@@ -9,6 +9,7 @@
 import { inboxRowArchived, type InboxListGroupId, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
 import { waitsBehindShow } from './held';
 import { offersRowMarkRead } from './markRead';
+import { isContested, machineOf, selfMachineId } from './inboxUrl';
 import type { BulkWrites } from './bulkWrites';
 import type { BandMenu } from './components/RowMenu';
 
@@ -18,15 +19,27 @@ import type { BandMenu } from './components/RowMenu';
  */
 export type BandMenuAction = 'read' | 'archive' | 'reask';
 
-/** The groups that hold questions open for the person: Re-ask all is offered on these bands only. */
+/**
+ * The groups Re-ask all is offered on (the owner is still choosing the list, 2026-11-21): the one place to change it.
+ */
 export const REASK_GROUPS: ReadonlySet<InboxListGroupId> = new Set<InboxListGroupId>(['stopped', 'holding', 'waiting']);
 
 /**
- * A row Re-ask all takes: drawn in a group of open questions, with a question open, and not already asked again (its
- * every open question is in a Re-ask note that still waits, `reask_pending`; such a row is in Sent anyway).
+ * Whether Re-ask all can write this row's thread from here: this Inbox's own (where its routes go). A linked
+ * machine's row is not part of Re-ask all at all (that Inbox's door does not take the route): never offered on,
+ * never written, never counted.
+ */
+export function reaskReaches(row: Pick<InboxListRow, 'thread_id'>): boolean {
+  const machine = machineOf(row.thread_id);
+  return (!machine || machine === selfMachineId()) && !isContested(row.thread_id);
+}
+
+/**
+ * A row Re-ask all takes: this Inbox's own, drawn in a group of open questions, with a question open, and not already
+ * asked again (its every open question is in a Re-ask note that still waits, `reask_pending`; such a row is in Sent anyway).
  */
 export function offersRowReask(row: InboxListRow, drawn: InboxListGroupId | null): boolean {
-  return drawn !== null && REASK_GROUPS.has(drawn) && row.questions.open > 0 && row.reask_pending !== true;
+  return drawn !== null && REASK_GROUPS.has(drawn) && row.questions.open > 0 && row.reask_pending !== true && reaskReaches(row);
 }
 
 /** The rows of these sections that `takes`, each once, in the order drawn. */

@@ -8,7 +8,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { inboxRowArchived, type InboxListGroupId, type InboxListRow } from '@plannotator/core/inbox-types';
 import { canMarkUnread, offersRowMarkRead } from './markRead';
-import { offersRowReask } from './markAllRead';
+import { offersRowReask, reaskReaches } from './markAllRead';
 import { priorityAction } from './priority';
 
 export type PickPress = 'toggle' | 'range';
@@ -88,9 +88,13 @@ export function bulkTargets(rows: readonly InboxListRow[], action: BulkAction, r
   });
 }
 
-/** Re-ask on the picks: only when every picked thread has a question open for the person (the band's Re-ask all). */
+/**
+ * Re-ask on the picks: only when every picked thread of this Inbox has a question open for the person (the band's
+ * Re-ask all). A linked machine's picked row is not part of it (`reaskReaches`): it neither offers nor blocks it.
+ */
 export function offersPicksReask(rows: readonly InboxListRow[], rules: PickRules): boolean {
-  return rows.length > 0 && bulkTargets(rows, 'reask', rules).length === rows.length;
+  const own = rows.filter(reaskReaches);
+  return own.length > 0 && bulkTargets(own, 'reask', rules).length === own.length;
 }
 
 export interface RowPicks {

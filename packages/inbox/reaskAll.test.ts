@@ -1,15 +1,16 @@
 /**
  * Re-ask all in the window (markAllRead.ts says which rows, reaskAll.ts what came of it, bulkWrites.ts `reaskAll`
  * writes): offered only on the bands of open questions, and on the picks only when every picked thread has one; it
- * takes only rows with a question open that were not asked again already; one press is one key for every thread; it
- * writes nothing for a linked machine's thread; the toast counts each agent once and says how many could not be
- * reached; there is no Undo.
+ * takes only rows with a question open that were not asked again already; one press is one key for every thread; a
+ * linked machine's row is no part of it (never offered on, written or counted); the toast counts each agent once and
+ * says how many could not be reached (a note that failed beside one written included); the live region says
+ * "Nothing to re-ask." unless every thread had its agents asked again already; there is no Undo.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { InboxListGroupId, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { bandMenuActions, bandReaskAllRows, offersRowReask } from './markAllRead';
 import { offersPicksReask, type PickRules } from './rowPicks';
-import { reaskAllToast, tallyReaskAll, type ReaskAllOutcome } from './reaskAll';
+import { reaskAllQuiet, reaskAllToast, tallyReaskAll, type ReaskAllOutcome } from './reaskAll';
 import { bulkWrites, type BulkHost } from './bulkWrites';
 import { rememberMachine, resetMachineRoutes } from './inboxUrl';
 import type { ThreadReaskAllView } from './data/actions/reaskAll';
@@ -38,6 +39,20 @@ describe('which rows Re-ask all takes', () => {
     expect(offersPicksReask([row('a', 'holding'), row('q', 'quiet', { questions: open(0) })], rules)).toBe(false);
     expect(offersPicksReask([], rules)).toBe(false);
   });
+
+  test('a linked machine’s row is no part of it: a band of only those offers no Re-ask all, and a picked one neither offers nor blocks it', () => {
+    rememberMachine(['far1', 'far2'], 'ibx_01ARZ3NDEKTSV4RRFFQ69G5FAV');
+    try {
+      expect(offersRowReask(row('far1', 'holding'), 'holding')).toBe(false);
+      expect(bandMenuActions(band('holding', [row('far1', 'holding'), row('far2', 'holding')]))).not.toContain('reask');
+      expect(bandReaskAllRows(band('holding', [row('far1', 'holding'), row('a', 'holding')])).map((r) => r.thread_id)).toEqual(['a']);
+      const rules = { drawn: (r: InboxListRow) => r.section } as unknown as PickRules;
+      expect(offersPicksReask([row('a', 'holding'), row('far1', 'quiet', { questions: open(0) })], rules)).toBe(true);
+      expect(offersPicksReask([row('far1', 'holding'), row('far2', 'holding')], rules)).toBe(false);
+    } finally {
+      resetMachineRoutes();
+    }
+  });
 });
 
 describe('what came of it', () => {
@@ -51,9 +66,25 @@ describe('what came of it', () => {
     },
   });
 
-  test('each agent counts once across its threads; one asked anywhere is never also "could not be reached"; a left-out thread is not reached', () => {
-    const t = tallyReaskAll([answer('t1', ['ses_a']), answer('t2', ['ses_a', 'ses_b'], ['ses_c']), answer('t3', [], ['ses_c']), { row: row('t4', 'holding'), ok: true, value: null }]);
-    expect(t).toMatchObject({ asked: 2, unreached: 2, refused: 0 });
+  test('each agent counts once across its threads; one asked anywhere is never also "could not be reached"', () => {
+    const t = tallyReaskAll([answer('t1', ['ses_a']), answer('t2', ['ses_a', 'ses_b'], ['ses_c']), answer('t3', [], ['ses_c'])]);
+    expect(t).toMatchObject({ asked: 2, unreached: 1, refused: 0 });
+  });
+
+  test('a note that failed beside one written: the agent asked counts, the failed one could not be reached', () => {
+    const partial = answer('t1', ['ses_a']);
+    if (partial.ok) partial.value.failed = [{ host: 'pi', session: 'ses_b' }];
+    const toast = reaskAllToast(tallyReaskAll([partial]))!;
+    expect(toast.lead).toBe('Asked 1 agent to re-ask');
+    expect(toast.detail).toBe('1 could not be reached');
+  });
+
+  test('nothing to say in a toast: "Nothing to re-ask." unless every such thread had its agents asked again already', () => {
+    const quiet = (already: number): ReaskAllOutcome => ({ row: row(`t${already}`, 'holding'), ok: true, value: { thread_id: 't', asked: [], unreached: [], failed: [], already } });
+    // Only a permission prompt, or only picks: nobody was asked again.
+    expect(reaskAllQuiet(tallyReaskAll([quiet(0)]))).toBe('Nothing to re-ask.');
+    expect(reaskAllQuiet(tallyReaskAll([quiet(1), quiet(0)]))).toBe('Nothing to re-ask.');
+    expect(reaskAllQuiet(tallyReaskAll([quiet(2)]))).toBe('Every agent was already asked again.');
   });
 
   test('the toast: a count and the ones not reached; a warning when none was asked; nothing to say when every agent waits already', () => {
@@ -105,8 +136,26 @@ describe('bulkWrites.reaskAll', () => {
     expect(written).toEqual([['msg_a', 'msg_c']]);
     expect(toasts).toHaveLength(1);
     expect(toasts[0]!.lead).toContain('2');
-    // The linked machine's thread is the one not reached.
-    expect(toasts[0]!.detail).toContain('1');
+    // The linked machine's thread is no part of it: not counted as an agent not reached.
+    expect(toasts[0]!.detail).toBeUndefined();
     expect(toasts[0]!.onUndo).toBeUndefined();
+  });
+
+  test('a thread whose only open item is a permission prompt, or whose agent has only picks: "Nothing to re-ask.", no toast', async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ thread_id: 'msg_p', asked: [], unreached: [], failed: [], already: 0 }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as unknown as typeof fetch;
+    const drawn = [row('msg_p', 'stopped')];
+    const said: string[] = [];
+    const toasts: unknown[] = [];
+    const host = {
+      rowOf: (id: string) => drawn.find((r) => r.thread_id === id),
+      shownRef: { current: [band('stopped', drawn)] },
+      afterWrite: async () => {},
+      showToast: (toast: unknown) => void toasts.push(toast),
+      say: (words: string) => void said.push(words),
+    } as unknown as BulkHost;
+    expect(await bulkWrites(host).reaskAll(drawn)).toBe(false);
+    expect(said).toEqual(['Nothing to re-ask.']);
+    expect(toasts).toEqual([]);
   });
 });

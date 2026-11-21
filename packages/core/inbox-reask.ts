@@ -63,13 +63,48 @@ export const isWaiting = (q: InboxQuestion) => q.state === 'open' || (q.state ==
  * its waits. `live` says which
  * messages still take answers (not closed by an archive).
  */
+/** The session an agent's message belongs to for a Re-ask: its host and session, or the message alone when it named none. */
+export const reaskSessionKey = (m: InboxMessageWire): string =>
+  m.author.kind === 'agent' && m.author.session ? `${m.author.host ?? ''}\u0000${m.author.session}` : `\u0001${m.id}`;
+
+/** One session's items still waiting on the person in a thread (`waitingSessions`). */
+export interface WaitingSession {
+  /** Open questions with no pick, and open action items. */
+  open: number;
+  /** Questions picked and not sent. */
+  picked: number;
+  /** A launched session's permission prompt: never asked again. */
+  permission: boolean;
+}
+
+/**
+ * Every session of a thread with something still waiting on the person (an
+ * item open, or a question picked and not sent), a launched session's
+ * permission prompt included, by `reaskSessionKey`. Re-ask all reads it to
+ * tell whether one agent is the only one anything in the thread waits on.
+ */
+export function waitingSessions(messages: readonly InboxMessageWire[], live: (message: InboxMessageWire) => boolean = () => true): Map<string, WaitingSession> {
+  const out = new Map<string, WaitingSession>();
+  for (const m of messages) {
+    if (m.author.kind !== 'agent' || !live(m)) continue;
+    const waiting = itemsOf(m).filter(isWaiting);
+    if (waiting.length === 0) continue;
+    const key = reaskSessionKey(m);
+    const seen = out.get(key) ?? { open: 0, picked: 0, permission: isInboxPermissionSession(m.author.session) };
+    seen.open += waiting.filter((q) => q.state === 'open').length;
+    seen.picked += waiting.filter((q) => q.state === 'picked').length;
+    out.set(key, seen);
+  }
+  return out;
+}
+
 export function reaskTargets(messages: readonly InboxMessageWire[], live: (message: InboxMessageWire) => boolean = () => true): ReaskTarget[] {
   const groups = new Map<string, InboxMessageWire[]>();
   for (const m of messages) {
     // A launched session's permission prompt is never asked again (the store refuses it): it is answered, or answered in Terminal.
     if (m.author.kind !== 'agent' || !live(m) || isInboxPermissionSession(m.author.session)) continue;
     // An agent that named no session: each message is its own.
-    const key = m.author.session ? `${m.author.host ?? ''}\u0000${m.author.session}` : `\u0001${m.id}`;
+    const key = reaskSessionKey(m);
     const list = groups.get(key) ?? [];
     list.push(m);
     groups.set(key, list);

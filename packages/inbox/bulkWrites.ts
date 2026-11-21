@@ -15,8 +15,8 @@ import { drawnSection, listGroups, markHeldRowArchived, putRowBack, replaceHeldR
 import { archivedRowPatch, patchShownRow, readRowPatch, shownRowOf } from './rowActions';
 import { setAsideCount, type SetAsideCount } from './markRead';
 import { currentArchiveAllRows, currentMarkAllRows, currentReaskAllRows } from './markAllRead';
-import { postReaskAll, reaskReaches } from './data/actions/reaskAll';
-import { reaskAllToast, tallyReaskAll } from './reaskAll';
+import { postReaskAll } from './data/actions/reaskAll';
+import { reaskAllQuiet, reaskAllToast, tallyReaskAll } from './reaskAll';
 import { newUuid } from '@plannotator/ui/utils/uuid';
 import { batchToastWhy } from './projectMenu';
 import type { RowWrites, RowDrawing } from './data/actions/rows';
@@ -320,10 +320,11 @@ export function bulkWrites(host: BulkHost) {
     const rows = currentReaskAllRows(drawn, rowOf, (id) => drawnSection(shownRef.current, id));
     if (rows.length === 0) return (say('Nothing to re-ask.'), false);
     const batch = newUuid();
-    const outcomes = await eachRow(rows, (row) => (reaskReaches(row.thread_id) ? postReaskAll(row.thread_id, batch) : Promise.resolve(null)));
-    await afterWrite(outcomes.flatMap((o) => (o.ok && o.value && o.value.asked.length > 0 ? [o.row.thread_id] : [])));
-    const copy = reaskAllToast(tallyReaskAll(outcomes.map((o) => (o.ok ? { row: o.row, ok: true as const, value: o.value } : o))));
-    if (!copy) return (say('Every agent was already asked again.'), false);
+    const outcomes = await eachRow(rows, (row) => postReaskAll(row.thread_id, batch));
+    await afterWrite(outcomes.flatMap((o) => (o.ok && o.value.asked.length > 0 ? [o.row.thread_id] : [])));
+    const tally = tallyReaskAll(outcomes);
+    const copy = reaskAllToast(tally);
+    if (!copy) return (say(reaskAllQuiet(tally)), false);
     showToast(copy);
     return true;
   };
