@@ -16,7 +16,7 @@
  * .local/proof/review-explorer/ (or $PLANNOTATOR_E2E_PROOF_DIR/review-explorer).
  */
 
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -138,14 +138,15 @@ async function stopReview(child: ChildProcess | undefined, root: string) {
 }
 
 const treeRows = (page: Page) =>
-  page.locator('[data-repo-file-tree] [role="treeitem"]').evaluateAll((rows) =>
-    rows.map((row) => {
-      const folder = row.querySelector<HTMLElement>('[data-repo-folder]');
-      if (folder) return `dir:${folder.dataset.repoFolder}`;
-      const file = row.querySelector<HTMLElement>('[data-repo-file]');
-      return `${file?.hasAttribute('data-repo-changed') ? 'changed' : 'file'}:${file?.dataset.repoFile}`;
+  page.locator('[data-repo-file-tree]').evaluate((tree) =>
+    [...tree.shadowRoot!.querySelectorAll<HTMLElement>('[data-type="item"]')].map((row) => {
+      const path = row.dataset.itemPath!;
+      if (row.dataset.itemType === 'folder') return `dir:${path.replace(/\/$/, '')}`;
+      const onDisk = row.querySelector('[title*="on disk since"]');
+      return `${onDisk ? 'disk' : row.dataset.itemGitStatus ? 'changed' : 'file'}:${path}`;
     }),
   );
+const repoRow = (page: Page, path: string) => page.locator(`[data-repo-file-tree] [data-item-path="${path}"]`);
 
 test('All files: the repository at the diff, remembered, and following the disk while the diff waits for Refresh', async ({ browser }) => {
   test.skip(!existsSync(binary), `compile the binary first: ${binary}`);
@@ -195,9 +196,9 @@ test('All files: the repository at the diff, remembered, and following the disk 
     const diffFilesBefore = await page.locator('[data-tree-scope="changes"]').textContent();
     write(repo, 'packages/review-editor/utils/newFromAgent.ts', 'export const fromAgent = true;\n');
     write(repo, 'packages/review-editor/utils/fileKindTree.ts', "export function kindFolderPath(kind: string, path: string) {\n  if (path === '') return kind;\n  return `${kind}/${path}`;\n}\n");
-    await expect(page.locator('[data-repo-file="packages/review-editor/utils/newFromAgent.ts"]')).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator('[data-repo-file="packages/review-editor/utils/newFromAgent.ts"] [data-repo-on-disk="A"]')).toBeVisible();
-    await expect(page.locator('[data-repo-file="packages/review-editor/utils/fileKindTree.ts"] [data-repo-on-disk="M"]')).toBeVisible();
+    await expect(repoRow(page, 'packages/review-editor/utils/newFromAgent.ts')).toBeVisible({ timeout: 20_000 });
+    await expect(repoRow(page, 'packages/review-editor/utils/newFromAgent.ts').locator('[title^=\"Added on disk\"]')).toBeVisible();
+    await expect(repoRow(page, 'packages/review-editor/utils/fileKindTree.ts').locator('[title^=\"Changed on disk\"]')).toBeVisible();
     await expect(page.locator('[data-repo-listing-status]')).toContainText('1 added, 1 edited');
     // The diff is still the snapshot: same changed files, and the banner offers Refresh.
     await expect(page.locator('[data-tree-scope="changes"]')).toHaveText(diffFilesBefore ?? '');
@@ -239,29 +240,29 @@ test('Any file in a tab: preview, keep, Whole file with change bars, and a comme
     await expect(page.locator('[data-repo-file-tree]')).toBeVisible();
 
     // A single click previews an unchanged file: italic tab, "Not in this review".
-    await page.locator('button[data-repo-file="packages/review-editor/utils/buildFileTree.ts"]').click();
+    await repoRow(page, 'packages/review-editor/utils/buildFileTree.ts').click();
     const view = page.locator('[data-repo-file-view="packages/review-editor/utils/buildFileTree.ts"]');
     await expect(view).toBeVisible();
     await expect(view.locator('[data-not-in-review]')).toHaveText('Not in this review');
     await expect(view.locator('[data-repo-file-revision]')).toHaveText('at working tree');
     await expect(page.locator('[data-preview-tab]')).toHaveCount(1);
-    await expect(page.locator('[data-preview-tab] .dv-review-tab-label')).toHaveText('buildFileTree.ts');
+    await expect(page.locator('[data-preview-tab][data-pane-tab], [data-preview-tab] .dv-review-tab-label')).toHaveText('buildFileTree.ts');
 
     // The next single click replaces the preview: still one preview tab.
-    await page.locator('button[data-repo-file="README.md"]').click();
+    await repoRow(page, 'README.md').click();
     await expect(page.locator('[data-repo-file-view="README.md"]')).toBeVisible();
     await expect(page.locator('[data-preview-tab]')).toHaveCount(1);
-    await expect(page.locator('[data-preview-tab] .dv-review-tab-label')).toHaveText('README.md');
-    await expect(page.locator('.dv-review-tab', { hasText: 'buildFileTree.ts' })).toHaveCount(0);
+    await expect(page.locator('[data-preview-tab][data-pane-tab], [data-preview-tab] .dv-review-tab-label')).toHaveText('README.md');
+    await expect(page.locator('[data-pane-tab], .dv-review-tab', { hasText: 'buildFileTree.ts' })).toHaveCount(0);
 
     // A double click on the tab keeps it.
     await page.locator('[data-preview-tab]').dblclick();
     await expect(page.locator('[data-preview-tab]')).toHaveCount(0);
-    await expect(page.locator('.dv-review-tab', { hasText: 'README.md' })).toHaveCount(1);
+    await expect(page.locator('[data-pane-tab], .dv-review-tab', { hasText: 'README.md' })).toHaveCount(1);
     await expect(page.locator('[data-repo-file-view="README.md"] [data-preview-hint]')).toHaveCount(0);
 
     // A changed file: Changes | Whole file, the new side with change bars.
-    await page.locator('[data-repo-file="packages/review-editor/utils/fileKindTree.ts"] button').first().click();
+    await repoRow(page, 'packages/review-editor/utils/fileKindTree.ts').click();
     await expect(page.locator('[data-file-view-switch]')).toBeVisible();
     await page.locator('[data-file-view="whole"]').click();
     const whole = page.locator('[data-whole-file-view="packages/review-editor/utils/fileKindTree.ts"]');
@@ -273,8 +274,8 @@ test('Any file in a tab: preview, keep, Whole file with change bars, and a comme
 
     // Commenting in a preview tab keeps that same tab: its place in the strip
     // and the line on screen (it is not closed and opened again).
-    await page.locator('[data-repo-folder="packages/shared"]').click();
-    await page.locator('button[data-repo-file="packages/shared/long.ts"]').click();
+    await repoRow(page, 'packages/shared/').click();
+    await repoRow(page, 'packages/shared/long.ts').click();
     const longView = page.locator('[data-repo-file-view="packages/shared/long.ts"]');
     await expect(longView.locator('[data-line="401"]').first()).toBeAttached();
     // The file draws, then draws again highlighted: scroll once it settles.
@@ -289,7 +290,7 @@ test('Any file in a tab: preview, keep, Whole file with change bars, and a comme
       expect(top).toBeGreaterThan(5_000);
     }).toPass({ timeout: 10_000 });
     await page.waitForTimeout(300);
-    const tabOrder = () => page.locator('.dv-review-tab-label').allTextContents();
+    const tabOrder = () => page.locator('[data-pane-tab], .dv-review-tab-label').allTextContents();
     const tabsBefore = await tabOrder();
     // The same view, scrolled where it was: not remounted at line 1.
     await longView.evaluate((el) => { (window as Window & { __longView?: Element }).__longView = el; });
@@ -307,15 +308,15 @@ test('Any file in a tab: preview, keep, Whole file with change bars, and a comme
     expect(await longView.evaluate((el) => el === (window as Window & { __longView?: Element }).__longView)).toBe(true);
     // Back to the kept tab from the tree after another file: where it was, not line 1.
     const keptTop = await scrollTop();
-    await page.locator('button[data-repo-file="README.md"]').click();
+    await repoRow(page, 'README.md').click();
     await expect(page.locator('[data-repo-file-view="README.md"]')).toBeVisible();
-    await page.locator('button[data-repo-file="packages/shared/long.ts"]').click();
+    await repoRow(page, 'packages/shared/long.ts').click();
     await expect(longView).toBeVisible();
     await expect.poll(scrollTop).toBeGreaterThan(keptTop - 200);
 
     // A comment on a file the review does not change keeps the preview tab
     // and reaches the agent labelled, with the code.
-    await page.locator('button[data-repo-file="packages/shared/review-core.ts"]').click();
+    await repoRow(page, 'packages/shared/review-core.ts').click();
     const coreView = page.locator('[data-repo-file-view="packages/shared/review-core.ts"]');
     await expect(coreView).toBeVisible();
     await coreView.locator('[data-line="1"]').first().click();
@@ -324,7 +325,7 @@ test('Any file in a tab: preview, keep, Whole file with change bars, and a comme
     await composer.press('ControlOrMeta+Enter');
     await expect(coreView.locator('[data-code-annotation-outside-diff]')).toHaveText('not in the diff');
     await expect(page.locator('[data-preview-tab]')).toHaveCount(0);
-    await expect(page.locator('button[data-repo-file="packages/shared/review-core.ts"]')).toContainText('1');
+    await expect(repoRow(page, 'packages/shared/review-core.ts')).toContainText('1');
     await page.screenshot({ path: join(proofDir, '08-comment.png') });
 
     await page.getByRole('button', { name: /Send Feedback/ }).first().click();
@@ -359,12 +360,14 @@ test('Go to File, Go to Definition and References into tabs, Back / Forward, nex
   const back = process.platform === 'darwin' ? 'Control+Minus' : process.platform === 'win32' ? 'Alt+ArrowLeft' : 'Control+Alt+Minus';
   const forward = process.platform === 'darwin' ? 'Control+Shift+Minus' : process.platform === 'win32' ? 'Alt+ArrowRight' : 'Control+Shift+Minus';
   let child: ChildProcess | undefined;
+  let context: BrowserContext | undefined;
   try {
     child = spawn(binary, ['review', '--diff-type', 'uncommitted'], { env, cwd: repo, stdio: 'ignore' });
     await expect.poll(() => (existsSync(readyFile) ? readFileSync(readyFile, 'utf8') : ''), { timeout: 30_000 }).toContain('"url"');
     const url = (JSON.parse(readFileSync(readyFile, 'utf8').trim().split('\n')[0]!) as { url: string }).url;
     const page = await openReview(browser, url);
-    const activeTab = page.locator('.dv-active-tab .dv-review-tab-label').first();
+    context = page.context();
+    const activeTab = page.locator('[data-active-pane-group] [data-pane-tab][aria-selected="true"], .dv-active-tab .dv-review-tab-label').first();
 
     // With no symbol under the pointer F12 is left to the browser (developer tools).
     expect(await page.evaluate(() => {
@@ -375,7 +378,7 @@ test('Go to File, Go to Definition and References into tabs, Back / Forward, nex
     await expect(page.locator('[data-code-nav-location]')).toHaveCount(0);
 
     // The changed file on its diff.
-    await page.locator('.file-tree-item', { hasText: 'fileKindTree.ts' }).first().click();
+    await page.locator('[data-review-sidebar] [data-item-type="file"][title$="/fileKindTree.ts"]').first().click();
     await expect(page.locator('[data-file-view-switch]')).toBeVisible();
 
     // Go to File (Mod+P): fuzzy over the whole repository; the changed file is marked.
@@ -395,11 +398,16 @@ test('Go to File, Go to Definition and References into tabs, Back / Forward, nex
     await page.keyboard.press('Enter');
     await expect(page.locator('[data-go-to-file]')).toHaveCount(0);
     await expect(page.locator('[data-repo-file-view="README.md"]')).toBeVisible();
-    await expect(page.locator('[data-repo-file-view="README.md"] [data-jump-crumb]')).toContainText('From fileKindTree.ts · Go to File');
+    const floatBack = page.locator('[data-jump-float-back]');
+    const floatForward = page.locator('[data-jump-float-forward]');
+    await expect(page.locator('[data-jump-float]')).toHaveCount(1);
+    await expect(floatBack).toHaveAttribute('aria-label', 'Back to fileKindTree.ts · Go to File');
+    await expect(floatForward).toHaveAttribute('aria-disabled', 'true');
 
     // Back returns to the diff; Forward to the file.
-    await page.keyboard.press(back);
+    await floatBack.click();
     await expect(activeTab).toHaveText('fileKindTree.ts');
+    await expect(floatForward).not.toHaveAttribute('aria-disabled', 'true');
     await page.keyboard.press(forward);
     await expect(page.locator('[data-repo-file-view="README.md"]')).toBeVisible();
     await page.keyboard.press(back);
@@ -411,7 +419,7 @@ test('Go to File, Go to Definition and References into tabs, Back / Forward, nex
     await page.keyboard.press('F12');
     const kinds = page.locator('[data-repo-file-view="packages/shared/kinds.ts"]');
     await expect(kinds).toBeVisible({ timeout: 20_000 });
-    await expect(kinds.locator('[data-jump-crumb]')).toContainText('From fileKindTree.ts:5 · Go to Definition (F12)');
+    await expect(floatBack).toHaveAttribute('aria-label', 'Back to fileKindTree.ts:5 · Go to Definition');
     await expect(kinds.locator('[data-line="3"][data-selected-line]').first()).toBeAttached();
     await page.screenshot({ path: join(proofDir, '07-definition.png') });
 
@@ -426,9 +434,9 @@ test('Go to File, Go to Definition and References into tabs, Back / Forward, nex
     await expect(longWhole.locator('[data-line="2"][data-selected-line]').first()).toBeAttached();
     await page.keyboard.press(back);
     await expect(activeTab).toHaveText('fileKindTree.ts');
-    await page.locator('.file-tree-item', { hasText: 'long.ts' }).first().click();
+    await page.locator('[data-review-sidebar] [data-item-type="file"][title$="/long.ts"]').first().click();
     await expect(page.locator('[data-file-view="changes"]')).toHaveAttribute('aria-pressed', 'true');
-    await page.locator('.file-tree-item', { hasText: 'fileKindTree.ts' }).first().click();
+    await page.locator('[data-review-sidebar] [data-item-type="file"][title$="/fileKindTree.ts"]').first().click();
     await expect(activeTab).toHaveText('fileKindTree.ts');
     await page.locator('[data-char]', { hasText: /^kindLabel$/ }).last().hover();
     await page.keyboard.press('F12');
@@ -440,18 +448,18 @@ test('Go to File, Go to Definition and References into tabs, Back / Forward, nex
     const reference = page.locator('[data-code-nav-location^="packages/review-editor/utils/fileKindTree.ts:"]').first();
     await expect(reference).toBeVisible({ timeout: 20_000 });
     await reference.click();
-    await expect(page.locator('[data-jump-crumb]', { hasText: 'References' }).first()).toBeVisible();
-    await expect(page.locator('[data-nav-history="back"]').first()).toBeEnabled();
+    await expect(floatBack).toHaveAttribute('aria-label', /^Back to kinds\.ts:\d+ · References$/);
+    await expect(floatBack).not.toHaveAttribute('aria-disabled', 'true');
     await page.screenshot({ path: join(proofDir, '07-refs.png') });
 
     // Next change: this diff fits the screen, so on to the next changed file.
-    await page.locator('.file-tree-item', { hasText: 'fileKindTree.ts' }).first().click();
+    await page.locator('[data-review-sidebar] [data-item-type="file"][title$="/fileKindTree.ts"]').first().click();
     await expect(activeTab).toHaveText('fileKindTree.ts');
     await page.keyboard.press('Alt+F5');
     await expect(activeTab).toHaveText('long.ts');
     // In a diff taller than the screen it walks the runs of changes, down and back up.
     const scrollTop = () => page.evaluate(() => {
-      const host = document.querySelector('.dv-active-group diffs-container');
+      const host = document.querySelector('[data-pane-active] [data-pane-panel] diffs-container, [data-pane-panel] diffs-container, .dv-active-group diffs-container');
       let node: Element | null = host;
       while (node) {
         if (node instanceof HTMLElement && node.scrollHeight > node.clientHeight && /(auto|scroll)/.test(getComputedStyle(node).overflowY)) return node.scrollTop;
@@ -469,8 +477,9 @@ test('Go to File, Go to Definition and References into tabs, Back / Forward, nex
     await page.keyboard.press('Shift+Alt+F5');
     await expect.poll(scrollTop).toBe(second);
     await expect(activeTab).toHaveText('long.ts');
-    await page.context().close();
   } finally {
+    // A failed run leaves no live page behind in the shared browser.
+    await context?.close();
     await stopReview(child, root);
   }
 });

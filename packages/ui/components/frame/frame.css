@@ -1,0 +1,758 @@
+/*
+ * Frame: tokens, card layout and sheet / tooltip motion for components/frame.
+ * Import it once in a Tailwind v4 entry, after `@import "tailwindcss"` and the
+ * theme: it declares theme names and variants, and scans the frame's sources.
+ * It only defines `--frame-*` names (and `frame-*` theme names) and rules on
+ * the frame's own attributes; no host token is redefined, so the package
+ * themes and a host document inside the frame are untouched.
+ */
+@import "./card/motions.css";
+
+@source "./**/*.tsx";
+@source "./**/*.ts";
+@source not "./**/*.test.tsx";
+@source not "./**/*.test.ts";
+
+/* Dark is "not under .light", the class the themes put on the root, so the frame follows the app, not the OS. */
+@custom-variant frame-dark (&:not(.light *));
+
+@custom-variant frame-reduce-transparency (@media (prefers-reduced-transparency: reduce));
+
+@theme {
+  --text-frame-2xs: 0.6875rem;
+  --text-frame-2xs--line-height: 0.875rem;
+  --text-frame-xs: 0.75rem;
+  --text-frame-xs--line-height: 1rem;
+  --text-frame-sm: 0.8125rem;
+  --text-frame-sm--line-height: 1.25rem;
+  --spacing-frame-control: 2rem;
+  --spacing-frame-row: 1.75rem;
+  --ease-frame-enter: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@theme inline {
+  --color-frame-ground: var(--frame-ground);
+  --color-frame-hover: var(--frame-surface-hover);
+  --color-frame-selected: var(--frame-selected);
+  --color-frame-selected-fg: var(--frame-selected-fg);
+  --color-frame-muted-fg: var(--frame-muted-fg);
+  --color-frame-tertiary: var(--frame-tertiary);
+  --color-frame-divider: var(--frame-divider);
+  --color-frame-border-subtle: var(--frame-border-subtle);
+  --color-frame-ring-soft: var(--frame-ring-soft);
+  --color-frame-band: var(--frame-surface-0);
+  --color-frame-quiet-fill: var(--frame-quiet-fill);
+  --color-frame-quiet-fill-hover: var(--frame-quiet-fill-hover);
+  --shadow-frame-pane: var(--frame-pane-shadow);
+  --shadow-frame-float: var(--frame-float-shadow);
+  --radius-frame-pane: var(--frame-r-pane);
+  --radius-frame-structure: var(--frame-r-structure);
+  --radius-frame-control: var(--frame-r-control);
+  --radius-frame-selection: var(--frame-r-selection);
+  --radius-frame-floating: var(--frame-r-floating);
+  --radius-frame-dialog: var(--frame-r-dialog);
+}
+
+/* ── tokens: dark on :root, light under .light ── */
+:root {
+  --frame-r-pane: 10px;
+  --frame-r-structure: 4px;
+  --frame-r-control: 10px;
+  --frame-r-selection: 8px;
+  --frame-r-floating: 10px;
+  --frame-r-dialog: 12px;
+  --frame-ground: var(--background);
+  --frame-surface-0: color-mix(in oklch, var(--muted) 40%, var(--background));
+  /* Selected, hover and subtle border are fixed by default; FrameGround colors="theme" derives them from the theme. */
+  --frame-surface-hover: oklch(0.90 0.01 260 / 0.07);
+  --frame-selected: oklch(0.72 0.15 280 / 0.13);
+  --frame-selected-fg: oklch(0.72 0.15 280);
+  --frame-muted-fg: var(--muted-foreground);
+  --frame-tertiary: color-mix(in oklch, var(--muted-foreground) 86%, var(--background));
+  --frame-divider: var(--border);
+  --frame-border-subtle: oklch(0.90 0.02 260 / 0.055);
+  --frame-ring-soft: color-mix(in oklch, var(--ring) 30%, transparent);
+  --frame-overlay: rgb(0 0 0 / 0.45);
+  --frame-quiet-fill: color-mix(in oklch, var(--muted) 60%, transparent);
+  --frame-quiet-fill-hover: color-mix(in oklch, var(--muted) 90%, transparent);
+  --frame-quiet-fg: color-mix(in oklch, var(--muted-foreground) 75%, var(--foreground));
+  --frame-shadow-ink: var(--background);
+  --frame-pane-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 6%, transparent), inset 0 1px 0 color-mix(in oklch, var(--foreground) 4%, transparent), 0 8px 24px -10px color-mix(in oklch, var(--frame-shadow-ink) 60%, transparent);
+  --frame-float-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 8%, transparent), 0 16px 40px -10px color-mix(in oklch, var(--frame-shadow-ink) 70%, transparent);
+}
+
+.light {
+  --frame-ground: color-mix(in oklch, var(--muted) 55%, var(--background));
+  --frame-surface-hover: oklch(0.30 0.02 260 / 0.06);
+  --frame-selected: oklch(0.50 0.23 280 / 0.08);
+  --frame-selected-fg: oklch(0.50 0.25 280);
+  --frame-tertiary: color-mix(in oklch, var(--muted-foreground) 82%, var(--background));
+  --frame-border-subtle: oklch(0.35 0.02 260 / 0.09);
+  --frame-ring-soft: color-mix(in oklch, var(--ring) 22%, transparent);
+  --frame-quiet-fg: var(--muted-foreground);
+  --frame-shadow-ink: var(--foreground);
+  --frame-pane-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 55%, transparent), 0 1px 2px color-mix(in oklch, var(--frame-shadow-ink) 5%, transparent), 0 6px 18px -8px color-mix(in oklch, var(--frame-shadow-ink) 12%, transparent);
+  --frame-float-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent), 0 12px 32px -8px color-mix(in oklch, var(--frame-shadow-ink) 22%, transparent);
+}
+
+@supports (color: oklch(from red calc(0.5 - sign(l - 0.6) * 0.5) 0 h)) {
+  :root {
+    --frame-shadow-ink: oklch(from var(--background) calc(l * 0.2) calc(c * 0.5) h);
+    --frame-card-ink: oklch(from var(--card) calc(0.5 - sign(l - 0.6) * 0.5) 0 none);
+    --frame-quiet-fg: color-mix(in oklch, var(--muted-foreground) 82%, var(--frame-card-ink));
+  }
+  .light {
+    --frame-shadow-ink: var(--foreground);
+    --frame-quiet-fg: var(--muted-foreground);
+  }
+}
+
+/*
+ * FrameGround's `colors="theme"`: selected, hover and subtle border follow the
+ * host theme's --primary and --foreground. The amounts match the fixed colours
+ * above when the theme's primary is the frame's violet (README.md). The
+ * selected text is the foreground, so only the fill carries the accent and
+ * the text keeps its contrast on any theme. Put the attribute on the root
+ * as well to reach the phone sheets, which portal out.
+ */
+[data-frame-colors="theme"] {
+  --frame-selected: color-mix(in oklch, var(--primary) 13%, transparent);
+  --frame-selected-fg: var(--foreground);
+  --frame-surface-hover: color-mix(in oklch, var(--foreground) 7%, transparent);
+  --frame-border-subtle: color-mix(in oklch, var(--foreground) 5.5%, transparent);
+}
+
+.light[data-frame-colors="theme"],
+.light [data-frame-colors="theme"] {
+  --frame-selected: color-mix(in oklch, var(--primary) 7.5%, transparent);
+  --frame-selected-fg: var(--foreground);
+  --frame-surface-hover: color-mix(in oklch, var(--foreground) 5.5%, transparent);
+  --frame-border-subtle: color-mix(in oklch, var(--foreground) 7.5%, transparent);
+}
+
+/* FrameGround's `tone`: the host picks a plain or tinted ground behind the cards. */
+[data-frame-tone="plain"] {
+  --frame-ground: var(--background);
+}
+
+[data-frame-tone="tinted"] {
+  --frame-ground: color-mix(in oklch, var(--muted) 55%, var(--background));
+}
+
+/* ── layout: every child of the frame row becomes a card from 768px up ── */
+@media (min-width: 768px) {
+  [data-frame-ground] {
+    background: var(--frame-ground);
+  }
+  [data-frame-ground] > [data-frame-pane]:has([data-frame]) {
+    margin: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  [data-frame] {
+    padding: 0 8px 8px;
+    background: transparent;
+  }
+  [data-frame] > [data-page-header] {
+    border-bottom-color: transparent;
+    background: transparent;
+    backdrop-filter: none;
+  }
+  [data-frame-row] {
+    gap: 8px;
+  }
+  [data-frame-row] :is([data-document-rail], [data-rail-reserved]) {
+    border-right-color: transparent;
+    border-radius: var(--frame-r-pane);
+    background-color: var(--card);
+    box-shadow: var(--frame-pane-shadow);
+  }
+  [data-frame-row] [data-document-rail] + .collapsible-edge {
+    margin-inline: -4px;
+  }
+  [data-frame-row] > :not([data-document-rail], [data-rail-reserved], [data-rail-flags]) {
+    overflow: hidden;
+    border-radius: var(--frame-r-pane);
+    background-color: var(--card);
+    box-shadow: var(--frame-pane-shadow);
+  }
+  [data-docked-panel-clip] [data-comments-panel] {
+    border-left-color: transparent;
+  }
+}
+
+/* Inside a dark pane, the frame's own quiet text is a little brighter; the host's --muted-foreground is left as it is. */
+:root:not(.light) [data-frame-pane] {
+  --frame-muted-fg: var(--frame-quiet-fg);
+  --frame-tertiary: color-mix(in oklch, var(--frame-quiet-fg) 86%, var(--background));
+}
+
+/* ── the card (card/Card.tsx): preview well, paper and the document type scale; its motions are in card/motions.css ── */
+:root {
+  --frame-paper: color-mix(in oklch, var(--card) 94%, var(--foreground));
+  --frame-paper-edge: color-mix(in oklch, var(--foreground) 12%, transparent);
+  --frame-ink-2: color-mix(in oklch, var(--foreground) 55%, transparent);
+  --frame-ink-3: color-mix(in oklch, var(--foreground) 22%, transparent);
+  --frame-card-ring: color-mix(in oklch, var(--foreground) 9%, transparent);
+  --frame-card-ring-hover: color-mix(in oklch, var(--foreground) 16%, transparent);
+}
+
+.light {
+  --frame-paper: var(--card);
+  --frame-paper-edge: color-mix(in oklch, var(--foreground) 11%, transparent);
+}
+
+[data-frame-card] {
+  box-shadow: 0 0 0 1px var(--frame-card-ring);
+}
+@media (hover: hover) {
+  [data-frame-card]:hover {
+    box-shadow: 0 0 0 1px var(--frame-card-ring-hover), 0 10px 24px -14px color-mix(in oklch, var(--frame-shadow-ink) 30%, transparent);
+  }
+}
+[data-frame-card]:has(:focus-visible:not([data-frame-card-action] *)) {
+  box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--primary);
+}
+:is([data-frame-card], [data-frame-card-row]) :focus-visible:not([data-frame-card-action] *) {
+  outline: none;
+}
+
+[data-frame-card-well] {
+  --frame-card-ground: color-mix(in oklch, var(--foreground) 4%, var(--card));
+  background: var(--frame-card-ground);
+  box-shadow: inset 0 -1px 0 color-mix(in oklch, var(--foreground) 7%, transparent);
+  color: var(--foreground);
+}
+[data-frame-card-well][data-frame-card-face="ready"][data-frame-card-kind="document"] {
+  --frame-card-ground: color-mix(in oklab, var(--primary) 12%, var(--card));
+}
+[data-frame-card-well][data-frame-card-face="ready"][data-frame-card-kind="page"] {
+  --frame-card-ground: color-mix(in oklch, var(--foreground) 5%, var(--card));
+}
+[data-frame-card-well][data-frame-card-face="ready"][data-frame-card-kind="image"] {
+  --frame-card-ground: color-mix(in oklab, var(--warning) 12%, var(--card));
+}
+[data-frame-card-well][data-frame-card-face="ready"][data-frame-card-kind="data"] {
+  --frame-card-ground: color-mix(in oklab, var(--success) 11%, var(--card));
+}
+.light [data-frame-card-well][data-frame-card-face="ready"][data-frame-card-kind="document"] {
+  --frame-card-ground: color-mix(in oklab, var(--primary) 8%, var(--card));
+}
+.light [data-frame-card-well][data-frame-card-face="ready"][data-frame-card-kind="image"] {
+  --frame-card-ground: color-mix(in oklab, var(--warning) 10%, var(--card));
+}
+.light [data-frame-card-well][data-frame-card-face="ready"][data-frame-card-kind="data"] {
+  --frame-card-ground: color-mix(in oklab, var(--success) 9%, var(--card));
+}
+
+.frame-card-sheet,
+.frame-card-window,
+.frame-card-panel {
+  position: absolute;
+  overflow: hidden;
+  background: var(--frame-paper);
+  box-shadow: 0 0 0 1px var(--frame-paper-edge), 0 2px 8px -4px color-mix(in oklch, var(--frame-shadow-ink) 18%, transparent);
+}
+.frame-card-sheet {
+  inset: 10% 10% -14px;
+  border-radius: 6px 6px 0 0;
+}
+[data-frame-card-back] {
+  transform: var(--frame-card-back-rest);
+  transform-origin: 50% 100%;
+  background: color-mix(in oklch, var(--frame-paper) 92%, var(--foreground));
+  box-shadow: 0 0 0 1px var(--frame-paper-edge);
+}
+.frame-card-window {
+  inset: 9% 8% -10px;
+  border-radius: 8px 8px 0 0;
+}
+.frame-card-window-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 16px;
+  padding: 0 8px;
+  box-shadow: inset 0 -1px 0 color-mix(in oklch, var(--foreground) 7%, transparent);
+}
+.frame-card-window-bar > i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: color-mix(in oklch, var(--foreground) 18%, transparent);
+}
+.frame-card-window-body {
+  position: absolute;
+  inset: 16px 0 0;
+  overflow: hidden;
+}
+.frame-card-panel {
+  inset: 9% 8%;
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px var(--frame-paper-edge);
+}
+.frame-card-panel-rows {
+  bottom: -10px;
+  border-radius: 6px 6px 0 0;
+}
+[data-frame-card-thumb] {
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--foreground) 7%, transparent);
+}
+[data-frame-card-thumb] .frame-card-sheet {
+  bottom: -2px;
+  border-radius: 2px 2px 0 0;
+}
+[data-frame-card-thumb] :is(.frame-card-window, .frame-card-panel) {
+  border-radius: 2px;
+}
+[data-frame-card-thumb] .frame-card-window-bar {
+  height: 3px;
+  padding: 0;
+}
+[data-frame-card-thumb] .frame-card-window-bar > i {
+  display: none;
+}
+[data-frame-card-thumb] .frame-card-window-body {
+  top: 3px;
+}
+
+/* Sizes. A card fills its column; columns are fluid with a minimum, so they wrap. A phone is under 768 px. */
+[data-frame-card-grid] {
+  display: grid;
+  gap: 28px 24px;
+}
+[data-frame-card-grid="large"] {
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+[data-frame-card-grid="regular"] {
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+}
+[data-frame-card-groups] {
+  --frame-card-column-min: 230px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--frame-card-column-min), 1fr));
+  grid-auto-flow: row;
+  gap: 44px 24px;
+}
+[data-frame-card-group="shared"] {
+  display: grid;
+  grid-template-columns: subgrid;
+  align-content: start;
+  row-gap: 24px;
+  min-width: 0;
+}
+[data-frame-card-group="shared"] > * {
+  grid-column: 1 / -1;
+}
+[data-frame-card-grid="group"] {
+  grid-template-columns: subgrid;
+  row-gap: 24px;
+}
+[data-frame-card-group="alone"] {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+}
+@media (max-width: 767px) {
+  [data-frame-card-grid]:not([data-frame-card-grid="group"]),
+  [data-frame-card-groups] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+[data-frame-card-title] {
+  font-weight: 500;
+  color: var(--foreground);
+  overflow-wrap: anywhere;
+}
+[data-frame-card] [data-frame-card-title] {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  text-wrap: pretty;
+}
+[data-frame-card-size="large"] [data-frame-card-title] {
+  font-size: 15px;
+  line-height: 22px;
+}
+[data-frame-card-size="regular"] [data-frame-card-title] {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/*
+ * Rows. Nothing in a row moves when a row is pinned, unpinned or hovered:
+ * every row's trailing text ends 10 px from its edge. The host's action
+ * (28 px wide) shows just before the trailing text, over the room the grey
+ * line leaves, on hover or keyboard focus, and the text before it always
+ * keeps 20 px clear for it. On a screen without hover a CardRows with
+ * actionAtRest "touch" (the default, and any row outside a CardRows) also
+ * shows it at rest; with "never" it shows only on keyboard focus. Hover
+ * styles apply only where the screen has hover, so a tap leaves none behind. A pinned row's resting mark
+ * is the card's pin after the title, never drawn while the action shows.
+ *
+ * The title is what a row must show: it keeps at least 40% of the row (112 px
+ * at the least). A project is shown whole or not at all: a CardRows narrower
+ * than 713 px, where a 160 px project and the title at 40% no longer fit, does
+ * not show it. The trailing text keeps 180 px in every row, so columns stay
+ * aligned, and gives way only to the title's minimum. A row outside a CardRows
+ * has no list width to go by: its project shrinks first, down to 20 px, then
+ * its trailing text. A phone keeps its own layout below.
+ */
+[data-frame-card-rows] {
+  container: frame-card-rows / inline-size;
+}
+[data-frame-card-row] {
+  --frame-card-row-title-min: max(112px, 40%);
+  height: 44px;
+  grid-template-columns: 36px minmax(var(--frame-card-row-title-min), 1fr) minmax(clamp(0px, 100% - 64px - var(--frame-card-row-title-min), 180px), 180px);
+}
+[data-frame-card-row][data-frame-card-columns~="secondary"] {
+  grid-template-columns: 36px minmax(var(--frame-card-row-title-min), 1fr) minmax(20px, 160px) minmax(clamp(0px, 100% - 98px - var(--frame-card-row-title-min), 180px), 180px);
+}
+@media (min-width: 768px) {
+  @container frame-card-rows (width < 713px) {
+    [data-frame-card-row][data-frame-card-columns~="secondary"] {
+      grid-template-columns: 36px minmax(var(--frame-card-row-title-min), 1fr) minmax(clamp(0px, 100% - 64px - var(--frame-card-row-title-min), 180px), 180px);
+    }
+    [data-frame-card-row] [data-frame-card-secondary] {
+      display: none;
+    }
+    [data-frame-card-row][data-frame-card-columns~="action"] > :nth-child(2) {
+      padding-inline-end: 20px;
+    }
+  }
+}
+[data-frame-card-trail] > [data-frame-card-action] {
+  position: absolute;
+  inset-block: 0;
+  right: calc(100% + 6px);
+}
+@media (hover: hover) {
+  [data-frame-card-row]:not(:hover, :has(:focus-visible)) [data-frame-card-action] {
+    pointer-events: none;
+  }
+  [data-frame-card-row][data-frame-card-columns~="action"]:hover [data-frame-card-pinned-mark] {
+    visibility: hidden;
+  }
+}
+[data-frame-card-row][data-frame-card-columns~="action"]:has(:focus-visible) [data-frame-card-pinned-mark] {
+  visibility: hidden;
+}
+@media (hover: none) {
+  [data-frame-card-row][data-frame-card-columns~="action"]:not([data-frame-card-rows][data-frame-card-action-rest="never"] *) [data-frame-card-pinned-mark] {
+    visibility: hidden;
+  }
+  [data-frame-card-row]:is([data-frame-card-rows][data-frame-card-action-rest="never"] *):not(:has(:focus-visible)) [data-frame-card-action] {
+    pointer-events: none;
+  }
+}
+[data-frame-card-row][data-frame-card-columns~="action"] [data-frame-card-secondary],
+[data-frame-card-row][data-frame-card-columns~="action"]:not([data-frame-card-columns~="secondary"]) > :nth-child(2) {
+  padding-inline-end: 20px;
+}
+[data-frame-card-row] [data-frame-card-title] {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 767px) {
+  [data-frame-card-row] {
+    height: 52px;
+    grid-template-columns: 36px minmax(0, 1fr) fit-content(50%);
+  }
+  [data-frame-card-row][data-frame-card-columns~="secondary"] {
+    grid-template-columns: 36px minmax(0, 1fr) fit-content(50%);
+  }
+  [data-frame-card-row] [data-frame-card-secondary] {
+    display: none;
+  }
+}
+@media (max-width: 767px) {
+  [data-frame-card-row][data-frame-card-columns~="action"] > :nth-child(2) {
+    padding-inline-end: 20px;
+  }
+}
+
+/* "3 updates · Show" */
+[data-frame-card-updates] {
+  position: relative;
+  cursor: pointer;
+  height: 20px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--primary);
+  background: color-mix(in oklch, var(--primary) 10%, transparent);
+}
+[data-frame-card-updates]::after {
+  content: "";
+  position: absolute;
+  inset: -2px 0;
+}
+@media (hover: hover) {
+  [data-frame-card-updates]:hover {
+    background: color-mix(in oklch, var(--primary) 16%, transparent);
+  }
+}
+[data-frame-card-updates]:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) {
+  [data-frame-card-row]:hover {
+    background: var(--frame-surface-hover);
+  }
+}
+[data-frame-card-row]:has(:focus-visible:not([data-frame-card-action] *)) {
+  background: color-mix(in oklch, var(--primary) 16%, transparent);
+}
+[data-frame-card-row]:has(:focus-visible:not([data-frame-card-action] *)) [data-frame-card-title] {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+/* The host's action: shown on hover and keyboard focus, always on touch; on a card also while pinned */
+[data-frame-card-action] {
+  opacity: 0;
+}
+[data-frame-card]:is(:has(:focus-visible), [data-frame-card-pinned]) [data-frame-card-action],
+[data-frame-card-row]:has(:focus-visible) [data-frame-card-action] {
+  opacity: 1;
+}
+@media (hover: hover) {
+  [data-frame-card]:hover [data-frame-card-action],
+  [data-frame-card-row]:hover [data-frame-card-action] {
+    opacity: 1;
+  }
+}
+@media (hover: none) {
+  [data-frame-card] [data-frame-card-action],
+  [data-frame-card-row]:not([data-frame-card-rows][data-frame-card-action-rest="never"] *) [data-frame-card-action] {
+    opacity: 1;
+  }
+}
+
+[data-frame-card-blank] {
+  background: transparent;
+  box-shadow: none;
+  outline: 1px dashed color-mix(in oklch, var(--foreground) 24%, transparent);
+  outline-offset: -1px;
+}
+
+/* The sheet's type: rendered Markdown on a 420 px page, scaled with the card. Headings are the body's size,
+   set apart by weight and space, so a plan's own words lead. */
+.frame-card-document {
+  padding: 34px 36px;
+  font-size: 15px;
+  line-height: 24px;
+  color: var(--foreground);
+}
+.frame-card-document :is(h1, h2, h3, h4, h5, h6) {
+  margin: 18px 0 8px;
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.frame-card-document h1 {
+  margin: 0 0 12px;
+  font-size: 26px;
+  line-height: 32px;
+  font-weight: 650;
+  letter-spacing: -0.018em;
+  text-wrap: balance;
+}
+.frame-card-document > :first-child,
+.frame-card-document [data-frame-card-title-repeat] + :not([data-frame-card-title-repeat]) {
+  margin-top: 0;
+}
+.frame-card-document p {
+  margin: 0 0 10px;
+  font-size: 15px;
+  line-height: 24px;
+  color: color-mix(in oklch, var(--foreground) 82%, transparent);
+}
+.frame-card-document :is(ul, ol) {
+  margin: 0 0 10px;
+  padding-left: 20px;
+  font-size: 15px;
+  line-height: 24px;
+}
+.frame-card-document ul {
+  list-style: disc;
+}
+.frame-card-document ol {
+  list-style: decimal;
+}
+.frame-card-document li {
+  margin-bottom: 2px;
+  padding-left: 4px;
+}
+.frame-card-document li::marker {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--frame-ink-2);
+}
+.frame-card-document table {
+  width: 100%;
+  margin: 0 0 10px;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 20px;
+}
+.frame-card-document th {
+  padding: 0 8px 6px 0;
+  text-align: left;
+  font-weight: 500;
+  color: var(--frame-ink-2);
+  box-shadow: inset 0 -1px 0 var(--frame-ink-3);
+}
+.frame-card-document td {
+  padding: 8px 8px 8px 0;
+  box-shadow: inset 0 -1px 0 color-mix(in oklch, var(--foreground) 9%, transparent);
+}
+.frame-card-document td:first-child {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.frame-card-document pre {
+  margin: 0 0 10px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--foreground) 5%, transparent);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 20px;
+  white-space: pre;
+}
+.frame-card-document code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.frame-scrim {
+  background-color: var(--frame-overlay);
+  backdrop-filter: blur(2px);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .frame-scrim {
+    backdrop-filter: none;
+    background-color: rgb(0 0 0 / 0.65);
+  }
+}
+
+.collapsible-edge [data-resize-track] {
+  background-color: transparent;
+}
+
+.collapsible-edge:focus-visible [data-resize-track] {
+  background-color: var(--ring);
+}
+
+/* ── motion for the sheets and tooltips (Base UI sets data-open / data-closed) ── */
+@keyframes frame-fade-in {
+  from { opacity: 0; }
+}
+
+@keyframes frame-fade-out {
+  to { opacity: 0; }
+}
+
+@keyframes frame-pop-in {
+  from { opacity: 0; transform: scale(0.98); }
+}
+
+@keyframes frame-pop-out {
+  to { opacity: 0; transform: scale(0.98); }
+}
+
+@keyframes frame-slide-in-right {
+  from { transform: translateX(100%); }
+}
+
+@keyframes frame-slide-out-right {
+  to { transform: translateX(100%); }
+}
+
+@keyframes frame-slide-in-left {
+  from { transform: translateX(-100%); }
+}
+
+@keyframes frame-slide-out-left {
+  to { transform: translateX(-100%); }
+}
+
+@keyframes frame-slide-in-top {
+  from { transform: translateY(-100%); }
+}
+
+@keyframes frame-slide-out-top {
+  to { transform: translateY(-100%); }
+}
+
+@keyframes frame-slide-in-bottom {
+  from { transform: translateY(100%); }
+}
+
+@keyframes frame-slide-out-bottom {
+  to { transform: translateY(100%); }
+}
+
+/* Only with motion allowed: under reduced motion the sheets and tooltips appear and leave at once. */
+@media (prefers-reduced-motion: no-preference) {
+  .frame-sheet-overlay[data-open] {
+    animation: frame-fade-in 300ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .frame-sheet-overlay[data-closed] {
+    animation: frame-fade-out 150ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+
+  .frame-sheet[data-open] {
+    animation-duration: 300ms;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .frame-sheet[data-closed] {
+    animation-duration: 150ms;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    animation-fill-mode: forwards;
+  }
+
+  .frame-sheet[data-side="right"][data-open] { animation-name: frame-slide-in-right; }
+  .frame-sheet[data-side="right"][data-closed] { animation-name: frame-slide-out-right; }
+  .frame-sheet[data-side="left"][data-open] { animation-name: frame-slide-in-left; }
+  .frame-sheet[data-side="left"][data-closed] { animation-name: frame-slide-out-left; }
+  .frame-sheet[data-side="top"][data-open] { animation-name: frame-slide-in-top; }
+  .frame-sheet[data-side="top"][data-closed] { animation-name: frame-slide-out-top; }
+  .frame-sheet[data-side="bottom"][data-open] { animation-name: frame-slide-in-bottom; }
+  .frame-sheet[data-side="bottom"][data-closed] { animation-name: frame-slide-out-bottom; }
+
+  .frame-tooltip {
+    animation: frame-pop-in 120ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .frame-tooltip[data-closed] {
+    animation: frame-pop-out 120ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+
+  .frame-tooltip[data-frame-motion="fade"] {
+    animation-name: frame-fade-in;
+  }
+
+  .frame-tooltip[data-frame-motion="fade"][data-closed] {
+    animation-name: frame-fade-out;
+  }
+}

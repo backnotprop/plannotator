@@ -69,7 +69,7 @@ function json(body: unknown, status = 200): Response {
 }
 
 /** Headers every byte answer carries: never sniffed, never run, never read by another site. */
-const BYTE_GUARD_HEADERS = {
+export const BYTE_GUARD_HEADERS = {
   "X-Content-Type-Options": "nosniff",
   "Cross-Origin-Resource-Policy": "same-origin",
 };

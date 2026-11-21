@@ -28,8 +28,8 @@ function everyStoredLook(): string[][] {
 describe('Settings → Rows control model', () => {
   test('every stored look reads into the controls and writes back the identical list', () => {
     const looks = everyStoredLook();
-    // 22 options; the rival rules leave 774,144 distinct looks. A new option or rule changes this on purpose.
-    expect(looks.length).toBe(774_144);
+    // 23 options; the rival rules leave 1,161,216 distinct looks (Agent icons is three ways: 774,144 × 1.5). A new option or rule changes this on purpose.
+    expect(looks.length).toBe(1_161_216);
     let bad: { stored: string[]; back: string[] } | null = null;
     for (const stored of looks) {
       const back = rowsFromLook(lookFromControlValues(rowsControlValues(lookFromRows(stored))));

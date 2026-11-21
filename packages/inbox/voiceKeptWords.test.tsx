@@ -380,8 +380,7 @@ describe.skipIf(!hasDom)("the thread's reply box while it says Transcribing", ()
     expect(draftSaves().some((body) => body.includes('said while recording'))).toBe(true);
   });
 
-  test('a cover mid-recording: the mic stops and what was said lands in the box under it', async () => {
-    const el = await recording();
+  const cover = () =>
     act(() => {
       root!.render(
         <div className="pn-inbox">
@@ -389,10 +388,22 @@ describe.skipIf(!hasDom)("the thread's reply box while it says Transcribing", ()
         </div>,
       );
     });
+
+  test('a cover mid-recording, speech already heard: the mic closes and nothing is posted', async () => {
+    await recording();
+    cover();
     await settle();
-    expect(mic).toEqual(['stopped', 'transcribing']);
-    await hear('said while recording');
-    expect(boxText(el)).toContain('said while recording');
+    expect(mic).toEqual(['aborted']);
+    expect(answer).toBeNull();
+    expect(posted.filter((p) => p.path.includes('/voice/'))).toEqual([]);
+  });
+
+  test('a cover while it says Transcribing: the take goes on and lands in the box under the cover', async () => {
+    const el = await transcribing();
+    cover();
+    await settle();
+    await hear('dictated words');
+    expect(boxText(el)).toContain('dictated words');
   });
 
   test("closing the box mid-recording lets the take go, as New message's close does", async () => {

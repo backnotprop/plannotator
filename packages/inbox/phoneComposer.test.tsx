@@ -258,7 +258,7 @@ test.skipIf(!hasDom)('a phone: a tap outside the sheet closes it', async () => {
   expect(document.activeElement).toBe(text);
 });
 
-test.skipIf(!hasDom)('a computer is as it was: a one-agent thread has no recipient control, several agents get the pill and its list, and nothing of the phone is drawn', async () => {
+test.skipIf(!hasDom)('a computer: a one-agent thread has no recipient control, several agents get the chip and its list, and nothing of the phone is drawn', async () => {
   await openReply(ONE_AGENT(), false);
   expect(q('[data-recipient]')).toBeNull();
   expect(q('[data-agent-mark], [data-agent-pill], [data-sheet]')).toBeNull();
@@ -268,7 +268,7 @@ test.skipIf(!hasDom)('a computer is as it was: a one-agent thread has no recipie
   host?.remove();
   await openReply(TWO_AGENTS(), false);
   const pill = q<HTMLButtonElement>('[data-recipient]')!;
-  expect(pill.className).toBe('ib-rto');
+  expect(pill.className).toBe('ib-rto-chip');
   await click(pill);
   expect(q('[data-recipient-list]')!.className).toContain('ib-rpick');
   expect(q('[data-agent-mark], [data-agent-pill], [data-sheet], [data-sheet-scrim]')).toBeNull();

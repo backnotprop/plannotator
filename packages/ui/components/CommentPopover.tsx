@@ -9,7 +9,7 @@ import { SparklesIcon } from './SparklesIcon';
 import { Icon } from './inbox-thread/icons';
 import { commentCardAimX, getCommentCardEnabled, getCommentCardLayout } from '../utils/commentCardPolicy';
 import { hasUnsavedCommentContent } from '../utils/commentContent';
-import { isCommentSubmitKey } from '../utils/commentSubmitKey';
+import { isCommentSubmitKey, isImeCompositionKey } from '../utils/commentSubmitKey';
 import { useConfigValue } from '../config/useConfig';
 import { useSkillReferenceAutocomplete } from '../hooks/useSkillReferenceAutocomplete';
 import { HumanOnlySkillNotice, SkillReferenceMenu } from './SkillReferenceMenu';
@@ -157,10 +157,24 @@ interface CommentPopoverProps {
   /** Opt-in: why the last submit failed (Shape: a Change it that did not reach the server), shown under the
    *  header with `role="alert"` while the person's words stay in the box. Absent → nothing, as always. */
   errorText?: string;
+  /** Opt-in: drawn under the header, above the words (Shape: what was asked or changed on this part, and the
+   *  answers). Absent → nothing, as always. */
+  before?: React.ReactNode;
   /** Opt-in: `side` opens the popover beside the anchor (right, else left),
    *  falling back to below/above when neither side has room (an image region
    *  in the image viewer). Absent → below/above, as always. */
   placement?: 'below' | 'side';
+  /** Opt-in, for the comment card with `placement: 'side'`: the card ends above this element's foot (as much
+   *  of it as shows), so what the host draws under it is never covered (a live html block's caption and its
+   *  pen, under the block's frame). The card goes beside the anchor (right, else left), from the anchor's top
+   *  down when that fits above the foot and from the foot up when the anchor is low; with no room on either
+   *  side, over the anchor, else under it, else on it, always above the foot. A phone docks the card as
+   *  always. Absent → as always. */
+  keepAbove?: HTMLElement | null;
+  /** Opt-in: the box the popover stays inside (Shape: the board, in a thread's pane), placed and clamped by its
+   *  edges rather than only the window's; with no room above or below it there, a sheet at the box's foot rather
+   *  than the window's dialog. Absent → the window, as always. */
+  within?: HTMLElement | null;
   /** Opt-in: the stacking level, for a composer over a surface that is
    *  itself above the page (the image viewer is z-200). Absent → 100. */
   zIndex?: number;
@@ -211,6 +225,23 @@ interface CommentPopoverPosition {
   requiresExpanded: boolean;
 }
 
+/** `bounds` cut to `el`'s box, `inset` in from its edges (the window's bounds when `el` is absent or not laid out). */
+export function boundsWithin(bounds: VisibleViewportBounds, el: HTMLElement | null | undefined, inset = 8): VisibleViewportBounds {
+  const r = el?.getBoundingClientRect();
+  if (!r || r.width <= 0 || r.height <= 0) return bounds;
+  const top = Math.max(bounds.top, r.top + inset);
+  const left = Math.max(bounds.left, r.left + inset);
+  const right = Math.max(left, Math.min(bounds.right, r.right - inset));
+  const bottom = Math.max(top, Math.min(bounds.bottom, r.bottom - inset));
+  return { top, left, right, bottom, width: right - left, height: bottom - top };
+}
+
+/** A popover with no room by its anchor inside `bounds`: a sheet at their foot, as wide as a popover may be. */
+export function sheetWithin(bounds: VisibleViewportBounds): CommentPopoverPosition {
+  const width = Math.min(MAX_POPOVER_WIDTH, bounds.width);
+  return { top: bounds.bottom, left: bounds.left + (bounds.width - width) / 2, flipAbove: true, width, maxHeight: Math.max(0, bounds.height * 0.75), requiresExpanded: false };
+}
+
 export function computeCommentPopoverPosition(
   anchorRect: Pick<DOMRect, 'top' | 'right' | 'bottom' | 'left' | 'width'>,
   bounds: VisibleViewportBounds,
@@ -258,6 +289,21 @@ export interface CommentCardGeometry { docked: boolean; above: boolean; style: R
 export const COMMENT_CARD_WIDTH = 352;
 /** The least room the card takes by the words; with less on both sides it docks. */
 const CARD_NEED = 132;
+/** With `keepAbove`: the room a card beside its anchor needs under the anchor's top to open downward. */
+const CARD_SIDE_ROOM = 200;
+/** With `keepAbove`: the space left between the card and the foot. */
+const CARD_FLOOR_GAP = 6;
+
+/** How much of `el` shows, at its foot: its own bottom edge, or that of an ancestor that clips it sooner. */
+export function visibleFootOf(el: HTMLElement): number {
+  let foot = el.getBoundingClientRect().bottom;
+  for (let up = el.parentElement; up && up !== document.body; up = up.parentElement) {
+    const style = getComputedStyle(up);
+    if (style.overflowY === 'visible' && style.overflowX === 'visible') continue;
+    foot = Math.min(foot, up.getBoundingClientRect().bottom);
+  }
+  return foot;
+}
 
 /**
  * The comment card's place. It never sits on the words it is about: a card beside them (under, else over; with
@@ -277,6 +323,8 @@ export function computeCommentCardGeometry(
     footTop?: number | null;
     aimX?: number | null;
     placement?: 'below' | 'side';
+    /** `keepAbove`'s foot: with `placement: 'side'`, the card ends above this line. */
+    floor?: number | null;
   },
 ): CommentCardGeometry {
   // The pane's foot is never covered: the card ends above it. A short window keeps the room instead.
@@ -294,6 +342,29 @@ export function computeCommentCardGeometry(
   };
   if (!anchor || opts.phone || opts.expanded) return dock();
   const width = Math.min(COMMENT_CARD_WIDTH, bounds.width);
+  if (opts.placement === 'side' && opts.floor != null) {
+    // Above the foot (`keepAbove`), inside the pane. The card's height is its words', so a card that opens
+    // upward is held by its bottom edge.
+    const foot = Math.min(bounds.bottom, opts.floor - CARD_FLOOR_GAP);
+    if (foot - bounds.top < CARD_NEED) return dock();
+    const minLeft = Math.max(bounds.left, opts.pane ? opts.pane.left + 8 : bounds.left);
+    const maxRight = Math.min(bounds.right, opts.pane ? opts.pane.right - 8 : bounds.right);
+    const up = (left: number, bottomEdge: number): CommentCardGeometry => ({ docked: false, above: true, style: { left, width, bottom: opts.viewportHeight - bottomEdge, maxHeight: bottomEdge - bounds.top } });
+    const right = anchor.right + GAP * 1.75;
+    const left = anchor.left - GAP * 1.75 - width;
+    const sideLeft = right + width <= maxRight ? right : left >= minLeft ? left : null;
+    if (sideLeft !== null) {
+      const top = Math.max(bounds.top, anchor.top);
+      if (foot - top >= CARD_SIDE_ROOM) return { docked: false, above: false, style: { left: sideLeft, width, top, maxHeight: foot - top } };
+      return up(sideLeft, foot);
+    }
+    const middle = Math.max(minLeft, Math.min(anchor.left + anchor.width / 2 - width / 2, maxRight - width));
+    const overTop = anchor.top - GAP;
+    if (overTop - bounds.top >= CARD_NEED) return up(middle, overTop);
+    const under = anchor.bottom + GAP;
+    if (foot - under >= CARD_NEED) return { docked: false, above: false, style: { left: middle, width, top: under, maxHeight: foot - under } };
+    return up(middle, foot);
+  }
   if (opts.placement === 'side') {
     const right = anchor.right + GAP * 1.75;
     const left = anchor.left - GAP * 1.75 - width;
@@ -372,7 +443,10 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   yieldState,
   headerText,
   errorText,
+  before,
   placement = 'below',
+  keepAbove,
+  within,
   zIndex,
   autoFocus = true,
 }) => {
@@ -451,6 +525,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       const footTop = feet.length ? Math.min(...feet.map((r) => r.top)) - 4 : null;
       setCardGeo(computeCommentCardGeometry(rect, visibleBounds, {
         phone: cardPhone, expanded: cardExpanded, pane, viewportHeight: layoutViewportHeight(window), footTop, aimX: cardAim.current, placement,
+        floor: keepAbove ? visibleFootOf(keepAbove) : null,
       }));
     };
     update();
@@ -460,7 +535,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       window.removeEventListener('scroll', update, true);
       window.removeEventListener('resize', update);
     };
-  }, [card, anchorEl, anchorRect, visibleBounds, cardPhone, cardExpanded, placement]);
+  }, [card, anchorEl, anchorRect, visibleBounds, cardPhone, cardExpanded, placement, keepAbove]);
   // Docked at the foot: the words the comment is about are scrolled up above the card, never left under it.
   const cardDocked = cardGeo?.docked ?? false;
   useEffect(() => {
@@ -510,7 +585,12 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     const update = () => {
       const rect = anchorEl?.getBoundingClientRect() ?? anchorRect;
       if (!rect) return;
-      const nextPosition = computeCommentPopoverPosition(rect, visibleBounds, placement);
+      const bounds = within ? boundsWithin(visibleBounds, within) : visibleBounds;
+      const nextPosition = computeCommentPopoverPosition(rect, bounds, placement);
+      if (nextPosition.requiresExpanded && within) {
+        setPosition(sheetWithin(bounds));
+        return;
+      }
       if (nextPosition.requiresExpanded) {
         setDialogIsForced(true);
         setMode('dialog');
@@ -524,7 +604,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     return () => {
       window.removeEventListener('scroll', update, true);
     };
-  }, [anchorEl, anchorRect, mode, visibleBounds, wasDragged, placement, card]);
+  }, [anchorEl, anchorRect, mode, visibleBounds, wasDragged, placement, card, within]);
 
   // Surface a "jump back" arrow when an open popover scrolls out of view.
   // Re-measures whenever the popover repositions (position updates every scroll
@@ -842,6 +922,12 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
 
   const enterSavesComment = useConfigValue('enterSavesComment');
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Escape during composition belongs to the IME. Leave its default alone
+    // and keep it from reaching the comment dialog or the app's close shortcut.
+    if (e.key === 'Escape' && isImeCompositionKey(e)) {
+      e.stopPropagation();
+      return;
+    }
     if (skillAc.onKeyDown(e)) return;
     if (mentionAc.onKeyDown(e)) return;
     if (e.key === 'Escape') {
@@ -1021,6 +1107,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
             {isGlobal ? 'Global comment' : on ?? 'Comment'}
           </div>
           {errorRow}
+          {before}
           {draftConflictRow}
           {chipsRow}
           <div className="pn-cbox-field">
@@ -1186,6 +1273,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           </div>
 
           {errorRow}
+          {before}
           {draftConflictRow}
           {chipsRow}
 
@@ -1358,6 +1446,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       </div>
 
       {errorRow}
+      {before}
           {draftConflictRow}
       {chipsRow}
 

@@ -19,10 +19,6 @@ import {
 import { readCapped, type PeerLink } from "./inbox-peer-link";
 import { isPullLooked } from "./inbox-pull-looked";
 
-/** How long the merged board waits for a linked machine's board when one is held already; a slower read follows (`pending`). */
-const FAR_PULLS_WAIT_MS = 3_000;
-/** The first read of a machine's board: nothing to show for it yet, so the board waits longer for it. */
-const FAR_PULLS_FIRST_WAIT_MS = 8_000;
 /** A far board's answer is read no further than this. */
 const FAR_PULLS_MAX_BYTES = 8 * 1024 * 1024;
 /** One far read: its own list may ask the forges. */
@@ -91,6 +87,8 @@ export interface FarBoardEntry {
   machine: string;
   board: FarBoard | null;
   pending: boolean;
+  /** The link's name for it, when known. */
+  name?: string;
   /** It keeps the PR page's look at its PRs (mark `pulls-looked`). */
   looked?: boolean;
 }
@@ -113,8 +111,8 @@ export function mergePullBoards<T extends Pick<InboxPullsAnswer, "pulls" | "link
   const hosts = [...local.hosts];
   const far_risk: Record<string, InboxPullRiskJudgment> = {};
   const machines: NonNullable<InboxPullsAnswer["machines"]> = {};
-  for (const { machine, board, pending, looked } of far) {
-    machines[machine] = { read_at: board?.read_at ?? null, pending, ...(looked ? { looked: true as const } : {}) };
+  for (const { machine, board, pending, name, looked } of far) {
+    machines[machine] = { read_at: board?.read_at ?? null, pending, ...(name ? { name } : {}), ...(looked ? { looked: true as const } : {}) };
     if (!board) continue;
     for (const pull of board.pulls) {
       if (keys.has(pull.key)) continue;
@@ -131,13 +129,13 @@ export function mergePullBoards<T extends Pick<InboxPullsAnswer, "pulls" | "link
 }
 
 /** The linked machines' boards: read when the merged board is asked for, one read per machine at a time, kept in memory. */
-export function createMachinePulls(options: { peers: () => Iterable<PeerLink>; waitMs?: number; firstWaitMs?: number; now?: () => Date }) {
+export function createMachinePulls(options: { peers: () => Iterable<PeerLink>; now?: () => Date }) {
   const boards = new Map<string, FarBoard>();
-  const reading = new Map<string, Promise<void>>();
+  const reading = new Map<string, { done: Promise<void>; abort: AbortController }>();
   const now = options.now ?? (() => new Date());
 
-  const readJson = async (peer: PeerLink, route: string, search: string): Promise<unknown> => {
-    const response = await peer.request(route, search, { method: "GET", headers: {}, timeoutMs: FAR_PULLS_READ_MS });
+  const readJson = async (peer: PeerLink, route: string, search: string, signal: AbortSignal): Promise<unknown> => {
+    const response = await peer.request(route, search, { method: "GET", headers: {}, timeoutMs: FAR_PULLS_READ_MS, signal });
     if (!response.ok) {
       response.body?.cancel().catch(() => {});
       return null;
@@ -149,18 +147,22 @@ export function createMachinePulls(options: { peers: () => Iterable<PeerLink>; w
   /** Read that machine's board now (or join the read under way). Never throws: a failed read keeps the last one. */
   const read = (peer: PeerLink, refresh: boolean): Promise<void> => {
     const running = reading.get(peer.id);
-    if (running) return running;
+    if (running) return running.done;
+    const abort = new AbortController();
     const run = (async () => {
       try {
-        const list = await readJson(peer, "pulls", `?everywhere=1${refresh ? "&refresh=1" : ""}`);
-        const risk = list ? await readJson(peer, "pulls/risk", "").catch(() => null) : null;
+        const list = await readJson(peer, "pulls", `?everywhere=1${refresh ? "&refresh=1" : ""}`, abort.signal);
+        if (abort.signal.aborted) return;
+        const risk = list ? await readJson(peer, "pulls/risk", "", abort.signal).catch(() => null) : null;
         const board = parseFarBoard(list, risk, now().toISOString());
-        if (board) boards.set(peer.id, board);
+        if (board && !abort.signal.aborted) boards.set(peer.id, board);
       } catch {
         // Asleep or unreachable: its rows stay as last read.
       }
-    })().finally(() => reading.delete(peer.id));
-    reading.set(peer.id, run);
+    })().finally(() => {
+      if (reading.get(peer.id)?.abort === abort) reading.delete(peer.id);
+    });
+    reading.set(peer.id, { done: run, abort });
     return run;
   };
 
@@ -168,25 +170,42 @@ export function createMachinePulls(options: { peers: () => Iterable<PeerLink>; w
 
   return {
     /**
-     * Each linked machine that takes `pulls`: its board read now while it is online, waited for a short while, else as
-     * last read (an asleep machine's rows stay). `pending`: its read goes on, and the window asks again for it.
+     * Each linked machine that takes `pulls`: a read of its board starts now while it is online (or joins the one under
+     * way), never waited for, so this machine's own board is never held up by another's. The answer is what each had
+     * when it is asked (`snapshot`, after this machine's own list): its board as last read (an asleep machine's rows
+     * stay), and `pending` while its read goes on, so the window asks again for it.
      */
-    async lists(refresh: boolean): Promise<FarBoardEntry[]> {
+    start(refresh: boolean): () => FarBoardEntry[] {
       const peers = takers();
-      if (peers.length === 0) return [];
-      const reads = peers.flatMap((peer) => (peer.state === "online" ? [read(peer, refresh)] : []));
-      const wait = peers.some((peer) => !boards.has(peer.id)) ? (options.firstWaitMs ?? FAR_PULLS_FIRST_WAIT_MS) : (options.waitMs ?? FAR_PULLS_WAIT_MS);
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      await Promise.race([Promise.all(reads), new Promise((resolve) => (timer = setTimeout(resolve, wait)))]);
-      clearTimeout(timer);
-      return peers.map((peer) => ({ machine: peer.id, board: boards.get(peer.id) ?? null, pending: reading.has(peer.id), ...(peer.list?.marks.includes("pulls-looked") ? { looked: true } : {}) }));
+      for (const peer of peers) if (peer.state === "online") void read(peer, refresh);
+      return () => peers.map((peer) => ({ machine: peer.id, board: boards.get(peer.id) ?? null, pending: reading.has(peer.id), ...(peer.list?.marks.includes("pulls-looked") ? { looked: true } : {}) }));
+    },
+    /** The reads under way, done (tests). */
+    async settled(): Promise<void> {
+      await Promise.all([...reading.values()].map(({ done }) => done));
     },
     /** After a close, reopen or merge there: its board again, so the next merged read shows it. */
     reread(peer: PeerLink): Promise<void> {
       return peer.list?.marks.includes("pulls") ? read(peer, false) : Promise.resolve();
     },
+    /**
+     * A PR's state on that machine's board, read now (after a write whose answer never came): null when the board
+     * could not be read now or does not list it.
+     */
+    async stateThere(peer: PeerLink, key: string): Promise<InboxPull["state"] | null> {
+      const before = boards.get(peer.id)?.read_at ?? null;
+      await read(peer, false);
+      const board = boards.get(peer.id);
+      if (!board || board.read_at === before) return null;
+      return board.pulls.find((pull) => pull.key === key)?.state ?? null;
+    },
+    linkedThere(key: string): boolean {
+      return [...boards.values()].some((board) => !!board.links[key]);
+    },
     /** The link went: nothing of that machine's board stays. */
     forget(machine: string): void {
+      reading.get(machine)?.abort.abort();
+      reading.delete(machine);
       boards.delete(machine);
     },
   };

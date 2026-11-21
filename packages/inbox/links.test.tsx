@@ -208,6 +208,31 @@ test.skipIf(!hasDom)('in a message, an attached file opens beside the thread; an
   }
 });
 
+// The owner, 2026-11-11 ("why don't those URLs work"): `[the mock](mock.html?variant=2)` opens the page with that
+// query, as a tab would. The query used to be dropped, so every such link opened the same default page.
+test.skipIf(!hasDom)("a link to an attached HTML page hands over the link's query and fragment; a Markdown file's are not", async () => {
+  const opened: Array<[string, string | undefined]> = [];
+  const body = '[two](mock.html?variant=2) [two at top](design/mock.html?variant=2#top) [plain](mock.html) [plan](docs/current-plan.md?x=1)';
+  await mount(
+    <MessageBody
+      message={message(body, [MOCK, PLAN])}
+      projectRoot={ROOT}
+      onOpenAttachment={(a, start) => opened.push([a.id, start])}
+      readOnly={false}
+      answers={new Map()}
+      onPick={() => {}}
+      footerFor={() => null}
+    />,
+  );
+  for (const link of host!.querySelectorAll<HTMLAnchorElement>('a[data-local-link="open"]')) await act(async () => link.click());
+  expect(opened).toEqual([
+    ['att_mock', '?variant=2'],
+    ['att_mock', '?variant=2#top'],
+    ['att_mock', undefined],
+    ['att_plan', undefined],
+  ]);
+});
+
 test.skipIf(!hasDom)('with component tooltips off (other hosts), a resolved local link keeps its native title and gains no aria attributes', async () => {
   await mount(
     <MessageBody

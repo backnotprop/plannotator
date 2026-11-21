@@ -152,23 +152,14 @@ test.skipIf(!hasDom)('go scrolls to the nearest row past that edge, to the middl
   expect(show.unseen).toEqual([{ id: 't_c', edge: 'bottom' }]);
 });
 
-test.skipIf(!hasDom)('go asked with Show (the pill\'s press) waits for the rows to slide into place, then goes, the count held back meanwhile', () => {
+test.skipIf(!hasDom)('go before the rows are measured scrolls nothing, then or later: the list never moves by itself', () => {
   act(() => {
     show.light(ALL, 280, body());
     show.go('bottom');
   });
-  pass(279);
+  pass(280);
+  pass(2000);
   expect(scrolled).toEqual([]);
-  pass(1);
-  expect(scrolled).toEqual([{ id: 't_b', block: 'center' }]);
-  // A row in view when the press came is not lit as the list leaves it: it is read where the scroll ends, and
-  // there it is past the top edge, so it waits and is counted.
-  expect(litRows()).toEqual([]);
-  expect(show.unseen).toEqual([]);
-  scroll(500);
-  act(() => void body().dispatchEvent(new Event('scrollend')));
-  expect(litRows()).toEqual(['t_b', 't_c']);
-  expect(show.unseen).toEqual([{ id: 't_a', edge: 'top' }]);
 });
 
 test.skipIf(!hasDom)('a row whose group is closed is no longer waited for', async () => {

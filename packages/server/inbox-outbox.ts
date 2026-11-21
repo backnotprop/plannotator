@@ -155,7 +155,9 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  * - `forge` writes to GitHub or GitLab as that machine's own gh / glab (a PR's
  *   close, reopen or merge): never held, sent only while online, and only from
  *   a press in this Inbox's window. The forge is asked first there, so a second
- *   copy is refused in the forge's words ("It is already closed.").
+ *   copy is refused in the forge's words ("It is already closed."). A review
+ *   thread's PRs tied there (`pulls/owner`) go the same way; the window sends
+ *   it right after the thread's start.
  * - `now` is a write sent only while online, never held, and only from a press
  *   in this Inbox's window (`forwardsNow`; the other machine refuses it at its
  *   door without the window's mark). Two uses: a file a message names,
@@ -163,7 +165,8 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  *   the attachment at once; the owner adds a file to its message once, so a
  *   second copy answers the same attachment); and a Combine, or a Tidy with the
  *   person's words, which asks an agent there to act on the person's threads
- *   (one held for days would archive threads nobody is looking at).
+ *   (one held for days would archive threads nobody is looking at); and Show in
+ *   Rex for an agent there (`rex/show`), which moves Rex's app at the click.
  * - `local` is never forwarded: `doorWriteKind` has no kind for it, so the
  *   forward answers 404. A phone reaches it at this Inbox's own door. Reuse
  *   (`uploads/reuse`) is useful only as its answer, the new upload's id: a held
@@ -190,6 +193,8 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   // Undo go to each machine that holds it (approval "inbox-thread-tags").
   "POST threads/:id/tags": "set",
   "POST initiatives/:id": "set",
+  // A project's tags live on the project's own machine, named by the tag's name, as a thread's do.
+  "POST projects/:id/tags": "set",
   // A tag's colour and "Show tag colors" carry the time the person chose, so a held one lands as of then.
   "POST tag-colours": "set",
   // A Board card lives on its project's machine (mark `cards`): a move, an edit, a link or a tag puts a state there,
@@ -201,6 +206,7 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST pulls/close": "forge",
   "POST pulls/reopen": "forge",
   "POST pulls/merge": "forge",
+  "POST pulls/owner": "forge",
   // The PR page's look at a linked machine's PR (approval "inbox-pr-dashboard"): kept there; the newer look wins.
   "POST pulls/looked": "set",
   // A file a linked machine's agent message names, attached there when the person comments on it (approval "inbox-file-refs-open-viewer").
@@ -217,6 +223,10 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST messages/:id/reask": "append",
   "POST messages/:id/handoff/undo": "set",
   "POST messages/:id/actions/(a-[0-9a-f]{8}(?:-\\d{1,3})?)": "set",
+  // A run starts, stops or opens a terminal now, and a secret's value is never written to the outbox: sent now from a
+  // press in a window there, or not at all (inbox-run-routes.ts).
+  "POST messages/:id/run": "now",
+  "POST messages/:id/secret": "now",
   "POST threads/:id/delete": "set",
   "POST annotations": "set",
   "POST annotations/:id/remove": "set",
@@ -243,6 +253,9 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST launch/:id/retry": "set",
   "POST launch/:id/trust": "set",
   "POST launch/:id/delete": "set",
+  // Show in Rex for an agent on another machine (inbox-rex-far.ts): a press that moves Rex's app now; held for later it
+  // would move it when nobody asked.
+  "POST rex/show": "now",
   "POST link-back": "set",
   "POST unlink": "set",
   // On this table so rule 8 knows it. The forward refuses it before this is read: an Update is never held to run days later.

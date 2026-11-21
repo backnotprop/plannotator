@@ -84,7 +84,9 @@ describe("a linked machine's looks on the merged board", () => {
     const peer = (id: string, marks: string[]) =>
       ({ id, state: "online", list: { marks }, request: async (route: string) => Response.json(route === "pulls" ? { pulls: [] } : { judgments: {} }) }) as unknown as PeerLink;
     const pulls = createMachinePulls({ peers: () => [peer(B, ["pulls", "pulls-looked"]), peer(C, ["pulls"])] });
-    const merged = mergePullBoards({ pulls: [], links: {}, projects: {}, cards: {}, hosts: [] }, await pulls.lists(false));
+    const snapshot = pulls.start(false);
+    await pulls.settled();
+    const merged = mergePullBoards({ pulls: [], links: {}, projects: {}, cards: {}, hosts: [] }, snapshot());
     expect(merged.machines[B]!.looked).toBe(true);
     expect(merged.machines[C]!.looked).toBeUndefined();
   });

@@ -19,6 +19,7 @@ import { startInboxServer, type InboxServer } from "./inbox";
 import { fetchReleaseImagesFor } from "./inbox-whats-new-images";
 import { takeDownInboxTailscale, type InboxTailscaleTimers } from "./inbox-tailscale";
 import { inboxLiveSiteId } from "./inbox-live";
+import { savedConfig } from "../../tests/helpers/saved-config";
 
 type Json = Record<string, any>;
 
@@ -127,7 +128,14 @@ describe("Inbox over your tailnet", () => {
     expect(ts.serve.get(inbox.port)).toBe(`http://127.0.0.1:${listener}`);
     expect(listener).not.toBe(inbox.port);
     expect(ts.calls.some((args) => args.includes("funnel"))).toBe(false);
-    expect(registryOf(dataDir).tailscale).toEqual({ url: `https://${MAGIC}:${inbox.port}/`, error: null, https_port: inbox.port, proxy_port: listener });
+    // `made`: the proxy ports this Inbox pointed its mapping on this port at (its own leftovers, inbox-tailscale.ts).
+    expect(registryOf(dataDir).tailscale).toEqual({
+      url: `https://${MAGIC}:${inbox.port}/`,
+      error: null,
+      https_port: inbox.port,
+      proxy_port: listener,
+      made: { https_port: inbox.port, proxy_ports: [listener] },
+    });
 
     // The owner, through serve: the window and its data.
     expect((await throughServe(inbox, "/")).status).toBe(200);
@@ -1018,7 +1026,7 @@ describe("what the owner reads through the tailnet, and what a page there never 
     const remote = await throughServe(inbox, "/api/inbox/sound/dialog", { method: "POST", headers: own, body: JSON.stringify({ serverSession: inbox.serverSession }) });
     expect(remote.status).toBe(200);
     expect(((await remote.json()) as Json).show).toBe(true);
-    expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxSound).toMatchObject({ dialogShownFor: "0.28.10" });
+    expect(savedConfig(dataDir).inboxSound).toMatchObject({ dialogShownFor: "0.28.10" });
     const local = await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/sound/dialog`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

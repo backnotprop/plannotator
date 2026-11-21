@@ -17,6 +17,7 @@
 import { afterEach, expect, jest, test } from 'bun:test';
 import type { InboxEventFrame, InboxEventHandlers, InboxEventWindow } from './api';
 import { dispatchInboxFrame } from './api';
+import { runEvents } from './data/runEvents';
 import {
   browserSharedEventsEnv,
   discardPreparedInboxEvents,
@@ -286,6 +287,7 @@ class World {
   /** Timings every tab gets (the leader check, the catch-up retry). */
   timing: SharedEventsEnv['timing'] = { pingEveryMs: 40, hiddenPingEveryMs: 150, pongTimeoutMs: 30, retryMs: 20, retryMaxMs: 80 };
   tabs = new Map<number, Tab>();
+  killed: Tab[] = [];
   gone: { by: number; window: string; unloading: boolean }[] = [];
   catchUps: { tab: number; cursor: number }[] = [];
   catchUpDelayMs = 0;
@@ -377,12 +379,13 @@ class World {
     this.kill(tab);
   }
 
-  /** The tab crashes: nothing of it runs again. */
+  /** The tab crashes: nothing of it runs again (its subscription ends after the test, so none reaches the next one). */
   kill(tab: Tab): void {
     this.locks.kill(tab.id);
     this.hub.kill(tab.id);
     this.server.closeTab(tab.id);
     this.tabs.delete(tab.id);
+    this.killed.push(tab);
   }
 
   leader(): number | null {
@@ -402,7 +405,7 @@ class World {
 
 let worlds: World[] = [];
 afterEach(() => {
-  for (const world of worlds) for (const tab of world.tabs.values()) tab.unsubscribe();
+  for (const world of worlds) for (const tab of [...world.tabs.values(), ...world.killed]) tab.unsubscribe();
   worlds = [];
 });
 function world(): World {
@@ -1485,4 +1488,13 @@ test("a linked machine's steps line never reaches the window; its other records 
   const read = { seq: 10, kind: 'read', message_id: 'msg_far' };
   dispatchInboxFrame(machineFrame(read), handlers);
   expect(got).toEqual([read]);
+});
+
+test('a reconnect (the stream back, its hello again) has the run cards read again; the first connect does not', async () => {
+  const heard: unknown[] = [];
+  const stop = runEvents.subscribe((change) => heard.push(change));
+  const first = await (world().open(), settle()).then(() => heard.length);
+  worlds[0]!.server.broadcast('hello', JSON.stringify({ serverSession: 's', cursor: worlds[0]!.server.seq }));
+  await settle().finally(stop);
+  expect([first, ...heard]).toEqual([0, { all: true }]);
 });

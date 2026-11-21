@@ -112,6 +112,7 @@ export function useFileQuestionViewerProps(questions: FileQuestions | null | und
       },
       questionContractLines: true,
       questionOptionLines: true,
+      questionChangeLines: true,
     };
   }, [records, answers, locked, onPick, footerFor]);
 }

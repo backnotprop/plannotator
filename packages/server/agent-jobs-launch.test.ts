@@ -150,6 +150,27 @@ describe("POST /api/agents/jobs — reviewProfileId launch plumbing", () => {
   });
 });
 
+describe("POST /api/agents/jobs — the run keeps what was launched", () => {
+  test("a caller's own label comes back as launchLabel beside the server's label; the server's default adds nothing", async () => {
+    const handler = createAgentJobHandler({
+      mode: "review",
+      getServerUrl: () => "http://localhost:1234",
+      getCwd: () => "/tmp",
+      async buildCommand() {
+        return { command: ["true"], label: "Code Review", model: "opus", reviewProfileLabel: "Security" };
+      },
+    });
+    const own = await (await handler.handle(post({ provider: "claude", label: "Review: money rounding" }), JOBS_URL))!.json();
+    expect(own.job.label).toBe("Code Review");
+    expect(own.job.launchLabel).toBe("Review: money rounding");
+    expect(own.job.model).toBe("opus");
+    expect(own.job.reviewProfileLabel).toBe("Security");
+    const plain = await (await handler.handle(post({ provider: "claude", label: "Code Review" }), JOBS_URL))!.json();
+    expect(plain.job.launchLabel).toBeUndefined();
+    handler.killAll();
+  });
+});
+
 describe("POST /api/agents/jobs — guide launch review plumbing (portable export)", () => {
   test("launchReview is handed to onJobComplete but never appears on the broadcast job", async () => {
     const launchReview = { rawPatch: "diff --git a/x b/x\n", gitRef: "HEAD", source: { kind: "local" as const } };

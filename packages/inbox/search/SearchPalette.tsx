@@ -1077,7 +1077,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
                   <span className="ib-sp-rs">
                     <span className="ib-sp-p">{actionLabel(action)}</span>
                     <span className="ib-sp-s">
-                      {action.kind === 'new' ? 'Start a thread with a live agent' : action.kind === 'review' ? 'Local changes or a pull request' : `${startedLine(action.target)} · ${busyWord(action.target).toLowerCase()}`}
+                      {action.kind === 'new' ? 'Start a thread with a live agent' : action.kind === 'review' ? 'Local changes or a pull request' : `${startedLine(action.target)}${busyWord(action.target) ? ` · ${busyWord(action.target)!.toLowerCase()}` : ''}`}
                     </span>
                   </span>
                 </div>
@@ -1115,7 +1115,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
             const tint = row.type === 'thread' ? (props.tintOf?.(row.thread_id) ?? null) : null;
             const tinted = tint ? tintAttrs(tint.colour) : null;
             return (
-              <div key={`${row.type}-${row.id}`} className="ib-sp-row" {...common} data-result={row.type} data-result-id={row.id} data-tint={tinted?.['data-tint']} style={tinted?.style}>
+              <div key={`${row.type}-${row.id}`} className="ib-sp-row" {...common} data-result={row.type} data-result-id={row.id} data-tint={tinted?.['data-tint']}>
                 {/* The tag as a string, so the memo holds while the answer and the colour stay. */}
                 <ResultContent row={row} phone={phone} projectName={projectName(row.project.id)} terms={answered?.model.terms ?? NO_TERMS} tag={tint ? JSON.stringify(tint) : undefined} />
               </div>

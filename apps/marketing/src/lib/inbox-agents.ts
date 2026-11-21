@@ -22,6 +22,7 @@
 // When one of those changes, change the entry here; the pages follow.
 
 import { inboxToolCostText } from '../../../../packages/core/inbox-types';
+import { INBOX_SETUP_COMMAND } from '../../../../packages/shared/inbox/connection';
 
 export type Tier = 'plugin' | 'hooks' | 'mcp' | 'cloud';
 
@@ -49,7 +50,7 @@ export interface Step {
   see?: string;
   /**
    * The install prompt (/inbox/prompt.md) gives this step to an agent setting up the Inbox for itself: before
-   * `plannotator inbox` (it turns a plugin's tool on only when it finds the plugin) or after it. A step only
+   * `plannotator inbox --open` (it turns a plugin's tool on only when it finds the plugin) or after it. A step only
    * Plannotator's own features need (a review plugin, a hook the installer adds) has none.
    */
   prompt?: 'before' | 'after';
@@ -166,6 +167,11 @@ export const INSTALL_WIN = 'irm https://plannotator.ai/install.ps1 | iex';
 export const TEST = 'Send me a test question in the Plannotator Inbox, and read my answer when I tell you I sent it.';
 const MCP_JSON = '{ "mcpServers": { "plannotator-inbox": { "command": "plannotator", "args": ["inbox", "mcp"] } } }';
 
+/**
+ * The first turn-on an agent runs: the setup prompt's step 2 and llms.txt's setup (INBOX_SETUP_COMMAND). The pages
+ * keep bare `plannotator inbox`, which the person runs: with the Inbox running it opens a tab, connects and exits.
+ */
+export const TURN_ON = INBOX_SETUP_COMMAND;
 const openInbox = (see: string): Step => ({ do: 'Open the Inbox. It connects the agents it finds on this computer.', code: 'plannotator inbox', see });
 /**
  * The OpenClaw plugin's install line (apps/openclaw-plugin/README.md). The `npm:`
@@ -342,13 +348,13 @@ export const AGENTS: Agent[] = [
         see: '`claude plugin list` shows `plannotator@plannotator`.',
         prompt: 'before',
       },
+      openInbox('The Inbox opens in your browser. Settings → Agents shows Claude Code as `Connected` through `Plannotator’s plugin`.'),
       {
         do: 'Quit Claude Code and start it again. `claude --continue` brings back the conversation you were in.',
         code: 'claude --continue',
         see: 'Claude has a `plannotator_inbox` tool. It needs Claude Code 2.1.287 or newer.',
         prompt: 'after',
       },
-      openInbox('The Inbox opens in your browser. Settings → Agents shows Claude Code as `Connected` through `Plannotator’s plugin`.'),
     ],
     other: [
       onWindows,
@@ -754,7 +760,7 @@ export const AGENTS: Agent[] = [
     other: [
       {
         title: 'Turn the tool on by hand',
-        steps: [{ do: 'Merge this into your Plannotator config. The Inbox must have run once on this computer. It applies from the next message in each chat.', file: '~/.plannotator/config.json', code: '{ "inboxTool": { "openclaw": true } }' }],
+        steps: [{ do: 'Merge this into your Plannotator config. The Inbox must be on (`plannotator inbox`). It applies from the next message in each chat.', file: '~/.plannotator/config.json', code: '{ "inboxTool": { "openclaw": true } }' }],
       },
     ],
     check: wakeCheck('OpenClaw'),
@@ -831,7 +837,7 @@ export const AGENTS: Agent[] = [
       },
       {
         title: 'Turn the tool on by hand',
-        steps: [{ do: 'Merge this into your Plannotator config. The Inbox must have run once on this computer. It applies to new Hermes sessions.', file: '~/.plannotator/config.json', code: '{ "inboxTool": { "hermes": true } }' }],
+        steps: [{ do: 'Merge this into your Plannotator config. The Inbox must be on (`plannotator inbox`). It applies to new Hermes sessions.', file: '~/.plannotator/config.json', code: '{ "inboxTool": { "hermes": true } }' }],
       },
     ],
     check: wakeCheck('Hermes Agent'),
@@ -1042,6 +1048,7 @@ export const AGENTS: Agent[] = [
         code: 'claude plugin marketplace add backnotprop/plannotator\nclaude plugin install plannotator@plannotator',
         prompt: 'before',
       },
+      openInbox('The Inbox opens in your browser.'),
       { do: 'Start a new Claude thread in T3.', see: 'Claude in the thread has a `plannotator_inbox` tool. It needs Claude Code 2.1.287 or newer.', prompt: 'after' },
       { do: 'So your replies still arrive after T3 stops an idle Claude, sign Plannotator in to T3 once. In T3 open Settings → Environments. Open the environment’s menu and choose Copy MCP URL.' },
       {
@@ -1103,6 +1110,54 @@ export const AGENTS: Agent[] = [
       { text: 'Tested on T3 Nightly 0.0.46.', src: 'packages/t3-code/README.md' },
     ],
     examples: ['Ask Claude in a T3 thread to run `plannotator review`. Your comments go back to that thread.'],
+  },
+  {
+    slug: 'antigravity',
+    name: 'Antigravity',
+    tier: 'mcp',
+    lede: 'Google Antigravity (the App, the IDE and the agy CLI) reaches the Inbox through MCP. Your reply starts a turn in the conversation that asked.',
+    diff: 'Reply wakes it · App, IDE and agy',
+    inbox: {
+      tool: mcpTool('`plannotator inbox` adds one `plannotator-inbox` key to `~/.gemini/config/mcp_config.json`, the file the App, the IDE and agy all read.', 'AG (antigravity); packages/server/inbox-agents.ts'),
+      reply: {
+        level: 'yes',
+        label: 'Wakes it',
+        detail: 'The Inbox sends your reply into the conversation with Antigravity’s own agent API. An idle conversation starts a turn with it; a busy one reads it at its next step. In agy the agent runs `plannotator inbox antigravity` once per launch first; the App and the IDE need nothing.',
+        src: 'packages/server/inbox-antigravity-wake.ts; apps/hook/server/inbox-antigravity-command.ts',
+      },
+      start: noStart,
+      permissions: noPermissions,
+    },
+    plannotator: {
+      plan: noPlan('No Antigravity plan hook in Plannotator'),
+      review: { level: 'part', label: 'From the terminal', detail: 'Ask the agent to run `plannotator review`.', src: 'apps/hook/server/index.ts (review command)' },
+      annotate: filesOnly('Ask the agent to run `plannotator annotate <file>`.', 'apps/hook/server/index.ts (annotate command)'),
+      ask: noAsk,
+    },
+    setup: [
+      { do: 'Install Plannotator.', code: INSTALL },
+      openInbox('The terminal says `Connected Antigravity … to the Inbox`.'),
+      { do: 'Restart the Antigravity App or IDE. A new agy session has it at once.' },
+    ],
+    other: [
+      { title: 'Connect the Inbox yourself', steps: [{ do: 'Merge this into `mcpServers`. The App, the IDE and agy read the same file.', file: '~/.gemini/config/mcp_config.json', code: MCP_JSON }] },
+      onWindows,
+    ],
+    check: wakeCheck('Antigravity'),
+    trouble: [
+      {
+        symptom: 'In agy, your reply never shows up on its own',
+        fix: 'The agent runs `plannotator inbox antigravity` once per agy launch; the Inbox tells it to when it asks. `agy -p` ends after its turn, so it reads the thread instead.',
+        src: 'apps/hook/server/inbox-antigravity-command.ts',
+      },
+      { symptom: 'The App doesn’t list the `plannotator-inbox` tools', fix: 'The App reads its MCP file when it starts. Restart it.', src: 'packages/server/inbox-agents.ts formatConnectReport' },
+      dockPath,
+      inboxLog,
+    ],
+    limits: [
+      { text: 'Tested with agy 1.5.9 and the App 2.32.1 on macOS. The IDE, Windows and Linux are untested.', src: 'packages/server/inbox-antigravity-wake.ts (the versions in its header)' },
+    ],
+    examples: ['Ask the agent to send you a question in the Plannotator Inbox, then answer it there.'],
   },
   {
     slug: 'qwen-code',
@@ -1231,6 +1286,7 @@ export const AGENTS: Agent[] = [
     },
     setup: [
       { do: 'Install Plannotator.', code: INSTALL },
+      openInbox('The Inbox opens in your browser.'),
       { do: 'In Copilot CLI add the plugin. Then restart Copilot CLI.', code: '/plugin marketplace add backnotprop/plannotator\n/plugin install plannotator-copilot@plannotator' },
       byHandMcp('Copilot CLI'),
     ],
@@ -1270,8 +1326,8 @@ export const AGENTS: Agent[] = [
         do: 'Add the plugin.',
         code: 'mkdir -p ~/.config/amp/plugins\ncurl -fsSL https://raw.githubusercontent.com/backnotprop/plannotator/main/apps/amp-plugin/plannotator.ts \\\n  -o ~/.config/amp/plugins/plannotator.ts',
       },
-      { do: 'Restart Amp or run `plugins: reload` from the command palette.', see: 'The palette lists Plannotator: Review changes.' },
       openInbox('The terminal says `Connected Amp … to the Inbox`.'),
+      { do: 'Restart Amp or run `plugins: reload` from the command palette.', see: 'The palette lists Plannotator: Review changes.' },
     ],
     other: [{ title: 'Connect the Inbox yourself', steps: [{ do: 'Run it in a terminal.', code: 'amp mcp add plannotator-inbox -- plannotator inbox mcp' }] }],
     check: readCheck('Amp'),
@@ -1304,6 +1360,7 @@ export const AGENTS: Agent[] = [
     },
     setup: [
       { do: 'Install Plannotator.', code: INSTALL },
+      openInbox('The Inbox opens in your browser.'),
       { do: 'Add the plugin. Then open a new Droid session.', code: 'droid plugin marketplace add https://github.com/backnotprop/plannotator\ndroid plugin install plannotator@plannotator', see: '`/plannotator-inbox` opens the Inbox.' },
       byHandMcp('Droid'),
     ],
@@ -1376,6 +1433,7 @@ export const AGENTS: Agent[] = [
         code: INSTALL,
         see: '`Plan review is configured through the Vibe pre_tool hook on exit_plan_mode`',
       },
+      openInbox('The Inbox opens in your browser.'),
       byHandMcp('Vibe'),
     ],
     other: [{ title: 'On Windows', steps: [{ do: 'The installer adds no hook there and prints the steps to add it by hand. The last-reply skill doesn’t work there yet.', code: INSTALL_WIN }] }],

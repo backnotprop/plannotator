@@ -218,10 +218,12 @@ describe.if(hasDom)('a host that does not ask for readFirst keeps its board', ()
       const note = { id: 'n1', kind: 'ask', v: 1, view: 'reqs', part: 'r-1', quote: 'Line one', text: 'Why this?', from: 'you', re: null, delivered: null, at: data.version.at };
       return { ...data, notes: [note as unknown as ShapeLoaded['notes'][number]] };
     };
-    await mount({}, { ...asHost, host: old, initialView: 'reqs' as ShapeViewId, initialPanel: 'ask' });
+    await mount({}, { ...asHost, host: old, initialView: 'reqs' as ShapeViewId });
     expect(document.querySelector('.shp-know')).toBeNull();
     expect(dock('Shape')?.getAttribute('aria-pressed')).toBe('true');
-    expect(document.body.textContent).toContain('Why this?');
+    // Its question is in the whole board's comment box (every question on the board).
+    await click(document.querySelector('.shp-general')!);
+    expect(popover()?.querySelector('[data-shape-talk]')?.textContent).toContain('Why this?');
     expect(document.body.textContent).not.toContain('reqs');
   });
 });

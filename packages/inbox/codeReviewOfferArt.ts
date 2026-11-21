@@ -8,7 +8,8 @@
  * frame is drawn. Decoration only (the canvas is aria-hidden); the same in light and dark.
  */
 
-const UV = { void: '#0F0D16', indigo: '#2A2262', violet: '#5038B0', lilac: '#A79AEC', bone: '#ECE7DC' };
+/** The Static Storm palette (the brand kit's; the Routines intro's loop draws in it too, routinesIntroArt.ts). */
+export const UV = { void: '#0F0D16', indigo: '#2A2262', violet: '#5038B0', lilac: '#A79AEC', bone: '#ECE7DC' } as const;
 const DX = { plus: '#2FD872', plusDeep: '#0E6E3B', minus: '#F2443B', minusDeep: '#8A1A26' };
 
 /** The art's options: `unit`, the smallest cell (px); `seed`, which storm; `cx`, where the column stands (0..1). */
@@ -23,7 +24,8 @@ export const CODE_REVIEW_ART_STEPS = [0, 0.34, 0.67, 1] as const;
 /** The beat between hops, ms. */
 export const CODE_REVIEW_ART_BEAT_MS = 125;
 
-function hash(...k: number[]): number {
+/** The kit's hash: the same cell always gets the same value, so the storm is the same on every draw. */
+export function hash(...k: number[]): number {
   let h = 2166136261 >>> 0;
   for (const v of k) {
     h ^= Math.imul((v | 0) + 0x9e3779b9, 2654435761) >>> 0;

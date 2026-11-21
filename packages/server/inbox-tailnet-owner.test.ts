@@ -24,10 +24,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
+import { savedBytes, savedConfig } from "../../tests/helpers/saved-config";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createAgentEnvironmentFor } from "./inbox-agents";
 import { doorRouteNames } from "./inbox-devices";
-import { doorWriteKind } from "./inbox-outbox";
+import { DOOR_WRITES, doorWriteKind } from "./inbox-outbox";
 
 type Json = Record<string, any>;
 
@@ -151,7 +152,7 @@ async function world(options: WorldOptions = {}) {
   servers.push(inbox);
   const project = inbox.store.ensureProject({ name: "web", root: join(root, "web") });
   const card = inbox.store.createCard({ project_id: project.id, by: { kind: "agent", host: "codex", session: "s", name: "Codex" }, title: "vite 8", prs: ["acme/widgets#12"], refs: [] }).card;
-  const config = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as Json;
+  const config = () => savedConfig(dataDir) as Json;
   return { inbox, dataDir, fake, ts, launches, opened, forgeCalls, card, config };
 }
 type World = Awaited<ReturnType<typeof world>>;
@@ -244,7 +245,7 @@ const BLOCKED: { name: string; call: (w: World) => Call; local: [number, string?
 describe("another Tailscale account: one refusal, on every route class", () => {
   test("a page, an API read and write, the event stream and /mcp: 403, a readable page for the browser, JSON for the rest; nothing changes", async () => {
     const w = await world();
-    const before = readFileSync(join(w.dataDir, "config.json"), "utf8");
+    const before = savedBytes(w.dataDir);
     const page = await call(w, "other", { path: "/" }, { Accept: "text/html" });
     expect(page.status).toBe(403);
     expect(page.headers.get("content-type")).toContain("text/html");
@@ -261,7 +262,7 @@ describe("another Tailscale account: one refusal, on every route class", () => {
       expect([request.path, answer.status, answer.headers.get("content-type")]).toEqual([request.path, 403, "application/json; charset=utf-8"]);
       expect([request.path, ((await answer.json()) as Json).code]).toEqual([request.path, "tailnet_identity_refused"]);
     }
-    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(before);
+    expect(savedBytes(w.dataDir)).toBe(before);
     // The owner over the tailnet and this computer: the same routes answer.
     for (const caller of CALLERS) {
       expect([caller, (await call(w, caller, { path: "/" }, { Accept: "text/html" })).status]).toEqual([caller, 200]);
@@ -610,6 +611,7 @@ const PARITY: { name: string; call: (w: World) => Call; world?: WorldOptions; sh
   { name: "a project's picture: Set picture… (take it away)", call: (w) => ({ path: `/api/inbox/projects/${projectOf(w)}/picture`, body: { picture: null } }) },
   { name: "settings float_drafts", call: () => ({ path: "/api/inbox/settings", body: { float_drafts: { on: true } } }) },
   { name: "settings mark_read_warning", call: () => ({ path: "/api/inbox/settings", body: { mark_read_warning: { on: false } } }) },
+  { name: "settings split_view", call: () => ({ path: "/api/inbox/settings", body: { split_view: { on: true } } }) },
 ];
 
 describe("the owner over the tailnet gets what this computer gets", () => {
@@ -685,7 +687,7 @@ describe("another site never rides the owner's login", () => {
 
   test("every opened POST, each forged four ways: refused, and nothing happened", async () => {
     const w = await world();
-    const before = readFileSync(join(w.dataDir, "config.json"), "utf8");
+    const before = savedBytes(w.dataDir);
     for (const make of WRITES) {
       const request = make(w);
       for (const [name, headers, refused] of forged) {
@@ -693,7 +695,7 @@ describe("another site never rides the owner's login", () => {
       }
     }
     expect(w.launches).toEqual([]);
-    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(before);
+    expect(savedBytes(w.dataDir)).toBe(before);
     expect(existsSync(join(w.dataDir, "inbox", "voice-key"))).toBe(false);
     expect(w.forgeCalls).toEqual([]);
   });
@@ -743,13 +745,13 @@ describe("another site never rides the owner's login", () => {
 describe("the login header counts only on the tailnet listener", () => {
   test("forged on the window's own port: refused on every opened route, and nothing happened", async () => {
     const w = await world();
-    const before = readFileSync(join(w.dataDir, "config.json"), "utf8");
+    const before = savedBytes(w.dataDir);
     for (const row of OPENED) {
       const answer = await call(w, "local", row.call(w), { "Tailscale-User-Login": OWNER });
       expect([row.name, ...(await answerOf(answer))]).toEqual([row.name, ...REFUSED]);
     }
     expect(w.launches).toEqual([]);
-    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(before);
+    expect(savedBytes(w.dataDir)).toBe(before);
     expect(existsSync(join(w.dataDir, "inbox", "voice-key"))).toBe(false);
   });
 
@@ -787,13 +789,33 @@ describe("the login header counts only on the tailnet listener", () => {
 });
 
 describe("a linked machine gains none of it", () => {
-  test("no opened route is a door route or a forwardable write", () => {
-    const names = doorRouteNames().join("\n");
+  test("no opened route is a door route or a forwardable write; this computer's gh runs for a linked machine on the PR board's routes only", () => {
+    const all = doorRouteNames();
+    const names = all.join("\n");
     for (const word of ["agents", "settings", "voice"]) expect(names).not.toContain(` ${word}`);
     // The Board's cards are door routes (mark `cards`, its own machine's store); their marks run this computer's gh and are not.
     expect(names).not.toContain("cards/marks");
-    // A linked machine's `update` is the one exception, and it is not on the allowlist: the forward refuses it (below), and only a machine's token reaches it.
-    expect(names.split("\n").filter((name) => name.includes("update"))).toEqual(["POST update"]);
+    // A linked machine may run PR actions with this computer's GitHub sign-in (mark `pulls`, inbox-machines.md "The PR
+    // board"). These are every door route that runs this computer's gh / glab: the board's reads, a thread's PRs (read
+    // and stored here; gh only reads their state), and the three writes. A new PR route or `forge` write fails here until it is named.
+    // "Changed since you looked" (`POST pulls/looked`) is a record kept here, a `set`: it runs no gh.
+    expect(doorWriteKind("pulls/looked")).toBe("set");
+    // Start review thread's tie (`POST pulls/owner`) is a record kept here; gh only reads the list to find its PRs. Its
+    // kind is `forge` for the sending: never held, the window's mark only.
+    expect(doorWriteKind("pulls/owner")).toBe("forge");
+    expect(all.filter((name) => name.includes("pulls") && name !== "POST pulls/looked")).toEqual([
+      "GET pulls",
+      "GET pulls/(risk|details|diff|file|repo-files|repo-file|avatar|media|media/sizes)",
+      "POST pulls/(close|reopen|merge|owner)",
+      "GET threads/:id/pulls",
+      "POST threads/:id/pulls",
+    ]);
+    // The door routes that write with gh / glab: exactly these, each a `forge` write (never held, a window's press only).
+    expect(Object.entries(DOOR_WRITES).filter(([, kind]) => kind === "forge").map(([name]) => name).sort()).toEqual(["POST pulls/close", "POST pulls/merge", "POST pulls/owner", "POST pulls/reopen"]);
+    for (const verb of ["close", "merge", "reopen"]) expect(doorWriteKind(`pulls/${verb}`)).toBe("forge");
+    expect(doorWriteKind("threads/msg_1/pulls")).toBe("set");
+    // A linked machine's `update` (read it, start it) is the one exception, and it is not on the allowlist: the forward refuses it (below), and only a machine's token reaches it.
+    expect(names.split("\n").filter((name) => name.includes("update"))).toEqual(["GET update", "POST update"]);
     for (const route of ["update/check", "update/snooze", "agents", "agents/notes", "agents/seen", "settings", "cards/marks", "voice/key"]) {
       expect([route, doorWriteKind(route)]).toEqual([route, null]);
     }
@@ -802,7 +824,7 @@ describe("a linked machine gains none of it", () => {
   test("the owner over the tailnet, through the forward to a linked machine: refused there, nothing runs there", async () => {
     setEnv("PLANNOTATOR_TEST_SANDBOX", process.env.PLANNOTATOR_TEST_SANDBOX ?? "1");
     const peer = await world({ phones: false });
-    const peerConfig = readFileSync(join(peer.dataDir, "config.json"), "utf8");
+    const peerConfig = savedBytes(peer.dataDir);
     const w = await world({ phones: false });
     const bearer = (inbox: InboxServer) => ({ Authorization: `Bearer ${inbox.token}`, "Content-Type": "application/json" });
     const offer = (await (
@@ -829,7 +851,7 @@ describe("a linked machine gains none of it", () => {
     expect(peer.launches).toEqual([]);
     expect(peer.fake.calls().filter((c) => c.args[0] === "mcp")).toEqual([]);
     expect(existsSync(join(peer.dataDir, "inbox", "voice-key"))).toBe(false);
-    expect(readFileSync(join(peer.dataDir, "config.json"), "utf8")).toBe(peerConfig);
+    expect(savedBytes(peer.dataDir)).toBe(peerConfig);
   });
 });
 

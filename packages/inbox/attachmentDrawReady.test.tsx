@@ -27,8 +27,10 @@ const { lazyParts, drawReady } = (hasDom
   ? { lazyParts: await import('./lazyParts'), drawReady: await import('./threadDrawReady') }
   : {}) as { lazyParts: typeof import('./lazyParts'); drawReady: typeof import('./threadDrawReady') };
 
-/** The fence theme the pane's ui CodeBlock draws in with no ThemeProvider (Plannotator, dark). */
+/** The fence theme the pane's ui CodeBlock draws in with no ThemeProvider: the Plannotator palette in the
+ * page's mode, which beforeEach makes theme.css's dark half (a theme class without `light`). */
 const FENCE = resolveFenceTheme('plannotator', 'dark');
+let pageClass = '';
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -58,6 +60,8 @@ async function ticks(n = 10) {
 beforeEach(() => {
   if (!hasDom) return;
   drawReady.setThreadFenceTheme(FENCE);
+  pageClass = document.documentElement.className;
+  document.documentElement.classList.add('theme-plannotator');
   resetMathRenderer();
 });
 
@@ -68,6 +72,7 @@ afterEach(() => {
   root = null;
   host = null;
   globalThis.fetch = realFetch;
+  document.documentElement.className = pageClass;
   __setCodeHighlightModuleForTests(undefined);
   __resetCodeHighlightCacheForTests();
   setMathRendererLoader(null);

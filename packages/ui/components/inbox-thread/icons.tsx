@@ -5,7 +5,7 @@
  */
 
 import type React from 'react';
-import { ClaudeIcon, CodexIcon, CursorIcon, GrokBotIcon, HermesAgentIcon, MuseIcon, OpenCodeIcon, PiIcon } from '../icons/AgentIcons';
+import { ClaudeIcon, CodexIcon, CursorIcon, GrokBotIcon, HermesAgentIcon, MuseIcon, OpenCodeIcon, PiIcon, T3Icon } from '../icons/AgentIcons';
 import type { InboxAuthor } from '@plannotator/core/inbox-types';
 
 const PATHS = {
@@ -116,7 +116,7 @@ const PATHS = {
   arrowUpRight: 'm4.5 19.5 15-15m0 0H8.25m11.25 0v11.25',
   // The tour's "Connect agents next →" (Heroicons outline arrow-right).
   arrowRight: 'M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3',
-  // The question sound (Heroicons outline): play, and cursor-arrow-rays for "click once in this tab".
+  // The Inbox's sound (Heroicons outline): play, and cursor-arrow-rays for "click once in this tab".
   film: 'M6 5.25h12a2.25 2.25 0 0 1 2.25 2.25v9a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25v-9A2.25 2.25 0 0 1 6 5.25ZM7.5 5.25v13.5M16.5 5.25v13.5M3.75 9.75H7.5M3.75 14.25H7.5M16.5 9.75h3.75M16.5 14.25h3.75',
   /** The onboarding tour's tag (Heroicons outline "map"). */
   map: 'M9 6.75V15m6-6v8.25m.503 3.498 4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 0 0-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0Z',
@@ -187,6 +187,8 @@ const PATHS = {
   terminal: 'm6.75 7.5 3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0 0 21 18V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v12a2.25 2.25 0 0 0 2.25 2.25Z',
   // The Board (Heroicons outline view-columns), New card (plus), a card the person made (user), Icebox (a snowflake, as the mock: Lucide snowflake).
   board: 'M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125Z',
+  /** A routine: a rounded play mark, in the outline style. */
+  scheduled: 'M6 6Q6 4 7.74 4.99L18.26 11.01Q20 12 18.26 12.99L7.74 19.01Q6 20 6 18Z',
   plus: 'M12 4.5v15m7.5-7.5h-15',
   cloud: 'M2.25 15a4.5 4.5 0 0 0 4.5 4.5H18a3.75 3.75 0 0 0 1.332-7.257 3 3 0 0 0-3.758-3.848 5.25 5.25 0 0 0-10.233 2.33A4.502 4.502 0 0 0 2.25 15Z',
   user: 'M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z',
@@ -300,6 +302,8 @@ function ownMark(host: string | null | undefined): React.ReactNode | null {
       return <CodexIcon />;
     case 'cursor':
       return <CursorIcon />;
+    case 't3':
+      return <T3Icon />;
     case 'cloud':
       return (
         <svg className="ib-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -335,8 +339,14 @@ export function hostHasMark(host: string | null | undefined): boolean {
 }
 
 /** The mark for an agent host: the real brand marks for the hosts ui carries, a neutral glyph otherwise. */
-export function HostMark({ host, big }: { host: string | null | undefined; big?: boolean }) {
-  return <span className={`ib-mk${big ? ' ib-big' : ''}`}>{ownMark(host) ?? <Icon name="code" />}</span>;
+/** `children`: drawn inside the mark's box after it (the Inbox's Rex status mark on its corner). */
+export function HostMark({ host, big, children }: { host: string | null | undefined; big?: boolean; children?: React.ReactNode }) {
+  return (
+    <span className={`ib-mk${big ? ' ib-big' : ''}`}>
+      {ownMark(host) ?? <Icon name="code" />}
+      {children}
+    </span>
+  );
 }
 
 export function AuthorMark({ author, big }: { author: InboxAuthor | null | undefined; big?: boolean }) {
