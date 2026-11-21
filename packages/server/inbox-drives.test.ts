@@ -39,9 +39,9 @@ test("Linux: drives under /mnt, /media and /run/media, spaces unescaped; NFS, SM
 });
 
 for (const marker of ["WSL_DISTRO_NAME", "WSL_INTEROP"]) {
-  test(`WSL (${marker}): automatic mounts keep their metadata without folder shortcuts`, async () => {
-    const paths = ["/mnt/c", "/mnt/D", "/mnt/wsl", "/mnt/wslg", "/mnt/wslg/distro", "/mnt/host"];
-    const other = ["/mnt/data", "/mnt/c/backup", "/mnt/wsl-projects", "/media/me/USB", "/run/media/me/remote"];
+  test(`WSL (${marker}): system mounts keep their metadata without folder shortcuts; drive letters and user mounts stay`, async () => {
+    const paths = ["/mnt/wsl", "/mnt/wslg", "/mnt/wslg/distro", "/mnt/host"];
+    const other = ["/mnt/c", "/mnt/D", "/mnt/data", "/mnt/c/backup", "/mnt/wsl-projects", "/media/me/USB", "/run/media/me/remote"];
     const env = {
       [marker]: "wsl",
       PLANNOTATOR_TEST_SANDBOX: "1",
@@ -56,10 +56,10 @@ for (const marker of ["WSL_DISTRO_NAME", "WSL_INTEROP"]) {
   });
 }
 
-test("Linux outside WSL keeps drive-letter mount shortcuts", async () => {
+test("Linux outside WSL keeps every mount as a shortcut", async () => {
   const list = createDriveList({
     platform: "linux",
-    env: { PLANNOTATOR_TEST_SANDBOX: "1", PLANNOTATOR_TEST_DRIVES: JSON.stringify({ drives: [{ path: "/mnt/c" }] }) },
+    env: { PLANNOTATOR_TEST_SANDBOX: "1", PLANNOTATOR_TEST_DRIVES: JSON.stringify({ drives: [{ path: "/mnt/wslg" }] }) },
   });
-  expect(await list.list()).toEqual([{ path: "/mnt/c", name: "c" }]);
+  expect(await list.list()).toEqual([{ path: "/mnt/wslg", name: "wslg" }]);
 });
