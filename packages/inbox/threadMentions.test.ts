@@ -117,6 +117,41 @@ describe('whether the reply\'s agent can open a mentioned thread', () => {
     expect(mentionReadable(HERE, asMention(OTHER))).toBe(false);
   });
 
+  // Linked machines whose agents read each other's threads (mark `agent-read`), and one too old to.
+  const THIRD = `ibx_${'01JD5THRD'.padEnd(26, '0')}`;
+  const linked = (marks: string[], both_ways = true) => [
+    { id: SELF, self: true, name: 'Studio', marks: ['agent-read'], both_ways: true },
+    { id: OTHER, name: 'Mini', marks, both_ways },
+  ];
+
+  test('a linked machine\'s thread is readable both ways once that machine reads across', () => {
+    setSelfMachine(SELF, linked(['star', 'agent-read']));
+    // This Inbox's thread, mentioning the linked machine's: this Inbox's agent reads it there.
+    expect(mentionReadable(HERE, asMention(OTHER))).toBe(true);
+    // The linked machine's thread, mentioning this Inbox's: its agent reads it here.
+    rememberMachine([HERE], OTHER);
+    expect(mentionReadable(HERE, asMention(SELF))).toBe(true);
+    const sent = replyWordsWithMentions(HERE, mentioned('See', { ...FLAKY, machine: SELF }));
+    expect(sent).toContain(W.read(FLAKY.id));
+    expect(sent).not.toContain(W.unreadable);
+  });
+
+  test('a linked machine too old to read across is named, with what to do', () => {
+    setSelfMachine(SELF, linked(['star']));
+    const sent = replyWordsWithMentions(HERE, mentioned('See', { ...FLAKY, machine: OTHER }));
+    expect(sent).toContain(W.needsUpdate('Mini'));
+    expect(sent).not.toContain(W.read(FLAKY.id));
+  });
+
+  test('no way there: a link only one way, or a third machine, stays unreadable', () => {
+    // The linked machine holds no link back to this one: its agent cannot reach this Inbox's thread.
+    setSelfMachine(SELF, linked(['agent-read'], false));
+    rememberMachine([HERE], OTHER);
+    expect(replyWordsWithMentions(HERE, mentioned('See', { ...FLAKY, machine: SELF }))).toContain(W.unreadable);
+    // A reply on one linked machine, mentioning another's thread: this window cannot tell they are linked.
+    expect(mentionReadable(HERE, asMention(THIRD))).toBe(false);
+  });
+
   test('the Send tells the agent which it cannot open', () => {
     setSelfMachine(SELF);
     rememberMachine([HERE], OTHER);

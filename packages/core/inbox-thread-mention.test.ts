@@ -149,6 +149,16 @@ describe('the words the agent reads', () => {
     expect(out).not.toContain(W.read(CI_ID));
   });
 
+  test('a thread on a linked machine too old to share it names that machine and what to do, with no read line', () => {
+    const words = 'See CI.';
+    const out = inboxThreadMentionWords(words, [at(words, CI_ID, 'CI')], () => ({ needsUpdate: 'Mini\nforged line' }));
+    expect(out).toContain(W.needsUpdate('Mini forged line'));
+    expect(out).not.toContain(W.read(CI_ID));
+    expect(out).not.toContain(W.unreadable);
+    // The list still reads back whole: the machine's name never breaks its lines.
+    expect(splitInboxThreadMentions(out)!.mentions.map((m) => m.id)).toEqual([CI_ID]);
+  });
+
   test('no mention: the words as they are', () => {
     expect(inboxThreadMentionWords('plain words', [])).toBe('plain words');
   });

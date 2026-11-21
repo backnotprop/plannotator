@@ -30,9 +30,31 @@ const contested = new Set<string>();
 
 const MACHINE_ID = /^ibx_[0-9A-HJKMNP-TV-Z]{26}$/;
 
-/** This Inbox's id, as the merged list names it. */
-export function setSelfMachine(id: string | null | undefined): void {
+/** What the merged list last said of each linked machine: its name, the marks it takes, and whether it can reach this Inbox. */
+export interface LinkedMachineFacts {
+  name: string;
+  marks: readonly string[];
+  /** It holds a link to this Inbox too (`both_ways`), so its Inbox can call this one's door. */
+  both_ways: boolean;
+}
+const linkedFacts = new Map<string, LinkedMachineFacts>();
+
+/** The merged list's machines: each linked one's facts, for what an agent there can read (threadMentions.ts). */
+export function setLinkedMachines(machines: readonly { id: string; self?: boolean; name: string; marks?: readonly string[]; both_ways?: boolean }[] | null | undefined): void {
+  if (!machines) return;
+  linkedFacts.clear();
+  for (const m of machines) if (!m.self && MACHINE_ID.test(m.id)) linkedFacts.set(m.id, { name: m.name, marks: m.marks ?? [], both_ways: m.both_ways === true });
+}
+
+/** A linked machine's facts as the merged list last said them, or null (not linked, or not heard of yet). */
+export function linkedMachineFacts(id: string): LinkedMachineFacts | null {
+  return linkedFacts.get(id) ?? null;
+}
+
+/** This Inbox's id, as the merged list names it, and (when the list carries them) every linked machine's facts. */
+export function setSelfMachine(id: string | null | undefined, machines?: Parameters<typeof setLinkedMachines>[0]): void {
   if (typeof id === 'string' && MACHINE_ID.test(id)) selfMachine = id;
+  setLinkedMachines(machines);
 }
 
 /** This Inbox's id once the merged list named it. */
@@ -86,6 +108,7 @@ export function localRoute(url: string): string {
 /** Tests only: forget every machine. */
 export function resetMachineRoutes(): void {
   selfMachine = null;
+  linkedFacts.clear();
   owners.clear();
   local.clear();
   contested.clear();

@@ -24,6 +24,7 @@
  *    (`link-back`, `unlink`).
  */
 
+import { isAbsolute } from "node:path";
 import { INBOX_LINKED_MARKS, inboxPullUrlOfKey, inboxRowArchived, isInboxId, type InboxAgentsGroup, type InboxCardWire, type InboxInitiative, type InboxListRow, type InboxMachineAccountsRead, type InboxTagColours } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -39,6 +40,7 @@ import { createMachinePulls } from "./inbox-machine-pulls";
 import { MACHINE_IMAGE_CSP, MACHINE_LINKED_PAGE_ROUTE, MACHINE_MARKDOWN_IMAGE_ROUTE, machineLinkedPageAnswer, machineMarkdownImageAnswer } from "./inbox-machine-files";
 import { farCsp, MACHINE_ASSET_ROUTE, MACHINE_PAGE_ROUTE, MACHINE_VIEW_ROUTE, machineAssetAnswer, machineAssetCsp, machinePageAnswer, machineViewAnswer } from "./inbox-machine-page";
 import { createMachineLaunchReads, MACHINE_SESSIONS_ROUTE } from "./inbox-machine-launch-reads";
+import { createMachineAgentRead, FAR_READ_REFUSALS } from "./inbox-machine-agent-read";
 import { INBOX_RUN_WINDOW_ONLY_BODY } from "./inbox-run-routes";
 import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
 import { createMachineBranches } from "./inbox-machine-branches";
@@ -451,6 +453,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const machineBranches = createMachineBranches({ peers: () => peers.values() });
   /** Each linked machine's last good launch read, so a window opened while it sleeps still lists its projects. */
   const launchReads = createMachineLaunchReads();
+  // An agent here reads a linked machine's thread, and saves its files here (inbox-machine-agent-read.ts).
+  const agentRead = createMachineAgentRead({ peers: () => peers.values(), nameOf: (id) => links.get(id)?.name ?? "A linked machine" });
   const listeners = new Set<(frame: MachineFrame) => void>();
   /** An offer that published the door: the door comes down when it expires unused. */
   let offerTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1233,6 +1237,13 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const body = await context.readBody(req);
     if (path === "/api/inbox/control/machines/offer") return json(offer({ tailscale: body.tailscale === true }), 201);
     if (path === "/api/inbox/control/machines/link") return json(await link(body), 201);
+    // `plannotator inbox call fetch_file` of a linked machine's message: saved on this computer, its path answered.
+    if (path === "/api/inbox/control/machines/fetch-file") {
+      const id = typeof body.message_id === "string" ? body.message_id.trim() : "";
+      if (id && context.holds("messages", id)) throw new InboxError("file_is_local", FAR_READ_REFUSALS.fileLocal(id));
+      const folder = typeof body.folder === "string" && isAbsolute(body.folder) ? body.folder : null;
+      return json({ saved: await agentRead.fetchFile({ message_id: id, file: typeof body.file === "string" ? body.file.trim() : "" }, folder) });
+    }
     if (path === "/api/inbox/control/machines/unlink") {
       const target = typeof body.machine === "string" ? body.machine.trim() : "";
       const record = links.list().find((l) => l.id === target || l.name.toLowerCase() === target.toLowerCase());
@@ -1352,6 +1363,12 @@ export function createInboxMachines(context: InboxMachinesContext) {
     branchLists: () => machineBranches.start((machine) => links.get(machine)?.name ?? null),
     farCard,
     snoozeThread,
+    readThread: agentRead.readThread,
+    /** The name of the linked machine whose list names `threadId` (send_message's reply_to there is refused in words). */
+    farThreadMachine: (threadId: string): string | null => {
+      const peer = [...peers.values()].find((p) => p.list?.rows.some((row) => row.thread_id === threadId));
+      return peer ? (links.get(peer.id)?.name ?? "A linked machine") : null;
+    },
     /** The linked machine a device on this Inbox's door belongs to (a launch it starts here records it), or null. */
     machineOfDevice: (deviceId: string): { machine: string; name: string } | null => {
       const record = links.list().find((l) => l.device_id === deviceId);
