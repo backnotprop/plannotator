@@ -130,5 +130,12 @@ export function writeAIChatSnapshot(
     window.sessionStorage.setItem(key, JSON.stringify(snapshot));
   } catch {
     // Persistence must never prevent asking, stopping or starting a new chat.
+    // A full storage keeps the last snapshot that fit; drop it, so a reload
+    // never shows an older chat with its latest answers missing.
+    try {
+      window.sessionStorage.removeItem(key);
+    } catch {
+      // Storage is unavailable altogether.
+    }
   }
 }

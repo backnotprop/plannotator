@@ -105,6 +105,25 @@ describe.if(hasDom)('useAIChat reload persistence', () => {
     expect(reloaded.current!.messages).toHaveLength(2);
   });
 
+  test('a restored session the server has dropped starts a new one instead of failing', async () => {
+    const fake = fakeTransport();
+    setAITransport(fake.transport);
+    const first = await mount();
+    await act(async () => { await first.current!.ask({ prompt: 'before the server dropped it' }); });
+    await unmount();
+
+    setAITransport({ ...fake.transport, query: async (body, signal) => (body as { sessionId: string }).sessionId === 's-1'
+      ? Response.json({ error: 'Session not found' }, { status: 404 })
+      : fake.transport.query(body, signal) });
+    const reloaded = await mount();
+    await act(async () => { await reloaded.current!.ask({ prompt: 'follow-up' }); });
+    expect(fake.sessions).toEqual(['s-1', 's-2']);
+    expect(reloaded.current!.sessionId).toBe('s-2');
+    expect(reloaded.current!.error).toBeNull();
+    expect(reloaded.current!.messages.map(m => m.response.error)).toEqual([undefined, undefined]);
+    expect(reloaded.current!.messages[1].response.text).toBe('answer 2');
+  });
+
   test('waits for the server identity without overwriting its saved chat', async () => {
     const fake = fakeTransport();
     setAITransport(fake.transport);
@@ -389,6 +408,29 @@ describe.if(hasDom)('useAIChat reload persistence', () => {
       await act(async () => { await chat.current!.ask({ prompt: 'large conversation' }); });
       expect(chat.current!.messages[0].response.text).toBe('answer 1');
       expect(chat.current!.error).toBeNull();
+    } finally {
+      if (descriptor) Object.defineProperty(window, 'sessionStorage', descriptor);
+      else delete (window as unknown as Record<string, unknown>).sessionStorage;
+    }
+  });
+
+  test('a chat that outgrew storage does not come back older on reload', async () => {
+    const fake = fakeTransport();
+    setAITransport(fake.transport);
+    const first = await mount();
+    await act(async () => { await first.current!.ask({ prompt: 'saved while it fit' }); });
+    const sessionStorage = window.sessionStorage;
+    const descriptor = Object.getOwnPropertyDescriptor(window, 'sessionStorage');
+    try {
+      Object.defineProperty(window, 'sessionStorage', { configurable: true, value: {
+        getItem: (key: string) => sessionStorage.getItem(key),
+        setItem: () => { throw new Error('Quota exceeded'); },
+        removeItem: (key: string) => sessionStorage.removeItem(key),
+      } });
+      await act(async () => { await first.current!.ask({ prompt: 'too large to save' }); });
+      await unmount();
+      const reloaded = await mount();
+      expect(reloaded.current!.messages).toEqual([]);
     } finally {
       if (descriptor) Object.defineProperty(window, 'sessionStorage', descriptor);
       else delete (window as unknown as Record<string, unknown>).sessionStorage;

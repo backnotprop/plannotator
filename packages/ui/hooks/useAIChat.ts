@@ -417,6 +417,7 @@ export function useAIChat({
 
     try {
       let sid = sessionIdRef.current;
+      const reusedSession = !askOptions?.providerId && !!sid;
       if (askOptions?.providerId) {
         sid = await createSession(controller.signal, epoch, askOptions.providerId);
       } else if (!sid) {
@@ -446,13 +447,29 @@ export function useAIChat({
           }
         }
       };
-      const res = await aiTransport.query({
-        sessionId: sid,
+      const sendQuery = (sessionId: string) => aiTransport.query({
+        sessionId,
         prompt: fullPrompt,
         ...(params.contextUpdate && { contextUpdate: params.contextUpdate }),
         ...(params.busyPolicy && { busyPolicy: params.busyPolicy }),
         ...(drafts !== undefined && { draftAnnotations: drafts }),
       }, controller.signal);
+      let res = await sendQuery(sid);
+      // A chat restored after a reload (or a long-lived tab) can hold a session
+      // the server has since dropped (it keeps a limited number). Start a new
+      // one quietly instead of failing this and every later question.
+      if (res.status === 404 && reusedSession) {
+        await res.body?.cancel().catch(() => {});
+        if (controller.signal.aborted || supersededRef.current.has(controller) || epoch !== sessionEpochRef.current) {
+          throw createAbortError('AI question was superseded');
+        }
+        if (sessionIdRef.current === sid) setSessionId(null);
+        sid = await createSession(controller.signal, epoch);
+        if (controller.signal.aborted || supersededRef.current.has(controller) || epoch !== sessionEpochRef.current) {
+          throw createAbortError('AI question was superseded');
+        }
+        res = await sendQuery(sid);
+      }
 
       if (!res.ok || !res.body) {
         const data = await res.json().catch(() => ({ error: 'Query failed' }));
