@@ -16,7 +16,8 @@ const listeners = new Set<() => void>();
 /** What Close kept for this thread (the newest answer's time then, '' for none), or null when its circle is not closed. */
 export function readSideClosed(threadId: string): string | null {
   try {
-    return window.sessionStorage.getItem(key(threadId));
+    // Full storage refuses the write but reads fine: the page's own copy still counts.
+    return window.sessionStorage.getItem(key(threadId)) ?? memory.get(threadId) ?? null;
   } catch {
     return memory.get(threadId) ?? null;
   }
