@@ -31,6 +31,7 @@ import {
   type ReviewPanelHeaderModel,
 } from './ReviewPanelHeader';
 import type { RepoFilesState } from '../hooks/useRepoFiles';
+import { useReviewFileFilter } from '../hooks/useReviewFileFilter';
 
 const hasDom = typeof document !== 'undefined';
 let host: HTMLDivElement | null = null;
@@ -137,6 +138,38 @@ describe('the list under the tabs', () => {
 });
 
 describe.skipIf(!hasDom)('ReviewPanelHeader', () => {
+  test('rapid edits to both filter fields apply together', async () => {
+    function Harness() {
+      const { applied, input } = useReviewFileFilter();
+
+      return (
+        <>
+          <ReviewPanelHeader model={model({ fileFilterInput: input })} width={256} />
+          <output>{JSON.stringify(applied)}</output>
+        </>
+      );
+    }
+
+    const el = await mount(<Harness />);
+    await act(async () => el.querySelector<HTMLButtonElement>('button[aria-label="Filter files"]')!.click());
+
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    act(() => {
+      for (const [name, value] of [['include', 'src/**'], ['exclude', '**/*.test.ts']]) {
+        const field = el.querySelector<HTMLInputElement>(`input[name="${name}"]`)!;
+        setValue.call(field, value);
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
+
+    await act(async () => { await Bun.sleep(120); });
+
+    expect(JSON.parse(el.querySelector('output')!.textContent!)).toEqual({
+      include: 'src/**',
+      exclude: '**/*.test.ts',
+    });
+  });
+
   test('the views as tabs with Go to file at the end of their row, then the sentence', async () => {
     const el = await mount(<ReviewPanelHeader model={model()} width={256} />);
     const tablist = el.querySelector('[role="tablist"][aria-label="Panel view"]')!;

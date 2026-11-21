@@ -1,4 +1,5 @@
 import React, { useCallback, useContext, useLayoutEffect, useMemo, useState } from 'react';
+import { NoMatchingReviewFiles } from '../../components/ReviewFileFilter';
 import type { IDockviewPanelProps } from 'dockview-react';
 import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
 import { MarkdownPreviewFailed } from '../../components/DiffViewer';
@@ -272,10 +273,13 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
   );
   if (!imageSizesReady) return null;
 
+  if (state.filteredDiffFiles?.length === 0 && state.onClearFileFilter) {
+    return <NoMatchingReviewFiles onClear={state.onClearFileFilter} />;
+  }
   return (
     <>
     <AllFilesCodeView
-      files={state.files}
+      files={state.filteredDiffFiles ?? state.files}
       {...(state.callTreeHunkNotes && state.callTreeHunkNotes.length > 0 ? { hostLineNotes: state.callTreeHunkNotes } : {})}
       diffStyle={paneDiffStyle}
       diffOverflow={state.diffOverflow}
