@@ -394,7 +394,8 @@ export interface PlannotatorConfig {
    * The Plannotator Inbox's browser notifications, set from the Inbox page
    * (its one-time ask and its Settings), kept here rather than in the page's
    * localStorage so they survive the Inbox moving to another port (another
-   * origin). `enabled`: notify at all (unset: on). `dismissed`: the person answered the ask with "Not now". `allowedOrigin`:
+   * origin). `enabled` / `dismissed` are settings (config.json); `allowedOrigin`
+   * is machine state (state.json). `enabled`: notify at all (unset: on). `dismissed`: the person answered the ask with "Not now". `allowedOrigin`:
    * the page origin where the person last turned them on, so a page on a new
    * port asks again with "The Inbox moved to a new address".
    */
@@ -1055,11 +1056,14 @@ function getStatePath(): string {
  */
 const MACHINE_STATE_KEYS = [
   "inboxAgentNotes", "inboxTour", "inboxBoardIntro", "inboxListIntro", "inboxVoiceIntro", "inboxSnoozeIntro",
-  "inboxReveals", "starAsk", "inboxThemeChooser", "inboxPriorityIntro",
+  "inboxReveals", "starAsk", "inboxThemeChooser", "inboxPriorityIntro", "inboxCloudflareAccess",
 ] as const;
 type MachineStateKey = (typeof MACHINE_STATE_KEYS)[number];
-/** Machine-state fields inside a key whose other fields are settings (`inboxSound.enabled` / `volume`). */
-const MACHINE_STATE_FIELDS: Readonly<Record<string, readonly string[]>> = { inboxSound: ["dialogDueFor", "dialogShownFor"] };
+/** Machine-state fields inside a key whose other fields are settings (`inboxSound.enabled` / `volume`, `inboxNotifications.enabled` / `dismissed`). */
+const MACHINE_STATE_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  inboxSound: ["dialogDueFor", "dialogShownFor"],
+  inboxNotifications: ["allowedOrigin"],
+};
 
 function pickFields(value: Record<string, unknown>, fields: readonly string[], keep: boolean): Record<string, unknown> | undefined {
   return withoutUndefined(Object.fromEntries(Object.entries(value).filter(([field]) => fields.includes(field) === keep)));
@@ -1173,6 +1177,7 @@ const starAskTime = (record: Record<string, unknown>) => String(record.answeredA
  * | inboxThemeChooser, inboxPriorityIntro   |                                                                         |
  * | inboxSound dialog fields                | newer `dialogShownFor` and `dialogDueFor`; due only while the due       |
  * |                                         | version is newer than the shown one (soundDialog)                       |
+ * | inboxCloudflareAccess                   | state.json wins (one machine's tunnel/app/zone)                         |
  */
 function mergeMachineRecord(key: MachineStateKey, fromConfig: unknown, fromState: unknown): unknown {
   const a = plainRecord(fromConfig);
@@ -1187,6 +1192,9 @@ function mergeMachineRecord(key: MachineStateKey, fromConfig: unknown, fromState
     const va = recordVersion(a, none);
     const vb = recordVersion(b, none);
     if (va !== undefined && vb !== undefined && va !== vb) return va > vb ? a : b;
+  }
+  if (key === "inboxCloudflareAccess") {
+    return Object.keys(b).length > 0 ? b : a;
   }
   const merged = mergeStamps(a, b) as Record<string, unknown>;
   if (key === "inboxTour") merged.notify_again = b.notify_again;
@@ -1224,6 +1232,16 @@ function soundDialog(fromConfig: Record<string, unknown>, fromState: Record<stri
   return order > 0 ? { dialogDueFor: due } : { dialogShownFor: shown };
 }
 
+/**
+ * One key's machine-state fields from both files.
+ * `inboxSound`: soundDialog compares version strings.
+ * Other keys (e.g. `inboxNotifications.allowedOrigin`): state.json's field wins, falling back to config.json's.
+ */
+function mergeMachineFields(key: string, fromConfig: Record<string, unknown>, fromState: Record<string, unknown>): Record<string, unknown> {
+  if (key === "inboxSound") return soundDialog(fromConfig, fromState);
+  return withoutUndefined({ ...fromConfig, ...fromState }) ?? {};
+}
+
 /** config.json's settings with state.json's machine state merged in (mergeMachineRecord). */
 function withMachineState(config: Record<string, unknown>, state: Record<string, unknown>): PlannotatorConfig {
   const merged: Record<string, unknown> = { ...config };
@@ -1234,7 +1252,10 @@ function withMachineState(config: Record<string, unknown>, state: Record<string,
     const saved = plainRecord(state[key]);
     if (!saved) continue;
     const kept = plainRecord(config[key]) ?? {};
-    merged[key] = withoutUndefined({ ...pickFields(kept, fields, false), ...soundDialog(pickFields(kept, fields, true) ?? {}, saved) });
+    merged[key] = withoutUndefined({
+      ...pickFields(kept, fields, false),
+      ...mergeMachineFields(key, pickFields(kept, fields, true) ?? {}, saved),
+    });
   }
   return merged as PlannotatorConfig;
 }
@@ -1586,7 +1607,9 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
       const par = (partial as Record<string, unknown>)[key];
       const cur = plainRecord((current as Record<string, unknown>)[key]);
       const parFields = plainRecord(par);
-      state[key] = parFields && pickFields(parFields, fields, true);
+      const curState = plainRecord(state[key]);
+      const stateUpdates = parFields ? pickFields(parFields, fields, true) : undefined;
+      state[key] = parFields ? withoutUndefined({ ...curState, ...stateUpdates }) : undefined;
       if (parFields || par === undefined) {
         // The settings fields from the save, each in its place; config.json's own dialog fields kept.
         const next: Record<string, unknown> = {};

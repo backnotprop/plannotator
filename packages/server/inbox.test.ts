@@ -830,6 +830,8 @@ describe("the window's routes: settings, restart, favicon", () => {
       expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxNotifications).toEqual({
         dismissed: true,
         enabled: false,
+      });
+      expect(JSON.parse(readFileSync(join(dataDir, "state.json"), "utf8")).inboxNotifications).toEqual({
         allowedOrigin: origin,
       });
     } finally {
