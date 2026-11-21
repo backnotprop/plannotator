@@ -314,6 +314,18 @@ describe('DecisionNoteField in the decision control (no enterSubmits)', () => {
   });
 });
 
+test.skipIf(skip)('DecisionNoteField: a composing Escape leaves the note open for the input method', async () => {
+  let cancels = 0;
+  await render(<DecisionNoteField text="draft" onTextChange={() => {}} onSubmit={() => {}} onCancel={() => { cancels++; }} />);
+  const field = must<HTMLTextAreaElement>('[data-decision-note-input]');
+  const escape = await pressKey(field, 'Escape', { isComposing: true });
+  await pressKey(field, 'Escape', { keyCode: 229 });
+  expect(escape.defaultPrevented).toBe(false);
+  expect(cancels).toBe(0);
+  await pressKey(field, 'Escape');
+  expect(cancels).toBe(1);
+});
+
 // --- The diagram composer: Enter has always saved there ---
 
 describe('DiagramComposer', () => {

@@ -129,3 +129,14 @@ test.skipIf(!hasDom)('Escape in the reply box still puts focus back on Reply', a
   expect(el.querySelector('textarea')).toBeNull();
   expect(document.activeElement === reply(el)).toBe(true);
 });
+
+test.skipIf(!hasDom)('Escape during an input method composition keeps the reply box open', async () => {
+  const el = await render(threadOf(T1, 'Nightly sync'));
+  const text = await openBox(el);
+  act(() => {
+    text.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true, cancelable: true }));
+    text.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 229, bubbles: true, cancelable: true }));
+  });
+  await settle();
+  expect(el.querySelector('textarea') === text).toBe(true);
+});
