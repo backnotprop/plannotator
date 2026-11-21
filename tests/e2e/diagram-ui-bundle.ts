@@ -15,6 +15,8 @@
  *   markup beyond the rules it always had (an `<a>`'s link, a `<style>`'s text,
  *   a reference that is not a fragment or http(s)): one line per element or
  *   attribute that differs from the DOMPurify parse alone.
+ * - `remoteLoads(on)`: `configurePlannotatorUI({ diagramRemoteLoads: on })`,
+ *   as a host calls it (diagram-remote-loads.spec.ts).
  */
 import type { Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
@@ -33,6 +35,7 @@ export function buildDiagramUiBundle(): string {
 import { parseDiagramSvg, renderDiagram, sanitizeDiagramSvg } from ${JSON.stringify(join(UI, 'utils/diagram-render.ts'))};
 import { loadMermaidRuntime } from ${JSON.stringify(join(UI, 'utils/mermaid.ts'))};
 import { applyMermaidTheme, mermaidThemeKey } from ${JSON.stringify(join(UI, 'utils/mermaidTheme.ts'))};
+import { configurePlannotatorUI } from ${JSON.stringify(join(UI, 'configure.ts'))};
 const host = () => document.getElementById('host')!;
 let seq = 0;
 /** A reference the post-pass always dropped (not a fragment, not http(s)). */
@@ -51,9 +54,13 @@ function describe(el: Element): string[] {
     host().replaceChildren(r.svgNode);
     return { ok: true, refused: false, message: '' };
   },
+  remoteLoads(on: boolean) {
+    configurePlannotatorUI({ diagramRemoteLoads: on });
+  },
   async measure(source: string) {
+    // One render first, so the runtime carries the config renderDiagram gives it (the theme, and the remote-loads policy).
+    await renderDiagram('mermaid', 'pn-warm-' + ++seq, 'flowchart LR\\n  W[w]', { colorTheme: 'plannotator', mode: 'light' });
     const mermaid = await loadMermaidRuntime();
-    applyMermaidTheme(mermaid, mermaidThemeKey('plannotator', 'light'));
     const id = 'pn-measure-' + ++seq;
     try {
       return (await mermaid.render(id, source)).svg;
@@ -125,7 +132,7 @@ export const NAVIGATING_LABELS = [
  * and aborted; every navigation of the page after it loaded is recorded in
  * `navigations`.
  */
-export async function openDiagramPage(page: Page, bundle: string, options: { tile?: boolean } = {}) {
+export async function openDiagramPage(page: Page, bundle: string, options: { tile?: boolean; csp?: string } = {}) {
   const errors: string[] = [];
   const requests: string[] = [];
   const navigations: string[] = [];
@@ -139,7 +146,7 @@ export async function openDiagramPage(page: Page, bundle: string, options: { til
   const box = options.tile
     ? `<div class="ib-art-prev" id="box" style="width:240px;margin:20px 0 0 20px"><span class="ib-art-svg" id="host" data-drawn></span></div>`
     : `<div id="box" style="position:relative;width:700px;height:450px;overflow:hidden"><div id="host" style="position:absolute;inset:0"></div></div>`;
-  await page.setContent(`<!DOCTYPE html><html><head><style>body{margin:0}${APP_UTILITIES}${options.tile ? artifactTileCss() : ''}</style></head><body>
+  await page.setContent(`<!DOCTYPE html><html><head>${options.csp ? `<meta http-equiv="Content-Security-Policy" content="${options.csp}">` : ''}<style>body{margin:0}${APP_UTILITIES}${options.tile ? artifactTileCss() : ''}</style></head><body>
 <div style="height:60px"><button id="app-button">Approve</button></div>
 ${box}
 <div style="height:300px;padding:20px 0 0 300px"><button id="app-below">Send</button></div>
