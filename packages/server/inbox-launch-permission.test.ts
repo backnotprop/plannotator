@@ -348,7 +348,7 @@ describe("the lease", () => {
     });
   });
 
-  test("the hook is gone and the host says the session went on: withdrawn at once, without waiting out the lease", async () => {
+  test("the hook is gone and the host says the session went on: withdrawn after the grace, without waiting out the lease", async () => {
     const { store, clock, host, permissions, call } = setup();
     const { body } = await call({ key: KEY, request_id: "req-00000011", event: EVENT });
     clock.now += 2_000;
@@ -421,6 +421,31 @@ describe("the lease", () => {
     permissions.sweep();
     expect(store.questionsOf(asked.body.message_id!)[0]!.state).toBe("open");
     expect((await held).body.status).toBe("waiting");
+    host.readAt = Date.now();
+    permissions.sweep();
+    expect(store.questionsOf(asked.body.message_id!)[0]!.state).toBe("open");
+  });
+
+  test("between calls, a fresh busy host read keeps the card open until the hook stops polling", async () => {
+    const { store, clock, host, permissions, call } = setup();
+    const { body } = await call({ key: KEY, request_id: "req-00000012", event: EVENT });
+    host.state = { status: "busy", state: "running", waitingFor: null };
+    for (let i = 0; i < 3; i++) {
+      clock.now += 25_000;
+      expect((await call({ key: KEY, request_id: "req-00000012", event: EVENT, message_id: body.message_id })).body.status).toBe("waiting");
+      host.readAt = clock.now;
+      permissions.sweep();
+      expect(store.questionsOf(body.message_id!)[0]!.state).toBe("open");
+      clock.now += 2_000;
+      host.readAt = clock.now;
+      permissions.sweep();
+      expect(store.questionsOf(body.message_id!)[0]!.state).toBe("open");
+    }
+    clock.now += 3_000;
+    host.readAt = clock.now;
+    permissions.sweep();
+    expect(store.questionsOf(body.message_id!)[0]!.state).toBe("superseded");
+    expect(store.message(store.threadMessageIds(store.message(body.message_id!)!.thread_id).at(-1)!)!.body).toBe("Answered in Terminal.");
   });
 });
 

@@ -24,7 +24,8 @@
  * a one-line follow-up from the same identity supersedes the question,
  * "No longer waiting.". With no call held, a host read made since the
  * question that says the session went on (not waiting, not stopped)
- * withdraws it at once as "Answered in Terminal.". Stop and Delete withdraw
+ * withdraws it as "Answered in Terminal." once the hook stops calling for
+ * a short grace window. Stop and Delete withdraw
  * at once. An Inbox restart forgets the leases: each open question gets a
  * fresh one, and the hook, retrying every 2 s, renews it. A question the host
  * takes no allow for (Approve in Terminal) is never withdrawn as answered in
@@ -60,6 +61,8 @@ import { powerShellCommandLine } from "./inbox-launch-windows";
 
 export const PERMISSION_HOLD_MS = 25_000;
 export const PERMISSION_LEASE_MS = 60_000;
+/** Between held calls, give the hook time to call again before trusting the host's not-waiting state. */
+const PERMISSION_POLL_GRACE_MS = 5_000;
 /** A host read this long after the question was asked can say the session went on without it. */
 const HOST_SETTLE_MS = 5_000;
 /** After an answer, a host read this much later says where the session is (earlier reads still show the prompt). */
@@ -138,6 +141,7 @@ interface Lease {
   expires: number;
   /** Calls held open now: the lease does not run out while one is. */
   holding: number;
+  lastHeldAt?: number;
   askedAt: number;
 }
 
@@ -234,7 +238,7 @@ export function createLaunchPermissions(options: LaunchPermissionContext & { hol
       };
       const done = settled(messageId, event, question, answerOptions);
       if (done) return answered(done);
-      const lease = leases.get(messageId) ?? { launchId, expires: 0, holding: 0, askedAt: Date.parse(store.message(messageId)!.created_at) };
+      const lease: Lease = leases.get(messageId) ?? { launchId, expires: 0, holding: 0, askedAt: Date.parse(store.message(messageId)!.created_at) };
       leases.set(messageId, lease);
       lease.holding += 1;
       const deadline = now() + holdMs;
@@ -246,6 +250,7 @@ export function createLaunchPermissions(options: LaunchPermissionContext & { hol
         }
       } finally {
         lease.holding -= 1;
+        lease.lastHeldAt = now();
         lease.expires = now() + leaseMs;
       }
       return json({ status: "waiting", message_id: messageId } satisfies PermissionAnswer);
@@ -281,9 +286,10 @@ export function createLaunchPermissions(options: LaunchPermissionContext & { hol
         if (lease.holding > 0) continue;
         const state = options.host.stateOf(root.launch!.session_ref);
         const fresh = options.host.readAt() >= lease.askedAt + HOST_SETTLE_MS;
+        const polling = lease.lastHeldAt !== undefined && t < lease.lastHeldAt + PERMISSION_POLL_GRACE_MS;
         // Claude Code went on without our answer (a host read since the question): the person answered in Terminal,
         // unless the host takes no allow from here (its dialog may have blocked the call by itself: not known).
-        if (fresh && state !== null && state !== "absent" && state.status !== "waiting" && state.state !== "stopped" && state.state !== "done") {
+        if (!polling && fresh && state !== null && state !== "absent" && state.status !== "waiting" && state.state !== "stopped" && state.state !== "done") {
           const offered = store.questionsOf(messageId)[0]?.choices.map((c) => c.label) ?? [];
           const terminalOnly = offered.includes(INBOX_PERMISSION_TERMINAL) && !offered.includes(INBOX_PERMISSION_ALLOW_ONCE);
           questions.withdraw(messageId, terminalOnly ? INBOX_PERMISSION_NO_LONGER_WAITING : INBOX_PERMISSION_ANSWERED_IN_TERMINAL);
