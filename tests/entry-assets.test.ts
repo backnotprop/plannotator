@@ -163,6 +163,12 @@ describe('review entry assets', () => {
     expect(read('packages/ui/utils/graphviz.ts')).not.toMatch(staticImport('@viz-js/viz'));
     expect(read('packages/ui/utils/graphviz.ts')).toContain("import('@viz-js/viz')");
     expect(read('packages/ui/utils/generateIdentity.ts')).not.toMatch(staticImport('unique-username-generator'));
+    // Pele (the second Mermaid engine, off by default) arrives only through
+    // `pele/lazy`, whose core and diagram types are chunks of their own.
+    for (const path of ['packages/ui/utils/pele.ts', 'packages/ui/utils/diagram-render.ts', 'packages/ui/utils/diagram-engine.ts', 'packages/ui/utils/peleTheme.ts', 'packages/ui/components/DiagramBlock.tsx', 'packages/ui/components/MermaidBlock.tsx']) {
+      expect(read(path)).not.toMatch(/^import\s+(?!type\b)[^;]*from\s+['"]pele(?:\/[^'"]*)?['"]/m);
+    }
+    expect(read('packages/ui/utils/pele.ts')).toContain("import('pele/lazy')");
   });
 
   // The Inbox window's guided review (PLAN step 5) reaches the guide chain and
