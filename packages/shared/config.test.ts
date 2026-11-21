@@ -15,6 +15,7 @@ import {
   renameSync,
   statSync,
 } from "node:fs";
+import * as nodeOs from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -1816,11 +1817,15 @@ describe("loadConfig reads config.json and state.json only when they change", ()
     writeFileSync(configPath(), JSON.stringify({ displayName: "bbbb" }));
     expect(loadConfig().displayName).toBe("bbbb");
     expect(count(reads, configPath())).toBe(2);
-    // Two seconds on: the same stat now holds for good, so the parse is kept.
+    // 2.5 s on, past a FAT tick but inside the margin: still read every time.
     now = 1_002_500;
     expect(loadConfig().displayName).toBe("bbbb");
-    expect(loadConfig().displayName).toBe("bbbb");
     expect(count(reads, configPath())).toBe(3);
+    // Three seconds on: the same stat now holds for good, so the parse is kept.
+    now = 1_003_000;
+    expect(loadConfig().displayName).toBe("bbbb");
+    expect(loadConfig().displayName).toBe("bbbb");
+    expect(count(reads, configPath())).toBe(4);
   });
 
   test("a file just written is read on every call until it settles (the real clock)", () => {
@@ -1887,7 +1892,16 @@ describe("loadConfig reads config.json and state.json only when they change", ()
     expect(second.experimental).toEqual({ voice: true });
     expect(second.inboxReactions).toEqual({ emoji: ["a"] });
     expect(second.inboxTour).toEqual({ version: 2 });
+    // The second came from the cache: changing it leaves the third clean too.
+    second.experimental.voice = "hit";
+    second.inboxReactions.emoji.push("c");
+    second.inboxTour.version = 100;
+    const third = loadConfig() as Record<string, any>;
+    expect(third.experimental).toEqual({ voice: true });
+    expect(third.inboxReactions).toEqual({ emoji: ["a"] });
+    expect(third.inboxTour).toEqual({ version: 2 });
     expect(count(reads, configPath())).toBe(1);
+    expect(count(reads, statePath())).toBe(1);
   });
 
   test("an env override read beside the config still changes between calls", () => {
@@ -1897,5 +1911,113 @@ describe("loadConfig reads config.json and state.json only when they change", ()
     expect(resolveSharingEnabled(loadConfig())).toBe(true);
     delete process.env.PLANNOTATOR_SHARE;
     expect(resolveSharingEnabled(loadConfig())).toBe(false);
+  });
+
+  test("no data dir to name (no home folder to find): {} with one warning, as before", () => {
+    const home = spyOn(nodeOs, "homedir").mockImplementation(() => {
+      throw Object.assign(new Error("ENOENT: no such file or directory, uv_os_homedir"), { code: "ENOENT" });
+    });
+    try {
+      expect(loadConfig()).toEqual({});
+      expect(warnings.filter((line) => line.includes("failed to read config.json"))).toHaveLength(1);
+      expect(loadConfig({ quiet: true })).toEqual({});
+      expect(warnings.filter((line) => line.includes("failed to read config.json"))).toHaveLength(1);
+    } finally {
+      home.mockRestore();
+    }
+  });
+
+  describe("through fake stats", () => {
+    type FakeStat = { mtimeMs: number; ctimeMs: number; size: number; dev: number; ino: number; isFile: () => boolean };
+    let fake: Map<string, FakeStat | Error>;
+    const statOf = (path: string) => {
+      const entry = fake.get(path);
+      if (entry instanceof Error) throw entry;
+      if (entry) return entry as unknown as ReturnType<typeof statSync>;
+      return statSync(path);
+    };
+    const file = (over: Partial<FakeStat> = {}): FakeStat => ({ mtimeMs: 1000, ctimeMs: 1000, size: 20, dev: 1, ino: 7, isFile: () => true, ...over });
+
+    beforeEach(() => {
+      fake = new Map();
+      // The clock far past every fake time: every parse counts as settled.
+      __setConfigReadForTest({ ...countingSeams(statOf), now: () => 1_000_000 });
+    });
+
+    test("a change of ctime alone, of the inode alone or of the device alone is read", () => {
+      fake.set(configPath(), file());
+      writeFileSync(configPath(), JSON.stringify({ displayName: "aaaa" }));
+      expect(loadConfig().displayName).toBe("aaaa");
+      expect(loadConfig().displayName).toBe("aaaa");
+      expect(count(reads, configPath())).toBe(1);
+      writeFileSync(configPath(), JSON.stringify({ displayName: "bbbb" }));
+      fake.set(configPath(), file({ ctimeMs: 1001 }));
+      expect(loadConfig().displayName).toBe("bbbb");
+      writeFileSync(configPath(), JSON.stringify({ displayName: "cccc" }));
+      fake.set(configPath(), file({ ctimeMs: 1001, ino: 8 }));
+      expect(loadConfig().displayName).toBe("cccc");
+      writeFileSync(configPath(), JSON.stringify({ displayName: "dddd" }));
+      fake.set(configPath(), file({ ctimeMs: 1001, ino: 8, dev: 2 }));
+      expect(loadConfig().displayName).toBe("dddd");
+      expect(loadConfig().displayName).toBe("dddd");
+      expect(count(reads, configPath())).toBe(4);
+    });
+
+    test("at most 8 paths are kept: the oldest is read again, every answer stays right", () => {
+      const dirs = Array.from({ length: 9 }, (_, i) => join(root, `dir-${i}`));
+      dirs.forEach((dir, i) => {
+        mkdirSync(dir);
+        writeFileSync(join(dir, "config.json"), JSON.stringify({ displayName: `n${i}` }));
+        fake.set(join(dir, "config.json"), file({ ino: 100 + i }));
+        fake.set(join(dir, "state.json"), Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+      });
+      const load = (i: number) => {
+        process.env.PLANNOTATOR_DATA_DIR = dirs[i];
+        return loadConfig().displayName;
+      };
+      dirs.forEach((_, i) => expect(load(i)).toBe(`n${i}`));
+      // dir-0 was the oldest of 9: read again; dir-8, the newest, is still kept.
+      expect(load(0)).toBe("n0");
+      expect(load(8)).toBe("n8");
+      expect(count(reads, join(dirs[0], "config.json"))).toBe(2);
+      expect(count(reads, join(dirs[8], "config.json"))).toBe(1);
+      dirs.forEach((_, i) => expect(load(i)).toBe(`n${i}`));
+    });
+
+    test("a folder in place of either file reads as before: config.json warns every call, state.json is no state", () => {
+      mkdirSync(configPath());
+      mkdirSync(statePath());
+      for (let i = 0; i < 3; i++) expect(loadConfig()).toEqual({});
+      expect(warnings.filter((line) => line.includes("failed to read config.json"))).toHaveLength(3);
+    });
+
+    test("EACCES: a stat refused reads as no file, silently; a read refused warns every call and is never kept", () => {
+      const refused = () => Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+      fake.set(configPath(), refused());
+      fake.set(statePath(), refused());
+      expect(loadConfig()).toEqual({});
+      expect(reads).toEqual([]);
+      expect(warnings).toEqual([]);
+      fake.set(configPath(), file());
+      fake.set(statePath(), file({ ino: 9 }));
+      writeFileSync(configPath(), JSON.stringify({ displayName: "Ada" }));
+      writeFileSync(statePath(), JSON.stringify({ inboxTour: { version: 2 } }));
+      __setConfigReadForTest({
+        stat: statOf,
+        read: (path) => {
+          reads.push(path);
+          throw refused();
+        },
+        now: () => 1_000_000,
+      });
+      for (let i = 0; i < 3; i++) expect(loadConfig()).toEqual({});
+      expect(count(reads, configPath())).toBe(3);
+      expect(count(reads, statePath())).toBe(3);
+      expect(warnings.filter((line) => line.includes("failed to read config.json") && line.includes("EACCES"))).toHaveLength(3);
+      // Readable again: read and right.
+      __setConfigReadForTest({ ...countingSeams(statOf), now: () => 1_000_000 });
+      expect(loadConfig().displayName).toBe("Ada");
+      expect(loadConfig().inboxTour?.version).toBe(2);
+    });
   });
 });

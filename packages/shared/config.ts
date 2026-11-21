@@ -1261,11 +1261,13 @@ export function loadConfig(options: { quiet?: boolean } = {}): PlannotatorConfig
 // loadConfig is called many times per request (one settings read asks it ~80
 // times), so each file's parse is kept, keyed by its path and its stat: an
 // unchanged file costs one stat per call and no read. The key is mtime, ctime,
-// size and inode (the pattern of inbox-launch.ts's config cache, with ctime
-// added: a copy that keeps the old mtime still changes ctime), so a hand edit,
+// size, device and inode (the pattern of inbox-launch.ts's config cache, with
+// ctime and device added: a copy that keeps the old mtime still changes
+// ctime), so a hand edit,
 // an editor's rename over the file, a delete or a write by another process is
 // read on the next call. A parse is kept only once the file is older than any
-// filesystem's timestamp tick (CONFIG_READ_SETTLE_MS: HFS+ 1 s, FAT 2 s), so
+// filesystem's timestamp tick (CONFIG_READ_SETTLE_MS: HFS+ 1 s, FAT 2 s, and
+// a margin for the lag at a tick's edge), so
 // two writes in one tick with the same size can never hide the second one. A
 // write from this process (writeConfigAtomic, writeState's set-aside) drops
 // the entry at once. Only a good parse is kept: a missing, unreadable or
@@ -1273,11 +1275,11 @@ export function loadConfig(options: { quiet?: boolean } = {}): PlannotatorConfig
 // Every call gets its own copy, so a caller that changes what it got changes
 // nothing for the next one.
 
-const CONFIG_READ_SETTLE_MS = 2000;
+const CONFIG_READ_SETTLE_MS = 3000;
 const CONFIG_READ_CACHE_LIMIT = 8;
 const configReadCache = new Map<string, { key: string; value: Record<string, unknown> }>();
 
-let statForLoad: (path: string) => { mtimeMs: number; ctimeMs: number; size: number; ino: number; isFile(): boolean } = (path) => statSync(path);
+let statForLoad: (path: string) => { mtimeMs: number; ctimeMs: number; size: number; dev: number; ino: number; isFile(): boolean } = (path) => statSync(path);
 let readForLoad: (path: string) => string = (path) => readFileSync(path, "utf-8");
 let nowForLoad: () => number = Date.now;
 
@@ -1304,7 +1306,7 @@ function configFileSignature(path: string): { key: string; settled: boolean } | 
   }
   if (!stat.isFile()) return null;
   return {
-    key: `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}:${stat.ino}`,
+    key: `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}:${stat.dev}:${stat.ino}`,
     settled: nowForLoad() - Math.max(stat.mtimeMs, stat.ctimeMs) >= CONFIG_READ_SETTLE_MS,
   };
 }
@@ -1354,20 +1356,27 @@ function loadSettings(options: { quiet?: boolean }): Record<string, unknown> {
   }
 }
 
-/** state.json's records for loadConfig, through the read cache. saveConfig reads it with readState, never from here. */
+/**
+ * state.json's records for loadConfig, through the read cache. saveConfig reads it with readState, never from here.
+ * Any failure (no data dir to name, as readState's own) reads as no state, without a warning, as readState did.
+ */
 function loadState(): Record<string, unknown> {
-  const statePath = getStatePath();
-  const signature = configFileSignature(statePath);
-  if (signature === "absent") {
-    forgetConfigRead(statePath);
+  try {
+    const statePath = getStatePath();
+    const signature = configFileSignature(statePath);
+    if (signature === "absent") {
+      forgetConfigRead(statePath);
+      return {};
+    }
+    const kept = signature && configReadCache.get(statePath);
+    if (kept && kept.key === signature.key) return copyJson(kept.value);
+    if (kept) forgetConfigRead(statePath);
+    const read = readState();
+    if (signature && read.raw !== null && !read.problem) rememberConfigRead(statePath, signature, read.state);
+    return read.state;
+  } catch {
     return {};
   }
-  const kept = signature && configReadCache.get(statePath);
-  if (kept && kept.key === signature.key) return copyJson(kept.value);
-  if (kept) forgetConfigRead(statePath);
-  const read = readState();
-  if (signature && read.raw !== null && !read.problem) rememberConfigRead(statePath, signature, read.state);
-  return read.state;
 }
 
 /**
