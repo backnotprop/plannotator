@@ -2,18 +2,19 @@
  * Re-ask all on one thread (reask-all.ts): the thread's own Re-ask to every session there with a question open that
  * can still be woken. What can regress: a note to a session with nothing open, two notes stacked for a session that
  * has not taken the first, a note to a session that cannot be woken, a retry writing again, the action archiving or
- * reading the thread, the note not going to the agent the way a reply goes, or the thread's own Re-ask note gaining
- * the tidy line. And Re-ask all's own rules: the tidy line only for the one agent everything left waits on (archiving
- * closes every question in the thread), the person's unsent picks left as they are and out of the note, a refusal on
- * one session not hiding the notes already written, an archived thread that came back, an agent that named no
- * session, a permission prompt never asked, and the per-message route taking neither rule from a body.
+ * reading the thread, or the note not going to the agent the way a reply goes. And Re-ask all's own rules: its note
+ * is the thread's own Re-ask note byte for byte in every shape of thread, and its wake never asks the agent to
+ * archive (the owner, 2026-11-21: "I don't think I'd ever expect re-ask to archive"); the person's unsent picks left
+ * as they are and out of the note; a refusal on one session not hiding the notes already written; an archived thread
+ * that came back; an agent that named no session; a permission prompt never asked; the per-message route taking
+ * nothing of Re-ask all's from a body.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { InboxAuthor } from "@plannotator/core/inbox-types";
-import { INBOX_REASK_TIDY_LINE } from "@plannotator/core/inbox-questions";
+import type { InboxAuthor, InboxMessage, InboxMessageWire } from "@plannotator/core/inbox-types";
+import { inboxWakeText } from "./connection";
 import { InboxError } from "./schema";
 import { InboxStore } from "./store";
 import { messageReaskInput, reaskAllReachable, reaskThreadAll } from "./reask-all";
@@ -56,13 +57,6 @@ describe("Re-ask all on a thread", () => {
     const toB = written.find((m) => m.reply_to === fromB.id)!;
     expect(toA.reask).toEqual(store.questionsOf(root.id).map((q) => `${root.id}/${q.key}`));
     expect(toB.reask).toEqual(store.questionsOf(fromB.id).map((q) => `${fromB.id}/${q.key}`));
-    // Two agents wait on the person here: an archive by one would close the other's question, so neither note tidies.
-    expect(toA.body).not.toContain(INBOX_REASK_TIDY_LINE);
-    expect(toB.body).not.toContain(INBOX_REASK_TIDY_LINE);
-    // Byte for byte the thread's own Re-ask note (the ids aside).
-    const { store: plain, root: plainRoot } = setup();
-    const own = plain.sendReask(plainRoot.id, { idempotency_key: "k1" }).reply;
-    expect(toA.body.replaceAll(toA.id, "<note>").replaceAll(root.id, "<asked>")).toBe(own.body.replaceAll(own.id, "<note>").replaceAll(plainRoot.id, "<asked>"));
   });
 
   test("the note goes to the asking agent as a reply goes (its pending items), and nothing comes to the person", () => {
@@ -115,12 +109,6 @@ describe("Re-ask all on a thread", () => {
     expect(notes(store, quiet.id)).toEqual([]);
   });
 
-  test("the thread's own Re-ask note is unchanged: no tidy line", () => {
-    const { store, root } = setup();
-    const { reply } = store.sendReask(root.id, { idempotency_key: "k1" });
-    expect(reply.body).not.toContain(INBOX_REASK_TIDY_LINE);
-  });
-
   test("a bad key or an unknown thread is refused, with nothing written", () => {
     const { store, root } = setup();
     expect(() => reaskThreadAll(store, root.id, "", always)).toThrow(InboxError);
@@ -145,69 +133,63 @@ const pick = (store: InboxStore, messageId: string, index: number) => {
   return q;
 };
 
-describe("Re-ask all's tidy line: only for the one agent everything left waits on", () => {
-  test("the only session with anything waiting gets the tidy line", () => {
-    const { store, root } = alone();
-    reaskThreadAll(store, root.id, "press1", always);
-    expect(notes(store, root.id)[0]!.body).toContain(INBOX_REASK_TIDY_LINE);
-  });
+/** Every message id in a body, by order of first use: two worlds' notes compare with their ids aside. */
+const sameIds = (body: string) => {
+  const ids = new Map<string, string>();
+  return body.replace(/msg_[0-9A-Z]{26}/g, (id) => ids.get(id) ?? (ids.set(id, `<id${ids.size}>`), `<id${ids.size - 1}>`));
+};
+const wakeOf = (note: InboxMessage) =>
+  inboxWakeText({ type: "reply", id: note.id, thread_id: note.thread_id, subject: null, body: note.body, reask: true, ...(note.reask?.length === 1 ? { reask_one: true } : {}) });
 
-  test("one session reached and one not: no tidy line (the other's question would close with an archive)", () => {
-    const { store, root } = setup();
-    reaskThreadAll(store, root.id, "press1", (m) => m.author.kind === "agent" && m.author.session !== "ses_b");
-    const [note] = notes(store, root.id);
-    expect(note!.reply_to).toBe(root.id);
-    expect(note!.body).not.toContain(INBOX_REASK_TIDY_LINE);
-  });
-
-  test("another session holding only picks the person has not sent: no tidy line", () => {
-    const { store, project, root } = alone();
-    const fromB = store.sendMessage({ project_id: project.id, author: B, wakes: true, reply_to: root.id, body: `One more.\n\n${block("Move refunds now?")}` }).message;
-    pick(store, fromB.id, 0);
-    const result = reaskThreadAll(store, root.id, "press1", always);
-    expect(result.asked.map((s) => s.session)).toEqual(["ses_a"]);
-    expect(notes(store, root.id)[0]!.body).not.toContain(INBOX_REASK_TIDY_LINE);
-  });
-
-  test("another session whose note still waits (asked again already): no tidy line, and it is counted as asked already", () => {
-    const { store, root, fromB } = setup();
-    store.sendReask(fromB.id, { idempotency_key: "own" });
-    const result = reaskThreadAll(store, root.id, "press1", always);
-    expect(result.asked.map((s) => s.session)).toEqual(["ses_a"]);
-    expect(result.already).toBe(1);
-    expect(notes(store, root.id).find((m) => m.reply_to === root.id)!.body).not.toContain(INBOX_REASK_TIDY_LINE);
-  });
-
-  test("an action item the person marked Done, waiting unsent in the draft: no tidy line, the thread's own note byte for byte", () => {
-    const world = () => {
-      const { store, project } = alone();
-      const asked = store.sendMessage({ project_id: project.id, author: A, wakes: true, body: `One call and one step.\n\n${block("Ship on Friday?")}\n\n:::action\nRotate the API key\n:::` }).message;
-      const action = store.questionsOf(asked.id).find((q) => q.kind === "action")!;
-      store.markAction(asked.id, action.key, { outcome: "done", staged: true });
-      return { store, asked };
-    };
-    const { store, asked } = world();
-    reaskThreadAll(store, asked.id, "press1", always);
-    const [note] = notes(store, asked.id);
-    expect(note!.body).not.toContain(INBOX_REASK_TIDY_LINE);
-    const plain = world();
-    const own = plain.store.sendReask(plain.asked.id, { idempotency_key: "own" }).reply;
-    expect(note!.body.replaceAll(note!.id, "<note>").replaceAll(asked.id, "<asked>")).toBe(own.body.replaceAll(own.id, "<note>").replaceAll(plain.asked.id, "<asked>"));
-  });
-
-  test("the person's reply words saved unsent in the thread: no tidy line", () => {
-    const { store, root } = alone();
-    store.saveReplyDraft(root.id, { body: "Half a thought", base: null });
-    reaskThreadAll(store, root.id, "press1", always);
-    expect(notes(store, root.id)[0]!.body).not.toContain(INBOX_REASK_TIDY_LINE);
-  });
-
-  test("a pick of its own not sent: no tidy line (an archive would close what the person picked)", () => {
-    const { store, root } = alone();
-    pick(store, root.id, 0);
-    reaskThreadAll(store, root.id, "press1", always);
-    expect(notes(store, root.id)[0]!.body).not.toContain(INBOX_REASK_TIDY_LINE);
-  });
+describe("Re-ask all's note is the thread's own Re-ask note, in every shape, and never asks for an archive", () => {
+  const shapes: { name: string; build: () => { store: InboxStore; threadId: string }; reachable?: (m: InboxMessageWire) => boolean; notes: number }[] = [
+    { name: "one session", build: () => ((w) => ({ store: w.store, threadId: w.root.id }))(alone()), notes: 1 },
+    { name: "two sessions", build: () => ((w) => ({ store: w.store, threadId: w.root.id }))(setup()), notes: 2 },
+    { name: "one session reached, one not", build: () => ((w) => ({ store: w.store, threadId: w.root.id }))(setup()), reachable: (m) => m.author.kind === "agent" && m.author.session !== "ses_b", notes: 1 },
+    {
+      name: "another session with only picks",
+      build: () => {
+        const { store, project, root } = alone();
+        const fromB = store.sendMessage({ project_id: project.id, author: B, wakes: true, reply_to: root.id, body: `One more.\n\n${block("Move refunds now?")}` }).message;
+        pick(store, fromB.id, 0);
+        return { store, threadId: root.id };
+      },
+      notes: 1,
+    },
+    {
+      name: "an action item marked Done, unsent in the draft, and reply words unsent",
+      build: () => {
+        const { store, project } = alone();
+        const asked = store.sendMessage({ project_id: project.id, author: A, wakes: true, body: `One call and one step.\n\n${block("Ship on Friday?")}\n\n:::action\nRotate the API key\n:::` }).message;
+        const action = store.questionsOf(asked.id).find((q) => q.kind === "action")!;
+        store.markAction(asked.id, action.key, { outcome: "done", staged: true });
+        store.saveReplyDraft(asked.id, { body: "Half a thought", base: null });
+        return { store, threadId: asked.id };
+      },
+      notes: 1,
+    },
+  ];
+  for (const shape of shapes) {
+    test(shape.name, () => {
+      const all = shape.build();
+      reaskThreadAll(all.store, all.threadId, "press1", shape.reachable ?? always);
+      const written = notes(all.store, all.threadId);
+      expect(written).toHaveLength(shape.notes);
+      // The same thread in a world of its own, each of those sessions asked by the thread's own Re-ask.
+      const own = shape.build();
+      const order = (store: InboxStore, threadId: string) => (store.thread(threadId)?.messages ?? []).map((m) => m.id);
+      const at = order(all.store, all.threadId);
+      const twin = order(own.store, own.threadId);
+      for (const note of written) {
+        const asked = twin[at.indexOf(note.reply_to!)]!;
+        const plain = own.store.sendReask(asked, { idempotency_key: `own-${asked}` }).reply;
+        expect(sameIds(note.body)).toBe(sameIds(plain.body));
+        const wake = wakeOf(note);
+        expect(wake.toLowerCase()).not.toContain("archive");
+        expect(wake).not.toContain("resolve_message");
+      }
+    });
+  }
 });
 
 describe("Re-ask all leaves the person's picks as they are", () => {
@@ -326,13 +308,12 @@ describe("who can be woken (reaskAllReachable)", () => {
 });
 
 describe("the per-message Re-ask route's input", () => {
-  test("a body's tidy or leave_picks is never taken: the note has no tidy line and its picks go with it", () => {
-    const input = messageReaskInput({ idempotency_key: "k1", tidy: true, leave_picks: true }, undefined);
+  test("a body's leave_picks (or any other field) is never taken: its picks go with the note", () => {
+    const input = messageReaskInput({ idempotency_key: "k1", leave_picks: true, tidy: true }, undefined);
     expect(input).toEqual({ idempotency_key: "k1" });
     const { store, root } = alone();
     const picked = pick(store, root.id, 0);
-    const { reply } = store.sendReask(root.id, input);
-    expect(reply.body).not.toContain(INBOX_REASK_TIDY_LINE);
+    store.sendReask(root.id, input);
     expect(store.questionsOf(root.id).find((q) => q.key === picked.key)!.state).toBe("sent");
   });
 });

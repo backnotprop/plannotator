@@ -457,12 +457,6 @@ export interface InboxReaskInput {
    */
   to?: InboxAddressee | null;
   /**
-   * Re-ask all (a group's menu, reask-all.ts): the note also asks the agent to
-   * archive the thread when nothing in it is left for the person. Absent on the
-   * thread's own Re-ask, whose note is unchanged.
-   */
-  tidy?: boolean;
-  /**
    * Re-ask all (reask-all.ts): the person's picks not sent stay as they are
    * (still picked, still unsent, nothing marked sent) and are not in the note:
    * from the list the person cannot see them, and a Send is the person's.
@@ -5460,7 +5454,6 @@ export class InboxStore {
       answered: picked.map((record) => ({ record, answer: record.answer as QuestionAnswer })),
       noteId: replyId,
       askedBy: redirected ? (INBOX_HOST_NAMES[asker.host ?? ""] ?? "agent") : null,
-      ...(input.tidy ? { tidy: true } : {}),
     });
     const note: InboxMessage = {
       id: replyId,

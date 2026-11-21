@@ -1,7 +1,7 @@
 /**
  * Re-ask all through the server's real doors (`POST /api/inbox/threads/:id/reask`, shared/inbox/reask-all.ts): the
- * window's route and its guards, the wake a waking connection polls (the Re-ask wake line, never the reply's, and the
- * note's tidy line), no second note for a session that has not taken the first, and a session that ended (a waking
+ * window's route and its guards, the wake a waking connection polls (the Re-ask wake line, never the reply's, and
+ * nothing asking the agent to archive), no second note for a session that has not taken the first, and a session that ended (a waking
  * connection, not heard from past the grace) counted and never written to. Every test uses its own temp data dir.
  */
 import { afterEach, describe, expect, test } from "bun:test";
@@ -10,7 +10,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { InboxThread } from "@plannotator/core/inbox-types";
-import { INBOX_REASK_TIDY_LINE } from "@plannotator/core/inbox-questions";
 import {
   INBOX_BRIDGE_POLL_PATH,
   INBOX_REASK_INSTRUCTION,
@@ -81,7 +80,7 @@ async function thread(server: InboxServer, id: string): Promise<InboxThread> {
 }
 
 describe("Re-ask all over the window's route", () => {
-  test("a live session is asked once, and its wake is the Re-ask wake with the tidy line; a second press stacks nothing", async () => {
+  test("a live session is asked once, and its wake is the Re-ask wake, asking for no archive; a second press stacks nothing", async () => {
     const { server, client, project } = await setup();
     const asked = await ask(client, project, "ses-a", `Two calls.\n\n${block("Backfill the ledger first?")}\n\n${block("Keep the old webhook?")}`);
     await poll(server, "ses-a", project);
@@ -93,7 +92,8 @@ describe("Re-ask all over the window's route", () => {
     const wake = inboxWakeText(command!);
     expect(wake.split("\n")[1]).toBe(INBOX_REASK_INSTRUCTION);
     expect(wake).not.toContain(INBOX_WAKE_INSTRUCTION);
-    expect(wake).toContain(INBOX_REASK_TIDY_LINE);
+    expect(wake.toLowerCase()).not.toContain("archive");
+    expect(wake).not.toContain("resolve_message");
     const again = (await (await reaskAll(server, asked.thread_id, { batch_id: "press-2" })).json()) as { asked: unknown[] };
     expect(again.asked).toEqual([]);
     expect((await thread(server, asked.thread_id)).messages.filter((m) => m.author.kind === "person")).toHaveLength(1);

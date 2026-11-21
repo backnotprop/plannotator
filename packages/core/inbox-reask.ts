@@ -6,7 +6,7 @@
  * sessions by the same rule. Moved here unchanged from the window.
  */
 
-import { inboxActionInDraft, type InboxMessageWire, type InboxQuestion } from './inbox-types';
+import type { InboxMessageWire, InboxQuestion } from './inbox-types';
 import { isInboxPermissionSession } from './inbox-permission';
 import { agentName } from './inbox-format';
 
@@ -51,6 +51,10 @@ export const isReaskNote = (m: InboxMessageWire): boolean => m.author.kind === '
 export const itemsOf = (m: InboxMessageWire): InboxQuestion[] => [...(m.questions ?? []), ...(m.actions ?? [])];
 export const isWaiting = (q: InboxQuestion) => q.state === 'open' || (q.state === 'picked' && q.kind !== 'action');
 
+/** The session an agent's message belongs to for a Re-ask: its host and session, or the message alone when it named none. */
+export const reaskSessionKey = (m: InboxMessageWire): string =>
+  m.author.kind === 'agent' && m.author.session ? `${m.author.host ?? ''}\u0000${m.author.session}` : `\u0001${m.id}`;
+
 /**
  * The sessions a Re-ask would go to now. A session is left out while a note
  * of its waits (rule 2a): no message after it from the session the note went
@@ -63,42 +67,6 @@ export const isWaiting = (q: InboxQuestion) => q.state === 'open' || (q.state ==
  * its waits. `live` says which
  * messages still take answers (not closed by an archive).
  */
-/** The session an agent's message belongs to for a Re-ask: its host and session, or the message alone when it named none. */
-export const reaskSessionKey = (m: InboxMessageWire): string =>
-  m.author.kind === 'agent' && m.author.session ? `${m.author.host ?? ''}\u0000${m.author.session}` : `\u0001${m.id}`;
-
-/** One session's items still waiting on the person in a thread (`waitingSessions`). */
-export interface WaitingSession {
-  /** Open questions with no pick, and open action items. */
-  open: number;
-  /** Questions picked and not sent, and action items whose Done or Can't do it waits in the draft (`inboxActionInDraft`). */
-  picked: number;
-  /** A launched session's permission prompt: never asked again. */
-  permission: boolean;
-}
-
-/**
- * Every session of a thread with something still waiting on the person (an
- * item open, or a question picked and not sent), a launched session's
- * permission prompt included, by `reaskSessionKey`. Re-ask all reads it to
- * tell whether one agent is the only one anything in the thread waits on.
- */
-export function waitingSessions(messages: readonly InboxMessageWire[], live: (message: InboxMessageWire) => boolean = () => true): Map<string, WaitingSession> {
-  const out = new Map<string, WaitingSession>();
-  for (const m of messages) {
-    if (m.author.kind !== 'agent' || !live(m)) continue;
-    // An action item the person marked, waiting unsent in their draft, waits on their Send: an archive would drop it.
-    const waiting = itemsOf(m).filter((q) => isWaiting(q) || inboxActionInDraft(q));
-    if (waiting.length === 0) continue;
-    const key = reaskSessionKey(m);
-    const seen = out.get(key) ?? { open: 0, picked: 0, permission: isInboxPermissionSession(m.author.session) };
-    seen.open += waiting.filter((q) => q.state === 'open').length;
-    seen.picked += waiting.filter((q) => q.state !== 'open').length;
-    out.set(key, seen);
-  }
-  return out;
-}
-
 export function reaskTargets(messages: readonly InboxMessageWire[], live: (message: InboxMessageWire) => boolean = () => true): ReaskTarget[] {
   const groups = new Map<string, InboxMessageWire[]>();
   for (const m of messages) {

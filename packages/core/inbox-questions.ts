@@ -842,13 +842,6 @@ function answersSection(group: InboxReplyMessageAnswers, headingLevel: 2 | 3): s
 }
 
 /**
- * The line Re-ask all adds to each note (a group's menu in the Inbox list; DRAFT, words not yet approved by the
- * owner): the agent tidies the thread when nothing in it is left for the person.
- */
-export const INBOX_REASK_TIDY_LINE =
-  "If nothing in this thread is still needed from the person after that message, archive the thread with resolve_message.";
-
-/**
  * The body of the person's Re-ask note (approval "inbox-reask"): what the
  * agent is asked to do with its open questions, then the answers the person
  * had picked and not sent, which go with the note. `noteId` is the note's
@@ -865,8 +858,6 @@ export function composeInboxReaskBody(input: {
    * whose questions they are instead of "your".
    */
   askedBy?: string | null;
-  /** Re-ask all (a group's menu): one line more, archive the thread when nothing in it is left for the person. */
-  tidy?: boolean;
 }): string {
   const n = input.reask.length;
   const actions = input.reask.filter((r) => r.kind === "action").length;
@@ -906,7 +897,6 @@ export function composeInboxReaskBody(input: {
     actions === 0
       ? `Send one message (send_message) with reply_to ${input.noteId}. Until every id above is replaced or in \`supersedes\`, the old ${n === 1 ? "question stays" : "questions stay"} open for the person.`
       : `Send one message (send_message) with reply_to ${input.noteId}. Until every id above is replaced, in \`supersedes\` or in \`done\`, the old ${n === 1 ? "one stays" : "ones stay"} open for the person.`,
-    ...(input.tidy ? [INBOX_REASK_TIDY_LINE] : []),
   );
   if (input.answered.length > 0) {
     let section = `## ${QUESTION_ANSWERS_HEADING}\n\n`;

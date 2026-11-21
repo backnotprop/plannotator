@@ -3,7 +3,9 @@
  * opportunity to tidy things as well"): a group's menu in the Inbox list sends, for each of its threads, the thread's
  * own Re-ask (approval "inbox-reask", `InboxStore.sendReask`) to every session there with a question open, so the
  * agent withdraws what no longer matters (`supersedes`) and asks again what does (`Replaces:`). The note is the Re-ask
- * note, delivered and woken as one.
+ * note, byte for byte, delivered and woken as one: nothing more is added, and nothing asks the agent to archive (the
+ * owner, 2026-11-21: "I don't think I'd ever expect re-ask to archive. In the instance when things don't need the
+ * human anymore, the question should just be cleared out").
  *
  * Which sessions a thread takes is the thread's Re-ask rule (`reaskTargets`, @plannotator/core/inbox-reask): one
  * note per session, none to a session whose note still waits (so a second Re-ask all stacks nothing), none right
@@ -11,20 +13,17 @@
  * cannot be woken any more (`reachable` false: its waking connection went quiet, past the grace) gets nothing: a note
  * there would put the thread in Sent with nobody to answer it. It is counted instead.
  *
- * Two rules of its own, since the person is in the list and sees neither the thread nor its picks:
- * - The picks the person made and did not send stay as they are (`leave_picks`): a Send is the person's. A picked
- *   question is not in the note either (the thread's own note never lists one as open: it sends it as an answer), so
- *   the agent neither withdraws nor asks again what the person already picked an answer for. No pick is read or
- *   written, so a pick being saved from an open thread at the same time cannot be half sent: it lands before the note
- *   (left out of it) or after (as any pick after a Re-ask).
- * - The tidy line (`INBOX_REASK_TIDY_LINE`: archive the thread when nothing is left) goes only to an agent that is
- *   the only one anything in the thread waits on: archiving closes every question in the thread, so with another
- *   session's question or pick open, a session not reached, or any unsent work of the person's in the thread (a pick,
- *   an action item marked in the draft, reply words, comments), the note is the plain one.
+ * One rule of its own, since the person is in the list and sees neither the thread nor its picks: the picks the
+ * person made and did not send stay as they are (`leave_picks`): a Send is the person's. A picked question is not in
+ * the note either (the thread's own note never lists one as open: it sends it as an answer), so the agent neither
+ * withdraws nor asks again what the person already picked an answer for. No pick is read or written, so a pick being
+ * saved from an open thread at the same time cannot be half sent: it lands before the note (left out of it) or after
+ * (as any pick after a Re-ask).
  */
 
-import { reaskSessionKey, reaskTargets, waitingSessions } from "@plannotator/core/inbox-reask";
-import { inboxHasUnsent, type InboxMessageWire } from "@plannotator/core/inbox-types";
+import { itemsOf, reaskSessionKey, reaskTargets } from "@plannotator/core/inbox-reask";
+import { isInboxPermissionSession } from "@plannotator/core/inbox-permission";
+import type { InboxMessageWire } from "@plannotator/core/inbox-types";
 import { InboxError } from "./schema";
 import type { InboxReaskInput, InboxStore } from "./store";
 
@@ -71,7 +70,7 @@ export function reaskAllReachable(message: InboxMessageWire, threadId: string, w
 
 /**
  * The per-message Re-ask route's input (`POST /api/inbox/messages/:id/reask`): the key and `to` only. Re-ask all's
- * `tidy` and `leave_picks` are never taken from a request body.
+ * `leave_picks`, or any other field, is never taken from a request body.
  */
 export function messageReaskInput(body: Record<string, unknown>, to: InboxReaskInput["to"] | undefined): InboxReaskInput {
   return { idempotency_key: body.idempotency_key as string, ...(to === undefined ? {} : { to }) };
@@ -99,24 +98,22 @@ export function reaskThreadAll(store: InboxStore, threadId: string, key: string,
     out.asked.push({ host: asked.author.host ?? null, session: asked.author.session ?? null, message_id: asked.id, reply_id: note.id });
   }
   const targets = reaskTargets(thread.messages, live);
-  const waiting = waitingSessions(thread.messages, live);
   const taken = new Set(targets.map((t) => reaskSessionKey(t.message)));
-  // Sessions with a question open the rule left out: asked again already (never a permission prompt).
-  for (const [session, w] of waiting) if (!taken.has(session) && !w.permission && w.open > 0) out.already += 1;
+  // Sessions with an item open the rule left out: asked again already (never a permission prompt).
+  const left = new Set<string>();
+  for (const m of thread.messages) {
+    if (m.author.kind !== "agent" || !live(m) || isInboxPermissionSession(m.author.session) || !itemsOf(m).some((q) => q.state === "open")) continue;
+    if (!taken.has(reaskSessionKey(m))) left.add(reaskSessionKey(m));
+  }
+  out.already = left.size;
   const asking = targets.filter((t) => t.kind === "reask");
   const reached = asking.filter((t) => reachable(t.message));
   for (const t of asking) if (!reached.includes(t)) out.unreached.push({ host: t.host, session: t.session });
-  // The tidy line only for the one agent everything left in the thread waits on, with no pick of its own unsent.
-  const only = reached.length === 1 && out.unreached.length === 0 ? reached[0]! : null;
-  // The person's own unsent work in the thread (reply words, picks, comments, a marked action item; the server keeps
-  // them, `listRow().unsent`) would be closed or dropped by an archive too: then no tidy line either.
-  const alone =
-    only !== null && waiting.size === 1 && waiting.get(reaskSessionKey(only.message))?.picked === 0 && !inboxHasUnsent(store.listRow(threadId)?.unsent);
   let firstError: unknown = null;
   for (const target of reached) {
     const who = { host: target.host, session: target.session };
     try {
-      const { reply } = store.sendReask(target.message.id, { idempotency_key: noteKey, leave_picks: true, ...(alone ? { tidy: true } : {}) });
+      const { reply } = store.sendReask(target.message.id, { idempotency_key: noteKey, leave_picks: true });
       out.asked.push({ ...who, message_id: target.message.id, reply_id: reply.id });
     } catch (error) {
       // Answered, superseded or archived between the read and the write: nothing left to ask that session.

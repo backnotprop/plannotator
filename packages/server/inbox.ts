@@ -8045,7 +8045,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             // (checked as a reply's is; null: not live, 409, nothing written).
             const asked = body.to === undefined ? undefined : store.message(messageId);
             const to = body.to === undefined || !asked ? undefined : live.replyTarget(asked.thread_id, body.to);
-            // The key and `to` only: Re-ask all's tidy line and left picks are never taken from a body.
+            // The key and `to` only: Re-ask all's left picks are never taken from a body.
             const result = store.sendReask(messageId, messageReaskInput(body, to));
             return json({
               message_id: messageId,
