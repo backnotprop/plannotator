@@ -81,6 +81,7 @@ import {
   parseOpaqueColor,
   quantize,
   relativeLuminance,
+  rgbToOklab,
   rgbToOklch,
   rotateHue,
   toHex,
@@ -172,6 +173,13 @@ const CATEGORICAL_COUNT = 12;
 const HUE_SEPARATION = 18;
 /** Opacity of the diagram container's `bg-muted/30` tint over the page. */
 const CANVAS_MUTED_ALPHA = 0.3;
+/**
+ * Minimum OKLab distance between a done gantt bar and a plain, active or
+ * critical one, so "finished" never reads as another kind of bar.
+ */
+const GANTT_DONE_MIN_DELTA_E = 0.1;
+/** A done bar is a filled shape on the page: at least the line minimum against it. */
+const GANTT_DONE_PAGE_CONTRAST_MIN = 3;
 
 // ---------------------------------------------------------------------------
 // Token reading (browser)
@@ -371,6 +379,40 @@ export function buildMermaidShadow(ground: RgbColor | undefined, amount: number)
  * Push a fill's lightness away from `ink` until `ink` reads on it at 4.5:1.
  * Used for the categorical scale, whose single ink is fixed per mode.
  */
+/** Euclidean distance in OKLab. */
+function oklabDeltaE(a: { r: number; g: number; b: number }, b: { r: number; g: number; b: number }): number {
+  const x = rgbToOklab(a);
+  const y = rgbToOklab(b);
+  return Math.hypot(x.L - y.L, x.a - y.a, x.b - y.b);
+}
+
+/**
+ * The done gantt bar: a neutral grey at the categorical lightness, fitted for
+ * the ink Mermaid writes its label in. Where that grey sits too close to a
+ * plain, active or critical bar (a palette whose critical or plain bar is
+ * itself near grey), its lightness moves away in the smallest steps until it
+ * is distinct from all of them, the label still reads and the bar still
+ * stands off the page. If no step satisfies all three, the fitted grey stays.
+ */
+function fitDoneTaskFill(ink: RgbColor, bars: RgbColor[], page: RgbColor, polarity: MermaidThemeMode): RgbColor {
+  const grey = quantize({ ...oklchToRgb({ L: CATEGORICAL_LIGHTNESS[polarity], C: 0, H: 0 }), a: 1 });
+  const fitted = fitFillForInk(grey, ink, polarity);
+  const ok = (c: RgbColor) =>
+    contrastRatio(ink, c) >= MERMAID_TEXT_CONTRAST_MIN &&
+    contrastRatio(page, c) >= GANTT_DONE_PAGE_CONTRAST_MIN &&
+    bars.every((bar) => oklabDeltaE(c, bar) >= GANTT_DONE_MIN_DELTA_E);
+  if (ok(fitted)) return fitted;
+  const L0 = rgbToOklch(fitted).L;
+  for (let k = 1; k <= 25; k++) {
+    for (const L of [L0 + 0.01 * k, L0 - 0.01 * k]) {
+      if (L < 0.05 || L > 0.98) continue;
+      const candidate = quantize({ ...oklchToRgb({ L, C: 0, H: 0 }), a: 1 });
+      if (ok(candidate)) return candidate;
+    }
+  }
+  return fitted;
+}
+
 function fitFillForInk(fill: RgbColor, ink: RgbColor, polarity: MermaidThemeMode): RgbColor {
   let current = quantize(fill);
   const step = polarity === 'dark' ? 0.02 : -0.02;
@@ -481,12 +523,16 @@ export function buildMermaidThemeVariables(
   const scaleHex = scale.map(toHex);
   const scalePeer = scale.map((c) => toHex(mixOklab(c, scaleInk, 0.25)));
   const scaleLabel = scale.map((c) => toHex(text(scaleInk, c)));
-  // A done gantt bar: a grey (the muted-foreground hue, its own low chroma)
-  // at the categorical lightness, fitted for the ink Mermaid writes the
-  // label in (`taskTextDarkColor`, `.doneText0`). `muted` read at 1.0-1.8:1.
-  const doneTaskBkg = fitFillForInk(
-    withOklchLightness(p.mutedForeground, CATEGORICAL_LIGHTNESS[polarity]),
+  const critTaskBkg = fitFillForInk(withOklchLightness(p.destructive, CATEGORICAL_LIGHTNESS[polarity]), scaleInk, polarity);
+  // A done gantt bar: a neutral grey, fitted for the ink Mermaid writes the
+  // label in (`taskTextDarkColor`, `.doneText0`; `muted` read at 1.0-1.8:1)
+  // and kept apart from the plain, active and critical bars (see
+  // `fitDoneTaskFill`). A tinted grey collided with a plain bar in palettes
+  // whose muted-foreground carries the primary hue.
+  const doneTaskBkg = fitDoneTaskFill(
     parseCssColor(scaleLabel[0]) as RgbColor,
+    [scaleHex[0]!, scaleHex[1] ?? scaleHex[0]!].map((hex) => parseCssColor(hex) as RgbColor).concat(critTaskBkg),
+    canvas,
     polarity,
   );
 
@@ -615,7 +661,7 @@ export function buildMermaidThemeVariables(
     doneTaskBkgColor: h(doneTaskBkg),
     doneTaskBorderColor: h(nodeBorder),
     critBorderColor: h(destructiveLine),
-    critBkgColor: h(fitFillForInk(withOklchLightness(p.destructive, CATEGORICAL_LIGHTNESS[polarity]), scaleInk, polarity)),
+    critBkgColor: h(critTaskBkg),
     todayLineColor: h(destructiveLine),
     vertLineColor: h(primaryLine),
 
