@@ -61,7 +61,7 @@ function setup(options: { homeDir?: (home: string, root: string) => string; adap
   /** The login-shell reads the engine made, and the context it gave the hosts. */
   const logins = { count: 0 };
   let context: LaunchHostContext | null = null;
-  const launch = createInboxLaunch({
+  const make = () => createInboxLaunch({
     store,
     live: { runStateOf: () => null },
     dataDir,
@@ -79,7 +79,14 @@ function setup(options: { homeDir?: (home: string, root: string) => string; adap
     hosts: (made) => ((context = made), [fake.host]),
     now: () => clock.now,
   });
+  const launch = make();
   restore.push(() => launch.stop());
+  /** The Inbox started again over the same store and host (the sessions live on outside it). */
+  const restart = () => {
+    const next = make();
+    restore.push(() => next.stop());
+    return next;
+  };
   /** From the window. `warning`: what a Trust folder click says the person read; by default the offer's line, as the window sends it. */
   const post = (id: string, action: string, via = "local", warning: string | null | undefined = fake.faults.offer?.read().warning) =>
     launch.route(
@@ -87,7 +94,7 @@ function setup(options: { homeDir?: (home: string, root: string) => string; adap
       `/api/inbox/launch/${id}/${action}`,
       via,
     );
-  return { store, clock, project, home, fake, launch, post, logins, context: () => context! };
+  return { store, clock, project, home, fake, launch, post, logins, restart, context: () => context! };
 }
 
 /** An offer whose reading is one line, and no facts. */
@@ -123,7 +130,8 @@ describe("a thread note quoting an agent", () => {
     const note = { author: { host: "fake-agent", session: "s1", name: "Fake Agent" }, body: "It failed.", key: "note-1" };
     writeLaunchNote({ store, onChange: () => changed.push("changed") }, root, note, (line) => lines.push(line));
     const written = store.message(store.threadMessageIds(root.thread_id).at(-1)!)!;
-    expect(written).toMatchObject({ body: "It failed.", reply_to: second.id, author: { kind: "agent", session: "s1" } });
+    // Marked as the Inbox's own note, so the sound never rings for it (the window's notify.ts).
+    expect(written).toMatchObject({ body: "It failed.", reply_to: second.id, author: { kind: "agent", session: "s1" }, launch_note: true });
     expect(changed).toEqual(["changed"]);
 
     const broken = { sendMessage: () => { throw new Error("the disk is full"); }, threadMessageIds: () => [] } as unknown as InboxStore;
@@ -853,5 +861,67 @@ describe("the trust how-to, from Claude Code's own trust key", () => {
   test("everyone else with no button keeps the words that help: a folder above home, and a scratch root at home with no repo", async () => {
     expect(await refusedIn((_home, root) => root)).toEqual(RUN_IT_THERE);
     expect(await refusedIn((home) => inside(home, "one"), { scratch: true })).toEqual(RUN_IT_THERE);
+  });
+});
+
+describe("the Inbox list's Hide: what counts as an agent's new activity (attentionSince)", () => {
+  const WAITING = { status: "waiting", state: "running", waitingFor: "permission prompt" };
+  const WORKING = { status: "working", state: "running" };
+  /** Past the host read's 10 s, so the next line reads the host again. */
+  const STALE = 11_000;
+
+  async function launched(waits: { now: boolean }) {
+    const t = setup({ adapt: (host) => void (host.sessions = async () => () => (waits.now ? WAITING : WORKING)) });
+    const { store, clock, project, fake, launch } = t;
+    const prepared = await launch.prepare(launch.target({ launch: { agent: FAKE, project_id: project.id } })!, { name: "Tidy", body: "Tidy.", resolveProject: async () => project });
+    const root = store.startPersonThread({ project_id: project.id, body: "Tidy.", to: prepared.to, idempotency_key: "send-1", thread_name: "Tidy", launch: prepared.launch }).message;
+    launch.begin(root);
+    await until(() => store.message(root.id)!.launch!.session_ref === "f1");
+    fake.poll("session-f1", true, clock.now);
+    store.recordDelivery(root.id, { host: FAKE, session: "session-f1" });
+    return { ...t, root: store.message(root.id)!, launchId: prepared.launch.id };
+  }
+
+  test("a Terminal prompt already there when the Inbox starts again is not new; one that begins after is", async () => {
+    const waits = { now: false };
+    const { clock, launch, root, restart } = await launched(waits);
+    waits.now = true;
+    clock.now += STALE;
+    expect((await launch.runOf(root.id))!.state).toBe("waiting_terminal");
+    expect(launch.attentionSince()(root.thread_id)).not.toBeNull();
+
+    // A restart: the same prompt, first seen by this Inbox now, is not news.
+    clock.now += 1_000;
+    const again = restart();
+    clock.now += STALE;
+    expect((await again.runOf(root.id))!.state).toBe("waiting_terminal");
+    expect(again.attentionSince()(root.thread_id)).toBeNull();
+
+    // It answers, works, then asks again: that prompt is new.
+    waits.now = false;
+    clock.now += STALE;
+    expect((await again.runOf(root.id))!.state).not.toBe("waiting_terminal");
+    waits.now = true;
+    clock.now += STALE;
+    expect((await again.runOf(root.id))!.state).toBe("waiting_terminal");
+    expect(again.attentionSince()(root.thread_id)).not.toBeNull();
+  });
+
+  test("the person's own Stop is not the agent's activity", async () => {
+    const { launch, root, launchId, post } = await launched({ now: false });
+    expect((await launch.runOf(root.id))!.state).not.toBe("stopped");
+    await post(launchId, "stop");
+    expect(await launch.runOf(root.id)).toMatchObject({ state: "stopped", stopped_by_person: true });
+    expect(launch.attentionSince()(root.thread_id)).toBeNull();
+  });
+});
+
+describe("each login read reaches the hosts", () => {
+  test("a host with loginRead gets the whole env of every login read the engine makes", async () => {
+    const seen: Record<string, string>[] = [];
+    const t = setup({ adapt: (host) => Object.assign(host, { loginRead: (login: Record<string, string>) => seen.push({ ...login }) }) });
+    await t.context().loginEnv();
+    expect(t.logins.count).toBe(1);
+    expect(seen).toEqual([{ HOME: t.home, PATH: "", FAKE_LOGIN: "yes" }]);
   });
 });

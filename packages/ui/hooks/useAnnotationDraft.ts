@@ -40,7 +40,7 @@ const DEBOUNCE_MS = 500;
  *    after submit re-creates a draft the server just deleted.
  *  - `load` returns the raw stored body (or null) plus the generation the
  *    store reports when there is NO draft (the default reads `draftGeneration`
- *    from the 404 body) so the client can resume past a tombstone.
+ *    from the 204 `Plannotator-Draft-Generation` header) so the client can resume past a tombstone.
  *  - `save` MAY resolve `{ staleGeneration }` when the store refused the body
  *    as stale (the default reads it from a `409 { draftGeneration }` that is
  *    not marked `decided: true`, which
@@ -73,13 +73,9 @@ export interface DraftSaveRefused {
 const defaultDraftTransport: DraftTransport = {
   async load() {
     const res = await fetch('/api/draft');
+    if (res.status === 204) return { data: null, generation: missingDraftGeneration(res) };
     const data = (await res.json().catch(() => null)) as unknown;
-    if (!res.ok) {
-      const generation = readDraftGeneration(
-        (data as MissingDraftData | null)?.draftGeneration,
-      );
-      return { data: null, generation };
-    }
+    if (!res.ok) return { data: null, generation: null };
     return { data, generation: null };
   },
   save(body, { keepalive }) {
@@ -289,6 +285,13 @@ function parseDraftDocuments(value: unknown): DraftDocumentCopy[] {
 
 const countDraftDocuments = (documents: DraftDocumentCopy[]): number =>
   documents.reduce((total, doc) => total + doc.annotations.length + doc.globalAttachments.length, 0);
+
+export const DRAFT_GENERATION_HEADER = 'Plannotator-Draft-Generation';
+
+export function missingDraftGeneration(res: Response): number | null {
+  const header = res.headers.get(DRAFT_GENERATION_HEADER);
+  return header === null || header === '' ? null : readDraftGeneration(Number(header));
+}
 
 function readDraftGeneration(value: unknown): number | null {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;

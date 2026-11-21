@@ -22,7 +22,7 @@
  *   "diff-controls-headers") sit in the bar only, never on the chapters. A
  *   phone's bar is one row: the same menu holds its title and switch.
  * - All files has the PR page's file tree on the left (approval
- *   "review-allfiles-tree", the PR page's `RailTree`): a click on a file goes to
+ *   "review-allfiles-tree", the PR page's `PullChangesTree`): a click on a file goes to
  *   it. As on the PR page, a phone has no rail: the bar's Files button opens the
  *   same tree as a sheet over the diff.
  * - The diff is Plannotator's own (`GuideReader` over review-editor's
@@ -51,7 +51,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
-import { GuideReaderPart, ReaderPart } from '../lazyParts';
+import { GuideReaderPart, PanePart, PullChangesTreePart, ReaderPart } from '../lazyParts';
 import { CommentPictures } from '../commentPictures';
 import { inboxPullIsOpen, inboxPullUrlOfKey, type InboxMessageWire, type InboxPull, type InboxThread } from '@plannotator/core/inbox-types';
 import { parseDiffToFiles, type DiffFile } from '@plannotator/core/diff-files';
@@ -114,7 +114,8 @@ import { DropdownMenuRadioGroup, DropdownMenuRadioItem } from '@plannotator/ui/c
 import { chapterInView, fileInView, ReviewJump } from './ReviewJump';
 import { OpenInCodeSpans, OpenInFile } from './OpenIn';
 import { Tip } from './Tip';
-import { RailTree } from '../pulls/RailTree';
+import { RailFilesHead } from '../pulls/RailFilesHead';
+import type { PullChangesTreeHandle } from '../guide/pullRepoTypes';
 import { reviewFiles } from '../pulls/reviewFiles';
 import { FileTreeMark } from '../pulls/fileTreeMark';
 import { failedCommentWrite, watchCommentWrites, withCommentWrites } from '../commentSaves';
@@ -383,9 +384,9 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
     move(path);
   };
   /** A file picked in the tree. From the phone's sheet it closes, showing the file, and focus goes back to its button. */
-  const pickFile = (path: string) => {
+  const pickFile = (path: string, how?: { via: 'focus' }) => {
     toFile(path);
-    if (filesSheet) closeFiles();
+    if (filesSheet && how?.via !== 'focus') queueMicrotask(closeFiles);
   };
   const closeFiles = () => {
     setFilesSheet(false);
@@ -395,9 +396,10 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
   useEffect(() => {
     if (!phone || !showTree) setFilesSheet(false);
   }, [phone, showTree]);
-  // Opening the Files sheet, focus goes to its first row.
+  // Opening the Files sheet, focus goes to the file open, else the first.
+  const changesTree = useRef<PullChangesTreeHandle>(null);
   useEffect(() => {
-    if (filesSheet) railRef.current?.querySelector<HTMLElement>('[data-review-files] button')?.focus({ preventScroll: true });
+    if (filesSheet) changesTree.current?.focus();
   }, [filesSheet]);
   /** The switch keeps the person's place: the file at the top of the view stays there in the other mode. */
   const flip = (next: RailMode) => {
@@ -798,6 +800,9 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
   );
   // Viewed ticks are Code review's: the server takes them only on a review, and only while Code review is on.
   const viewedProp = useMemo(() => (readOnly || !viewedTicks ? undefined : { files: viewedSet, onToggle: toggleViewed }), [readOnly, viewedTicks, viewedSet, toggleViewed]);
+  const railViewed = viewedProp ? viewedSet : NO_VIEWED;
+  const filesHead = tree ? <RailFilesHead files={tree.files} viewed={railViewed} /> : null;
+  const treeActive = reveal?.path ?? null;
   // The top bar's menu lists what the review draws, in the order it draws it (code, then tests, then generated).
   const jumpChapters = chapters.map((chapter, index) => ({ title: chapter.title, reviewed: !walkthrough && (reviewed[index] ?? snapshot?.guide.reviewed[index] ?? false) }));
   const jumpFiles = groupByFileKind(files, (file) => file.path)
@@ -1166,15 +1171,18 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
             }}
             data-review-tree=""
           >
-            <RailTree
-              tree={tree.tree}
-              loose={tree.loose}
-              files={tree.files}
-              viewed={viewedProp ? viewedSet : NO_VIEWED}
-              commentCount={(path) => comments.filter((comment) => comment.filePath === path).length}
-              onSelect={pickFile}
-              {...(viewedProp ? { onToggleViewed: toggleViewed } : {})}
-            />
+            <PanePart loading={<div className="ib-prp-files">{filesHead}</div>}>
+              <PullChangesTreePart.Part
+                files={tree.files}
+                viewed={railViewed}
+                showViewed={!!viewedProp}
+                comments={comments}
+                activePath={treeActive}
+                head={filesHead}
+                onSelect={pickFile}
+                handleRef={changesTree}
+              />
+            </PanePart>
           </nav>
         )}
         {phone && <ThreadPullTitleRow state={pullDetails} />}

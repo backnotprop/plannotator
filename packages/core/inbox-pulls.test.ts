@@ -155,6 +155,14 @@ describe("inboxPullStacks", () => {
     expect(inboxPullStacks([feature, intoMain, above]).find((s) => s.layers.some((l) => l.number === 32))!.layers.map((l) => l.number)).toEqual([31, 32]);
   });
 
+  test("a stale main branch does not win over the forge's configured default", () => {
+    const main = pr({ number: 120, head: "rounding", base: "main", default_branch: "next" });
+    const next = pr({ number: 121, head: "rounding", base: "next", default_branch: "next" });
+    const child = pr({ number: 122, head: "rounding-tests", base: "rounding", default_branch: "next" });
+    const stack = inboxPullStacks([main, next, child]).find((s) => s.layers.includes(child))!;
+    expect(inboxPullParent(stack, child.key)?.key).toBe(next.key);
+  });
+
   test("two layers on one branch stay in one stack, by depth then number", () => {
     const low = pr({ number: 10, head: "base-work", base: "main" });
     const b = pr({ number: 12, head: "b", base: "base-work" });
@@ -183,6 +191,17 @@ describe("inboxPullStacks", () => {
     expect(keys(chain!.layers)).toEqual([50, 51, 52, 53]);
     expect(chain!.layers.map((l) => inboxPullParent(chain!, l.key)?.number ?? null)).toEqual([null, 50, 51, 52]);
   });
+});
+
+test("a stack reconnects to its open parent through five merged layers", () => {
+  const parent = pr({ number: 1, head: "chain-1" });
+  const merged = Array.from({ length: 5 }, (_, i) =>
+    pr({ number: i + 2, state: "merged", head: `chain-${i + 2}`, base: `chain-${i + 1}` }),
+  );
+  const child = pr({ number: 7, head: "chain-7", base: "chain-6" });
+  const stacks = inboxPullStacks([child, ...merged.reverse(), parent]);
+  expect(stacks.map((stack) => keys(stack.layers))).toEqual([[1, 2, 3, 4, 5, 6, 7]]);
+  expect(keys(inboxPullAncestors(stacks[0]!, child.key))).toEqual([6, 5, 4, 3, 2, 1]);
 });
 
 describe("whose move", () => {

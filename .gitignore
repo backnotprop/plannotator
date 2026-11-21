@@ -15,6 +15,7 @@ dist-ssr
 
 # npm pack output
 *.tgz
+!vendor/pierre-diffs/*.tgz
 
 # VS Code extension package
 *.vsix
@@ -32,6 +33,7 @@ apps/pi-extension/plannotator.html
 apps/pi-extension/review-editor.html
 # Code review's diagram engine files (copied from apps/hook/dist/diagram-engine)
 apps/pi-extension/diagram-engine/
+apps/pi-extension/sem-diff/
 # Same knowledge skill, vendored by vendor.sh; offered to Pi by bundled-skill.ts.
 apps/pi-extension/skills/
 apps/pi-extension/storage.ts
@@ -122,3 +124,9 @@ tests/helpers/.outside-scratch-*
 
 __pycache__/
 *.pyc
+
+# The native iPhone app (apps/mobile/ios): Xcode's build output and per-user state
+apps/mobile/ios/build/
+DerivedData/
+xcuserdata/
+*.xcuserstate

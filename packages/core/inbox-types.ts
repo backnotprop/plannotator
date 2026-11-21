@@ -14,6 +14,7 @@
  * Browser-safe and dependency-free apart from core's own question model.
  */
 
+import type { InboxReviewAnchor, InboxReviewBatch, InboxReviewLive, InboxReviewResolved } from "./review-threads";
 import type { QuestionAnswer, QuestionKind } from "./question-block";
 import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, InboxInlineImage, InboxLiveSiteRef } from "./inbox-attachments";
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
@@ -23,6 +24,7 @@ import type { InboxSteps } from "./inbox-steps";
 import type { InboxThreadPull, InboxThreadPullsSummary } from "./inbox-thread-pulls";
 import type { InboxInitiative } from "./inbox-initiatives";
 import type { InboxScheduledChange, InboxScheduledRun, InboxScheduledThread } from "./inbox-scheduled-types";
+import type { InboxPictureItPage } from "./picture-it-page";
 import type { InboxReviewVerdictRecord } from "./inbox-review";
 import type { InboxReviewSource } from "./inbox-reviews";
 import type { InboxTidyMark } from "./inbox-tidy";
@@ -628,6 +630,7 @@ export interface InboxMessage {
    * it was sent (packages/server/inbox-live.ts). Absent otherwise.
    */
   live_sites?: InboxLiveSiteRef[];
+  picture_it?: InboxPictureItPage;
   /**
    * On a person's reply: it reached the asking agent's session as a turn
    * through an agent connection (the Claude Code mod), and when. Absent until
@@ -679,6 +682,12 @@ export interface InboxMessage {
    * the Inbox itself, never by an agent's call. Absent otherwise. Additive.
    */
   turn_error?: true;
+  /**
+   * One of the Inbox's own notes from a launched session in its thread (`writeLaunchNote`: a failed turn, a dialog
+   * answered Cancel, a session file gone), written only by the Inbox itself. The sound never rings for one, except a
+   * failed turn's (`turn_error`), which notifies. Absent otherwise. Additive.
+   */
+  launch_note?: true;
   /**
    * A guided review this message carries (submit_guide, PLAN step 5): the
    * snapshot is a content-addressed blob, `inbox/blobs/<sha256>`. Absent on
@@ -881,6 +890,10 @@ export interface InboxMessage {
    * checks the session really ended; a reply aimed elsewhere while the asker is live does not carry it.
    */
   took_over?: boolean;
+  review_live?: InboxReviewLive;
+  review_anchor?: InboxReviewAnchor;
+  review_batch?: InboxReviewBatch;
+  review_resolved?: InboxReviewResolved | null;
 }
 
 /** A hand-off a person's reply carries (`InboxMessage.handoff`). */
@@ -1184,11 +1197,41 @@ export interface InboxLaunchRecord {
   /** Fixed at Send, so Try again and every restart start the same. */
   model?: string;
   effort?: string;
+  /** OpenCode's own primary agent the session started as (build, plan, …); absent: its default. */
+  primary_agent?: string;
   error?: InboxLaunchError | null;
   /** The ⋯ menu's Delete removed the session and its files; the thread stays, with no run line. */
   deleted_at?: string;
   /** Started from a linked machine's window (remote launch): which one. Where the click came from, never a credential. Absent: this computer. */
   from?: InboxLaunchFrom;
+  /**
+   * Settings → Agents' "Start new agents in" said Rex when it was made (fixed at Send): the agent runs in a tab of
+   * Rex (superlogical.com/rex) instead of in the background, and Rex owns its process. `line`: where Rex put it
+   * ("Rex · <session> / <tab>") once the tab was made; `unavailable`: Rex was not on this computer at the start, so it
+   * started in the background as usual; `refused`: Rex answered the ask with an error (it made nothing), so it
+   * started in the background as usual. Empty until the start.
+   */
+  rex?: InboxLaunchRex;
+}
+
+/** `InboxLaunchRecord.rex`. `session` and `block`: the Rex session and the pane Rex made for it (Stop closes that pane). */
+export interface InboxLaunchRex {
+  line?: string;
+  unavailable?: true;
+  /**
+   * With `unavailable`, why, where it is not "Rex's app isn't open here" (a Mac): `server`, Rex on that computer is a
+   * server with no app (Linux, FreeBSD) and it did not answer; `shared`, the Rex server there is another account's
+   * (a shared server named by `REX_SERVER`), where the Inbox reads but never starts an agent.
+   */
+  why?: "server" | "shared";
+  refused?: true;
+  session?: string;
+  block?: string;
+}
+
+/** The launch runs in a Rex tab (it asked for Rex and Rex made the tab): Rex owns it, the Inbox never stops or removes it. */
+export function inboxLaunchInRex(launch: Pick<InboxLaunchRecord, "rex" | "session_ref">): boolean {
+  return !!launch.rex && !launch.rex.unavailable && !launch.rex.refused && !!launch.session_ref;
 }
 
 /**
@@ -1228,9 +1271,20 @@ export type InboxRunState = "starting" | "working" | "waiting_answer" | "waiting
 /**
  * Whether Stop is offered for a launch: it started (the host gave it a session) and it runs, at rest (no line) or
  * starting, working or at a prompt in Terminal. A prompt in the window has its own Stop on the permission card.
+ * `rex`: it runs in Rex and the Inbox has no pane of it to close (`inboxLaunchRexUnstoppable`), so no Stop.
  */
-export function inboxLaunchStops(started: boolean, run: InboxRunState | null): boolean {
-  return started && (run === null || run === "working" || run === "waiting_terminal" || run === "starting");
+export function inboxLaunchStops(started: boolean, run: InboxRunState | null, rex = false): boolean {
+  return !rex && started && (run === null || run === "working" || run === "waiting_terminal" || run === "starting");
+}
+
+/** A launch in Rex the Inbox cannot stop: it never learned the pane Rex made for it (`InboxLaunchRex.block`). */
+export function inboxLaunchRexUnstoppable(launch: Pick<InboxLaunchRecord, "rex" | "session_ref">): boolean {
+  return inboxLaunchInRex(launch) && !launch.rex?.block;
+}
+
+/** A run line's launch runs in a Rex tab (`InboxRun.rex`, not one that started in the background instead). */
+export function inboxRunInRex(run: Pick<InboxRun, "rex"> | null | undefined): boolean {
+  return !!run?.rex && !run.rex.unavailable && !run.rex.refused;
 }
 
 /** What a launched thread's run line shows (the thread route's `run`). */
@@ -1265,6 +1319,18 @@ export interface InboxRun {
   made_folder?: string;
   /** A launch that clones first (E1-E11): the repo, the percent once git says one (after a few seconds), why it failed, and what it brings. */
   clone?: { url: string; host: string; slug: string; branch: string | null; pct: number | null; error: "auth" | "not_found" | "network" | "failed" | null; error_text: string | null; renamed_from: string | null; brings: string[] | null; folder_shown: string | null };
+  /**
+   * Started in Rex (`InboxLaunchRecord.rex`): `line` once Rex made its tab (null while asked); `unavailable`: Rex was not
+   * here, so it started in the background; `refused`: Rex said no to the ask, so it started in the background;
+   * `waiting`: `waiting_terminal` because its Rex pane says it waits on the person (OSC 7501 `blocked`), with the kind
+   * when it said one. Absent: not a Rex start. Additive.
+   */
+  /**
+   * `held`: a reply waits to start it again, as its old process may still run (`may_run`: the Inbox just started and
+   * has not heard from it yet) or still does (`still_runs`: a process runs that session, in its tab or wherever it was resumed). `stops`: the Inbox knows its own
+   * pane, so Stop closes it (or, run on in a pane the Inbox did not open, ends just its process).
+   */
+  rex?: { line: string | null; unavailable?: true; why?: "server" | "shared"; refused?: true; waiting?: "permission" | "question" | "auth" | "other"; held?: "may_run" | "still_runs"; stops?: true };
 }
 
 /** How a person's reply or New message reached an agent session (`InboxMessage.delivery`). */
@@ -1524,8 +1590,13 @@ export interface InboxActionFacts {
 
 /** What came of an action item (`InboxQuestionRecord.action_result`). */
 export interface InboxActionResult {
-  outcome: "done" | "cant";
-  /** The person's note with Done, or the reason with Can't do it; null for none. */
+  /**
+   * The person's mark: Done, Can't do it (with a reason), or Skip (they chose
+   * not to do it; approval "action-item-skip", option A). A record stored
+   * before Skip only ever holds "done" or "cant".
+   */
+  outcome: "done" | "cant" | "skip";
+  /** The person's note with Done, or the reason with Can't do it; null for none (always for Skip). */
   note: string | null;
   at: string;
   by: "person" | "agent";
@@ -1543,8 +1614,11 @@ export interface InboxActionResult {
    * (approval "inbox-action-items-in-reply", Q3). When it carries a note, the
    * note still goes with the person's next Send (`inboxActionInDraft`).
    */
-  person?: { outcome: "done" | "cant"; note: string | null; at: string } | null;
+  person?: { outcome: "done" | "cant" | "skip"; note: string | null; at: string } | null;
 }
+
+/** The person's mark on an action item (`InboxActionResult.outcome`). */
+export type InboxActionOutcome = InboxActionResult["outcome"];
 
 /**
  * An action item whose result waits in the person's reply draft (approval
@@ -1563,7 +1637,7 @@ export function inboxActionInDraft(
 }
 
 /** The person's own mark on an action item in their draft or sent: their staged mark, or the one the agent's done settled. */
-export function inboxActionPersonMark(result: InboxActionResult | null | undefined): { outcome: "done" | "cant"; note: string | null; at: string } | null {
+export function inboxActionPersonMark(result: InboxActionResult | null | undefined): { outcome: InboxActionOutcome; note: string | null; at: string } | null {
   if (!result) return null;
   if (result.by === "person") return { outcome: result.outcome, note: result.note, at: result.at };
   return result.person ?? null;
@@ -1855,6 +1929,12 @@ export interface InboxListRow extends InboxThreadSummary {
    * from an older Inbox.
    */
   pulls?: InboxThreadPullsSummary;
+  /**
+   * The thread's open PRs that are not hidden (keys; the server's inbox-pull-hidden.ts): the row menu's and the picks'
+   * "Hide pull request". Only on this Inbox's own rows of the list the window and the phone read; absent when none.
+   * A thread whose open PRs are all hidden is left out of that list (it stays in search and in Reviews' Hidden).
+   */
+  hide_pulls?: string[];
 
   /**
    * Agent messages after the person's last look (a reply of theirs counts as
@@ -1900,6 +1980,12 @@ export interface InboxListRow extends InboxThreadSummary {
    * agent activity by it. Absent from an older Inbox.
    */
   last_agent_at?: string | null;
+  /**
+   * Who wrote the latest agent message, when more than one agent is in the thread (`participants`): the window's
+   * held line names the agent that wrote ("Codex replied in …"). Absent with one agent (that is the row's own agent)
+   * and from an older Inbox.
+   */
+  last_agent?: { host: string | null; name?: string | null };
   /** A message in the thread carries a guided review: the row's "Guided review" mark. */
   guide: boolean;
   /** The thread's latest guide is a walkthrough: the same mark says Walkthrough. */
@@ -2244,17 +2330,32 @@ export function isInboxHealth(value: unknown): value is InboxHealth {
 }
 
 /**
- * The question sound (config.json `inboxSound`, through GET and POST
+ * The Inbox's sound (config.json `inboxSound`, through GET and POST
  * /api/inbox/settings): on unless turned off, one volume for every device.
  */
 export interface InboxSoundSettings {
   enabled: boolean;
   /** 10 to 100; the slider has no 0, because the switch is how the sound goes off. */
   volume: number;
+  /**
+   * What rings it (the owner, 2026-11-18): `messages`, any new message from an agent (the default, also for
+   * everyone who had the sound before and never chose); `asks`, only when an agent asks. Absent from an Inbox before it.
+   */
+  when?: InboxSoundWhen;
   /** The version the one-time "The Inbox can ring now" dialog was shown for (or a fresh install was marked with); null while never. */
   dialog_shown_for: string | null;
   /** The one-time dialog waits for a page on this computer to claim it (POST /api/inbox/sound/dialog). Absent from an Inbox before it. */
   dialog_due?: boolean;
+}
+
+/** What rings the sound: any new agent message, or only an agent asking. */
+export type InboxSoundWhen = "messages" | "asks";
+export const INBOX_SOUND_WHEN: readonly InboxSoundWhen[] = ["asks", "messages"];
+export const INBOX_SOUND_DEFAULT_WHEN: InboxSoundWhen = "messages";
+
+/** The choice as saved; anything else (nothing chosen yet, an unknown value) is the default. */
+export function inboxSoundWhen(value: unknown): InboxSoundWhen {
+  return value === "asks" || value === "messages" ? value : INBOX_SOUND_DEFAULT_WHEN;
 }
 
 export const INBOX_SOUND_DEFAULT_VOLUME = 60;
@@ -3172,9 +3273,16 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * characters): the entry as the tool builds it from the default tool list, with Pi's wrapper, 13,084 → 13,869 bytes
  * (+785), Board on the same +785. Tokens scaled at the entry's bytes per token (3.7), +212, not counted on Pi.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 13869, tokens: 3729 };
+/*
+ * Showing a proposed change (INBOX_CHANGE_RULE on send_message's `body`, approval "before-after", 2026-11-18; no line
+ * in the description): +653 bytes, measured on the real Pi and OpenCode 2 requests in CI (13,869 → 14,522). Board on
+ * measured by inbox-board-switch.test.ts's request shape at 16,451 (it had drifted about 330 bytes before this).
+ * Tokens scaled at the entry's bytes per token (3.7), not counted on Pi.
+ */
+/* Skip on action items (the action guide's sentence, and the connection's short `body` wording, 2026-11-19): +162 bytes, estimated (not measured), inside the 5%; the constants stay. */
+const INBOX_TOOL_COST_NOW = { bytes: 14522, tokens: 3906 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 15466, tokens: 4226 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 16451, tokens: 4492 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval
@@ -3229,7 +3337,7 @@ export interface InboxUpload {
   media_type?: string;
   width?: number;
   height?: number;
-  /** A film's length, when the file came from a message that knew it (a reuse, inboxUploadFromAttachment). */
+  /** The film or recording's length, when its metadata can be read. */
   duration_ms?: number;
   /** The listing's stat name for a big changed file this was added from, so the button knows its tile after a reload. */
   shown_sha256?: string;
@@ -3261,6 +3369,8 @@ export interface InboxRowUnsent {
   done?: number;
   /** Action items marked Can't do it waiting in the reply draft ("Draft · 1 can't do"). Absent: none. */
   cant?: number;
+  /** Action items skipped waiting in the reply draft ("Draft · 1 skipped"; approval "action-item-skip"). Absent: none. */
+  skipped?: number;
 }
 
 /**
@@ -3276,7 +3386,7 @@ export function inboxRowArchived(row: Pick<InboxListRow, "resolved_at" | "back_f
 
 /** The thread holds something the person has not sent: reply words, picks or comments. */
 export function inboxHasUnsent(unsent: InboxRowUnsent | null | undefined): boolean {
-  return !!unsent && (unsent.reply_at !== null || unsent.picks > 0 || unsent.comments > 0 || (unsent.done ?? 0) > 0 || (unsent.cant ?? 0) > 0);
+  return !!unsent && (unsent.reply_at !== null || unsent.picks > 0 || unsent.comments > 0 || (unsent.done ?? 0) > 0 || (unsent.cant ?? 0) > 0 || (unsent.skipped ?? 0) > 0);
 }
 
 /**
@@ -3384,9 +3494,10 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * name is read through its door, and attached to that message there when the person comments on it. `tidy` and
  * `combine` (approval "inbox-multi-select"): a linked machine's window asks this Inbox's sessions to tidy or combine
  * this Inbox's threads, through its door. `pulls-looked` (approval "inbox-pr-dashboard"): the PR page's look at a PR
- * it lists is kept there ("Changed since you looked").
+ * it lists is kept there ("Changed since you looked"). `project-tags`: its projects take tags from a linked machine's
+ * window (`projects/:id/tags`, by the tag's name), kept there.
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**
@@ -3473,6 +3584,33 @@ export interface InboxComposeSession {
   root?: string;
   /** Its title as its host keeps it (a poll's `label`, cleaned): the To picker's name for it, display only. Absent when it has none. Additive. */
   label?: string;
+  /** Where it lives, as Rex confirmed it for this answer (`InboxAgentPlace`, never with `show`). Additive. */
+  place?: InboxAgentPlace;
+}
+
+/**
+ * Where an agent lives, as this computer's Rex last confirmed it (packages/server/inbox-rex.ts): one quiet line,
+ * "Rex · <session> / <tab>" in Rex's own names as of that read. `show`: Show in Rex is offered to the window asking: a
+ * Rex app that can go to the pane for it is attached to that Rex (this computer's own app for this computer's own
+ * window; an app attached from another computer for the tailnet's or a linked machine's) and has not failed a Show
+ * since. Additive: absent from an older Inbox, and for an agent whose place Rex does not confirm.
+ */
+export interface InboxAgentPlace {
+  kind: "rex";
+  line: string;
+  show?: true;
+}
+
+/** The longest place line kept from another machine's list. */
+const INBOX_AGENT_PLACE_LINE_MAX = 200;
+
+/** A place as an Inbox sent it: its line, and `show` only when `show` is allowed and it is exactly `true`. */
+export function inboxAgentPlaceChecked(value: unknown, options: { show: boolean }): InboxAgentPlace | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const place = value as Record<string, unknown>;
+  if (place.kind !== "rex" || typeof place.line !== "string") return undefined;
+  const line = place.line.replace(/[\p{Cc}\p{Zl}\p{Zp}\p{Bidi_Control}]/gu, " ").trim().slice(0, INBOX_AGENT_PLACE_LINE_MAX);
+  return line ? { kind: "rex", line, ...(options.show && place.show === true ? { show: true as const } : {}) } : undefined;
 }
 
 /** Live sessions grouped by the project they work in; `id` null for a folder the Inbox has not seen yet. */
@@ -3483,8 +3621,9 @@ export interface InboxComposeProject {
 
 /**
  * One agent of a machine, as the list model names it for the sidebar's Agents section (`GET /api/inbox/threads`'
- * `agents`; packages/server/inbox-agents-list.ts). An agent is a live session, a session that owns a thread waiting on
- * the person (ended or not), a session that ended today, or a session the Inbox launched (a stopped one is idle).
+ * `agents`; packages/server/inbox-agents-list.ts) and the list's Agents view. An agent is a live session, a session
+ * that owns a thread waiting on the person (ended or not), a session that ended in the last seven days
+ * (`INBOX_AGENTS_ENDED_DAYS`), or a session the Inbox launched (a stopped one is idle).
  */
 export interface InboxAgent {
   /** Stable while the agent lasts: the launch id for a session the Inbox launched, else the session id. */
@@ -3501,7 +3640,7 @@ export interface InboxAgent {
    * run line's state (`run`, null: no line) and the name of the scratch folder its Delete removes (`scratch`, null in
    * a project), absent from an older Inbox.
    */
-  launch?: { id: string; thread_id: string; started?: boolean; run?: InboxRunState | null; scratch?: string | null };
+  launch?: { id: string; thread_id: string; started?: boolean; run?: InboxRunState | null; scratch?: string | null; rex?: true };
   /** `claude-code`, `codex`, `pi`, ... (`InboxAuthor.host`); null when nothing said. */
   host: string | null;
   /** Its title as its connection last said it (the To picker's name). Absent when none. */
@@ -3537,6 +3676,72 @@ export interface InboxAgent {
   effort?: string;
   /** How full its context window is, 0 to 100, as its connection last said (live only). Absent when not said. Additive. */
   context?: number;
+  /** Where it lives (`InboxAgentPlace`): a Rex pane Rex confirmed for this read. Absent when none. Additive. */
+  place?: InboxAgentPlace;
+  /**
+   * What that confirmed Rex pane says the agent is doing (OSC 7501's root record, state and kind only), when it says
+   * more than the Inbox knows: `blocked` (`state` then `waiting`), `done` or `error` (`state` idle). This
+   * computer's own window only. Additive.
+   */
+  rex_status?: { state: "blocked" | "done" | "error"; kind?: "permission" | "question" | "auth" };
+  /**
+   * The status mark on its icon (the owner's "jelly" marks): only for a session the Inbox started in Rex while
+   * "Start new agents in" is Rex, as its pane's status record said at a read of the last few seconds (none when stale
+   * or missing: today's icon). This computer's own window only. Additive.
+   */
+  rex_mark?: InboxRexMark;
+  /**
+   * The status mark for any agent (owner, 2026-11-18, "steps 1 and 2 together"), from what this Inbox knows of it
+   * (packages/server/inbox-agent-mark.ts): it waits on the person in its terminal (its connection said so: `blocked`
+   * with `permission` or `question`, `where: "terminal"`), a thread of it waits on the person here (`blocked`,
+   * `where: "inbox"`), a turn runs (`working`), or it is at rest on a host that reports turns (`idle`). Never `done`,
+   * never from silence; none for an ended agent or a host that reports nothing about turns. Always sent; a window
+   * draws it only while the person's "Agent status" setting is on (`InboxAgentsGroup.status_marks`), and a fresh
+   * `rex_mark` wins over it. Additive.
+   */
+  status_mark?: InboxAgentMark;
+  /**
+   * Live, and its host reports nothing about its turns (Codex, Qwen Code, T3 Code, Antigravity, an MCP-only agent):
+   * neither working nor idle is known, so the window says neither. Absent otherwise. Additive.
+   */
+  turns_unknown?: true;
+}
+
+/**
+ * An agent's status mark from what the Inbox knows (`InboxAgent.status_mark`): the jelly marks' states it can claim.
+ * No idle (owner ruling, 2026-11-18): an agent at rest draws no mark.
+ */
+export interface InboxAgentMark {
+  state: "working" | "blocked";
+  /** For `blocked` in its terminal: a permission prompt or a question. */
+  kind?: "permission" | "question";
+  /** For `blocked`: where it waits on the person, here in the Inbox (a thread) or in its own terminal. */
+  where?: "inbox" | "terminal";
+}
+
+/** A status mark as another machine or Inbox sent it: null unless it is one this Inbox knows. */
+export function inboxAgentMarkChecked(value: unknown): InboxAgentMark | null {
+  const mark = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  const state = mark?.state;
+  if (state !== "working" && state !== "blocked") return null;
+  if (state !== "blocked") return { state };
+  if (mark!.where === "terminal" && (mark!.kind === "permission" || mark!.kind === "question")) return { state, kind: mark!.kind, where: "terminal" };
+  return mark!.where === "inbox" ? { state, where: "inbox" } : null;
+}
+
+/** A Rex pane's status as a mark: OSC 7501's state, and for `blocked` its kind. */
+export interface InboxRexMark {
+  state: "idle" | "working" | "done" | "blocked" | "error";
+  kind?: "permission" | "question" | "auth";
+}
+
+/** A mark as another machine or Inbox sent it: null unless it is one this Inbox knows. */
+export function inboxRexMarkChecked(value: unknown): InboxRexMark | null {
+  const mark = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  const state = mark?.state;
+  if (state !== "idle" && state !== "working" && state !== "done" && state !== "blocked" && state !== "error") return null;
+  const kind = state === "blocked" && (mark!.kind === "permission" || mark!.kind === "question" || mark!.kind === "auth") ? mark!.kind : null;
+  return { state, ...(kind ? { kind } : {}) };
 }
 
 /** The most agents a list names per machine; `total` says how many there are past that. */
@@ -3546,11 +3751,22 @@ export const INBOX_AGENTS_LISTED_MAX = 40;
  * An agent as another machine (or an older or newer Inbox) sent it, with its names checked: a `label`, `title` or
  * `first_thread` that is not text is dropped, the rest of the agent kept.
  */
-export function inboxAgentNamesChecked(agent: InboxAgent): InboxAgent {
-  const { label, title, first_thread, ...rest } = agent as InboxAgent & Record<string, unknown>;
+export function inboxAgentNamesChecked(agent: InboxAgent, options: { show: boolean } = { show: false }): InboxAgent {
+  const { label, title, first_thread, place, rex_status, rex_mark, status_mark, turns_unknown, ...rest } = agent as InboxAgent & Record<string, unknown>;
+  const mark = inboxRexMarkChecked(rex_mark);
+  const statusMark = inboxAgentMarkChecked(status_mark);
   const thread = first_thread as unknown as Record<string, unknown> | null | undefined;
+  const where = inboxAgentPlaceChecked(place, options);
+  const status = rex_status && typeof rex_status === "object" ? (rex_status as Record<string, unknown>) : null;
+  const statusState = status && (status.state === "blocked" || status.state === "done" || status.state === "error") ? status.state : null;
+  const statusKind = statusState === "blocked" && (status!.kind === "permission" || status!.kind === "question" || status!.kind === "auth") ? status!.kind : null;
   return {
     ...rest,
+    ...(where ? { place: where } : {}),
+    ...(statusState ? { rex_status: { state: statusState, ...(statusKind ? { kind: statusKind } : {}) } } : {}),
+    ...(mark ? { rex_mark: mark } : {}),
+    ...(statusMark ? { status_mark: statusMark } : {}),
+    ...(turns_unknown === true ? { turns_unknown: true as const } : {}),
     ...(typeof label === "string" ? { label } : {}),
     ...(typeof title === "string" ? { title } : {}),
     ...(thread && typeof thread === "object" && typeof thread.id === "string" && typeof thread.name === "string" ? { first_thread: { id: thread.id, name: thread.name } } : {}),
@@ -3582,6 +3798,11 @@ export interface InboxAgentsGroup {
    * an Inbox from before tiles: the window then draws and offers that machine's agents what it can keep (no tile).
    */
   face_tiles?: true;
+  /**
+   * The person's "Agent status" setting is on (config.json `inboxAgentStatus`; off by default): the windows draw every
+   * agent's `status_mark`. On this Inbox's own group only; absent when off, and from an older Inbox. Additive.
+   */
+  status_marks?: true;
 }
 
 /** A press of Trust and start, on `POST /api/inbox/messages`'s `to.launch.trust`: what the person was offered. The press is the consent. */
@@ -3705,6 +3926,13 @@ export function inboxEngineTooOldForSendNow(version: string | null | undefined):
  * Settings → Prompts (approval "inbox-prompts-page", #2194): what Plannotator
  * tells agents, as `GET /api/inbox/settings` carries it in `prompts`.
  */
+/**
+ * What an MCP client keeps of the Inbox's server instructions, from its `initialize` `clientInfo`:
+ * Claude Code before 2.1.296 (or a client that does not say who it is) 2,048 characters, Claude Code
+ * 2.1.296 and later 4,096, any other client no known cut (packages/server/inbox-mcp-instructions.ts).
+ */
+export type InboxMcpTier = "claude_code_old" | "claude_code" | "other";
+
 export const INBOX_PROMPT_HOSTS = ["claude-code", "pi", "opencode"] as const;
 export type InboxPromptHost = (typeof INBOX_PROMPT_HOSTS)[number];
 
@@ -3765,6 +3993,15 @@ export interface InboxPromptsSettings {
     runtimes: Record<InboxPromptHost, string | null>;
     room: { shared: number; runtimes: Record<InboxPromptHost, number> };
     dropped: InboxPromptHost[];
+    /**
+     * Agents that reach the Inbox over MCP (T3 Code, Codex, any MCP client): they get the shared
+     * ("All agents") rules and reminder in the MCP server's instructions, sized to what each kind of
+     * client keeps (`InboxMcpTier`). `room`: the count the editor shows, current Claude Code's (the
+     * tightest current client); `rooms`: the most characters the shared rules may hold per tier;
+     * `dropped` / `reminder_dropped`: the tiers the shared rules / the shared reminder are set and left
+     * out for, tightest first. Absent from an older Inbox.
+     */
+    mcp?: { room: number; rooms: Record<InboxMcpTier, number>; dropped: InboxMcpTier[]; reminder_dropped: InboxMcpTier[] };
   };
 }
 

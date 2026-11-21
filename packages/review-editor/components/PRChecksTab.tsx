@@ -99,8 +99,8 @@ export const PRChecksTab: React.FC<PRChecksTabProps> = ({ context, bare = false 
     <div className={bare ? 'space-y-4' : 'px-8 py-4 space-y-4 max-w-2xl'}>
       {/* Merge readiness */}
       <div className="space-y-2">
-        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Merge Status
+        <h3 className="text-xs font-semibold text-muted-foreground">
+          Merge status
         </h3>
 
         <div className="space-y-1.5">
@@ -126,10 +126,10 @@ export const PRChecksTab: React.FC<PRChecksTabProps> = ({ context, bare = false 
       {context.checks.length > 0 && (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <h3 className="text-xs font-semibold text-muted-foreground">
               Checks
             </h3>
-            <span className="text-[10px] font-mono text-muted-foreground">
+            <span className="text-xs font-mono text-muted-foreground">
               {checkSummary.passed}/{checkSummary.total} passed
               {checkSummary.failed > 0 && <span className="text-destructive ml-1">{checkSummary.failed} failed</span>}
               {checkSummary.pending > 0 && <span className="text-yellow-500 ml-1">{checkSummary.pending} pending</span>}
@@ -139,7 +139,7 @@ export const PRChecksTab: React.FC<PRChecksTabProps> = ({ context, bare = false 
           <div className="space-y-4">
             {Array.from(groupedChecks.entries()).map(([workflow, checks]) => (
               <div key={workflow}>
-                <div className="text-[10px] font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">{workflow}</div>
+                <div className="text-xs font-semibold text-muted-foreground mb-1.5">{workflow}</div>
                 <div className="space-y-1">
                   {checks.map((check, i) => (
                     <a

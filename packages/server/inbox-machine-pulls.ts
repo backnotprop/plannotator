@@ -131,11 +131,11 @@ export function mergePullBoards<T extends Pick<InboxPullsAnswer, "pulls" | "link
 /** The linked machines' boards: read when the merged board is asked for, one read per machine at a time, kept in memory. */
 export function createMachinePulls(options: { peers: () => Iterable<PeerLink>; now?: () => Date }) {
   const boards = new Map<string, FarBoard>();
-  const reading = new Map<string, Promise<void>>();
+  const reading = new Map<string, { done: Promise<void>; abort: AbortController }>();
   const now = options.now ?? (() => new Date());
 
-  const readJson = async (peer: PeerLink, route: string, search: string): Promise<unknown> => {
-    const response = await peer.request(route, search, { method: "GET", headers: {}, timeoutMs: FAR_PULLS_READ_MS });
+  const readJson = async (peer: PeerLink, route: string, search: string, signal: AbortSignal): Promise<unknown> => {
+    const response = await peer.request(route, search, { method: "GET", headers: {}, timeoutMs: FAR_PULLS_READ_MS, signal });
     if (!response.ok) {
       response.body?.cancel().catch(() => {});
       return null;
@@ -147,18 +147,22 @@ export function createMachinePulls(options: { peers: () => Iterable<PeerLink>; n
   /** Read that machine's board now (or join the read under way). Never throws: a failed read keeps the last one. */
   const read = (peer: PeerLink, refresh: boolean): Promise<void> => {
     const running = reading.get(peer.id);
-    if (running) return running;
+    if (running) return running.done;
+    const abort = new AbortController();
     const run = (async () => {
       try {
-        const list = await readJson(peer, "pulls", `?everywhere=1${refresh ? "&refresh=1" : ""}`);
-        const risk = list ? await readJson(peer, "pulls/risk", "").catch(() => null) : null;
+        const list = await readJson(peer, "pulls", `?everywhere=1${refresh ? "&refresh=1" : ""}`, abort.signal);
+        if (abort.signal.aborted) return;
+        const risk = list ? await readJson(peer, "pulls/risk", "", abort.signal).catch(() => null) : null;
         const board = parseFarBoard(list, risk, now().toISOString());
-        if (board) boards.set(peer.id, board);
+        if (board && !abort.signal.aborted) boards.set(peer.id, board);
       } catch {
         // Asleep or unreachable: its rows stay as last read.
       }
-    })().finally(() => reading.delete(peer.id));
-    reading.set(peer.id, run);
+    })().finally(() => {
+      if (reading.get(peer.id)?.abort === abort) reading.delete(peer.id);
+    });
+    reading.set(peer.id, { done: run, abort });
     return run;
   };
 
@@ -178,7 +182,7 @@ export function createMachinePulls(options: { peers: () => Iterable<PeerLink>; n
     },
     /** The reads under way, done (tests). */
     async settled(): Promise<void> {
-      await Promise.all(reading.values());
+      await Promise.all([...reading.values()].map(({ done }) => done));
     },
     /** After a close, reopen or merge there: its board again, so the next merged read shows it. */
     reread(peer: PeerLink): Promise<void> {
@@ -195,8 +199,13 @@ export function createMachinePulls(options: { peers: () => Iterable<PeerLink>; n
       if (!board || board.read_at === before) return null;
       return board.pulls.find((pull) => pull.key === key)?.state ?? null;
     },
+    linkedThere(key: string): boolean {
+      return [...boards.values()].some((board) => !!board.links[key]);
+    },
     /** The link went: nothing of that machine's board stays. */
     forget(machine: string): void {
+      reading.get(machine)?.abort.abort();
+      reading.delete(machine);
       boards.delete(machine);
     },
   };

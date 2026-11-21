@@ -4,6 +4,7 @@
 // bun tests beside the sources in hooks/mod/.
 import { describe, expect, mock, test, tier } from 'claude-code/testing'
 import { inboxReminderText } from '../hooks/mod/inbox-contract'
+import { CLAUDE_CODE_VERSION } from './engine-under-test'
 
 tier('user')
 
@@ -12,6 +13,8 @@ const SESSION = { surface: 'terminal', isInteractive: true, cwd: '/work' } as co
 /** What the engine names a plugin's registered tool (the mock answers with this). */
 const TOOL_PREFIX = 'mcp__plugin_plannotator_tools__'
 const TOOL = `${TOOL_PREFIX}plannotator`
+/** The Inbox's gate (packages/shared/inbox/turned-on.ts): the person's own `plannotator inbox` writes it. */
+const TURNED_ON = '/home/me/.plannotator/inbox/turned-on'
 
 /** The world beneath the mod: a session, a file map, and a CLI that comes up at once. */
 function world(
@@ -37,9 +40,12 @@ function world(
     /** Holds every `$.tool.register` until it settles; `onRegister` runs as each one arrives. */
     toolRegistered?: Promise<void>
     onRegister?: (name: string) => void
+    /** The person never ran `plannotator inbox` here: no `inbox/turned-on` mark (by default there is one). */
+    noMark?: boolean
   } = {},
 ) {
   const files = options.files ?? new Map<string, string>()
+  if (!options.noMark && !files.has(TURNED_ON)) files.set(TURNED_ON, '{"on":true,"by":"command"}')
   const runs: string[][] = []
   const submits: string[] = []
   const logs: string[] = []
@@ -635,8 +641,31 @@ describe('register', () => {
     // Every action a real Inbox offers, in the contract's order (INBOX_TOOL_ACTIONS).
     expect(registered?.inputSchema.properties.action.enum).toEqual(['send_message', 'read_thread', 'search', 'resolve_message', 'snooze_thread', 'thread_pulls', 'submit_guide', 'get_guide_brief'])
     expect(calls).toEqual([])
-    expect([...w.files.keys()].filter((path) => path.includes('/inbox'))).toEqual([])
+    expect([...w.files.keys()].filter((path) => path.includes('/inbox') && path !== TURNED_ON)).toEqual([])
     expect(w.runs.filter((argv) => argv.includes('inbox'))).toEqual([])
+  })
+
+  // The Inbox is off until the person runs it (inbox-turned-on.ts): no tool, no reminder, nothing asked or started.
+  test('the person never ran plannotator inbox here: no plannotator_inbox, no reminder, nothing run', async ($: any, on: any) => {
+    const calls: { url: string; body: any }[] = []
+    const w = world(on, { fetch: inbox(TOOLS, calls), noMark: true })
+    await $.session.start(SESSION)
+    await $.prompt.submit({ text: 'Refactor the handler.' })
+
+    expect(w.tools.map((t) => t.name)).toEqual(['plannotator'])
+    expect(w.contexts).toEqual([null])
+    expect(calls).toEqual([])
+    expect(w.runs.filter((argv) => argv.includes('inbox'))).toEqual([])
+    expect(w.files.has(TURNED_ON)).toBe(false)
+  })
+
+  // An Inbox that ran before the mark, or that an older plannotator started (it writes no mark): on, written once.
+  test('an Inbox ran here with no mark (inbox.json from before, or an older plannotator): plannotator_inbox, and the mark written on', async ($: any, on: any) => {
+    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []), noMark: true })
+    await $.session.start(SESSION)
+
+    expect(w.tools.map((t) => t.name)).toEqual(['plannotator_inbox', 'plannotator'])
+    expect(JSON.parse(w.files.get(TURNED_ON)!)).toMatchObject({ on: true, by: 'update-existing' })
   })
 
   test('the first plannotator_inbox call with no Inbox yet starts one with plannotator inbox --background', async ($: any, on: any) => {
@@ -1349,6 +1378,9 @@ describe('register', () => {
         return path === '/api/inbox/bridge/poll' ? { commands: delivered ? [] : [reply] } : { ok: true }
       }),
     })
+    // The kit's session mock is newer than the oldest engine in the matrix (2.1.287), which has no
+    // `$.session.append` either; "an engine older than the API with $.session.append" below covers that engine.
+    if (typeof mock.session !== 'function') return
     const session = mock.session(on)
     on('turn.start', ($: any, e: any) => ({ turnId: e.turnId }))
     // An engine whose API has `$.session.append` (the version decides: validate refuses testing the noun itself).
@@ -1414,5 +1446,165 @@ describe('register', () => {
     const polls = calls.filter((c) => c.url.endsWith('/api/inbox/bridge/poll'))
     expect(polls.length).toBeGreaterThan(0)
     expect(polls.some((c) => c.body.send_now === true)).toBe(false)
+  })
+})
+
+// Claude Code 2.1.326 added an early-run rule to its built-in guard (cc-plugin-sec-default, Team and Enterprise
+// logins): it holds each call the model makes until the call reaches tool.run, and refuses a person's mod's process
+// run that repeats a held call (hooks/mod/early-run.ts). The mod passes such a call on at tool.call and opens it at
+// tool.run, through a `tool.*` hook, since an engine before 2.1.326 refuses a module that names tool.run. This
+// suite runs on the oldest engine the mod supports, the pinned one and a current one (test.yml's matrix): every
+// test here loading at all on the first two proves that `tool.*` with a matcher loads there.
+describe("Claude Code's guard from 2.1.326 (early run)", () => {
+  /** Whether `version` (x.y.z) is `floor` or later. */
+  const atLeast = (version: string, floor: string) => {
+    const [a, b] = [version, floor].map((v) => v.split('.').map(Number))
+    for (let part = 0; part < 3; part++) if (a![part] !== b![part]) return a![part]! > b![part]!
+    return true
+  }
+  /**
+   * Whether the engine raises tool.run. Run through scripts/test-claude-code-mod.sh the version is known, and an
+   * engine from 2.1.326 must raise it: a test cannot pass by finding no tool.run where it should be.
+   */
+  const raisesToolRun = ($: any) => {
+    const raises = typeof $.tool?.run === 'function'
+    if (CLAUDE_CODE_VERSION) expect(`${CLAUDE_CODE_VERSION} raises tool.run: ${raises}`).toBe(`${CLAUDE_CODE_VERSION} raises tool.run: ${atLeast(CLAUDE_CODE_VERSION, '2.1.326')}`)
+    return raises
+  }
+
+  // The guard's rule as its source has it: a call is held from its tool.call until its tool.run; while held, a
+  // process run whose argv ends in a held Bash command, or hands a shell an item equal to one of a held call's
+  // texts, is refused. Hooked through `tool.*` so it loads on any engine; self-contained, as the kit requires.
+  const EARLY_RUN_GUARD = {
+    name: 'early-run-standin',
+    tier: 'prepend' as const,
+    register(on: any) {
+      const held = new Map<string, { command?: string; texts: string[] }>()
+      const keyOf = (e: any) => JSON.stringify([e.tool, e.command ?? null, e.action ?? null, e.target ?? null])
+      on('tool.*', async ($: any, e: any, next: any) => {
+        if (next.event === 'tool.call') {
+          const texts = Object.entries(e).filter(([name, value]) => name !== 'tool' && name !== 'tool_use_id' && typeof value === 'string').map(([, value]) => value as string)
+          held.set(keyOf(e), { command: e.tool === 'Bash' ? e.command : undefined, texts })
+          await $.ui.log(`early-run: held ${e.tool}`)
+        }
+        if (next.event === 'tool.run' && held.delete(keyOf(e))) await $.ui.log(`early-run: forgot ${e.tool}`)
+        return next(e)
+      })
+      on('process.run', async ($: any, e: any, next: any) => {
+        const argv: string[] = [...e.argv]
+        const repeats = [...held.values()].some((call) => (call.command !== undefined && argv.join(' ').endsWith(call.command)) || call.texts.some((text) => argv.slice(1).includes(text)))
+        if (!repeats) return next(e)
+        await $.ui.log('early-run: refused a start')
+        return { deny: 'this repeats a Bash call that is not allowed; serve an allowed call at tool.run' }
+      })
+    },
+  }
+
+  // The kit raises a test's `$.tool.call` as a session does once a hook may answer at tool.run: the plugins'
+  // tool.call hooks, classic.PreToolUse, the permission check, the plugins' tool.run hooks, then the test's own
+  // tool.call hook, which stands for the tool itself. The stand-in holds the call from its tool.call to its tool.run
+  // and refuses any start that repeats it meanwhile, so one refused start and then one launch prove that the mod
+  // passed the call on at tool.call and opened it at tool.run.
+  test('held by the guard: refused once at tool.call and passed on, then opened once at tool.run; the tool and a taken-over Bash command', { plugins: [EARLY_RUN_GUARD] }, async ($: any, on: any) => {
+    const w = world(on)
+    const launches = () => w.runs.filter((argv) => argv[3] === 'plannotator-launch').map((argv) => argv.slice(5))
+    if (!raisesToolRun($)) {
+      // No tool.run, so no early-run rule: the module still loads and answers at tool.call.
+      await $.session.start(SESSION)
+      expect(w.tools.map((tool) => tool.name)).toContain('plannotator')
+      return
+    }
+    // The tool itself: never reached, since the mod answers at tool.run.
+    const ran: string[] = []
+    on('tool.call', ($: any, e: any) => {
+      ran.push(e.tool)
+      return e.tool === 'Bash' ? { result: { stdout: 'the command ran', stderr: '', interrupted: false } } : { result: 'no hook served it' }
+    })
+    await $.session.start(SESSION)
+
+    const opened = await $.tool.call({ tool: TOOL, action: 'annotate', target: 'notes.md', gate: true })
+    expect(opened.result).toContain('Opened notes.md in Plannotator: http://localhost:4321')
+    expect(launches()).toEqual([['plannotator', 'annotate', 'notes.md', '--gate']])
+
+    // Without --json the launch's argv ends in the command, so the guard holds this one too.
+    const taken = await $.tool.call({ tool: 'Bash', command: 'plannotator annotate todo.md --gate' })
+    expect(taken.result.stdout).toContain('Opened todo.md in Plannotator: http://localhost:4321')
+    expect(launches()).toEqual([['plannotator', 'annotate', 'notes.md', '--gate'], ['plannotator', 'annotate', 'todo.md', '--gate']])
+
+    expect(ran).toEqual([])
+    expect(w.logs.filter((line) => line.startsWith('early-run: '))).toEqual([
+      `early-run: held ${TOOL}`,
+      'early-run: refused a start',
+      `early-run: forgot ${TOOL}`,
+      'early-run: held Bash',
+      'early-run: refused a start',
+      'early-run: forgot Bash',
+    ])
+  })
+
+  // Review M2. The engine picks a module's hooks for an event by pattern, so `tool.*` puts the mod in the chain of
+  // every tool.* event, and a guard that sends one past the user tier makes Claude Code report the mod's hook
+  // skipped there, matcher or not (as #2243 found for classic hooks). The real guard does so with an organization's
+  // tools' tool.describe (and tool.offer, after 2.1.327). The probe asks whether a matcher key the event lacks
+  // (`tool_use_id`, which tool.describe never carries) keeps a hook off that list; if it ever does, RUN_MATCHER can
+  // carry it and the line goes away.
+  const DESCRIBE_GUARD = {
+    name: 'describe-standin',
+    tier: 'prepend' as const,
+    register(on: any) {
+      on('tool.*', async ($: any, e: any, next: any) => {
+        if (next.event !== 'tool.describe') return next(e)
+        const result = await next.to(e, 'append')
+        for (const link of next.trace) if (link.outcome === 'skipped') await $.ui.log(`passed by: ${link.plugin} ${next.event}`)
+        return result
+      })
+    },
+  }
+  const MATCHER_PROBE = {
+    name: 'matcher-probe',
+    register(on: any) {
+      on('tool.*', { tool: 'mcp__org_tools__lookup', tool_use_id: /^toolu_/ }, ($: any, e: any, next: any) => next(e))
+    },
+  }
+
+  test("a guard that sends an organization tool's tool.describe past the user tier reports the mod's tool.* hook skipped; a tool_use_id matcher key does not avoid it", { plugins: [DESCRIBE_GUARD, MATCHER_PROBE] }, async ($: any, on: any) => {
+    const w = world(on)
+    // `$.tool.describe` is among the engine's own calls from 2.1.318 at the latest: there the case must run.
+    const describes = typeof $.tool?.describe === 'function'
+    if (CLAUDE_CODE_VERSION && atLeast(CLAUDE_CODE_VERSION, '2.1.318')) expect(`${CLAUDE_CODE_VERSION} raises tool.describe: ${describes}`).toBe(`${CLAUDE_CODE_VERSION} raises tool.describe: true`)
+    if (!describes) return
+    on('tool.describe', ($: any, e: any) => ({ description: e.description }))
+    await $.session.start(SESSION)
+
+    await $.tool.describe({ tool: 'mcp__org_tools__lookup', description: 'Looks a record up.', provider: { plugin: 'matcher-probe', tier: 'user' } })
+
+    expect(w.logs.filter((line) => line.startsWith('passed by: ')).sort()).toEqual(['passed by: matcher-probe tool.describe', 'passed by: plannotator tool.describe'])
+  })
+})
+
+// What waits on the person where the session runs (hooks/mod/terminal-prompts.ts), for the Inbox's Agents list. The
+// mod reads it only from hooks it has anyway (tool.call, the Bash-matched tool.check, the matched tool.* run hook),
+// never with a wildcard or a hook on another tool's permission (an engine refuses two matcherless `tool.*` hooks, and
+// a hook there changes how other tools' prompts behave). The failures this guards on each engine of test.yml's
+// matrix: a question's answer, a Bash call's result or a Bash verdict reaching the caller changed (the mod only
+// watches).
+describe('watching for prompts where the session runs', () => {
+  test("an AskUserQuestion answer, a Bash result and a Bash ask verdict reach the caller unchanged", async ($: any, on: any) => {
+    world(on)
+    const called: string[] = []
+    // An ask for one command only (the call below is another): a Bash prompt as the session would raise it.
+    on('tool.check', ($: any, e: any, next: any) => (e.input?.command === 'rm -rf build' ? { decision: 'ask', reason: 'beneath' } : next(e)))
+    on('tool.call', ($: any, e: any) => {
+      called.push(e.tool)
+      return e.tool === 'AskUserQuestion' ? { result: { answers: { 'Which database?': 'Postgres' } } } : { result: `ran ${e.command}` }
+    })
+    await $.session.start(SESSION)
+    const asked = await $.tool.call({ tool: 'AskUserQuestion', questions: [{ question: 'Which database?' }] })
+    expect(asked.result).toEqual({ answers: { 'Which database?': 'Postgres' } })
+    const ran = await $.tool.call({ tool: 'Bash', command: 'npm run build' })
+    expect(ran.result).toBe('ran npm run build')
+    expect(called).toEqual(['AskUserQuestion', 'Bash'])
+    const verdict = await $.tool.check({ tool: 'Bash', input: { command: 'rm -rf build' } })
+    expect([verdict.decision, verdict.reason]).toEqual(['ask', 'beneath'])
   })
 })

@@ -1,7 +1,7 @@
 /**
  * Each machine's agents for the sidebar's Agents section (inbox-agents-list.ts). The failures this catches: a live
  * session missing or in the wrong state, a session that still owns a thread waiting on the person dropped because it
- * ended, a session that ended yesterday still listed (or one that ended today dropped), a launched agent that is only
+ * ended, a session that ended yesterday counted as ended today (or one that ended today dropped, or the week the window reads lost), a launched agent that is only
  * stopped read as ended, a list that grows without bound, another machine's agents lost or unnamed on the merged view,
  * and an Agents change that no `event: deliveries` would tell a window about.
  *
@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_AGENTS_LISTED_MAX, type InboxAgentsGroup } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { inboxAgentsGroup, inboxMergedAgents, inboxPeerAgentsGroup, inboxStartOfDay, type InboxAgentsEvidence } from "./inbox-agents-list";
+import { inboxAgentsEndedSince, inboxAgentsGroup, inboxMergedAgents, inboxPeerAgentsGroup, inboxStartOfDay, type InboxAgentsEvidence } from "./inbox-agents-list";
 import { createInboxFirstSeen, type InboxFirstSeen } from "./inbox-first-seen";
 import { createInboxLiveSessions } from "./inbox-sessions";
 
@@ -116,6 +116,30 @@ describe("who is listed, and how", () => {
     expect(group.agents[1]!.live).toBe(false);
   });
 
+  test("the window's read keeps a week of ended sessions (the list's Agents view names their threads' agent); only today's count as ended today", async () => {
+    const { live, clock } = liveSessions();
+    const noon = clock.t;
+    clock.t = noon - 6 * 24 * 60 * 60_000 - 11 * 60 * 60_000; // Six days ago, 1 AM: the first day kept.
+    await poll(live, "ses-six-days");
+    clock.t = noon - 7 * 24 * 60 * 60_000; // A week ago, noon: before the first day kept.
+    await poll(live, "ses-a-week");
+    clock.t = noon - 13 * 60 * 60_000; // Yesterday, 11 PM.
+    await poll(live, "ses-yesterday");
+    clock.t = noon - 10 * 60 * 60_000; // Today, 2 AM.
+    await poll(live, "ses-today");
+    clock.t = noon;
+    await poll(live, "ses-live");
+    const group = inboxAgentsGroup(evidence({ sessions: live.agentSessions(inboxAgentsEndedSince(clock.t)), today: inboxStartOfDay(clock.t) }));
+    expect(group.agents.map((agent) => [agent.id, agent.state])).toEqual([
+      ["ses-live", "idle"],
+      ["ses-today", "ended"],
+      ["ses-yesterday", "ended"],
+      ["ses-six-days", "ended"],
+    ]);
+    expect(group.ended_today).toBe(1);
+    expect(group.total).toBe(4);
+  });
+
   test("a session that owns a thread waiting on the person stays listed, waiting with its count, ended or not", () => {
     const group = inboxAgentsGroup(
       evidence({
@@ -154,6 +178,16 @@ describe("who is listed, and how", () => {
     // The session it runs as, its launch and thread, and what its session said of itself.
     expect(byId("lch_stopped")).toMatchObject({ session: "ses-real", launch: { id: "lch_stopped", thread_id: "msg_lch_stopped", started: true, run: "stopped", scratch: null }, label: "Stopped one" });
     expect(byId("lch_starting")).toMatchObject({ session: "launch:lch_starting", launch: { started: false, run: "starting", scratch: "palette-helper" }, project: { id: "prj_ledger", name: "ledger" } });
+  });
+
+  test("a launch the person stopped reads idle at once, though its session's last poll still said busy", () => {
+    const launch = (id: string, run: InboxAgentsEvidence["launches"][number]["run"]) => ({ launch_id: id, session: `ses-${id}`, thread_id: `msg_${id}`, host: "claude-code", project_id: "prj_ledger", started_at: "2026-11-09T08:00:00.000Z", started: true, run, scratch: null });
+    const busy = (session: string) => ({ session, host: "claude-code", root: "/work/ledger", startedAt: 1, lastSeen: 2, live: true, busy: true, label: null });
+    const group = inboxAgentsGroup(evidence({ sessions: [busy("ses-lch_stopped"), busy("ses-lch_running")], launches: [launch("lch_stopped", "stopped"), launch("lch_running", null)] }));
+    expect(group.agents.map((agent) => [agent.id, agent.state]).sort()).toEqual([
+      ["lch_running", "working"],
+      ["lch_stopped", "idle"],
+    ]);
   });
 
   test("a routine is one agent, its newest run's; an earlier run's session only while it is live; other launches as before", () => {
@@ -543,6 +577,19 @@ describe("linked machines", () => {
     const group = inboxPeerAgentsGroup([{ agents: [{ id: "a", session: "a", state: "idle" }, { id: "b", state: "idle" }, null, { id: "c", session: "c", state: "dancing" }], total: -1 }], "ibx_far") as InboxAgentsGroup;
     expect(group.agents.map((agent) => agent.id)).toEqual(["a"]);
     expect(group).toMatchObject({ machine: "ibx_far", total: 1, ended_today: 0 });
+  });
+
+  test("another machine's agent keeps where it lives in that machine's Rex, its pane's status and mark, and Show in Rex only as that machine offers it", () => {
+    const sent = { id: "a", session: "a", state: "waiting", place: { kind: "rex", line: "Rex · x / y", show: true }, rex_status: { state: "blocked", kind: "auth" }, rex_mark: { state: "blocked", kind: "auth" } };
+    const [agent] = inboxPeerAgentsGroup([{ agents: [sent] }], "ibx_far")!.agents;
+    expect(agent).toMatchObject({ id: "a", state: "waiting", place: { kind: "rex", line: "Rex · x / y", show: true }, rex_status: { state: "blocked", kind: "auth" }, rex_mark: { state: "blocked", kind: "auth" } });
+    // It offered none (no Rex app attached to its Rex from elsewhere, or an older Inbox there): none here; nothing but `true` is an offer.
+    for (const place of [{ kind: "rex", line: "Rex · x / y" }, { kind: "rex", line: "Rex · x / y", show: "yes" }]) {
+      expect(inboxPeerAgentsGroup([{ agents: [{ ...sent, place }] }], "ibx_far")!.agents[0]!.place).toEqual({ kind: "rex", line: "Rex · x / y" });
+    }
+    // A malformed one is dropped, as any field that does not parse.
+    const [odd] = inboxPeerAgentsGroup([{ agents: [{ ...sent, place: { kind: "elsewhere", line: 3 }, rex_mark: { state: "dancing" } }] }], "ibx_far")!.agents;
+    expect([odd!.place, odd!.rex_mark]).toEqual([undefined, undefined]);
   });
 
   test("a machine keeps a tile choice only when its list says so: an older Inbox's group never claims it", () => {

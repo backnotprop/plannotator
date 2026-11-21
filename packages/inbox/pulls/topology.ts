@@ -14,6 +14,9 @@ import {
   type InboxPullLink,
   type InboxPullStack,
 } from '@plannotator/core/inbox-types';
+import { stackLink } from '@plannotator/core/inbox-pull-handoff';
+
+export { stackLink };
 
 type Links = Readonly<Record<string, InboxPullLink>>;
 
@@ -88,14 +91,6 @@ export function chainMarks(layers: readonly InboxPull[]): (InboxPull | { more: n
   return [layers[0]!, layers[1]!, { more: layers.length - 4 }, layers[layers.length - 2]!, layers[layers.length - 1]!];
 }
 
-/**
- * The agent's thread behind a stack: the lowest open layer's link (the agent that opened the stack from its
- * bottom), else any layer's. An agent that linked one layer higher up is that layer's agent, not the stack's.
- */
-export function stackLink(stack: InboxPullStack, links: Links): InboxPullLink | null {
-  for (const layer of stack.layers) if (isOpen(layer) && links[layer.key]) return links[layer.key]!;
-  return stack.layers.map((l) => links[l.key]).find((l): l is InboxPullLink => !!l) ?? null;
-}
 
 /**
  * Where a verdict on one layer goes: that layer's own agent thread; else the thread of the nearest linked layer it

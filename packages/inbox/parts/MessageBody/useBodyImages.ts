@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
 import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import type { InboxInlineImage } from '@plannotator/core/inbox-types';
+import { inboxInlineMediaKind } from '@plannotator/core/inbox-inline-media';
 import type { HtmlEmbedHost } from '@plannotator/ui/components/html-embed/HtmlEmbedBlock';
 import { agentName } from '../../format';
 import { inboxMessageImageBase, inlineImageRefFromSrc, syncMessageImages, toggleMessageImage, MESSAGE_IMAGE_WIDTH, drawnImageUrl } from '../../images';
@@ -42,6 +43,8 @@ export function useBodyImages({
     (src) => {
       if (/^(https?:|data:|blob:)/i.test(src)) return { kind: 'src', src };
       const url = getImageSrc(src, imageBaseDir);
+      const media = inboxInlineMediaKind(src);
+      if (media) return { kind: 'src', src: url, media };
       const width = widths.get(src);
       const drawn = drawnImageUrl(url, width, MESSAGE_IMAGE_WIDTH);
       return drawn === url ? { kind: 'src', src: url } : { kind: 'src', src: drawn, width };

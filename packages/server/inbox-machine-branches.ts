@@ -60,31 +60,34 @@ export function farBranchRow(value: unknown): Omit<InboxBranchReportRow, "machin
 export function createMachineBranches(options: { peers: () => Iterable<PeerLink>; now?: () => number }) {
   const now = options.now ?? Date.now;
   const lists = new Map<string, Omit<InboxBranchReportRow, "machine">[]>();
-  const reading = new Map<string, Promise<void>>();
+  const reading = new Map<string, { done: Promise<void>; abort: AbortController }>();
   const readAt = new Map<string, number>();
 
   const read = (peer: PeerLink): Promise<void> => {
     const running = reading.get(peer.id);
-    if (running) return running;
+    if (running) return running.done;
     readAt.set(peer.id, now());
+    const abort = new AbortController();
     const run = (async () => {
       try {
-        const response = await peer.request("reviews/branches", "", { method: "GET", headers: {}, timeoutMs: FAR_BRANCHES_READ_MS });
+        const response = await peer.request("reviews/branches", "", { method: "GET", headers: {}, timeoutMs: FAR_BRANCHES_READ_MS, signal: abort.signal });
         if (!response.ok) {
           response.body?.cancel().catch(() => {});
           // Branch reviews off there: nothing of it listed here.
-          if (response.status === 409) lists.delete(peer.id);
+          if (response.status === 409 && !abort.signal.aborted) lists.delete(peer.id);
           return;
         }
         const body = await readCapped(response, FAR_BRANCHES_MAX_BYTES);
         const answer = body === null ? null : (JSON.parse(body) as { reports?: unknown });
-        if (!answer || !Array.isArray(answer.reports)) return;
+        if (abort.signal.aborted || !answer || !Array.isArray(answer.reports)) return;
         lists.set(peer.id, answer.reports.slice(0, FAR_BRANCHES_MAX).flatMap((value) => farBranchRow(value) ?? []));
       } catch {
         // Asleep or unreachable: its rows stay as last read.
       }
-    })().finally(() => reading.delete(peer.id));
-    reading.set(peer.id, run);
+    })().finally(() => {
+      if (reading.get(peer.id)?.abort === abort) reading.delete(peer.id);
+    });
+    reading.set(peer.id, { done: run, abort });
     return run;
   };
 
@@ -101,9 +104,11 @@ export function createMachineBranches(options: { peers: () => Iterable<PeerLink>
       });
     },
     async settled(): Promise<void> {
-      await Promise.all(reading.values());
+      await Promise.all([...reading.values()].map(({ done }) => done));
     },
     forget(machine: string): void {
+      reading.get(machine)?.abort.abort();
+      reading.delete(machine);
       lists.delete(machine);
       readAt.delete(machine);
     },

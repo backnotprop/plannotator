@@ -7,7 +7,7 @@ import { expect, test } from 'bun:test';
 import type { InboxAuthor, InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import { QUESTION_ANSWERS_HEADING } from '@plannotator/core/question-block';
 import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
-import { SNIPPET_PROMPT_MAX, answerWords, cleanInline, cutAtWord, firstWords, foldSnippet, lookBoundary, newSinceLook, plainLabel, planFolds, replyWords, snippetText } from './folding';
+import { KEPT_CHARS_MAX, SNIPPET_PROMPT_MAX, answerWords, cleanInline, cutAtWord, firstWords, foldSnippet, keptFirstWords, keptFirstWordsChars, lookBoundary, newSinceLook, plainLabel, planFolds, replyWords, snippetText } from './folding';
 
 const AGENT: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 'ses_a', name: null };
 const PERSON: InboxAuthor = { kind: 'person' };
@@ -255,4 +255,50 @@ test('a reply of pasted files alone: the snippet names the files, never the stil
   expect(foldSnippet(reply)).toEqual({ kind: 'words', text: 'pasted-image-2026-10-16-0912.png, notes.md' });
   // With words, the words.
   expect(foldSnippet({ ...reply, body: `See these.\n\n${line}` })).toEqual({ kind: 'words', text: 'See these.' });
+});
+
+test('a long thread’s folded lines read through keptFirstWords say what a fresh read says, and an edited body gets its own words', () => {
+  const line = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.";
+  const file = (name: string) => ({ id: `att_${name}`, name }) as NonNullable<InboxMessageWire['attachments']>[number];
+  const long = Array.from({ length: 400 }, (_, i) => `Line ${i} of the trace, with **bold** and a [link](https://x.test/${i}).`).join('\n');
+  const messages = [
+    msg('m1', AGENT, 1, { body: '```ts\nconst a = 1;\n```\n\nThe retry worker charges twice.' }),
+    msg('m2', AGENT, 2, { body: long }),
+    msg('m3', PERSON, 3, { body: `See these.\n\n${line}` }),
+    msg('m4', PERSON, 4, { body: line, attachments: [file('notes.md')] }),
+    msg('m5', AGENT, 5, { body: '' }),
+    msg('m6', PERSON, 6, { body: '' }),
+  ];
+  for (let pass = 0; pass < 2; pass++) {
+    for (const message of messages) expect(foldSnippet(message, messages, keptFirstWords)).toEqual(foldSnippet(message, messages));
+  }
+  // The same message with new words (an edit, a refresh): the line follows the words, never the kept ones.
+  const edited = { ...messages[1]!, body: `Fixed: one charge now.\n${long}` };
+  expect(snippetText(foldSnippet(edited, messages, keptFirstWords))).toBe(snippetText(foldSnippet(edited, messages)));
+  expect(snippetText(foldSnippet(edited, messages, keptFirstWords)).startsWith('Fixed: one charge now.')).toBe(true);
+});
+
+test('keptFirstWords holds no more than its character cap, however many long bodies a window reads', () => {
+  const plan = (i: number) => `Plan ${i}: move the retry worker.\n${'A long step of the plan, read once. '.repeat(30_000)}`;
+  const count = Math.ceil((3 * KEPT_CHARS_MAX) / plan(0).length);
+  for (let i = 0; i < count; i++) {
+    expect(keptFirstWords(plan(i))).toBe(firstWords(plan(i)));
+    expect(keptFirstWordsChars()).toBeLessThanOrEqual(KEPT_CHARS_MAX);
+  }
+  // A body longer than the cap on its own still gets its words, and is not kept.
+  const huge = `Huge.\n${'x '.repeat(KEPT_CHARS_MAX)}`;
+  const before = keptFirstWordsChars();
+  expect(keptFirstWords(huge)).toBe(firstWords(huge));
+  expect(keptFirstWordsChars()).toBe(before);
+});
+
+test("an agent's message with a run or secret card stays open, like one with a pick not sent", () => {
+  const card = [':::run', 'Check', '```', 'ls', '```', ':::'].join('\n');
+  const messages = [msg('m1', AGENT, 1), msg('m2', AGENT, 2, { body: card }), msg('m3', PERSON, 3, { body: 'Command you asked the person to run' }), msg('m4', AGENT, 4), msg('m5', PERSON, 5)];
+  const plan = planFolds(messages, new Set(), 9);
+  expect(plan.folded.has('m2')).toBe(false);
+  expect(plan.folded.has('m1')).toBe(true);
+  expect(plan.folded.has('m3')).toBe(true);
+  // A person's message quoting a block is not a card.
+  expect(planFolds([msg('m1', AGENT, 1), msg('m2', PERSON, 2, { body: card }), msg('m3', AGENT, 3)], new Set(), 9).folded.has('m2')).toBe(true);
 });

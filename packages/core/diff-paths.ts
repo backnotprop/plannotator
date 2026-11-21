@@ -205,6 +205,21 @@ export const OVERSIZED_REVIEW_STUB_MARKER = "#plannotator-oversized-file";
  */
 export const OVERSIZED_REVIEW_STUB_LIMIT_LABEL = "5 MB";
 
+export const OVERSIZED_REVIEW_STUB_BYTES_PREFIX = "#plannotator-file-bytes";
+
+export function oversizedReviewStubBytes(patch: string): { old?: number; new?: number } | null {
+  const line = patch.split("\n").find((row) => row.startsWith(`${OVERSIZED_REVIEW_STUB_BYTES_PREFIX} `));
+  if (!line) return null;
+  const sizes: { old?: number; new?: number } = {};
+  for (const match of line.matchAll(/\b(old|new)=(\d+)\b/g)) sizes[match[1] as "old" | "new"] = Number(match[2]);
+  return sizes;
+}
+
+export function oversizedReviewStubBytesLine(sizes: { old?: number | null; new?: number | null }): string | null {
+  const parts = (["old", "new"] as const).flatMap((side) => (typeof sizes[side] === "number" ? [`${side}=${sizes[side]}`] : []));
+  return parts.length > 0 ? `${OVERSIZED_REVIEW_STUB_BYTES_PREFIX} ${parts.join(" ")}` : null;
+}
+
 /** True when `patch` is one of our oversized-file stubs (see the marker above). */
 export function isOversizedReviewStubPatch(patch: string): boolean {
   return patch.split("\n").some((line) => line === OVERSIZED_REVIEW_STUB_MARKER);
