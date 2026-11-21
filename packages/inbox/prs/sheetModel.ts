@@ -147,7 +147,8 @@ export function matchesQuery(pull: Pick<InboxPull, 'title' | 'author' | 'repo' |
   const hay = `${pull.title}\n${pull.author ?? ''}\n${pull.repo}`.toLowerCase();
   const label = inboxPullLabel(pull).toLowerCase();
   return words.every((word) => {
-    if (/^[#!]?\d+$/.test(word)) return String(pull.number) === word.replace(/^[#!]/, '') || label === word;
+    if (/^[#!]\d+$/.test(word)) return label === word;
+    if (/^\d+$/.test(word)) return String(pull.number) === word;
     return hay.includes(word);
   });
 }
