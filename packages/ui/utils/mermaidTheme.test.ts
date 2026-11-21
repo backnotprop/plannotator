@@ -304,6 +304,11 @@ describe('contrast guard', () => {
     ['commitLabelColor', 'commitLabelBackground'],
     ['tagLabelColor', 'tagLabelBackground'],
     ['taskTextColor', 'taskBkgColor'],
+    // Mermaid paints the label INSIDE a done, active or critical bar with
+    // taskTextDarkColor (`.doneText0`, `.activeText0`, `.critText0` …).
+    ['taskTextDarkColor', 'doneTaskBkgColor'],
+    ['taskTextDarkColor', 'activeTaskBkgColor'],
+    ['taskTextDarkColor', 'critBkgColor'],
     ['taskTextOutsideColor', 'background'],
     ['pieLegendTextColor', 'background'],
     ['pieTitleTextColor', 'background'],
