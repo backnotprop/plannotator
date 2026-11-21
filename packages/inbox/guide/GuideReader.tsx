@@ -34,6 +34,7 @@ import type {
   TokenAnnotationMeta,
 } from '@plannotator/ui/types';
 import { ReviewWorkerPoolProvider } from '@plannotator/review-editor/worker-pool';
+import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { openedLinesQuote } from '../attachments';
 import { wholeFileReader, type KeptWholeFiles } from './wholeFileReader';
 import { useSemDiffClient } from './useSemDiffClient';
@@ -565,10 +566,15 @@ function Reader({
 
   // The window's wrap for a code span, for the viewer's own inline parser.
   const codeSpan = useContext(CodeSpanContext);
+  // Hover cards for the links in the guide's prose (issue, PR, MR and Linear issue links), as a message body has
+  // them, over the window's own transport. The region adds no box (`display: contents`), so the layout is unchanged.
+  const proseRef = useRef<HTMLDivElement>(null);
+  const refCard = useRefHoverCards(proseRef);
 
   return (
     <GuideHostProvider value={host}>
       <GuideCodeSpanContext.Provider value={codeSpan}>
+      <div ref={proseRef} style={{ display: 'contents' }} data-guide-ref-cards="">
       <GuideView
         guide={guide}
         reviewed={ticks}
@@ -585,6 +591,8 @@ function Reader({
         // Every file's box as tall as its diff, in the readers built on this one (a thread's guided review, the review, the PR page).
         fitFileHeights
       />
+      </div>
+      {refCard}
       </GuideCodeSpanContext.Provider>
       {globalAnchor && globalDraftKey && (
         <CommentPopover

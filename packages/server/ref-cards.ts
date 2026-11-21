@@ -21,8 +21,7 @@ import { prCommandRuntime } from "./pr";
 
 import { childEnv } from "@plannotator/shared/child-env";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
-import { createLinearCards, withLinearCards } from "./inbox-linear-cards";
-import { readLinearApiKey } from "./inbox-linear-key";
+import { withSessionLinearCards } from "@plannotator/shared/linear-cards";
 import { sessionTailnetAskAllowed } from "./session-tailnet";
 
 export * from "@plannotator/shared/ref-cards";
@@ -115,15 +114,15 @@ export function createRefCards(options: Partial<Parameters<typeof createSharedRe
 }
 
 /**
- * The cards behind `GET /api/ref` on a Bun plan or annotate server: the forges', with Linear issue links answered
- * from Linear (inbox-linear-cards.ts) under the Inbox's key (the one saved in its Settings → Accounts, else
- * `LINEAR_API_KEY`), read per fetch. A test's own `refRunner` gets no real Linear.
+ * The cards behind `GET /api/ref` on a Bun plan, annotate or review server: the forges', with Linear issue links
+ * answered from Linear (`withSessionLinearCards`, packages/shared/linear-cards.ts; Pi's servers do the same) under
+ * the Inbox's key (the one saved in its Settings → Accounts, else `LINEAR_API_KEY`), read per fetch. A test's own
+ * `refRunner` gets no real Linear.
  */
 export function createRefCardsWithLinear(refRunner?: RefRunner): ReturnType<typeof createRefCards> {
   const cards = createRefCards(refRunner ? { run: refRunner } : {});
   if (refRunner) return cards;
-  const dataDir = getPlannotatorDataDir();
-  return withLinearCards(cards, createLinearCards({ apiKey: () => readLinearApiKey(dataDir) }));
+  return withSessionLinearCards(cards, getPlannotatorDataDir());
 }
 
 /**
