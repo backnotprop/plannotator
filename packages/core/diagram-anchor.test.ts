@@ -193,6 +193,34 @@ describe('the sequence family and the whole-diagram kind (additive within v: 1)'
     expect([frame(1), frame(2), frame(3), frame(4)]).toEqual([[7, 7], [5, 5], [11, 11], null]);
   });
 
+  test('a par_over frame is a frame, and a box around participants is none', () => {
+    // What regresses: `par_over` (Mermaid 12.2.0 draws it as a `par`) is not
+    // read as opening a frame, so its `end` closes the frame around it and
+    // every later frame's gutter mark lands on the wrong line; a `box`'s
+    // `end` does the same to a frame opened before it.
+    const source = [
+      'sequenceDiagram',
+      '  box Aqua Team',
+      '    participant A',
+      '    participant B',
+      '  end',
+      '  participant C',
+      '  loop again',
+      '    par_over both',
+      '      A->>B: one',
+      '    and',
+      '      B->>C: two',
+      '    end',
+      '    A->>C: three',
+      '  end',
+      '  opt last',
+      '    C->>A: four',
+      '  end',
+    ].join('\n');
+    const frame = (n: number) => diagramSourceLine(source, { family: 'sequence', kind: 'cluster', id: `frame-${n}`, label: '' });
+    expect([frame(1), frame(2), frame(3), frame(4)]).toEqual([[8, 8], [7, 7], [15, 15], null]);
+  });
+
   test('a whole-diagram anchor has no id, spans the source, and round-trips', () => {
     // What regresses: a click that resolves no part does nothing, or the
     // parser refuses the id-less anchor and the comment lists as unanchored.

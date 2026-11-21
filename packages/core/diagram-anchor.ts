@@ -197,7 +197,11 @@ export function lineMentions(line: string, token: string): boolean {
  * with the optional activation `+` / `-` on the receiver. */
 const SEQUENCE_MESSAGE = /^\s*[^\s:][^:]*?\s*(?:<<)?--?(?:>>|>|x|\))\s*[+-]?\s*[^:]+:/u;
 const SEQUENCE_NOTE = /^\s*note\s+(?:left\s+of|right\s+of|over)\b/iu;
-const SEQUENCE_FRAME = /^\s*(?:loop|alt|opt|par|critical|break|rect)\b/iu;
+/** A statement that opens a block closed by `end`: a frame (`par_over` is a
+ * `par` both engines draw), or a `rect` background or a `box` around
+ * participants, which close with `end` too but are no frame. */
+const SEQUENCE_FRAME = /^\s*(?:loop|alt|opt|par_over|par|critical|break|rect|box)\b/iu;
+const SEQUENCE_UNNUMBERED_BLOCK = /^\s*(?:rect|box)\b/iu;
 
 /** The n-th (1-based) line that matches, as a line range. */
 function nthMatchingLine(lines: readonly string[], pattern: RegExp, n: number): readonly [number, number] | null {
@@ -213,8 +217,8 @@ function nthMatchingLine(lines: readonly string[], pattern: RegExp, n: number): 
 /**
  * The line that opens the n-th (1-based) frame, frames numbered as both
  * engines draw them: a frame is drawn when its `end` is reached, so a frame
- * nested in another comes BEFORE the one around it; a `rect` (a background,
- * not a frame) takes no number.
+ * nested in another comes BEFORE the one around it; a `rect` or a `box` (a
+ * background, not a frame) takes no number.
  */
 function nthFrameLine(lines: readonly string[], n: number): readonly [number, number] | null {
   const open: Array<{ readonly line: number; readonly rect: boolean }> = [];
@@ -222,7 +226,7 @@ function nthFrameLine(lines: readonly string[], n: number): readonly [number, nu
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i] ?? '';
     if (SEQUENCE_FRAME.test(line)) {
-      open.push({ line: i + 1, rect: /^\s*rect\b/iu.test(line) });
+      open.push({ line: i + 1, rect: SEQUENCE_UNNUMBERED_BLOCK.test(line) });
       continue;
     }
     if (!/^\s*end\s*$/iu.test(line)) continue;
