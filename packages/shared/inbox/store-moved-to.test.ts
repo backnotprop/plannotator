@@ -210,26 +210,36 @@ describe("resolve_message with moved_to", () => {
     expect(store.message(old.id)!.resolved_at).toBeNull();
   });
 
-  test("refuses a thread with no open question from the caller: nothing for the person to answer there would swallow the old questions", () => {
+  test("refuses a thread with no question from the caller: one where it asked nothing would swallow the old questions", () => {
     const { store } = open();
     const { project, old } = world(store);
     const noQuestion = store.sendMessage({ project_id: project.id, author: ORCH, subject: "Notes only", body: "What I did overnight." }).message;
-    // The caller's question there was answered and sent: nothing left open.
-    const answered = store.sendMessage({ project_id: project.id, author: ORCH, subject: "Answered brief", body: ASK("Ship it?") }).message;
-    const [record] = store.questionsOf(answered.id);
-    store.sendReply(answered.id, { idempotency_key: "k-answered", questions: [{ key: record!.key, revision: 0, answer: { v: 1, key: record!.key, kind: "single", prompt: record!.prompt, selected: ["Yes"] } }] });
-    expect(store.questionsOf(answered.id)[0]!.state).toBe("sent");
-    // Only another session's question is open there.
+    // Only another session's question there.
     const othersOnly = store.sendMessage({ project_id: project.id, author: SUB, subject: "Sub brief", body: ASK("Sub's question?") }).message;
     store.sendMessage({ project_id: project.id, author: ORCH, body: "Noted.", reply_to: othersOnly.id });
+    // The caller's question there was withdrawn: it no longer asks anything.
+    const withdrawn = store.sendMessage({ project_id: project.id, author: ORCH, subject: "Withdrawn brief", body: ASK("Ship it?") }).message;
+    store.sendMessage({ project_id: project.id, author: ORCH, body: "Never mind.", reply_to: withdrawn.id, supersedes: [withdrawn.id] });
+    expect(store.questionsOf(withdrawn.id)[0]!.state).toBe("superseded");
     const cursor = store.cursor();
-    for (const target of [noQuestion, answered, othersOnly]) {
+    for (const target of [noQuestion, othersOnly, withdrawn]) {
       const error = refusal(() => store.resolveThread(old.id, true, "agent", { to: target.id, session: ORCH.session }));
       expect(error.code).toBe("validation_error");
-      expect(error.message).toBe(`moved_to: thread ${target.id} has no open question from your session; ask the questions there first. Nothing was archived.`);
+      expect(error.message).toBe(`moved_to: thread ${target.id} has no question from your session; ask the questions there first. Nothing was archived.`);
     }
     expect(store.cursor()).toBe(cursor);
     expect(store.message(old.id)!.resolved_at).toBeNull();
+  });
+
+  test("takes a brief the person already answered and sent: they answered it before the close-out", () => {
+    const { store } = open();
+    const { project, old } = world(store);
+    const answered = store.sendMessage({ project_id: project.id, author: ORCH, subject: "Answered brief", body: ASK("Retry failed charges?") }).message;
+    const [record] = store.questionsOf(answered.id);
+    store.sendReply(answered.id, { idempotency_key: "k-answered", questions: [{ key: record!.key, revision: 0, answer: { v: 1, key: record!.key, kind: "single", prompt: record!.prompt, selected: ["Yes"] } }] });
+    expect(store.questionsOf(answered.id)[0]!.state).toBe("sent");
+    store.resolveThread(old.id, true, "agent", { to: answered.id, session: ORCH.session });
+    expect(store.message(old.id)!.moved_to).toEqual({ thread_id: answered.id, subject: "Answered brief" });
   });
 
   test("the window's read names the brief as it is now while it is open (its thread name over its subject); archived, only the subject it had", () => {

@@ -241,9 +241,9 @@ export const SEND_BODY_DESCRIPTION = [
 
 const AGENT_SESSION_DESCRIPTION =
   "Your session id. The `plannotator inbox mcp` shim fills it. read_thread's asked_by \"me\" matches on it.";
-/** resolve_message's `agent_session`: it is there for `moved_to` only (the thread it names must hold your open question). */
+/** resolve_message's `agent_session`: it is there for `moved_to` only (the thread it names must hold a question your session asked). */
 const RESOLVE_AGENT_SESSION_DESCRIPTION =
-  "Your session id. The `plannotator inbox mcp` shim fills it. moved_to needs it: the thread it names must hold an open question your session asked.";
+  "Your session id. The `plannotator inbox mcp` shim fills it. moved_to needs it: the thread it names must hold a question your session asked.";
 
 /**
  * The fields every sending tool takes beside its content (send_message and

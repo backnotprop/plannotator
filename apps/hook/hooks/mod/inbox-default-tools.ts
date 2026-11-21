@@ -220,11 +220,11 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
           "type": "boolean"
         },
         "moved_to": {
-          "description": "After you moved this thread's open questions into another thread (one that gathers several): that thread's id, or a message id in it, an open thread of this project that you wrote in. The person then sees a link to it on the archived thread; nothing is written there, and it does not show as new.",
+          "description": "After you asked this thread's open questions again in another thread (one that gathers several): that thread's id, or a message id in it. It must be an open thread of this project where you asked a question. The person then sees a link to it on the archived thread; nothing is written there, and it does not show as new.",
           "type": "string"
         },
         "agent_session": {
-          "description": "Your session id. The `plannotator inbox mcp` shim fills it. moved_to needs it: the thread it names must hold an open question your session asked.",
+          "description": "Your session id. The `plannotator inbox mcp` shim fills it. moved_to needs it: the thread it names must hold a question your session asked.",
           "type": "string"
         }
       },

@@ -3304,11 +3304,12 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * INBOX_MOVED_TO_RULE on `supersedes`, 4 characters on the resolve_message line, which makes the description 1,948):
  * +525 bytes on the entry as the tool builds it from the default tool list (14,696 → 15,221), Board on the same +525.
  * Estimated, not measured on Pi; added here so the skip sentence's 162 and this stay inside the 5%. Tokens scaled at
- * the entry's bytes per token (3.7), +142.
+ * the entry's bytes per token (3.7), +142. The `moved_to` field's next draft words: +24 more (15,221 → 15,245 on the
+ * same build), +6 tokens, Board on the same.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 15047, tokens: 4048 };
+const INBOX_TOOL_COST_NOW = { bytes: 15071, tokens: 4054 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 16976, tokens: 4634 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 17000, tokens: 4640 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval

@@ -170,7 +170,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
     args: ["message_id", "resolved", "moved_to"],
     lines: [
       "Archive the thread a message belongs to for the person; use it only when nothing in it is left for them to read or answer, or when you moved its questions to another thread (`moved_to`). `message_id` is any message in the thread, or the thread id; `resolved: false` reopens it. Its questions then read as closed. Nothing is written in the thread and the person is not notified.",
-      `- \`moved_to\`: ${INBOX_MOVED_TO_FIELD_DESCRIPTION} It needs your session (\`agent_session\`, filled as on send_message; over HTTP, pass the one you sent with), and that thread must hold an open question your session asked. Any other thread, or no session, is refused with \`validation_error: moved_to: …\` (an archived one with \`thread_resolved\`), and nothing is archived. If that thread's agent writes in it again later, it comes back to the person as any archived thread does.`,
+      `- \`moved_to\`: ${INBOX_MOVED_TO_FIELD_DESCRIPTION} It needs your session (\`agent_session\`, filled as on send_message; over HTTP, pass the one you sent with), and that thread must hold a question your session asked there. Any other thread, or no session, is refused with \`validation_error: moved_to: …\` (an archived one with \`thread_resolved\`), and nothing is archived. If that thread's agent writes in it again later, it comes back to the person as any archived thread does.`,
     ],
   },
   snooze_thread: {

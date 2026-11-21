@@ -5632,8 +5632,8 @@ export class InboxStore {
    *
    * `movedTo` (an agent's resolve_message `moved_to`): the thread, or a message
    * of it, this thread's questions were moved to. Checked before anything is
-   * written: an open thread of the same project, not this one, holding an
-   * open question the calling `session` asked. The root then keeps it
+   * written: an open thread of the same project, not this one, holding a
+   * question the calling `session` asked (open, picked or answered and sent). The root then keeps it
    * (`InboxMessage.moved_to`) so the archived foot says where they went; no
    * message is written. A person's Unarchive drops it, and so does an agent
    * writing in the thread again (sendMessage: the thread came back).
@@ -5695,11 +5695,14 @@ export class InboxStore {
     const members = this.threadMessages(target.id);
     const wrote = members.some((m) => m.author.kind === "agent" && m.author.session === session);
     if (!wrote) throw refuse(`thread ${target.id} has no message from your session; name the thread you sent the questions in.`);
-    // A thread with nothing of the caller's left for the person to answer would swallow the old thread's questions.
+    // A thread where the caller asked nothing would swallow the old thread's questions. One the person already
+    // answered and sent counts (they answered the brief quickly); a withdrawn or Mark-read-closed one does not.
     const asks = members.some((m) =>
-      this.questionsOf(m.id).some((q) => q.kind !== "action" && q.asked_by_agent_id === session && (q.state === "open" || q.state === "picked")),
+      this.questionsOf(m.id).some(
+        (q) => q.kind !== "action" && q.asked_by_agent_id === session && (q.state === "open" || q.state === "picked" || q.state === "sent"),
+      ),
     );
-    if (!asks) throw refuse(`thread ${target.id} has no open question from your session; ask the questions there first.`);
+    if (!asks) throw refuse(`thread ${target.id} has no question from your session; ask the questions there first.`);
     return { thread_id: target.id, subject: this.threadSubject(target.id) };
   }
 

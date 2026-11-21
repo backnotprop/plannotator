@@ -587,7 +587,7 @@ export const INBOX_MOVED_TO_RULE =
 
 /** resolve_message's `moved_to` (DRAFT words, with INBOX_MOVED_TO_RULE): the MCP field, so every host's copy, and --help. */
 export const INBOX_MOVED_TO_FIELD_DESCRIPTION =
-  "After you moved this thread's open questions into another thread (one that gathers several): that thread's id, or a message id in it, an open thread of this project that you wrote in. The person then sees a link to it on the archived thread; nothing is written there, and it does not show as new."
+  "After you asked this thread's open questions again in another thread (one that gathers several): that thread's id, or a message id in it. It must be an open thread of this project where you asked a question. The person then sees a link to it on the archived thread; nothing is written there, and it does not show as new."
 
 /** The end of every copy of send_message's `thread` field (approved 2026-11-15): INBOX_THREAD_RULE says when, this says how. */
 export const INBOX_THREAD_NEW_ISSUE_RULE =
