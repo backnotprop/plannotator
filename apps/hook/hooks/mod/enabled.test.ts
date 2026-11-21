@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { AGENT_TOOL_DEFAULTS, INBOX_TOOL_DEFAULTS, resolveAgentTool, resolveClaudeCodeMod, resolveInboxReminder, resolveInboxTool } from '@plannotator/shared/config'
-import { AGENT_TOOL_DEFAULT, INBOX_TOOL_DEFAULT, resolveAgentToolEnabled, resolveClaudeModEnabled, resolveInboxReminderEnabled, resolveInboxToolEnabled } from './enabled'
+import { AGENT_TOOL_DEFAULTS, INBOX_TOOL_DEFAULTS, resolveAgentTool, resolveClaudeCodeMod, resolveInboxReminder, resolveInboxTool, resolvePlanReview } from '@plannotator/shared/config'
+import { AGENT_TOOL_DEFAULT, INBOX_TOOL_DEFAULT, resolveAgentToolEnabled, resolveClaudeModEnabled, resolveInboxReminderEnabled, resolveInboxToolEnabled, resolvePlanReviewEnabled } from './enabled'
 
 // The mod cannot import packages/shared, so it mirrors resolveClaudeCodeMod.
 // The failure this guards: the two drift, and the CLI docs/settings say the
@@ -60,6 +60,29 @@ describe('agent tool switch', () => {
   test('agentTool is its own key: it never reads claudeCodeMod, and the mod switch never reads agentTool', () => {
     expect(resolveAgentToolEnabled(undefined, '{"claudeCodeMod":false}')).toBe(AGENT_TOOL_DEFAULT)
     expect(resolveClaudeModEnabled(undefined, '{"agentTool":false}')).toBe(true)
+  })
+})
+
+// Same mirror for plan review: the failure is the mod intercepting ExitPlanMode
+// while the CLI hook passes it through (or the reverse), leaving no review or two.
+describe('plan review switch', () => {
+  const envs = [undefined, '', '1', 'true', 'ON', ' on ', '0', 'false', 'off', 'disabled', 'yes', 'garbage']
+  const configs: unknown[] = [undefined, true, false, 'true', 'false', '1', '0', 'yes', 1, null]
+
+  test('the mod and packages/shared resolve every combination the same way', () => {
+    for (const env of envs) {
+      for (const value of configs) {
+        const config = value === undefined ? {} : { planReview: value }
+        const shared = resolvePlanReview(config as never, env === undefined ? {} : { PLANNOTATOR_PLAN_REVIEW: env })
+        expect([env, value, resolvePlanReviewEnabled(env, JSON.stringify(config))]).toEqual([env, value, shared])
+      }
+    }
+    expect(resolvePlanReviewEnabled(undefined, '{ not json')).toBe(resolvePlanReview({}, {}))
+  })
+
+  test('on by default', () => {
+    expect(resolvePlanReviewEnabled(undefined, null)).toBe(true)
+    expect(resolvePlanReview({}, {})).toBe(true)
   })
 })
 

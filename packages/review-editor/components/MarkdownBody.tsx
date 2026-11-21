@@ -3,13 +3,41 @@
  * (PR descriptions, PR comments, commit messages). No annotation
  * infrastructure — the full document surface is Viewer/BlockRenderer.
  */
-import React, { useMemo, useRef, useEffect } from 'react';
+import React, { useMemo, useRef, useLayoutEffect } from 'react';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import type { Block } from '@plannotator/ui/types';
 import { MAX_QUOTE_DEPTH, isProseQuote, parseQuoteBody } from '@plannotator/ui/components/blocks/BlockquoteBlock';
 import { parseTableContent } from '@plannotator/ui/components/blocks/TableBlock';
 import { sanitizeInlineHtml } from '@plannotator/ui/utils/sanitizeHtml';
-import { renderInlineMarkdown } from '../utils/renderInlineMarkdown';
+import { paintAuthorColors } from '@plannotator/ui/utils/authorColorContrast';
+import { renderInlineMarkdown as renderInline } from '../utils/renderInlineMarkdown';
+import { prImageSrc, prImageSrcset } from '../utils/prImage';
+import { PRMediaScope, PR_MEDIA_SKIP_ATTR } from './PRMediaScope';
+import { OpenInArtifactsButton } from './OpenInArtifactsButton';
+
+function renderInlineMarkdown(content: string, authenticatedImages: boolean) {
+  return renderInline(content, { resolveImageSrc: authenticatedImages ? prImageSrc : undefined });
+}
+
+/**
+ * Comment HTML with GitHub attachment image URLs (`src`, and every `srcset`
+ * candidate, so a `<picture>`'s dark-mode `<source>` still applies) routed
+ * through the proxy. The rewrite runs on an inert `<template>` first and the
+ * sanitizer last, so what is inserted is exactly DOMPurify's output.
+ */
+function sanitizePRHtml(content: string, authenticatedImages: boolean): string {
+  if (!authenticatedImages) return sanitizeInlineHtml(content);
+  const template = document.createElement('template');
+  template.innerHTML = content;
+  for (const image of template.content.querySelectorAll('img')) {
+    const src = image.getAttribute('src');
+    if (src) image.setAttribute('src', prImageSrc(src));
+  }
+  for (const element of template.content.querySelectorAll('img[srcset], picture source[srcset]')) {
+    element.setAttribute('srcset', prImageSrcset(element.getAttribute('srcset') ?? ''));
+  }
+  return sanitizeInlineHtml(template.innerHTML);
+}
 
 
 
@@ -20,12 +48,14 @@ const containsHtml = (text: string) => HTML_TAG_RE.test(text);
 /** Renders sanitized HTML and hides broken images via ref (no inline event handlers). */
 function SafeHtml({ html, as: Tag = 'div' }: { html: string; as?: 'div' | 'span' }) {
   const ref = useRef<HTMLElement>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!ref.current) return;
     const imgs = ref.current.querySelectorAll('img');
     imgs.forEach((img) => {
       img.onerror = () => { img.style.display = 'none'; img.onerror = null; };
     });
+    // An author's colour from GitHub text is held to the theme like a document's.
+    return paintAuthorColors(ref.current);
   }, [html]);
   return <Tag ref={ref as any} dangerouslySetInnerHTML={{ __html: html }} />;
 }
@@ -34,11 +64,11 @@ function SafeHtml({ html, as: Tag = 'div' }: { html: string; as?: 'div' | 'span'
  * Render inline content — if it contains HTML tags, sanitize and render.
  * Otherwise use our markdown renderer.
  */
-function renderContent(content: string): React.ReactNode {
+function renderContent(content: string, authenticatedImages: boolean): React.ReactNode {
   if (containsHtml(content)) {
-    return <SafeHtml html={sanitizeInlineHtml(content)} as="span" />;
+    return <SafeHtml html={sanitizePRHtml(content, authenticatedImages)} as="span" />;
   }
-  return renderInlineMarkdown(content);
+  return renderInlineMarkdown(content, authenticatedImages);
 }
 
 /** Video file links (GitHub can't inline-play these either, but we can). */
@@ -54,14 +84,20 @@ function parseLoneVideoLink(content: string): { url: string; label: string } | n
 }
 
 /** Render a simplified block-level markdown view (no annotation infrastructure). */
-export function MarkdownBody({ markdown, textClassName = 'text-xs' }: { markdown: string; textClassName?: string }) {
+export function MarkdownBody({ markdown, textClassName = 'text-xs', authenticatedImages = false, prMedia = false }: {
+  markdown: string;
+  textClassName?: string;
+  authenticatedImages?: boolean;
+  prMedia?: boolean;
+}) {
   const blocks = useMemo(() => parseMarkdownToBlocks(markdown), [markdown]);
 
-  return (
+  const body = (
     <div className={`space-y-2.5 ${textClassName} text-foreground/90 leading-relaxed`}>
-      {renderBlocks(blocks)}
+      {renderBlocks(blocks, authenticatedImages)}
     </div>
   );
+  return prMedia ? <PRMediaScope>{body}</PRMediaScope> : body;
 }
 
 /** A quote holding more than paragraphs (a code fence, a list, a nested
@@ -75,7 +111,7 @@ function quoteBlocks(content: string, depth: number): Block[] | null {
 }
 
 /** `depth`: the number of quotes around these blocks. */
-function renderBlocks(blocks: Block[], depth = 0): React.ReactNode[] {
+function renderBlocks(blocks: Block[], authenticatedImages: boolean, depth = 0): React.ReactNode[] {
   return blocks.map((block) => {
     switch (block.type) {
       case 'heading': {
@@ -87,13 +123,13 @@ function renderBlocks(blocks: Block[], depth = 0): React.ReactNode[] {
         };
         return (
           <Tag key={block.id} className={`${sizes[block.level ?? 1] ?? 'text-xs font-medium'} text-foreground`}>
-            {renderContent(block.content)}
+            {renderContent(block.content, authenticatedImages)}
           </Tag>
         );
       }
       case 'code':
         return (
-          <pre key={block.id} className="bg-muted/50 rounded-md p-2 text-[11px] font-mono overflow-x-auto whitespace-pre-wrap">
+          <pre key={block.id} className="bg-muted/50 rounded-md p-2 text-xs font-mono overflow-x-auto whitespace-pre-wrap">
             <code>{block.content}</code>
           </pre>
         );
@@ -101,14 +137,14 @@ function renderBlocks(blocks: Block[], depth = 0): React.ReactNode[] {
         return (
           <div key={block.id} className="flex gap-1.5" style={{ paddingLeft: (block.level ?? 0) * 12 }}>
             <span className="text-muted-foreground shrink-0">{block.checked !== undefined ? (block.checked ? '☑' : '☐') : '•'}</span>
-            <span>{renderContent(block.content)}</span>
+            <span>{renderContent(block.content, authenticatedImages)}</span>
           </div>
         );
       case 'blockquote': {
         const inner = block.alertKind ? null : quoteBlocks(block.content, depth);
         return (
           <blockquote key={block.id} className="border-l-2 border-border pl-2 text-muted-foreground italic">
-            {inner ? <div className="space-y-2.5">{renderBlocks(inner, depth + 1)}</div> : renderContent(block.content)}
+            {inner ? <div className="space-y-2.5">{renderBlocks(inner, authenticatedImages, depth + 1)}</div> : renderContent(block.content, authenticatedImages)}
           </blockquote>
         );
       }
@@ -124,7 +160,7 @@ function renderBlocks(blocks: Block[], depth = 0): React.ReactNode[] {
                 <tr className="border-b border-border">
                   {headers.map((header, i) => (
                     <th key={i} className="px-2 py-1 text-left font-semibold text-foreground/90 bg-muted/30">
-                      {renderContent(header)}
+                      {renderContent(header, authenticatedImages)}
                     </th>
                   ))}
                 </tr>
@@ -134,7 +170,7 @@ function renderBlocks(blocks: Block[], depth = 0): React.ReactNode[] {
                   <tr key={ri} className="border-b border-border/50">
                     {row.map((cell, ci) => (
                       <td key={ci} className="px-2 py-1 align-top">
-                        {renderContent(cell)}
+                        {renderContent(cell, authenticatedImages)}
                       </td>
                     ))}
                   </tr>
@@ -157,22 +193,26 @@ function renderBlocks(blocks: Block[], depth = 0): React.ReactNode[] {
                 src={video.url}
                 className="max-w-full rounded-md border border-border bg-black"
               />
-              <a
-                href={video.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-1 block text-[11px] text-muted-foreground hover:text-foreground truncate"
-              >
-                {video.label}
-              </a>
+              <div className="mt-1 flex min-w-0 items-center gap-2">
+                <a
+                  href={video.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  {...{ [PR_MEDIA_SKIP_ATTR]: '' }}
+                  className="block min-w-0 truncate text-xs text-muted-foreground hover:text-foreground"
+                >
+                  {video.label}
+                </a>
+                <OpenInArtifactsButton url={video.url} />
+              </div>
             </div>
           );
         }
         // If the entire paragraph is HTML, sanitize and render
         if (containsHtml(block.content)) {
-          return <SafeHtml key={block.id} html={sanitizeInlineHtml(block.content)} />;
+          return <SafeHtml key={block.id} html={sanitizePRHtml(block.content, authenticatedImages)} />;
         }
-        return <p key={block.id}>{renderInlineMarkdown(block.content)}</p>;
+        return <p key={block.id}>{renderInlineMarkdown(block.content, authenticatedImages)}</p>;
       }
     }
   });

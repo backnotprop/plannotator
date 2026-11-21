@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import {
-  extractSkillReferences,
   filterSkillCatalog,
   findSkillReferenceTokens,
   findSkillTrigger,
@@ -9,8 +8,10 @@ import {
   type SkillCatalogEntry,
   type SkillReferenceToken,
   type SkillTriggerContext,
+  uniqueSkillReferences,
 } from '../utils/skillReferences';
-import { fetchSkillCatalog, getCachedSkillCatalog } from '../utils/skillCatalog';
+import { fetchSkillCatalog, getCachedSkillCatalog, onSkillCatalogReload } from '../utils/skillCatalog';
+import { replaceUndoably } from '../utils/undoableEdit';
 
 export interface SkillReferenceMenuState {
   items: SkillCatalogEntry[];
@@ -26,6 +27,11 @@ export interface UseSkillReferenceAutocompleteResult {
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => boolean;
   /** Call from the textarea's onSelect (fires on every caret move + input). */
   onSelect: () => void;
+  /**
+   * Call from the textarea's onChange with the input's `inputType`, in place of `onSelect` there. It reads the caret
+   * as `onSelect` does; with `quietOnDelete` it also keeps a list from opening on a deletion.
+   */
+  onEdit: (inputType?: string) => void;
   /** Insert the given menu item at the active trigger. */
   select: (index: number) => void;
   /** Human-only skills currently referenced in the text (drives the composer warning). */
@@ -69,18 +75,55 @@ export function useSkillReferenceAutocomplete(options: {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   enabled: boolean;
   bareEscapeDismisses?: boolean;
+  /**
+   * Which catalog entries this composer offers and paints (a host's per-place
+   * rule, e.g. the Inbox's `/review-recheck` only in a reviewed thread).
+   * Absent: every entry, as before. Keep its identity stable across renders.
+   */
+  catalogFilter?: (entry: SkillCatalogEntry) => boolean;
+  /**
+   * A host's own commands (opt-in; the Inbox's `/side`): rows the `/` list offers that are not skills. They are
+   * listed after the catalog's leading host-served rows (root `plannotator`), a skill with the same name wins, and
+   * `$` never lists them. Picking one inserts nothing: the typed trigger leaves the text (`setText`) and `onCommand`
+   * gets the row and the words that are left. A command typed and not picked is plain text: never painted, never a
+   * reference. Absent: none, as before. Keep its identity stable across renders.
+   */
+  commands?: readonly SkillCatalogEntry[];
+  onCommand?: (command: SkillCatalogEntry, text: string) => void;
+  /**
+   * Keep the host-served rows (root `plannotator`) together at the top of the list whatever was typed (opt-in; pairs
+   * with SkillReferenceMenu's `groupHostRows`, which draws them as their own group). Within each group the filter's
+   * order stands. Absent: the filter's order alone, as before.
+   */
+  hostRowsFirst?: boolean;
+  /**
+   * The list opens when the person types, never because they deleted (opt-in; the Inbox's composers): holding
+   * Backspace back into a `/name` already in the words keeps it shut. A list for the name being typed (open, or shut
+   * for a moment by a typo) stays with it through a Backspace, as before. Needs `onEdit` from the onChange. Absent:
+   * a deletion opens the list as a caret move does, as before.
+   */
+  quietOnDelete?: boolean;
 }): UseSkillReferenceAutocompleteResult {
-  const { text, setText, textareaRef, enabled, bareEscapeDismisses = false } = options;
+  const { text, setText, textareaRef, enabled, bareEscapeDismisses = false, catalogFilter, commands, onCommand, hostRowsFirst = false, quietOnDelete = false } = options;
   // Seed from the memory cache only when the surface opted in — a disabled
   // composer must stay inert even after another surface warmed the catalog.
-  const [catalog, setCatalog] = useState<SkillCatalogEntry[]>(() =>
+  const [fullCatalog, setCatalog] = useState<SkillCatalogEntry[]>(() =>
     enabled ? getCachedSkillCatalog() : [],
   );
+  const catalog = useMemo(() => (catalogFilter ? fullCatalog.filter(catalogFilter) : fullCatalog), [fullCatalog, catalogFilter]);
   const [caret, setCaret] = useState<number | null>(null);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   // Escape dismisses the menu for the trigger it was open on; the same trigger
   // does not reopen until the user leaves it (new trigger start clears this).
   const [dismissedStart, setDismissedStart] = useState<number | null>(null);
+  // With `quietOnDelete`: the trigger a deletion brought the caret to, shut until the person types at it, and the
+  // one they last typed at (its list goes with them through a typo's Backspace, even when the typo had shut it).
+  const [quietStart, setQuietStart] = useState<number | null>(null);
+  const typedStart = useRef<number | null>(null);
+
+  // A reload (the host's catalog changed at its source) reads it again here too.
+  const [reloads, setReloads] = useState(0);
+  useEffect(() => (enabled ? onSkillCatalogReload(() => setReloads((n) => n + 1)) : undefined), [enabled]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -91,27 +134,38 @@ export function useSkillReferenceAutocomplete(options: {
     return () => {
       cancelled = true;
     };
-  }, [enabled]);
+  }, [enabled, reloads]);
 
   const trigger: SkillTriggerContext | null = useMemo(() => {
-    if (!enabled || catalog.length === 0 || caret === null) return null;
+    if (!enabled || (catalog.length === 0 && !commands?.length) || caret === null) return null;
     return findSkillTrigger(text, caret);
-  }, [enabled, catalog, text, caret]);
+  }, [enabled, catalog, commands, text, caret]);
 
-  const items = useMemo(
-    () => (trigger ? filterSkillCatalog(catalog, trigger.query) : []),
-    [catalog, trigger],
-  );
+  // What a `/` lists: the catalog, with the host's commands after its leading host-served rows.
+  const slashList = useMemo(() => {
+    const offered = commands?.filter((command) => !catalog.some((skill) => skill.name === command.name)) ?? [];
+    if (offered.length === 0) return catalog;
+    const lead = catalog.findIndex((skill) => skill.root !== 'plannotator');
+    const at = lead === -1 ? catalog.length : lead;
+    return [...catalog.slice(0, at), ...offered, ...catalog.slice(at)];
+  }, [catalog, commands]);
 
-  const open = trigger !== null && items.length > 0 && trigger.start !== dismissedStart;
+  const items = useMemo(() => {
+    if (!trigger) return [];
+    const found = filterSkillCatalog(trigger.trigger === '/' ? slashList : catalog, trigger.query);
+    return hostRowsFirst ? [...found.filter((row) => row.root === 'plannotator'), ...found.filter((row) => row.root !== 'plannotator')] : found;
+  }, [catalog, hostRowsFirst, slashList, trigger]);
 
-  // A new trigger start clears the dismissal memory.
+  const open = trigger !== null && items.length > 0 && trigger.start !== dismissedStart && trigger.start !== quietStart;
+
+  // A new trigger start clears the dismissal memory (and a deletion's quiet, unless the deletion brought it there).
   const lastTriggerStart = useRef<number | null>(null);
   useEffect(() => {
     const start = trigger?.start ?? null;
     if (start !== lastTriggerStart.current) {
       lastTriggerStart.current = start;
       setDismissedStart(null);
+      setQuietStart((quiet) => (quiet === start ? quiet : null));
     }
   }, [trigger]);
 
@@ -134,14 +188,61 @@ export function useSkillReferenceAutocomplete(options: {
     setCaret(el ? el.selectionStart : null);
   }, [textareaRef]);
 
+  const onEdit = useCallback(
+    (inputType?: string) => {
+      readCaret();
+      if (!quietOnDelete) return;
+      const el = textareaRef.current;
+      const next = el ? (findSkillTrigger(el.value, el.selectionStart)?.start ?? null) : null;
+      if (!inputType?.startsWith('delete')) {
+        typedStart.current = next;
+        setQuietStart(null);
+        return;
+      }
+      // The name being typed, or the list already open for it: it stays. Any other trigger a deletion reaches: shut.
+      const typing = next !== null && (next === typedStart.current || (open && next === trigger?.start));
+      if (!typing) typedStart.current = null;
+      setQuietStart(typing ? null : next);
+    },
+    [open, quietOnDelete, readCaret, textareaRef, trigger],
+  );
+
+  // The caret a pick owes the field, placed in the commit that writes the new text (below), before the person can
+  // type again. Placed only from a timer, a key pressed in between landed where the commit had left the caret (the
+  // end), and the timer then pulled the caret back over it: a quick "/b" after a click came out "b/".
+  const pendingCaret = useRef<{ el: HTMLTextAreaElement; text: string; caret: number } | null>(null);
+  useLayoutEffect(() => {
+    const pending = pendingCaret.current;
+    if (!pending || pending.el.value !== pending.text) return;
+    pendingCaret.current = null;
+    if (!pending.el.isConnected) return;
+    pending.el.focus();
+    pending.el.setSelectionRange(pending.caret, pending.caret);
+  });
+
   const select = useCallback(
     (index: number) => {
       const el = textareaRef.current;
       if (!trigger || !el) return;
       const item = items[index];
       if (!item) return;
+      // A picked name is no longer the one being typed: a Backspace after the pick reaches it as a deletion.
+      typedStart.current = null;
+      if (commands?.includes(item)) {
+        // A command: the typed trigger goes, nothing is inserted, and focus is the host's to place.
+        const rest = text.slice(0, trigger.start) + text.slice(el.selectionStart);
+        // As the browser's own edit, so ⌘Z stays true (utils/undoableEdit.ts); else written as before.
+        if (!replaceUndoably(el, trigger.start, el.selectionStart, '')) setText(rest);
+        setCaret(trigger.start);
+        setActiveIndex(null);
+        setDismissedStart(trigger.start);
+        onCommand?.(item, rest);
+        return;
+      }
       const result = insertSkillReference(text, el.selectionStart, trigger, item);
-      setText(result.text);
+      // The pick is the browser's own edit, one ⌘Z step of its own (utils/undoableEdit.ts): a write of the value
+      // left Chrome's undo replaying old steps onto the new words. Else (not focused, no execCommand) as before.
+      if (!replaceUndoably(el, trigger.start, el.selectionStart, result.text.slice(trigger.start, result.caret))) setText(result.text);
       setCaret(result.caret);
       setActiveIndex(null);
       // Close deterministically. The DOM caret only moves in the 0ms timer
@@ -151,14 +252,21 @@ export function useSkillReferenceAutocomplete(options: {
       // start makes the close ordering-safe; the dismissal clears itself as
       // soon as the trigger changes (including to null when the caret lands).
       setDismissedStart(trigger.start);
-      // Restore focus + caret after React commits the new value.
+      // Restore focus + caret once React commits the new value: in that commit (the layout effect above), else
+      // here, for a host that commits the text later. Never once the person has typed since (the text changed):
+      // their caret is already where they are typing.
+      const pending = { el, text: result.text, caret: result.caret };
+      pendingCaret.current = pending;
       setTimeout(() => {
-        if (!el.isConnected) return;
+        // The commit placed it already (a later pick replaced it): leave the caret where the person has it now.
+        if (pendingCaret.current !== pending) return;
+        pendingCaret.current = null;
+        if (!el.isConnected || el.value !== result.text) return;
         el.focus();
         el.setSelectionRange(result.caret, result.caret);
       }, 0);
     },
-    [items, setText, text, textareaRef, trigger],
+    [commands, items, onCommand, setText, text, textareaRef, trigger],
   );
 
   const onKeyDown = useCallback(
@@ -222,20 +330,22 @@ export function useSkillReferenceAutocomplete(options: {
     [bareEscapeDismisses, boundedActive, items.length, open, select, trigger],
   );
 
-  const humanOnlyReferences = useMemo(
-    () => (enabled ? extractSkillReferences(text, catalog).filter((s) => s.humanOnly) : []),
-    [enabled, text, catalog],
-  );
-
   const referenceTokens = useMemo(
     () => (enabled ? findSkillReferenceTokens(text, catalog) : []),
     [enabled, text, catalog],
+  );
+
+  // From the tokens above: one scan of the text a change, not two.
+  const humanOnlyReferences = useMemo(
+    () => (enabled ? uniqueSkillReferences(referenceTokens).filter((s) => s.humanOnly) : []),
+    [enabled, referenceTokens],
   );
 
   return {
     menu: open ? { items, activeIndex: boundedActive, query: trigger.query } : null,
     onKeyDown,
     onSelect: readCaret,
+    onEdit,
     select,
     humanOnlyReferences,
     referenceTokens,

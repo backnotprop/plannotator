@@ -6,7 +6,7 @@
  * catches: a message stuck on a session that is gone with nothing saying
  * so, or moved somewhere the person did not pick.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -116,7 +116,7 @@ test.skipIf(!hasDom)('a thread the person started names whom it went to, and say
   const el = await render(started());
   expect(el.querySelector('[data-started-by]')?.textContent).toBe('You started this threadto Claude Code in ledger');
   expect(el.querySelector('[data-delivery]')?.getAttribute('data-delivery')).toBe('queued');
-  expect(el.querySelector('[data-delivery]')?.textContent).toBe('Queued for Claude Code; it gets this as its next turn.');
+  expect(el.querySelector('[data-delivery] .ib-dl-text')?.textContent).toBe('Queued for Claude Code; it gets this as its next turn.');
   expect(el.querySelector('[data-readdress]')).toBeNull();
 });
 

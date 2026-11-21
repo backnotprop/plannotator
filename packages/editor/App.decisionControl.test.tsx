@@ -37,6 +37,7 @@ const hasDom = typeof document !== "undefined";
 if (hasDom) {
   document.cookie = "plannotator-look-feel-announcement-seen=2; path=/";
   document.cookie = "plannotator-announce-tui-herdr-seen=1; path=/";
+  document.cookie = "plannotator-announce-inbox-seen=1; path=/";
   document.cookie = "plannotator-vim-mode-announcement-seen=2; path=/";
   document.cookie = "plannotator-plan-ai-announcement-seen=1; path=/";
 }
@@ -58,6 +59,7 @@ const memoryBackend: StorageBackend = {
 function seedAnnouncementsSeen(): void {
   memory.set("plannotator-look-feel-announcement-seen", "2");
   memory.set("plannotator-announce-tui-herdr-seen", "1");
+  memory.set("plannotator-announce-inbox-seen", "1");
   memory.set("plannotator-vim-mode-announcement-seen", "2");
   memory.set("plannotator-plan-ai-announcement-seen", "1");
 }
@@ -115,6 +117,14 @@ let submissions: SubmittedBody[] = [];
 /** How many upcoming /api/feedback POSTs answer 500. Each failed attempt is
  *  still recorded in `submissions` so its captured body can be asserted. */
 let failFeedbackPosts = 0;
+/** Upcoming /api/feedback POSTs that reject as a network error (a stopped
+ *  server), recorded first. */
+let feedbackNetworkFailures = 0;
+/** Upcoming /api/approve POSTs that answer 500, recorded first. */
+let failApprovePosts = 0;
+/** When true, the next /api/feedback POST gets the servers' already-decided
+ *  refusal (another window sent first), recorded first. */
+let refuseNextFeedbackAsDecided = false;
 
 const MARKDOWN = "# Notes\n\nSome body text.\n";
 
@@ -160,6 +170,18 @@ function makeFetch(plan: unknown): typeof fetch {
       });
       if (url.pathname === "/api/feedback" && failFeedbackPosts > 0) {
         failFeedbackPosts -= 1;
+        return Response.json({ error: "boom" }, { status: 500 });
+      }
+      if (url.pathname === "/api/feedback" && refuseNextFeedbackAsDecided) {
+        refuseNextFeedbackAsDecided = false;
+        return Response.json({ error: "This review session has already been decided.", code: "already_decided" }, { status: 409 });
+      }
+      if (url.pathname === "/api/feedback" && feedbackNetworkFailures > 0) {
+        feedbackNetworkFailures -= 1;
+        throw new TypeError("Failed to fetch");
+      }
+      if (url.pathname === "/api/approve" && failApprovePosts > 0) {
+        failApprovePosts -= 1;
         return Response.json({ error: "boom" }, { status: 500 });
       }
       return Response.json({ ok: true });
@@ -256,6 +278,9 @@ afterEach(async () => {
   if (hasDom && originalMatchMedia) window.matchMedia = originalMatchMedia;
   submissions = [];
   failFeedbackPosts = 0;
+  feedbackNetworkFailures = 0;
+  failApprovePosts = 0;
+  refuseNextFeedbackAsDecided = false;
   seededExternalAnnotations = [];
   savedDocumentDrafts.clear();
   fileBrowserModule?.resetFileTreeBackend();
@@ -777,5 +802,148 @@ describe.if(hasDom)("annotate completion screen", () => {
     expect(submissions[0]!.nothingToSend).toBe(true);
     expect(completionState()).toBe("done");
     expectNoSentClaim();
+  });
+});
+
+/**
+ * #1392: `plannotator annotate`, the server stopped with the page open, Send
+ * feedback: the POST rejected and the page showed nothing, so the reviewer
+ * believed it was sent. A failed send must keep the session as it was, say
+ * the feedback was not sent, and offer Retry and Copy feedback.
+ */
+describe.if(hasDom)("annotate: a send that does not reach Plannotator", () => {
+  // Sonner keeps earlier tests' toasts in its module store, so find this one
+  // by its title rather than taking the first toast on the page.
+  const failureToast = () =>
+    Array.from(document.querySelectorAll<HTMLElement>("[data-sonner-toast]"))
+      // A dismissed toast stays in the DOM while it animates out.
+      .filter((el) => el.getAttribute("data-removed") !== "true")
+      .find((el) => el.querySelector("[data-title]")?.textContent?.endsWith(" not sent"));
+  const toastButton = (label: string) =>
+    Array.from(failureToast()?.querySelectorAll<HTMLButtonElement>("button") ?? []).find((b) => b.textContent === label);
+
+  async function waitFor(check: () => unknown, what: string): Promise<void> {
+    for (let attempt = 0; attempt < 40 && !check(); attempt += 1) await settle();
+    if (!check()) throw new Error(`timed out waiting for ${what}`);
+  }
+
+  async function sendNote(text: string): Promise<void> {
+    await openComposer("Send a note");
+    await typeNote(text);
+    await pressNoteKey("Enter", { metaKey: true });
+  }
+
+  test("server gone: no sent screen, Feedback not sent, and Copy feedback copies the panel's Copy text", async () => {
+    setStorageBackend(memoryBackend);
+    seedAnnouncementsSeen();
+    feedbackNetworkFailures = 1;
+    const clipboard = navigator.clipboard;
+    const copied: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async (text: string) => void copied.push(text) },
+    });
+    try {
+      await mountAnnotate();
+      await sendNote("keep the second example");
+      await waitFor(failureToast, "the failure message");
+
+      expect(submissions).toHaveLength(1);
+      expect(completionState()).toBeNull();
+      // Deliberate copy: the title says the feedback did not go out, and why.
+      expect(failureToast()!.textContent).toContain("Feedback not sent");
+      expect(failureToast()!.textContent).toContain("isn't running");
+      expect(primaryButton()!.disabled).toBe(false);
+
+      await act(async () => toastButton("Copy feedback")!.click());
+      await waitFor(() => copied.length > 0, "the copy");
+      // The annotate-file framing Copy adds (it names the file) around the note.
+      expect(copied[0]).toContain("keep the second example");
+      expect(copied[0]).toContain("/tmp/notes.md");
+      await waitFor(() => toastButton("Copied"), "the Copied label");
+      expect(Boolean(toastButton("Retry"))).toBe(true);
+    } finally {
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: clipboard });
+    }
+  });
+
+  test("answered 500: Retry sends the same note once and only then shows Feedback Sent", async () => {
+    setStorageBackend(memoryBackend);
+    seedAnnouncementsSeen();
+    failFeedbackPosts = 1;
+    await mountAnnotate();
+    await sendNote("hold the line");
+    await waitFor(failureToast, "the failure message");
+
+    expect(completionState()).toBeNull();
+    expect(failureToast()!.textContent).toContain("500");
+
+    await act(async () => toastButton("Retry")!.click());
+    await waitFor(() => completionState(), "the completion screen");
+    expect(submissions).toHaveLength(2);
+    const notes = globalComments(submissions[1]!);
+    expect(notes.map((n) => n.text)).toEqual(["hold the line"]);
+    expect(completionState()).toBe("denied");
+  });
+
+  test("annotate-last: server gone keeps the message review open and says so", async () => {
+    setStorageBackend(memoryBackend);
+    seedAnnouncementsSeen();
+    feedbackNetworkFailures = 1;
+    await mountAnnotate({ mode: "annotate-last", filePath: undefined });
+    await sendNote("answer the second question too");
+    await waitFor(failureToast, "the failure message");
+
+    expect(completionState()).toBeNull();
+    expect(failureToast()!.textContent).toContain("Feedback not sent");
+    expect(Boolean(toastButton("Copy feedback"))).toBe(true);
+  });
+
+  test("gate: an Approve answered 500 says Approval not sent and shows no Approved screen", async () => {
+    setStorageBackend(memoryBackend);
+    seedAnnouncementsSeen();
+    failApprovePosts = 1;
+    await mountAnnotate({ gate: true });
+    await act(async () => primaryButton()!.click());
+    await waitFor(failureToast, "the failure message");
+
+    expect(submissions[0]!.endpoint).toBe("approve");
+    expect(completionState()).toBeNull();
+    expect(failureToast()!.textContent).toContain("Approval not sent");
+    // A bare approval carries no text, so there is nothing to copy.
+    expect(Boolean(toastButton("Copy feedback"))).toBe(false);
+  });
+
+  test("a send that then succeeds leaves no failure message over Feedback Sent", async () => {
+    setStorageBackend(memoryBackend);
+    seedAnnouncementsSeen();
+    failFeedbackPosts = 1;
+    await mountAnnotate();
+    await sendNote("tighten the intro");
+    await waitFor(failureToast, "the failure message");
+
+    await act(async () => primaryButton()!.click());
+    await waitFor(() => completionState(), "the completion screen");
+    expect(completionState()).toBe("denied");
+    expect(failureToast()).toBeUndefined();
+  });
+
+  // Another window (or the agent) decided this review first: the server
+  // refuses with 409 already_decided. Retrying can never work, so the
+  // message says why and offers only Copy feedback.
+  test("already decided elsewhere: its own message, Copy feedback, no Retry", async () => {
+    setStorageBackend(memoryBackend);
+    seedAnnouncementsSeen();
+    refuseNextFeedbackAsDecided = true;
+    await mountAnnotate();
+    await sendNote("one more thing");
+    await waitFor(failureToast, "the failure message");
+
+    expect(completionState()).toBeNull();
+    expect(failureToast()!.textContent).toContain("Feedback not sent");
+    expect(failureToast()!.textContent).toContain("already decided");
+    expect(failureToast()!.textContent).not.toContain("409");
+    expect(Boolean(toastButton("Retry"))).toBe(false);
+    expect(Boolean(toastButton("Copy feedback"))).toBe(true);
   });
 });

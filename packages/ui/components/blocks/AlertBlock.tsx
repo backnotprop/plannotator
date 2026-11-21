@@ -1,11 +1,14 @@
 import React from 'react';
-import type { AlertKind } from '../../types';
+import type { AlertKind, Block } from '../../types';
+import { sourceLineAttrs } from '../../utils/sourceLineAttrs';
 import { renderProseBody } from './proseBody';
+import { CalloutBlocks, calloutNeedsBlocks, parseQuoteBody, useAtQuoteDepthCap } from './BlockquoteBlock';
 import { InlineMarkdown } from '../InlineMarkdown';
 import { parseAlertTitleLine } from '../../utils/alertTitle';
 
 interface AlertBlockProps {
   blockId: string;
+  sourceBlock?: Block;
   kind: AlertKind;
   body: string;
   onOpenLinkedDoc?: (path: string) => void;
@@ -61,7 +64,7 @@ const Icon: React.FC<{ kind: AlertKind }> = ({ kind }) => {
 };
 
 export const AlertBlock: React.FC<AlertBlockProps> = ({
-  blockId, kind, body, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, githubRepo, repoHost, onNavigateAnchor,
+  blockId, sourceBlock, kind, body, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, githubRepo, repoHost, onNavigateAnchor,
 }) => {
   const proseProps = { imageBaseDir, onImageClick, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, githubRepo, repoHost };
 
@@ -71,6 +74,17 @@ export const AlertBlock: React.FC<AlertBlockProps> = ({
   // takes the icon slot. See utils/alertTitle for the exact grammar. A body
   // with no such line renders exactly as before.
   const titleLine = parseAlertTitleLine(body);
+  const bodyText = titleLine ? titleLine.rest : body;
+  // A callout nests through the quote layout, so it stops where quotes stop:
+  // past the cap its body renders as prose text, inner markers included.
+  const atCap = useAtQuoteDepthCap();
+  const inner = React.useMemo(() => (atCap ? [] : parseQuoteBody(bodyText)), [atCap, bodyText]);
+  // Paragraphs and lists render as they always have; a fence, a table, a heading
+  // or a nested quote needs the block layout a plain quote gets.
+  const renderBody = () =>
+    calloutNeedsBlocks(inner)
+      ? <CalloutBlocks inner={inner} className="text-[15px] leading-relaxed text-foreground/90" {...proseProps} />
+      : renderProseBody({ body: bodyText, ...proseProps });
   // The emoji wins outright: the host renderer is consulted only for a title
   // line that carries an icon comment and no emoji (the seam contract).
   const icon = titleLine?.emoji
@@ -79,10 +93,11 @@ export const AlertBlock: React.FC<AlertBlockProps> = ({
 
   return (
     <div
-      className={`alert alert-${kind} my-4 pl-4 pr-3 py-2 border-l-[3px]`}
+      className={`alert alert-${kind} relative my-4 pl-4 pr-3 py-2 border-l-[3px] [overflow-wrap:anywhere]`}
       data-block-id={blockId}
       data-block-type="alert"
       data-alert-kind={kind}
+      {...sourceLineAttrs(sourceBlock)}
     >
       <div className="alert-title flex items-center gap-2 font-semibold mb-1">
         {icon}
@@ -109,9 +124,9 @@ export const AlertBlock: React.FC<AlertBlockProps> = ({
         ? (titleLine.rest.trim()
             // Indent the body by the icon's width plus the row gap so it starts
             // at the title's left edge (16px icon + 8px gap = pl-6).
-            ? <div className="alert-body pl-6">{renderProseBody({ body: titleLine.rest, ...proseProps })}</div>
+            ? <div className="alert-body pl-6">{renderBody()}</div>
             : null)
-        : renderProseBody({ body, ...proseProps })}
+        : renderBody()}
     </div>
   );
 };

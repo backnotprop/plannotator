@@ -9,7 +9,7 @@
  * name that stops saying what the pill is for, or the agents' marks being
  * read aloud or dropped while it says "Copied".
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, expect, jest, test } from 'bun:test';
 import { act } from 'react';
@@ -17,6 +17,7 @@ import { createRoot, type Root } from 'react-dom/client';
 
 const hasDom = typeof document !== 'undefined';
 const { Sidebar, CONNECT_COPIED_MS, CONNECT_COPY_FAILED_MS } = (hasDom ? await import('./components/Sidebar') : {}) as typeof import('./components/Sidebar');
+const { PHONE_QUERY } = (hasDom ? await import('./phone') : {}) as typeof import('./phone');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 
 const BIN = '/Users/ada/.local/bin/plannotator';
@@ -85,6 +86,11 @@ async function click(button: HTMLButtonElement) {
   });
 }
 
+/** The foot's rows in order: a sidebar item's wrapper (`.ib-side-item`, `display: contents`) is not a row of its own. */
+function footRows(foot: Element): Element[] {
+  return [...foot.children].flatMap((el) => (el.classList.contains('ib-side-item') ? [...el.children] : [el]));
+}
+
 test.skipIf(!hasDom)('a click copies the prompt naming this binary, says Copied, keeps focus, and goes back after 2 s', async () => {
   const written: string[] = [];
   override(navigator, 'clipboard', { writeText: async (text: string) => void written.push(text) });
@@ -93,8 +99,9 @@ test.skipIf(!hasDom)('a click copies the prompt naming this binary, says Copied,
 
   // The pill sits above Settings, in the foot (nothing between them without an update).
   const foot = host.querySelector('.ib-side-foot')!;
-  expect(row().parentElement === foot).toBe(true);
-  expect(row().nextElementSibling?.nextElementSibling?.querySelector('.ib-nav')?.textContent).toBe('Settings');
+  const rows = footRows(foot);
+  expect(rows.includes(row())).toBe(true);
+  expect(rows[rows.indexOf(row()) + 2]?.querySelector('.ib-nav')?.textContent).toBe('Settings');
   // Its name starts with the visible words and says what they are for; the marks are not read.
   expect(row().textContent).toBe(IDLE_NAME);
   const marks = () => row().querySelector('[aria-hidden="true"]')!.children;
@@ -127,7 +134,7 @@ test.skipIf(!hasDom)('a click copies the prompt naming this binary, says Copied,
 test.skipIf(!hasDom)("the pill sits above What's new, which sits above Settings", () => {
   const { host, row } = render([BIN, 'inbox', 'mcp'], { updated: '0.28.19' });
   const foot = host.querySelector<HTMLElement>('.ib-side-foot')!;
-  const order = [...foot.children]
+  const order = footRows(foot)
     .map((el) =>
       el.matches('button[data-connect-prompt]') ? 'pill'
       : el.matches('[data-whats-new-link]') ? 'whats-new'
@@ -136,7 +143,32 @@ test.skipIf(!hasDom)("the pill sits above What's new, which sits above Settings"
     )
     .filter(Boolean);
   expect(order).toEqual(['pill', 'whats-new', 'settings']);
-  expect(row().parentElement).toBe(foot);
+  expect(footRows(foot).includes(row())).toBe(true);
+});
+
+test.skipIf(!hasDom)('the pill is drawn on a desktop window and not in a phone sidebar', () => {
+  const phoneAt = (phone: boolean) =>
+    override(window, 'matchMedia', (query: string) => ({
+      matches: phone && query === PHONE_QUERY,
+      media: query,
+      onchange: null,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+      dispatchEvent: () => false,
+    }));
+  phoneAt(false);
+  const desktop = render([BIN, 'inbox', 'mcp']);
+  expect(desktop.row()).not.toBeNull();
+  act(() => root?.unmount());
+  document.body.innerHTML = '';
+
+  phoneAt(true);
+  const phone = render([BIN, 'inbox', 'mcp']);
+  expect(phone.host.querySelector('.ib-side-foot .ib-setrow')).not.toBeNull();
+  expect(phone.host.querySelector('[data-connect-prompt]')).toBeNull();
+  expect(phone.host.querySelector('[data-connect-prompt-live]')).toBeNull();
 });
 
 test.skipIf(!hasDom)('before the settings load it copies bare plannotator, and the path once they arrive', async () => {

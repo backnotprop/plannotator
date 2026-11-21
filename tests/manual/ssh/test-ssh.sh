@@ -1,4 +1,5 @@
 #!/bin/bash
+# Manual QA: runs inside the Docker image with its HOME and Plannotator config, unsandboxed, on purpose. For an isolated test run, use `bun run test:sandbox`.
 # Test script to simulate Plannotator running over SSH
 
 # Sample plan JSON input

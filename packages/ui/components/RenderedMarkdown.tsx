@@ -1,9 +1,12 @@
 import React, { useMemo } from 'react';
+import type { Block } from '../types';
 import { parseMarkdownToBlocks, groupBlocks, computeListIndices } from '../utils/parser';
 import { BlockRenderer } from './BlockRenderer';
 import { LocalLinkContext, type LocalLinkResolver } from './LocalLinkContext';
-import { ImageResolverContext, type ImageResolver } from './ImageResolverContext';
+import { ImageResolverContext, PreserveResolvedVideosContext, ResolvedResponsiveImagesContext, type ImageResolver } from './ImageResolverContext';
+import { SoftLineBreaksContext } from './InlineMarkdown';
 import { buildHeadingSlugMap } from '../utils/slugify';
+import { FootnoteList, FootnoteProvider, useFootnotes } from './footnotes/Footnotes';
 
 /**
  * Full markdown renderer for surfaces outside the plan editor (e.g. the PR
@@ -33,11 +36,23 @@ export interface RenderedMarkdownProps {
    * Absent, images resolve exactly as before.
    */
   resolveImage?: ImageResolver;
+  /** Preserve raw HTML videos when the image resolver is only a URL rewriter. */
+  preserveVideos?: boolean;
+  /** With `resolveImage`: keep raw HTML's `<picture><source>` and `srcset`, each candidate resolved (see ResolvedResponsiveImagesContext). */
+  responsiveImages?: boolean;
+  /** Optional host rendering for paragraphs; the fallback keeps the standard renderer. */
+  renderParagraph?: (block: Block, fallback: React.ReactNode) => React.ReactNode;
   /**
    * Optional: give headings slug ids (Viewer's slugger, GitHub dedup), so a
    * host can scroll to `#section` links. Absent/false, headings carry no id.
    */
   headingAnchors?: boolean;
+  /**
+   * Optional: draw every bare newline in inline text as a line break, as
+   * GitHub does for issue, PR and comment text. Absent/false, a bare newline
+   * stays a space. Code blocks and paragraph spacing are not affected.
+   */
+  softLineBreaks?: boolean;
 }
 
 export const RenderedMarkdown: React.FC<RenderedMarkdownProps> = ({
@@ -50,15 +65,24 @@ export const RenderedMarkdown: React.FC<RenderedMarkdownProps> = ({
   repoHost,
   resolveLocalLink,
   resolveImage,
+  preserveVideos = false,
+  responsiveImages = false,
+  renderParagraph,
   headingAnchors = false,
+  softLineBreaks = false,
 }) => {
   const blocks = useMemo(() => parseMarkdownToBlocks(markdown), [markdown]);
-  const groups = useMemo(() => groupBlocks(blocks), [blocks]);
+  const footnotes = useFootnotes(blocks);
+  const groups = useMemo(() => groupBlocks(footnotes ? footnotes.bodyBlocks : blocks), [blocks, footnotes]);
   const headingSlugMap = useMemo(
     () => (headingAnchors ? buildHeadingSlugMap(blocks) : null),
     [blocks, headingAnchors],
   );
   const cb = { onImageClick, onOpenLinkedDoc, onOpenCodeFile, githubRepo, repoHost };
+  const renderBlock = (block: Block) => {
+    const fallback = <BlockRenderer block={block} headingAnchorId={headingSlugMap?.get(block.id)} {...cb} />;
+    return block.type === 'paragraph' && renderParagraph ? renderParagraph(block, fallback) : fallback;
+  };
 
   let body = (
     <div className={className}>
@@ -75,13 +99,24 @@ export const RenderedMarkdown: React.FC<RenderedMarkdownProps> = ({
             );
           })()
         ) : (
-          <BlockRenderer key={group.block.id} block={group.block} headingAnchorId={headingSlugMap?.get(group.block.id)} {...cb} />
+          <React.Fragment key={group.block.id}>{renderBlock(group.block)}</React.Fragment>
         ),
       )}
+      {footnotes && <FootnoteList index={footnotes} {...cb} />}
     </div>
   );
+  body = <FootnoteProvider index={footnotes}>{body}</FootnoteProvider>;
   // Provide only what the caller passed, so an enclosing provider still
   // applies when a prop is absent.
+  if (softLineBreaks) {
+    body = <SoftLineBreaksContext.Provider value={true}>{body}</SoftLineBreaksContext.Provider>;
+  }
+  if (preserveVideos) {
+    body = <PreserveResolvedVideosContext.Provider value={true}>{body}</PreserveResolvedVideosContext.Provider>;
+  }
+  if (responsiveImages) {
+    body = <ResolvedResponsiveImagesContext.Provider value={true}>{body}</ResolvedResponsiveImagesContext.Provider>;
+  }
   if (resolveImage) {
     body = <ImageResolverContext.Provider value={resolveImage}>{body}</ImageResolverContext.Provider>;
   }

@@ -40,11 +40,21 @@ import { isAbsolute, join, resolve } from "node:path";
 import {
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
+  INBOX_PLACE_POLL_FIELD,
   INBOX_SEND_NOW_POLL_FIELD,
+  INBOX_STEER_POLLS_POLL_FIELD,
+  inboxClaimName,
   INBOX_TAGS_POLL_FIELD,
+  INBOX_TOOL_NAME,
+  inboxHealthPeeks,
+  inboxPlaceFromEnv,
+  inboxSessionThreadsParams,
+  inboxSessionThreadsText,
   inboxToolCall,
+  inboxResultWithNote,
   inboxToolCallParams,
   inboxToolResultText,
+  inboxToolsWithoutBro,
   inboxWakeText,
   mcpAnswerOfResponse,
   parseInboxBridgeCommands,
@@ -53,10 +63,17 @@ import {
   type InboxRegistryView,
   type InboxReplyCommand,
   type InboxToolInfo,
+  inboxBlockedField,
+  type InboxBlockedKind,
+  INBOX_OFF_LINE,
 } from "./connection";
+import { isInboxTurnedOn } from "./turned-on";
+import { directFetchInit } from "../loopback-proxy";
 
 /** The longest a host's start waits for a running Inbox's `tools/list` (the mod's bound). */
 export const INBOX_DISCOVER_TIMEOUT_MS = 2_000;
+/** The longest the session's thread list may take (the Claude Code mod's bound); past it there is no list. */
+export const INBOX_SESSION_THREADS_TIMEOUT_MS = 1_500;
 /** Poll wait asked of the bridge (the server holds at most 25 s). */
 export const INBOX_POLL_WAIT_MS = 20_000;
 /** After a failed poll: 5 s, doubling to 60 s while the Inbox stays away, never giving up. */
@@ -87,13 +104,12 @@ function rememberedToolsFileOf(dataDir: string): string {
 }
 
 /**
- * The claim folder of one delivery. A reply that tags agents goes to several
- * sessions, which may share this data dir (two Pi sessions, Pi and OpenCode):
- * a tagged session's claim names its session too, so each is delivered once.
+ * The claim folder of one delivery. A reply can go to several sessions, which may share this data dir (two Pi
+ * sessions, Pi and OpenCode): a reply that tags agents, or one moved after its session stopped holding the claim. So
+ * the claim names the session too, and each is delivered once.
  */
-function claimDirOf(dataDir: string, replyId: string, taggedSession?: string | null): string {
-  const name = taggedSession ? `${replyId}.${taggedSession.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120)}` : replyId;
-  return join(dataDir, "inbox", "claims", name);
+function claimDirOf(dataDir: string, replyId: string, session: string): string {
+  return join(dataDir, "inbox", "claims", inboxClaimName(replyId, session));
 }
 
 /** One session's lease on one host: which of its processes polls and delivers. */
@@ -143,12 +159,12 @@ async function mcpCall(
   params: Record<string, unknown>,
   signal?: AbortSignal,
 ): Promise<{ result?: unknown; error?: { message?: string } } | null> {
-  const response = await fetch(`http://127.0.0.1:${port}/mcp`, {
+  const response = await fetch(`http://127.0.0.1:${port}/mcp`, directFetchInit({
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
     signal,
-  });
+  }));
   return mcpAnswerOfResponse(response.status, await response.text());
 }
 
@@ -184,7 +200,7 @@ export async function discoverInboxTools(
   } catch {
     remembered = null;
   }
-  const tools = parseInboxToolList(remembered);
+  const tools = inboxToolsWithoutBro(parseInboxToolList(remembered));
   return tools.length > 0 ? tools : null;
 }
 
@@ -207,6 +223,8 @@ export interface InboxAgentConnectionOptions {
   tools: readonly InboxToolInfo[];
   /** The command that starts the Inbox. Default: PLANNOTATOR_BIN, else `plannotator` on PATH, else ~/.local/bin/plannotator. */
   command?: string;
+  /** The environment the host started with, where its place is read (`inboxPlaceFromEnv`). Default: process.env. */
+  env?: Readonly<Record<string, string | undefined>>;
 }
 
 /** The `plannotator_inbox` tool and the bridge doors, for one host process. */
@@ -256,13 +274,39 @@ export class InboxAgentConnection {
       if (/not found|unknown tool/i.test(message)) return { text: `This Plannotator Inbox has no ${call.name}; update Plannotator. (${message})`, isError: true };
       return { text: `The Plannotator Inbox refused the call: ${message}`, isError: true };
     }
-    return inboxToolResultText(answer.result);
+    const result = inboxToolResultText(answer.result);
+    // A call the host could not parse, read again with a bare id quoted: the result says so.
+    return { ...result, text: inboxResultWithNote(result.text, call.note) };
+  }
+
+  /**
+   * The session's open threads as a few short lines (`inboxSessionThreadsText`),
+   * or null: no Inbox has run here, it is not running (it is never started
+   * for this), it did not answer within `timeoutMs`, there is no open
+   * thread, or the Inbox is older than the peek mark (no `peek: true` in its
+   * health: it would make a project for the folder). Read with the peek mark, so the Inbox makes no project and the
+   * rows do not count as the session having read them. Never throws.
+   */
+  async sessionThreads(at: { sessionId: string; cwd: string }, toolName: string = INBOX_TOOL_NAME, timeoutMs = INBOX_SESSION_THREADS_TIMEOUT_MS): Promise<string | null> {
+    const registry = readRegistry(this.dataDir);
+    if (!registry || !at.sessionId || !at.cwd) return null;
+    const signal = AbortSignal.timeout(timeoutMs);
+    try {
+      const health = await fetch(`http://127.0.0.1:${registry.port}/api/inbox/health`, directFetchInit({ signal }));
+      if (health.status !== 200 || !inboxHealthPeeks(await health.json(), registry.serverSession)) return null;
+      const answer = await mcpCall(registry.port, "tools/call", inboxSessionThreadsParams(at.cwd, at.sessionId), signal);
+      if (!answer || !("result" in answer)) return null;
+      const result = answer.result as { isError?: unknown } | undefined;
+      return result?.isError === true ? null : inboxSessionThreadsText(result, toolName);
+    } catch {
+      return null;
+    }
   }
 
   /** Running: the registry's port answers health with the registry's serverSession. */
   private async isRunning(registry: InboxRegistryView): Promise<boolean> {
     try {
-      const response = await fetch(`http://127.0.0.1:${registry.port}/api/inbox/health`, { signal: AbortSignal.timeout(5_000) });
+      const response = await fetch(`http://127.0.0.1:${registry.port}/api/inbox/health`, directFetchInit({ signal: AbortSignal.timeout(5_000) }));
       if (response.status !== 200) return false;
       return ((await response.json()) as { serverSession?: unknown }).serverSession === registry.serverSession;
     } catch {
@@ -272,6 +316,8 @@ export class InboxAgentConnection {
 
   /** The running Inbox, starting a stopped one detached (no browser) first. */
   async ensureRunning(): Promise<InboxRegistryView | { error: string }> {
+    // Not turned on here (turned-on.ts): nothing is reached or started.
+    if (!isInboxTurnedOn(this.dataDir)) return { error: INBOX_OFF_LINE };
     const known = readRegistry(this.dataDir);
     if (known && (await this.isRunning(known))) return known;
     const started = await this.startInbox();
@@ -282,6 +328,7 @@ export class InboxAgentConnection {
     }
     if (started.exitCode !== 0) {
       const why = started.output.trim() || `exit ${started.exitCode}`;
+      if (why.includes(INBOX_OFF_LINE)) return { error: INBOX_OFF_LINE };
       if (/unknown command/i.test(why)) return { error: "The plannotator on PATH has no Inbox (an older version); update Plannotator." };
       return { error: `The Plannotator Inbox did not start: ${why}` };
     }
@@ -302,12 +349,12 @@ export class InboxAgentConnection {
     const registry = readRegistry(this.dataDir);
     if (!registry) return null;
     try {
-      const response = await fetch(`http://127.0.0.1:${registry.port}${path}`, {
+      const response = await fetch(`http://127.0.0.1:${registry.port}${path}`, directFetchInit({
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${registry.token}` },
         body: JSON.stringify({ session, host: this.options.host, ...body }),
         signal,
-      });
+      }));
       return { status: response.status, text: await response.text() };
     } catch {
       return null;
@@ -444,12 +491,57 @@ export interface InboxWakeTarget {
    */
   projectPath?(): string | null | undefined | Promise<string | null | undefined>;
   /**
+   * The session's title as its host keeps it (OpenCode 2: `Session.title`; Pi:
+   * the name someone gave the session), read for every poll, so a later title
+   * replaces it. `""` says it has none, which clears it (a default title is
+   * none). null, undefined or a throw say it cannot tell now: the poll repeats
+   * the last word, since sending nothing would clear the label too. Set by the
+   * host, never by the model: it is no tool argument. Optional: a host without
+   * it sends no `label`.
+   */
+  label?(): string | null | undefined | Promise<string | null | undefined>;
+  /**
    * The version of Plannotator's plugin or extension this process loaded
    * (Pi: the extension's package.json). Each poll carries it as `plugin:
    * { version }`, so the Inbox can say when the session runs an older one.
-   * Optional: a host without it sends nothing.
+   * Optional: a host without it sends nothing. `plugin` wins when both exist.
    */
   pluginVersion?(): string | null;
+  /**
+   * What this process loaded AND what is on disk now (owner approval
+   * "reload-hosts"): `{ version, on_disk, host }`. `on_disk` is null when the
+   * package is gone from disk (OpenCode 2: its generation folder was
+   * deleted), `host` `oh-my-pi` inside Oh My Pi. Each poll carries it as
+   * `plugin`, so the Inbox can say which command loads the newer code.
+   */
+  plugin?(): InboxLoadedPluginReport | null;
+  /**
+   * The session waits on the person in its own terminal now (blocked.ts): a permission prompt or a question, the kind
+   * only. Asked every tick (keep it cheap: no I/O); a change goes to the Inbox at once as a `state` event, and every
+   * poll repeats it. Null once the prompt is answered or the turn ends. Optional: a host without it never says so.
+   */
+  blocked?(): InboxBlockedKind | null;
+}
+
+/** A poll's `plugin` as Pi, Oh My Pi and OpenCode 2 send it. */
+export interface InboxLoadedPluginReport {
+  version: string;
+  on_disk: string | null;
+  host?: "pi" | "oh-my-pi";
+}
+
+/**
+ * A `deliver` failure for a reason that passes (DeepSeek Harness: the session
+ * closed and cleared its queue before a turn read the reply). The wake gives
+ * the claim back instead of reporting the reply lost, so it waits and a later
+ * wake of the session delivers it.
+ */
+export class InboxDeliverLater extends Error {
+  readonly deliverLater = true;
+}
+
+function isInboxDeliverLater(error: unknown): boolean {
+  return error instanceof InboxDeliverLater || (typeof error === "object" && error !== null && (error as { deliverLater?: unknown }).deliverLater === true);
 }
 
 /**
@@ -483,12 +575,18 @@ export class InboxWake {
   private touchedAt = 0;
   /** When this wake started: the poll's `started_at`, as the Claude Code mod sends it. */
   private readonly startedAt = Date.now();
+  /** The last title the host could say; what a poll repeats when it cannot tell. */
+  private lastLabel = "";
   /** Whether a turn runs, as last asked (null until asked), and since when the session is idle. */
   private busy: boolean | null = null;
   private idleSince: number | null = null;
   private stateCheckedAt = Number.NEGATIVE_INFINITY;
   /** Whether Send now could go in, as last told to the Inbox. */
   private lastSteerable: boolean | null = null;
+  /** What the session waits on in its terminal, as last told to the Inbox (`target.blocked`). */
+  private blocked: InboxBlockedKind | null = null;
+  /** When `blocked` last changed (INBOX_BLOCKED_AT_FIELD): this link's start until the first change. */
+  private blockedAt = Date.now();
 
   constructor(
     private readonly connection: InboxAgentConnection,
@@ -572,6 +670,7 @@ export class InboxWake {
       busy = await this.target.isBusy();
       this.noteBusy(busy, asked);
     }
+    this.noteBlocked();
     this.idleTicks = this.pending.size === 0 || busy !== false ? 0 : this.idleTicks + 1;
     for (const id of [...this.unacked]) await this.acknowledge(id);
     const now = Date.now();
@@ -587,11 +686,13 @@ export class InboxWake {
       (this.steerable || busy === false);
     if (!this.delivering && this.pending.size > 0 && (this.idleTicks >= 2 || urgent)) {
       this.delivering = true;
-      try {
-        await this.deliverNext(this.idleTicks < 2 && urgent);
-      } finally {
-        this.delivering = false;
-      }
+      // Not awaited: a steer resolves only when the message enters the run, which a long tool call can hold for
+      // minutes, and the tick has to go on polling meanwhile, or the session reads as ended (the Claude Code mod's way).
+      void this.deliverNext(this.idleTicks < 2 && urgent)
+        .catch(() => undefined)
+        .finally(() => {
+          this.delivering = false;
+        });
     }
   }
 
@@ -615,9 +716,35 @@ export class InboxWake {
     this.lastSteerable = steerable;
     if (known && this.leader && !this.disposed) {
       void this.connection
-        .bridge(INBOX_BRIDGE_EVENT_PATH, this.sessionId, { type: "state", busy, idle_since: this.idleSince, [INBOX_SEND_NOW_POLL_FIELD]: steerable })
+        .bridge(INBOX_BRIDGE_EVENT_PATH, this.sessionId, { type: "state", busy, idle_since: this.idleSince, [INBOX_SEND_NOW_POLL_FIELD]: steerable, ...inboxBlockedField(this.blocked, this.blockedAt) })
         .catch(() => null);
     }
+  }
+
+  /**
+   * A prompt came up in the session's terminal, or went (`target.blocked`): the Inbox hears it at once, as a `state`
+   * event carrying the kind (none: cleared). Through `bridge`, which sends nothing while no Inbox exists (no
+   * registry: no request, no file).
+   */
+  private noteBlocked(): void {
+    let blocked: InboxBlockedKind | null = null;
+    try {
+      blocked = this.target.blocked?.() ?? null;
+    } catch {
+      blocked = null;
+    }
+    if (blocked === this.blocked) return;
+    this.blocked = blocked;
+    this.blockedAt = Math.max(Date.now(), this.blockedAt + 1);
+    if (!this.leader || this.disposed) return;
+    void this.connection
+      .bridge(INBOX_BRIDGE_EVENT_PATH, this.sessionId, {
+        type: "state",
+        ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
+        [INBOX_SEND_NOW_POLL_FIELD]: this.steerable,
+        ...inboxBlockedField(blocked, this.blockedAt),
+      })
+      .catch(() => null);
   }
 
   /**
@@ -634,25 +761,43 @@ export class InboxWake {
     } catch {
       projectPath = null;
     }
-    let pluginVersion: string | null = null;
     try {
-      pluginVersion = this.target.pluginVersion?.() ?? null;
+      const label = await this.target.label?.();
+      if (typeof label === "string") this.lastLabel = label;
     } catch {
-      pluginVersion = null;
+      // It cannot tell now: the last word stands.
     }
+    let plugin: InboxLoadedPluginReport | { version: string } | null = null;
+    try {
+      plugin = this.target.plugin?.() ?? null;
+      if (!plugin) {
+        const version = this.target.pluginVersion?.() ?? null;
+        plugin = version ? { version } : null;
+      }
+    } catch {
+      plugin = null;
+    }
+    const place = inboxPlaceFromEnv(this.connection.options.env ?? process.env);
     const response = await this.connection.bridge(
       INBOX_BRIDGE_POLL_PATH,
       this.sessionId,
       {
         waitMs,
         ...(typeof projectPath === "string" && projectPath ? { project_path: projectPath } : {}),
+        // Where the host lives (a Rex pane's ids): a hint the Inbox checks against Rex before it shows anything.
+        ...(place ? { [INBOX_PLACE_POLL_FIELD]: place } : {}),
+        // The host's title for the session (additive): the To picker's name for it; empty clears it.
+        ...(this.target.label ? { label: this.lastLabel } : {}),
         started_at: this.startedAt,
         ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
         ...(this.steerable ? { [INBOX_SEND_NOW_POLL_FIELD]: true } : {}),
+        // A prompt up in its terminal (blocked.ts): said again on every poll while it lasts.
+        ...inboxBlockedField(this.blocked, this.blockedAt),
+        [INBOX_STEER_POLLS_POLL_FIELD]: true,
         // Tags (approval "inbox-tag-agents"): this connection words a reply it was tagged in truthfully.
         [INBOX_TAGS_POLL_FIELD]: true,
         // What this process loaded (additive): the Inbox says when the session runs an older one.
-        ...(pluginVersion ? { plugin: { version: pluginVersion } } : {}),
+        ...(plugin?.version ? { plugin } : {}),
       },
       signal,
     );
@@ -673,6 +818,9 @@ export class InboxWake {
       }
       this.backoffMs = 0;
       this.retryAt = 0;
+      // What the Inbox stopped handing out is done with here: handed out again (the reply moved back), it is new.
+      const handedOut = new Set(commands.map((command) => command.id));
+      for (const id of this.settled) if (!handedOut.has(id)) this.settled.delete(id);
       for (const command of commands) {
         // A later poll may carry `now` (the person pressed Send now): the newest command wins.
         if (!this.settled.has(command.id)) this.pending.set(command.id, command);
@@ -693,14 +841,17 @@ export class InboxWake {
    * running turn when one runs (`steer`), else as a turn at once.
    */
   private async deliverNext(urgent = false): Promise<void> {
-    const command = this.pending.values().next().value as InboxReplyCommand | undefined;
-    if (!command) return;
+    const waiting = this.pending.values().next().value as InboxReplyCommand | undefined;
+    if (!waiting) return;
     // Still waiting? An agent may have read it through the tool meanwhile, or
     // another process delivered it.
     const fresh = await this.pendingNow(0);
     if (fresh === null || this.disposed) return;
-    if (!fresh.some((candidate) => candidate.id === command.id)) {
-      this.settle(command.id);
+    // What the Inbox says now is what goes in: a reply can have moved here since it was first handed out.
+    const command = fresh.find((candidate) => candidate.id === waiting.id);
+    if (!command) {
+      // Not settled: nothing went in here, so if the reply moves back before the next poll, it goes in.
+      this.pending.delete(waiting.id);
       return;
     }
     const busy = await this.target.isBusy();
@@ -711,7 +862,12 @@ export class InboxWake {
     }
     // The person may have moved to another process since the last tick.
     if (this.disposed || !this.holdLease(Date.now())) return;
-    const claim = claimDirOf(this.connection.dataDir, command.id, command.tagged ? this.sessionId : null);
+    // An older version's claim, by the reply id alone: that process took it (the Inbox removes it when it moves the reply).
+    if (!command.tagged && existsSync(join(this.connection.dataDir, "inbox", "claims", command.id))) {
+      this.settle(command.id);
+      return;
+    }
+    const claim = claimDirOf(this.connection.dataDir, command.id, this.sessionId);
     try {
       mkdirSync(join(claim, ".."), { recursive: true, mode: 0o700 });
       mkdirSync(claim, { mode: 0o700 });
@@ -720,6 +876,9 @@ export class InboxWake {
       if ((error as NodeJS.ErrnoException).code === "EEXIST") this.settle(command.id);
       return;
     }
+    // Who holds it: the Inbox calls it stuck only once this process is gone (never while it may still deliver).
+    writeQuietly(join(claim, "by"), this.instanceId);
+    writeQuietly(join(claim, "pid"), String(process.pid));
     if (steering) {
       try {
         await this.target.steer!(inboxWakeText(command), command);
@@ -744,6 +903,16 @@ export class InboxWake {
     try {
       await this.target.deliver(inboxWakeText(command), command);
     } catch (error) {
+      if (isInboxDeliverLater(error)) {
+        // Lost for a reason that passes (the session closed with it queued): give the claim back, so the
+        // reply waits, as after a failed Send now, and a later wake of this session delivers it.
+        try {
+          rmSync(claim, { recursive: true, force: true });
+        } catch {
+          // A leftover claim: another process reports it.
+        }
+        return;
+      }
       this.settle(command.id);
       writeQuietly(join(claim, "reported"), "1");
       this.target.notify(

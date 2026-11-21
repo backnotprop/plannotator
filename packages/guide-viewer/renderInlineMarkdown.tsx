@@ -1,4 +1,5 @@
 import React from 'react';
+import { isCodeFilePath } from '@plannotator/core/code-file';
 import { GUIDE_LINK_TARGET_SOURCE } from '@plannotator/core/guide-links';
 
 /**
@@ -8,8 +9,26 @@ import { GUIDE_LINK_TARGET_SOURCE } from '@plannotator/core/guide-links';
  */
 export type GuideLinkRenderer = (href: string, label: React.ReactNode, key: number) => React.ReactNode | null;
 
+/**
+ * A host's own wrap for an inline code span that names a code file (`src/a.ts:12`): `text` is the span's words, `code`
+ * the span as it is drawn without a host. With no provider, nothing changes.
+ */
+export type GuideCodeSpanRenderer = (text: string, code: React.ReactNode) => React.ReactNode;
+export const GuideCodeSpanContext = React.createContext<GuideCodeSpanRenderer | null>(null);
+
+function GuideCodeSpan({ text, children }: { text: string; children: React.ReactNode }) {
+  const wrap = React.useContext(GuideCodeSpanContext);
+  return <>{wrap && isCodeFilePath(text) ? wrap(text, children) : children}</>;
+}
+
+// An http(s) link's or image's destination, with the optional title markdown
+// allows after it. The URL reads one level of balanced parentheses, as
+// `INLINE_DESTINATION` and `GUIDE_LINK_TARGET_SOURCE` already do.
+const URL_DESTINATION = String.raw`(https?:\/\/(?:[^()\s]|\([^()\s]*\))*)(?:[ \t]+(?:"[^"]*"|'[^']*'))?`;
+
 export interface InlineMarkdownOptions {
   renderLink?: GuideLinkRenderer;
+  resolveImageSrc?: (src: string) => string;
 }
 
 /**
@@ -45,7 +64,7 @@ export function renderInlineMarkdown(text: string, opts?: InlineMarkdownOptions)
   return nodes;
 }
 
-function renderInline(text: string, startKey: number, opts?: InlineMarkdownOptions): React.ReactNode[] {
+function renderInline(text: string, startKey: number, opts?: InlineMarkdownOptions, inLink = false): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
   let key = startKey;
 
@@ -53,7 +72,7 @@ function renderInline(text: string, startKey: number, opts?: InlineMarkdownOptio
   // The last alternative is a guide link: [label](code:…|symbol:…|chapter:…),
   // its target read as guide-links reads it (balanced parentheses allowed).
   const regex = new RegExp(
-    String.raw`(\[([^\]]+)\]\((https?:\/\/[^)]+)\)|` + '`[^`]+`' + String.raw`|\*\*[^*]+\*\*|(?<!\w)_([^_\s](?:[\s\S]*?[^_\s])?)_(?!\w)|\*[^*]+\*|https?:\/\/[^\s<)\]]+|\[([^\]]+)\]\((${GUIDE_LINK_TARGET_SOURCE})\))`,
+    String.raw`(\[([^\]]+)\]\(${URL_DESTINATION}\)|` + '`[^`]+`' + String.raw`|\*\*[^*]+\*\*|(?<!\w)_([^_\s](?:[\s\S]*?[^_\s])?)_(?!\w)|\*[^*]+\*|https?:\/\/[^\s<)\]]+|\[([^\]]+)\]\((${GUIDE_LINK_TARGET_SOURCE})\))`,
     'g',
   );
   let lastIndex = 0;
@@ -72,7 +91,7 @@ function renderInline(text: string, startKey: number, opts?: InlineMarkdownOptio
 
     const token = match[0];
     if (match[5] !== undefined && match[6] !== undefined) {
-      const label = renderInline(match[5], 0);
+      const label = renderInline(match[5], 0, undefined, true);
       const rendered = opts?.renderLink?.(match[6], label, key);
       nodes.push(rendered ?? <span key={key} data-guide-link={match[6]}>{label}</span>);
       key++;
@@ -82,7 +101,7 @@ function renderInline(text: string, startKey: number, opts?: InlineMarkdownOptio
         nodes.push(
           <img
             key={key++}
-            src={match[3]}
+            src={opts?.resolveImageSrc?.(match[3]) ?? match[3]}
             alt={match[2]}
             loading="lazy"
             className="max-w-full h-auto rounded my-1"
@@ -98,7 +117,9 @@ function renderInline(text: string, startKey: number, opts?: InlineMarkdownOptio
         );
       }
     } else if (token.startsWith('`')) {
-      nodes.push(<code key={key++} className="inline-code">{token.slice(1, -1)}</code>);
+      // A span inside a guide link's label is that link's words: the link decides what a click does.
+      const code = <code className="inline-code">{token.slice(1, -1)}</code>;
+      nodes.push(inLink ? <React.Fragment key={key++}>{code}</React.Fragment> : <GuideCodeSpan key={key++} text={token.slice(1, -1)}>{code}</GuideCodeSpan>);
     } else if (token.startsWith('**')) {
       nodes.push(<strong key={key++}>{token.slice(2, -2)}</strong>);
     } else if (token.startsWith('_')) {

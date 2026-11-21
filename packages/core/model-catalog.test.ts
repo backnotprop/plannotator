@@ -5,9 +5,11 @@ import {
   claudeCatalogFromSdk,
   claudeModelVersion,
   cliVersionFrom,
+  modelFallbackNotice,
   modelSelectOptions,
   piCatalogFromRpc,
   piThinkingLevelsSupported,
+  qwenCatalogFromSettings,
   resolveEffortChoice,
   resolveModelChoice,
   type CatalogModel,
@@ -144,7 +146,7 @@ describe("resolveModelChoice", () => {
   });
 
   test("a stale pinned id keeps its family instead of taking the surface default", () => {
-    // Tour/guide default to sonnet, review to opus: neither may win over the
+    // Guide defaults to sonnet, review to opus: neither may win over the
     // family the user picked.
     expect(resolveModelChoice("claude-opus-5-5", catalog, "sonnet")).toBe("opus");
     expect(resolveModelChoice("claude-opus-5", catalog, "sonnet")).toBe("opus");
@@ -216,8 +218,16 @@ test("claudeModelVersion reads major.minor and ignores date and [1m] suffixes", 
   expect(claudeModelVersion(undefined)).toBeUndefined();
 });
 
-test("the Codex fallback defaults to GPT-6-Sol, which codex >= 0.155 lists", () => {
-  expect(CODEX_FALLBACK_MODELS.filter((m) => m.default).map((m) => m.id)).toEqual(["gpt-6-sol"]);
+test("a saved model the CLI no longer offers gets one quiet line; the same model under its alias gets none", () => {
+  const offered = [
+    { id: "opus", label: "Opus 5.5 (latest)", resolvedId: "claude-opus-5-5" },
+    { id: "sonnet", label: "Sonnet 5.5 (latest)" },
+  ];
+  expect(modelFallbackNotice("claude-opus-4-1", offered, "opus", "Claude")).toBe("claude-opus-4-1 isn't offered by Claude any more. Using Opus 5.5 (latest).");
+  expect(modelFallbackNotice("claude-opus-5-5", offered, "opus", "Claude")).toBeNull();
+  expect(modelFallbackNotice("sonnet", offered, "sonnet", "Claude")).toBeNull();
+  expect(modelFallbackNotice("", offered, "sonnet", "Claude")).toBeNull();
+  expect(modelFallbackNotice("openai/gpt-4o", [{ id: "", label: "Default" }, { id: "openai/gpt-6-sol", label: "GPT-6 Sol" }], "", "Pi")).toBe("openai/gpt-4o isn't offered by Pi any more. Using Default.");
 });
 
 test("cliVersionFrom reads the version from claude --version and the codex userAgent", () => {
@@ -291,5 +301,42 @@ describe("piCatalogFromRpc", () => {
     expect(piThinkingLevelsSupported("1.0.0")).toBe(true);
     expect(piThinkingLevelsSupported("0.84.2")).toBe(false);
     expect(piThinkingLevelsSupported("garbage")).toBe(false);
+  });
+});
+
+describe("qwenCatalogFromSettings", () => {
+  const PROVIDERS = {
+    openai: [
+      { id: "qwen3-coder-plus", name: "Qwen3 Coder Plus" },
+      { id: "gpt-local" },
+      { id: "qwen3-coder-plus", name: "Duplicate" },
+      { name: "no id" },
+      null,
+    ],
+    anthropic: [{ id: "claude-via-qwen", name: "Claude" }],
+  };
+
+  test("lists the selected auth type's models, the active model as default", () => {
+    expect(qwenCatalogFromSettings({ model: { name: "gpt-local" }, modelProviders: PROVIDERS })).toEqual([
+      { id: "qwen3-coder-plus", label: "Qwen3 Coder Plus" },
+      { id: "gpt-local", label: "gpt-local", default: true },
+    ]);
+    // `qwen -m` resolves against the selected type only, so another type's models are not offered.
+    expect(
+      qwenCatalogFromSettings({ security: { auth: { selectedType: "anthropic" } }, modelProviders: PROVIDERS }),
+    ).toEqual([{ id: "claude-via-qwen", label: "Claude", default: true }]);
+  });
+
+  test("an active model the list does not name comes first; no settings means no models", () => {
+    expect(qwenCatalogFromSettings({ model: { name: "coder-model" }, modelProviders: PROVIDERS }).slice(0, 2)).toEqual([
+      { id: "coder-model", label: "coder-model", default: true },
+      { id: "qwen3-coder-plus", label: "Qwen3 Coder Plus" },
+    ]);
+    expect(qwenCatalogFromSettings({ security: { auth: { selectedType: "qwen-oauth" } }, model: { name: "coder-model" } })).toEqual([
+      { id: "coder-model", label: "coder-model", default: true },
+    ]);
+    expect(qwenCatalogFromSettings({})).toEqual([]);
+    expect(qwenCatalogFromSettings(null)).toEqual([]);
+    expect(qwenCatalogFromSettings({ modelProviders: { openai: "not a list" } })).toEqual([]);
   });
 });

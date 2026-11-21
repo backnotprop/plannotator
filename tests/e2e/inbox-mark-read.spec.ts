@@ -15,11 +15,12 @@
  *    words-only Send after Skip it is one reply: one new person message,
  *    carrying the skip and the words, to the message that asked;
  *  - a words-only reply left as it is keeps every question open, and the
- *    agent's wait_for_reply gets the words plus the still-open line;
+ *    agent's read_thread gets the words plus the still-open line;
  *  - Mark read moves a thread to Quiet ("Read"), and an agent's new message
  *    brings it back to the top;
  *  - Mark read on a thread an agent is stopped on warns, and Z undoes it;
- *  - the row's hover action, and its Undo;
+ *  - the row's hover action, and its Undo; on a touch tablet (no hover) no
+ *    action shows and one tap opens the thread;
  *  - the toast's × and a swipe close it early, its Undo with it (Z no longer
  *    undoes), a short drag springs back, and the longest one-line toasts stay
  *    one line with the ×.
@@ -28,7 +29,7 @@
  * PNGs at 1440 by 900 land in .local/proof/mark-read/.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -129,7 +130,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-markread-e2e-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -175,6 +176,23 @@ test.afterAll(async () => {
     await removeInboxScratch();
   }
 });
+
+
+/** The thread header's ⋯ More, its read action: Mark read, or Move back to the top on a thread marked read. */
+async function readAction(page: Page): Promise<string> {
+  await page.locator('section.ib-pane [data-thread-more]').click();
+  const item = page.locator('[data-thread-menu] :is([data-thread-read-item], [data-thread-move-back-item])').first();
+  const label = ((await item.textContent()) ?? '').trim();
+  await page.locator('[data-thread-menu]').press('Escape');
+  await expect(page.locator('[data-thread-menu]')).toHaveCount(0);
+  return label;
+}
+
+/** Choose the ⋯ menu's Mark read (or Move back to the top). */
+async function chooseRead(page: Page, which: 'read' | 'move-back' = 'read'): Promise<void> {
+  await page.locator('section.ib-pane [data-thread-more]').click();
+  await page.locator(which === 'read' ? '[data-thread-menu] [data-thread-read-item]' : '[data-thread-menu] [data-thread-move-back-item]').click();
+}
 
 test('the list before: Stopped, Waiting, then New', async () => {
   const { page, threads } = world;
@@ -267,8 +285,7 @@ test('a words-only reply left as it is: the questions stay open, and the agent g
   // The cards still take answers: nothing was skipped.
   await expect(pane.getByText(/^Skipped · \d{1,2}:\d{2} [AP]M$/)).toHaveCount(0);
   await shot('04c-words-only-keeps-open');
-  const waited = await agents.codex.waitForReply(threadId, 5);
-  expect((waited.reply as { body: string }).body).toBe(
+  expect((await agents.codex.nextReply(threadId, 5)).body).toBe(
     "Received, I'll answer these after lunch.\n\nNo questions answered yet; all 3 are still open. Don't re-ask them; the person will answer in the Inbox.",
   );
   type Model = { thread: { messages: { questions?: { state: string }[] }[] } };
@@ -278,7 +295,7 @@ test('a words-only reply left as it is: the questions stay open, and the agent g
   await expect(pane).toHaveCount(0);
 });
 
-test('the foot after a pick: the buttons on the left, the draft status at the row\'s right end; too narrow, the status on its own line above the buttons', async () => {
+test('the foot after a pick: the buttons on the left, the draft status at the row\'s right end; on a phone no status, the draft\'s count on Edit draft', async () => {
   const { page, agents, project } = world;
   const asked = await agents.pi.send({ project_path: project, subject: 'Refunds page: a few calls', thread: 'refunds', body: INVOICES.replace('invoice list', 'refunds page') });
   await page.goto(`${world.url}#thread=${asked.thread_id as string}`);
@@ -288,7 +305,9 @@ test('the foot after a pick: the buttons on the left, the draft status at the ro
   const row = page.locator('.ib-pfoot [data-foot-row]');
   const status = row.locator('[data-foot-status]');
   await expect(status.locator('[data-draft-foot]')).toContainText('1 pick');
-  await expect(status.locator('[data-skip-chip]')).toContainText('2 questions stay open');
+  // One count per thing (approval "reply-bar-pairs"): no skip chip; the open questions count the 2 unanswered.
+  await expect(row.locator('[data-skip-chip]')).toHaveCount(0);
+  await expect(row.locator('[data-open-questions]')).toHaveAccessibleName('2 open questions');
   const box = async (sel: string) => (await page.locator(sel).first().boundingBox())!;
   const send = async () => box('.ib-pfoot [data-foot-buttons] .ib-btn.ib-pri');
   const reask = async () => box('.ib-pfoot [data-foot-buttons] [data-open-questions]');
@@ -301,18 +320,18 @@ test('the foot after a pick: the buttons on the left, the draft status at the ro
   expect(wide.status.x).toBeGreaterThan(wide.reask.x + wide.reask.width);
   expect(Math.abs(wide.status.x + wide.status.width - (wide.row.x + wide.row.width))).toBeLessThan(2);
   await shot('04d-foot-status-right');
-  // A phone: the row shortens to its last step (Edit draft as its pencil) and keeps one line: the buttons, then the status.
+  // A phone: no status; Send, then Edit draft carrying the draft's count ("Draft 1"), then the open questions, on one line.
   await page.setViewportSize({ width: 390, height: 844 });
   // Read in one frame (the layout moves while the window settles into the phone's).
   const narrow = () =>
     page.evaluate(() => {
       const r = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
-      const [status, send, reask] = ['[data-foot-status]', '[data-foot-buttons] .ib-btn.ib-pri', '[data-foot-buttons] [data-open-questions]'].map((s) => r(`.ib-pfoot ${s}`));
-      const mid = (b: DOMRect) => b.top + b.height / 2;
-      return { besideButtons: Math.abs(mid(status!) - mid(send!)) < 4 && status!.left >= reask!.right, oneLine: Math.abs(reask!.top - send!.top) < 2 };
+      const [send, draft, reask] = ['[data-foot-buttons] .ib-btn.ib-pri', '[data-foot-buttons] [data-edit-draft]', '[data-foot-buttons] [data-open-questions]'].map((s) => r(`.ib-pfoot ${s}`));
+      return { status: !!document.querySelector('.ib-pfoot [data-foot-status]'), order: send!.right <= draft!.left && draft!.right <= reask!.left, oneLine: Math.abs(reask!.top - send!.top) < 2 && Math.abs(draft!.top - send!.top) < 2 };
     });
-  await expect.poll(narrow).toEqual({ besideButtons: true, oneLine: true });
-  await expect(page.locator('.ib-pfoot [data-foot-buttons]').getByRole('button', { name: 'Edit draft' })).toBeVisible();
+  await expect.poll(narrow).toEqual({ status: false, order: true, oneLine: true });
+  await expect(page.locator('.ib-pfoot [data-foot-buttons]').getByRole('button', { name: 'Draft 1: 1 pick. Edit draft' })).toBeVisible();
+  await expect(page.locator('.ib-pfoot [data-edit-draft] [data-draft-count]')).toHaveText('1');
   await shot('04e-foot-status-phone');
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(world.url);
@@ -322,23 +341,21 @@ test('the foot after a pick: the buttons on the left, the draft status at the ro
 test('Mark read moves the thread to Quiet ("Read"); a new agent message brings it back to the top', async () => {
   const { page, threads } = world;
   await page.locator(`.ib-lbody [data-thread-id="${threads.search}"]`).click();
-  const head = page.locator('[data-mark-read]');
-  await expect(head).toHaveAttribute('aria-pressed', 'false');
-  await head.click();
-  await expect(head).toHaveAttribute('aria-pressed', 'true');
-  await expect(head).toContainText('Read');
+  expect(await readAction(page)).toBe('Mark read');
+  await chooseRead(page);
+  await expect.poll(() => readAction(page)).toBe('Move back to the top');
   await expect(page.locator('[data-read-line]')).toContainText('It stays out of the top until Codex writes again.');
   await expect(page.locator('[data-inbox-toast]')).toContainText('Moves to Quiet');
   await shot('05-thread-read');
   await page.keyboard.press('Escape');
   await openQuiet(page);
   await expect.poll(() => sectionOf(page, threads.search)).toBe('quiet');
-  await expect(page.locator(`.ib-lbody [data-row="${threads.search}"] .ib-c`)).toHaveText('Read');
+  await expect(page.locator(`.ib-lbody [data-row="${threads.search}"] .ib-c .ib-cs`)).toHaveText('Read');
   await shot('06-list-read-in-quiet', ['light', 'dark']);
 
-  // The agent writes again: the thread waits behind "1 new", then is back on top.
+  // The agent writes again: the thread waits behind the line ("Codex asked in …"), then is back on top.
   await world.agents.codex.send({ project_path: world.project, reply_to: world.searchMessage, body: ['One more:', '', ':::question', 'Index the API reference too?', '', '- [ ] Yes', '- [ ] No', ':::'].join('\n') });
-  await expect(page.locator('[data-inbox-notice]')).toContainText('1 new in billing');
+  await expect(page.locator('[data-inbox-notice]')).toContainText(/^Codex (asked|replied) in “/);
   await page.locator('[data-inbox-notice]').click();
   await expect.poll(() => sectionOf(page, threads.search)).toBe('waiting');
 });
@@ -346,7 +363,7 @@ test('Mark read moves the thread to Quiet ("Read"); a new agent message brings i
 test('Mark read on a thread an agent is stopped on warns with Reply; Z undoes it', async () => {
   const { page, threads } = world;
   await page.locator(`.ib-lbody [data-thread-id="${threads.worker}"]`).click();
-  await expect(page.locator('[data-mark-read]')).toHaveAttribute('aria-pressed', 'false');
+  expect(await readAction(page)).toBe('Mark read');
   await page.locator('body').press('e');
   const toast = page.locator('[data-inbox-toast]');
   await expect(toast).toContainText('Claude Code was stopped');
@@ -364,11 +381,10 @@ test('Mark read on a thread an agent is stopped on warns with Reply; Z undoes it
   // The list sits beside the thread, so the window's center is not the pane's.
   expect(Math.abs(paneBox!.x + paneBox!.width / 2 - viewport.width / 2)).toBeGreaterThan(40);
   expect(Math.abs(viewport.height - (toastBox!.y + toastBox!.height) - 16)).toBeLessThanOrEqual(1);
-  await expect(page.locator('[data-mark-read]')).toHaveAttribute('aria-pressed', 'true');
   await shot('07-stopped-warning', ['light', 'dark']);
   await page.locator('body').press('z');
-  await expect(page.locator('[data-mark-read]')).toHaveAttribute('aria-pressed', 'false');
   await expect(toast).toHaveCount(0);
+  expect(await readAction(page)).toBe('Mark read');
   await page.keyboard.press('Escape');
   await expect.poll(() => sectionOf(page, threads.worker)).toBe('stopped');
 });
@@ -376,11 +392,16 @@ test('Mark read on a thread an agent is stopped on warns with Reply; Z undoes it
 test('the toast closes early: the × (focus back, Z no longer undoes), a mouse swipe past 40%; a short drag springs back; long one-line toasts keep one line', async () => {
   const { page, threads } = world;
   await page.locator(`.ib-lbody [data-thread-id="${threads.worker}"]`).click();
-  const head = page.locator('[data-mark-read]');
-  await expect(head).toHaveAttribute('aria-pressed', 'false');
+  // Mark read from the ⋯ menu by keyboard: Enter opens it on its first item, Mark read; Enter chooses it, and focus
+  // goes back to ⋯.
+  const head = page.locator('section.ib-pane [data-thread-more]');
+  expect(await readAction(page)).toBe('Mark read');
   await head.focus();
   await page.keyboard.press('Enter');
-  await expect(head).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('[data-thread-menu] [data-thread-read-item]')).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-inbox-toast]')).toContainText('Marked read');
+  await expect(head).toBeFocused();
   const toast = page.locator('[data-inbox-toast]');
   await toast.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)).then(() => undefined));
   const close = toast.locator('[data-toast-dismiss]');
@@ -396,7 +417,7 @@ test('the toast closes early: the × (focus back, Z no longer undoes), a mouse s
     // [lead, detail, the actions before the ×]: the real copy of the widest one-line toasts.
     const copies: [string, string, ('reply' | 'undo' | 'drafts')[]][] = [
       ['Looks good', 'Goes to Claude Code in 10 s · Moves to Quiet', ['undo']],
-      ['Draft saved', 'It waits under Drafts and never sends itself.', ['drafts']],
+      ['Draft saved', 'It never sends itself', ['drafts']],
       ['Marked read', 'Claude Code was stopped', ['reply', 'undo']],
       ['Back in your Inbox', '“Retry worker: Stripe 409”', ['undo']],
     ];
@@ -509,8 +530,8 @@ test('the toast closes early: the × (focus back, Z no longer undoes), a mouse s
   });
   expect(tight).toEqual({ wrapped: true, tight: true, height: 40, kbd: 'none', keys: 'Z', back: false });
 
-  // Focus moves from Mark read onto the × (the toast sits at the end of the page, past the thread, so this
-  // stands in for the Tabs); Enter on it: the toast goes, focus is back on Mark read, and Z has nothing to undo.
+  // Focus moves from ⋯ onto the × (the toast sits at the end of the page, past the thread, so this
+  // stands in for the Tabs); Enter on it: the toast goes, focus is back on ⋯, and Z has nothing to undo.
   await close.focus();
   await expect(close).toBeFocused();
   await shot('09-toast-close-focused', ['light', 'dark']);
@@ -519,13 +540,12 @@ test('the toast closes early: the × (focus back, Z no longer undoes), a mouse s
   await expect(head).toBeFocused();
   await page.locator('body').press('z');
   await page.waitForTimeout(400);
-  await expect(head).toHaveAttribute('aria-pressed', 'true');
+  expect(await readAction(page)).toBe('Move back to the top');
 
-  // Move it back (Undo), then swipe that toast away with the mouse: a short drag springs back first.
-  await head.click();
-  await expect(head).toHaveAttribute('aria-pressed', 'false');
-  await head.click();
-  await expect(head).toHaveAttribute('aria-pressed', 'true');
+  // Move it back, mark it read again, then swipe that toast away with the mouse: a short drag springs back first.
+  await chooseRead(page, 'move-back');
+  await expect.poll(() => readAction(page)).toBe('Mark read');
+  await chooseRead(page);
   await expect(toast).toContainText('Claude Code was stopped');
   await toast.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)).then(() => undefined));
   const box = (await toast.boundingBox())!;
@@ -557,16 +577,16 @@ test('the toast closes early: the × (focus back, Z no longer undoes), a mouse s
   await expect(page.locator('[data-toast-ghost]')).toHaveCount(0);
   await page.locator('body').press('z');
   await page.waitForTimeout(400);
-  await expect(head).toHaveAttribute('aria-pressed', 'true');
+  expect(await readAction(page)).toBe('Move back to the top');
 
   // Put it back for the tests after this one.
-  await head.click();
-  await expect(head).toHaveAttribute('aria-pressed', 'false');
+  await chooseRead(page, 'move-back');
+  await expect.poll(() => readAction(page)).toBe('Mark read');
   await page.keyboard.press('Escape');
   await expect.poll(() => sectionOf(page, threads.worker)).toBe('stopped');
 });
 
-test('the row hover action marks read without opening the thread; its Undo puts the row back; no page errors', async () => {
+test('the row hover action marks read without opening the thread, in place; its Undo makes it bold again; no page errors', async () => {
   const { page, threads } = world;
   const row = page.locator(`.ib-lbody [data-row="${threads.news}"]`);
   await row.hover();
@@ -575,16 +595,48 @@ test('the row hover action marks read without opening the thread; its Undo puts 
   await shot('08-row-hover-action', ['light']);
   await action.click();
   await expect(page.locator('section.ib-pane')).toHaveCount(0);
-  await expect.poll(() => sectionOf(page, threads.news)).toBe('quiet');
+  // The list holds still (approval "inbox-list-view", R7): the row stays in New, not bold, until the list settles.
+  const button = row.locator('[data-thread-id]');
+  await expect(button).not.toHaveClass(/\bib-u\b/);
+  expect(await sectionOf(page, threads.news)).toBe('new');
   // No thread open: the same place, centered on the window, 16 px from its bottom edge.
   const toast = page.locator('[data-inbox-toast]');
-  await expect(toast).toContainText('Moved to Quiet');
+  await expect(toast).toContainText('Marked read');
+  await expect(toast).not.toContainText('Moved to Quiet');
   await toast.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)).then(() => undefined));
   const toastBox = await toast.boundingBox();
   const viewport = page.viewportSize()!;
   expect(Math.abs(toastBox!.x + toastBox!.width / 2 - viewport.width / 2)).toBeLessThanOrEqual(1);
   expect(Math.abs(viewport.height - (toastBox!.y + toastBox!.height) - 16)).toBeLessThanOrEqual(1);
   await toast.getByRole('button', { name: /Undo/ }).click();
-  await expect.poll(() => sectionOf(page, threads.news)).toBe('new');
+  await expect(button).toHaveClass(/\bib-u\b/);
+  expect(await sectionOf(page, threads.news)).toBe('new');
   expect(world.errors).toEqual([]);
+});
+
+test('on a touch tablet (820 by 1180, no hover) a row shows no hover action and one tap opens its thread', async ({ browser }: { browser: Browser }) => {
+  // iPadOS Safari takes the first tap on a row as a hover when that hover shows a button, and drops the click, so
+  // "Mark read" showing on the tap meant two taps to open. Chromium never drops the click, so this checks the cause:
+  // a pointer resting on the row (`:hover`) shows no action where the screen cannot hover.
+  const { threads } = world;
+  const context = await browser.newContext({ viewport: { width: 820, height: 1180 }, hasTouch: true, isMobile: true, colorScheme: 'light' });
+  try {
+    const page = await context.newPage();
+    await page.goto(world.url);
+    expect(await page.evaluate(() => matchMedia('(hover: none)').matches)).toBe(true);
+    const row = page.locator(`.ib-lbody [data-row="${threads.news}"]`);
+    const button = row.locator('[data-thread-id]');
+    await expect(button).toHaveClass(/\bib-u\b/);
+    // The row offers Mark read (the action is drawn), but a hover does not show it.
+    await expect(row.locator('[data-row-mark-read]')).toHaveCount(1);
+    await row.hover();
+    expect(await row.evaluate((el) => el.matches(':hover'))).toBe(true);
+    await expect(row.locator('[data-row-mark-read]')).toBeHidden();
+    await expect(row.locator('.ib-t').first()).toBeVisible();
+    await button.tap();
+    await expect(page.locator('section.ib-pane')).toBeVisible();
+    await expect(row.locator('[data-row-mark-read]')).toBeHidden();
+  } finally {
+    await context.close();
+  }
 });

@@ -56,6 +56,23 @@ export function createExternalAnnotationHandler(mode: "plan" | "review") {
 		/** Send an event that is not a store mutation (session-closed) to every open stream. */
 		broadcast,
 
+		/**
+		 * End every open stream. A server's stop() calls this before
+		 * closeAllConnections(): that destroys the sockets, and on Node (and Bun
+		 * >= 1.4) a destroy drops what was just written, so the tab never got the
+		 * session-closed sent right before stop(). Ending first sends it.
+		 */
+		endStreams() {
+			for (const res of subscribers) {
+				try {
+					res.end();
+				} catch {
+					// Already closed.
+				}
+			}
+			subscribers.clear();
+		},
+
 		/** Push annotations directly into the store (bypasses HTTP, reuses same validation). */
 		addAnnotations(body: unknown): { ids: string[] } | { error: string } {
 			const parsed = transform(body);

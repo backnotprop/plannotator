@@ -13,8 +13,8 @@ import {
   isAnnotateAgentTerminalSide,
   type AnnotateAgentTerminalSide,
 } from '@plannotator/core/agent-terminal';
-import type { DiffLineBgIntensity } from '@plannotator/core/config-types';
-import { isFaviconStyle, type FaviconStyle } from '@plannotator/core/favicon';
+import type { DiffLineBgIntensity, ReviewDefaults } from '@plannotator/core/config-types';
+import { DEFAULT_FAVICON_STYLE, isFaviconStyle, type FaviconStyle } from '@plannotator/core/favicon-style';
 import {
   agentSwitchConfigValue,
   isAgentSwitchName,
@@ -34,7 +34,9 @@ import {
   isDocumentTextSize,
   type DocumentTextSize,
 } from '../utils/documentTextSize';
+import { normalizeFontFamilyName } from '../utils/cssFontFamily';
 import { storage } from '../utils/storage';
+import { isLookChoiceResolved } from '../utils/lookAndFeelAnnouncement';
 import { generateIdentity } from '../utils/generateIdentity';
 import {
   getDefaultThemePair,
@@ -121,9 +123,28 @@ function writeAgentSwitchCookies(choice: AgentSwitchChoice | null): void {
   else if (choice.switchTo === 'custom') storage.removeItem(AGENT_SWITCH_CUSTOM_COOKIE);
 }
 
+export type DiffMinimapMode = 'auto' | 'always' | 'off';
+const DIFF_MINIMAP_MODES = ['auto', 'always', 'off'] as const;
+function isDiffMinimapMode(v: unknown): v is DiffMinimapMode {
+  return typeof v === 'string' && (DIFF_MINIMAP_MODES as readonly string[]).includes(v);
+}
+
 const DIFF_LINE_BG_INTENSITY_VALUES = ['subtle', 'normal', 'strong'] as const;
 function isDiffLineBgIntensity(v: unknown): v is DiffLineBgIntensity {
   return typeof v === 'string' && (DIFF_LINE_BG_INTENSITY_VALUES as readonly string[]).includes(v);
+}
+
+function parseReviewDefaults(value: unknown): ReviewDefaults | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const defaults: ReviewDefaults = {};
+  for (const [providerId, providerValue] of Object.entries(value)) {
+    if (!providerId || !providerValue || typeof providerValue !== 'object' || Array.isArray(providerValue)) continue;
+    const defaultDiffType = (providerValue as Record<string, unknown>).defaultDiffType;
+    if (typeof defaultDiffType === 'string' && defaultDiffType) {
+      defaults[providerId] = { defaultDiffType };
+    }
+  }
+  return defaults;
 }
 
 export interface SettingDef<T> {
@@ -177,7 +198,7 @@ export const SETTINGS = {
     toServer: (v: ThemePair) => ({ theme: { mode: v.mode, light: v.light, dark: v.dark } }),
   },
   faviconStyle: {
-    defaultValue: 'totman' as FaviconStyle,
+    defaultValue: DEFAULT_FAVICON_STYLE as FaviconStyle,
     fromCookie: () => {
       const v = storage.getItem('plannotator-favicon');
       return isFaviconStyle(v) ? v : undefined;
@@ -192,10 +213,18 @@ export const SETTINGS = {
   },
 
   gridEnabled: {
-    // Default ON: plans open in the classic grid / floating-card look. The UI 2.0
-    // flat look is offered as an opt-in via the look-and-feel chooser dialog.
-    defaultValue: true as boolean,
+    // Default OFF: plans open in the Clean look (the document edge to edge).
+    // Grid (the classic floating card on grid paper) is a choice, made in the
+    // first-run chooser or in Settings.
+    defaultValue: false as boolean,
     fromCookie: () => {
+      // ConfigStore writes the default into this cookie on first load, so every
+      // browser that ran an older build stored 'true' (the old default) without
+      // anyone choosing it. The stored value counts only once the person has
+      // resolved the Grid/Clean choice under the Clean default (the v2 marker;
+      // a v1 marker with Grid stored is moved to Clean once, see
+      // utils/lookAndFeelAnnouncement); until then they get Clean.
+      if (!isLookChoiceResolved()) return undefined;
       const v = storage.getItem('plannotator-grid-enabled');
       return v === 'true' ? true : v === 'false' ? false : undefined;
     },
@@ -243,6 +272,35 @@ export const SETTINGS = {
   },
 
   /**
+   * The document's font in plan review and annotate (#1657; see
+   * `utils/documentFont`): a generic preset or an installed family name.
+   * Empty = the theme's font. Cookie-only, like Text size.
+   */
+  documentFontFamily: {
+    defaultValue: '' as string,
+    fromCookie: () =>
+      normalizeFontFamilyName(storage.getItem('plannotator-document-font-family') ?? '') || undefined,
+    toCookie: (value: string) => storage.setItem('plannotator-document-font-family', value),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
+  /**
+   * Show each rendered block's source lines in plan review and annotate
+   * (#1650). Default OFF: today's document with no gutter. Cookie-only, like
+   * Text size and Document font. `42` for one line, `42–45` for a span.
+   */
+  documentSourceLineNumbers: {
+    defaultValue: false as boolean,
+    fromCookie: () => {
+      const value = storage.getItem('plannotator-document-source-line-numbers');
+      return value === 'true' ? true : value === 'false' ? false : undefined;
+    },
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-document-source-line-numbers', String(value)),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
+  /**
    * Enter saves a comment and Shift+Enter adds a new line (#1934). Default
    * OFF: comments save with Cmd/Ctrl+Enter only, as they always have, and
    * Cmd/Ctrl+Enter keeps saving with it on. Read by every comment composer
@@ -256,6 +314,24 @@ export const SETTINGS = {
     },
     toCookie: (value: boolean) =>
       storage.setItem('plannotator-enter-saves-comment', String(value)),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
+  /**
+   * Hide the owner in the repository's label: `payments-service` (on) instead
+   * of `acme/payments-service`. Default OFF, today's look. Applies beside the
+   * document, in the plan diff, in code review's header and in the tab
+   * titles; hovering the label always shows the full `owner/repo`. Read
+   * through `repoLabel` (`utils/repoLabel`). Cookie-only.
+   */
+  hideRepoOwner: {
+    defaultValue: false as boolean,
+    fromCookie: () => {
+      const value = storage.getItem('plannotator-hide-repo-owner');
+      return value === 'true' ? true : value === 'false' ? false : undefined;
+    },
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-hide-repo-owner', String(value)),
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 
@@ -427,6 +503,25 @@ export const SETTINGS = {
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 
+  reviewDefaults: {
+    defaultValue: {} as ReviewDefaults,
+    fromCookie: () => {
+      const value = storage.getItem('plannotator-review-defaults');
+      if (!value) return undefined;
+      try {
+        return parseReviewDefaults(JSON.parse(value));
+      } catch {
+        return undefined;
+      }
+    },
+    toCookie: (value: ReviewDefaults) =>
+      storage.setItem('plannotator-review-defaults', JSON.stringify(value)),
+    serverKey: 'reviewDefaults',
+    fromServer: (serverConfig: Record<string, unknown>) =>
+      parseReviewDefaults(serverConfig.reviewDefaults),
+    toServer: (value: ReviewDefaults) => ({ reviewDefaults: value }),
+  },
+
   defaultDiffType: {
     defaultValue: 'since-base' as 'since-base' | 'local-vs-remote' | 'uncommitted' | 'unstaged' | 'staged' | 'merge-base' | 'all',
     fromCookie: () => {
@@ -546,6 +641,51 @@ export const SETTINGS = {
     toServer: (v: string) => ({ diffOptions: { fontFamily: v } }),
   },
 
+  diffSemantic: {
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-semantic');
+      return v === 'true' ? true : v === 'false' ? false : undefined;
+    },
+    toCookie: (v: boolean) => storage.setItem('plannotator-diff-semantic', String(v)),
+    serverKey: 'diffOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = (sc.diffOptions as Record<string, unknown> | undefined)?.semantic;
+      return typeof v === 'boolean' ? v : undefined;
+    },
+    toServer: (v: boolean) => ({ diffOptions: { semantic: v } }),
+  },
+
+  diffPowerUp: {
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-power-up');
+      return v === 'true' ? true : v === 'false' ? false : undefined;
+    },
+    toCookie: (v: boolean) => storage.setItem('plannotator-diff-power-up', String(v)),
+    serverKey: 'diffOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = (sc.diffOptions as Record<string, unknown> | undefined)?.powerUp;
+      return typeof v === 'boolean' ? v : undefined;
+    },
+    toServer: (v: boolean) => ({ diffOptions: { powerUp: v } }),
+  },
+
+  diffPowerUpMotion: {
+    defaultValue: 'still' as 'stream' | 'still',
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-power-up-motion');
+      return v === 'stream' || v === 'still' ? v : undefined;
+    },
+    toCookie: (v: 'stream' | 'still') => storage.setItem('plannotator-diff-power-up-motion', v),
+    serverKey: 'diffOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = (sc.diffOptions as Record<string, unknown> | undefined)?.powerUpMotion;
+      return v === 'stream' || v === 'still' ? v : undefined;
+    },
+    toServer: (v: 'stream' | 'still') => ({ diffOptions: { powerUpMotion: v } }),
+  },
+
   diffHideWhitespace: {
     defaultValue: false as boolean,
     fromCookie: () => {
@@ -616,6 +756,17 @@ export const SETTINGS = {
       return isDiffLineBgIntensity(v) ? v : undefined;
     },
     toServer: (v: DiffLineBgIntensity) => ({ diffOptions: { lineBgIntensity: v } }),
+  },
+  diffMinimap: {
+    defaultValue: 'auto' as DiffMinimapMode,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-minimap');
+      return isDiffMinimapMode(v) ? v : undefined;
+    },
+    toCookie: (v: DiffMinimapMode) => storage.setItem('plannotator-diff-minimap', v),
+    serverKey: undefined,
+    fromServer: undefined,
+    toServer: undefined,
   },
   /** Experimental: author suggestions by editing code in place in the review
    *  all-files view. Cookie-only (no server sync) while the feature is

@@ -8,10 +8,10 @@
  * changes only once the traversal lands.
  */
 import { describe, expect, test } from 'bun:test';
-import { backLanded, backTo, pushScreen, type HistoryLike } from './history';
+import { backBy, backLanded, backTo, pushScreen, settleLanding, signalNotificationClick, whileWritingRoute, withoutClickSignal, type HistoryLike } from './history';
 
 /** A history whose Back lands only when `land()` is called, as a browser's traversal does a task later. */
-function fakeHistory(): HistoryLike & { entries: { state: unknown; url: string }[]; index: number; backs: number; land: () => void } {
+function fakeHistory(): HistoryLike & { entries: { state: unknown; url: string }[]; index: number; backs: number; land: () => void; withoutGo: () => void } {
   const h = {
     entries: [{ state: null as unknown, url: '/' }],
     index: 0,
@@ -25,9 +25,19 @@ function fakeHistory(): HistoryLike & { entries: { state: unknown; url: string }
       h.entries.push({ state, url: String(url) });
       h.index += 1;
     },
+    get length() {
+      return h.entries.length;
+    },
     back() {
       h.backs += 1;
       h.queued += 1;
+    },
+    go(delta: number) {
+      h.backs += 1;
+      h.queued += -delta;
+    },
+    withoutGo() {
+      (h as { go?: unknown }).go = undefined;
     },
     land() {
       h.index = Math.max(0, h.index - h.queued);
@@ -104,4 +114,150 @@ test('with a comparison that ignores the view, a Back finds the entry it was ope
   // Another page is still another screen.
   pushScreen('#thread=msg_1&file=att_1&linked=B.html&view=side', page, '/x', h);
   expect(backTo('#thread=msg_1&file=att_2&view=side', h, sameScreenAnyView)).toBe(false);
+});
+
+describe("full screen's way back (backBy, fullScreenOrigin.ts)", () => {
+  /** The list, the thread, a file beside it, then `depth` entries of a full screen entered from there. */
+  function besideThenFull(depth: number) {
+    const h = fakeHistory();
+    pushScreen('#thread=t', '', '#thread=t', h);
+    pushScreen('#thread=t&file=a&view=side', '#thread=t', '/side', h);
+    for (let i = 0; i < depth; i++) pushScreen(`#thread=t&file=b&view=full&n=${i}`, 'prev', `/full${i}`, h, { ibFullDepth: i + 1 });
+    return h;
+  }
+
+  test('goes back exactly that many entries, onto the file beside the thread, in one traversal', () => {
+    const h = besideThenFull(3);
+    expect(backBy(3, h)).toBe(true);
+    h.land();
+    expect(h.entries[h.index]!.url).toBe('/side');
+    expect(h.backs).toBe(1);
+  });
+
+  test('never goes back past the first entry: nothing is done and the caller writes the route instead', () => {
+    const h = besideThenFull(1);
+    // Four entries: four steps or more would leave the history.
+    expect(backBy(h.entries.length, h)).toBe(false);
+    expect(backBy(h.entries.length + 2, h)).toBe(false);
+    expect(backBy(0, h)).toBe(false);
+    expect(backBy(1.5, h)).toBe(false);
+    expect(h.backs).toBe(0);
+    // A history with no go: one step is still a Back, more is not tried.
+    const single = besideThenFull(2);
+    single.withoutGo();
+    expect(backBy(2, single)).toBe(false);
+    expect(backBy(1, single)).toBe(true);
+    single.land();
+    expect(single.backs).toBe(1);
+  });
+
+  test('a second press while the first is on its way goes back once, and the first Back keeps what it asked for', () => {
+    const h = besideThenFull(2);
+    const ran: string[] = [];
+    expect(backBy(2, h, () => ran.push('first'))).toBe(true);
+    expect(backBy(2, h, () => ran.push('second'))).toBe(true);
+    expect(backTo('#thread=t', h, undefined, () => ran.push('third'))).toBe(true);
+    expect(h.backs).toBe(1);
+    h.land();
+    settleLanding();
+    expect(ran).toEqual(['first']);
+    expect(h.entries[h.index]!.url).toBe('/side');
+    // It ran once: a later hashchange runs nothing.
+    settleLanding();
+    expect(ran).toEqual(['first']);
+  });
+
+  test("the window's own route write before the Back lands is not its landing", () => {
+    const h = besideThenFull(1);
+    const ran: string[] = [];
+    expect(backBy(1, h, () => ran.push('landed'))).toBe(true);
+    // A route write (its own hashchange) while the Back is on its way.
+    whileWritingRoute(() => settleLanding());
+    expect(ran).toEqual([]);
+    h.land();
+    settleLanding();
+    expect(ran).toEqual(['landed']);
+  });
+});
+
+/**
+ * What a desktop app wrapping the page relies on (inbox-notifications-and-agents.md):
+ * the address changes on every click, even when the click routes nowhere, and
+ * rests where it was, on the same entry with the same state.
+ */
+describe('signalNotificationClick', () => {
+  function addressBar(start: string, state: unknown = null) {
+    const steps: string[] = [];
+    const states: unknown[] = [];
+    let at = new URL(start);
+    return {
+      steps,
+      states,
+      location: {
+        get href() {
+          return at.href;
+        },
+        get hash() {
+          return at.hash;
+        },
+      },
+      history: {
+        state,
+        replaceState(next: unknown, _title: string, url?: string | URL | null) {
+          at = new URL(String(url), at);
+          steps.push(at.href);
+          states.push(next);
+        },
+      },
+    };
+  }
+
+  test('the thread already showing: the address gains a value, then is exactly what it was', () => {
+    const bar = addressBar('http://localhost:1234/#thread=msg_a');
+    signalNotificationClick(bar.history, bar.location);
+    expect(bar.steps).toHaveLength(2);
+    expect(bar.steps[0]).toMatch(/^http:\/\/localhost:1234\/#thread=msg_a&click=\d+$/);
+    expect(bar.steps[1]).toBe('http://localhost:1234/#thread=msg_a');
+  });
+
+  test('two clicks carry two different values', () => {
+    const bar = addressBar('http://localhost:1234/#thread=msg_a');
+    signalNotificationClick(bar.history, bar.location);
+    signalNotificationClick(bar.history, bar.location);
+    expect(bar.steps[0]).not.toBe(bar.steps[2]);
+  });
+
+  test('the list at rest, with no hash: it still changes, and the address ends with no hash again', () => {
+    const bar = addressBar('http://localhost:1234/?x=1');
+    signalNotificationClick(bar.history, bar.location);
+    expect(bar.steps[0]).toMatch(/^http:\/\/localhost:1234\/\?x=1#click=\d+$/);
+    expect(bar.steps[1]).toBe('http://localhost:1234/?x=1');
+  });
+
+  test('a file open in its view: view= rests where it was, spelled as it was', () => {
+    const start = 'http://localhost:1234/#thread=msg_a&file=att_1&view=full&set=msg_a%3Akey';
+    const bar = addressBar(start);
+    signalNotificationClick(bar.history, bar.location);
+    expect(bar.steps.at(-1)).toBe(start);
+  });
+
+  test("the entry keeps its state at both steps: a phone's Back still knows where it was opened from", () => {
+    const state = { ibFrom: '#project=prj_1' };
+    const bar = addressBar('http://localhost:1234/#thread=msg_a', state);
+    signalNotificationClick(bar.history, bar.location);
+    expect(bar.states).toEqual([state, state]);
+  });
+});
+
+describe('withoutClickSignal', () => {
+  test('an address back from the browser history reads as the screen it was on', () => {
+    expect(withoutClickSignal('#thread=msg_a&click=3')).toBe('#thread=msg_a');
+    expect(withoutClickSignal('#thread=msg_a&click=3&file=att_1&view=full')).toBe('#thread=msg_a&file=att_1&view=full');
+    expect(withoutClickSignal('#settings/general&click=3')).toBe('#settings/general');
+    expect(withoutClickSignal('#click=3')).toBe('');
+  });
+
+  test("what only looks like it is someone else's", () => {
+    for (const hash of ['#thread=click=3', '#thread=msg_a&clicks=3', '#thread=msg_a&click=abc', '']) expect(withoutClickSignal(hash)).toBe(hash);
+  });
 });

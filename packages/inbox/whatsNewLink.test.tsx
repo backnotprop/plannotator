@@ -7,7 +7,7 @@
  * What is proved: the link shows and opens the notes the server fetched by the
  * release's tag; with update checks off and no notes saved there is no link.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';

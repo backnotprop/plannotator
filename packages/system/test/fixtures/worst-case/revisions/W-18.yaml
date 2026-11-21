@@ -1,0 +1,5 @@
+revision: W-18
+scope: core
+title: Small plan 18
+change:
+  redis: "Small change number 18."

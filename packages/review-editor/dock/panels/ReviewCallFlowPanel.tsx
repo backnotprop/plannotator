@@ -1,16 +1,19 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type { CallFlowAdvert, CallFlowInstallStage, CallFlowNode } from '@plannotator/shared/call-flow-types';
 import { getCallFlowLanguage, type CallFlowLanguageId } from '@plannotator/shared/call-flow-languages';
 import type { CallFlowInstallController } from '../../hooks/useCallFlowInstall';
 import { Popover } from '@base-ui/react/popover';
-import { Check, Info, Settings2 } from 'lucide-react';
+import { Check, Info, Settings2, X } from 'lucide-react';
 import { Tooltip } from '@plannotator/ui/components/Tooltip';
 import { useReviewState } from '../ReviewStateContext';
+import { useCallFlowNodeSource } from '../../hooks/useCallFlowNodeSource';
 import {
   CallFlowTreeView,
   selectionForCallFlowNode,
 } from '../../components/CallFlowTreeView';
 import { CallFlowRawView } from '../../components/CallFlowRawView';
+import { CallTreeList } from '../../components/callTree/CallTreeList';
+import { callTreeFromEntry } from '@plannotator/shared/call-tree';
 import { formatCallFlowInstallSize } from '../../utils/callFlowPresentation';
 
 function errorMessage(error: Exclude<import('@plannotator/shared/call-flow-types').CallFlowResponse, { status: 'ok' }> | Error): string {
@@ -190,7 +193,7 @@ export function CallFlowInstallFunnel({
           <strong>{status.error}</strong>
           <p>
             {isNodeInstallError(status.reason)
-              ? 'Install Node.js 22 or newer, make sure it is on PATH, then retry.'
+              ? 'Install Node.js 22.18 or newer, make sure it is on PATH, then retry.'
               : 'Nothing was changed. You can retry the install at any time.'}
           </p>
           <div className="call-flow-install-action">
@@ -222,7 +225,7 @@ export function CallFlowInstallFunnel({
           <p className="call-flow-install-disclosure">
             Installing <strong>{advert.installPlan.labels.join(', ')}</strong>,{' '}
             <strong>{formatCallFlowInstallSize(advert.installPlan.installSizeBytes)}</strong> on disk.
-            {' '}Requires Node.js 22 or newer. Other languages install automatically, only
+            {' '}Requires Node.js 22.18 or newer. Other languages install automatically, only
             when a review needs them.
           </p>
         )}
@@ -233,14 +236,28 @@ export function CallFlowInstallFunnel({
 
 export function ReviewCallFlowPanel() {
   const state = useReviewState();
+  const loadNodeSource = useCallFlowNodeSource(state);
   const analysis = state.callFlowAnalysis;
-  const [view, setView] = useState<'paths' | 'raw'>('paths');
+  // The tab opens on the Call tree (owner, 2026-11-10, once the tree had search); Paths and Raw stay one click away.
+  const [view, setView] = useState<'paths' | 'tree' | 'raw'>('tree');
+  const callTreeRequest = state.callTreeRequest ?? null;
+  // A hunk's "Call tree" entry shows its tree here.
+  useEffect(() => {
+    if (callTreeRequest) setView('tree');
+  }, [callTreeRequest]);
+  const readyData = analysis.status === 'ready' ? analysis.data : null;
+  const entryDocs = useMemo(
+    () => (readyData ? readyData.trees.map((tree, index) => callTreeFromEntry(tree, index, { from: readyData.from, to: readyData.to })) : []),
+    [readyData],
+  );
+  const entryTrees = useMemo(() => entryDocs.map((doc) => ({ key: doc.rootPath, doc })), [entryDocs]);
 
   const openNode = (node: CallFlowNode) => {
     if (!node.file) return;
     state.openDiffFile(node.file);
     state.onLineSelection(selectionForCallFlowNode(node));
   };
+  const openTreeNode = state.openCallTreeNode ?? openNode;
   if (!state.callFlowAdvert.available) {
     // The runtime-missing flavor of unavailable is the setup progress surface.
     // Unsupported views and the disabled state never offer the install.
@@ -310,12 +327,35 @@ export function ReviewCallFlowPanel() {
       <div className="call-flow-shell">
         <header className="call-flow-header">
           <div>
-            <div className="call-flow-eyebrow">Inferred call paths</div>
-            <h2>{data.summary.changedNodes === 0 ? 'No changed call paths' : `${data.summary.changedNodes} changed path ${data.summary.changedNodes === 1 ? 'step' : 'steps'}`}</h2>
-            <p>{data.summary.entries} entr{data.summary.entries === 1 ? 'y' : 'ies'} · {data.summary.impactedFiles} impacted {data.summary.impactedFiles === 1 ? 'file' : 'files'}</p>
+            <h2>{data.summary.changedNodes === 0 ? 'No changed call paths' : 'Call paths'}</h2>
+            {/* The items are spaced by CSS gap; the hidden ", " keeps them apart when read aloud. */}
+            <p className="call-flow-summary">
+              {data.summary.added > 0 && (
+                <span className="call-flow-summary-item call-flow-summary-changed">
+                  <span className="call-flow-marker call-flow-marker-added" aria-hidden="true" />
+                  {data.summary.added.toLocaleString()} new
+                </span>
+              )}
+              {data.summary.removed > 0 && (
+                <span className="call-flow-summary-item call-flow-summary-changed">
+                  {data.summary.added > 0 && <span className="sr-only">, </span>}
+                  <span className="call-flow-marker call-flow-marker-removed" aria-hidden="true" />
+                  {data.summary.removed.toLocaleString()} removed
+                </span>
+              )}
+              <span className="call-flow-summary-item">
+                {(data.summary.added > 0 || data.summary.removed > 0) && <span className="sr-only">, </span>}
+                {data.summary.impactedFiles.toLocaleString()} {data.summary.impactedFiles === 1 ? 'file' : 'files'}
+              </span>
+              <span className="call-flow-summary-item">
+                <span className="sr-only">, </span>
+                {data.summary.entries.toLocaleString()} {data.summary.entries === 1 ? 'entry' : 'entries'}
+              </span>
+            </p>
           </div>
           <div className="call-flow-header-actions">
             <div className="call-flow-view-switch" aria-label="Call flow view">
+              <button type="button" aria-pressed={view === 'tree'} onClick={() => setView('tree')}>Call tree</button>
               <button type="button" aria-pressed={view === 'paths'} onClick={() => setView('paths')}>Paths</button>
               <button type="button" aria-pressed={view === 'raw'} onClick={() => setView('raw')}>Raw</button>
             </div>
@@ -341,10 +381,10 @@ export function ReviewCallFlowPanel() {
 
         {view === 'paths' && (
           <div className="call-flow-legend" aria-label="Call-flow legend">
-            <span><b className="call-flow-status-added">+</b> added</span>
-            <span><b className="call-flow-status-removed">−</b> removed</span>
-            <span><b>·</b> unchanged context</span>
-            <span className="call-flow-legend-hint">Click any row to comment. Shift-click adds steps. Select a file path to open source.</span>
+            <span className="call-flow-legend-key">
+              <span className="call-flow-marker call-flow-marker-same" aria-hidden="true" /> unchanged
+            </span>
+            <span className="call-flow-legend-hint">Click a call to comment, Shift-click to add steps. Click a location to open it.</span>
           </div>
         )}
 
@@ -377,7 +417,48 @@ export function ReviewCallFlowPanel() {
           </div>
         )}
 
-        {view === 'raw' ? (
+        {view === 'tree' && callTreeRequest ? (
+          <CallTreeList
+            key={`${callTreeRequest.doc.rootPath}:${callTreeRequest.token}`}
+            trees={[{
+              key: callTreeRequest.doc.rootPath,
+              doc: callTreeRequest.doc,
+              ...(state.returnFromCallTree ? { onBack: state.returnFromCallTree } : {}),
+              autoFocus: true,
+              headerAccessory: state.clearCallTreeRequest && (
+                <button
+                  type="button"
+                  className="call-flow-icon-button"
+                  aria-label="Close"
+                  title="Close"
+                  onClick={state.clearCallTreeRequest}
+                >
+                  <X aria-hidden="true" size={14} />
+                </button>
+              ),
+            }]}
+            onOpen={openTreeNode}
+            loadNodeSource={loadNodeSource}
+            onAnnotateTargets={state.onAddCallFlowAnnotation}
+            findShortcutActive={state.isCallFlowActive}
+          />
+        ) : view === 'tree' ? (
+          data.trees.length === 0 ? (
+            <div className="call-flow-empty">
+              <span className="call-flow-empty-kicker">Snapshots match structurally</span>
+              <strong>{data.message ?? 'CallDiff found no changed call paths.'}</strong>
+              <p>This is syntactic call analysis; the ordinary and semantic diffs may still contain changes.</p>
+            </div>
+          ) : (
+            <CallTreeList
+              trees={entryTrees}
+              onOpen={openTreeNode}
+              loadNodeSource={loadNodeSource}
+              onAnnotateTargets={state.onAddCallFlowAnnotation}
+              findShortcutActive={state.isCallFlowActive}
+            />
+          )
+        ) : view === 'raw' ? (
           <CallFlowRawView
             sections={[{ key: 'complete', raw: data.raw, rawLineStart: 1 }]}
             onAnnotateTargets={state.onAddCallFlowAnnotation}
@@ -393,6 +474,7 @@ export function ReviewCallFlowPanel() {
           <CallFlowTreeView
             trees={data.trees}
             onOpenNode={openNode}
+            loadNodeSource={loadNodeSource}
             onAnnotateTargets={state.onAddCallFlowAnnotation}
             canInteractWithNode={state.isCallFlowNodeInPatch}
             findShortcutActive={state.isCallFlowActive}

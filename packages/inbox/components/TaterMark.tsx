@@ -17,13 +17,14 @@ export function TaterMark() {
     io.observe(el);
     return () => io.disconnect();
   }, []);
+  // A one-frame window over the sprite strip; the strip slides by `transform` (composited, inbox.css).
   return (
-    <span
-      ref={ref}
-      className="ib-tater"
-      data-sprite="tater-sidebar"
-      aria-hidden="true"
-      style={{ backgroundImage: `url(${spriteSheet})`, animationPlayState: offscreen ? 'paused' : 'running' }}
-    />
+    <span ref={ref} className="ib-tater" aria-hidden="true">
+      <span
+        className="ib-tater-strip"
+        data-sprite="tater-sidebar"
+        style={{ backgroundImage: `url(${spriteSheet})`, animationPlayState: offscreen ? 'paused' : 'running' }}
+      />
+    </span>
   );
 }

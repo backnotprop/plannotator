@@ -30,7 +30,9 @@
  * the other process defers while it is live.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadConfig, resolveInboxTool } from "@plannotator/shared/config";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import {
@@ -38,13 +40,71 @@ import {
   InboxAgentConnection,
   inboxRegistryFileOf,
   InboxWake,
+  type InboxLoadedPluginReport,
   type InboxWakeTarget,
 } from "@plannotator/shared/inbox/agent-link";
+import { isInboxTurnedOn } from "@plannotator/shared/inbox/turned-on";
 import { INBOX_REMINDER_TEXT, INBOX_REMINDER_TEXT_NO_WAKE, INBOX_TOOL_NAME, inboxAgentTool } from "@plannotator/shared/inbox/connection";
 import { createOpenCodeMessageId, isAskTurnActive } from "./opencode-session-bridge";
 import type { V2ContextLike } from "./v2-client";
 
 export const OPENCODE_INBOX_HOST = "opencode";
+
+/** The plugin's package.json: beside the source (a checkout), or one level up from the built `dist/server.js`. */
+function findPluginPackageJson(from: string): string | null {
+  for (const candidate of [path.join(from, "package.json"), path.join(from, "..", "package.json")]) {
+    try {
+      const pkg = JSON.parse(readFileSync(candidate, "utf8")) as { name?: unknown };
+      if (pkg.name === "@plannotator/opencode") return candidate;
+    } catch {
+      // Next.
+    }
+  }
+  return null;
+}
+
+/** The `version` in a package.json, or null when it cannot be read (the generation folder was deleted). */
+function readVersionAt(file: string | null): string | null {
+  if (!file) return null;
+  try {
+    const pkg = JSON.parse(readFileSync(file, "utf8")) as { version?: unknown };
+    return typeof pkg.version === "string" && pkg.version ? pkg.version : null;
+  } catch {
+    return null;
+  }
+}
+
+const PLUGIN_PACKAGE_JSON = (() => {
+  try {
+    return findPluginPackageJson(path.dirname(fileURLToPath(import.meta.url)));
+  } catch {
+    return null;
+  }
+})();
+/** The plugin version this process loaded, read when the module was evaluated. */
+const LOADED_PLUGIN_VERSION = readVersionAt(PLUGIN_PACKAGE_JSON);
+/** How long a read of package.json on disk is reused: every poll asks. */
+const ON_DISK_FRESH_MS = 2_000;
+
+/**
+ * What this OpenCode 2 service loaded and what is on disk now (owner approval
+ * "reload-hosts"): OpenCode 2 installs a plugin into an immutable generation
+ * folder, so `on_disk` is the same version, or null once that folder was
+ * deleted under the running service (the install script clears the cache).
+ * The Inbox then says `opencode2 reload`. Null when the version is unknown.
+ */
+export function openCodePluginReporter(
+  file: string | null = PLUGIN_PACKAGE_JSON,
+  loaded: string | null = LOADED_PLUGIN_VERSION,
+  now: () => number = Date.now,
+): () => InboxLoadedPluginReport | null {
+  let cache: { at: number; value: string | null } | null = null;
+  return () => {
+    if (!loaded) return null;
+    if (!cache || now() - cache.at >= ON_DISK_FRESH_MS) cache = { at: now(), value: readVersionAt(file) };
+    return { version: loaded, on_disk: cache.value };
+  };
+}
 export const OPENCODE_INBOX_AGENT_NAME = "OpenCode";
 /** A session that reads running with no event for this long is checked against OpenCode. */
 export const RUNNING_CROSS_CHECK_MS = 20_000;
@@ -174,7 +234,8 @@ export function dropInboxDuplicates(messages: unknown[]): number {
 export async function findInboxConnection(): Promise<InboxAgentConnection | null> {
   if (!resolveInboxTool(loadConfig(), process.env, "opencode")) return null;
   const dataDir = getPlannotatorDataDir();
-  if (!existsSync(inboxRegistryFileOf(dataDir))) return null;
+  // Only once the person turned the Inbox on here (turned-on.ts).
+  if (!existsSync(inboxRegistryFileOf(dataDir)) || !isInboxTurnedOn(dataDir)) return null;
   const tools = await discoverInboxTools(dataDir);
   return tools ? new InboxAgentConnection({ dataDir, host: OPENCODE_INBOX_HOST, agentName: OPENCODE_INBOX_AGENT_NAME, tools }) : null;
 }
@@ -262,12 +323,12 @@ export async function registerInboxOpenCode2(
   v2: V2ContextLike,
   connection: InboxAgentConnection,
   resolveRoot: (sessionID: string) => Promise<{ root: string }>,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; plugin?: () => InboxLoadedPluginReport | null; launch?: { created: boolean; session: string | null } } = {},
 ): Promise<boolean> {
   const transform = toolDomain?.transform;
   const spec = inboxAgentTool(connection.tools, { wakes: typeof v2.session?.prompt === "function" });
   if (typeof transform !== "function" || !spec) return false;
-  const wakes = typeof v2.session?.prompt === "function" ? new OpenCode2Wakes(v2, connection, resolveRoot) : null;
+  const wakes = typeof v2.session?.prompt === "function" ? new OpenCode2Wakes(v2, connection, resolveRoot, options.plugin ?? openCodePluginReporter(), options.launch) : null;
   // `signal` ends the wakes (their event subscription and lease timers): the plugin's lifetime otherwise.
   if (wakes && options.signal) {
     if (options.signal.aborted) wakes.dispose();
@@ -306,6 +367,79 @@ export async function registerInboxOpenCode2(
 interface SessionState {
   running: boolean;
   lastEventAt: number;
+  /**
+   * What waits on the person in its terminal now, by request or form id (`permission.asked` until
+   * `permission.replied`, `question.asked` until `question.replied` / `rejected`, `form.created` until a later
+   * `form.*` event for the same id), cleared when the turn ends or the session is found not running.
+   * Absent: none. The kind only goes to the Inbox (blocked.ts).
+   */
+  prompts?: Map<string, "permission" | "question">;
+}
+
+/** The session's terminal prompts, as the Inbox hears them: a permission prompt first, then a question; null when none. */
+export function openCodeBlocked(state: Pick<SessionState, "prompts"> | undefined): "permission" | "question" | null {
+  const kinds = [...(state?.prompts?.values() ?? [])];
+  return kinds.includes("permission") ? "permission" : kinds.includes("question") ? "question" : null;
+}
+
+/**
+ * One event's word on a session's terminal prompts (OpenCode 2's stream): a permission asked or replied, a question
+ * asked, replied or rejected, a turn over. Returns whether it was such an event. Questions under both names OpenCode
+ * has used: `question.asked` / `replied` / `rejected` (the SDK's v2 types, 1.19.3: `id`, then `requestID`), and
+ * `form.created` and a later `form.*` event naming the same id. Whatever ends the turn ends them all too: the
+ * execution events here, and `endOpenCodePrompts` wherever the plugin learns the session is not running.
+ */
+export function noteOpenCodePrompt(state: SessionState, type: string, data: Record<string, unknown> | undefined): boolean {
+  const id = (key: string) => (typeof data?.[key] === "string" && data[key] ? (data[key] as string) : null);
+  if (type === "permission.asked") {
+    const request = id("id");
+    if (request) (state.prompts ??= new Map()).set(request, "permission");
+    return true;
+  }
+  if (type === "permission.replied") {
+    const request = id("requestID") ?? id("id");
+    if (request) state.prompts?.delete(request);
+    return true;
+  }
+  if (type === "question.asked") {
+    const request = id("id");
+    if (request) (state.prompts ??= new Map()).set(request, "question");
+    return true;
+  }
+  if (type === "question.replied" || type === "question.rejected") {
+    const request = id("requestID") ?? id("id");
+    if (request) state.prompts?.delete(request);
+    return true;
+  }
+  if (type === "form.created") {
+    const form = id("id") ?? id("formID");
+    if (form) (state.prompts ??= new Map()).set(form, "question");
+    return true;
+  }
+  if (type.startsWith("form.")) {
+    const form = id("id") ?? id("formID");
+    if (form && state.prompts?.get(form) === "question") state.prompts.delete(form);
+    return true;
+  }
+  if (type === "session.execution.succeeded" || type === "session.execution.failed" || type === "session.execution.interrupted") {
+    state.prompts?.clear();
+    return false;
+  }
+  return false;
+}
+
+/** The session is not running (its turn ended, a lost end event found out, the session went): nothing waits in it. */
+export function endOpenCodePrompts(state: Pick<SessionState, "prompts"> | undefined): void {
+  state?.prompts?.clear();
+}
+
+/**
+ * A session's title as the Inbox's To picker shows it: the title, or '' for
+ * none or for the default one OpenCode gives a session until it has a real title.
+ */
+export function openCodeSessionLabel(title: unknown): string {
+  if (typeof title !== "string") return "";
+  return /^(New|Child) session - \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(title.trim()) ? "" : title;
 }
 
 /** A steer row Send now sent, waiting to be seen delivered. */
@@ -338,7 +472,11 @@ class OpenCode2Wakes {
     private readonly v2: V2ContextLike,
     private readonly connection: InboxAgentConnection,
     private readonly resolveRoot: (sessionID: string) => Promise<{ root: string }>,
+    /** What this service loaded and what is on disk now (`plugin` on each poll). */
+    private readonly pluginReport: () => InboxLoadedPluginReport | null = () => null,
+    private readonly launch: { created: boolean; session: string | null } = { created: false, session: null },
   ) {
+    if (launch.session) this.watch(launch.session);
     const subscribe = v2.event?.subscribe;
     if (typeof subscribe !== "function") return;
     this.eventsAvailable = true;
@@ -403,12 +541,14 @@ class OpenCode2Wakes {
         state.lastEventAt = Date.now();
         if (!(await this.idleProbe(entry.sessionID))) return;
         state.running = false;
+        endOpenCodePrompts(state);
         this.startGrace(entry);
         return;
       }
       // The event stream ended: wait for idle, then read the session's context for the row.
       if (!(await this.idleProbe(entry.sessionID))) return;
       state.running = false;
+      endOpenCodePrompts(state);
       entry.settle(await this.steerInContext(entry));
     } finally {
       entry.checking = false;
@@ -445,6 +585,8 @@ class OpenCode2Wakes {
 
   /** Start the wake for a root session, once; later calls say the session is in use here. */
   watch(sessionID: string): void {
+    // A disposed generation (OpenCode unloaded this plugin) starts no wake: its polls would report the old version.
+    if (this.controller.signal.aborted) return;
     this.seen.add(sessionID);
     const known = this.wakes.get(sessionID);
     if (known) {
@@ -476,7 +618,11 @@ class OpenCode2Wakes {
     if (typeof type !== "string" || !sessionID) return;
     const state = this.state(sessionID);
     state.lastEventAt = Date.now();
+    if (noteOpenCodePrompt(state, type, data)) return;
     switch (type) {
+      case "session.created":
+        if (this.launch.created) this.discover(sessionID);
+        return;
       case "session.execution.started":
         state.running = true;
         this.discover(sessionID);
@@ -487,6 +633,13 @@ class OpenCode2Wakes {
         state.running = false;
         // A steer row of this session not delivered yet: OpenCode may still promote it; past the grace, it is sent queued.
         for (const entry of this.steering.values()) if (entry.sessionID === sessionID) this.startGrace(entry);
+        return;
+      case "session.renamed":
+        this.noteTitle(sessionID, data?.title);
+        return;
+      case "session.updated":
+        // The older event: the whole session, so a title that is gone is gone.
+        this.noteTitle(sessionID, (data?.info as { title?: unknown } | undefined)?.title);
         return;
       case "session.inbox.enqueued":
         // A prompt is entering the session (the person, another plugin, or
@@ -500,15 +653,22 @@ class OpenCode2Wakes {
       case "session.deleted":
         // Its steer rows are given up (their watches stop); a deleted session gets no fallback.
         for (const entry of [...this.steering.values()]) if (entry.sessionID === sessionID) entry.settle("abandoned");
+        endOpenCodePrompts(this.states.get(sessionID));
         this.wakes.get(sessionID)?.dispose();
         this.wakes.delete(sessionID);
+        this.titles.delete(sessionID);
         return;
     }
   }
 
+  /** The events' word on a watched session's title (a child session's has no poll to go on). */
+  private noteTitle(sessionID: string, title: unknown): void {
+    if (this.wakes.has(sessionID)) this.titles.set(sessionID, openCodeSessionLabel(title));
+  }
+
   /** A session ran here that this process has not seen: watch its root. */
   private discover(sessionID: string): void {
-    if (this.seen.has(sessionID)) return;
+    if (this.controller.signal.aborted || this.seen.has(sessionID)) return;
     this.seen.add(sessionID);
     void this.resolveRoot(sessionID).then(
       ({ root }) => this.watch(root),
@@ -533,6 +693,12 @@ class OpenCode2Wakes {
 
   private target(sessionID: string): InboxWakeTarget {
     return {
+      // A permission prompt or a question up in the session (the kind only); cleared when answered or the turn ends,
+      // and never said for a session the plugin does not think is running (a lost end event must not hold it).
+      blocked: () => {
+        const state = this.states.get(sessionID);
+        return state?.running ? openCodeBlocked(state) : null;
+      },
       isBusy: async () => {
         const state = this.state(sessionID);
         if (!this.eventsAvailable) return !(await this.idleProbe(sessionID));
@@ -542,6 +708,7 @@ class OpenCode2Wakes {
         state.lastEventAt = Date.now();
         if (!(await this.idleProbe(sessionID))) return true;
         state.running = false;
+        endOpenCodePrompts(state);
         return false;
       },
       deliver: async (text) => {
@@ -586,7 +753,27 @@ class OpenCode2Wakes {
       },
       // The session's folder (its `location.directory`, looked up once), so the Inbox lists it under its project.
       projectPath: () => this.directory(sessionID),
+      // The session's own title, nothing for a default one.
+      label: () => this.title(sessionID),
+      // What this service loaded and what is on disk now: the Inbox says `opencode2 reload` when it is behind.
+      plugin: () => this.pluginReport(),
     };
+  }
+
+  private readonly titles = new Map<string, string>();
+
+  /** The title `session.get` answers once; after that the events keep it current, and without them each poll asks. */
+  private async title(sessionID: string): Promise<string> {
+    const known = this.titles.get(sessionID);
+    if (known !== undefined && this.eventsAvailable) return known;
+    try {
+      const asked = openCodeSessionLabel((await this.v2.session?.get?.({ sessionID }))?.title);
+      // An event that landed while this was out is newer.
+      if (!this.titles.has(sessionID) || !this.eventsAvailable) this.titles.set(sessionID, asked);
+    } catch {
+      // Not answered: the last word stands.
+    }
+    return this.titles.get(sessionID) ?? "";
   }
 
   private readonly directories = new Map<string, Promise<string | null>>();

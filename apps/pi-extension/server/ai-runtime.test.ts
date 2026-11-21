@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
 	chmodSync,
+	mkdirSync,
 	mkdtempSync,
+	realpathSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -9,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { FAKE_CODEX_MODEL, fakeAgentClis } from "../../../tests/test-fixtures/fake-agent-clis.ts";
+import { fakeQwenCli, fakeQwenRuns } from "../../../tests/test-fixtures/fake-qwen-cli.ts";
 
 const tempDirs: string[] = [];
 
@@ -307,4 +310,81 @@ describe("createPiAIRuntime with a session bridge", () => {
 			withoutBridgeHasBridge: false,
 		});
 	}, 30_000);
+});
+
+describe("createPiAIRuntime Qwen Code", () => {
+	// `qwen` on PATH registers the qwen-sdk provider. Its models come from
+	// $QWEN_HOME/settings.json (no qwen runs for that), and a question is
+	// answered by one qwen run (tests/test-fixtures/fake-qwen-cli.ts).
+	test("registers qwen-sdk, lists the settings models without running qwen, and answers a question", async () => {
+		if (process.platform === "win32") return;
+
+		const dir = mkdtempSync(join(tmpdir(), "plannotator-pi-qwen-runtime-"));
+		tempDirs.push(dir);
+		const fake = fakeQwenCli(dir);
+		const qwenHome = join(dir, "qwen-home");
+		mkdirSync(qwenHome);
+		writeFileSync(
+			join(qwenHome, "settings.json"),
+			JSON.stringify({ model: { name: "qwen-a" }, modelProviders: { openai: [{ id: "qwen-a" }, { id: "qwen-b", name: "Qwen B" }] } }),
+		);
+
+		const runner = join(dir, "runner.ts");
+		const runtimeUrl = pathToFileURL(join(import.meta.dir, "ai-runtime.ts")).href;
+		writeFileSync(runner, `
+			import { existsSync } from "node:fs";
+			import { createPiAIRuntime } from ${JSON.stringify(runtimeUrl)};
+			const runtime = await createPiAIRuntime({ cwd: ${JSON.stringify(dir)} });
+			const call = (path, body) => runtime.endpoints[path.split("?")[0]](new Request("http://localhost" + path, body === undefined ? undefined : {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(body),
+			}));
+			const plain = await (await call("/api/ai/capabilities")).json();
+			const activated = await (await call("/api/ai/capabilities?activate=qwen-sdk")).json();
+			const ranBeforeSession = existsSync(${JSON.stringify(fake.log)});
+			const session = await (await call("/api/ai/session", {
+				context: { mode: "plan-review", plan: { plan: "# Test" } },
+				providerId: "qwen-sdk",
+				model: "qwen-b",
+			})).json();
+			const stream = await (await call("/api/ai/query", { sessionId: session.sessionId, prompt: "ping" })).text();
+			const events = stream.split("\\n").filter((l) => l.startsWith("data: ") && l !== "data: [DONE]").map((l) => JSON.parse(l.slice(6)));
+			console.log(JSON.stringify({
+				listed: plain.providers.some((p) => p.id === "qwen-sdk"),
+				models: activated.providers.find((p) => p.id === "qwen-sdk")?.models,
+				ranBeforeSession,
+				answer: events.filter((e) => e.type === "text_delta").map((e) => e.delta).join(""),
+				result: events.find((e) => e.type === "result")?.success,
+			}));
+			runtime.dispose();
+		`);
+
+		const proc = Bun.spawn([process.execPath, runner], {
+			cwd: import.meta.dir,
+			env: { ...process.env, PATH: `${dir}:/usr/bin:/bin`, HOME: dir, QWEN_HOME: qwenHome },
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const [stdout, stderr, exitCode] = await Promise.all([
+			new Response(proc.stdout).text(),
+			new Response(proc.stderr).text(),
+			proc.exited,
+		]);
+		expect(exitCode, stderr).toBe(0);
+		expect(JSON.parse(stdout.trim())).toEqual({
+			listed: true,
+			models: [
+				{ id: "qwen-a", label: "qwen-a", default: true },
+				{ id: "qwen-b", label: "Qwen B" },
+			],
+			ranBeforeSession: false,
+			answer: "pong",
+			result: true,
+		});
+		const runs = fakeQwenRuns(fake.log);
+		expect(runs).toHaveLength(1);
+		expect(runs[0]!.args.join(" ")).toContain("--model qwen-b");
+		expect(runs[0]!.cwd).toBe(realpathSync(dir));
+	}, 15_000);
 });

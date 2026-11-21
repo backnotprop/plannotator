@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { buildCsv } from './TableBlock';
 import { copyTextToClipboard } from '../../utils/clipboard';
+import { stripAuthorColor } from '../../utils/authorColor';
 
 interface TableToolbarProps {
   element: HTMLElement;
@@ -53,7 +54,8 @@ export const TableToolbar: React.FC<TableToolbarProps> = ({
   }, [element]);
 
   const handleCopyMarkdown = async () => {
-    if (await copyTextToClipboard(markdown)) {
+    // Row by row: a code span never runs from one row into the next.
+    if (await copyTextToClipboard(markdown.split('\n').map(stripAuthorColor).join('\n'))) {
       setCopiedMd(true);
       setTimeout(() => setCopiedMd(false), 1500);
     } else {
@@ -83,6 +85,7 @@ export const TableToolbar: React.FC<TableToolbarProps> = ({
   return createPortal(
     <div
       ref={toolbarRef}
+      data-table-toolbar=""
       className="fixed z-[100] bg-popover border border-border rounded-md shadow-md"
       style={style}
       onMouseDown={(e) => e.stopPropagation()}

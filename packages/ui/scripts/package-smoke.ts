@@ -256,6 +256,12 @@ try {
     "configure.ts",
     "HANDOFF.md",
     "styles.css",
+    "contents-rail.css",
+    "inbox-thread.css",
+    "components/shape/index.ts",
+    "components/shape/shape.css",
+    "components/frame/index.ts",
+    "components/frame/frame.css",
     "types.ts",
   ];
   for (const entry of requiredEntries) {
@@ -313,6 +319,11 @@ try {
   writeFileSync(
     join(consumerDir, "consumer.tsx"),
     [
+      'import "@plannotator/ui/inbox-thread.css";',
+      'import "@plannotator/ui/shape.css";',
+      'import { ShapeSurface, ShapeDiagram, type ShapeHost } from "@plannotator/ui/components/shape";',
+      'import "@plannotator/ui/frame.css";',
+      'import { FrameGround, DocumentRailShell } from "@plannotator/ui/components/frame";',
       'import { AnnotationPanel } from "@plannotator/ui/components/AnnotationPanel";',
       'import { StickyHeaderLane, type StickyHeaderLaneProps } from "@plannotator/ui/components/StickyHeaderLane";',
       'import { DiffFileTree, type DiffFileTreeProps } from "@plannotator/ui/components/DiffFileTree";',
@@ -334,6 +345,12 @@ try {
       "void parser;",
       "configurePlannotatorUI({});",
       "void config;",
+      "void ShapeSurface;",
+      "void ShapeDiagram;",
+      "const shapeHost: Pick<ShapeHost, \"load\"> | null = null;",
+      "void shapeHost;",
+      "void FrameGround;",
+      "void DocumentRailShell;",
       "",
     ].join("\n"),
   );
@@ -400,9 +417,13 @@ try {
     installedCoreManifest.exports["./annotation-threads"] === "./annotation-threads.ts",
     "external pnpm consumer core is missing the ./annotation-threads export",
   );
+  assert(
+    installedCoreManifest.exports["./shape"] === "./shape.ts",
+    "external pnpm consumer core is missing the ./shape export (components/shape needs it)",
+  );
 
   console.log(
-    `Verified @plannotator/ui@${expectedUiVersion} packs, resolves AnnotationPanel/Viewer/StickyHeaderLane/DiffFileTree/parser, and installs externally with @plannotator/core@${expectedCoreVersion}.`,
+    `Verified @plannotator/ui@${expectedUiVersion} packs, resolves AnnotationPanel/Viewer/StickyHeaderLane/DiffFileTree/parser/inbox-thread.css/components/shape/shape.css/components/frame/frame.css, and installs externally with @plannotator/core@${expectedCoreVersion}.`,
   );
 } finally {
   rmSync(workDir, { recursive: true, force: true });

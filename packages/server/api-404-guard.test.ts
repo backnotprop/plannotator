@@ -3,8 +3,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CLASSIC_FAVICON_SVG, FAVICON_PNG_BYTES } from "../core/favicon";
+import { FACE_FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, FAVICON_PNG_BYTES, YELLOW_FAVICON_ICO_BYTES, YELLOW_FAVICON_PNG_BYTES } from "../core/favicon";
 import { saveConfig } from "./config";
+import { packApp } from "../shared/packed-app";
 // Use a distinct module key so unrelated mock.module() tests cannot replace
 // the real server.
 import { startAnnotateServer as startBunAnnotateServer } from "./annotate.ts?api-404-guard";
@@ -21,6 +22,13 @@ import {
 } from "../../apps/pi-extension/server/ai-runtime";
 
 const SPA_HTML = "<!doctype html><html><body>SPA fallback</body></html>";
+// The built app carries its code-split chunks packed behind the page
+// (packages/shared/packed-app.ts): every server must serve the page without
+// the pack, and each chunk at its own URL.
+const SPA_CHUNK = "export default 'packed chunk';";
+const SPA_BUNDLE = packApp(SPA_HTML, {
+  "/assets/index-test.js": { type: "text/javascript; charset=utf-8", text: SPA_CHUNK },
+});
 const AI_ENDPOINTS_REQUIRING_BACKEND = [
   "/api/ai/session",
   "/api/ai/query",
@@ -53,7 +61,7 @@ const serverCases = [
       startBunPlanServer({
         plan: "# Test Plan",
         origin: "claude-code",
-        htmlContent: SPA_HTML,
+        htmlContent: SPA_BUNDLE,
         mode: "archive",
         customPlanPath: archivePath,
       }),
@@ -66,7 +74,7 @@ const serverCases = [
         rawPatch: "",
         gitRef: "HEAD",
         origin: "claude-code",
-        htmlContent: SPA_HTML,
+        htmlContent: SPA_BUNDLE,
       }),
   },
   {
@@ -77,7 +85,7 @@ const serverCases = [
         markdown: "# Test Document",
         filePath: "test.md",
         origin: "claude-code",
-        htmlContent: SPA_HTML,
+        htmlContent: SPA_BUNDLE,
       }),
   },
   {
@@ -88,7 +96,7 @@ const serverCases = [
       startPiPlanServer({
         plan: "# Test Plan",
         origin: "pi",
-        htmlContent: SPA_HTML,
+        htmlContent: SPA_BUNDLE,
         mode: "archive",
         customPlanPath: archivePath,
       }),
@@ -101,7 +109,7 @@ const serverCases = [
         rawPatch: "",
         gitRef: "HEAD",
         origin: "pi",
-        htmlContent: SPA_HTML,
+        htmlContent: SPA_BUNDLE,
       }),
   },
   {
@@ -112,7 +120,7 @@ const serverCases = [
         markdown: "# Test Document",
         filePath: "test.md",
         origin: "pi",
-        htmlContent: SPA_HTML,
+        htmlContent: SPA_BUNDLE,
       }),
   },
 ] satisfies readonly ServerCase[];
@@ -260,7 +268,7 @@ describe("API route 404 guards", () => {
         const faviconResponse = await fetch(`${server.url}/favicon.png`);
         expect(faviconResponse.status).toBe(200);
         expect(faviconResponse.headers.get("content-type")).toBe("image/png");
-        // Was `public, max-age=86400`. One URL now has two possible bodies
+        // Was `public, max-age=86400`. One URL has three possible bodies
         // (the style is a live preference), so a day-long cache would re-paint
         // the previous icon on the next session after a switch.
         expect(faviconResponse.headers.get("cache-control")).toBe("no-cache");
@@ -268,19 +276,62 @@ describe("API route 404 guards", () => {
           FAVICON_PNG_BYTES,
         );
 
-        // Cross-runtime parity for the classic style: Bun and Pi must agree on
+        // /favicon.ico, what the entry HTML links: Glass's multi-size .ico on Bun and Pi alike.
+        const icoResponse = await fetch(`${server.url}/favicon.ico`);
+        expect(icoResponse.status).toBe(200);
+        expect(icoResponse.headers.get("content-type")).toBe("image/x-icon");
+        expect(icoResponse.headers.get("cache-control")).toBe("no-cache");
+        expect(new Uint8Array(await icoResponse.arrayBuffer())).toEqual(FAVICON_ICO_BYTES);
+
+        // Cross-runtime parity for the other styles: Bun and Pi must agree on
         // both the bytes and the content type, since the entry HTML's
         // <link rel="icon"> declares no type of its own.
-        saveConfig({ favicon: "classic" });
-        const classicResponse = await fetch(`${server.url}/favicon.png`);
-        expect(classicResponse.status).toBe(200);
-        expect(classicResponse.headers.get("content-type")).toBe("image/svg+xml");
-        expect(await classicResponse.text()).toBe(CLASSIC_FAVICON_SVG);
+        // Face has no .ico: /favicon.ico answers its PNG. A 'classic' left by
+        // 0.28.57 (the removed P) answers the default, Glass, on both URLs.
+        for (const [style, png, ico, icoType] of [
+          ["yellow", YELLOW_FAVICON_PNG_BYTES, YELLOW_FAVICON_ICO_BYTES, "image/x-icon"],
+          ["totman", FACE_FAVICON_PNG_BYTES, FACE_FAVICON_PNG_BYTES, "image/png"],
+          ["classic", FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, "image/x-icon"],
+        ] as const) {
+          saveConfig({ favicon: style as never });
+          const styleResponse = await fetch(`${server.url}/favicon.png`);
+          expect(styleResponse.status).toBe(200);
+          expect(styleResponse.headers.get("content-type")).toBe("image/png");
+          expect(new Uint8Array(await styleResponse.arrayBuffer())).toEqual(png);
+          const styleIco = await fetch(`${server.url}/favicon.ico`);
+          expect(styleIco.headers.get("content-type")).toBe(icoType);
+          expect(new Uint8Array(await styleIco.arrayBuffer())).toEqual(ico);
+        }
 
         const spaResponse = await fetch(`${server.url}/some/random/path`);
         expect(spaResponse.status).toBe(200);
         expect(spaResponse.headers.get("content-type")).toContain("text/html");
         expect(await spaResponse.text()).toBe(SPA_HTML);
+
+        // A local session: the chunk as built, uncompressed like the page.
+        const chunkResponse = await fetch(`${server.url}/assets/index-test.js`, {
+          headers: { "Accept-Encoding": "gzip" },
+        });
+        expect(chunkResponse.status).toBe(200);
+        expect(chunkResponse.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
+        expect(chunkResponse.headers.get("x-content-type-options")).toBe("nosniff");
+        expect(chunkResponse.headers.get("content-encoding")).toBeNull();
+        expect(await chunkResponse.text()).toBe(SPA_CHUNK);
+        const head = await fetch(`${server.url}/assets/index-test.js`, { method: "HEAD" });
+        expect(head.status).toBe(200);
+        expect(head.headers.get("content-length")).toBe(String(SPA_CHUNK.length));
+        expect(await head.text()).toBe("");
+
+        // Under /assets/ only exact packed names answer; nothing falls back to the page.
+        for (const path of ["/assets/missing.js", "/assets/index-test.js.map", "/assets/INDEX-TEST.js"]) {
+          const missing = await fetch(`${server.url}${path}`);
+          expect({ path, status: missing.status }).toEqual({ path, status: 404 });
+          expect(missing.headers.get("x-content-type-options")).toBe("nosniff");
+          expect(await missing.text()).not.toContain("SPA fallback");
+        }
+        const post = await fetch(`${server.url}/assets/index-test.js`, { method: "POST" });
+        expect(post.status).toBe(405);
+        expect(post.headers.get("allow")).toBe("GET, HEAD");
       } finally {
         server.stop();
       }

@@ -19,6 +19,9 @@ import { join } from "node:path";
 import { startReviewServer as startBunReviewServer } from "./review";
 import { startReviewServer as startPiReviewServer } from "../../apps/pi-extension/server";
 import { getVcsContext, runVcsDiff } from "./vcs";
+import { useScratchJjConfig } from "../../tests/helpers/jj-scratch-config";
+
+const jjConfig = useScratchJjConfig();
 
 const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
 const originalPort = process.env.PLANNOTATOR_PORT;
@@ -44,7 +47,7 @@ function makeTempDir(prefix: string): string {
 }
 
 function jj(cwd: string, args: string[]): string {
-  const result = spawnSync("jj", args, { cwd, encoding: "utf-8" });
+  const result = spawnSync("jj", args, { cwd, encoding: "utf-8", env: jjConfig.env() });
   if (result.status !== 0) throw new Error(result.stderr || `jj ${args.join(" ")} failed`);
   return result.stdout.trim();
 }

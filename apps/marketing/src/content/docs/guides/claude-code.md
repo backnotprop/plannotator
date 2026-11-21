@@ -9,7 +9,7 @@ section: "Getting Started"
 Plannotator works with Claude Code in one of two ways. Both open the same review UI.
 
 - **The Plannotator mod** (Claude Code 2.1.287 or newer, in the interactive terminal). It is on by default. Claude does not wait for you.
-- **The classic hook** (older Claude Code, `claude -p` and SDK runs, Windows, or the mod turned off). Claude waits until you decide.
+- **The classic hook** (older Claude Code, `claude -p` and SDK runs, or the mod turned off). Claude waits until you decide.
 
 ## The Plannotator mod
 
@@ -39,6 +39,8 @@ Set `PLANNOTATOR_CLAUDE_MOD=0` in the shell that starts Claude Code (or in the `
 The environment variable wins over the config file. Claude Code reads the setting when it starts, so restart Claude Code after you change it. With the mod off, the classic hook and the slash command skills work as described below.
 
 To keep only the `plannotator` tool out of Claude's tool list and leave the rest of the mod on, set `PLANNOTATOR_AGENT_TOOL=0` or add `{ "agentTool": false }` to `~/.plannotator/config.json`. The slash commands, plan review, Ask this session, and Bash `plannotator` commands that Claude runs work as before. Turning the tool off keeps that Bash take-over, so a `plannotator` command Claude runs still opens without blocking; to get the blocking CLI back, set `PLANNOTATOR_CLAUDE_MOD=0` instead. Restart Claude Code after you change it.
+
+To turn off plan review and keep everything else, set `PLANNOTATOR_PLAN_REVIEW=0` or add `{ "planReview": false }` to `~/.plannotator/config.json`. Claude Code then shows its own plan approval dialog. That dialog offers "Yes, clear context" only when `showClearContextOnPlanAccept` is `true` in Claude Code's settings (it is hidden by default since Claude Code 2.1.81). This helps when you drive Claude Code from a device that can't open the review in a browser. Code review, annotate, the `plannotator` tool and the Inbox work as before. Restart Claude Code after you change it.
 
 ## The classic hook
 
@@ -141,7 +143,7 @@ Annotates the agent's most recent message. See the [annotate last docs](/docs/co
 
 ### `/plannotator-inbox`
 
-Opens your [Plannotator Inbox](/docs/reference/inbox/) in the browser, starting it if needed, and shows its address. Use it when you closed the Inbox tab.
+Opens your [Plannotator Inbox](/docs/reference/inbox/) in the browser, starting it if needed, and shows its address. Use it when you closed the Inbox tab. It also briefs Claude on using the Inbox for the rest of the session, without starting new work; with the plugin you see only the address and Claude gets the briefing unseen.
 
 Optional extra skills (compound planning, setup-goal, visual explainer) are not installed by default. Add them with:
 

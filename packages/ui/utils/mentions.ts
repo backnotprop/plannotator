@@ -27,6 +27,7 @@ export interface MentionPerson {
    * means the muted surface). Absent → no avatar column, the 0.43.1 row.
    */
   readonly avatar?: { readonly url?: string; readonly initials?: string; readonly tint?: string };
+  readonly mark?: ReactNode;
   /**
    * Whether this person can open the document. Host data: rows render
    * identically either way, and a `false` row is only special when the host
@@ -196,5 +197,17 @@ export function survivingMentions(
   text: string,
   tagged: readonly MentionPerson[],
 ): readonly MentionPerson[] {
-  return tagged.filter((person) => text.includes(mentionToken(person)));
+  const tokens = tagged.map(mentionToken);
+  // An occurrence that is the start of a longer tagged token belongs to that
+  // token ("@Fix" in "@Fix login" when "Fix login" is tagged too). Anything
+  // else still counts as before, whatever follows it ("@Ann2", "@Annさん").
+  const standsAt = (token: string, at: number) =>
+    !tokens.some((other) => other.length > token.length && other.startsWith(token) && text.startsWith(other, at));
+  return tagged.filter((_, index) => {
+    const token = tokens[index]!;
+    for (let at = text.indexOf(token); at !== -1; at = text.indexOf(token, at + 1)) {
+      if (standsAt(token, at)) return true;
+    }
+    return false;
+  });
 }

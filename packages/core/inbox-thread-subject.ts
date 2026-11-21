@@ -175,7 +175,7 @@ function plainSubjectLine(input: string, images: { alt: string; src: string }[])
 
 const FILLER_WORD = "(?:so|ok|okay|alright|all right|well|right|anyway|anyways|yeah|basically)";
 /** An agent's name: "Hey Claude can you…" needs no comma after it. */
-const AGENT_NAME = "(?:claude|codex|pi|opencode|amp|gemini|cursor|droid)";
+const AGENT_NAME = "(?:claude|codex|pi|opencode|amp|gemini|qwen|cursor|droid)";
 /** A word that is an addressee only before punctuation: "Hey there, …", never "Hey there is a bug". */
 const ADDRESSEE_WORD = "(?:there|team|buddy|friend|folks|all|everyone)";
 /**

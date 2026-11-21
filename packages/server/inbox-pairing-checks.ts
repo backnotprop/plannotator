@@ -22,26 +22,29 @@
  * state.
  */
 
-import { childPath } from "@plannotator/shared/child-env";
+import { childEnv, childPath } from "@plannotator/shared/child-env";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { join } from "node:path";
 import {
+  checkTailscaleAppAnswer,
   parseTailscaleSelfIdentity,
-  serveStatusProxy,
+  tailscaleAppEnv,
+  tailscaleAppFallback,
   TAILSCALE_CLI_TIMEOUT_MS,
   TAILSCALE_SERVE_TIMEOUT_MS,
   type TailscaleRunResult,
 } from "@plannotator/shared/tailscale";
 import { inboxTlsDir, lanAddress } from "./inbox-lan";
+import type { TailnetDoorPort } from "./inbox-tailnet-door";
 
 /** The macOS application firewall: off, on (macOS asks per app), or blocking every incoming connection. Unknown elsewhere. */
 export type FirewallState = "off" | "on" | "block_all" | "unknown";
 
 /**
- * `cli_missing`: no `tailscale` command on PATH (Tailscale may still be
- * installed, as the Mac App Store app is without its command-line tool).
+ * `cli_missing`: no `tailscale` command on PATH and, on a Mac, no
+ * /Applications/Tailscale.app whose own CLI could stand in for it.
  * `no_answer`: the command did not answer within its time limit.
  */
 export type TailscaleBackend = "running" | "stopped" | "signed_out" | "needs_approval" | "starting" | "cli_missing" | "no_answer" | "unknown";
@@ -66,8 +69,10 @@ export interface PairingChecks {
     login: string | null;
     /** HTTPS certificates are on for the tailnet (`CertDomains`), which `tailscale serve --https` needs. Null when unknown. */
     https_certs: boolean | null;
-    /** Port 8443 is free, or already the Inbox's own mapping. Null when unknown (not running, or serve did not answer). */
+    /** A tailnet port the door may take (8443 to 8450) is free, or already the Inbox's own mapping. Null when unknown (not running, or serve did not answer). */
     port_free: boolean | null;
+    /** The port the door would take (`port_free`), or the door's kept port another mapping now holds (`port_free: false`); null when every port is held or unknown. */
+    https_port: number | null;
     /** What the CLI said when it could not be read, in its own words. */
     error: string | null;
   };
@@ -102,7 +107,7 @@ const SOCKETFILTERFW = "/usr/libexec/ApplicationFirewall/socketfilterfw";
  * close. Settling on exit alone would not hold either, for the same reason:
  * `close` waits for the pipes, so only the timer ends a lingering read.
  */
-export function runQuietly(command: string, args: string[], timeoutMs: number): Promise<TailscaleRunResult> {
+export function runQuietly(command: string, args: string[], timeoutMs: number, env?: Record<string, string | undefined>): Promise<TailscaleRunResult> {
   const path = command.includes("/") ? (existsSync(command) ? command : null) : Bun.which(command, { PATH: childPath() });
   if (!path) return Promise.resolve({ error: Object.assign(new Error(`${command}: not found on PATH`), { code: "ENOENT" }), status: null, stdout: "", stderr: "" });
   const group = process.platform !== "win32";
@@ -119,7 +124,7 @@ export function runQuietly(command: string, args: string[], timeoutMs: number): 
       resolve(result);
     };
     try {
-      child = spawn(path, args, { stdio: ["ignore", "pipe", "pipe"], detached: group, windowsHide: true });
+      child = spawn(path, args, { stdio: ["ignore", "pipe", "pipe"], detached: group, windowsHide: true, ...(env ? { env } : {}) });
     } catch (cause) {
       finish({ error: cause instanceof Error ? cause : new Error(String(cause)), status: null, stdout: "", stderr: "" });
       return;
@@ -167,8 +172,16 @@ function withDeadline<T>(value: T | Promise<T>, ms: number, fallback: T): Promis
 /** The most one read of the checks takes: past it, a probe that has not answered reads as not answering. */
 export const PAIRING_CHECKS_DEADLINE_MS = 15_000;
 
-/** The default Tailscale runner for the checks: the CLI on PATH, asynchronously. */
-export const runTailscaleQuietly: PairingTailscaleRunner = (args, timeoutMs) => runQuietly("tailscale", args, timeoutMs);
+/**
+ * The default Tailscale runner for the checks: the CLI on PATH, then the Mac
+ * app's own CLI (`tailscaleAppFallback`) in a shell-like env
+ * (`tailscaleAppEnv`), asynchronously.
+ */
+export const runTailscaleQuietly: PairingTailscaleRunner = async (args, timeoutMs) => {
+  const onPath = await runQuietly("tailscale", args, timeoutMs);
+  const app = tailscaleAppFallback(onPath);
+  return app ? checkTailscaleAppAnswer(await runQuietly(app, args, timeoutMs, tailscaleAppEnv(childEnv()))) : onPath;
+};
 
 /**
  * `socketfilterfw --getglobalstate` and `--getblockall`, as macOS prints them
@@ -265,17 +278,15 @@ export const defaultPairingProbes: PairingProbes = {
 export interface PairingChecksContext {
   dataDir: string;
   tailscale: PairingTailscaleRunner;
-  /** The HTTPS port phones reach the tailnet door on (8443). */
-  httpsPort: number;
-  /** Proxy targets a mapping of the Inbox's own points at (its door listener now or last run). */
-  ownTargets: () => string[];
+  /** The tailnet port the door would take, read from `tailscale serve status --json` (inbox-tailnet-door.ts). */
+  doorPort: (serveStatus: string) => TailnetDoorPort;
   probes?: Partial<PairingProbes>;
   /** The whole read's deadline. Default `PAIRING_CHECKS_DEADLINE_MS`. */
   deadlineMs?: number;
 }
 
 async function tailscaleChecks(context: PairingChecksContext): Promise<PairingChecks["tailscale"]> {
-  const tailscale: PairingChecks["tailscale"] = { state: "unknown", login: null, https_certs: null, port_free: null, error: null };
+  const tailscale: PairingChecks["tailscale"] = { state: "unknown", login: null, https_certs: null, port_free: null, https_port: null, error: null };
   // `--peers=false`: this computer only; the tailnet's other devices are never read.
   const status = await context.tailscale(["status", "--json", "--peers=false"], TAILSCALE_CLI_TIMEOUT_MS);
   if (status.error) {
@@ -296,9 +307,14 @@ async function tailscaleChecks(context: PairingChecksContext): Promise<PairingCh
   if (tailscale.state === "running") {
     const serve = await context.tailscale(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
     if (!serve.error && serve.status === 0) {
-      const mapped = serveStatusProxy(serve.stdout, context.httpsPort);
-      if (mapped.state === "free") tailscale.port_free = true;
-      else if (mapped.state === "mapped") tailscale.port_free = context.ownTargets().includes(mapped.proxy);
+      const port = context.doorPort(serve.stdout);
+      if (port.state === "usable") {
+        tailscale.port_free = true;
+        tailscale.https_port = port.port;
+      } else if (port.state === "held") {
+        tailscale.port_free = false;
+        tailscale.https_port = port.port;
+      } else if (port.state === "taken") tailscale.port_free = false;
     }
   }
   return tailscale;
@@ -311,7 +327,7 @@ export async function readPairingChecks(context: PairingChecksContext): Promise<
   const bonjourTool = process.platform === "darwin" ? "dns-sd" : "avahi-publish";
   const tls = inboxTlsDir(context.dataDir);
   const deadline = context.deadlineMs ?? PAIRING_CHECKS_DEADLINE_MS;
-  const silent: PairingChecks["tailscale"] = { state: "no_answer", login: null, https_certs: null, port_free: null, error: null };
+  const silent: PairingChecks["tailscale"] = { state: "no_answer", login: null, https_certs: null, port_free: null, https_port: null, error: null };
   const [network, firewall, tailscale] = await Promise.all([
     address ? withDeadline(probes.network(address), deadline, null) : null,
     withDeadline(probes.firewall(), deadline, "unknown" as FirewallState),

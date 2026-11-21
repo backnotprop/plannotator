@@ -31,6 +31,8 @@ interface FakeSpawn {
 	port?: number;
 	timeout?: number;
 	closed: boolean;
+	/** The switches process.env held when the SDK was called (it copies process.env into the spawn there). */
+	env: Record<string, string | undefined>;
 }
 
 let spawned: FakeSpawn[] = [];
@@ -45,7 +47,15 @@ mock.module("@opencode-ai/sdk", () => ({
 		timeout?: number;
 	}) => {
 		if (serverError) throw serverError;
-		const record: FakeSpawn = { ...opts, closed: false };
+		const record: FakeSpawn = {
+			...opts,
+			closed: false,
+			env: {
+				PLANNOTATOR_ASK_AI_CHILD: process.env.PLANNOTATOR_ASK_AI_CHILD,
+				PLANNOTATOR_INBOX_TOOL: process.env.PLANNOTATOR_INBOX_TOOL,
+				PLANNOTATOR_AGENT_TOOL: process.env.PLANNOTATOR_AGENT_TOOL,
+			},
+		};
 		spawned.push(record);
 		if (spawnGate) await spawnGate;
 		return {
@@ -105,6 +115,23 @@ describe("OpenCodeProvider server lifecycle", () => {
 		expect(spawned[0]!.closed).toBe(true);
 
 		provider.dispose();
+	});
+
+	test("`opencode serve` starts with Plannotator's integration off, and the host's own env is untouched", async () => {
+		const saved = process.env.PLANNOTATOR_INBOX_TOOL;
+		// The person turned the Inbox tool on for their own sessions.
+		process.env.PLANNOTATOR_INBOX_TOOL = "1";
+		try {
+			const provider = makeProvider();
+			await provider.ensureServer();
+			expect(spawned[0]!.env).toEqual({ PLANNOTATOR_ASK_AI_CHILD: "1", PLANNOTATOR_INBOX_TOOL: "0", PLANNOTATOR_AGENT_TOOL: "0" });
+			expect(process.env.PLANNOTATOR_INBOX_TOOL).toBe("1");
+			expect(process.env.PLANNOTATOR_ASK_AI_CHILD).toBeUndefined();
+			provider.dispose();
+		} finally {
+			if (saved === undefined) delete process.env.PLANNOTATOR_INBOX_TOOL;
+			else process.env.PLANNOTATOR_INBOX_TOOL = saved;
+		}
 	});
 
 	test("honors an explicitly configured port verbatim", async () => {
@@ -175,6 +202,34 @@ describe("OpenCodeProvider server lifecycle", () => {
 		expect(spawned[1]!.closed).toBe(false);
 		provider.dispose();
 		expect(spawned[1]!.closed).toBe(true);
+	});
+
+	test("an old rejected startup does not clear the next startup", async () => {
+		const provider = makeProvider();
+		let releaseOld = () => {};
+		let releaseCurrent = () => {};
+		try {
+			spawnGate = new Promise<void>((resolve) => { releaseOld = resolve; });
+			const old = provider.ensureServer().catch((error: unknown) => error);
+			await Bun.sleep(0);
+			provider.dispose();
+
+			spawnGate = new Promise<void>((resolve) => { releaseCurrent = resolve; });
+			const current = provider.ensureServer();
+			await Bun.sleep(0);
+			releaseOld();
+			expect(await old).toBeInstanceOf(Error);
+			expect(spawned[0]?.closed).toBe(true);
+
+			const concurrent = provider.ensureServer();
+			releaseCurrent();
+			await Promise.all([current, concurrent]);
+			expect(spawned).toHaveLength(2);
+		} finally {
+			releaseOld();
+			releaseCurrent();
+			provider.dispose();
+		}
 	});
 
 	test("surfaces a friendly error when opencode is not on PATH (ENOENT)", async () => {
@@ -323,6 +378,25 @@ describe("OpenCode Ask AI event stream", () => {
 		return messages;
 	}
 
+	test("a one-shot prompt turns every tool off and carries its own system prompt; a normal question does neither", async () => {
+		const bodies: Record<string, unknown>[] = [];
+		const made = fakeClient((push) => push({ type: "server.connected", properties: {} }));
+		const client = made.client as { session: { promptAsync: (args: { body: Record<string, unknown> }) => Promise<unknown> } };
+		const answer = client.session.promptAsync as unknown as () => Promise<unknown>;
+		client.session.promptAsync = (args) => {
+			bodies.push(args.body);
+			return answer();
+		};
+		clientFactory = () => made.client;
+		const provider = new OpenCodeProvider({ type: "opencode-sdk" });
+		const context = { mode: "plan-review", plan: { plan: "# Plan" } };
+		for await (const _ of (await provider.createSession({ context, oneShot: { systemPrompt: "JUDGE" } } as never)).query("x")) void _;
+		for await (const _ of (await provider.createSession({ context } as never)).query("x")) void _;
+		provider.dispose();
+		expect(bodies[0]).toMatchObject({ system: "JUDGE", tools: { "*": false }, variant: "low" });
+		expect(bodies[1]!.tools).toBeUndefined();
+	});
+
 	test("sends the question only after the first frame, then streams the answer", async () => {
 		const { client, log, signals } = fakeClient((push) => {
 			setTimeout(() => push({ type: "server.connected", properties: {} }), 20);
@@ -370,7 +444,7 @@ describe("OpenCode Ask AI event stream through the real client", async () => {
 	const { createOpencodeClient } = await import("@opencode-ai/sdk/client");
 	const encoder = new TextEncoder();
 
-	type Mode = "silent" | "answers" | "connects";
+	type Mode = "silent" | "answers" | "connects" | "rejects";
 	function fakeOpencodeServe(mode: Mode) {
 		const events: Array<{ opened: number; closed: number | null }> = [];
 		let send: ((event: unknown) => void) | null = null;
@@ -383,6 +457,9 @@ describe("OpenCode Ask AI event stream through the real client", async () => {
 					return Response.json({ id: "oc_real", title: "t", version: "1", time: { created: 0, updated: 0 } });
 				}
 				if (url.pathname.endsWith("/prompt_async")) {
+					if (mode === "rejects") {
+						return Response.json({ name: "BadRequest", data: { message: "Unknown model" } }, { status: 400 });
+					}
 					if (mode === "answers") {
 						setTimeout(() => {
 							send?.({ type: "message.part.delta", properties: { sessionID: "oc_real", field: "text", delta: "pong" } });
@@ -423,11 +500,15 @@ describe("OpenCode Ask AI event stream through the real client", async () => {
 		clientFactory = () => createOpencodeClient({ baseUrl: serve.url });
 		const provider = new OpenCodeProvider({ type: "opencode-sdk", firstEventTimeoutMs: timeoutMs });
 		const session = await provider.createSession({ context: { mode: "plan-review", plan: { plan: "# Plan" } } } as never);
-		if (stopAfterMs != null) setTimeout(() => session.abort(), stopAfterMs);
-		const messages: Array<Record<string, unknown>> = [];
-		for await (const message of session.query("ping")) messages.push(message as Record<string, unknown>);
-		provider.dispose();
-		return messages;
+		const stop = stopAfterMs == null ? undefined : setTimeout(() => session.abort(), stopAfterMs);
+		try {
+			const messages: Array<Record<string, unknown>> = [];
+			for await (const message of session.query("ping")) messages.push(message as Record<string, unknown>);
+			return messages;
+		} finally {
+			clearTimeout(stop);
+			provider.dispose();
+		}
 	}
 
 	async function closedSoon(serve: ReturnType<typeof fakeOpencodeServe>): Promise<boolean> {
@@ -455,6 +536,21 @@ describe("OpenCode Ask AI event stream through the real client", async () => {
 				{ type: "text_delta", delta: "pong" },
 				{ type: "result", sessionId: "oc_real", success: true },
 			]);
+			expect(await closedSoon(serve)).toBe(true);
+		} finally {
+			serve.stop();
+		}
+	});
+
+	test("reports a rejected HTTP prompt without waiting for a turn that never started", async () => {
+		const serve = fakeOpencodeServe("rejects");
+		try {
+			const messages = await askReal(serve, 5_000, 250);
+			expect(messages).toEqual([{
+				type: "error",
+				error: "OpenCode rejected prompt: Unknown model",
+				code: "opencode_prompt_rejected",
+			}]);
 			expect(await closedSoon(serve)).toBe(true);
 		} finally {
 			serve.stop();

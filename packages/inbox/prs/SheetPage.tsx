@@ -1,0 +1,1334 @@
+/**
+ * The Pull requests page, "the Sheet" (approval "inbox-pr-dashboard"; the owner's answers of 2026-11-09): one full
+ * page, a section per repository, each open PR a number tile, stacks as joined tiles (one strip past 8 PRs). The
+ * header counts; a filter field (title, author, repository, number), Open | Merged (the last 14 days), and the forge's
+ * own closed search as a link. A tile's popover (hover or focus; Enter or a tap pins it, a bottom sheet on a phone)
+ * says what the PR is and offers Open, Open on GitHub, and Merge when the forge said it can (a second click confirms).
+ * A desktop's Grid | Table shows the same PRs as rows instead (SheetTable.tsx; approval "inbox-pr-board-bulk").
+ * Select (the owner's pick B there) is a mode of its own: no box shows until it is pressed; then a tile's or a row's
+ * click picks, a shift-click picks the range from the last one, and the bar in place of the filter row counts them
+ * (a phone's sheet at the bottom). Done or Clear leaves it; outside it, clicks are as above. The bar's Merge N merges
+ * the green picks one at a time after a second click and reports the rest (bulkMerge.ts); Close N closes every pick
+ * without a confirm, one at a time, with the window's toast offering Undo, which reopens exactly those (bulkClose.ts).
+ * Start review thread starts one review thread per repository of the picks, on the machine whose list has them, and
+ * links a pick that has one already (bulkReview.ts, startReviews.ts); the report under the bar opens each thread.
+ *
+ * Keyboard: Tab and Enter only (arrow keys are deferred, q-38094e68). A tile's popover actions join the Tab order only
+ * once Enter pins it; Escape closes it back to the tile.
+ */
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent as ReactFocusEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { inboxPullIsOpen, inboxPullLabel, type InboxPull, type InboxPullStack, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
+import { useShortcutScope } from '@plannotator/ui/shortcuts';
+import { Icon } from '../icons';
+import { SidebarTrigger } from '../shell/sidebar';
+import { inboxApi } from '../api';
+import { forgeName, hostName } from '../pulls/labels';
+import { pullsEmptyWords, pullsNotices } from '../pulls/notices';
+import { usePullRisk } from '../pulls/usePullRisk';
+import { Named, Person } from '../pulls/Face';
+import { facesOnce } from '../pulls/words';
+import { inOverlay, isComposingKey, isEditableTarget, keyTarget, modalOpen } from '../shortcuts/guards';
+import { inboxPrBoardShortcuts } from '../shortcuts/prBoard.shortcuts';
+import { ChecksMark, checksLabel } from './ChecksMark';
+import { BoxMark, boxState, SelectBox } from './SelectBox';
+import { cantMergeLine, confirmWords, farMergeLine, mergeHint, mergePlan, notMergedLine, refusedLine, type MergePlan } from './bulkMerge';
+import { CLOSE_UNDO_MS, doneLine, runningWords, toastLead, type BulkVerb, type RunOutcome } from './bulkClose';
+import { ALREADY_HEADING, ALREADY_LEAD, alreadyPart, groupPart, notStartedLine, reviewPlan, startButtonWords, startedHeading, startedLead, startedToast, startingWords, stoppedToast, untiedLine, type ReviewReport } from './bulkReview';
+import { retryTies, startReview } from './startReviews';
+import { untiedStarts } from './reviewStarts';
+import type { InboxToastModel } from '../components/Toast';
+import { useToastAbove } from '../toastAbove';
+import { focusWhenGone, hideRepoWithUndo, hideWithUndo, itemsBy } from '../pulls/hiddenPulls';
+import { SheetTable, type TableSection } from './SheetTable';
+import { nextSort, pullWords, sortUnits, type SheetLayout, type TableSort } from './tableModel';
+import {
+  agoWords,
+  closedLinks,
+  foldsToStrip,
+  isStack,
+  matchesQuery,
+  mergedModel,
+  mergeOffered,
+  needsYou,
+  sheetModel,
+  stackCounts,
+  statusParts,
+  type RiskLevels,
+} from './sheetModel';
+
+export type SheetView = 'open' | 'merged';
+
+export interface SheetPageProps {
+  model: InboxPullsAnswer | null;
+  error: string | null;
+  loading: boolean;
+  phone: boolean;
+  view: SheetView;
+  /** The agent's risk levels by PR key; absent: read here (`GET /api/inbox/pulls/risk`), as the Reviews page does. */
+  risk?: RiskLevels;
+  onView: (view: SheetView) => void;
+  /** Open a PR's own view (the Inbox's PR review), from the Sheet. */
+  onOpenPull: (pull: InboxPull, stack: InboxPullStack) => void;
+  /** Open a stack's own page. */
+  onOpenStack: (stack: InboxPullStack) => void;
+  /** A merge, a close or a reopen went: read the list again. */
+  onMerged: () => void;
+  /** The window's one toast (Close's count with Undo); null takes it down. Absent: no toast, the report alone. */
+  onToast?: (toast: Omit<InboxToastModel, 'id'>, ms: number) => void;
+  /** For tests and shots: the clock. */
+  now?: number;
+  /**
+   * `page`: its own page (`#prs`, a phone's way in from Reviews); `pane`: Reviews' right pane while no review is open
+   * there (approval "inbox-pr-dashboard", the owner's pick "in Reviews", take C), with no sidebar button of its own.
+   */
+  mode?: 'page' | 'pane';
+  /** The page's back arrow, to Reviews (in place of the sidebar button). */
+  onBack?: () => void;
+  /** Grid (the tiles) or Table; a phone always has the grid. */
+  layout?: SheetLayout;
+  /** Without it there is no Grid | Table switch. */
+  onLayout?: (layout: SheetLayout) => void;
+  /** A linked machine's name, for Start review thread's words about it. */
+  machineName?: (machine: string) => string | null;
+  /** Open a review thread (Start review thread's report, a tile's Open review thread). Without it neither is offered. */
+  onOpenThread?: (threadId: string) => void;
+  /** Reviews' project filter's name, when one is on: `model` is already that project's (`boardInProject`). */
+  projectName?: string | null;
+  /** Reviews' project filter (its id): picks the board no longer holds are dropped when it changes. */
+  project?: string | null;
+}
+
+/** The popover: the PR it is of, the tile it hangs from, and whether Enter or a tap pinned it (its actions take focus). */
+interface Pop {
+  pull: InboxPull;
+  stack: InboxPullStack;
+  anchor: HTMLElement;
+  pinned: boolean;
+}
+
+const HOVER_OPEN_MS = 280;
+const HOVER_CLOSE_MS = 180;
+/** How long "✓ Merged" stays in the popover before it closes and the PR leaves Open. */
+export const MERGED_SHOWN_MS = 1500;
+
+/** What this page did to a PR before the next read says so: merged or closed it, or reopened one it closed (as it was). */
+interface DoneHere {
+  merged: ReadonlyMap<string, string>;
+  closed: ReadonlyMap<string, InboxPull['state']>;
+  reopened: ReadonlyMap<string, InboxPull['state']>;
+}
+
+/** The list with what this page did shown so, before the next read says it. */
+function withDoneHere(model: InboxPullsAnswer | null, here: DoneHere): InboxPullsAnswer | null {
+  if (!model || (here.merged.size === 0 && here.closed.size === 0 && here.reopened.size === 0)) return model;
+  return {
+    ...model,
+    pulls: model.pulls.map((pull) => {
+      if (here.merged.has(pull.key) && inboxPullIsOpen(pull)) return { ...pull, state: 'merged' as const, merged_at: pull.merged_at ?? here.merged.get(pull.key)! };
+      if (here.closed.has(pull.key) && inboxPullIsOpen(pull)) return { ...pull, state: 'closed' as const };
+      const was = here.reopened.get(pull.key);
+      return was && pull.state === 'closed' ? { ...pull, state: was } : pull;
+    }),
+  };
+}
+
+export function SheetPage(props: SheetPageProps) {
+  const { phone, view } = props;
+  // A PR merged here leaves Open as its popover closes, whatever the list on screen still says.
+  const [mergedHere, setMergedHere] = useState<ReadonlyMap<string, string>>(() => new Map());
+  // Closed here (and the state each had), and reopened by Close's Undo.
+  const [closedHere, setClosedHere] = useState<ReadonlyMap<string, InboxPull['state']>>(() => new Map());
+  const [reopenedHere, setReopenedHere] = useState<ReadonlyMap<string, InboxPull['state']>>(() => new Map());
+  // The review threads started here, by PR key, until the list links them: a second press never starts another. A
+  // thread whose PRs could not be tied to it stays here across a reload (reviewStarts.ts) while its tie is tried again.
+  const [threadsHere, setThreadsHere] = useState<ReadonlyMap<string, string>>(() => new Map(untiedStarts().flatMap((s) => s.keys.map((k) => [k, s.thread!] as const))));
+  const onMerged = useRef(props.onMerged);
+  onMerged.current = props.onMerged;
+  useEffect(() => {
+    void retryTies().then((tied) => tied.length > 0 && onMerged.current());
+  }, []);
+  const model = useMemo(() => withDoneHere(props.model, { merged: mergedHere, closed: closedHere, reopened: reopenedHere }), [props.model, mergedHere, closedHere, reopenedHere]);
+  // A merge under way or just done holds its popover open: the pointer leaving or another tile doesn't close it.
+  const held = useRef(false);
+  // The clock moves with the list (ages and "this week" are read against the answer on screen).
+  const readAt = useMemo(() => Date.now(), [model]);
+  const now = props.now ?? readAt;
+  const [query, setQuery] = useState('');
+  const [pop, setPop] = useState<Pop | null>(null);
+  const titleId = useId();
+  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearTimers = () => {
+    if (openTimer.current) clearTimeout(openTimer.current);
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    openTimer.current = closeTimer.current = null;
+  };
+  useEffect(() => clearTimers, []);
+
+  const riskAnswer = usePullRisk(props.risk ? null : model).answer;
+  // A linked machine's PRs carry that machine's judgments (`far_risk`); this machine's own come from its risk read.
+  const judgments = useMemo(() => (props.risk ? undefined : { ...props.model?.far_risk, ...riskAnswer?.judgments }), [props.risk, props.model, riskAnswer]);
+  const risk = useMemo<RiskLevels>(
+    () => props.risk ?? Object.fromEntries(Object.entries(judgments ?? {}).map(([key, judgment]) => [key, judgment.level])),
+    [props.risk, judgments],
+  );
+  const layout: SheetLayout = phone || !props.onLayout ? 'grid' : (props.layout ?? 'grid');
+  const [sort, setSort] = useState<TableSort | null>(null);
+  // The table's header sticks under the bar, whose height changes as it wraps.
+  const barRef = useRef<HTMLDivElement>(null);
+  const [barHeight, setBarHeight] = useState(0);
+  useLayoutEffect(() => {
+    const bar = barRef.current;
+    if (!bar || layout !== 'table') return;
+    const measure = () => setBarHeight(bar.offsetHeight);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const watch = new ResizeObserver(measure);
+    watch.observe(bar);
+    return () => watch.disconnect();
+  }, [layout]);
+  const sheet = useMemo(() => (model ? sheetModel(model, now, risk) : null), [model, now, risk]);
+  const merged = useMemo(() => (model && view === 'merged' ? mergedModel(model, now) : null), [model, now, view]);
+  const notices = useMemo(() => (model ? pullsNotices(model) : []), [model]);
+  const q = query.trim();
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
+  // Where a shift-click's range starts: the PR last picked or let go.
+  const anchor = useRef<string | null>(null);
+  const selectOn = selecting && view === 'open';
+  // A pick that is no longer open (merged meanwhile) drops out.
+  const chosen = useMemo(() => {
+    const open = new Set(model?.pulls.filter(inboxPullIsOpen).map((p) => p.key));
+    return new Set([...picked].filter((key) => open.has(key)));
+  }, [model, picked]);
+  // Another project filter: picks it no longer shows are let go, so none comes back unseen when the filter is cleared.
+  const modelRef = useRef(model);
+  modelRef.current = model;
+  useEffect(() => {
+    const keys = new Set(modelRef.current?.pulls.map((p) => p.key));
+    setPicked((was) => (was.size === 0 || [...was].every((key) => keys.has(key)) ? was : new Set([...was].filter((key) => keys.has(key)))));
+  }, [props.project]);
+  // Bulk Merge: the confirm and the report hold the picks they were for; another pick drops them.
+  const [bulk, setBulk] = useState<BulkPhase>({ at: 'idle' });
+  const chosenKey = [...chosen].sort().join('\n');
+  const pickSheet = useToastAbove();
+
+  const show = useCallback((next: Pop) => {
+    clearTimers();
+    setPop(next);
+  }, []);
+  const hide = useCallback((returnFocus: boolean) => {
+    clearTimers();
+    setPop((was) => {
+      if (was && returnFocus) queueMicrotask(() => was.anchor.isConnected && was.anchor.focus());
+      return null;
+    });
+  }, []);
+
+  /**
+   * A tile's handlers: hover and focus show the popover, a mouse click opens the PR, Enter or a tap pins the popover.
+   * In select mode a click (or Enter, or a tap) picks it, and there is no popover.
+   */
+  const tileHandlers = (pull: InboxPull, stack: InboxPullStack) => (selectOn ? pickHandlers(pull) : {
+    onPointerEnter: (event: ReactPointerEvent<HTMLButtonElement>) => {
+      if (event.pointerType !== 'mouse' || phone) return;
+      const anchor = event.currentTarget;
+      clearTimers();
+      if (held.current) return;
+      if (pop && !pop.pinned) setPop({ pull, stack, anchor, pinned: false });
+      else if (!pop) openTimer.current = setTimeout(() => setPop({ pull, stack, anchor, pinned: false }), HOVER_OPEN_MS);
+    },
+    onPointerLeave: (event: ReactPointerEvent<HTMLButtonElement>) => {
+      if (event.pointerType !== 'mouse' || phone) return;
+      if (openTimer.current) clearTimeout(openTimer.current);
+      openTimer.current = null;
+      closeTimer.current = setTimeout(() => setPop((was) => (was && !was.pinned && !held.current ? null : was)), HOVER_CLOSE_MS);
+    },
+    onFocus: (event: ReactFocusEvent<HTMLButtonElement>) => {
+      if (phone || held.current || !event.currentTarget.matches(':focus-visible')) return;
+      show({ pull, stack, anchor: event.currentTarget, pinned: false });
+    },
+    onBlur: (event: ReactFocusEvent<HTMLButtonElement>) => {
+      // Into the pinned popover is not away.
+      const to = event.relatedTarget as Node | null;
+      if (to && document.querySelector('[data-pr-pop]')?.contains(to)) return;
+      setPop((was) => (was && !was.pinned && !held.current && was.anchor === event.currentTarget ? null : was));
+    },
+    onClick: (event: ReactMouseEvent<HTMLButtonElement>) => {
+      const anchor = event.currentTarget;
+      // A mouse click on a desktop opens the PR: hovering already showed what the popover says.
+      if (!phone && event.detail > 0) {
+        hide(false);
+        props.onOpenPull(pull, stack);
+        return;
+      }
+      show({ pull, stack, anchor, pinned: true });
+    },
+  });
+  const pickHandlers = (pull: InboxPull) => ({
+    onMouseDown: (event: ReactMouseEvent<HTMLButtonElement>) => {
+      // A shift-click picks a range: it must not select the text between.
+      if (event.shiftKey) event.preventDefault();
+    },
+    onClick: (event: ReactMouseEvent<HTMLButtonElement>) => {
+      if (!busy && inboxPullIsOpen(pull)) pick(pull.key, event.shiftKey);
+    },
+  });
+
+  const tile = (pull: InboxPull, stack: InboxPullStack, inStack: boolean) => {
+    const you = needsYou(pull);
+    const dim = !!q && !matchesQuery(pull, q);
+    const words = pullWords(pull);
+    const box = selectOn && inboxPullIsOpen(pull);
+    const on = box && chosen.has(pull.key);
+    return (
+      <button
+        key={pull.key}
+        type="button"
+        className="ib-prt"
+        data-pr-tile={pull.key}
+        data-state={pull.state}
+        data-you={you ? '' : undefined}
+        data-dim={dim ? '' : undefined}
+        data-in-stack={inStack ? '' : undefined}
+        data-picked={on ? '' : undefined}
+        role={box ? 'checkbox' : undefined}
+        aria-checked={box ? on : undefined}
+        aria-label={words}
+        aria-haspopup={selectOn ? undefined : 'dialog'}
+        aria-expanded={!selectOn && pop?.pull.key === pull.key && pop.pinned ? true : undefined}
+        {...tileHandlers(pull, stack)}
+      >
+        {box && <BoxMark on={on} />}
+        {pull.state === 'merged' && <Icon name="pullRequest" size={12} />}
+        <span className="ib-prt-n">{inboxPullLabel(pull)}</span>
+        {inboxPullIsOpen(pull) && <ChecksMark checks={pull.checks} />}
+      </button>
+    );
+  };
+
+  const stackMark = (stack: InboxPullStack) => (
+    <button type="button" className="ib-prs-mark" aria-label={`Open the stack: ${stack.layers.length} layers`} title={`Open the stack: ${stack.layers.length} layers`} onClick={() => props.onOpenStack(stack)} data-pr-stack-mark="">
+      <Icon name="layers" size={14} />
+    </button>
+  );
+
+  const strip = (stack: InboxPullStack) => {
+    const counts = stackCounts(stack);
+    const dim = !!q && !stack.layers.some((l) => matchesQuery(l, q));
+    const bottomOpen = stack.layers.find(inboxPullIsOpen) ?? stack.layers[0]!;
+    const many = stack.layers.length > 24;
+    return (
+      <button
+        key={stack.id}
+        type="button"
+        className="ib-prs-strip"
+        data-dim={dim ? '' : undefined}
+        data-pr-strip={stack.id}
+        onClick={() => props.onOpenStack(stack)}
+        aria-label={`Stack of ${stack.layers.length}, ${counts.open} open${counts.needYou ? `, ${counts.needYou} need you` : ''}${counts.failing ? `, ${counts.failing} failing` : ''}: ${bottomOpen.title}. Open the stack.`}
+        title={bottomOpen.title}
+      >
+        <Icon name="layers" size={14} />
+        <span className="ib-prs-strip-t">
+          Stack of {stack.layers.length} · {counts.open} open
+        </span>
+        <span className="ib-prs-strip-marks" data-many={many ? '' : undefined} style={{ '--n': stack.layers.length } as CSSProperties} aria-hidden="true">
+          {stack.layers.map((l) => (
+            <i key={l.key} data-state={l.state} data-you={needsYou(l) ? '' : undefined} data-fail={inboxPullIsOpen(l) && l.checks === 'failure' ? '' : undefined} />
+          ))}
+        </span>
+        {counts.needYou > 0 && <span className="ib-prs-you">{counts.needYou} need you</span>}
+        {counts.failing > 0 && <span className="ib-prs-bad">{counts.failing} failing</span>}
+        <Icon name="chevR" size={13} />
+      </button>
+    );
+  };
+
+  const unit = (stack: InboxPullStack) => {
+    if (!isStack(stack)) return tile(stack.layers[0]!, stack, false);
+    if (foldsToStrip(stack)) return strip(stack);
+    return (
+      <span key={stack.id} className="ib-prs-stack" role="group" aria-label={`Stack of ${stack.layers.length}`} data-pr-stack={stack.id}>
+        {stackMark(stack)}
+        {stack.layers.map((layer, i) => (
+          <span key={layer.key} className="ib-prs-join">
+            {i > 0 && <i className="ib-prs-link" aria-hidden="true" />}
+            {tile(layer, stack, true)}
+          </span>
+        ))}
+      </span>
+    );
+  };
+
+  const head = sheet?.head;
+  const closed = model ? closedLinks(model.hosts) : [];
+  const empty = model && sheet && sheet.sections.length === 0 ? pullsEmptyWords(model, notices) : null;
+  const visible = sheet ? sheet.sections.filter((s) => !q || s.units.some((u) => u.layers.some((l) => matchesQuery(l, q)))) : [];
+
+  // What can be picked: an open PR the filter doesn't dim.
+  const pickable = (pull: InboxPull) => inboxPullIsOpen(pull) && (!q || matchesQuery(pull, q));
+  const keysOf = (section: { units: InboxPullStack[] }) => section.units.flatMap((u) => u.layers.filter(pickable).map((l) => l.key));
+  // A shift-click's range runs over the PRs in the order drawn; a folded strip draws no tile of its own layers.
+  const order = visible.flatMap((s) => (layout === 'table' ? sortUnits(s.units, sort, now, risk) : s.units.filter((u) => !foldsToStrip(u))).flatMap((u) => u.layers.filter(pickable).map((l) => l.key)));
+  const allKeys = visible.flatMap(keysOf);
+  const pick = (key: string, range: boolean) => {
+    const from = anchor.current;
+    anchor.current = key;
+    setPicked((was) => {
+      const next = new Set(was);
+      const a = from ? order.indexOf(from) : -1;
+      const b = order.indexOf(key);
+      if (range && a >= 0 && b >= 0) for (const k of order.slice(Math.min(a, b), Math.max(a, b) + 1)) next.add(k);
+      else if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+  /** A group's box: picks all of it, or lets all of it go when all of it is picked. */
+  const pickAll = (keys: string[]) =>
+    !busy &&
+    setPicked((was) => {
+      const all = keys.every((k) => was.has(k));
+      const next = new Set(was);
+      for (const k of keys) {
+        if (all) next.delete(k);
+        else next.add(k);
+      }
+      return next;
+    });
+  const startSelect = () => {
+    hide(false);
+    setSelecting(true);
+  };
+  const leaveSelect = () => {
+    setSelecting(false);
+    setPicked(new Set());
+    anchor.current = null;
+    setBulk({ at: 'idle' });
+  };
+
+  // The picks in the order on screen (a pick the filter dims comes last), split into what merges and what stays.
+  const stackOf = useMemo(() => {
+    const of = new Map<string, InboxPullStack>();
+    for (const section of sheet?.sections ?? []) for (const unit of section.units) for (const layer of unit.layers) of.set(layer.key, unit);
+    return of;
+  }, [sheet]);
+  const pickedPulls = useMemo(() => {
+    const byKey = new Map(model?.pulls.map((p) => [p.key, p]));
+    const drawn = order.filter((key) => chosen.has(key));
+    const rest = [...chosen].filter((key) => !drawn.includes(key)).sort();
+    return [...drawn, ...rest].map((key) => byKey.get(key)).filter((p): p is InboxPull => !!p);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model, chosenKey, order.join('\n')]);
+  const plan = useMemo(() => mergePlan(pickedPulls, (key) => stackOf.get(key) ?? null), [pickedPulls, stackOf]);
+  // A refresh can replace a selected PR's head or change where the merge will run.
+  const mergeTargets = JSON.stringify(plan.merge.map(({ key, head_sha, base, machine }) => [key, head_sha, base, machine]));
+  const picksChanged = (bulk.at === 'confirm' || bulk.at === 'report' || bulk.at === 'reviewed') && bulk.keys !== chosenKey;
+  const targetsChanged = bulk.at === 'confirm' && bulk.targets !== mergeTargets;
+  const live: BulkPhase = picksChanged || targetsChanged ? { at: 'idle' } : bulk;
+  const busy = live.at === 'running';
+  useEffect(() => {
+    if (bulk.at === 'confirm' && live.at === 'idle') setBulk({ at: 'idle' });
+  }, [bulk.at, live.at]);
+
+  const labelOf = (repo: string) => sheet?.sections.find((section) => section.key === repo)?.label ?? repo;
+  const reviews = reviewPlan(pickedPulls, model?.links ?? {}, threadsHere, model?.projects ?? {}, labelOf);
+  // One run at a time: Close's Undo, pressed from the toast while another runs, waits for it.
+  const runs = useRef<Promise<void>>(Promise.resolve());
+  const waiting = useRef(0);
+  const queue = (run: () => Promise<void>) => {
+    const start = () => run().finally(() => void (waiting.current -= 1));
+    waiting.current += 1;
+    runs.current = waiting.current === 1 ? start() : runs.current.then(start, start);
+  };
+  /** Each PR in turn; a refusal keeps its words and is never sent again by itself. */
+  const runEach = async (verb: BulkVerb, list: readonly InboxPull[], send: (pull: InboxPull) => Promise<unknown>, went: (pull: InboxPull) => void): Promise<RunOutcome[]> => {
+    const outcomes: RunOutcome[] = [];
+    for (let i = 0; i < list.length; i++) {
+      const pull = list[i]!;
+      setBulk({ at: 'running', verb, done: i + 1, total: list.length });
+      try {
+        await send(pull);
+        outcomes.push({ pull, ok: true });
+        went(pull);
+      } catch (cause) {
+        outcomes.push({ pull, ok: false, why: cause instanceof Error && cause.message ? cause.message : verb === 'merge' ? 'The merge didn’t go.' : 'It didn’t go.' });
+      }
+    }
+    return outcomes;
+  };
+  /** After a run: what went leaves the picks (or, for Undo, is picked again), the report says each, the list is read again. */
+  const report = (verb: BulkVerb, outcomes: RunOutcome[], skipped: MergePlan['skip'], picks: ReadonlySet<string>) => {
+    setPicked(picks);
+    anchor.current = null;
+    setBulk({ at: 'report', verb, keys: [...picks].sort().join('\n'), outcomes, skipped });
+    if (outcomes.some((o) => o.ok)) props.onMerged();
+  };
+  /** Merge: one at a time through the popover's own route, which asks the forge again and pins the head the person saw. */
+  const runMerge = (list: InboxPull[], skipped: MergePlan['skip']) =>
+    queue(async () => {
+      const outcomes = await runEach('merge', list, (pull) => inboxApi.pullMerge(pull.key, pull.head_sha!, pull.machine ?? null), (pull) => setMergedHere((was) => new Map(was).set(pull.key, new Date().toISOString())));
+      const merged = new Set(outcomes.filter((o) => o.ok).map((o) => o.pull.key));
+      report('merge', outcomes, skipped, new Set([...chosen].filter((key) => !merged.has(key))));
+    });
+  /**
+   * Close (no confirm: the count with Undo is the pause, the owner's pick): each pick in turn, the host asked first. What
+   * closed leaves Open and the toast offers Undo, which reopens exactly those.
+   */
+  const runClose = (list: InboxPull[]) =>
+    queue(async () => {
+      const outcomes = await runEach('close', list, (pull) => inboxApi.pullClose(pull.key, pull.machine ?? null), (pull) => {
+        setReopenedHere((was) => withoutKey(was, pull.key));
+        setClosedHere((was) => new Map(was).set(pull.key, pull.state));
+      });
+      const closed = outcomes.filter((o) => o.ok).map((o) => o.pull);
+      report('close', outcomes, [], new Set([...chosen].filter((key) => !closed.some((p) => p.key === key))));
+      if (closed.length > 0) props.onToast?.({ icon: 'check', lead: toastLead('close', closed.length), onUndo: () => undoClose(closed), noKey: true }, CLOSE_UNDO_MS);
+    });
+  /** Close's Undo: reopens exactly what that Close closed, picks them again, and says how each went. */
+  const undoClose = (closed: readonly InboxPull[]) =>
+    queue(async () => {
+      setSelecting(true);
+      const outcomes = await runEach('reopen', closed, (pull) => inboxApi.pullReopen(pull.key, pull.machine ?? null), (pull) => {
+        setClosedHere((was) => withoutKey(was, pull.key));
+        setReopenedHere((was) => new Map(was).set(pull.key, pull.state));
+      });
+      const reopened = outcomes.filter((o) => o.ok).map((o) => o.pull.key);
+      report('reopen', outcomes, [], new Set(reopened));
+      if (reopened.length > 0) props.onToast?.({ icon: 'check', lead: toastLead('reopen', reopened.length) }, CLOSE_UNDO_MS);
+    });
+  /**
+   * Start review thread: one thread per repository, one after another, each on its PRs' machine; a pick with a thread
+   * already is linked to it. What started or was linked leaves the picks; what could not stays, with why. A run that
+   * started only new agents toasts with Stop, which stops those agents (their threads stay, as a run line's Stop does).
+   */
+  const runReviews = () =>
+    queue(async () => {
+      const { groups, already, failed } = reviews;
+      const report: ReviewReport = { started: [], already, failed: [] };
+      for (let i = 0; i < groups.length; i++) {
+        setBulk({ at: 'running', verb: 'review', done: i + 1, total: groups.length });
+        const outcome = await startReview(groups[i]!, groups[i]!.machine ? (props.machineName?.(groups[i]!.machine!) ?? null) : null);
+        if ('why' in outcome) report.failed.push({ pulls: outcome.group.pulls, why: outcome.why });
+        else report.started.push(outcome);
+      }
+      report.failed.push(...failed);
+      const went = new Map(report.started.flatMap(({ group, threadId }) => group.pulls.map((pull) => [pull.key, threadId] as const)));
+      setThreadsHere((was) => new Map([...was, ...went]));
+      const stays = new Set([...chosen].filter((key) => !went.has(key) && !already.some((a) => a.pull.key === key)));
+      setPicked(stays);
+      anchor.current = null;
+      setBulk({ at: 'reviewed', keys: [...stays].sort().join('\n'), report });
+      if (report.started.length > 0) props.onMerged();
+      const launched = report.started.flatMap(({ group, launch }) => (launch ? [{ id: launch, machine: group.machine }] : []));
+      if (launched.length > 0 && launched.length === report.started.length) {
+        const stop = () =>
+          void Promise.allSettled(launched.map(({ id, machine }) => inboxApi.launchStop(id, machine))).then((ends) => {
+            const stopped = ends.filter((end) => end.status === 'fulfilled').length;
+            if (stopped > 0) props.onToast?.({ icon: 'check', lead: stoppedToast(stopped) }, CLOSE_UNDO_MS);
+          });
+        props.onToast?.({ icon: 'check', lead: startedToast(launched.length), action: { label: 'Stop', onPress: stop }, noKey: true }, CLOSE_UNDO_MS);
+      }
+    });
+  const pressMerge = () => {
+    if (live.at === 'confirm') runMerge(plan.merge, plan.skip);
+    else if (live.at !== 'running' && plan.merge.length > 0) setBulk({ at: 'confirm', keys: chosenKey, targets: mergeTargets });
+  };
+  // A click anywhere but Confirm merge drops the confirm.
+  useEffect(() => {
+    if (live.at !== 'confirm') return;
+    const onDown = (event: PointerEvent) => {
+      if ((event.target as Element | null)?.closest?.('[data-pr-merge]')) return;
+      setBulk({ at: 'idle' });
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    return () => document.removeEventListener('pointerdown', onDown, true);
+  }, [live.at]);
+  // Escape leaves select mode once nothing inside the page took it: a menu, the filter's list, a field, a dialog.
+  useShortcutScope({
+    scope: inboxPrBoardShortcuts,
+    target: 'document',
+    handlers: {
+      leaveSelect: {
+        when: (event) => {
+          if (!selecting || busy || event.defaultPrevented || isComposingKey(event) || modalOpen()) return false;
+          const from = keyTarget(event);
+          return !(from && (isEditableTarget(from) || inOverlay(from) || from.closest('[role="menu"], [role="listbox"], [aria-expanded="true"]')));
+        },
+        handle: () => {
+          // One layer at a time: a confirm drops first, and focus stays on Merge.
+          if (live.at === 'confirm') {
+            setBulk({ at: 'idle' });
+            return;
+          }
+          // Clear and the boxes go with select mode: focus they held moves to Select.
+          const lost = !!document.activeElement?.closest('[data-pr-actions], .ib-prs-box, [data-pr-box]');
+          leaveSelect();
+          if (lost) setTimeout(() => barRef.current?.querySelector<HTMLElement>('[data-pr-select]')?.focus());
+        },
+      },
+    },
+  });
+  const actions = selectOn && (chosen.size > 0 || live.at !== 'idle');
+  // Hide repository (hiddenPulls.ts): every PR in it leaves the board, Reviews and the counts, new ones too; nothing
+  // changes on the forge. Always shown, quiet (prs.css); not while picking. Undo is the toast's.
+  const repoHide = (section: { key: string; label: string; platform: InboxPull['platform'] }) =>
+    selectOn ? null : (
+      <button
+        type="button"
+        className="ib-prs-rhide"
+        aria-label={`Hide ${section.label}`}
+        title={`Hide this repository from your lists, new pull requests too. They stay open on ${forgeName(section)}.`}
+        onClick={(event) => {
+          // The section leaves: focus goes to the next one's Hide, else the page's title.
+          const root = event.currentTarget.closest('.pn-inbox');
+          focusWhenGone(itemsBy(() => root, 'data-pr-repo-hide'), section.key, () => document.getElementById(titleId));
+          void hideRepoWithUndo(section, props.onToast);
+        }}
+        data-pr-repo-hide={section.key}
+      >
+        <Icon name="eyeOff" size={13} />
+        Hide
+      </button>
+    );
+  const table = (sections: TableSection[]) => (
+    <SheetTable
+      repoHide={repoHide}
+      sections={sections}
+      query={q}
+      now={now}
+      risk={risk}
+      judgments={judgments}
+      sort={sort}
+      onSort={(key) => setSort((was) => nextSort(was, key))}
+      onRow={(pull, stack, event) => {
+        if (!selectOn) props.onOpenPull(pull, stack);
+        else if (!busy && inboxPullIsOpen(pull)) pick(pull.key, event.shiftKey);
+      }}
+      onOpenStack={props.onOpenStack}
+      labelledBy={titleId}
+      select={
+        selectOn
+          ? {
+              picked: chosen,
+              all: boxState(allKeys, chosen),
+              onAll: () => pickAll(allKeys),
+              section: (section) => boxState(keysOf(section), chosen),
+              onSection: (section) => pickAll(keysOf(section)),
+            }
+          : undefined
+      }
+    />
+  );
+
+  let body: ReactNode;
+  if (!model && props.error) {
+    body = (
+      <div className="ib-prs-empty" role="alert">
+        <h2>Couldn’t read your pull requests</h2>
+        <p>{props.error}</p>
+      </div>
+    );
+  } else if (!model || !sheet) {
+    body = <div className="ib-prs-loading" aria-busy="true" />;
+  } else if (view === 'merged') {
+    body = (
+      <>
+        <p className="ib-prs-note">
+          Merged in the last 14 days: yours, and the layers under your stacks.
+          {closed[0] && (
+            <>
+              {' '}
+              Older ones:{' '}
+              <a href={closed[0].url.replace('is%3Aclosed', 'is%3Amerged')} target="_blank" rel="noreferrer">
+                search on {hostName(closed[0].host)}
+              </a>
+            </>
+          )}
+        </p>
+        {layout === 'table'
+          ? table(
+              merged!.sections
+                .map((section) => ({ section, shown: section.pulls.filter((p) => !q || matchesQuery(p, q)) }))
+                .filter(({ shown }) => shown.length > 0)
+                .map(({ section, shown }) => ({ key: section.key, host: shown[0]!.host, repo: shown[0]!.repo, platform: shown[0]!.platform, label: section.label, outside: false, units: shown.map(alone), count: `${section.pulls.length} merged` })),
+            )
+          : merged!.sections.map((section) => {
+              const shown = section.pulls.filter((p) => !q || matchesQuery(p, q));
+              if (shown.length === 0) return null;
+              return (
+                <section key={section.key} className="ib-prs-sec" aria-label={section.label}>
+                  <div className="ib-prs-sech">
+                    <h2>{section.label}</h2>
+                    <span className="ib-prs-secn">{section.pulls.length} merged</span>
+                    {repoHide({ key: section.key, label: section.label, platform: section.pulls[0]!.platform })}
+                  </div>
+                  <div className="ib-prs-tiles">{shown.map((p) => tile(p, alone(p), false))}</div>
+                </section>
+              );
+            })}
+        {merged!.sections.length === 0 && <p className="ib-prs-note">Nothing merged in the last 14 days.</p>}
+        {merged!.quiet.length > 0 && merged!.sections.length > 0 && <p className="ib-prs-note">Nothing merged in {joinOr(merged!.quiet)}</p>}
+      </>
+    );
+  } else if (empty) {
+    body = (
+      <div className="ib-prs-empty">
+        <h2>{empty.kind === 'nothing' ? (props.projectName ? `Nothing open in ${props.projectName}` : 'Nothing open') : empty.head}</h2>
+        {(empty.kind === 'nothing'
+          ? [props.projectName ? 'Clear the project filter in Reviews to see every repository.' : 'Pull requests that ask for your review, that are yours or that are assigned to you show here, from any repository, with every open one in your projects.']
+          : empty.lines
+        ).map(
+          (line) => (
+            <p key={line}>{line}</p>
+          ),
+        )}
+      </div>
+    );
+  } else {
+    const count = (section: (typeof visible)[number]) => `${section.open} open${section.landedWeek > 0 ? ` · ${section.landedWeek} landed this week` : ''}`;
+    body = (
+      <>
+        {layout === 'table' && visible.length > 0 && table(visible.map((section) => ({ ...section, platform: section.units[0]!.platform, count: count(section) })))}
+        {layout === 'grid' && visible.map((section) => (
+          <section key={section.key} className="ib-prs-sec" aria-label={section.label} data-pr-repo={section.key}>
+            <div className="ib-prs-sech">
+              {selectOn && <SelectBox state={boxState(keysOf(section), chosen)} label={`Select all in ${section.label}`} tooltip onClick={() => pickAll(keysOf(section))} />}
+              <h2 title={`${section.host}/${section.repo}`}>{section.label}</h2>
+              {section.outside && <span className="ib-prs-outside">not a project</span>}
+              <span className="ib-prs-secn">{count(section)}</span>
+              {repoHide({ key: section.key, label: section.label, platform: section.units[0]!.platform })}
+            </div>
+            <div className="ib-prs-tiles">{section.units.map(unit)}</div>
+          </section>
+        ))}
+        {q && visible.length === 0 && <p className="ib-prs-note">No open pull request matches “{q}”.</p>}
+      </>
+    );
+  }
+
+  const mode = props.mode ?? 'page';
+  const threadOf = (key: string) => {
+    const link = model?.links[key];
+    return (link && link.agent?.ended !== true ? link.thread_id : null) ?? threadsHere.get(key) ?? null;
+  };
+  const popover = pop && (
+    <TilePopover
+      key={pop.pull.key}
+      pop={pop}
+      phone={phone}
+      now={now}
+      onEnter={() => clearTimers()}
+      onLeave={() => {
+        if (pop.pinned) return;
+        closeTimer.current = setTimeout(() => setPop((was) => (was && !was.pinned && !held.current ? null : was)), HOVER_CLOSE_MS);
+      }}
+      onClose={(returnFocus) => hide(returnFocus)}
+      onOpen={() => {
+        hide(false);
+        props.onOpenPull(pop.pull, pop.stack);
+      }}
+      onOpenStack={() => {
+        hide(false);
+        props.onOpenStack(pop.stack);
+      }}
+      onOpenThread={threadOf(pop.pull.key) && props.onOpenThread ? () => {
+        hide(false);
+        props.onOpenThread!(threadOf(pop.pull.key)!);
+      } : undefined}
+      onHide={() => {
+        // The tile leaves with the popover: focus goes to the PR now in its place.
+        const root = pop.anchor.closest('.pn-inbox');
+        focusWhenGone(
+          () =>
+            [...(root?.querySelectorAll<HTMLElement>('[data-pr-tile], [data-pr-row]') ?? [])].flatMap((el) => {
+              const target = el.matches('[data-pr-tile]') ? el : el.querySelector<HTMLElement>('[data-pr-open]');
+              return target ? [{ id: el.getAttribute('data-pr-tile') ?? el.getAttribute('data-pr-row') ?? '', el: target }] : [];
+            }),
+          pop.pull.key,
+        );
+        hide(false);
+        void hideWithUndo([pop.pull], props.onToast);
+      }}
+      onHold={(hold) => {
+        held.current = hold;
+      }}
+      onMerged={(key) => {
+        held.current = false;
+        setMergedHere((was) => new Map(was).set(key, new Date().toISOString()));
+        hide(false);
+        props.onMerged();
+      }}
+    />
+  );
+  // Select mode's bar while something is picked: the count, Merge, its hint or confirm, Clear, then the list under it.
+  const confirmId = `${titleId}-merge`;
+  const pickedWords = chosen.size > 0 && (
+    <span className="ib-prs-picked" data-pr-picked="">
+      {chosen.size} selected
+    </span>
+  );
+  const mergeControl =
+    live.at === 'running' ? (
+      <span className="ib-prs-merging" role="status" data-pr-merging="" data-pr-running={live.verb}>
+        {live.verb === 'review' ? startingWords(live.done, live.total) : runningWords(live.verb, live.done, live.total)}
+      </span>
+    ) : plan.merge.length > 0 ? (
+      <button
+        type="button"
+        className="ib-prs-btn"
+        data-merge={live.at === 'confirm' ? 'confirm' : undefined}
+        aria-describedby={live.at === 'confirm' ? confirmId : undefined}
+        onClick={pressMerge}
+        data-pr-merge={live.at === 'confirm' ? 'confirm' : 'merge'}
+      >
+        {live.at === 'confirm' ? 'Confirm merge' : `Merge ${plan.merge.length}`}
+      </button>
+    ) : null;
+  // Close: every pick is open; the host refuses one that isn't any more, in its words.
+  const closeControl = live.at !== 'running' && pickedPulls.length > 0 && (
+    <button type="button" className="ib-prs-btn" onClick={() => runClose(pickedPulls)} data-pr-close="">
+      Close {pickedPulls.length}
+    </button>
+  );
+  const reviewControl = live.at !== 'running' && pickedPulls.length > 0 && (
+    <button type="button" className="ib-prs-btn" onClick={runReviews} data-pr-review="">
+      {startButtonWords(reviews.groups.length)}
+    </button>
+  );
+  // Hide (hiddenPulls.ts): every pick leaves the board and Reviews at once, and select mode ends; nothing changes on the forge. The toast's Undo shows them again.
+  const hideControl = live.at !== 'running' && pickedPulls.length > 0 && (
+    <button
+      type="button"
+      className="ib-prs-btn"
+      onClick={() => {
+        const list = pickedPulls;
+        // Every pick hid: nothing is left to act on, so select mode ends with it.
+        void hideWithUndo(list, props.onToast).then((hid) => {
+          if (hid) leaveSelect();
+        });
+      }}
+      data-pr-hide=""
+    >
+      Hide {pickedPulls.length}
+    </button>
+  );
+  const threadLink = (threadId: string, words: string, key: string) =>
+    props.onOpenThread ? (
+      <button key={key} type="button" className="ib-prs-tlink" onClick={() => props.onOpenThread!(threadId)} data-pr-thread-link={threadId}>
+        {words}
+      </button>
+    ) : (
+      <span key={key}>{words}</span>
+    );
+  const commas = (parts: ReactNode[]) => parts.flatMap((part, i) => (i > 0 ? [', ', part] : [part]));
+  // A phone gives each thread its own 44 px row under its heading: links in a wrapped sentence leave ragged gaps.
+  const reportLinks = (kind: 'started' | 'already', heading: string, lead: string, links: { id: string; words: string; key: string }[], end = '') =>
+    phone
+      ? [
+          <li key={kind} data-pr-review-row={kind}>{heading}</li>,
+          ...links.map((l) => <li key={l.key} data-pr-review-row={`${kind}-thread`}>{threadLink(l.id, l.words, l.key)}</li>),
+        ]
+      : (
+          <li key={kind} data-pr-review-row={kind}>
+            {lead}
+            {commas(links.map((l) => threadLink(l.id, l.words, l.key)))}
+            {end}
+          </li>
+        );
+  const far = live.at === 'confirm' ? farMergeLine(plan.merge, props.model?.machines) : null;
+  const hint = live.at === 'confirm' ? `${confirmWords(plan.merge.length, phone)}${far ? ` ${far}` : ''}` : live.at === 'idle' ? mergeHint(plan) : null;
+  const mergeNote = hint && (
+    <span className="ib-prs-mnote" id={live.at === 'confirm' ? confirmId : undefined} data-pr-merge-hint="">
+      {hint}
+    </span>
+  );
+  const mergeList =
+    live.at === 'confirm' ? (
+      <ul className="ib-prs-mlist" data-pr-merge-list="">
+        {plan.merge.map((pull) => (
+          <li key={pull.key} data-pr-merge-row="merge">
+            <Icon name="check" size={13} />
+            <span className="ib-prs-mn">{inboxPullLabel(pull)}</span>
+            <span className="ib-prs-mt" dir="auto">
+              {pull.title}
+            </span>
+          </li>
+        ))}
+        {plan.skip.map(({ pull, why }) => (
+          <li key={pull.key} data-pr-merge-row="skip">
+            <span className="ib-prs-mskip">{cantMergeLine(pull, why)}</span>
+          </li>
+        ))}
+      </ul>
+    ) : live.at === 'reviewed' ? (
+      <ul className="ib-prs-mlist" role="status" data-pr-review-report={phone ? 'rows' : ''}>
+        {live.report.started.length > 0 &&
+          reportLinks(
+            'started',
+            startedHeading(live.report.started.length),
+            startedLead(live.report.started.length),
+            live.report.started.map(({ group, threadId }) => ({ id: threadId, words: groupPart(group), key: group.key })),
+          )}
+        {live.report.already.length > 0 &&
+          reportLinks(
+            'already',
+            ALREADY_HEADING,
+            ALREADY_LEAD,
+            live.report.already.map((a) => ({ id: a.threadId, words: alreadyPart(a), key: a.pull.key })),
+            '.',
+          )}
+        {live.report.started.map(({ group, untied }) =>
+          untied ? (
+            <li key={group.key} className="ib-prs-mbad" data-pr-review-row="untied">
+              {untiedLine(group.pulls, untied)}
+            </li>
+          ) : null,
+        )}
+        {live.report.failed.map((failed) => (
+          <li key={failed.pulls[0]!.key} className="ib-prs-mbad" data-pr-review-row="failed">
+            {notStartedLine(failed)}
+          </li>
+        ))}
+      </ul>
+    ) : live.at === 'report' ? (
+      <ul className="ib-prs-mlist" role="status" data-pr-merge-report={live.verb}>
+        {doneLine(live.verb, okPulls(live.outcomes)) && <li data-pr-merge-row={live.verb === 'merge' ? 'merged' : live.verb === 'close' ? 'closed' : 'reopened'}>{doneLine(live.verb, okPulls(live.outcomes))}</li>}
+        {live.outcomes.map((o) =>
+          o.ok ? null : (
+            <li key={o.pull.key} className="ib-prs-mbad" data-pr-merge-row="refused">
+              {refusedLine(o.pull, o.why)}
+            </li>
+          ),
+        )}
+        {live.skipped.map(({ pull, why }) => (
+          <li key={pull.key} data-pr-merge-row="skipped">
+            {notMergedLine(pull, why)}
+          </li>
+        ))}
+      </ul>
+    ) : null;
+
+  return (
+    <section
+      className={`ib-prs${mode === 'pane' ? ' ib-pane ib-prs-inpane' : ''}`}
+      aria-labelledby={titleId}
+      data-prs-page=""
+      data-phone={phone ? '' : undefined}
+      data-layout={layout}
+      data-selecting={selectOn ? '' : undefined}
+      data-picking={actions ? '' : undefined}
+      style={layout === 'table' ? ({ '--ib-prs-bar-h': `${barHeight}px` } as CSSProperties) : undefined}
+    >
+      <div className="ib-prs-scroll">
+        <header className="ib-prs-head">
+          <div className="ib-prs-title">
+            {props.onBack ? (
+              <button type="button" className="ib-iconbtn" onClick={props.onBack} aria-label="Back to Reviews" data-prs-back="">
+                <Icon name="chevL" size={18} />
+              </button>
+            ) : mode === 'page' ? (
+              <SidebarTrigger />
+            ) : null}
+            <h1 id={titleId} tabIndex={-1}>
+              Pull requests
+            </h1>
+          </div>
+          {/* Nothing listed: the empty words below say so; "0 open in 0 repositories" would only repeat them. */}
+          {head && (head.open > 0 || head.landedWeek > 0) && (
+            <p className="ib-prs-sum" data-pr-summary="">
+              {props.projectName && (
+                <span className="ib-prs-in" dir="auto" data-pr-summary-project="">
+                  In {props.projectName}
+                </span>
+              )}
+              <span>
+                {head.open} open in {head.repos} {head.repos === 1 ? 'repository' : 'repositories'}
+              </span>
+              {head.needYou > 0 && <span className="ib-prs-you">{head.needYou} need you</span>}
+              {head.failing > 0 && <span className="ib-prs-bad">{head.failing} with failing checks</span>}
+              {head.landedWeek > 0 && <span>{head.landedWeek} landed this week</span>}
+            </p>
+          )}
+        </header>
+        {/* While something is picked the bar is select mode's own (a phone's is a sheet at the bottom instead). */}
+        <div className="ib-prs-bar" ref={barRef} data-pr-actions={actions && !phone ? '' : undefined}>
+          {actions && !phone ? (
+            <>
+              {pickedWords}
+              {mergeControl}
+              {closeControl}
+              {reviewControl}
+              {hideControl}
+              {mergeNote}
+              {!busy && (
+                <button type="button" className="ib-prs-btn ib-prs-end" onClick={leaveSelect} data-pr-clear="">
+                  Clear
+                </button>
+              )}
+              {mergeList}
+            </>
+          ) : (
+            <>
+              <label className="ib-prs-field">
+                <Icon name="search" size={14} />
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={phone ? 'Filter by title, author, repo or #' : 'Filter by title, author, repository or number'}
+                  aria-label="Filter pull requests"
+                  spellCheck={false}
+                  autoComplete="off"
+                  data-pr-filter=""
+                />
+              </label>
+              <div className="ib-seg ib-prs-seg" role="group" aria-label="State">
+                {(['open', 'merged'] as const).map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    className="ib-seg-o"
+                    data-on={view === v ? '' : undefined}
+                    aria-pressed={view === v}
+                    onClick={() => {
+                      if (v === 'merged') leaveSelect();
+                      props.onView(v);
+                    }}
+                    data-pr-view={v}
+                  >
+                    {v === 'open' ? 'Open' : 'Merged'}
+                  </button>
+                ))}
+              </div>
+              {props.onLayout && !phone && (
+                <div className="ib-seg ib-prs-seg">
+                  {(['grid', 'table'] as const).map((l) => (
+                    <button key={l} type="button" className="ib-seg-o" data-on={layout === l ? '' : undefined} aria-pressed={layout === l} onClick={() => props.onLayout!(l)} data-pr-layout={l}>
+                      {l === 'grid' ? 'Grid' : 'Table'}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {closed.map((link) => (
+                <a key={link.host} className="ib-prs-closed" href={link.url} target="_blank" rel="noreferrer">
+                  {link.label}
+                  <Icon name="external" size={12} />
+                </a>
+              ))}
+              {view === 'open' && (selecting || visible.length > 0) && (
+                <button type="button" className="ib-prs-btn ib-prs-end" onClick={selecting ? leaveSelect : startSelect} data-pr-select={selecting ? 'done' : 'select'}>
+                  {selecting ? 'Done' : 'Select'}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+        {model && notices.length > 0 && !empty && (
+          <div className="ib-prs-notices">
+            {notices.map((n) => (
+              <p key={n.key}>
+                {n.line}
+                {n.link && (
+                  <>
+                    {' '}
+                    <a href={n.link.href} target="_blank" rel="noreferrer">
+                      {n.link.label}
+                    </a>
+                  </>
+                )}
+              </p>
+            ))}
+          </div>
+        )}
+        {model && props.error && <p className="ib-prs-notices">Couldn’t read the list again: {props.error} Showing the last read.</p>}
+        <div className="ib-prs-body">{body}</div>
+      </div>
+      {popover}
+      {actions && phone && (
+        <div ref={pickSheet} className="ib-prs-picksheet" data-pr-actions="">
+          {mergeList}
+          {mergeNote}
+          <div className="ib-prs-pickrow">
+            {pickedWords}
+            {mergeControl}
+            {closeControl}
+            {reviewControl}
+            {hideControl}
+            {!busy && (
+              <button type="button" className="ib-prs-btn ib-prs-end" onClick={leaveSelect} data-pr-clear="">
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** A PR on its own, as a stack of one (the Merged view's tiles and rows). */
+function alone(p: InboxPull): InboxPullStack {
+  return { id: p.key, platform: p.platform, host: p.host, repo: p.repo, layers: [p], parents: { [p.key]: null }, base: p.base, open_base: p.base };
+}
+
+function joinOr(names: readonly string[]): string {
+  return names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
+}
+
+const MERGE_WORDS = ['Merge', 'Confirm merge', 'Merging…', 'Merged'] as const;
+
+/** The bar's actions: idle, Merge's confirm (for the picks it was asked for), one PR after another, then the report. */
+type BulkPhase =
+  | { at: 'idle' }
+  | { at: 'confirm'; keys: string; targets: string }
+  | { at: 'running'; verb: BulkVerb | 'review'; done: number; total: number }
+  | { at: 'report'; verb: BulkVerb; keys: string; outcomes: RunOutcome[]; skipped: MergePlan['skip'] }
+  | { at: 'reviewed'; keys: string; report: ReviewReport };
+
+const okPulls = (outcomes: readonly RunOutcome[]) => outcomes.filter((o) => o.ok).map((o) => o.pull);
+
+function withoutKey<V>(map: ReadonlyMap<string, V>, key: string): ReadonlyMap<string, V> {
+  if (!map.has(key)) return map;
+  const next = new Map(map);
+  next.delete(key);
+  return next;
+}
+
+type MergePhase = { at: 'idle' } | { at: 'confirm' } | { at: 'merging' } | { at: 'done' } | { at: 'failed'; message: string };
+
+function TilePopover(props: {
+  pop: Pop;
+  phone: boolean;
+  now: number;
+  onEnter: () => void;
+  onLeave: () => void;
+  onClose: (returnFocus: boolean) => void;
+  onOpen: () => void;
+  onOpenStack: () => void;
+  /** The PR's review thread, when it has one. */
+  onOpenThread?: () => void;
+  /** Hide it from the lists (hiddenPulls.ts); nothing changes on the forge. */
+  onHide: () => void;
+  /** A merge under way or done: keep the popover open (true), or let it go again (false). */
+  onHold: (hold: boolean) => void;
+  /** The merge went and "Merged" was shown for `MERGED_SHOWN_MS`: close, and the PR leaves Open. */
+  onMerged: (key: string) => void;
+}) {
+  const { pop, phone, now } = props;
+  const { pull, stack } = pop;
+  const ref = useRef<HTMLDivElement>(null);
+  const [place, setPlace] = useState<{ top: number; left: number } | null>(null);
+  const [merge, setMerge] = useState<MergePhase>({ at: 'idle' });
+  const labelId = useId();
+  const pinned = pop.pinned || phone;
+
+  // Below the tile, or above it when there is no room; never past the window's edges.
+  useLayoutEffect(() => {
+    if (phone) return;
+    const placeIt = () => {
+      const el = ref.current;
+      if (!el || !pop.anchor.isConnected) return;
+      const rect = pop.anchor.getBoundingClientRect();
+      const w = el.offsetWidth;
+      const h = el.offsetHeight;
+      const left = Math.max(8, Math.min(rect.left, window.innerWidth - w - 8));
+      const below = rect.bottom + 6;
+      const top = below + h <= window.innerHeight - 8 ? below : Math.max(8, rect.top - 6 - h);
+      setPlace({ top, left });
+    };
+    placeIt();
+    window.addEventListener('resize', placeIt);
+    window.addEventListener('scroll', placeIt, true);
+    return () => {
+      window.removeEventListener('resize', placeIt);
+      window.removeEventListener('scroll', placeIt, true);
+    };
+  }, [pop.anchor, phone]);
+
+  // Pinned: its first action takes focus; Escape closes it back to the tile; a click outside closes it.
+  useEffect(() => {
+    if (!pinned) return;
+    ref.current?.querySelector<HTMLElement>('[data-pr-pop-first]')?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        props.onClose(true);
+      }
+    };
+    const onDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (ref.current?.contains(target) || pop.anchor.contains(target)) return;
+      props.onClose(false);
+    };
+    document.addEventListener('keydown', onKey, true);
+    document.addEventListener('pointerdown', onDown, true);
+    return () => {
+      document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('pointerdown', onDown, true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pinned, pop.anchor]);
+
+  const you = needsYou(pull);
+  const open = inboxPullIsOpen(pull);
+  const canMerge = open && mergeOffered(pull);
+  const checks = checksLabel(pull.checks);
+  const status = statusParts(pull, now);
+  const layerAt = isStack(stack) ? stack.layers.findIndex((l) => l.key === pull.key) + 1 : 0;
+
+  const pressMerge = () => {
+    if (merge.at === 'idle') {
+      setMerge({ at: 'confirm' });
+      return;
+    }
+    if (merge.at !== 'confirm' || !pull.head_sha) return;
+    setMerge({ at: 'merging' });
+    props.onHold(true);
+    inboxApi.pullMerge(pull.key, pull.head_sha, pull.machine ?? null).then(
+      () => {
+        setMerge({ at: 'done' });
+        // Long enough to read; the timer runs on if the popover is closed meanwhile, so the PR still leaves Open.
+        setTimeout(() => props.onMerged(pull.key), MERGED_SHOWN_MS);
+      },
+      (cause: unknown) => {
+        props.onHold(false);
+        setMerge({ at: 'failed', message: cause instanceof Error ? cause.message : 'The merge didn’t go.' });
+      },
+    );
+  };
+
+  const tabIndex = pinned ? undefined : -1;
+  // The confirm hint and a refusal: under the buttons on a desktop (the popover grows down, the buttons stay); above
+  // them on a phone's bottom sheet (it grows up, the buttons stay at the bottom).
+  const notes = (
+    <>
+      {merge.at === 'confirm' && (
+        <p className="ib-prpop-hint" id={`${labelId}-confirm`}>
+          Click again to merge {inboxPullLabel(pull)} into {pull.base}.
+        </p>
+      )}
+      {merge.at === 'failed' && (
+        <p className="ib-prpop-err" role="alert">
+          {merge.message}
+        </p>
+      )}
+    </>
+  );
+  return (
+    <>
+      {phone && <div className="ib-prpop-scrim" onClick={() => props.onClose(false)} aria-hidden="true" />}
+      <div
+        ref={ref}
+        className="ib-prpop"
+        role="dialog"
+        aria-labelledby={labelId}
+        data-pr-pop={pull.key}
+        data-phone={phone ? '' : undefined}
+        data-pinned={pinned ? '' : undefined}
+        style={phone ? undefined : { top: place?.top ?? -9999, left: place?.left ?? -9999 }}
+        onPointerEnter={props.onEnter}
+        onPointerLeave={props.onLeave}
+      >
+        <div className="ib-prpop-top">
+          <span className="ib-prpop-n">{inboxPullLabel(pull)}</span>
+          <span className="ib-prpop-state" data-state={pull.state}>
+            {pull.state === 'open' ? 'Open' : pull.state === 'draft' ? 'Draft' : pull.state === 'merged' ? 'Merged' : 'Closed'}
+          </span>
+          <span className="ib-prpop-repo" title={`${pull.host}/${pull.repo}`}>
+            {pull.repo}
+          </span>
+          {phone && (
+            <button type="button" className="ib-iconbtn ib-prpop-x" aria-label="Close" onClick={() => props.onClose(true)}>
+              <Icon name="x" size={16} />
+            </button>
+          )}
+        </div>
+        <p className="ib-prpop-title" id={labelId} dir="auto">
+          {pull.title || inboxPullLabel(pull)}
+        </p>
+        <p className="ib-prpop-meta">
+          {pull.author && <span>{pull.mine ? 'You' : <Person login={pull.author} host={pull.host} />}</span>}
+          <span>updated {agoWords(pull.updated_at, now)}</span>
+          <span className="ib-prpop-diff">
+            +{pull.additions.toLocaleString()} −{pull.deletions.toLocaleString()}
+          </span>
+        </p>
+        <p className="ib-prpop-status" data-tone={you ? 'you' : pull.checks === 'failure' && open ? 'bad' : undefined}>
+          <Named words={facesOnce(status)} host={pull.host} />
+        </p>
+        {open && checks && (
+          <p className="ib-prpop-checks">
+            <ChecksMark checks={pull.checks} />
+            {checks.replace(/^./, (c) => c.toUpperCase())}
+          </p>
+        )}
+        {layerAt > 0 && (
+          <button type="button" className="ib-prpop-stack" onClick={props.onOpenStack} tabIndex={tabIndex} data-pr-pop-stack="">
+            <Icon name="layers" size={13} />
+            Layer {layerAt} of a stack of {stack.layers.length}
+            <span className="ib-prpop-go">
+              Open the stack <Icon name="chevR" size={12} />
+            </span>
+          </button>
+        )}
+        {phone && notes}
+        <div className="ib-prpop-acts">
+          <button type="button" className="ib-prpop-btn" data-primary="" onClick={props.onOpen} tabIndex={tabIndex} data-pr-pop-first="" data-pr-pop-open="">
+            Open
+          </button>
+          {props.onOpenThread && (
+            <button type="button" className="ib-prpop-btn" onClick={props.onOpenThread} tabIndex={tabIndex} data-pr-pop-thread="">
+              Open review thread
+            </button>
+          )}
+          <a className="ib-prpop-btn" href={pull.url} target="_blank" rel="noreferrer" tabIndex={tabIndex} data-pr-pop-forge="">
+            Open on {forgeName(pull)}
+            <Icon name="external" size={12} />
+          </a>
+          {/* Refused by the forge: its words say why, and Merge is not offered again until the list says otherwise. One
+              slot as wide as its widest word, so Merge, Confirm merge, Merging… and Merged stay where the pointer is. */}
+          {canMerge && merge.at !== 'failed' && (
+            <span className="ib-prpop-mslot" data-pr-pop-mslot="">
+              {MERGE_WORDS.map((words) => (
+                <span key={words} className="ib-prpop-btn ib-prpop-msize" aria-hidden="true">
+                  {words === 'Merged' && <Icon name="check" size={13} />}
+                  {words}
+                </span>
+              ))}
+              {merge.at === 'done' ? (
+                <span className="ib-prpop-btn ib-prpop-merged" role="status" data-pr-pop-merged="">
+                  <Icon name="check" size={13} />
+                  Merged
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  className="ib-prpop-btn"
+                  data-merge={merge.at}
+                  onClick={pressMerge}
+                  disabled={merge.at === 'merging'}
+                  tabIndex={tabIndex}
+                  data-pr-pop-merge=""
+                  aria-describedby={merge.at === 'confirm' ? `${labelId}-confirm` : undefined}
+                >
+                  {merge.at === 'confirm' ? 'Confirm merge' : merge.at === 'merging' ? 'Merging…' : 'Merge'}
+                </button>
+              )}
+            </span>
+          )}
+          {/* Last, so Merge's second click stays where the first one was. An open PR only, and never mid-merge. */}
+          {open && merge.at !== 'merging' && merge.at !== 'done' && (
+            <button type="button" className="ib-prpop-btn" onClick={props.onHide} tabIndex={tabIndex} title={`Hide from your lists. It stays open on ${forgeName(pull)}.`} data-pr-pop-hide="">
+              <Icon name="eyeOff" size={13} />
+              Hide
+            </button>
+          )}
+        </div>
+        {!phone && notes}
+      </div>
+    </>
+  );
+}

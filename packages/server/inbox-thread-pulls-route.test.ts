@@ -1,0 +1,506 @@
+/**
+ * The window's route for a thread's PRs and the state reader behind it
+ * (approval "inbox-pr-binding", 2026-11-08). The forge is a stand-in runner:
+ * no gh runs. The failures these guard: a stale window that changes a
+ * thread's PRs; a bad ref
+ * that half-writes; the person's change recorded as an agent's; one gh call
+ * per PR instead of one per repository; a merged PR read again on every view;
+ * a state that lands on one thread but not on another holding the same PR;
+ * a fixture that is not read in the sandbox; and a window's read that waits
+ * on the forge (a stuck glab once kept a hover on "Loading" and, with the
+ * browser's few connections held, stopped threads from opening).
+ */
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { parseInboxThreadPullRefs, type InboxAuthor, type InboxThreadPullsAnswer } from "@plannotator/core/inbox-types";
+import { InboxError } from "@plannotator/shared/inbox/schema";
+import { InboxStore } from "@plannotator/shared/inbox/store";
+import { createThreadPullStates, createThreadPullsRoute, THREAD_PULLS_ADD_WAIT_MS, threadPullsChangedForWake, type ThreadPullFixture } from "./inbox-thread-pulls";
+import { createRefCards, type BitbucketRefReader } from "./ref-cards";
+
+/** Let the reads behind an answer land (the stand-in forges answer at once). */
+const settle = async () => {
+  for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+};
+
+const roots: string[] = [];
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+const AGENT: InboxAuthor = { kind: "agent", host: "claude-code", session: "ses_a", name: "Claude Code" };
+
+/** A gh stand-in answering one GraphQL query per repository with the PRs it names. */
+function fakeGh(states: Record<number, { state: string; isDraft?: boolean; base?: string; head?: string; checks?: string }>) {
+  const calls: string[][] = [];
+  const run = async (cli: string, args: string[]) => {
+    calls.push([cli, ...args]);
+    const numbers = [...args.join(" ").matchAll(/n(\d+): pullRequest/g)].map((m) => Number(m[1]));
+    const repository: Record<string, unknown> = {};
+    for (const number of numbers) {
+      const s = states[number];
+      repository[`n${number}`] = s
+        ? { state: s.state, isDraft: s.isDraft ?? false, title: `PR ${number}`, baseRefName: s.base ?? "main", headRefName: s.head ?? `b${number}`, reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: s.checks ? { state: s.checks } : null } }] } }
+        : null;
+    }
+    return { stdout: JSON.stringify({ data: { repository } }), stderr: "", exitCode: 0 };
+  };
+  return { run, calls };
+}
+
+function world(
+  options: {
+    fixture?: () => ThreadPullFixture | null;
+    gh?: { run: unknown; calls: string[][] };
+    onLiveChange?: (threadIds: readonly string[]) => void;
+    bitbucket?: BitbucketRefReader;
+    cards?: boolean;
+    projectHost?: (projectId: string) => Promise<string | null>;
+    projectHostOf?: (projectId: string) => string | null;
+  } = {},
+) {
+  const dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-route-"));
+  roots.push(dir);
+  let now = Date.parse("2026-11-08T10:00:00.000Z");
+  const store = InboxStore.open(dir, { now: () => new Date(now) });
+  const project = store.ensureProject({ name: "billing", root: "/work/billing" });
+  const thread = store.sendMessage({ project_id: project.id, author: AGENT, body: "Opened the retry PR.", subject: "Invoice retries" }).message.id;
+  const gh = options.gh ?? fakeGh({});
+  const refCards = options.bitbucket || options.cards ? createRefCards({ run: gh.run as never, now: () => now, avatar: async () => null, bitbucket: options.bitbucket }) : undefined;
+  const states = createThreadPullStates({ store, run: gh.run as never, ...(refCards ? { refCards } : {}), now: () => now, fixture: options.fixture ?? null, onLiveChange: options.onLiveChange, projectHostOf: options.projectHostOf });
+  const route = createThreadPullsRoute({
+    store,
+    states,
+    serverSession: "srv_1",
+    json: (data, status = 200) => Response.json(data, { status }),
+    readBody: async (req) => (await req.json()) as Record<string, unknown>,
+    sessionMismatch: (body) => (typeof body.serverSession === "string" && body.serverSession !== "srv_1" ? Response.json({ error: "stale" }, { status: 409 }) : null),
+    projectHost: options.projectHost,
+    now: () => now,
+  });
+  const path = (id: string) => `/api/inbox/threads/${id}/pulls`;
+  const get = (id: string, query = "") => route.route(new Request(`http://x${path(id)}${query}`), path(id));
+  const post = (id: string, body: Record<string, unknown>) =>
+    route.route(new Request(`http://x${path(id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), path(id));
+  const agentAdd = (id: string, ...values: string[]) => {
+    const parsed = parseInboxThreadPullRefs(values, "add");
+    if ("error" in parsed) throw new Error(parsed.error);
+    return store.changeThreadPulls({ thread_id: id, add: parsed.refs, by: { kind: "agent", session: "ses_a", host: "claude-code", name: "Claude Code" } });
+  };
+  return { store, project, thread, get, post, agentAdd, gh, states, advance: (ms: number) => (now += ms) };
+}
+
+describe("the window's route", () => {
+  test("a window from before a restart is told so, and writes nothing", async () => {
+    const w = world();
+    expect((await w.post(w.thread, { serverSession: "srv_old", add: ["o/r#1"] }))!.status).toBe(409);
+    expect(w.store.threadPulls(w.thread)).toEqual([]);
+  });
+
+  test("the person's add is written as the person's and answers the list; a bad ref refuses the whole change", async () => {
+    const w = world();
+    const answer = (await (await w.post(w.thread, { add: ["o/r#1", "acme/api!3"] }))!.json()) as InboxThreadPullsAnswer & { serverSession: string };
+    expect(answer.serverSession).toBe("srv_1");
+    expect(answer.pulls.map((p) => [p.ref, p.added_by.kind])).toEqual([
+      ["o/r#1", "person"],
+      ["acme/api!3", "person"],
+    ]);
+    let error: unknown = null;
+    await w.post(w.thread, { add: ["o/r#2", "#5"] }).catch((e) => (error = e));
+    expect(error).toBeInstanceOf(InboxError);
+    expect((error as InboxError).code).toBe("validation_error");
+    expect(w.store.threadPulls(w.thread)).toHaveLength(2);
+  });
+
+  test("the person's short group/project!n is on the thread's project's own GitLab host, and is looked up only for one", async () => {
+    const asked: string[] = [];
+    const w = world({ projectHost: async (projectId) => (asked.push(projectId), "gitlab.acme.dev") });
+    await w.post(w.thread, { add: ["o/r#1", "https://gitlab.acme.dev/acme/api/-/merge_requests/2"] });
+    expect(asked).toEqual([]);
+    const answer = (await (await w.post(w.thread, { add: ["acme/api!3"] }))!.json()) as InboxThreadPullsAnswer;
+    expect(asked).toEqual([w.project.id]);
+    expect(answer.pulls.map((p) => [p.pull, p.url])).toEqual([
+      ["github.com/o/r#1", "https://github.com/o/r/pull/1"],
+      ["gitlab.acme.dev/acme/api#2:pull", "https://gitlab.acme.dev/acme/api/-/merge_requests/2"],
+      ["gitlab.acme.dev/acme/api#3:pull", "https://gitlab.acme.dev/acme/api/-/merge_requests/3"],
+    ]);
+    // Its short form takes it off again.
+    await w.post(w.thread, { remove: ["acme/api!3"] });
+    expect(w.store.threadPulls(w.thread).map((p) => p.pull)).toEqual(["github.com/o/r#1", "gitlab.acme.dev/acme/api#2:pull"]);
+  });
+
+  test("an MR stored on gitlab.com in a self-managed project is never rewritten; its short text takes it off, and added again it lands on the project's host", async () => {
+    const w = world({ projectHost: async () => "gitlab-master.example.com" });
+    // How an older Inbox stored `acme/api!3` in a project whose host it did not know as a GitLab.
+    w.agentAdd(w.thread, "acme/api!3");
+    const before = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+    expect(before.pulls.map((p) => [p.pull, p.url, p.host, p.ref])).toEqual([["gitlab.com/acme/api#3:pull", "https://gitlab.com/acme/api/-/merge_requests/3", "gitlab.com", "acme/api!3"]]);
+    // The window removes a row by its `ref`.
+    await w.post(w.thread, { remove: [before.pulls[0]!.ref] });
+    expect(w.store.threadPulls(w.thread)).toEqual([]);
+    await w.post(w.thread, { add: ["acme/api!3"] });
+    expect(w.store.threadPulls(w.thread).map((p) => p.url)).toEqual(["https://gitlab-master.example.com/acme/api/-/merge_requests/3"]);
+    // With both on the thread, each comes off by the text it shows: the gitlab.com row by `acme/api!3`, the project's by its URL.
+    w.agentAdd(w.thread, "acme/api!3");
+    const pair = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+    expect(pair.pulls.map((p) => p.ref).sort()).toEqual(["acme/api!3", "https://gitlab-master.example.com/acme/api/-/merge_requests/3"]);
+    await w.post(w.thread, { remove: ["acme/api!3"] });
+    expect(w.store.threadPulls(w.thread).map((p) => p.pull)).toEqual(["gitlab-master.example.com/acme/api#3:pull"]);
+    w.agentAdd(w.thread, "acme/api!3");
+    await w.post(w.thread, { remove: ["https://gitlab-master.example.com/acme/api/-/merge_requests/3"] });
+    expect(w.store.threadPulls(w.thread).map((p) => p.pull)).toEqual(["gitlab.com/acme/api#3:pull"]);
+  });
+
+  test("remove [\"all\"] takes every PR off, and the answer lists them as removed", async () => {
+    const w = world();
+    w.agentAdd(w.thread, "o/r#1", "o/r#2");
+    const answer = (await (await w.post(w.thread, { remove: ["all"] }))!.json()) as InboxThreadPullsAnswer;
+    expect(answer.pulls).toEqual([]);
+    expect(answer.removed.map((p) => p.removed_by?.kind)).toEqual(["person", "person"]);
+  });
+
+  test("an unknown thread is 404; another path is not this route's", async () => {
+    const w = world();
+    expect((await w.get("msg_nope"))!.status).toBe(404);
+    expect(await w.get(`${w.thread}/x`)).toBeNull();
+  });
+});
+
+describe("the state reader", () => {
+  test("one gh call per repository; the state lands on every thread holding the PR, and stacks come out of it", async () => {
+    const gh = fakeGh({ 1: { state: "MERGED", base: "main", head: "schema" }, 2: { state: "OPEN", base: "schema", head: "worker", checks: "PENDING" }, 3: { state: "OPEN", isDraft: true } });
+    const w = world({ gh });
+    const other = w.store.sendMessage({ project_id: w.project.id, author: { ...AGENT, session: "ses_b" }, body: "Another thread.", subject: "Other" }).message.id;
+    expect(other).not.toBe(w.thread);
+    w.agentAdd(w.thread, "o/r#1", "o/r#2", "o/r#3");
+    w.agentAdd(other, "o/r#2");
+    // The read answers what is known at once (nothing read yet), and reads behind it.
+    const first = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+    expect(first.pulls.map((p) => p.state)).toEqual(["unknown", "unknown", "unknown"]);
+    await settle();
+    const answer = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+    expect(gh.calls).toHaveLength(1);
+    expect(gh.calls[0]!.slice(0, 3)).toEqual(["gh", "api", "graphql"]);
+    expect(answer.pulls.map((p) => [p.label, p.state, p.checks])).toEqual([
+      ["#1", "merged", null],
+      ["#2", "open", "running"],
+      ["#3", "draft", null],
+    ]);
+    expect(answer.groups).toEqual([
+      { kind: "stack", pulls: ["github.com/o/r#1", "github.com/o/r#2"] },
+      { kind: "related", pulls: ["github.com/o/r#3"] },
+    ]);
+    expect(w.store.threadPulls(other)[0]!.state).toBe("open");
+  });
+
+  test("a merged PR is never read again; an open one is read again only once its answer is 30 s old on a view", async () => {
+    const gh = fakeGh({ 1: { state: "MERGED" }, 2: { state: "OPEN" } });
+    const w = world({ gh });
+    w.agentAdd(w.thread, "o/r#1", "o/r#2");
+    await w.get(w.thread);
+    await settle();
+    await w.get(w.thread);
+    await settle();
+    expect(gh.calls).toHaveLength(1);
+    w.advance(31_000);
+    await w.get(w.thread);
+    await settle();
+    expect(gh.calls).toHaveLength(2);
+    expect(gh.calls[1]!.join(" ")).toContain("n2: pullRequest");
+    expect(gh.calls[1]!.join(" ")).not.toContain("n1: pullRequest");
+  });
+
+  test("a Bitbucket Cloud PR's state, checks and review come through its API reader; no CLI runs", async () => {
+    const gh = fakeGh({});
+    const reads: unknown[] = [];
+    const w = world({
+      gh,
+      bitbucket: async (ref) => {
+        reads.push(ref);
+        return {
+          platform: "bitbucket", kind: "pull", repo: "acme/billing", number: 7, url: "https://bitbucket.org/acme/billing/pull-requests/7",
+          title: "Retry invoices", state: "open", author: null, createdAt: "", updatedAt: "", closedAt: null, labels: [], assignees: [],
+          comments: 0, body: "", bodyCut: false, lastComment: null, linked: [],
+          pull: { base: "main", head: "retries", additions: 0, deletions: 0, files: 0, review: "approved", checks: { state: "failure", passed: 1, failed: 1, pending: 0, total: 2 } },
+        };
+      },
+    });
+    w.agentAdd(w.thread, "https://bitbucket.org/acme/billing/pull-requests/7");
+    // The window's read answers at once and reads Bitbucket behind it; the next read has the answer.
+    await w.get(w.thread);
+    await settle();
+    const answer = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+    expect(gh.calls).toEqual([]);
+    expect(reads).toEqual([{ workspace: "acme", repo: "billing", number: 7 }]);
+    expect(answer.pulls.map((p) => [p.platform, p.label, p.state, p.title, p.checks, p.review])).toEqual([["bitbucket", "#7", "open", "Retry invoices", "failing", "approved"]]);
+    expect(w.store.threadPulls(w.thread)[0]).toMatchObject({ state: "open", base: "main", head: "retries" });
+  });
+
+  test("a self-managed GitLab's MR reads its state through the glab signed in there; a host glab is not signed in to is never asked", async () => {
+    const calls: string[][] = [];
+    const run = async (cli: string, args: string[]) => {
+      calls.push([cli, ...args]);
+      if (args[0] === "auth") return { stdout: "", stderr: "git.acme.com\n  ✓ Logged in to git.acme.com as dev (keyring)\n", exitCode: 0 };
+      if (cli === "glab" && args.includes("git.acme.com")) {
+        const mergeRequest = { iid: "61", title: "Retry invoices", webUrl: "https://git.acme.com/acme/api/-/merge_requests/61", state: "opened", draft: false, createdAt: "", updatedAt: "", closedAt: null, mergedAt: null, description: "", author: null, labels: { nodes: [] }, assignees: { nodes: [] }, userNotesCount: 0, notes: { nodes: [] }, sourceBranch: "retries", targetBranch: "main", diffStatsSummary: {}, approved: true, detailedMergeStatus: "MERGEABLE", headPipeline: null };
+        return { stdout: JSON.stringify({ data: { project: { fullPath: "acme/api", mergeRequest } } }), stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "unexpected", exitCode: 1 };
+    };
+    const w = world({ gh: { run, calls }, cards: true });
+    w.agentAdd(w.thread, "https://git.acme.com/acme/api/-/merge_requests/61", "https://gitlab.evil.example/acme/api/-/merge_requests/1", "https://evil.example/acme/api/-/merge_requests/2");
+    await w.get(w.thread);
+    await settle();
+    const answer = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+    expect(answer.pulls.map((p) => [p.host, p.platform, p.label, p.state])).toEqual([
+      ["git.acme.com", "gitlab", "!61", "open"],
+      ["gitlab.evil.example", "gitlab", "!1", "unknown"],
+      ["evil.example", "gitlab", "!2", "unknown"],
+    ]);
+    expect(w.store.threadPulls(w.thread)[0]).toMatchObject({ state: "open", base: "main", head: "retries" });
+    expect(calls.filter((call) => call.includes("--hostname")).map((call) => call[call.indexOf("--hostname") + 1])).toEqual(["git.acme.com"]);
+    expect(calls.some((call) => call.some((arg) => arg.includes("evil.example")))).toBe(false);
+  });
+
+  test("the sandbox's stand-in states are read instead of the forge, by ref, key or URL", async () => {
+    const gh = fakeGh({});
+    const w = world({ gh, fixture: () => ({ "o/r#1": { state: "open", checks: "failing" }, "gitlab.com/acme/api#3:pull": { state: "merged" } }) });
+    w.agentAdd(w.thread, "o/r#1", "acme/api!3");
+    const answer = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+    expect(gh.calls).toEqual([]);
+    expect(answer.pulls.map((p) => [p.ref, p.state, p.checks])).toEqual([
+      ["o/r#1", "open", "failing"],
+      ["acme/api!3", "merged", null],
+    ]);
+  });
+});
+
+describe("a forge that never answers", () => {
+  /** A gh that never exits (a stuck CLI the runner has not ended yet): every call stays pending. */
+  const stuckGh = () => {
+    const calls: string[][] = [];
+    return { calls, run: (cli: string, args: string[]) => (calls.push([cli, ...args]), new Promise(() => {})) };
+  };
+  const within = async <T>(work: Promise<T>, ms: number): Promise<T | "late"> =>
+    Promise.race([work, new Promise<"late">((resolve) => setTimeout(() => resolve("late"), ms))]);
+
+  test("the window's read answers at once with what is known, for this thread and every later one", async () => {
+    const gh = stuckGh();
+    const w = world({ gh });
+    w.agentAdd(w.thread, "o/r#1");
+    const others = [1, 2, 3, 4, 5].map((i) => {
+      const id = w.store.sendMessage({ project_id: w.project.id, author: { ...AGENT, session: `ses_${i}` }, body: `Thread ${i}.`, subject: `T${i}` }).message.id;
+      w.agentAdd(id, `o/r${i}#${i}`);
+      return id;
+    });
+    // Hovered again and again, then every other thread opened: each read answers, none waits on the stuck gh.
+    for (const id of [w.thread, w.thread, w.thread, ...others]) {
+      const res = await within(w.get(id)!, 200);
+      expect(res).not.toBe("late");
+      const answer = (await (res as Response).json()) as InboxThreadPullsAnswer;
+      expect(answer.pulls).toHaveLength(1);
+      expect(answer.pulls[0]!.state).toBe("unknown");
+    }
+    // The reads behind them did start (two at once at most, the others queued), so a forge that comes back is read.
+    expect(gh.calls.length).toBeGreaterThan(0);
+  });
+
+  test("the person's Add waits for the new PR's read only briefly", async () => {
+    const w = world({ gh: stuckGh() });
+    const started = Date.now();
+    const res = await within(w.post(w.thread, { add: ["o/r#7"] })!, THREAD_PULLS_ADD_WAIT_MS + 1_000);
+    expect(res).not.toBe("late");
+    expect(Date.now() - started).toBeGreaterThanOrEqual(THREAD_PULLS_ADD_WAIT_MS - 50);
+    const answer = (await (res as Response).json()) as InboxThreadPullsAnswer;
+    expect(answer.pulls.map((p) => [p.ref, p.state])).toEqual([["o/r#7", "unknown"]]);
+  });
+
+  test("checks and the review read behind the answer reach the windows (they write no record)", async () => {
+    const heard: string[][] = [];
+    const gh = fakeGh({ 2: { state: "OPEN", checks: "FAILURE" } });
+    const w = world({ gh, onLiveChange: (ids) => heard.push([...ids]) });
+    w.agentAdd(w.thread, "o/r#2");
+    await w.get(w.thread);
+    await settle();
+    expect(heard).toEqual([[w.thread]]);
+    const answer = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+    expect(answer.pulls.map((p) => [p.state, p.checks])).toEqual([["open", "failing"]]);
+    // The same answer again (a later read): nothing new to say.
+    w.advance(31_000);
+    await w.get(w.thread);
+    await settle();
+    expect(heard).toHaveLength(1);
+  });
+});
+
+describe("why a PR could not be read (the card's tool state)", () => {
+  test("signed-out gh: the read answers at once, the windows hear of it, the next read carries the problem (the tool's own words stay here), and Try again reads the held failure again", async () => {
+    // The preload's fake GH_TOKEN would turn this into "the token in GH_TOKEN was refused": this is the plain case.
+    const token = process.env.GH_TOKEN;
+    delete process.env.GH_TOKEN;
+    try {
+      let signedIn = false;
+      const answered = fakeGh({ 3: { state: "OPEN" } });
+      const calls: string[][] = [];
+      // gh's own words, as gh 2.103 says them with no login (verified against the real gh in an empty GH_CONFIG_DIR).
+      const run = async (cli: string, args: string[]) => {
+        calls.push(args);
+        if (args[0] === "auth") return { stdout: "", stderr: "You are not logged into any GitHub hosts. To log in, run: gh auth login", exitCode: 1 };
+        if (!signedIn) return { stdout: "", stderr: "To get started with GitHub CLI, please run:  gh auth login\nAlternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token.", exitCode: 4 };
+        return answered.run(cli, args);
+      };
+      const heard: string[][] = [];
+      const w = world({ gh: { run, calls }, onLiveChange: (ids) => heard.push([...ids]) });
+      w.agentAdd(w.thread, "o/r#3");
+      const first = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+      expect(first.pulls[0]!.problem).toBeUndefined();
+      await settle();
+      expect(heard).toEqual([[w.thread]]);
+      const body = await (await w.get(w.thread))!.text();
+      const problem = (JSON.parse(body) as InboxThreadPullsAnswer).pulls[0]!.problem!;
+      expect(problem.code).toBe("tool.signed_out");
+      // The exact command the person copies (pinned on purpose: it is what they run).
+      expect(problem.action).toEqual({ kind: "copy_command", value: "gh auth login --hostname github.com" });
+      // What gh printed is kept on the server only.
+      expect(body).not.toContain("populate the GH_TOKEN");
+      expect(w.states.diag("github.com/o/r#3")?.last_line).toContain("populate the GH_TOKEN");
+      // Signed in since: a hover inside the failure hold runs nothing; Try again reads at once and the problem clears.
+      signedIn = true;
+      const ghCalls = () => calls.filter((c) => c[0] === "api").length;
+      const before = ghCalls();
+      await w.get(w.thread);
+      await settle();
+      expect(ghCalls()).toBe(before);
+      const retried = (await (await w.get(w.thread, "?retry=1"))!.json()) as InboxThreadPullsAnswer;
+      expect(retried.pulls.map((p) => [p.state, p.problem])).toEqual([["open", undefined]]);
+    } finally {
+      if (token === undefined) delete process.env.GH_TOKEN;
+      else process.env.GH_TOKEN = token;
+    }
+  });
+
+  /** Run `work` with no GH_ENTERPRISE_TOKEN / GITLAB_TOKEN (the preload's fake token would name the variable instead). */
+  const noTokens = async (work: () => Promise<void>) => {
+    const saved = { GH_ENTERPRISE_TOKEN: process.env.GH_ENTERPRISE_TOKEN, GITHUB_ENTERPRISE_TOKEN: process.env.GITHUB_ENTERPRISE_TOKEN, GITLAB_TOKEN: process.env.GITLAB_TOKEN };
+    for (const k of Object.keys(saved)) delete process.env[k];
+    try {
+      await work();
+    } finally {
+      for (const [k, v] of Object.entries(saved)) if (v !== undefined) process.env[k] = v;
+    }
+  };
+  const problemsOf = async (w: ReturnType<typeof world>, query = "") => {
+    await w.get(w.thread, query);
+    await settle();
+    return ((await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer).pulls.map((p) => [p.host, p.problem?.code, p.problem?.action ?? null, p.problem?.retry ?? null]);
+  };
+
+  test("a GitHub Enterprise host in gh's configuration, signed out: the command names it, and Try again recovers right after the sign-in", async () => {
+    await noTokens(async () => {
+      let signedIn = false;
+      const answered = fakeGh({ 5: { state: "OPEN" } });
+      const calls: string[][] = [];
+      const run = async (cli: string, args: string[]) => {
+        calls.push([cli, ...args]);
+        if (args.join(" ") === "auth status --json hosts") return { stdout: JSON.stringify({ hosts: { "github.acme.dev": [{ state: signedIn ? "success" : "error", login: "dana" }] } }), stderr: "", exitCode: signedIn ? 0 : 1 };
+        if (args[0] === "auth") return signedIn ? { stdout: "", stderr: "", exitCode: 0 } : { stdout: "", stderr: "You are not logged into any accounts on github.acme.dev", exitCode: 1 };
+        return answered.run(cli, args);
+      };
+      const w = world({ gh: { run, calls } });
+      w.agentAdd(w.thread, "https://github.acme.dev/acme/api/pull/5");
+      expect(await problemsOf(w)).toEqual([["github.acme.dev", "tool.signed_out", { kind: "copy_command", value: "gh auth login --hostname github.acme.dev" }, true]]);
+      // The person runs the command, then presses Try again (the card's button: `?retry=1`).
+      signedIn = true;
+      await w.get(w.thread);
+      await settle();
+      expect(((await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer).pulls[0]!.problem?.code).toBe("tool.signed_out");
+      const retried = (await (await w.get(w.thread, "?retry=1"))!.json()) as InboxThreadPullsAnswer;
+      expect(retried.pulls.map((p) => [p.state, p.problem])).toEqual([["open", undefined]]);
+    });
+  });
+
+  test("a host gh only knows from its configuration and cannot check now: failed, never signed out", async () => {
+    await noTokens(async () => {
+      const run = async (_cli: string, args: string[]) => {
+        if (args.join(" ") === "auth status --json hosts") return { stdout: JSON.stringify({ hosts: { "github.acme.dev": [{ state: "error", login: "dana" }] } }), stderr: "", exitCode: 1 };
+        if (args[0] === "auth") return { stdout: "", stderr: "X Failed to log in to github.acme.dev account dana (keyring)", exitCode: 1 };
+        return { stdout: "", stderr: "unexpected", exitCode: 1 };
+      };
+      const w = world({ gh: { run, calls: [] } });
+      w.agentAdd(w.thread, "https://github.acme.dev/acme/api/pull/5");
+      expect(await problemsOf(w)).toEqual([["github.acme.dev", "tool.failed", { kind: "retry" }, null]]);
+    });
+  });
+
+  test("gh or glab not installed: a self-managed host says missing, with the install link and Try again", async () => {
+    const run = async () => ({ stdout: "", stderr: "", exitCode: 127 });
+    const w = world({ gh: { run, calls: [] }, cards: true });
+    w.agentAdd(w.thread, "https://github.acme.dev/acme/api/pull/5", "https://gitlab.acme.dev/acme/api/-/merge_requests/9");
+    expect(await problemsOf(w)).toEqual([
+      ["github.acme.dev", "tool.missing", { kind: "open_url", value: "https://cli.github.com", label: "Install gh" }, true],
+      ["gitlab.acme.dev", "tool.missing", { kind: "open_url", value: "https://gitlab.com/gitlab-org/cli#installation", label: "Install glab" }, true],
+    ]);
+  });
+
+  test("a sign-in command names only a host the person uses: the project's own GitLab yes; look-alikes an agent linked get no command and are never asked", async () => {
+    await noTokens(async () => {
+      const calls: string[][] = [];
+      // Signed in nowhere but the public forges; nothing in either CLI's configuration for these hosts.
+      const run = async (cli: string, args: string[]) => {
+        calls.push([cli, ...args]);
+        if (cli === "gh" && args.join(" ") === "auth status --json hosts") return { stdout: JSON.stringify({ hosts: { "github.com": [{ state: "success", login: "dana" }] } }), stderr: "", exitCode: 0 };
+        if (args[0] === "auth") return { stdout: "", stderr: "gitlab.com\n  ✓ Logged in to gitlab.com as dana\n", exitCode: 0 };
+        return { stdout: "", stderr: "unexpected", exitCode: 1 };
+      };
+      const w = world({ gh: { run, calls }, cards: true, projectHostOf: () => "gitlab.acme.dev" });
+      w.agentAdd(
+        w.thread,
+        "https://gitlab.acme.dev/acme/api/-/merge_requests/9",
+        "https://github.corn/acme/api/pull/1",
+        "https://gitlab-acme.com/acme/api/-/merge_requests/2",
+      );
+      // A host that only starts like a public forge is no forge link at all: it never reaches a card.
+      expect(() => w.agentAdd(w.thread, "https://gitlab.com.evil.example/acme/api/-/merge_requests/3")).toThrow();
+      const unsupported = ["tool.unsupported", null, true];
+      expect(await problemsOf(w)).toEqual([
+        ["gitlab.acme.dev", "tool.signed_out", { kind: "copy_command", value: "glab auth login --hostname gitlab.acme.dev" }, true],
+        ["github.corn", ...unsupported],
+        ["gitlab-acme.com", ...unsupported],
+      ]);
+      // No tool was ever run naming a look-alike, the status check included.
+      expect(calls.filter((call) => call.some((arg) => /github\.corn|gitlab-acme|evil\.example/.test(arg)))).toEqual([]);
+    });
+  });
+});
+
+describe("what the owner's next wake says", () => {
+  test("the person's changes since the owner last saw the thread, net; nothing once it has seen them; never for another session", () => {
+    const w = world();
+    w.agentAdd(w.thread, "o/r#1", "o/r#2");
+    w.advance(60_000);
+    const person = (values: string[], op: "add" | "remove") => {
+      const parsed = parseInboxThreadPullRefs(values, op);
+      if ("error" in parsed) throw new Error(parsed.error);
+      w.store.changeThreadPulls({ thread_id: w.thread, [op]: parsed.refs, by: { kind: "person" } });
+    };
+    person(["o/r#3"], "add");
+    person(["o/r#1"], "remove");
+    person(["o/r#4"], "add");
+    person(["o/r#4"], "remove");
+    expect(threadPullsChangedForWake(w.store, w.thread, "ses_a")).toEqual({ added: ["o/r#3"], removed: ["o/r#1"] });
+    expect(threadPullsChangedForWake(w.store, w.thread, "ses_other")).toBeNull();
+    // The owner writes in the thread: it has seen the thread since, so the next wake says nothing of them.
+    w.advance(60_000);
+    w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: "Noted.", reply_to: w.thread });
+    expect(threadPullsChangedForWake(w.store, w.thread, "ses_a")).toBeNull();
+    // A later change by the person is named again; the owner's own change after it settles it.
+    w.advance(60_000);
+    person(["o/r#2"], "remove");
+    expect(threadPullsChangedForWake(w.store, w.thread, "ses_a")).toEqual({ added: [], removed: ["o/r#2"] });
+    w.advance(60_000);
+    w.agentAdd(w.thread, "o/r#9");
+    expect(threadPullsChangedForWake(w.store, w.thread, "ses_a")).toBeNull();
+  });
+});

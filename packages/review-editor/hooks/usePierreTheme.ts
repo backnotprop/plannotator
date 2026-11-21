@@ -1,6 +1,7 @@
+import { COMPACT_HUNK_SEPARATOR_HEIGHT, HUNK_SEPARATOR_HEIGHT } from '../utils/diffChromeMetrics';
 import { useState, useEffect } from 'react';
 import type { DiffLineBgIntensity } from '@plannotator/shared/config';
-import { useTheme } from '@plannotator/ui/components/ThemeProvider';
+import { extendThemeSwitch, useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { useConfigValue } from '@plannotator/ui/config';
 import { buildPierreFontCSS } from '../utils/pierreFontCss';
 
@@ -10,9 +11,11 @@ import { buildPierreFontCSS } from '../utils/pierreFontCss';
  * resolve the same theme this diff pane does. Re-exported here because it is
  * the import path the review editor has always used.
  */
-import { resolveSyntaxTheme } from '@plannotator/ui/utils/syntaxTheme';
+import { resolvePierreSyntaxTheme as resolveSyntaxTheme } from '../utils/pierreSyntaxTheme';
 import { tokenHoverUnderlineCss } from '../components/tokenHoverStyles';
-export { SHIKI_THEME_MAP, resolveSyntaxTheme } from '@plannotator/ui/utils/syntaxTheme';
+export { SHIKI_THEME_MAP } from '@plannotator/ui/utils/syntaxTheme';
+// The theme pair for Pierre's diff views, a custom theme's code colours registered first.
+export { resolveSyntaxTheme };
 
 export interface PierreTheme {
   type: 'dark' | 'light';
@@ -171,6 +174,14 @@ export function buildLineBgOverrides(intensity: DiffLineBgIntensity, mode: 'ligh
   `;
 }
 
+/** Pierre's own display for the slot, until a host's selection bar is open (comments.css). */
+const SELECTION_BAR_PLUS_CSS = `[data-gutter-utility-slot] { display: var(--review-selection-plus, flex); }`;
+
+export const ANNOTATED_LINE_TINT_CSS = `
+  [data-selected-line] { --mix-selection-light: 92% !important; --mix-selection-dark: 88% !important; }
+  :is([data-line-annotation], [data-gutter-buffer='annotation'])[data-selected-line] { --mix-selection-light: 100% !important; --mix-selection-dark: 100% !important; }
+`;
+
 /**
  * Pierre's gutter comment button (`[data-utility-button]`) is `1lh` square —
  * 20px at the default line height — plus a 4px leftward bleed on its invisible
@@ -199,56 +210,71 @@ const COMPACT_TOUCH_GUTTER_UTILITY_CSS = `
   }
 `;
 
+/**
+ * Opt-in hooks for a host page that sets a file's name on its own surface, above
+ * a framed code box (the Inbox's review, inbox.css). Custom properties inherit
+ * into Pierre's shadow root, so the host sets them on any ancestor of the
+ * `diffs-container`:
+ *
+ * - `--pn-diff-header-bg`: the file header's fill. The header sticks to the top
+ *   of the scroller, so it needs a solid colour (the host's surface), never
+ *   transparent, or the code shows through it while stuck.
+ * - `--pn-diff-code-border`, `--pn-diff-code-radius`, `--pn-diff-code-overflow`:
+ *   a border, corners and clipping (`clip`, so the rows' fills keep to the
+ *   corners) on the code under the header. The border is not in CodeView's
+ *   height metrics, so these assume one file per CodeView (the 2 px land in the
+ *   host's box padding); an outline would not show over the code's own layers.
+ *   The sideways scrollbar's track is inset by the radius, so the corners do
+ *   not cut its thumb's ends.
+ *
+ * Each fallback is what Pierre draws without them (its sticky and default
+ * headers fill with `--diffs-bg`; `pre` has no border, radius or overflow of
+ * its own, nor the scrollbar track a margin), so the review app, which sets
+ * none, renders exactly as before.
+ */
+const HOST_SURFACE_HOOKS_CSS = `
+  [data-diffs-header][data-sticky], [data-diffs-header='default'] { background-color: var(--pn-diff-header-bg, var(--diffs-bg)); }
+  pre[data-diff], pre[data-file] {
+    border: var(--pn-diff-code-border, none);
+    border-radius: var(--pn-diff-code-radius, 0);
+    overflow: var(--pn-diff-code-overflow, visible);
+  }
+  [data-code]::-webkit-scrollbar-track { margin: 0 var(--pn-diff-code-radius, 0); }
+`;
+
 export function usePierreTheme(options?: {
   fontFamily?: string;
   fontSize?: string;
   showFileHeader?: boolean;
   compactTouchLayout?: boolean;
+  flushCodeTop?: boolean;
 }): PierreTheme {
   const { colorTheme, resolvedMode } = useTheme();
   const fontFamily = options?.fontFamily;
   const fontSize = options?.fontSize;
   const showFileHeader = options?.showFileHeader ?? false;
+  const flushCodeTop = options?.flushCodeTop === true;
   const compactTouchLayout = options?.compactTouchLayout === true;
   const compactTouchCSS = compactTouchLayout ? COMPACT_TOUCH_GUTTER_UTILITY_CSS : '';
+  const separatorPx = compactTouchLayout ? COMPACT_HUNK_SEPARATOR_HEIGHT : HUNK_SEPARATOR_HEIGHT;
   const lineBgIntensity = useConfigValue('diffLineBgIntensity');
 
-  const [pierreTheme, setPierreTheme] = useState<PierreTheme>(() => {
+  const buildTheme = (): PierreTheme => {
+    const mode = resolvedMode ?? 'dark';
     const styles = getComputedStyle(document.documentElement);
     const bg = styles.getPropertyValue('--background').trim();
     const fg = styles.getPropertyValue('--foreground').trim();
-    if (!bg || !fg) return { type: resolvedMode ?? 'dark', css: '', syntaxTheme: resolveSyntaxTheme(colorTheme, resolvedMode ?? 'dark') };
-    return { type: resolvedMode ?? 'dark', syntaxTheme: resolveSyntaxTheme(colorTheme, resolvedMode ?? 'dark'), css: `
-      :host, [data-diff], [data-file], [data-diffs-header], [data-error-wrapper], [data-virtualizer-buffer] {
-        --diffs-bg: ${bg} !important; --diffs-fg: ${fg} !important;
-        --diffs-dark-bg: ${bg}; --diffs-light-bg: ${bg}; --diffs-dark: ${fg}; --diffs-light: ${fg};
-      }
-      pre, code { background-color: ${bg} !important; }
-      :host { --diffs-bg-separator-override: color-mix(in srgb, ${fg} 8%, ${bg}); }
-      [data-separator='line-info'], [data-separator='line-info-basic'] { height: 24px !important; }
-      [data-separator='line-info'] { margin-block: 4px !important; }
-      ${buildLineBgOverrides(lineBgIntensity, resolvedMode ?? 'dark')}
-      ${compactTouchCSS}
-    `};
-  });
-
-  useEffect(() => {
-    requestAnimationFrame(() => {
-      const styles = getComputedStyle(document.documentElement);
-      const bg = styles.getPropertyValue('--background').trim();
-      const fg = styles.getPropertyValue('--foreground').trim();
-      const muted = styles.getPropertyValue('--muted').trim();
-      const mutedFg = styles.getPropertyValue('--muted-foreground').trim();
-      const border = styles.getPropertyValue('--border').trim();
-      const primary = styles.getPropertyValue('--primary').trim();
-      if (!bg || !fg) return;
-
-      const fontCSS = buildPierreFontCSS(fontFamily, fontSize);
-
-      setPierreTheme({
-        type: resolvedMode,
-        syntaxTheme: resolveSyntaxTheme(colorTheme, resolvedMode),
-        css: `
+    const muted = styles.getPropertyValue('--muted').trim();
+    const mutedFg = styles.getPropertyValue('--muted-foreground').trim();
+    const border = styles.getPropertyValue('--border').trim();
+    const primary = styles.getPropertyValue('--primary').trim();
+    const syntaxTheme = resolveSyntaxTheme(colorTheme, mode);
+    if (!bg || !fg) return { type: mode, css: '', syntaxTheme };
+    const fontCSS = buildPierreFontCSS(fontFamily, fontSize);
+    return {
+      type: mode,
+      syntaxTheme,
+      css: `
           :host, [data-diff], [data-file], [data-diffs-header], [data-error-wrapper], [data-virtualizer-buffer] {
             --diffs-bg: ${bg} !important;
             --diffs-fg: ${fg} !important;
@@ -260,10 +286,33 @@ export function usePierreTheme(options?: {
           pre, code { background-color: ${bg} !important; }
           [data-file-info] { background-color: ${muted} !important; }
           [data-column-number] { background-color: ${bg} !important; }
+          :is([data-line-annotation], [data-gutter-buffer='annotation']) { background-color: ${bg} !important; background-image: none !important; }
+          [data-gutter-buffer='annotation']::before, [data-gutter-buffer='annotation']::after { content: none !important; }
           ${showFileHeader ? '' : '[data-diffs-header] [data-title] { display: none !important; }'}
+          ${flushCodeTop ? '[data-code] { padding-top: 0 !important; }' : ''}
           [data-diff-type='split'][data-overflow='scroll'] {
             grid-template-columns:
               minmax(0, var(--split-left, 1fr))
+              minmax(0, var(--split-right, 1fr)) !important;
+          }
+          [data-code]:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+          [data-semantic-start]::after {
+            margin-left: 3ch;
+            font: 500 10.5px/inherit ui-sans-serif, system-ui, sans-serif;
+            letter-spacing: 0.02em; color: ${fg}; opacity: 0.55; pointer-events: none;
+            user-select: none; white-space: nowrap;
+          }
+          [data-semantic-start][data-line-type='change-moved']::after { content: 'moved'; }
+          [data-semantic-start][data-line-type='change-moved-with-edit']::after { content: 'moved & edited'; }
+          [data-semantic-start][data-line-type='change-renamed']::after { content: 'renamed'; }
+          [data-semantic-start][data-line-type='change-reordered']::after { content: 'reordered'; }
+          [data-semantic-start][data-line-type='change-reformatted']::after { content: 'reformatted'; }
+          [data-semantic-start][data-line-type='change-extracted-function']::after { content: 'extracted'; }
+          [data-semantic-start][data-line-type='change-inlined-function']::after { content: 'inlined'; }
+          [data-diff-type='split'][data-overflow='scroll'][data-semantic] {
+            grid-template-columns:
+              minmax(0, var(--split-left, 1fr))
+              var(--diffs-connector-column-width, 40px)
               minmax(0, var(--split-right, 1fr)) !important;
           }
           [data-diff-type='split'][data-overflow='scroll'] > [data-code][data-deletions],
@@ -272,13 +321,16 @@ export function usePierreTheme(options?: {
           [data-diff-type='split'][data-overflow='scroll'] > [data-code][data-additions] [data-content] {
             min-width: 0 !important;
           }
-          /* Pierre's own horizontal scrollbar sits at the bottom of each
-             file's content, which is off-screen on any diff taller than the
-             panel (#1048). DiffHScrollbar replaces it, pinned to the file
-             header, so suppress this one. Height only — the vertical width
-             is already 0 upstream. */
-          [data-code] { scrollbar-width: none !important; }
-          [data-code]::-webkit-scrollbar { height: 0 !important; }
+          /* Pierre's own horizontal scrollbar, at the bottom of each file's
+             code (theme.css lets it keep its own size). Its thumb is
+             transparent until hover upstream; here it has a quiet mix of the
+             text colour that reads in light and dark. Firefox has no
+             -webkit- pseudo: its scrollbar-color. */
+          [data-code]::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, ${fg} 28%, ${bg}) !important; }
+          [data-code]::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, ${fg} 45%, ${bg}) !important; }
+          @supports (-moz-appearance: none) {
+            [data-code] { scrollbar-color: color-mix(in srgb, ${fg} 28%, ${bg}) transparent; }
+          }
           .pn-token-hover {${tokenHoverUnderlineCss(primary || 'oklch(0.70 0.20 280)')}
           }
           .pn-token-nav {
@@ -296,18 +348,17 @@ export function usePierreTheme(options?: {
           }
           [data-separator='line-info'],
           [data-separator='line-info-basic'] {
-            height: 24px !important;
+            height: ${separatorPx}px !important;
           }
           [data-separator='line-info'] {
-            margin-block: 4px !important;
+            margin-block: 0 !important;
           }
           [data-separator-content] {
-            font-size: 11px !important;
+            font-size: 12px !important;
             color: ${mutedFg || fg} !important;
-            opacity: 0.7;
           }
           [data-separator-content]:hover {
-            opacity: 1;
+            color: ${fg} !important;
           }
           [data-expand-button] {
             min-width: 24px !important;
@@ -335,13 +386,25 @@ export function usePierreTheme(options?: {
 
           ${fontCSS}
 
-          ${buildLineBgOverrides(lineBgIntensity, resolvedMode)}
+          ${buildLineBgOverrides(lineBgIntensity, mode)}
 
           ${compactTouchCSS}
-        `,
-      });
+          ${SELECTION_BAR_PLUS_CSS}
+          ${ANNOTATED_LINE_TINT_CSS}
+
+          ${HOST_SURFACE_HOOKS_CSS}
+      `,
+    };
+  };
+
+  const [pierreTheme, setPierreTheme] = useState<PierreTheme>(buildTheme);
+
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      extendThemeSwitch();
+      setPierreTheme(buildTheme());
     });
-  }, [resolvedMode, colorTheme, fontFamily, fontSize, showFileHeader, lineBgIntensity, compactTouchCSS]);
+  }, [resolvedMode, colorTheme, fontFamily, fontSize, showFileHeader, flushCodeTop, lineBgIntensity, compactTouchCSS, separatorPx]);
 
   return pierreTheme;
 }

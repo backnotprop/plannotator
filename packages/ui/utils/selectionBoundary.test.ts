@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { trimWhitespaceOnlyBoundaryNodes, type SelectedNodeLike } from './selectionBoundary';
+import { dropEmptyNodes, trimWhitespaceOnlyBoundaryNodes, type SelectedNodeLike } from './selectionBoundary';
 
 // Failure this guards: a triple-click leaves the selection's end boundary on the
 // NEXT block's text node at offset 0, so web-highlighter's splitText(0) hands the
@@ -66,5 +66,20 @@ describe('trimWhitespaceOnlyBoundaryNodes', () => {
 
   test('handles an empty node list', () => {
     expect(trimWhitespaceOnlyBoundaryNodes([])).toEqual([]);
+  });
+});
+
+// Failure this guards: a selection over a highlight inside a highlight takes the
+// empty text nodes the library's own splits left in the inner wrapper, between
+// real nodes; wrapping them throws (useAnnotationHighlighter.reselectOverlap.test.tsx
+// drives the library itself).
+describe('dropEmptyNodes', () => {
+  test('drops empty nodes between real ones, and keeps a space', () => {
+    expect(texts(dropEmptyNodes(nodes('Stripe answers ', '', 'idempotency key', '', ' ', 'in flight')))).toEqual([
+      'Stripe answers ',
+      'idempotency key',
+      ' ',
+      'in flight',
+    ]);
   });
 });

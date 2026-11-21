@@ -25,12 +25,13 @@
  * PNG frames of two returns land in PLANNOTATOR_SCROLL_RETURN_SHOTS when set.
  */
 
-import { devices, expect, test, webkit, type Browser, type Page } from '@playwright/test';
+import { devices, expect, test, webkit, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { forgetFileViewChoice } from './file-view';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
@@ -159,8 +160,8 @@ async function leave(p: Page, how: Return, narrow: boolean): Promise<void> {
     return leave(p, narrow ? 'back-to-thread' : 'close', narrow);
   }
   if (how === 'escape') {
-    // Escape's ladder: on a desktop its last rung puts the file beside the thread, and the × closes it;
-    // where the file can only be full screen, the last rung goes back to the thread.
+    // Escape's ladder: its last rung goes back where full screen was opened from (fullScreenOrigin.ts), here the
+    // thread alone, as where the file can only be full screen; a file beside the thread closes with its ×.
     for (let i = 0; i < 6 && (await pane(p).count()) > 0 && (narrow || (await isFull(p))); i++) {
       await p.keyboard.press('Escape');
       await p.waitForTimeout(150);
@@ -172,9 +173,16 @@ async function leave(p: Page, how: Return, narrow: boolean): Promise<void> {
     await p.locator('[data-full-view-exit="back"]').click();
     return;
   }
-  for (let i = 0; i < 5 && (await isFull(p)); i++) {
-    await p.keyboard.press('Escape');
-    await p.waitForTimeout(120);
+  if (await isFull(p)) {
+    if (how === 'close') {
+      // Opened full screen from the thread: its × goes back to the thread as it was (fullScreenOrigin.ts).
+      await p.locator('[data-full-view-close]').click();
+      return;
+    }
+    // ‹ Inbox leads only beside the thread: Side by side first (a pick, forgotten again).
+    await p.locator('[data-full-view-bar]').getByRole('button', { name: 'Side by side' }).click();
+    await expect(pane(p)).not.toHaveClass(/ib-full/);
+    await forgetFileViewChoice(p);
   }
   if (how === 'inbox') await p.locator('[data-file-back]').click();
   else await pane(p).getByRole('button', { name: /^Close / }).first().click();
@@ -197,7 +205,11 @@ async function roundTrip(p: Page, { file, opener, how, narrow = false, shot }: {
   const before = await where(p, selector);
   expect(before.scrollTop, 'the thread is scrolled before the file opens').toBeGreaterThan(40);
   if (shot && shotsDir) await p.screenshot({ path: join(shotsDir, `${shot}-1-thread.png`) });
-  await p.locator(selector).click();
+  // Pressed where it is, as a person presses it: never scrolled first. A click that finds the opener still moving
+  // (the thread settles a pixel as its far messages' controls go plain) retries, and Playwright's retry scrolls the
+  // opener to the view's bottom edge (`scrollIntoView({ block: 'end' })`): the file then opens from a place
+  // 44 px from the one measured above, and comes back there, as it should.
+  await p.locator(selector).click({ scroll: 'none' });
   await expect(pane(p)).toBeVisible();
   await p.waitForTimeout(300);
   if (shot && shotsDir) await p.screenshot({ path: join(shotsDir, `${shot}-2-file.png`) });
@@ -245,13 +257,17 @@ test('desktop 1440: opened by keyboard, focus comes back to the tile or the imag
     await p.keyboard.press('Enter');
     await expect(pane(p)).toBeVisible();
     await p.waitForTimeout(300);
-    // Out by the keyboard: Escape to beside the thread, then the file's × pressed with Enter.
-    for (let i = 0; i < 5 && (await isFull(p)); i++) {
-      await p.keyboard.press('Escape');
-      await p.waitForTimeout(120);
+    // Out by the keyboard: beside the thread, the file's × pressed with Enter; opened full screen from the
+    // thread, Escape goes straight back to it (fullScreenOrigin.ts).
+    if (await isFull(p)) {
+      for (let i = 0; i < 5 && (await pane(p).count()) > 0; i++) {
+        await p.keyboard.press('Escape');
+        await p.waitForTimeout(120);
+      }
+    } else {
+      await pane(p).getByRole('button', { name: /^Close / }).first().focus();
+      await p.keyboard.press('Enter');
     }
-    await pane(p).getByRole('button', { name: /^Close / }).first().focus();
-    await p.keyboard.press('Enter');
     await expect(pane(p)).toHaveCount(0);
     await p.waitForTimeout(800);
     const after = await where(p, selector);
@@ -348,7 +364,7 @@ test("a comment opened from the reply box's list right after a file closes lands
   expect(saved).toBe(200);
   await loadThread(p);
   // The reply box open first, so nothing scrolls the thread between the close and the comment.
-  await p.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ }).first().click();
+  await p.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
   await expect(p.locator('[data-annotations-chip]')).toBeVisible();
   const tile = openerSelector('foot', 'rollout.md');
   await p.locator(tile).scrollIntoViewIfNeeded();

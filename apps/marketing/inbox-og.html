@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<!--
+  Source of inbox-assets/inbox-og.jpg (1200x630), the share image of /inbox/
+  and of the post the-age-of-the-inbox. Kept outside inbox-assets/ because that
+  folder is copied into the deployed site. Render it again with:
+    bun apps/marketing/render-inbox-og.ts
+  The headline should match the h1 of src/pages/[inbox].astro.
+
+  The wordmark's place was measured in Chromium, not set by eye:
+  - its cap top (baseline minus the 24 px cap height, 17.28) is the cap top of
+    the headline's first line (baseline 130 minus 54.72 = 75.28);
+  - the ink of its last letter ends on the screen's outer border edge
+    (72 + 1056 + 2 x 1 px border = 1130).
+  Change the wordmark's text, font or size and both numbers in .lab move.
+-->
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@600;700&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;width:1200px;height:630px;overflow:hidden;background:oklch(0.15 0.02 260);color:oklch(0.90 0.01 260);font-family:Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  .t{position:absolute;left:72px;top:64px}
+  h1{margin:0;font-family:'Instrument Sans',sans-serif;font-weight:700;font-size:76px;line-height:1.02;letter-spacing:-.04em}
+  h1 em{font-style:normal;color:oklch(0.75 0.18 280)}
+  /* The wordmark as the Inbox sidebar writes it: "Plannotator" in the text colour, "Inbox" in the muted grey.
+     Only Instrument Sans 600 and 700 are loaded, so both words render at 600. */
+  .lab{position:absolute;left:924.9375px;top:72.546875px;white-space:nowrap;font-family:'Instrument Sans',sans-serif;font-weight:600;font-size:24px;line-height:1;letter-spacing:0}
+  .lab .w{color:oklch(0.90 0.01 260)}
+  .lab .m{color:oklch(0.72 0.02 260);margin-left:8px}
+  .shot{position:absolute;left:72px;top:246px;width:1056px;border-radius:14px 14px 0 0;overflow:hidden;border:1px solid oklch(0.35 0.02 260);border-bottom:0;box-shadow:0 30px 80px -20px rgba(0,0,0,.6)}
+  .shot img{display:block;width:100%}
+</style></head><body>
+  <div class="t">
+    <h1>An inbox to stay<br><em>on top of your agents</em></h1>
+  </div>
+  <div class="lab"><span class="w">Plannotator</span><span class="m">Inbox</span></div>
+  <div class="shot"><img src="inbox-assets/1.1-dark.webp" alt=""></div>
+</body></html>

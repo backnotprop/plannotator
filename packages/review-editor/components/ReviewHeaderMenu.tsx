@@ -92,7 +92,11 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
             if (!isOpen && showUpdateDot) updateInfo?.dismiss();
             toggleMenu();
           }}
-          className={`relative flex h-7 items-center gap-1.5 px-1.5 lg:px-2.5 rounded-md text-xs font-medium transition-colors ${
+          // Desktop: the ☰ alone (owner's header order), named by its tooltip
+          // and aria-label. Compact touch keeps today's button and word.
+          className={`relative flex h-7 items-center rounded-md transition-colors ${
+            compactTouchLayout ? 'gap-1.5 px-1.5 lg:px-2.5 text-xs font-medium' : 'w-7 justify-center'
+          } ${
             isOpen
               ? 'bg-muted text-foreground'
               : 'text-muted-foreground hover:text-foreground hover:bg-muted'
@@ -103,9 +107,11 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
         >
           {isOpen ? <CloseIcon /> : <MenuIcon />}
           {/* The dot says an update is out; the label never moves (no shimmer). */}
-          <span className="hidden lg:inline">Options</span>
+          {compactTouchLayout && <span className="hidden lg:inline">Options</span>}
           {showUpdateDot && (
-            <span className="absolute top-0.5 right-0.5 lg:-top-0.5 lg:-right-0.5 w-2 h-2 rounded-full bg-primary ring-2 ring-background" />
+            <span className={`absolute w-2 h-2 rounded-full bg-primary ring-2 ring-background ${
+              compactTouchLayout ? 'top-0.5 right-0.5 lg:-top-0.5 lg:-right-0.5' : 'top-0.5 right-0.5'
+            }`} />
           )}
         </button>
       )}
@@ -115,7 +121,7 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
           {compactTouchLayout && (compactDestination || compactActions.length > 0) && (
             <>
               <div className="px-3 py-2 space-y-2">
-                <ActionMenuSectionLabel>Review</ActionMenuSectionLabel>
+                <ActionMenuSectionLabel plain>Review</ActionMenuSectionLabel>
                 {compactDestination && (
                   <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted/50 p-0.5" aria-label="Review destination">
                     {(['agent', 'platform'] as const).map((destination) => {
@@ -128,7 +134,7 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
                           key={destination}
                           aria-pressed={selected}
                           onClick={() => compactDestination.onChange(destination)}
-                          className={`flex min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
+                          className={`flex min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
                             selected
                               ? 'bg-background text-foreground shadow-sm'
                               : 'text-muted-foreground hover:text-foreground'
@@ -163,7 +169,7 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
           )}
 
           <div className="px-3 py-2 space-y-1.5">
-            <ActionMenuSectionLabel>Theme</ActionMenuSectionLabel>
+            <ActionMenuSectionLabel plain>Theme</ActionMenuSectionLabel>
             <div className="flex items-center gap-1 rounded-lg bg-muted/50 p-0.5">
               {THEME_MODES.map(({ id, label, Icon }) => (
                 <button
@@ -173,7 +179,7 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
                     closeMenu();
                     setTheme(id);
                   }}
-                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
+                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
                     theme === id
                       ? 'bg-background text-foreground shadow-sm'
                       : 'text-muted-foreground hover:text-foreground'
@@ -236,7 +242,7 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
                     onOpenAnnotations();
                   }}
                   icon={<SidebarIcon />}
-                  label="Annotations"
+                  label="Comments"
                 />
               )}
               {onOpenAI && (
@@ -246,7 +252,7 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
                     onOpenAI();
                   }}
                   icon={<SparklesIcon className="w-3.5 h-3.5" />}
-                  label="AI Chat"
+                  label="AI"
                 />
               )}
               {onOpenAgents && (
@@ -256,7 +262,7 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
                     onOpenAgents();
                   }}
                   icon={<ReviewAgentsIcon className="w-3.5 h-3.5" />}
-                  label="Review Agents"
+                  label="Agents"
                 />
               )}
             </>
@@ -338,7 +344,7 @@ const FileTreeMenuIcon = () => (
 const KbdHint: React.FC<{ keys: string[] }> = ({ keys }) => (
   <span className="inline-flex items-center gap-0.5 ml-auto">
     {keys.map((k, i) => (
-      <kbd key={i} className="inline-flex items-center justify-center h-[18px] min-w-[18px] px-1 rounded bg-muted border border-border/60 text-[10px] font-mono leading-none text-muted-foreground">
+      <kbd key={i} className="inline-flex items-center justify-center h-[18px] min-w-[18px] px-1 rounded bg-muted border border-border/60 text-xs font-mono leading-none text-muted-foreground">
         {k}
       </kbd>
     ))}

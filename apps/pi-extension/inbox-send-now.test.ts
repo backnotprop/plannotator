@@ -11,6 +11,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editorWithout, setupPiInbox } from "./inbox.ts";
+import { setPiHost } from "./pi-host.ts";
 import {
 	createInboxWorld,
 	destroyInboxWorld,
@@ -38,6 +39,7 @@ afterAll(() => {
 	removeStubbedHtml(stubs);
 });
 afterEach(async () => {
+	setPiHost("pi");
 	for (const end of ends.splice(0)) end();
 	for (const key of ["PLANNOTATOR_DATA_DIR", "PLANNOTATOR_INBOX_TOOL", "PLANNOTATOR_BIN"]) {
 		if (saved[key] === undefined) delete process.env[key];
@@ -166,6 +168,33 @@ describe.skipIf(process.platform === "win32")("Pi: Send now", () => {
 		expect(followUp.deliverAs).toBe("followUp");
 		fake.emit("message_start", { message: { role: "user", content: followUp.text } });
 		expect(fake.sent).toHaveLength(1);
+	}, 60_000);
+});
+
+describe.skipIf(process.platform === "win32")("Oh My Pi: the wake", () => {
+	test("an idle session gets the reply without deliverAs, so it starts a turn (Oh My Pi only queues a follow-up)", async () => {
+		const w = createInboxWorld("plannotator-inbox-omp-wake-", "omp-wake", "pi");
+		worlds.push(w);
+		startInbox(w);
+		mkdirSync(w.dataDir, { recursive: true });
+		writeFileSync(join(w.dataDir, "config.json"), JSON.stringify({ inboxTool: { pi: true } }));
+		process.env.PLANNOTATOR_DATA_DIR = w.dataDir;
+		process.env.PLANNOTATOR_BIN = join(w.bin, "plannotator");
+
+		const fake = fakePi(w.project);
+		// What index.ts records when Oh My Pi loads the extension.
+		setPiHost("oh-my-pi");
+		await setupPiInbox(fake.pi as never, { isAskActive: () => false });
+		fake.emit("session_start", {});
+		ends.push(() => fake.emit("session_shutdown", {}));
+		fake.setIdle(true);
+		const result = await fake.tool().execute("call-1", { action: "send_message", body: QUESTION }, undefined, undefined, fake.ctx);
+		const text = result.content[0]!.text;
+		const asked = JSON.parse(text.slice(text.indexOf("{"))) as { message_id: string };
+		await personSends(w, asked.message_id, "Retry with the same key.");
+		const wake = await waitFor("the wake", () => fake.sent[0]);
+		expect(wake.text).toContain("Retry with the same key.");
+		expect(wake.deliverAs).toBeUndefined();
 	}, 60_000);
 });
 

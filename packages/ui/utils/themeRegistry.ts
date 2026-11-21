@@ -1,3 +1,4 @@
+import { isCustomThemeInfo } from '@plannotator/core/theme-file';
 import { parseThemeMode, type Mode } from '../components/themeModes';
 
 export interface ThemeColors {
@@ -14,6 +15,8 @@ export interface ThemeInfo {
   builtIn: boolean;
   modeSupport: 'both' | 'dark-only' | 'light-only';
   syntaxHighlighting?: boolean;
+  /** A custom theme's halves with code colours of their own (customSyntaxThemes.ts). */
+  syntax?: ('dark' | 'light')[];
   colors: {
     dark: ThemeColors;
     light: ThemeColors;
@@ -39,6 +42,17 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     colors: {
       dark: { primary: 'oklch(0.765 0.124 283)', secondary: 'oklch(0.740 0.123 180)', accent: 'oklch(0.765 0.156 60)', background: 'oklch(0.225 0.006 286)', foreground: 'oklch(0.945 0.003 286)' },
       light: { primary: 'oklch(0.50 0.25 280)', secondary: 'oklch(0.50 0.18 180)', accent: 'oklch(0.60 0.22 50)', background: 'oklch(0.97 0.005 260)', foreground: 'oklch(0.18 0.02 260)' },
+    },
+  },
+  {
+    id: 'plannotator-modern',
+    name: 'Plannotator Modern',
+    builtIn: true,
+    modeSupport: 'both',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: 'oklch(0.515 0.245 263)', secondary: '#414141', accent: '#66ccff', background: '#000000', foreground: '#f2f2f2' },
+      light: { primary: 'oklch(0.515 0.245 263)', secondary: 'oklch(0.45 0.085 224.283)', accent: 'oklch(0.47 0.157 37.304)', background: '#f7f7f7', foreground: '#0a0a0a' },
     },
   },
   {
@@ -545,6 +559,17 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     },
   },
   {
+    id: 'tokyo-night-moon',
+    name: 'Tokyo Night Moon',
+    builtIn: true,
+    modeSupport: 'dark-only',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#82aaff', secondary: '#444a73', accent: '#86e1fc', background: '#222436', foreground: '#c8d3f5' },
+      light: { primary: '#82aaff', secondary: '#444a73', accent: '#86e1fc', background: '#222436', foreground: '#c8d3f5' },
+    },
+  },
+  {
     id: 'vesper',
     name: 'Vesper',
     builtIn: true,
@@ -589,9 +614,69 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
   },
 ];
 
+// --- Custom themes ------------------------------------------------------------
+//
+// A person's own theme files (`plannotator theme add`, kept in the data dir).
+// Each server writes a script into the page's head (pageWithCustomThemes in
+// packages/shared/theme-files.ts; none when there are no custom themes) that
+// runs before this module: it adds the themes' stylesheet and leaves
+// their registry entries on `window.__PLANNOTATOR_CUSTOM_THEMES__`, read here
+// once, so the first render already knows a custom id (cookies and config.json
+// name it like any palette). Each entry is checked again: it is data from a
+// script. A host page without that script has none.
+
+declare global {
+  interface Window {
+    __PLANNOTATOR_CUSTOM_THEMES__?: unknown;
+  }
+}
+
+function toCustomThemes(list: unknown): ThemeInfo[] {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set<string>();
+  const out: ThemeInfo[] = [];
+  for (const entry of list) {
+    if (!isCustomThemeInfo(entry) || seen.has(entry.id)) continue;
+    seen.add(entry.id);
+    out.push({
+      id: entry.id,
+      name: entry.name,
+      builtIn: false,
+      modeSupport: entry.modeSupport,
+      colors: entry.colors,
+      ...(entry.syntax?.length ? { syntax: [...entry.syntax], syntaxHighlighting: true } : {}),
+    });
+  }
+  return out;
+}
+
+let customThemes: ThemeInfo[] = toCustomThemes(
+  typeof window === 'undefined' ? undefined : window.__PLANNOTATOR_CUSTOM_THEMES__,
+);
+
+/** The custom themes this page was given, in the order the server listed them (by name). */
+export function getCustomThemes(): ThemeInfo[] {
+  return customThemes;
+}
+
+/** Replace the custom themes (tests; a host that loads them its own way). Entries that are not valid are dropped. */
+export function setCustomThemes(list: unknown): void {
+  customThemes = toCustomThemes(list);
+}
+
+/** Every palette a picker offers: the person's own first, then the built-ins. */
+export function getAllThemes(): ThemeInfo[] {
+  return customThemes.length === 0 ? BUILT_IN_THEMES : [...customThemes, ...BUILT_IN_THEMES];
+}
+
+/** A palette by id, custom or built-in. */
+export function findTheme(themeId: string): ThemeInfo | undefined {
+  return customThemes.find(({ id }) => id === themeId) ?? BUILT_IN_THEMES.find(({ id }) => id === themeId);
+}
+
 /** Return the explicit mode a palette cannot render, if any. */
 export function getUnsupportedMode(themeId: string): 'light' | 'dark' | null {
-  const theme = BUILT_IN_THEMES.find(({ id }) => id === themeId);
+  const theme = findTheme(themeId);
   if (theme?.modeSupport === 'dark-only') return 'light';
   if (theme?.modeSupport === 'light-only') return 'dark';
   return null;
@@ -661,7 +746,7 @@ export const DEFAULT_THEME_PAIR: ThemePair = {
 
 /** Return whether a palette is registered. */
 export function isKnownTheme(themeId: unknown): themeId is string {
-  return typeof themeId === 'string' && BUILT_IN_THEMES.some(({ id }) => id === themeId);
+  return typeof themeId === 'string' && findTheme(themeId) !== undefined;
 }
 
 /** Return whether a palette can occupy one half of the pair. */

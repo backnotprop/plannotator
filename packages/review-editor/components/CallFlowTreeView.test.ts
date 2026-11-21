@@ -26,6 +26,11 @@ function callTree(entry: string, tree: CallFlowNode): CallFlowTree {
   return { entry, raw: entry, rawLineStart: 1, tree };
 }
 
+/** Visible text of server-rendered markup: a label is split into receiver, name and arguments. */
+function textOf(markup: string): string {
+  return markup.replace(/<[^>]+>/g, '');
+}
+
 describe('Call Flow source selections', () => {
   test('maps added and removed nodes to the native diff sides', () => {
     expect(selectionForCallFlowNode(node({ status: 'added', line: 41, endLine: 43 }))).toEqual({
@@ -102,41 +107,6 @@ describe('Call Flow source selections', () => {
     expect(inside).not.toContain('call-flow-comment');
   });
 
-  test('separates entry paths at real cross-file boundaries', () => {
-    const treeNode = node({
-      children: [
-        node({ key: 'same-file', label: 'validate()', file: 'src/checkout.ts', line: 42 }),
-        node({ key: 'other-file', label: 'authorize()', file: 'src/auth.ts', line: 10 }),
-      ],
-    });
-    const markup = renderToStaticMarkup(React.createElement(CallFlowTreeView, {
-      trees: [callTree('checkout()', treeNode)],
-      onOpenNode: () => {},
-    }));
-
-    expect(markup.match(/class="call-flow-file-boundary"/g)).toHaveLength(2);
-    expect(markup).toContain('File boundary: src/checkout.ts');
-    expect(markup).toContain('File boundary: src/auth.ts');
-  });
-
-  test('does not repeat a file boundary for consecutive sibling calls in the same file', () => {
-    const treeNode = node({
-      file: 'src/CallFlowFileBadge.tsx',
-      children: [
-        node({ key: 'memo-1', label: 'useMemo()', file: 'src/CallFlowTreeView.tsx', line: 303 }),
-        node({ key: 'memo-2', label: 'useMemo()', file: 'src/CallFlowTreeView.tsx', line: 304 }),
-        node({ key: 'state', label: 'useState()', file: 'src/CallFlowTreeView.tsx', line: 331 }),
-      ],
-    });
-    const markup = renderToStaticMarkup(React.createElement(CallFlowTreeView, {
-      trees: [callTree('CallFlowTreeView({})', treeNode)],
-      onOpenNode: () => {},
-    }));
-
-    expect(markup.match(/class="call-flow-file-boundary"/g)).toHaveLength(2);
-    expect(markup.match(/File boundary: src\/CallFlowTreeView\.tsx/g)).toHaveLength(1);
-  });
-
   test('renders changed paths first while keeping full unchanged context available on demand', () => {
     const treeNode = node({
       status: 'same',
@@ -159,14 +129,15 @@ describe('Call Flow source selections', () => {
       trees: [callTree('checkout()', treeNode)],
       onOpenNode: () => {},
     }));
+    const text = textOf(markup);
 
-    expect(markup).not.toContain('unchangedContext()');
-    expect(markup).not.toContain('deepContext()');
-    expect(markup).toContain('changedPath()');
-    expect(markup).toContain('changedCall()');
+    expect(text).not.toContain('unchangedContext()');
+    expect(text).not.toContain('deepContext()');
+    expect(text).toContain('changedPath()');
+    expect(text).toContain('changedCall()');
     expect(markup).toContain('aria-label="Collapse changedPath()"');
-    expect(markup).toContain('more context steps hidden');
-    expect(markup).toContain('Show all context');
+    expect(text).toContain('more context steps hidden');
+    expect(text).toContain('Show all context');
   });
 
   test('shows adjacent structural context without expanding the complete tree', () => {
@@ -188,11 +159,12 @@ describe('Call Flow source selections', () => {
       onOpenNode: () => {},
       initialContext: 'nearby',
     }));
+    const text = textOf(markup);
 
-    expect(markup).toContain('nearbyContext()');
-    expect(markup).toContain('changedCall()');
-    expect(markup).toContain('afterContext()');
-    expect(markup).not.toContain('deepContext()');
-    expect(markup).toContain('Show all context');
+    expect(text).toContain('nearbyContext()');
+    expect(text).toContain('changedCall()');
+    expect(text).toContain('afterContext()');
+    expect(text).not.toContain('deepContext()');
+    expect(text).toContain('Show all context');
   });
 });

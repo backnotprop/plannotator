@@ -6,7 +6,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { LanState, PairingChecks, TailnetState } from './api';
 import { attemptNotes, canShowCode, hasFailure, pairedVia, tailscaleCheckLines, troubleshooting, wifiCheckLines } from './pairing';
-import { parseSettingsHash, settingsHash } from './settingsRoute';
+import { movedSettingsHash, parseSettingsHash, settingsHash } from './settingsRoute';
 
 const lan = (over: Partial<LanState> = {}): LanState => ({ on: false, address: null, fingerprint: null, bonjour: false, error: null, ...over });
 const tailnet = (over: Partial<TailnetState> = {}): TailnetState => ({ on: false, address: null, error: null, ...over });
@@ -72,6 +72,14 @@ describe("Settings' addresses", () => {
     expect(parseSettingsHash('settings/devices/pair')).toEqual({ section: 'devices', pair: true });
     expect(parseSettingsHash('settings/general/pair')).toEqual({ section: 'general', pair: false });
     expect(parseSettingsHash('settings/nope')).toEqual({ section: null, pair: false });
+    // Experimental's old page is Capabilities now, landing on its Experimental group.
+    expect(parseSettingsHash('settings/experimental')).toEqual({ section: 'capabilities', pair: false, experimental: true });
+    // Decision data's old page is Activity now, and its address is rewritten to Activity's.
+    expect(parseSettingsHash('settings/decision-data')).toEqual({ section: 'activity', pair: false });
+    expect(movedSettingsHash('settings/decision-data')).toBe('settings/activity');
+    expect(movedSettingsHash('settings/activity')).toBeNull();
+    expect(movedSettingsHash('settings/nope')).toBeNull();
+    expect(movedSettingsHash('thread=decision-data')).toBeNull();
     expect(parseSettingsHash('thread=msg_1')).toBeNull();
     expect(parseSettingsHash('settingsx')).toBeNull();
     expect(settingsHash({ section: 'devices', pair: true })).toBe('settings/devices/pair');

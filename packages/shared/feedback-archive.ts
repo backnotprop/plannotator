@@ -174,6 +174,9 @@ export interface FeedbackAnnotationRecord {
    *  (maintainer ruling on open question 2; additive per the field contract
    *  above). */
   scope?: string;
+  /** A code-review comment on lines outside the diff (a file the review does
+   *  not change, or a changed file outside its hunks). Absent otherwise. */
+  outsideDiff?: boolean;
   blockId?: string;
   diffContext?: string;
   severity?: string;
@@ -217,6 +220,13 @@ export interface FeedbackAnnotationRecord {
    *  annotation kind. This is the "how I answer things" record: the text
    *  also rides `feedback`, this is the structured copy. */
   questionAnswer?: QuestionAnswer;
+  /** A quick label (the annotation's `isQuickLabel`): `text` is then the
+   *  label itself ("🔍 Verify this"), not the person's words. Additive per
+   *  the field contract above; absent for every other annotation. */
+  isQuickLabel?: boolean;
+  /** The label's tip, the instruction the agent got with it (the
+   *  annotation's `quickLabelTip`). Absent when the label has none. */
+  quickLabelTip?: string;
   images?: number;
 }
 
@@ -340,6 +350,7 @@ function normalizeAnnotation(raw: unknown): FeedbackAnnotationRecord {
   if (side) record.side = side;
   const scope = asString(a.scope);
   if (scope) record.scope = scope;
+  if (a.outsideDiff === true) record.outsideDiff = true;
   const blockId = asString(a.blockId);
   if (blockId) record.blockId = blockId;
   const diffContext = asString(a.diffContext);
@@ -375,6 +386,11 @@ function normalizeAnnotation(raw: unknown): FeedbackAnnotationRecord {
   if (imageRegion !== null) record.imageRegion = imageRegion;
   const questionAnswer = a.questionAnswer === undefined ? null : parseQuestionAnswer(a.questionAnswer);
   if (questionAnswer !== null) record.questionAnswer = questionAnswer;
+  if (a.isQuickLabel === true) {
+    record.isQuickLabel = true;
+    const quickLabelTip = asString(a.quickLabelTip);
+    if (quickLabelTip) record.quickLabelTip = quickLabelTip;
+  }
   return record;
 }
 

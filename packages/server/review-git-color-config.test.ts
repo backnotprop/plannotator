@@ -8,7 +8,8 @@
  * `color.diff` key wins), so this config sets both kinds of key, plus the other
  * settings a dotfiles repo commonly carries (`diff.noprefix`, pagers).
  *
- * Every git and jj call here reads a sandboxed GIT_CONFIG_GLOBAL / JJ_CONFIG;
+ * Every git and jj call here reads a sandboxed GIT_CONFIG_GLOBAL / JJ_CONFIG,
+ * and jj records its repos in a scratch config folder (useScratchJjConfig);
  * the real user config is never read or written.
  */
 import { afterEach, describe, expect, test } from "bun:test";
@@ -27,6 +28,10 @@ import {
   getVcsContext as getPiVcsContext,
   runVcsDiff as runPiVcsDiff,
 } from "../../apps/pi-extension/server/vcs";
+import { useScratchJjConfig } from "../../tests/helpers/jj-scratch-config";
+
+// Sets XDG_CONFIG_HOME in process.env, which run() and the child below pass on.
+useScratchJjConfig();
 
 const HOSTILE_GIT_CONFIG = `[user]
   name = Color Test
@@ -163,7 +168,7 @@ describe("code review with color forced on in the user's git config (#1661)", ()
   });
 
   test("agent jobs' environment keeps the git they run themselves color-free", () => {
-    // Review, tour and guide jobs spawn an agent that runs `git diff` through
+    // Review and guide jobs spawn an agent that runs `git diff` through
     // its own pipe; the job environment carries the color-off settings.
     sandboxConfig();
     const repo = initGitRepo();

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -54,6 +54,17 @@ describe("codexCatalogFromModelList", () => {
 });
 
 describe("tool version capture during discovery", () => {
+  // The Codex provider reads $CODEX_HOME/config.toml: a temp folder, never the real ~/.codex.
+  const savedCodexHome = process.env.CODEX_HOME;
+  const codexHome = mkdtempSync(join(tmpdir(), "plannotator-codex-home-"));
+  beforeAll(() => {
+    process.env.CODEX_HOME = codexHome;
+  });
+  afterAll(() => {
+    if (savedCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = savedCodexHome;
+    rmSync(codexHome, { recursive: true, force: true });
+  });
   // Fake CLIs: each reports a version but cannot list models, so the version
   // must survive a failed discovery (it is what explains a fallback list).
   const fakeCli = (name: string, body: string) => {

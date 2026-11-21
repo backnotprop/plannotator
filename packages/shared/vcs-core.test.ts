@@ -265,6 +265,33 @@ describe("createVcsApi", () => {
     });
   });
 
+  test("a saved Evolution diff default opens against the change's previous state, not the line base", async () => {
+    // Failure caught: opening on jj-evolog with the line base, which diffs
+    // the whole line of work under an "Evolution diff from trunk()" label.
+    const jj = provider("jj", true, ["jj-current", "jj-evolog"], {
+      defaultBranch: "trunk()",
+      diffOptions: [
+        { id: "jj-current", label: "Current change" },
+        { id: "jj-evolog", label: "Evolution diff" },
+      ],
+      jjEvologs: [
+        { commitId: "now0", description: "" },
+        { commitId: "prev1", description: "" },
+      ],
+      vcsType: "jj",
+    });
+    const api = createVcsApi([jj]);
+
+    await expect(api.prepareLocalReviewDiff({
+      cwd: "/repo",
+      configuredDiffType: "jj-evolog",
+    })).resolves.toMatchObject({
+      diffType: "jj-evolog",
+      base: "prev1",
+      rawPatch: "jj:jj-evolog:prev1",
+    });
+  });
+
   test("prepares local reviews by preserving valid requested diff types for the detected VCS", async () => {
     const jj = provider("jj", true, ["jj-current", "jj-line"], {
       defaultBranch: "trunk()",
@@ -472,7 +499,7 @@ describe("resolveInitialDiffType", () => {
       diffOptions: [
         { id: "jj-current", label: "Current change" },
         { id: "jj-line", label: "Line of work" },
-        { id: "jj-all", label: "All files" },
+        { id: "jj-all", label: "Every file" },
       ],
       vcsType: "jj",
     });
@@ -480,6 +507,21 @@ describe("resolveInitialDiffType", () => {
     expect(resolveInitialDiffType(jjContext, "all")).toBe("jj-current");
     expect(resolveInitialDiffType(jjContext, "merge-base")).toBe("jj-current");
     expect(resolveInitialDiffType(jjContext, "unstaged")).toBe("jj-current");
+  });
+
+  test("opens a jj review on its saved jj default when the change offers it", () => {
+    const jjContext = context({
+      defaultBranch: "trunk()",
+      diffOptions: [
+        { id: "jj-current", label: "Current change" },
+        { id: "jj-line", label: "Line of work" },
+      ],
+      vcsType: "jj",
+    });
+
+    expect(resolveInitialDiffType(jjContext, "jj-line")).toBe("jj-line");
+    // Evolution diff is only offered with evolog history.
+    expect(resolveInitialDiffType(jjContext, "jj-evolog")).toBe("jj-current");
   });
 
   test("falls back to the first available option for unknown non-jj modes", () => {

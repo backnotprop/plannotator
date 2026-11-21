@@ -1,4 +1,5 @@
 #!/bin/bash
+# Manual QA: runs with your real HOME and Plannotator config on purpose. For an isolated test run, use `bun run test:sandbox`.
 # Sandbox script for testing Plannotator with Codex
 #
 # Usage:
@@ -48,6 +49,7 @@ echo ""
 # Build the plannotator binary
 echo "Compiling plannotator binary..."
 cd "$PROJECT_ROOT"
+bun scripts/require-bun.ts || exit 1
 bun run build:hook > /dev/null 2>&1
 bun run build:review > /dev/null 2>&1
 bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --outfile ~/.local/bin/plannotator 2>&1

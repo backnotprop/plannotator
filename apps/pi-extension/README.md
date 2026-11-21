@@ -31,13 +31,20 @@ pi -e npm:@plannotator/pi-extension
 pi update --extensions
 ```
 
-This updates your installed Pi packages, Plannotator included. `pi update npm:@plannotator/pi-extension` updates only Plannotator, and `pi update --all` updates Pi and every package. A plain `pi update` updates only Pi itself, not Plannotator. Restart Pi after updating.
+This updates your installed Pi packages, Plannotator included. `pi update npm:@plannotator/pi-extension` updates only Plannotator, and `pi update --all` updates Pi and every package. A plain `pi update` updates only Pi itself, not Plannotator. On Pi 0.84.2 or newer, each open Pi session then reloads itself to load the new version, once it is idle: no response running, no dialog or Plannotator review open, nothing typed for 15 seconds and an empty editor. It shows `Plannotator updated to X. Pi reloaded while idle.` To turn this off, set `PLANNOTATOR_AUTO_RELOAD=0` or `{ "autoReload": false }` in `~/.plannotator/config.json`; then, and on an older Pi, the session tells you once to type `/reload` (Oh My Pi: `omp plugin upgrade @plannotator/pi-extension`, then `/restart`; Oh My Pi never restarts by itself). With the Inbox tool on, a session says so once when the version on disk differs from the one it runs, and the Inbox's Settings → Agents lists it. A version pinned in Pi's settings (`npm:@plannotator/pi-extension@0.28.20`) is skipped by `pi update`: run `pi install npm:@plannotator/pi-extension` to move it to the latest.
 
 ## Pi version and project trust
 
 Plannotator requires **Pi 0.79.1 or newer**. Updating only the Plannotator
 extension does not repair the security behavior of an older Pi host; update Pi
 itself before loading the extension.
+
+Run Pi on **Node 22.23.4+, 24.22.1+ or 26.12.1+**. These October 2026 security
+releases stop trusting the compromised eMudhra certificate chain. On an older
+Node, HTTPS calls made inside Pi still trust it, and the extension says so once
+when Pi starts (on Bun: Bun 1.4.4+). The package declares no `engines` floor on
+purpose: npm passes over a release whose floor the running Node misses, which
+kept older-Node installs on an old Plannotator without a word.
 
 Pi 0.79 introduced project trust for repository-local inputs. In interactive
 sessions, Pi asks before loading project settings, instructions, resources, and
@@ -69,7 +76,8 @@ extension runs in OMP too. Install it, then restart OMP:
 omp plugin install @plannotator/pi-extension
 ```
 
-Update with `omp plugin upgrade @plannotator/pi-extension`. Remove with
+Update with `omp plugin upgrade @plannotator/pi-extension`, then type
+`/restart` in each open OMP session to load the new version. Remove with
 `omp plugin uninstall @plannotator/pi-extension`.
 
 Open reviews with the extension's commands: `/plannotator-review`,
@@ -257,7 +265,7 @@ Use these inside `instructions` strings. They render once, when the phase is ent
 Run `/plannotator-review` to open your current VCS changes in the code review UI. Annotate specific lines, switch between the modes supported by the detected Git, GitButler, or JJ provider, and submit feedback that gets sent to the agent. Pass `--git` or `--gitbutler` to force that provider; GitButler requires `but` 0.21.0 or newer on `PATH`. Pass `--patch-file <path>` to review a static caller-supplied unified diff without a repository.
 ### Ask this session
 
-In plan review, code review, annotate and `/plannotator-last`, Ask AI is answered by your Pi session ("Ask this session"). It is the only Ask AI option there, so there is no provider picker. Your question shows in Pi's chat. If the agent is busy, choose **Ask when it finishes** or **Interrupt and ask now**. In remote mode you pick a separate provider instead. Review agents, Code Tour and Guided Review still run their own models.
+In plan review, code review, annotate and `/plannotator-last`, Ask AI is answered by your Pi session ("Ask this session"). It is the only Ask AI option there, so there is no provider picker. Your question shows in Pi's chat. If the agent is busy, choose **Ask when it finishes** or **Interrupt and ask now**. In remote mode you pick a separate provider instead. Review agents and Guided Review still run their own models.
 
 ### Shared Plannotator event API
 
@@ -384,7 +392,7 @@ The extension also ships the `plannotator` knowledge skill (a CLI reference) for
 
 ### The `plannotator_inbox` tool
 
-With this tool the agent writes to your Plannotator Inbox and reads it: `send_message` starts or continues a thread (a question, a note, files to annotate as attachments), `read_thread` and `wait_for_reply` read your answers, `search` finds messages by their words, and `get_guide_brief` and `submit_guide` send you a guided review. The actions are the ones your Inbox offers when the session starts. When you press Send on a reply, the session that sent the message wakes: the reply goes in as a follow-up once Pi is idle (a run is never interrupted), and the thread shows "Delivered to Pi". If two Pi processes have the same session open, the one you used last gets it. The tool appears only when an Inbox is installed (you ran `plannotator inbox` once) and the `inboxTool` setting is on for Pi. It is off by default on Pi, because Pi sends every tool's full definition with each request. Turn it on with `export PLANNOTATOR_INBOX_TOOL=1`, or with `{ "inboxTool": { "pi": true } }` in `~/.plannotator/config.json` (the Inbox's Settings writes this key; the environment variable wins). The setting is read when a session starts. A call starts a stopped Inbox in the background. In print or JSON mode the tool is inactive.
+With this tool the agent writes to your Plannotator Inbox and reads it: `send_message` starts or continues a thread (a question, a note, files to annotate as attachments), `read_thread` reads your answers, `search` finds messages by their words, and `get_guide_brief` and `submit_guide` send you a guided review. The actions are the ones your Inbox offers when the session starts. When you press Send on a reply, the session that sent the message wakes: the reply goes in as a follow-up once Pi is idle (a run is never interrupted), and the thread shows "Delivered to Pi". If two Pi processes have the same session open, the one you used last gets it. The tool appears only when an Inbox is installed (you ran `plannotator inbox` once) and the `inboxTool` setting is on for Pi. It is off by default on Pi, because Pi sends every tool's full definition with each request. Turn it on with `export PLANNOTATOR_INBOX_TOOL=1`, or with `{ "inboxTool": { "pi": true } }` in `~/.plannotator/config.json` (the Inbox's Settings writes this key; the environment variable wins). The setting is read when a session starts. A call starts a stopped Inbox in the background. In print or JSON mode the tool is inactive.
 
 ### Archive browser
 
@@ -402,7 +410,7 @@ During execution, the agent marks completed steps with `[DONE:n]` markers. Progr
 | `/plannotator-review [DIRECTORY \| PR_URL]` | Open code review UI for current changes, another repository/worktree, or a PR |
 | `/plannotator-annotate <file>` | Open markdown file in annotation UI |
 | `/plannotator-last` | Annotate the last assistant message |
-| `/plannotator-inbox` | Open the Plannotator Inbox in the browser and show its address (needs the `plannotator` CLI) |
+| `/plannotator-inbox` | Open the Plannotator Inbox in the browser, show its address, and brief the agent on using it (needs the `plannotator` CLI) |
 
 When the `plannotator` tool is turned on, the agent opens, lists and closes reviews with it (see above).
 

@@ -1,4 +1,5 @@
 #!/bin/bash
+# Manual QA: runs with your real HOME and Plannotator config on purpose. For an isolated test run, use `bun run test:sandbox`.
 # Adds [[Plannotator Plans]] backlink to existing plan files
 #
 # Usage: ./fix-vault-links.sh /path/to/vault/plannotator

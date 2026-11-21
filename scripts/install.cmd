@@ -9,7 +9,8 @@ REM Tracks whether a version was explicitly set via --version or positional.
 REM Used to reject mixing --version <tag> with a stray positional token.
 set "VERSION_EXPLICIT=0"
 REM Three-layer opt-in for SLSA provenance verification.
-REM Precedence: CLI flag > env var > %USERPROFILE%\.plannotator\config.json > default.
+REM Precedence: CLI flag > env var > config.json in the Plannotator data folder
+REM (`plannotator data-dir`) > default.
 REM -1 = flag not set (fall through); 0 = disable; 1 = enable.
 set "VERIFY_ATTESTATION_FLAG=-1"
 REM Opt-in install of the pruned CallDiff call-flow core (default off; the
@@ -36,6 +37,7 @@ set "SKIP_GEMINI_FLAG=0"
 set "SKIP_KIRO_FLAG=0"
 set "SKIP_VIBE_FLAG=0"
 set "SKIP_OPENCODE_FLAG=0"
+set "SKIP_QWEN_FLAG=0"
 REM Same shape, but scoped to the skills/slash-command sparse checkout rather
 REM than one agent's home: --skip-skills turns the whole fetch into a no-op for
 REM every scope it writes (Claude, .agents, OpenCode, Gemini, Kiro), including
@@ -175,6 +177,11 @@ if /i "%~1"=="--skip-opencode" (
     shift
     goto parse_args
 )
+if /i "%~1"=="--skip-qwen" (
+    set "SKIP_QWEN_FLAG=1"
+    shift
+    goto parse_args
+)
 if /i "%~1"=="--skip-skills" (
     set "SKIP_SKILLS_FLAG=1"
     shift
@@ -199,7 +206,7 @@ REM unquoted arg containing `&` would re-trigger metacharacter interpretation.
 set "CURRENT_ARG=%~1"
 if "!CURRENT_ARG:~0,1!"=="-" (
     echo Unknown option: "%~1" >&2
-    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--with-call-flow] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--minimal ^| --no-minimal] [--skip-codex] [--skip-gemini] [--skip-kiro] [--skip-vibe] [--skip-opencode] [--skip-skills] [--skip-claude-plugin] [--non-interactive] [--reconfigure] >&2
+    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--with-call-flow] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--minimal ^| --no-minimal] [--skip-codex] [--skip-gemini] [--skip-kiro] [--skip-vibe] [--skip-opencode] [--skip-skills] [--skip-qwen] [--skip-claude-plugin] [--non-interactive] [--reconfigure] >&2
     exit /b 1
 )
 REM Positional form: install.cmd vX.Y.Z (legacy interface).
@@ -225,8 +232,6 @@ if "!MINIMAL_FLAG!"=="1" set "MINIMAL=1"
 if "!MINIMAL_FLAG!"=="0" set "MINIMAL=0"
 
 set "REPO=backnotprop/plannotator"
-set "SEM_REPO=Ataraxy-Labs/sem"
-set "SEM_VERSION=v0.8.0"
 set "INSTALL_DIR=%USERPROFILE%\.local\bin"
 
 REM First plannotator release that carries SLSA build-provenance attestations.
@@ -480,25 +485,46 @@ set "VERIFY_ATTESTATION=0"
 
 REM Layer 3: config file (lowest precedence of the opt-in sources).
 REM Unset PLANNOTATOR_DATA_DIR: an existing %USERPROFILE%\.plannotator
-REM (legacy default) always wins; otherwise an explicitly-set absolute
-REM XDG_DATA_HOME (rare on Windows but honored the same way as the runtime;
-REM drive-rooted or UNC) places the directory at XDG_DATA_HOME\plannotator;
-REM otherwise %USERPROFILE%\.plannotator.
+REM (legacy default) wins, unless it holds none of Plannotator's data while
+REM XDG_DATA_HOME\plannotator does (a stray folder, #2305); otherwise an
+REM explicitly-set absolute XDG_DATA_HOME (rare on Windows but honored the
+REM same way as the runtime, packages/shared/data-dir.ts; drive-rooted or
+REM UNC) places the directory at XDG_DATA_HOME\plannotator; otherwise
+REM %USERPROFILE%\.plannotator.
+REM BEGIN data-dir resolution (windows.yml runs this block: scripts/check-data-dir-windows.ps1)
 if defined PLANNOTATOR_DATA_DIR (
     set "_CONFIG_DIR=!PLANNOTATOR_DATA_DIR!"
 ) else (
     set "_CONFIG_DIR=%USERPROFILE%\.plannotator"
-    if not exist "%USERPROFILE%\.plannotator\" if defined XDG_DATA_HOME (
-        if "!XDG_DATA_HOME:~1,1!"==":" (
-            set "_CONFIG_DIR=!XDG_DATA_HOME!\plannotator"
-        ) else if "!XDG_DATA_HOME:~0,2!"=="\\" (
-            set "_CONFIG_DIR=!XDG_DATA_HOME!\plannotator"
+    set "_XDG_DIR="
+    REM XDG_DATA_HOME is trimmed like the runtime trims it: for /f drops the
+    REM leading spaces and tabs, the loop the trailing ones.
+    set "_XDG_HOME="
+    if defined XDG_DATA_HOME for /f "tokens=*" %%A in ("!XDG_DATA_HOME!") do set "_XDG_HOME=%%A"
+    for /l %%I in (1,1,32) do (
+        if defined _XDG_HOME if "!_XDG_HOME:~-1!"==" " set "_XDG_HOME=!_XDG_HOME:~0,-1!"
+        if defined _XDG_HOME if "!_XDG_HOME:~-1!"=="	" set "_XDG_HOME=!_XDG_HOME:~0,-1!"
+    )
+    if defined _XDG_HOME (
+        if "!_XDG_HOME:~1,1!"==":" set "_XDG_DIR=!_XDG_HOME!\plannotator"
+        if "!_XDG_HOME:~0,2!"=="\\" set "_XDG_DIR=!_XDG_HOME!\plannotator"
+    )
+    if not exist "%USERPROFILE%\.plannotator\" (
+        if defined _XDG_DIR set "_CONFIG_DIR=!_XDG_DIR!"
+    ) else if defined _XDG_DIR if exist "!_XDG_DIR!\" (
+        set "_XDG_DATA=0"
+        set "_LEGACY_DATA=0"
+        for %%M in (history sessions drafts inbox claude-code-mod install-flags.json) do (
+            if exist "!_XDG_DIR!\%%M" set "_XDG_DATA=1"
+            if exist "%USERPROFILE%\.plannotator\%%M" set "_LEGACY_DATA=1"
         )
+        if "!_XDG_DATA!"=="1" if "!_LEGACY_DATA!"=="0" set "_CONFIG_DIR=!_XDG_DIR!"
     )
 )
 if /i "!_CONFIG_DIR!"=="~" set "_CONFIG_DIR=%USERPROFILE%"
 if "!_CONFIG_DIR:~0,2!"=="~\" set "_CONFIG_DIR=%USERPROFILE%\!_CONFIG_DIR:~2!"
 if "!_CONFIG_DIR:~0,2!"=="~/" set "_CONFIG_DIR=%USERPROFILE%\!_CONFIG_DIR:~2!"
+REM END data-dir resolution
 if exist "!_CONFIG_DIR!\config.json" (
     findstr /r /c:"\"verifyAttestation\"[ 	]*:[ 	]*true" "!_CONFIG_DIR!\config.json" >nul 2>&1
     if !ERRORLEVEL! equ 0 set "VERIFY_ATTESTATION=1"
@@ -551,6 +577,8 @@ set "SKIP_VIBE=0"
 set "SKIP_VIBE_SOURCE="
 set "SKIP_OPENCODE=0"
 set "SKIP_OPENCODE_SOURCE="
+set "SKIP_QWEN=0"
+set "SKIP_QWEN_SOURCE="
 REM skipInstall.skills is not an agent - it opts out of the skills/slash-command
 REM checkout for every scope at once - but it shares the same three layers.
 set "SKIP_SKILLS=0"
@@ -560,7 +588,7 @@ set "SKIP_CLAUDE_PLUGIN=0"
 set "SKIP_CLAUDE_PLUGIN_SOURCE="
 if exist "!_CONFIG_DIR!\config.json" (
     set "PLN_CONFIG_JSON=!_CONFIG_DIR!\config.json"
-    for /f "usebackq delims=" %%K in (`powershell -NoProfile -Command "try { $c = Get-Content $env:PLN_CONFIG_JSON -Raw | ConvertFrom-Json } catch { exit 0 }; if (-not $c.skipInstall) { exit 0 }; foreach ($k in @('codex','gemini','kiro','vibe','opencode','skills','claudePlugin')) { $v = $c.skipInstall.$k; if ($v -is [bool] -and $v) { $k } }"`) do (
+    for /f "usebackq delims=" %%K in (`powershell -NoProfile -Command "try { $c = Get-Content $env:PLN_CONFIG_JSON -Raw | ConvertFrom-Json } catch { exit 0 }; if (-not $c.skipInstall) { exit 0 }; foreach ($k in @('codex','gemini','kiro','vibe','opencode','qwen','skills','claudePlugin')) { $v = $c.skipInstall.$k; if ($v -is [bool] -and $v) { $k } }"`) do (
         if /i "%%K"=="codex" (
             set "SKIP_CODEX=1"
             set "SKIP_CODEX_SOURCE=config skipInstall.codex"
@@ -580,6 +608,10 @@ if exist "!_CONFIG_DIR!\config.json" (
         if /i "%%K"=="opencode" (
             set "SKIP_OPENCODE=1"
             set "SKIP_OPENCODE_SOURCE=config skipInstall.opencode"
+        )
+        if /i "%%K"=="qwen" (
+            set "SKIP_QWEN=1"
+            set "SKIP_QWEN_SOURCE=config skipInstall.qwen"
         )
         if /i "%%K"=="skills" (
             set "SKIP_SKILLS=1"
@@ -632,6 +664,14 @@ for %%V in (0 false no) do if /i "!PLANNOTATOR_SKIP_OPENCODE_INSTALL!"=="%%V" (
     set "SKIP_OPENCODE=0"
     set "SKIP_OPENCODE_SOURCE="
 )
+for %%V in (1 true yes) do if /i "!PLANNOTATOR_SKIP_QWEN_INSTALL!"=="%%V" (
+    set "SKIP_QWEN=1"
+    set "SKIP_QWEN_SOURCE=PLANNOTATOR_SKIP_QWEN_INSTALL"
+)
+for %%V in (0 false no) do if /i "!PLANNOTATOR_SKIP_QWEN_INSTALL!"=="%%V" (
+    set "SKIP_QWEN=0"
+    set "SKIP_QWEN_SOURCE="
+)
 for %%V in (1 true yes) do if /i "!PLANNOTATOR_SKIP_SKILLS_INSTALL!"=="%%V" (
     set "SKIP_SKILLS=1"
     set "SKIP_SKILLS_SOURCE=PLANNOTATOR_SKIP_SKILLS_INSTALL"
@@ -667,6 +707,10 @@ if "!SKIP_VIBE_FLAG!"=="1" (
 if "!SKIP_OPENCODE_FLAG!"=="1" (
     set "SKIP_OPENCODE=1"
     set "SKIP_OPENCODE_SOURCE=--skip-opencode"
+)
+if "!SKIP_QWEN_FLAG!"=="1" (
+    set "SKIP_QWEN=1"
+    set "SKIP_QWEN_SOURCE=--skip-qwen"
 )
 if "!SKIP_SKILLS_FLAG!"=="1" (
     set "SKIP_SKILLS=1"
@@ -727,7 +771,7 @@ if "!VERIFY_ATTESTATION!"=="1" (
         echo   - Pin to !MIN_ATTESTED_VERSION! or later: --version !MIN_ATTESTED_VERSION! >&2
         echo   - Install without provenance verification: --skip-attestation >&2
         echo   - Or unset PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation >&2
-        echo     from %USERPROFILE%\.plannotator\config.json >&2
+        echo     from config.json in your Plannotator data folder ^(plannotator data-dir^) >&2
         exit /b 1
     )
 )
@@ -741,33 +785,78 @@ REM don't collide and a same-user pre-placed symlink at a predictable
 REM path can't redirect where curl writes the downloaded executable.
 REM The SHA256 check would pass regardless (content is authentic), but
 REM the install destination would be corrupted.
-set "TEMP_FILE=%TEMP%\plannotator-%RANDOM%.exe"
-curl -fsSL "!BINARY_URL!" -o "!TEMP_FILE!"
-if !ERRORLEVEL! neq 0 (
-    echo Failed to download binary >&2
-    if exist "!TEMP_FILE!" del "!TEMP_FILE!"
-    exit /b 1
-)
-
+REM
+REM The binary continues where a dropped or stalled connection stopped (see
+REM :DownloadBinary). The checksum download retries a dropped connection
+REM (#2788). --retry-all-errors (curl 7.71+) also retries what plain --retry
+REM treats as final, such as an HTTP/2 stream error (curl 92); the curl.exe of
+REM an older Windows rejects it, so it gets --retry alone. The probe puts the
+REM option before --version, which ends curl's option parsing.
+set "CURL_RETRY=--retry 3 --retry-delay 2"
+curl --retry-all-errors --version >nul 2>&1
+if !ERRORLEVEL! equ 0 set "CURL_RETRY=!CURL_RETRY! --retry-all-errors"
 REM Download checksum to a randomized temp path for the same reason as
-REM the binary download above (concurrent collision + symlink pre-placement).
+REM the binary download below (concurrent collision + symlink pre-placement).
 set "CHECKSUM_FILE=%TEMP%\plannotator-checksum-%RANDOM%.txt"
-curl -fsSL "!CHECKSUM_URL!" -o "!CHECKSUM_FILE!"
-if !ERRORLEVEL! neq 0 (
+set "CURL_SUM_LIMITS=--connect-timeout 30 --max-time 120 --retry-max-time 120"
+curl -fsSL !CURL_RETRY! !CURL_SUM_LIMITS! "!CHECKSUM_URL!" -o "!CHECKSUM_FILE!"
+set "DL_STATUS=!ERRORLEVEL!"
+if "!DL_STATUS!"=="92" (
+    echo The checksum download hit an HTTP/2 error; trying again over HTTP/1.1... >&2
+    curl -fsSL --http1.1 !CURL_RETRY! !CURL_SUM_LIMITS! "!CHECKSUM_URL!" -o "!CHECKSUM_FILE!"
+    set "DL_STATUS=!ERRORLEVEL!"
+)
+if !DL_STATUS! neq 0 (
     echo Failed to download checksum >&2
     REM curl -o creates the output file before receiving data, so a
     REM network failure or HTTP error leaves a 0-byte/partial file
     REM at CHECKSUM_FILE. Clean it up to match the discipline used
     REM for TEMP_FILE elsewhere in this script.
     if exist "!CHECKSUM_FILE!" del "!CHECKSUM_FILE!"
-    del "!TEMP_FILE!"
     exit /b 1
 )
 
-REM Extract expected checksum (first field)
+REM Extract expected checksum (first field). Cleared first: set /p keeps
+REM the old value when the file is empty.
+set "EXPECTED_CHECKSUM="
 set /p EXPECTED_CHECKSUM=<"!CHECKSUM_FILE!"
 for /f "tokens=1" %%i in ("!EXPECTED_CHECKSUM!") do set "EXPECTED_CHECKSUM=%%i"
 del "!CHECKSUM_FILE!"
+
+REM The value must be 64 hex characters, as install.sh checks: an empty or
+REM garbled .sha256 (a proxy's page, a cut-off file) never gets as far as the
+REM compare. The leading x keeps both variables defined: the loop removes
+REM every hex digit (substitution ignores case), so only the x may be left,
+REM and x plus 64 characters is 65 long.
+set "CHECKSUM_SHAPE=x!EXPECTED_CHECKSUM!"
+set "CHECKSUM_REST=!CHECKSUM_SHAPE!"
+for %%c in (0 1 2 3 4 5 6 7 8 9 a b c d e f) do set "CHECKSUM_REST=!CHECKSUM_REST:%%c=!"
+set "CHECKSUM_OK=1"
+if not "!CHECKSUM_REST!"=="x" set "CHECKSUM_OK="
+if "!CHECKSUM_SHAPE:~64,1!"=="" set "CHECKSUM_OK="
+if not "!CHECKSUM_SHAPE:~65!"=="" set "CHECKSUM_OK="
+if not defined CHECKSUM_OK (
+    echo The checksum file for !BINARY_NAME! !TAG! is not a SHA-256 checksum. Nothing was changed; try again later. >&2
+    exit /b 1
+)
+
+set "TEMP_FILE=%TEMP%\plannotator-%RANDOM%.exe"
+set "TAKEN="
+set "PACKED_SUFFIXES=.gz"
+if /i "!PLANNOTATOR_SKIP_COMPRESSED_DOWNLOAD!"=="1" set "PACKED_SUFFIXES="
+if /i "!PLANNOTATOR_SKIP_COMPRESSED_DOWNLOAD!"=="true" set "PACKED_SUFFIXES="
+if /i "!PLANNOTATOR_SKIP_COMPRESSED_DOWNLOAD!"=="yes" set "PACKED_SUFFIXES="
+for %%S in (!PACKED_SUFFIXES!) do if not defined TAKEN call :DownloadPacked %%S
+if defined TAKEN goto :DownloadTaken
+call :DownloadBinary
+if !DL_STATUS! neq 0 (
+    echo Failed to download binary >&2
+    if exist "!TEMP_FILE!" del "!TEMP_FILE!"
+    exit /b 1
+)
+set "TAKEN=!BINARY_NAME!"
+:DownloadTaken
+echo Downloaded !TAKEN!.
 
 REM Verify checksum using certutil
 set "ACTUAL_CHECKSUM="
@@ -913,7 +1002,7 @@ if "!VERIFY_ATTESTATION!"=="1" (
         echo Install https://cli.github.com ^(no login is needed when the public >&2
         echo attestation bundle fetch succeeds^), or unset >&2
         echo PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation >&2
-        echo from %USERPROFILE%\.plannotator\config.json / pass --skip-attestation. >&2
+        echo from config.json in your Plannotator data folder ^(plannotator data-dir^) / pass --skip-attestation. >&2
         del "!TEMP_FILE!"
         exit /b 1
     )
@@ -960,7 +1049,6 @@ if "!MINIMAL!"=="1" (
     exit /b 0
 )
 
-call :InstallSemSidecar
 call :InstallAgentTerminalRuntime
 call :InstallCallFlowRuntime
 
@@ -997,6 +1085,7 @@ REM what gets copied. It never installs the plugin, never prompts, and never
 REM fails the install. Opt out with --skip-claude-plugin,
 REM PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE=1 or skipInstall.claudePlugin.
 set "CLAUDE_PLUGIN_STATE=none"
+set "CLAUDE_PLUGIN_FROM="
 call :UpdateClaudePlugin
 
 REM Codex hooks on Windows are still experimental upstream. Do not mutate
@@ -1037,6 +1126,33 @@ REM reads the wrong session.
 if not defined VIBE_HOME set "VIBE_HOME=%USERPROFILE%\.vibe"
 set "VIBE_AVAILABLE=0"
 if exist "!VIBE_HOME!" set "VIBE_AVAILABLE=1"
+
+REM Qwen Code keeps its user files in QWEN_HOME when set, else
+REM %USERPROFILE%\.qwen. QWEN_HOME is the Qwen folder itself, a leading ~ is
+REM expanded and a relative path is taken from the current folder, as in
+REM Qwen. Detected as in install.sh: that folder must exist, and so must the
+REM qwen command or a file only Qwen Code writes there ^(settings.json,
+REM installation_id, projects\, extensions\^). The `skills` CLI makes
+REM ~/.qwen/skills for people who never installed Qwen Code, so the folder
+REM alone is not enough. The extension step needs the qwen command.
+set "QWEN_DIR=%USERPROFILE%\.qwen"
+if defined QWEN_HOME set "QWEN_DIR=!QWEN_HOME!"
+if "!QWEN_DIR!"=="~" set "QWEN_DIR=%USERPROFILE%"
+if "!QWEN_DIR:~0,2!"=="~/" set "QWEN_DIR=%USERPROFILE%\!QWEN_DIR:~2!"
+if "!QWEN_DIR:~0,2!"=="~\" set "QWEN_DIR=%USERPROFILE%\!QWEN_DIR:~2!"
+for %%P in ("!QWEN_DIR!") do set "QWEN_DIR=%%~fP"
+set "QWEN_SKILLS_DIR=!QWEN_DIR!\skills"
+set "QWEN_AVAILABLE=0"
+set "QWEN_SKILLS_INSTALLED=0"
+set "QWEN_TOO_OLD=0"
+if exist "!QWEN_DIR!\" (
+    where $PATH:qwen >nul 2>&1
+    if !ERRORLEVEL! equ 0 set "QWEN_AVAILABLE=1"
+    if exist "!QWEN_DIR!\settings.json" set "QWEN_AVAILABLE=1"
+    if exist "!QWEN_DIR!\installation_id" set "QWEN_AVAILABLE=1"
+    if exist "!QWEN_DIR!\projects\" set "QWEN_AVAILABLE=1"
+    if exist "!QWEN_DIR!\extensions\" set "QWEN_AVAILABLE=1"
+)
 REM HONEST three-state reporting (#1178): detected-but-skipped is its own
 REM state, never conflated with "not detected". A Codex opt-out leaves the
 REM Codex home entirely untouched (no writes, no cleanup, no removal).
@@ -1323,6 +1439,8 @@ if "!SKIP_SKILLS!"=="1" (
         exit /b 1
     )
 )
+REM Qwen Code too old for plan review: nothing is installed for it. See :QwenVersionCheck.
+call :QwenVersionCheck
 set "CHECKOUT_FAILED=0"
 set "KIRO_SKILLS_DIR=%USERPROFILE%\.kiro\skills"
 set "KIRO_AGENTS_DIR=%USERPROFILE%\.kiro\agents"
@@ -1375,7 +1493,7 @@ if "!SPARSE_UNSUPPORTED!"=="1" (
 
 if "!CLONE_OK!"=="1" (
     pushd "!SKILLS_TMP!\repo"
-    if "!SPARSE_CLONE!"=="1" git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands >nul 2>&1
+    if "!SPARSE_CLONE!"=="1" git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands apps/qwen-code >nul 2>&1
 
     REM Claude Code reads apps\skills\claude\* (injection `!`plannotator ... $ARGUMENTS``
     REM + allowed-tools, so /plannotator-* run with no permission prompt); Codex
@@ -1466,6 +1584,27 @@ if "!CLONE_OK!"=="1" (
         echo Installed Kiro skills to !KIRO_SKILLS_DIR!\ and agent to !KIRO_AGENTS_DIR!\plannotator.json
     )
 
+    REM Qwen Code: its own copies of review, annotate and last ^(they run the
+    REM command in the background, past the shell tool's time limit^). Qwen
+    REM reads QWEN_DIR\skills before ~/.agents/skills, so these take the place
+    REM of the shared copies. The extension is copied out of the checkout here
+    REM and installed after this block ^(:InstallQwenExtension^). A Qwen opt-out,
+    REM or a Qwen Code too old for plan review, leaves QWEN_DIR untouched.
+    if "!QWEN_AVAILABLE!"=="1" if "!SKIP_QWEN!"=="0" if "!QWEN_TOO_OLD!"=="0" if exist "apps\qwen-code\skills" (
+        if not exist "!QWEN_SKILLS_DIR!" mkdir "!QWEN_SKILLS_DIR!"
+        for %%S in (plannotator-review plannotator-annotate plannotator-last) do (
+            if exist "apps\qwen-code\skills\%%S" (
+                if exist "!QWEN_SKILLS_DIR!\%%S" rmdir /s /q "!QWEN_SKILLS_DIR!\%%S" >nul 2>&1
+                xcopy /s /i /y /q "apps\qwen-code\skills\%%S" "!QWEN_SKILLS_DIR!\%%S\" >nul 2>&1
+            )
+        )
+        echo Installed Qwen Code skills to !QWEN_SKILLS_DIR!\
+        set "QWEN_SKILLS_INSTALLED=1"
+    )
+    if "!QWEN_AVAILABLE!"=="1" if "!SKIP_QWEN!"=="0" if "!QWEN_TOO_OLD!"=="0" if exist "apps\qwen-code\extension\qwen-extension.json" (
+        xcopy /s /i /y /q "apps\qwen-code\extension" "!SKILLS_TMP!\qwen-extension\" >nul 2>&1
+    )
+
     REM Vibe - no skills are copied to !VIBE_HOME! on Windows. The apps\vibe
     REM skills use a POSIX env-prefix that Vibe's PowerShell fallback cannot
     REM run; Vibe reads the shell-neutral core skills from ~/.agents/skills.
@@ -1476,6 +1615,8 @@ if "!CLONE_OK!"=="1" (
 )
 
 :skills_checkout_done
+REM The Qwen Code extension, outside any parenthesized block. See :InstallQwenExtension.
+if "!CHECKOUT_FAILED!"=="0" if "!QWEN_AVAILABLE!"=="1" call :InstallQwenExtension
 rmdir /s /q "!SKILLS_TMP!" >nul 2>&1
 
 if "!CHECKOUT_FAILED!"=="1" (
@@ -1554,8 +1695,12 @@ REM unlock - and rewriting a PREVIOUS run's SKILL.md would be a write the
 REM opt-out promised not to make.
 if "!SKIP_SKILLS!"=="0" if defined INVOCABLE_CHOICE if not "!INVOCABLE_CHOICE!"=="none" (
     for %%K in ("!INVOCABLE_CHOICE:,=" "!") do (
-        for %%D in ("!CLAUDE_SKILLS_DIR!" "!AGENTS_SKILLS_DIR!") do (
-            if exist "%%~D\%%~K\SKILL.md" (
+        for %%D in ("!CLAUDE_SKILLS_DIR!" "!AGENTS_SKILLS_DIR!" "!QWEN_SKILLS_DIR!") do (
+            REM A Qwen opt-out ^(or a Qwen Code too old for plan review^) leaves
+            REM QWEN_DIR untouched, a previous run's copies included.
+            set "SCOPE_OK=1"
+            if /i "%%~D"=="!QWEN_SKILLS_DIR!" if not "!QWEN_AVAILABLE!!SKIP_QWEN!!QWEN_TOO_OLD!"=="100" set "SCOPE_OK=0"
+            if "!SCOPE_OK!"=="1" if exist "%%~D\%%~K\SKILL.md" (
                 findstr /c:"disable-model-invocation: true" "%%~D\%%~K\SKILL.md" >nul 2>&1
                 if !ERRORLEVEL! equ 0 (
                     findstr /v /c:"disable-model-invocation: true" "%%~D\%%~K\SKILL.md" > "%%~D\%%~K\SKILL.md.tmp"
@@ -1575,17 +1720,9 @@ if "!SKIP_SKILLS!"=="0" if defined INVOCABLE_CHOICE if not "!INVOCABLE_CHOICE!"=
 
 REM Update Pi extension if pi is installed. Pi keeps its 6 extension commands
 REM and the plannotator_submit_plan tool; it no longer bundles skills, so there
-REM is no settings.json package-skills filter to configure.
+REM is no settings.json package-skills filter to configure. See :UpdatePiExtension.
 where pi >nul 2>&1
-if !ERRORLEVEL! equ 0 (
-    echo Updating Pi extension...
-    pi install npm:@plannotator/pi-extension
-    if !ERRORLEVEL! equ 0 (
-        echo Pi extension updated.
-    ) else (
-        echo Skipping Pi update ^(pi install failed^)
-    )
-)
+if !ERRORLEVEL! equ 0 call :UpdatePiExtension
 
 REM --- Gemini CLI support (only if Gemini is installed) ---
 REM HONEST three-state reporting (#1178): detected-but-skipped is its own
@@ -1715,6 +1852,59 @@ if "!VIBE_AVAILABLE!"=="1" (
     )
 )
 
+REM The Qwen Code section prints only when Qwen Code was detected.
+if "!QWEN_AVAILABLE!"=="1" (
+    echo.
+    echo ==========================================
+    echo   QWEN CODE USERS
+    echo ==========================================
+    echo.
+    if "!SKIP_QWEN!"=="1" (
+        echo Qwen Code was detected, but the integration was skipped ^(!SKIP_QWEN_SOURCE!^).
+        echo No extension was installed or removed, and no files under !QWEN_DIR! were
+        echo written. Re-run without the opt-out to add plan review and the skills.
+    ) else if "!SKIP_SKILLS!"=="1" (
+        echo Qwen Code was detected, but skills were skipped ^(!SKIP_SKILLS_SOURCE!^). The
+        echo Qwen Code extension and skills come from the same download, so neither was
+        echo installed or changed. Re-run without the opt-out to add them.
+    ) else if "!QWEN_TOO_OLD!"=="1" (
+        echo Qwen Code is older than 0.13.0, the first release that runs extension
+        echo hooks, so nothing was installed for it. Update Qwen Code to use plan
+        echo review, then re-run this installer.
+    ) else (
+        if "!QWEN_EXTENSION_STATE!"=="ok" (
+            echo Plan review: when the agent calls exit_plan_mode, the plan opens in your
+            echo browser. After you approve it there, Qwen Code asks you to confirm the plan
+            echo once more in the terminal. Restart Qwen Code to load a new extension.
+        ) else if "!QWEN_EXTENSION_STATE!"=="ok-off" (
+            echo The plannotator extension is turned off in Qwen Code ^(in some or all
+            echo projects^), and it stays off. Where it is off, plan review is off. To
+            echo turn it on: qwen extensions enable plannotator
+        ) else if "!QWEN_EXTENSION_STATE!"=="linked" (
+            echo The plannotator extension is linked from a local folder ^(qwen extensions
+            echo link^), so this installer left it as it is.
+        ) else if "!QWEN_EXTENSION_STATE!"=="foreign" (
+            echo The plannotator extension was installed from another source ^(see above^),
+            echo not by this installer, so it was left as it is. To let this installer
+            echo manage it, run: qwen extensions uninstall plannotator
+            echo and re-run this installer.
+        ) else if "!QWEN_EXTENSION_STATE!"=="no-cli" (
+            echo The qwen command was not found, so the plan-review extension was not
+            echo installed. Put qwen on PATH and re-run this installer.
+        ) else if "!QWEN_EXTENSION_STATE!"=="not-in-tag" (
+            echo This release has no Qwen Code extension. Install a newer release for plan review.
+        ) else (
+            echo The plan-review extension could not be installed ^(see the message above^).
+            echo Re-run this installer to try again.
+        )
+        if "!QWEN_SKILLS_INSTALLED!"=="1" (
+            echo.
+            echo Skills are installed to !QWEN_SKILLS_DIR!\:
+            echo   /plannotator-review, /plannotator-annotate, /plannotator-last
+        )
+    )
+)
+
 echo.
 echo Test the install:
 echo   echo {"tool_input":{"plan":"# Test Plan\\n\\nHello world"}} ^| plannotator
@@ -1782,6 +1972,10 @@ if exist "!PLUGIN_HOOKS!" if exist "!CLAUDE_SETTINGS!" (
 REM The full install completed: remember its command-line flags for auto-update.
 call :WriteInstallFlags
 
+REM One Windows notification when open Claude Code sessions cannot load the
+REM plugin by themselves (see :ClaudePluginReloadAlert). Never fails the install.
+call :ClaudePluginReloadAlert
+
 echo.
 exit /b 0
 
@@ -1807,6 +2001,7 @@ if "!SKIP_GEMINI_FLAG!"=="1" call :AddInstallFlag skip-gemini
 if "!SKIP_KIRO_FLAG!"=="1" call :AddInstallFlag skip-kiro
 if "!SKIP_VIBE_FLAG!"=="1" call :AddInstallFlag skip-vibe
 if "!SKIP_OPENCODE_FLAG!"=="1" call :AddInstallFlag skip-opencode
+if "!SKIP_QWEN_FLAG!"=="1" call :AddInstallFlag skip-qwen
 if "!SKIP_SKILLS_FLAG!"=="1" call :AddInstallFlag skip-skills
 if "!SKIP_CLAUDE_PLUGIN_FLAG!"=="1" call :AddInstallFlag skip-claude-plugin
 if not exist "!_CONFIG_DIR!" mkdir "!_CONFIG_DIR!" >nul 2>&1
@@ -1837,17 +2032,158 @@ set "PLN_HOOKS_RE="
 goto :eof
 
 REM ======================================================================
+REM :ClaudePluginReloadAlert - one Windows notification when Claude Code
+REM sessions that are open right now cannot load the plugin by themselves,
+REM and the plugin-update page on plannotator.ai in the default browser
+REM (PLANNOTATOR_BROWSER honored; a none value opens none). Same rule and
+REM URL as notify_claude_plugin_reload in install.sh and
+REM Get-ClaudePluginReloadAlert in install.ps1 (keep the three in step):
+REM updated from a plugin older than 0.28.52 (the first release whose mod
+REM reloads itself, #2356), or not updated (manual / failed / no-marketplace)
+REM while older than this release. Never on a fresh install, a skipped or
+REM current plugin, with no live Claude Code session (sessions\<pid>.json), in
+REM CI, over SSH, in a non-interactive session or under
+REM PLANNOTATOR_TEST_SANDBOX; opt out of both with
+REM PLANNOTATOR_INSTALL_NOTIFY=0. The toast is shown by Windows PowerShell
+REM (powershell.exe -EncodedCommand), time-bounded. Inputs travel in PLN_NT_*;
+REM the command carries no double quote, percent sign or exclamation mark.
+REM ======================================================================
+:ClaudePluginReloadAlert
+set "PLN_NT_STATE=!CLAUDE_PLUGIN_STATE!"
+set "PLN_NT_FROM=!CLAUDE_PLUGIN_FROM!"
+set "PLN_NT_TAG=!TAG!"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'SilentlyContinue'; if ($env:PLANNOTATOR_INSTALL_NOTIFY -match '^(0|false|no|off|disabled)$') { exit 0 }; if ($env:PLANNOTATOR_TEST_SANDBOX -or $env:CI -or $env:SSH_CONNECTION -or $env:SSH_CLIENT -or $env:SSH_TTY) { exit 0 }; if (-not [Environment]::UserInteractive) { exit 0 }; function P($v) { if ([string]$v -match '^v?([0-9]+)[.]([0-9]+)[.]([0-9]+)$') { return $Matches[1] + '.' + $Matches[2] + '.' + $Matches[3] }; return '' }; $h = P $env:PLN_NT_FROM; if (-not $h) { exit 0 }; $w = P $env:PLN_NT_TAG; $s = $env:PLN_NT_STATE; if ($s -eq 'updated') { if ([version]$h -ge [version]'0.28.52') { exit 0 }; $k = 'reload'; $t = 'Plannotator updated its Claude Code plugin'; $b = 'Type /reload-plugins in each open Claude Code session to load it.' } elseif ($s -in @('manual', 'failed', 'no-marketplace')) { if (-not $w -or [version]$h -ge [version]$w) { exit 0 }; $k = 'manual'; $t = 'Plannotator could not update its Claude Code plugin'; $b = 'See Settings > Agents in the Plannotator Inbox for the two commands to run.' } else { exit 0 }; $d = if ($env:CLAUDE_CONFIG_DIR) { Join-Path $env:CLAUDE_CONFIG_DIR 'sessions' } else { Join-Path $env:USERPROFILE '.claude\sessions' }; $o = $false; foreach ($f in @(Get-ChildItem -LiteralPath $d -Filter '*.json' -File)) { if ($f.BaseName -match '^[0-9]+$' -and (Get-Process -Id ([int]$f.BaseName))) { $o = $true; break } }; if (-not $o) { exit 0 }; $u = 'https://plannotator.ai/plugin-update?state=' + $k + [char]38 + 'from=' + $h; if ($w) { $u = $u + [char]38 + 'to=' + $w }; $ps = Get-Command powershell.exe -CommandType Application | Select-Object -First 1; if ($ps) { $q = '$m = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]; $x = $m::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); $n = $x.GetElementsByTagName(''text''); $null = $n.Item(0).AppendChild($x.CreateTextNode(''' + $t + ''')); $null = $n.Item(1).AppendChild($x.CreateTextNode(''' + $b + ''')); $m::CreateToastNotifier(''{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe'').Show([Windows.UI.Notifications.ToastNotification]::new($x))'; $si = New-Object System.Diagnostics.ProcessStartInfo; $si.FileName = $ps.Source; $si.Arguments = '-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ' + [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($q)); $si.UseShellExecute = $false; $si.CreateNoWindow = $true; try { $p = [System.Diagnostics.Process]::Start($si); if (-not $p.WaitForExit(10000)) { $p.Kill() } } catch { } }; $br = [string]$env:PLANNOTATOR_BROWSER; if ($br.Trim().ToLowerInvariant() -in @('none', 'false', '0', 'off', 'no', 'true', '1', ':')) { exit 0 }; try { if ($br) { Start-Process -FilePath $br -ArgumentList $u -ErrorAction Stop } else { Start-Process -FilePath $u -ErrorAction Stop } } catch { }; exit 0" >nul 2>&1
+set "PLN_NT_STATE="
+set "PLN_NT_FROM="
+set "PLN_NT_TAG="
+goto :eof
+
+:DownloadPacked
+set "PK_SUFFIX=%~1"
+curl -fsSIL --connect-timeout 30 --max-time 60 "!BINARY_URL!!PK_SUFFIX!" >nul 2>&1
+if errorlevel 1 goto :eof
+set "PK_RAW_URL=!BINARY_URL!"
+set "PK_RAW_FILE=!TEMP_FILE!"
+set "BINARY_URL=!BINARY_URL!!PK_SUFFIX!"
+set "TEMP_FILE=%TEMP%\plannotator-packed-%RANDOM%!PK_SUFFIX!"
+call :DownloadBinary 2>nul
+set "PK_FILE=!TEMP_FILE!"
+set "BINARY_URL=!PK_RAW_URL!"
+set "TEMP_FILE=!PK_RAW_FILE!"
+set "PK_STATUS=1"
+set "PLN_PK_IN=!PK_FILE!"
+set "PLN_PK_OUT=!TEMP_FILE!"
+set "PLN_PK_SHA=!EXPECTED_CHECKSUM!"
+if !DL_STATUS! equ 0 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Stop'; try { $i = [System.IO.File]::OpenRead($env:PLN_PK_IN); try { $g = New-Object System.IO.Compression.GZipStream -ArgumentList $i, ([System.IO.Compression.CompressionMode]::Decompress); $o = [System.IO.File]::Create($env:PLN_PK_OUT); try { $g.CopyTo($o) } finally { $o.Dispose(); $g.Dispose() } } finally { $i.Dispose() }; $s = [System.IO.File]::OpenRead($env:PLN_PK_OUT); try { $h = [BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash($s)).Replace('-', '') } finally { $s.Dispose() }; if ($h -ne $env:PLN_PK_SHA) { exit 1 } } catch { exit 1 }; exit 0" >nul 2>&1 && set "PK_STATUS=0"
+if exist "!PK_FILE!" del "!PK_FILE!" >nul 2>&1
+if "!PK_STATUS!"=="0" (
+    set "TAKEN=!BINARY_NAME!!PK_SUFFIX!"
+) else (
+    if exist "!TEMP_FILE!" del "!TEMP_FILE!" >nul 2>&1
+)
+goto :eof
+
+REM ======================================================================
+REM :DownloadBinary - download BINARY_URL to TEMP_FILE, continuing where a
+REM dropped or stalled connection stopped instead of starting the ~200 MB
+REM binary again from zero. Same rules as download_release_binary in
+REM install.sh and Invoke-ResumableDownload in install.ps1 (keep the three in
+REM step). Each attempt is one curl run against the github.com URL (it
+REM redirects to a signed URL that expires, so that one is never reused);
+REM after the first, curl -C - asks only for the rest of the file. curl's own
+REM --retry is not used here: it throws away the bytes of the attempt it
+REM retries. Bounds: at most 30 attempts, at most 4 in a row that add no
+REM bytes, 2 s apart, and no more than 6 hours in all (curl reports the time
+REM of each attempt). Each attempt must connect within 30 s, and a stall
+REM (below 1 byte/s for 60 s) ends it so the next one continues. A server that
+REM ignores the Range (curl exit 33) gets the whole file again, and later
+REM attempts start from zero; after an HTTP/2 error (curl 92) the attempts go
+REM over HTTP/1.1. curl's error is shown only when it gives up. Sets DL_STATUS
+REM to 0, or to curl's last exit code; the SHA-256 check after it still covers
+REM the whole file. The pause is ping, not timeout, which fails when stdin is
+REM redirected. PLANNOTATOR_DOWNLOAD_STALL_SECONDS and
+REM PLANNOTATOR_DOWNLOAD_RETRY_DELAY are internal knobs for the tests.
+REM ======================================================================
+:DownloadBinary
+REM A file left at this random name by an earlier, stopped run is not ours to continue.
+if exist "!TEMP_FILE!" del "!TEMP_FILE!" >nul 2>&1
+set "DL_STALL=60"
+set "DL_N=0"
+if defined PLANNOTATOR_DOWNLOAD_STALL_SECONDS set /a "DL_N=PLANNOTATOR_DOWNLOAD_STALL_SECONDS" >nul 2>&1
+if !DL_N! gtr 0 set "DL_STALL=!DL_N!"
+set "DL_DELAY=2"
+set "DL_N=-1"
+if defined PLANNOTATOR_DOWNLOAD_RETRY_DELAY set /a "DL_N=PLANNOTATOR_DOWNLOAD_RETRY_DELAY" >nul 2>&1
+if !DL_N! geq 0 set "DL_DELAY=!DL_N!"
+set "DL_TIMES=%TEMP%\plannotator-time-%RANDOM%.txt"
+set "DL_ERR=%TEMP%\plannotator-curl-%RANDOM%.txt"
+set "DL_TRIES=0"
+set "DL_IDLE=0"
+set "DL_SPENT=0"
+set "DL_RANGE=1"
+set "DL_HTTP="
+:DownloadBinaryAttempt
+set /a DL_TRIES+=1
+set "DL_HAVE=0"
+if exist "!TEMP_FILE!" for %%A in ("!TEMP_FILE!") do set "DL_HAVE=%%~zA"
+set "DL_RESUME="
+if !DL_HAVE! gtr 0 if "!DL_RANGE!"=="1" set "DL_RESUME=-C -"
+if !DL_HAVE! gtr 0 if not "!DL_RANGE!"=="1" (
+    type nul > "!TEMP_FILE!"
+    set "DL_HAVE=0"
+)
+set /a DL_LEFT=21600-DL_SPENT
+if !DL_LEFT! lss 1 set "DL_LEFT=1"
+curl -fsSL !DL_HTTP! !DL_RESUME! --connect-timeout 30 --max-time !DL_LEFT! --speed-limit 1 --speed-time !DL_STALL! -w "%%{time_total}" "!BINARY_URL!" -o "!TEMP_FILE!" >"!DL_TIMES!" 2>"!DL_ERR!"
+set "DL_STATUS=!ERRORLEVEL!"
+if "!DL_STATUS!"=="0" goto :DownloadBinaryEnd
+if "!DL_STATUS!"=="33" set "DL_RANGE=0"
+if "!DL_STATUS!"=="92" if not defined DL_HTTP (
+    echo The download hit an HTTP/2 error; trying again over HTTP/1.1... >&2
+    set "DL_HTTP=--http1.1"
+)
+set "DL_NOW=0"
+if exist "!TEMP_FILE!" for %%A in ("!TEMP_FILE!") do set "DL_NOW=%%~zA"
+if !DL_NOW! gtr !DL_HAVE! (set "DL_IDLE=0") else (set /a DL_IDLE+=1)
+REM Seconds this attempt took: the whole part of curl's time_total.
+set "DL_TIME=0"
+if exist "!DL_TIMES!" set /p DL_TIME=<"!DL_TIMES!"
+for /f "tokens=1 delims=.," %%T in ("!DL_TIME!") do set "DL_TIME=%%T"
+set /a "DL_SPENT=DL_SPENT+DL_TIME+DL_DELAY+1" >nul 2>&1
+set "DL_GIVE_UP="
+if !DL_TRIES! geq 30 set "DL_GIVE_UP=1"
+if !DL_IDLE! geq 4 set "DL_GIVE_UP=1"
+if !DL_SPENT! geq 21600 set "DL_GIVE_UP=1"
+if defined DL_GIVE_UP (
+    if exist "!DL_ERR!" type "!DL_ERR!" >&2
+    goto :DownloadBinaryEnd
+)
+if !DL_DELAY! gtr 0 (
+    set /a "DL_N=DL_DELAY+1"
+    ping -n !DL_N! 127.0.0.1 >nul 2>&1
+)
+goto :DownloadBinaryAttempt
+:DownloadBinaryEnd
+if exist "!DL_TIMES!" del "!DL_TIMES!" >nul 2>&1
+if exist "!DL_ERR!" del "!DL_ERR!" >nul 2>&1
+goto :eof
+
+REM ======================================================================
 REM :UpdateClaudePlugin - update an installed Claude Code plugin (see the call
 REM site). Same steps as update_claude_plugin_if_installed in install.sh and
 REM Update-ClaudePluginIfInstalled in install.ps1 (keep the three in step):
 REM read the user-scope plannotator@plannotator record from
 REM <claude config>\plugins\installed_plugins.json; without one do nothing;
-REM without a claude CLI on PATH, or when opted out, run nothing; otherwise run
+REM without a claude CLI (on PATH, else in the profile's .local\bin or
+REM .claude\local, Claude Code's own install folders, which an update the
+REM Inbox starts may not have on PATH), or when opted out, run nothing; otherwise run
 REM `claude plugin marketplace update plannotator` then `claude plugin update
 REM plannotator@plannotator --scope user`, each started directly with its stdin pipe
 REM closed at once (a claude that exits first is not an error) and a time
-REM limit (PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT seconds, default 120, an internal
-REM knob for the tests), and report updated / already up to date from the
+REM limit (PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT seconds, default 660, an internal
+REM knob for the tests; CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS gives Claude Code's
+REM own git clone 10 minutes instead of 120 s, unless the person set it), and
+REM report updated / already up to date from the
 REM record, or the manual commands on failure. The PowerShell reports its state
 REM as its exit code (0 none, 20 no CLI, 21 skipped, 22 updated, 23 current,
 REM 24 failed, 25 marketplace missing). A --version pin (TAG is not the release
@@ -1870,10 +2206,18 @@ if not exist "!PLN_CP_REGISTRY!" (
 )
 set "PLN_CP_SKIP="
 if "!SKIP_CLAUDE_PLUGIN!"=="1" set "PLN_CP_SKIP=!SKIP_CLAUDE_PLUGIN_SOURCE!"
+set "PLN_CP_FROM_FILE=!TEMP!\plannotator-claude-plugin-from-!RANDOM!!RANDOM!.txt"
+if exist "!PLN_CP_FROM_FILE!" del /f /q "!PLN_CP_FROM_FILE!" >nul 2>&1
 set "PLN_CP_PINNED="
 if /i not "!VERSION!"=="latest" if not "!TAG!"=="!PLANNOTATOR_UPDATE_VERSION!" set "PLN_CP_PINNED=!TAG!"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Continue'; $id = 'plannotator@plannotator'; $reg = $env:PLN_CP_REGISTRY; function Rec { if (-not (Test-Path -LiteralPath $reg -PathType Leaf)) { return $null }; try { $j = Get-Content -LiteralPath $reg -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop } catch { return $null }; if ($null -eq $j -or $null -eq $j.plugins) { return $null }; $e = $j.plugins.$id; if ($null -eq $e) { return $null }; return @($e) | Where-Object { $null -ne $_ -and ((-not $_.scope) -or ($_.scope -eq 'user')) } | Select-Object -First 1 }; function Fp($r) { if ($null -eq $r) { return '||' }; return [string]$r.version + '|' + [string]$r.gitCommitSha + '|' + [string]$r.installPath }; function Run($a) { $si = New-Object System.Diagnostics.ProcessStartInfo; $si.FileName = $cl; $si.Arguments = ($a -join ' '); $si.UseShellExecute = $false; $si.RedirectStandardInput = $true; $si.RedirectStandardOutput = $true; $si.RedirectStandardError = $true; $si.CreateNoWindow = $true; try { $p = [System.Diagnostics.Process]::Start($si) } catch { return 'could not run claude: ' + $_.Exception.Message }; try { $p.StandardInput.Close() } catch { }; $to = $p.StandardOutput.ReadToEndAsync(); $te = $p.StandardError.ReadToEndAsync(); if (-not $p.WaitForExit($secs * 1000)) { try { $p.Kill($true) } catch { try { $null = & taskkill /T /F /PID $p.Id 2>$null } catch { }; try { $p.Kill() } catch { } }; return 'timed out after ' + $secs + 's' }; $p.WaitForExit(); if ($p.ExitCode -eq 0) { return '' }; $tx = @(); foreach ($t in @($te, $to)) { $v = ''; try { if ($t.Wait(5000)) { $v = [string]$t.Result } } catch { }; $tx += $v }; foreach ($m in @($tx | ForEach-Object { $_ -split '\r?\n' })) { if ($m -match 'marketplace' -and $m -match 'not found|not exist|no such|unknown') { $script:mm = $true } }; $l = $null; foreach ($v in $tx) { $l = @($v -split '\r?\n') | ForEach-Object { ($_ -replace '[^\x20-\x7E]', '').Trim() } | Where-Object { $_ } | Select-Object -Last 1; if ($l) { break } }; if ($l -and $l.Length -gt 200) { $l = $l.Substring(0, 200) }; if ($l) { return 'claude exited ' + $p.ExitCode + ': ' + $l }; return 'claude exited ' + $p.ExitCode }; function Manual { Write-Output '  claude plugin marketplace update plannotator'; Write-Output ('  claude plugin update ' + $id + ' --scope user') }; function Readd { Write-Output '  claude plugin marketplace add backnotprop/plannotator'; Write-Output ('  claude plugin update ' + $id + ' --scope user') }; $r = Rec; if ($null -eq $r) { exit 0 }; $c = Get-Command claude -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1; if (-not $c) { exit 20 }; $cl = $c.Source; if ($env:PLN_CP_SKIP) { Write-Output ('Claude Code plugin: not updated (' + $env:PLN_CP_SKIP + ').'); exit 21 }; if ($env:PLN_CP_PINNED) { Write-Output ('Claude Code plugin: not updated: pinned to ' + $env:PLN_CP_PINNED + '; updating would install the newest plugin.'); exit 21 }; $secs = 120; if ($env:PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT -match '^[1-9][0-9]*$') { $secs = [int]$env:PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT }; $b = Fp $r; Remove-Item Env:CLAUDECODE -ErrorAction SilentlyContinue; Write-Output 'Updating the Claude Code plugin...'; $script:mm = $false; $x = Run @('plugin', 'marketplace', 'update', 'plannotator'); if (-not $x) { $x = Run @('plugin', 'update', $id, '--scope', 'user') }; if ($x -and $script:mm) { Write-Output 'Claude Code plugin: could not update it (the plannotator marketplace is not registered). Re-add it, then restart Claude Code:'; Readd; exit 25 }; if ($x) { Write-Output ('Claude Code plugin: could not update it (' + $x + '). Run these, then restart Claude Code:'); Manual; exit 24 }; $r = Rec; $a = Fp $r; $v = ''; if ($r -and $r.version) { $v = [string]$r.version }; if ($a -eq '||' -or $b -ne $a) { if ($v) { $v = ' to ' + $v }; Write-Output ('Claude Code plugin: updated' + $v + ' (restart Claude Code to load it).'); exit 22 }; if ($v) { $v = ' (' + $v + ')' }; Write-Output ('Claude Code plugin: already up to date' + $v + '.'); exit 23"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Continue'; $id = 'plannotator@plannotator'; $reg = $env:PLN_CP_REGISTRY; function Rec { if (-not (Test-Path -LiteralPath $reg -PathType Leaf)) { return $null }; try { $j = Get-Content -LiteralPath $reg -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop } catch { return $null }; if ($null -eq $j -or $null -eq $j.plugins) { return $null }; $e = $j.plugins.$id; if ($null -eq $e) { return $null }; return @($e) | Where-Object { $null -ne $_ -and ((-not $_.scope) -or ($_.scope -eq 'user')) } | Select-Object -First 1 }; function Fp($r) { if ($null -eq $r) { return '||' }; return [string]$r.version + '|' + [string]$r.gitCommitSha + '|' + [string]$r.installPath }; function Run($a) { $si = New-Object System.Diagnostics.ProcessStartInfo; $si.FileName = $cl; $si.Arguments = ($a -join ' '); $si.UseShellExecute = $false; $si.RedirectStandardInput = $true; $si.RedirectStandardOutput = $true; $si.RedirectStandardError = $true; $si.CreateNoWindow = $true; try { $p = [System.Diagnostics.Process]::Start($si) } catch { return 'could not run claude: ' + $_.Exception.Message }; try { $p.StandardInput.Close() } catch { }; $to = $p.StandardOutput.ReadToEndAsync(); $te = $p.StandardError.ReadToEndAsync(); if (-not $p.WaitForExit($secs * 1000)) { try { $p.Kill($true) } catch { try { $null = & taskkill /T /F /PID $p.Id 2>$null } catch { }; try { $p.Kill() } catch { } }; return 'timed out after ' + $secs + 's' }; $p.WaitForExit(); if ($p.ExitCode -eq 0) { return '' }; $tx = @(); foreach ($t in @($te, $to)) { $v = ''; try { if ($t.Wait(5000)) { $v = [string]$t.Result } } catch { }; $tx += $v }; foreach ($m in @($tx | ForEach-Object { $_ -split '\r?\n' })) { if ($m -match 'marketplace' -and $m -match 'not found|not exist|no such|unknown') { $script:mm = $true } }; $l = $null; foreach ($v in $tx) { $l = @($v -split '\r?\n') | ForEach-Object { ($_ -replace '[^\x20-\x7E]', '').Trim() } | Where-Object { $_ } | Select-Object -Last 1; if ($l) { break } }; if ($l -and $l.Length -gt 200) { $l = $l.Substring(0, 200) }; if ($l) { return 'claude exited ' + $p.ExitCode + ': ' + $l }; return 'claude exited ' + $p.ExitCode }; function Manual { Write-Output '  claude plugin marketplace update plannotator'; Write-Output ('  claude plugin update ' + $id + ' --scope user') }; function Readd { Write-Output '  claude plugin marketplace add backnotprop/plannotator'; Write-Output ('  claude plugin update ' + $id + ' --scope user') }; $r = Rec; if ($null -eq $r) { exit 0 }; if ($env:PLN_CP_FROM_FILE) { try { Set-Content -LiteralPath $env:PLN_CP_FROM_FILE -Value ([string]$r.version) -NoNewline } catch { } }; $c = Get-Command claude -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1; foreach ($d in @(@('.local', 'bin'), @('.claude', 'local'))) { if (-not $c -and $env:USERPROFILE) { $c = Get-Command ([System.IO.Path]::Combine($env:USERPROFILE, $d[0], $d[1], 'claude')) -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 } }; if (-not $c) { exit 20 }; $cl = $c.Source; if ($env:PLN_CP_SKIP) { Write-Output ('Claude Code plugin: not updated (' + $env:PLN_CP_SKIP + ').'); exit 21 }; if ($env:PLN_CP_PINNED) { Write-Output ('Claude Code plugin: not updated: pinned to ' + $env:PLN_CP_PINNED + '; updating would install the newest plugin.'); exit 21 }; $secs = 660; if ($env:PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT -match '^[1-9][0-9]*$') { $secs = [int]$env:PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT }; if (-not $env:CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS) { $env:CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS = '600000' }; $b = Fp $r; Remove-Item Env:CLAUDECODE -ErrorAction SilentlyContinue; Write-Output 'Updating the Claude Code plugin...'; $script:mm = $false; $x = Run @('plugin', 'marketplace', 'update', 'plannotator'); if (-not $x) { $x = Run @('plugin', 'update', $id, '--scope', 'user') }; if ($x -and $script:mm) { Write-Output 'Claude Code plugin: could not update it (the plannotator marketplace is not registered). Re-add it, then restart Claude Code:'; Readd; exit 25 }; if ($x) { Write-Output ('Claude Code plugin: could not update it (' + $x + '). Run these, then restart Claude Code:'); Manual; exit 24 }; $r = Rec; $a = Fp $r; $v = ''; if ($r -and $r.version) { $v = [string]$r.version }; if ($a -eq '||' -or $b -ne $a) { if ($v) { $v = ' to ' + $v }; Write-Output ('Claude Code plugin: updated' + $v + ' (restart Claude Code to load it).'); exit 22 }; if ($v) { $v = ' (' + $v + ')' }; Write-Output ('Claude Code plugin: already up to date' + $v + '.'); exit 23"
 set "PLN_CP_RC=!ERRORLEVEL!"
+set "CLAUDE_PLUGIN_FROM="
+if exist "!PLN_CP_FROM_FILE!" (
+    set /p CLAUDE_PLUGIN_FROM=<"!PLN_CP_FROM_FILE!"
+    del /f /q "!PLN_CP_FROM_FILE!" >nul 2>&1
+)
+set "PLN_CP_FROM_FILE="
 if "!PLN_CP_RC!"=="20" set "CLAUDE_PLUGIN_STATE=manual"
 if "!PLN_CP_RC!"=="21" set "CLAUDE_PLUGIN_STATE=skipped"
 if "!PLN_CP_RC!"=="22" set "CLAUDE_PLUGIN_STATE=updated"
@@ -1886,6 +2230,203 @@ set "PLN_CP_SKIP="
 set "PLN_CP_PINNED="
 goto :eof
 
+REM ======================================================================
+REM Pi extension (#902), the same logic as install.sh / install.ps1.
+REM `pi install npm:@plannotator/pi-extension` runs a bare `npm install` that
+REM may settle on an older version and still exit 0 (npm passes over a release
+REM whose engines the running Node does not meet; a registry mirror can lag).
+REM So an install Pi's settings already list is updated with Pi's own `pi
+REM update <source>`, which installs <name>@latest by name (falling back to
+REM `pi install` when it fails); a first install that landed on an older
+REM version gets the same `pi update`. The version on disk is read back where
+REM Pi loads it from (<agent dir>\npm\node_modules, else the global npm root),
+REM and installed/updated is said only when it reached this release; otherwise
+REM one line names the cause it can see (the release not on the npm registry
+REM yet) and the command to run. The step never pins a version in Pi's
+REM settings; a version the person pinned is left alone with the command that
+REM moves it. Nothing is removed first, so a failed step leaves the install as
+REM it was.
+REM The release travels in PLN_PI_TARGET, never interpolated; the command
+REM carries no double quote, percent sign, exclamation mark or caret for
+REM cmd.exe to parse (quote, caret and apostrophe come from [char]). Called
+REM outside any parenthesized block. Best effort: never fails the install.
+REM ======================================================================
+:UpdatePiExtension
+set "PLN_PI_TARGET=!TAG!"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Continue'; $q = [char]34; $src = 'npm:@plannotator/pi-extension'; $t = ([string]$env:PLN_PI_TARGET).TrimStart('v'); $d = $env:PI_CODING_AGENT_DIR; if (-not $d) { $d = Join-Path (Join-Path $env:USERPROFILE '.pi') 'agent' } elseif ($d -eq '~') { $d = $env:USERPROFILE } elseif ($d.StartsWith('~/') -or $d.StartsWith('~\')) { $d = Join-Path $env:USERPROFILE $d.Substring(2) }; function Ver { $p = Join-Path (Join-Path (Join-Path (Join-Path $d 'npm') 'node_modules') '@plannotator') 'pi-extension'; if (-not (Test-Path -LiteralPath $p -PathType Container)) { $p = $null; if (Get-Command npm -ErrorAction SilentlyContinue) { $r = $null; try { $r = & npm root -g 2>$null | Select-Object -First 1 } catch { }; if ($r) { $p = Join-Path (Join-Path ([string]$r).Trim() '@plannotator') 'pi-extension' } } }; if (-not $p) { return '' }; $j = Join-Path $p 'package.json'; if (-not (Test-Path -LiteralPath $j -PathType Leaf)) { return '' }; try { return [string](Get-Content -LiteralPath $j -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop).version } catch { return '' } }; function AtLeast($a, $b) { $x = @(((([string]$a).TrimStart('v') -split '[-+]')[0]).Split('.')); $y = @(((([string]$b).TrimStart('v') -split '[-+]')[0]).Split('.')); for ($i = 0; $i -lt 3; $i++) { $m = 0; $n = 0; if ($i -lt $x.Count) { [void][int]::TryParse($x[$i], [ref]$m) }; if ($i -lt $y.Count) { [void][int]::TryParse($y[$i], [ref]$n) }; if ($m -gt $n) { return $true }; if ($m -lt $n) { return $false } }; return $true }; $s = Join-Path $d 'settings.json'; $txt = ''; if (Test-Path -LiteralPath $s -PathType Leaf) { try { $txt = [string](Get-Content -LiteralPath $s -Raw -ErrorAction Stop) } catch { } }; if ($txt -match ($q + 'npm:@plannotator/pi-extension@v?([0-9]+\.[0-9]+\.[0-9][0-9A-Za-z.+-]*)' + $q)) { Write-Output ('Pi extension: pinned to ' + $Matches[1] + ' in Pi' + [char]39 + 's settings, left as is. To move it: pi install ' + $src + '@' + $t); exit 0 }; $fresh = $false; $b = ''; if (-not ($txt -match ($q + 'npm:@plannotator/pi-extension(@[' + [char]94 + $q + ']*)?' + $q))) { $fresh = $true; Write-Output 'Installing Pi extension...'; & pi install $src; if ($LASTEXITCODE -ne 0) { Write-Output 'Skipping Pi extension install (pi install failed)'; exit 0 }; $b = Ver; if ((-not $b) -or (-not (AtLeast $b $t))) { & pi update $src } } else { Write-Output 'Updating Pi extension...'; $b = Ver; & pi update $src; if ($LASTEXITCODE -ne 0) { & pi install $src } }; $a = Ver; if (-not $a) { Write-Output ('Pi extension: could not read its installed version. To update it: pi update ' + $src) } elseif (-not (AtLeast $a $t)) { $v = ''; if (Get-Command npm -ErrorAction SilentlyContinue) { try { $v = (& npm view ('@plannotator/pi-extension@' + $t) version --fetch-timeout=10000 --fetch-retries=0 2>&1 | Out-String) } catch { $v = '' } }; if ($v -match 'E404') { Write-Output ('Pi extension: still ' + $a + ' (' + $t + ' is not on your npm registry yet). Run this later: pi update ' + $src) } else { Write-Output ('Pi extension: still ' + $a + ' (this release is ' + $t + '). To update it: pi update ' + $src) } } elseif ($fresh) { Write-Output ('Pi extension installed (' + $a + ').') } elseif ($b -eq $a) { Write-Output ('Pi extension already up to date (' + $a + ').') } else { Write-Output ('Pi extension updated to ' + $a + '.') }; exit 0"
+set "PLN_PI_TARGET="
+goto :eof
+
+REM BEGIN Qwen Code subroutines
+REM ======================================================================
+REM The Qwen Code steps, as in install.sh and install.ps1. One PowerShell
+REM program (:QwenPsDefs) does the work; each of its lines is kept in its
+REM own PLN_QX_Pnnn variable and the program is put together from them, so
+REM no line comes near cmd.exe's 8191-character limit. Its lines carry no
+REM double quote, percent sign, exclamation mark or caret, so cmd.exe passes
+REM them as written. Inputs travel in PLN_QX_* variables, never interpolated.
+REM Every qwen command has a time limit, reads no input and runs in an empty
+REM temporary folder. Its exit code is the result. Best effort: never fails
+REM the install.
+REM ======================================================================
+
+REM :QwenVersionCheck - plan review needs extension hooks, which Qwen Code
+REM runs from 0.13.0 on. Below that, nothing is installed for Qwen Code (no
+REM extension, no skills): QWEN_TOO_OLD=1. A version that cannot be read
+REM does not block the install.
+:QwenVersionCheck
+set "QWEN_TOO_OLD=0"
+if not "!QWEN_AVAILABLE!"=="1" goto :eof
+if "!SKIP_QWEN!"=="1" goto :eof
+if "!SKIP_SKILLS!"=="1" goto :eof
+call :QwenPsDefs
+set "PLN_QX_MODE=version"
+set "PLN_QX_HOME=!QWEN_DIR!"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iex ((Get-ChildItem env: | Where-Object Name -like 'PLN_QX_P*' | Sort-Object Name | ForEach-Object Value) -join [char]10); exit $rc"
+if "!ERRORLEVEL!"=="36" set "QWEN_TOO_OLD=1"
+call :QwenPsClear
+goto :eof
+
+REM :InstallQwenExtension - install or update the plannotator Qwen Code
+REM extension with Qwen's own commands. Its source is kept at
+REM _CONFIG_DIR\qwen-code\extension, a path that does not change: Qwen
+REM records it as the source, derives the extension's id from it and reads
+REM it on update. Not installed: `qwen extensions install that path
+REM --consent`. Installed from that path in another version: `qwen extensions
+REM update plannotator`, which keeps the id and the user's on/off choices
+REM ^(never uninstalled here^). The same version: no extension command runs.
+REM Linked ^(`qwen extensions link`^) or installed from another source: left
+REM as it is.
+:InstallQwenExtension
+if "!SKIP_QWEN!"=="1" (
+    echo.
+    echo Qwen Code: detected, skipped ^(!SKIP_QWEN_SOURCE!^).
+    if exist "!QWEN_DIR!\extensions\plannotator\qwen-extension.json" echo The installed Qwen Code extension was left untouched.
+    goto :eof
+)
+if "!SKIP_SKILLS!"=="1" goto :eof
+if "!QWEN_TOO_OLD!"=="1" (
+    set "QWEN_EXTENSION_STATE=too-old"
+    goto :eof
+)
+call :QwenPsDefs
+set "PLN_QX_MODE=extension"
+set "PLN_QX_HOME=!QWEN_DIR!"
+set "PLN_QX_SRC=!SKILLS_TMP!\qwen-extension"
+set "PLN_QX_DATA=!_CONFIG_DIR!"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iex ((Get-ChildItem env: | Where-Object Name -like 'PLN_QX_P*' | Sort-Object Name | ForEach-Object Value) -join [char]10); exit $rc"
+set "PLN_QX_RC=!ERRORLEVEL!"
+set "QWEN_EXTENSION_STATE=failed"
+if "!PLN_QX_RC!"=="30" set "QWEN_EXTENSION_STATE=no-cli"
+if "!PLN_QX_RC!"=="31" set "QWEN_EXTENSION_STATE=ok"
+if "!PLN_QX_RC!"=="32" set "QWEN_EXTENSION_STATE=ok"
+if "!PLN_QX_RC!"=="33" set "QWEN_EXTENSION_STATE=ok"
+if "!PLN_QX_RC!"=="35" set "QWEN_EXTENSION_STATE=not-in-tag"
+if "!PLN_QX_RC!"=="37" set "QWEN_EXTENSION_STATE=linked"
+if "!PLN_QX_RC!"=="38" set "QWEN_EXTENSION_STATE=foreign"
+if "!PLN_QX_RC!"=="41" set "QWEN_EXTENSION_STATE=ok-off"
+if "!PLN_QX_RC!"=="43" set "QWEN_EXTENSION_STATE=ok-off"
+call :QwenPsClear
+goto :eof
+
+:QwenPsClear
+for /f "delims==" %%V in ('set PLN_QX_ 2^>nul') do set "%%V="
+goto :eof
+
+REM :QwenPsDefs - the PowerShell program, one line per variable.
+:QwenPsDefs
+set "PLN_QX_P001=$ErrorActionPreference = 'Continue'"
+set "PLN_QX_P002=$q = [char]34"
+set "PLN_QX_P003=function QwenPath { $c = Get-Command qwen -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1; if ($c) { return $c.Source }; return $null }"
+set "PLN_QX_P004=function Secs { if ($env:PLANNOTATOR_QWEN_EXTENSION_TIMEOUT -match '\A[1-9][0-9]*\z') { return [int]$env:PLANNOTATOR_QWEN_EXTENSION_TIMEOUT }; return 120 }"
+set "PLN_QX_P005=function NewTmp { $t = Join-Path ([System.IO.Path]::GetTempPath()) ('plannotator-qwen-' + [System.Guid]::NewGuid().ToString('N')); try { New-Item -ItemType Directory -Force -Path (Join-Path $t 'cwd') -ErrorAction Stop | Out-Null; return $t } catch { return $null } }"
+set "PLN_QX_P006=function Run($exe, $argv, $work) {"
+set "PLN_QX_P007=    $secs = Secs"
+set "PLN_QX_P008=    $quoted = ($argv | ForEach-Object { $q + $_ + $q }) -join ' '"
+set "PLN_QX_P009=    $si = New-Object System.Diagnostics.ProcessStartInfo"
+set "PLN_QX_P010=    if ($exe -match '\.(cmd|bat)\z') {"
+set "PLN_QX_P011=        if (($exe + ($argv -join '')) -match ('[' + $q + [char]37 + [char]33 + ']')) { return @{ Why = 'could not run ' + (Split-Path $exe -Leaf) + ': a path has a character cmd.exe would change'; Out = ''; Last = '' } }"
+set "PLN_QX_P012=        $si.FileName = $(if ($env:ComSpec) { $env:ComSpec } else { 'cmd.exe' })"
+set "PLN_QX_P013=        $si.Arguments = '/d /s /c ' + $q + $q + $exe + $q + ' ' + $quoted + $q"
+set "PLN_QX_P014=    } else { $si.FileName = $exe; $si.Arguments = $quoted }"
+set "PLN_QX_P015=    $si.WorkingDirectory = $work; $si.UseShellExecute = $false; $si.RedirectStandardInput = $true; $si.RedirectStandardOutput = $true; $si.RedirectStandardError = $true; $si.CreateNoWindow = $true"
+set "PLN_QX_P016=    try { $p = [System.Diagnostics.Process]::Start($si) } catch { return @{ Why = 'could not run qwen: ' + $_.Exception.Message; Out = ''; Last = '' } }"
+set "PLN_QX_P017=    try { $p.StandardInput.Close() } catch { }"
+set "PLN_QX_P018=    $to = $p.StandardOutput.ReadToEndAsync(); $te = $p.StandardError.ReadToEndAsync()"
+set "PLN_QX_P019=    if (-not $p.WaitForExit($secs * 1000)) { try { $p.Kill($true) } catch { try { $null = & taskkill /T /F /PID $p.Id 2>$null } catch { }; try { $p.Kill() } catch { } }; return @{ Why = 'timed out after ' + $secs + 's'; Out = ''; Last = '' } }"
+set "PLN_QX_P020=    $p.WaitForExit()"
+set "PLN_QX_P021=    $texts = @(); foreach ($t in @($to, $te)) { $v = ''; try { if ($t.Wait(5000)) { $v = [string]$t.Result } } catch { }; $texts += $v }"
+set "PLN_QX_P022=    $l = $null; foreach ($v in @($texts[1], $texts[0])) { $l = @($v -split '\r?\n') | ForEach-Object { ($_ -replace ('[' + [char]94 + '\x20-\x7E]'), '').Trim() } | Where-Object { $_ } | Select-Object -Last 1; if ($l) { break } }"
+set "PLN_QX_P023=    if ($l -and $l.Length -gt 200) { $l = $l.Substring(0, 200) }"
+set "PLN_QX_P024=    $why = ''; if ($p.ExitCode -ne 0) { $why = 'qwen exited ' + $p.ExitCode; if ($l) { $why = $why + ': ' + $l } }"
+set "PLN_QX_P025=    return @{ Why = $why; Out = $texts[0]; Last = $l }"
+set "PLN_QX_P026=}"
+set "PLN_QX_P027=function Ver($path) { try { return [string]((Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json).version) } catch { return '' } }"
+set "PLN_QX_P028=function SamePath($a, $b) {"
+set "PLN_QX_P029=    if (-not $a -or -not $b) { return $false }"
+set "PLN_QX_P030=    try { $x = [System.IO.Path]::GetFullPath($a).TrimEnd('\', '/'); $y = [System.IO.Path]::GetFullPath($b).TrimEnd('\', '/') } catch { return $false }"
+set "PLN_QX_P031=    if ([System.IO.Path]::DirectorySeparatorChar -eq '\') { return $x -ieq $y }; return $x -ceq $y"
+set "PLN_QX_P032=}"
+set "PLN_QX_P033=function Off($qd) {"
+set "PLN_QX_P034=    $off = $false"
+set "PLN_QX_P035=    try { $s = Get-Content -LiteralPath (Join-Path (Join-Path $qd 'extension-store') 'state.json') -Raw -ErrorAction Stop | ConvertFrom-Json; foreach ($p in @($s.extensions.PSObject.Properties)) { $v = $p.Value; if ($v.name -ne 'plannotator') { continue }; if ($v.defaultActivation -eq 'disabled') { $off = $true }; if ($v.workspaceOverrides) { foreach ($o in @($v.workspaceOverrides.PSObject.Properties)) { if ($o.Value -eq 'disabled') { $off = $true } } } } } catch { }"
+set "PLN_QX_P036=    try { $l = Get-Content -LiteralPath (Join-Path (Join-Path $qd 'extensions') 'extension-enablement.json') -Raw -ErrorAction Stop | ConvertFrom-Json; if ($l.plannotator -and $l.plannotator.overrides) { foreach ($r in @($l.plannotator.overrides)) { if (([string]$r).StartsWith([string][char]33)) { $off = $true } } } } catch { }"
+set "PLN_QX_P037=    return $off"
+set "PLN_QX_P038=}"
+set "PLN_QX_P039=function Main {"
+set "PLN_QX_P040=    $qd = $env:PLN_QX_HOME"
+set "PLN_QX_P041=    $qwen = QwenPath"
+set "PLN_QX_P042=    if ($env:PLN_QX_MODE -eq 'version') {"
+set "PLN_QX_P043=        if (-not $qwen) { return 0 }"
+set "PLN_QX_P044=        $tmp = NewTmp; if (-not $tmp) { return 0 }"
+set "PLN_QX_P045=        try {"
+set "PLN_QX_P046=            $r = Run $qwen @('--version') (Join-Path $tmp 'cwd')"
+set "PLN_QX_P047=            $m = [regex]::Match([string]$r.Out, '[0-9]+\.[0-9]+\.[0-9]+')"
+set "PLN_QX_P048=            if ($m.Success -and ([version]$m.Value -lt [version]'0.13.0')) { Write-Host ''; Write-Host ('Qwen Code ' + $m.Value + ' is older than 0.13.0, so nothing was installed for it. Update Qwen Code to use plan review.'); return 36 }"
+set "PLN_QX_P049=        } catch { } finally { Remove-Item -Recurse -Force -LiteralPath $tmp -ErrorAction SilentlyContinue }"
+set "PLN_QX_P050=        return 0"
+set "PLN_QX_P051=    }"
+set "PLN_QX_P052=    $src = $env:PLN_QX_SRC"
+set "PLN_QX_P053=    if (-not (Test-Path -LiteralPath (Join-Path $src 'qwen-extension.json') -PathType Leaf) -or -not (Test-Path -LiteralPath (Join-Path (Join-Path $src 'hooks') 'hooks.json') -PathType Leaf)) { return 35 }"
+set "PLN_QX_P054=    $dest = Join-Path (Join-Path $qd 'extensions') 'plannotator'"
+set "PLN_QX_P055=    $rec = $null; try { $rec = Get-Content -LiteralPath (Join-Path $dest '.qwen-extension-install.json') -Raw -ErrorAction Stop | ConvertFrom-Json } catch { }"
+set "PLN_QX_P056=    if ($rec -and $rec.type -eq 'link') { Write-Host 'Qwen Code extension: linked from a local folder (qwen extensions link), left as it is.'; return 37 }"
+set "PLN_QX_P057=    if (-not $qwen) { Write-Host 'Qwen Code extension: not installed (the qwen command is not on PATH).'; return 30 }"
+set "PLN_QX_P058=    $data = $env:PLN_QX_DATA; if (-not [System.IO.Path]::IsPathRooted($data)) { $data = Join-Path (Get-Location).Path $data }"
+set "PLN_QX_P059=    $stable = Join-Path (Join-Path $data 'qwen-code') 'extension'"
+set "PLN_QX_P060=    $nv = Ver (Join-Path $src 'qwen-extension.json')"
+set "PLN_QX_P061=    $had = Test-Path -LiteralPath (Join-Path $dest 'qwen-extension.json') -PathType Leaf"
+set "PLN_QX_P062=    if ($had) { $from = ''; if ($rec) { $from = [string]$rec.source }; if (-not (SamePath $from $stable)) { if (-not $from) { $from = 'an unknown source' }; Write-Host ('Qwen Code extension: installed from ' + $from + ', not by this installer, so it was left as it is.'); return 38 } }"
+set "PLN_QX_P063=    $staged = $stable + '.new'"
+set "PLN_QX_P064=    try {"
+set "PLN_QX_P065=        if (Test-Path -LiteralPath $staged) { Remove-Item -Recurse -Force -LiteralPath $staged -ErrorAction Stop }"
+set "PLN_QX_P066=        New-Item -ItemType Directory -Force -Path (Split-Path $stable) -ErrorAction Stop | Out-Null"
+set "PLN_QX_P067=        Copy-Item -Recurse -Force -LiteralPath $src -Destination $staged -ErrorAction Stop"
+set "PLN_QX_P068=        if (Test-Path -LiteralPath $stable) { Remove-Item -Recurse -Force -LiteralPath $stable -ErrorAction Stop }"
+set "PLN_QX_P069=        Move-Item -LiteralPath $staged -Destination $stable -ErrorAction Stop"
+set "PLN_QX_P070=    } catch { Remove-Item -Recurse -Force -LiteralPath $staged -ErrorAction SilentlyContinue; Write-Host ('Qwen Code extension: could not write its source to ' + $stable + '. The installed one was left as it was.'); return 34 }"
+set "PLN_QX_P071=    $off = $false; if ($had) { $off = [bool](Off $qd) }"
+set "PLN_QX_P072=    if ($had -and ((Ver (Join-Path $dest 'qwen-extension.json')) -eq $nv)) { Write-Host 'Qwen Code extension: already up to date.'; if ($off) { return 41 }; return 31 }"
+set "PLN_QX_P073=    $tmp = NewTmp; if (-not $tmp) { Write-Host 'Qwen Code extension: could not install it (no temporary directory).'; return 34 }"
+set "PLN_QX_P074=    try {"
+set "PLN_QX_P075=        $work = Join-Path $tmp 'cwd'"
+set "PLN_QX_P076=        if ($had) {"
+set "PLN_QX_P077=            Write-Host 'Updating the Qwen Code extension...'"
+set "PLN_QX_P078=            $r = Run $qwen @('extensions', 'update', 'plannotator') $work"
+set "PLN_QX_P079=            if ((Ver (Join-Path $dest 'qwen-extension.json')) -eq $nv) { Write-Host 'Qwen Code extension: updated (restart Qwen Code to load it).'; if ($off) { Write-Host 'It stays turned off where you turned it off in Qwen Code.'; return 43 }; return 33 }"
+set "PLN_QX_P080=            $w = $r.Why; if (-not $w) { $w = $r.Last }; if (-not $w) { $w = 'qwen did not update it' }"
+set "PLN_QX_P081=            Write-Host ('Qwen Code extension: could not update it (' + $w + '). The installed one was left as it was.'); Write-Host 'To try again by hand: qwen extensions update plannotator'; return 34"
+set "PLN_QX_P082=        }"
+set "PLN_QX_P083=        Write-Host 'Installing the Qwen Code extension...'"
+set "PLN_QX_P084=        $r = Run $qwen @('extensions', 'install', $stable, '--consent') $work"
+set "PLN_QX_P085=        if (-not $r.Why) { Write-Host 'Qwen Code extension: installed (restart Qwen Code to load it).'; return 32 }"
+set "PLN_QX_P086=        Write-Host ('Qwen Code extension: could not install it (' + $r.Why + ').'); Write-Host ('To try again by hand: qwen extensions install ' + $q + $stable + $q); return 34"
+set "PLN_QX_P087=    } finally { Remove-Item -Recurse -Force -LiteralPath $tmp -ErrorAction SilentlyContinue }"
+set "PLN_QX_P088=}"
+set "PLN_QX_P089=$rc = $(if ($env:PLN_QX_MODE -eq 'version') { 0 } else { 34 })"
+set "PLN_QX_P090=try { $rc = Main | Select-Object -Last 1 } catch { }"
+goto :eof
+REM END Qwen Code subroutines
 :AddInstallFlag
 if defined IFL (set "IFL=!IFL!,"%~1"") else (set "IFL="%~1"")
 goto :eof
@@ -1971,110 +2512,6 @@ if not "!INSTALL_CALL_FLOW!"=="1" (
 if !ERRORLEVEL! neq 0 (
     echo Call-flow runtime install failed; it remains available as an in-app opt-in install
 )
-goto :eof
-
-REM ======================================================================
-REM Optional semantic diff sidecar install. Non-fatal: Plannotator remains
-REM installed if sem download, checksum, or extraction fails.
-REM ======================================================================
-:InstallSemSidecar
-if /i "!PLANNOTATOR_SKIP_SEM_INSTALL!"=="1" (
-    echo Skipping semantic diff sidecar install ^(PLANNOTATOR_SKIP_SEM_INSTALL is set^)
-    goto :eof
-)
-if /i "!PLANNOTATOR_SKIP_SEM_INSTALL!"=="true" (
-    echo Skipping semantic diff sidecar install ^(PLANNOTATOR_SKIP_SEM_INSTALL is set^)
-    goto :eof
-)
-if /i "!PLANNOTATOR_SKIP_SEM_INSTALL!"=="yes" (
-    echo Skipping semantic diff sidecar install ^(PLANNOTATOR_SKIP_SEM_INSTALL is set^)
-    goto :eof
-)
-
-set "SEM_ASSET="
-if /i "!PLATFORM!"=="win32-x64" set "SEM_ASSET=sem-windows-x86_64.zip"
-if not defined SEM_ASSET (
-    echo Skipping semantic diff sidecar install ^(sem does not publish !PLATFORM!^)
-    goto :eof
-)
-
-set "SEM_DIR=!_CONFIG_DIR!\vendor\sem\!SEM_VERSION!"
-set "SEM_PATH=!SEM_DIR!\sem.exe"
-if exist "!SEM_PATH!" (
-    "!SEM_PATH!" --version 2>nul | findstr /r /c:"^sem " >nul 2>&1
-    if !ERRORLEVEL! equ 0 (
-        echo Semantic diff sidecar already installed at !SEM_PATH!
-        goto :eof
-    )
-)
-
-set "SEM_BASE_URL=https://github.com/!SEM_REPO!/releases/download/!SEM_VERSION!"
-set "SEM_ARCHIVE=%TEMP%\plannotator-sem-%RANDOM%.zip"
-set "SEM_CHECKSUMS=%TEMP%\plannotator-sem-checksums-%RANDOM%.txt"
-set "SEM_EXTRACT=%TEMP%\plannotator-sem-%RANDOM%"
-mkdir "!SEM_EXTRACT!" >nul 2>&1
-
-REM Bounded so a slow/hung download of this optional sidecar can't wedge an
-REM install where plannotator already landed. Opt out with PLANNOTATOR_SKIP_SEM_INSTALL=1.
-curl -fsSL --connect-timeout 10 --max-time 120 "!SEM_BASE_URL!/!SEM_ASSET!" -o "!SEM_ARCHIVE!"
-if !ERRORLEVEL! neq 0 (
-    echo Skipping semantic diff sidecar install ^(download failed^)
-    goto :sem_cleanup
-)
-
-curl -fsSL --connect-timeout 10 --max-time 60 "!SEM_BASE_URL!/checksums.txt" -o "!SEM_CHECKSUMS!"
-if !ERRORLEVEL! neq 0 (
-    echo Skipping semantic diff sidecar install ^(checksum download failed^)
-    goto :sem_cleanup
-)
-
-set "EXPECTED_SEM_CHECKSUM="
-for /f "usebackq tokens=1,2" %%i in ("!SEM_CHECKSUMS!") do (
-    if "%%j"=="!SEM_ASSET!" set "EXPECTED_SEM_CHECKSUM=%%i"
-)
-if not defined EXPECTED_SEM_CHECKSUM (
-    echo Skipping semantic diff sidecar install ^(checksum missing for !SEM_ASSET!^)
-    goto :sem_cleanup
-)
-
-set "ACTUAL_SEM_CHECKSUM="
-for /f "skip=1 tokens=*" %%i in ('certutil -hashfile "!SEM_ARCHIVE!" SHA256') do (
-    if not defined ACTUAL_SEM_CHECKSUM (
-        set "ACTUAL_SEM_CHECKSUM=%%i"
-        set "ACTUAL_SEM_CHECKSUM=!ACTUAL_SEM_CHECKSUM: =!"
-    )
-)
-if /i "!ACTUAL_SEM_CHECKSUM!" neq "!EXPECTED_SEM_CHECKSUM!" (
-    echo Skipping semantic diff sidecar install ^(checksum mismatch^)
-    goto :sem_cleanup
-)
-
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Force -Path $env:SEM_ARCHIVE -DestinationPath $env:SEM_EXTRACT"
-if !ERRORLEVEL! neq 0 (
-    echo Skipping semantic diff sidecar install ^(extract failed^)
-    goto :sem_cleanup
-)
-set "EXTRACTED_SEM="
-for /f "usebackq delims=" %%i in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -Path $env:SEM_EXTRACT -Filter sem.exe -Recurse -File | Select-Object -First 1 -ExpandProperty FullName"`) do (
-    set "EXTRACTED_SEM=%%i"
-)
-if not defined EXTRACTED_SEM (
-    echo Skipping semantic diff sidecar install ^(binary missing from archive^)
-    goto :sem_cleanup
-)
-
-if not exist "!SEM_DIR!" mkdir "!SEM_DIR!"
-copy /y "!EXTRACTED_SEM!" "!SEM_PATH!" >nul
-if !ERRORLEVEL! equ 0 (
-    echo Semantic diff sidecar installed to !SEM_PATH!
-) else (
-    echo Skipping semantic diff sidecar install ^(copy failed^)
-)
-
-:sem_cleanup
-if exist "!SEM_ARCHIVE!" del "!SEM_ARCHIVE!"
-if exist "!SEM_CHECKSUMS!" del "!SEM_CHECKSUMS!"
-if exist "!SEM_EXTRACT!" rmdir /s /q "!SEM_EXTRACT!"
 goto :eof
 
 REM ======================================================================

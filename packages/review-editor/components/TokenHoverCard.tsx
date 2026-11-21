@@ -1,3 +1,4 @@
+import type React from 'react';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { modKey } from '@plannotator/ui/utils/platform';
@@ -46,6 +47,14 @@ export interface TokenHoverCardProps {
    * carried by that dialog's own labelled region instead.
    */
   inert?: boolean;
+  /**
+   * The card's contents, drawn in place of the search card's own. A host
+   * whose answers come from somewhere else (the VS Code extension's guide
+   * reader: the language server's hover, the guide's chapter) keeps this
+   * card's placement, pointer grace and scroll behavior and draws its own
+   * contents. Absent: the search card, exactly as before.
+   */
+  content?: React.ReactNode;
 }
 
 function locationLabel(filePath: string, line: number): string {
@@ -79,7 +88,7 @@ function TokenHoverCardContent({
   const remaining = referenceCount - references.length;
   const inertProps = interactive ? {} : { tabIndex: -1, 'aria-disabled': true as const };
   // Out of the tab order, and out of the affordance: the card's own footer
-  // says "Click a location to jump", so a location that still underlines on
+  // says "Click to jump", so a location that still underlines on
   // hover and shows a hand cursor is advertising something that does nothing.
   // Appended to each button's own classes, never replacing them, so the
   // display-only card stays the same card.
@@ -90,14 +99,14 @@ function TokenHoverCardContent({
       <div className="flex items-center gap-2 px-3.5 pt-3">
         <span className="font-mono text-sm font-bold text-primary">{data.symbol}</span>
         {definition?.symbolKind && (
-          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+          <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-bold text-muted-foreground">
             {definition.symbolKind}
           </span>
         )}
       </div>
 
       {definition?.signature && (
-        <div className="mx-3.5 mt-2 overflow-x-auto whitespace-pre rounded-md border border-border bg-muted/40 px-2.5 py-2 font-mono text-[11.5px] text-foreground">
+        <div className="mx-3.5 mt-2 overflow-x-auto whitespace-pre rounded-md border border-border bg-muted/40 px-2.5 py-2 font-mono text-xs text-foreground">
           {definition.signature}
           {definition.signatureApproximate && (
             <span className="text-muted-foreground"> {'// matched line'}</span>
@@ -119,7 +128,7 @@ function TokenHoverCardContent({
             <button
               type="button"
               {...inertProps}
-              className={`font-mono text-[11.5px] text-success hover:underline${locationClass}`}
+              className={`font-mono text-xs text-success hover:underline${locationClass}`}
               onClick={() => onSelectLocation(definition)}
             >
               {locationLabel(definition.filePath, definition.line)}
@@ -132,7 +141,7 @@ function TokenHoverCardContent({
               <button
                 type="button"
                 {...inertProps}
-                className={`font-mono text-[11.5px] text-success hover:underline${locationClass}`}
+                className={`font-mono text-xs text-success hover:underline${locationClass}`}
                 onClick={() => onSelectLocation(alternateDefinition)}
               >
                 {locationLabel(alternateDefinition.filePath, alternateDefinition.line)}
@@ -150,7 +159,7 @@ function TokenHoverCardContent({
           {references.map((reference) => (
             <div
               key={`${reference.filePath}:${reference.line}:${reference.column}`}
-              className="flex gap-1.5 py-0.5 font-mono text-[11px]"
+              className="flex gap-1.5 py-0.5 font-mono text-xs"
             >
               <span className="text-muted-foreground/60" aria-hidden="true">{'❯'}</span>
               <button
@@ -164,7 +173,7 @@ function TokenHoverCardContent({
             </div>
           ))}
           {remaining > 0 && (
-            <div className="py-0.5 text-[11px] text-muted-foreground">
+            <div className="py-0.5 text-xs text-muted-foreground">
               {`… ${remaining} more in the References panel`}
             </div>
           )}
@@ -173,12 +182,12 @@ function TokenHoverCardContent({
 
       {/* Frozen copy: the card teaches exactly one thing, and the Alt-click
           alias is deliberately not advertised here. */}
-      <div className="border-t border-border px-3.5 py-1.5 text-[10.5px] text-muted-foreground">
-        Click a location to jump.{' '}
-        <kbd className="rounded border border-border bg-muted px-1 font-mono text-[10px]">
+      <div className="border-t border-border px-3.5 py-1.5 text-xs text-muted-foreground">
+        Click to jump ·{' '}
+        <kbd className="rounded border border-border bg-muted px-1 font-mono text-xs">
           {modKey}
         </kbd>
-        {modKey === '⌘' ? '' : '+'}click a token for the full References panel.
+        {modKey === '⌘' ? ' ' : '+'}click for all references
       </div>
     </>
   );
@@ -197,6 +206,7 @@ export function TokenHoverCard({
   onSelectLocation,
   layerClassName = 'fixed z-[60]',
   inert = false,
+  content,
 }: TokenHoverCardProps) {
   const { data, rect } = hover;
   const cardRef = useRef<HTMLDivElement>(null);
@@ -250,11 +260,13 @@ export function TokenHoverCard({
         visibility: placed ? 'visible' : 'hidden',
       }}
     >
-      <TokenHoverCardContent
-        data={data}
-        onSelectLocation={onSelectLocation}
-        interactive={!inert}
-      />
+      {content ?? (
+        <TokenHoverCardContent
+          data={data}
+          onSelectLocation={onSelectLocation}
+          interactive={!inert}
+        />
+      )}
     </div>,
     document.body,
   );

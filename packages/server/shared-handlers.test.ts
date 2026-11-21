@@ -10,7 +10,7 @@ import {
   writeServerReadyMetadata,
 } from "./shared-handlers";
 import { saveConfig } from "./config";
-import { CLASSIC_FAVICON_SVG, FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
+import { FACE_FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, FAVICON_PNG_BYTES, YELLOW_FAVICON_ICO_BYTES, YELLOW_FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
 
 function saveNotesRequest(body: unknown): Request {
   return new Request("http://localhost/api/save-notes", {
@@ -70,6 +70,48 @@ describe("handleSaveNotes", () => {
     expect(json).toHaveProperty("ok", true);
     expect(json.results.obsidian).toHaveProperty("success", false);
     expect(json.results.obsidian).toHaveProperty("error");
+  });
+
+  describe("Notion", () => {
+    const originalToken = process.env.NOTION_TOKEN;
+    const originalFetch = globalThis.fetch;
+    let notionCalls = 0;
+
+    beforeEach(() => {
+      notionCalls = 0;
+      process.env.NOTION_TOKEN = "secret-token";
+      globalThis.fetch = (async () => {
+        notionCalls++;
+        return Response.json({ url: "https://www.notion.so/saved-plan" });
+      }) as unknown as typeof fetch;
+    });
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+      if (originalToken === undefined) delete process.env.NOTION_TOKEN;
+      else process.env.NOTION_TOKEN = originalToken;
+    });
+
+    const notionBody = { notion: { plan: "# Test Plan", parentPageId: "parent-page-id" } };
+
+    test("saves when the server offers Notion, without returning the token", async () => {
+      const response = await handleSaveNotes(saveNotesRequest(notionBody), { notion: true });
+
+      expect(response.status).toBe(200);
+      const json = await response.json();
+      expect(json.results.notion).toEqual({ success: true, url: "https://www.notion.so/saved-plan" });
+      expect(JSON.stringify(json)).not.toContain("secret-token");
+      expect(notionCalls).toBe(1);
+    });
+
+    test("never calls Notion when the session does not offer it (remote, --tailscale)", async () => {
+      const response = await handleSaveNotes(saveNotesRequest(notionBody));
+
+      expect(response.status).toBe(200);
+      const json = await response.json();
+      expect(json.results.notion).toBeUndefined();
+      expect(notionCalls).toBe(0);
+    });
   });
 
   test("an unparseable body returns a 500 JSON error (not SPA HTML)", async () => {
@@ -256,6 +298,17 @@ describe("handleServerReady", () => {
     }
   });
 
+  // A reverse-proxy origin has no port to forward; the advice would be wrong.
+  test("a public proxy URL gets the device line, not the forwarding advice", async () => {
+    const url = "https://plannotator.example.com";
+    const { stderr } = await captureStreams(async () => {
+      await handleServerReady(url, true, 19432, { skipBrowserOpen: true });
+    });
+    expectSingleReadyLine(stderr, url);
+    expect(stderr).toContain("  Open it on your device (the URL above).\n");
+    expect(stderr).not.toContain("forward port");
+  });
+
   // PLANNOTATOR_BROWSER=none (or --browser none) opens nothing: the reason
   // goes under the URL, and no launch (so no failure line) follows.
   test.each([
@@ -372,21 +425,44 @@ describe("handleFavicon", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  test("serves the production PNG when no style is persisted", async () => {
+  test("serves the Glass PNG when no style is persisted", async () => {
     const response = handleFavicon();
     expect(response.headers.get("content-type")).toBe("image/png");
     const bytes = new Uint8Array(await response.arrayBuffer());
     expect(bytes).toEqual(FAVICON_PNG_BYTES);
   });
 
-  test("serves the classic SVG, correctly typed, when the style is classic", async () => {
-    saveConfig({ favicon: "classic" });
-    const response = handleFavicon();
-    // The whole point of reading config here: without the right content type the
-    // browser has nothing to go on, since the entry HTML's <link> declares none.
-    // An image/png header over SVG bytes would be the pre-fix flash again.
-    expect(response.headers.get("content-type")).toBe("image/svg+xml");
-    expect(await response.text()).toBe(CLASSIC_FAVICON_SVG);
+  test("serves each persisted style's own PNG: glass, yellow, totman (Face); classic (the removed P) the default", async () => {
+    for (const [style, expected] of [
+      ["glass", FAVICON_PNG_BYTES],
+      ["yellow", YELLOW_FAVICON_PNG_BYTES],
+      ["totman", FACE_FAVICON_PNG_BYTES],
+      ["classic", FAVICON_PNG_BYTES],
+    ] as const) {
+      saveConfig({ favicon: style as never });
+      const response = handleFavicon();
+      // The entry HTML's <link> declares no type, so the header is all the browser has.
+      expect(response.headers.get("content-type"), style).toBe("image/png");
+      expect(new Uint8Array(await response.arrayBuffer()), style).toEqual(expected);
+    }
+  });
+
+  test("/favicon.ico, what every page links: Glass's and Yellow's multi-size .ico, Face its PNG", async () => {
+    const glass = handleFavicon("/favicon.ico");
+    expect(glass.headers.get("content-type")).toBe("image/x-icon");
+    expect(glass.headers.get("cache-control")).toBe("no-cache");
+    expect(new Uint8Array(await glass.arrayBuffer())).toEqual(FAVICON_ICO_BYTES);
+    for (const [style, expected] of [
+      ["glass", FAVICON_ICO_BYTES],
+      ["yellow", YELLOW_FAVICON_ICO_BYTES],
+      ["totman", FACE_FAVICON_PNG_BYTES],
+      ["classic", FAVICON_ICO_BYTES],
+    ] as const) {
+      saveConfig({ favicon: style as never });
+      const response = handleFavicon("/favicon.ico");
+      expect(response.headers.get("content-type"), style).toBe(style === "totman" ? "image/png" : "image/x-icon");
+      expect(new Uint8Array(await response.arrayBuffer()), style).toEqual(expected);
+    }
   });
 
   test("ignores an unknown persisted style and falls back to the PNG", async () => {
@@ -399,7 +475,7 @@ describe("handleFavicon", () => {
   // on the next session after a switch.
   test("does not let either payload be cached under the shared URL", () => {
     expect(handleFavicon().headers.get("cache-control")).toBe("no-cache");
-    saveConfig({ favicon: "classic" });
+    saveConfig({ favicon: "totman" });
     expect(handleFavicon().headers.get("cache-control")).toBe("no-cache");
   });
 });

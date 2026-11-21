@@ -18,6 +18,9 @@ import type { ReviewJjRuntime } from "./jj-core";
 import { createGitProvider, createJjProvider, createVcsApi } from "./vcs-core";
 import { getJjCommitDiffInfo, listJjCommitHistory, resolveJjCommitRailBase } from "./commit-history";
 import { canonicalizeJjCommitDiffType } from "./jj-core";
+import { useScratchJjConfig } from "../../tests/helpers/jj-scratch-config";
+
+const jjConfig = useScratchJjConfig();
 
 function hasJj(): boolean {
   try {
@@ -29,7 +32,7 @@ function hasJj(): boolean {
 
 const jjRuntime: ReviewJjRuntime = {
   async runJj(args, options): Promise<GitCommandResult> {
-    const result = Bun.spawnSync(["jj", ...args], { cwd: options?.cwd, stdout: "pipe", stderr: "pipe" });
+    const result = Bun.spawnSync(["jj", ...args], { cwd: options?.cwd, env: jjConfig.env(), stdout: "pipe", stderr: "pipe" });
     return { stdout: result.stdout.toString(), stderr: result.stderr.toString(), exitCode: result.exitCode };
   },
 };
@@ -48,7 +51,7 @@ const vcs = createVcsApi([createJjProvider(jjRuntime, unusedGitRuntime), createG
 let workspace = "";
 
 function jj(args: string[]): string {
-  const result = Bun.spawnSync(["jj", ...args], { cwd: workspace, stdout: "pipe", stderr: "pipe" });
+  const result = Bun.spawnSync(["jj", ...args], { cwd: workspace, env: jjConfig.env(), stdout: "pipe", stderr: "pipe" });
   if (result.exitCode !== 0) throw new Error(result.stderr.toString() || `jj ${args.join(" ")} failed`);
   return result.stdout.toString().trim();
 }

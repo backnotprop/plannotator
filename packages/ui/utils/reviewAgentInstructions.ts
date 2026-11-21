@@ -51,7 +51,7 @@ Use the **file line number**, not the line's position within the diff. \`side\` 
 
 - **Line comment** (\`scope: "line"\`, the default) — pinned to a specific line range in one file. Requires \`filePath\`, \`lineStart\`, \`lineEnd\`. Use for feedback about specific code.
 - **File comment** (\`scope: "file"\`) — pinned to a whole file, shown as a banner in that file's header. Requires \`filePath\`; no line numbers. Use for feedback about the file as a whole.
-- **General comment** (\`scope: "general"\`) — not tied to any file. Sidebar entry only. Use for review-level feedback like "the error handling is inconsistent across these changes."
+- **Global comment** (\`scope: "general"\`) — on the whole review, not tied to any file or line. Listed under "Global comments" in the sidebar and at the top of a guided review. Use for review-level feedback like "the error handling is inconsistent across these changes."
 
 ## Posting a line comment
 
@@ -98,7 +98,7 @@ curl -s ${origin}/api/external-annotations \\
   }'
 \`\`\`
 
-## Posting a general comment
+## Posting a global comment
 
 \`\`\`sh
 curl -s ${origin}/api/external-annotations \\

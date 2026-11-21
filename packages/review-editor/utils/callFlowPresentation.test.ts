@@ -5,6 +5,7 @@ import {
   formatCallFlowInstallSize,
   getCallFlowRawLines,
   splitCallFlowFilePath,
+  splitCallFlowSignature,
 } from './callFlowPresentation';
 
 describe('formatCallFlowInstallSize', () => {
@@ -22,6 +23,39 @@ describe('Call Flow paths', () => {
       name: 'ReviewCallFlowPanel.tsx',
     });
     expect(splitCallFlowFilePath('index.ts')).toEqual({ directory: '', name: 'index.ts' });
+  });
+});
+
+describe('Call Flow signatures', () => {
+  test('leads with the called name, keeping receiver and arguments apart', () => {
+    expect(splitCallFlowSignature('ScheduleCheck.authorize(session, name)')).toEqual({
+      receiver: 'ScheduleCheck.',
+      name: 'authorize',
+      rest: '(session, name)',
+    });
+    expect(splitCallFlowSignature('new Storage.Client(url)')).toEqual({
+      receiver: 'new Storage.',
+      name: 'Client',
+      rest: '(url)',
+    });
+  });
+
+  test('keeps a chained tail in the arguments and a call-less label as the name', () => {
+    expect(splitCallFlowSignature('CodeMode.make({ a }).execute(code)')).toEqual({
+      receiver: 'CodeMode.',
+      name: 'make',
+      rest: '({ a }).execute(code)',
+    });
+    expect(splitCallFlowSignature('authorizeCode(...)')).toEqual({ receiver: '', name: 'authorizeCode', rest: '(...)' });
+    expect(splitCallFlowSignature('<anonymous>')).toEqual({ receiver: '', name: '<anonymous>', rest: '' });
+    expect(splitCallFlowSignature('.then')).toEqual({ receiver: '', name: '.then', rest: '' });
+  });
+
+  test('never drops a character, so search offsets map onto the parts', () => {
+    for (const label of ['a.b.c(d)', 'new X()', 'x.(y)', 'f', '', 'obj.method']) {
+      const parts = splitCallFlowSignature(label);
+      expect(parts.receiver + parts.name + parts.rest).toBe(label);
+    }
   });
 });
 

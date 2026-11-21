@@ -20,7 +20,7 @@
  * MOBILE_FIXES_SHOT_PREFIX (default `after`).
  */
 
-import { chromium, devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { chromium, devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -120,7 +120,7 @@ test.beforeAll(async () => {
   if (extraShots) mkdirSync(extraShots, { recursive: true });
   const root = inboxScratch('plannotator-inbox-mobile-fixes-e2e-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -243,11 +243,18 @@ for (const phone of PHONES) {
       await second.getByRole('button', { name: 'Add note' }).click();
       await second.locator('textarea').last().fill('Shipped too, after a week.');
       await expect(second.locator('.ib-qfoot-st')).toContainText('in your draft');
+      // Accept recommended steps aside while a note has focus, and is back once the note is left.
+      await expect(second.getByRole('button', { name: 'Accept recommended' })).toBeHidden();
+      await second.locator('textarea').last().blur();
       await expect(second.getByRole('button', { name: 'Accept recommended' })).toBeVisible();
       await first.scrollIntoViewIfNeeded();
       await shot(page, `${phone.tag}-card-footer-390`);
+      // Narrower, never shorter or taller: Linux WebKit fires `resize` with the new visual viewport height while
+      // documentElement.clientHeight still holds the old one, and sends nothing once it catches up. Back from 844 px
+      // to the phone's 659, the Inbox read that as a keyboard (phone.ts trackKeyboard) and kept
+      // `data-ib-keyboard-pin`, so the radio picked next hid the reply foot (inbox.css) and Reply never showed.
       for (const width of [390, 320]) {
-        await page.setViewportSize({ width, height: 844 });
+        await page.setViewportSize({ width, height: phone.device.viewport.height });
         await page.waitForTimeout(150);
         check(await footerProblems(page), `at ${width} px`).toEqual([]);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -282,14 +289,38 @@ for (const phone of PHONES) {
 
     test('the reply box: an attach button on a phone, a picked image uploads and rides the Send', async () => {
       const pane = page.locator('section.ib-pane');
-      await pane.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ }).first().click();
+      await pane.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
       const box = pane.locator('.ib-rbox');
       await box.getByRole('textbox').fill(`From the ${phone.tag}: the header on my phone.`);
-      const attach = pane.locator('[data-reply-attach]');
+      // The paperclip leads the box's row on a phone (approval "inbox-reply-box", T6; the owner: "I like attachment on
+      // left"): a round 36 px button (approval "inbox-phone-composer-picker") that takes a tap 44 px across, all of it
+      // the tap area, with nothing over it.
+      const attach = box.locator('[data-reply-row] [data-reply-attach]');
       await expect(attach).toHaveCount(1);
-      const target = await pane.locator('.ib-rattach').boundingBox();
-      expect(target!.width).toBeGreaterThanOrEqual(44);
-      expect(target!.height).toBeGreaterThanOrEqual(44);
+      const clip = box.locator('[data-reply-row] .ib-rclip');
+      const target = (await clip.boundingBox())!;
+      expect(target.width).toBe(36);
+      expect(target.height).toBe(36);
+      const leads = await box.locator('[data-reply-row]').evaluate((row) => {
+        const controls = [...row.querySelectorAll<HTMLElement>('button, label')].filter((el) => el.getClientRects().length > 0);
+        const lefts = controls.map((el) => ({ clip: el.classList.contains('ib-rclip'), left: el.getBoundingClientRect().left }));
+        return lefts.sort((a, b) => a.left - b.left)[0]?.clip ?? false;
+      });
+      expect(leads).toBe(true);
+      const tapArea = await clip.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const hit = (x: number, y: number) => el.contains(document.elementFromPoint(x, y));
+        return {
+          left: hit(r.left + 2, r.top + r.height / 2),
+          top: hit(r.left + r.width / 2, r.top + 2),
+          bottom: hit(r.left + r.width / 2, r.bottom - 2),
+          // 4 px more on every side takes the tap too (the 44 px): a point 3 px outside what is drawn.
+          outsideLeft: hit(r.left - 3, r.top + r.height / 2),
+          outsideTop: hit(r.left + r.width / 2, r.top - 3),
+          outsideBottom: hit(r.left + r.width / 2, r.bottom + 3),
+        };
+      });
+      expect(tapArea).toEqual({ left: true, top: true, bottom: true, outsideLeft: true, outsideTop: true, outsideBottom: true });
       // What the photo library hands over: a file named image.png (iOS) with no name a person chose.
       await attach.setInputFiles({ name: 'image.png', mimeType: 'image/png', buffer: PNG });
       await expect(box.locator('[data-compose-file="done"]')).toHaveCount(1);
@@ -324,9 +355,8 @@ for (const phone of PHONES) {
       const names = await box.locator('[data-compose-file]').evaluateAll((els) => els.map((el) => el.getAttribute('data-compose-file-name')!));
       await pane.getByRole('button', { name: 'Send', exact: true }).click();
       await expect(box).toHaveCount(0);
-      const answer = await world.agent.waitForReply(threadId, 10);
-      const body = (answer.reply as { body: string }).body;
-      for (const n of names) expect(body).toContain(`Attached: ${n} (`);
+      const answer = await world.agent.nextReply(threadId, 10);
+      expect((answer.attachments as { name: string }[]).map((a) => a.name)).toEqual(names);
       expect(errors).toEqual([]);
     });
 
@@ -334,13 +364,21 @@ for (const phone of PHONES) {
       await page.goto(world.url);
       await page.locator('[data-open-compose]').filter({ visible: true }).first().click();
       const dialog = page.locator('dialog[data-compose]');
-      const to = dialog.locator('.ib-cp-tobtn');
+      // To is the pill in the foot's row; its list is a bottom sheet.
+      const to = dialog.locator('.ib-cp-foot [data-compose-to]');
       await expect(to).not.toHaveAttribute('data-loading', /.*/, { timeout: 15_000 });
       await to.click();
-      await page.locator('[data-compose-session="ses-pi"]').click();
+      await dialog.locator('[data-compose-to-sheet] [data-compose-session="ses-pi"]').click();
+      await expect(to).toHaveAttribute('data-compose-to', 'ses-pi');
       await dialog.getByRole('textbox', { name: 'Message' }).fill(`Compose from the ${phone.tag}.`);
-      const clip = await dialog.locator('.ib-cp-clip').boundingBox();
-      expect(clip!.width).toBeGreaterThanOrEqual(44);
+      // The paperclip is 36 px to the eye and 44 px to the touch (its `::after`).
+      const clip = await dialog.locator('.ib-cp-clip').evaluate((el) => {
+        const after = getComputedStyle(el, '::after');
+        const r = el.getBoundingClientRect();
+        return { width: Math.max(r.width, parseFloat(after.width) || 0), height: Math.max(r.height, parseFloat(after.height) || 0) };
+      });
+      expect(clip.width).toBeGreaterThanOrEqual(44);
+      expect(clip.height).toBeGreaterThanOrEqual(44);
       await dialog.locator('[data-compose-attach]').setInputFiles({ name: 'image.png', mimeType: 'image/png', buffer: PNG });
       const tile = dialog.locator('[data-compose-file="done"]');
       await expect(tile).toHaveCount(1);

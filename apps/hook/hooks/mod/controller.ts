@@ -7,11 +7,14 @@
  * bun tests drive this class with a host made of memory.
  */
 
+import { AutoReload } from './auto-reload'
 import { BRIDGE_HOST, BRIDGE_MODES, bridgeBaseUrl, createBridge, type BridgeEnd, type BridgeHandle } from './bridge'
 import { deliveryFor, legacyResult, parseHostResult, type HostResultRecord, type SessionKind } from './delivery'
-import type { Host, HttpResult } from './host'
-import { InboxLink } from './inbox'
-import type { InboxToolInfo } from './inbox-contract'
+import { isEarlyRunRefusal } from './early-run'
+import { PromptDropped, type Host, type HttpResult } from './host'
+import { inboxAgentProjectEnvValue, InboxLink, inboxSessionProjectEnvValue, sessionProjectFolder, type InboxAgentIdentity, type InboxLaunchReminder, type InboxOwnerAnswer } from './inbox'
+import { isAbsolutePath } from './paths'
+import { inboxCommandBriefing, type InboxPlace, type InboxToolInfo } from './inbox-contract'
 import {
   aliveArgv,
   CLAIM_EXIT,
@@ -24,6 +27,7 @@ import {
   fileIn,
   INBOX_OPEN_TIMEOUT_MS,
   inboxOpenAnswer,
+  inboxOpened,
   inboxOpenArgv,
   isSeveralFilePaths,
   launchArgv,
@@ -34,7 +38,7 @@ import {
   pickerFile,
   planApprovalPathOf,
   privateDirArgv,
-  pruneArgv,
+  pruneArgvs,
   RECENT_MESSAGES_SUBJECT,
   removeFileArgv,
   recentAssistantTexts,
@@ -80,6 +84,7 @@ import {
   plannotatorUnknownSessionText,
   PLANNOTATOR_TOOL_BUNDLE_UNAVAILABLE_TEXT,
   PLANNOTATOR_TOOL_TAILSCALE_UNAVAILABLE_TEXT,
+  PLANNOTATOR_TOOL_CLOUDFLARE_ACCESS_UNAVAILABLE_TEXT,
   scriptOnlyAnnotateFlag,
   scriptOnlyAnnotateFlagText,
   type PlannotatorCloseOutcome,
@@ -87,6 +92,7 @@ import {
   type PlannotatorTarget,
 } from './tool'
 import { TurnTracker, type EnteredPrompt } from './turns'
+import { TerminalPrompts } from './terminal-prompts'
 
 /** Persisted in `$.store` so open reviews reattach after a restart or `--resume`. */
 export interface LaunchRecord {
@@ -312,21 +318,45 @@ export interface SessionInfo {
    * at its first session start (inbox.ts); absent: no Inbox connection.
    */
   inboxTools?: readonly InboxToolInfo[]
-  /** The name the engine registered `plannotator_inbox` under (`mcp__<server>__plannotator_inbox`): the wake's closing line names it. */
-  inboxToolName?: string
+  /** Who the session is in the Inbox (a T3 Code thread); absent: this Claude Code session. */
+  inboxAs?: InboxAgentIdentity
+  /** False: the Inbox tool without the reply wake (`InboxLinkOptions.wake`). */
+  inboxWake?: boolean
+  /** Whether this process is the session's own (a T3 Code thread's Claude; `InboxLinkOptions.owner`). */
+  inboxOwner?: () => Promise<InboxOwnerAnswer>
   /** The session's working folder, read when asked (the Inbox link's polls say where the session works). */
   cwd?: () => Promise<string>
   /** The session's root folder (`$.session.root()`), read once at the link's start: where `claude --resume` runs. */
   root?: () => Promise<string>
+  /** The name the person gave the session, read for each Inbox poll (`InboxLinkOptions.label`). */
+  label?: () => string | Promise<string>
+  title?: () => string | Promise<string>
+  /** The session's first start, given the link's (`InboxLinkOptions.firstStart`). */
+  firstStart?: (startedAt: number) => Promise<number>
+  /** The session ids this conversation continues, read for each Inbox poll (`InboxLinkOptions.continues`). */
+  continues?: () => Promise<readonly string[]>
+  /** Where the session lives (a Rex pane), read for each Inbox poll (`InboxLinkOptions.place`). */
+  place?: () => Promise<InboxPlace | null>
+  /** The Inbox reminder a launched session's first wake carries (`InboxLinkOptions.launchReminder`). */
+  launchReminder?: () => Promise<InboxLaunchReminder | null>
+  /**
+   * Made by the self-heal (self-heal.ts), not by anything the person did: the
+   * Inbox link starts without a touch, so a live lease another process holds stands.
+   */
+  healed?: boolean
 }
 
 export class PlannotatorMod {
   readonly turns = new TurnTracker()
+  /** What the session waits on in its terminal now (terminal-prompts.ts), for the Inbox's Agents list. */
+  readonly prompts = new TerminalPrompts()
   private launches = new Map<string, LiveLaunch>()
   private approval: PendingApproval | null = null
   /** ExitPlanMode calls passed through as the approved plan, by tool_use_id. */
   private passing = new Map<string, PendingApproval>()
   private planVersion = 0
+  /** The session root, read once: names the plan history project (see planHistoryRoot). */
+  private historyRoot: Promise<string | null> | null = null
   /**
    * The CLI has no `claude-mod-plan` (it is older than the plugin): every
    * ExitPlanMode of this session takes Claude Code's own flow, and the
@@ -335,6 +365,8 @@ export class PlannotatorMod {
   private classicPlanReview = false
   private timer: { cancel: () => void } | null = null
   private delivering: Promise<void> = Promise.resolve()
+  /** Decisions Claude Code dropped (`PromptDropped`), waiting for the next prompt, turn start or dispose to try again. */
+  private inputWaiters: (() => void)[] = []
   private sequence = 0
   private disposed = false
   /** Launch ids this instance settled or dropped: kept out of the store even if another process re-adds them. */
@@ -355,20 +387,47 @@ export class PlannotatorMod {
   private tickCount = 0
   /** This session's connection to the Plannotator Inbox (the tool and the reply wake); null without one. */
   readonly inbox: InboxLink | null
+  /**
+   * Plannotator reloads itself after an update (auto-reload.ts), told by the
+   * Inbox link's polls; null without an Inbox link, or a host that cannot read
+   * the prompt box or run a command.
+   */
+  readonly autoReload: AutoReload | null
 
   constructor(
     private readonly host: Host,
     readonly session: SessionInfo,
   ) {
     this.instanceId = host.randomHex(8)
+    const { readPrompt, runReload, loadedPlugin } = host
+    this.autoReload =
+      session.inboxTools && readPrompt && runReload && loadedPlugin
+        ? new AutoReload({
+            sessionId: session.sessionId,
+            now: () => host.now(),
+            storeGet: (key) => host.storeGet(key),
+            storeSet: (key, value) => host.storeSet(key, value),
+            loaded: () => loadedPlugin.call(host),
+            promptText: () => readPrompt.call(host),
+            run: () => runReload.call(host),
+            busyReason: () => this.reloadBusyReason(),
+            after: (ms, fn) => {
+              const timer = host.every(ms, () => {
+                timer.cancel()
+                fn()
+              })
+            },
+            debug: (text) => host.debug(text),
+          })
+        : null
     this.inbox = session.inboxTools
       ? new InboxLink({
           host,
           dataDir: session.dataDir,
           sessionId: session.sessionId,
           tools: session.inboxTools,
-          ...(session.inboxToolName ? { toolName: session.inboxToolName } : {}),
           isBusy: () => this.turns.busy,
+          blocked: (now) => this.prompts.kind(now),
           // Send now goes into a running main turn, never into this session's own Ask question, and
           // never into a turn another plugin's prompt started (that plugin may read its answer as its own).
           steerableTurn: () => {
@@ -377,10 +436,78 @@ export class PlannotatorMod {
           },
           ...(session.cwd ? { cwd: session.cwd } : {}),
           ...(session.root ? { root: session.root } : {}),
+          ...(session.label ? { label: session.label } : {}),
+          ...(session.title ? { title: session.title } : {}),
+          ...(session.firstStart ? { firstStart: session.firstStart } : {}),
+          ...(session.continues ? { continues: session.continues } : {}),
+          ...(session.place ? { place: session.place } : {}),
           instanceId: this.instanceId,
+          ...(session.inboxAs ? { agent: session.inboxAs } : {}),
+          ...(session.inboxWake === false ? { wake: false } : {}),
+          ...(session.inboxOwner ? { owner: session.inboxOwner } : {}),
+          turns: this.turns,
+          ...(this.autoReload ? { reload: this.autoReload } : {}),
+          ...(session.launchReminder ? { launchReminder: session.launchReminder } : {}),
         })
       : null
-    this.inbox?.start()
+    this.inbox?.start({ touch: !session.healed })
+  }
+
+  /**
+   * Why Plannotator should not reload itself now, or null: a main-loop turn
+   * or this session's own Ask question, an open review or a decision waiting
+   * to go in, Inbox work in flight. The prompt box is read by AutoReload
+   * itself. Background agents and subagents never hold it: `/reload-plugins`
+   * leaves them running (owner, "it should never stop work").
+   */
+  reloadBusyReason(): string | null {
+    if (this.disposed) return 'the instance was disposed'
+    if (this.turns.busy) return 'a turn runs'
+    if (this.launches.size > 0 || this.awaitingIdle.size > 0) return 'a Plannotator review is open'
+    if (this.inbox?.hasWorkInFlight) return 'Inbox work is in flight'
+    return null
+  }
+
+  /** The first instance of a freshly loaded module: if this session's reload made it, say so (auto-reload.ts). */
+  async checkInAfterReload(): Promise<boolean> {
+    return (await this.autoReload?.checkIn().catch(() => null)) != null
+  }
+
+  /** The PLANNOTATOR_SESSION_PROJECT value last exported (null: none yet, or the write failed). */
+  private exportedProject: string | null = null
+
+  /**
+   * Exports the folder this session files under in the Inbox
+   * (PLANNOTATOR_SESSION_PROJECT, beside PLANNOTATOR_SESSION_TAG), so a
+   * `plannotator inbox call` or `plannotator card` its shell runs lands in the
+   * same project as its `plannotator_inbox` tool, wherever the shell has
+   * `cd`'d to. The Inbox link's own folder when there is one, else the same
+   * rule on the session's root and working folder. Called when the instance
+   * starts, at each main-loop turn start and before each Bash call (a `/cd`
+   * or a worktree move changes it); written only when it changed. Never
+   * throws.
+   */
+  async exportSessionProject(): Promise<void> {
+    if (!this.host.setSessionProject || this.disposed) return
+    try {
+      const folder = this.inbox
+        ? await this.inbox.projectFolder()
+        : await sessionProjectFolder(
+            this.host,
+            this.session.root ? await this.session.root().catch(() => null) : null,
+            null,
+            this.session.cwd ? await this.session.cwd().catch(() => null) : null,
+          )
+      if (!folder) return
+      const agent = this.inbox?.agent ?? this.session.inboxAs
+      const value = agent ? inboxAgentProjectEnvValue(agent, folder) : inboxSessionProjectEnvValue(this.session.sessionId, folder)
+      if (value === null || value === this.exportedProject) return
+      this.exportedProject = value
+      await this.host.setSessionProject(value)
+    } catch {
+      // Not exported now: the next call tries again.
+      this.exportedProject = null
+    }
   }
 
   // --- Lifecycle -----------------------------------------------------------
@@ -534,9 +661,11 @@ export class PlannotatorMod {
    */
   dispose(): void {
     this.disposed = true
+    this.autoReload?.dispose()
     this.timer?.cancel()
     this.timer = null
     this.inbox?.dispose()
+    this.inputMoved()
     this.host.status(undefined)
     // Hand the launches this instance watched to any other process on the session at once.
     for (const launch of this.launches.values()) {
@@ -552,6 +681,19 @@ export class PlannotatorMod {
 
   get isDisposed(): boolean {
     return this.disposed
+  }
+
+  /**
+   * The process moved here from `previous`'s session (`/clear`, an in-process
+   * resume): question prompts still waiting in the engine run as turns of
+   * THIS session, so this instance aborts them when they start
+   * (`TurnTracker.queuedPrompts`). `previous` is usually disposed already
+   * (`session.end`): reading its tracker then is intended, and stays safe
+   * only while `dispose()` leaves `turns` alone. register.ts `currentMod` and
+   * `ClaudeSession.clear` both call this.
+   */
+  carryQueued(previous: PlannotatorMod | null): void {
+    if (previous && previous !== this) this.turns.dropQueued(previous.turns.queuedPrompts())
   }
 
   private adopt(record: LaunchRecord, touchedAt = 0): LiveLaunch {
@@ -600,9 +742,12 @@ export class PlannotatorMod {
       dead: old.filter((record) => !mine(record) && age(record) <= LAUNCH_EXPIRED_MS).map((record) => record.dir),
       expired: old.filter((record) => !mine(record) && age(record) > LAUNCH_EXPIRED_MS).map((record) => record.dir),
     }
-    const probe = await this.host.run(pruneArgv(groups), { timeoutMs: 5_000 }).catch(() => null)
-    if (!probe || probe.exitCode !== 0) return
-    const gone = new Set(probe.stdout.split('\n').map((line) => line.trim()).filter(Boolean))
+    const gone = new Set<string>()
+    for (const argv of pruneArgvs(groups)) {
+      const result = await this.host.run(argv, { timeoutMs: 5_000 }).catch(() => null)
+      if (!result || result.exitCode !== 0) continue
+      for (const line of result.stdout.split('\n')) if (line.trim()) gone.add(line.trim())
+    }
     if (gone.size === 0) return
     const current = await this.host.storeGet(STORE_LAUNCHES)
     const all = Array.isArray(current) ? (current as LaunchRecord[]) : []
@@ -709,7 +854,11 @@ export class PlannotatorMod {
       })
       if (result.exitCode !== 0) return { error: result.stderr.trim() || `launcher exited ${result.exitCode}` }
     } catch (error) {
-      return { error: error instanceof Error ? error.message : String(error) }
+      const message = error instanceof Error ? error.message : String(error)
+      // Claude Code's guard held the start until the call is allowed (early-run.ts): nothing
+      // started, and the call opens again at tool.run in a launch of its own.
+      if (isEarlyRunRefusal(message)) await this.host.run(cleanupArgv(dir), { timeoutMs: 5_000 }).catch(() => undefined)
+      return { error: message }
     }
     const target = extra.target ?? modTargetFor(kind, cliArgv.slice(2), cwd)
     const record: LaunchRecord = {
@@ -826,11 +975,18 @@ export class PlannotatorMod {
   // --- Commands ------------------------------------------------------------
 
   /** `/plannotator-inbox`: open the person's Inbox (starting it detached when stopped) and say its address. */
-  async openInbox(): Promise<string> {
+  /**
+   * `/plannotator-inbox`'s answer: the address for the person and, once the
+   * Inbox opened, the Inbox briefing for the model as the command's hidden
+   * `context` (no turn starts). `toolName` is `plannotator_inbox` as this
+   * session registered it, when it did.
+   */
+  async openInbox(toolName?: string | null): Promise<{ text: string; context?: string[] }> {
     const result = await this.host
       .run(inboxOpenArgv(), { env: { PLANNOTATOR_DATA_DIR: this.session.dataDir }, timeoutMs: INBOX_OPEN_TIMEOUT_MS })
       .catch((error: unknown) => ({ exitCode: -1, stdout: '', stderr: error instanceof Error ? error.message : String(error) }))
-    return inboxOpenAnswer(result)
+    const text = inboxOpenAnswer(result)
+    return inboxOpened(result) ? { text, context: [inboxCommandBriefing(toolName ?? undefined)] } : { text }
   }
 
   /** `/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`: open and return at once. */
@@ -882,7 +1038,8 @@ export class PlannotatorMod {
     // A list of files is one review of all of them (a bundle), named as such.
     const bundle = Array.isArray(call.target)
     const subject = bundle ? plannotatorBundleSubject(targets) : subjectFor(action, targets)
-    const tailscale = call.tailscale === true
+    const tailscale = call.tailscale === true || call.cloudflareAccess === true
+    const unavailable = call.cloudflareAccess === true ? PLANNOTATOR_TOOL_CLOUDFLARE_ACCESS_UNAVAILABLE_TEXT : PLANNOTATOR_TOOL_TAILSCALE_UNAVAILABLE_TEXT
     const opened = await this.open(action, plannotatorToolArgs(call), subject, {
       ...(gate ? { deliverApproval: true } : {}),
       ...(tailscale ? { tailscaleAsked: true } : {}),
@@ -894,7 +1051,7 @@ export class PlannotatorMod {
         // A CLI from before `--tailscale` refuses the word (an unknown flag or
         // file). A current CLI's publish failure (`--tailscale: Tailscale is
         // not running`, signed out, port routed) is shown as it is.
-        if (tailscale && isOlderCliTailscaleRefusal(opened.text)) return { deny: PLANNOTATOR_TOOL_TAILSCALE_UNAVAILABLE_TEXT }
+        if (tailscale && isOlderCliTailscaleRefusal(opened.text)) return { deny: unavailable }
         return { deny: opened.text }
       case 'starting':
         return { text: plannotatorToolOpenedText(opened.subject, undefined, gate, opened.sessionId, opened.target) }
@@ -904,7 +1061,7 @@ export class PlannotatorMod {
           // predates #2166) or not on the tailnet at all (it ignored the
           // flag): say so and do not leave it open, never a silent downgrade.
           await this.abandonLaunch(opened.sessionId)
-          return { deny: PLANNOTATOR_TOOL_TAILSCALE_UNAVAILABLE_TEXT }
+          return { deny: unavailable }
         }
         return {
           text: plannotatorToolOpenedText(
@@ -1221,7 +1378,9 @@ export class PlannotatorMod {
     if (this.classicPlanReview) return { pass: true }
     const version = this.planVersion + 1
     const subject = subjectFor('plan', '', version)
-    const stdin = (dir: string) => JSON.stringify({ plan, planFilePath, revisionFile: fileIn(dir, 'revision') })
+    const projectRoot = await this.planHistoryRoot()
+    const stdin = (dir: string) =>
+      JSON.stringify({ plan, planFilePath, revisionFile: fileIn(dir, 'revision'), ...(projectRoot ? { projectRoot } : {}) })
     const started = await this.launch('plan', ['plannotator', 'claude-mod-plan'], subject, stdin, {
       version,
       revisionSeq: 0,
@@ -1245,6 +1404,20 @@ export class PlannotatorMod {
     }
     this.host.toast(planWaitingStatus(version))
     return { deny: waitingDenyText(version, started.url) }
+  }
+
+  /**
+   * The session's root (`$.session.root()`), read once per session: the CLI
+   * also looks for the plan's history chain under its project, besides its
+   * cwd's (which a shell `cd` moves), so a resubmit from another repository
+   * keeps its version chain (#2197). Null when the engine cannot say.
+   */
+  private planHistoryRoot(): Promise<string | null> {
+    this.historyRoot ??= (async () => {
+      const root = this.session.root ? await this.session.root().catch(() => null) : null
+      return root && isAbsolutePath(root) ? root : null
+    })()
+    return this.historyRoot
   }
 
   private async revisePlan(open: LiveLaunch & { version: number }, plan: string): Promise<{ deny: string }> {
@@ -1424,8 +1597,9 @@ export class PlannotatorMod {
       if (launch.kind === 'plan' && (await this.lacksModPlan(launch))) {
         await this.fallBackToClassicPlans(launch)
         this.delivering = this.delivering
-          .then(() => this.host.submit(`Plannotator: ${launch.subject} — not opened.\n\n${CLASSIC_PLAN_RETRY_TEXT}`))
-          .catch(() => undefined)
+          // Dropped (Claude Code holds plugins' input): tried again after the next input, as a decision is.
+          .then(() => this.submitDecision(launch.subject, `Plannotator: ${launch.subject} — not opened.\n\n${CLASSIC_PLAN_RETRY_TEXT}`, { quiet: true }))
+          .then(() => undefined, () => undefined)
         await this.delivering
         return
       }
@@ -1575,6 +1749,7 @@ export class PlannotatorMod {
       ...(launch.target !== undefined ? { target: launch.target } : {}),
     })
     // Several decisions are delivered one by one, in the order they arrived.
+    let delivered = true
     this.delivering = this.delivering.then(async () => {
       if (delivery.action === 'log') {
         this.host.log(delivery.text)
@@ -1583,13 +1758,13 @@ export class PlannotatorMod {
       }
       if (delivery.overflow) await this.host.writeFile(delivery.overflow.path, delivery.overflow.text)
       this.host.toast(`${launch.subject} — feedback received`)
-      await this.host.submit(delivery.text).catch((error: unknown) => {
-        this.host.log(`Could not send the ${launch.subject} decision to Claude (${error instanceof Error ? error.message : String(error)}).`)
-      })
+      delivered = await this.submitDecision(launch.subject, delivery.text)
     }).catch(() => undefined)
     // `$.prompt.submit` resolves once Claude was idle and took the turn: a long
     // turn means a long wait, which this process may not survive (quit, crash).
     await this.delivering
+    // Ended while a dropped decision waited for input: the claim stays undelivered, and a restore reports it.
+    if (!delivered) return
     await this.markDelivered(launch.dir)
     this.awaitingIdle.delete(launch.id)
     await this.persist()
@@ -1597,6 +1772,36 @@ export class PlannotatorMod {
     // The launch's copies of the plan/message and feedback are not kept once
     // delivered (feedback.md stays: Claude reads it after this turn).
     await this.host.run(cleanupArgv(launch.dir), { timeoutMs: 5_000 }).catch(() => undefined)
+  }
+
+  /**
+   * A decision's turn. One Claude Code dropped (`PromptDropped`: the person
+   * stopped the session and nobody has typed since) is tried again after the
+   * next prompt or turn start, so it goes in at the idle after the person's
+   * input. False: the instance was disposed while it waited, nothing went in.
+   * `quiet`: a failure is not logged (the classic-plan retry never logged one).
+   */
+  private async submitDecision(subject: string, text: string, options: { quiet?: boolean } = {}): Promise<boolean> {
+    for (;;) {
+      try {
+        await this.host.submit(text)
+        return true
+      } catch (error) {
+        if (!(error instanceof PromptDropped)) {
+          if (!options.quiet) this.host.log(`Could not send the ${subject} decision to Claude (${error instanceof Error ? error.message : String(error)}).`)
+          return true
+        }
+        if (this.disposed) return false
+        this.host.debug(`decision for ${subject} was not taken (${error.reason}); it waits for the next input`)
+        await new Promise<void>((resolve) => this.inputWaiters.push(resolve))
+        if (this.disposed) return false
+      }
+    }
+  }
+
+  /** Input moved (a prompt entered, a turn started) or the instance ended: dropped decisions try again. */
+  private inputMoved(): void {
+    for (const resolve of this.inputWaiters.splice(0)) resolve()
   }
 
   private async forget(launch: LiveLaunch): Promise<void> {
@@ -1659,7 +1864,11 @@ export class PlannotatorMod {
     )
     const wasOurs = !!turnId && this.turns.ownsTurn(turnId)
     this.turns.onPromptEntered(prompt)
+    // Auto reload: a prompt into a turn already running gets no turn.start of its own (that turn keeps the
+    // session busy); a new one counts as on its way in until its turn.start.
+    this.autoReload?.notePromptLeft(turnId ? 'into-turn' : 'new-turn')
     if (!fromUs) this.inbox?.onForeignPrompt(prompt)
+    if (!fromUs) this.inputMoved()
     if (wasOurs && turnId && this.turns.isTakenOver(turnId)) this.host.debug(`ask turn ${turnId} taken over`)
     // The person typed here: decisions should arrive in this conversation.
     if (originKind === 'composer') void this.touchLaunches()
@@ -1668,16 +1877,44 @@ export class PlannotatorMod {
   /** A prompt reached prompt.submit, before the hooks beneath it ran, from register.ts. */
   onPromptSubmitting(prompt: Omit<EnteredPrompt, 'text'>): void {
     this.turns.onPromptSubmitting(prompt)
+    // Between Enter and turn.start no turn is counted yet: auto reload waits while the prompt is submitted.
+    this.autoReload?.notePromptSubmitting()
   }
 
   /** A prompt announced by onPromptSubmitting did not enter, from register.ts. */
   onPromptDropped(prompt: Omit<EnteredPrompt, 'text'>): void {
     this.turns.onPromptDropped(prompt)
+    this.autoReload?.notePromptLeft('dropped')
   }
 
   /** A main-loop model request is about to go out (every turn.step without an agent id), from register.ts. */
   onMainStep(turnId: string): void {
     this.inbox?.onMainStep(turnId)
+  }
+
+  /** `tool.check` answered `ask` for a call: a permission prompt is up in the terminal (terminal-prompts.ts). */
+  async onToolAsked(callId: string, agentId?: string): Promise<void> {
+    this.prompts.asked(callId, agentId, await this.host.now())
+  }
+
+  /** An `AskUserQuestion` call started: a question is up in the terminal. */
+  async onQuestionAsked(callId: string, agentId?: string): Promise<void> {
+    this.prompts.question(callId, agentId, await this.host.now())
+  }
+
+  /** The call was allowed and runs (`tool.run`): its permission prompt is over. */
+  onToolRan(callId: string): void {
+    this.prompts.ran(callId)
+  }
+
+  /** The call settled (its `tool.call` returned): nothing of it waits. */
+  onToolSettled(callId: string): void {
+    this.prompts.settled(callId)
+  }
+
+  /** A model request of a loop is about to go out (every turn.step): what that loop waited on was answered. */
+  onLoopStep(agentId?: string): void {
+    this.prompts.stepped(agentId)
   }
 
   /** A model request of a turn is about to go out (turn.step), from register.ts. */
@@ -1696,8 +1933,12 @@ export class PlannotatorMod {
     // background one included), but its end is not counted (register.ts
     // filters turn.complete by agent id), so counting the start left the
     // session busy after the main turn ended, and the Inbox's replies waited.
+    // Auto reload does not wait for subagents either.
     if (agentId) return
     this.host.debug(`turn.start ${turnId}: ${JSON.stringify(text.slice(0, 160))}`)
+    this.inbox?.onMainTurnStart()
+    this.autoReload?.onInputMoved()
+    this.inputMoved()
     const drop = this.turns.onTurnStart(turnId, text)
     if (drop) await this.host.abortTurn(drop).catch(() => undefined)
     this.pushBridgeStatus()
@@ -1706,12 +1947,14 @@ export class PlannotatorMod {
   onTurnComplete(turnId: string, answer: string, aborted: boolean): void {
     this.host.debug(`turn.complete ${turnId}${aborted ? ' (aborted)' : ''}: ${answer.length} chars`)
     this.turns.onTurnComplete(turnId, answer, aborted)
+    this.prompts.ended()
     this.inbox?.onMainTurnComplete(turnId)
     this.pushBridgeStatus()
   }
 
   private pushBridgeStatus(): void {
     for (const launch of this.launches.values()) launch.bridge?.pushStatus()
+    this.inbox?.pushAskStatus()
   }
 
   // --- Names ----------------------------------------------------------------------

@@ -104,7 +104,7 @@ describe("review decision handler exhaustiveness", () => {
   // the composer note as the feedback, or the live annotations + their
   // export — never an empty body and never the removed LGTM placeholder.
   test("under a true advert, every approve-carrying item's payload delivers the content", () => {
-    const EXPORT = "# Code Review Feedback\n\n## General\n\n- overall note\n";
+    const EXPORT = "# Code Review Feedback\n\n## Global comments\n\n- overall note\n";
     const NOTE_ANNOTATION = createGeneralReviewComment("overall note")!;
     for (const count of [0, 2]) {
       const spec = buildDecisionSpec({

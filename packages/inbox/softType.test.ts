@@ -114,7 +114,7 @@ test('layout corners are one scale; buttons keep their own', () => {
   expect(CODE).toMatch(/--ib-sf-r14-s:\s*var\(--ib-soft-surfaces\)\s*var\(--ib-lr-lg\);/);
   expect(CODE).toMatch(/dialog\.ib-dlg \{[^}]*border-radius: var\(--ib-rl-xl-s, 12px\)/);
   // The header's buttons, the foot's pills and the window's buttons keep theirs.
-  expect(CODE).toMatch(/\.pn-inbox \.ib-hbtn \{[^}]*border-radius: var\(--ib-r10-s, 7px\)/);
+  expect(CODE).toMatch(/\.pn-inbox \.ib-iconbtn \{[^}]*border-radius: var\(--ib-r10-s, 7px\)/);
   expect(CODE).toMatch(/--ib-ft-r-s:\s*var\(--ib-soft-foot\)\s*999px;/);
   expect(CODE).toMatch(/--ib-bt-r-s:\s*var\(--ib-soft-buttons\)\s*10px;/);
 });
@@ -132,8 +132,10 @@ test("a phone's bottom sheet has the dialog corner on top (owner's ruling q8), f
 });
 
 test('rows part with no line between them in both modes (the prototype\'s rows); other lines keep today\'s colour', () => {
-  expect(CODE).toMatch(/\.pn-inbox \{[^}]*--ib-soft-rows:\s*;/);
-  const light = /:root\.light \.pn-inbox \{([^}]*)\}/.exec(CODE)?.[1] ?? '';
+  // The window's token blocks also name the list options dialog's light picture (`.ib-lightscope`).
+  expect(CODE).toMatch(/\.pn-inbox, \.ib-lightscope \{[^}]*--ib-soft-rows:\s*;/);
+  const light = /:root\.light \.pn-inbox,\s*\.ib-lightscope\.light \{([^}]*)\}/.exec(CODE)?.[1] ?? '';
+  expect(light).toContain('--ib-soft-nav');
   expect(light).not.toContain('--ib-soft-rows');
   expect(CODE).toMatch(/--ib-row-line-s:\s*var\(--ib-soft-rows\)\s*transparent;/);
   expect(CODE).toMatch(/\.ib-row, \.ib-nrow \{ border-bottom-color: var\(--ib-row-line\); \}/);

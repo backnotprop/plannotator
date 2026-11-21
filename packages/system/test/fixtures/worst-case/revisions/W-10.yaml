@@ -1,0 +1,5 @@
+revision: W-10
+scope: core
+title: Small plan 10
+change:
+  ledger: "Small change number 10."

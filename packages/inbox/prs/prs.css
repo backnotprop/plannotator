@@ -1,0 +1,463 @@
+/*
+ * The Pull requests page, "the Sheet" (packages/inbox/prs/; approval "inbox-pr-dashboard"), and a stack's page.
+ * The Inbox's own tokens and type. One accent (needs you), red only for failing checks, green for merged. No
+ * left-border cards, no uppercase tracked labels, no outline row highlights, no gradients or glows.
+ */
+.ib-prs {
+  --ib-prt-fill: color-mix(in oklch, var(--foreground) 6%, transparent);
+  --ib-prt-hover: color-mix(in oklch, var(--foreground) 11%, transparent);
+  --ib-prt-quiet: color-mix(in oklch, var(--muted-foreground) 72%, transparent);
+  --ib-prs-ease: cubic-bezier(0.23, 1, 0.32, 1);
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  /* The list panel's own surface (inbox.css: a pane's card under floating panes, else the window's), never the ground
+     between the panes: the board beside Reviews' list reads as the same kind of panel. */
+  background: var(--ib-pane-bg-s, var(--ib-main-bg));
+}
+.ib-prs-scroll { flex: 1; min-height: 0; overflow: auto; padding: 0 32px 48px max(32px, var(--ib-controls-left, 0px)); }
+.ib-prs-head { padding: 22px 0 10px; }
+.ib-prs-title { display: flex; align-items: center; gap: 8px; }
+.ib-prs-head h1,
+.ib-prst-head h1 { margin: 0; font-size: var(--ib-fs-20, 20px); font-weight: 650; letter-spacing: -0.01em; outline: none; }
+/* Every count has its "·" in front; the line starts 13px left and that band is clipped, so a count that wraps to the
+   start of a line has no dot in front of it (a narrow pane, about 1024 px wide). */
+.ib-prs-sum { display: flex; flex-wrap: wrap; column-gap: 0; row-gap: 2px; margin: 4px 0 0 -13px; clip-path: inset(-4px -4px -4px 13px); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-prs-sum > span { white-space: nowrap; }
+.ib-prs-sum > span::before { content: '·'; display: inline-block; width: 13px; text-align: center; color: var(--ib-prt-quiet); }
+.ib-prs-you { color: var(--primary); }
+.ib-prs-bad { color: var(--destructive); }
+
+/* The bar: the field, Open | Merged, Closed on GitHub. */
+.ib-prs-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px; padding: 6px 0 14px; border-bottom: 1px solid var(--ib-line); }
+.ib-prs-field { flex: 0 1 420px; min-width: 200px; display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px; border-radius: 6px; background: var(--ib-prt-fill); color: var(--muted-foreground); }
+.ib-prs-field:focus-within { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-prs-field input { flex: 1; min-width: 0; border: 0; background: none; outline: none; font: inherit; font-size: var(--ib-fs-13, 13px); color: var(--foreground); }
+.ib-prs-field input::placeholder { color: var(--muted-foreground); }
+.ib-prs-field input::-webkit-search-cancel-button { cursor: pointer; }
+.ib-prs-seg .ib-seg-o { border: 0; background: none; font: inherit; font-size: var(--ib-fs-13, 13px); }
+/* The board sits on the card colour, so in dark a selected option painted with it showed as the page through the well
+   (Open / Merged, Grid / Table): it is raised above the well there, as the Guide tabs' marks are. Light keeps the card. */
+.ib-prs-seg .ib-seg-o[data-on] { background: color-mix(in oklch, var(--foreground) 20%, var(--card)); }
+:root.light .ib-prs-seg .ib-seg-o[data-on], .ib-lightscope.light .ib-prs-seg .ib-seg-o[data-on] { background: var(--card); }
+.ib-prs-seg .ib-seg-o:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-prs-closed { display: inline-flex; align-items: center; gap: 4px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); text-decoration: none; border-radius: 6px; padding: 4px 6px; }
+.ib-prs-closed:hover { color: var(--foreground); background: var(--ib-hover); }
+.ib-prs-closed:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-prs-notices { margin: 10px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-prs-notices p { margin: 2px 0; }
+.ib-prs-notices a,
+.ib-prs-note a { color: inherit; text-decoration: underline; text-decoration-color: color-mix(in oklch, currentColor 40%, transparent); text-underline-offset: 2px; }
+.ib-prs-note { margin: 14px 0 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+
+/* A repository's section. */
+.ib-prs-sec { padding: 16px 0 18px; border-bottom: 1px solid var(--ib-line); }
+.ib-prs-sech { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin-bottom: 10px; }
+.ib-prs-sech h2 { margin: 0; font-size: var(--ib-fs-15, 15px); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ib-prs-outside { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); white-space: nowrap; }
+.ib-prs-secn { margin-left: auto; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ib-prs-tiles { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
+/* A tile: the number, then the checks' mark. */
+.ib-prt {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--ib-prt-fill);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: var(--ib-fs-12-5, 12.5px);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 140ms var(--ib-prs-ease), opacity 160ms var(--ib-prs-ease);
+}
+.ib-prt:hover { background: var(--ib-prt-hover); }
+.ib-prt:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-prt .ib-prck { flex: none; }
+/* Checks running, wherever a PR's are drawn (ChecksMark on the board, its table, a stack's page, the popover; the PR
+   page's Details ring): the mark turns, on the thread steps' turn (inbox.css `ib-st-turn`) at the Inbox's quiet
+   working pace, 2.4 s. Transform only. Passed, failed and none rest; with reduced motion it rests too, as before. */
+.ib-prck-turn { transform-origin: 50% 50%; }
+@media (prefers-reduced-motion: no-preference) {
+  .ib-prck-turn { animation: ib-st-turn 2.4s linear infinite; }
+}
+.ib-prt .ib-prck[data-checks='success'],
+.ib-prt .ib-prck[data-checks='pending'] { color: var(--ib-prt-quiet); }
+.ib-prt[data-you] { background: var(--primary); color: var(--primary-foreground); }
+.ib-prt[data-you]:hover { background: color-mix(in oklch, var(--primary) 88%, var(--foreground)); }
+.ib-prt[data-you] .ib-prck[data-checks='success'],
+.ib-prt[data-you] .ib-prck[data-checks='pending'] { color: color-mix(in oklch, var(--primary-foreground) 75%, transparent); }
+/* A draft: hollow, a 1 px rim (no dash: dash means leaving). */
+.ib-prt[data-state='draft']:not([data-you]) { background: transparent; color: var(--muted-foreground); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--border) 90%, transparent); }
+.ib-prt[data-state='draft'][data-you] { box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--primary-foreground) 45%, transparent); }
+/* Merged: green = landed. */
+.ib-prt[data-state='merged'],
+.ib-prt[data-state='closed'] { background: transparent; color: var(--muted-foreground); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); }
+.ib-prt[data-state='merged'] svg { color: var(--success, oklch(0.62 0.15 150)); }
+.ib-prt[data-state='closed'] .ib-prt-n { text-decoration: line-through; }
+.ib-prt[data-dim],
+.ib-prs-strip[data-dim] { opacity: 0.4; }
+
+/* A stack: its tiles joined in a pod, the stack mark first. */
+.ib-prs-stack { display: inline-flex; align-items: center; flex-wrap: wrap; row-gap: 4px; padding: 2px; border-radius: 6px; background: color-mix(in oklch, var(--foreground) 3%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--border) 55%, transparent); }
+.ib-prs-join { display: inline-flex; align-items: center; }
+.ib-prs-link { display: block; width: 8px; height: 1px; background: color-mix(in oklch, var(--muted-foreground) 55%, transparent); }
+/* A stack's chips take a lone chip's fill (.ib-prt), over the pod's fainter one: on the board's surface (the list
+   panel's card) a card-coloured chip would vanish into the pod. */
+.ib-prs-stack .ib-prt[data-you] { background: var(--primary); }
+.ib-prs-stack .ib-prt[data-state='draft']:not([data-you]),
+.ib-prs-stack .ib-prt[data-state='merged'] { background: transparent; }
+.ib-prs-mark { display: inline-grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 4px; background: none; color: var(--muted-foreground); cursor: pointer; }
+.ib-prs-mark:hover { color: var(--foreground); background: var(--ib-prt-hover); }
+.ib-prs-mark:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+
+/* A stack of more than 8: one strip. */
+.ib-prs-strip { display: inline-flex; align-items: center; gap: 8px; height: 30px; max-width: 100%; padding: 0 10px; border: 0; border-radius: 6px; background: color-mix(in oklch, var(--foreground) 3%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--border) 55%, transparent); color: var(--foreground); font-size: var(--ib-fs-13, 13px); white-space: nowrap; cursor: pointer; min-width: 0; }
+.ib-prs-strip:hover { background: var(--ib-prt-hover); }
+.ib-prs-strip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-prs-strip > svg { flex: none; color: var(--muted-foreground); }
+.ib-prs-strip-t { font-variant-numeric: tabular-nums; }
+.ib-prs-strip-marks { display: inline-flex; gap: 2px; align-items: center; width: min(calc(var(--n, 12) * 10px), 240px); min-width: 60px; flex: 0 1 auto; }
+.ib-prs-strip-marks i { flex: 1 1 0; max-width: 8px; min-width: 2px; height: 12px; border-radius: 1.5px; background: color-mix(in oklch, var(--muted-foreground) 35%, transparent); }
+.ib-prs-strip-marks[data-many] { gap: 1px; width: 120px; }
+.ib-prs-strip-marks[data-many] i { min-width: 1px; border-radius: 0.5px; }
+.ib-prs-strip-marks i[data-state='merged'] { background: none; box-shadow: inset 0 0 0 1px var(--success, oklch(0.62 0.15 150)); }
+.ib-prs-strip-marks i[data-state='draft'] { background: none; box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--muted-foreground) 55%, transparent); }
+.ib-prs-strip-marks i[data-you] { background: var(--primary); box-shadow: none; }
+.ib-prs-strip-marks i[data-fail] { background: var(--destructive); box-shadow: none; }
+
+.ib-prs-empty { padding: 40px 0; max-width: 520px; }
+.ib-prs-empty h1,
+.ib-prs-empty h2 { margin: 0 0 6px; font-size: var(--ib-fs-15, 15px); font-weight: 600; }
+.ib-prs-empty p { margin: 2px 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-prs-loading { min-height: 200px; }
+
+/* The popover. */
+.ib-prpop {
+  position: fixed;
+  z-index: 60;
+  width: 352px;
+  max-width: calc(100vw - 16px);
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: var(--ib-float-s, 0 0 0 1px var(--border), 0 12px 30px -12px oklch(0 0 0 / 0.45));
+  font-size: var(--ib-fs-13, 13px);
+  animation: ib-prpop-in 140ms var(--ib-prs-ease);
+}
+@keyframes ib-prpop-in { from { opacity: 0; transform: translateY(-2px); } }
+@media (prefers-reduced-motion: reduce) { .ib-prpop { animation: none; } }
+.ib-prpop-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.ib-prpop-n { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted-foreground); }
+.ib-prpop-state { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-prpop-state[data-state='merged'] { color: var(--success, oklch(0.62 0.15 150)); }
+.ib-prpop-repo { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-prpop-title { margin: 6px 0 2px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; text-align: start; }
+.ib-prpop-meta { display: flex; flex-wrap: wrap; margin: 0; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-prpop-meta > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.ib-prpop-meta > span + span::before { content: '·'; padding: 0 5px; color: var(--ib-prt-quiet); }
+.ib-prpop-diff { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.ib-prpop-status { margin: 8px 0 0; }
+.ib-prpop-status[data-tone='you'] { color: var(--primary); }
+.ib-prpop-status[data-tone='bad'] { color: var(--destructive); }
+.ib-prpop-checks { display: flex; align-items: center; gap: 6px; margin: 2px 0 0; color: var(--muted-foreground); }
+.ib-prpop-checks .ib-prck[data-checks='success'] { color: var(--success, oklch(0.62 0.15 150)); }
+.ib-prpop-stack { display: flex; align-items: center; gap: 6px; width: 100%; margin: 10px 0 0; padding: 6px 8px; border: 0; border-radius: 6px; background: var(--ib-prt-fill); color: var(--foreground); font: inherit; font-size: var(--ib-fs-12-5, 12.5px); cursor: pointer; text-align: start; }
+.ib-prpop-stack:hover { background: var(--ib-prt-hover); }
+.ib-prpop-stack:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-prpop-go { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; color: var(--muted-foreground); white-space: nowrap; }
+.ib-prpop-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; }
+.ib-prpop-btn { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border: 0; border-radius: 4px; background: var(--ib-prt-fill); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13, 13px); text-decoration: none; cursor: pointer; white-space: nowrap; }
+.ib-prpop-btn:hover { background: var(--ib-prt-hover); }
+.ib-prpop-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-prpop-btn[data-primary] { background: var(--primary); color: var(--primary-foreground); }
+.ib-prpop-btn[data-primary]:hover { background: color-mix(in oklch, var(--primary) 88%, var(--foreground)); }
+/* The second click: green, the colour of landed. */
+.ib-prpop-btn[data-merge='confirm'] { background: var(--success, oklch(0.62 0.15 150)); color: var(--success-foreground, #fff); }
+.ib-prpop-btn:disabled { opacity: 0.6; cursor: default; }
+/* Merge's slot: every word it can say stacked in one cell, so the slot is as wide as the widest and never moves. */
+.ib-prpop-mslot { display: inline-grid; }
+.ib-prpop-mslot > * { grid-area: 1 / 1; justify-content: center; }
+.ib-prpop-msize { visibility: hidden; }
+.ib-prpop-btn.ib-prpop-merged { background: none; color: var(--success, oklch(0.62 0.15 150)); cursor: default; }
+.ib-prpop-hint { margin: 8px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-prpop-err { margin: 8px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--destructive); overflow-wrap: anywhere; }
+.ib-prpop-x { margin-left: 4px; }
+/* A phone: a bottom sheet over a scrim, 44 px targets. */
+.ib-prpop-scrim { position: fixed; inset: 0; z-index: 59; background: color-mix(in oklch, oklch(0 0 0) 28%, transparent); }
+.ib-prpop[data-phone] { left: 0; right: 0; bottom: 0; top: auto; width: auto; max-width: none; padding: 14px 16px calc(16px + var(--pn-safe-bottom, 0px)); border-radius: 12px 12px 0 0; animation: ib-prpop-up 200ms var(--ib-prs-ease); }
+@keyframes ib-prpop-up { from { transform: translateY(16px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .ib-prpop[data-phone] { animation: none; } }
+.ib-prpop[data-phone] .ib-prpop-btn,
+.ib-prpop[data-phone] .ib-prpop-stack { min-height: 44px; }
+.ib-prpop[data-phone] .ib-prpop-acts { display: grid; grid-template-columns: 1fr 1fr; }
+.ib-prpop[data-phone] .ib-prpop-btn { justify-content: center; }
+.ib-prpop[data-phone] .ib-prpop-mslot { grid-column: 1 / -1; display: grid; }
+
+/* A stack's page. */
+.ib-prst-crumb { display: flex; align-items: center; gap: 4px; padding: 16px 0 0; margin-left: -4px; font-size: var(--ib-fs-14, 14px); }
+.ib-prst-repo { color: var(--muted-foreground); }
+.ib-prst-head { padding: 8px 0 14px; border-bottom: 1px solid var(--ib-line); }
+.ib-prst-head code,
+.ib-prst-basen code { font-family: var(--font-mono); font-size: 0.95em; }
+.ib-prst-list { list-style: none; margin: 8px 0 0; padding: 0; max-width: 1100px; }
+.ib-prst-li { position: relative; }
+.ib-prst-row,
+.ib-prst-base {
+  display: grid;
+  grid-template-columns: 28px 18px 64px minmax(0, 1fr) 24px 112px minmax(120px, 200px) 44px;
+  align-items: center;
+  column-gap: 10px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--ib-fs-13, 13px);
+  text-align: start;
+}
+.ib-prst-row { cursor: pointer; }
+.ib-prst-row:hover { background: var(--ib-prt-fill); }
+.ib-prst-row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-prst-row[data-lands] { background: color-mix(in oklch, var(--primary) 9%, transparent); }
+.ib-prst-row[data-lands]:hover { background: color-mix(in oklch, var(--primary) 14%, transparent); }
+.ib-prst-row[data-state='merged'],
+.ib-prst-row[data-state='closed'] { color: var(--muted-foreground); }
+.ib-prst-at { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted-foreground); text-align: end; font-size: var(--ib-fs-12, 12px); }
+/* The rail: one line through the nodes, down to the base branch. */
+.ib-prst-node { position: relative; justify-self: center; width: 10px; height: 10px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--muted-foreground); background: var(--card); z-index: 1; }
+.ib-prst-li::before { content: ''; position: absolute; left: calc(8px + 28px + 10px + 9px - 0.5px); top: 0; bottom: 0; width: 1px; background: color-mix(in oklch, var(--muted-foreground) 45%, transparent); }
+.ib-prst-li:first-child::before { top: 50%; }
+.ib-prst-base::before { bottom: 50%; }
+.ib-prst-row[data-you] .ib-prst-node { background: var(--primary); box-shadow: none; }
+.ib-prst-row[data-fail] .ib-prst-node { background: var(--destructive); box-shadow: none; }
+.ib-prst-row[data-state='draft'] .ib-prst-node { box-shadow: inset 0 0 0 1.5px color-mix(in oklch, var(--muted-foreground) 60%, transparent); }
+.ib-prst-row[data-state='merged'] .ib-prst-node { box-shadow: none; background: var(--success, oklch(0.62 0.15 150)); }
+.ib-prst-node[data-base] { border-radius: 2px; background: var(--muted-foreground); box-shadow: none; }
+.ib-prst-n { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-prst-t { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.ib-prst-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-prst-who { flex: 0 1 auto; max-width: 112px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-prst-ck { display: inline-flex; justify-content: center; }
+.ib-prst-ck .ib-prck[data-checks='success'] { color: var(--success, oklch(0.62 0.15 150)); }
+.ib-prst-ck .ib-prck[data-checks='pending'] { color: var(--muted-foreground); }
+.ib-prst-diff { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: var(--ib-fs-12, 12px); text-align: end; white-space: nowrap; }
+.ib-prst-add { color: var(--success, oklch(0.62 0.15 150)); }
+.ib-prst-del { color: var(--muted-foreground); }
+.ib-prst-row[data-state='merged'] .ib-prst-add { color: inherit; }
+.ib-prst-st { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
+.ib-prst-row[data-you] .ib-prst-st { color: var(--primary); }
+.ib-prst-row[data-fail] .ib-prst-st { color: var(--destructive); }
+.ib-prst-row[data-state='merged'] .ib-prst-st { color: var(--success, oklch(0.62 0.15 150)); }
+.ib-prst-age { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); text-align: end; }
+.ib-prst-base { min-height: 32px; color: var(--muted-foreground); }
+.ib-prst-basen { grid-column: 3 / -1; }
+
+/* Narrower: the two-line rows (title; then number, status and age). */
+@media (max-width: 1100px) {
+  .ib-prst-row { grid-template-columns: 28px 18px minmax(0, 1fr) 24px 44px; grid-template-rows: auto auto; row-gap: 1px; padding-top: 5px; padding-bottom: 5px; }
+  .ib-prst-row .ib-prst-at { grid-row: 1 / span 2; }
+  .ib-prst-row .ib-prst-node { grid-row: 1 / span 2; }
+  .ib-prst-row .ib-prst-t { grid-column: 3; grid-row: 1; }
+  .ib-prst-row .ib-prst-ck { grid-column: 4; grid-row: 1; }
+  .ib-prst-row .ib-prst-age { grid-column: 5; grid-row: 1; }
+  .ib-prst-row .ib-prst-n { grid-column: 3; grid-row: 2; display: inline; font-size: var(--ib-fs-12, 12px); }
+  .ib-prst-row .ib-prst-st { grid-column: 3 / -1; grid-row: 2; padding-left: calc(7ch + 8px); font-size: var(--ib-fs-12, 12px); }
+  .ib-prst-row .ib-prst-diff { display: none; }
+  .ib-prst-base { grid-template-columns: 28px 18px minmax(0, 1fr); }
+}
+
+/* The board as a table (prs/SheetTable.tsx): 40 px rows, fixed column widths, the title takes the rest. The bar and
+   the header stay put while the rows scroll; the header sits under the bar (--ib-prs-bar-h, measured). What sticks
+   paints what is behind the page: its own fill when it has one, else the window's ground. */
+.ib-prs { --ib-prs-solid: linear-gradient(var(--ib-pane-bg-s, var(--ib-main-bg)), var(--ib-pane-bg-s, var(--ib-main-bg))), var(--ib-ground, var(--background)); }
+.ib-prs[data-layout='table'] .ib-prs-bar { position: sticky; top: 0; z-index: 4; background: var(--ib-prs-solid); }
+.ib-prtb-wrap { container-type: inline-size; }
+.ib-prtb { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: var(--ib-fs-13, 13px); font-variant-numeric: tabular-nums; }
+.ib-prtb th,
+.ib-prtb td { padding: 0 8px; text-align: start; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-prtb thead th { position: sticky; top: var(--ib-prs-bar-h, 0px); z-index: 2; height: 32px; padding: 0; background: var(--ib-prs-solid); border-bottom: 1px solid var(--ib-line); font-weight: 500; }
+.ib-prtb-n { width: 104px; }
+.ib-prtb-a { width: 128px; }
+.ib-prtb-s { width: 196px; }
+.ib-prtb-ck { width: 92px; }
+.ib-prtb-risk { width: 80px; }
+.ib-prtb-upd { width: 82px; }
+.ib-prtb-size { width: 104px; }
+.ib-prtb-sort { display: flex; align-items: center; gap: 3px; width: 100%; height: 32px; padding: 0 8px; border: 0; background: none; color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; text-align: start; cursor: pointer; }
+.ib-prtb-sort:hover,
+.ib-prtb th[aria-sort] .ib-prtb-sort { color: var(--foreground); }
+.ib-prtb-sort:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; border-radius: 4px; }
+.ib-prtb-ar { display: inline-flex; width: 11px; }
+/* A repository's row. */
+.ib-prtb-g th { height: 38px; padding-top: 10px; border-bottom: 1px solid var(--ib-line); font-weight: 600; font-size: var(--ib-fs-14, 14px); color: var(--foreground); }
+.ib-prtb-gin { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.ib-prtb-gl { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-prtb-gn { font-weight: 400; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+/* A PR's row. */
+.ib-prtb-r td { height: 40px; border-bottom: 1px solid color-mix(in oklch, var(--border) 40%, transparent); cursor: pointer; transition: background-color 120ms var(--ib-prs-ease); }
+.ib-prtb-r:hover td { background: var(--ib-hover); }
+.ib-prtb-r[data-dim] td { opacity: 0.4; }
+.ib-prtb-nin { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.ib-prtb-open { display: inline-flex; align-items: center; gap: 4px; min-width: 0; padding: 0; border: 0; background: none; color: var(--muted-foreground); font-family: var(--font-mono); font-size: var(--ib-fs-12-5, 12.5px); cursor: pointer; border-radius: 3px; }
+.ib-prtb-open:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ib-prtb-r[data-you] .ib-prtb-open { color: var(--primary); font-weight: 600; }
+.ib-prtb-open svg { color: var(--success, oklch(0.62 0.15 150)); }
+.ib-prtb-stack { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--muted-foreground); cursor: pointer; }
+.ib-prtb-stack:hover { color: var(--foreground); background: var(--ib-prt-hover); }
+.ib-prtb-stack:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* A layer above the first: an elbow from the layer under it, as wide as the stack's mark. */
+.ib-prtb-elbow { flex: none; width: 9px; height: 12px; margin: 0 5px 0 6px; transform: translateY(-5px); border-left: 1px solid var(--ib-prt-quiet); border-bottom: 1px solid var(--ib-prt-quiet); border-bottom-left-radius: 3px; }
+.ib-prtb-t span { display: block; overflow: hidden; text-overflow: ellipsis; }
+.ib-prtb-r[data-state='merged'] .ib-prtb-t,
+.ib-prtb-r[data-state='closed'] .ib-prtb-t { color: var(--muted-foreground); }
+.ib-prtb-who { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ib-prtb-who > span:last-child:not(.ib-prd-face) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-prtb-s > span { display: block; overflow: hidden; text-overflow: ellipsis; }
+.ib-prtb-s[data-tone='you'] { color: var(--primary); }
+.ib-prtb-s[data-tone='bad'] { color: var(--destructive); }
+.ib-prtb-ckin { display: inline-flex; align-items: center; gap: 6px; color: var(--muted-foreground); }
+.ib-prtb-ckin .ib-prck[data-checks='success'],
+.ib-prtb-ckin .ib-prck[data-checks='pending'] { color: var(--ib-prt-quiet); }
+.ib-prtb-upd { color: var(--muted-foreground); }
+td.ib-prtb-size { font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); }
+.ib-prtb-add { color: var(--success, oklch(0.62 0.15 150)); }
+.ib-prtb-del { color: var(--destructive); }
+/* Narrower, so the title keeps about 200 px: Risk goes, then Updated and Size, then Author. A column goes to no width
+   rather than out of the table: the repository rows span every column, and a fixed table would share a dropped
+   column's width out among empty ones. */
+@container (max-width: 1000px) { .ib-prtb .ib-prtb-risk { width: 0; padding: 0; } .ib-prtb .ib-prtb-risk > * { display: none; } }
+@container (max-width: 920px) { .ib-prtb :is(.ib-prtb-upd, .ib-prtb-size) { width: 0; padding: 0; } .ib-prtb :is(.ib-prtb-upd, .ib-prtb-size) > * { display: none; } }
+@container (max-width: 640px) { .ib-prtb .ib-prtb-a { width: 0; padding: 0; } .ib-prtb .ib-prtb-a > * { display: none; } }
+
+/* Select mode (approval "inbox-pr-board-bulk", take B): a box in every open tile, before each repository's name, and a
+   first column in the table; a picked tile or row is filled (--ib-cur-bg), never outlined. On a desktop the bar stays
+   put while it is on, and while something is picked it is the count and Clear. */
+.ib-prs[data-selecting]:not([data-phone]) .ib-prs-bar { position: sticky; top: 0; z-index: 4; background: var(--ib-prs-solid); }
+.ib-prs-bar[data-pr-actions] { min-height: 30px; }
+.ib-prs-picked { font-weight: 600; font-size: var(--ib-fs-13-5, 13.5px); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ib-prs-btn { display: inline-flex; align-items: center; justify-content: center; height: 30px; padding: 0 12px; border: 0; border-radius: 7px; background: var(--ib-prt-fill); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13, 13px); white-space: nowrap; cursor: pointer; }
+.ib-prs-btn:hover { background: var(--ib-prt-hover); }
+.ib-prs-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-prs-end { margin-left: auto; }
+.ib-prs-box { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 4px; background: var(--card); box-shadow: inset 0 0 0 1.5px color-mix(in oklch, var(--muted-foreground) 60%, transparent); color: transparent; cursor: pointer; }
+.ib-prs-box svg { stroke-width: 2.6; }
+.ib-prs-box[data-on] { background: var(--primary); box-shadow: none; color: var(--primary-foreground); }
+button.ib-prs-box:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-prs-sech .ib-prs-box { align-self: center; }
+.ib-prt .ib-prs-box { width: 13px; height: 13px; margin-left: -2px; border-radius: 3px; }
+/* In select mode a fill means picked: a PR that needs you drops its fill and reads as its table row does, bold in the primary colour. */
+.ib-prs[data-selecting] .ib-prt[data-you] { color: var(--primary); font-weight: 600; box-shadow: none; }
+.ib-prs[data-selecting] .ib-prt[data-you]:not([data-picked]) { background: var(--ib-prt-fill); }
+.ib-prs[data-selecting] .ib-prt[data-you]:not([data-picked]):hover { background: var(--ib-prt-hover); }
+.ib-prs[data-selecting] .ib-prt[data-you][data-state='draft']:not([data-picked]) { background: transparent; box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--border) 90%, transparent); }
+.ib-prs[data-selecting] .ib-prt[data-you] .ib-prck:is([data-checks='success'], [data-checks='pending']) { color: var(--ib-prt-quiet); }
+.ib-prs[data-selecting] .ib-prt[data-picked] { background: var(--ib-cur-bg); box-shadow: none; }
+.ib-prs[data-selecting] .ib-prt[data-picked]:not([data-you]),
+.ib-prs[data-selecting] .ib-prt[data-picked]:not([data-you]) .ib-prck[data-checks='success'] { color: var(--ib-cur-fg); }
+.ib-prs[data-selecting] :is(.ib-prt, .ib-prtb-r) { user-select: none; }
+.ib-prtb .ib-prtb-c { width: 36px; padding: 0 0 0 10px; }
+.ib-prtb .ib-prtb-c .ib-prs-box { vertical-align: middle; }
+.ib-prtb-r[data-picked] td,
+.ib-prtb-r[data-picked]:hover td { background: var(--ib-cur-bg); }
+/* A phone: the count, Merge and Clear in a sheet at the bottom, 44 px to tap, the list above them; the filter row keeps Done. */
+.ib-prs-picksheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; align-items: center; gap: 12px; padding: 10px 12px calc(12px + var(--pn-safe-bottom, 0px)) 18px; border-radius: 14px 14px 0 0; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-s, 0 0 0 1px var(--border), 0 -12px 30px -12px oklch(0 0 0 / 0.45)); }
+.ib-prs-picksheet .ib-prs-picked { font-size: var(--ib-fs-15, 15px); }
+/* Bulk Merge (approval "inbox-pr-board-bulk"): Merge N, its second click green as the popover's, the hint beside it,
+   and under the bar the confirm's list (what merges, what stays and why) or the report. */
+.ib-prs-btn[data-merge='confirm'] { background: var(--success, oklch(0.62 0.15 150)); color: var(--success-foreground, #fff); }
+.ib-prs-btn[data-merge='confirm']:hover { background: color-mix(in oklch, var(--success, oklch(0.62 0.15 150)) 88%, var(--foreground)); }
+.ib-prs-mnote { min-width: 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-prs-merging { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ib-prs-mlist { flex: 1 0 100%; display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: var(--ib-fs-13, 13px); }
+.ib-prs-mlist li { display: flex; align-items: baseline; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+.ib-prs-mlist li > svg { flex: none; align-self: center; color: var(--success, oklch(0.62 0.15 150)); }
+.ib-prs-mn { flex: none; font-family: var(--font-mono); font-size: var(--ib-fs-12-5, 12.5px); font-variant-numeric: tabular-nums; }
+.ib-prs-mt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
+.ib-prs-mskip { color: var(--muted-foreground); }
+.ib-prs-mlist .ib-prs-mbad { color: var(--destructive); }
+/* Start review thread's report: a sentence with links in it, each thread one click away, in the link colour. */
+.ib-prs-mlist li[data-pr-review-row] { display: block; }
+.ib-prs-tlink { padding: 0; border: 0; background: none; font: inherit; font-weight: 550; color: var(--primary); cursor: pointer; }
+.ib-prs-tlink:hover { text-decoration: underline; }
+.ib-prs-tlink:focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: 1px; border-radius: 3px; }
+@media (pointer: coarse) { .ib-prs-tlink { min-height: 44px; } }
+/* A phone's report: every row 44 px, a thread's row all link, so the rows read evenly. */
+.ib-prs-mlist[data-pr-review-report="rows"] { gap: 0; }
+.ib-prs-mlist[data-pr-review-report="rows"] li { display: flex; align-items: center; min-height: 44px; }
+.ib-prs-mlist li[data-pr-review-row$="-thread"] .ib-prs-tlink { display: flex; align-items: center; width: 100%; min-height: 44px; text-align: start; }
+.ib-prs-picksheet { flex-direction: column; align-items: stretch; gap: 10px; max-height: 70vh; overflow-y: auto; }
+.ib-prs-pickrow { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 12px; }
+.ib-prs-picksheet .ib-prs-mlist { font-size: var(--ib-fs-14, 14px); }
+.ib-prs-picksheet .ib-prs-btn { height: 44px; padding: 0 18px; font-size: var(--ib-fs-15, 15px); }
+/* The window's toast (Close's count with Undo) sits above the phone's pick sheet, never over its buttons (SheetPage's useToastAbove). */
+.pn-inbox[data-prs-sheet] .ib-toast { bottom: calc(var(--ib-prs-sheet-h, 0px) + 8px); }
+.ib-prs[data-phone] .ib-prs-bar .ib-prs-btn { height: 36px; padding: 0 14px; }
+.ib-prs[data-phone][data-picking] .ib-prs-scroll { padding-bottom: 96px; }
+
+/* A phone: one column, tighter gutters; the counts part by space (a dot would dangle at a line's start). */
+.ib-prs[data-phone] .ib-prs-scroll { padding: 0 14px 32px; }
+.ib-prs[data-phone] .ib-prs-sum { column-gap: 12px; margin-left: 0; clip-path: none; }
+.ib-prs[data-phone] .ib-prs-sum > span::before { content: none; }
+.ib-prs[data-phone] .ib-prs-field { flex: 1 1 100%; }
+.ib-prs[data-phone] .ib-prs-sech { flex-wrap: wrap; }
+.ib-prs[data-phone] .ib-prs-strip { flex-wrap: wrap; height: auto; min-height: 36px; padding: 6px 10px; row-gap: 4px; white-space: normal; }
+.ib-prs[data-phone] .ib-prt { height: 32px; padding: 0 10px; }
+.ib-prs[data-phone] .ib-prs-mark { width: 32px; height: 32px; }
+.ib-prs[data-phone] .ib-prst-row { min-height: 48px; }
+
+/* Inside Reviews (the owner's pick, take C): the board in Reviews' right pane; a phone gets a row at the top of the list. */
+.ib-prs.ib-prs-inpane .ib-prs-scroll { padding: 0 28px 40px; }
+/* The pane is narrower than the page: a stack's strip wraps its counts under its marks rather than over them. */
+.ib-prs-inpane .ib-prs-strip { flex-wrap: wrap; height: auto; min-height: 30px; padding: 5px 10px; row-gap: 4px; white-space: normal; text-align: start; }
+.ib-prs-inpane .ib-prs-strip-marks { flex: none; }
+.ib-prs-entry { display: flex; align-items: center; gap: 8px; width: calc(100% - 8px); margin: 4px 4px 8px; padding: 12px 12px; border: 0; border-radius: 8px; background: var(--ib-band); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); text-align: left; cursor: pointer; }
+.ib-prs-entry:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-prs-entry-t { font-weight: 600; }
+.ib-prs-entry-n { margin-left: auto; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-prs-entry > svg:last-child { color: var(--muted-foreground); }
+
+/* A stack's page: changed since you looked (a dot after the number, and before the header's count), and choosing a
+   range of layers (prs/StackRangeBar.tsx: the bar sticks while the layers scroll; picked rows are filled). */
+.ib-prst-dot { display: inline-block; width: 6px; height: 6px; margin: 0 0 1px 6px; border-radius: 50%; background: var(--foreground); vertical-align: middle; }
+.ib-prs-sum .ib-prst-dot { margin: 0 5px 1px 0; }
+.ib-prst-range { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; min-height: 50px; padding: 8px 0; border-bottom: 1px solid var(--ib-line); background: var(--ib-prs-solid); font-size: var(--ib-fs-13, 13px); }
+.ib-prst-range-n { color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ib-prst-range-name { font-weight: 600; font-variant-numeric: tabular-nums; }
+.ib-prst-range-end { display: inline-flex; gap: 8px; margin-left: auto; }
+.ib-prs-btn[data-primary] { background: var(--primary); color: var(--primary-foreground); }
+.ib-prs-btn[data-primary]:hover { background: color-mix(in oklch, var(--primary) 88%, var(--foreground)); }
+.ib-prst-row[data-picked],
+.ib-prst-row[data-picked]:hover { background: var(--ib-cur-bg); }
+.ib-prst-list[data-picking] .ib-prst-row[data-lands]:not([data-picked]) { background: none; }
+.ib-prst-list[data-picking] .ib-prst-row[aria-disabled] { cursor: default; }
+.ib-prst-list[data-picking] .ib-prst-row[aria-disabled]:hover { background: none; }
+.ib-prst-foot { margin: 14px 0 0; padding-left: 8px; }
+.ib-prst-choose { padding: 0; border: 0; background: none; color: var(--primary); font: inherit; font-size: var(--ib-fs-13, 13px); cursor: pointer; }
+.ib-prst-choose:hover { text-decoration: underline; }
+.ib-prst-choose:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 2px; }
+.ib-prs[data-phone] .ib-prst-range .ib-prs-btn { height: 40px; padding: 0 16px; }
+.ib-prs[data-phone] .ib-prst-choose { min-height: 44px; }
+
+/* The PR page's rail: a range on screen and Since you looked (pulls/RailScopeRows.tsx), under the stack's rows. */
+.ib-prp-stack.ib-prp-views { flex: none; max-height: none; }
+.ib-prp-sincedot { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; }
+.ib-prp-sincedot::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--foreground); }
+
+/* Hide repository (SheetPage's `repoHide`): quiet, muted words and icon at the end of a repository's header, always shown. */
+.ib-prs-rhide { display: inline-flex; align-items: center; gap: 4px; align-self: center; height: 22px; padding: 0 6px; border: 0; border-radius: 4px; background: transparent; color: var(--muted-foreground); font-family: inherit; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 400; cursor: pointer; white-space: nowrap; }
+.ib-prs-rhide:hover { background: var(--ib-prt-hover); color: var(--foreground); }
+.ib-prs-rhide:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-prtb-gin .ib-prs-rhide { margin-left: auto; }
+.ib-prs-sum > .ib-prs-in { color: var(--foreground); }

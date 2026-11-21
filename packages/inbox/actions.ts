@@ -63,12 +63,13 @@ export function actionForBlock(
   if (!actions || actions.length === 0) return null;
   const parsed = parseInboxActionBlocks(body);
   const hit = parsed.find((a) => a.startLine === block.startLine) ?? null;
-  if (hit) return actions.find((a) => a.key === hit.key) ?? null;
-  return null;
+  if (!hit) return null;
+  // By its place when the key moved: a message stored before the reader dropped a task box (`- [ ] …`) from the first line.
+  return actions.find((a) => a.key === hit.key) ?? actions.find((a) => a.position === hit.position) ?? null;
 }
 
 /** What an action item's card says it is, for its badge. */
-export type ActionCardState = 'open' | 'pending' | 'done' | 'cant' | 'seen' | 'set-aside' | 'archived' | 'replaced';
+export type ActionCardState = 'open' | 'pending' | 'done' | 'cant' | 'skipped' | 'seen' | 'set-aside' | 'archived' | 'replaced';
 
 export function actionCardState(action: InboxQuestion): ActionCardState {
   const result = action.action_result ?? null;
@@ -77,5 +78,5 @@ export function actionCardState(action: InboxQuestion): ActionCardState {
   if (action.state === 'closed') return action.set_aside_at ? 'set-aside' : 'archived';
   if (!result) return 'open';
   if (action.state === 'picked') return 'pending';
-  return result.outcome === 'cant' ? 'cant' : 'done';
+  return result.outcome === 'cant' ? 'cant' : result.outcome === 'skip' ? 'skipped' : 'done';
 }

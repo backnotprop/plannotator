@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Runner } from "../sources/runner";
 import { adaptersRoot, hasManagedCopy, installAdapter, managedDir, managedLaunch, manualInstallCommand, npmCommand, npmReason, satisfiesNodeRange, sweepCopies } from "./adapters";
-import { ensureAgentLaunch } from "./ensure-launch";
-import { CLAUDE_CODE, CODEX, COPILOT, CURSOR, KILO, KIRO, KNOWN_AGENTS, OPENCODE, PI, canStart, detectAgents, resolveAgentLaunch, type AgentDescriptor } from "./agents";
+import { ensureAgentLaunch } from "@plannotator/acp-client/ensure-launch";
+import { CLAUDE_CODE, CODEX, COPILOT, CURSOR, KILO, KIRO, KNOWN_AGENTS, OPENCODE, PI, canStart, detectAgents, resolveAgentLaunch, type AgentDescriptor } from "@plannotator/acp-client/agents";
 
 const dirs: string[] = [];
 function tempRoot(): string {

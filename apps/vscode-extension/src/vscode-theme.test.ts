@@ -187,6 +187,20 @@ describe.skipIf(!hasDom)("theme bridge precedence", () => {
     // useEditorAnnotations keys off this flag; the bridge is where it is set.
     expect(mountBridge(DEFAULT_THEME_CLASS).vscodeFlag()).toBe(true);
   });
+
+  // The IDE's theme changing swaps classes and tokens outside ThemeProvider.
+  // Without the hold, every element runs theme.css's 150 ms colour transition
+  // and the panel freezes, then fades; a hold that stays stops hover fades.
+  it("lands an IDE theme change in one frame, then lets transitions back", async () => {
+    const bridge = mountBridge(DEFAULT_THEME_CLASS, "plannotator-theme=system");
+
+    bridge.post(IDE_LIGHT);
+
+    expect(bridge.root.classList.contains("light")).toBe(true);
+    expect(bridge.root.classList.contains("pn-theme-switching")).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(bridge.root.classList.contains("pn-theme-switching")).toBe(false);
+  });
 });
 
 /**

@@ -1,0 +1,8 @@
+sheet: X-101
+scope: core
+kind: state
+title: Dispatch and billing core
+question: The states of a stop.
+bands:
+  - { id: s, row: [ dispatch ] }
+show: []

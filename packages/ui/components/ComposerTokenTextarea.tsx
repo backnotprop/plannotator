@@ -19,6 +19,16 @@ import type { MentionPerson } from '../utils/mentions';
  * and box metrics MUST stay identical or the overlay drifts out of alignment. */
 export const COMPOSER_TEXT_CLASSES = 'w-full bg-transparent text-sm px-1 py-0.5';
 
+/**
+ * The textareas' `defaultValue`, beside their `value`. Given `value` alone, React 19 also sets the textarea's
+ * `defaultValue` (its text child) to the words on every change: a write of the whole text and a DOM mutation per key,
+ * and in Chrome that mutation ends the browser's undo step, so ⌘Z took back one character at a time. With a
+ * `defaultValue` of its own React writes that instead, and an empty one changes nothing, so the text child stays
+ * empty and the browser's undo groups a typing run again. The value is controlled as before. (React's dev build
+ * warns once about a textarea with both props; the production build says nothing.)
+ */
+const KEEP_TEXT_CHILD_EMPTY = '';
+
 /** Per-composer memo for the overlay gutter sync below. */
 interface OverlayGutterState {
   /** The overlay the applied value belongs to (a remount invalidates it). */
@@ -207,6 +217,16 @@ export interface ComposerTokenTextareaProps {
     React.TextareaHTMLAttributes<HTMLTextAreaElement>,
     'value' | 'onChange' | 'onKeyDown' | 'onSelect' | 'onScroll' | 'className' | 'placeholder'
   >;
+  /** Paint on the mirror that is not in the value. Same metric rule as the token spans: it must add no width. */
+  mirrorPaint?: ComposerMirrorPaint;
+}
+
+export interface ComposerMirrorPaint {
+  /** Drawn at this offset (past the end of a token it falls inside). */
+  at?: number;
+  node?: React.ReactNode;
+  /** A range of plain text behind a mark. A token inside it keeps its own paint. */
+  wash?: { start: number; end: number; className: string };
 }
 
 /**
@@ -241,6 +261,7 @@ export const ComposerTokenTextarea: React.FC<ComposerTokenTextareaProps> = ({
   inputClassName,
   mirrorClassName,
   inputProps,
+  mirrorPaint,
 }) => {
   const overlayRef = useRef<HTMLDivElement>(null);
   const [composing, setComposing] = useState(false);
@@ -261,6 +282,14 @@ export const ComposerTokenTextarea: React.FC<ComposerTokenTextareaProps> = ({
   const attachRef = useCallback(
     (el: HTMLTextAreaElement | null) => {
       innerRef.current = el;
+      // See `defaultValue=""` on the textareas below: React wrote the first words (a draft brought back) as the
+      // textarea's text child when it made it. Dropped now, before the person types, rather than by React's first
+      // update, which would make the first key its own undo step. The value is the person's and stays.
+      if (el && el.defaultValue !== '') {
+        const words = el.value;
+        el.defaultValue = '';
+        if (el.value !== words) el.value = words;
+      }
       textareaRef(el);
     },
     [textareaRef],
@@ -285,9 +314,33 @@ export const ComposerTokenTextarea: React.FC<ComposerTokenTextareaProps> = ({
 
   // Keep the mirror aligned when the value changes without a scroll event
   // (e.g. programmatic insertion moving the caret into a scrolled region).
+  // Read in the next frame, before it paints, not in the key's own task: a
+  // read of `scrollTop` right after React's write forces a layout of the
+  // whole text on every key (and again for every key that lands before the
+  // frame), where the frame lays it out once anyway. Animation frames run
+  // before the frame's layout and paint, so the mirror is aligned in every
+  // frame drawn, as before; scroll events and the ResizeObserver still sync
+  // at once.
+  const syncFrame = useRef<number | null>(null);
   useEffect(() => {
-    if (innerRef.current) syncScroll(innerRef.current);
+    if (typeof requestAnimationFrame === 'undefined') {
+      if (innerRef.current) syncScroll(innerRef.current);
+      return;
+    }
+    // One read a frame, however many keys land before it.
+    if (syncFrame.current !== null) return;
+    syncFrame.current = requestAnimationFrame(() => {
+      syncFrame.current = null;
+      if (innerRef.current) syncScroll(innerRef.current);
+    });
   }, [value, syncScroll]);
+  useEffect(
+    () => () => {
+      if (syncFrame.current !== null) cancelAnimationFrame(syncFrame.current);
+      syncFrame.current = null;
+    },
+    [],
+  );
 
   // `syncScroll` otherwise only runs on scroll and on value change, so a
   // window/panel resize that grows or drops the textarea's scrollbar without a
@@ -314,6 +367,7 @@ export const ComposerTokenTextarea: React.FC<ComposerTokenTextareaProps> = ({
         {...inputProps}
         ref={attachRef}
         value={value}
+        defaultValue={KEEP_TEXT_CHILD_EMPTY}
         onChange={onChange}
         onKeyDown={onKeyDown}
         onSelect={onSelectCaret}
@@ -325,15 +379,45 @@ export const ComposerTokenTextarea: React.FC<ComposerTokenTextareaProps> = ({
   }
 
   const segments: React.ReactNode[] = [];
+  let paintDrawn = false;
+  /** One run of plain text, cut at the paint's offsets. With no paint, the plain string as ever. */
+  const pushPlain = (start: number, end: number) => {
+    if (!mirrorPaint) {
+      segments.push(value.slice(start, end));
+      return;
+    }
+    const { at, node, wash } = mirrorPaint;
+    const cuts = [start, end, ...[at, wash?.start, wash?.end].filter((cut): cut is number => cut !== undefined && cut > start && cut < end)].sort((a, b) => a - b);
+    for (let i = 0; i + 1 < cuts.length; i++) {
+      const from = cuts[i]!;
+      const to = cuts[i + 1]!;
+      if (!paintDrawn && at !== undefined && from >= at) {
+        paintDrawn = true;
+        segments.push(<React.Fragment key="mirror-paint">{node}</React.Fragment>);
+      }
+      if (from === to) continue;
+      const text = value.slice(from, to);
+      segments.push(
+        wash && from >= wash.start && to <= wash.end ? (
+          <mark key={`mirror-wash-${from}`} className={wash.className}>
+            {text}
+          </mark>
+        ) : (
+          text
+        ),
+      );
+    }
+  };
   let pos = 0;
   for (const range of ranges) {
-    if (range.start > pos) segments.push(value.slice(pos, range.start));
+    if (range.start > pos) pushPlain(pos, range.start);
     segments.push(
       renderTokenSpan(range, value.slice(range.start, range.end), mentionChips?.tokenClassName),
     );
     pos = range.end;
   }
-  segments.push(value.slice(pos));
+  pushPlain(pos, value.length);
+  if (mirrorPaint?.at !== undefined && !paintDrawn) segments.push(<React.Fragment key="mirror-paint">{mirrorPaint.node}</React.Fragment>);
 
   return (
     <div className="relative">
@@ -362,6 +446,7 @@ export const ComposerTokenTextarea: React.FC<ComposerTokenTextareaProps> = ({
         aria-activedescendant={activeOptionId}
         ref={attachRef}
         value={value}
+        defaultValue={KEEP_TEXT_CHILD_EMPTY}
         onChange={onChange}
         onKeyDown={onKeyDown}
         onSelect={onSelectCaret}

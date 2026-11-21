@@ -39,12 +39,16 @@ export interface DocumentTitleInput {
   /** Archive browsing: the archived plan's title. */
   archiveTitle?: string | null;
   repo?: DocumentTitleRepo | null;
+  /** The caller's `--title` (#2289): the whole tab title and the header's name. */
+  sessionTitle?: string | null;
 }
 
 /** What the desktop header shows beside the logo; `title` rides its tooltip. */
 export interface DocumentHeaderName {
   name: string;
   title?: string;
+  /** `name` is a path: cut from the start when the header runs short, so its last name stays whole. */
+  cutsFromStart?: boolean;
 }
 
 const URL_PATTERN = /^https?:\/\//i;
@@ -167,9 +171,12 @@ function documentName(input: DocumentTitleInput): { name: string; title?: string
  * The browser tab's title, name first: `rollout-plan.md · acme/payments`,
  * `docs.stripe.com/refunds · Plannotator`, `Add partial refunds (plan) · …`.
  * Archive, goal setup, share links and an unnamed plan keep today's title.
+ * A session launched with `--title` shows that text alone, whichever document
+ * is open (#2289).
  */
 export function documentTabTitle(input: DocumentTitleInput): string {
   if (!input.apiMode || input.archiveMode || input.goalSetupMode) return defaultTabTitle(input.repo);
+  if (input.sessionTitle) return input.sessionTitle;
   const named = documentName(input);
   if (named) return `${named.name} · ${named.web ? 'Plannotator' : repoSuffix(input.repo)}`;
   if (!input.annotateMode && input.planHeading) {
@@ -183,10 +190,26 @@ export function documentTabTitle(input: DocumentTitleInput): string {
  * The name beside the logo in the desktop header, or null when it shows
  * none: plan review, archive, goal setup, share links, and a review of
  * several files (its switcher already names the open file).
+ *
+ * A folder session's header names its folder, as a path, whichever file is
+ * open, a document linked from one included: the folder is what the session
+ * is about, and the open file is named by the file list's selected row and the
+ * chip at the top of the document. The tab title still names the open file,
+ * so several tabs stay apart (#2061).
+ *
+ * A session launched with `--title` shows that text instead, so the page and
+ * its tab agree (#2289); the tooltip still names the folder or the open file.
  */
 export function documentHeaderName(input: DocumentTitleInput): DocumentHeaderName | null {
   if (!input.apiMode || !input.annotateMode || input.archiveMode || input.goalSetupMode) return null;
   if (input.bundle) return null;
+  if (input.sessionTitle) {
+    const tooltip = input.annotateSource === 'folder' && input.folderPath ? input.folderPath : documentName(input)?.title;
+    return tooltip ? { name: input.sessionTitle, title: tooltip } : { name: input.sessionTitle };
+  }
+  if (input.annotateSource === 'folder' && input.folderPath) {
+    return { name: input.folderPath, title: input.folderPath, cutsFromStart: true };
+  }
   const named = documentName(input);
   if (!named) return null;
   return named.title ? { name: named.name, title: named.title } : { name: named.name };

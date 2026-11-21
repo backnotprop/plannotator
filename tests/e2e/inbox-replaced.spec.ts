@@ -16,7 +16,7 @@
  * PLANNOTATOR_E2E_PROOF_DIR/replaced).
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -110,7 +110,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   mkdirSync(trap);
   writeFileSync(join(trap, 'tailscale'), "#!/bin/sh\necho 'inbox-replaced.spec: tailscale must not run' >&2\nexit 97\n");
   chmodSync(join(trap, 'tailscale'), 0o755);
-  const env = { PATH: `${trap}:${process.env.PATH ?? ''}`, HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER };
+  const env = { PATH: `${trap}:${process.env.PATH ?? ''}`, HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -219,8 +219,7 @@ test('the guard shows once per replacement: the next Send carries the words only
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
   await expect(page.getByRole('alertdialog')).toHaveCount(0);
   await expect(page.locator('.ib-delivered')).toContainText('Saved for Claude Code');
-  const reply = await claude.waitForReply(first.thread_id, 10);
-  expect(reply.status).toBe('replied');
+  await claude.nextReply(first.thread_id, 10);
   // The Send also skips the questions it left open, each on the reply to its
   // own message; the words ride the last reply. No reply carries the replaced pick.
   const thread = await claude.readThread(first.thread_id);
@@ -240,7 +239,8 @@ test('a whole message withdrawn: the held list says "1 new"; shown, the row leav
   await expect(row).toHaveAttribute('data-section', 'stopped');
   // Looked at once, so the withdrawal is the only news.
   await row.click();
-  await expect(page.locator('section.ib-pane h2.ib-subject')).toHaveText('Which way should the worker go on a Stripe 409?');
+  await expect(page.locator('section.ib-pane h2.ib-subject [data-header-name-words]')).toHaveText('refund-webhooks');
+  await expect(page.locator('section.ib-pane h2.ib-subject [data-header-after]')).toHaveText('Which way should the worker go on a Stripe 409?');
   await page.keyboard.press('Escape');
   await claude.send({
     project_path: world.billing,
@@ -248,7 +248,7 @@ test('a whole message withdrawn: the held list says "1 new"; shown, the row leav
     body: 'You settled this in our session: the jobs queue already retries a 409 with the same idempotency key, so neither question above applies any more.',
     supersedes: [String(second.message_id)],
   });
-  await expect(page.locator('[data-inbox-notice]')).toContainText('1 new in billing-svc');
+  await expect(page.locator('[data-inbox-notice]')).toContainText(/^.+ (asked|replied) in “/);
   await expect(row).toHaveAttribute('data-section', 'stopped');
   await shot('5-withdrawn-held');
   await page.locator('[data-inbox-notice]').click();
@@ -263,8 +263,9 @@ test('a whole message withdrawn: the held list says "1 new"; shown, the row leav
   const tags = pane.locator('[data-replaced-tag]');
   await expect(tags).toHaveText(['No longer applies', 'No longer applies']);
   await expect(pane.locator('[data-replaced-row]').first()).toContainText(/Claude Code said at \d{1,2}:\d{2} [AP]M that this no longer applies\. Read why/);
-  // The subject never followed a withdrawal.
-  await expect(pane.locator('h2.ib-subject')).toHaveText('Which way should the worker go on a Stripe 409?');
+  // The subject never followed a withdrawal (the bar shows the thread's name, the subject after it; its label carries both).
+  await expect(pane.locator('h2.ib-subject')).toHaveAccessibleName('refund-webhooks: Which way should the worker go on a Stripe 409?');
+  await expect(pane.locator('h2.ib-subject [data-header-after]')).toHaveText('Which way should the worker go on a Stripe 409?');
   await pane.locator('[data-replaced-row]').first().scrollIntoViewIfNeeded();
   await shot('7-no-longer-applies');
   expect(world.errors).toEqual([]);

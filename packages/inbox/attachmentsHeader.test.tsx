@@ -8,7 +8,7 @@
  * when nothing changed), a band that stays open or traps Escape, and a file
  * opened from the header going somewhere other than where its tile goes.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -221,9 +221,13 @@ test.skipIf(!hasDom)('the count opens the same tiles in a band under the sender;
   expect(words(band.querySelector('[data-attachment-name="plan.html"]'))).toContain('Changed since it was sent');
   expect(band.querySelector('.ib-attach-h')).toBeNull();
   expect(words(band)).toContain('Also at the end of the message.');
-  // Detail ids stay unique with both sets on the page.
-  const described = [...el.querySelectorAll('[aria-describedby]')].map((t) => t.getAttribute('aria-describedby'));
+  // Detail ids stay unique with both sets on the page: each tile of the band and the foot names its own detail, and
+  // that id is one element. (Only tiles: the list's rows all point at one shared drag help, `ib-thread-drag-help`,
+  // which ARIA allows, an IDREF any number of elements may name, and which is the same words for every row.)
+  const described = [...el.querySelectorAll('[data-attachment-id][aria-describedby]')].map((t) => t.getAttribute('aria-describedby')!);
+  expect(described.length).toBeGreaterThanOrEqual(6); // this message's three, in the band and in the foot
   expect(new Set(described).size).toBe(described.length);
+  for (const id of described) expect(document.querySelectorAll(`[id="${id}"]`).length).toBe(1);
   // The band sits above the message body, under the sender row.
   const msg = article(el, ids.files.first).querySelector('.ib-msg')!;
   expect(msg.firstElementChild).toBe(band);
@@ -263,10 +267,14 @@ test.skipIf(!hasDom)('a file opened from the header opens beside the thread exac
   expect(fromHeader).toContain(`file=${specId}`);
   // Focus goes into the pane, as from a tile.
   await until(() => el.querySelector(`[data-attachment-pane="${specId}"]`)!.contains(document.activeElement), 'focus in the pane');
-  // The band stays open; its tile and the foot's both say "Open beside".
+  // The band stays open; its tile and the foot's are both marked as the open file, and keep their words.
   expect(bandOf(el, ids.files.first)!.hidden).toBe(false);
   const current = [...el.querySelectorAll(`[data-attachment-id="${specId}"][aria-current="true"]`)];
   expect(current).toHaveLength(2);
+  for (const tile of current) {
+    expect(tile.querySelector('.ib-open')!.textContent!.trim()).toBe('Open');
+    expect(tile.getAttribute('aria-label')).toBe('Open spec.md');
+  }
   // Stepping order is the thread's, whichever tile opened it: spec, plan, run, listing.
   expect(words(el.querySelector('[data-attachment-pane]'))).toContain('1 of 4');
 

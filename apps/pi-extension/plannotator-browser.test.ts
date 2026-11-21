@@ -14,10 +14,16 @@ delete process.env.PLANNOTATOR_BROWSER;
 delete process.env.BROWSER;
 
 import { afterAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { setPlanBrowserHtmlForTests } from "./plannotator-browser-runtime.ts";
 import {
 	getActiveBrowserSessionCount,
 	shouldUseLocalPrCheckout,
 	startBrowserDecisionSession,
+	startMarkdownAnnotationSession,
 	startServerWithSelfPreemption,
 	stopAllBrowserDecisionSessions,
 } from "./plannotator-browser.ts";
@@ -111,6 +117,68 @@ describe("browser URL notification", () => {
 		]);
 		// no-browser-guard: sentinel under test (openBrowser returns before any launch)
 		expect(await notificationsFor({ plannotatorBrowser: "none", announcedInTurn: true })).toEqual([]);
+	});
+});
+
+describe("gated annotation client lease (#2553)", () => {
+	type Session = Awaited<ReturnType<typeof startMarkdownAnnotationSession>>;
+	/** Start a real gated local session, run `check` on it, and clean up. */
+	async function withGatedSession(clientLease: boolean | undefined, check: (session: Session) => Promise<void>): Promise<void> {
+		const keys = ["PLANNOTATOR_REMOTE", "PLANNOTATOR_PORT", "PLANNOTATOR_DATA_DIR", "PLANNOTATOR_BROWSER"] as const;
+		const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+		const dir = mkdtempSync(join(tmpdir(), "plannotator-pi-lease-"));
+		setPlanBrowserHtmlForTests("<!doctype html><title>Annotate</title>");
+		process.env.PLANNOTATOR_DATA_DIR = dir;
+		process.env.PLANNOTATOR_REMOTE = "0";
+		process.env.PLANNOTATOR_BROWSER = NO_BROWSER;
+		delete process.env.PLANNOTATOR_PORT;
+		const ctx = { cwd: dir, hasUI: true, ui: { notify() {} } } as ExtensionContext;
+		let session: Session | undefined;
+		try {
+			const path = join(dir, "notes.md");
+			session = clientLease === undefined
+				// The event bus's argument list (plannotator-events.ts).
+				? await startMarkdownAnnotationSession(ctx, path, "# Notes", "annotate", undefined, undefined, undefined, true)
+				: await startMarkdownAnnotationSession(ctx, path, "# Notes", "annotate", undefined, undefined, undefined, true,
+					undefined, undefined, undefined, undefined, undefined, undefined, undefined, true, clientLease);
+			await check(session);
+		} finally {
+			session?.stop();
+			setPlanBrowserHtmlForTests(undefined);
+			for (const key of keys) {
+				if (saved[key] === undefined) delete process.env[key];
+				else process.env[key] = saved[key];
+			}
+			rmSync(dir, { recursive: true, force: true });
+		}
+	}
+
+	// The tool and the slash commands return at once: a closed tab must not
+	// settle the review as dismissed, so it waits for an explicit decision.
+	test("off for the tool and commands: no lease route, and the review waits for an explicit decision", async () => {
+		await withGatedSession(false, async (session) => {
+			const plan = await (await fetch(`${session.url}/api/plan`)).json();
+			expect(plan.gate).toBe(true);
+			expect(plan.clientLease).toEqual({ enabled: false });
+			const lease = await fetch(`${session.url}/api/annotate/client-lease`);
+			expect(lease.status).toBe(404);
+			await lease.body?.cancel();
+			expect(session.hostControl?.status().decided).toBe(false);
+			const decision = session.waitForDecision();
+			expect((await fetch(`${session.url}/api/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status).toBe(200);
+			expect(await decision).toMatchObject({ approved: true });
+		});
+	});
+
+	// An event-bus caller (and openMarkdownAnnotation) awaits the decision, so
+	// a closed tab must still settle it after 30 s (#1143) instead of hanging
+	// the caller until Pi exits.
+	test("kept for callers that await the decision (the event bus's arguments)", async () => {
+		await withGatedSession(undefined, async (session) => {
+			const plan = await (await fetch(`${session.url}/api/plan`)).json();
+			expect(plan.gate).toBe(true);
+			expect(plan.clientLease?.enabled).toBe(true);
+		});
 	});
 });
 

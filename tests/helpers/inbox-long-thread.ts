@@ -22,7 +22,7 @@ const PROSE =
   "I went through the retry worker again. The queue drains in order, the dead-letter path is wired, and the metrics land in the dashboard. " +
   "Two things still need your call before I go on; everything else in this step is done and pushed to the branch.";
 
-export const LONG_THREAD_FIRST_CHOICE = "Exponential, capped at 30 s (recommended)";
+export const LONG_THREAD_FIRST_CHOICE = "Exponential, capped at 30 s";
 
 function body(round: number): string {
   return [
@@ -35,6 +35,8 @@ function body(round: number): string {
     "",
     `- [ ] ${LONG_THREAD_FIRST_CHOICE}`,
     "- [ ] Fixed 5 s",
+    "",
+    `Recommended: ${LONG_THREAD_FIRST_CHOICE}`,
     ":::",
     "",
     ":::question",

@@ -458,3 +458,15 @@ describe('SkillReferenceMenu adaptive placement', () => {
     },
   );
 });
+
+describe('computeMenuPlacement with a reading that is not a number', () => {
+  // A host's boundary or cap read mid-rotation can be NaN; NaN never equals itself, so a NaN height
+  // made the equality-guarded setPlacement re-render forever (React error 185: the Inbox went blank).
+  test.skipIf(!hasDom)('always yields a finite height', async () => {
+    const { computeMenuPlacement } = await import('./SkillReferenceMenu');
+    const nanBottom = computeMenuPlacement({ top: 300, bottom: 360 }, 2000, 2, Number.NaN, { boundaryTop: 0 });
+    expect(Number.isFinite(nanBottom.maxListHeight)).toBe(true);
+    const nanCap = computeMenuPlacement({ top: 300, bottom: 360 }, 2000, 2, 800, { boundaryTop: 0, maxListHeight: Number.NaN });
+    expect(Number.isFinite(nanCap.maxListHeight)).toBe(true);
+  });
+});

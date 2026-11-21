@@ -10,35 +10,43 @@ export function quoteHookWord(value: string): string {
 
 /**
  * The shell gate in front of the hook. T3 Code runs Claude through the Agent
- * SDK, which sets CLAUDE_CODE_ENTRYPOINT to `sdk-ts` (`sdk-py`, `sdk-cli`, …)
- * for the Claude it starts; an interactive `claude` reports `cli`. The hook
- * runs on every Bash call of every Claude session that loads this settings
- * file, so outside an SDK session the shell answers on its own (no output, no
- * decision) and the Plannotator binary never starts.
+ * SDK and names itself in CLAUDE_CODE_ENTRYPOINT (`t3-code`); other SDK apps
+ * report `sdk-ts` (`sdk-py`, `sdk-cli`, …) and an interactive `claude` `cli`.
+ * The hook runs on every Bash call of every Claude session that loads this
+ * settings file, so outside an SDK session the shell answers on its own (no
+ * output, no decision) and the Plannotator binary never starts.
+ *
+ * One list, as shell `case` patterns, for the shell gate and
+ * `isAgentSdkEntrypoint` (the binary's own check), so the two cannot drift.
+ * Each entry is an exact name or a name with one trailing `*` (a prefix):
+ * `isAgentSdkEntrypoint` reads no other glob syntax.
  */
-const T3_HOOK_GATE_OPEN = 'case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) ';
+const T3_ENTRYPOINT_PATTERNS = ["sdk*", "t3-code"] as const;
+const T3_HOOK_GATE_OPEN = `case "$CLAUDE_CODE_ENTRYPOINT" in ${T3_ENTRYPOINT_PATTERNS.join("|")}) `;
+/** The gate earlier builds wrote, before T3 named its entrypoint: still read, so reinstall and uninstall clean it up. */
+const T3_HOOK_GATE_OPEN_SDK_ONLY = 'case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) ';
 const T3_HOOK_GATE_CLOSE = ";; esac";
 
 export function t3HookCommand(executable: string, dataDir: string): string {
   return `${T3_HOOK_GATE_OPEN}PLANNOTATOR_DATA_DIR=${quoteHookWord(dataDir)} ${quoteHookWord(executable)} t3-hook${T3_HOOK_GATE_CLOSE}`;
 }
 
-/** Whether a Claude session can be T3's: only Agent SDK sessions are. */
+/** Whether a Claude session can be T3's: only Agent SDK sessions (T3's own `t3-code` included) are. */
 export function isAgentSdkEntrypoint(value: string | undefined): boolean {
-  return typeof value === "string" && value.startsWith("sdk");
+  return typeof value === "string"
+    && T3_ENTRYPOINT_PATTERNS.some((pattern) => pattern.endsWith("*") ? value.startsWith(pattern.slice(0, -1)) : value === pattern);
 }
 
 /**
  * The executable a T3 hook command runs, or undefined when the command is not
- * one. Accepts the gated form `t3HookCommand` writes and the ungated form
- * earlier builds of this integration wrote, so reinstall and uninstall clean
- * up either.
+ * one. Accepts the gated form `t3HookCommand` writes, the SDK-only gate and
+ * the ungated form earlier builds of this integration wrote, so reinstall and
+ * uninstall clean up any of them.
  */
 export function parseT3HookCommand(command: string): { executable: string } | undefined {
   let inner = command.trim();
-  if (inner.startsWith(T3_HOOK_GATE_OPEN) && inner.endsWith(T3_HOOK_GATE_CLOSE)) {
-    inner = inner.slice(T3_HOOK_GATE_OPEN.length, -T3_HOOK_GATE_CLOSE.length);
-  }
+  const gate = [T3_HOOK_GATE_OPEN, T3_HOOK_GATE_OPEN_SDK_ONLY].find((open) => inner.startsWith(open) && inner.endsWith(T3_HOOK_GATE_CLOSE));
+  if (gate) inner = inner.slice(gate.length, -T3_HOOK_GATE_CLOSE.length);
   const words = simpleShellCommandWords(inner);
   if (!words) return;
   if (words[0]?.startsWith("PLANNOTATOR_DATA_DIR=")) words.shift();

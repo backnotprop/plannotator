@@ -3,9 +3,11 @@
  *
  * - `GET /api/inbox/search`: read-only. `q` (trimmed, 200 characters at
  *   most, 8 terms), `project=prj_…`, `status=waiting|new|sent|quiet|archived`,
- *   `from=agent|me`, `group=` with `offset=` for "Show all", `limit` (per
+ *   `from=agent|me`, `tag=ini_…` (repeatable, at most 50: threads in any of
+ *   those tags; an id this Inbox has no tag for matches nothing), `group=` with `offset=` for "Show all", `limit` (per
  *   group, at most 50), `current=prj_…` (the project open in the list: a tie
- *   boost, never a filter). The index (packages/shared/inbox/search.ts) is
+ *   boost, never a filter), `sort=best|newest` (best match, the default;
+ *   newest: each group by its latest message first). The index (packages/shared/inbox/search.ts) is
  *   built on the first call, in slices that yield, so every other route keeps
  *   answering; a call that finds it still building waits a moment, then
  *   answers `indexing: true` with no groups, and the window asks again. An
@@ -30,17 +32,21 @@ import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
 import {
   INBOX_SEARCH_GROUPS,
   INBOX_SEARCH_LIMIT_MAX,
+  INBOX_SEARCH_SORTS,
   INBOX_SEARCH_STATUSES,
   InboxSearchIndex,
   type InboxSearchAnswer,
   type InboxSearchFrom,
   type InboxSearchGroupId,
   type InboxSearchIndexOptions,
+  type InboxSearchSort,
   type InboxSearchStatus,
 } from "@plannotator/shared/inbox/search";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 
 export const INBOX_SEARCH_PATH = "/api/inbox/search";
+/** More tags than a person keeps; the window sends one id per picked tag. */
+const INBOX_SEARCH_TAGS_MAX = 200;
 export const INBOX_SEARCH_RECENT_PATH = "/api/inbox/search/recent";
 /** Recent searches kept. */
 export const INBOX_RECENT_SEARCHES_MAX = 6;
@@ -123,6 +129,9 @@ export function createInboxSearchRoutes(input: { store: InboxStore; serverSessio
     const group = oneOf<InboxSearchGroupId>(url, "group", INBOX_SEARCH_GROUPS);
     const offset = count(url, "offset", 0, 1_000_000) ?? 0;
     const limit = count(url, "limit", 1, INBOX_SEARCH_LIMIT_MAX);
+    const sort = oneOf<InboxSearchSort>(url, "sort", INBOX_SEARCH_SORTS);
+    const tags = [...new Set(url.searchParams.getAll("tag").filter(Boolean))];
+    if (tags.length > INBOX_SEARCH_TAGS_MAX || tags.some((tag) => !isInboxId("ini", tag))) throw new InboxError("validation_error", `tag: ini_ ids, at most ${INBOX_SEARCH_TAGS_MAX}.`, { field: "tag" });
     const recentSearches = (answer: InboxSearchAnswer) => (answer.recent ? { recent_searches: readRecentSearches(store.dir) } : {});
     if (!index.ready()) {
       // The build runs in slices; give a short query a chance to land on a finished index.
@@ -133,7 +142,7 @@ export function createInboxSearchRoutes(input: { store: InboxStore; serverSessio
         return json({ serverSession, ...answer });
       }
     }
-    const answer = index.search({ q, project, status, from, group, offset, limit, current });
+    const answer = index.search({ q, project, status, from, tags, group, offset, limit, current, sort });
     return json({ serverSession, ...answer, ...recentSearches(answer) });
   };
 

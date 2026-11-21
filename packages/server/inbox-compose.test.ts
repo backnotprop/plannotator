@@ -7,7 +7,8 @@
  * attachments. Every test uses its own temp data dir; the connections are
  * plain HTTP calls with the registry's token, never a real agent.
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
+import * as realFs from "node:fs";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,6 +25,7 @@ import {
 import { inboxId } from "@plannotator/core/inbox-types";
 import { INBOX_WAKE_INSTRUCTION, inboxContinuesLine } from "@plannotator/shared/inbox/connection";
 import { InboxAgentConnection, InboxWake } from "@plannotator/shared/inbox/agent-link";
+import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 import { startInboxServer, type InboxServer } from "./inbox";
 import type { InboxGitRunner } from "./inbox-project-root";
 
@@ -61,7 +63,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-async function setup(projectRootGit?: InboxGitRunner) {
+async function setup(projectRootGit?: InboxGitRunner, sessionsNow?: () => number) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-compose-")));
   roots.push(root);
   const ledger = join(root, "ledger");
@@ -69,7 +71,7 @@ async function setup(projectRootGit?: InboxGitRunner) {
   mkdirSync(ledger, { recursive: true });
   mkdirSync(billing, { recursive: true });
   const dataDir = join(root, "data");
-  const server = await startInboxServer({ dataDir, ...(projectRootGit ? { projectRootGit } : {}) });
+  const server = await startInboxServer({ dataDir, ...(projectRootGit ? { projectRootGit } : {}), ...(sessionsNow ? { sessionsNow } : {}) });
   servers.push(server);
   const client = new Client({ name: "inbox-compose-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -210,9 +212,11 @@ describe("a thread the person starts", () => {
   });
 
   test("Send to another session moves a message no session took yet; once delivered it stays", async () => {
-    const { server, billing } = await setup();
+    let now = 1_000_000;
+    const { server, billing } = await setup(undefined, () => now);
     await poll(server, "ses-a", "claude-code", billing);
     const sent = (await (await post(server, "/api/inbox/messages", { to: { session: "ses-a" }, body: "Rename Quiet?", idempotency_key: "c1" })).json()) as { message: InboxMessage };
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
     await poll(server, "ses-b", "pi", billing);
     const moved = await post(server, `/api/inbox/messages/${sent.message.id}/to`, { to: { host: "pi", session: "ses-b" } });
     expect(moved.status).toBe(200);
@@ -228,7 +232,7 @@ describe("a thread the person starts", () => {
     expect(((await late.json()) as { code: string }).code).toBe("already_delivered");
   });
 
-  test("more words before the agent answered reach only its session: another agent's read_thread or wait_for_reply settles nothing", async () => {
+  test("more words before the agent answered reach only its session: another agent's read_thread settles nothing", async () => {
     const { server, client, billing } = await setup();
     await poll(server, "ses-a", "claude-code", billing);
     const sent = (await (await post(server, "/api/inbox/messages", { to: { session: "ses-a" }, body: "Add a retry budget.", idempotency_key: "c1" })).json()) as { message: InboxMessage };
@@ -237,23 +241,15 @@ describe("a thread the person starts", () => {
     const follow = ((await more.json()) as { reply: InboxMessage }).reply;
     expect(follow.to).toMatchObject({ session: "ses-a" });
 
-    // An unrelated agent reads the thread and waits on it.
+    // An unrelated agent reads the thread.
     await client.callTool({ name: "read_thread", arguments: { thread_id: sent.message.thread_id, agent_session: "ses-x" } });
-    const waited = (await client.callTool({ name: "wait_for_reply", arguments: { thread_id: sent.message.thread_id, agent_session: "ses-x", timeout_seconds: 1 } })) as {
-      structuredContent: { status: string };
-    };
-    expect(waited.structuredContent.status).toBe("waiting");
 
     expect((await poll(server, "ses-a", "claude-code", billing)).map((c) => c.id)).toEqual([sent.message.id, follow.id]);
-    // Its own wait_for_reply gets the words (and settles them).
-    const mine = (await client.callTool({ name: "wait_for_reply", arguments: { thread_id: sent.message.thread_id, agent_session: "ses-a", timeout_seconds: 1 } })) as {
-      structuredContent: { status: string; reply: { message_id: string } };
-    };
-    expect(mine.structuredContent).toMatchObject({ status: "replied" });
   });
 
   test("more words moved to a session that has seen nothing of the thread wake it with the line to read the thread first", async () => {
-    const { server, billing } = await setup();
+    let now = 1_000_000;
+    const { server, billing } = await setup(undefined, () => now);
     await poll(server, "ses-a", "claude-code", billing);
     const sent = (await (await post(server, "/api/inbox/messages", { to: { session: "ses-a" }, body: "Add a retry budget.", idempotency_key: "c1" })).json()) as { message: InboxMessage };
     await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-a", host: "claude-code", type: "delivered", id: sent.message.id });
@@ -263,6 +259,7 @@ describe("a thread the person starts", () => {
     expect(own).toMatchObject({ type: "reply", id: follow.id });
     expect(own!.continues_thread).toBeUndefined();
 
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
     await poll(server, "ses-b", "pi", billing);
     expect((await post(server, `/api/inbox/messages/${follow.id}/to`, { to: { host: "pi", session: "ses-b" } })).status).toBe(200);
     const [moved] = await poll(server, "ses-b", "pi", billing);
@@ -278,7 +275,8 @@ describe("a thread the person starts", () => {
   });
 
   test("the root and a follow-up for the same session in one poll: no 'another session' line, also after both are moved there", async () => {
-    const { server, billing } = await setup();
+    let now = 1_000_000;
+    const { server, billing } = await setup(undefined, () => now);
     await poll(server, "ses-a", "claude-code", billing);
     const sent = (await (await post(server, "/api/inbox/messages", { to: { session: "ses-a" }, body: "Add a retry budget.", idempotency_key: "c1" })).json()) as { message: InboxMessage };
     const follow = ((await (await post(server, `/api/inbox/messages/${sent.message.id}/reply`, { words: "And log each retry.", idempotency_key: "r1" })).json()) as { reply: InboxMessage }).reply;
@@ -287,6 +285,7 @@ describe("a thread the person starts", () => {
     expect(both[1]!.continues_thread).toBeUndefined();
 
     // Both moved to B before anyone took them: B gets the root first, so the follow-up needs no line either.
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
     await poll(server, "ses-b", "pi", billing);
     for (const id of [sent.message.id, follow.id]) {
       expect((await post(server, `/api/inbox/messages/${id}/to`, { to: { host: "pi", session: "ses-b" } })).status).toBe(200);
@@ -364,6 +363,88 @@ describe("worktrees and a slow git (#1919)", () => {
 });
 
 describe("uploads", () => {
+  test("reuse: a file the Inbox holds becomes a pending upload with no new bytes, and goes out as an ordinary attachment", async () => {
+    const { server, dataDir, billing } = await setup();
+    const blobs = () => readdirSync(join(dataDir, "inbox", "blobs")).filter((name) => /^[0-9a-f]{64}$/.test(name));
+    await poll(server, "ses-pi", "pi", billing);
+    const first = ((await (await upload(server, "ref02.png", PNG)).json()) as { upload: InboxUpload }).upload;
+    const started = (await (await post(server, "/api/inbox/messages", { to: { session: "ses-pi" }, body: "See this.", idempotency_key: "r0", uploads: [first.upload_id] })).json()) as { thread_id: string; message: InboxMessage };
+    const source = started.message.attachments![0]!;
+    const before = blobs();
+
+    const answer = await post(server, "/api/inbox/uploads/reuse", { attachment_id: source.id, version: "sent" });
+    expect(answer.status).toBe(200);
+    const reused = ((await answer.json()) as { upload: InboxUpload }).upload;
+    expect([reused.name, reused.kind, reused.sha256, reused.width, reused.height]).toEqual([source.name, source.kind, source.sent_sha256, source.width, source.height]);
+    expect(reused.upload_id).not.toBe(first.upload_id);
+    expect(blobs()).toEqual(before);
+
+    const sent = (await (await post(server, "/api/inbox/messages", { to: { session: "ses-pi" }, body: "Again.", idempotency_key: "r1", uploads: [reused.upload_id] })).json()) as { message: InboxMessage };
+    const made = sent.message.attachments![0]!;
+    expect(made.id).not.toBe(source.id);
+    expect(made.path).not.toBe(source.path);
+    expect(readFileSync(made.path).equals(Buffer.from(PNG))).toBe(true);
+    expect(blobs()).toEqual(before);
+    // The agent's line is the one any upload gets, with no word of where it came from.
+    const commands = await poll(server, "ses-pi", "pi", billing);
+    expect(commands.find((command) => command.id === sent.message.id)!.body).toBe(`Again.\n\nAttached: ref02.png (${made.path})`);
+  });
+
+  test("two windows send one draft's files under two keys while they copy: one thread has them, the other is told", async () => {
+    const { server, billing } = await setup();
+    await poll(server, "ses-pi", "pi", billing);
+    const file = ((await (await upload(server, "ref02.png", PNG)).json()) as { upload: InboxUpload }).upload;
+    const send = (key: string) => post(server, "/api/inbox/messages", { to: { session: "ses-pi" }, body: "See this.", idempotency_key: key, uploads: [file.upload_id] });
+    const answers = await Promise.all([send("window-a"), send("window-b")]);
+    expect(answers.map((answer) => answer.status).sort()).toEqual([200, 404]);
+    expect(readdirSync(join(server.store.dir, "uploads")).filter((name) => name !== "pending")).toHaveLength(1);
+  });
+
+  test("the same Send twice at once with one upload, while it copies: one thread and one set of files, both answered", async () => {
+    const { server, billing } = await setup();
+    await poll(server, "ses-pi", "pi", billing);
+    const file = ((await (await upload(server, "ref02.png", PNG)).json()) as { upload: InboxUpload }).upload;
+    const send = () => post(server, "/api/inbox/messages", { to: { session: "ses-pi" }, body: "See this.", idempotency_key: "twice", uploads: [file.upload_id] });
+    const answers = await Promise.all([send(), send()]);
+    expect(answers.map((answer) => answer.status)).toEqual([200, 200]);
+    expect(readdirSync(join(server.store.dir, "uploads")).filter((name) => name !== "pending")).toHaveLength(1);
+  });
+
+  test("a full disk is answered 507 in words, when adding a file and when saving a draft", async () => {
+    const { server, billing } = await setup();
+    await poll(server, "ses-pi", "pi", billing);
+    const first = ((await (await upload(server, "ref02.png", PNG)).json()) as { upload: InboxUpload }).upload;
+    const started = (await (await post(server, "/api/inbox/messages", { to: { session: "ses-pi" }, body: "See this.", idempotency_key: "f0", uploads: [first.upload_id] })).json()) as { message: InboxMessage };
+    const trueWrite = realFs.writeFileSync;
+    const fs = { ...realFs };
+    mock.module("node:fs", () => ({
+      ...fs,
+      writeFileSync: (path: string, ...rest: unknown[]) => {
+        if (/\/(pending|drafts)\//.test(String(path))) throw Object.assign(new Error("no room"), { code: "ENOSPC" });
+        return (trueWrite as (...args: unknown[]) => unknown)(path, ...rest);
+      },
+    }));
+    try {
+      const added = await post(server, "/api/inbox/uploads/reuse", { attachment_id: started.message.attachments![0]!.id, version: "sent" });
+      expect([added.status, ((await added.json()) as { error: string }).error]).toEqual([507, "The disk is full, so the file could not be added. Free some space and try again."]);
+      const draft = await post(server, `/api/inbox/drafts/${inboxId("drf")}`, { body: "A thought.", to: null, project: { id: null, root: billing, name: "billing" }, files: [], base: null });
+      expect([draft.status, ((await draft.json()) as { error: string }).error]).toEqual([507, "The disk is full, so that could not be saved. Free some space and try again."]);
+    } finally {
+      mock.module("node:fs", () => fs);
+    }
+  });
+
+  test("reuse refuses a stale tab, another site, an unknown or malformed id, and a GET", async () => {
+    const { server } = await setup();
+    const ask = (body: Record<string, unknown>, headers: Record<string, string> = {}) => post(server, "/api/inbox/uploads/reuse", body, headers);
+    const unknown = await ask({ attachment_id: inboxId("att"), version: "sent" });
+    expect([unknown.status, ((await unknown.json()) as { code: string }).code]).toEqual([404, "upload_not_found"]);
+    expect((await ask({ attachment_id: { nope: 1 }, version: "sent" })).status).toBe(404);
+    expect((await ask({ attachment_id: inboxId("att"), serverSession: "another-run" })).status).toBe(409);
+    expect((await ask({ attachment_id: inboxId("att") }, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect((await fetch(`${base(server)}/api/inbox/uploads/reuse`)).status).toBe(405);
+  });
+
   test("become ordinary attachments: a real read-only file with its name, viewable, listed unchanged, named in the wake", async () => {
     const { server, billing, dataDir } = await setup();
     const text = await upload(server, "notes.md", "# Notes\n\nThe export.");
@@ -399,6 +480,30 @@ describe("uploads", () => {
 
     const [command] = await poll(server, "ses-pi", "pi", billing);
     expect(command!.body).toBe(`See the files.\n\nAttached: notes.md (${attachments[0]!.path})\nAttached: shot.png (${attachments[1]!.path})`);
+  });
+
+  test("words or files, as a reply: a long paste attached alone starts a thread; neither is refused and writes nothing", async () => {
+    const { server, billing } = await setup();
+    await poll(server, "ses-pi", "pi", billing);
+    const before = server.store.cursor();
+    const empty = await post(server, "/api/inbox/messages", { to: { session: "ses-pi" }, body: "  ", idempotency_key: "c0" });
+    expect(empty.status).toBe(422);
+    expect(((await empty.json()) as { code: string }).code).toBe("validation_error");
+    expect(server.store.cursor()).toBe(before);
+
+    const log = "2026-11-01T21:10:04Z retry 3 charged twice\n".repeat(900);
+    const pasted = ((await (await upload(server, "pasted-text-2026-11-01-2256.txt", log)).json()) as { upload: InboxUpload }).upload;
+    const sent = await post(server, "/api/inbox/messages", { to: { session: "ses-pi" }, body: "", idempotency_key: "c1", uploads: [pasted.upload_id] });
+    expect(sent.status).toBe(200);
+    const { message } = (await sent.json()) as { message: InboxMessage };
+    expect(message.body).toBe("");
+    expect(message.attachments!.map((a) => a.name)).toEqual(["pasted-text-2026-11-01-2256.txt"]);
+    expect(readFileSync(message.attachments![0]!.path, "utf8")).toBe(log);
+    // A thread with no words is named by its file.
+    expect(message.subject).toBe("pasted-text-2026-11-01-2256.txt");
+    // The agent's turn is the usual Attached line, and no words before it.
+    const [command] = await poll(server, "ses-pi", "pi", billing);
+    expect(command!.body).toBe(`Attached: pasted-text-2026-11-01-2256.txt (${message.attachments![0]!.path})`);
   });
 
   test("the dotenv family, path separators and control characters are refused, and nothing is kept", async () => {
@@ -453,6 +558,63 @@ describe("drafts", () => {
     expect(after.map((d) => d.id)).toEqual([ended]);
     expect(((await (await post(server, `/api/inbox/drafts/${ended}/delete`, {})).json()) as { deleted: boolean }).deleted).toBe(true);
     expect(((await (await fetch(`${base(server)}/api/inbox/drafts`)).json()) as { drafts: InboxDraft[] }).drafts).toEqual([]);
+  });
+
+  test("a draft saved, deleted or sent tells every window's stream (event: drafts, compose); a refused save, a delete of nothing and the phone's stream hear nothing", async () => {
+    const { server, billing } = await setup();
+    /** The `event: drafts` frames a stream has carried so far. */
+    const listen = async (query: string) => {
+      const response = await fetch(`${base(server)}/api/inbox/events${query}`);
+      const reader = response.body!.getReader();
+      let text = "";
+      let open = true;
+      void (async () => {
+        while (open) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          text += new TextDecoder().decode(value);
+        }
+      })().catch(() => {});
+      return {
+        frames: () => text.split("\n\n").filter((frame) => frame.includes("event: drafts")).map((frame) => JSON.parse(frame.split("data: ")[1]!) as unknown),
+        close: () => {
+          open = false;
+          void reader.cancel().catch(() => {});
+        },
+      };
+    };
+    const windowA = await listen("?window=window-aaaa");
+    const phone = await listen("");
+    const settle = () => new Promise((done) => setTimeout(done, 100));
+    await settle();
+    const compose = { compose: true };
+
+    const id = inboxId("drf");
+    const created = (await (await post(server, `/api/inbox/drafts/${id}`, { body: "First words", to: null, base: null })).json()) as { draft: InboxDraft };
+    await settle();
+    expect(windowA.frames()).toEqual([compose]);
+    // A stale save is refused and changes nothing; neither does deleting a draft that is not there.
+    expect((await post(server, `/api/inbox/drafts/${id}`, { body: "other tab", base: null })).status).toBe(409);
+    expect(((await (await post(server, `/api/inbox/drafts/${inboxId("drf")}/delete`, {})).json()) as { deleted: boolean }).deleted).toBe(false);
+    await settle();
+    expect(windowA.frames()).toEqual([compose]);
+
+    expect(((await (await post(server, `/api/inbox/drafts/${id}/delete`, {})).json()) as { deleted: boolean }).deleted).toBe(true);
+    await settle();
+    expect(windowA.frames()).toEqual([compose, compose]);
+
+    // Sent from a draft: the draft is gone, and the windows hear it (the new thread's record says nothing of the draft).
+    await poll(server, "ses-pi", "pi", billing);
+    const again = inboxId("drf");
+    await post(server, `/api/inbox/drafts/${again}`, { body: "Send me", to: { host: "pi", session: "ses-pi" }, base: null });
+    expect((await post(server, "/api/inbox/messages", { to: { session: "ses-pi" }, body: "Send me", idempotency_key: "c-drafts", draft_id: again })).status).toBe(200);
+    await settle();
+    expect(windowA.frames()).toEqual([compose, compose, compose, compose]);
+    expect(created.draft.id).toBe(id);
+    // The phone's door (no window id) never carries drafts.
+    expect(phone.frames()).toEqual([]);
+    windowA.close();
+    phone.close();
   });
 
   test("a draft naming an upload that is gone is refused", async () => {

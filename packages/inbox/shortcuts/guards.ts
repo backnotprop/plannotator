@@ -5,6 +5,19 @@
  * focused component's first). The registry already refuses a binding whose
  * modifiers differ from the key's (`E` never matches ⌘E or ⌥E).
  */
+import { isTouchPhone } from '../phone';
+import { selectionToolbarShowing, STRANGERS_MARKUP } from '../selectionToolbar';
+import { shortcutPrefs } from './prefs';
+
+/**
+ * Whether single keys (letters, J / K and Shift+J / Shift+K, `[` `]`, `/`, G) act at all: Single-key shortcuts on,
+ * and not a real touch phone (`isTouchPhone`: the phone layout with a coarse pointer and no hover). A desktop window
+ * narrower than 768 px draws the phone layout (no keycaps, no map button) but keeps every key, as on main; `?`
+ * works on a touch phone too, for a hardware keyboard (design §5.4; `bareKeyAllowed`'s `onTouchPhone`).
+ */
+export function singleKeysLive(prefs: { singleKeys: boolean } = shortcutPrefs(), { onTouchPhone = false } = {}): boolean {
+  return prefs.singleKeys && (onTouchPhone || !isTouchPhone());
+}
 
 /**
  * The element the key came from. `composedPath()[0]` reaches into shadow
@@ -14,6 +27,20 @@ export function keyTarget(event: Event): Element | null {
   const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
   const first = path[0] ?? event.target;
   return first instanceof Element ? first : event.target instanceof Element ? event.target : null;
+}
+
+/**
+ * The element the person aimed a key at on purpose: one with keyboard focus
+ * (`:focus-visible`). A row that holds focus because it was clicked, or because
+ * the window put focus there after a mouse action, is not.
+ */
+export function keyboardFocused(el: Element): boolean {
+  try {
+    return el.matches(':focus-visible');
+  } catch {
+    // A DOM without the selector (tests): focus counts.
+    return true;
+  }
 }
 
 /** Where focus is a place to type: a bare key, `[` `]` and the arrows are text there. */
@@ -44,16 +71,63 @@ export function hasCommandModifier(event: KeyboardEvent): boolean {
 }
 
 /**
+ * The image annotator's stage on its overlay. A Markdown body's raw HTML keeps `data-*` but never a class
+ * (`sanitizeHtml`), so a message cannot draw one to switch these keys off; a diagram's label can, so a PR description
+ * is ruled out by place (`STRANGERS_MARKUP`).
+ */
+export const ANNOTATOR_STAGE = '.pn-visible-viewport-overlay [data-pn-image-annotator-stage]';
+
+/**
  * A modal over the window keeps its keys: the Inbox's dialogs (update, sound,
  * agent note, search, compose: `<dialog open>`) and the image annotator's
  * stage (Mark up).
  */
 export function modalOpen(doc: Document | null = typeof document === 'undefined' ? null : document): boolean {
   if (!doc) return false;
-  return doc.querySelector('dialog[open], [data-pn-image-annotator-stage]') !== null;
+  for (const el of doc.querySelectorAll(`dialog[open], ${ANNOTATOR_STAGE}`)) {
+    if (!el.closest(STRANGERS_MARKUP)) return true;
+  }
+  return false;
 }
 
-/** The key came from inside a dialog or a popover layer (a composer, the image annotator): it is theirs. */
+/** The key came from inside a dialog or a popover layer (a composer, the image annotator): it is theirs. A body's raw HTML is no layer. */
 export function inOverlay(target: Element | null): boolean {
-  return !!target?.closest('[role="dialog"], [role="alertdialog"], [data-popover-layer], [data-pn-image-annotator-stage]');
+  if (target?.closest(STRANGERS_MARKUP)) return false;
+  if (target?.closest(`[role="dialog"], [role="alertdialog"], ${ANNOTATOR_STAGE}`)) return true;
+  return !!target?.closest('[data-popover-layer]') && !target.closest('.html-block');
+}
+
+/**
+ * A binding that is one plain key (or a sequence of them): a letter, a digit
+ * or a punctuation key, no ⌘ / Ctrl / Alt. These are the keys Single-key
+ * shortcuts turns off (WCAG 2.1.4): Escape, Enter, Tab, the arrows, Home / End
+ * and every chord keep working.
+ */
+export function isBareBinding(binding: string): boolean {
+  const tokens = binding.trim().split(/[+\s]+/).filter(Boolean);
+  if (tokens.length === 0 || tokens.includes('Mod') || tokens.includes('Alt')) return false;
+  return tokens.filter((token) => token !== 'Shift').every((token) => token.length === 1);
+}
+
+/**
+ * Whether a single key may act now, for every Inbox scope: never while typing
+ * (a field, a contenteditable), while an input method composes, on a held
+ * key's repeat, with ⌘ / Ctrl / Alt, from inside a dialog, menu, listbox or a
+ * file's frame, under a modal, while words selected in a message show their
+ * toolbar (a printable key starts a comment there), after something else used
+ * the key, when Single-key shortcuts is off, or on a touch phone (unless
+ * `onTouchPhone`: `?`). A scope adds its own rules
+ * (the tour's replay, a guided review) on top.
+ */
+export function bareKeyAllowed(event: KeyboardEvent, prefs: { singleKeys: boolean } = shortcutPrefs(), { onTouchPhone = false } = {}): boolean {
+  if (!singleKeysLive(prefs, { onTouchPhone })) return false;
+  if (event.defaultPrevented || isRepeatKey(event) || isComposingKey(event) || hasCommandModifier(event)) return false;
+  const target = keyTarget(event);
+  if (target) {
+    if (isEditableTarget(target) || inOverlay(target)) return false;
+    if (target.closest('[role="menu"], [role="listbox"], iframe')) return false;
+  }
+  if (modalOpen()) return false;
+  if (typeof document !== 'undefined' && selectionToolbarShowing(document)) return false;
+  return true;
 }

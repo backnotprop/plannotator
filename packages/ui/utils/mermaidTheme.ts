@@ -70,6 +70,7 @@
  */
 import type { Mermaid, MermaidConfig } from 'mermaid';
 import { MERMAID_CONFIG } from './mermaid';
+import { readThemeTokenValues } from './themeTokens';
 import {
   compositeOver,
   contrastRatio,
@@ -183,57 +184,8 @@ const CANVAS_MUTED_ALPHA = 0.3;
  * is the signal to keep the static config.
  */
 export function readThemeTokens(el?: Element | null): MermaidThemeTokens | undefined {
-  if (typeof document === 'undefined' || typeof getComputedStyle !== 'function') return undefined;
-  const target = el ?? document.documentElement;
-  if (!target) return undefined;
-  let computed: CSSStyleDeclaration;
-  try {
-    computed = getComputedStyle(target);
-  } catch {
-    return undefined;
-  }
-  const tokens: MermaidThemeTokens = {};
-  let probe: HTMLElement | null = null;
-  try {
-    for (const name of MERMAID_THEME_TOKEN_NAMES) {
-      let raw = '';
-      try {
-        raw = computed.getPropertyValue(`--${name}`).trim();
-      } catch {
-        raw = '';
-      }
-      if (!raw) continue;
-      if (name === 'font-sans') {
-        tokens[name] = raw;
-        continue;
-      }
-      if (parseCssColor(raw)) {
-        tokens[name] = raw;
-        continue;
-      }
-      // Unparsable as written: let the engine resolve it to a colour.
-      try {
-        if (!probe) {
-          probe = document.createElement('span');
-          probe.setAttribute('aria-hidden', 'true');
-          probe.style.position = 'absolute';
-          probe.style.width = '0';
-          probe.style.height = '0';
-          probe.style.overflow = 'hidden';
-          probe.style.pointerEvents = 'none';
-          target.appendChild(probe);
-        }
-        probe.style.color = `var(--${name})`;
-        const resolved = getComputedStyle(probe).color.trim();
-        if (resolved && parseCssColor(resolved)) tokens[name] = resolved;
-      } catch {
-        // leave the token absent
-      }
-    }
-  } finally {
-    probe?.remove();
-  }
-  if (!tokens.background || !tokens.foreground) return undefined;
+  const tokens: MermaidThemeTokens | undefined = readThemeTokenValues(MERMAID_THEME_TOKEN_NAMES, el, ['font-sans']);
+  if (!tokens?.background || !tokens.foreground) return undefined;
   return tokens;
 }
 

@@ -39,7 +39,7 @@ export function parseT3Args(args: readonly string[]): Invocation {
     } else targets.push(arg);
   }
   const url = flags.get("--url");
-  if (!url) throw new Error("--url is required; copy the MCP URL from T3 Settings → Connections.");
+  if (!url) throw new Error("--url is required; in T3 Settings → Environments, open the environment's menu and choose Copy MCP URL.");
   const thread = flags.get("--thread");
   if ((command === "login" || command === "logout") && thread) throw new Error(`${command === "login" ? "Login authorizes" : "Logout forgets"} an environment; it takes no --thread.`);
   if (command !== "login" && command !== "logout") {

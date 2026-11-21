@@ -232,7 +232,7 @@ blockquote { margin: 8px 0; padding: 0 12px; border-left: 3px solid var(--pn-lin
 .pn-side-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
 .pn-side-foot { font-size: 12px; }
 
-/* Ask box and answers (chapter view and answer tab) */
+/* Answers (the answer tab) */
 .pn-ask {
   display: flex; align-items: center; gap: 8px; margin: 14px 0 6px; padding: 0 10px; min-height: 32px;
   border: 1px solid var(--vscode-input-border, var(--pn-line)); border-radius: var(--pn-radius);

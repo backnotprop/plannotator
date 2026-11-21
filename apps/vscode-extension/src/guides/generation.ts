@@ -11,7 +11,7 @@
  */
 
 import { readFile } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import type { McpServer, NewSessionResponse, RequestPermissionRequest, RequestPermissionResponse, SessionConfigOption, SessionNotification, ToolCallLocation, ToolKind } from "@agentclientprotocol/sdk";
 import {
   GUIDE_BUILDER_TOOLS,
@@ -27,12 +27,13 @@ import {
   type GuideSymbolResolution,
 } from "./core/adapter";
 import type { GuideLaunchReview, GuideSnapshot } from "@plannotator/core/guide-format";
-import { ACP_AUTH_REQUIRED_CODE, AcpClient, readEffortSelect, readModeSelect, readModelSelect, type AcpClientInfo, type AgentLaunch } from "./acp/client";
-import { loginCommands, type AgentDescriptor, type LoginCommand } from "./acp/agents";
+import { ACP_AUTH_REQUIRED_CODE, AcpClient, readEffortSelect, readModeSelect, readModelSelect, type AcpClientInfo, type AgentLaunch } from "@plannotator/acp-client/client";
+import { loginCommands, type AgentDescriptor, type LoginCommand } from "@plannotator/acp-client/agents";
 import { builderAutoAllow } from "./acp/permission-policy";
 import type { RelayHost, RelaySession } from "./mcp/relay-host";
 import type { ChangedFileInfo } from "./sources/git";
 import { buildGuidePrompt } from "./prompt";
+import { realFileInside } from "./safe-path";
 import {
   buildFinishedGuide,
   deleteDraftRecord,
@@ -118,7 +119,7 @@ export interface GenerationState {
   signIn?: { logins: LoginCommand[] };
   /** Guide history is off: nothing of this run is written to disk. */
   memoryOnly?: boolean;
-  /** The overview diagram was saved without a render check (no Guides webview could run one). */
+  /** A diagram (the overview's or a chapter's) was saved without a render check (no Guides webview could run one). */
   diagramUnchecked?: boolean;
   /** Permission requests waiting on the user. */
   pendingPermissions: PendingPermission[];
@@ -172,6 +173,23 @@ export interface GenerationInput {
 
 const MAX_ACTIVITY = 400;
 const BUILDER_TITLE = /guide_(set_header|set_overview|add_chapter|update_chapter|move_chapter|remove_chapter|place_file|move_file|unplace_file|read|finish)(?![a-z_])/;
+
+/**
+ * The builder's `resolveFile` hook: whether a `code:` link's file is at the
+ * head and how many lines it has. Read only when it is a regular file inside
+ * the head once symlinks are followed; a symlink out of the repository reads
+ * as not there.
+ */
+export async function resolveHeadFile(headRoot: string, path: string): Promise<{ exists: false } | { exists: true; lineCount: number }> {
+  const real = realFileInside(headRoot, path);
+  if (!real) return { exists: false };
+  try {
+    const text = await readFile(real, "utf8");
+    return { exists: true, lineCount: text.length === 0 ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0) };
+  } catch {
+    return { exists: false };
+  }
+}
 
 export class GuideGeneration {
   readonly state: GenerationState;
@@ -257,17 +275,7 @@ export class GuideGeneration {
     const { files, source } = this.input;
     const headRoot = source.headRoot;
     return {
-      resolveFile: async ({ path }) => {
-        const full = resolve(headRoot, path);
-        const rel = relative(headRoot, full);
-        if (rel.startsWith("..") || isAbsolute(rel)) return { exists: false };
-        try {
-          const text = await readFile(full, "utf8");
-          return { exists: true, lineCount: text.length === 0 ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0) };
-        } catch {
-          return { exists: false };
-        }
-      },
+      resolveFile: ({ path }) => resolveHeadFile(headRoot, path),
       resolveSymbol: ({ name, path }) => this.deps.resolveSymbol(name, path, files, headRoot),
       checkMermaid: async (src) => {
         const r = await this.deps.checkMermaid(src);
@@ -461,7 +469,7 @@ export class GuideGeneration {
     this.state.status = "finished";
     this.state.endedAt = this.now();
     const notes = [this.history ? "Saved." : "Done. Not saved: guide history is off, so this guide is kept only until VS Code closes."];
-    if (this.state.diagramUnchecked) notes.push("The overview diagram was not render-checked (no Guided Review tab was open); it is checked when the guide opens.");
+    if (this.state.diagramUnchecked) notes.push("A diagram was not render-checked (no Guided Review tab was open); it is checked when the guide opens.");
     this.state.statusMessage = notes.join(" ");
     if (this.history) deleteDraftRecord(this.input.repoKey, this.state.id);
     this.emit();
@@ -531,8 +539,10 @@ export class GuideGeneration {
   }
 
   private saveGuide(snapshot: GuideSnapshot, draft: GuideDraft): string {
-    const diagram = (snapshot.guide as { overview?: { diagram?: { source?: string } } }).overview?.diagram?.source;
-    const diagramCheck = diagram === undefined ? undefined : this.diagramChecks.get(diagram) ?? "unchecked";
+    // Every diagram of the guide (the overview's and each chapter's): "ok" only when each one passed a real render check.
+    const diagrams = [snapshot.guide.overview?.diagram, ...snapshot.guide.sections.map((s) => s.diagram)].filter((d) => d !== undefined);
+    const diagramCheck =
+      diagrams.length === 0 ? undefined : diagrams.every((d) => this.diagramChecks.get(d.source) === "ok") ? ("ok" as const) : ("unchecked" as const);
     if (diagramCheck === "unchecked") this.state.diagramUnchecked = true;
     const input = {
       repoKey: this.input.repoKey,
@@ -582,9 +592,9 @@ export class GuideGeneration {
         return { text: `The guide could not be saved: ${message}`, isError: true };
       }
       this.addActivity({ kind: "builder", title: name, detail: this.history ? "saved" : "done (not saved: guide history is off)", status: "completed" });
-      if (this.state.diagramUnchecked) this.addActivity({ kind: "info", title: "The overview diagram was not render-checked here; it is checked when the guide opens." });
+      if (this.state.diagramUnchecked) this.addActivity({ kind: "info", title: "A diagram was not render-checked here; it is checked when the guide opens." });
       this.emit();
-      const unchecked = this.state.diagramUnchecked ? "\nThe overview diagram could not be render-checked (no Guided Review tab is open); the reader checks it when the guide opens." : "";
+      const unchecked = this.state.diagramUnchecked ? "\nA diagram could not be render-checked (no Guided Review tab is open); the reader checks it when the guide opens." : "";
       return { text: `${answer.text}${unchecked}\nThe reader opens the guide now; end your turn.`, isError: false };
     }
     this.addActivity({

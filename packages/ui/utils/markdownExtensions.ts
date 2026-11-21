@@ -13,14 +13,14 @@
  * default, so nothing changes for a user with no config.
  *
  * The built-in set here is deliberately NARROWER than the annotatable set on
- * the server (`.md`/`.mdx`/`.txt`/`.html`/`.htm` only) — widening it is a
+ * the server (`.md`/`.mdx`/`.txt`/`.adoc`/`.asciidoc`/`.html`/`.htm` only) — widening it is a
  * separate decision. Extras are added on top of it.
  */
 
 import { normalizeMarkdownExtensions } from "@plannotator/core/annotatable";
 
 /** Built-in extensions the renderer treats as openable local documents. */
-const BUILTIN_LINKED_DOC_REGEX = /\.(mdx?|txt|html?)$/i;
+const BUILTIN_LINKED_DOC_REGEX = /\.(mdx?|txt|adoc|asciidoc|html?)$/i;
 
 let extraExtensions: string[] = [];
 

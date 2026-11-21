@@ -1,21 +1,12 @@
-// The Inbox reminder where a guard plugin skips the mod's prompt.context hook
-// (#2159): the learned prompt.submit fallback (pure rules) and the plugin's
-// SessionStart `compact` command hook, run for real under sh and bash (and
-// PowerShell when it is installed) from the command hooks.json ships.
+// The Inbox reminder (#2243): the record of sessions it reached, telling a
+// resumed conversation apart, and the plugin's SessionStart `compact` command hook, run for
+// real under sh and bash (and PowerShell when it is installed) from the
+// command hooks.json ships.
 import { describe, expect, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import {
-  INBOX_REMINDER_ENV,
-  INBOX_REMINDER_RESUMED_SLACK_MS,
-  inboxReminderEnvValue,
-  inboxReminderFirstTurnLesson,
-  inboxReminderSubmitCopy,
-  readReminderContextWorks,
-  reminderSessionResumed,
-  STORE_INBOX_REMINDER_CONTEXT_WORKS,
-} from './inbox'
+import { conversationResumed, INBOX_REMINDER_ENV, INBOX_REMINDER_SESSIONS_MAX, inboxReminderEnvValue, readReminderSessions, withReminderSession } from './inbox'
 import { inboxReminderText } from './inbox-contract'
 
 const TOOL = 'mcp__plugin_plannotator_tools__plannotator_inbox'
@@ -27,84 +18,33 @@ const TOOL = 'mcp__plugin_plannotator_tools__plannotator_inbox'
 const MARKER = `/tmp/plannotator-reminder-pwned-${process.pid}`
 const HOSTILE = `-n Ask first. a\\b \\c\\n 100% %s %d "double" 'single' $(touch ${MARKER}-1) \`touch ${MARKER}-2\` \${HOME} $HOME\nsecond line\n\tthird \\ end\n`
 
-describe('the prompt.submit copy (rule 2)', () => {
-  // Every row of the decision: delivered × what the store says × meta × command.
-  const rows: Array<[delivered: boolean, works: boolean | undefined, isMeta: boolean, command: boolean, copy: boolean]> = [
-    // Not reached yet, no evidence prompt.context runs: the copy goes.
-    [false, undefined, false, false, true],
-    [false, false, false, false, true],
-    // prompt.context known to run here: today's path alone.
-    [false, true, false, false, false],
-    // Already reached in this conversation (by either path): never twice.
-    [true, undefined, false, false, false],
-    [true, false, false, false, false],
-    [true, true, false, false, false],
-    // A meta prompt or a slash command never carries it.
-    [false, undefined, true, false, false],
-    [false, false, true, false, false],
-    [false, undefined, false, true, false],
-    [false, false, false, true, false],
-    [false, true, true, true, false],
-  ]
-  for (const [delivered, works, isMeta, command, copy] of rows) {
-    test(`delivered=${delivered} contextWorks=${works} isMeta=${isMeta} command=${command} → ${copy ? 'copy' : 'none'}`, () => {
-      expect(inboxReminderSubmitCopy({ delivered, contextWorks: works, isMeta, command })).toBe(copy)
-    })
-  }
-})
-
-describe('the first turn of a conversation (rule 3)', () => {
-  test('prompt.context did not run in a fresh conversation: learn false', () => {
-    expect(inboxReminderFirstTurnLesson({ contextRan: false, aborted: false, resumed: false, contextWorks: undefined })).toEqual({ done: true, write: false })
-    expect(inboxReminderFirstTurnLesson({ contextRan: false, aborted: false, resumed: false, contextWorks: true })).toEqual({ done: true, write: false })
+describe("the record of sessions whose first prompt had the reminder", () => {
+  test('a resumed session over the limit: the newest are kept, the oldest go, and a fresh one is always in', () => {
+    let record: Record<string, number> = {}
+    for (let i = 0; i < INBOX_REMINDER_SESSIONS_MAX; i++) record = withReminderSession(record, `s-${i}`, 1_000 + i)
+    record = withReminderSession(record, 'newest', 5_000)
+    expect(Object.keys(record)).toHaveLength(INBOX_REMINDER_SESSIONS_MAX)
+    expect(record.newest).toBe(5_000)
+    expect('s-0' in record).toBe(false)
+    expect(record[`s-${INBOX_REMINDER_SESSIONS_MAX - 1}`]).toBe(1_000 + INBOX_REMINDER_SESSIONS_MAX - 1)
   })
-
-  test('already false: nothing to write', () => {
-    expect(inboxReminderFirstTurnLesson({ contextRan: false, aborted: false, resumed: false, contextWorks: false })).toEqual({ done: true, write: null })
-  })
-
-  test('prompt.context ran: rule 1 already wrote true, nothing here', () => {
-    for (const works of [undefined, true, false] as const) {
-      expect(inboxReminderFirstTurnLesson({ contextRan: true, aborted: false, resumed: false, contextWorks: works })).toEqual({ done: true, write: null })
-    }
-  })
-
-  test('a resumed conversation teaches nothing (its first turn here is not its first)', () => {
-    expect(inboxReminderFirstTurnLesson({ contextRan: false, aborted: false, resumed: true, contextWorks: true })).toEqual({ done: true, write: null })
-  })
-
-  test('an aborted turn decides nothing: the next one is looked at', () => {
-    expect(inboxReminderFirstTurnLesson({ contextRan: false, aborted: true, resumed: false, contextWorks: undefined })).toEqual({ done: false, write: null })
-    expect(inboxReminderFirstTurnLesson({ contextRan: true, aborted: true, resumed: false, contextWorks: true })).toEqual({ done: false, write: null })
+  test('a stored value someone else wrote: only id-to-time entries count', () => {
+    expect(readReminderSessions(['session-1'])).toEqual({})
+    expect(readReminderSessions('session-1')).toEqual({})
+    expect(readReminderSessions({ 'session-1': 1, 'session-2': 'yes', '': 3, 'session-3': Number.NaN })).toEqual({ 'session-1': 1 })
   })
 })
 
-describe('telling a resumed session from one started in this process', () => {
-  const start = 1_000_000_000
-  test('started at or after this process (minus the slack): not resumed', () => {
-    expect(reminderSessionResumed(start, start)).toBe(false)
-    expect(reminderSessionResumed(start - 5_000, start)).toBe(false)
-    expect(reminderSessionResumed(start - INBOX_REMINDER_RESUMED_SLACK_MS, start)).toBe(false)
-    expect(reminderSessionResumed(start + 60_000, start)).toBe(false)
+describe('telling a resumed conversation from one that starts here', () => {
+  test('an assistant row already there: resumed (--resume, --continue, /resume, a fork)', () => {
+    expect(conversationResumed([{ role: 'user', text: 'Ship it.' }, { role: 'assistant', text: 'Shipped.' }])).toBe(true)
   })
-  test('started well before this process: resumed', () => {
-    expect(reminderSessionResumed(start - INBOX_REMINDER_RESUMED_SLACK_MS - 1, start)).toBe(true)
-    expect(reminderSessionResumed(start - 3_600_000, start)).toBe(true)
+  test('nothing yet, or only rows of the person (a command they ran first): starts here', () => {
+    expect(conversationResumed([])).toBe(false)
+    expect(conversationResumed([{ role: 'user', text: '/plannotator-review' }])).toBe(false)
   })
-  test('nothing readable: not resumed (learning proceeds as the spec has it)', () => {
-    expect(reminderSessionResumed(undefined, start)).toBe(false)
-    expect(reminderSessionResumed('x', start)).toBe(false)
-    expect(reminderSessionResumed(Number.NaN, start)).toBe(false)
-    expect(reminderSessionResumed(start - 3_600_000, null)).toBe(false)
-  })
-})
-
-describe('the stored value', () => {
-  test('only booleans count', () => {
-    expect(STORE_INBOX_REMINDER_CONTEXT_WORKS).toBe('inboxReminderContextWorks')
-    expect(readReminderContextWorks(true)).toBe(true)
-    expect(readReminderContextWorks(false)).toBe(false)
-    for (const other of [undefined, null, 'true', 1, 0, {}, []]) expect(readReminderContextWorks(other)).toBeUndefined()
+  test('nothing readable: starts here, so the reminder goes', () => {
+    for (const value of [undefined, null, 'x', {}, [null, 'assistant', { role: 'system' }]]) expect(conversationResumed(value)).toBe(false)
   })
 })
 
@@ -147,15 +87,19 @@ describe("hooks.json's SessionStart compact hook", () => {
   })
 
   /** The command as a hook process runs it: a clean environment, plus the variable when given. */
-  function run(shell: string, args: string[], value?: string) {
+  function run(shell: string, args: string[], value?: string, timeout = 10_000) {
     const env: Record<string, string> = { PATH: process.env.PATH ?? '/usr/bin:/bin' }
+    // PowerShell needs the Windows folder to start, and the profile folders a hook gets from Claude Code: without
+    // them Windows PowerShell 5.1 can't keep its module cache and takes 20 s or more to start on a CI runner.
+    for (const name of ['SystemRoot', 'windir', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'TEMP', 'TMP', 'PSModulePath']) if (process.env[name]) env[name] = process.env[name] as string
     if (value !== undefined) env[INBOX_REMINDER_ENV] = value
-    return spawnSync(shell, [...args, command], { env, encoding: 'utf8', timeout: 10_000 })
+    return spawnSync(shell, [...args, command], { env, encoding: 'utf8', timeout })
   }
 
   const text = inboxReminderText(TOOL)
   // dash is Debian's and Ubuntu's /bin/sh (CI); its echo read backslashes, which is why the hook uses printf.
-  const shells = ['/bin/sh', '/bin/bash', ...['/usr/bin/dash', '/bin/dash'].filter((path) => existsSync(path)).slice(0, 1)]
+  // Windows has no /bin/sh or /bin/bash: the PowerShell legs below cover it.
+  const shells = process.platform === 'win32' ? [] : ['/bin/sh', '/bin/bash', ...['/usr/bin/dash', '/bin/dash'].filter((path) => existsSync(path)).slice(0, 1)]
   for (const shell of shells) {
     test(`${shell}: set, prints the text and one newline; exit 0`, () => {
       const result = run(shell, ['-c'], text)
@@ -179,16 +123,33 @@ describe("hooks.json's SessionStart compact hook", () => {
     })
   }
 
-  // Claude Code runs a Windows hook in Git Bash, else PowerShell (-NoProfile);
-  // there `$PLANNOTATOR_INBOX_REMINDER` is a PowerShell variable, always empty
-  // (the mod never runs on Windows anyway). The line must parse and exit 0.
-  const pwsh = spawnSync('pwsh', ['-NoProfile', '-Command', 'exit 0'], { encoding: 'utf8' })
-  test.skipIf(pwsh.status !== 0)('PowerShell: prints only whitespace and exits 0, set or not', () => {
-    for (const value of [undefined, text, HOSTILE]) {
-      const result = run('pwsh', ['-NoProfile', '-NonInteractive', '-Command'], value)
+  // Without Git Bash, Claude Code runs a Windows hook in PowerShell 7 where it is
+  // installed, else Windows PowerShell, with these arguments. The line prints the
+  // reminder there too, since the mod runs on Windows through PowerShell. One
+  // test per value: each cold-starts PowerShell, so the starts don't share one
+  // 5 s budget.
+  const POWERSHELL_HOOK_ARGS = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command']
+  // A cold Windows PowerShell 5.1 takes more than 5 s to start on a CI runner.
+  const POWERSHELL_MS = 30_000
+  const windowsPowerShell = process.platform === 'win32' && process.env.SystemRoot ? `${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe` : ''
+  const pwsh = spawnSync('pwsh', ['-NoProfile', '-Command', 'exit 0'], { encoding: 'utf8' }).status === 0 ? 'pwsh' : ''
+  const powerShells = [windowsPowerShell && existsSync(windowsPowerShell) ? windowsPowerShell : '', pwsh].filter(Boolean)
+  for (const shell of powerShells) {
+    for (const [label, value] of [['the text', text], ['the hostile text', HOSTILE]] as const) {
+      test(`${shell}: set to ${label}, prints it byte for byte and one newline, and nothing in it runs; exit 0`, () => {
+        const result = run(shell, POWERSHELL_HOOK_ARGS, value, POWERSHELL_MS)
+        expect(result.status).toBe(0)
+        expect(result.stdout).toBe(`${value}\n`)
+        expect(result.stderr).toBe('')
+        expect(existsSync(`${MARKER}-1`)).toBe(false)
+        expect(existsSync(`${MARKER}-2`)).toBe(false)
+      }, POWERSHELL_MS + 5_000)
+    }
+    test(`${shell}: unset, prints only whitespace; exit 0`, () => {
+      const result = run(shell, POWERSHELL_HOOK_ARGS, undefined, POWERSHELL_MS)
       expect(result.status).toBe(0)
       expect(result.stdout.trim()).toBe('')
       expect(result.stderr).toBe('')
-    }
-  })
+    }, POWERSHELL_MS + 5_000)
+  }
 })

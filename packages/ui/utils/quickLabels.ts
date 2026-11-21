@@ -54,7 +54,7 @@ export const DEFAULT_QUICK_LABELS: QuickLabel[] = [
   { id: 'ensure-no-regression',     emoji: '📉', text: 'Ensure no regression',     color: 'amber', tip: 'Verify that this change will not break existing behavior. Identify what could regress and how to protect against it.' },
   { id: 'out-of-scope',            emoji: '🚫', text: 'Out of scope',            color: 'red', tip: 'This is not part of the current task. Remove it and stay focused on what was actually requested.' },
   { id: 'needs-tests',             emoji: '🧪', text: 'Needs tests',             color: 'blue' },
-  { id: 'nice-approach',           emoji: '👍', text: 'Nice approach',           color: 'green' },
+  { id: 'nice-approach',           emoji: '👍', text: 'Looks good',              color: 'green' },
 ];
 
 export function getQuickLabels(): QuickLabel[] {

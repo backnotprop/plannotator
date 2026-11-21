@@ -8,8 +8,8 @@ RUN apt-get update && apt-get install -y \
     openssh-server \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Bun
-RUN curl -fsSL https://bun.sh/install | bash
+# Install Bun, pinned to the release floor (scripts/check-bun-runtime-trust.ts)
+RUN curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.4"
 ENV PATH="/root/.bun/bin:$PATH"
 
 # Set up SSH

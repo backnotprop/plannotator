@@ -6,12 +6,14 @@
  * mcp` (scripts/inbox-sim.ts), one shim per agent session.
  *
  * Desktop (Chromium, 1440 by 900): nothing of decision mode shows until
- * Settings → General → Experimental turns it on; then "Decide N" in the
- * sidebar and the list header. Claude Code asks two questions in one message
- * (one Stopped, one with a picture in its context), Codex one two-way question,
- * Pi a pick-any. The queue opens Stopped first; picks save at once; once Claude
+ * Settings → Capabilities → Experimental turns it on; then still no global way in
+ * (no sidebar row, no list-header button): decision mode is thread only, and
+ * its one way in is "Decide these N" in a thread's open-questions list. In one
+ * thread, Claude Code asks two questions in one message (one Stopped), Codex
+ * one two-way question with a picture in its context, Pi a pick-any. The
+ * dialog from that thread opens Stopped first; picks save at once; once Claude
  * Code's two are answered its chip says "Sending in N s · Hold", and after the
- * Hold its reply reaches the agent's own wait_for_reply as ONE reply carrying
+ * Hold the agent reads its reply with read_thread as ONE reply carrying
  * both answers; Codex replaces its question while it is on screen and the card
  * swaps under a banner; the end screen. Then a phone (WebKit, iPhone 15).
  * Then the agent contract lines (approval "inbox-decision-mode", "Agent
@@ -25,7 +27,7 @@
  * /Users/ramos/plannotator/.ops/shots/decision-mode-build/ when that folder's parent exists, else .local/proof/decision-mode/.
  */
 
-import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { chromium, devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -33,6 +35,8 @@ import { deflateSync } from 'node:zlib';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { agentCliCalls, writeAgentCliStubs } from './agent-cli-stubs';
+import { finger } from './phone-touch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -87,6 +91,8 @@ function mockPng(width = 240, height = 360, accent: [number, number, number] = [
 interface World {
   root: string;
   dataDir: string;
+  /** Agent CLI stubs first on the Inbox's PATH: each call is recorded. */
+  stubs: string;
   env: Record<string, string>;
   url: string;
   claude: SimAgent;
@@ -99,6 +105,8 @@ interface World {
   errors: string[];
 }
 let world: World;
+/** The thread test 1 seeds (Claude Code, Codex and Pi ask in it). */
+let stripeThread = '';
 
 function port(): number {
   return (JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8')) as { port: number }).port;
@@ -123,7 +131,11 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-decide-e2e-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  // Codex sends with a wake, so the person's reply to it is queued through `codex queue`: under the test sandbox
+  // the Inbox looks for no codex (an empty agent PATH, never the apps' own CLIs), and the stubs first on PATH
+  // record any lookup that gets past it (the last test). Never the codex on the runner's PATH.
+  const stubs = writeAgentCliStubs(join(root, 'agent-clis'));
+  const env = { PATH: `${stubs}:${process.env.PATH ?? ''}`, HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_TEST_SANDBOX: root };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -135,10 +147,12 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const web = scratchProject(join(root, 'src'), 'web');
   mkdirSync(join(web, 'design'), { recursive: true });
   writeFileSync(join(web, 'design', 'drawer-b.png'), mockPng());
+  mkdirSync(join(billing, 'design'), { recursive: true });
+  writeFileSync(join(billing, 'design', 'drawer-b.png'), mockPng());
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const codex = await SimAgent.connect({ binary, env, name: 'Codex', host: 'codex' });
   const pi = await SimAgent.connect({ binary, env, name: 'Pi', host: 'pi' });
-  world = { root, dataDir, env, url, claude, codex, pi, billing, web, context, page, errors };
+  world = { root, dataDir, stubs, env, url, claude, codex, pi, billing, web, context, page, errors };
   await fetch(`http://127.0.0.1:${port()}/api/inbox/settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ notifications: { dismissed: true } }) });
 });
 
@@ -152,9 +166,10 @@ test.afterAll(async () => {
   }
 });
 
-test('off by default: nothing of decision mode until Settings → General → Experimental turns it on', async () => {
+test('off by default: nothing of decision mode until Settings → Capabilities → Experimental turns it on', async () => {
   const { page, url, claude, codex, pi } = world;
-  await claude.send(
+  // One thread, three agents (decision mode is thread only): Codex and Pi write in Claude Code's thread.
+  const asked = await claude.send(
     {
       project_path: world.billing,
       subject: 'Stripe 409 retries',
@@ -162,8 +177,9 @@ test('off by default: nothing of decision mode until Settings → General → Ex
     },
     { wakes: true },
   );
-  await codex.send({ project_path: world.web, subject: 'Checkout drawer for 4.2', body: `B tested best on small phones.\n\n${q('Ship drawer B to all of checkout?', ['Yes, ship B — the total stays next to Pay', 'No, keep A'], ['![Drawer B](design/drawer-b.png)', '', 'Holds up: the 4.2 release'])}` }, { wakes: true });
-  await pi.send({ project_path: world.billing, subject: 'Ledger exports', body: q('Which exports should the ledger keep?', ['CSV', 'Parquet', 'JSON lines'], ['Recommended: CSV, Parquet'], 'question-multi') }, { wakes: true });
+  await codex.send({ project_path: world.billing, reply_to: asked.message_id, body: `B tested best on small phones.\n\n${q('Ship drawer B to all of checkout?', ['Yes, ship B — the total stays next to Pay', 'No, keep A'], ['![Drawer B](design/drawer-b.png)', '', 'Holds up: the 4.2 release'])}` }, { wakes: true });
+  stripeThread = asked.thread_id;
+  await pi.send({ project_path: world.billing, reply_to: asked.message_id, body: q('Which exports should the ledger keep?', ['CSV', 'Parquet', 'JSON lines'], ['Recommended: CSV, Parquet'], 'question-multi') }, { wakes: true });
 
   await page.goto(url);
   await expect(page.locator('[data-inbox-nav]')).toBeVisible();
@@ -171,7 +187,7 @@ test('off by default: nothing of decision mode until Settings → General → Ex
   await expect(page.locator('[data-decide-head]')).toHaveCount(0);
   expect((await fetch(`http://127.0.0.1:${port()}/api/inbox/decisions`)).status).toBe(404);
 
-  await page.goto(`${url}#settings/general`);
+  await page.goto(`${url}#settings/capabilities`);
   const group = page.locator('[data-settings-experimental]');
   await expect(group).toBeVisible();
   await expect(group).toContainText('Decision mode');
@@ -181,18 +197,42 @@ test('off by default: nothing of decision mode until Settings → General → Ex
   await shot(page, 'settings-experimental');
   await sw.click();
   await expect(sw).toHaveAttribute('aria-checked', 'true');
-  expect(JSON.parse(readFileSync(join(world.dataDir, 'config.json'), 'utf8')).experimental).toEqual({ decisionMode: true });
+  // The switch shows on before the save lands; poll the file (a read between the two sees no config yet).
+  await expect
+    .poll(() => {
+      try {
+        return JSON.parse(readFileSync(join(world.dataDir, 'config.json'), 'utf8')).experimental;
+      } catch {
+        return undefined;
+      }
+    })
+    .toEqual({ decisionMode: true });
 
   await page.goto(url);
-  await expect(page.locator('[data-decide-nav]')).toContainText('Decide');
-  await expect(page.locator('[data-decide-nav] .ib-n')).toHaveText('4');
-  await expect(page.locator('[data-decide-head]')).toHaveText('Decide 4');
+  // On, and still no global way in: no sidebar row, no list-header button.
+  await expect(page.locator('[data-thread-id]', { hasText: 'Stripe 409 retries' }).first()).toBeVisible();
+  await expect(page.locator('[data-decide-nav]')).toHaveCount(0);
+  await expect(page.locator('[data-decide-head]')).toHaveCount(0);
+  // The thread's open-questions list: "Decide these 4" on top.
+  await page.locator('[data-thread-id]', { hasText: 'Stripe 409 retries' }).first().click();
+  await page.locator('section.ib-pane [data-open-questions]').click();
+  await expect(page.locator('[data-thread-decide]')).toHaveText('Decide these 4');
   await shot(page, 'entry-points');
 });
 
+/** Decision mode's one way in: the thread, its open-questions list, then "Decide these N". */
+async function decideIn(page: Page, threadId: string): Promise<void> {
+  await page.goto(`${world.url}#thread=${threadId}`);
+  // A goto that changes only the hash keeps the page: the list may still be open from before.
+  await expect(page.locator('section.ib-pane [data-open-questions]')).toBeVisible();
+  if (!(await page.locator('[data-open-questions-list]').isVisible())) await page.locator('section.ib-pane [data-open-questions]').click();
+  await page.locator('[data-thread-decide]').click();
+  await expect(page.locator('[data-decision-mode]')).toBeVisible();
+}
+
 test('the queue: Stopped first, a pick saves at once, the session replies once after its Hold, a replaced question swaps in, the end', async () => {
   const { page, claude, codex } = world;
-  await page.locator('[data-decide-nav]').click();
+  await decideIn(page, stripeThread);
   const dialog = page.locator('[data-decision-mode]');
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('heading', { name: 'Decide', exact: true })).toBeVisible();
@@ -220,7 +260,7 @@ test('the queue: Stopped first, a pick saves at once, the session replies once a
   await shot(page, 'queue-picture');
   const list = (await (await fetch(`http://127.0.0.1:${port()}/api/inbox/decisions`)).json()) as { decisions: { id: string; message: { id: string }; thread: { id: string }; question: { prompt: string } }[] };
   const codexDecision = list.decisions.find((d) => d.question.prompt === 'Ship drawer B to all of checkout?')!;
-  await codex.send({ project_path: world.web, reply_to: codexDecision.message.id, supersedes: [codexDecision.id], body: q('Ship drawer B to checkout on Thursday, behind the 4.2 flag?', ['Yes, Thursday', 'No, wait for QA']) }, { wakes: true });
+  await codex.send({ project_path: world.billing, reply_to: codexDecision.message.id, supersedes: [codexDecision.id], body: q('Ship drawer B to checkout on Thursday, behind the 4.2 flag?', ['Yes, Thursday', 'No, wait for QA']) }, { wakes: true });
   await expect(dialog.locator('[data-decision-replaced]')).toContainText('Codex replaced this question just now.');
   await expect(promptOf(page)).toHaveText('Ship drawer B to checkout on Thursday, behind the 4.2 flag?');
   await shot(page, 'queue-replaced');
@@ -237,16 +277,16 @@ test('the queue: Stopped first, a pick saves at once, the session replies once a
   await expect.poll(async () => ((await (await fetch(`http://127.0.0.1:${port()}/api/inbox/decisions`)).json()) as { decisions: unknown[] }).decisions.length, { timeout: 20_000 }).toBe(0);
   await expect(dialog.locator('[data-decision-end-row] .ib-dm-endstate').first()).toHaveText(/Delivered|Sending|Queued|Saved|Working|Replied|Nothing to send/);
 
-  // Claude Code's thread got ONE reply, carrying both answers.
+  // The thread got ONE reply per agent session: Claude Code's carries both its answers.
   const threads = (await (await fetch(`http://127.0.0.1:${port()}/api/inbox/threads`)).json()) as { sections: { threads: { thread_id: string; subject: string | null }[] }[] };
   const claudeThread = threads.sections.flatMap((s) => s.threads).find((t) => t.subject === 'Stripe 409 retries')!;
   const thread = (await (await fetch(`http://127.0.0.1:${port()}/api/inbox/threads/${claudeThread.thread_id}`)).json()) as { thread: { messages: { author: { kind: string }; body: string }[] } };
   const replies = thread.thread.messages.filter((m) => m.author.kind === 'person');
-  expect(replies).toHaveLength(1);
-  expect(replies[0]!.body).toContain('Retry with the same key');
-  expect(replies[0]!.body).toContain('Yes, page on-call');
-  const received = await claude.waitForReply(claudeThread.thread_id, 5);
-  expect(JSON.stringify(received)).toContain('Yes, page on-call');
+  expect(replies).toHaveLength(3);
+  const claudes = replies.filter((m) => m.body.includes('Retry with the same key'));
+  expect(claudes).toHaveLength(1);
+  expect(claudes[0]!.body).toContain('Yes, page on-call');
+  expect(JSON.stringify(await claude.readThread(claudeThread.thread_id))).toContain('Yes, page on-call');
   // The agent answers: its chip and its end row go to Replied.
   await claude.send({ project_path: world.billing, reply_to: claudeThread.thread_id, body: 'Retrying 409s with the same key now; paging on-call after 5 tries.' }, { wakes: true });
   await expect(dialog.locator('[data-decision-end-row] .ib-dm-endstate').first()).toHaveText('Replied');
@@ -256,10 +296,15 @@ test('the queue: Stopped first, a pick saves at once, the session replies once a
   expect(world.errors).toEqual([]);
 });
 
+/** Longer than any phone's pill has room for, so the Resume pill has to cut it. */
+const REFUNDS_SUBJECT = 'Refund emails for partial refunds, the JPY rounding rule and the finance export before 4.2 ships';
+
 test('a phone (WebKit, iPhone 15): the card is a full-screen column with 44 px targets', async () => {
   const { claude, pi } = world;
-  await claude.send({ project_path: world.billing, subject: 'Refund emails', body: q('Send the partial-refund email?', ['Yes, send it', 'No, not yet'], ['Stopped: the email job waits on this.']) }, { wakes: true });
-  await pi.send({ project_path: world.billing, subject: 'Ledger rounding', body: q('Round half-even or half-up for JPY refunds?', ['Half-even — matches Stripe', 'Half-up — what finance does today']) }, { wakes: true });
+  const refunds = await claude.send({ project_path: world.billing, thread: 'refund-emails', subject: REFUNDS_SUBJECT, body: q('Send the partial-refund email?', ['Yes, send it', 'No, not yet'], ['Stopped: the email job waits on this.']) }, { wakes: true });
+  await pi.send({ project_path: world.billing, reply_to: refunds.message_id, body: q('Round half-even or half-up for JPY refunds?', ['Half-even — matches Stripe', 'Half-up — what finance does today']) }, { wakes: true });
+  // Its own thread, so the Stripe thread is another one to open while the sitting is tucked.
+  expect(refunds.thread_id).not.toBe(stripeThread);
   const own = await webkit.launch({ args: [] });
   try {
     // Dark first: the light pass then answers (a saved pick is handled, so a later sitting starts after it).
@@ -267,7 +312,7 @@ test('a phone (WebKit, iPhone 15): the card is a full-screen column with 44 px t
       const context = await own.newContext({ ...devices['iPhone 15'], colorScheme: scheme, reducedMotion: 'reduce' });
       const page = await context.newPage();
       await page.goto(world.url);
-      await page.locator('[data-decide-head]').click();
+      await decideIn(page, refunds.thread_id);
       const dialog = page.locator('[data-decision-mode]');
       await expect(promptOf(page)).toHaveText('Send the partial-refund email?');
       const box = await dialog.boundingBox();
@@ -293,6 +338,22 @@ test('a phone (WebKit, iPhone 15): the card is a full-screen column with 44 px t
           })
           .toBe(true);
         await page.screenshot({ path: join(proofDir, `phone-pill-${scheme}.png`) });
+        // Another thread on screen: the pill names the sitting's thread, and a long subject is what gives way.
+        // The pill stays inside the screen with the count and Resume whole.
+        await page.evaluate((id) => {
+          location.hash = `thread=${id}`;
+        }, stripeThread);
+        const named = pill.locator('[data-decision-pill-thread]');
+        await expect(named).toBeVisible();
+        const viewport2 = page.viewportSize()!;
+        const p = (await pill.boundingBox())!;
+        expect(p.x).toBeGreaterThanOrEqual(8);
+        expect(p.x + p.width).toBeLessThanOrEqual(viewport2.width - 8);
+        expect(await named.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+        await expect(pill).toContainText('left');
+        const resume = (await pill.locator('[data-decision-resume]').boundingBox())!;
+        expect(resume.x + resume.width).toBeLessThanOrEqual(p.x + p.width);
+        await page.screenshot({ path: join(proofDir, `phone-pill-named-${scheme}.png`) });
         await page.locator('[data-decision-resume]').tap();
         await expect(dialog).toBeVisible();
       }
@@ -338,7 +399,7 @@ test('the contract lines: picture tiles (the picture answers, its zoom never doe
   const INVOICES = 'Delete the 3 duplicate invoices in the legacy billing system now?';
   const accents: Record<string, [number, number, number]> = { a: [224, 112, 56], b: [91, 63, 230], c: [36, 150, 104] };
   for (const [name, accent] of Object.entries(accents)) writeFileSync(join(world.web, 'design', `drawer-${name}.png`), mockPng(240, 360, accent));
-  await claude.send(
+  const drawers = await claude.send(
     {
       project_path: world.web,
       subject: 'Checkout drawer for 4.2',
@@ -364,8 +425,8 @@ test('the contract lines: picture tiles (the picture answers, its zoom never doe
   );
   await codex.send(
     {
-      project_path: world.billing,
-      subject: 'Legacy invoices',
+      project_path: world.web,
+      reply_to: drawers.message_id,
       body: [
         ':::question',
         INVOICES,
@@ -392,7 +453,7 @@ test('the contract lines: picture tiles (the picture answers, its zoom never doe
       const context = await own.newContext({ ...devices['iPhone 15'], colorScheme: scheme, reducedMotion: 'reduce' });
       const phone = await context.newPage();
       await phone.goto(world.url);
-      await phone.locator('[data-decide-head]').tap();
+      await decideIn(phone, drawers.thread_id);
       await goToCard(phone, DRAWERS);
       const tiles = card(phone).locator('[data-decision-tiles] [data-question-tile]');
       await expect(tiles).toHaveCount(3);
@@ -423,8 +484,54 @@ test('the contract lines: picture tiles (the picture answers, its zoom never doe
   }
   expect((await stateOf(INVOICES))?.state).toBe('open');
 
+  // The pictures' viewer on a phone (Chromium, real touches; approval "inbox-image-swipe"): only the picture follows
+  // the finger (the viewer's header and its image area stay put), two quick flicks step twice (the second, while the
+  // first still slides, is not lost), and a drag down closes it. Nothing is answered.
+  const real = await chromium.launch();
+  try {
+    const { defaultBrowserType: _ignored, ...pixel } = devices['Pixel 7'];
+    const context = await real.newContext({ ...pixel, colorScheme: 'light' });
+    const phone = await context.newPage();
+    await phone.goto(world.url);
+    await decideIn(phone, drawers.thread_id);
+    await goToCard(phone, DRAWERS);
+    await card(phone).locator('[data-decision-tiles] [data-question-tile]').nth(0).locator('[data-question-zoom]').tap();
+    const viewer = phone.locator('[data-image-lightbox]');
+    await expect(viewer.locator('[data-lightbox-count]')).toHaveText('1 of 3');
+    await expect(viewer).toHaveAttribute('aria-label', 'A · Total on top, image 1 of 3');
+    const swipeArea = viewer.locator('[data-lightbox-swipe]');
+    const box = (await swipeArea.boundingBox())!;
+    const at = { x: box.x + box.width * 0.75, y: box.y + box.height * 0.45 };
+    const touch = await finger(phone, 'chromium');
+    const header = viewer.locator('[data-lightbox-count]');
+    const headerBefore = await header.boundingBox();
+    // Slow and short of a third: it follows, then springs back.
+    await touch.down(at.x, at.y, -box.width * 0.15, 0);
+    expect(await viewer.locator('[data-lightbox-track]').evaluate((el) => (el as HTMLElement).style.transform)).toMatch(/^translateX\(-\d/);
+    expect(await swipeArea.evaluate((el) => (el as HTMLElement).style.transform)).toBe('');
+    expect(await header.boundingBox()).toEqual(headerBefore);
+    await touch.up();
+    await phone.waitForTimeout(400);
+    await expect(viewer.locator('[data-lightbox-count]')).toHaveText('1 of 3');
+    await touch.down(at.x, at.y, -box.width * 0.3, 0, 3);
+    await touch.up();
+    await touch.down(at.x, at.y, -box.width * 0.3, 0, 3);
+    await touch.up();
+    await expect(viewer.locator('[data-lightbox-count]')).toHaveText('3 of 3');
+    await expect(viewer).toHaveAttribute('aria-label', 'C · Three steps, image 3 of 3');
+    await phone.waitForTimeout(400);
+    await touch.down(box.x + box.width / 2, box.y + box.height * 0.3, 0, box.height * 0.4);
+    await touch.up();
+    await expect(viewer).toHaveCount(0);
+    await expect(phone.locator('[data-decision-mode]')).toBeVisible();
+    await context.close();
+  } finally {
+    await real.close();
+  }
+  expect((await stateOf(DRAWERS))?.state).toBe('open');
+
   await page.goto(world.url);
-  await page.locator('[data-decide-head]').click();
+  await decideIn(page, drawers.thread_id);
   const dialog = page.locator('[data-decision-mode]');
   await goToCard(page, DRAWERS);
   await expect(card(page).locator('[data-decision-stakes]')).toHaveText('Ships to all of checkout on Thursday; changing it later costs a week of QA.');
@@ -480,4 +587,14 @@ test('the contract lines: picture tiles (the picture answers, its zoom never doe
   if (await keep.isVisible().catch(() => false)) await keep.click();
   await expect(dialog).toBeHidden();
   expect(world.errors).toEqual([]);
+});
+
+test('the Codex session it answered is never woken through a codex CLI: none is looked up or run', async () => {
+  // Test 2 answers Codex's question (its session sent with a wake): without that answer this proves nothing.
+  const thread = (await (await fetch(`http://127.0.0.1:${port()}/api/inbox/threads/${stripeThread}`)).json()) as { thread?: { messages: { author: { kind: string }; body: string }[] } };
+  const answered = thread.thread?.messages.some((m) => m.author.kind === 'person' && m.body.includes('Yes, Thursday')) ?? false;
+  expect(answered, "Codex's question was answered (run this with the queue test)").toBe(true);
+  // Without the sandbox the Inbox ran `codex --version` and `codex queue` from PATH: here, the stubs in front of
+  // the runner's own codex.
+  expect(agentCliCalls(world.stubs)).toEqual([]);
 });

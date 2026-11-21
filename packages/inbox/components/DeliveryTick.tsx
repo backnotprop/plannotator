@@ -7,10 +7,11 @@
  * row's accessible name (the glyph's `aria-label`), and the thread's own
  * delivery line is the tooltip. Send now stays in the thread.
  */
+import type { ReactNode } from 'react';
 import type { InboxRowDelivery } from '@plannotator/core/inbox-types';
 import { Icon } from '../icons';
 import { rowDeliveryLine, rowDeliverySpoken } from '../rowDelivery';
-import { Tip } from './Tip';
+import { RowTip } from './RowTip';
 
 /** Two offset checks: delivered (messaging apps' double tick). */
 function DoubleCheck() {
@@ -43,16 +44,16 @@ function Glyph({ state }: { state: InboxRowDelivery['state'] }) {
 
 export function DeliveryTick({ delivery }: { delivery: InboxRowDelivery }) {
   return (
-    <Tip content={rowDeliveryLine(delivery)}>
+    <RowTip content={rowDeliveryLine(delivery)}>
       <span className="ib-tick" data-tick={delivery.state} role="img" aria-label={`${rowDeliverySpoken(delivery)},`}>
         <Glyph state={delivery.state} />
       </span>
-    </Tip>
+    </RowTip>
   );
 }
 
 /** The row's time cell: the glyph, then the time (the delivery time once delivered). */
-export function TimeWithTick({ delivery, time }: { delivery: InboxRowDelivery | null | undefined; time: string }) {
+export function TimeWithTick({ delivery, time }: { delivery: InboxRowDelivery | null | undefined; time: ReactNode }) {
   if (!delivery) return <>{time}</>;
   return (
     <span className="ib-tickt">

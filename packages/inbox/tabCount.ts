@@ -1,7 +1,8 @@
 /**
  * The count on the Inbox's browser tab (approval "inbox-tab-count",
  * 2026-10-20): how many threads hold agent messages the person has not looked
- * at yet, as a badge on the favicon (white, near-black digits, a dark ring) and "(N) " before the title.
+ * at yet, as a badge on the favicon (white, near-black digits, a dark ring) and "(N) " before the title,
+ * and on the app's icon when the Inbox is installed as an app.
  *
  * What counts is the list rows' `unseen` (new since you looked), across every
  * project whatever the sidebar's filter, never the sidebar's waiting-on-you
@@ -44,6 +45,25 @@ export function tabTitle(base: string, count: number): string {
   return count > 0 ? `(${count}) ${plain}` : plain;
 }
 
+/**
+ * The same count on the installed app's icon (the Dock, the taskbar), through
+ * the Badging API: the number, and no badge at zero. A browser without the API
+ * does nothing, and a refusal is dropped: the tab still carries the count.
+ *
+ * The badge is one for all of the app's windows and the last write wins, so
+ * the window writes it only from a list it has read (App.tsx), never while it
+ * has none (zero then means "not known", not "nothing unread") and never when
+ * it goes away.
+ */
+export function setAppBadge(count: number, nav: Pick<Navigator, 'setAppBadge' | 'clearAppBadge'> = navigator): void {
+  try {
+    const done = count > 0 ? nav.setAppBadge?.(count) : nav.clearAppBadge?.();
+    void done?.catch(() => {});
+  } catch {
+    // Thrown, not rejected, by a browser whose API differs.
+  }
+}
+
 /** The icon is drawn at 64 px; the browser scales it to the tab (16 or 32). */
 export const TAB_ICON_SIZE = 64;
 const BADGE_HEIGHT = 40;
@@ -84,6 +104,9 @@ function drawOnCanvas(base: CanvasImageSource, count: number, doc: Document): st
   canvas.height = TAB_ICON_SIZE;
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
+  // The plain icon is a pixel build (Glass's 32): doubled pixel for pixel, not
+  // smoothed, so the tab's own halving gives back the studio's frame under the badge.
+  ctx.imageSmoothingEnabled = false;
   ctx.drawImage(base, 0, 0, TAB_ICON_SIZE, TAB_ICON_SIZE);
   if (label) {
     const { x, y, w, h } = badgeBox(label);
@@ -148,11 +171,17 @@ type BaseIcon = { dataUrl: string; image: HTMLImageElement | null };
 
 /**
  * Keeps the tab's title and favicon in step with `count`. The plain icon is
- * the one the page loaded with (`/favicon.png`, which the server picks from
- * the person's favicon style); it is read once, and each count is drawn once.
+ * the one the page loaded with (`/favicon.ico`, which the server picks from
+ * the person's favicon style). The badge is drawn over that style's one-PNG
+ * build, `/favicon.png` (Glass's hand-pixelled 32), read once; each count is
+ * drawn once. `iconHref`, when given, is a favicon the person picked on this
+ * page (faviconChoice.ts): it becomes the plain icon, `badgeHref` (that
+ * style's PNG) is what the badge is drawn over, again with no reload.
  */
-export function useTabCount(count: number): void {
-  const original = useRef<{ title: string; href: string; type: string | null } | null>(null);
+export function useTabCount(count: number, iconHref: string | null = null, badgeHref: string | null = null): void {
+  const original = useRef<{ title: string; href: string; type: string | null; badge: string } | null>(null);
+  /** The icon the page loaded with: what the tab goes back to once `iconHref` is null again (a try put back). */
+  const loaded = useRef<{ href: string; type: string | null; badge: string } | null>(null);
   const base = useRef<Promise<BaseIcon | null> | null>(null);
   const drawn = useRef(new Map<number, string>());
 
@@ -163,7 +192,16 @@ export function useTabCount(count: number): void {
         title: document.title.replace(COUNT_PREFIX, ''),
         href: link?.getAttribute('href') ?? '/favicon.png',
         type: link?.getAttribute('type') ?? null,
+        badge: '/favicon.png',
       };
+      loaded.current = { href: original.current.href, type: original.current.type, badge: original.current.badge };
+    }
+    const plain = iconHref ? { href: iconHref, type: null, badge: badgeHref ?? iconHref } : loaded.current!;
+    if (plain.href !== original.current.href) {
+      // A new plain icon (or the loaded one back): forget the old one and every badge drawn over it.
+      original.current = { ...original.current, ...plain };
+      base.current = null;
+      drawn.current.clear();
     }
     const start = original.current;
     document.title = tabTitle(start.title, count);
@@ -179,7 +217,7 @@ export function useTabCount(count: number): void {
       setIcon(link, ready, null);
       return;
     }
-    base.current ??= loadBase(start.href);
+    base.current ??= loadBase(start.badge);
     void base.current.then((icon) => {
       // A failed read is tried again at the next count.
       if (!icon) base.current = null;
@@ -196,7 +234,7 @@ export function useTabCount(count: number): void {
     return () => {
       cancelled = true;
     };
-  }, [count]);
+  }, [count, iconHref, badgeHref]);
 
   // Leave the tab as it was found when the window goes away (a test's unmount).
   useEffect(
@@ -224,9 +262,13 @@ function setIcon(link: HTMLLinkElement, href: string, type: string | null): void
 
 async function loadBase(href: string): Promise<BaseIcon | null> {
   try {
-    const response = await fetch(href, { cache: 'no-cache' });
-    if (!response.ok) return null;
-    const dataUrl = await readAsDataUrl(await response.blob());
+    // A favicon picked on this page is already a data URL (faviconChoice.ts): nothing to fetch.
+    let dataUrl = href;
+    if (!href.startsWith('data:')) {
+      const response = await fetch(href, { cache: 'no-cache' });
+      if (!response.ok) return null;
+      dataUrl = await readAsDataUrl(await response.blob());
+    }
     // A canvas draws only a decoded image; with no 2D context the SVG needs only the bytes.
     const hasCanvas = document.createElement('canvas').getContext('2d') !== null;
     const image = hasCanvas ? await loadImage(dataUrl).catch(() => null) : null;

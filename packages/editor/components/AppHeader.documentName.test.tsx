@@ -2,7 +2,8 @@
  * The open document's name beside the logo (#2061, DOM-gated). Failures to
  * catch: the name not drawn, its full path lost (no tooltip on hover, nothing
  * for a screen reader), a review of several files naming the open file twice
- * (switcher plus name), and the compact header picking the name up.
+ * (switcher plus name), the compact header picking the name up, and a folder
+ * session's folder path drawn without its start cut.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -90,6 +91,24 @@ describe.skipIf(!hasDom)('AppHeader document name', () => {
     expect(document.querySelector('[data-pn-tooltip]')).toBeNull();
     await hover(name);
     expect(document.querySelector('[data-pn-tooltip]')?.textContent).toBe('/repo/docs/rollout-plan.md');
+  });
+
+  // A folder session's folder. Fails if the path is drawn as plain text cut at
+  // its end (a long path then loses the folder's own name), if the folder's
+  // name is not a part of its own that never shrinks, or if the full path
+  // stops reaching the tooltip and screen readers.
+  test('a folder path is cut from the start: the folder name its own part, the full path on hover', async () => {
+    const path = 'C:\\repo\\docs\\changes\\add-refund-flow';
+    const el = await render({ documentName: { name: path, title: path, cutsFromStart: true } });
+    const name = nameOf(el)!;
+    expect(name.textContent).toBe(path);
+    expect(name.querySelector('[data-start-cut-path-last]')?.textContent).toBe('add-refund-flow');
+    expect(name.querySelector('[data-start-cut-path-folders]')?.textContent).toBe('C:\\repo\\docs\\changes\\');
+    const describedBy = name.getAttribute('aria-describedby')!;
+    expect(document.getElementById(describedBy)?.textContent).toBe(path);
+
+    await hover(name);
+    expect(document.querySelector('[data-pn-tooltip]')?.textContent).toBe(path);
   });
 
   test('a name with no path (last message) has no tooltip', async () => {

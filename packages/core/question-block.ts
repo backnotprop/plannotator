@@ -32,6 +32,20 @@
  * - Prompt: the first non-blank line that is not a choice or a
  *   recommendation. No prompt means the block is not a question: the parser
  *   returns null and the renderer falls back to the plain directive callout.
+ * - Id label: before the prompt, a short lower-case `id:` or `key:` line
+ *   (`id: sd-approach`, `question_id: q7`, `decision-key: db`; the value one
+ *   token with no spaces, not ending in `?`) is the asker's own label for
+ *   the question, as agents write it: it is never the prompt (the line
+ *   after it is), but nothing the asker wrote is hidden: it shows as the
+ *   first context line, the small line under the question. The key is still
+ *   hashed from the label line, as it was when the label was the prompt:
+ *   the store keeps each question's key from the send, while the window
+ *   computes it again from the body, so a question stored with a leading
+ *   label keeps its picks, answers and supersedes. The value itself is never
+ *   the key. A label with nothing after it to ask stays the prompt (and is
+ *   not context too). A capitalised or spaced line (`ID: x`, `Deploy: should
+ *   we…?`) is the prompt as before, and an `id:` line after the prompt is
+ *   context.
  * - Context: every other prose line (before or after the choices). A
  *   `Context:` line after the prompt is always context: it never continues
  *   the choice, bullet or recommendation above it.
@@ -52,7 +66,15 @@
  *   several. Failing that, text that begins exactly ONE choice's label,
  *   followed there by `:` `—` `–` ` - ` or `(` (`Unpin it` for `Unpin it:
  *   the toast says…`), names that choice. Anything else is a suggested
- *   free-text answer. A line right
+ *   free-text answer. With no such line (not even an empty one), a choice
+ *   whose label ends or starts with a `(recommended)` / `[recommended]`
+ *   marker (`Foo (Recommended)`, `[Recommended] Foo`, `Foo (Recommended):
+ *   why`; or whose description is the bare word, `Foo — recommended`, or
+ *   starts with a bracketed marker), as other tools teach, is the
+ *   recommendation: exactly one such choice on pick one, any on pick any;
+ *   the marker leaves the label and the raw label stays an alias. With a
+ *   line naming something, the line decides and every marker leaves its
+ *   label all the same. A line right
  *   under it continues it only when it wraps the same sentence (the line
  *   ends without sentence punctuation and the next starts in lower case);
  *   a reason on its own line stays context, and a choice is matched on the
@@ -102,6 +124,7 @@
  */
 
 import { sliceText } from "./text-cut";
+import { stripInlineMarkup } from "./inline-markdown";
 import {
   DIRECTIVE_OPEN_RE,
   codeFenceCloseIndex,
@@ -133,11 +156,82 @@ export interface QuestionChoice {
   aliases?: string[];
   /** `- [x]`: the agent marked this choice as already decided. */
   settled: boolean;
-  /** Named by the block's `Recommended:` line. */
+  /** Named by the block's `Recommended:` line, or, when the block has none,
+   *  by a recommended marker in this choice's label (`Foo (Recommended)`;
+   *  see `questionChoiceWithoutRecommendedMarker`). */
   recommended: boolean;
   /** A picture choice: the choice's first markdown image. The picture picks
    *  the choice; the answer is still the label. Absent otherwise. */
   image?: QuestionChoiceImage;
+  /** `Pros:` under a `- [ ]` choice (option lines, the Plannotator Inbox):
+   *  its items, split on `;`. Absent otherwise: the line stays in the
+   *  description. */
+  pros?: string[];
+  /** `Cons:` (or `Trade-off:`) under a `- [ ]` choice, as `pros`. */
+  cons?: string[];
+  /** `Prototype:` (or `Try:`) under a `- [ ]` choice: the page that shows
+   *  this option, as `QuestionPrototype`. Option lines only. */
+  prototype?: QuestionPrototype;
+  /** `Before:` indented under a `- [ ]` choice: what this choice's own change
+   *  replaces (change lines only, `ParseQuestionBlockOptions.changeLines`). */
+  before?: QuestionChangeValue;
+  /** `After:` indented under a `- [ ]` choice: this choice is its own version
+   *  or change, and this is how it reads (change lines only). With several
+   *  places, its first place's. */
+  after?: QuestionChangeValue;
+  /** Every place of a choice that names one (`Where:` under it) or has more
+   *  than one (a second `Before:` / `After:` starts the next, as at the
+   *  block's indent). A place without its own Where or Before is the
+   *  question's place in the same position. Absent otherwise. */
+  places?: QuestionChangeGroup[];
+}
+
+/**
+ * One side of a before and after (change lines): the text as written (inline
+ * markdown; a `> ` quoted value keeps its lines), one picture (`![alt](src)`,
+ * a GIF too), or nothing there (`none`).
+ */
+export type QuestionChangeValue =
+  | { kind: 'text'; text: string }
+  /** `caption`: words written after the picture on its line (what it shows, in text). */
+  | { kind: 'image'; alt: string; src: string; caption?: string }
+  | { kind: 'none' };
+
+/** One place a question changes: its own `Where:` (when the question has
+ *  several places) and its `Before:` / `After:`. */
+export interface QuestionChangeGroup {
+  where?: string;
+  before?: QuestionChangeValue;
+  after?: QuestionChangeValue;
+}
+
+/**
+ * A question that proposes a change (change lines, read only with
+ * `ParseQuestionBlockOptions.changeLines`): `Where:` what it is and where the
+ * person sees it, then `Before:` and `After:`; a second `Where:` starts another
+ * place. `Source:` is where it lives (a path or URL), for the opened picture
+ * only. Never the prompt, never context, never in the key.
+ */
+export interface QuestionChange {
+  /** The question's own `Where:` (the first, when the places below have their own). */
+  where?: string;
+  /** `Source:` — a file:line or URL, shown only with the opened place picture. */
+  source?: string;
+  /** The places, in order; empty when only choices carry a change. */
+  groups: QuestionChangeGroup[];
+}
+
+/**
+ * A prototype as written: `Prototype: proto/a.html`, `Prototype:
+ * http://localhost:3000/checkout?v=a`, `Prototype: <target>` or `Prototype:
+ * [Name](target)`. `target` is the path or address exactly as written; the
+ * host decides what it opens (the Inbox: an attached HTML file, or an app
+ * running on this computer through its live proxy).
+ */
+export interface QuestionPrototype {
+  target: string;
+  /** The link's text, when written as `[Name](target)`. */
+  label?: string;
 }
 
 /** The picture of a picture choice (`- [ ] Label — ![alt](src)`). */
@@ -179,6 +273,10 @@ export interface ParsedQuestion {
   recommendation?: string;
   /** The recommendation when it names no choice: a suggested answer. */
   suggestedText?: string;
+  /** A choice was written with a recommended marker in its label or
+   *  description (`Foo (Recommended)`), read or not: the Inbox nudges the
+   *  agent to keep labels plain. */
+  recommendedMarker?: true;
   /** Stable identity: `q-` + hash8(kind + prompt). See questionKey. */
   key: string;
   /** `Decision: when answered`: the asker flagged that answering this
@@ -200,6 +298,13 @@ export interface ParsedQuestion {
   why?: string;
   /** `Reversible: no — <why>`. Absent means reversible (`yes`, or no line). */
   reversible?: QuestionIrreversible;
+  /** `Prototype:` at the block's own indent: one page every option shows
+   *  (option lines only, `ParseQuestionBlockOptions.optionLines`). */
+  prototype?: QuestionPrototype;
+  /** `Where:` / `Before:` / `After:` / `Source:` at the block's own indent
+   *  (change lines only, `ParseQuestionBlockOptions.changeLines`). Absent when
+   *  the block has none of them and no choice carries a change. */
+  change?: QuestionChange;
 }
 
 /** A recorded decision a question links to (`Decision: [statement](url)`). */
@@ -210,21 +315,29 @@ export interface QuestionDecisionLink {
   url: string;
 }
 
-/** Caps. Parsing is bounded; answers are truncated to these on validation. */
+/** @deprecated No longer applied: a block of any length is a question, and
+ *  every choice is kept (through core 0.25.27 a block over 20,000 characters
+ *  was not a question and choices past 20 were dropped, with no word to the
+ *  person or the agent). Kept so an importer still builds. */
 export const MAX_QUESTION_BODY_CHARS = 20_000;
+/** @deprecated No longer applied; see MAX_QUESTION_BODY_CHARS. */
 export const MAX_QUESTION_CHOICES = 20;
 export const MAX_QUESTION_PROMPT_CHARS = 400;
 /** The longest label a plain-bullet choice takes before the rest moves to
  *  its description (see capChoiceLabel). Task-list labels are not cut. */
 export const MAX_QUESTION_CHOICE_LABEL_CHARS = 200;
-/** The cap on each `selected` label of an answer. A picked label is a choice
- *  label, and a choice lives in a block body of at most
- *  MAX_QUESTION_BODY_CHARS, so any label a block can hold round-trips whole.
- *  (Through 0.28.17 this was MAX_QUESTION_CHOICE_LABEL_CHARS, which cut a
- *  task-list label over 200 characters, so it could never be picked.) */
+/** @deprecated No longer applied: a picked label is kept whole, as every
+ *  choice label is. (Through 0.28.17 picks were cut at
+ *  MAX_QUESTION_CHOICE_LABEL_CHARS, so a long task-list label could never be
+ *  picked; through core 0.25.27 at this body-sized cap.) */
 export const MAX_QUESTION_SELECTED_CHARS = MAX_QUESTION_BODY_CHARS;
+/** @deprecated No longer applied: the person's answer, Other and note are kept
+ *  whole (through core 0.25.27 they were cut here without a word). Kept so an
+ *  importer still builds. */
 export const MAX_QUESTION_OTHER_CHARS = 2000;
+/** @deprecated No longer applied; see MAX_QUESTION_OTHER_CHARS. */
 export const MAX_QUESTION_TEXT_CHARS = 4000;
+/** @deprecated No longer applied; see MAX_QUESTION_OTHER_CHARS. */
 export const MAX_QUESTION_NOTE_CHARS = 2000;
 
 const CHOICE_RE = /^\s*(?:[-*+]|\d{1,3}[.)])\s+\[([ xX])\]\s+(.*)$/;
@@ -241,6 +354,8 @@ const CONTEXT_LINE_RE = /^\s*(?:[*_]{1,2})?context(?:[*_]{1,2})?\s*:/i;
 const CONTRACT_LINE_RE = /^\s*(?:[*_]{1,2})?(stakes|shows|why|reversible)(?:[*_]{1,2})?\s*:\s*(?:[*_]{1,2})?\s*(.*?)\s*$/i;
 const SHOWS_IMAGE_RE = /^!\[([^\]\n]*)\]\(([^)\n]+)\)\.?$/;
 const SHOWS_LINK_RE = /^\[([^\]\n]+)\]\(([^)\n]+)\)\.?$/;
+/** A picture's or link's address without the title markdown allows after it (`![a](b.png "Title")` → `b.png`). */
+const markdownSrc = (raw: string): string => raw.trim().replace(/\s+(?:"[^"\n]*"|'[^'\n]*')$/, '').replace(/^<(.+)>$/, '$1');
 const REVERSIBLE_NO_RE = /^(?:no|false|never)\b\s*(?:[—–:;,.]|-{1,2}(?=\s))?\s*(.*)$/i;
 const REVERSIBLE_YES_RE = /^(?:yes|true)\b/i;
 // A markdown image as the window renders it (InlineMarkdown, and the Inbox's
@@ -249,6 +364,11 @@ const CHOICE_IMAGE_RE = /!\[([^\]\n]*)\]\(([^)\n]+)\)/;
 // What may follow a recommendation that names the start of a choice label
 // (`Recommended: Unpin it` for `Unpin it: the toast says…`).
 const LABEL_HEAD_SEP_RE = /^(?:\s*[:—–(]|\s+-\s)/;
+// A recommendation that is only a label's leading token, a letter or a
+// number (`Recommended: A` for `A · Yes`), names the label when the token is
+// followed by a middle dot.
+const LABEL_TOKEN_RE = /^(?:[a-z]|\d+)$/;
+const LABEL_TOKEN_SEP_RE = /^ · /;
 // At the start of the line (no indentation), so an indented line under a
 // choice stays that choice's continuation.
 const DECISION_RE = /^decision\s*:\s*(.*?)\s*$/i;
@@ -261,6 +381,10 @@ const DECISION_LINK_RE = /^\[([^\]]+)\]\((\S+)\)\.?$/;
 const REPLACES_KEY = String.raw`q-[0-9a-f]{8}(?:-\d{1,3})?`;
 const REPLACES_TOKEN = String.raw`(?:msg_[0-9A-HJKMNP-TV-Z]{26}(?:/${REPLACES_KEY})?|${REPLACES_KEY})\.?`;
 const REPLACES_RE = new RegExp(String.raw`^\s*replaces\s*:\s*(${REPLACES_TOKEN}(?:[\s,;]+${REPLACES_TOKEN})*)[\s,;]*$`, 'i');
+// An asker's own label for the question before the prompt (`id: sd-approach`):
+// a lower-case `id` or `key`, optionally after a short `name_` / `name-`,
+// a colon, one token with no spaces that does not end in `?`. Shown as context.
+const ID_LABEL_RE = /^\s*(?:[a-z][a-z0-9]{0,15}[_-])?(?:id|key)\s*:\s*\S{0,79}[^\s?]\s*$/;
 // A line (leading whitespace aside) that opens a block of its own (list item, heading,
 // quote, fence, directive, table row, HTML, rule) ends a plain bullet instead
 // of continuing it lazily.
@@ -369,8 +493,8 @@ const splitBoldLead = (raw: string): { label: string; description: string } | nu
 /** A plain-bullet label longer than `MAX_QUESTION_CHOICE_LABEL_CHARS` is cut
  *  at its first sentence end (else its last space) within the cap; the rest
  *  leads the description, so the card shows a short name. Nothing is
- *  dropped. Task-list labels keep their full length (an answer quotes up to
- *  `MAX_QUESTION_SELECTED_CHARS`). */
+ *  dropped. Task-list labels keep their full length (an answer quotes them
+ *  whole). */
 const capChoiceLabel = (split: { label: string; description?: string }): { label: string; description?: string } => {
   const { label, description } = split;
   if (label.length <= MAX_QUESTION_CHOICE_LABEL_CHARS) return split;
@@ -469,7 +593,9 @@ const QUESTION_KEY_RE = /^q-[0-9a-f]{8}(?:-\d{1,3})?$/;
  * The one choice a recommendation names by the start of its label: the
  * choice whose label (or any of its other names, such as a task list's full
  * text) begins with the text and then a separator (`:` `—` `–` ` - ` `(`),
- * compared case-insensitively with emphasis and spacing folded
+ * or whose leading letter or number the text is, followed by ` · `
+ * (`Recommended: A` names `A · Yes`), compared case-insensitively with
+ * emphasis and spacing folded
  * (`Recommended: Unpin it` names `Unpin it: the toast says…`). -1 when no
  * choice or several do. `names` holds each choice's names, label first.
  */
@@ -482,9 +608,25 @@ export const recommendationHeadChoice = (
   const begins = (value: string | undefined): boolean => {
     if (!value) return false;
     const folded = value.replace(/[*_`]+/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
-    return folded.startsWith(target) && LABEL_HEAD_SEP_RE.test(folded.slice(target.length));
+    if (!folded.startsWith(target)) return false;
+    const rest = folded.slice(target.length);
+    return LABEL_HEAD_SEP_RE.test(rest) || (LABEL_TOKEN_RE.test(target) && LABEL_TOKEN_SEP_RE.test(rest));
   };
   const hits = names.flatMap((entry, i) => ((typeof entry === 'string' ? [entry] : entry).some(begins) ? [i] : []));
+  return hits.length === 1 ? hits[0] : -1;
+};
+
+/** Inline markdown's plain words, normalized: link and wiki-link labels kept,
+ *  images and HTML tags out (normalizeQuestionText drops emphasis and code
+ *  marks). */
+const plainWords = (value: string): string => normalizeQuestionText(stripInlineMarkup(value));
+
+/** The one choice (index) one of whose texts has the same plain words as one
+ *  of the candidates, or -1 when none or several do. */
+const plainWordsChoice = (candidates: string[], texts: string[][]): number => {
+  const targets = new Set(candidates.map(plainWords).filter(Boolean));
+  if (targets.size === 0) return -1;
+  const hits = texts.flatMap((list, i) => (list.some((t) => t && targets.has(plainWords(t))) ? [i] : []));
   return hits.length === 1 ? hits[0] : -1;
 };
 
@@ -499,6 +641,11 @@ const matchRecommendation = (
   plainBullets = false,
 ): number[] => {
   const match = (candidate: string): number => {
+    // The choice written exactly so first: `Recommended: Yes!` names `Yes!`, not a `Yes` before it.
+    const written = candidate.trim();
+    if (!written) return -1;
+    const exact = choices.findIndex((c, i) => c.label === written || raws[i]?.trim() === written || (names[i] ?? []).includes(written));
+    if (exact !== -1) return exact;
     const target = normalizeQuestionText(candidate);
     if (!target) return -1;
     return choices.findIndex(
@@ -518,6 +665,12 @@ const matchRecommendation = (
     const hit = lead ? match(lead) : -1;
     if (hit !== -1) return [hit];
   }
+  // No exact match: the plain words of a label written as markdown
+  // (`[Pagefind](x.html)` is named by `Pagefind`), only when exactly one
+  // choice has them.
+  const choiceTexts = choices.map((c, i) => [c.label, raws[i], ...(names[i] ?? [])]);
+  const plainHit = plainWordsChoice([text, splitLabel(text).label], choiceTexts);
+  if (plainHit !== -1) return [plainHit];
   // Plain bullets only (task lists match exactly as they always have):
   // `b. Default off; …` names the one choice whose label starts `b.` / `b)`,
   // same case, so `A. Smith's proposal` never names an `a.` choice.
@@ -540,6 +693,9 @@ const matchRecommendation = (
   const fallbackHit = (candidate: string): number => {
     const lettered = letteredHit(candidate);
     if (lettered !== -1) return lettered;
+    // A part of a pick-any line (`Pagefind and Algolia`) names a markdown label by its plain words too.
+    const plain = plainWordsChoice([candidate, splitLabel(candidate).label], choiceTexts);
+    if (plain !== -1) return plain;
     const hit = headHit(candidate);
     return hit !== -1 ? hit : headHit(splitLabel(candidate).label);
   };
@@ -606,24 +762,219 @@ const matchRecommendation = (
   return fallback !== -1 ? [fallback] : [];
 };
 
-type ContractField = 'stakes' | 'shows' | 'why' | 'reversible';
+type ContractField = 'stakes' | 'shows' | 'why' | 'reversible' | 'prototype';
 type ContractValue =
   | { field: 'stakes' | 'why'; value: string }
   | { field: 'shows'; value: QuestionShows }
-  | { field: 'reversible'; value: QuestionIrreversible | null };
+  | { field: 'reversible'; value: QuestionIrreversible | null }
+  | { field: 'prototype'; value: QuestionPrototype };
+
+// Option lines (`ParseQuestionBlockOptions.optionLines`): under a `- [ ]`
+// choice, `Pros:`, `Cons:` (aliases `Pro:`, `Con:`, `Trade-off:`) and
+// `Prototype:` (alias `Try:`), any case, emphasis around the label allowed.
+const OPTION_LINE_RE = /^[*_]{0,2}(pros?|cons?|trade-?offs?|prototype|try)[*_]{0,2}\s*:\s*[*_]{0,2}\s*(.*?)\s*$/i;
+const PROTOTYPE_LINK_RE = /^\[([^\]\n]*)\]\(\s*<?([^)\s>]+)>?\s*\)\.?$/;
+const PROTOTYPE_ANGLED_RE = /^<([^>\s]+)>\.?$/;
+
+/** A prototype line's value: `[Name](target)`, `<target>`, or one bare
+ *  target (no spaces: "Try: run it twice" is prose). Null when it is none. */
+const readPrototypeValue = (raw: string): QuestionPrototype | null => {
+  const value = raw.replace(/[*_]{1,2}$/, '').trim();
+  const link = value.match(PROTOTYPE_LINK_RE);
+  if (link) return link[2] ? { target: link[2], ...(link[1].trim() ? { label: link[1].trim() } : {}) } : null;
+  const angled = value.match(PROTOTYPE_ANGLED_RE);
+  if (angled) return { target: angled[1] };
+  return /^\S+$/.test(value) ? { target: value.replace(/\.$/, '') } : null;
+};
+
+/** One option line read (`Pros:` and `Cons:` items, or a prototype), or
+ *  null when the line is not one or its value is empty or not a target. */
+export const readOptionLine = (
+  line: string,
+): { field: 'pros' | 'cons'; value: string[] } | { field: 'prototype'; value: QuestionPrototype } | null => {
+  const m = line.trim().match(OPTION_LINE_RE);
+  if (!m) return null;
+  const name = m[1].toLowerCase();
+  if (name === 'prototype' || name === 'try') {
+    const value = readPrototypeValue(m[2]);
+    return value ? { field: 'prototype', value } : null;
+  }
+  const items = m[2]
+    .replace(/[*_]{1,2}$/, '')
+    .split(';')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (items.length === 0) return null;
+  return { field: name.startsWith('pro') ? 'pros' : 'cons', value: items };
+};
+
+// Change lines (`ParseQuestionBlockOptions.changeLines`): `Where:`, `Before:`,
+// `After:` and `Source:` at the block's indent, `Before:` and `After:` under a
+// `- [ ]` choice. Any case, emphasis around the label allowed.
+const CHANGE_LINE_RE = /^\s*(?:[*_]{1,2})?(where|before|after|source)(?:[*_]{1,2})?\s*:\s*(?:[*_]{1,2}(?=\s|$))?\s*(.*?)\s*$/i;
+const CHANGE_NONE_RE = /^(?:none|nothing)\.?$/i;
+// A quoted line (`> text`), the multi-line form of a value: `Before:` alone, then the lines.
+const QUOTE_LINE_RE = /^\s*>/;
+
+type ChangeField = 'where' | 'before' | 'after' | 'source';
+
+/** A change line read: its field and the value as written (empty when the
+ *  value follows as quoted lines), or null when the line is not one. */
+const readChangeLine = (line: string): { field: ChangeField; value: string } | null => {
+  const m = line.match(CHANGE_LINE_RE);
+  return m ? { field: m[1].toLowerCase() as ChangeField, value: m[2] } : null;
+};
+
+/** A `Before:` / `After:` value: `none`, one picture, or text. Null when empty. */
+const CHANGE_CAPTIONED_IMAGE_RE = /^!\[([^\]\n]*)\]\(([^)\n]+)\)\s+(\S.*)$/;
+
+const readChangeValue = (raw: string): QuestionChangeValue | null => {
+  const value = raw.trim();
+  if (!value) return null;
+  if (CHANGE_NONE_RE.test(value)) return { kind: 'none' };
+  const image = value.match(SHOWS_IMAGE_RE);
+  if (image) return { kind: 'image', alt: image[1].trim(), src: markdownSrc(image[2]) };
+  // A picture with words after it: the picture, those words its caption.
+  const captioned = value.match(CHANGE_CAPTIONED_IMAGE_RE);
+  if (captioned) return { kind: 'image', alt: captioned[1].trim(), src: markdownSrc(captioned[2]), caption: captioned[3] };
+  return { kind: 'text', text: value };
+};
+
+/** A quoted line's text: the `>` and one space after it taken off. */
+const unquote = (line: string): string => line.replace(/^\s*>\s?/, '').trimEnd();
+
+/**
+ * A change line as read, with where the default parse put its text: the
+ * context lines (`ctx`, by index) or the pieces of its choice's description
+ * (`parts`). A Before / After keeps its lines: the text after the colon and
+ * the lines that continue it (`quoted`: `> ` lines under a bare label).
+ */
+type TrackedChangeLine =
+  | { field: 'where'; value: string; ctx: number[]; parts: number[] }
+  | { field: 'before' | 'after'; lines: string[]; quoted: boolean; ctx: number[]; parts: number[] };
+
+/** A Before / After line's value, or null when it has none (a bare label with no `> ` line under it). */
+const trackedValue = (event: TrackedChangeLine & { field: 'before' | 'after' }): QuestionChangeValue | null => {
+  const joined = event.lines.join('\n').replace(/^\n+|\n+$/g, '');
+  if (!joined.trim()) return null;
+  return event.lines.length === 1 ? readChangeValue(joined) : { kind: 'text', text: joined };
+};
+
+type TrackedGroup = { group: QuestionChangeGroup; events: TrackedChangeLine[] };
+
+/**
+ * The places of change lines, in the order written: a `Where:` after anything
+ * starts a new place, as does a `Before:` after a Before or an After, and an
+ * `After:` after an After. A Before / After with no value is no line of a place.
+ */
+const trackedGroupsOf = (events: ReadonlyArray<TrackedChangeLine>): TrackedGroup[] => {
+  const groups: TrackedGroup[] = [];
+  for (const event of events) {
+    const current = groups[groups.length - 1];
+    if (event.field === 'where') {
+      if (!current || current.group.where !== undefined || current.group.before || current.group.after) groups.push({ group: { where: event.value }, events: [event] });
+      else {
+        current.group.where = event.value;
+        current.events.push(event);
+      }
+      continue;
+    }
+    const value = trackedValue(event);
+    if (!value) continue;
+    const startsNew = !current || current.group.after !== undefined || (event.field === 'before' && current.group.before !== undefined);
+    if (startsNew) groups.push({ group: { [event.field]: value }, events: [event] });
+    else {
+      current.group[event.field] = value;
+      current.events.push(event);
+    }
+  }
+  return groups;
+};
+
+/** What the card draws of a question's change lines, and where those lines were. */
+interface AcceptedChange {
+  where?: string;
+  groups: QuestionChangeGroup[];
+  /** Context lines the drawn places took (the block's, and a choice's written unindented). */
+  context: number[];
+  choices: Array<{ places: QuestionChangeGroup[]; parts: Set<number> }>;
+}
+
+/**
+ * The change lines the card draws whole; every other one stays as the
+ * default parse has it (context text, or its choice's description).
+ *
+ * - Under a choice, a place needs an `After:`; its Where and Before are optional.
+ * - At the block's indent, a place needs a `Before:` and an `After:`. A
+ *   `Before:` alone is the version every choice is compared with when a
+ *   choice has a drawn After (one version per choice). A first `Where:` with
+ *   nothing under it is the question's own when anything is drawn; a Where in
+ *   a place that is drawn shows as its pin line.
+ */
+const acceptChangeLines = (
+  blockEvents: ReadonlyArray<TrackedChangeLine>,
+  choiceEvents: ReadonlyArray<ReadonlyArray<TrackedChangeLine>>,
+): AcceptedChange => {
+  const context: number[] = [];
+  const take = (events: TrackedChangeLine[], parts?: Set<number>) => {
+    for (const event of events) {
+      context.push(...event.ctx);
+      if (parts) for (const part of event.parts) parts.add(part);
+    }
+  };
+  const choices = choiceEvents.map((events) => {
+    const parts = new Set<number>();
+    const places: QuestionChangeGroup[] = [];
+    for (const { group, events: lines } of trackedGroupsOf(events)) {
+      if (group.after === undefined) continue;
+      places.push(group);
+      take(lines, parts);
+    }
+    return { places, parts };
+  });
+  const choiceAfter = choices.some((c) => c.places.length > 0);
+  const tracked = trackedGroupsOf(blockEvents);
+  const drawn = tracked.map(({ group }) => group.before !== undefined && (group.after !== undefined || choiceAfter));
+  const anyDrawn = choiceAfter || drawn.some(Boolean);
+  const ownWhere = tracked.length > 0 && anyDrawn && tracked[0]!.group.where !== undefined
+    && tracked[0]!.group.before === undefined && tracked[0]!.group.after === undefined;
+  let where: string | undefined;
+  if (ownWhere) {
+    where = tracked[0]!.group.where;
+    take(tracked[0]!.events);
+  }
+  const groups: QuestionChangeGroup[] = [];
+  tracked.forEach(({ group, events }, index) => {
+    if (!drawn[index]) return;
+    groups.push(group);
+    take(events);
+  });
+  if (where === undefined && groups.length === 1 && groups[0]!.where !== undefined) {
+    where = groups[0]!.where;
+    delete groups[0]!.where;
+  }
+  return { ...(where !== undefined ? { where } : {}), groups, context, choices };
+};
+
+/** A question's own `Prototype:` (or `Try:`) line at the block's indent:
+ *  one page for every option (option lines only). */
+const readSharedPrototypeLine = (line: string): ContractValue | null => {
+  const read = readOptionLine(line);
+  return read && read.field === 'prototype' ? read : null;
+};
 
 /** A contract line (`Stakes:`, `Shows:`, `Why:`, `Reversible:`) read, or
  *  null when the line is not one or its value does not fit (prose). */
 const readContractLine = (line: string): ContractValue | null => {
   const m = line.match(CONTRACT_LINE_RE);
   if (!m) return null;
-  const field = m[1].toLowerCase() as ContractField;
+  const field = m[1].toLowerCase() as Exclude<ContractField, 'prototype'>;
   const value = m[2].replace(/[*_]{1,2}$/, '').trim();
   if (!value) return null;
   if (field === 'stakes' || field === 'why') return { field, value };
   if (field === 'shows') {
     const image = value.match(SHOWS_IMAGE_RE);
-    if (image) return { field, value: { kind: 'image', label: image[1].trim(), src: image[2] } };
+    if (image) return { field, value: { kind: 'image', label: image[1].trim(), src: markdownSrc(image[2]) } };
     const link = value.match(SHOWS_LINK_RE);
     if (link) return { field, value: { kind: 'link', label: link[1].trim(), src: link[2] } };
     return null;
@@ -633,6 +984,66 @@ const readContractLine = (line: string): ContractValue | null => {
   if (!no) return null;
   const why = no[1].trim();
   return { field, value: { value: false, ...(why ? { why } : {}) } };
+};
+
+// A recommendation written into a choice's own label, the way other tools
+// teach it (Claude Code's AskUserQuestion appends "(Recommended)"): a
+// bracketed `(recommended)` / `[recommended]` at the label's end, optionally
+// in its own emphasis or inside the label's closing emphasis.
+const LABEL_REC_MARKER_RE = /^(.*?\S)\s*([*_]{1,2})?[([]\s*recommended\s*[)\]]\2?([*_]{0,2})\s*$/i;
+// The same marker leading the label (`[Recommended] Foo`, `(Recommended):
+// Foo`, `**[Recommended]** Foo`, `**(Recommended) Foo**`): group 1 is the
+// label's own opening emphasis, kept; group 3 the label.
+const LABEL_LEAD_REC_MARKER_RE = /^([*_]{0,2})([*_]{1,2})?[([]\s*recommended\s*[)\]]\2?:?\s+(\S[\s\S]*)$/i;
+// The marker then a colon inside the label (`Foo (Recommended): cheap`, which
+// the choice split leaves whole): the label, then the description.
+const LABEL_COLON_REC_MARKER_RE = /^(.*?\S)\s*[([]\s*recommended\s*[)\]]:\s+(\S[\s\S]*)$/i;
+// The same marker as the description: the bare word alone (`Foo —
+// recommended`), or a bracketed marker leading it (`Foo — (Recommended)
+// cheap`). Words after a bare `Recommended` are prose (`Foo — Recommended:
+// no, too slow`, "recommended by the vendor"), never a marker.
+const DESC_REC_MARKER_RE = /^[*_]{0,2}(?:[([]\s*recommended\s*[)\]][*_]{0,2}\s*([\s\S]*)|recommended[*_]{0,2}[.!]?)$/i;
+
+/**
+ * A choice whose label (or the start of its description) carries a
+ * recommended marker (`Foo (Recommended)`, `[Recommended] Foo`, `Foo
+ * (Recommended): why`, `Foo [recommended]`, `Foo — recommended`): the label
+ * and description with the marker taken out. Null when the choice carries
+ * none, or taking it out would leave no label. Only the bracketed word
+ * `recommended` is a marker: "Use the recommended defaults", "(not
+ * recommended)" and "(recommended by the vendor)" are not. `parseQuestionBlock`
+ * reads it (as the recommendation only when the block has no `Recommended:`
+ * line); the Plannotator Inbox reads a stored label through it.
+ */
+export const questionChoiceWithoutRecommendedMarker = (
+  choice: { label: string; description?: string | null },
+): { label: string; description?: string } | null => {
+  const inLabel = choice.label.match(LABEL_REC_MARKER_RE);
+  if (inLabel) {
+    // The label's own closing emphasis (`**Foo (recommended)**`) stays on it.
+    const label = `${inLabel[1]}${inLabel[2] ? '' : inLabel[3]}`.trim();
+    if (!label) return null;
+    return { label, ...(choice.description ? { description: choice.description } : {}) };
+  }
+  const leading = choice.label.match(LABEL_LEAD_REC_MARKER_RE);
+  if (leading) {
+    const label = `${leading[1]}${leading[3]}`.trim();
+    if (!label || /^[*_]*$/.test(label)) return null;
+    return { label, ...(choice.description ? { description: choice.description } : {}) };
+  }
+  const colon = choice.label.match(LABEL_COLON_REC_MARKER_RE);
+  if (colon) {
+    const description = [colon[2].trim(), choice.description?.trim()].filter(Boolean).join(' — ');
+    return { label: colon[1].trim(), ...(description ? { description } : {}) };
+  }
+  const inDesc = choice.description?.trim().match(DESC_REC_MARKER_RE);
+  if (inDesc) {
+    // What follows the marker, without the separator written after it
+    // (`(Recommended): cheap`, `[recommended] — cheap`, `(Recommended) - cheap`).
+    const description = (inDesc[1] ?? '').trim().replace(/^(?:[:—–]|-(?=\s|$))+\s*/, '').trim();
+    return { label: choice.label, ...(description ? { description } : {}) };
+  }
+  return null;
 };
 
 /** A label with the first markdown image written in it taken out (spacing
@@ -722,6 +1133,30 @@ export interface ParseQuestionBlockOptions {
    *  annotate pass false (approval "inbox-decision-mode": plan review shows
    *  the lines as plain text); picture choices are read either way. */
   contractLines?: boolean;
+  /** Read option lines (approval "inbox-question-tradeoffs"): `Pros:`,
+   *  `Cons:` and `Prototype:` lines indented under a `- [ ]` choice go into
+   *  that choice's `pros`, `cons` and `prototype` (the first of each wins; a
+   *  later one is description), and a `Prototype:` line at the block's own
+   *  indent is the question's shared `prototype`. Default false: each line
+   *  stays where it always went (a choice's description, or context), so
+   *  plan review, annotate and every older reader show it as text. The key,
+   *  labels and answers of `- [ ]` choices are the same either way. Only the
+   *  Plannotator Inbox passes true. */
+  optionLines?: boolean;
+  /** Read change lines (a question that proposes a change): `Where:`,
+   *  `Before:`, `After:` and `Source:` at the block's own indent into
+   *  `change`, and `Where:` / `Before:` / `After:` indented under a `- [ ]`
+   *  choice into that choice's `before` / `after` (and `places`). A value is the rest of the line (text,
+   *  one `![alt](src)` picture, or `none`), or, with nothing after the colon,
+   *  the `> ` quoted lines right under it. Default false: every such line
+   *  stays where it always went (context, or the choice's description), as
+   *  it does in every older reader. A line is read only where the default
+   *  parse would have kept it as a context line of its own (never the
+   *  continuation of a plain bullet or a recommendation), so the prompt, the
+   *  key, the labels and the recommendation are the default parse's. Only the
+   *  Plannotator Inbox's cards pass true; its server stores the default
+   *  parse. */
+  changeLines?: boolean;
 }
 
 export const parseQuestionBlock = (
@@ -732,11 +1167,19 @@ export const parseQuestionBlock = (
   if (!isQuestionDirectiveKind(directiveKind)) return null;
   const readDecisionLines = options?.decisionLines !== false;
   const readContractLines = options?.contractLines !== false;
-  if (typeof body !== 'string' || body.length > MAX_QUESTION_BODY_CHARS) return null;
+  const readOptionLines = options?.optionLines === true;
+  const readChangeLines = options?.changeLines === true;
+  if (typeof body !== 'string') return null;
   const lines = body.replace(/\r\n?/g, '\n').split('\n');
 
   let prompt = '';
   let promptLine = -1;
+  // The text the key is hashed from when an id label came first: the label
+  // line, which builds before the label was dropped read as the prompt, so a
+  // stored question keeps its key (and its picks, answers and supersedes).
+  let keyText: string | undefined;
+  let keyTextLine = -1;
+  let keyTextContext = -1;
   const contextLines: string[] = [];
   const choices: QuestionChoice[] = [];
   const raws: string[] = [];
@@ -757,6 +1200,9 @@ export const parseQuestionBlock = (
   let recommendation: string | undefined;
   let recommendationWrapped: string | undefined;
   let recommendationOpen = false;
+  // Any `Recommended:` (or arrow) line, even an empty one: a block that has
+  // one never reads a recommended marker in a label.
+  let recommendationLine = false;
   let lastChoice = -1;
   // The plain bullet the next line may continue (CommonMark list-item
   // paragraph rules): an indented line, or an unindented "lazy" line that
@@ -769,7 +1215,7 @@ export const parseQuestionBlock = (
   let decisionFlag = false;
   let decision: QuestionDecisionLink | undefined;
   const replaces: string[] = [];
-  const contract: { stakes?: string; shows?: QuestionShows; why?: string; reversible?: QuestionIrreversible | null } = {};
+  const contract: { stakes?: string; shows?: QuestionShows; why?: string; reversible?: QuestionIrreversible | null; prototype?: QuestionPrototype } = {};
   // A code fence open anywhere in the body after the prompt: a contract line
   // inside it is code, never read.
   let bodyFence: string | null = null;
@@ -793,6 +1239,35 @@ export const parseQuestionBlock = (
     else if (marker[0] === continuationFence[0] && marker.length >= continuationFence.length && line.trim() === marker) continuationFence = null;
   };
 
+  // Change lines (`changeLines`). Every line of one is first put exactly
+  // where the default parse puts it (a context line, or a piece of its
+  // choice's description), and where it went is recorded. Only a shape the
+  // card draws whole leaves those places at the end (`acceptChangeLines`);
+  // anything else stays as written, so nothing an agent wrote is lost.
+  const changeEvents: TrackedChangeLine[] = [];
+  // A choice's own lines (indented under it, or right under its line), by choice.
+  const choiceChangeEvents = new Map<number, TrackedChangeLine[]>();
+  const trackChange = (choice: number, event: TrackedChangeLine) => {
+    if (choice === -1) {
+      changeEvents.push(event);
+      return;
+    }
+    const list = choiceChangeEvents.get(choice) ?? [];
+    list.push(event);
+    choiceChangeEvents.set(choice, list);
+  };
+  // Each choice's description as the default parse builds it, piece by piece.
+  const descParts: string[][] = [];
+  let changeSource: { value: string; contextIndex: number } | undefined;
+  // A bare `Before:` / `After:` still taking its `> ` quoted lines. A value
+  // written after the colon is that one line: the plain line under it is
+  // the agent's own words (commentary), never part of the value.
+  let openValue: { event: TrackedChangeLine & { field: 'before' | 'after' }; owner: number; inDescription: boolean; lastLine: number } | null = null;
+  const continuesValue = (i: number, text: string, inDescription: boolean, owner: number): boolean => {
+    if (!openValue || openValue.lastLine !== i - 1 || openValue.inDescription !== inDescription || openValue.owner !== owner) return false;
+    return openValue.event.quoted && QUOTE_LINE_RE.test(text);
+  };
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (line.trim() === '') {
@@ -804,7 +1279,6 @@ export const parseQuestionBlock = (
     }
     const choice = directiveKind === 'question-text' ? null : line.match(CHOICE_RE);
     if (choice) {
-      if (choices.length >= MAX_QUESTION_CHOICES) continue;
       const raw = choice[2].trim();
       const { label, description } = splitLabel(raw);
       if (!label) continue;
@@ -817,6 +1291,7 @@ export const parseQuestionBlock = (
         recommended: false,
       });
       raws.push(raw);
+      descParts.push(description ? [description] : []);
       lastChoice = choices.length - 1;
       openBullet = null;
       continuationFence = null;
@@ -836,6 +1311,7 @@ export const parseQuestionBlock = (
     }
     const rec = line.match(RECOMMENDED_RE) ?? line.match(ARROW_RE);
     if (rec) {
+      recommendationLine = true;
       const text = rec[1].replace(/[*_]{1,2}$/, '').trim();
       if (text) {
         recommendation = recommendationWrapped = text;
@@ -844,6 +1320,18 @@ export const parseQuestionBlock = (
       recommendationOpen = !!text;
       lastChoice = -1;
       openBullet = null;
+      continue;
+    }
+    // The asker's own label before the prompt (`id: sd-approach`): never the
+    // prompt, but it still shows, as the first context line, and the first
+    // one stays the key's text (see `keyText`).
+    if (!prompt && ID_LABEL_RE.test(line)) {
+      if (keyText === undefined) {
+        keyText = line.trim().replace(/^#{1,6}\s+/, '');
+        keyTextLine = i;
+        keyTextContext = contextLines.length;
+      }
+      pushContext(line.trimEnd());
       continue;
     }
     if (!prompt) {
@@ -861,10 +1349,13 @@ export const parseQuestionBlock = (
     const fenceBefore = bodyFence;
     trackBodyFence(line);
     const atBlockIndent = indentWidth(line) <= indentWidth(lines[promptLine] ?? '');
-    const contractLine = fenceBefore || bodyFence || continuationFence || !atBlockIndent ? null : readContractLine(line);
+    const contractLine =
+      fenceBefore || bodyFence || continuationFence || !atBlockIndent
+        ? null
+        : (readContractLine(line) ?? (readOptionLines ? readSharedPrototypeLine(line) : null));
     if (contractLine && !(contractLine.field in contract)) {
       (contract as Record<string, unknown>)[contractLine.field] = contractLine.value;
-      if (!readContractLines) pushContext(line.trim());
+      if (!readContractLines && contractLine.field !== 'prototype') pushContext(line.trim());
       lastChoice = -1;
       recommendationOpen = false;
       if (openBullet) {
@@ -925,6 +1416,35 @@ export const parseQuestionBlock = (
       trackContinuationFence(line);
       const c = choices[lastChoice];
       const extra = line.trim();
+      // An option line (`Pros:`, `Cons:`, `Prototype:`), read once per field: never the description.
+      const optionLine = readOptionLines && !continuationFence ? readOptionLine(extra) : null;
+      if (optionLine && c[optionLine.field] === undefined) {
+        if (optionLine.field === 'prototype') c.prototype = optionLine.value;
+        else c[optionLine.field] = optionLine.value;
+        continue;
+      }
+      // A choice's own `Where:` / `Before:` / `After:` (or a line of its
+      // value): recorded, and still put in the description as the default
+      // parse does; it leaves it only if the choice's place is drawn.
+      if (readChangeLines && !continuationFence) {
+        const part = descParts[lastChoice]!.length;
+        if (continuesValue(i, extra, true, lastChoice)) {
+          openValue!.event.lines.push(unquote(extra));
+          openValue!.event.parts.push(part);
+          openValue!.lastLine = i;
+        } else {
+          const changeLine = readChangeLine(extra);
+          const text = changeLine?.value.trim() ?? '';
+          if (changeLine && changeLine.field === 'where' && text) {
+            trackChange(lastChoice, { field: 'where', value: text, ctx: [], parts: [part] });
+          } else if (changeLine && (changeLine.field === 'before' || changeLine.field === 'after')) {
+            const event = { field: changeLine.field, lines: text ? [text] : [], quoted: !text, ctx: [], parts: [part] };
+            trackChange(lastChoice, event);
+            openValue = { event, owner: lastChoice, inDescription: true, lastLine: i };
+          }
+        }
+      }
+      descParts[lastChoice]!.push(extra);
       if (c.description) c.description = `${c.description} ${extra}`;
       else c.description = extra;
       raws[lastChoice] = `${raws[lastChoice]} ${extra}`;
@@ -959,6 +1479,36 @@ export const parseQuestionBlock = (
     }
     openBullet = null;
     continuationFence = null;
+    // Change lines at the block's indent: only where the default parse keeps
+    // the line as a context line of its own (outside a code fence, not a
+    // bullet). The line goes to the context as always; where it went is
+    // recorded. A choice's own lines are indented under it: one written at
+    // the block's indent, even right after a choice, is the question's.
+    if (readChangeLines && !bullet && !fenceBefore && !bodyFence && atBlockIndent) {
+      const at = contextLines.length;
+      if (continuesValue(i, line.trim(), false, -1)) {
+        openValue!.event.lines.push(unquote(line));
+        openValue!.event.ctx.push(at);
+        openValue!.lastLine = i;
+        pushContext(line.trimEnd());
+        continue;
+      }
+      const changeLine = readChangeLine(line);
+      if (changeLine) {
+        const text = changeLine.value.trim();
+        if (changeLine.field === 'where' && text) {
+          trackChange(-1, { field: 'where', value: text, ctx: [at], parts: [] });
+        } else if (changeLine.field === 'source' && text && !changeSource) {
+          changeSource = { value: text, contextIndex: at };
+        } else if (changeLine.field === 'before' || changeLine.field === 'after') {
+          const event = { field: changeLine.field, lines: text ? [text] : [], quoted: !text, ctx: [at], parts: [] };
+          trackChange(-1, event);
+          openValue = { event, owner: -1, inDescription: false, lastLine: i };
+        }
+        pushContext(line.trimEnd());
+        continue;
+      }
+    }
     if (bullet && bullet[1].trim()) {
       plainBullets.push({ text: bullet[1].trim(), first: bullet[1].trim(), contextIndices: [contextLines.length] });
       openBullet = {
@@ -969,13 +1519,45 @@ export const parseQuestionBlock = (
     }
     pushContext(line.trimEnd());
   }
+  // The change lines the card draws whole (`acceptChangeLines`): their
+  // places and values; the context lines and description pieces they leave.
+  const accepted = readChangeLines
+    ? acceptChangeLines(changeEvents, choices.map((_, index) => choiceChangeEvents.get(index) ?? []))
+    : null;
+  // Each choice's description as the default parse has it, and without the
+  // pieces its drawn places took: its recommended marker is read as the
+  // default parse reads it, so the card and the stored record agree.
+  const defaultDescriptions = choices.map((c) => c.description);
+  const keptDescriptions: Array<string | undefined> = choices.map((c) => c.description);
+  if (accepted) {
+    accepted.choices.forEach((placesOfChoice, index) => {
+      const c = choices[index]!;
+      if (placesOfChoice.places.length === 0) return;
+      const kept = descParts[index]!.filter((_, part) => !placesOfChoice.parts.has(part));
+      const description = kept.join(' ').trim();
+      if (description) c.description = description;
+      else delete c.description;
+      keptDescriptions[index] = c.description;
+      const first = placesOfChoice.places[0]!;
+      if (first.before) c.before = first.before;
+      if (first.after) c.after = first.after;
+      if (placesOfChoice.places.length > 1 || placesOfChoice.places.some((g) => g.where !== undefined)) c.places = placesOfChoice.places;
+    });
+  }
 
+  // A label and nothing to ask: the label is the prompt, as before it was
+  // read, and leaves the context.
+  if (!prompt && keyText !== undefined) {
+    prompt = keyText;
+    promptLine = keyTextLine;
+    dropContext.add(keyTextContext);
+  }
   if (!prompt) return null;
 
   // A pick question written with plain bullets: the bullets are the choices.
   const choicesArePlainBullets = choices.length === 0 && directiveKind !== 'question-text' && plainBullets.length > 0;
   if (choicesArePlainBullets) {
-    const bullets = plainBullets.slice(0, MAX_QUESTION_CHOICES);
+    const bullets = plainBullets;
     const { splits, names } = plainBulletSplits(bullets);
     bullets.forEach((bullet, i) => {
       const { label, description } = splits[i];
@@ -1004,29 +1586,100 @@ export const parseQuestionBlock = (
       for (const index of bullet.contextIndices) dropContext.add(index);
     });
   }
+  // Two choices whose text before the dash is the same ("Yes — keep it", "Yes — drop it") would be one answer: each
+  // takes its whole text as its label, so a pick, a stored answer and the reply name one choice.
+  const labelCount = new Map<string, number>();
+  for (const c of choices) labelCount.set(normalizeQuestionText(c.label), (labelCount.get(normalizeQuestionText(c.label)) ?? 0) + 1);
+  choices.forEach((c, i) => {
+    // A choice's own Before / After was description text to the default parse: it counts here too, so both read one label.
+    if (!(c.description || c.before || c.after) || (labelCount.get(normalizeQuestionText(c.label)) ?? 0) < 2) return;
+    const { description: _d, ...rest } = c;
+    choices[i] = { ...rest, label: raws[i]!.trim() };
+  });
   if (choices.some((c) => c.label.includes('![') || c.description?.includes('!['))) {
     choices.splice(0, choices.length, ...withPictureChoices(choices));
   }
   for (const index of recommendationWrapIndices) dropContext.add(index);
+  // The change: present when the card draws a place (the block's or a
+  // choice's). `Source:` leaves the context only when it shows with the place
+  // picture (a Where and a `Shows:` picture); otherwise it stays as written.
+  let change: QuestionChange | undefined;
+  if (accepted && (accepted.groups.length > 0 || accepted.choices.some((c) => c.places.length > 0))) {
+    const shownWithPicture = !!changeSource && accepted.where !== undefined && readContractLines && contract.shows?.kind === 'image';
+    change = {
+      ...(accepted.where !== undefined ? { where: accepted.where } : {}),
+      ...(shownWithPicture ? { source: changeSource!.value } : {}),
+      groups: accepted.groups,
+    };
+    for (const index of accepted.context) dropContext.add(index);
+    if (shownWithPicture) dropContext.add(changeSource!.contextIndex);
+  }
   for (let i = contextLines.length - 1; i >= 0; i--) if (dropContext.has(i)) contextLines.splice(i, 1);
 
   const kind: QuestionKind = choices.length === 0 || directiveKind === 'question-text'
     ? 'text'
     : directiveKind === 'question-multi' ? 'multi' : 'single';
 
+  // No `Recommended:` line: a recommendation written into a choice's label
+  // (`- [ ] Foo (Recommended) — why`) names that choice, so the card still
+  // shows the tag, Accept recommended and "(your recommendation)". Exactly
+  // one marked choice on a pick-one question (several name none: the labels
+  // stay as written), any number on pick any. The marker leaves the label;
+  // the raw label stays an alias, so an answer that quotes it still matches.
+  // A label that would then twin another choice's keeps its marker.
+  // Decided on the description as the default parse has it (a choice's own
+  // change lines included), so the card and the stored record agree.
+  const marked = kind === 'text' ? [] : choices.map((c, i) => {
+    const trimmed = !choicesArePlainBullets && keptDescriptions[i] !== defaultDescriptions[i] && c.description === keptDescriptions[i];
+    if (!trimmed) return questionChoiceWithoutRecommendedMarker(c);
+    const asDefault = questionChoiceWithoutRecommendedMarker({ label: c.label, description: defaultDescriptions[i] });
+    if (!asDefault) return null;
+    return questionChoiceWithoutRecommendedMarker(c) ?? { label: asDefault.label, ...(c.description ? { description: c.description } : {}) };
+  });
+  const markedAt = marked.flatMap((m, i) => (m ? [i] : []));
+  const withoutMarker = (i: number) => {
+    const c = choices[i];
+    const next = marked[i]!;
+    const twin = choices.some((o, j) => j !== i && normalizeQuestionText(o.label) === normalizeQuestionText(next.label));
+    if (twin) return;
+    const aliases = next.label === c.label ? c.aliases : [...new Set([...(c.aliases ?? []), c.label])];
+    const { description: _d, aliases: _a, ...rest } = c;
+    choices[i] = {
+      ...rest,
+      label: next.label,
+      ...(next.description ? { description: next.description } : {}),
+      ...(aliases?.length ? { aliases } : {}),
+    };
+  };
+  if (!recommendationLine && kind !== 'text') {
+    if (markedAt.length === 1 || (kind === 'multi' && markedAt.length > 0)) {
+      for (const i of markedAt) {
+        withoutMarker(i);
+        choices[i].recommended = true;
+      }
+    }
+  }
+
   let suggestedText: string | undefined;
   if (recommendation) {
     const wrapped = recommendationWrapped ?? recommendation;
     let hits: number[] = [];
     if (kind !== 'text') {
-      hits = matchRecommendation(recommendation, raws, choices, kind === 'multi', choiceNames, choicesArePlainBullets);
+      // A label written with a marker is named by its label without it too.
+      const names = choices.map((_, i) => [...(choiceNames[i] ?? []), ...(marked[i] ? [marked[i]!.label] : [])]);
+      hits = matchRecommendation(recommendation, raws, choices, kind === 'multi', names, choicesArePlainBullets);
       if (hits.length === 0 && wrapped !== recommendation) {
-        hits = matchRecommendation(wrapped, raws, choices, kind === 'multi', choiceNames, choicesArePlainBullets);
+        hits = matchRecommendation(wrapped, raws, choices, kind === 'multi', names, choicesArePlainBullets);
       }
     }
     if (hits.length > 0) for (const hit of hits) choices[hit].recommended = true;
     else suggestedText = wrapped;
     recommendation = wrapped;
+    // The line decides; a marker left in a label is clutter (`Foo
+    // (Recommended) (your recommendation)`) or a second recommendation the
+    // card would show beside the line's: it leaves every label (matched
+    // above against the label as written, which stays an alias).
+    for (const i of markedAt) withoutMarker(i);
   }
 
   // Context keeps each line's indentation (a nested list, a wrapped list item,
@@ -1049,13 +1702,16 @@ export const parseQuestionBlock = (
     choices: kind === 'text' ? [] : choices,
     ...(recommendation ? { recommendation } : {}),
     ...(suggestedText ? { suggestedText } : {}),
-    key: questionKey(kind, prompt),
+    ...(markedAt.length > 0 ? { recommendedMarker: true as const } : {}),
+    key: questionKey(kind, keyText ?? prompt),
     ...(!readDecisionLines ? {} : decision ? { decision } : decisionFlag ? { decisionOnAnswer: true as const } : {}),
     ...(replaces.length > 0 ? { replaces } : {}),
     ...(readContractLines && contract.stakes ? { stakes: contract.stakes } : {}),
     ...(readContractLines && contract.shows ? { shows: contract.shows } : {}),
     ...(readContractLines && contract.why ? { why: contract.why } : {}),
     ...(readContractLines && contract.reversible ? { reversible: contract.reversible } : {}),
+    ...(readOptionLines && contract.prototype ? { prototype: contract.prototype } : {}),
+    ...(change ? { change } : {}),
   };
 };
 
@@ -1193,14 +1849,47 @@ export const findDirectiveBlocks = (
   markdown: string,
   options: { frontmatter?: boolean } = {},
 ): DirectiveBlockLocation[] => {
-  if (typeof markdown !== 'string') return [];
+  const out: DirectiveBlockLocation[] = [];
+  walkTopLevelLines(markdown, options, { directive: (block) => out.push(block) });
+  return out;
+};
+
+/**
+ * Every top-level line of a markdown document that the block splitter reads
+ * as an ordinary line: not inside a code fence, display math, a directive's
+ * body or a raw HTML block, and not a directive's opener (the walk
+ * `findDirectiveBlocks` makes, so the two cannot differ). `lineNumber` is
+ * the line's 1-based line in `markdown`. For a host that checks lines the
+ * parser leaves as text (the Plannotator Inbox's `:::question {#x}` warning).
+ *
+ * `line` is the parser's processed text, not the source line: link
+ * references are resolved, and after a display math block that closes
+ * mid-line it is only the text after the close. Read the source line by
+ * `lineNumber` when the exact text matters.
+ *
+ * @internal Not part of the published grammar; it may change with the walk.
+ */
+export const forEachTopLevelLine = (
+  markdown: string,
+  options: { frontmatter?: boolean } = {},
+  visit: (line: string, lineNumber: number) => void,
+): void => {
+  walkTopLevelLines(markdown, options, { line: visit });
+};
+
+/** The block splitter's top-level walk: directives to `directive`, every other line it reads as one line to `line`. */
+function walkTopLevelLines(
+  markdown: string,
+  options: { frontmatter?: boolean },
+  on: { directive?: (block: DirectiveBlockLocation) => void; line?: (line: string, lineNumber: number) => void },
+): void {
+  if (typeof markdown !== 'string') return;
   const { content, contentStartLine } = options.frontmatter === false
     ? { content: markdown, contentStartLine: 1 }
     : splitFrontmatter(markdown);
   const source = markdown.split('\n');
   const lines = resolveReferenceLinks(content).split('\n');
   const closeCache = new Map<string, TagCloseIndex>();
-  const out: DirectiveBlockLocation[] = [];
 
   // The block splitter's multi-line constructs, in its order. Every other
   // construct it knows (headings, rules, list items, quotes, tables,
@@ -1228,7 +1917,7 @@ export const findDirectiveBlocks = (
       const close = directiveCloseIndex(lines, i);
       const startLine = i + contentStartLine;
       const endLine = Math.min(close, lines.length - 1) + contentStartLine;
-      out.push({
+      on.directive?.({
         directiveKind: directiveOpen[1].toLowerCase(),
         startLine,
         endLine,
@@ -1239,10 +1928,13 @@ export const findDirectiveBlocks = (
       continue;
     }
     const htmlEnd = htmlBlockEndAt(lines, i, closeCache);
-    if (htmlEnd !== -1) i = htmlEnd;
+    if (htmlEnd !== -1) {
+      i = htmlEnd;
+      continue;
+    }
+    on.line?.(lines[i], i + contentStartLine);
   }
-  return out;
-};
+}
 
 // ─────────────────────────────── Answers ───────────────────────────────
 
@@ -1284,7 +1976,7 @@ export function capQuestionPrompt(prompt: string): string {
 
 /**
  * Fail-closed validator: returns a normalized copy holding only the known
- * fields (strings truncated to their caps, empty optionals dropped), or null
+ * fields (the prompt copy cut to its cap, empty optionals dropped), or null
  * for anything malformed. Every reader of `questionAnswer` goes through it,
  * so a row from an older or foreign writer can never throw in a renderer.
  */
@@ -1304,12 +1996,12 @@ export const parseQuestionAnswer = (value: unknown): QuestionAnswer | null => {
   if (v.sourceLine !== undefined && !(Number.isInteger(v.sourceLine) && (v.sourceLine as number) > 0)) return null;
 
   const selected = [...new Set((v.selected as string[])
-    .map((s) => cap(s.trim(), MAX_QUESTION_SELECTED_CHARS))
-    .filter(Boolean))]
-    .slice(0, MAX_QUESTION_CHOICES);
-  const other = typeof v.other === 'string' ? cap(v.other, MAX_QUESTION_OTHER_CHARS) : '';
-  const text = typeof v.text === 'string' ? cap(v.text, MAX_QUESTION_TEXT_CHARS) : '';
-  const note = typeof v.note === 'string' ? cap(v.note, MAX_QUESTION_NOTE_CHARS) : '';
+    .map((s) => s.trim())
+    .filter(Boolean))];
+  // The person's own words are kept whole: never cut without a word.
+  const other = typeof v.other === 'string' ? v.other : '';
+  const text = typeof v.text === 'string' ? v.text : '';
+  const note = typeof v.note === 'string' ? v.note : '';
   return {
     v: 1,
     key: v.key,
@@ -1478,6 +2170,10 @@ export const isRecommendedQuestionAnswer = (
   }
   const sameSet = (labels: readonly string[]): boolean => {
     if (answer.other?.trim()) return false;
+    // Picks that are all exact choice labels compare exactly: "ship it." is not "Ship it" when both are choices.
+    const exact = new Set(labels);
+    const known = new Set(context.choiceLabels ?? labels);
+    if (answer.selected.every((l) => known.has(l))) return answer.selected.length === exact.size && answer.selected.every((l) => exact.has(l));
     const want = new Set(labels.map(normalizeQuestionText));
     const got = new Set(answer.selected.map(normalizeQuestionText));
     return want.size === got.size && [...want].every((l) => got.has(l));
@@ -1533,11 +2229,19 @@ export const formatQuestionAnswerLines = (
       : `Answer: ${labels[0]} (already settled in the document)\n`;
   }
   const picks = [...answer.selected.map(oneLine)];
-  if (answer.other?.trim()) picks.push(`Other: ${oneLine(answer.other)}`);
+  // A multi-line Other answer keeps its line breaks, quoted under `Other:`
+  // the way a multi-line note is quoted under `Note:` (indented under its
+  // bullet when there are several picks); a one-line one stays on its line.
+  const other = answer.other?.trim() ?? '';
+  const otherLines = /\r?\n/.test(other) ? other.split(/\r?\n/) : null;
+  if (other) picks.push(otherLines ? 'Other:' : `Other: ${oneLine(other)}`);
+  const quoted = (indent: string) => (otherLines ?? []).map((line) => `${indent}> ${line}\n`).join('');
   if (answer.text?.trim()) {
     out += `Answer${rec}:\n> ${answer.text.trim().replace(/\r?\n/g, '\n> ')}\n`;
   } else if (picks.length > 1) {
-    out += `Answer${rec}:\n${picks.map((p) => `- ${p}\n`).join('')}`;
+    out += `Answer${rec}:\n${picks.map((p) => `- ${p}\n`).join('')}${quoted('  ')}`;
+  } else if (picks.length === 1 && otherLines) {
+    out += `Answer${rec}: ${picks[0]}\n${quoted('')}`;
   } else if (picks.length === 1) {
     out += `Answer: ${picks[0]}${rec}\n`;
   } else if (answer.skipped) {
@@ -1730,11 +2434,11 @@ Ask what only the reviewer can decide as a question block. Answers come back at 
 :::question
 Where should we keep the edit that loses a sync conflict?
 
-When two devices edit one note offline, the later save wins and the other edit is lost. Local storage keeps it with no server work.
+When two devices edit one note offline, the later save wins and the other is lost. Local storage keeps it with no server work.
 
-- [ ] Local only, purged after 30 days — cheap, no server change
+- [ ] Nowhere — silent loss, as today
+- [ ] Local only, purged after 30 days — cheap
 - [ ] Server-side per user — survives reinstall, needs a retention policy
-- [ ] Nowhere — accept silent loss for v1
 
 Recommended: Local only, purged after 30 days
 :::
@@ -1746,9 +2450,9 @@ Recommended: Local only, purged after 30 days
   - Be terse: one to three short sentences, plain words, no jargon or internal names.
   - Add a screenshot (\`![alt](path)\`) for anything visual.
   - Link a file that shows it better (a plan, a mock): \`[the mock](mock.html)\`. In the Inbox, attach it too; the link opens it beside the thread.
-- Choices: \`- [ ] label\`, optionally \`- [ ] label — why\`. The reviewer can also answer "Other", add a note, or skip.
-- \`Recommended: <label>\` marks yours (\`A, B and C\` on \`:::question-multi\`); other text shows as one more answer, tagged Recommended.
-- Ask only what you cannot decide alone, about 8 a round at most. Do not ask rhetorical questions or questions the codebase answers.
+- Choices: \`- [ ] label\`, optionally \`- [ ] label — why\`, in natural order. The reviewer can also answer "Other", add a note, or skip.
+- \`Recommended: <label>\` marks yours (\`A, B and C\` on \`:::question-multi\`); other text is one more answer, tagged Recommended. Never move yours first.
+- Ask only what you cannot decide alone, about 8 a round. Do not ask rhetorical questions or questions the codebase answers.
 - \`- [x]\` marks a settled choice. On resubmit, check the chosen answer, or drop the block and state the decision in prose.
 - Leave blank lines between the parts so the block reads well on GitHub.
 - Each answer comes back under its question (\`### Q2. <question> (line N)\`) as \`Answer: <choice>\`, marked \`(your recommendation)\` when the reviewer took yours, or as \`Other: …\`, free text in a quote, or \`Skipped\`, plus any \`Note:\`. A question you marked \`- [x]\` is settled and only comes back if the reviewer changed it or added a note.

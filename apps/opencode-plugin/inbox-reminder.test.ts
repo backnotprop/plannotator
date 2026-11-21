@@ -35,7 +35,7 @@ describe("addInboxReminder", () => {
 
   // The failure: a host without session.prompt registers the tool without the
   // wake, and a line saying "Their reply comes back here" would be untrue there.
-  test("a host that cannot deliver a reply as a turn gets the wait_for_reply wording", async () => {
+  test("a host that cannot deliver a reply as a turn gets the read-it-later wording", async () => {
     expect(openCode2InboxReminder({ session: { prompt: () => undefined } })).toBe(INBOX_REMINDER_TEXT);
     expect(openCode2InboxReminder({ session: {} })).toBe(INBOX_REMINDER_TEXT_NO_WAKE);
     expect(openCode2InboxReminder({})).toBe(INBOX_REMINDER_TEXT_NO_WAKE);

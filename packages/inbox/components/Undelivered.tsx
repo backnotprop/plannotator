@@ -10,10 +10,11 @@
  */
 import { useEffect, useState } from 'react';
 import type { DeliveryLine, RestartNote } from '../deliveryLine';
-import { undeliveredLabel, undeliveredWords } from '../deliveryLine';
+import { undeliveredLabel, undeliveredShort, undeliveredWords } from '../deliveryLine';
 import { Icon } from '../icons';
 import { StuckReason } from './RestartNote';
 import { Tip } from './Tip';
+import { TAKE_BACK_LABEL } from '../takeBack';
 
 /** How often the minute words are written again: often enough that a minute turns over within a few seconds. */
 export const UNDELIVERED_TICK_MS = 5_000;
@@ -32,12 +33,16 @@ export function useMinuteClock(active: boolean): number {
 
 type Wait = NonNullable<DeliveryLine['wait']>;
 
-/** The row's badge, in place of the count: blue while it can go in now, grey when it cannot. */
-export function UndeliveredBadge({ wait }: { wait: Wait }) {
-  const now = useMinuteClock(true);
+/**
+ * The row's badge, in place of the count: blue while it can go in now, grey when it cannot. On a three-line or phone
+ * row it says the short form, "Undelivered 3m", "2h", "1d" (approval "inbox-row-byline", option A), and the row
+ * (InboxList's `CountWords`, which keeps the clock) puts "Undelivered 3 min" in the tooltip and its name; on a wide
+ * row (`full`) the full words.
+ */
+export function UndeliveredBadge({ wait, now, full = false }: { wait: Wait; now: number; full?: boolean }) {
   return (
     <span className="ib-badge ib-b-wait" data-undelivered="" data-stuck={wait.steerable ? undefined : ''}>
-      {undeliveredLabel(wait.since, now)}
+      <span className="ib-bwt">{full ? undeliveredLabel(wait.since, now) : undeliveredShort(wait.since, now)}</span>
     </span>
   );
 }
@@ -63,6 +68,8 @@ export function UndeliveredBand({
   name,
   onSendNow,
   sending,
+  onTakeBack,
+  takingBack,
   restart,
   restartName,
 }: {
@@ -71,6 +78,8 @@ export function UndeliveredBand({
   /** Present while Send now is offered. */
   onSendNow?: (() => void) | null;
   sending?: boolean;
+  onTakeBack?: (() => void) | null;
+  takingBack?: boolean;
   /** Why it cannot go in sooner, when the fix is a plugin reload (restartNote). */
   restart: RestartNote | null;
   restartName: string;
@@ -82,15 +91,28 @@ export function UndeliveredBand({
         <Icon name="clock" size={14} />
         <UndeliveredText wait={wait} name={name} />
       </span>
-      {onSendNow && (
-        <Tip content="Put it into the running turn now: the agent reads it at its next step, without waiting for the turn to end.">
-          <button type="button" className="ib-sendnow ib-sendnow-go" data-send-now="" disabled={sending} onClick={onSendNow}>
-            <Icon name="send" size={14} />
-            Send now
-          </button>
-        </Tip>
-      )}
+      <span className="ib-dl-acts">
+        {onTakeBack && <TakeBackButton busy={takingBack} onPress={onTakeBack} />}
+        {onSendNow && (
+          <Tip content="Put it into the running turn now: the agent reads it at its next step, without waiting for the turn to end.">
+            <button type="button" className="ib-sendnow ib-sendnow-go" data-send-now="" disabled={sending} onClick={onSendNow}>
+              <Icon name="send" size={14} />
+              Send now
+            </button>
+          </Tip>
+        )}
+      </span>
       {stuck && <StuckReason note={restart} name={restartName} />}
     </div>
+  );
+}
+
+export function TakeBackButton({ busy, onPress }: { busy?: boolean; onPress: () => void }) {
+  return (
+    <Tip content="Take it out of the queue and back into your reply box. Nothing goes out until you send it again.">
+      <button type="button" className="ib-sendnow ib-takeback" data-take-back="" disabled={busy} onClick={onPress}>
+        {TAKE_BACK_LABEL}
+      </button>
+    </Tip>
   );
 }

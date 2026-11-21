@@ -7,21 +7,23 @@
  * loaded at startup (generated/config.ts and others) stay the OLD ones in the
  * host's module registry. Bun then fails to link ("Export named 'x' not found
  * in module …"), and jiti hands back `undefined` for the missing export. The
- * package itself is fine; the host has to restart to load it whole.
+ * package itself is fine; the host has to reload it (Pi `/reload`, Oh My Pi
+ * `/restart`) to load it whole.
  *
  * So the version this module was loaded with is recorded once, and every lazy
  * import first reads package.json on disk again (one small synchronous read).
- * A different version stops the import with a message that says to restart.
+ * A different version stops the import with a message that names that command.
  * A link error that slips past the check (a read that raced the upgrade) gets
  * the same message.
  */
 
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { currentPiHost, type PiAgentToolHost } from "./pi-host.ts";
 
-const PACKAGE_JSON_PATH = join(dirname(fileURLToPath(import.meta.url)), "package.json");
+const PACKAGE_DIR = dirname(fileURLToPath(import.meta.url));
+const PACKAGE_JSON_PATH = join(PACKAGE_DIR, "package.json");
 
 /** The `version` in a package.json, or null when it cannot be read. */
 export function readPackageVersion(path: string = PACKAGE_JSON_PATH): string | null {
@@ -30,6 +32,54 @@ export function readPackageVersion(path: string = PACKAGE_JSON_PATH): string | n
 		return typeof pkg.version === "string" && pkg.version ? pkg.version : null;
 	} catch {
 		return null;
+	}
+}
+
+/**
+ * Whether the install of the package in `dir` looks finished, so a reload loads it whole. npm writes
+ * package.json first and the rest after it, in parallel with changed dependencies; while it works, the
+ * replaced copy waits beside the package as `.<name>-<hash>` and is deleted at the end. So: no such
+ * copy, the extension's entry is on disk, and every dependency resolves (a `node_modules/<dep>` in this
+ * folder or one above it). A few stat calls, no wait. A parent folder it cannot list gives no sign.
+ */
+export function packageInstallSettled(dir: string = PACKAGE_DIR): boolean {
+	let pkg: { pi?: { extensions?: unknown }; dependencies?: unknown };
+	try {
+		pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf-8"));
+	} catch {
+		return false;
+	}
+	try {
+		const retired = `.${basename(dir)}-`;
+		if (readdirSync(dirname(dir)).some((name) => name.startsWith(retired))) return false;
+	} catch {
+		// The parent cannot be listed: no sign either way.
+	}
+	const entries = Array.isArray(pkg.pi?.extensions) ? (pkg.pi.extensions as unknown[]) : ["./"];
+	for (const entry of entries) {
+		if (typeof entry !== "string") continue;
+		const path = resolve(dir, entry);
+		let isDir = false;
+		try {
+			isDir = statSync(path).isDirectory();
+		} catch {
+			return false;
+		}
+		if (isDir && !existsSync(join(path, "index.ts")) && !existsSync(join(path, "index.js"))) return false;
+	}
+	const deps = pkg.dependencies && typeof pkg.dependencies === "object" ? Object.keys(pkg.dependencies) : [];
+	for (const dep of deps) if (!dependencyOnDisk(dir, dep)) return false;
+	return true;
+}
+
+/** `node_modules/<dep>/package.json` in `dir` or a folder above it (Node's lookup). */
+function dependencyOnDisk(dir: string, dep: string): boolean {
+	let at = dir;
+	for (;;) {
+		if (existsSync(join(at, "node_modules", dep, "package.json"))) return true;
+		const up = dirname(at);
+		if (up === at) return false;
+		at = up;
 	}
 }
 
@@ -45,13 +95,24 @@ export function piHostDisplayName(host: PiAgentToolHost): string {
 	return host === "oh-my-pi" ? "Oh My Pi" : "Pi";
 }
 
+/**
+ * What loads the new version in the host, typed in the session: Pi's
+ * `/reload` re-imports the extension from disk (since 0.79.9); Oh My Pi
+ * imports an extension once per process, so `/restart` (restarts omp and
+ * resumes the session; its `/reload-plugins` does not reload extension code).
+ */
+export function piReloadCommand(host: PiAgentToolHost): string {
+	return host === "oh-my-pi" ? "/restart" : "/reload";
+}
+
 /** The message for an update under a running host; without versions, a plain "files changed". */
 export function packageUpdatedMessage(from: string | null, to: string | null, host: PiAgentToolHost): string {
 	const name = piHostDisplayName(host);
+	const fix = `Type ${piReloadCommand(host)} to load the new version.`;
 	if (from && to && from !== to) {
-		return `Plannotator was updated from ${from} to ${to} while ${name} was running. Restart ${name} to load the new version.`;
+		return `Plannotator was updated from ${from} to ${to} while ${name} was running. ${fix}`;
 	}
-	return `Plannotator's files changed on disk while ${name} was running. Restart ${name} to load the new version.`;
+	return `Plannotator's files changed on disk while ${name} was running. ${fix}`;
 }
 
 /**

@@ -21,6 +21,12 @@
  * whose list is 4½ rows); it starts at the caret's line, not at the field's
  * bottom; and Escape closes the picker, not the dialog.
  *
+ * The comment card on picked words (a message's, and so a file's: one card) has the same picker. The bug there:
+ * the list was drawn inside the card's scrolling field, which clipped all of it, so `/` showed nothing; and the
+ * card could not be dragged (a drag from its words selected the page and closed it as a draft). Typing `/` in the
+ * card shows the list with nothing over its rows, a click writes the reference, and dragging the quoted words
+ * moves the card, open, with its words, whole inside the window.
+ *
  * Build the binary first (see inbox.spec.ts), then
  * `bun run test:e2e:inbox -- inbox-compose-skill-picker.spec.ts`.
  * PNGs land in .local/proof/compose-skill-picker/ (and SKILL_PICKER_SHOTS_DIR
@@ -28,7 +34,7 @@
  * the picker's placement is checked, so an older binary still leaves one.
  */
 
-import { devices, expect, test, webkit, type Browser, type Page } from '@playwright/test';
+import { devices, expect, test, webkit, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -44,7 +50,7 @@ const extraShots = process.env.SKILL_PICKER_SHOTS_DIR ? resolve(process.env.SKIL
 const shotPrefix = process.env.SKILL_PICKER_SHOTS_PREFIX ?? '';
 
 const SKILLS = [
-  'agents', 'anatomy', 'animate', 'break-ui', 'changelog-draft', 'design-artifact',
+  'agents', 'anatomy', 'animate', 'break-ui', 'changelog-draft', 'deploy-preview', 'design-artifact',
   'effect', 'emil-design-eng', 'foundry', 'html-plan', 'loop', 'write-better',
 ];
 
@@ -55,6 +61,9 @@ interface World {
   agent: SimAgent;
   stopPolling: () => Promise<void>;
   files: string[];
+  /** The agent's message, opened in the window. */
+  thread: string;
+  threadId: string;
 }
 
 let world: World;
@@ -115,6 +124,7 @@ test.beforeAll(async () => {
     CLAUDE_CONFIG_DIR: join(root, '.claude'),
     CODEX_HOME: join(root, '.codex'),
     XDG_CONFIG_HOME: join(root, '.config'),
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,
@@ -125,13 +135,13 @@ test.beforeAll(async () => {
   const url = started.stdout.trim();
   const project = scratchProject(join(root, 'src'), 'plannotator');
   const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
-  await agent.send({ project_path: project, subject: 'Run finished', body: 'The export now streams rows to the file.' });
+  const sent = await agent.send({ project_path: project, subject: 'Run finished', body: 'The export now streams rows to the file.' });
   const files = ['notes.md', 'plan.md'].map((name) => {
     const file = join(root, name);
     writeFileSync(file, `# ${name}\n\nA file to attach.\n`);
     return file;
   });
-  world = { root, dataDir, url, agent, stopPolling: liveSession(dataDir, project), files };
+  world = { root, dataDir, url, agent, stopPolling: liveSession(dataDir, project), files, thread: String(sent.url), threadId: String(sent.thread_id) };
 });
 
 test.afterAll(async () => {
@@ -163,8 +173,8 @@ async function openCompose(page: Page, opener: string): Promise<void> {
   await page.locator(opener).first().click();
   const dialog = page.locator('dialog[data-compose]');
   await expect(dialog).toBeVisible();
-  // A plain New message opens with To empty: pick the live session.
-  const to = dialog.locator('.ib-cp-tobtn');
+  // A plain New message opens with To empty: pick the live session (a computer's To line, a phone's pill in the foot's row).
+  const to = dialog.locator('[data-compose-to]');
   await expect(to).not.toHaveAttribute('data-loading', /.*/);
   await to.click();
   await dialog.locator('[data-compose-session="ses_picker"]').click();
@@ -228,12 +238,10 @@ async function expectEscapeClosesPickerFirst(page: Page): Promise<void> {
   await page.keyboard.press('Escape');
   await expect(dialog.locator('[data-skill-menu]')).toHaveCount(0);
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator('[data-compose-question]')).toHaveCount(0);
-  // The next Escape is the dialog's: the message asks to be kept as a draft.
+  // The next Escape is the dialog's: it keeps the message as a draft and leaves, with no question.
   await page.keyboard.press('Escape');
-  await expect(dialog.locator('[data-compose-question]')).toBeVisible();
-  await dialog.locator('[data-compose-discard]').click();
   await expect(dialog).toHaveCount(0);
+  await expect(page.locator('[data-inbox-toast]')).toContainText('Draft saved');
 }
 
 for (const size of [
@@ -251,7 +259,7 @@ for (const size of [
       await expectPickerAtCaret(page, { firstLine: true, minRows: 6 });
       // A query filters in place and the picker stays at the caret.
       await page.keyboard.type('an');
-      await expect(page.locator('dialog[data-compose] [data-skill-item]').first()).toHaveAttribute('data-skill-item', /an/);
+      await expect(page.locator('dialog[data-compose] [data-skill-item]:not([data-skill-item-host])').first()).toHaveAttribute('data-skill-item', /an/);
       await expectEscapeClosesPickerFirst(page);
     } finally {
       await context.close();
@@ -275,8 +283,8 @@ for (const size of [
       await dialog.locator('[data-skill-item="anatomy"]').dispatchEvent('pointerdown');
       await expect(dialog.getByRole('textbox', { name: 'Message' })).toHaveValue(/\/anatomy /);
       await expect(dialog.locator('[data-skill-menu]')).toHaveCount(0);
+      // Escape keeps it as a draft and closes.
       await page.keyboard.press('Escape');
-      await dialog.locator('[data-compose-discard]').click();
       await expect(dialog).toHaveCount(0);
     } finally {
       await context.close();
@@ -338,5 +346,158 @@ test('an iPhone (WebKit): the picker opens full width at the caret, 44 px rows, 
     await context.close();
   } finally {
     await browser.close();
+  }
+});
+
+test('the comment card on picked words: "/" lists the skills on top, a pick writes the reference, and its words drag it', async ({ browser }: { browser: Browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
+  const page = await context.newPage();
+  try {
+    await page.goto(world.thread);
+    const words = page.getByText('The export now streams rows to the file.').last();
+    await expect(words).toBeVisible();
+    const line = (await words.boundingBox())!;
+    await page.mouse.move(line.x + 3, line.y + line.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(line.x + 150, line.y + line.height / 2, { steps: 8 });
+    await page.mouse.up();
+    await page.locator('.annotation-toolbar').getByRole('button', { name: 'Comment', exact: true }).click();
+    const card = page.locator('[data-comment-popover][data-comment-card]');
+    const field = card.locator('textarea');
+    await expect(field).toBeFocused();
+    await page.keyboard.type('Tighten this /');
+    const menu = card.locator('[data-skill-menu]');
+    await expect(menu).toBeVisible();
+    await page.waitForTimeout(150);
+    // Every row that shows is hit at its middle: nothing clips or covers the list, and it is inside the window.
+    const seen = await card.locator('[data-skill-item]').evaluateAll((rows) => {
+      const list = rows[0]!.parentElement!.getBoundingClientRect();
+      const menuBox = rows[0]!.closest('[data-skill-menu]')!.getBoundingClientRect();
+      const shown = rows.filter((row) => { const r = row.getBoundingClientRect(); return r.top >= list.top - 0.5 && r.bottom <= list.bottom + 0.5; });
+      return {
+        shown: shown.length,
+        covered: shown.filter((row) => { const r = row.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !hit || !row.contains(hit); }).map((row) => row.getAttribute('data-skill-item')),
+        inside: menuBox.top >= 0 && menuBox.left >= 0 && menuBox.bottom <= window.innerHeight && menuBox.right <= window.innerWidth,
+      };
+    });
+    expect(seen.shown).toBeGreaterThanOrEqual(4);
+    expect(seen.covered).toEqual([]);
+    expect(seen.inside).toBe(true);
+    await card.locator('[data-skill-item="agents"]').click();
+    await expect(field).toHaveValue('Tighten this /agents ');
+    await expect(menu).toHaveCount(0);
+
+    // Dragged by the quoted words: it moves that far, stays open with its words, and no draft was left behind.
+    const handle = card.locator('[data-comment-card-handle]');
+    const from = (await card.boundingBox())!;
+    const grip = (await handle.boundingBox())!;
+    await page.mouse.move(grip.x + 40, grip.y + grip.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(grip.x + 40 + 180, grip.y + grip.height / 2 + 120, { steps: 10 });
+    await page.mouse.up();
+    const to = (await card.boundingBox())!;
+    expect(Math.abs(to.x - from.x - 180)).toBeLessThanOrEqual(1);
+    expect(Math.abs(to.y - from.y - 120)).toBeLessThanOrEqual(1);
+    await expect(field).toHaveValue('Tighten this /agents ');
+    await expect(page.locator('[data-comment-draft-badge]')).toHaveCount(0);
+    // Thrown past a corner, the whole card is still inside the window.
+    const grip2 = (await handle.boundingBox())!;
+    await page.mouse.move(grip2.x + 40, grip2.y + grip2.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(4000, 4000, { steps: 6 });
+    await page.mouse.up();
+    const far = (await card.boundingBox())!;
+    expect(far.x + far.width).toBeLessThanOrEqual(1440 + 1);
+    expect(far.y + far.height).toBeLessThanOrEqual(900 + 1);
+    await expect(field).toHaveValue('Tighten this /agents ');
+  } finally {
+    await context.close();
+  }
+});
+
+/**
+ * The reply box's undo after a pick (QA of main after 0.28.67): type `alpha beta gamma`, select all, Backspace,
+ * type `Run /dep`, pick `deploy-preview`, ⌘Z three times, and the box read `Run /deploy-preview alpha beta gamma`.
+ * The pick wrote the words outside the browser's undo stack; it is the browser's own edit now
+ * (ui's utils/undoableEdit.ts). ⌘Z takes back the pick alone, then the typing (Chrome may split it while the list is
+ * open) and the deletion, then the first words, and stops at an empty box; ⌘⇧Z puts the pick back after its undo.
+ * No step ever shows deleted words beside the picked ones.
+ */
+test('the reply box: undo after a skill pick steps back through the pick, the typing and the deletion, and redo forward', async ({ browser }: { browser: Browser }) => {
+  const UNDO = process.platform === 'darwin' ? 'Meta+z' : 'Control+z';
+  const REDO = process.platform === 'darwin' ? 'Meta+Shift+z' : 'Control+Shift+z';
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
+  const page = await context.newPage();
+  try {
+    await page.goto(world.thread);
+    const pane = page.locator('section.ib-pane');
+    await pane.getByRole('button', { name: 'Reply', exact: true }).last().click();
+    const field = pane.locator('.ib-rbox').getByRole('textbox');
+    await expect(field).toBeFocused();
+    await page.keyboard.type('alpha beta gamma');
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.press('Backspace');
+    await expect(field).toHaveValue('');
+    await page.keyboard.type('Run /dep');
+    const row = page.locator('[data-skill-item="deploy-preview"]');
+    await expect(row).toBeVisible();
+    await row.click();
+    await expect(field).toHaveValue('Run /deploy-preview ');
+    await expect(field).toBeFocused();
+
+    const FIRST = 'alpha beta gamma';
+    /** A state the box really had: the first words (or part of them), empty, the typing, the pick. */
+    // Chrome may end the typing run while the list is open, so part of the typing can be its own step (`Run /de`).
+    const real = (words: string) => FIRST.startsWith(words) || 'Run /dep'.startsWith(words) || words === 'Run /deploy-preview ';
+    const press = async (key: string) => {
+      await page.keyboard.press(key);
+      await page.waitForTimeout(60);
+      return field.inputValue();
+    };
+    // The pick alone: undo takes it back, redo puts it back.
+    expect(await press(UNDO)).toBe('Run /dep');
+    expect(await press(REDO)).toBe('Run /deploy-preview ');
+
+    // Undo until the first words are back, then twice more: an empty box, and nothing further.
+    const back: string[] = [];
+    for (let i = 0; i < 12 && !back.includes(FIRST); i++) back.push(await press(UNDO));
+    back.push(await press(UNDO), await press(UNDO));
+    expect(back[0], `undo after the pick: ${JSON.stringify(back)}`).toBe('Run /dep');
+    expect(back.every(real), `every undo is a state the box had: ${JSON.stringify(back)}`).toBe(true);
+    expect(back, 'the first words come back').toContain(FIRST);
+    expect(back.slice(-2), 'undo stops at an empty box').toEqual(['', '']);
+
+    // Redo from there: the first words first, and never a state the box did not have. (How far Chrome's redo goes
+    // past the deletion is the browser's: in CI it stopped at the empty box, before any pick.)
+    const forward: string[] = [];
+    for (let i = 0; i < 6; i++) forward.push(await press(REDO));
+    expect(forward[0]).toBe(FIRST);
+    expect(forward.every(real), `every redo is a state the box had: ${JSON.stringify(forward)}`).toBe(true);
+  } finally {
+    await context.close();
+  }
+});
+
+test('a plain thread: "/" lists picture-it, and a pick sent carries its instructions once', async ({ browser }: { browser: Browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
+  const page = await context.newPage();
+  try {
+    await page.goto(world.thread);
+    const pane = page.locator('section.ib-pane');
+    await pane.getByRole('button', { name: 'Reply', exact: true }).last().click();
+    const field = pane.locator('.ib-rbox').getByRole('textbox');
+    await expect(field).toBeFocused();
+    await page.keyboard.type('Draw the export for me /');
+    const row = page.locator('[data-skill-item="picture-it"]');
+    await expect(row).toBeVisible();
+    await row.click();
+    await expect(field).toHaveValue('Draw the export for me /picture-it ');
+    await pane.locator('.ib-rbox [data-reply-send]').click();
+    const reply = (await world.agent.nextReply(world.threadId)) as { body: string };
+    expect(reply.body.startsWith('Draw the export for me /picture-it')).toBe(true);
+    expect(reply.body.split('--- BEGIN SKILL INSTRUCTIONS: picture-it ---')).toHaveLength(2);
+    expect(reply.body).toContain('--- END SKILL INSTRUCTIONS: picture-it ---');
+  } finally {
+    await context.close();
   }
 });

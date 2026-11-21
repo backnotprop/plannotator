@@ -9,17 +9,20 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { inboxMessageImageRefs, readInboxMessageImage } from "@plannotator/shared/inbox/message-images";
+import { inboxHomeDotFolder, inboxMessageImageRefs, readInboxMessageImage } from "@plannotator/shared/inbox/message-images";
 import { MAX_REVIEW_IMAGE_PREVIEW_BYTES } from "@plannotator/shared/diff-paths";
+import { INBOX_INLINE_MEDIA_MAX_BYTES } from "@plannotator/core/inbox-inline-media";
 import { startInboxServer, type InboxServer } from "./inbox";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
 const clients: Client[] = [];
 let previousDataDir: string | undefined;
+let previousHome: string | undefined;
 
 beforeEach(() => {
   previousDataDir = process.env.PLANNOTATOR_DATA_DIR;
+  previousHome = process.env.HOME;
 });
 
 afterEach(async () => {
@@ -28,6 +31,8 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   if (previousDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
   else process.env.PLANNOTATOR_DATA_DIR = previousDataDir;
+  if (previousHome === undefined) delete process.env.HOME;
+  else process.env.HOME = previousHome;
 });
 
 /** A PNG's signature and IHDR (2 x 3 px): enough for the sniffer and the dimension read. */
@@ -57,7 +62,9 @@ function world() {
   // Outside the project: shown, as an attachment from anywhere would be.
   writeFileSync(join(root, "secret.png"), png());
   symlinkSync(join(root, "secret.png"), join(project, ".walkthrough", "shots", "escape.png"));
-  // In a hidden folder outside the project (as ~/.ssh): never shown, by path or through a symlink.
+  // The temp root is the home folder (a scratch HOME, never the real one).
+  process.env.HOME = root;
+  // In a hidden folder of the home folder (as ~/.ssh): never shown, by path or through a symlink.
   mkdirSync(join(root, ".secrets"), { recursive: true });
   writeFileSync(join(root, ".secrets", "key.png"), png());
   symlinkSync(join(root, ".secrets", "key.png"), join(project, ".walkthrough", "shots", "to-hidden.png"));
@@ -132,7 +139,7 @@ test("an image the message shows serves from its project, typed by its bytes, wi
   expect(html.headers.get("content-type")).toBe("image/png");
 });
 
-test("images outside the project serve; hidden folders outside it, non-images, unreferenced paths, unknown messages and other sites are refused", async () => {
+test("images outside the project serve; the home folder's hidden folders, non-images, unreferenced paths, unknown messages and other sites are refused", async () => {
   const { project, dataDir } = world();
   const server = await start(dataDir);
   const sent = await send(await agent(server), { project_path: project, body: BODY });
@@ -144,7 +151,7 @@ test("images outside the project serve; hidden folders outside it, non-images, u
   expectGuardHeaders(up);
   expect((await image(server, id, ".walkthrough/shots/escape.png")).status).toBe(200);
 
-  // A hidden folder outside the project: refused as named, and through a symlink by its realpath.
+  // A hidden folder of the home folder: refused as named, and through a symlink by its realpath.
   const hidden = await image(server, id, "../.secrets/key.png");
   expect(hidden.status).toBe(403);
   expect(((await hidden.json()) as { code: string }).code).toBe("image_hidden");
@@ -272,6 +279,60 @@ test("a dotenv-family name is refused even inside the project", async () => {
   expect(((await answer.json()) as { code: string }).code).toBe("image_hidden");
 });
 
+test("an image in a hidden folder beside the project shows inline, as the same folder's attachment does; a .env file there and the home folder's hidden folders do not", async () => {
+  const { root, dataDir } = world();
+  // As reported: the project is ~/work/plannotator, the pictures sit in ~/work/.ops (not the home folder's own hidden folder).
+  const project = join(root, "work", "plannotator");
+  const ops = join(root, "work", ".ops", "multi-machine");
+  mkdirSync(project, { recursive: true });
+  mkdirSync(ops, { recursive: true });
+  Bun.spawnSync(["git", "init", "-q"], { cwd: project, env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } });
+  const light = join(ops, "explainer-light.png");
+  const dark = join(ops, "explainer-dark.png");
+  const dotenv = join(ops, ".env.png");
+  const homeHidden = join(root, ".secrets", "key.png");
+  for (const file of [light, dark, dotenv]) writeFileSync(file, png());
+  const server = await start(dataDir);
+  const { text, structured } = await sendResult(await agent(server), {
+    project_path: project,
+    body: `![One Inbox, every machine](${light})\n\n![e](${dotenv}) ![k](${homeHidden})`,
+    attachments: [dark],
+  });
+  // Only the .env file and the home folder's hidden folder are named as not shown.
+  expect(structured.images_not_shown).toEqual([
+    { ref: dotenv, reason: "a .env file, or in a hidden folder of the home folder such as ~/.ssh" },
+    { ref: homeHidden, reason: "a .env file, or in a hidden folder of the home folder such as ~/.ssh" },
+  ]);
+  expect(text).not.toContain(light);
+  // The inline picture shows, and was captured at send, as the attachment beside it was taken.
+  const shown = await image(server, structured.message_id, light);
+  expect(shown.status).toBe(200);
+  expect(new Uint8Array(await shown.arrayBuffer())).toEqual(png());
+  const message = server.store.message(structured.message_id)!;
+  expect((message.inline_images ?? []).map((i) => i.ref)).toEqual([light]);
+  expect((message.attachments ?? []).map((a) => a.path)).toEqual([dark]);
+  for (const refused of [dotenv, homeHidden]) {
+    const answer = await image(server, structured.message_id, refused);
+    expect(answer.status).toBe(403);
+    expect(((await answer.json()) as { code: string }).code).toBe("image_hidden");
+  }
+});
+
+test("with HOME pointed elsewhere, a real home folder's hidden folders are still refused; a hidden folder deeper in it still shows", async () => {
+  const { root } = world();
+  // A scratch HOME (world sets it): the real home, other users' and root's are judged by their shape.
+  expect(process.env.HOME).toBe(root);
+  for (const path of ["/Users/someone/.ssh/k.png", "/home/someone/.config/app/x.png", "/root/.cache/t.png", "/var/root/.ssh/k.png", "/private/var/root/.x/k.png", "C:\\Users\\someone\\.ssh\\k.png", "/.hidden/x.png", join(root, ".secrets", "key.png")]) {
+    expect(inboxHomeDotFolder(path)).not.toBeNull();
+  }
+  for (const path of ["/Users/someone/work/.ops/e.png", "/home/someone/src/app/.walkthrough/a.png", "C:\\Users\\someone\\work\\.ops\\e.png", join(root, "work", ".ops", "e.png")]) {
+    expect(inboxHomeDotFolder(path)).toBeNull();
+  }
+  // A relative HOME names no home at all: the shape still guards.
+  process.env.HOME = "relative/home";
+  expect(inboxHomeDotFolder("/Users/someone/.aws/x.png")).toBe("/Users/someone/.aws");
+});
+
 /** send_message's whole result: its text line and structured content. */
 async function sendResult(client: Client, args: Record<string, unknown>): Promise<{ text: string; structured: Record<string, any> }> {
   const result = (await client.callTool({ name: "send_message", arguments: args })) as { isError?: boolean; content: { text: string }[]; structuredContent: Record<string, any> };
@@ -297,7 +358,7 @@ test("send_message says which images will not show, and still sends the message"
   expect(server.store.message(structured.message_id)?.body).toBe(body);
   expect(structured.images_not_shown).toEqual([
     { ref: ".walkthrough/shots/missing.png", reason: "does not exist yet; it will show if it is written there later", not_yet: true },
-    { ref: "../.secrets/key.png", reason: "in a hidden folder, or a hidden or .env file" },
+    { ref: "../.secrets/key.png", reason: "a .env file, or in a hidden folder of the home folder such as ~/.ssh" },
     { ref: ".walkthrough/shots/fake.png", reason: "not an image (png, jpg, gif, webp, svg, avif, bmp, ico)" },
     { ref: "https://example.com/shot.png", reason: "remote images never load in the Inbox" },
     { ref: "//cdn.example.com/x.png", reason: "remote images never load in the Inbox" },
@@ -369,7 +430,7 @@ test("submit_guide's result carries the same warning", async () => {
     arguments: { project_path: project, guide, patch, body: "Before: ![shot](../.secrets/key.png)" },
   })) as { isError?: boolean; content: { text: string }[]; structuredContent: Record<string, any> };
   expect(result.isError).toBeFalsy();
-  expect(result.structuredContent.images_not_shown).toEqual([{ ref: "../.secrets/key.png", reason: "in a hidden folder, or a hidden or .env file" }]);
+  expect(result.structuredContent.images_not_shown).toEqual([{ ref: "../.secrets/key.png", reason: "a .env file, or in a hidden folder of the home folder such as ~/.ssh" }]);
   expect(result.content[0]!.text).toContain("this image will not show: ../.secrets/key.png");
 });
 
@@ -537,4 +598,77 @@ test("a cache validator: the ETag is the SHA-256 of the bytes served, If-None-Ma
   expect(changed.headers.get("etag")).toBe(`"${createHash("sha256").update(gif()).digest("hex")}"`);
   expect(changed.headers.get("etag")).not.toBe(etag);
   expect(new Uint8Array(await changed.arrayBuffer())).toEqual(gif());
+});
+
+test("a sound or a video the message shows serves by Range from the same route and rules; a picture still serves; what was refused stays refused", async () => {
+  const { root, project, dataDir } = world();
+  const wav = new Uint8Array(44);
+  wav.set(new TextEncoder().encode("RIFF"), 0);
+  wav.set(new TextEncoder().encode("WAVEfmt "), 8);
+  wav.set(new TextEncoder().encode("data"), 36);
+  writeFileSync(join(project, ".walkthrough", "voice.wav"), wav);
+  writeFileSync(join(project, ".walkthrough", "fake.mp4"), "not a film");
+  writeFileSync(join(root, ".secrets", "call.wav"), wav);
+  const server = await start(dataDir);
+  const body = "![voice](.walkthrough/voice.wav) ![fake](.walkthrough/fake.mp4) ![hidden](../.secrets/call.wav) ![after](.walkthrough/shots/after.png)";
+  const sent = await send(await agent(server), { project_path: project, body });
+  expect(sent.images_not_shown).toBeUndefined();
+  const id = sent.message_id as string;
+
+  const whole = await image(server, id, ".walkthrough/voice.wav", { "Sec-Fetch-Site": "same-origin" });
+  expect(whole.status).toBe(200);
+  expect(whole.headers.get("content-type")).toBe("audio/wav");
+  expect(whole.headers.get("accept-ranges")).toBe("bytes");
+  expectGuardHeaders(whole);
+  expect(new Uint8Array(await whole.arrayBuffer())).toEqual(wav);
+  const part = await image(server, id, ".walkthrough/voice.wav", { Range: "bytes=8-11" });
+  expect(part.status).toBe(206);
+  expect(part.headers.get("content-range")).toBe("bytes 8-11/44");
+  expect(new TextDecoder().decode(await part.arrayBuffer())).toBe("WAVE");
+
+  expect((await image(server, id, ".walkthrough/shots/after.png")).headers.get("content-type")).toBe("image/png");
+  expect((await image(server, id, ".walkthrough/fake.mp4")).status).toBe(415);
+  const hidden = await image(server, id, "../.secrets/call.wav");
+  expect(hidden.status).toBe(403);
+  expect(((await hidden.json()) as { code: string }).code).toBe("image_hidden");
+  writeFileSync(join(project, "other.wav"), wav);
+  expect((await image(server, id, "other.wav")).status).toBe(403);
+  expect((await image(server, id, ".walkthrough/voice.wav", { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+});
+
+test("send_message says which sounds and videos will not play, by the route's own rules, and names a remote video once", async () => {
+  const { root, project, dataDir } = world();
+  const wav = new Uint8Array(44);
+  wav.set(new TextEncoder().encode("RIFF"), 0);
+  wav.set(new TextEncoder().encode("WAVEfmt "), 8);
+  wav.set(new TextEncoder().encode("data"), 36);
+  writeFileSync(join(project, ".walkthrough", "voice.wav"), wav);
+  writeFileSync(join(project, ".walkthrough", "fake.mp4"), "not a film");
+  writeFileSync(join(root, ".secrets", "call.wav"), wav);
+  const big = join(project, ".walkthrough", "big.mp4");
+  writeFileSync(big, "");
+  truncateSync(big, INBOX_INLINE_MEDIA_MAX_BYTES + 1);
+  const server = await start(dataDir);
+  const client = await agent(server);
+  const body = "![voice](.walkthrough/voice.wav) ![hidden](../.secrets/call.wav) ![big](.walkthrough/big.mp4) ![fake](.walkthrough/fake.mp4) ![later](.walkthrough/later.mov) ![web](https://example.com/demo.mp4)";
+  const { text, structured } = await sendResult(client, { project_path: project, body });
+  expect(structured.images_not_shown).toBeUndefined();
+  expect(structured.media_not_shown).toEqual([
+    { ref: "../.secrets/call.wav", reason: "a .env file, or in a hidden folder of the home folder such as ~/.ssh" },
+    { ref: ".walkthrough/big.mp4", reason: "over 2 GB" },
+    { ref: ".walkthrough/fake.mp4", reason: "not a sound or video file" },
+    { ref: ".walkthrough/later.mov", reason: "does not exist yet; it plays once written there", not_yet: true },
+    { ref: "https://example.com/demo.mp4", reason: "remote sounds and videos never play in the Inbox" },
+  ]);
+  expect(text).toContain(" 4 sounds or videos will not play: ../.secrets/call.wav (a .env file, or in a hidden folder of the home folder such as ~/.ssh); .walkthrough/big.mp4 (over 2 GB); ");
+  expect(text).toContain(" This sound or video does not exist yet: .walkthrough/later.mov; it plays once written there.");
+  expect(text).not.toMatch(/images? will not show/);
+  expect((await image(server, structured.message_id, ".walkthrough/big.mp4")).status).toBe(413);
+
+  const one = await sendResult(client, { project_path: project, body: "![big](.walkthrough/big.mp4)" });
+  expect(one.text).toContain(" This sound or video will not play: .walkthrough/big.mp4 (over 2 GB). Put it in a plain folder");
+
+  const clean = await sendResult(client, { project_path: project, body: "![voice](.walkthrough/voice.wav)" });
+  expect(clean.structured.media_not_shown).toBeUndefined();
+  expect(clean.text).not.toContain("will not play");
 });

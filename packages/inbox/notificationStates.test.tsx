@@ -4,7 +4,7 @@
  * General's status, Allow, the blocked steps, Send a test notification with
  * the macOS hint, and "Notifications reach you".
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -53,7 +53,7 @@ const settingsModel = (enabled = true) =>
     inbox_tool: { hosts: { 'claude-code': true, pi: false, opencode: false }, env: null },
     notifications: { enabled, dismissed: false, allowed_origin: null },
     phones: false,
-    store: { dir: '/home/u/.plannotator/inbox', bytes: 0, projects: [] },
+    store_dir: '/home/u/.plannotator/inbox',
   }) as unknown as SettingsModel;
 
 function settings(options: {

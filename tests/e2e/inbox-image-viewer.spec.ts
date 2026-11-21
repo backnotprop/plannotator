@@ -10,7 +10,7 @@
  * toolbar (above the bar beside the thread; one row per message, the open
  * file ringed) and owns the keys while open; an inline
  * image takes a comment and a markup and rides the Send under its path and
- * message; an image the agent overwrites says "Changed since Claude sent it"
+ * message; an image the agent overwrites says "Claude sent an earlier version at …"
  * and opens the version it sent; a typed comment asks before a step; on an
  * iPhone (WebKit) the toolbar's ⋯ opens the peek as a bottom sheet; and plan
  * review's annotate surface gets the light version (full screen, ← →, the
@@ -21,7 +21,7 @@
  * PNGs, light and dark, land in PLANNOTATOR_E2E_SHOTS_DIR (default .local/proof/image-viewer).
  */
 
-import { expect, test, webkit, devices, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, webkit, devices, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -173,11 +173,13 @@ test('an agent sends three messages: images in their text are captured at send, 
   });
   const second = await world.claude.send({
     project_path: world.project,
+    reply_to: first.message_id,
     body: ['The empty orders page, and its copy:', '', '![Empty orders](design/empty-orders.png)'].join('\n'),
     attachments: ['docs/empty-states.md'],
   });
   const third = await world.claude.send({
     project_path: world.project,
+    reply_to: second.message_id,
     body: 'The phone checkout and the receipt spec.',
     attachments: ['shots/checkout-mobile.png', 'docs/receipt-spec.pdf'],
   });
@@ -298,11 +300,12 @@ test('an image in a message takes a comment and a markup, like an attached image
   await page.mouse.move(at(0.5, 0.15).x, at(0.5, 0.15).y, { steps: 8 });
   await page.mouse.move(at(0.64, 0.19).x, at(0.64, 0.19).y, { steps: 8 });
   await page.mouse.up();
+  // Enter adds the drawing to the reply at once; the words after it are its note.
   await page.keyboard.press('Enter');
-  await expect(pane().locator('.ib-imgcompose .ib-markup img')).toBeVisible();
-  await pane().getByRole('textbox', { name: 'Comment on checkout-b-steps.png' }).fill('Make step 1 bold, and say which step you are on.');
+  await expect(pane().locator('[data-image-composer] [data-markup-kept] img')).toBeVisible();
+  await pane().getByRole('textbox', { name: 'A note with your drawing on checkout-b-steps.png' }).fill('Make step 1 bold, and say which step you are on.');
   await shot(page, '03-inline-image-comment-and-markup');
-  await pane().getByRole('button', { name: 'Comment', exact: true }).click();
+  await pane().getByRole('button', { name: 'Add note', exact: true }).click();
   await expect(pane().locator('.ib-apanel')).toContainText('Make step 1 bold');
   await shot(page, '04-inline-image-comment-saved');
 });
@@ -319,24 +322,28 @@ test('an image the agent overwrites says it changed since it was sent, and opens
   await expect(line).toContainText('Changed since sent');
   await expect(line).not.toHaveAttribute('title', /./);
   await line.locator('.ib-fvver-t').hover();
-  await expect(page.locator('[data-side].bg-popover')).toHaveText(/^Changed since Claude sent it/);
+  await expect(page.locator('[data-side].bg-popover')).toHaveText(/^Viewing the current file \(edited [^)]*\)\. Claude sent an earlier version at /);
   await page.mouse.move(700, 600);
   await expect(page.locator('[data-side].bg-popover')).toHaveCount(0);
   await shot(page, '05-inline-image-changed');
-  await line.getByRole('button', { name: 'Open the version it sent' }).click();
+  await line.getByRole('button', { name: 'View sent version' }).click();
   await expect(pane()).toHaveAttribute('data-version', 'sent');
 });
 
-test('a typed comment on an image asks before a step', async () => {
+test('a typed comment on an image never stops a step, and waits in its box for that image', async () => {
   const page = world.page;
   await pane().getByRole('textbox', { name: 'Comment on checkout-c-drawer.png' }).fill('The drawer hides the total.');
   await pane().locator('.ib-imgstage').click();
   await page.keyboard.press(']');
-  const guard = page.locator('[data-step-guard]');
-  await expect(guard).toBeVisible();
-  await expect(guard.getByRole('button', { name: 'Discard and go to empty-orders.png' })).toBeVisible();
-  await shot(page, '06-guard');
-  await guard.getByRole('button', { name: 'Discard and go to empty-orders.png' }).click();
+  await expectAt(page, 4, 'empty-orders.png');
+  await expect(page.locator('[data-step-guard]')).toHaveCount(0);
+  await page.keyboard.press('[');
+  await expect(pane().getByRole('textbox', { name: 'Comment on checkout-c-drawer.png' })).toHaveValue('The drawer hides the total.');
+  await shot(page, '06-kept');
+  // Cleared on the comment itself, then on: nothing waits for it.
+  await pane().getByRole('textbox', { name: 'Comment on checkout-c-drawer.png' }).fill('');
+  await pane().locator('.ib-imgstage').click();
+  await page.keyboard.press(']');
   await expectAt(page, 4, 'empty-orders.png');
 });
 
@@ -355,13 +362,11 @@ test('beside the thread a document keeps its frame, and the peek opens over it',
 test('Send carries the comment on the image in the message, named by its path and its message', async () => {
   const page = world.page;
   await pane().getByRole('button', { name: /^Close / }).click();
-  const waiting = world.claude.waitForReply(world.threadId, 40);
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Edit draft' }).click();
   await page.getByRole('textbox', { name: /^Reply to / }).fill('One note on B.');
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-  const reply = await waiting;
-  expect(reply.status).toBe('replied');
-  const body = reply.reply.body as string;
+  const reply = await world.claude.nextReply(world.threadId, 40);
+  const body = reply.body as string;
   expect(body).toContain('the images your messages showed');
   expect(body).toMatch(/## design\/checkout-b-steps\.png \(image in your \d{1,2}:\d{2} [AP]M message\)/);
   expect(body).toContain('Make step 1 bold');
@@ -418,7 +423,7 @@ test('plan review and annotate get the light version: full screen, ← → acros
     ['# Checkout plan', '', '## Options', '', '![A: one page](checkout-a-single-page.png)', '', '![B: three steps](checkout-b-steps.png)', '', '![C: a drawer](checkout-c-drawer.png)', '', '## Mobile', '', '![Phone](checkout-mobile.png)', ''].join('\n'),
   );
   const readyFile = join(root, 'ready.jsonl');
-  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
   let child: ChildProcess | undefined;
   let url = '';
   try {
@@ -430,6 +435,7 @@ test('plan review and annotate get the light version: full screen, ← → acros
       [
         ['plannotator-plan-look-choice-resolved', 'true'],
         ['plannotator-announce-tui-herdr-seen', '1'],
+        ['plannotator-announce-inbox-seen', '1'],
         ['plannotator-announce-ask-session-seen', '1'],
         ['plannotator-announce-agent-tool-seen', '1'],
       ].map(([name, value]) => ({ name: name!, value: value!, url })),
@@ -493,7 +499,7 @@ test('Actual size shows an image at its real size: a tall one scrolls, a small o
   const doc = join(root, 'PLAN.md');
   writeFileSync(doc, ['# Sizes', '', '![Tall](tall.png)', '', '![Small](small.png)', ''].join('\n'));
   const readyFile = join(root, 'ready.jsonl');
-  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
   let child: ChildProcess | undefined;
   let url = '';
   try {
@@ -505,6 +511,7 @@ test('Actual size shows an image at its real size: a tall one scrolls, a small o
       [
         ['plannotator-plan-look-choice-resolved', 'true'],
         ['plannotator-announce-tui-herdr-seen', '1'],
+        ['plannotator-announce-inbox-seen', '1'],
         ['plannotator-announce-ask-session-seen', '1'],
         ['plannotator-announce-agent-tool-seen', '1'],
       ].map(([name, value]) => ({ name: name!, value: value!, url })),
@@ -593,7 +600,7 @@ test('the lightbox zooms: Ctrl + wheel about the pointer, drag pans, a double cl
   const doc = join(root, 'PLAN.md');
   writeFileSync(doc, ['# Zoom', '', '![Wide](wide.png)', '', '![Other](other.png)', ''].join('\n'));
   const readyFile = join(root, 'ready.jsonl');
-  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
   let child: ChildProcess | undefined;
   let url = '';
   try {
@@ -605,6 +612,7 @@ test('the lightbox zooms: Ctrl + wheel about the pointer, drag pans, a double cl
       [
         ['plannotator-plan-look-choice-resolved', 'true'],
         ['plannotator-announce-tui-herdr-seen', '1'],
+        ['plannotator-announce-inbox-seen', '1'],
         ['plannotator-announce-ask-session-seen', '1'],
         ['plannotator-announce-agent-tool-seen', '1'],
       ].map(([name, value]) => ({ name: name!, value: value!, url })),
@@ -699,7 +707,7 @@ test('on an iPhone (WebKit) a tap beside the image closes the single overlay, an
   // A link high on the page, where the tap beside the image lands once the overlay is open.
   writeFileSync(doc, ['# Ghost tap', '', '[Go somewhere else](https://example.com/ghost) and [another link](https://example.com/ghost-2)', '', '![Small](small.png)', ''].join('\n'));
   const readyFile = join(root, 'ready.jsonl');
-  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
   let child: ChildProcess | undefined;
   let url = '';
   const { defaultBrowserType: _ignored, ...device } = devices['iPhone 15'];
@@ -713,6 +721,7 @@ test('on an iPhone (WebKit) a tap beside the image closes the single overlay, an
       [
         ['plannotator-plan-look-choice-resolved', 'true'],
         ['plannotator-announce-tui-herdr-seen', '1'],
+        ['plannotator-announce-inbox-seen', '1'],
         ['plannotator-announce-ask-session-seen', '1'],
         ['plannotator-announce-agent-tool-seen', '1'],
       ].map(([name, value]) => ({ name: name!, value: value!, url })),
@@ -895,9 +904,9 @@ test('the Inbox\'s file viewer zooms like the lightbox: Ctrl + wheel keeps the p
   await page.mouse.move(c.x + c.width * (target.u + reach), c.y + c.height * target.v, { steps: 10 });
   await page.mouse.up();
   await page.keyboard.press('Enter');
-  await expect(pane().locator('.ib-imgcompose .ib-markup img')).toBeVisible();
-  await pane().getByRole('textbox', { name: 'Comment on summary.png' }).fill('Circle the total; it should be bigger.');
-  await pane().getByRole('button', { name: 'Comment', exact: true }).click();
+  await expect(pane().locator('[data-image-composer] [data-markup-kept] img')).toBeVisible();
+  await pane().getByRole('textbox', { name: 'A note with your drawing on summary.png' }).fill('Circle the total; it should be bigger.');
+  await pane().getByRole('button', { name: 'Add note', exact: true }).click();
   await page.locator('[data-full-view-comments]').click();
   const drawer = pane().locator('[data-comments-drawer="open"]');
   await expect(drawer).toBeVisible();
@@ -934,9 +943,14 @@ test('the Inbox\'s file viewer zooms like the lightbox: Ctrl + wheel keeps the p
   expect(Math.abs((ink.minY + ink.maxY) / 2 - target.v * 760)).toBeLessThan(3);
   expect(Math.abs((ink.maxX - ink.minX) / 2 - reach * 1200)).toBeLessThan(8);
 
-  /** Where the drawing's colour is on the screen, inside the stage, in page pixels. */
+  /**
+   * Where the drawing's colour is on the screen, inside the stage, in page pixels. The open comments panel floats
+   * over the stage's right side, and its card shows the drawing too: only the stage left of the panel is read.
+   */
   const inkOnScreen = async () => {
-    const box = (await pane().locator('[data-image-zoom-stage]').boundingBox())!;
+    const stageBox = (await pane().locator('[data-image-zoom-stage]').boundingBox())!;
+    const panelBox = await pane().locator('[data-comments-drawer="open"]').boundingBox();
+    const box = panelBox && panelBox.x < stageBox.x + stageBox.width ? { ...stageBox, width: panelBox.x - stageBox.x } : stageBox;
     const shotPng = await page.screenshot({ clip: box });
     const found = await page.evaluate(async ({ data, color }) => {
       // The window's CSP lets images load data: URLs (connect-src does not).
@@ -1072,7 +1086,7 @@ test('#2127: in annotate, a plain wheel zooms in, a pause, then the wheel scroll
   const doc = join(root, 'NOTES.md');
   writeFileSync(doc, ['# Notes', '', '![Big](big.png)', ''].join('\n'));
   const readyFile = join(root, 'ready.jsonl');
-  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
   let child: ChildProcess | undefined;
   let url = '';
   try {
@@ -1088,6 +1102,7 @@ test('#2127: in annotate, a plain wheel zooms in, a pause, then the wheel scroll
         [
           ['plannotator-plan-look-choice-resolved', 'true'],
           ['plannotator-announce-tui-herdr-seen', '1'],
+          ['plannotator-announce-inbox-seen', '1'],
           ['plannotator-announce-ask-session-seen', '1'],
           ['plannotator-announce-agent-tool-seen', '1'],
         ].map(([name, value]) => ({ name: name!, value: value!, url })),

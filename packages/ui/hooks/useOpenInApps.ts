@@ -26,6 +26,7 @@ export interface OpenInAppsAnswer {
 }
 
 const loads = new Map<string, Promise<OpenInAppsAnswer>>();
+const answered = new Map<string, OpenInAppsAnswer>();
 
 /**
  * The apps a route answers, fetched once per URL for the page. Only an
@@ -38,6 +39,7 @@ export function loadOpenInApps(url: string): Promise<OpenInAppsAnswer> {
   if (!load) {
     const unavailable = (): OpenInAppsAnswer => {
       loads.delete(url);
+      answered.delete(url);
       return { available: false, apps: [] };
     };
     load = fetch(url)
@@ -45,7 +47,9 @@ export function loadOpenInApps(url: string): Promise<OpenInAppsAnswer> {
         if (!response.ok) return unavailable();
         const data = (await response.json()) as Partial<OpenInAppsAnswer>;
         const platform = data.platform === 'mac' || data.platform === 'win' || data.platform === 'linux' ? data.platform : undefined;
-        return { available: data.available === true, apps: Array.isArray(data.apps) ? data.apps : [], ...(platform ? { platform } : {}) };
+        const answer: OpenInAppsAnswer = { available: data.available === true, apps: Array.isArray(data.apps) ? data.apps : [], ...(platform ? { platform } : {}) };
+        answered.set(url, answer);
+        return answer;
       })
       .catch(unavailable);
     loads.set(url, load);
@@ -59,9 +63,10 @@ export function loadOpenInApps(url: string): Promise<OpenInAppsAnswer> {
  * that did not answer; a kept answer comes back at once.
  */
 export function useOpenInApps(url: string, enabled = true, retryKey?: string): OpenInAppsAnswer | null {
-  const [answer, setAnswer] = useState<OpenInAppsAnswer | null>(null);
+  const [answer, setAnswer] = useState<OpenInAppsAnswer | null>(() => answered.get(url) ?? null);
   useEffect(() => {
     if (!enabled) return;
+    if (answered.get(url) && answered.get(url) === answer) return;
     let cancelled = false;
     void loadOpenInApps(url).then((next) => {
       if (!cancelled) setAnswer(next);

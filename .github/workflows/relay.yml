@@ -32,33 +32,20 @@ on:
       - 'packages/shared/data-dir.ts'
       - 'bun.lock'
       - '.github/workflows/relay.yml'
-  push:
-    branches:
-      - main
-    paths:
-      - 'apps/relay/**'
-      - 'packages/server/inbox*'
-      - 'packages/shared/inbox/**'
-      - 'packages/core/crypto*'
-      - 'packages/core/fixtures/inbox-relay*'
-      - 'packages/core/inbox*'
-      - 'apps/hook/server/index.ts'
-      - 'apps/hook/server/inbox*'
-      - 'scripts/inbox-sim.ts'
-      - 'tests/helpers/inbox-world.ts'
-      - 'tests/helpers/inbox-process.ts'
-      - 'tests/helpers/real-data-dir.ts'
-      - 'tests/helpers/hook-dist-stub.ts'
-      - 'tests/setup/sandbox-data-dir.ts'
-      - 'packages/shared/data-dir.ts'
-      - 'bun.lock'
-      - '.github/workflows/relay.yml'
+  # On a PR it runs when one of these paths changes, with no label. Main is
+  # not run after every merge: a nightly run on main catches what a PR did not
+  # touch here, and a release dispatches it on main before the tag.
+  schedule:
+    - cron: "37 7 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# One run per PR: a newer push cancels the older run. Nightly and manual runs
+# each get a group of their own.
 concurrency:
-  group: relay-${{ github.ref }}
+  group: relay-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
   cancel-in-progress: true
 
 jobs:
@@ -74,7 +61,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       - name: Install dependencies
         run: bun install --frozen-lockfile

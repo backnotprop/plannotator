@@ -72,6 +72,12 @@ export interface LiveAppProxyOptions {
   editorOrigins: string[];
   /** Fully composed bridge body (config prelude + bootstrap + bridge). */
   bridgeJs: string;
+  /**
+   * Bind any free loopback port, ignoring PLANNOTATOR_LIVE_PORT. The Inbox
+   * sets it (Bun proxy only): it runs one proxy per site at once, and that
+   * variable names annotate's one port. Absent: annotate's behavior.
+   */
+  anyFreePort?: boolean;
 }
 
 export interface LiveAppProxy {
@@ -550,6 +556,13 @@ export interface LiveBridgeSources {
   bridgeBootstrap: string;
   /** The bridge script itself. */
   bridgeScript: string;
+  /**
+   * Optional: the editor frames the app through a same-origin wrapper page
+   * (the Inbox, whose window names no proxy port in its own policy), so the
+   * editor is the frame's grandparent, not its parent. Absent: annotate's
+   * output, unchanged.
+   */
+  nested?: boolean;
 }
 
 /**
@@ -566,6 +579,7 @@ export function composeLiveBridgeJs(sources: LiveBridgeSources): string {
       token: sources.token,
       editorOrigins: sources.editorOrigins,
       css: sources.annotationCss,
+      ...(sources.nested ? { nested: true } : {}),
     })
     + ";\n"
     + sources.bridgeBootstrap

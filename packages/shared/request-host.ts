@@ -17,8 +17,9 @@
  *  - Loopback names (`localhost`, `*.localhost`, 127.0.0.0/8 literals,
  *    `[::1]`): allowed in every mode.
  *  - Remote mode (wide bind): also any IPv4 or IPv6 literal (a LAN address,
- *    a container address), plus `extraHosts` (the configured urlHost and this
- *    machine's own hostname, supplied by the runtime adapter).
+ *    a container address), plus `extraHosts` (the configured urlHost, the
+ *    public URL's host and this machine's own hostname, supplied by the
+ *    runtime adapter).
  *  - `extraHosts` in any mode: names a runtime learned it is served on (the
  *    `tailscale serve` MagicDNS name of a `--tailscale` session).
  *  - `portHostPatterns` in any mode: the per-port hostnames of a browser IDE's

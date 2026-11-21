@@ -6,12 +6,39 @@
  * closes (`settleOwn`; when that happens and how it moves: settle.ts). Pure.
  */
 
-import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+import { INBOX_PRIORITY_GROUP, inboxRowInPriority, type InboxListGroupId, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
+import { INBOX_SNOOZED_BAND } from '@plannotator/core/inbox-snooze';
+
+/**
+ * What the list draws from a read: the Priority group, the sections without
+ * the rows Priority took, then the Snoozed band under Quiet. Only the list
+ * goes through here: neither group is a section, so what counts sections (the
+ * sidebar, the tab, notifications) counts a row wherever it is drawn. The
+ * held rules below treat both as more groups, so a row in either settles,
+ * holds and comes back as any other row does.
+ */
+export function listGroups(model: { sections: readonly InboxListSection[]; snoozed?: readonly InboxListRow[] }): InboxListSection[] {
+  const first: InboxListRow[] = [];
+  const sections = model.sections.map((section) => {
+    if (!section.threads.some(inboxRowInPriority)) return section;
+    first.push(...section.threads.filter(inboxRowInPriority));
+    return { ...section, threads: section.threads.filter((row) => !inboxRowInPriority(row)) };
+  });
+  return [{ ...INBOX_PRIORITY_GROUP, threads: first.sort(newestFirst) }, ...sections, { ...INBOX_SNOOZED_BAND, threads: [...(model.snoozed ?? [])] }];
+}
+
+/** The group a row's state puts it in. */
+function groupOf(row: InboxListRow): InboxListGroupId {
+  if (row.snoozed) return INBOX_SNOOZED_BAND.id;
+  return inboxRowInPriority(row) ? INBOX_PRIORITY_GROUP.id : row.section;
+}
 
 export interface HeldNotice {
   count: number;
   /** "1 new in docs-site", or "3 new" across projects; null when nothing waits. */
   text: string | null;
+  /** The one project the news is in ("docs-site"), drawn apart so a long name is cut, not wrapped; absent across projects. */
+  project?: string;
 }
 
 function rowsById(sections: readonly InboxListSection[]): Map<string, InboxListRow> {
@@ -44,9 +71,14 @@ function lastAgentAt(row: InboxListRow): string | null {
  * notification, Settings' Unarchive) and whose agent messages they have all
  * seen (`unseen` 0) came in by their own hand (it was archived, say, and they
  * unarchived it). A thread read somewhere else (a phone, another tab) is not
- * exempt: this tab has not shown it, so it stays news here.
+ * exempt: this tab has not shown it, so it stays news here. A snoozed thread
+ * is never news, whatever an agent wrote there (approval "inbox-snooze"), and
+ * its return is: a row that comes to the top by the clock waits behind "N new"
+ * as an agent's message does, so the list never moves under the reader.
  */
 function hasNewAgentActivity(old: InboxListRow | undefined, row: InboxListRow, openedHere?: ReadonlySet<string>): boolean {
+  if (row.snoozed) return false;
+  if (row.snooze_back && row.snooze_back !== old?.snooze_back) return true;
   const at = lastAgentAt(row);
   // The person's own reply came after the agent's last message (`sent` reads
   // past the notes): whatever the agent wrote before it, they answered, on
@@ -56,6 +88,14 @@ function hasNewAgentActivity(old: InboxListRow | undefined, row: InboxListRow, o
   // An older row on screen without the field: compare with its last_at, as before.
   const before = old.last_agent_at !== undefined ? (old.last_agent_at ?? '') : old.last_at;
   return at > before;
+}
+
+/**
+ * The thread's row now (`current`) carries agent activity the row drawn on screen (`drawn`) does not show: that news
+ * waits behind "N new · Show". Mark all as read (markAllRead.ts) leaves such a thread out, so it stays new.
+ */
+export function waitsBehindShow(drawn: InboxListRow, current: InboxListRow): boolean {
+  return hasNewAgentActivity(drawn, current);
 }
 
 /**
@@ -80,34 +120,51 @@ function isOpenRow(row: InboxListRow, open: OpenThread | null | undefined): bool
 }
 
 /**
- * The threads in `latest` with agent activity the list on screen does not
- * show: a thread it lacks, or one whose last message is a newer agent
- * message. The person's own picks, replies and looks never count. `open`:
- * the thread the person has open, or just closed until the list settles
- * (design record "inbox-new-in-open-thread", approved 2026-10-12), which is
- * never counted or named here.
+ * The rows of `latest` with agent activity the list on screen does not show:
+ * a thread it lacks, or one whose last message is a newer agent message. The
+ * person's own picks, replies and looks never count. `open`: the thread the
+ * person has open, or just closed until the list settles (design record
+ * "inbox-new-in-open-thread", approved 2026-10-12), which is never news here:
+ * its own row and its pill say what arrived there. In the list's order.
  */
+function newsRows(shown: readonly InboxListSection[], latest: readonly InboxListSection[], openedHere?: ReadonlySet<string>, open?: OpenThread | null): InboxListRow[] {
+  const before = rowsById(shown);
+  return [...rowsById(latest).values()].filter((row) => !isOpenRow(row, open) && hasNewAgentActivity(before.get(row.thread_id), row, openedHere));
+}
+
+/**
+ * The news that waits (`newsRows`), each with the row the list on screen has for that thread (undefined: the list
+ * lacks it): what the held line's words read (newsWords.ts), new thread, question or reply.
+ */
+export function heldArrivalRows(
+  shown: readonly InboxListSection[],
+  latest: readonly InboxListSection[],
+  openedHere?: ReadonlySet<string>,
+  open?: OpenThread | null,
+): { row: InboxListRow; was: InboxListRow | undefined }[] {
+  const before = rowsById(shown);
+  return newsRows(shown, latest, openedHere, open).map((row) => ({ row, was: before.get(row.thread_id) }));
+}
+
+/** What "N new" says of the news that waits (`newsRows`): how many threads, and the one project they are in. */
 export function heldNotice(
   shown: readonly InboxListSection[],
   latest: readonly InboxListSection[],
   openedHere?: ReadonlySet<string>,
   open?: OpenThread | null,
+  /** The window's project names by id (`windowProjectNames`); a project not in it reads its server name. */
+  names?: ReadonlyMap<string, string>,
 ): HeldNotice {
-  const before = rowsById(shown);
+  const rows = newsRows(shown, latest, openedHere, open);
+  const count = rows.length;
   // By id: two projects can share a name ("api" at work and at home), and two
   // projects are never "new in api".
   const projects = new Map<string, string>();
-  let count = 0;
-  for (const row of rowsById(latest).values()) {
-    // The thread the person has open (or just closed, until the list settles)
-    // is never news here: its own row and its pill say what arrived there.
-    if (isOpenRow(row, open)) continue;
-    if (!hasNewAgentActivity(before.get(row.thread_id), row, openedHere)) continue;
-    count += 1;
-    projects.set(row.project.id, row.project.name);
-  }
+  for (const row of rows) projects.set(row.project.id, names?.get(row.project.id) ?? row.project.name);
   if (count === 0) return { count, text: null };
-  return { count, text: projects.size === 1 ? `${count} new in ${[...projects.values()][0]}` : `${count} new` };
+  if (projects.size !== 1) return { count, text: `${count} new` };
+  const project = [...projects.values()][0]!;
+  return { count, text: `${count} new in ${project}`, project };
 }
 
 /**
@@ -128,25 +185,72 @@ export function showBroughtIn(shown: readonly InboxListSection[], latest: readon
 }
 
 /**
+ * The groups the rows Show brings in (`showBroughtIn`) land in, in the list's
+ * order. Show opens each of them that is closed (the owner, 2026-11-08: "When
+ * I hit this two new, I want it to open up whatever groups they appear in"),
+ * so the rows it lights are on screen.
+ */
+export function showLandsIn(shown: readonly InboxListSection[], latest: readonly InboxListSection[]): InboxListGroupId[] {
+  const ids = showBroughtIn(shown, latest);
+  return latest.filter((section) => section.threads.some((row) => ids.has(row.thread_id))).map((section) => section.id);
+}
+
+/**
  * The held list with each row's own state brought up to date in place. The
  * rows keep their sections and their order, which wait for an action; but a
  * row whose thread changed without new agent activity (the reply was
  * delivered, an agent read it, the thread was resolved) shows its state as it
  * now is, so a Sent row stops saying "Saved for" once the agent has the
  * reply. A row with new agent activity keeps what was on screen: that change
- * waits behind "N new". A row whose thread is gone stays as it was.
+ * waits behind "N new". A row whose thread is gone stays as it was here;
+ * `goneRows` says which leave (archived or deleted elsewhere).
  */
 export function refreshHeldRows(shown: readonly InboxListSection[], latest: readonly InboxListSection[], open?: OpenThread | null): InboxListSection[] {
   const fresh = rowsById(latest);
-  return shown.map((section) => ({
-    ...section,
-    threads: section.threads.map((row) => {
+  // What did not change stays the same objects: a read that changed no row on screen keeps the list drawn as it is.
+  let changed = false;
+  const sections = shown.map((section) => {
+    let moved = false;
+    const threads = section.threads.map((row) => {
       const next = fresh.get(row.thread_id);
       // The open thread's row always tells its state, in place: bold when an
       // agent message arrives, not bold once it is seen (it never moves).
-      return next && (isOpenRow(next, open) || !hasNewAgentActivity(row, next)) ? next : row;
-    }),
-  }));
+      const take = next && (isOpenRow(next, open) || !hasNewAgentActivity(row, next)) ? next : row;
+      if (take !== row) moved = true;
+      return take;
+    });
+    if (!moved) return section;
+    changed = true;
+    return { ...section, threads };
+  });
+  return changed ? sections : (shown as InboxListSection[]);
+}
+
+/**
+ * The rows on screen whose thread the read no longer lists: archived or deleted in another window, on the phone, or
+ * by its agent. They leave every window's list at once, as a pin or a snooze from elsewhere moves its row (the
+ * owner, 2026-11-10). Two stay: the open thread's (`open`), and one this window archived itself (drawn archived in
+ * place until the list next settles; `archiving` while its write is on its way).
+ */
+export function goneRows(shown: readonly InboxListSection[] | null, latest: readonly InboxListSection[], open: string | null, archiving: ReadonlySet<string> = new Set()): Set<string> {
+  const out = new Set<string>();
+  if (!hasRows(shown)) return out;
+  const listed = rowsById(latest);
+  for (const section of shown!) {
+    for (const row of section.threads) if (!listed.has(row.thread_id) && row.thread_id !== open && row.resolved_at == null && !archiving.has(row.thread_id)) out.add(row.thread_id);
+  }
+  return out;
+}
+
+/** Rows the person reads in place: the folded Snoozed band alone holds nothing still, so a read is adopted whole. */
+export function hasRows(sections: readonly InboxListSection[] | null): boolean {
+  return !!sections && sections.some((s) => s.id !== 'snoozed' && s.threads.length > 0);
+}
+
+/** The list on screen without these rows; nothing else moves. */
+export function withoutRows(shown: readonly InboxListSection[], ids: ReadonlySet<string>): InboxListSection[] {
+  if (ids.size === 0) return shown as InboxListSection[];
+  return shown.map((section) => (section.threads.some((row) => ids.has(row.thread_id)) ? { ...section, threads: section.threads.filter((row) => !ids.has(row.thread_id)) } : section));
 }
 
 /** The list's own order within a section (packages/shared/inbox/list.ts): newest first, ties on the thread id. */
@@ -174,7 +278,10 @@ export function settleOwn(
   open?: OpenThread | null,
 ): InboxListSection[] {
   const before = rowsById(shown);
-  const known = new Set(latest.map((section) => section.id));
+  const known = new Set<string>(latest.map((section) => section.id));
+  // A row held in the band or in Priority stays there: its own `section` says where it was, not where it is drawn.
+  const inBand = new Set(shown.find((section) => section.id === INBOX_SNOOZED_BAND.id)?.threads.map((row) => row.thread_id));
+  const inPriority = new Set(shown.find((section) => section.id === INBOX_PRIORITY_GROUP.id)?.threads.map((row) => row.thread_id));
   const buckets = new Map<string, InboxListRow[]>();
   const put = (sectionId: string, row: InboxListRow) => {
     const bucket = buckets.get(sectionId);
@@ -194,10 +301,25 @@ export function settleOwn(
       // "N new", like any agent activity.
       else if (old && (old.resolved_at ?? null) !== null && old.back_from_archive !== true) continue;
       // Held: the state on screen, in the section that state sits in.
-      else if (old) put(known.has(old.section) ? old.section : section.id, old);
+      else if (old)
+        put(
+          inBand.has(old.thread_id) && known.has(INBOX_SNOOZED_BAND.id)
+            ? INBOX_SNOOZED_BAND.id
+            : inPriority.has(old.thread_id) && known.has(INBOX_PRIORITY_GROUP.id)
+              ? INBOX_PRIORITY_GROUP.id
+              : known.has(old.section)
+                ? old.section
+                : section.id,
+          old,
+        );
     }
   }
-  return latest.map((section) => ({ ...section, threads: (buckets.get(section.id) ?? []).sort(newestFirst) }));
+  return latest.map((section) => ({ ...section, threads: (buckets.get(section.id) ?? []).sort(section.id === INBOX_SNOOZED_BAND.id ? soonestBack : newestFirst) }));
+}
+
+/** The band's own order (core inbox-snooze.ts): a row a settle leaves there keeps its place by its time. */
+function soonestBack(left: InboxListRow, right: InboxListRow): number {
+  return (left.snoozed?.until ?? '').localeCompare(right.snoozed?.until ?? '') || left.thread_id.localeCompare(right.thread_id);
 }
 
 /**
@@ -212,13 +334,77 @@ export function settleOwn(
 export function settleThread(shown: readonly InboxListSection[], latest: readonly InboxListSection[], threadId: string): InboxListSection[] {
   const next = rowsById(latest).get(threadId);
   if (!next) return shown.map((section) => ({ ...section }));
+  const place = groupOf(next);
   return shown.map((section) => {
     const threads = section.threads.filter((row) => row.thread_id !== threadId);
-    if (section.id !== next.section) return { ...section, threads };
-    const at = threads.findIndex((row) => newestFirst(next, row) < 0);
+    if (section.id !== place) return { ...section, threads };
+    const at = threads.findIndex((row) => (place === INBOX_SNOOZED_BAND.id ? soonestBack : newestFirst)(next, row) < 0);
     threads.splice(at < 0 ? threads.length : at, 0, next);
     return { ...section, threads };
   });
+}
+
+/**
+ * The rows on screen a snooze change moves by itself (`event: snoozes` with no thread open, approval
+ * "inbox-list-view", R7): each row drawn in the Snoozed band that the read shows not snoozed, or drawn in its
+ * group and now snoozed (another tab or machine snoozed or unsnoozed it). Nothing else moves, and the list is not
+ * sorted whole: the person's pending reads and archives keep their places. A snooze run out by the clock is not one:
+ * its return is news, which waits behind "N new" (`hasNewAgentActivity`). The person's own snooze and unsnooze have
+ * moved their row already, so it is not here either.
+ */
+export function snoozeChangedRows(shown: readonly InboxListSection[], latest: readonly InboxListSection[]): string[] {
+  const fresh = rowsById(latest);
+  const out: string[] = [];
+  for (const section of shown) {
+    for (const row of section.threads) {
+      const next = fresh.get(row.thread_id);
+      if (!next || (section.id === INBOX_SNOOZED_BAND.id) === !!next.snoozed) continue;
+      if (!hasNewAgentActivity(row, next)) out.push(row.thread_id);
+    }
+  }
+  return out;
+}
+
+/**
+ * The rows on screen a Priority change moves by itself (`event: priority` with no thread open, as
+ * `snoozeChangedRows` for a snooze): each row drawn in Priority that the read no longer puts there, or drawn
+ * elsewhere and now in it (another tab or a phone added or removed it). Rows with agent activity wait behind "N new".
+ * The person's own add and remove in this window have moved their row already, so it is not here.
+ */
+export function priorityChangedRows(shown: readonly InboxListSection[], latest: readonly InboxListSection[]): string[] {
+  const fresh = rowsById(latest);
+  const out: string[] = [];
+  for (const section of shown) {
+    if (section.id === INBOX_SNOOZED_BAND.id) continue;
+    for (const row of section.threads) {
+      const next = fresh.get(row.thread_id);
+      if (!next || next.snoozed || (section.id === INBOX_PRIORITY_GROUP.id) === inboxRowInPriority(next)) continue;
+      if (!hasNewAgentActivity(row, next)) out.push(row.thread_id);
+    }
+  }
+  return out;
+}
+
+/**
+ * Where the thread covers the list, does Back move the thread just closed
+ * (`settleThread`) instead of showing it as left? Yes when an agent message
+ * there is still unseen (it comes back unread), and when the thread now waits
+ * on the person (Stopped, Holding, Waiting: an agent asked while it was open,
+ * seen or not) and is drawn in another group, so it is never left folded in
+ * Quiet with questions open. A thread only read stays where it was left. A
+ * thread snoozed or unsnoozed, or added to or removed from Priority, while it
+ * was open goes to its place: that is what the person just asked for.
+ */
+export function settlesOnBack(shown: readonly InboxListSection[], row: InboxListRow): boolean {
+  const drawn = shown.find((section) => section.threads.some((other) => other.thread_id === row.thread_id));
+  if (drawn && (drawn.id === INBOX_SNOOZED_BAND.id) !== !!row.snoozed) return true;
+  if (row.snoozed) return false;
+  if (drawn && (drawn.id === INBOX_PRIORITY_GROUP.id) !== inboxRowInPriority(row)) return true;
+  if (row.unseen > 0) return true;
+  if (drawn?.id === INBOX_PRIORITY_GROUP.id) return false;
+  const onYou = (section: string | undefined) => section === 'stopped' || section === 'holding' || section === 'waiting';
+  if (!onYou(row.section)) return onYou(drawn?.id);
+  return drawn?.id !== row.section;
 }
 
 /**
@@ -230,7 +416,9 @@ export function settleThread(shown: readonly InboxListSection[], latest: readonl
  * behind "N new". Each row `latest` has for `threadIds` and the list on
  * screen lacks goes into its section at its place there (newest first: the
  * top of Sent); every other row keeps its section and its order. A thread
- * already on screen, or not in `latest`, changes nothing.
+ * already on screen, or not in `latest`, changes nothing. Also a write's own
+ * rows that the list on screen lost (App.tsx `afterWrite`: an Undo of Archive
+ * after the list settled without the row); a snoozed one goes into the band.
  */
 export function addOwnThreads(shown: readonly InboxListSection[], latest: readonly InboxListSection[], threadIds: readonly string[]): InboxListSection[] {
   const fresh = rowsById(latest);
@@ -240,8 +428,8 @@ export function addOwnThreads(shown: readonly InboxListSection[], latest: readon
   return shown.map((section) => {
     const threads = [...section.threads];
     for (const row of adding) {
-      if (row.section !== section.id) continue;
-      const at = threads.findIndex((other) => newestFirst(row, other) < 0);
+      if (groupOf(row) !== section.id) continue;
+      const at = threads.findIndex((other) => (section.id === INBOX_SNOOZED_BAND.id ? soonestBack : newestFirst)(row, other) < 0);
       threads.splice(at < 0 ? threads.length : at, 0, row);
     }
     return { ...section, threads };
@@ -283,6 +471,79 @@ export function adoptKeepingOpen(shown: readonly InboxListSection[], latest: rea
 }
 
 /**
+ * The group a thread's row sits in on screen, or null when the list on screen
+ * has none for it. While the list holds still this can differ from the row's
+ * own `section`, which says where it will settle.
+ */
+export function drawnSection(shown: readonly InboxListSection[] | null, threadId: string): InboxListGroupId | null {
+  return shown?.find((section) => section.threads.some((row) => row.thread_id === threadId))?.id ?? null;
+}
+
+/**
+ * Undo of a row moved on screen only (Mark read on a seen update held in New,
+ * markRead.ts `seenHeldInNew`): the row goes back into the group it was drawn
+ * in `before`, between the same neighbours, in its state as it is now; every
+ * other row stays as it is on screen. A row no longer on screen stays out.
+ */
+export function putRowBack(shown: readonly InboxListSection[], before: readonly InboxListSection[], threadId: string): InboxListSection[] {
+  if (drawnSection(shown, threadId) === null) return shown.map((section) => ({ ...section }));
+  return adoptKeepingOpen(before, shown, threadId);
+}
+
+/**
+ * Undo of Mark read (App.tsx `markRead`): the row comes back into the group it
+ * was drawn in when Mark read was pressed (`before`), between the same
+ * neighbours, in its state as it is now (`next`). Only when a settle moved it
+ * since (another thread closed and the list tidied: the read row went into
+ * folded Quiet), so it is never left hidden there while it waits on the person
+ * again. Null when it has not moved, or either list has no row for it.
+ */
+export function putReadRowBack(shown: readonly InboxListSection[], before: readonly InboxListSection[], next: InboxListRow): InboxListSection[] | null {
+  const was = drawnSection(before, next.thread_id);
+  const is = drawnSection(shown, next.thread_id);
+  if (was === null || is === null || was === is) return null;
+  return putRowBack(replaceHeldRow(shown, next), before, next.thread_id);
+}
+
+/**
+ * The look the window sends when a thread opens has gone out: the open row
+ * reads as looked at until the server has taken the look and the list has
+ * been read again (App.tsx `looking`), which then gives the server's row. Its
+ * news is seen (`unseen` 0), so the row is no longer bold (shared/inbox/list.ts
+ * `inboxRowUnread`), in the group it is drawn in. A row in New for that news
+ * alone offers Mark unread at once, on its hover action and the header's
+ * button (markRead.ts `canMarkUnread`). A row in Stopped, Holding up work or
+ * Waiting on you keeps Mark read (its questions still wait). Only picks not
+ * sent ("Answered, not sent") keep a row bold: it waits on the person's Send.
+ */
+export function lookedRow(row: InboxListRow): InboxListRow {
+  if (row.unseen === 0) return row;
+  return { ...row, unseen: 0, unread: row.unread && row.section === 'new' && row.answered_not_sent };
+}
+
+/** The list on screen with the rows of `threadIds` read as looked at (`lookedRow`); the group each is drawn in never changes. */
+export function markHeldRowLooked(shown: readonly InboxListSection[], threadIds: ReadonlySet<string>): InboxListSection[] {
+  return shown.map((section) => ({
+    ...section,
+    threads: section.threads.map((row) => (threadIds.has(row.thread_id) ? lookedRow(row) : row)),
+  }));
+}
+
+/**
+ * The server's row for a thread in place of the one on screen, in the group it
+ * is drawn in (the list holds still). For a write that found the row on screen
+ * out of date (Mark unread answering `wrote: false`: an agent wrote there and
+ * the held list kept the old row behind "N new"): the row shows what is true
+ * now, bold with Mark read, instead of offering the same dead click again.
+ */
+export function replaceHeldRow(shown: readonly InboxListSection[], next: InboxListRow): InboxListSection[] {
+  return shown.map((section) => ({
+    ...section,
+    threads: section.threads.map((row) => (row.thread_id === next.thread_id ? next : row)),
+  }));
+}
+
+/**
  * The person archived a thread while its row is on screen (the thread is
  * open). The list the window reads leaves archived threads out, so
  * refreshHeldRows would keep the row as it was; this shows it archived in
@@ -312,4 +573,15 @@ export function waitingCount(sections: readonly InboxListSection[], projectId?: 
     for (const row of section.threads) if (!projectId || row.project.id === projectId) n += 1;
   }
   return n;
+}
+
+/**
+ * The rows on screen once a list read or a record brought `latest`: nothing on screen yet, the whole list; adopted
+ * (an action, Show), the whole list, the open thread's row kept where it is (`keep`); else held, each row's own
+ * state following at once and the rows `gone` (archived or deleted elsewhere) left out.
+ */
+export function shownAfter(shown: InboxListSection[] | null, latest: InboxListSection[], how: { adopt: boolean; keep: string | null; open: OpenThread | null; gone: ReadonlySet<string> }): InboxListSection[] {
+  if (shown === null || !hasRows(shown)) return latest;
+  if (how.adopt) return how.keep ? adoptKeepingOpen(shown, latest, how.keep) : latest;
+  return withoutRows(refreshHeldRows(shown, latest, how.open), how.gone);
 }

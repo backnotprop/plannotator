@@ -23,10 +23,16 @@ export interface OctarineConfig {
 	folder: string;
 }
 
+export interface NotionConfig {
+	plan: string;
+	parentPageId: string;
+}
+
 export interface IntegrationResult {
 	success: boolean;
 	error?: string;
 	path?: string;
+	url?: string;
 }
 
 /**

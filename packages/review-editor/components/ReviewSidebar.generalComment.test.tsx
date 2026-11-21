@@ -41,6 +41,8 @@ let added: string[] = [];
 /** First call mounts; later calls re-render the SAME root, so parent state
  *  (the lifted composer draft) survives — exactly the SSE placement-flip
  *  scenario the L2 test drives. */
+let addResult: boolean | void = undefined;
+
 async function renderSidebar(annotations: CodeAnnotation[]): Promise<void> {
   if (!root) {
     host = document.createElement("div");
@@ -59,7 +61,10 @@ async function renderSidebar(annotations: CodeAnnotation[]): Promise<void> {
         onSelectAnnotation={() => {}}
         onNavigateToAnnotation={() => {}}
         onDeleteAnnotation={() => {}}
-        onAddGeneralComment={(text) => added.push(text)}
+        onAddGeneralComment={(text) => {
+          added.push(text);
+          return addResult;
+        }}
       />,
     );
   });
@@ -99,6 +104,7 @@ afterEach(async () => {
   host?.remove();
   host = null;
   added = [];
+  addResult = undefined;
   if (hasDom) document.body.replaceChildren();
 });
 
@@ -130,6 +136,17 @@ describe.if(hasDom)("review sidebar + General comment", () => {
       );
     });
     expect(added).toEqual(["overall: needs a migration plan"]);
+  });
+
+  test("an add that fails keeps the words in the open box", async () => {
+    addResult = false;
+    await renderSidebar([]);
+    await openComposer();
+    await typeNote("Split this into two PRs.");
+    await act(async () => commitButton()!.click());
+
+    expect(added).toEqual(["Split this into two PRs."]);
+    expect(noteInput()?.value).toBe("Split this into two PRs.");
   });
 
   test("an empty note never commits; the composer stays open and refocuses the field", async () => {

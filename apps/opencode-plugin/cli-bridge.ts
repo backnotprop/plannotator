@@ -10,7 +10,9 @@ import {
   SESSION_BRIDGE_TOKEN_ENV,
 } from "@plannotator/ai/session-bridge-pull";
 import { runPullSessionBridgeClient } from "@plannotator/ai/session-bridge-pull-client";
+import { isSshDetectedRemote } from "@plannotator/server/remote";
 import { inboxOpenedText, openInboxInBrowser } from "@plannotator/shared/inbox/agent-link";
+import { INBOX_COMMAND_BRIEFING } from "@plannotator/shared/inbox/connection";
 import { annotateTargetWords, parseAnnotateArgs, type ParsedAnnotateArgs } from "@plannotator/shared/annotate-args";
 import {
   annotateInputNamesExistingTarget,
@@ -47,10 +49,10 @@ import {
 } from "./prompt-delivery-error";
 import {
   readLastUserAgent,
-  readMessageAgent,
   resolveAddressableAgent,
   resolveAnnotatedMessageAgent,
 } from "./message-agent";
+import { pickRecentAssistantMessages, type RecentAssistantMessage } from "./recent-messages";
 
 type LogLevel = "info" | "error";
 
@@ -77,6 +79,8 @@ interface OpenCodeClient {
   notifyFailure?: (input: { command: string; message: string }) => unknown;
   /** OpenCode 2's slash commands: `/plannotator-inbox`'s transcript notice. */
   notifyInbox?: (input: { url: string; detail?: string }) => unknown;
+  /** OpenCode 2's slash commands: the Inbox opened, so the session's requests carry the Inbox briefing from now on. */
+  briefInbox?: () => unknown;
   session?: {
     messages?: (input: unknown) => Promise<{ data?: any[] }>;
     prompt?: (input: unknown) => Promise<unknown>;
@@ -230,16 +234,7 @@ export function cliTargetOf(value: unknown): string | string[] | undefined {
   return undefined;
 }
 
-export interface RecentAssistantMessage {
-  messageId: string;
-  text: string;
-  timestamp?: string;
-  /**
-   * The agent that wrote the message (#1612). Plugin-side only: it decides who
-   * answers the feedback and is never sent to the CLI.
-   */
-  agent?: string;
-}
+export type { RecentAssistantMessage };
 
 function log(client: OpenCodeClient, level: LogLevel, message: string): void {
   try {
@@ -546,7 +541,9 @@ async function runPlannotatorCli(options: RunCliOptions): Promise<RunCliResult> 
     }
     const { port, isRemote } = metadata;
     // The server keeps the bridge off in remote mode; nothing to poll there.
-    if (port === undefined || !sessionBridge || !bridgeToken || bridgeClientStarted || isRemote) return;
+    // A remote session only SSH turned on keeps it for its own tunnel, and this
+    // client polls over loopback, so it starts there too.
+    if (port === undefined || !sessionBridge || !bridgeToken || bridgeClientStarted || (isRemote && !isSshDetectedRemote())) return;
     bridgeClientStarted = true;
     void runPullSessionBridgeClient({
       baseUrl: `http://127.0.0.1:${port}`,
@@ -623,6 +620,7 @@ async function runPlannotatorCli(options: RunCliOptions): Promise<RunCliResult> 
         shell: spawnConfig.shell,
         stdio: ["pipe", "pipe", "pipe"],
         detached,
+        windowsHide: true,
       });
       const spawned = child;
       try {
@@ -844,28 +842,7 @@ export async function getRecentAssistantMessages(
   const messagesResponse = await client.session?.messages?.({
     path: { id: sessionId },
   });
-  const messages = messagesResponse?.data;
-  if (!messages) return [];
-
-  const recentMessages: RecentAssistantMessage[] = [];
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (recentMessages.length >= limit) break;
-    const msg = messages[i];
-    if (msg.info?.role !== "assistant") continue;
-    const textParts = (msg.parts ?? [])
-      .filter((part: any) => part.type === "text" && part.text?.trim())
-      .map((part: any) => part.text);
-    if (textParts.length === 0) continue;
-    const agent = readMessageAgent(msg.info);
-    recentMessages.push({
-      messageId: msg.info?.id ?? `opencode-${i}`,
-      text: textParts.join("\n"),
-      timestamp: msg.info?.time?.created ? new Date(msg.info.time.created).toISOString() : undefined,
-      ...(agent && { agent }),
-    });
-  }
-
-  return recentMessages;
+  return pickRecentAssistantMessages(messagesResponse?.data, limit);
 }
 
 /** The agent of the session's latest user message, or undefined on any failure. */
@@ -1021,6 +998,14 @@ export function annotateDecisionOutcome(outcome: CliAnnotateOutcome): string {
 /** `/plannotator-inbox`: opens the Inbox; never a review, never the embedded runtime. */
 export const INBOX_COMMAND = "plannotator-inbox";
 
+/**
+ * OpenCode 1's turn for `/plannotator-inbox`: the address to pass on, the
+ * command copies' ending, then the Inbox briefing.
+ */
+export function inboxCommandTurnText(opened: string): string {
+  return `${opened}\n\nTell the user this address in one sentence. This command starts no new work and resumes none: do anything else the person asked in the same message, otherwise stop there.\n\n${INBOX_COMMAND_BRIEFING}`;
+}
+
 export async function handleCliCommand(input: {
   command: string;
   client: OpenCodeClient;
@@ -1115,10 +1100,13 @@ export async function handleCliCommand(input: {
           // The toast is best-effort; the command's own turn below says it too.
         }
       }
-      // OpenCode 1 runs a model turn for the command's message anyway: let it
-      // carry the address (the command turn client records this prompt).
+      // The model gets the Inbox briefing (people type the command to teach
+      // their agent the Inbox): OpenCode 2 on its session's requests from now
+      // on, with no turn; OpenCode 1 in the command's own turn, which it runs
+      // anyway (the command turn client records this prompt).
+      if (typeof input.client.briefInbox === "function") input.client.briefInbox();
       if (input.commandTurn) {
-        await injectSessionPrompt(input.client, input.sessionId, `${text}\n\nTell the user this address in one sentence and stop. Do not begin any work.`);
+        await injectSessionPrompt(input.client, input.sessionId, inboxCommandTurnText(text));
       }
       return;
     }
@@ -1157,6 +1145,7 @@ export async function handleCliCommand(input: {
           // render — nothing a new binary does can make an old plugin drop a
           // reviewer's note.
           supportsApprovalNotes: true,
+          ...(input.sessionId ? { inboxSession: input.sessionId } : {}),
           ...buildBridgePayload(input.bridge),
         }),
         readyLabel: "code review",

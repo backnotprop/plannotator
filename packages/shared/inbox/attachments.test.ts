@@ -13,6 +13,8 @@ import { createHash } from "node:crypto";
 import { appendFileSync, utimesSync } from "node:fs";
 import { INBOX_VIEW_MAX_BYTES } from "@plannotator/core/inbox-types";
 import {
+  checkCurrent,
+  checkCurrentAsync,
   decideInboxAttachmentKind,
   inboxAttachmentState,
   inboxBlobPath,
@@ -184,6 +186,44 @@ test("the current file is re-hashed only when it changes; an image that stops be
   if (sent.ok) await sent.handle.close();
   const current = await openInboxAttachmentVersion(w.inbox, attachment!, "current");
   expect(current.ok).toBe(false);
+});
+
+test("a listing reads the file as it is at each read (the check off the event loop answers as the one at once): gone, back, edited, a link, a folder", async () => {
+  const w = world();
+  const path = join(w.project, "notes.txt");
+  writeFileSync(path, "first\n");
+  const [attachment] = await record(w, ["notes.txt"]);
+  const states: { label: string; code: string | null; current: string | null }[] = [];
+  const read = async (label: string) => {
+    const state = await inboxAttachmentState(attachment!, "msg_x", { hash: "small" });
+    // The check off the loop answers exactly what the one at once does.
+    const sync = checkCurrent(attachment!);
+    const async = await checkCurrentAsync(attachment!);
+    expect({ label, ok: async.ok, unavailable: async.ok ? null : async.unavailable }).toEqual({ label, ok: sync.ok, unavailable: sync.ok ? null : sync.unavailable });
+    states.push({ label, code: state.unavailable?.code ?? null, current: state.current ? (state.changed_since_sent ? "changed" : "same") : null });
+  };
+  await read("sent");
+  rmSync(path);
+  await read("gone");
+  writeFileSync(path, "first\n");
+  await read("back");
+  writeFileSync(path, "second\n");
+  await read("edited");
+  rmSync(path);
+  writeFileSync(join(w.project, "other.txt"), "first\n");
+  symlinkSync(join(w.project, "other.txt"), path);
+  await read("a link");
+  rmSync(path);
+  mkdirSync(path);
+  await read("a folder");
+  expect(states).toEqual([
+    { label: "sent", code: null, current: "same" },
+    { label: "gone", code: "attachment_missing", current: null },
+    { label: "back", code: null, current: "same" },
+    { label: "edited", code: null, current: "changed" },
+    { label: "a link", code: "attachment_changed_type", current: null },
+    { label: "a folder", code: "attachment_changed_type", current: null },
+  ]);
 });
 
 test("the current file is refused when its recorded path is of the dotenv family (the one check every route runs)", async () => {

@@ -1,3 +1,5 @@
 generated/
 plannotator.html
 review-editor.html
+# Release CI writes it before packing (the daily ping counts only a marked build).
+release.json

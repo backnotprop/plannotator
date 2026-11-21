@@ -2,7 +2,8 @@
  * Each Inbox project's git remote, so bare `#123` refs in its messages link to
  * the right forge (#1840).
  *
- * The remote is `origin`, parsed by the same `parseRemoteUrl` /
+ * The remote is the one `gh repo set-default` picked (`remote.<name>.gh-resolved
+ * = base`), else `origin`, parsed by the same `parseRemoteUrl` /
  * `parseRemoteHost` plan and code review use for `repoInfo`. It is resolved off
  * the request path: once per project just after the Inbox starts listening and
  * when a project is first seen, then again in the background when a read finds
@@ -14,28 +15,38 @@
  * TTL runs out.
  */
 
-import type { InboxProjectRepo } from "@plannotator/core/inbox-types";
+import { INBOX_REPO_TTL_MS, type InboxProjectRepo } from "@plannotator/core/inbox-types";
 import { parseRemoteHost, parseRemoteUrl } from "@plannotator/shared/repo";
 import { runtime } from "./git";
 
-/** How long a resolved remote counts as fresh before a read refreshes it in the background. */
-export const INBOX_REPO_TTL_MS = 5 * 60_000;
-/** One `git remote get-url origin` never runs longer than this. */
+/** How long a resolved remote counts as fresh before a read refreshes it in the background (kept in core: the window reads it too). */
+export { INBOX_REPO_TTL_MS };
+/** Each git a read runs (the gh pick, then `git remote get-url`) never runs longer than this. */
 export const INBOX_REPO_GIT_TIMEOUT_MS = 3_000;
 /** At most this many `git remote get-url` run at once. */
 export const INBOX_REPO_MAX_CONCURRENT = 4;
 
-/** The repository a project root's `origin` names, or null. Never throws. */
+/** The repository a project root's gh default remote (else `origin`) names, or null. Never throws. */
 export async function readInboxProjectRepo(root: string, timeoutMs = INBOX_REPO_GIT_TIMEOUT_MS): Promise<InboxProjectRepo | null> {
   try {
     // `prepareGitCommand` (inside runGit) keeps color and pagers out; "forbid"
     // also rules out a credential prompt, though get-url never asks for one.
-    const result = await runtime.runGit(["remote", "get-url", "origin"], { cwd: root, timeoutMs, interaction: "forbid" });
-    if (result.exitCode !== 0) return null;
-    const url = result.stdout.trim();
-    const display = parseRemoteUrl(url);
-    if (!display) return null;
-    return { display, host: parseRemoteHost(url) };
+    // A fork checkout points `gh repo set-default` at the canonical remote
+    // (`remote.<name>.gh-resolved = base`); refs mean what `gh issue view` means there (#3585).
+    const resolved = await runtime.runGit(["config", "--get-regexp", "^remote\\..*\\.gh-resolved$"], { cwd: root, timeoutMs, interaction: "forbid" });
+    const key = resolved.exitCode === 0
+      ? resolved.stdout.split("\n").map((line) => line.trim().split(/\s+/)).find(([, value]) => value === "base")?.[0]
+      : undefined;
+    const picked = key ? key.slice("remote.".length, -".gh-resolved".length) : null;
+    // gh's pick first; a pick git cannot name or parse (a key left after its URL went) falls back to origin.
+    for (const remote of picked && picked !== "origin" ? [picked, "origin"] : ["origin"]) {
+      const result = await runtime.runGit(["remote", "get-url", remote], { cwd: root, timeoutMs, interaction: "forbid" });
+      if (result.exitCode !== 0) continue;
+      const url = result.stdout.trim();
+      const display = parseRemoteUrl(url);
+      if (display) return { display, host: parseRemoteHost(url) };
+    }
+    return null;
   } catch {
     return null;
   }
@@ -44,8 +55,14 @@ export async function readInboxProjectRepo(root: string, timeoutMs = INBOX_REPO_
 export interface InboxRepoCache {
   /** The cached repo for a root (null when unknown or none); refreshes it in the background when missing or stale. */
   get(root: string): InboxProjectRepo | null;
+  /** What the cache holds for a root, however old; never runs git. For a read too frequent to refresh from. */
+  peek(root: string): InboxProjectRepo | null;
+  /** Whether a read for the root has landed (its answer may be null: no `origin`), however old. Never runs git. */
+  known(root: string): boolean;
   /** Resolve a root now (deduplicated while one is running); resolves once the cache holds the answer. */
   refresh(root: string): Promise<InboxProjectRepo | null>;
+  /** Whether a read is running or queued, so a `peek` may not hold the answer yet. Never runs git. */
+  reading(): boolean;
 }
 
 export function createInboxRepoCache(options: {
@@ -98,6 +115,9 @@ export function createInboxRepoCache(options: {
       if (!entry || now() - entry.at >= ttlMs) void refresh(root);
       return entry?.repo ?? null;
     },
+    peek: (root) => entries.get(root)?.repo ?? null,
+    known: (root) => entries.has(root),
     refresh,
+    reading: () => pending.size > 0,
   };
 }

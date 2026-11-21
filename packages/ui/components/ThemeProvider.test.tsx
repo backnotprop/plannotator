@@ -9,6 +9,7 @@ import {
   normalizeThemePair,
   resetDefaultThemePair,
   seedThemePair,
+  setCustomThemes,
   themesForHalf,
   themeSupportsHalf,
 } from '../utils/themeRegistry';
@@ -353,6 +354,32 @@ describe('ThemeProvider', () => {
     expect(themeState().resolvedMode).toBe('dark');
   });
 
+  // Plannotator's packed pages set the scheme inline before any script runs
+  // (build/pack-app.ts), so the empty page never paints white under a dark
+  // theme. What regresses: the value goes stale after a theme switch (native
+  // controls and the page canvas in the wrong scheme), or a host page that set
+  // none suddenly gets one.
+  test.skipIf(!hasDom)('takes over an inline color-scheme set before it mounted, and adds none where there was none', async () => {
+    stored.set('plannotator-theme', 'system');
+    stored.set('plannotator-color-theme', 'plannotator');
+    const media = installMatchMedia(false);
+    document.documentElement.style.colorScheme = 'dark';
+    try {
+      await mountTheme();
+      expect(document.documentElement.style.colorScheme).toBe('dark');
+      await act(async () => media.setMatches(true));
+      expect(document.documentElement.style.colorScheme).toBe('light');
+
+      await unmountTheme();
+      document.documentElement.style.colorScheme = '';
+      await mountTheme();
+      await act(async () => media.setMatches(false));
+      expect(document.documentElement.style.colorScheme).toBe('');
+    } finally {
+      document.documentElement.style.colorScheme = '';
+    }
+  });
+
   test.skipIf(!hasDom)('flips between the two halves of the pair when the OS scheme changes', async () => {
     stored.set('plannotator-theme', 'system');
     stored.set('plannotator-light-theme', 'kanagawa-lotus');
@@ -476,6 +503,76 @@ describe('ThemeProvider', () => {
     expect(paletteNames()).toContain('Kanagawa Lotus');
   });
 
+  // The switch lands in one frame (owner, 2026-11-02): theme.css's 150 ms `*`
+  // colour transition is held at 0 s while `pn-theme-switching` is on <html>.
+  // What regresses: one path that changes what is shown (Settings' mode
+  // buttons, a palette pick, Match system following the OS) swapping the
+  // classes without the hold, so every element fades again and the page
+  // freezes first; or the hold staying, so hovers stop fading for good.
+  test.skipIf(!hasDom)('the first paint holds nothing: a class change on <html> after the page drew would restyle every element', async () => {
+    stored.set('plannotator-theme', 'dark');
+    installMatchMedia(false);
+    const html = document.documentElement;
+    const seen: string[] = [];
+    const watch = new MutationObserver(() => seen.push(html.className));
+    watch.observe(html, { attributes: true, attributeFilter: ['class'] });
+    await mountTheme();
+    await act(async () => {
+      await new Promise<void>(resolve => setTimeout(resolve, 120));
+    });
+    watch.disconnect();
+    expect(html.classList.contains('transitions-ready')).toBe(true);
+    expect(seen.some(c => c.includes('pn-theme-switching'))).toBe(false);
+  });
+
+  test.skipIf(!hasDom)('every change of what is shown lands without the colour fade, and the hold then goes', async () => {
+    stored.set('plannotator-theme', 'dark');
+    stored.set('plannotator-light-theme', DEFAULT_COLOR_THEME);
+    stored.set('plannotator-dark-theme', DEFAULT_COLOR_THEME);
+    const media = installMatchMedia(false);
+    const html = document.documentElement;
+    const held = () => html.classList.contains('pn-theme-switching');
+    const afterTwoFrames = () => act(async () => {
+      await new Promise<void>(resolve => setTimeout(resolve, 120));
+    });
+
+    await mountTheme(<ThemeTab />);
+    await afterTwoFrames();
+    expect(held()).toBe(false);
+
+    // Settings' mode buttons.
+    await act(async () => clickButton(button('Light')));
+    expect(html.classList.contains('light')).toBe(true);
+    expect(held()).toBe(true);
+    await afterTwoFrames();
+    expect(held()).toBe(false);
+
+    // A palette for the half on screen.
+    await act(async () => clickButton(palette('Tinacious')));
+    expect(html.classList.contains('theme-tinacious')).toBe(true);
+    expect(held()).toBe(true);
+    await afterTwoFrames();
+    expect(held()).toBe(false);
+
+    // A palette for the half not on screen changes nothing shown, so nothing is held.
+    await act(async () => clickButton(button('Dark theme')));
+    await act(async () => clickButton(palette('Dracula')));
+    expect(themeState().darkTheme).toBe('dracula');
+    expect(held()).toBe(false);
+
+    // Match system, then the computer turning dark at sunset.
+    await act(async () => clickButton(button('System')));
+    expect(html.classList.contains('theme-dracula')).toBe(true);
+    expect(held()).toBe(true);
+    await afterTwoFrames();
+    expect(held()).toBe(false);
+    await act(async () => media.setMatches(true));
+    expect(html.classList.contains('light')).toBe(true);
+    expect(held()).toBe(true);
+    await afterTwoFrames();
+    expect(held()).toBe(false);
+  });
+
   test.skipIf(!hasDom)('honors a host\'s own storage keys when migrating to a pair', async () => {
     stored.set('host-mode', 'system');
     stored.set('host-palette', 'kanagawa-wave');
@@ -499,6 +596,40 @@ describe('ThemeProvider', () => {
     // And the mirror keeps writing the host's keys, not Plannotator's.
     expect(stored.get('host-mode')).toBe('system');
     expect(stored.get('host-palette')).toBe('kanagawa-wave');
+  });
+
+  // A custom theme from the page's `/plannotator-themes.js` (theme-files.ts): its tile comes first, is drawn from its
+  // own colours, and assigning it applies its class like a built-in's. A cookie naming it survives the first render.
+  test.skipIf(!hasDom)('a custom theme is a tile of its own colours, first in the grid, and selectable', async () => {
+    const swatch = { primary: '#4cc2ff', secondary: '#5fd4c4', accent: '#ffb547', background: '#0c0f14', foreground: '#d9dee7' };
+    setCustomThemes([{ id: 'instrument', name: 'Instrument', modeSupport: 'both', colors: { dark: swatch, light: swatch } }]);
+    try {
+      stored.set('plannotator-theme', 'dark');
+      stored.set('plannotator-dark-theme', 'instrument');
+      stored.set('plannotator-light-theme', DEFAULT_COLOR_THEME);
+      installMatchMedia(false);
+
+      await mountTheme(<ThemeTab />);
+      expect(themeState().colorTheme).toBe('instrument');
+      expect(document.documentElement.classList.contains('theme-instrument')).toBe(true);
+
+      expect(paletteNames()[0]).toBe('Instrument');
+      // The DOM may keep the hex as written or report rgb(): read either as hex.
+      const hex = (value: string) => {
+        const m = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(value);
+        return m ? `#${m.slice(1).map(n => Number(n).toString(16).padStart(2, '0')).join('')}` : value.toLowerCase();
+      };
+      const dots = Array.from(palette('Instrument').querySelectorAll<HTMLElement>('.rounded-full')).map(dot => hex(dot.style.backgroundColor));
+      expect(dots).toEqual([swatch.primary, swatch.secondary, swatch.accent, swatch.background, swatch.foreground]);
+
+      await act(async () => clickButton(palette('Plannotator')));
+      expect(themeState().darkTheme).toBe(DEFAULT_COLOR_THEME);
+      await act(async () => clickButton(palette('Instrument')));
+      expect(themeState().darkTheme).toBe('instrument');
+      expect(stored.get('plannotator-dark-theme')).toBe('instrument');
+    } finally {
+      setCustomThemes([]);
+    }
   });
 });
 

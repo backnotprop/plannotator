@@ -1,6 +1,8 @@
 import React, { useRef } from 'react';
 import type { Block } from '../../types';
 import { InlineMarkdown } from '../InlineMarkdown';
+import { stripAuthorColor } from '../../utils/authorColor';
+import { sourceLineAttrs } from '../../utils/sourceLineAttrs';
 
 interface TableBlockProps {
   block: Block;
@@ -22,8 +24,11 @@ export const parseTableContent = (content: string): { headers: string[]; rows: s
   const lines = content.split('\n').filter((line) => line.trim());
   if (lines.length === 0) return { headers: [], rows: [] };
 
+  // Trim first: a table nested under a list item arrives indented, and the
+  // outer pipes must be stripped from every row alike, header included.
   const parseRow = (line: string): string[] =>
     line
+      .trim()
       .replace(/^\|/, '')
       .replace(/\|$/, '')
       .split(/(?<!\\)\|/)
@@ -49,9 +54,10 @@ const csvEscape = (value: string): string => {
 };
 
 // Build RFC 4180 CSV from pre-parsed headers + rows. The popout uses this
-// directly with TanStack's visible (filter + sort applied) rows.
+// directly with TanStack's visible (filter + sort applied) rows. A coloured
+// cell copies as its words (utils/authorColor).
 export const buildCsvFromRows = (headers: string[], rows: string[][]): string => {
-  const lines = [headers, ...rows].map((row) => row.map(csvEscape).join(','));
+  const lines = [headers, ...rows].map((row) => row.map((cell) => csvEscape(stripAuthorColor(cell))).join(','));
   return lines.join('\n');
 };
 
@@ -62,7 +68,7 @@ export const buildCsvFromRows = (headers: string[], rows: string[][]): string =>
 // parseTableContent unescapes `\|` → `|`, so cells may hold literal pipes.
 // Re-escape on the way out — otherwise the serialized table sprouts extra
 // columns wherever a cell had a pipe.
-const mdCellEscape = (value: string): string => value.replace(/\|/g, '\\|');
+const mdCellEscape = (value: string): string => stripAuthorColor(value).replace(/\|/g, '\\|');
 
 export const buildMarkdownTable = (headers: string[], rows: string[][]): string => {
   const headerLine = `| ${headers.map(mdCellEscape).join(' | ')} |`;
@@ -100,12 +106,14 @@ export const TableBlock: React.FC<TableBlockProps> = ({
   return (
     <div
       ref={containerRef}
-      className="my-4 overflow-x-auto"
+      className="relative my-4"
       data-block-id={block.id}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={onLeave}
+      {...sourceLineAttrs(block)}
     >
-      <table className="min-w-full border-collapse text-sm">
+      <div className="overflow-x-auto">
+      <table className="min-w-full border-collapse text-sm [overflow-wrap:normal]">
         <thead>
           <tr className="border-b border-border">
             {headers.map((header, i) => (
@@ -145,6 +153,7 @@ export const TableBlock: React.FC<TableBlockProps> = ({
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 };

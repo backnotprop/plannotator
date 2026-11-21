@@ -34,20 +34,17 @@
  */
 import DOMPurify from 'dompurify';
 import type { DiagramKind } from '@plannotator/core/diagram-anchor';
-import type { DiagramFinder } from './diagram-anchor';
-import { PELE_FINDER } from './diagram-anchor-pele';
+import { MERMAID_FINDER, type DiagramFinder } from './diagram-anchor';
 import { GRAPHVIZ_FINDER } from './diagram-anchor-graphviz';
 import { getGraphvizRetryDelayMs, loadGraphvizRuntime, type GraphvizRuntime } from './graphviz';
-import {
-  loadPeleRuntime,
-  PELE_OUTPUT_LIMIT,
-  PELE_SOURCE_LIMIT,
-  peleSvgId,
-  renderPeleSource,
-  peleThemeStyle,
-} from './pele';
+import { loadMathRenderer } from './math';
+import { getMermaidRetryDelayMs, loadMermaidRuntime } from './mermaid';
+import { hasMermaidMath } from './mermaid-math-slot';
+import { applyMermaidTheme, mermaidThemeKey, type MermaidThemeMode } from './mermaidTheme';
 
 export type { DiagramKind } from '@plannotator/core/diagram-anchor';
+
+type Mermaid = Awaited<ReturnType<typeof loadMermaidRuntime>>;
 
 /**
  * The (palette, mode) a render is for: the same pair `useTheme()` resolves
@@ -59,14 +56,13 @@ export type { DiagramKind } from '@plannotator/core/diagram-anchor';
  */
 export interface DiagramTheme {
   readonly colorTheme: string;
-  readonly mode: 'dark' | 'light';
+  readonly mode: MermaidThemeMode;
   /**
    * Node drop shadow strength, 0..1 (see `mermaidTheme.buildMermaidShadow`).
    * Absent means the shipped default, so a host that builds its own
    * `DiagramTheme` renders exactly what Plannotator renders.
    */
   readonly shadowAmount?: number;
-
 }
 
 export type DiagramRenderError = {
@@ -76,7 +72,24 @@ export type DiagramRenderError = {
   /** The engine could not be loaded (as opposed to the source not
    * parsing): the one failure a Retry can change. */
   readonly runtimeUnavailable: boolean;
+  /** A part of the engine loaded on demand (Mermaid's chunk for one diagram
+   * type) did not arrive, after the one automatic re-attempt. Not the
+   * source's fault, and not one a Retry can change in Safari, which keeps a
+   * failed module fetch for the page: the block offers Reload. */
+  readonly chunkFailed?: boolean;
+  /** The host's check (`DiagramRenderOptions.accept`) refused the drawn svg before it reached the page: the block
+   * shows the source instead. */
+  readonly refused?: boolean;
 };
+
+/**
+ * Opt-in, per render: `accept` is shown the drawn svg after the sanitizer's parse and before the root is adopted into
+ * the page (in DOMPurify's inert document, so nothing it references has loaded). False: the svg is never mounted and
+ * the result is `refused`. Absent: every render is exactly as before.
+ */
+export interface DiagramRenderOptions {
+  readonly accept?: (svg: SVGSVGElement) => boolean;
+}
 
 export type DiagramRenderResult =
   | {
@@ -89,7 +102,7 @@ export type DiagramRenderResult =
   | DiagramRenderError;
 
 interface DiagramRenderer {
-  render(renderId: string, source: string, theme: DiagramTheme): Promise<DiagramRenderResult>;
+  render(renderId: string, source: string, theme: DiagramTheme, options?: DiagramRenderOptions): Promise<DiagramRenderResult>;
   readonly finder: DiagramFinder;
 }
 
@@ -127,6 +140,17 @@ export function sanitizeDiagramSvg(svg: string): SVGSVGElement | null {
  * document, or when the fragment cannot be adopted.
  */
 export function parseDiagramSvg(svg: string): SVGSVGElement | null {
+  const root = parseDiagramSvgDetached(svg);
+  if (root === null) return null;
+  try {
+    return document.adoptNode(root) as SVGSVGElement;
+  } catch {
+    return null;
+  }
+}
+
+/** The parse alone: the svg root still in DOMPurify's inert document, not adopted into the page. */
+function parseDiagramSvgDetached(svg: string): SVGSVGElement | null {
   if (typeof document === 'undefined') return null;
   const fragment = DOMPurify.sanitize(svg, {
     USE_PROFILES: { svg: true, svgFilters: true, html: true },
@@ -135,13 +159,40 @@ export function parseDiagramSvg(svg: string): SVGSVGElement | null {
     HTML_INTEGRATION_POINTS: { foreignobject: true },
     RETURN_DOM_FRAGMENT: true,
   });
-  const root = fragment.querySelector('svg');
-  if (root === null) return null;
-  try {
-    return document.adoptNode(root) as SVGSVGElement;
-  } catch {
-    return null;
+  return fragment.querySelector('svg');
+}
+
+const REFUSED = 'refused' as const;
+
+/**
+ * `sanitizeDiagramSvg` with a host's `accept` asked first, on the parsed root before it is adopted into the page.
+ * (A test's stand-in parser adopts as it parses; happy-dom loads nothing.)
+ */
+function sanitizeAcceptedDiagramSvg(svg: string, accept: (svg: SVGSVGElement) => boolean): SVGSVGElement | null | typeof REFUSED {
+  let root: SVGSVGElement | null;
+  if (parseSvg === parseDiagramSvg) {
+    const detached = parseDiagramSvgDetached(svg);
+    if (detached === null) return null;
+    if (!accept(detached)) return REFUSED;
+    try {
+      root = document.adoptNode(detached) as SVGSVGElement;
+    } catch {
+      return null;
+    }
+  } else {
+    root = parseSvg(svg);
+    if (root === null) return null;
+    if (!accept(root)) return REFUSED;
   }
+  scrubDiagramSvg(root);
+  return root;
+}
+
+const REFUSED_RESULT: DiagramRenderError = { ok: false, message: 'The diagram is shown as its source.', line: null, runtimeUnavailable: false, refused: true };
+
+/** The sanitized root, through `accept` when the host gave one. */
+function sanitizeFor(svg: string, options: DiagramRenderOptions | undefined): SVGSVGElement | null | typeof REFUSED {
+  return options?.accept ? sanitizeAcceptedDiagramSvg(svg, options.accept) : sanitizeDiagramSvg(svg);
 }
 
 /**
@@ -180,7 +231,7 @@ function scrubAttributes(el: Element): void {
   for (const attribute of Array.from(el.attributes)) {
     const name = attribute.name.toLowerCase();
     const value = attribute.value.trim().toLowerCase();
-    if (name.startsWith('on') || (name === 'style' && cssFetches(attribute.value))) {
+    if (name.startsWith('on')) {
       el.removeAttribute(attribute.name);
       continue;
     }
@@ -222,7 +273,6 @@ const EDGE_SELECTOR = [
   'path.messageLine0',
   'path.messageLine1',
   'g.edge > path',
-  'g.pele-edge > path:not(.pele-marker)',
 ].join(', ');
 
 /** The geometry a hit path keeps from its edge; everything else (id, class,
@@ -446,12 +496,7 @@ export function __setDiagramSvgParserForTests(next: ((svg: string) => SVGSVGElem
  * in line N near '...'". */
 function errorLine(error: unknown): number | null {
   if (typeof error === 'object' && error !== null) {
-    const sourceError = error as { line?: unknown; hash?: { line?: unknown; loc?: { first_line?: unknown } } };
-    // Pele reports one-based lines; Mermaid's parser hash is zero-based.
-    if (typeof sourceError.line === 'number' && sourceError.line > 0 && Number.isFinite(sourceError.line)) {
-      return sourceError.line;
-    }
-    const hash = sourceError.hash;
+    const hash = (error as { hash?: { line?: unknown; loc?: { first_line?: unknown } } }).hash;
     const line = hash?.line ?? hash?.loc?.first_line;
     if (typeof line === 'number' && Number.isFinite(line)) return line + 1;
   }
@@ -484,9 +529,126 @@ async function loadWithRetry<T>(load: () => Promise<T>, delayMs: number): Promis
   }
 }
 
-const peleRenderer: DiagramRenderer = {
-  finder: PELE_FINDER,
-  render: renderPele,
+/**
+ * What a browser says when a lazily imported chunk does not arrive: Chromium,
+ * WebKit (Safari, every iPad browser), Firefox, and Vite's CSS preload. The
+ * last is WebKit's words when the chunk's request was redirected to another
+ * origin: a sign-in proxy in front of the Inbox (Cloudflare Access) whose
+ * session lapsed answers every request with a redirect to its login page.
+ */
+const CHUNK_LOAD_FAILURE =
+  /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|Unable to preload CSS|Cross-origin script load denied/i;
+
+function isChunkLoadFailure(error: unknown): boolean {
+  return CHUNK_LOAD_FAILURE.test(error instanceof Error ? error.message : String(error));
+}
+
+/**
+ * Mermaid loads each diagram type (sequence, flowchart, its ELK layout, ...)
+ * as a chunk of its own on that type's first render, after the runtime
+ * itself has loaded. Such a chunk failing (a dropped request, or a tab older
+ * than the server's build, whose chunk names are gone) is a load failure, not
+ * a fault in the source: it gets one automatic re-attempt (Mermaid keeps no
+ * failed load; Chromium and Firefox fetch again), and if that fails too, the
+ * result says `chunkFailed` and the block shows the source under the quiet
+ * Reload line. Not a Retry: WebKit keeps a failed module fetch that a
+ * modulepreload link started (Vite adds one) for the life of the page, so
+ * only a reload fetches it again.
+ */
+async function renderMermaid(runtime: Mermaid, renderId: string, source: string, options?: DiagramRenderOptions): Promise<DiagramRenderResult> {
+  try {
+    return await renderMermaidOnce(runtime, renderId, source, options);
+  } catch (error) {
+    if (!isChunkLoadFailure(error)) return mermaidFailure(error, false);
+  }
+  await wait(getMermaidRetryDelayMs());
+  try {
+    return await renderMermaidOnce(runtime, renderId, source, options);
+  } catch (error) {
+    return mermaidFailure(error, isChunkLoadFailure(error));
+  }
+}
+
+function mermaidFailure(error: unknown, chunkFailed: boolean): DiagramRenderResult {
+  return {
+    ok: false,
+    message: errorMessage(error, 'Failed to render diagram'),
+    line: chunkFailed ? null : errorLine(error),
+    runtimeUnavailable: false,
+    ...(chunkFailed ? { chunkFailed: true } : {}),
+  };
+}
+
+/**
+ * Mermaid renders into a temporary `<div id="d{id}">` (an `<iframe
+ * id="i{id}">` when sandboxed) that it appends to `document.body`. When the
+ * source does not parse, or a diagram-type chunk does not load (Mermaid
+ * reports both as a parse failure), it draws its own "Syntax error in text"
+ * graphic there and throws WITHOUT removing it; a draw error does the same.
+ * Each render has its own id, so nothing ever removed it: every failed render
+ * left that graphic at the bottom of the page, under the app, one more per
+ * re-render (a theme change). The block shows the failure itself, so the
+ * temporary nodes go after every failed render.
+ */
+function removeMermaidLeftovers(renderId: string): void {
+  if (typeof document === 'undefined') return;
+  document.getElementById(`d${renderId}`)?.remove();
+  document.getElementById(`i${renderId}`)?.remove();
+}
+
+/** One render; a throw (a parse error, a chunk that did not load) is the caller's. */
+async function renderMermaidOnce(runtime: Mermaid, renderId: string, source: string, options?: DiagramRenderOptions): Promise<DiagramRenderResult> {
+  let svg: string;
+  try {
+    ({ svg } = await runtime.render(renderId, source));
+  } catch (error) {
+    removeMermaidLeftovers(renderId);
+    throw error;
+  }
+  const svgNode = sanitizeFor(svg, options);
+  if (svgNode === REFUSED) return REFUSED_RESULT;
+  if (svgNode === null) {
+    return { ok: false, message: 'The diagram could not be rendered.', line: null, runtimeUnavailable: false };
+  }
+  widenEdgeHitAreas(svgNode);
+  return { ok: true, svgNode, findTarget: MERMAID_FINDER.findTarget };
+}
+
+const mermaidRenderer: DiagramRenderer = {
+  finder: MERMAID_FINDER,
+  async render(renderId, source, theme, options) {
+    let runtime: Mermaid;
+    try {
+      runtime = await loadWithRetry(loadMermaidRuntime, getMermaidRetryDelayMs());
+    } catch (error) {
+      return {
+        ok: false,
+        message: errorMessage(error, 'Failed to render diagram'),
+        line: null,
+        runtimeUnavailable: true,
+      };
+    }
+    // A `$$` label makes Mermaid render KaTeX. On a host that redirects
+    // Mermaid's `katex` import to `utils/mermaid-math-slot` the label is
+    // typeset through the math slot, which must be filled by then: warm it
+    // with the registered loader first. A filled slot resolves at once; a
+    // load failure is left to the render, whose error names it.
+    if (hasMermaidMath(source)) {
+      try {
+        await loadMathRenderer();
+      } catch {
+        // Reported by the render below.
+      }
+    }
+    // Derive every Mermaid theme variable from the page's tokens before each
+    // render, so the diagram follows the palette and mode. Keyed on the
+    // runtime plus (palette, mode, shadow amount), so the lazy runtime is
+    // themed on its first render and re-initialized only when one changes.
+    // With no tokens on the page it is a no-op and the static
+    // MERMAID_CONFIG (securityLevel strict) applies.
+    applyMermaidTheme(runtime, mermaidThemeKey(theme.colorTheme, theme.mode, theme.shadowAmount));
+    return renderMermaid(runtime, renderId, source, options);
+  },
 };
 
 /** A Graphviz default color, as `viz` writes it: a named default or its
@@ -571,7 +733,7 @@ export function themeGraphvizSvg(svg: SVGSVGElement): void {
  */
 const graphvizRenderer: DiagramRenderer = {
   finder: GRAPHVIZ_FINDER,
-  async render(_renderId, source) {
+  async render(_renderId, source, _theme, options) {
     let viz: GraphvizRuntime;
     try {
       viz = await loadWithRetry(loadGraphvizRuntime, getGraphvizRetryDelayMs());
@@ -590,7 +752,8 @@ const graphvizRenderer: DiagramRenderer = {
         const message = first?.message.trim() || 'The graph could not be rendered.';
         return { ok: false, message, line: errorLine(message), runtimeUnavailable: false };
       }
-      const svgNode = sanitizeDiagramSvg(result.output);
+      const svgNode = sanitizeFor(result.output, options);
+      if (svgNode === REFUSED) return REFUSED_RESULT;
       if (svgNode === null) {
         return { ok: false, message: 'The graph could not be rendered.', line: null, runtimeUnavailable: false };
       }
@@ -608,46 +771,8 @@ const graphvizRenderer: DiagramRenderer = {
   },
 };
 
-async function renderPele(renderId: string, source: string): Promise<DiagramRenderResult> {
-  let runtime: Awaited<ReturnType<typeof loadPeleRuntime>>;
-  try {
-    runtime = await loadWithRetry(loadPeleRuntime, 250);
-  } catch (error) {
-    return {
-      ok: false,
-      message: errorMessage(error, 'The Pele engine could not be loaded.'),
-      line: null,
-      runtimeUnavailable: true,
-    };
-  }
-  if (source.length > PELE_SOURCE_LIMIT) {
-    return { ok: false, message: `Diagram source exceeds the ${PELE_SOURCE_LIMIT.toLocaleString()} character limit.`, line: null, runtimeUnavailable: false };
-  }
-  try {
-    const result = renderPeleSource(runtime, source, renderId);
-    if (result.svg.length > PELE_OUTPUT_LIMIT) {
-      return { ok: false, message: `Rendered diagram exceeds the ${PELE_OUTPUT_LIMIT.toLocaleString()} character limit.`, line: null, runtimeUnavailable: false };
-    }
-    const svgNode = sanitizeDiagramSvg(result.svg);
-    if (svgNode === null) {
-      return { ok: false, message: 'The diagram could not be rendered.', line: null, runtimeUnavailable: false };
-    }
-    svgNode.id = peleSvgId(renderId);
-    svgNode.setAttribute('style', `${svgNode.getAttribute('style') ?? ''};${peleThemeStyle()}`);
-    widenEdgeHitAreas(svgNode);
-    return { ok: true, svgNode, findTarget: PELE_FINDER.findTarget };
-  } catch (error) {
-    return {
-      ok: false,
-      message: errorMessage(error, 'Failed to render diagram'),
-      line: errorLine(error),
-      runtimeUnavailable: false,
-    };
-  }
-}
-
 const RENDERERS: Record<DiagramKind, DiagramRenderer> = {
-  mermaid: peleRenderer,
+  mermaid: mermaidRenderer,
   graphviz: graphvizRenderer,
 };
 
@@ -667,6 +792,7 @@ export function renderDiagram(
   renderId: string,
   source: string,
   theme: DiagramTheme,
+  options?: DiagramRenderOptions,
 ): Promise<DiagramRenderResult> {
-  return RENDERERS[kind].render(renderId, source, theme);
+  return RENDERERS[kind].render(renderId, source, theme, options);
 }

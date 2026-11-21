@@ -8,6 +8,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { mp4 } from "../../../tests/helpers/video-fixtures";
 import { inboxBlobPath, inboxBlobsDir } from "./attachments";
 import { InboxError } from "./schema";
 import { InboxStore } from "./store";
@@ -36,6 +37,17 @@ const stream = (...parts: string[]) =>
 const at = (ms: number) => new Date(ms).toISOString();
 
 describe("uploads", () => {
+  test("uploaded MP4s keep the track type, duration and video dimensions when sent", async () => {
+    const { inbox } = world();
+    const video = mp4({ duration: 8, width: 1280, height: 720, mdatBytes: 200_000 });
+    const audio = mp4({ duration: 12, tracks: ["soun"], mdatBytes: 200_000 });
+    const film = await receiveInboxUpload(inbox, "walkthrough.mp4", new Blob([new Uint8Array(video)]).stream(), { at: at(0) });
+    const recording = await receiveInboxUpload(inbox, "voice.mp4", new Blob([new Uint8Array(audio)]).stream(), { at: at(0) });
+    const [sentFilm, sentRecording] = await inboxUploadAttachments(inbox, [film.upload_id, recording.upload_id], at(1));
+    expect(sentFilm).toMatchObject({ kind: "video", media_type: "video/mp4", duration_ms: 8_000, width: 1280, height: 720 });
+    expect(sentRecording).toMatchObject({ kind: "audio", media_type: "audio/mp4", duration_ms: 12_000 });
+  });
+
   test("a body over the cap is refused and leaves no temp file or blob", async () => {
     const { inbox } = world();
     const error = await receiveInboxUpload(inbox, "big.log", stream("1234", "5678", "9"), { at: at(0), maxBytes: 8 }).catch((e) => e);
@@ -60,7 +72,7 @@ describe("uploads", () => {
       body: "files",
       to: { host: "pi", session: "s" },
       idempotency_key: "k",
-      attachments: inboxUploadAttachments(inbox, [sentBytes.upload_id], at(old)),
+      attachments: await inboxUploadAttachments(inbox, [sentBytes.upload_id], at(old)),
     });
     const swept = sweepInboxUploads(inbox, { keep: new Set([drafted.upload_id]), usedBlobs: store.usedBlobs(), now });
     expect(swept.sort()).toEqual([forgotten.upload_id, sentBytes.upload_id].sort());
@@ -75,7 +87,7 @@ describe("uploads", () => {
     const project = store.ensureProject({ name: "repo", root: "/work/repo" });
     const pending = await receiveInboxUpload(inbox, "pending.txt", stream("not sent yet"), { at: at(Date.now()) });
     const sent = await receiveInboxUpload(inbox, "sent.txt", stream("sent with the thread"), { at: at(Date.now()) });
-    const attachments = inboxUploadAttachments(inbox, [sent.upload_id], at(Date.now()));
+    const attachments = await inboxUploadAttachments(inbox, [sent.upload_id], at(Date.now()));
     const { message } = store.startPersonThread({ project_id: project.id, body: "files", to: { host: "pi", session: "s" }, idempotency_key: "k", attachments });
     expect(existsSync(attachments[0]!.path)).toBe(true);
     store.deleteThread(message.thread_id);

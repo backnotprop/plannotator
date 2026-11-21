@@ -67,7 +67,7 @@ describe('auto-mark-viewed notice gate', () => {
   });
 
   test('toggling the setting from a UI control also consumes the gate', () => {
-    // Settings > Git and the file-list gear both route through here, so a
+    // Settings → Review and the file-list gear both route through here, so a
     // reviewer who turned the feature ON deliberately is not then told about
     // it the first time it fires.
     installMemoryBackend();

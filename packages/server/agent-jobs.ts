@@ -9,6 +9,8 @@
  */
 
 import { childEnv } from "@plannotator/shared/child-env";
+import { askAiChildEnv } from "@plannotator/ai/providers/ask-ai-env";
+import { killWindowsProcessTree, planAgentJobSpawn } from "@plannotator/ai/providers/command-path";
 import { resolve as resolvePath } from "node:path";
 import { allowedToolsOf, CLAUDE_SHELL_BLOCKED_WARNING, detectClaudeShellBlocked, disallowedToolsOf, formatClaudeLogEvent } from "./claude-review";
 import {
@@ -27,6 +29,7 @@ import {
   type AgentCapabilities,
   isTerminalStatus,
   jobSource,
+  launchLabelOf,
   serializeAgentSSEEvent,
   AGENT_HEARTBEAT_COMMENT,
   AGENT_HEARTBEAT_INTERVAL_MS,
@@ -79,7 +82,6 @@ const CAPABILITIES = `${BASE}/capabilities`;
 const SERVER_BUILT_PROVIDERS: ReadonlySet<string> = new Set([
   "claude",
   "codex",
-  "tour",
   "guide",
   "cursor",
   "opencode",
@@ -169,6 +171,17 @@ export interface AgentJobHandlerOptions {
 
 
 /**
+ * Where `name` is on the live `process.env.PATH`, which the job spawn inherits.
+ * (`Bun.which` without the option consults the PATH captured at process start.)
+ */
+const whichOnPath = (name: string): string | null => Bun.which(name, { PATH: process.env.PATH }) ?? null;
+
+/** The marker engine a job runs: its provider's, or the one a guide job carries. */
+function jobMarkerEngine(provider: string, engine: string | undefined): MarkerEngine | undefined {
+  return MARKER_ENGINES[provider as MarkerEngineId] ?? (engine ? MARKER_ENGINES[engine as MarkerEngineId] : undefined);
+}
+
+/**
  * Best-effort model catalog for a marker engine, spawned once. The spawn lives
  * HERE (per-runtime — Bun.spawn) rather than in marker-review.ts, which must stay
  * Bun-free for the Pi vendor build. ASYNC so it never blocks the event loop on
@@ -179,16 +192,32 @@ export interface AgentJobHandlerOptions {
  */
 async function discoverMarkerModels(engine: MarkerEngine, program: string): Promise<MarkerModel[]> {
   try {
-    const proc = Bun.spawn([program, ...engine.modelsArgv], {
+    // A Windows .cmd shim starts through cmd.exe, as a job does (#2372).
+    const launch = planAgentJobSpawn([program, ...engine.modelsArgv], { which: whichOnPath });
+    if (launch.unsafeScript) return [];
+    const proc = Bun.spawn(launch.command, {
+      windowsVerbatimArguments: launch.verbatim,
       env: childEnv(),
       stdout: "pipe",
       stderr: "ignore",
-      timeout: 5000,
+      windowsHide: true,
     });
-    const stdout = await new Response(proc.stdout).text();
-    const exitCode = await proc.exited;
-    if (exitCode !== 0) return [];
-    return engine.parseModels(stdout);
+    // Out of time: through cmd.exe the whole tree ends, not cmd.exe alone.
+    const timer = setTimeout(() => {
+      try {
+        if (!launch.verbatim || !killWindowsProcessTree(proc.pid)) proc.kill();
+      } catch {
+        // Already gone.
+      }
+    }, 5000);
+    try {
+      const stdout = await new Response(proc.stdout).text();
+      const exitCode = await proc.exited;
+      if (exitCode !== 0) return [];
+      return engine.parseModels(stdout);
+    } finally {
+      clearTimeout(timer);
+    }
   } catch {
     return [];
   }
@@ -198,7 +227,9 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
   const { mode, getServerUrl, getCwd } = options;
 
   // --- State ---
-  const jobs = new Map<string, { info: AgentJobInfo; proc: ReturnType<typeof Bun.spawn> | null }>();
+  // `tree`: the job runs through cmd.exe (a Windows .cmd shim), so Stop ends
+  // the whole process tree, not cmd.exe alone (#2372).
+  const jobs = new Map<string, { info: AgentJobInfo; proc: ReturnType<typeof Bun.spawn> | null; tree?: boolean }>();
   const jobOutputPaths = new Map<string, string>();
   const jobChangedFilesSnapshots = new Map<string, string[]>();
   const jobLaunchReviews = new Map<string, GuideLaunchReview>();
@@ -224,7 +255,6 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
   const capabilities: AgentCapability[] = [
     { id: "claude", name: "Claude Code", available: onPath("claude") },
     { id: "codex", name: "Codex CLI", available: onPath("codex") },
-    { id: "tour", name: "Code Tour", available: onPath("claude") || onPath("codex") },
     {
       id: "guide",
       name: "Guided Review",
@@ -285,7 +315,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
     command: string[],
     label: string,
     outputPath?: string,
-    spawnOptions?: { captureStdout?: boolean; stdinPrompt?: string; cwd?: string; prompt?: string; engine?: string; model?: string; effort?: string; reasoningEffort?: string; fastMode?: boolean; thinking?: string; prUrl?: string; diffScope?: string; diffContext?: AgentJobInfo["diffContext"]; reviewProfileId?: string; reviewProfileLabel?: string; changedFilesSnapshot?: string[]; guideContext?: AgentJobInfo["guideContext"]; launchReview?: GuideLaunchReview },
+    spawnOptions?: { captureStdout?: boolean; stdinPrompt?: string; cwd?: string; prompt?: string; engine?: string; model?: string; effort?: string; reasoningEffort?: string; fastMode?: boolean; thinking?: string; prUrl?: string; diffScope?: string; diffContext?: AgentJobInfo["diffContext"]; reviewProfileId?: string; reviewProfileLabel?: string; launchLabel?: string; changedFilesSnapshot?: string[]; guideContext?: AgentJobInfo["guideContext"]; launchReview?: GuideLaunchReview },
   ): AgentJobInfo {
     const source = jobSource(id);
 
@@ -310,6 +340,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
       ...(spawnOptions?.guideContext && { guideContext: spawnOptions.guideContext }),
       ...(spawnOptions?.reviewProfileId && { reviewProfileId: spawnOptions.reviewProfileId }),
       ...(spawnOptions?.reviewProfileLabel && { reviewProfileLabel: spawnOptions.reviewProfileLabel }),
+      ...(spawnOptions?.launchLabel && { launchLabel: spawnOptions.launchLabel }),
     };
 
     let proc: ReturnType<typeof Bun.spawn> | null = null;
@@ -318,15 +349,31 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
       const spawnCwd = spawnOptions?.cwd ?? getCwd();
       const captureStdout = spawnOptions?.captureStdout ?? false;
 
-      const hasStdinPrompt = !!spawnOptions?.stdinPrompt;
+      // On Windows a CLI installed as a .cmd shim (Pi's pi.cmd) starts
+      // through cmd.exe, as Ask AI starts it (#2372). A job whose arguments
+      // cmd.exe would misread (`unsafeScript`) is refused, never started
+      // with them. Elsewhere this is the command as built.
+      const launch = planAgentJobSpawn(command, {
+        which: whichOnPath,
+        stdinPrompt: spawnOptions?.stdinPrompt,
+        promptOnStdin: jobMarkerEngine(provider, spawnOptions?.engine)?.promptOnStdin,
+      });
+      if (launch.unsafeScript) throw new Error(launch.unsafeScript);
+      const stdinPrompt = launch.stdinPrompt;
+      const hasStdinPrompt = !!stdinPrompt;
 
-      proc = Bun.spawn(command, {
+      proc = Bun.spawn(launch.command, {
         cwd: spawnCwd,
+        windowsVerbatimArguments: launch.verbatim,
+        windowsHide: true,
         stdin: hasStdinPrompt ? "pipe" : undefined,
         stdout: captureStdout ? "pipe" : "ignore",
         stderr: "pipe",
         env: {
-          ...process.env,
+          // The live env with Plannotator's own integration off (the Inbox MCP,
+          // the agent tool, the plan and Stop hooks). No job uses it: each
+          // returns its result on stdout or in its output file (ask-ai-env.ts).
+          ...askAiChildEnv(),
           // The agent runs `git diff` / `git log` itself through a pipe; keep a
           // user's `color.diff = always` from filling its context with ANSI
           // escapes (#1661).
@@ -348,14 +395,23 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
       // Write prompt to stdin and close (for providers that read prompt from stdin)
       if (hasStdinPrompt && proc.stdin) {
         const sink = proc.stdin as import("bun").FileSink;
-        sink.write(spawnOptions!.stdinPrompt!);
-        sink.end();
+        // A child that exits before reading its prompt (EPIPE) must not take
+        // the server down; the job's exit reports it.
+        const ignore = (result: unknown) => {
+          if (result instanceof Promise) result.catch(() => {});
+        };
+        try {
+          ignore(sink.write(stdinPrompt!));
+          ignore(sink.end());
+        } catch {
+          // The pipe is already closed.
+        }
       }
 
       info.status = "running";
       info.cwd = spawnCwd;
       if (spawnOptions?.prompt) info.prompt = spawnOptions.prompt;
-      jobs.set(id, { info, proc });
+      jobs.set(id, { info, proc, tree: launch.verbatim });
       if (outputPath) jobOutputPaths.set(id, outputPath);
       if (spawnOptions?.cwd) jobOutputPaths.set(`${id}:cwd`, spawnOptions.cwd);
       if (spawnOptions?.changedFilesSnapshot) jobChangedFilesSnapshots.set(id, spawnOptions.changedFilesSnapshot);
@@ -406,7 +462,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
             // events — those are handled in onJobComplete).
             const emitLogLine = (line: string) => {
               if (!line.trim()) return;
-              // Claude: format JSONL into readable text. Tour jobs with the
+              // Claude: format JSONL into readable text. Guide jobs with the
               // Claude engine also stream Claude JSONL, so key off engine too.
               if (provider === "claude" || spawnOptions?.engine === "claude") {
                 const formatted = formatClaudeLogEvent(line);
@@ -497,15 +553,14 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
             // fail-closed — their findings are prompt-enforced, so an unexpected
             // throw here must surface as a failed job rather than a green one.
             // (Their handlers normally fail by mutation and never throw; this
-            // guards future refactors.) Tour and guide widen that fail-closed
-            // rule too: both are single-shot, all-or-nothing outputs (a tour's
-            // stops/checklist, a guide's sections) with nothing meaningful
-            // partially ingested, so an unexpected throw here means the whole
+            // guards future refactors.) Guide widens that fail-closed
+            // rule too: it is a single-shot, all-or-nothing output (a guide's
+            // sections) with nothing meaningful partially ingested, so an unexpected throw here means the whole
             // result is unusable — it must not sit at "done" with no content.
             if (MARKER_ENGINES[provider as MarkerEngineId]) {
               entry.info.status = "failed";
               entry.info.error = err instanceof Error ? err.message : `${provider} result ingestion failed`;
-            } else if (provider === "tour" || provider === "guide") {
+            } else if (provider === "guide") {
               entry.info.status = "failed";
               entry.info.error = `Result ingestion failed: ${err instanceof Error ? err.message : String(err)}`;
             }
@@ -540,7 +595,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
 
     if (entry.proc) {
       try {
-        entry.proc.kill();
+        if (!entry.tree || !killWindowsProcessTree(entry.proc.pid)) entry.proc.kill();
       } catch {
         // Process may have already exited
       }
@@ -835,6 +890,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
             diffContext: jobDiffContext,
             reviewProfileId: jobReviewProfileId,
             reviewProfileLabel: jobReviewProfileLabel,
+            launchLabel: launchLabelOf(body.label, label),
             changedFilesSnapshot: jobChangedFilesSnapshot,
             guideContext: jobGuideContext,
             launchReview: jobLaunchReview,

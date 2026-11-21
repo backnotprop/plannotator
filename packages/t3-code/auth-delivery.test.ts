@@ -40,6 +40,14 @@ describe("T3 OAuth and durable sends", () => {
     expect((statSync(store.path).mode & 0o777)).toBe(0o600);
     expect((statSync(store.directory).mode & 0o777)).toBe(0o700);
     await expect(new T3Delivery(thread, store).send("Changed reply", "reply-1")).rejects.toThrow("changed its scope or content");
+    // A wake's words can drift between tries (a renamed thread): its retry re-sends the first words under the same request.
+    networkLost = true;
+    const sent: unknown[] = [];
+    const wake = new T3Thread({ call: (name, args) => (sent.push(args.message), rpc.call(name, args)) }, "thread-a");
+    await expect(new T3Delivery(wake, store).sendFirst("Wake as first worded", "wake-1")).rejects.toThrow("Lost response");
+    await new T3Delivery(wake, store).sendFirst("Wake under a new thread name", "wake-1");
+    expect(sent).toEqual(["Wake as first worded", "Wake as first worded"]);
+    expect(inserted).toBe(2);
   });
   test("a new OAuth grant refuses to replay an uncertain old delivery", async () => {
     const store = credentials(); store.save({ endpoint: store.endpoint.href, epoch: "old", tokens: { access_token: "test", token_type: "Bearer" } });
@@ -49,6 +57,25 @@ describe("T3 OAuth and durable sends", () => {
     store.save({ endpoint: store.endpoint.href, epoch: "new", tokens: { access_token: "new-test", token_type: "Bearer" } });
     await expect(new T3Delivery(thread, store).send("Decision", "decision-1")).rejects.toThrow("uncertain after T3 reauthorization");
     expect(sends).toBe(1);
+  });
+  test("a send T3 denied for the grant's mode goes under the next grant, once, with its first words", async () => {
+    const store = credentials(); store.save({ endpoint: store.endpoint.href, epoch: "read-only", tokens: { access_token: "a", token_type: "Bearer" } });
+    const calls: unknown[] = [];
+    let deny = true;
+    const thread = new T3Thread({ async call(_name, args) {
+      calls.push(args.message);
+      if (deny) throw new Error('T3 t3_thread_send: {"code":"capability_denied"}');
+      return { threadId: args.threadId, messageId: "m", runId: "r", status: "queued", delivery: "queued" };
+    } }, "mcp:launch:516a2801f994e37f7b141931e19a9c846af2dbc38866a7a8b1ddc2fd079ce967");
+    await expect(new T3Delivery(thread, store).sendFirst("Wake", "wake-1")).rejects.toThrow("capability_denied");
+    new T3Delivery(thread, store).denied("wake-1");
+    deny = false;
+    store.save({ endpoint: store.endpoint.href, epoch: "supervised", tokens: { access_token: "b", token_type: "Bearer" } });
+    expect((await new T3Delivery(thread, store).sendFirst("Wake, worded later", "wake-1")).messageId).toBe("m");
+    expect(calls).toEqual(["Wake", "Wake"]);
+    // Sent under the new grant, it is that grant's: a send cut short after it is uncertain again, never sent twice.
+    expect((await new T3Delivery(thread, store).sendFirst("Wake", "wake-1")).messageId).toBe("m");
+    expect(calls).toHaveLength(2);
   });
   test("after a new login a running worker's delivery object sends new decisions without a restart", async () => {
     // What regresses: every send refused with "Restart this thread's companion" after re-login.

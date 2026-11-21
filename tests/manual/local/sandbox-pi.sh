@@ -1,4 +1,5 @@
 #!/bin/bash
+# Manual QA: runs with your real HOME and Plannotator config on purpose. For an isolated test run, use `bun run test:sandbox`.
 # Sandbox script for testing Plannotator Pi extension locally
 #
 # Usage:

@@ -21,7 +21,7 @@ function DropdownMenuTrigger({ ...props }: MenuPrimitive.Trigger.Props) {
 }
 
 const dropdownMenuPopupClassName =
-  "z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground origin-[var(--transform-origin)] transition-[opacity,scale] duration-150 data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95";
+  "z-50 min-w-[8rem] overflow-hidden rounded-lg border border-transparent bg-popover p-1 text-popover-foreground origin-[var(--transform-origin)] transition-[opacity,scale] duration-150 data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95";
 
 function DropdownMenuContent({
   className,
@@ -29,9 +29,10 @@ function DropdownMenuContent({
   sideOffset = 4,
   align,
   alignOffset,
+  anchor,
   ...props
 }: MenuPrimitive.Popup.Props &
-  Pick<MenuPrimitive.Positioner.Props, "side" | "sideOffset" | "align" | "alignOffset">) {
+  Pick<MenuPrimitive.Positioner.Props, "side" | "sideOffset" | "align" | "alignOffset" | "anchor">) {
   return (
     <MenuPrimitive.Portal>
       <MenuPrimitive.Positioner
@@ -40,10 +41,11 @@ function DropdownMenuContent({
         sideOffset={sideOffset}
         align={align}
         alignOffset={alignOffset}
+        {...(anchor ? { anchor } : {})}
       >
         <MenuPrimitive.Popup
           data-slot="dropdown-menu-content"
-          className={cn(dropdownMenuPopupClassName, "shadow-md", className)}
+          className={cn(dropdownMenuPopupClassName, "shadow-[var(--float-shadow)]", className)}
           {...props}
         />
       </MenuPrimitive.Positioner>

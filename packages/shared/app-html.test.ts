@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { makeAppHtml } from "../../tests/helpers/app-html";
-import { encodeAppHtml, negotiateAppHtmlEncoding, prepareAppHtml } from "./app-html";
+import { acceptsGzip, encodeAppHtml, negotiateAppHtmlEncoding, prepareAppHtml } from "./app-html";
 
 describe("negotiateAppHtmlEncoding", () => {
   test.each([
@@ -32,6 +32,12 @@ describe("negotiateAppHtmlEncoding", () => {
   ] as const)("%p -> %p", (header, expected) => {
     expect(negotiateAppHtmlEncoding(header)).toBe(expected);
   });
+});
+
+// A gzip-only body (the Shape page): sent zipped only when the browser takes gzip, whatever it prefers.
+test("acceptsGzip: gzip, x-gzip or * above q=0", () => {
+  for (const yes of ["gzip", "gzip, deflate, br", "br;q=1, gzip;q=0.1", "x-gzip", "*", "br, *;q=0.5"]) expect({ yes, ok: acceptsGzip(yes) }).toEqual({ yes, ok: true });
+  for (const no of [null, undefined, "", "identity", "br", "gzip;q=0", "br, gzip;q=0", "*;q=0", "*, gzip;q=0"]) expect({ no, ok: acceptsGzip(no) }).toEqual({ no, ok: false });
 });
 
 describe("prepareAppHtml", () => {

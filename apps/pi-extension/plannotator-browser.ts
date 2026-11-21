@@ -12,6 +12,7 @@ import {
 	getVcsDiffFingerprint,
 	getVcsFileContentsForDiff,
 	getVcsFileBytesForDiff,
+	listVcsFiles,
 	canStageFiles,
 	runVcsDiff,
 	stageFile,
@@ -44,7 +45,7 @@ import {
 } from "./generated/pr-provider.ts";
 import { parseRemoteUrl } from "./generated/repo.ts";
 import { fetchRef, createWorktree, removeWorktree, ensureObjectAvailable } from "./generated/worktree.ts";
-import { loadConfig, resolveDefaultDiffType, resolveSharingEnabled } from "./generated/config.ts";
+import { loadConfig, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled } from "./generated/config.ts";
 import {
 	WorkspaceReviewSession,
 	type WorkspaceDiffType,
@@ -56,13 +57,17 @@ import {
 	hasPlanBrowserHtml,
 	hasReviewBrowserHtml,
 	reviewDiagramEngineDirectory,
+	reviewSemDiffDirectory,
 } from "./plannotator-browser-runtime.ts";
 import { diagramEngineSourcesFromDir, type DiagramEngineSources } from "./generated/diagram-engine-assets.ts";
+import { semDiffSourcesFromDir, type SemDiffSources } from "./generated/sem-diff-assets.ts";
 
 /** The diagram engine files, read once per extension process (the first review that needs them). */
 let reviewDiagramEngineSources: Promise<DiagramEngineSources | null> | undefined;
 const readReviewDiagramEngine = () =>
 	(reviewDiagramEngineSources ??= diagramEngineSourcesFromDir(reviewDiagramEngineDirectory)());
+let reviewSemDiffSources: Promise<SemDiffSources | null> | undefined;
+const readReviewSemDiff = () => (reviewSemDiffSources ??= semDiffSourcesFromDir(reviewSemDiffDirectory)());
 export { getLastAssistantMessageText } from "./assistant-message.ts";
 export {
 	getStartupErrorMessage,
@@ -297,6 +302,7 @@ async function buildLocalWorkspaceReview(
 		runVcsDiff,
 		getVcsFileContentsForDiff,
 		getVcsFileBytesForDiff,
+		listVcsFiles,
 		getVcsDiffFingerprint,
 		canStageFiles,
 		stageFile,
@@ -460,6 +466,11 @@ export async function openCodeReview(
 	return session.waitForDecision();
 }
 
+export function piLiveReviewAgent(ctx: unknown): { host: "pi"; session: string } | null {
+	const session = (ctx as { sessionManager?: { getSessionId?: () => string | undefined } } | null)?.sessionManager?.getSessionId?.();
+	return typeof session === "string" && session ? { host: "pi", session } : null;
+}
+
 export async function startCodeReviewBrowserSession(
 	ctx: ExtensionContext,
 	options: CodeReviewOptions = {},
@@ -584,7 +595,7 @@ async function createCodeReviewBrowserSession(
 				// A fork URL fetch must never stop to prompt for credentials.
 				const fetchHead = async (args: string[], cwd: string) => {
 					if (!headFetch.remote) return checkoutRuntime.runGit(args, { cwd });
-					const r = spawnSync("git", args, { cwd, encoding: "utf-8", env: { ...process.env, ...ghAccountEnv, GIT_TERMINAL_PROMPT: "0" } });
+					const r = spawnSync("git", args, { cwd, encoding: "utf-8", env: { ...process.env, ...ghAccountEnv, GIT_TERMINAL_PROMPT: "0" }, windowsHide: true });
 					return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", exitCode: r.status ?? 1 };
 				};
 
@@ -632,7 +643,7 @@ async function createCodeReviewBrowserSession(
 					exitHandler = () => {
 						try {
 							for (const entry of worktreePool?.entries() ?? []) {
-								spawnSync("git", ["worktree", "remove", "--force", entry.path], { cwd: wtRepoDir, env: process.env });
+								spawnSync("git", ["worktree", "remove", "--force", entry.path], { cwd: wtRepoDir, env: process.env, windowsHide: true });
 							}
 						} catch {}
 						if (sessionDir) try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
@@ -654,7 +665,7 @@ async function createCodeReviewBrowserSession(
 					const [cloneCmd, ...cloneArgs] = cloneCommand.argv;
 
 					setCodeReviewProgress(ctx, `Cloning ${prRepo}...`);
-					const cloneResult = spawnSync(cloneCmd, cloneArgs, { encoding: "utf-8", env: cloneEnv ?? process.env });
+					const cloneResult = spawnSync(cloneCmd, cloneArgs, { encoding: "utf-8", env: cloneEnv ?? process.env, windowsHide: true });
 					if ((cloneResult.status ?? 1) !== 0) {
 						throw new Error(`${cloneCmd === "git" ? "git clone" : `${cloneCmd} repo clone`} failed: ${(cloneResult.stderr ?? "").trim()}`);
 					}
@@ -784,7 +795,7 @@ async function createCodeReviewBrowserSession(
 				vcsType: options.vcsType,
 				requestedDiffType,
 				requestedBase,
-				configuredDiffType: resolveDefaultDiffType(config),
+				configuredDiffType: resolveDefaultDiffTypeFor(config, managedVcs?.id),
 				hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
 			});
 			gitCtx = result.gitContext;
@@ -820,6 +831,7 @@ async function createCodeReviewBrowserSession(
 
 	const server = await startServerWithSelfPreemption(() => startReviewServer({
 		sessionBridge: options.sessionBridge,
+		liveReviewAgent: piLiveReviewAgent(ctx),
 		rawPatch,
 		gitRef,
 		error: diffError,
@@ -841,6 +853,7 @@ async function createCodeReviewBrowserSession(
 		worktreePool,
 		htmlContent: reviewHtmlContent,
 		diagramEngine: readReviewDiagramEngine,
+		semDiff: readReviewSemDiff,
 		sharingEnabled: resolveSharingEnabled(loadConfig()),
 		// Pi's review consumer (index.ts) sends approve-time feedback after the
 		// approved prompt, so the advert is unconditional — same shape as the
@@ -902,6 +915,14 @@ export async function startMarkdownAnnotationSession(
 	bundleFiles?: AnnotateBundleFile[],
 	/** The caller shows the URL in its own in-turn message (`sessionOpenedMessage`). */
 	announcedInTurn?: boolean,
+	/**
+	 * Whether a gated local session gets the blocking CLI's client lease (a
+	 * closed tab settles as dismissed after 30 s, #1143). On for callers that
+	 * await the decision (the event bus, `openMarkdownAnnotation`). The tool and
+	 * the slash commands pass false: they return at once, and the review must
+	 * stay open after tab loss until an explicit decision or close.
+	 */
+	clientLease = true,
 ): Promise<BrowserDecisionSession<AnnotateDecision>> {
 	if (!ctx.hasUI) {
 		throw new Error("Plannotator annotation browser is unavailable in this session.");
@@ -953,7 +974,7 @@ export async function startMarkdownAnnotationSession(
 		sourceConverted,
 		gate,
 		approvalNotesSupported: true,
-		clientLeaseSupported: gate === true && !isRemoteSession(),
+		clientLeaseSupported: clientLease && gate === true && !isRemoteSession(),
 		rawHtml,
 		renderHtml,
 		convertHtml,
@@ -990,6 +1011,8 @@ export async function startLastMessageAnnotationSession(
 	sessionBridge?: SessionBridge,
 	/** The caller shows the URL in its own in-turn message (`sessionOpenedMessage`). */
 	announcedInTurn?: boolean,
+	/** See `startMarkdownAnnotationSession`: false from the tool and commands. */
+	clientLease = true,
 ): Promise<BrowserDecisionSession<AnnotateDecision>> {
 	return startMarkdownAnnotationSession(
 		ctx,
@@ -1008,6 +1031,7 @@ export async function startLastMessageAnnotationSession(
 		sessionBridge,
 		undefined,
 		announcedInTurn,
+		clientLease,
 	);
 }
 

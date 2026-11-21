@@ -19,12 +19,13 @@
 
 import { childEnv, childPath } from "@plannotator/shared/child-env";
 import path from "node:path";
-import fs from "node:fs";
-import os from "node:os";
 import { spawn } from "node:child_process";
 import {
   OPEN_IN_APPS,
   checkOpenInAppId,
+  openInFileArgv,
+  openInMacArgv,
+  parseOpenInLine,
   resolveRevealLabel,
   resolveRevealIcon,
   type OpenInApp,
@@ -32,6 +33,7 @@ import {
   type OpenInPlatform,
 } from "@plannotator/shared/open-in-apps";
 import { resolveOpenInTarget } from "@plannotator/shared/html-assets-node";
+import { locateOpenInApp } from "@plannotator/shared/open-in-locate";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { checkServerSession, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 import { isRemoteSession } from "./remote";
@@ -87,6 +89,7 @@ function runArgv(
 
     let child: ReturnType<typeof spawn>;
     try {
+      // windows-hide-guard: starts the app window the person asked for, which windowsHide would start hidden.
       child = spawn(cmd, args, {
         detached: true,
         stdio: ["ignore", "ignore", "pipe"],
@@ -173,6 +176,7 @@ function spawnDetached(
   friendlyName: string,
 ): Promise<OpenInLaunchResult> {
   try {
+    // windows-hide-guard: starts the app window the person asked for, which windowsHide would start hidden.
     Bun.spawn([cmd, ...args], { env: childEnv(), stdout: "ignore", stderr: "ignore" });
     return Promise.resolve({ ok: true });
   } catch (err) {
@@ -199,27 +203,35 @@ export function revealFile(absPath: string): Promise<OpenInLaunchResult> {
   return runArgv("xdg-open", [path.dirname(absPath)], "file manager");
 }
 
+/** The catalog binary's argv for a file, at `line` when the app's launcher takes one. */
+function fileArgv(app: OpenInApp, target: string, line?: number): string[] {
+  return openInFileArgv(app, target, line);
+}
+
 /**
  * Launch an editor/terminal app from the catalog.
- *   - editor   -> open the file itself
+ *   - editor   -> open the file itself, at `line` when its launcher can (the catalog's `line`)
  *   - terminal -> open the file's parent directory
  */
 export function openWithApp(
   app: OpenInApp,
   absPath: string,
+  line?: number,
 ): Promise<OpenInLaunchResult> {
   const platform = currentPlatform();
   const target = app.kind === "terminal" ? path.dirname(absPath) : absPath;
 
   if (platform === "mac") {
-    const appName = app.mac?.appName;
-    if (!appName) {
+    if (!app.mac?.appName) {
       return Promise.resolve({
         ok: false,
         error: `${app.label} is not available on macOS`,
       });
     }
-    return runArgv("open", ["-a", appName, target], app.label);
+    // The installed bundle's name (an app may install under more than one).
+    const appName = locateApp(app, platform) ?? app.mac.appName;
+    // A line rides a URL scheme, or the app launcher's own `--line` (openInMacArgv).
+    return runArgv("open", openInMacArgv(app, appName, target, line), app.label);
   }
 
   if (platform === "win") {
@@ -236,7 +248,13 @@ export function openWithApp(
       // parser; `start` inherits that cwd. bin is a trusted catalog value.
       return runArgv("cmd", ["/c", "start", "", bin], app.label, { cwd: target });
     }
-    return runArgv(bin, [target], app.label);
+    // An `exeOnly` app runs only its own .exe, by absolute path: never a
+    // .cmd/.bat, which cmd.exe would run with the file path on its command line.
+    const winBin = app.win?.exeOnly ? locateApp(app, platform) : bin;
+    if (!winBin) {
+      return Promise.resolve({ ok: false, error: `${app.label} not found` });
+    }
+    return runArgv(winBin, fileArgv(app, target, line), app.label);
   }
 
   const bin = app.linux?.bin;
@@ -246,7 +264,8 @@ export function openWithApp(
       error: `${app.label} is not available on Linux`,
     });
   }
-  return runArgv(bin, [target], app.label);
+  // The first of its names on PATH (a snap command, say); else its catalog bin.
+  return runArgv(locateApp(app, platform) ?? bin, fileArgv(app, target, line), app.label);
 }
 
 /**
@@ -277,6 +296,7 @@ export function openWithSystemDefault(absPath: string): Promise<OpenInLaunchResu
 export async function openFileInApp(
   absPath: string,
   appId: string,
+  line?: number,
 ): Promise<OpenInLaunchResult> {
   const checked = checkOpenInAppId(appId);
   if (!checked.ok) return { ok: false, error: checked.error };
@@ -286,58 +306,30 @@ export async function openFileInApp(
     return revealFile(absPath);
   }
 
-  return openWithApp(app, absPath);
+  return openWithApp(app, absPath, line);
 }
 
-/**
- * Whether a macOS app bundle named `<appName>.app` exists in one of the
- * standard application directories.
- */
-function macAppBundleExists(appName: string): boolean {
-  const bundle = `${appName}.app`;
-  const candidates = [
-    path.join("/Applications", bundle),
-    path.join(os.homedir(), "Applications", bundle),
-    path.join("/System/Applications", bundle),
-    // Terminal.app and other built-ins live in the Utilities subfolder.
-    path.join("/System/Applications/Utilities", bundle),
-  ];
-  return candidates.some((p) => {
-    try {
-      return fs.existsSync(p);
-    } catch {
-      return false;
-    }
+/** Where `app` is installed here (shared with Pi): see locateOpenInApp. */
+function locateApp(app: OpenInApp, platform: OpenInPlatform): string | null {
+  return locateOpenInApp(app, {
+    platform,
+    which: (bin) => Bun.which(bin, { PATH: childPath() }),
   });
 }
 
 /**
  * Whether the given catalog app is launchable on this host.
  *   - 'reveal' is always available.
- *   - mac: the `.app` bundle exists (we launch via `open -a "<appName>"`).
- *   - win/linux: its bin resolves on PATH.
+ *   - mac: one of its `.app` bundles exists (we launch via `open -a "<appName>"`;
+ *     a CLI shim on PATH without the bundle would show and then fail to launch).
+ *   - win/linux: one of its bins resolves on PATH (an `exeOnly` app: a real
+ *     `.exe`, on PATH or in an install folder).
  */
 function isAppAvailable(app: OpenInApp, platform: OpenInPlatform): boolean {
   if (app.id === "reveal") {
     return true;
   }
-
-  if (platform === "mac") {
-    // We launch via `open -a "<appName>"`, so availability must mean the .app
-    // bundle is present — a CLI shim on PATH without the bundle would show the
-    // app in the menu and then fail to launch.
-    const appName = app.mac?.appName;
-    return !!appName && macAppBundleExists(appName);
-  }
-
-  if (platform === "win") {
-    const bin = app.win?.bin;
-    return !!bin && !!Bun.which(bin, { PATH: childPath() });
-  }
-
-  // linux
-  const bin = app.linux?.bin;
-  return !!bin && !!Bun.which(bin, { PATH: childPath() });
+  return locateApp(app, platform) !== null;
 }
 
 export interface AvailableOpenInApp {
@@ -424,7 +416,8 @@ export interface HandleOpenInOptions {
  * POST /api/open-in handler. Refuses another site's page (including the
  * sandboxed annotated-HTML frame, which sends `Origin: null`) and a stale tab,
  * requires a catalog `appId`, resolves + containment-checks the target via
- * resolveOpenInTarget (shared), then launches via openFileInApp.
+ * resolveOpenInTarget (shared), then launches via openFileInApp. Optional
+ * `line` (1-based) is passed through when the catalog app's launcher takes one.
  */
 export async function handleOpenIn(
   req: Request,
@@ -452,7 +445,7 @@ export async function handleOpenIn(
     );
   }
 
-  let body: { filePath?: unknown; base?: unknown; appId?: unknown };
+  let body: { filePath?: unknown; base?: unknown; appId?: unknown; line?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -486,7 +479,7 @@ export async function handleOpenIn(
     return Response.json({ ok: false, error: "Access denied" }, { status: 403 });
   }
 
-  const result = await openFileInApp(abs, app.app.id);
+  const result = await openFileInApp(abs, app.app.id, parseOpenInLine(body.line));
   // A failed launch is a valid request with the result in the body (ok:false),
   // not a server error — return 200 and let the client read `ok`. Matches Pi.
   return Response.json(result);

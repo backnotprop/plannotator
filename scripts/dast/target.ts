@@ -38,7 +38,6 @@ Object.assign(process.env, {
   PLANNOTATOR_GLIMPSE: "0",
   PLANNOTATOR_SKIP_BROWSER_OPEN: "1",
   PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL: "1",
-  PLANNOTATOR_SKIP_SEM_INSTALL: "1",
   PLANNOTATOR_FILE_BROWSER_MAX_FILES: "64",
   BROWSER: "true",
   // The read-only guards below forward the scanner's Host
@@ -89,7 +88,8 @@ const scanTarget = Bun.serve({
     const sourceUrl = new URL(request.url);
     if (
       !readOnlyMethods.has(request.method) ||
-      !forwardedPaths.has(sourceUrl.pathname)
+      // The page's packed chunks, so the scan sees their responses too.
+      !(forwardedPaths.has(sourceUrl.pathname) || sourceUrl.pathname.startsWith("/assets/"))
     ) {
       return new Response("Not found", {
         status:

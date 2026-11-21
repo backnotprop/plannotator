@@ -1,0 +1,41 @@
+# Plannotator PR 2563, merged as ab70b560b on 2026-11-03: the Inbox wakes T3 Code.
+# SOURCES (git diff --numstat ab70b560b^1 ab70b560b):
+#   packages/server/inbox-t3-wake.ts (+473, new), packages/core/inbox-t3.ts (+25, new)
+#   apps/hook/server/inbox-mcp-shim.ts (+71 -18), packages/server/inbox.ts (+27 -5), packages/core/inbox-types.ts (+8 -4)
+#   packages/t3-code (+55 -10: sendFirst, the setup text; the grant stays t3-code/auth.ts)
+revision: PR-2563
+scope: root
+pr: 2563
+repo: github.com/backnotprop/plannotator
+merged: ab70b560b
+title: "The Inbox wakes T3 Code threads"
+date: "2026-11-03"
+add:
+  parts:
+    it3: ~
+  flows:
+    i_t3stdio: ~
+    i_wt3: ~
+change:
+  iserver: { says: "Adds t3 to the hosts it wakes: it finds the thread with t3_thread_read and sends your reply with t3_thread_send." }
+  shim: { says: "Reads T3CODE_THREAD_ID and files the calls as host t3, session the thread id." }
+lines:
+  iserver: "inbox-t3-wake.ts and 3 more · +509 −9"
+  shim: "inbox-mcp-shim.ts and 2 more · +101 −20"
+steps:
+  title: A reply wakes a T3 thread
+  question: "How your answer in the Inbox becomes the next turn of a Claude thread in T3 Code."
+  lanes: [it3, shim, iserver, istore, iwindow]
+  places:
+    - { label: T3 Code, tone: sand, lanes: [it3] }
+    - { label: The Inbox, means: this computer, tone: stone, lanes: [shim, iserver, istore] }
+    - { label: Your browser, tone: mist, lanes: [iwindow] }
+  hops:
+    - { from: it3, to: shim, says: "starts plannotator inbox mcp", is: added }
+    - { from: shim, to: iserver, says: "send_message as host t3, the thread id", is: changed }
+    - { from: iserver, to: it3, says: "t3_thread_read: find the thread", is: added }
+    - { from: it3, to: iserver, reply: true, says: "the thread and its mode", is: added }
+    - { from: iwindow, to: iserver, says: "you send a reply" }
+    - { from: iserver, to: istore, says: "store the reply; the wake sweeps" }
+    - { from: iserver, to: it3, says: "t3_thread_send, a queued turn", is: added }
+    - { from: it3, to: iserver, reply: true, says: "accepted; delivery recorded", is: added }

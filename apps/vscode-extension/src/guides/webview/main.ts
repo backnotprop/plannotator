@@ -1,17 +1,15 @@
 /**
- * The Guides webviews (one bundle, four modes): the "Guided Reviews" home tab,
- * the generating view, the Guide tab (title, intent, overview with its
- * diagram, chapter list) and the chapter side view. It draws the state the
- * extension sends and reports clicks by name; it runs no agent code.
+ * The Guides webviews (one bundle, three modes): the "Guided Reviews" home
+ * tab, the generating view and the answer tab. (The Guide tab is the guide
+ * reader, `src/guides/reader/`.) It draws the state the extension sends and
+ * reports clicks by name; it runs no agent code.
  */
 
 import "./style.css";
 import type {
   ActivityRow,
   AnswerViewState,
-  ChapterViewState,
   GeneratingViewState,
-  GuideViewState,
   HomeViewState,
   LinkInfo,
   ToExtension,
@@ -19,7 +17,7 @@ import type {
   ViewState,
 } from "../webview-protocol";
 import { renderInlineMarkdown, renderMarkdown } from "./markdown";
-import { checkMermaid, renderMermaid } from "./diagram";
+import { checkMermaid } from "./diagram-loader";
 import { h, icon } from "./dom";
 import { renderBottlenecks, renderPermissions } from "./approvals";
 import { answerFrame } from "./answer-frame";
@@ -47,7 +45,7 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
     linkRequests.delete(msg.reqId);
     pending?.(msg.info);
   } else if (msg.type === "checkMermaid") {
-    void checkMermaid(msg.source).then((r) => post({ type: "mermaidResult", reqId: msg.reqId, ok: r.ok, message: r.message, line: r.line }));
+    void checkMermaid(msg.source).then((r) => post({ type: "mermaidResult", reqId: msg.reqId, ok: r.ok, message: r.message, line: r.line, ...(r.unavailable && { unavailable: true }) }));
   }
 });
 
@@ -63,9 +61,7 @@ function render(): void {
   root.replaceChildren(
     state.mode === "home" ? renderHome(state)
       : state.mode === "generating" ? renderGenerating(state)
-      : state.mode === "guide" ? renderGuide(state)
-      : state.mode === "answer" ? renderAnswer(state)
-      : renderChapter(state),
+      : renderAnswer(state),
   );
   const list = root.querySelector(".pn-activity-list");
   if (list && stick) list.scrollTop = list.scrollHeight;
@@ -278,109 +274,6 @@ function toolTitle(a: ActivityRow): Node[] {
 
 function locationLink(loc: { path: string; line?: number }): HTMLElement {
   return h("a", { class: "pn-loc", href: "#", onclick: (e) => { e.preventDefault(); command("openLocation", loc.path, loc.line ?? null); } }, loc.path);
-}
-
-// ---------------------------------------------------------------------------
-// Guide tab
-// ---------------------------------------------------------------------------
-
-function renderGuide(s: GuideViewState): HTMLElement {
-  const page = h("div", { class: "pn-page pn-guide" },
-    h("div", { class: "pn-kicker" }, s.kicker),
-    h("h1", {}, s.title),
-    h("div", { class: "pn-intent" }, renderMarkdown(s.intent)),
-    s.moved ? h("div", { class: "pn-note pn-warn" }, icon("warning"), " The head moved since this guide was made: line numbers may have shifted.") : null,
-  );
-  if (s.overview) {
-    page.append(h("div", { class: "pn-section-head" }, h("span", {}, "Overview")));
-    page.append(h("div", { class: "pn-prose" }, renderMarkdown(s.overview.text)));
-    if (s.overview.diagram?.kind === "mermaid") page.append(diagramCard(s.overview.diagram.source));
-  }
-  page.append(h("div", { class: "pn-section-head" }, h("span", {}, "Chapters"), h("span", { class: "pn-muted" }, `${s.reviewed} of ${s.chapters.length} reviewed`)));
-  page.append(h("div", { class: "pn-chapters" }, ...s.chapters.map((c) =>
-    h("button", { class: `pn-chapter${c.reviewed ? " pn-chapter-done" : ""}`, onclick: () => command("openChapter", c.n) },
-      h("span", { class: "pn-chapter-n", style: `background:${c.color}` }, String(c.n)),
-      h("div", { class: "pn-chapter-main" }, h("div", { class: "pn-chapter-title" }, c.title), h("div", { class: "pn-chapter-files" }, c.files.join(" · "))),
-      c.reviewed ? h("span", { class: "pn-ok" }, "✓ reviewed") : h("span", { class: "pn-muted" }, `${c.files.length} ${c.files.length === 1 ? "file" : "files"}`),
-    ))));
-  return page;
-}
-
-function diagramCard(source: string): HTMLElement {
-  const canvas = h("div", { class: "pn-diagram-canvas" }, h("div", { class: "pn-muted pn-diagram-wait" }, "Drawing the diagram…"));
-  const card = h("div", { class: "pn-diagram" },
-    h("div", { class: "pn-diagram-head" }, icon("type-hierarchy-sub"), " Mermaid", h("span", { class: "pn-muted" }, " · Click a box to open its code · hover for details")),
-    canvas,
-  );
-  void renderMermaid(source).then((r) => {
-    if (r.ok) canvas.replaceChildren(r.svg);
-    else canvas.replaceChildren(h("div", { class: "pn-status pn-status-error" }, `The diagram does not render${r.line ? ` (line ${r.line})` : ""}: ${r.message}`), h("pre", { class: "pn-pre" }, source));
-  });
-  return card;
-}
-
-// ---------------------------------------------------------------------------
-// Chapter side view
-// ---------------------------------------------------------------------------
-
-function renderChapter(s: ChapterViewState): HTMLElement {
-  if (s.empty) return h("div", { class: "pn-side pn-muted" }, "Open a chapter of the guide to read why it changed.");
-  return h("div", { class: "pn-side" },
-    h("h2", {}, s.title ?? ""),
-    h("div", { class: "pn-prose pn-prose-side" }, renderMarkdown(s.overview ?? "")),
-    h("div", { class: "pn-side-files" }, ...(s.files ?? []).map((f) =>
-      h("div", { class: "pn-side-file" },
-        h("a", { class: "pn-loc pn-mono", href: "#", onclick: (e) => { e.preventDefault(); command("openFile", f.path); } }, f.name),
-        f.reviewed ? h("span", { class: "pn-ok" }, " ✓") : null,
-        f.summary ? h("span", { class: "pn-muted" }, " · ", renderInlineMarkdown(f.summary)) : null,
-      ))),
-    h("div", { class: "pn-side-actions" },
-      s.reviewed
-        ? h("button", { class: "pn-btn", onclick: () => command("markChapterReviewed", s.n, false) }, icon("check"), " Reviewed")
-        : h("button", { class: "pn-btn pn-btn-primary", onclick: () => command("markChapterReviewed", s.n, true) }, icon("check"), " Mark chapter reviewed"),
-      s.hasNext ? h("button", { class: "pn-btn", onclick: () => command("nextChapter") }, "Next chapter ›") : null,
-    ),
-    s.ask ? askBox(s) : null,
-    s.answers?.length ? answersList(s) : null,
-    s.answersFooter ? h("div", { class: "pn-side-foot pn-muted" }, icon("sparkle", "pn-agent-mark"), ` ${s.answersFooter}`) : s.footer ? h("div", { class: "pn-side-foot pn-muted" }, icon("sparkle", "pn-agent-mark"), ` ${s.footer}`) : null,
-  );
-}
-
-/** "Ask the agent about this chapter…": Enter asks what is typed; empty, it opens the question box with suggestions. */
-function askBox(s: ChapterViewState): HTMLElement {
-  const input = h("input", {
-    class: "pn-ask-input",
-    type: "text",
-    placeholder: s.ask!.busy ? `${s.ask!.agent} is answering a question…` : "Ask the agent about this chapter…",
-    "aria-label": `Ask ${s.ask!.agent} about this chapter`,
-    maxlength: 2000,
-  }) as HTMLInputElement;
-  input.addEventListener("keydown", (e) => {
-    if ((e as KeyboardEvent).key !== "Enter") return;
-    e.preventDefault();
-    command("ask", s.n, input.value.trim());
-    input.value = "";
-  });
-  return h("div", { class: "pn-ask", "data-ask": "chapter" },
-    h("button", { class: "pn-ask-icon", title: "Suggestions and past questions", "aria-label": "Open the question box", onclick: () => command("ask", s.n, "") }, icon("sparkle")),
-    input,
-  );
-}
-
-function answersList(s: ChapterViewState): HTMLElement {
-  const items = s.answers ?? [];
-  return h("div", { class: "pn-answers", "data-answers": items.length },
-    h("div", { class: "pn-side-head" }, `Answers · ${items.length}`),
-    ...items.map((a) =>
-      h("button", { class: "pn-answer-row", "data-answer": a.id, onclick: () => command("openAnswer", a.id) },
-        icon(a.status === "answering" ? "loading" : a.status === "failed" ? "error" : "sparkle", `pn-answer-icon${a.status === "answering" ? " codicon-modifier-spin" : ""}`),
-        h("div", { class: "pn-answer-main" },
-          h("div", { class: "pn-answer-q" }, a.question, a.isNew ? h("span", { class: "pn-tag pn-tag-new" }, "new") : null),
-          h("div", { class: "pn-muted pn-answer-sub" }, a.sub),
-        ),
-        h("span", { class: "pn-muted pn-answer-when" }, a.when),
-      )),
-  );
 }
 
 // ---------------------------------------------------------------------------

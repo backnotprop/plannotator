@@ -1,5 +1,6 @@
 import { describe, expect, test, spyOn } from "bun:test";
 import { fetchGhPR, reconstructGhPatch, type GitHubFileEntry } from "./pr-github";
+import { fetchPRContextWithReviewers } from "./pr-provider";
 import { parseDiffGitHeader, parseDiffFilePathLines, parseDiffMetadataPathLines } from "./diff-paths";
 import type { PRRuntime } from "./pr-types";
 
@@ -200,6 +201,43 @@ describe("fetchGhPR", () => {
 
     await expect(fetchGhPR(runtime, REF)).rejects.toThrow(/Failed to fetch PR metadata/);
     expect(calls.some((c) => c.includes("/pulls/123/files"))).toBe(false);
+  });
+});
+
+describe("fetchPRContextWithReviewers", () => {
+  const REF = { platform: "github", host: "github.com", owner: "o", repo: "r", number: 7 } as const;
+  const run = (requested: { stdout: string; exitCode: number }, rollup: unknown[] = []): PRRuntime => ({
+    async runCommand(_command, args) {
+      if (args[0] === "pr") return { stdout: JSON.stringify({ statusCheckRollup: rollup }), stderr: "", exitCode: 0 };
+      if (args[1]?.endsWith("/requested_reviewers")) return { ...requested, stderr: "" };
+      return { stdout: "{}", stderr: "", exitCode: 0 };
+    },
+  });
+
+  test("people and teams from their own read", async () => {
+    const context = await fetchPRContextWithReviewers(run({ stdout: JSON.stringify({ users: [{ login: "ana", avatar_url: "https://a/ana", type: "User" }, { login: "copilot[bot]", type: "Bot" }], teams: [{ slug: "core" }] }), exitCode: 0 }), REF);
+    expect(context.requestedReviewers).toEqual([{ login: "ana", avatarUrl: "https://a/ana" }, { login: "copilot[bot]", isBot: true }, { login: "o/core", isTeam: true }]);
+  });
+
+  test("a token that cannot read them costs only their names", async () => {
+    for (const answer of [{ stdout: "", exitCode: 1 }, { stdout: "not json", exitCode: 0 }]) {
+      const context = await fetchPRContextWithReviewers(run(answer), REF);
+      expect(context.requestedReviewers).toEqual([]);
+      expect(context.state).toBeDefined();
+    }
+  });
+
+  test("a commit status has a name, a page and a result like a check run", async () => {
+    const context = await fetchPRContextWithReviewers(run({ stdout: "{}", exitCode: 0 }, [
+      { context: "ci/a", state: "SUCCESS", targetUrl: "https://ci/a" },
+      { context: "ci/b", state: "PENDING", targetUrl: "https://ci/b" },
+      { name: "unit", status: "COMPLETED", conclusion: "FAILURE", workflowName: "test", detailsUrl: "https://ci/u" },
+    ]), REF);
+    expect(context.checks).toEqual([
+      { name: "ci/a", status: "COMPLETED", conclusion: "SUCCESS", workflowName: "", detailsUrl: "https://ci/a" },
+      { name: "ci/b", status: "IN_PROGRESS", conclusion: null, workflowName: "", detailsUrl: "https://ci/b" },
+      { name: "unit", status: "COMPLETED", conclusion: "FAILURE", workflowName: "test", detailsUrl: "https://ci/u" },
+    ]);
   });
 });
 

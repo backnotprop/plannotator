@@ -305,7 +305,7 @@ export function getTreeItem(data: TreeData, node: TreeNode): vscode.TreeItem {
       t.description = `${ch.files.length} ${ch.files.length === 1 ? "file" : "files"}`;
       t.checkboxState = r.reviewed[node.index] ? vscode.TreeItemCheckboxState.Checked : vscode.TreeItemCheckboxState.Unchecked;
       t.contextValue = "pn.chapter";
-      t.command = { command: "plannotator.guides.openChapter", title: "Open chapter", arguments: [node.index + 1] };
+      t.command = { command: "plannotator.guides.openChapter", title: "Show the chapter in the Guide tab", arguments: [node.index + 1] };
       return t;
     }
     case "file": {
@@ -318,7 +318,7 @@ export function getTreeItem(data: TreeData, node: TreeNode): vscode.TreeItem {
       t.checkboxState = r.fileTicks.has(node.path) ? vscode.TreeItemCheckboxState.Checked : vscode.TreeItemCheckboxState.Unchecked;
       t.tooltip = r.chapters[node.chapter].files.find((x) => x.path === node.path)?.summary || node.path;
       t.contextValue = "pn.file";
-      t.command = { command: "plannotator.guides.openFile", title: "Open diff", arguments: [node.path] };
+      t.command = { command: "plannotator.guides.openFile", title: "Show the file in the Guide tab", arguments: [node.path] };
       if (data.currentFile === node.path) t.description = `${t.description} ●`;
       return t;
     }

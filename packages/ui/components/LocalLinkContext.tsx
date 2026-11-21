@@ -1,4 +1,5 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, type ReactNode } from "react";
+import { isCodeFilePath } from "@plannotator/core/code-file";
 
 /**
  * What a host makes of a link to a local path (`[the mock](mock.html)`):
@@ -9,13 +10,25 @@ import { createContext, useContext } from "react";
  *   click (Cmd/Ctrl/Shift, middle button), drag and copy use it: a host's
  *   own address for the same thing. Without it, a modified click also calls
  *   `open` and the middle button does nothing.
+ *   `wrap`, when given (opt-in), draws the link inside it, without the
+ *   tooltip: a host's own hover for that path (its code, say). The link
+ *   still opens on a click; absent, the link is drawn exactly as before.
  * - `unavailable`: draw the link text as inert text with `title` as its
- *   tooltip: no href, so nothing is fetched or navigated.
+ *   tooltip: no href, so nothing is fetched or navigated. `wrap`, when given,
+ *   draws that text instead, without the tooltip (a host's own hover for that
+ *   path, which then decides when `title` shows). `after`, when given, is drawn
+ *   right after it (a host's own control for that path); deprecated, prefer `wrap`.
  * - `null` from the resolver: the renderer's default for that link.
  */
 export type LocalLinkResolution =
-  | { kind: "open"; open: () => void; title?: string; href?: string }
-  | { kind: "unavailable"; title: string };
+  | { kind: "open"; open: () => void; title?: string; href?: string; wrap?: (link: ReactNode) => ReactNode }
+  | {
+      kind: "unavailable";
+      title: string;
+      wrap?: (text: ReactNode) => ReactNode;
+      /** @deprecated Use `wrap`. Still drawn right after the inert link, as before. */
+      after?: ReactNode;
+    };
 
 /** Called with the link target as written (fragment and query included). */
 export type LocalLinkResolver = (href: string) => LocalLinkResolution | null;
@@ -25,6 +38,49 @@ export type LocalLinkResolver = (href: string) => LocalLinkResolution | null;
  * (null), every link renders exactly as it always has.
  */
 export const LocalLinkContext = createContext<LocalLinkResolver | null>(null);
+
+/**
+ * Opt-in: which link targets the resolver above is asked about. Absent, local paths only (`isLocalLinkTarget`), as
+ * always; a host that must keep every non-web link from doing anything (a `mailto:`, an editor scheme) gives a wider
+ * test and answers those as `unavailable`. External http(s) links are best left out: they open in a new tab.
+ */
+export const LocalLinkMatchContext = createContext<((href: string) => boolean) | null>(null);
+
+/** The test a renderer applies before asking the resolver: the host's, else `isLocalLinkTarget`. */
+export function useLocalLinkMatch(): (href: string) => boolean {
+  return useContext(LocalLinkMatchContext) ?? isLocalLinkTarget;
+}
+
+/**
+ * A host's own wrap for an inline code span that names a code file (`src/a.ts:12`): `text` is the span's words, `code`
+ * the span as it is drawn without a host. With no provider, nothing changes.
+ */
+export type CodeSpanRenderer = (text: string, code: ReactNode) => ReactNode;
+export const CodeSpanContext = createContext<CodeSpanRenderer | null>(null);
+
+/**
+ * Opt-in: which code spans a host's wrap is asked about. Absent, a span that names a code file (`isCodeFilePath`), as
+ * always; a host that opens any file (a picture, a page, a document) gives its own test.
+ */
+export const CodeSpanMatchContext = createContext<((text: string) => boolean) | null>(null);
+
+/**
+ * Opt-in: file paths written as plain words (outside code spans, links and code), as a host finds them. `find` gives
+ * each path's start and end in a run of words; `wrap` draws one (a focusable control, say). Absent, plain words stay
+ * plain words, exactly as always.
+ */
+export interface BarePathWrap {
+  find: (text: string) => readonly { start: number; end: number }[];
+  wrap: (text: string) => ReactNode;
+}
+export const BarePathContext = createContext<BarePathWrap | null>(null);
+
+/** An inline code span as drawn (`children`), through the host's wrap when it names a code file (or what the host's test takes). */
+export function CodeSpan({ text, children }: { text: string; children: ReactNode }) {
+  const wrap = useContext(CodeSpanContext);
+  const match = useContext(CodeSpanMatchContext) ?? isCodeFilePath;
+  return <>{wrap && match(text) ? wrap(text, children) : children}</>;
+}
 
 export function useLocalLinkResolver(): LocalLinkResolver | null {
   return useContext(LocalLinkContext);

@@ -1,4 +1,5 @@
 #!/bin/bash
+# Manual QA: starts from your real HOME on purpose (only the agent it sets up gets a scratch HOME). For an isolated test run, use `bun run test:sandbox`.
 # End-to-end Codex Stop-hook test harness for Plannotator.
 #
 # Creates a disposable HOME and sample workspace, enables Codex hooks there,

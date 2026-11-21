@@ -4,9 +4,9 @@
  * with a live agent session polling the bridge as a connection does. What is
  * proved, with the window's own code (BoardPage) doing the calls:
  *
- *  - Start on an agent's Backlog card sends that agent ONE message in the
- *    card's thread naming the card, and marks the card sent; the card does
- *    not move. When the answer to the send is lost, pressing Start again
+ *  - Start on an agent's Todo card sends that agent ONE message in the
+ *    card's thread naming the card, and marks the card sent; the card stays
+ *    in Todo. When the answer to the send is lost, pressing Start again
  *    sends nothing more: the message and the send replay.
  *  - New card, Send to an agent: the card is made first (so the message can
  *    name it), then a thread to the session, then the send. When the answer
@@ -17,7 +17,7 @@
  * card, a message that says "it is yours now" for a card that does not
  * exist, or a Start that moves the card.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -50,6 +50,8 @@ let buffered = '';
 let loseAnswerOf: { method: string; path: RegExp } | null = null;
 /** The next request that fails before it reaches the server (nothing happens there). */
 let failBeforeOf: { method: string; path: RegExp } | null = null;
+/** Whether the window's read of the live sessions has been answered in this test. */
+let sessionsAnswered = false;
 
 function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
   return new Promise((done, fail) => {
@@ -116,6 +118,7 @@ beforeEach(() => {
   world = worlds[index]!;
   index += 1;
   savedFetch = globalThis.fetch;
+  sessionsAnswered = false;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     const method = init?.method ?? 'GET';
@@ -124,6 +127,7 @@ beforeEach(() => {
       throw new TypeError('Failed to fetch');
     }
     const answer = await loopback(path, method, init?.body ? String(init.body) : undefined);
+    if (method === 'GET' && path.startsWith('/api/inbox/sessions')) sessionsAnswered = true;
     if (loseAnswerOf && loseAnswerOf.method === method && loseAnswerOf.path.test(path)) {
       loseAnswerOf = null;
       throw new TypeError('Failed to fetch');
@@ -180,6 +184,7 @@ async function drawBoard(openCard: string | null) {
     onChanged: () => {},
     onSeeDrops: () => {},
     onOpenThread: () => {},
+    onCreateThread: () => {},
   };
   act(() => root!.render(<SidebarProvider><BoardPage {...props} /></SidebarProvider>));
 }
@@ -188,7 +193,7 @@ const cardsTitled = async (title: string) => (await get<{ cards: InboxCardWire[]
 
 test.if(hasDom)('Start tells the card’s live agent once, in the card’s thread, naming the card; a retry after a lost answer sends nothing more', async () => {
   const session = `ses_a${index - 1}`;
-  // The agent's connection polls: it is live. It makes a card in Backlog, linked to its thread.
+  // The agent's connection polls: it is live. It makes a card (Todo, an agent's default), linked to its thread.
   await ask({ poll: { session, body: {} } });
   const { carded } = (await ask({ card: { project: world.project, session, title: 'Retry budget', say: 'Not started', thread: world.stopped } })) as { carded: string };
   await drawBoard(carded);
@@ -203,7 +208,7 @@ test.if(hasDom)('Start tells the card’s live agent once, in the card’s threa
   await act(async () => document.querySelector<HTMLButtonElement>('[data-card-start]')?.click());
   await until(async () => (await cardsTitled('Retry budget'))[0]?.sent !== null, 'the card sent');
   const [card] = await cardsTitled('Retry budget');
-  expect(card!.column).toBe('backlog');
+  expect(card!.column).toBe('todo');
   expect(card!.sent).toMatchObject({ to: { session }, thread_id: world.stopped });
   const thread = await get<{ thread: { messages: { author: { kind: string }; body: string; to?: { session: string } | null }[] } }>(`/api/inbox/threads/${world.stopped}`);
   const mine = thread.thread.messages.filter((m) => m.author.kind === 'person');
@@ -228,7 +233,9 @@ test.if(hasDom)('New card, Send to an agent: the card first and named in the mes
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(title, 'Sent from the Board');
     title.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  // Send to an agent: the radio, then the live session in the picker.
+  // Send to an agent once the window knows the live sessions (choosing Send opens the picker
+  // only then; Bun 1.4.4's loopback answers after the click when the test does not wait).
+  await until(() => sessionsAnswered, 'the live sessions read');
   await act(async () => document.querySelector<HTMLInputElement>('[data-new-card-mode="send"] input')!.click());
   await until(() => document.querySelectorAll('[role="option"]').length > 0, 'the live sessions');
   await act(async () => document.querySelector<HTMLElement>('[role="option"]')!.click());

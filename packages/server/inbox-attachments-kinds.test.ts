@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { startInboxServer, type InboxServer } from "./inbox";
-import { contentDisposition } from "./inbox-attachments";
+import { contentDisposition } from "./inbox-message-images";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];

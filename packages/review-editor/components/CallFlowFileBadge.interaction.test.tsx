@@ -19,7 +19,7 @@ function lensState(): ReviewState {
         status: 'ok',
         snapshotId: 'snapshot',
         provider: 'calldiff',
-        version: '0.4.1',
+        version: '0.6.0',
         from: 'before',
         to: 'after',
         raw: [

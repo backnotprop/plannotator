@@ -12,8 +12,8 @@
  *    code, a phone after expiry, the pairing itself), never its secret or
  *    code.
  *
- * Both answer only this computer's own page: through the tailnet they are
- * `local_only`, and another site's read is `cross_origin`.
+ * Both answer this computer's own page and its owner's over the tailnet; another
+ * allowed tailnet login gets `local_only`, and another site's read is `cross_origin`.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -165,7 +165,7 @@ describe("GET /api/inbox/pairing/checks", () => {
     expect(status).toBe(200);
     expect(body.checks).toEqual({
       wifi: { address: "192.168.1.42", network: "Ramos Home", openssl: true, certificate: false, bonjour: true, firewall: "off" },
-      tailscale: { state: "running", login: OWNER, https_certs: true, port_free: true, error: null },
+      tailscale: { state: "running", login: OWNER, https_certs: true, port_free: true, https_port: 8443, error: null },
     });
     expect(body.lan).toMatchObject({ on: false, address: null });
     expect(body.tailnet).toEqual({ on: false, address: null, error: null });
@@ -186,7 +186,7 @@ describe("GET /api/inbox/pairing/checks", () => {
     const missing = await read();
     expect(missing.wifi).toEqual({ address: null, network: null, openssl: false, certificate: false, bonjour: false, firewall: "block_all" });
     // No `tailscale` command on PATH (the Mac App Store app has none until its CLI is turned on): not "not installed".
-    expect(missing.tailscale).toEqual({ state: "cli_missing", login: null, https_certs: null, port_free: null, error: null });
+    expect(missing.tailscale).toEqual({ state: "cli_missing", login: null, https_certs: null, port_free: null, https_port: null, error: null });
 
     ts.state.missing = false;
     ts.state.timeout = true;
@@ -201,8 +201,12 @@ describe("GET /api/inbox/pairing/checks", () => {
     ts.state.certs = false;
     expect((await read()).tailscale).toMatchObject({ state: "running", https_certs: false, port_free: true });
     ts.state.certs = true;
+    // 8443 held by someone else: the door would take the next free port.
     ts.serve.set(8443, "http://127.0.0.1:9999");
-    expect((await read()).tailscale.port_free).toBe(false);
+    expect((await read()).tailscale).toMatchObject({ port_free: true, https_port: 8444 });
+    // Every port the door may take is held: that fails.
+    for (let port = 8444; port <= 8450; port++) ts.serve.set(port, "http://127.0.0.1:9999");
+    expect((await read()).tailscale).toMatchObject({ port_free: false, https_port: null });
   });
 
   test("one read in flight is shared and kept a few seconds; fresh skips a kept answer; a slow tailscale never holds the Inbox", async () => {
@@ -438,15 +442,15 @@ describe("only this computer's own page reads them", () => {
     }
   });
 
-  test("through the tailnet both are local_only, even for the owner", async () => {
-    const dataDir = world();
+  test("through the tailnet the owner reads both as on the computer", async () => {
+    const dataDir = world({});
     const ts = fakeTailscale();
     const inbox = await start(dataDir, ts.run, { pairingProbes: probes(), publishTailnet: true });
     const listener = inbox.tailscale.listenerPort();
     expect(listener).not.toBeNull();
     for (const path of ["/api/inbox/pairing", "/api/inbox/pairing/checks"]) {
-      const response = await fetch(`http://127.0.0.1:${listener}${path}`, { headers: { Host: `${MAGIC}:${inbox.port}`, "Tailscale-User-Login": OWNER } });
-      expect([path, response.status, ((await response.json()) as Json).code]).toEqual([path, 403, "local_only"]);
+      const as = (login: string) => fetch(`http://127.0.0.1:${listener}${path}`, { headers: { Host: `${MAGIC}:${inbox.port}`, "Tailscale-User-Login": login } });
+      expect([path, (await as(OWNER)).status]).toEqual([path, 200]);
     }
   });
 });

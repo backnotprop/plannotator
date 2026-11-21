@@ -2,11 +2,12 @@
  * Where an issue / PR / MR hover card's data comes from (`components/RefHoverCard`).
  *
  * A host seam in the `configurePlannotatorUI` style: the default is NO
- * transport, so a host that installs none (plan review, annotate and code
- * review today, every `@plannotator/ui` consumer) draws no card and makes no
- * request: byte for byte as before. A host that can fetch (the Inbox, through
- * its `/api/inbox/ref` route) installs one with `setRefCardTransport` or
- * `configurePlannotatorUI({ refCardTransport })`.
+ * transport, so a host that installs none (every `@plannotator/ui` consumer
+ * that does not opt in) draws no card and makes no request: byte for byte as
+ * before. A host that can fetch installs one with `setRefCardTransport` or
+ * `configurePlannotatorUI({ refCardTransport })`: the Inbox over its
+ * `/api/inbox/ref` route, plan review, annotate and code review over
+ * `GET /api/ref` (`refCardRouteTransport` below).
  *
  * The client keeps answers for `REF_CARD_CLIENT_FRESH_MS` per ref and shares
  * one request between hovers of the same ref. The server keeps its own cache;
@@ -15,20 +16,51 @@
 
 import { forgeRefKey, parseForgeRefUrl, type ForgeRef, type ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 
+import { providedRefCardTarget } from './refCardProviders';
+
 export type { ForgeRef, ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 
 /** Fetch the card for a link. Resolve null when the host does not read that link. */
 export type RefCardTransport = (href: string, ref: ForgeRef, signal: AbortSignal) => Promise<ForgeRefCardResult | null>;
 
 let transport: RefCardTransport | null = null;
+/** Bitbucket Cloud links get a card too: only a host whose server reads them (the Inbox) turns it on. */
+let bitbucketCards = false;
 
 export function setRefCardTransport(next: RefCardTransport | null): void {
   transport = next;
   cache.clear();
 }
 
+export function setRefCardBitbucket(on: boolean): void {
+  bitbucketCards = on;
+  cache.clear();
+}
+
 export function getRefCardTransport(): RefCardTransport | null {
   return transport;
+}
+
+/**
+ * A transport over a server route answering like Plannotator's `GET /api/ref`
+ * (and the Inbox's `/api/inbox/ref`): `?url=<link>` → `{ ok, data | error,
+ * fetchedAt }`. A 404 means the route is not there (an older server) or is off
+ * (a session other devices can reach): the transport then stops asking for
+ * the life of the page and answers null. Any other failure answers null.
+ */
+export function refCardRouteTransport(route: string): RefCardTransport {
+  let off = false;
+  return async (href, _ref, signal) => {
+    if (off) return null;
+    const res = await fetch(`${route}?url=${encodeURIComponent(href)}`, { signal, headers: { accept: 'application/json' } });
+    if (res.status === 404) {
+      off = true;
+      return null;
+    }
+    if (!res.ok) return null;
+    const body = (await res.json()) as unknown;
+    return body && typeof body === 'object' && typeof (body as { ok?: unknown }).ok === 'boolean' ? (body as ForgeRefCardResult) : null;
+  };
 }
 
 export const REF_CARD_CLIENT_FRESH_MS = 30_000;
@@ -38,7 +70,15 @@ const cache = new Map<string, { at: number; promise: Promise<ForgeRefCardResult 
 /** The ref a link names, when a transport is installed to fetch it; else null (no card). */
 export function refCardTarget(href: string | null | undefined): ForgeRef | null {
   if (!transport || !href) return null;
-  return parseForgeRefUrl(href);
+  const ref = parseForgeRefUrl(href);
+  // Bitbucket issues get no card anywhere: the server reads only its pull requests.
+  if (ref) return ref.platform !== 'bitbucket' || (bitbucketCards && ref.kind === 'pull') ? ref : null;
+  return providedRefCardTarget(href);
+}
+
+/** Drop a ref's kept answer, so the next `loadRefCard` asks again (a failure the person fixed since). */
+export function forgetRefCard(ref: ForgeRef): void {
+  cache.delete(forgeRefKey(ref));
 }
 
 /** The card for a link, through the installed transport (shared and cached per ref). */

@@ -55,7 +55,7 @@ ${where}
    Recommended: Yes, send something from what we are working on
    :::
 
-4. Tell me the message is there. Then wait for my answer: call wait_for_reply, or, if your host wakes you with Inbox replies, end your turn.
+4. Tell me the message is there and end your turn. If your host wakes you with Inbox replies, my answer arrives by itself; otherwise call read_thread when I tell you I answered.
 5. If I answer Yes, send one or two short, real messages from what we are working on in this project: an open decision as a question block, and a plan or document you wrote, attached. Never invent work, and never send secrets or .env files. Then resolve the first thread.
 
 Never run uninstall, delete files or stop processes. If a sandbox or a missing permission blocks a command, give me the exact command to run myself.`;

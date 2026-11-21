@@ -160,6 +160,35 @@ describe("naming a thread the person started", () => {
     expect(store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "ok", reply_to: later.id, thread: "Auth refactor" }).naming?.status).toBe("named");
   });
 
+  test("a compose name another open thread has is refused naming that thread, so compose can send there; never an archived one or another project's", () => {
+    const { store, project } = world();
+    const other = store.ensureProject({ name: "other", root: "/work/other" });
+    const taken = (projectId: string, name: string, key: string): Record<string, unknown> | null => {
+      try {
+        store.startPersonThread({ project_id: projectId, body: "x", to: claude, idempotency_key: key, thread_name: name });
+        return null;
+      } catch (error) {
+        if (!(error instanceof InboxError) || error.code !== "thread_name_taken") throw error;
+        return error.details;
+      }
+    };
+    // A thread the person named in compose, and one an agent named.
+    const { message: mine } = store.startPersonThread({ project_id: project.id, body: "first", to: claude, idempotency_key: "a", thread_name: "Launch notes" });
+    const theirs = store.sendMessage({ project_id: project.id, author: agent("ses_b"), body: "B's work", thread: "Auth refactor" });
+
+    // The same name by the name rule (case, spaces) names the thread that has it.
+    expect(taken(project.id, "launch  NOTES", "b")).toMatchObject({ field: "thread_name", thread_id: mine.thread_id });
+    expect(taken(project.id, "auth refactor", "c")).toMatchObject({ thread_id: theirs.message.thread_id });
+
+    // Another project's thread of that name is not in the way: the Send starts its own thread.
+    expect(taken(other.id, "Launch notes", "d")).toBeNull();
+
+    // An archived thread neither holds the name nor is offered.
+    store.resolveThread(mine.thread_id, true);
+    expect(taken(project.id, "Launch notes", "e")).toBeNull();
+    expect(store.personThreadByKey("e")!.thread_id).not.toBe(mine.thread_id);
+  });
+
   test("a named thread takes later sends with its name, and a replay routes the same", () => {
     const { dir, store, project } = world();
     const { message: root } = store.startPersonThread({ project_id: project.id, body: IDEA, to: claude, idempotency_key: "k" });
@@ -274,6 +303,33 @@ describe("compose's suggested name (thread_name_auto)", () => {
     expect(code(() => store.startPersonThread({ project_id: project.id, body: "fourth", to: claude, idempotency_key: "k4", thread_name: "relay BUDGET" }))).toBe("thread_name_taken");
   });
 
+  test("New review's suggestion (thread_name_numbered) is numbered when taken, never dropped; a freed number is reused; a long name is cut to fit", () => {
+    const { store, project } = world();
+    const send = (key: string, name: string) =>
+      store.startPersonThread({ project_id: project.id, body: `review ${key}`, to: claude, idempotency_key: key, thread_name: name, thread_name_auto: true, thread_name_numbered: true }).message;
+    const name = "Review web-app: uncommitted on main";
+    expect(send("r1", name).thread_name).toBe(name);
+    expect(send("r2", name).thread_name).toBe(`${name} (2)`);
+    const third = send("r3", "review WEB-APP: uncommitted on main");
+    expect(third.thread_name).toBe(`review WEB-APP: uncommitted on main (3)`);
+    expect(third.named_by).toMatchObject({ kind: "auto" });
+    // An archived (resolved) thread frees its number.
+    store.resolveThread(third.id, true);
+    expect(send("r4", name).thread_name).toBe(`${name} (3)`);
+    // At the 120-character limit the base is cut so the number still fits.
+    const long = `Review #869: ${"x".repeat(107)}`;
+    expect([...long].length).toBe(120);
+    expect(send("l1", long).thread_name).toBe(long);
+    const numbered = send("l2", long).thread_name!;
+    expect(numbered.endsWith(" (2)")).toBe(true);
+    expect([...numbered].length).toBe(120);
+    // A typed name is still refused, and New message's own suggestion is still dropped.
+    expect(code(() => store.startPersonThread({ project_id: project.id, body: "typed", to: claude, idempotency_key: "t", thread_name: name, thread_name_numbered: true }))).toBe("thread_name_taken");
+    expect(store.startPersonThread({ project_id: project.id, body: "plain", to: claude, idempotency_key: "p", thread_name: name, thread_name_auto: true }).message.thread_name ?? null).toBeNull();
+    // checkPersonThreadName (the trust path's check) agrees: a numbered suggestion never refuses.
+    expect(() => store.checkPersonThreadName({ project_id: project.id, thread_name: name, thread_name_auto: true, thread_name_numbered: true })).not.toThrow();
+  });
+
   test("a retried Send with a suggestion answers the first thread, even once the suggestion was dropped", () => {
     const { store, project } = world();
     store.startPersonThread({ project_id: project.id, body: "first", to: claude, idempotency_key: "k1", thread_name: "Relay budget" });
@@ -298,5 +354,40 @@ describe("a retried reply whose `thread` could not name anything", () => {
     const { message: person } = store.startPersonThread({ project_id: project.id, body: IDEA, to: claude, idempotency_key: "k", thread_name: "Board" });
     const r = store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "ok", reply_to: person.id, idempotency_key: "r2" });
     expect(store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "ok", reply_to: person.id, thread: "Other", idempotency_key: "r2" }).message.id).toBe(r.message.id);
+  });
+});
+
+describe("the title a thread the person started reaches an agent with (agentTitle)", () => {
+  test("its first message: the name the person typed; with no name, or compose's suggestion, the body's first words", () => {
+    const { store, project } = world();
+    const { message: typed } = store.startPersonThread({ project_id: project.id, body: IDEA, to: claude, idempotency_key: "k1", thread_name: "Retry budget" });
+    expect(store.agentTitle(typed, "ses_live")).toBe("Retry budget");
+    const { message: bare } = store.startPersonThread({ project_id: project.id, body: IDEA, to: claude, idempotency_key: "k2" });
+    expect(bare.subject).not.toBeNull();
+    expect(store.agentTitle(bare, "ses_live")).toBe(bare.subject);
+    const { message: auto } = store.startPersonThread({ project_id: project.id, body: IDEA, to: claude, idempotency_key: "k3", thread_name: "Board ideas", thread_name_auto: true });
+    expect(auto.thread_name).toBe("Board ideas");
+    expect(store.agentTitle(auto, "ses_live")).toBe(auto.subject);
+    // An agent's own thread, named by it: the root's subject, as before.
+    const own = store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "status", subject: "Nightly status", thread: "Nightly" }).message;
+    expect(store.agentTitle(own, "ses_a")).toBe("Nightly status");
+  });
+
+  test("a session's first sight of it (a New message to a session new to it, a reply sent on to another session) takes the name too; an unnamed one keeps the subject", () => {
+    const { store, project } = world();
+    const other = { host: "claude-code", session: "ses_other" };
+    for (const [name, title] of [["Retry budget", "Retry budget"], [null, null]] as const) {
+      const { message: root } = store.startPersonThread({ project_id: project.id, body: IDEA, to: claude, idempotency_key: `root-${name}`, ...(name ? { thread_name: name } : {}) });
+      const expected = title ?? root.subject;
+      const answer = store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "On it.", reply_to: root.id }).message;
+      const fresh = store.sendNewMessage(root.id, { body: "Pick this up too.", to: other, idempotency_key: `new-${name}` }).message;
+      expect(store.agentTitle(fresh, "ses_other")).toBe(expected);
+      const sentOn = store.sendReply(answer.id, { words: "Take this over.", to: other, idempotency_key: `on-${name}` }).reply;
+      expect(store.redirectedFrom(sentOn)).not.toBeNull();
+      expect(store.agentTitle(sentOn, "ses_other")).toBe(expected);
+      // A plain reply to the session that has it: the name, or none (`a reply`), as before.
+      const plain = store.sendReply(answer.id, { words: "Thanks.", idempotency_key: `plain-${name}` }).reply;
+      expect(store.agentTitle(plain, "ses_live")).toBe(title);
+    }
   });
 });

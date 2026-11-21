@@ -1,0 +1,51 @@
+# The big plan: 30 rows in its revision schedule (2 added, 26 changed, 2 removed).
+revision: W-01
+scope: core
+title: Split the gateway, move recon to hourly, and retire the SFTP drop and the voice line before the Gulf launch
+add:
+  parts:
+    fraud:
+      in: core
+      name: Fraud screening for cash-on-delivery stops
+      kind: service
+      role: Holds a stop when the payment pattern looks wrong.
+      marks: [ python ]
+    eta:
+      in: core
+      name: ETA
+      kind: service
+  flows:
+    screen: { from: gateway, to: fraud, says: "every cash-on-delivery stop, before dispatch" }
+    etas: { from: dispatch, to: eta, says: ETAs }
+  place:
+    L-101: { fraud: { band: services, after: ledger, span: 3 }, eta: { band: doors, after: gateway } }
+change:
+  web: "Booking moves to a three-step form."
+  ios: "Offline mode for basements and tunnels."
+  android: "Drops Android 8; 4% of subcontractors still run it and will need a loaner phone before the cut-over weekend."
+  kiosk: "Gains a printer."
+  partnerapi: "v2 with idempotency keys."
+  edi: "X12 5010 only."
+  email: "メール注文はOCRから構造化抽出に移行します。"
+  sms: "Short codes per country."
+  rtl: "يدعم التطبيق الآن الوضع الليلي."
+  slackbot: "Moves to Slack workflows."
+  gateway: "Splits into a public door and a partner door, so a partner outage cannot take bookings down with it."
+  auth: "Passkeys for shippers."
+  webhooks: "Signed with Ed25519."
+  scheduler: "Moves from cron to Temporal."
+  dispatch: "Reassigns automatically after 0 minutes of driver silence instead of 5."
+  recon: "Runs every hour instead of nightly."
+  routing: "OR-Toolsを9.10に更新します。"
+  notify: "WhatsApp as a channel."
+  ledger: "Adds a second currency rounding mode."
+  unnamed: "Gets a name."
+  pg: "Postgres 17, logical replication to the warehouse."
+  s3: "Photos expire after 7 years."
+  redis: "Valkey."
+  warehouse: "Iceberg tables."
+  twilio: "Second SMS provider for failover."
+  sfsl: "Contract ends in March."
+remove:
+  sftp: Carriers move to the partner API.
+  voice: Nobody has called in 11 months.

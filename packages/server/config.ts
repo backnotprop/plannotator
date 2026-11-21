@@ -12,9 +12,12 @@ export {
   resolveReviewProgress,
   resolveGitRemoteCheck,
   parseReviewAnalysisConfig,
+  parsePackageChangesConfig,
+  resolvePackageLookup,
   isAgentTerminalSide,
   agentToolSaveFailed,
   agentSwitchConfigToSave,
+  cookieHostConfigWrite,
   type PlannotatorConfig,
   type DiffOptions,
 } from "@plannotator/shared/config";

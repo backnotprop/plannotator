@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   RELEASE_CHECK_RETRY_MS,
+  RELEASE_NOTES_PENDING_RETRY_MS,
   readReleaseNotes,
   readUpdateState,
   writeReleaseNotes,
@@ -267,6 +268,35 @@ describe("a release's images", () => {
     expect(await fetchReleaseImagesFor(deps({ enabled: () => false }))).toEqual({ outcome: "disabled" });
     expect(requests).toEqual([]);
     expect(readUpdateState(dataDir).releaseImagesFetch).toBeUndefined();
+  });
+
+  test("a process that quits mid-fetch (its claim never answered) is retried after 15 minutes, not in a day", async () => {
+    routes["/user-attachments/assets/a"] = () => new Response(png());
+    writeNotes(`![a](${asset("a")})`);
+    const start = Date.now();
+    // The first try claims, then its process goes away before any image answers.
+    void fetchReleaseImagesFor(deps({ now: () => start, fetchImpl: (() => new Promise<never>(() => {})) as unknown as typeof fetch }));
+    expect(readUpdateState(dataDir).releaseImagesFetch?.["0.28.12"]?.attemptedAt).toBe(start);
+    // A concurrent process still waits out the claim (a live fetch takes about 3 min at most)...
+    expect(await fetchReleaseImagesFor(deps({ now: () => start + RELEASE_NOTES_PENDING_RETRY_MS - 1 }))).toEqual({ outcome: "not-due" });
+    expect(requests).toEqual([]);
+    // ...and asks again 15 minutes after it.
+    expect(await fetchReleaseImagesFor(deps({ now: () => start + RELEASE_NOTES_PENDING_RETRY_MS }))).toMatchObject({ outcome: "fetched", stored: [asset("a")] });
+    expect(Object.keys(readReleaseImages("0.28.12", dataDir))).toEqual([asset("a")]);
+  });
+
+  test("an answer clears the in-flight mark: an image added to the notes later waits the answer's day", async () => {
+    routes["/user-attachments/assets/a"] = () => new Response(png());
+    routes["/user-attachments/assets/b"] = () => new Response(png(4, 5));
+    writeNotes(`![a](${asset("a")})`);
+    const start = Date.now();
+    expect(await fetchReleaseImagesFor(deps({ now: () => start }))).toMatchObject({ outcome: "fetched", stored: [asset("a")] });
+    // The release body is edited after publishing: the notes now show a second image.
+    writeNotes(`![a](${asset("a")})\n\n![b](${asset("b")})`);
+    const before = requests.length;
+    expect(await fetchReleaseImagesFor(deps({ now: () => start + RELEASE_NOTES_PENDING_RETRY_MS }))).toEqual({ outcome: "not-due" });
+    expect(requests.length).toBe(before);
+    expect(await fetchReleaseImagesFor(deps({ now: () => start + 24 * 60 * 60 * 1000 }))).toMatchObject({ outcome: "fetched", stored: [asset("b")] });
   });
 
   test("at most 12 per release", async () => {

@@ -1,0 +1,145 @@
+{
+  "about": "Flaky browser tests that CI leaves out (tests/e2e/quarantine.ts). Each failed on several unrelated PRs, trains or main, and passed on a rerun of the same commit. Run them locally with `bun run test:e2e:quarantine`; remove an entry once its fix passes there.",
+  "tests": [
+    {
+      "spec": "inbox-mobile.spec.ts",
+      "describe": "iPhone 15 (WebKit)",
+      "title": "a file opens over the thread, its comments are a sheet, and Back returns to the thread",
+      "why": "WebKit only (Pixel 7 passes): right after the thread opens, the count of running ib-push slide animations on the pane is not 1 (line 442, `expect(await pane.evaluate(slides)).toBe(1)`).",
+      "firstSeen": "2026-11-04",
+      "evidence": [
+        41748882370,
+        41830824147,
+        42031486637,
+        42089368923,
+        42122898360,
+        42137072382,
+        42151231524,
+        42154700500,
+        42165849664,
+        42168321325,
+        42223127512
+      ]
+    },
+    {
+      "spec": "inbox-show-me.spec.ts",
+      "title": "a busy agent: the box offers the Ask window's choice, never says it draws",
+      "why": "After Send with the fake agent set busy, the Show me box never turns `busy` (15 s then, 20 s now: `toHaveAttribute('data-show-me-box', 'busy')`).",
+      "firstSeen": "2026-11-05",
+      "evidence": [
+        42004602635,
+        42122893618,
+        42137072382,
+        42150235389,
+        42156380448,
+        42176139859,
+        42186760384,
+        42223127512
+      ]
+    },
+    {
+      "spec": "inbox-launch-scratch.spec.ts",
+      "title": "Delete removes the scratch folder and runs claude purge for it only",
+      "why": "The second Delete of the same launch must call no CLI, but the fake has one call more than before it (line 289, `expect(fake.calls()).toHaveLength(callsBefore)`: 12, expected 11).",
+      "firstSeen": "2026-11-05",
+      "evidence": [
+        42038876752,
+        42075358318,
+        42082636323,
+        42087760631,
+        42142816538,
+        42168116756,
+        42208402611,
+        42223153321
+      ]
+    },
+    {
+      "spec": "inbox-pull-requests.spec.ts",
+      "title": "Review layer by layer: the layer's own diff, Next layer, Whole stack from the lowest open layer, and Approve into the agent's thread",
+      "why": "The migration's line 5 has no box yet when its height is measured (line 1009, `boundingBox()` returns null: \"Cannot read properties of null (reading 'y')\").",
+      "firstSeen": "2026-11-05",
+      "evidence": [
+        42101469159,
+        42131196700,
+        42160233880,
+        42178736747,
+        42186346120,
+        42186760384,
+        42209719213
+      ],
+      "dependents": [
+        {
+          "title": "Reply at the stack's foot goes into the agent's thread",
+          "why": "It replies on the stack page the layer test leaves open, after the approval it records (`verdictId`)."
+        }
+      ]
+    },
+    {
+      "spec": "inbox-seen-on-sight.spec.ts",
+      "title": "desktop, read with another app in front: the reply on screen leaves the pill, and scrolling up never brings it back",
+      "why": "With another app in front, the new-messages pill does not go off for a reply already in view (line 305, `toHaveAttribute('data-off', '')`).",
+      "firstSeen": "2026-11-06",
+      "evidence": [
+        42151377743,
+        42155908680,
+        42167679727,
+        42170470187,
+        42193885328
+      ]
+    },
+    {
+      "spec": "inbox-code-review.spec.ts",
+      "title": "the top bar holds what the rail held: chapters, the count, files, Overview, and the diff controls, by mouse and by keyboard",
+      "why": "After Enter on the third chapter in the jump menu, the top bar still reads \"1 of 3\" where \"3 of 3\" is expected (line 698, `expect(await jump.textContent()).toBe(place)`).",
+      "firstSeen": "2026-11-05",
+      "evidence": [
+        42119502727,
+        42122455103,
+        42133516139
+      ]
+    },
+    {
+      "spec": "inbox-review-jumps.spec.ts",
+      "title": "a jump to a file nearby lands exactly",
+      "why": "After the first jump, to file 100 from the changed-files menu, the file settles 83 px above the top of the reader instead of 16 px below it (line 228, `expect(await settledPlace(page, body, fixture.paths[100])).toBe(PLACE)`: -83, expected 16).",
+      "firstSeen": "2026-11-06",
+      "evidence": [
+        42255709255,
+        42272056744,
+        42307730886
+      ]
+    },
+    {
+      "spec": "inbox-guides.spec.ts",
+      "title": "a thread's guided review with Code review off: arrows open a long file in place, the page scrolls with no box limit, the file header sticks, and a comment on an opened line saves",
+      "why": "The middle scroll check misses by a few hundred px (line 689, `expect(await scrollTop()).toBe(middle)`, e.g. 10932 vs 10512), and the runner was then killed (exit 137) on one run. Failed on three unrelated PRs (#2721 shape kit contrast, #2842 Shape run player, #2847 checklist line) that do not touch guided review.",
+      "firstSeen": "2026-11-07",
+      "evidence": [
+        42346233742,
+        42347213074,
+        42348560192
+      ]
+    },
+    {
+      "spec": "inbox-list-view.spec.ts",
+      "title": "grouped: the same hover Mark read keeps the row in its group, not bold, and brings no news in",
+      "why": "After the hover Mark read is clicked, the row in New stays bold (line 333, `expect(row).not.toHaveClass(/\\bib-u\\b/)`: still \"ib-row ib-u\" after 15 s). Failed on three unrelated PRs (#2824 reply box, #2690 Reviews links, #2822 close keeps the draft) and passed on #2721's run of the same main.",
+      "firstSeen": "2026-11-07",
+      "evidence": [
+        42350363799,
+        42350656727,
+        42357501348
+      ],
+      "dependents": [
+        {
+          "title": "grouped: with a read waiting in place, a snooze made elsewhere moves only its own row (review P1)",
+          "why": "It needs the Grouped view, which the left-out test chooses; the test before it leaves List on."
+        },
+        {
+          "title": "grouped: an Archive waits in place, faded; after the list settles without it, its Undo brings the row back (review N1)",
+          "why": "It needs the Grouped view too, and follows the snooze test."
+        }
+      ]
+    }
+  ]
+}

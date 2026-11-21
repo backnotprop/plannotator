@@ -17,18 +17,282 @@ agent-run `plannotator` commands (below). With the knob off `session.start` stop
 anything (no `$.command.register` or `$.tool.register`, no `$.env.set`, no
 `$.store`, no process) and every other hook passes straight through with
 `next(e)`, so the classic PermissionRequest hook and the `/plannotator-*`
-skills run as they do without mods. See the env table row.
+skills run as they do without mods. (One gap: a `/rename` or `/clear` that beats
+`session.start` to its decision still records the name; see "The session's name".)
+See the env table row.
+
+**Sessions the Inbox launched** carry a second PermissionRequest hook in their
+`--settings` file (`plannotator inbox permission-hook`, `inbox-launch.md`,
+"Permission prompts"). It prints nothing for ExitPlanMode, so plan review stays
+with the mod or the classic hook exactly as above.
 
 **Inert without mods.** Checked live: Claude Code 2.1.150 (no hooks modules)
 validates and loads the plugin with the `modules` key, ignores it, and runs the
 classic PermissionRequest command hook (the blocking review) exactly as before;
 2.1.288 with modules on runs the mod and never reaches that command hook. The mod
-also stands down by itself (every hook passes through) in `-p` / SDK sessions
-(`isInteractive` false: a later plugin turn would have no session to land in)
-and where `/bin/sh` is missing (Windows), leaving the classic hook and the
-`/plannotator-*` skills in charge. A mods-capable Claude Code whose rollout
-switch is off could not be reproduced locally; the engine only inserts modules
-into the hook chain when they load, so it should behave like 2.1.150.
+stands down by itself (every hook passes through) only for Plannotator's own Ask
+AI child (`PLANNOTATOR_ASK_AI_CHILD=1`: Plannotator's agent must never get
+Plannotator's tools or reach the person's Inbox), where the user turned it off
+(the knob, "Off switch" below), and where it finds no shell for its scripts
+("The shell" below), leaving the classic hook and the `/plannotator-*` skills in
+charge. A mods-capable Claude Code whose rollout switch is off could not be
+reproduced locally; the engine only inserts modules into the hook chain when
+they load, so it should behave like 2.1.150.
+
+**Every session, interactive or not.** The mod runs in every Claude Code
+session; a feature stays classic only where it cannot work. `resolveAllowed`
+sorts the session (`sessionKindOf`, `SESSION_KIND_FEATURES` in `enabled.ts`)
+and each kind gets what works there:
+
+| Session | `plannotator_inbox` | Reply wake | `plannotator` tool, commands, Bash take-over | Plan review |
+| --- | --- | --- | --- | --- |
+| `terminal` (interactive) | yes | yes | yes | the mod's |
+| `panel` (VS Code chat panel) | yes | yes | yes | the mod's |
+| `panel` (Orca chat) | yes | yes | yes | Orca's own plan card |
+| `t3` (a T3 Code thread) | yes, as the thread | yes, as the thread | yes | T3's own Plan mode |
+| `headless` (`claude -p`, any other SDK app) | yes | no | no: the classic CLI | the classic hook |
+
+The one real barrier is that a run without a person (`claude -p`, an SDK
+script) ends when its turn ends, and at `session.start` the mod cannot tell a
+one-shot run from a long-lived host. So nothing a headless session is promised
+for later may depend on its process: its Inbox sends carry no wake mark (the
+Inbox tells the agent to read the thread later), no reminder is added, the
+bridge is never polled, and reviews, annotations and plans keep the classic
+flows, which wait for the decision inside the run (the plan hook is bounded
+by its 4-day `timeout` in `hooks.json`). What changes for a `-p` user: the
+model has `plannotator_inbox` with no MCP entry to add; nothing else.
+
+**The VS Code extension's chat panel (#3111).** Claude Code's VS Code
+extension hosts the CLI through the Agent SDK, so its sessions raise
+`session.start` with `isInteractive: false` and `surface: null`. The panel has
+a person reading it and shows a plugin's turn ("Prompt from the <plugin>
+plugin", Claude Code's VS Code docs), so it is its own kind
+(`isPanelSession` in `enabled.ts`; `panel` on `Allowed`):
+`CLAUDE_CODE_ENTRYPOINT` is exactly `claude-vscode` (the extension sets it in
+the environment it spawns the CLI with; read in the 2.1.322 extension), and
+none of `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION` or a `PLANNOTATOR_SESSION_TAG`
+naming another session is set. The entrypoint is inherited (Claude Code
+rewrites only `cli`), so a `claude -p` started from inside a panel session
+(Claude's Bash, or an agent job of a CLI the mod started) would read
+`claude-vscode` too; the extension deletes `CLAUDECODE` and
+`CLAUDE_CODE_CHILD_SESSION` from the panel's own environment, and Claude Code
+sets them in every process it starts, so either one, or the mod's tag for
+another session, makes such a run headless. The tag naming this session is the
+process's own (a module reload raises `session.start` again). In a panel
+session the mod runs as in the terminal (the tools, the wake through
+`$.prompt.submit`, the non-blocking flows, Ask this session, auto reload). The
+person's Enter in the panel reaches Claude Code as the SDK host's own turn,
+`origin.kind` `sdk`, so there it reads as `composer` (`promptOriginKind`): a
+typed prompt takes over an Ask question's turn and pulls the leases to this
+process, as in the terminal. What the panel draws differently: status lines
+and toasts show above the prompt box; `$.prompt.suggest` shows nothing (the
+review "address the comments" suggestion is not seen); `$.prompt.read` answers
+empty (auto reload's "a prompt is being typed" gate sees no draft there); the
+`CommandOutput` render hook on `/reload-plugins` does not run (Terminal and
+Desktop only). The `AbovePrompt` band is not built anywhere (see Plan review),
+and the panel has no `AbovePrompt` site either. A wake the host refuses
+resolves `{ drop }` (after Stop, "the host has ended its input", a
+`--max-turns` limit) and is held as after a Stop in the terminal: the reply
+stays pending, no delivery is tried until the person's next prompt or a
+main-loop turn start, and the window says "Stopped". Not seen yet in a real
+panel.
+
+**The panel hosts.** `isPanelEntrypoint` reads one table, `PANEL_HOSTS` in
+`enabled.ts`: each entrypoint a panel host gives its sessions, with whether
+the mod reviews ExitPlanMode there. Every panel host gets the same checks
+(the nested-run variables, a tag naming another session) and everything
+above except, where its flag says the host draws its own plan card, plan
+review (`panelHostOwnsPlanMode`, `hostPlanMode` on `Allowed`).
+
+**Orca chat (#3325).** Orca uses the same panel path with
+`CLAUDE_CODE_ENTRYPOINT=orca`, but draws its own "Review proposed plan" card
+(Approve plan / Keep planning) for ExitPlanMode: with the mod's plan review on
+as well, a real run opened both, and approving Orca's card left Plannotator's
+plan server running with its tab open. So in Orca the mod reviews no plan: its
+`tool.call` and `classic.PermissionRequest` hooks pass ExitPlanMode on. Once
+the mod passes it on, Claude Code runs the plugin's classic PermissionRequest
+command hook (`plannotator`, started by the session's `claude` itself; seen in
+a real Orca 1.4.259 run), as it also does when a guard plugin
+(`cc-plugin-sec-default`) sends `classic.*` past the mod. So at `session.start`,
+before any request of its own, the mod sets `PLANNOTATOR_PLAN_REVIEW=0` in the
+process's environment (`HOST_PLAN_CARD_ENV`, the existing switch, #2299) and
+`PLANNOTATOR_PLAN_REVIEW_SET_BY=claude-code:<session id>` beside it
+(`HOST_PLAN_CARD_MARKER`; it follows the session id after `/clear`). The hook
+process inherits both and exits 0 with no decision, and Orca's card decides.
+The switch is set for every process with Orca's entrypoint, also one the panel
+guard sorted `headless` (an Orca started from a terminal inside a
+Plannotator-enabled Claude Code session inherits that session's
+`PLANNOTATOR_SESSION_TAG`, so its sessions are `headless`, with the Inbox tool
+alone, but its plans still go to Orca's card). It is never set over the
+person's own explicit on value (`1`, `true`, `on`), and the person's own off
+value stays unmarked (`planSwitchAction`). Binaries 0.28.52 and later honor the
+switch, so no binary change is needed; with an older binary (see "Version
+skew") Orca shows both plan UIs, as before this change. Orca also shows both
+when the switch never reaches the hook: the mod off, a Claude Code without
+hooks modules (before 2.1.287), or a managed-settings `env` that names
+`PLANNOTATOR_PLAN_REVIEW` (the mod's `env.set` is then refused).
+
+Everything the session starts inherits both variables: a `claude -p` from
+Claude's Bash (it has no dialog, so its own permissions decide ExitPlanMode,
+and with none Claude Code denies it), but also a review server, the Inbox, an
+"Open in" terminal or a tmux server, from which a person may later start a
+terminal Claude Code. Two guards keep that session's plan review: its mod
+treats a `0` whose marker names another session as unset and clears both
+(`clear` in `planSwitchAction`), and a binary from this change on honors a
+marked `0` only in the hook of the session that set it (`planReviewEnvFor`)
+and drops both from its own environment at startup, so nothing it starts
+inherits them (`scrubModSessionEnv`, `apps/hook/server/mod-session-env.ts`).
+A person's own `0` has no marker and is always honored. With an older binary
+and the mod off in that later session, the inherited `0` still turns its plan
+review off.
+
+Seen in a real Orca 1.4.259 run: Orca's card shows and waits, no Plannotator
+plan server starts, and the debug log says the switch was set and that both
+ExitPlanMode and its permission request were passed on.
+
+**A T3 Code thread.** T3 Code (pingdotgg/t3code) runs a thread's Claude through
+the Agent SDK with no `settingSources`, so the user's plugins, this one
+included, load as in the terminal. From T3 0.1.7 its environment carries
+`CLAUDE_CODE_ENTRYPOINT=t3-code` (`mergeClaudeProcessEnvironment`, unless the
+person's settings override it) beside the thread's `T3CODE_THREAD_ID`, and T3
+deletes `CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION` from it, as the VS Code
+extension does. T3 0.1.5 and 0.1.6 do neither, so their threads are
+`headless` (sends without the wake mark, nothing polls): 0.1.7 is the floor.
+`t3ThreadOf` in `enabled.ts` reads a thread when the entrypoint is exactly
+`t3-code`, the thread id is one T3 gives (`isT3ThreadId`, core's rule), no
+nested-run variable is set, and no `t3:` tag names another thread. A tag of
+another host (`claude-code:<id>`, with its `PLANNOTATOR_SESSION_PROJECT`) is
+what T3 inherited from the shell it was started in, a terminal of a Claude
+Code session, and every Claude it runs inherits it: it never decides, and the
+shim (`inboxHostSessionFromEnv`) gives the thread precedence over it wherever
+the entrypoint is `t3-code` and `CLAUDE_CODE_CHILD_SESSION` is unset.
+
+*Which process is the thread.* T3's own short runs (a title, a capability
+probe) inherit the same environment, the thread id included when T3's own
+environment holds one, and so does a `claude -p` that drops `CLAUDECODE`. So a
+`t3` session is only a candidate until it shows T3's own MCP server: T3 adds
+`t3-code` through the Agent SDK options of a thread's run alone, it reaches
+the session a few seconds after the start, and no variable carries it.
+`t3ThreadOwnHere` (`register.ts`, `InboxLinkOptions.owner`) looks for an
+`mcp__t3-code__` tool in `$.tool.list()` (`isT3ThreadOwnTools`), else for a
+`t3-code` server among `$.session.usage({ breakdown: 'summary' })`'s
+`mcpTools`, which lists a tool behind ToolSearch that was not searched for
+yet too (the list's own docs do not say whether it holds those). The link asks
+at start, every 2 s, and at each touch and send, for 3 minutes from the first
+ask or the last touch (`INBOX_OWNER_WAIT_MS`), then every 30 s for as long as
+it lives; each ask is bounded at 2 s, so a hang holds neither a tick nor a
+call. A yes stays for the process. Where `$.tool.list` is missing or throws,
+the engine cannot tell, and the link runs as it did before the check (owner
+at once, its creation a touch), so on such an engine a title run may take the
+lease again. With `PLANNOTATOR_MOD_DEBUG` the debug log says
+`inbox: t3 thread confirmed after <ms> ms via <tools | mcp server | no $.tool.list here …>`
+or, at the end of the 3 minutes, `inbox: t3 thread not confirmed: <why>`
+(no id). Until a yes the link writes no lease, never polls the bridge, claims
+or delivers nothing, and a touch (the person's `sdk` prompt included) only
+notes its time. A `plannotator_inbox` send from it first asks again for up to
+8 s, waiting in `$.process.run` (the call takes that much longer at most),
+and goes with the wake mark either way, as the thread's: the agent reads the
+words a confirmed thread gets (`INBOX_REPLY_ARRIVES_TEXT` and
+`INBOX_REPLY_LOOK_TEXT`, or `INBOX_REPLY_T3_WHILE_RUNNING_TEXT` where no T3
+wake reaches the thread). A run that is not the thread is told too much
+there; a `claude -p` from the thread's Bash is headless and reads
+`INBOX_REPLY_READ_LATER_TEXT`. Once a yes, its creation is no touch: it takes the
+thread's lease (`claude-code-mod/<thread>/inbox/watcher.json`, renewed every
+5 s, stale after 20 s, released at `session.end`) only when it is free or
+stale, or when the person acts in it (a send confirmed while it waits is that
+touch). A T3 restart resumes the same Claude session under a new process,
+which shows `t3-code` again and takes the lease once the old one released it
+or went stale. While no process shows it (a T3 that adds no such server),
+nothing polls for the thread, so the person's reply waits in the Inbox under
+"Waiting for T3 Code. …" (`inboxT3WaitLine`) or goes in through the T3 wake;
+nothing says it was delivered. A server the person named `t3-code` in their
+own Claude Code settings would show in T3's title runs too and defeat the
+check.
+
+The mod then works as the thread, not as the Claude session:
+`plannotator_inbox` files as host `t3`, the thread id and "T3 Code"
+(`inboxT3Agent`), the tag is `t3:<thread id>` (so the shim and every
+`plannotator inbox call` the thread runs are the same agent,
+`inboxHostSessionFromEnv`), the wake polls the bridge as host `t3` and the
+thread, and its files live under the thread id with every character a file
+name cannot hold read `_` (`inboxSessionDirName`; the Inbox's
+`inboxModClaimDir` reads the same name). `PLANNOTATOR_SESSION_PROJECT` is left
+unset for a thread id holding `:` (its parser splits on the first two colons);
+the tag still names the thread. The reply goes in through `$.prompt.submit`,
+which T3 takes as a turn Claude started by itself (its wake continuation, as
+for a Monitor event), so a T3 thread needs no `plannotator t3 login` while T3
+keeps its Claude. One owner per reply (`t3ModDelivers` in
+`packages/server/inbox.ts`): while the thread polls, and for an item the mod's
+claim folder holds, the T3 wake leaves the reply alone; once the poll is stale
+(T3 releases an idle Claude after 30 minutes, later while it has background
+work), the T3 wake sends what still waits, under a grant, and the bridge poll
+never hands the mod what the T3 wake handed for a send in flight. ExitPlanMode
+passes on to T3's own Plan mode (the mod passes it on, so the plugin's
+classic command hook runs there too; Orca's switch is not set for T3).
+Commands and the Bash take-over are the mod's,
+and the opt-in T3 Bash hook (`prepareT3Hook`, `claudeModServesThread`) stands
+aside in a thread whose tag the mod set. Not seen yet in a real T3: how T3
+draws a plugin-started turn. A review decision after T3 released the Claude is
+restored by the Claude session id, which T3 resumes under the same thread.
+
+Tests: `session-kind.test.ts` (the thread rule against core's for every id
+form, the allow/deny table, the identity against the shim's, the claim folder
+against the Inbox's, the feature table, the panel hosts and which one draws
+its own plan card), `register-vscode.test.ts` (the real
+registered hooks on a fake `$`: every panel host and a T3 thread register both tools,
+poll as their session or thread and deliver once; each refusal is held and
+goes in once after the person's prompt; the mod's plan review opens in VS Code,
+and in Orca it does not, while Orca's code review
+stays the mod's; every process with Orca's entrypoint leaves a marked
+`PLANNOTATOR_PLAN_REVIEW=0` in its environment and no other session does,
+the person's own value is never overwritten, and a terminal or panel
+session that inherited another session's marked `0` reviews plans and
+clears it; the real classic plan hook, run as a process in the environment
+the mod left, exits 0 with no decision for Orca, opens a review in another
+session's hook with that environment, and opens one for the VS Code panel;
+`mod-session-env.test.ts` (the CLI drops the marked `0` and keeps it for its
+own session's hook only); the `sdk` origin pulls the lease, a
+task notification does not; each headless session gets `plannotator_inbox`
+alone, filed as its session, without the wake mark, no poll, the classic
+flows; an Ask AI child and the knob off stay inert; a thread under an
+inherited `claude-code:` tag files as the thread; a run without the `t3-code`
+tools never takes the lease while the thread delivers once; tools that never
+show leave no lease and no poll, and are asked again every 30 s; a first send
+before the tools waits for them and goes marked; late tools, a confirmation
+after the 3 minutes (by a touch or the slow ask), a server behind ToolSearch,
+a restart, a `session.end` and two live processes each deliver once; an
+engine without `$.tool.list` runs as before; a hung list holds nothing; the
+panel and the headless sessions never ask for the tool list),
+`packages/server/inbox-t3-wake.test.ts` (one owner per reply) and engine-harness
+cases in `apps/hook/tests/register.test.ts`.
+
+**A prompt waiting in the terminal (Inbox).** `TerminalPrompts`
+(`terminal-prompts.ts`) learns when the person must answer where the session
+runs only from hooks the mod has anyway, and never changes an answer: no
+wildcard hook and no hook on another tool's permission (the engine refuses a
+second matcherless `tool.*` hook, and the guard test in `register.test.ts`
+allows one `tool.*` hook, the run hook, matched on Bash and the mod's tool). A
+question: the `tool.call` hook sees an `AskUserQuestion` call (its dialog is
+inside the call) until the call settles, on every engine. A permission: Bash
+only, where the Bash-matched `tool.check` hook reads a verdict of `ask`, until
+the run hook sees that call's `tool.run` or the call settles. It is told only in
+a process that has seen `tool.run` fire (Claude Code 2.1.326+, and not where a
+guard sends `tool.run` past the user tier): elsewhere an approved call's run is
+unseen and would read as "asking" for its whole run, so no permission is told
+there at all. Another tool's permission prompt is never seen, so never told. A
+prompt also ends at that loop's next `turn.step` or at the turn's end. An `ask`
+is told only once it has held 1.5 s (`TERMINAL_PROMPT_SETTLE_MS`), so auto mode
+or a hook that answers at once never flashes (whether auto mode's classifier can
+take longer after an `ask` is not yet checked live). Never noted: a Bash command
+the mod takes over (`answeredByUs`). The InboxLink's `blocked` option sends
+`blocked: { kind }` in a `state` event on change and on every poll, with
+`blocked_at` (when its word last changed), after the registry check (nothing
+while no Inbox has run). Only the kind leaves the session. With the knob off the
+mod registers nothing and none of this runs. The Inbox side: "Status marks for
+every agent" in
+[inbox-notifications-and-agents.md](inbox-notifications-and-agents.md). Tests:
+`terminal-prompts.test.ts`, the guard in `register.test.ts`, and the engine
+matrix's case in `tests/register.test.ts`.
 
 **Files.** `register.ts` holds every `$` call (`claude plugin validate` follows
 `$` only through top-level functions and inline hooks) and builds a `Host` of
@@ -36,9 +300,53 @@ closures; `controller.ts` (`PlannotatorMod`) is the per-session state machine;
 `launch.ts` (detached launcher, launch-directory layout, command table, copy),
 `delivery.ts` (turn vs log, 12 KB inline limit), `plan.ts` (ExitPlanMode
 decisions and deny copy), `turns.ts` and `bridge.ts` (Ask this session),
-`shell-words.ts` (argument splitting), `tool.ts` (the `plannotator` tool contract, a copy of `packages/shared/plannotator-tool.ts`), `take-over.ts` (agent-run Bash `plannotator` commands answered through the tool), `inbox.ts` and `inbox-contract.ts` (the Plannotator Inbox connection, below; the contract a copy of `packages/shared/inbox/connection.ts`). The mod is self-contained: a plugin
+`shell-words.ts` (argument splitting), `tool.ts` (the `plannotator` tool contract, a copy of `packages/shared/plannotator-tool.ts`), `take-over.ts` (agent-run Bash `plannotator` commands answered through the tool), `inbox.ts` and `inbox-contract.ts` (the Plannotator Inbox connection, below; the contract a copy of `packages/shared/inbox/connection.ts`), `shell.ts` (the shell the scripts run in, below) and `paths.ts` (absolute paths, Windows' included). The mod is self-contained: a plugin
 installed from the marketplace is only `apps/hook/`, and a hooks module may
 import only its own files.
+
+**The shell.** `$.process.run` runs an argv with no shell, so each file
+operation the engine has no call for (the `mkdir` claims, `rm`, the debug log's
+append, `kill`, the detached launch) is a short script. Every argv builder
+names its script (`ShellScriptId`) and gives its POSIX text, and `shellArgv`
+turns that into the argv of the shell `resolveShell` picked at `session.start`:
+`/bin/sh` on macOS and Linux. Windows has no `/bin/sh`: there it is Git Bash
+where it is installed (`git-bash.ts`), else Windows PowerShell 5.1
+(`powershell.ts`), which every Windows 10 and 11 has. `PLANNOTATOR_MOD_SHELL`
+(`sh` or `powershell`) holds Windows to one of the two; `sh` without Git Bash
+leaves the mod inert. Before using a Windows shell, `pickShell` runs one probe
+script in it; a shell that fails (PowerShell under Constrained Language Mode, or
+a security product that blocks a hidden `-EncodedCommand` run) gives way to the
+next, and none leaves the mod off. The first process on a session records its
+shell in `claude-code-mod/<session>/shell`, and every later process on that
+session uses it over its own `PLANNOTATOR_MOD_SHELL`: the two shells claim a
+decision differently and record different pids, so one session never mixes
+them. macOS and Linux skip the probe and the pin. Git Bash is the standard name of the bash that ships with
+Git for Windows, and Claude Code uses the same name and the same bash for its
+own shell commands. The mod finds it through `CLAUDE_CODE_GIT_BASH_PATH`
+(Claude Code's setting), then next to a `git.exe` on `PATH`, then under
+`%PROGRAMFILES%` and `%LOCALAPPDATA%\Programs`, and finds PowerShell under
+`%SYSTEMROOT%` or `%WINDIR%`; no drive or folder is fixed. Git Bash runs the
+POSIX scripts as they are except where MSYS reports something differently: its `ps` has no `-o`, so
+the stop check reads the pid's command line from `/proc`, and `pwd` prints
+`/c/…`, so the scripts that print a folder use `pwd -W`. In PowerShell each
+script has a twin with the same arguments, output and exit codes; it travels as
+`-EncodedCommand` with each argument written in as base64 (PowerShell also ends
+a string at `‘ ’ ‚ ‛`, so escaping `'` would not be enough), prints lines ending in `\n` alone, and reads stdin as bytes (with no console a
+process decodes stdin in the system code page). Its launch hands the CLI to a
+hidden watcher process that writes the CLI's (Windows) pid and exit code; the
+watcher looks a bare CLI name up as an `.exe` on `PATH` only, since
+`Process.Start` would search the session's folder first and run a
+`plannotator.exe` committed to a repository. Its transcript peek prints no file id (NTFS's needs a compiled call per read).
+Each bash call takes about 15 ms and each PowerShell call about 200 ms. The variables `resolveShell` reads are read in `register.ts`
+(`shellEnvOf`), each named as a literal: Claude Code refuses to load a hooks
+module whose `$.env.get` takes anything else (`env-get-literal.test.ts`).
+Every check for an absolute path goes through `isAbsolutePath`, since Claude
+Code gives a Windows session its folders as `C:\…`, and the home folder is
+`USERPROFILE` on Windows (as the CLI's `homedir()` reads it), else `HOME`. Off
+Windows a review's target and name keep a backslash as an ordinary character
+in a file name. The
+`claude-code-mod-windows` job of `windows.yml` runs the mod's Windows tests
+(paths, Git Bash, the shell pick, every PowerShell twin, the compaction hook).
 
 **Detached launch.** `$.process.run` is one-shot (10 minutes at most) and a hook
 has a 10 s budget of its own time, so the mod runs a tiny `/bin/sh` wrapper
@@ -66,7 +374,33 @@ session is resumed (re-adopting them across a fork is a follow-up).
 `/clear` or an in-process resume (the process goes on under another session
 id), so `session.end` disposes the instance (timer and bridges stop; nothing is
 delivered into the next session) and the next hook that needs the mod makes a
-new one for the current id, restoring that session's open reviews. The launch
+new one for the current id, restoring that session's open reviews. Only an end
+of the session the instance serves disposes it (`disposesOnSessionEnd`,
+`self-heal.ts`): no `agentId`, and a `sessionId` that is the instance's, the
+one the process is in now (an instance still serving an older id is stale), or
+none (an older engine). The event decides first, so the dispose (the lease
+release, the hand-off writes) goes out inside the hook's time bound; the
+process's id is asked only when the event names another session. `/clear`
+(whose `session.end` names the id it leaves) and a quit still dispose. The
+rule is defensive: on 2.1.318 `session.end` names this session and carries no
+`agentId`. Seen live: an Inbox reply to an idle session did not go in until the
+person typed, and a disposed instance is one way that happens (nothing polls
+the Inbox). As a safety net, a 30 s `$.clock.every` (`MOD_HEAL_EVERY_MS`),
+armed at the first `session.start` the mod runs in (after the commands and
+the tool, never holding them), makes a missing or disposed instance again
+(through `currentMod`, so never two; one disposed by this session's own
+`session.end` is left for one whole period, since `/clear` moves the id just
+after it). That instance is `healed`: its Inbox link starts without a touch,
+so a live lease another process holds stands. A live instance's Inbox tick
+that stopped firing (the engine ends an interval at a refused period) is
+armed again at the next look, 30 to 60 s after it stopped
+(`InboxLink.ensureTicking`). The self-heal's own timer, silent for two
+periods, is armed again at the next `turn.complete` (one timer, the old one
+cancelled). With `PLANNOTATOR_MOD_DEBUG=1` each `session.end` logs its
+`sessionId`, `agentId`, reason and whether it disposed, a rebuild or re-arm
+logs a `self-heal:` line, and each reason a waiting reply is not submitted
+(`inbox: not delivering <id>: <reason>`, at most once a minute per reason)
+is logged. The launch
 directory is created owner-only (`umask 077`, `chmod 700`) before `stdin` is
 written; once a decision is delivered its files are removed (`cleanupArgv`),
 except `feedback.md`, which Claude reads afterwards. A launch whose server
@@ -268,6 +602,12 @@ released 0.27.25 and 0.27.10 binaries as processes:
   approved-with-notes prompt as "Approved with notes" (a user-customized
   approved prompt cannot be told apart and arrives as feedback). Close and an
   empty Done log only.
+- Data dir (#2305): a mod with the stray-folder rule (`resolveDataDir` in
+  `launch.ts`) and a CLI from before it can disagree only on a machine where a
+  stray `~/.plannotator` sits beside an XDG folder with data (the mod picks the
+  XDG folder, the old CLI the stray one). It heals itself on the old CLI's first
+  server run: that run writes `sessions/` into the stray folder, which then
+  holds data, so the mod picks it too from its next session start.
 - Review platform flag (0.28.0 to 0.28.3 CLIs): those CLIs wrote `platform:
   true, noop: true` for ANY request-changes review with zero code annotations,
   so feedback made only of PR description, PR comment or editor comments would
@@ -288,6 +628,12 @@ released 0.27.25 and 0.27.10 binaries as processes:
   mod's bridge stops, and Ask AI offers only its providers.
 - A CLI before 0.19.24 writes no ready file: commands wait their full 45 s /
   15 s and say "Starting…", and decisions still arrive at exit.
+- Inbox reply title (#2464): the title is the Inbox's call, not the mod's. A
+  newer Inbox sends `subject: null` on a plain reply in a thread with no name,
+  which every mod since the first Inbox connection words `a reply` (its notices
+  `(a thread)`); an older Inbox sends the subject, and a newer mod prints it as
+  before. Either way the reply is delivered. See "The title on the wake's first
+  line" in `inbox-notifications-and-agents.md`.
 - The tool's `list` and `close` (contract v2): a CLI without
   `/api/host/status` lists its reviews with `unsent: unknown`. `close` counts as
   closed ONLY a JSON answer with a numeric `unsentAnnotations`
@@ -320,7 +666,9 @@ the user's core skills hold the names (Claude Code refuses
 answers the skill's command itself, so the skill's blocking bang line never
 runs; a name nobody holds is registered (`immediate: true`). Arguments are split
 like the skill's shell line (`splitShellWords`: quotes and backslashes, no
-expansion) and passed to the same CLI parsers (`review`, `annotate`; `last`
+expansion; on Windows a backslash and a single quote are plain characters and
+only double quotes group, so `C:\Users\me\O'Brien\plan.md` stays one word, the
+same argv under Git Bash and PowerShell) and passed to the same CLI parsers (`review`, `annotate`; `last`
 runs `annotate-last --stdin`, see the next paragraph). The command returns
 "Opened <subject> in Plannotator · <url>" once the ready file appears (up to
 45 s for review, 15 s otherwise), or the CLI's own startup error. Under the mod
@@ -365,11 +713,11 @@ classic path, which falls back to the pre-compaction file.
 blocks and gives Ask AI a separate AI. The mod registers a real tool instead:
 `$.tool.register({ name: "plannotator", description, inputSchema })` at
 `session.start`, right after the commands, and only when the mod is on (the
-knob not turned off, an interactive session, `/bin/sh` present) and the agent tool
+knob not turned off, any session but a headless one ("Every session, interactive or not"), a shell found) and the agent tool
 switch is on (on by default here; `PLANNOTATOR_AGENT_TOOL=0` / `{ "agentTool": false }` turn it off; `resolveAgentToolEnabled`
 in `hooks/mod/enabled.ts`, read with the mod switch at the first `session.start`
-of the process, never re-read); with either switch off, in `-p`/SDK runs and on
-Windows nothing is registered and Claude keeps the CLI through the `plannotator`
+of the process, never re-read); with either switch off, in a headless session (`claude -p`, an SDK app) and
+where no shell is found nothing is registered and Claude keeps the CLI through the `plannotator`
 skill. With only the agent tool off, the rest of the mod runs: the slash
 commands, non-blocking ExitPlanMode, Ask this session, and the Bash take-over
 below, which stays because it adds nothing to Claude's context (it changes only
@@ -518,19 +866,114 @@ subcommands, every other flag (`--require-approval`, `--result-file`, `--hook`,
 flags, several targets that are not all file paths (prose, which the CLI's
 tolerant resolution reads) or several review targets, environment prefixes, and any compound command
 (`cd x && plannotator ...`, pipes, redirects, substitutions), so scripted
-strict gates keep the real CLI and its exit codes. With the mod off, in `-p`/SDK
-runs and on Windows nothing is taken over. The CLI the mod launches runs in the
+strict gates keep the real CLI and its exit codes. With the mod off, in a headless
+session and where no shell is found nothing is taken over. The CLI the mod launches runs in the
 session's cwd (`$.process.run`'s default), the same as for the tool. Pi and
 OpenCode do not take over shell runs: there an agent-run `plannotator` command
 still runs the CLI (Pi registers the tool itself; see "Pi: the `plannotator`
 tool").
+
+**Behind Claude Code's guard: opened at `tool.run` (`hooks/mod/early-run.ts`).**
+Claude Code 2.1.326 added an "early run" rule to its built-in guard
+(`cc-plugin-sec-default`, seated on Team/Enterprise logins and by managed
+settings). The guard remembers each call the model makes until the call reaches
+`tool.run` (allowed, about to run), or until the person's next message when a
+hook answered or the session refused it. While it remembers a call, a
+person-installed mod's `$.process.run` that repeats the call is refused. A
+repeat is an argv that ends in a remembered Bash command, or an argv that hands
+a shell an item equal to one of the call's texts (the tool's `annotate`, its
+target). The guard checks each repeat as a Bash call with its own
+`$.tool.check`, past the user tier, so Claude Code also prints "its tool.check
+hook was skipped"; anything but `allow` is refused. The mod answers the tool and
+the take-over at `tool.call`, before the permission check, and the launch hands
+`/bin/sh` the call's words, so from 2.1.326 a guarded open could fail with
+`Plannotator could not start: plannotator: $.process.run: this repeats a Bash
+call that is not allowed; serve an allowed call at tool.run`:
+- The tool: always. The checked "commands" are its bare words (`annotate`, the
+  path), so a `Bash(plannotator:*)` rule cannot allow them.
+- A taken-over Bash command: the guard re-checks the remembered command itself,
+  so a rule that allows it passes. `plannotator annotate x.md --gate --json` on
+  its own is not refused at all: the launch drops `--json`, so its argv does not
+  end in the command. It fails without such a rule when the argv does end in the
+  command (no `--json`), or when an earlier remembered call shares its words,
+  such as a refused or answered tool call for the same file in the same turn.
+
+The mod still answers at `tool.call`, so nothing changes where the guard does
+not refuse: no guard, an engine before 2.1.326, a call that repeats nothing, or
+`list`/`close`, which start nothing. When the launch fails with the guard's
+refusal (`isEarlyRunRefusal`), `launch()` removes the launch folder, and the
+`tool.call` hook calls `next(e)` instead of answering (`heldUntilAllowed`). The
+session then decides the call by its rules and mode: auto mode's classifier, or
+a prompt for `mcp__plannotator__plannotator` or the Bash command. An allowed
+call reaches the mod's `tool.run` hook, where the guard has forgotten it, and is
+answered there with the same `runTool` launch (`answerModTool`,
+`answerShellCall`). A `tool.run` hook's `{ result }` is the call's result and
+the tool does not run (2.1.327: its core is the tool; a `$.tool.register` tool
+that no hook answers fails with "no hook answered this call: add
+on("tool.run", ...)"). A refused call never reaches `tool.run`, so it opens
+nothing and Claude reads the refusal. If the guard refuses the start at
+`tool.run` too, another call it still holds shares this one's words (one
+refused or answered in this turn); Claude then reads `HELD_AT_RUN_TEXT` (what to
+do: the guard lets go at the person's next message), not the guard's advice to
+serve at `tool.run`. The `tool.run` hook needs nothing from `tool.call` or
+`tool.check`: it answers every call of the mod's own tool that reaches it, and
+takes over a Bash command by the same rule as `tool.call`. It never answers
+`tool.check` or `tool.judge`, and never loosens or bypasses the guard; nothing
+hides the call's words from it (writing the arguments to a file would, and the
+mod must not).
+
+It is registered as `on('tool.*', RUN_MATCHER, ...)` and acts only when
+`next.event` is `tool.run`, because an engine before 2.1.326 refuses to load a
+module that names `tool.run`. `RUN_MATCHER` is `Bash` and
+`mcp__<server>__plannotator`. The engine picks a module's hooks for an event by
+pattern alone (read from the 2.1.327 binary), so the glob puts the mod in the
+chain of every `tool.*` event (`tool.call`, `tool.check`, `tool.judge`,
+`tool.run`, `tool.describe`, `tool.list`, `tool.register`, and `tool.offer`
+where the engine has it; 2.1.327 does not); the matcher only decides whether
+the hook runs. Where the guard sends one of them past the user
+tier, Claude Code prints "plannotator: its <event> hook was skipped" once per
+session, matcher or not (as for classic hooks, #2243): `tool.check` (printed
+before this change too, from the skip-rm-prompts hook), and `tool.describe` and
+`tool.offer` where the organization has its own tools (managed MCP servers,
+organization plugins). `tool.list` is never reported. No matcher key avoids
+it: in the engine harness (2.1.325 and 2.1.327) a probe whose matcher names
+`tool_use_id`, which `tool.describe` never carries, is reported skipped like the
+mod. Costs on a
+guarded machine: the first launch of each open is refused once, and the open
+then goes through the session's permission decision, which is the guard's
+requirement. At `tool.run` the guard excuses an allowed call's own words for
+other remembered calls of the same tool, so several opens in one message do not
+block each other there; what remains is the tool and Bash used with the same
+words in one turn.
+
+Before this fix, a guarded user can have the person type `/plannotator-annotate
+<file>` (or `/plannotator-review`, `/plannotator-last`): a person's command is
+not a model call, so the guard has nothing of its own to match. A refused model
+call with the same words is still remembered until the person's next message,
+so if the command is refused, send any message first. Or turn the mod off
+(`PLANNOTATOR_CLAUDE_MOD=0`, or `{ "claudeCodeMod": false }` in config.json): the
+classic CLI, skills and plan hook run as before mods, and Claude Code then also
+has no `plannotator_inbox` tool and no Inbox reply wake. Tests:
+`apps/hook/hooks/mod/early-run.test.ts` (the real hooks with a stand-in guard
+that refuses every start while a call is held, and an engine whose `tool.check`
+never reaches the mod) and the engine harness's "Claude Code's guard from
+2.1.326" (`apps/hook/tests/register.test.ts`), which CI runs on 2.1.287, 2.1.325
+and 2.1.327 (test.yml's matrix; `scripts/test-claude-code-mod.sh` writes the
+version under test into `tests/engine-under-test.ts`, so 2.1.326+ must raise
+`tool.run`). From 2.1.326 the kit raises a test's `$.tool.call` through the
+permission check and the plugins' `tool.run` hooks; there a stand-in guard that
+holds each call from `tool.call` to `tool.run` sees the tool and a taken-over
+Bash command each refused once and then opened once, at `tool.run`. On older
+engines the case only checks that the module loads.
 
 **Plan review.** The `tool.call` hook on the main loop's ExitPlanMode resolves
 the plan (the plan file when it is an absolute `.md` regular file within the
 2 MB cap, else the inline `plan`: the #1667 rule), then:
 1. no review open: starts `plannotator claude-mod-plan` (internal subcommand,
    `apps/hook/server/claude-mod-plan.ts`; stdin `{ plan, planFilePath,
-   revisionFile }`; the plan server with `planRevisions: true`) and answers
+   revisionFile, projectRoot? }`, `projectRoot` the session's `$.session.root()`
+   read once per session, under whose project an existing plan history chain is also looked for (#2197, see
+   "Plan Version History"); the plan server with `planRevisions: true`) and answers
    `{ deny }` with the waiting text (`waitingDenyText`). ExitPlanMode never runs,
    so plan mode stays on.
 2. a review open: writes `revision.json` `{ seq, plan }`; the subcommand polls it
@@ -545,10 +988,13 @@ the plan (the plan file when it is an absolute `.md` regular file within the
    the settings hooks in that chain, so the plugin's own PermissionRequest
    command hook never runs: no second review. The mod's
    `classic.PermissionRequest` hook is registered with the matcher
-   `{ tool_name: "ExitPlanMode" }` (#2159), so the engine never selects it for
-   another tool's permission prompt; unmatched, a guard seated above made
-   Claude Code print "its classic.PermissionRequest hook was skipped" at the
-   first permission prompt of every session. A different plan opens a new
+   `{ tool_name: "ExitPlanMode" }` (#2159), so without a guard the engine
+   never runs it for another tool's permission prompt. Under a guard seated
+   above (below) the matcher does NOT stop Claude Code printing "its
+   classic.PermissionRequest hook was skipped" at the first permission prompt
+   of a session, whatever the tool: the host trims only the plugins above the
+   first one that matches, and the guard matches every event (checked with
+   2.1.314's plugin test kit and in its host code; #2243). That line remains. A different plan opens a new
    review instead. **When a plugin seated above sends
    `classic.PermissionRequest` past the mod** (Claude Code's built-in guard
    `cc-plugin-sec-default` does on Team/Enterprise accounts, #2007; the
@@ -582,6 +1028,91 @@ Edit/Write while a plan is in review after the user leaves plan mode), the
 is always sent (`$.prompt.submit` waits for idle; draft text in the composer
 is left alone).
 
+**The skip-rm-prompts variable (`skip-rm-prompts.ts`).** Claude Code's
+`CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS` waives, in bypass
+permissions mode, the prompts for removals it cannot prove safe
+(`rm -rf logs/*/*`), but only while no PermissionRequest hook is installed, so
+the plugin's ExitPlanMode hook (and the mod's own) turned it off for every
+session. The plan hook stays; the mod gives the person's setting back instead:
+a `tool.check` hook on Bash only watches each call's verdict, and a
+`classic.PermissionRequest` hook matched on Bash answers the prompt `allow`
+when all of these hold: the variable is on (`1`/`true`/`yes`/`on`), the
+session is not nested (`CLAUDE_CODE_CHILD_SESSION`), the call's loop (main or
+subagent, from the prompt's `permission_mode`) is in bypass mode, the call's
+verdict (kept 5 seconds, read once, by loop and command) is the removal
+check's ask alone (its message `Dangerous <cmd> operation…` or `This command
+passes a shell -c script that runs rm…`, and no `rule`, `hook`, `setting` or
+`plugin` on it, so any PreToolUse hook that asked, and any plugin beneath the
+mod that made or joined the ask, keeps its prompt), `$.settings.read()`
+(every source, managed included) holds no ask/deny rule on Bash, PowerShell,
+Monitor or `rm`, no `blockReadsOutsideWorkingDirectories`, and no
+PermissionRequest hook whose matcher could select Bash (absent, `*`, a
+regex matching `Bash`, or one that does not compile), and no enabled plugin
+holds such a hook either. A PreToolUse hook is no reason to step aside by
+being there: it has run before the prompt whatever
+the mod answers, Claude Code itself keeps the waiver on beside one (real
+runs, 2.1.318 and 2.1.321: a no-op, allow or deny PreToolUse hook on Bash or
+`*`, in settings or a plugin, leaves the removal unprompted with no
+Plannotator), and its ask is on the verdict (`hook`). **A command of several
+parts** (`cd /tmp/x && rm -rf logs/*/*`, two removals in one command, a
+removal outside the working directories beside a `mkdir`) gets another
+wording from Claude Code, `This Bash command contains multiple operations.
+The following parts require approval: <part>, <part>`, which lists the parts
+(allowed ones too) and never names the check that asked. The mod answers it
+only when the verdict carries no `rule`, `hook`, `setting` or `plugin`, a
+listed part runs `rm` or `rmdir`, and Claude Code's own verdict for each
+listed part asked by itself (`$.tool.check`, which runs nothing and no classic
+hook) is `allow` or a removal-check ask alone; a part that asks for any other
+reason, or a query that fails, keeps the prompt. The mod answers without the
+PermissionRequest hooks beneath it, so it
+reads every plugin the settings' `enabledPlugins` turn on (anything but
+`false`) from Claude Code's registry
+(`<CLAUDE_CONFIG_DIR or ~/.claude>/plugins/installed_plugins.json`, every
+record's `installPath`): its `hooks/hooks.json` and the `hooks` of its
+`.claude-plugin/plugin.json` (inline, or the files it names). Plannotator's
+own hooks are on EnterPlanMode and ExitPlanMode and never count. Anything
+else, or anything unreadable (a registry or hooks file that does not parse, an
+enabled plugin not in the registry, a hooks file the manifest names that is
+not there), steps aside and the dialog shows as before. Without the variable
+nothing changes, and the debug log gets no line for Bash asks. With it and
+`PLANNOTATOR_MOD_DEBUG=1`, `<data dir>/claude-code-mod/debug.log` gets a
+`Bash ask (main|subagent): <reason>` line for every Bash ask and a `removal
+prompt (…): allowed, as the variable asks` or `left to the dialog: <what kept
+it>` line for every Bash prompt (the rule kind, the settings hook, the
+plugin's id, the mode, a part that asked for another reason). Plannotator
+judges no removal itself. Not covered: headless sessions and a mod turned off (the
+mod does not take over a prompt there); hooks the mod cannot see: those in an agent's or skill's
+frontmatter (Claude Code keeps them in the session's hooks registry, which no
+mod API reads), plugins loaded with `--plugin-dir` or from a session-only
+source rather than the registry, and another plugin's hooks module with a
+`classic.PermissionRequest` hook beneath the mod (the mod sees what such a
+plugin put on the call's verdict, not what it would answer at the prompt); the waiver's own timing conditions, which Claude Code
+checks and the mod cannot: managed settings sources still loading or failed
+to load, settings changes not yet applied, hook registration still in flight;
+Bash ask/deny rules given as CLI flags (`--disallowedTools` and the like, not
+in `$.settings.read()`); a several-parts ask whose parts are each allowed by
+themselves and which a check other than the removal check raised from the
+parts together (none known in bypass mode); a plugin the registry lists but
+`enabledPlugins` does not name (Claude Code 2.1.321 did not load such a
+plugin's hooks in a real run); a built-in plugin named in `enabledPlugins`
+(`<name>@builtin` is never in the registry, so the mod steps aside); and the
+Monitor and PowerShell tools. Under a guard
+that sends `classic.*` past the mod (`cc-plugin-sec-default`) the hook never
+runs and the prompt stays. Tests: `skip-rm-prompts.test.ts` (through the real
+hooks, with plugin registries and hooks files in temp folders).
+
+**Plan review off (`PLANNOTATOR_PLAN_REVIEW=0` / `{ "planReview": false }`,
+Claude Code only, #2299).** Read at the first `session.start` like the other
+switches: the `tool.call` and `classic.PermissionRequest` hooks on
+ExitPlanMode call `next(e)`, and the classic command hook exits 0 with no
+decision, so Claude Code shows its own dialog ("Yes, clear context" only with
+its `showClearContextOnPlanAccept` setting on). In a headless session there is no
+dialog; the run's own permissions decide (see the env table row). Older Claude
+Code: before 2.1.268 PermissionRequest hooks did not run in `-p` at all, and
+before 2.1.287 (no mods) the command hook alone decides, with the same result.
+Version skew: a binary older than the switch opens the blocking review from
+the command hook, since the mod has already passed the call through.
+
 **Delivery.** Each decision is one plugin turn, in arrival order, prefixed
 `Plannotator: <subject> — <outcome>.`; a message over 12 KB is written in full
 to the launch's `feedback.md` and Claude is told to Read it (the feedback
@@ -597,6 +1128,65 @@ detached servers) inherits it; `registerCliSession` records it as
 as this session (the `plannotator_inbox` tool's author, so the reply wakes it).
 The tag follows `/clear` and an in-process resume: `currentMod` sets it again
 for the new id, at the latest on the next `turn.start`.
+A branched conversation has a new session id, and the Inbox routes a reply by
+session id, so the branch's link says which session it continues on every poll
+(`continues`, `INBOX_CONTINUES_POLL_FIELD`): `TranscriptForkedFrom` reads it
+once per session in a process from the branch's own transcript, where Claude
+Code writes `"forkedFrom":{"sessionId":…,"messageUuid":…}` on every row it
+copies (read in the 2.1.321 binary's branch code; one `/bin/sh` or PowerShell
+call over the file's first 8 MB, the transcript found as the title's is, looked
+for again after 2 s doubling to 60 s while it is not there). The Inbox then
+hands the branch what waits for the old id once that id no longer polls
+("A conversation that goes on under a new session id" in
+`inbox-notifications-and-agents.md`). A `--resume` or `--continue` that keeps
+its id, and `/clear` (a new conversation), name nothing. Not checked on a live
+Claude Code: whether `--fork-session` writes the same rows.
+A conversation handed over to a new session is the other case, and the one the
+report was: the new transcript has no `forkedFrom`. Claude Code instead ends
+the OLD transcript with
+`{"type":"continued-in","sessionId":<old>,"continuedInSessionId":<new>}` (read
+in the 2.1.321 binary, where it is written when a conversation is moved to a
+background session, which starts in another process from the old transcript;
+seen in a real transcript about 2.5 minutes after a manual `/compact`, among
+`/model` and `/login`, and which of the person's actions led to it is not
+known). So the new session looks for the transcript that names it:
+`TranscriptContinuedIn` looks through the transcripts in its own project folder
+(one `/bin/sh` or PowerShell call for the folder; only the records come back)
+and follows the records back, nearest first, up to 8 sessions (A handed to B
+handed to C: C says `[B, A]`); a session is named once, so records that point
+at each other end the line. A record counts wherever it is and whatever follows
+it (a report of 2026-11-10: a conversation still listed as two agents; before,
+only a record in a transcript's last 8 KB with no `user` or `assistant` row
+after it counted, as Claude Code itself reads it). Whether the old session
+still goes on is the Inbox's to judge: one that still polls keeps its own. A cut
+or broken record is nothing. The work is capped: the last 64 MB of each
+transcript (`TRANSCRIPT_CONTINUED_IN_READ_BYTES`), streamed through `grep` a
+line at a time and never held whole, the 200 most recently written transcripts
+of a folder (`TRANSCRIPT_CONTINUED_IN_FILES_MAX`), each file's last 4 records,
+and 20 s a look (`TRANSCRIPT_CONTINUED_IN_TIMEOUT_MS`; a look that runs out
+finds nothing). Looked for at the session's first poll in a process and, while
+nothing is found, 5 more times over about a minute (the record is written just
+after the new session starts), then once every 10 minutes
+(`TRANSCRIPT_CONTINUED_IN_LOOK_AGAIN_MS`); once found, kept for the session in
+that process; never at delivery. A session that was already running gets the
+new read without a restart: after an update the Inbox reloads its module
+("Plannotator reloads itself after an update"), and the new module looks at
+its first poll. The poll
+sends both cases' ids in the one `continues` list. Not checked: a hand-over
+whose new transcript is in another project folder (a worktree move) is not
+found.
+Beside it, `exportSessionProject` (`controller.ts`) sets
+`PLANNOTATOR_SESSION_PROJECT=claude-code:<session id>:<folder>`, the folder
+the session's `plannotator_inbox` tool files under (`InboxLink.projectFolder()`,
+the session root; with the tool off, `sessionProjectFolder` over the root, else
+the cwd), so `plannotator inbox call` and `plannotator card` run from a
+`cd`'d shell file under the same project. Set in `currentMod` (not awaited:
+every hook, ExitPlanMode included, waits on that switch), at each top-level
+`turn.start` and before each shell tool call (a `/cd` or a worktree move
+between turns; each waited for at most `SESSION_PROJECT_EXPORT_MS`, 250 ms,
+then left to finish behind the hook), written only when the value changes; a
+failed write is retried at the next call. Wiring proof:
+`inbox-session-project.test.ts` drives the real hooks. See "A session's project" in `inbox-foundation.md`.
 
 **Ask this session.** Every launched server gets a 32-byte hex token
 (`PLANNOTATOR_SESSION_BRIDGE_TOKEN`, `_HOST=claude-code`, `_MODES=turn`). Once
@@ -609,7 +1199,23 @@ an `ask` is submitted as a real turn (`$.prompt.submit`), identified at
 `busy` = a MAIN-LOOP turn is running (pushed on `turn.start` / `turn.complete`, not only
 at the next poll; a subagent's `turn.start`, which every hook hears, is ignored by `onTurnStart`: its end is never counted, so counting it left the session busy for good after a background subagent started, and the Inbox wake never delivered); `interrupt` aborts the running turn (`$.turn.abort`), except a turn another plugin's prompt started (below), which it refuses with `ok: false` and `OTHER_PLUGIN_INTERRUPT_TEXT` ("The session is answering a message from another plugin, so Plannotator will not stop it. Ask when it finishes instead.", `bridge.ts`);
 cancel aborts our own turn, or, while it is still queued, confirms at once and
-aborts its turn the moment it starts. Claude Code never raises a plugin's own hooks
+aborts its turn the moment it starts. A question still queued when the process
+moves to another session (`/clear` queued in the turn it waits behind, or an
+in-process resume) is dropped the same way: a pending `$.prompt.submit` can't
+be withdrawn, so `currentMod` calls `PlannotatorMod.carryQueued`, which hands
+every question prompt that may still wait in the engine (a live question's not
+started, one Stopped while queued, one carried from an earlier switch:
+`TurnTracker.queuedPrompts` / `dropQueued`) to the new instance's tracker. That
+tracker aborts the turn when it starts, so no answer runs in the new
+conversation, but the aborted turn's user row (the framed question, with its
+drafts and context) and an interrupted marker stay in the cleared conversation's
+transcript, where the model sees them on the person's next prompt: nothing can
+withdraw it (a question Stopped while queued leaves the same). Each carried
+prompt follows its submit (`QueuedPrompt`): rejected, it is forgotten at once;
+taken, at the next turn's end, so a prompt the engine never ran can't abort the
+same words asked again. The window then sees `session_gone`, and Ask again sends
+it once (`inbox-ask.test.ts` and `turns.test.ts`; `ClaudeSession.clear` calls
+the same `carryQueued`). Claude Code never raises a plugin's own hooks
 for a prompt its code submitted (the debug log says "skipped: re-entry"), so the
 mod's `prompt.submit` hook sees every OTHER prompt (the user's Enter, a
 notification, another plugin); a turn whose text is exactly one of those is
@@ -640,7 +1246,10 @@ step followed, as `done` with the turn's answer (their prompt then runs as a
 turn of its own). The note reads "You typed into this session…" for
 `composer` / `bridge` and the neutral "Another message entered this session…"
 otherwise. From the take-over on, a cancel closes only the question and an
-interrupt answers `ok: false`; Plannotator never aborts that turn. Plan review does not block the session
+interrupt answers `ok: false`; Plannotator never aborts that turn. An interrupt
+that arrives once the launch is not live here (a poll stays open past `/clear`
+or a lease move) also answers `ok: false` and aborts nothing, as a question
+there is refused `gone`. Plan review does not block the session
 under the mod, so the status is never `blocked` and plan review gets real turns
 too (verified live). Polls ask for 15 s (750 ms while our question streams, so
 deltas flush), and stop for good on 401/403/404/405/503 (`404` = an older CLI
@@ -652,10 +1261,34 @@ about three minutes) is not the end: `run()` reports why it ended
 loop with the same token after 5 s, doubling to 60 s while the server stays
 silent (`BRIDGE_RETRY_MS`), so Ask AI comes back once the server answers again.
 A poll answered `superseded: true` (another client polled the server after us)
-waits 10-15 s before polling again, instead of taking the server back at once
-and starting a busy loop with the other client.
+waits 10-14 s before polling again, instead of taking the server back at once
+and starting a busy loop with the other client. It stays under the 15 s poll
+wait, so two clients cannot line up. The Inbox's Ask AI runs the same client
+(`InboxLink.startAskClient`; "Ask AI" in `inbox-messages.md`), started by a poll
+answer that says a question waits, so a session with no question has none.
 
-**The Plannotator Inbox (`plannotator_inbox` and the reply wake, `inbox.ts`).** Where `PLANNOTATOR_INBOX_TOOL` / `inboxTool` allows it at the first `session.start` (on by default here), `register.ts` reads the Inbox's tool list once (`discoverInboxTools`: `tools/list` on its `/mcp`; a stopped Inbox is described by the list it last answered with, kept in `$.store` as `inboxTools`; with neither, the list bundled with the mod, `INBOX_DEFAULT_TOOLS` in `inbox-default-tools.ts`, generated from a real Inbox by `bun run scripts/sync-mod-inbox-tools.ts` and pinned to one by `inbox-default-tools.test.ts`) and registers `plannotator_inbox` (`inboxAgentTool`), a SEPARATE tool, never actions on `plannotator`. So Claude Code has the tool before this computer ever ran the Inbox: the first call starts it. With no `inbox/inbox.json` the link stays silent: no HTTP request and no file (no lease, no claims folder) until a call starts the Inbox, and the wake polls from the next tick after. With the tool, `inbox/inbox.json` present at the first `session.start` (an Inbox has run here) and `inboxReminder` on (default), a `prompt.context` hook adds the `plannotatorInbox` block (`withInboxReminder`, the line naming the tool's registered full name) to the conversation's first message, once per conversation (see `inboxReminder` under Config-only settings). **Guarded sessions (#2159).** On Team/Enterprise accounts (and wherever managed settings seat it) Claude Code's built-in `cc-plugin-sec-default` runs in the `prepend` tier and sends `prompt.context` (and every `classic.*` event) past every user-tier hook, so that block never reaches the model there (the engine prints "its prompt.context hook was skipped"; the line stays, since the mod cannot register `prompt.context` conditionally). **The engine runs `prompt.context` before the mod's `session.start` finishes** (seen live on 2.1.310: the hook returned about 230 ms before `plannotator_inbox` was registered), so a hook that read the module state at once added nothing to every process's first conversation (true on main before #2167 too). `session.start` therefore settles a promise with its decision (`reminderGate` / `settleReminderGate`) once the switch, `inbox.json` and the tool's registered name are known, also on its early returns (`-p`, the mod off) and on a throw, before it goes on to the commands and the `plannotator` tool; `prompt.context` and the `prompt.submit` fallback wait on it, at most 2.5 s (`REMINDER_GATE_WAIT_MS`, `reminderGateDecided`). A `prompt.context` that outwaits it adds no block but still records that it ran, so the machine is never taken for a guarded one. Two additions, both under the same gate (`reminderOn` in `register.ts`): (1) the learned fallback: `$.store` key `inboxReminderContextWorks` (`STORE_INBOX_REMINDER_CONTEXT_WORKS`, read once per process) is written `true` the first time the mod's `prompt.context` hook runs and `false` when a conversation's first main-loop `turn.complete` (not aborted, not a session started by an earlier process: `$.session.usage().startedAt` over a minute before this process's first `session.start`, `reminderSessionResumed`) went by without it. While it is not `true`, the conversation's first prompt that is not `isMeta` and not a slash command carries the same text as `prompt.submit` `context` (`inboxReminderSubmitCopy`); it counts as reached only once the prompt entered (a dropped prompt does not), and a conversation reached by either path gets no second copy. So a standard user gets one duplicate, in the first conversation after the update, then today's path alone; a guarded user gets it on every conversation's first prompt; a machine that becomes guarded later gets it from the second prompt of its first guarded conversation. `prompt.submit` `context` exists on the mod's floor engine (checked in the 2.1.287 binary: it becomes a `hook_additional_context` row, `hookName: "prompt.submit"`). Known limits: a resumed guarded conversation gets the copy again (one duplicate); the transcript notice stays. (2) After compaction, for everyone: the mod sets `PLANNOTATOR_INBOX_REMINDER` (`INBOX_REMINDER_ENV`) to the text at its first `session.start` (unset when the gate is off; `env.set` is not guarded unless managed `env` names the variable), and `hooks.json` has one `SessionStart` command hook matched on `compact`, `set \' ; printf "%s\n" "$PLANNOTATOR_INBOX_REMINDER" ; : ' #'` (timeout 5 s). It never starts the `plannotator` binary; the engine trims hook stdout, so an unset variable (mod off, reminder off, `-p`, Windows) adds nothing, and a set one adds `SessionStart:compact hook success: <the reminder>` to the conversation after the compaction (standard users then hold the re-made block and this line: one duplicate per compaction, accepted). The command is a sh / PowerShell polyglot, because Claude Code runs a command hook in Git Bash on Windows, else in PowerShell (`-NoProfile`), never cmd. sh runs `set \'` (sets `$1`, silent), then `printf "%s\n" "$X"`, which prints the value byte for byte (a custom text's backslashes, leading `-`, `%`, quotes and `$(...)` included; an expansion's result is never run), then `: ' #'`. PowerShell reads `\'` as `\` plus the start of a single-quoted string that ends at the `'` before ` #`, so it runs `set` (Set-Variable) with that string as a name, silently, and the rest is a comment: no printf, no output, exit 0, even where no `printf` exists (Windows). Unset, sh prints only a newline, exactly as the earlier `echo "$X"` did, and with the built-in text the bytes are the same as `echo` printed. Proved under sh, bash and dash (and PowerShell when installed) by `inbox-reminder.test.ts`, with a hostile value whose command substitutions would leave marker files. The `plannotator` CLI removes the variable at startup (`scrubModSessionEnv`, `apps/hook/server/mod-session-env.ts`, beside the bridge token and the host result file), so nothing a CLI the mod started spawns inherits it (Claude agent jobs, `claude -p`, included). Gaps: `disableAllHooks` / settings hooks off (no command hooks, so a guarded user has no reminder after compaction); a nested `claude` that Claude itself starts from Bash inherits the variable, and if that run is `-p` (mod inert, nothing set or cleared) and compacts, it prints the parent's line. Tests: `apps/hook/hooks/mod/inbox-reminder.test.ts` (the decision table; the hooks.json command run under `/bin/sh` and `/bin/bash`, and PowerShell when `pwsh` is installed) and the engine harness (`apps/hook/tests/register.test.ts`, with an inline `prepend`-tier stand-in for the guard that does `next.to(e, 'append')` on `prompt.context` and `classic.*`). The session's `PlannotatorMod` owns an `InboxLink` (one per session id, so `/clear` and an in-process resume follow the new id: the old link is disposed at `session.end` and the next hook makes one for the new id). A call (`tool.call`, answered by the mod) re-reads the registry, checks health against its `serverSession`, starts a stopped Inbox with `plannotator inbox --background` (a one-shot that detaches the Inbox into its own session and waits for it; never a browser tab), and proxies to `/mcp` with `project_path` = `$.session.cwd()` (or the agent's optional `project_path`, resolved against it by `INBOX_PROJECT_DIR_SCRIPT` and refused before the Inbox is reached when it is not an existing folder) and `agent_session` = the host's real session id; `wait_for_reply` is held to 25 s through the tool (`$.http.fetch` gives up at 30 s). The wake: a 1 s `$.clock.every` tick long-polls `/api/inbox/bridge/poll` (20 s) with a 5 to 60 s backoff that never gives up; a reply waits in the mod (unless the person pressed Send now: see "Questions and Send"; the mod then puts it into the running turn with `$.session.append`, unless another plugin's prompt started that turn) until the session has been idle for two ticks (a pending `$.prompt.submit` cannot be withdrawn, so a prompt the person typed, or a `/clear`, queued during a turn goes first), is checked once more with the Inbox (an agent may have read it meanwhile), claimed once across processes (`INBOX_CLAIM_SCRIPT`: mkdir of `claude-code-mod/<session>/inbox/claims/<reply id>`), submitted (`inboxWakeText`), and acknowledged (`delivered`, retried until the Inbox answers). A prompt typed into the reply's own turn takes it over as Claude Code folds it in; the mod never aborts it and never delivers the reply again. Two processes on one session: the session's inbox lease (`claude-code-mod/<session>/inbox/watcher.json`, the rules of the review watcher lease: the person's last process wins, 20 s stale) picks the one that polls and delivers, and the claim makes a lease race harmless; a claimant writes `alive` while its turn waits, and a reply whose claimant stopped for 60 s without `delivered` is reported once with a toast (the only toast the connection raises); one marked `delivered` whose acknowledgement was lost is acknowledged by the other process. Nothing touches the system prompt; the tool list is fixed per process. Version skew: an Inbox without the bridge route (404) just leaves the poll backing off; an action the running Inbox lost answers "update Plannotator"; a `plannotator` without the `inbox` subcommand answers that the binary has no Inbox.
+**The Plannotator Inbox (`plannotator_inbox` and the reply wake, `inbox.ts`).** Where `PLANNOTATOR_INBOX_TOOL` / `inboxTool` allows it at the first `session.start` (on by default here) and the Inbox is on on this computer (the mark `inbox/turned-on`, read by `inbox-turned-on.ts`; see "Off until the person runs it" in `inbox-foundation.md`), `register.ts` reads the Inbox's tool list once (`discoverInboxTools`: `tools/list` on its `/mcp`; a stopped Inbox is described by the list it last answered with, kept in `$.store` as `inboxTools`; with neither, the list bundled with the mod, `INBOX_DEFAULT_TOOLS` in `inbox-default-tools.ts`, generated from a real Inbox by `bun run scripts/sync-mod-inbox-tools.ts` and pinned to one by `inbox-default-tools.test.ts`) and registers `plannotator_inbox` (`inboxAgentTool`), a SEPARATE tool, never actions on `plannotator`. So once the Inbox is on, Claude Code has the tool even with no Inbox running: the first call starts it. With no `inbox/inbox.json` the link stays silent: no HTTP request and no file (no lease, no claims folder) until a call starts the Inbox, and the wake polls from the next tick after. With the tool, `inbox/inbox.json` present at the first `session.start` (an Inbox has run here) and `inboxReminder` on (default), the conversation's first prompt carries the reminder (`inboxReminderFor`, the line naming the tool's registered full name) as `prompt.submit` `context`, once per conversation (see `inboxReminder` under Config-only settings): the first prompt that is not `isMeta` and not a slash command (`inboxFirstPromptContext`); it counts as reached only once the prompt entered (a dropped prompt does not). A session the Inbox launched (`claude --bg`, approval "inbox-launched-agent-note") starts with the Inbox's wake, a prompt the plugin submits, which never reaches this module's `prompt.submit`; so a wake whose command carries `launched` gets the same reminder appended to its text, after a blank line (`InboxLinkOptions.launchReminder`, `launchReminderFor` in `register.ts`): under the same gate, once per conversation (none when this conversation's first prompt had it, here or by the store's record), and once that turn was taken it counts as the first prompt's, recorded in `inboxReminderSessions`, so a prompt the person types later carries none (`inbox-launched-reminder.test.ts`). `prompt.submit` `context` exists on the mod's floor engine (checked in the 2.1.287 binary: it becomes a `hook_additional_context` row, `hookName: "prompt.submit"`). A **resumed** conversation (`--resume`, `--continue`, an in-process `/resume`, a fork: `$.session.messages()` already holds an assistant row when this process first sees the conversation, at its first `prompt.submit` or main-loop `turn.start` here, `conversationResumed`) gets the session's open Inbox threads on its first prompt here (`readSessionThreads`, bounded by 1.5 s, the Inbox never started; nothing when there is no open thread or no Inbox), and the Inbox is asked once per conversation, not on every prompt. The conversation is classed at that first sight whatever `session.start` has decided yet, so a first prompt that outwaits the gate below (and goes on with no context) still leaves it fresh, and the next prompt carries the reminder. Whether a resumed conversation also needs the reminder is the mod's record in `$.store` (`inboxReminderSessions`, `STORE_INBOX_REMINDER_SESSIONS`: session id to the time its first prompt entered with the reminder, the newest 500 kept), read when that first prompt is submitted: a session id in it gets only its threads; one without it (a conversation from an older mod, whose `prompt.context` block was never in the transcript, or from before the Inbox ran here, or with the reminder off then) gets the reminder too, once, and is recorded. A fork has a new id, so it gets the reminder again (a duplicate line, accepted). An in-process `/resume` back to a session id this process already saw gets its threads again. **Why not `prompt.context` or `classic.SessionStart` (#2243).** Before #2243 the reminder was a `prompt.context` block and the resume list a `classic.SessionStart` hook matched on `source: "resume"`. On Team/Enterprise accounts (and wherever managed settings seat it) Claude Code's built-in `cc-plugin-sec-default` runs in the `prepend` tier and sends events past every user-tier hook: in 2.1.314 `classic.*`, `prompt.context`, `prompt.section`, `prompt.attachment`, `prompt.compose`, `skill.prompt`, `attribution.text`, `session.compact` and `settings.read` (read from the binary). For every hook the engine passes by that way, Claude Code prints `plannotator: its <event> hook was skipped. "cc-plugin-sec-default" runs first and sent the event on past it.` once per session id (each startup and `/clear`), and queues the same line as a hidden note to the model. **A matcher does not prevent it:** the host trims only the plugins above the first one that matches the event, and the guard (outermost, unmatched) matches every one, so a hook of ours whose matcher does not match is still in the chain and still reported (the `{ source: "resume" }` hook printed at every startup). Registration cannot depend on what the machine learned either: `on()` runs only inside `register()`, which runs before `$` exists (an `engine.create` step runs after it, and `$.store` is refused there until the fold), and `on()` after `register()` returned throws. So neither hook is registered anywhere now, and the old learned store key `inboxReminderContextWorks` is no longer read or written (an older mod that finds it still works). **What the guard still makes Claude Code print:** "its classic.PermissionRequest hook was skipped" at the first permission prompt of a session (the hook is matched on ExitPlanMode, which does not stop it; see Plan review) and "its session.compact hook was skipped" at the first compaction, where guarded users also get the plain reminder without the thread list. Subagents: the old `prompt.context` block also reached subagents' first messages (the engine computes one context for both); `prompt.submit` runs only for the main conversation's prompts, so subagents no longer get the reminder, as on guarded machines before. **The engine may raise a conversation's first events before the mod's `session.start` finishes** (seen live on 2.1.310: the first `prompt.context` returned about 230 ms before `plannotator_inbox` was registered), so `session.start` settles a promise with its decision (`reminderGate` / `settleReminderGate`) once the switch, `inbox.json` and the tool's registered name are known, also on its early returns (`-p`, the mod off) and on a throw, before it goes on to the commands and the `plannotator` tool; the first prompt's context waits on it, at most 2.5 s (`REMINDER_GATE_WAIT_MS`, `reminderGateDecided`). (2) After compaction, for everyone: the mod sets `PLANNOTATOR_INBOX_REMINDER` (`INBOX_REMINDER_ENV`) to the text at its first `session.start` (unset when the gate is off; `env.set` is not guarded unless managed `env` names the variable), and `hooks.json` has one `SessionStart` command hook matched on `compact`, `set \' ; printf "%s\n" "$PLANNOTATOR_INBOX_REMINDER" ; : ' ; [Console]::OutputEncoding = New-Object Text.UTF8Encoding $false ; [Console]::Out.Write($env:PLANNOTATOR_INBOX_REMINDER + [char]10) #'` (timeout 5 s). It never starts the `plannotator` binary; the engine trims hook stdout, so an unset variable (mod off, reminder off, `-p`) adds nothing, and a set one adds `SessionStart:compact hook success: <the reminder>` to the conversation after the compaction: the one copy the conversation holds after it (the summary replaced the first prompt's). The command is a sh / PowerShell polyglot, because Claude Code runs a command hook in Git Bash on Windows, else in PowerShell (`-NoProfile`), never cmd. sh runs `set \'` (sets `$1`, silent), then `printf "%s\n" "$X"`, which prints the value byte for byte (a custom text's backslashes, leading `-`, `%`, quotes and `$(...)` included; an expansion's result is never run), then `: '…'`, a no-op whose quoted argument holds the PowerShell half. PowerShell reads `\'` as `\` plus the start of a single-quoted string that ends at the `'` after `:`, so it runs `set` (Set-Variable) with that string as a name, silently, then switches its output to UTF-8 without a BOM and writes `$env:PLANNOTATOR_INBOX_REMINDER` and one newline with `[Console]::Out.Write`, byte for byte with nothing in it run; the closing `#'` is a comment. Both PowerShell 7 (`pwsh`, which Claude Code prefers) and Windows PowerShell 5.1 print it, exit 0 (Windows). Unset, sh prints only a newline, exactly as the earlier `echo "$X"` did, and with the built-in text the bytes are the same as `echo` printed. Proved under sh, bash and dash (and PowerShell when installed) by `inbox-reminder.test.ts`, with a hostile value whose command substitutions would leave marker files. The `plannotator` CLI removes the variable at startup (`scrubModSessionEnv`, `apps/hook/server/mod-session-env.ts`, beside the bridge token and the host result file), so nothing a CLI the mod started spawns inherits it (Claude agent jobs, `claude -p`, included). Before each compaction installs (`session.compact`, not `precompute` or a subagent's), the mod sets the variable again, to the reminder plus a blank line and the session's open Inbox threads (or the reminder alone when there are none or the Inbox did not answer within 1.5 s; never starting it), so the same command hook prints the list (its command unchanged; only `hooks.json`'s description mentions the list), and the variable goes back to the plain reminder at the next main-loop step or turn, keeping thread ids out of Bash children's environment (see "The session's open threads" in `inbox-notifications-and-agents.md`). Gaps: `disableAllHooks` / settings hooks off (no command hooks, so a guarded user has no reminder after compaction); a nested `claude` that Claude itself starts from Bash inherits the variable, and if that run is `-p` (mod inert, nothing set or cleared) and compacts, it prints the parent's line. Tests: `apps/hook/hooks/mod/inbox-reminder.test.ts` (the session record's bound; the hooks.json command run under `/bin/sh` and `/bin/bash`, and PowerShell when `pwsh` is installed) and the engine harness (`apps/hook/tests/register.test.ts`, with an inline `prepend`-tier stand-in for the guard that does `next.to(e, 'append')` on `classic.*`, `prompt.context` and `session.compact` and reports each link of ours the engine bypassed, the trace the transcript notice comes from). The session's `PlannotatorMod` owns an `InboxLink` (one per session id, so `/clear` and an in-process resume follow the new id: the old link is disposed at `session.end` and the next hook makes one for the new id). A call (`tool.call`, answered by the mod) re-reads the registry, checks health against its `serverSession`, starts a stopped Inbox with `plannotator inbox --background` (a one-shot that detaches the Inbox into its own session and waits for it; never a browser tab), and proxies to `/mcp` with `project_path` = `InboxLink.projectFolder()` (the session's start folder, its root, which a shell `cd` never moves; see "A session's project" in `inbox-foundation.md`), or the agent's optional `project_path`, resolved against `$.session.cwd()` by `INBOX_PROJECT_DIR_SCRIPT` and refused before the Inbox is reached when it is not an existing folder and `agent_session` = the host's real session id. The wake: a 1 s `$.clock.every` tick long-polls `/api/inbox/bridge/poll` (20 s) with a 5 to 60 s backoff that never gives up; a reply waits in the mod (unless the person pressed Send now: see "Questions and Send"; the mod then puts it into the running turn with `$.session.append`, unless another plugin's prompt started that turn) until the session has been idle for two ticks (a pending `$.prompt.submit` cannot be withdrawn, so a prompt the person typed, or a `/clear`, queued during a turn goes first), is checked once more with the Inbox (an agent may have read it meanwhile), claimed once across processes (`INBOX_CLAIM_SCRIPT`: mkdir of `claude-code-mod/<session>/inbox/claims/<reply id>`), submitted (`inboxWakeText`), and acknowledged (`delivered`, retried until the Inbox answers). A wake Claude Code drops is not delivered: `$.prompt.submit` does not reject a prompt it refuses, it resolves `{ drop: <reason> }` while it holds plugins' input until someone types (after the person stops the session, Esc or a remote interrupt: "the session was stopped and nobody has sent input since"; seen too after an idle compaction), and `register.ts` turns any `drop` (not `undefined`, `null` or `false`; only a string is kept as the reason) into `PromptDropped` (`submitOrThrow` in `host.ts`). The hold (`heldForInput`) is set first, then the claim is given back, so input that arrives during that release still clears it; the reply stays pending, with no `delivered` and no `reported`, and no delivery is tried until the person's next prompt or a main-loop turn start, so it goes in at the idle after their input. While held, the mod tells the Inbox with `held: true` (`INBOX_HELD_POLL_FIELD`) on every poll and a `state` event when the hold starts or lifts (`held: false`), so the window says "Stopped: goes in when you type in that session" for the waiting reply (approval "inbox-stopped-reply"; see `inbox-window.md`). A review decision, and the classic-plan retry, dropped the same way wait in `submitDecision` (`controller.ts`) for the next prompt or turn start and are tried again; a decision is marked `settled/delivered` only once it went in, so a session that ends while it waits leaves it for a restore to report. A dropped "Ask this session" question ends `failed` with the engine's reason (an empty one gets the server's own fallback, "The session could not answer.", `SESSION_COULD_NOT_ANSWER_TEXT` in `bridge.ts`). A prompt typed into the reply's own turn takes it over as Claude Code folds it in; the mod never aborts it and never delivers the reply again. Two processes on one session: the session's inbox lease (`claude-code-mod/<session>/inbox/watcher.json`, the rules of the review watcher lease: the person's last process wins, 20 s stale) picks the one that polls and delivers, and the claim makes a lease race harmless; a claimant writes `alive` while its turn waits, and a reply whose claimant stopped for 60 s without `delivered` is reported once with a toast (the only toast the connection raises); one marked `delivered` whose acknowledgement was lost is acknowledged by the other process. The Inbox server reads these claim files too (`inboxClaimAbandoned`, `packages/server/inbox-stuck-delivery.ts`): a claim with `reported` and no `delivered`, or, once the session is gone, one whose `alive` is `INBOX_UNDELIVERED_AFTER_MS` old (60 s, in the shared contract), is a stuck reply the person may move to another session. A change to the claim folder's path, its `alive`, `reported` or `delivered` markers, or that cadence changes the Inbox's reading too. Nothing touches the system prompt; the tool list is fixed per process. Version skew: an Inbox without the bridge route (404) just leaves the poll backing off; an action the running Inbox lost answers "update Plannotator"; a `plannotator` without the `inbox` subcommand answers that the binary has no Inbox. An older Inbox ignores `held` (the reply's line reads Sending or Queued as before); an older mod never sends it, and each of its polls clears it.
+
+**A `plannotator-inbox` MCP entry beside the tool.** The mod reads no MCP settings and is unchanged by one. The T3 Code setup (`plannotator t3 --help`) adds `claude mcp add -s user plannotator-inbox -- plannotator inbox mcp --t3`, which interactive Claude Code loads too: there, with no `T3CODE_THREAD_ID`, the shim answers with no tools (`inboxT3EntryIdle`), so `/mcp` lists a `plannotator-inbox` server with no tools and the session has only the mod's `plannotator_inbox`. An entry without `--t3` (one a person added by hand) lists the Inbox's tools as before, and its calls send as the session: the tag is not reliably in that server's environment (Claude Code starts it as it starts, beside or before `session.start`), so the shim reads the `CLAUDE_CODE_SESSION_ID` Claude Code gives its MCP servers ("Claude Code's own MCP client" in `inbox-foundation.md`, #3309). See "T3 Code" in `inbox-notifications-and-agents.md`.
+
+**The session's name in the Inbox's To picker (`noteSessionName`, `sessionNamesAfterCommand`).** A session named with `/rename` shows that name; an unnamed one reads as it always did (owner's decision on #2450, 2026-11-01). The engine gives a plugin no way to read a session's name: no `$` call has it, no module event carries it, and `session_title` is only on the classic inputs, whose hooks cost a "hook was skipped" line every session on a guarded account (#2243), so **never add a classic hook for it**. A second `command.run` hook, matched on `rename` and `clear` (aliases resolved: `/name`, `/reset`, `/new`), writes `$.store`'s `inboxSessionNames` (session id → name, newest 500, each name cut to its first 200 characters, `INBOX_SESSION_LABEL_INPUT_MAX`, the most the server reads), and each poll reads it, `""` for none. `$.store` and not `$.state`: `$.state` is held for the session, and a `--resume` is another process that has to find the name. A `--resume` reuses the session id (`--fork-session` is what makes a new one), so the entry is found again; the engine restores the name for itself from the transcript and tells no one.
+
+The hook calls `next(e)` first and returns its answer untouched: a command that threw names nothing, and `/clear` has moved the session id by then. A real session on 2.1.316 showed no credit line (`plannotator: …`) on `/rename` or `/clear` with this hook in place; that is the one version it was watched on. The command never pays for the label: `$` failing before `next` only skips the name, and the write after it is bounded (`SESSION_NAME_WRITE_MS`, 500 ms), so a store that never settles leaves the name unkept and the answer on time. It writes only a change, because the record is read and written back whole and a write of nothing new could only undo another session's. It writes once `session.start` has decided the mod is on, or before it has decided, since a first `/rename` can beat it; a `/rename` in that gap with the mod off leaves an entry nothing reads, and after the decision the knob-off hook passes straight through. Read from the 2.1.316 binary, same shape in 2.1.312:
+
+- `/rename <name>`: `e.args` is the name. `/rename` is `local-jsx`, so on every interactive path `next(e)` resolves with no `text`: `args` is all there is. Its final name can differ: if another live session on the machine holds it, the engine picks another, and the label still shows what was typed.
+- Bare `/rename`: the model makes the name up, and neither `args` nor the answer has it. The session then reads as unnamed, since the name it had is no longer its name.
+- `/clear`: the engine writes the name onto the new session id (`clearConversation`, `T` → `saveCustomTitle`), so the name goes with it. `/clear <name>` names the session it left and the new one has none. A new instance starts with the next event (`currentMod`), so the label follows then.
+- Not seen, and showing no label: `claude --name`, a rename from a phone or the bridge (`saveCustomTitle` with source `remote`), the resume picker's rename, a fork, a name given before this version. A plan approval's "clear context" reaches the same clear with no command, so the engine keeps the name and the new id has no label until the next `/rename`.
+
+**The transcript's title first (`TranscriptTitle`, `claudeTranscriptPaths`, issue #2450).** Most of the misses above are names the engine wrote to the transcript as a `custom-title` line (`{"type":"custom-title","customTitle":…,"sessionId":…}`): a bare `/rename`, `claude --name`, a rename from a phone, the resume picker's. So each poll's `label` asks the transcript first and falls back to the `/rename` store only when the transcript has no say (`sessionTitleOf` in `register.ts`). The transcript is `<CLAUDE_CONFIG_DIR, else $HOME/.claude>/projects/<folder with every character but letters and digits turned into "-">/<session id>.jsonl`, tried for the first root, the root and the cwd; a folder whose slug passes 200 characters is skipped (the engine adds a hash there), and a session id outside `[A-Za-z0-9._-]` is never a path. It stays cheap on every poll: a `$.fs.stat` per poll and nothing more while the size is unchanged; when it grew, one `/bin/sh` (5 s timeout) reads only the new bytes (`tail -c +offset | head -c length | LC_ALL=C awk`, `TRANSCRIPT_TITLE_SCRIPT`) and prints the `custom-title` lines plus an `end:` line, so a half-written last line is read again whole next time. The first read is the last 4 MiB at most, and so is any read past 4 MiB of new bytes (read from the end). A last line with no newline yet is read again whole once the file grows, never on every poll. The latest title of this session wins (another session's line, a quoted mention in a message and a line that does not parse are skipped; 200 characters at most); `""` is a title cleared. A file that shrinks is read from its end as new; another inode under the path (the script prints `ls -di`'s) is a rewrite at any size, so the old title is dropped and the new file's end is read; a transcript not found is looked for again after 60 s. A failed or timed-out run keeps the last title and the offset, waits 5 s before the next try, doubling with every failure in a row (a skip does not start it over; only a read that works does) up to 5 min, and the third failure in a row of one region skips it (`TRANSCRIPT_TITLE_FAILURES_MAX`). A rewrite to exactly the same size is seen only when the file next grows. The server refuses a title that reads as "You", since the session's own model can append the line. Limits: Windows (no `/bin/sh`), an over-long project path, and a title older than the last 4 MiB at the first read fall back to the store. A model could write a `custom-title` line with a tool, but the label is display only and routes nothing. Tests: `apps/hook/hooks/mod/inbox-session-title.test.ts` (real temp transcripts and a real `/bin/sh`; `CLAUDE_CONFIG_DIR` in a scratch folder, never the real `~/.claude`).
+
+**Plannotator reloads itself after an update (`auto-reload.ts`, owner approval "cc-auto-reload", 2026-11-07, with its 19:00Z addendum).** One judge: the Inbox. The mod's Inbox link sends `auto_reload: true` on every bridge poll (`INBOX_AUTO_RELOAD_POLL_FIELD`), and while `claudeSessionOutdated` (the rule Settings → Agents and the sidebar show, from the poll's `plugin` field and Claude Code's plugin registry) says the session is outdated with fix `restart`, each poll answer carries `reload: { installed }` (`INBOX_RELOAD_FIELD`, `reloadOfferFor` in `inbox-sessions.ts`). No running Inbox, no offer: the session keeps today's manual `/reload-plugins` path. `fix: "update_plugin"` (the installed plugin is itself behind the Inbox) and a `--plugin-dir` or directory-marketplace session never get one. From the Inbox tick (a `$.clock` timer, never a hook a turn waits on; not awaited by the tick), `AutoReload` runs `$.command.run({ command: 'reload-plugins', args: 'plannotator' })` once per installed version per session, only when `reloadBusyReason()` is null (no main-loop turn or Ask question; no open review or decision waiting to go in; no Inbox reply handed out, being delivered or put into a turn, no Ask AI client: `InboxLink.hasWorkInFlight`), no prompt is on its way in (inside `prompt.submit` until the hooks beneath finish, with no time limit; then, for one that entered as a new turn, until its `turn.start`, or 30 ticks for one that starts none), and the prompt box is empty (`$.prompt.read()`, which never rejects and reads `''` where no box is mounted, such as under a full-screen panel). The record is `$.store` `autoReloads` (session id to `{ version, at, from, outcome, tried }`, newest 50; `tried` holds the session's last 10 versions, so an Inbox that names A, B, A, B runs twice, not four times), so it outlives the reload: a reload that loads nothing new is never tried again and the Inbox keeps the manual notice for that session (the fallback; no retry). Nothing runs until the store kept the `pending` record (written, then read back with the same `at`): a store that refuses (over 4 MiB in all) or fails means no reload, tried again 60 s later, never a loop. The module also keeps the versions it ran for in memory (shared by its instances, so a `/clear` does not run again), a backstop for a store that loses the record later. Background agents and subagents never hold it (follow-up approved 2026-11-07T21:09Z: the owner asked that it "never stop work", and a live `/reload-plugins` with a real module swap under a running two-step background agent left the agent finishing both steps on the new code): a turn with an agent id is not counted at all, neither as busy nor as the main turn, and `$.agent.list()` is not asked. After the store calls the box and every other gate are checked again, the last of them with no await before `run()`; when one fails then, the record is put back as it was (a put-back that fails leaves it `pending`: that version is not tried again in the session). Each reason a look stops is a debug line, once per change of reason. A run the engine refuses before it runs (after an Esc with no input since) is tried again only after the next main-loop turn starts, at most 3 times per version; the refusal is written only over that run's own `pending` record, never over what a newer module wrote. Never `--force`: Plannotator declares no MCP or LSP servers, so `/reload-plugins`' prompt-cache stop comes only from another plugin's pending change, and forcing would apply it and re-read the conversation uncached; the stop's text is shown and the fallback applies.
+
+What the chat shows: the engine's echo, `❯ /reload-plugins plannotator` (the command reads only `--force`/`force`, read in the 2.1.319 binary; Claude Code skips a plugin's `ui.render` hook on rows its own code raised, "ui.render skipped: re-entry", seen live, and the owner accepted that line). The output row is hidden by a `ui.render` hook on `CommandOutput` / `reload-plugins` only when `hidesReloadOutput` reads our argument and a plain `Reloaded: …` with no error, warning, "not applied", `--force` or "could not"; anything else draws as always. The row carries no origin, so a `/reload-plugins plannotator` the person types is hidden the same way; a plain `/reload-plugins` (or any other argument) the person types draws as always. The row is drawn by the module the reload loaded, often before its `session.start` decided, so it is hidden until a decision says the mod is off.
+
+After the run: the new module's first instance checks in (`checkInAfterReload`: the record is `pending`, this module loaded after the run was queued, at most 30 min after, since the engine runs it once the session is idle, and checks in within 60 s of loading) and records its version (`did_not_take` when it is not the version asked for: the reload loaded old code), then whether its tools registered (`plannotator`, and `plannotator_inbox` where on) and its Inbox link's first answered poll; its poll reports the new `plugin`, which ends the offer and takes the session off Settings → Agents' list and the Inbox's `/reload-plugins` prompts (no Inbox change needed for that). An old module still running 30 s after its run resolved (`AUTO_RELOAD_CHECK_IN_MS`) records `did_not_take`. Every step is a debug-log line (`PLANNOTATOR_MOD_DEBUG=1`).
+
+What `/reload-plugins` touches (2.1.319 binary, `refreshActivePlugins`): it clears the plugin caches and re-reads every enabled plugin's commands, skills, agent definitions, plugin MCP/LSP config (behind the cache stop above) and hooks, applies staged installs of every plugin, and reloads the hooks modules that changed (each loses its timers and in-memory state; `$.state` and `$.store` stay). It does not touch the task list: background Bash tasks, Monitors, running subagents, `/loop`, ScheduleWakeup and cron keep running. So the gate does not wait for any of them; it waits for the main turn, a prompt being typed or submitted, and Plannotator's own work, the one state a module reload would drop. A new module restores open reviews from the store as on any `session.start`, but the gate keeps a reload away from them anyway. Tests: `apps/hook/hooks/mod/auto-reload.test.ts`, `apps/hook/hooks/mod/auto-reload-register.test.ts` (the gates wired through the real registered hooks), `packages/server/inbox-auto-reload.test.ts`. A live check on a real cache install (plugin from GitHub into Claude's cache) is still owed.
 
 **Tests.** Bun: `apps/hook/hooks/mod/*.test.ts` (controller flows over an
 in-memory `Host`, delivery, shell words, and `bridge.test.ts` against the REAL
@@ -667,7 +1300,9 @@ the messages file yields the picker, a malformed one exits 1, plain `--stdin`
 unchanged). Engine
 harness: `apps/hook/tests/register.test.ts` via `scripts/test-claude-code-mod.sh`
 (stages the plugin without the CLI, whose bun tests `claude plugin test` would
-otherwise try to load; bun skips `apps/hook/tests/` through `pathIgnorePatterns`).
+otherwise try to load; bun skips `apps/hook/tests/` through `pathIgnorePatterns`;
+CI runs it in the `claude-code-mod` job of `.github/workflows/test.yml`, on the
+Claude Code pinned there, with no login).
 Typecheck: `apps/hook/hooks/mod/tsconfig.json` (no DOM, no Node; `globals.d.ts`
 declares the few web APIs a hooks module has). `PLANNOTATOR_MOD_DEBUG=1` writes
-`claude-code-mod/debug.log` in the data dir. The Inbox connection is proved against a REAL Inbox in `apps/hook/hooks/mod/inbox.test.ts`: `plannotator inbox --background` under a temp data dir (the compiled binary when `PLANNOTATOR_INBOX_TEST_BINARY` names one, as `.github/workflows/inbox-claude-code.yml` runs it; the CLI from source otherwise) and the mod's own code on a Host of real processes, HTTP and files (`testing/claude-session.ts`, which simulates the conversation the way `register.ts` feeds it): with no registry the tool comes from the bundled list, nothing polls or writes, and the first call starts the Inbox and lands its message, after which the wake polls; the tool carries what the Inbox's `/mcp` offers, `send_message` lands a thread, the window's Send arrives once as a turn with the stable header and the reply verbatim (delivered, then replied), a typed prompt goes first and takes the reply's turn over, `/clear` follows the new id, two processes deliver once, and a dead Inbox is started by the first call with no browser tab. `INBOX_PROOF_DIR=<dir>` keeps a transcript per proof. The engine harness (`apps/hook/tests/register.test.ts`) covers the wiring with the engine's own `$`.
+`claude-code-mod/debug.log` in the data dir. The Inbox connection is proved against a REAL Inbox in `apps/hook/hooks/mod/inbox.test.ts`: `plannotator inbox --background` under a temp data dir (the compiled binary when `PLANNOTATOR_INBOX_TEST_BINARY` names one, as `.github/workflows/inbox-claude-code.yml` runs it; the CLI from source otherwise) and the mod's own code on a Host of real processes, HTTP and files (`testing/claude-session.ts`, which simulates the conversation the way `register.ts` feeds it): with no registry the tool comes from the bundled list, nothing polls or writes, and the first call starts the Inbox and lands its message, after which the wake polls; the tool carries what the Inbox's `/mcp` offers, `send_message` lands a thread, the window's Send arrives once as a turn with the stable header and the reply verbatim (delivered, then replied), a typed prompt goes first and takes the reply's turn over, `/clear` follows the new id, two processes deliver once, and a dead Inbox is started by the first call with no browser tab. `apps/hook/hooks/mod/inbox-session-end.test.ts` (a real Inbox in process) proves that another session's or a subagent's `session.end` leaves an idle session's wake running, and that the self-heal makes a disposed instance again and the waiting reply goes in once; `register-self-heal.test.ts` drives the real registered hooks on a fake `$` (the dispose rule, the self-heal armed, rebuilding and armed again, a healed link leaving another process's lease alone), and `self-heal.test.ts` pins the rule and the tick re-arm. `INBOX_PROOF_DIR=<dir>` keeps a transcript per proof. The engine harness (`apps/hook/tests/register.test.ts`) covers the wiring with the engine's own `$`.

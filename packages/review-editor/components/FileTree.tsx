@@ -1,40 +1,59 @@
 import React, { useEffect, useCallback, useState, useMemo, useRef } from 'react';
+import { focusFileHeaderWhenLost } from '../utils/focusFileHeader';
+import { useCompactTouchLayout } from '@plannotator/ui/hooks/useIsMobile';
 import { CodeAnnotation } from '@plannotator/ui/types';
 import type {
-  AvailableBranches,
-  CompareTargetConfig,
-  DiffOption,
   JjEvoLogEntry,
-  RecentCommit,
   SinceBaseSections,
   WorktreeInfo,
 } from '@plannotator/shared/types';
-import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
-import { buildFileKindBlocks, kindFolderPath, type FileKindBlock } from '../utils/fileKindTree';
-import { fileKind, type FileKind } from '@plannotator/core/file-kind';
+import { buildFileTree, getAllFolderPaths, getVisualFileOrder, type FileTreeNode } from '../utils/buildFileTree';
+import { buildFileKindBlocks, type FileKindBlock } from '../utils/fileKindTree';
+import { buildFileStatusBlocks, FILE_STATUS_COVERS, FILE_STATUS_LABELS } from '../utils/fileStatusTree';
 import { FileKindIcon, FILE_KIND_LABELS } from '@plannotator/guide-viewer/FileKindIcon';
-import { useDiffFileTreeExpansion } from '@plannotator/ui/hooks/useDiffFileTreeExpansion';
-import { FileTreeNodeItem } from './FileTreeNode';
-import { BaseBranchPicker } from './BaseBranchPicker';
+import { ChangesTreeView, type ChangesTreeHandle } from './ChangesTreeView';
+import { useAfterFirstCode } from '../utils/firstCodePaint';
 import { EvoLogPicker } from './EvoLogPicker';
-import { DiffTypePicker } from './DiffTypePicker';
 import { WorktreePicker } from './WorktreePicker';
-import { PanelViewToggle, type ReviewPanelView } from './PanelViewToggle';
-import { getReviewSearchSideLabel, type ReviewSearchFileGroup, type ReviewSearchMatch } from '../utils/reviewSearch';
+import { type ReviewSearchFileGroup, type ReviewSearchMatch } from '../utils/reviewSearch';
 import type { DiffFile } from '../types';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { PRPlatformIcon } from '@plannotator/ui/components/PRPlatformIcon';
 import { Paperclip } from 'lucide-react';
+import { RepoTreeView, type RepoTreeHandle } from './RepoTreeView';
+import { ReviewPanelHeader, ScopeSwitch, reviewPanelBodyProps, type ReviewPanelHeaderModel } from './ReviewPanelHeader';
 
-import { SidebarActionRow, SemanticDiffRow, CallFlowRow, AllFilesRow } from './PanelNavRows';
+import type { TreeScope } from '../hooks/useTreeScope';
+import type { RepoFiles } from '../hooks/useRepoFiles';
+import type { OverlayScrollAreaHandle } from '@plannotator/ui/components/OverlayScrollArea';
+
+import { SidebarActionRow, SemanticDiffRow, CallFlowRow, AllChangesRow } from './PanelNavRows';
 import { PanelControlsRow, PanelSearchField } from './PanelChrome';
-import { PanelSectionHeader, DiffCounts } from './FileRowBits';
+import { countColumnVars, compactRowsProps } from './FileRowBits';
+import { useHiddenViewedFiles } from '../hooks/useHiddenViewedFiles';
+import { useReviewStateOptional } from '../dock/ReviewStateContext';
 
 interface FileTreeProps {
+  controlsNotice?: React.ReactNode;
+  /** The top of the panel (views, the comparison sentence, Changes | All
+   *  files, Go to File), shared with the other views. Absent: no header. */
+  header?: ReviewPanelHeaderModel;
+  /** Changes | All files (approved design record "review-explorer"): which
+   *  list the tree draws. All files needs `repoFiles`. */
+  treeScope?: TreeScope;
+  /** The repository listing behind All files (`useRepoFiles`). */
+  repoFiles?: RepoFiles;
+  /** Opens a file of the listing that is not in the review (single click: preview; double: pin). */
+  onOpenRepoFile?: (path: string, options: { pin: boolean }) => void;
+  /** A file of the listing open outside the diff, highlighted in All files. */
+  activeRepoPath?: string | null;
   /** Split the tree into Code / Tests / Generated blocks when the change holds
-   *  two or more kinds ("Group by kind" in Tree controls). */
+   *  two or more kinds ("Group by kind" in the list options menu). */
   groupByKind?: boolean;
   onToggleGroupByKind?: () => void;
+  groupBy?: FileGroupBy;
+  onSelectGroupBy?: (groupBy: FileGroupBy) => void;
+  statusGroupingAvailable?: boolean;
   /** The server's generated set: which files form the Generated block. */
   generatedFiles?: ReadonlySet<string>;
   /** Markdown files shown rendered, Changes or Read (an eye after the name). */
@@ -45,29 +64,22 @@ interface FileTreeProps {
   onDoubleClickFile?: (index: number) => void;
   annotations: CodeAnnotation[];
   viewedFiles: Set<string>;
-  onToggleViewed?: (filePath: string) => void;
   hideViewedFiles?: boolean;
   onToggleHideViewed?: () => void;
   showViewedControls?: boolean;
   onToggleShowViewedControls?: () => void;
   enableKeyboardNav?: boolean;
-  diffOptions?: DiffOption[];
+  /** The active diff type: the jj evolution picker shows under the header for `jj-evolog`. */
   activeDiffType?: string;
-  onSelectDiff?: (diffType: string) => void;
   isLoadingDiff?: boolean;
   width?: number;
   worktrees?: WorktreeInfo[];
   activeWorktreePath?: string | null;
   onSelectWorktree?: (path: string | null) => void;
   currentBranch?: string;
-  /** Compare target picker — base branch for Git, bookmark/revision for jj. */
-  availableBranches?: AvailableBranches;
+  /** The evolution entry compared against (jj-evolog), and its picker. */
   selectedBase?: string;
-  detectedBase?: string;
   onSelectBase?: (branch: string) => void;
-  compareTarget?: CompareTargetConfig;
-  /** HEAD ancestry for the commit-baseline picker (git only, #709). */
-  recentCommits?: RecentCommit[];
   /** Evolution log entries for the current jj change (jj-evolog mode only). */
   jjEvologs?: JjEvoLogEntry[];
   /** Default evolog commit ID to compare against (second evolog entry). */
@@ -111,6 +123,7 @@ interface FileTreeProps {
   onSelectSemanticDiff?: () => void;
   isSemanticDiffActive?: boolean;
   semanticDiffAvailable?: boolean;
+  semanticDiffCount?: number;
   onSelectCallFlow?: () => void;
   isCallFlowActive?: boolean;
   callFlowEnabled?: boolean;
@@ -122,26 +135,23 @@ interface FileTreeProps {
   scrollHighlightIndex?: number;
   /** Absolute repo root for the "Copy full path" context menu item. Null/undefined hides the option (e.g. PR review mode). */
   repoRoot?: string | null;
-  /** Current panel-view selection. The tree also renders as the FALLBACK for a
-   * latent 'sections'/'commits' selection the session can't offer, so the
-   * toggle must reflect the real selection, not assume 'tree'. */
-  panelView?: ReviewPanelView;
-  /** When the since-base sections view is available, renders a nav row back to it. */
-  onSwitchToSections?: () => void;
-  /** When the commit-history view is available, offers its toggle segment. */
-  onSwitchToCommits?: () => void;
-  /** Selects the tree view through the app's shared panel-view funnel. */
-  onSwitchToTree?: () => void;
-  /** Sections sidecar while the since-base diff is displayed as a tree —
-   * powers per-row U/staged markers and the stage button. */
+  /** Sections sidecar while the since-base diff is displayed as a tree:
+   * untracked letters and the git status groups. */
   sinceBaseSections?: SinceBaseSections | null;
-  onStageFile?: (filePath: string) => void;
-  stagingFile?: string | null;
+  snapshotId?: string;
 }
 
 export const FileTree: React.FC<FileTreeProps> = ({
+  header,
+  treeScope = 'changes',
+  repoFiles,
+  onOpenRepoFile,
+  activeRepoPath,
   groupByKind = false,
   onToggleGroupByKind,
+  groupBy,
+  onSelectGroupBy,
+  statusGroupingAvailable = false,
   generatedFiles,
   markdownPreviewedPaths,
   files,
@@ -150,27 +160,20 @@ export const FileTree: React.FC<FileTreeProps> = ({
   onDoubleClickFile,
   annotations,
   viewedFiles,
-  onToggleViewed,
   hideViewedFiles = false,
   onToggleHideViewed,
   showViewedControls = true,
   onToggleShowViewedControls,
   enableKeyboardNav = true,
-  diffOptions,
   activeDiffType,
-  onSelectDiff,
   isLoadingDiff,
   width,
   worktrees,
   activeWorktreePath,
   onSelectWorktree,
   currentBranch,
-  availableBranches,
   selectedBase,
-  detectedBase,
   onSelectBase,
-  compareTarget,
-  recentCommits,
   jjEvologs,
   detectedEvoBase,
   stagedFiles,
@@ -178,6 +181,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   onToggleShowStageControls,
   autoViewed,
   onToggleAutoViewed,
+  controlsNotice,
   onCopyRawDiff,
   canCopyRawDiff = false,
   copyRawDiffStatus = 'idle',
@@ -205,6 +209,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   onSelectSemanticDiff,
   isSemanticDiffActive = false,
   semanticDiffAvailable = false,
+  semanticDiffCount,
   onSelectCallFlow,
   isCallFlowActive = false,
   callFlowEnabled = false,
@@ -215,38 +220,51 @@ export const FileTree: React.FC<FileTreeProps> = ({
   isAllFilesActive = false,
   scrollHighlightIndex,
   repoRoot,
-  panelView = 'tree',
-  onSwitchToSections,
-  onSwitchToCommits,
-  onSwitchToTree,
   sinceBaseSections,
-  onStageFile,
-  stagingFile,
+  snapshotId,
 }) => {
   const isSearchVisible = !!onSearchChange && (isSearchOpen || !!searchQuery.trim());
 
-  // Kind blocks (Code / Tests / Generated) when the switch is on and the change
-  // holds two or more kinds; null keeps today's single tree.
-  const kindBlocks = useMemo(
-    () => (groupByKind ? buildFileKindBlocks(files, generatedFiles) : null),
-    [files, groupByKind, generatedFiles],
+  const effectiveGroupBy: FileGroupBy = groupBy ?? (groupByKind ? 'kind' : 'none');
+  const statusBlocks = useMemo(
+    () => (effectiveGroupBy === 'status' && sinceBaseSections ? buildFileStatusBlocks(files, sinceBaseSections, stagedFiles) : null),
+    [effectiveGroupBy, files, sinceBaseSections, stagedFiles],
   );
-  // Every block's nodes in block order: the expansion state and j/k order run
-  // over this one list, so they follow the blocks.
-  const tree = useMemo(() => (kindBlocks ? kindBlocks.flatMap((block) => block.tree) : buildFileTree(files)), [files, kindBlocks]);
-  // Folding a block hides it in the tree only. Generated starts folded.
-  const [foldedKinds, setFoldedKinds] = useState<ReadonlySet<FileKind>>(() => new Set(['generated']));
-  const setKindFolded = useCallback((kind: FileKind, folded: boolean) => {
-    setFoldedKinds((prev) => {
-      if (prev.has(kind) === folded) return prev;
-      const next = new Set(prev);
-      if (folded) next.add(kind);
-      else next.delete(kind);
-      return next;
-    });
-  }, []);
+  const kindBlocks = useMemo(
+    () => (effectiveGroupBy === 'kind' ? buildFileKindBlocks(files, generatedFiles) : null),
+    [files, effectiveGroupBy, generatedFiles],
+  );
+  const blocks = useMemo<FileGroupBlock[] | null>(() => {
+    if (statusBlocks) {
+      return statusBlocks.map((block) => ({
+        key: block.status,
+        group: 'status',
+        label: FILE_STATUS_LABELS[block.status],
+        tooltip: FILE_STATUS_COVERS[block.status],
+        tree: block.tree,
+        paths: block.paths,
+        additions: block.additions,
+        deletions: block.deletions,
+      }));
+    }
+    if (kindBlocks) {
+      return kindBlocks.map((block) => ({
+        key: block.kind,
+        group: 'kind',
+        label: FILE_KIND_LABELS[block.kind],
+        icon: <FileKindIcon kind={block.kind} />,
+        tooltip: KIND_COVERS[block.kind],
+        tree: block.tree,
+        paths: block.paths,
+        additions: block.additions,
+        deletions: block.deletions,
+      }));
+    }
+    return null;
+  }, [statusBlocks, kindBlocks]);
+  const tree = useMemo(() => (blocks ? blocks.flatMap((block) => block.tree) : buildFileTree(files)), [files, blocks]);
+  const plainTree = useMemo(() => (blocks ? [] : tree), [blocks, tree]);
 
-  // Since-base sidecar lookup for per-row lifecycle markers + stage buttons.
   const getSectionEntry = useMemo(() => {
     if (!sinceBaseSections) return undefined;
     return (filePath: string) => sinceBaseSections.files[filePath];
@@ -279,27 +297,33 @@ export const FileTree: React.FC<FileTreeProps> = ({
         return;
       }
 
+      if (e.composedPath?.().some((node) => node instanceof HTMLElement && (node.hasAttribute('data-changes-tree') || node.hasAttribute('data-repo-file-tree')))) return;
+
       const visualPos = visualOrder.indexOf(activeFileIndex);
 
+      const select = (index: number) => {
+        onSelectFile(index);
+        focusFileHeaderWhenLost(files[index]?.path);
+      };
       if (e.key === 'j' || e.key === 'ArrowDown') {
         e.preventDefault();
         if (visualPos < visualOrder.length - 1) {
-          onSelectFile(visualOrder[visualPos + 1]);
+          select(visualOrder[visualPos + 1]);
         }
       } else if (e.key === 'k' || e.key === 'ArrowUp') {
         e.preventDefault();
         if (visualPos > 0) {
-          onSelectFile(visualOrder[visualPos - 1]);
+          select(visualOrder[visualPos - 1]);
         }
       } else if (e.key === 'Home') {
         e.preventDefault();
-        onSelectFile(visualOrder[0]);
+        select(visualOrder[0]);
       } else if (e.key === 'End') {
         e.preventDefault();
-        onSelectFile(visualOrder[visualOrder.length - 1]);
+        select(visualOrder[visualOrder.length - 1]);
       }
     },
-    [enableKeyboardNav, activeFileIndex, visualOrder, onSelectFile],
+    [enableKeyboardNav, activeFileIndex, visualOrder, onSelectFile, files],
   );
 
   useEffect(() => {
@@ -315,55 +339,51 @@ export const FileTree: React.FC<FileTreeProps> = ({
     return map;
   }, [annotations]);
 
-  const getAnnotationCount = useCallback(
-    (filePath: string) => {
-      return annotationCountMap.get(filePath) ?? 0;
-    },
-    [annotationCountMap],
-  );
+  const changesTreeRef = useRef<ChangesTreeHandle>(null);
+  const touchRows = useCompactTouchLayout();
+  const treeMounts = useAfterFirstCode();
+  const [foldersExpanded, setFoldersExpanded] = useState(true);
+  const allFolderPaths = useMemo(() => getAllFolderPaths(tree), [tree]);
+  const handleToggleAllFolders = useCallback(() => {
+    const next = !foldersExpanded;
+    setFoldersExpanded(next);
+    changesTreeRef.current?.setAllFoldersExpanded(next);
+  }, [foldersExpanded]);
 
-  // Inside kind blocks a folder path is scoped to its block, so the active
-  // file's path is too (its ancestors are then the block's folders).
-  const activePath = files[activeFileIndex]?.path;
-  const activeExpansionPath =
-    kindBlocks && activePath ? kindFolderPath(fileKind(activePath, generatedFiles), activePath) : activePath;
+  // --- All files -----------------------------------------------------------
+  const showAllFiles = treeScope === 'all' && !!repoFiles;
+  const repoState = repoFiles?.state;
+  const repoReady = repoState?.status === 'ready' ? repoState : null;
+  const repoTreeRef = useRef<RepoTreeHandle>(null);
+  const [repoFoldersOpen, setRepoFoldersOpen] = useState(true);
+  const toggleAllRepoFolders = useCallback(() => {
+    const next = !repoFoldersOpen;
+    setRepoFoldersOpen(next);
+    repoTreeRef.current?.setAllFoldersExpanded(next);
+  }, [repoFoldersOpen]);
+  const scrollAreaRef = useRef<OverlayScrollAreaHandle>(null);
 
-  // A file that becomes active by any route (j/k, a click in all-files, the
-  // scroll highlight, an annotation or search jump) opens its folded kind
-  // block, the way folded folders open for the active file. Only a change
-  // opens a block, and a new file list never does, so Generated stays folded
-  // when a diff loads.
-  const scrollPath = isAllFilesActive && scrollHighlightIndex != null ? files[scrollHighlightIndex]?.path : undefined;
-  const revealedRef = useRef<{ files: DiffFile[]; active?: string; scroll?: string } | null>(null);
-  useEffect(() => {
-    const before = revealedRef.current;
-    revealedRef.current = { files, active: activePath, scroll: scrollPath };
-    if (!before || before.files !== files || !kindBlocks) return;
-    if (activePath && activePath !== before.active) setKindFolded(fileKind(activePath, generatedFiles), false);
-    if (scrollPath && scrollPath !== before.scroll) setKindFolded(fileKind(scrollPath, generatedFiles), false);
-  }, [files, activePath, scrollPath, kindBlocks, generatedFiles, setKindFolded]);
-
-  // Folder open/closed state is the shared diff-file-tree hook (expand all on a
-  // new tree, keep the active file's ancestors open), the same one the
-  // embeddable @plannotator/ui DiffFileTree uses.
-  const {
-    expandedFolders,
-    allFolderPaths,
-    areAllFoldersExpanded,
-    toggleFolder: handleToggleFolder,
-    toggleAllFolders: handleToggleAllFolders,
-  } = useDiffFileTreeExpansion(tree, activeExpansionPath);
+  const reviewState = useReviewStateOptional();
+  const phoneFolds = !!reviewState?.isCompactTouchLayout && !!isAllFilesActive;
+  const panelWidth = width ?? 256;
+  const totalAdditions = files.reduce((sum, file) => sum + file.additions, 0);
+  const totalDeletions = files.reduce((sum, file) => sum + file.deletions, 0);
+  const { hiddenFiles, panelPointerProps } = useHiddenViewedFiles(viewedFiles, hideViewedFiles);
 
   const panelControls = (
     <PanelControlsRow
+      scope={header ? <ScopeSwitch model={header} width={panelWidth} progress={{ viewed: viewedFiles.size, total: files.length, staged: stagedFiles.size, showViewed: showViewedControls !== false }} /> : undefined}
       stagedCount={stagedFiles.size}
       isSearchVisible={isSearchVisible}
       onOpenSearch={onOpenSearch}
-      onToggleAllFolders={handleToggleAllFolders}
-      areAllFoldersExpanded={areAllFoldersExpanded}
-      collapseDisabled={allFolderPaths.length === 0}
+      onCloseSearch={searchQuery.trim() ? onSearchClear : onSearchClose}
+      onToggleAllFolders={showAllFiles ? toggleAllRepoFolders : handleToggleAllFolders}
+      areAllFoldersExpanded={showAllFiles ? repoFoldersOpen : foldersExpanded}
+      collapseDisabled={showAllFiles ? !repoReady : allFolderPaths.length === 0}
       onToggleHideViewed={onToggleHideViewed}
       hideViewedFiles={hideViewedFiles}
+      onToggleFilesCollapsed={phoneFolds ? reviewState!.onToggleAllFilesCollapsed : undefined}
+      filesCollapsed={reviewState?.allFilesAllCollapsed}
       viewedCount={viewedFiles.size}
       totalCount={files.length}
       onCopyRawDiff={onCopyRawDiff}
@@ -375,8 +395,12 @@ export const FileTree: React.FC<FileTreeProps> = ({
       onToggleShowStageControls={onToggleShowStageControls}
       autoViewed={autoViewed}
       onToggleAutoViewed={onToggleAutoViewed}
+      notice={controlsNotice}
       groupByKind={groupByKind}
       onToggleGroupByKind={onToggleGroupByKind}
+      groupBy={onSelectGroupBy ? effectiveGroupBy : undefined}
+      onSelectGroupBy={onSelectGroupBy}
+      statusGroupingAvailable={statusGroupingAvailable}
     />
   );
 
@@ -384,31 +408,15 @@ export const FileTree: React.FC<FileTreeProps> = ({
     isAllFilesActive || isSemanticDiffActive || isCallFlowActive || isPROverviewActive || isPRArtifactsActive
       ? -1
       : activeFileIndex;
-  const renderNodes = (nodes: typeof tree) =>
-    nodes.map((node) => (
-      <FileTreeNodeItem
-        key={node.type === 'file' ? node.path : `folder:${node.path}`}
-        node={node}
-        expandedFolders={expandedFolders}
-        onToggleFolder={handleToggleFolder}
-        activeFileIndex={rowActiveIndex}
-        scrollHighlightIndex={isAllFilesActive ? scrollHighlightIndex : undefined}
-        onSelectFile={onSelectFile}
-        onDoubleClickFile={onDoubleClickFile}
-        viewedFiles={viewedFiles}
-        onToggleViewed={onToggleViewed}
-        showViewedControls={showViewedControls}
-        hideViewedFiles={hideViewedFiles}
-        getAnnotationCount={getAnnotationCount}
-        stagedFiles={stagedFiles}
-        repoRoot={repoRoot}
-        getSectionEntry={getSectionEntry}
-        onStageFile={onStageFile}
-        stagingFile={stagingFile}
-        showStageControls={showStageControls}
-        markdownPreviewedPaths={markdownPreviewedPaths}
-      />
-    ));
+  const treeActivePath =
+    rowActiveIndex >= 0 ? files[rowActiveIndex]?.path ?? null : isAllFilesActive && scrollHighlightIndex != null ? files[scrollHighlightIndex]?.path ?? null : null;
+  const annotationCounts = annotationCountMap;
+  const showChangesTree = !searchQuery.trim() && !showAllFiles;
+  const showRepoTree = !searchQuery.trim() && showAllFiles && !!repoReady;
+  const [repoVisited, setRepoVisited] = useState(false);
+  useEffect(() => {
+    if (showRepoTree) setRepoVisited(true);
+  }, [showRepoTree]);
 
   const searchField = isSearchVisible ? (
     <PanelSearchField
@@ -443,58 +451,24 @@ export const FileTree: React.FC<FileTreeProps> = ({
 
   return (
     <aside
-      className="border-r border-border/50 bg-card/30 flex flex-col flex-shrink-0 overflow-hidden"
-      style={{ width: width ?? 256 }}
+      data-review-sidebar=""
+      {...compactRowsProps(panelWidth)}
+      {...panelPointerProps}
+      className="review-sidebar border-r flex flex-col flex-shrink-0 overflow-hidden"
+      style={{ width: panelWidth }}
     >
-      {/* Header — the view toggle owns the entire top row (full width). The
-          controls that used to share it render as PanelControlsRow above the
-          tree, below the All files entry. */}
-      <div className="px-3 flex items-center border-b border-border/50" style={{ height: 'var(--panel-header-h)' }}>
-        {searchQuery.trim() ? (
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Results</span>
-        ) : onSwitchToSections || onSwitchToCommits ? (
-          <PanelViewToggle
-            view={panelView}
-            showSections={!!onSwitchToSections}
-            showCommits={!!onSwitchToCommits}
-            onSelect={(view) => {
-              if (view === 'sections') onSwitchToSections?.();
-              else if (view === 'commits') onSwitchToCommits?.();
-              else onSwitchToTree?.();
-            }}
-          />
-        ) : (
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Files</span>
-        )}
-      </div>
+      {header && <ReviewPanelHeader model={header} width={panelWidth} />}
 
-      {/* Worktree + diff selectors — combined row when both present */}
-      {((worktrees && worktrees.length > 0 && onSelectWorktree) ||
-        (diffOptions && diffOptions.length > 0 && onSelectDiff)) && (
-        <div className="px-2 py-1.5 border-b border-border/30 flex gap-2">
-          {worktrees && worktrees.length > 0 && onSelectWorktree && (
-            <div className="flex-1 min-w-0">
-              <WorktreePicker
-                worktrees={worktrees}
-                activeWorktreePath={activeWorktreePath ?? null}
-                currentBranch={currentBranch}
-                onSelect={onSelectWorktree}
-                disabled={isLoadingDiff}
-              />
-            </div>
-          )}
-          {diffOptions && diffOptions.length > 0 && onSelectDiff && (
-            <div className="flex-1 min-w-0">
-              <DiffTypePicker
-                options={diffOptions}
-                activeDiffType={activeDiffType || 'uncommitted'}
-                onSelect={onSelectDiff}
-                isLoading={isLoadingDiff}
-                hasBasePicker={!!onSelectBase && !!availableBranches}
-                activeBase={selectedBase}
-              />
-            </div>
-          )}
+      {/* Worktree picker */}
+      {worktrees && worktrees.length > 0 && onSelectWorktree && (
+        <div className="px-2 py-1.5 border-b border-border/30">
+          <WorktreePicker
+            worktrees={worktrees}
+            activeWorktreePath={activeWorktreePath ?? null}
+            currentBranch={currentBranch}
+            onSelect={onSelectWorktree}
+            disabled={isLoadingDiff}
+          />
         </div>
       )}
 
@@ -506,7 +480,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
         jjEvologs.length >= 2 &&
         detectedEvoBase && (
           <div className="px-2 py-1.5 border-b border-border/30 flex items-center gap-2">
-            <span className="text-[10px] uppercase tracking-wide text-muted-foreground flex-shrink-0">
+            <span className="text-xs text-muted-foreground flex-shrink-0">
               from evolution
             </span>
             <div className="flex-1 min-w-0">
@@ -521,35 +495,24 @@ export const FileTree: React.FC<FileTreeProps> = ({
           </div>
         )}
 
-      {/* Compare target picker — only relevant for base-dependent diff types (not evolog) */}
-      {activeDiffType !== 'jj-evolog' &&
-        onSelectBase &&
-        selectedBase &&
-        detectedBase &&
-        availableBranches &&
-        activeDiffType &&
-        compareTarget?.diffTypes.includes(activeDiffType) && (
-          <div className="px-2 py-1.5 border-b border-border/30 flex items-center gap-2">
-            <span className="text-[10px] uppercase tracking-wide text-muted-foreground flex-shrink-0">
-              {compareTarget.picker.rowLabel}
-            </span>
-            <div className="flex-1 min-w-0">
-              <BaseBranchPicker
-                availableBranches={availableBranches}
-                selectedBase={selectedBase}
-                detectedBase={detectedBase}
-                onSelectBase={onSelectBase}
-                disabled={isLoadingDiff}
-                copy={compareTarget.picker}
-                recentCommits={recentCommits}
-              />
-            </div>
-          </div>
-        )}
-
-      {/* File tree or search results */}
-      <OverlayScrollArea className="flex-1 min-h-0">
-        <div className="px-1 py-1">
+      {/* The list: the nav rows scroll with it; the tools and progress rows
+          stick to its top. Then the file tree, All files or search results. */}
+      <OverlayScrollArea ref={scrollAreaRef} className={showChangesTree || showRepoTree ? 'flex-none' : 'flex-1 min-h-0'}>
+        <div
+          {...reviewPanelBodyProps(header)}
+          data-review-panel-list=""
+          className="px-2 pb-2"
+          style={countColumnVars(totalAdditions, totalDeletions)}
+        >
+          <nav aria-label="Review views" className="pb-1 flex flex-col empty:hidden" data-review-views-nav="">
+          {onSelectAllFiles && files.length > 0 && (
+            <AllChangesRow
+              active={isAllFilesActive}
+              onClick={onSelectAllFiles}
+              additions={totalAdditions}
+              deletions={totalDeletions}
+            />
+          )}
           {prOverviewNumber && prOverviewTitle && onSelectPROverview && (
             <SidebarActionRow
               active={isPROverviewActive}
@@ -569,10 +532,13 @@ export const FileTree: React.FC<FileTreeProps> = ({
             >
               <Paperclip className="w-3.5 h-3.5 flex-shrink-0" />
               <span>Artifacts</span>
-              <span className="ml-auto rounded bg-muted px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-muted-foreground">
+              <span className="ml-auto rounded bg-muted px-1.5 py-0.5 font-mono text-xs tabular-nums text-muted-foreground" data-nav-count="">
                 {prArtifactCount}
               </span>
             </SidebarActionRow>
+          )}
+          {semanticDiffAvailable && onSelectSemanticDiff && (
+            <SemanticDiffRow active={isSemanticDiffActive} onClick={onSelectSemanticDiff} count={semanticDiffCount} />
           )}
           {callFlowEnabled && onSelectCallFlow && (
             <CallFlowRow
@@ -583,17 +549,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
               error={callFlowError}
             />
           )}
-          {semanticDiffAvailable && onSelectSemanticDiff && (
-            <SemanticDiffRow active={isSemanticDiffActive} onClick={onSelectSemanticDiff} />
-          )}
-          {onSelectAllFiles && (
-            <AllFilesRow
-              active={isAllFilesActive}
-              onClick={onSelectAllFiles}
-              additions={files.reduce((sum, file) => sum + file.additions, 0)}
-              deletions={files.reduce((sum, file) => sum + file.deletions, 0)}
-            />
-          )}
+          </nav>
           {panelControls}
           {searchField}
 
@@ -613,53 +569,118 @@ export const FileTree: React.FC<FileTreeProps> = ({
             ) : (
               <div className="py-6 text-center text-xs text-muted-foreground/50">No matches found</div>
             )
-          ) : (
-            <>
-              {kindBlocks
-                ? kindBlocks.map((block) => {
-                    const folded = foldedKinds.has(block.kind);
-                    // Hide-viewed hides a viewed row unless it is the active
-                    // one; a block with no row left hides its header too.
-                    if (hideViewedFiles && block.paths.every((path) => viewedFiles.has(path) && path !== files[rowActiveIndex]?.path)) {
-                      return null;
-                    }
-                    return (
-                      <div key={block.kind} className="mb-1" data-file-kind-block={block.kind}>
-                        <PanelSectionHeader
-                          label={FILE_KIND_LABELS[block.kind]}
-                          collapsed={folded}
-                          onToggle={() => setKindFolded(block.kind, !folded)}
-                          icon={<FileKindIcon kind={block.kind} />}
-                        >
-                          <KindBlockCounts block={block} viewedFiles={viewedFiles} />
-                        </PanelSectionHeader>
-                        {!folded && renderNodes(block.tree)}
-                      </div>
-                    );
-                  })
-                : renderNodes(tree)}
-            </>
-          )}
+          ) : showAllFiles && !repoReady ? (
+            <RepoListingPlaceholder state={repoState} onRetry={repoFiles?.reload} />
+          ) : null}
         </div>
       </OverlayScrollArea>
+      <div className={showChangesTree || showRepoTree ? 'flex-1 min-h-0 relative' : 'hidden'} style={countColumnVars(totalAdditions, totalDeletions)}>
+        <div
+          className={`absolute inset-0 px-2 pb-2 ${showChangesTree ? '' : 'invisible pointer-events-none'}`}
+          inert={!showChangesTree}
+          data-changes-tree-wrap=""
+        >
+          {treeMounts && <ChangesTreeView
+            key={touchRows ? 'touch' : 'pointer'}
+            touch={touchRows}
+            handleRef={changesTreeRef}
+            grouping={blocks ? effectiveGroupBy : 'none'}
+            tree={plainTree}
+            groups={blocks}
+            initiallyFoldedGroups={INITIALLY_FOLDED}
+            activePath={treeActivePath}
+            viewedFiles={viewedFiles}
+            hiddenFiles={hiddenFiles}
+            hideViewedFiles={hideViewedFiles}
+            showViewedControls={showViewedControls}
+            getSectionEntry={getSectionEntry}
+            annotationCounts={annotationCounts}
+            markdownPreviewedPaths={markdownPreviewedPaths}
+            repoRoot={repoRoot}
+            onSelectFile={onSelectFile}
+            onDoubleClickFile={onDoubleClickFile}
+          />}
+        </div>
+        {repoReady && (showRepoTree || repoVisited) && (
+          <div
+            className={`absolute inset-0 px-2 pb-2 ${showRepoTree ? '' : 'invisible pointer-events-none'}`}
+            inert={!showRepoTree}
+            data-repo-tree-wrap=""
+          >
+            <RepoTreeView
+              key={touchRows ? 'touch' : 'pointer'}
+              touch={touchRows}
+              handleRef={repoTreeRef}
+              repo={repoReady}
+              loadDir={repoFiles!.loadDir}
+              files={files}
+              activePath={activeRepoPath ?? treeActivePath}
+              viewedFiles={viewedFiles}
+              showViewedControls={showViewedControls}
+              getSectionEntry={getSectionEntry}
+              annotationCounts={annotationCounts}
+              markdownPreviewedPaths={markdownPreviewedPaths}
+              repoRoot={repoRoot}
+              onSelectFile={onSelectFile}
+              onDoubleClickFile={onDoubleClickFile}
+              onOpenRepoFile={onOpenRepoFile}
+              snapshotId={snapshotId}
+            />
+          </div>
+        )}
+      </div>
     </aside>
   );
 };
 
-/** A kind block header's tail: file count, then viewed/total and +/-. */
-const KindBlockCounts: React.FC<{ block: FileKindBlock; viewedFiles: Set<string> }> = ({ block, viewedFiles }) => {
-  const total = block.paths.length;
-  const viewed = block.paths.filter((path) => viewedFiles.has(path)).length;
-  return (
-    <>
-      <span className="text-[11px] tabular-nums text-muted-foreground/70">{total}</span>
-      <span className="ml-auto flex items-center gap-1.5 text-[10px] tabular-nums">
-        <span title={`${viewed} of ${total} viewed`}>{viewed}/{total}</span>
-        <DiffCounts additions={block.additions} deletions={block.deletions} />
-      </span>
-    </>
-  );
+const INITIALLY_FOLDED: ReadonlySet<string> = new Set(['generated']);
+
+/** The All files list while it loads, or why there is none. */
+export const RepoListingPlaceholder: React.FC<{ state: RepoFiles['state'] | undefined; onRetry?: () => void }> = ({ state, onRetry }) => {
+  if (!state || state.status === 'idle' || state.status === 'loading') {
+    return <div className="py-6 text-center text-xs text-muted-foreground/60" data-repo-files-loading>Listing the repository…</div>;
+  }
+  if (state.status === 'unavailable') {
+    return <div className="px-3 py-6 text-center text-xs text-muted-foreground/70" data-repo-files-unavailable={state.reason}>{state.message}</div>;
+  }
+  if (state.status === 'error') {
+    return (
+      <div className="px-3 py-6 text-center text-xs text-muted-foreground/70" data-repo-files-error>
+        <div>The repository could not be listed.</div>
+        {onRetry && (
+          <button type="button" className="mt-2 text-primary hover:underline" onClick={onRetry}>
+            Try again
+          </button>
+        )}
+      </div>
+    );
+  }
+  return null;
 };
+
+/** What each kind block holds (`fileKind` in packages/core/file-kind.ts),
+ *  for its heading's tooltip and spoken name. The label stays "Code"
+ *  (approved design record "review-file-kinds"); this says what it means. */
+const KIND_COVERS: Record<FileKindBlock['kind'], string> = {
+  code: 'Everything that is not a test, documentation or a generated file, config included',
+  test: 'Test files (such as *.test.ts, *_test.go, test_*.py) and files in test folders (tests, __tests__, spec, e2e, fixtures)',
+  docs: 'Documentation: Markdown and other prose, READMEs, changelogs, licences, and files in docs folders',
+  generated: 'Generated files: lockfiles, minified and source-map files, and files marked linguist-generated in .gitattributes',
+};
+
+export type FileGroupBy = 'none' | 'kind' | 'status';
+
+interface FileGroupBlock {
+  key: string;
+  group: 'kind' | 'status';
+  label: string;
+  icon?: React.ReactNode;
+  tooltip: string;
+  tree: FileTreeNode[];
+  paths: string[];
+  additions: number;
+  deletions: number;
+}
 
 // --- Search result components ---
 
@@ -720,8 +741,8 @@ export const SearchFileGroup: React.FC<{
           />
         </svg>
         <span className="truncate text-foreground font-medium">{fileName}</span>
-        {dirPath && <span className="truncate text-muted-foreground/50 text-[10px]">{dirPath}</span>}
-        <span className="ml-auto flex-shrink-0 text-[10px] text-muted-foreground/50 bg-muted rounded px-1.5 py-0.5">
+        {dirPath && <span className="truncate text-muted-foreground/50 text-xs">{dirPath}</span>}
+        <span className="ml-auto flex-shrink-0 text-xs text-muted-foreground/50 bg-muted rounded px-1.5 py-0.5">
           {group.matches.length}
         </span>
       </button>
@@ -752,7 +773,6 @@ const SearchMatchRow: React.FC<{
   isActive: boolean;
   onSelect: () => void;
 }> = ({ match, searchQuery, isActive, onSelect }) => {
-  const sideLabel = getReviewSearchSideLabel(match.side);
   const sideColor =
     match.side === 'addition'
       ? 'text-success'
@@ -763,12 +783,12 @@ const SearchMatchRow: React.FC<{
   return (
     <button
       className={`w-full text-left px-2 py-1 rounded-sm text-xs font-mono transition-colors flex items-start gap-1.5 ${
-        isActive ? 'bg-primary/15 text-foreground' : 'hover:bg-muted/50 text-muted-foreground'
+        isActive ? 'bg-[var(--sidebar-fill-strong)] text-foreground' : 'hover:bg-muted/50 text-muted-foreground'
       }`}
       onClick={onSelect}
     >
       <span className="flex-shrink-0 text-muted-foreground/40 w-7 text-right tabular-nums">{match.lineNumber}</span>
-      <span className={`flex-shrink-0 w-6 text-[10px] font-semibold uppercase ${sideColor}`}>{sideLabel}</span>
+      <span className={`flex-shrink-0 w-3 text-center ${sideColor}`} title={match.side === 'addition' ? 'Added line' : match.side === 'deletion' ? 'Removed line' : 'Unchanged line'} data-search-side={match.side}>{match.side === 'addition' ? '+' : match.side === 'deletion' ? '−' : ''}</span>
       <span className="truncate leading-relaxed">{highlightQuery(match.snippet, searchQuery)}</span>
     </button>
   );

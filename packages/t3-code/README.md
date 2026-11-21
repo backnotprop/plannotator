@@ -2,7 +2,9 @@
 
 Claude keeps using ordinary Plannotator commands. An optional installer-managed Claude hook connects supported review launches to the originating T3 conversation automatically, after one-time authorization. **Ask this session** sends a question into that conversation and displays its answer in the review.
 
-This is a Plannotator-only integration. It uses T3's existing external MCP API as a client. It requires no T3 code change, provider-side Plannotator MCP server, or change to the Plannotator skill. Inbox is outside this integration.
+This is a Plannotator-only integration. It uses T3's existing external MCP API as a client. Ask this session requires no T3 code change, provider-side Plannotator MCP server, or change to the Plannotator skill.
+
+The Plannotator Inbox uses the same sign-in: after `plannotator t3 login`, a reply the person sends to an agent in a T3 Claude thread arrives in that thread as a new turn. Its setup is in `plannotator t3 --help`: the login, then `claude mcp add -s user plannotator-inbox -- plannotator inbox mcp --t3` (that entry lists its tools only inside a T3 thread). See "T3 Code" in `docs/agent-guides/inbox-notifications-and-agents.md`.
 
 ## Setup
 
@@ -12,9 +14,9 @@ T3 support is off by default and is not registered by the Claude plugin. In a re
 bash scripts/install.sh --with-t3
 ```
 
-The flag installs one `PreToolUse` Bash hook into `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json`. The hook command starts with a shell gate: only a Claude started through the Agent SDK (as T3 starts it; `CLAUDE_CODE_ENTRYPOINT=sdk-…`) runs Plannotator. An interactive `claude` that loads the same profile is answered by the shell in a few milliseconds and is never routed. The gate opens for every Agent SDK session, not only T3's: `claude -p` (`sdk-cli`), other SDK apps, and Plannotator's own Claude review-agent jobs. There each Bash call pays the binary's start (about 320 ms) before the hook finds no T3 conversation and leaves the command alone. If a step of the hook installation fails, the installer prints why and the command to retry, and the rest of the install continues. It preserves other hooks and settings, backs up existing settings before the first change, and pins the installed binary and selected Plannotator data directory in the hook command. Automatic updates replay the installation flag. An install without either T3 flag leaves any existing T3 hook alone. `--minimal` remains binary-only and skips both T3 flags.
+The flag installs one `PreToolUse` Bash hook into `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json`. The hook command starts with a shell gate: only a Claude started through the Agent SDK (T3 starts it with `CLAUDE_CODE_ENTRYPOINT=t3-code`; other SDK apps report `sdk-…`) runs Plannotator. An interactive `claude` that loads the same profile is answered by the shell in a few milliseconds and is never routed. The gate opens for every Agent SDK session, not only T3's: `claude -p` (`sdk-cli`), other SDK apps, and Plannotator's own Claude review-agent jobs. There each Bash call pays the binary's start (about 320 ms) before the hook finds no T3 conversation and leaves the command alone. If a step of the hook installation fails, the installer prints why and the command to retry, and the rest of the install continues. It preserves other hooks and settings, backs up existing settings before the first change, and pins the installed binary and selected Plannotator data directory in the hook command. Automatic updates replay the installation flag. An install without either T3 flag leaves any existing T3 hook alone. `--minimal` remains binary-only and skips both T3 flags.
 
-The currently released installer does not include this experimental integration. To test this source checkout without downloading an older release, build the binary:
+Released installers include this experimental integration since v0.28.19. To test this source checkout instead, build the binary:
 
 ```sh
 bun install --frozen-lockfile
@@ -31,9 +33,11 @@ For local testing, the same settings helper can register the built binary direct
   --executable "$PWD/packages/t3-code/dist/plannotator"
 ```
 
+Run it again after updating a build that registered the hook this way. Hooks registered before T3 began reporting `CLAUDE_CODE_ENTRYPOINT=t3-code` keep the old `sdk*`-only gate, which T3 sessions never pass. Reinstalling replaces that gate, and the installer's own `--with-t3` does this on every update.
+
 `t3-hook` is an internal installer/helper command; agents do not invoke it. The commands below use `plannotator` for that build (`packages/t3-code/dist/plannotator`). A running Claude provider session needs to restart to load changed hooks. The normal Claude plugin is unchanged and is not needed to register the T3 hook; its plan-review integration remains separate. The live routing verification used an equivalent command hook in isolated project settings. Installer tests use isolated profiles rather than changing a person's installed configuration.
 
-In T3 Settings → Connections, copy the environment's MCP URL. A person authorizes once:
+In T3 Settings → Environments, open the environment's menu and choose **Copy MCP URL**. A person authorizes once:
 
 ```sh
 plannotator t3 login --url http://127.0.0.1:3773/mcp

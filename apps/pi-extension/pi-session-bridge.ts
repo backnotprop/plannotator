@@ -58,6 +58,8 @@ export const PLANNOTATOR_ASK_CUSTOM_TYPE = "plannotator-ask";
  * question over.
  */
 export const PI_INBOX_REMINDER_CUSTOM_TYPE = "plannotator-inbox-reminder";
+/** `/plannotator-inbox`'s hidden Inbox briefing (index.ts), sent with the next prompt: like the reminder, never someone else's prompt. */
+export const PI_INBOX_BRIEFING_CUSTOM_TYPE = "plannotator-inbox-briefing";
 
 /** How long a sent question may take to show up in the session before it is reported as failed. */
 const START_WATCHDOG_MS = 15_000;
@@ -181,7 +183,7 @@ export function createPiSessionBridgeHub(
 			clearWatchdog(ask);
 			return;
 		}
-		if (message.role === "custom" && message.customType === PI_INBOX_REMINDER_CUSTOM_TYPE) return;
+		if (message.role === "custom" && (message.customType === PI_INBOX_REMINDER_CUSTOM_TYPE || message.customType === PI_INBOX_BRIEFING_CUSTOM_TYPE)) return;
 		if (ask.started && (message.role === "user" || (message.role === "custom" && inPrelude))) {
 			// Someone else's prompt entered the run answering our question: the
 			// rest of it answers them. Settle now and leave the run alone.

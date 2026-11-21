@@ -1,7 +1,7 @@
 /**
  * Re-ask (approval "inbox-reask") through the server's real doors: the
  * window's route and its guards, the connection's poll (the wake's own
- * line), an MCP agent that receives the note with wait_for_reply and
+ * line), an MCP agent that reads the note with read_thread and
  * supersedes its old questions through send_message, and the phone's door.
  * Every test uses its own temp data dir.
  */
@@ -19,7 +19,7 @@ import {
   inboxReaskInstruction,
   inboxReaskRedirectedLine,
   inboxRedirectedLine,
-  inboxWakeClosingLine,
+  INBOX_WAKE_CLOSING_LINE,
   inboxWakeText,
   parseInboxBridgeCommands,
 } from "@plannotator/shared/inbox/connection";
@@ -29,7 +29,11 @@ const roots: string[] = [];
 const servers: InboxServer[] = [];
 const clients: Client[] = [];
 
+const savedRelay = process.env.PLANNOTATOR_RELAY_URL;
+
 afterEach(async () => {
+  if (savedRelay === undefined) delete process.env.PLANNOTATOR_RELAY_URL;
+  else process.env.PLANNOTATOR_RELAY_URL = savedRelay;
   for (const client of clients.splice(0)) await client.close().catch(() => {});
   for (const server of servers.splice(0)) server.stop();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -40,6 +44,8 @@ async function setup(options: { phones?: boolean } = {}) {
   roots.push(root);
   const project = join(root, "billing");
   mkdirSync(project, { recursive: true });
+  // Phones on starts the relay connection: it must never reach the real relay from a test (a port nothing answers on; restored after each test).
+  if (options.phones) process.env.PLANNOTATOR_RELAY_URL = "http://127.0.0.1:9";
   const server = await startInboxServer({ dataDir: join(root, "data"), binaryPath: null, ...(options.phones ? { phones: true } : {}) });
   servers.push(server);
   const client = new Client({ name: "inbox-reask-test", version: "1.0.0" });
@@ -135,18 +141,18 @@ describe("Re-ask reaches the agent", () => {
     const wake = inboxWakeText(command!);
     expect(wake.split("\n")[1]).toBe(INBOX_REASK_INSTRUCTION);
     expect(wake).not.toContain(INBOX_WAKE_INSTRUCTION);
-    expect(wake.endsWith(`${note.reply.body}\n\n${inboxWakeClosingLine(command!.thread_id)}`)).toBe(true);
+    expect(wake.endsWith(`${note.reply.body}\n\n${INBOX_WAKE_CLOSING_LINE}`)).toBe(true);
     expect((await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-a", host: "claude-code", type: "delivered", id: note.reply.id })).status).toBe(200);
     // Delivered, and still Sent: the agent has not asked again yet.
     expect((await row(server, t.thread)).section).toBe("sent");
   });
 
-  test("an MCP agent reads the note with wait_for_reply, re-asks with Replaces: lines and drops one with supersedes", async () => {
+  test("an MCP agent reads the note with read_thread, re-asks with Replaces: lines and drops one with supersedes", async () => {
     const { server, client, project } = await setup();
     const t = await seed(client, project);
     const note = (await (await reask(server, t.second, { idempotency_key: "k1" })).json()) as { reply: { id: string; reask: string[] } };
-    const waited = await client.callTool({ name: "wait_for_reply", arguments: { thread_id: t.thread, agent_session: "ses-a", timeout_seconds: 1 } });
-    const text = JSON.stringify(waited.content);
+    const read = await client.callTool({ name: "read_thread", arguments: { thread_id: t.thread, agent_session: "ses-a" } });
+    const text = JSON.stringify(read.content);
     expect(text).toContain("Please ask your 3 open questions in this thread again");
     expect(text).toContain(`reply_to ${note.reply.id}`);
     // The agent re-asks the first two and drops the third, as the note says.

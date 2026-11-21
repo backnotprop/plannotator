@@ -1,0 +1,5 @@
+revision: W-05
+scope: core
+title: Small plan 5
+change:
+  slackbot: "Small change number 5."

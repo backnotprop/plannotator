@@ -1,91 +1,167 @@
 /**
- * Usage counts for Plannotator's experimental features: a Worker in front of
- * one D1 table of daily totals (approval record "experimental-telemetry").
+ * Plannotator's daily ping: a Worker in front of three D1 tables of daily totals.
  *
- *  - POST /v1/counts    one batch from a Plannotator process: validated
- *                       against the registry the client builds from
- *                       (@plannotator/core/usage-counts), then added into
- *                       the day's totals. 204, no body.
- *  - GET  /v1/totals    the totals for agents, with a bearer token: only
- *                       days closed for good (older than the 3 days a batch
- *                       is accepted for); a (day, rev) with fewer than 5
- *                       reporting install-days, and any cell with fewer than
- *                       5 reports, is left out and counted as suppressed.
- *  - GET  /             one sentence about the service.
- *  - scheduled          retention: a feature's totals go 180 days after its
- *                       counting ends; anything older than 400 days goes; a
- *                       feature no longer in the registry goes.
+ *  - POST /ping     `{"version":"X.Y.Z","age_week":1-4,"tool":"plan","first":0|1,"favicon":"glass"}`
+ *                   and nothing else: adds 1 to today's (UTC) total for that
+ *                   version, age bucket and tool, and, when `first` is 1 (the
+ *                   computer's first ping of the day), to the day's user
+ *                   total and to the day's count for that `favicon` (glass,
+ *                   yellow, face or none), a table of its own, never stored next
+ *                   to the version, age bucket or tool. The four-key body
+ *                   without `favicon` (every release before it) is accepted
+ *                   for ever and counts no favicon. 204, no body. Anything
+ *                   else: 400 / 413 / 405.
+ *                   A body over MAX_BODY_BYTES is refused before it is read
+ *                   (its Content-Length) and never read past that size.
+ *  - GET  /totals   read-only JSON of the last TOTALS_DAYS days' sums, for a
+ *                   public page. Served from the Cache API for 5 minutes, so
+ *                   repeated GETs do not read D1.
  *
- * Stores no IP, no per-request row, no time beyond the day. Reads
- * CF-Connecting-IP only to hand it to the rate limiter, never `request.cf`,
- * and logs nothing about a request (the only log lines are fixed codes).
+ * It stores no IP, no header, no `request.cf` field, no time finer than the
+ * UTC day, and no row per request. The only header it reads is
+ * Content-Length (to refuse a large body unread), and it never logs. The
+ * client is packages/shared/daily-ping.ts.
+ *
+ * No per-isolate rate limit: isolates are many and short-lived, so a counter
+ * in one would not bound anything. If counts are ever inflated on purpose, add
+ * a Cloudflare rate-limiting rule on /ping at the zone (it stores nothing here).
  */
-import {
-  addUtcDays,
-  countBucketLabel,
-  daysLast7Label,
-  isUtcDay,
-  parseUsageCountsBatch,
-  USAGE_COUNT_FEATURES,
-  USAGE_COUNTS_MAX_BODY_BYTES,
-  USAGE_COUNTS_MIN_REPORTS,
-  USAGE_COUNTS_PATH,
-  USAGE_COUNTS_RETENTION_DAYS,
-  usageCountsServedThrough,
-  usageCountEvent,
-  usageCountFeature,
-  utcDay,
-  utcDaysBetween,
-  type UsageCountsBatch,
-} from "@plannotator/core/usage-counts";
+
+/** The part of D1 this Worker uses (D1Database fits; tests pass a fake). */
+export interface PingDb {
+  prepare(query: string): {
+    bind(...values: unknown[]): {
+      run(): Promise<unknown>;
+      all<T = Record<string, unknown>>(): Promise<{ results: T[] }>;
+    };
+  };
+}
 
 export interface Env {
-  COUNTS: D1Database;
-  /** `[[ratelimits]] name = "COUNTS_LIMITER"`. Optional: without it nothing is braked. */
-  COUNTS_LIMITER?: RateLimit;
-  /** The read route's bearer token (a secret). Without it every read is 401. */
-  READ_TOKEN?: string;
+  DB: PingDb;
 }
 
-/** The pseudo-event that counts batches (reporting install-days) per (day, feature, rev). */
-export const REPORTS_EVENT = "_reports";
-/** The longest range GET /v1/totals answers. */
-export const MAX_TOTALS_RANGE_DAYS = 400;
-/** Nothing is kept longer than this, whatever the registry says. */
-export const MAX_KEEP_DAYS = 400;
-const RATE_LIMIT_PERIOD_SECONDS = 60;
-
-const BASE_HEADERS = { "cache-control": "no-store", "x-content-type-options": "nosniff" };
-
-function json(body: unknown, status: number, extra: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body), { status, headers: { ...BASE_HEADERS, "content-type": "application/json", ...extra } });
+/** The part of the Cache API GET /totals uses (`caches.default` fits; tests pass a fake). */
+export interface TotalsCache {
+  match(key: Request): Promise<Response | undefined>;
+  put(key: Request, res: Response): Promise<void>;
 }
 
-function empty(status: number, extra: Record<string, string> = {}): Response {
-  return new Response(null, { status, headers: { ...BASE_HEADERS, ...extra } });
+/** How long a /totals answer is served from the cache. */
+export const TOTALS_CACHE_SECONDS = 300;
+/** The one cache key every /totals request shares (no query string can split it). */
+const TOTALS_CACHE_KEY = "https://ping.plannotator.ai/totals";
+
+export const MAX_BODY_BYTES = 160;
+export const AGE_WEEKS = [1, 2, 3, 4] as const;
+export const TOOLS = ["inbox", "plan", "review", "annotate", "last"] as const;
+/** The favicon set in Settings (packages/shared/daily-ping.ts), or none when never picked. */
+export const FAVICONS = ["glass", "yellow", "face", "none"] as const;
+/** How many days GET /totals answers, newest last. */
+export const TOTALS_DAYS = 90;
+
+const VERSION_RE = /^\d{1,4}\.\d{1,4}\.\d{1,4}$/;
+const DAY_MS = 86_400_000;
+
+export const TOOL_UPSERT_SQL =
+  "INSERT INTO daily (day, version, age_week, tool, n) VALUES (?1, ?2, ?3, ?4, 1) ON CONFLICT (day, version, age_week, tool) DO UPDATE SET n = n + 1";
+export const TOTAL_UPSERT_SQL =
+  "INSERT INTO daily_total (day, version, age_week, n) VALUES (?1, ?2, ?3, 1) ON CONFLICT (day, version, age_week) DO UPDATE SET n = n + 1";
+export const FAVICON_UPSERT_SQL =
+  "INSERT INTO daily_favicon (day, favicon, n) VALUES (?1, ?2, 1) ON CONFLICT (day, favicon) DO UPDATE SET n = n + 1";
+export const TOOL_TOTALS_SQL = "SELECT day, version, age_week, tool, n FROM daily WHERE day >= ?1";
+export const USER_TOTALS_SQL = "SELECT day, version, age_week, n FROM daily_total WHERE day >= ?1";
+export const FAVICON_TOTALS_SQL = "SELECT day, favicon, n FROM daily_favicon WHERE day >= ?1";
+
+export interface Ping {
+  version: string;
+  age_week: (typeof AGE_WEEKS)[number];
+  tool: (typeof TOOLS)[number];
+  first: 0 | 1;
+  /** Absent in the four-key body older releases send. */
+  favicon?: (typeof FAVICONS)[number];
 }
 
-/** The rows one batch adds 1 to: the reports row, then one per event. */
-export function rowsForBatch(batch: UsageCountsBatch): { event: string; bucket: string; total: number }[] {
-  const feature = usageCountFeature(batch.feature)!;
-  const rows = [{ event: REPORTS_EVENT, bucket: "", total: 1 }];
-  for (const [id, value] of Object.entries(batch.events)) {
-    const def = usageCountEvent(feature, id)!;
-    if (def.kind === "count") rows.push({ event: id, bucket: countBucketLabel(value), total: value });
-    else if (def.kind === "days_last7") rows.push({ event: id, bucket: daysLast7Label(value)!, total: 0 });
-    else rows.push({ event: id, bucket: "1", total: 1 });
+/**
+ * The body, or null: exactly the keys `version` (X.Y.Z), `age_week` (1-4),
+ * `tool` (one of TOOLS) and `first` (0 or 1), with or without `favicon` (one
+ * of FAVICONS).
+ */
+export function parsePing(text: string): Ping | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return null;
   }
-  return rows;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const keys = Object.keys(value).sort().join(",");
+  if (keys !== "age_week,first,tool,version" && keys !== "age_week,favicon,first,tool,version") return null;
+  const { version, age_week, tool, first, favicon } = value as Record<string, unknown>;
+  if (typeof version !== "string" || !VERSION_RE.test(version)) return null;
+  if (typeof age_week !== "number" || !(AGE_WEEKS as readonly number[]).includes(age_week)) return null;
+  if (typeof tool !== "string" || !(TOOLS as readonly string[]).includes(tool)) return null;
+  if (first !== 0 && first !== 1) return null;
+  const out: Ping = { version, age_week: age_week as Ping["age_week"], tool: tool as Ping["tool"], first };
+  if (favicon === undefined) return out;
+  if (typeof favicon !== "string" || !(FAVICONS as readonly string[]).includes(favicon)) return null;
+  return { ...out, favicon: favicon as Ping["favicon"] };
 }
 
-const UPSERT = `INSERT INTO daily_totals (day, feature, rev, event, bucket, reports, total) VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6)
-ON CONFLICT (day, feature, rev, event, bucket) DO UPDATE SET reports = reports + 1, total = total + excluded.total`;
+function utcDay(now: number): string {
+  return new Date(now).toISOString().slice(0, 10);
+}
 
-/** Read the body, refusing it the moment it passes the limit. Null when too large. */
-async function readLimited(req: Request, limit: number): Promise<string | null> {
-  const declared = req.headers.get("content-length");
-  if (declared !== null && (!/^\d+$/.test(declared) || Number(declared) > limit)) return null;
-  if (!req.body) return "";
+function empty(status: number): Response {
+  return new Response(null, { status, headers: { "cache-control": "no-store" } });
+}
+
+export interface DayTotals {
+  day: string;
+  /** Computers that sent any ping that day (the pings with `first: 1`). */
+  users: number;
+  /** Users per install-age bucket. */
+  age_week: Record<string, number>;
+  /** Users per version. */
+  versions: Record<string, number>;
+  /** Computers that used each tool that day. */
+  tools: Record<string, number>;
+  /** Computers per favicon that day (from releases that send it; older ones count in `users` only). */
+  favicon: Record<string, number>;
+}
+
+type ToolRow = { day: string; version: string; age_week: number; tool: string; n: number };
+type UserRow = { day: string; version: string; age_week: number; n: number };
+type FaviconRow = { day: string; favicon: string; n: number };
+
+/** The rows, summed per day. */
+export function sumDays(users: UserRow[], tools: ToolRow[], favicons: FaviconRow[]): DayTotals[] {
+  const days = new Map<string, DayTotals>();
+  const day = (d: string) => {
+    let t = days.get(d);
+    if (!t) days.set(d, (t = { day: d, users: 0, age_week: {}, versions: {}, tools: {}, favicon: {} }));
+    return t;
+  };
+  for (const row of users) {
+    const t = day(row.day);
+    t.users += row.n;
+    t.age_week[String(row.age_week)] = (t.age_week[String(row.age_week)] ?? 0) + row.n;
+    t.versions[row.version] = (t.versions[row.version] ?? 0) + row.n;
+  }
+  for (const row of tools) {
+    const t = day(row.day);
+    t.tools[row.tool] = (t.tools[row.tool] ?? 0) + row.n;
+  }
+  for (const row of favicons) {
+    const t = day(row.day);
+    t.favicon[row.favicon] = (t.favicon[row.favicon] ?? 0) + row.n;
+  }
+  return [...days.values()].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
+}
+
+/** The body, read up to `max` bytes; null when it is larger (the rest is never read). */
+async function readCapped(req: Request, max: number): Promise<Uint8Array | null> {
+  if (!req.body) return new Uint8Array(0);
   const reader = req.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -93,204 +169,58 @@ async function readLimited(req: Request, limit: number): Promise<string | null> 
     const { done, value } = await reader.read();
     if (done) break;
     size += value.byteLength;
-    if (size > limit) {
+    if (size > max) {
       await reader.cancel().catch(() => {});
       return null;
     }
     chunks.push(value);
   }
-  const bytes = new Uint8Array(size);
+  const out = new Uint8Array(size);
   let at = 0;
-  for (const c of chunks) {
-    bytes.set(c, at);
-    at += c.byteLength;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.byteLength;
   }
-  try {
-    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
-  } catch {
-    return "\u0000";
-  }
+  return out;
 }
 
-async function rateLimited(req: Request, limiter: RateLimit | undefined): Promise<boolean> {
-  if (!limiter) return false;
-  const ip = req.headers.get("cf-connecting-ip");
-  if (!ip) return false;
-  try {
-    return !(await limiter.limit({ key: ip })).success;
-  } catch {
-    console.error("counts: limiter_failed");
-    return false;
-  }
-}
-
-async function postCounts(req: Request, env: Env, now: number): Promise<Response> {
-  if (req.headers.has("origin")) return json({ code: "forbidden" }, 403);
-  const type = (req.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
-  if (type !== "application/json") return json({ code: "unsupported_media_type" }, 415);
-  const body = await readLimited(req, USAGE_COUNTS_MAX_BODY_BYTES);
-  if (body === null) return json({ code: "too_large" }, 413);
-  if (await rateLimited(req, env.COUNTS_LIMITER)) return json({ code: "rate_limited" }, 429, { "retry-after": String(RATE_LIMIT_PERIOD_SECONDS) });
-  const batch = parseUsageCountsBatch(body, { today: utcDay(now) });
-  if (!batch) return json({ code: "invalid" }, 400);
-  try {
-    await env.COUNTS.batch(
-      rowsForBatch(batch).map((r) => env.COUNTS.prepare(UPSERT).bind(batch.day, batch.feature, batch.rev, r.event, r.bucket, r.total)),
-    );
-  } catch {
-    console.error("counts: write_failed");
-    return json({ code: "unavailable" }, 503);
-  }
-  return empty(204);
-}
-
-/** Constant-time comparison of two strings by their SHA-256 digests. */
-async function sameSecret(a: string, b: string): Promise<boolean> {
-  const enc = new TextEncoder();
-  const [x, y] = await Promise.all([crypto.subtle.digest("SHA-256", enc.encode(a)), crypto.subtle.digest("SHA-256", enc.encode(b))]);
-  const ua = new Uint8Array(x);
-  const ub = new Uint8Array(y);
-  let diff = 0;
-  for (let i = 0; i < ua.length; i++) diff |= ua[i]! ^ ub[i]!;
-  return diff === 0;
-}
-
-interface EventTotals {
-  reports: number;
-  total: number;
-  buckets: Record<string, number>;
-}
-
-interface DayTotals {
-  day: string;
-  rev: number;
-  reports: number;
-  events: Record<string, EventTotals>;
-}
-
-function addTo(target: Record<string, EventTotals>, event: string, bucket: string, reports: number, total: number): void {
-  const t = (target[event] ??= { reports: 0, total: 0, buckets: {} });
-  t.reports += reports;
-  t.total += total;
-  t.buckets[bucket] = (t.buckets[bucket] ?? 0) + reports;
-}
-
-async function getTotals(req: Request, env: Env, url: URL, now: number): Promise<Response> {
-  const auth = /^Bearer (.+)$/.exec(req.headers.get("authorization") ?? "")?.[1];
-  if (!env.READ_TOKEN || !auth || !(await sameSecret(auth, env.READ_TOKEN))) {
-    return json({ code: "unauthorized" }, 401, { "www-authenticate": "Bearer" });
-  }
-  const feature = url.searchParams.get("feature") ?? "";
-  const from = url.searchParams.get("from") ?? "";
-  const to = url.searchParams.get("to") ?? "";
-  const revParam = url.searchParams.get("rev");
-  if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(feature) || !isUtcDay(from) || !isUtcDay(to) || from > to) {
-    return json({ code: "invalid", hint: "feature, from and to (YYYY-MM-DD, from <= to) are required" }, 400);
-  }
-  if (utcDaysBetween(from, to) >= MAX_TOTALS_RANGE_DAYS) return json({ code: "invalid", hint: `at most ${MAX_TOTALS_RANGE_DAYS} days` }, 400);
-  if (revParam !== null && !/^[1-9]\d{0,5}$/.test(revParam)) return json({ code: "invalid", hint: "rev is a whole number" }, 400);
-
-  // Only days no batch can still change: a day is accepted for
-  // USAGE_COUNTS_MAX_DAYS_BACK days, so reading a total before and after one
-  // install's batch is never possible through this route.
-  const servedThrough = usageCountsServedThrough(utcDay(now));
-  const upTo = to < servedThrough ? to : servedThrough;
-  const where = revParam === null ? "" : " AND rev = ?4";
-  const params: (string | number)[] = [feature, from, upTo, ...(revParam === null ? [] : [Number(revParam)])];
-  const { results } =
-    from > upTo
-      ? { results: [] as { day: string; rev: number; event: string; bucket: string; reports: number; total: number }[] }
-      : await env.COUNTS.prepare(
-          `SELECT day, rev, event, bucket, reports, total FROM daily_totals WHERE feature = ?1 AND day BETWEEN ?2 AND ?3${where} ORDER BY day, rev, event, bucket`,
-        )
-          .bind(...params)
-          .all<{ day: string; rev: number; event: string; bucket: string; reports: number; total: number }>();
-
-  // A (day, rev) with fewer than 5 reports is hidden whole; inside a shown
-  // day, any (event, bucket) cell with fewer than 5 reports is hidden too, and
-  // never enters a sum, so no total can be subtracted from another to find it.
-  const groups = new Map<string, { day: string; rev: number; reports: number; cells: typeof results }>();
-  for (const row of results) {
-    const key = `${row.day}\u0000${row.rev}`;
-    const g = groups.get(key) ?? { day: row.day, rev: row.rev, reports: 0, cells: [] };
-    groups.set(key, g);
-    if (row.event === REPORTS_EVENT) g.reports += row.reports;
-    else g.cells.push(row);
-  }
-  const days: DayTotals[] = [];
-  let suppressedDays = 0;
-  let suppressedCells = 0;
-  const totals: Record<string, EventTotals> = {};
-  let installDays = 0;
-  for (const g of groups.values()) {
-    if (g.reports < USAGE_COUNTS_MIN_REPORTS) {
-      suppressedDays++;
-      continue;
+export async function handleRequest(req: Request, env: Env, now: number = Date.now(), cache?: TotalsCache): Promise<Response> {
+  const path = new URL(req.url).pathname;
+  if (path === "/ping") {
+    if (req.method !== "POST") return empty(405);
+    const declared = Number(req.headers.get("content-length") ?? "0");
+    if (!(declared <= MAX_BODY_BYTES)) return empty(413);
+    const bytes = await readCapped(req, MAX_BODY_BYTES);
+    if (!bytes) return empty(413);
+    const ping = parsePing(new TextDecoder().decode(bytes));
+    if (!ping) return empty(400);
+    const day = utcDay(now);
+    await env.DB.prepare(TOOL_UPSERT_SQL).bind(day, ping.version, ping.age_week, ping.tool).run();
+    if (ping.first === 1) {
+      await env.DB.prepare(TOTAL_UPSERT_SQL).bind(day, ping.version, ping.age_week).run();
+      if (ping.favicon) await env.DB.prepare(FAVICON_UPSERT_SQL).bind(day, ping.favicon).run();
     }
-    const day: DayTotals = { day: g.day, rev: g.rev, reports: g.reports, events: {} };
-    for (const cell of g.cells) {
-      if (cell.reports < USAGE_COUNTS_MIN_REPORTS) {
-        suppressedCells++;
-        continue;
-      }
-      addTo(day.events, cell.event, cell.bucket, cell.reports, cell.total);
-      addTo(totals, cell.event, cell.bucket, cell.reports, cell.total);
-    }
-    days.push(day);
-    installDays += g.reports;
+    return empty(204);
   }
-  return json(
-    {
-      feature,
-      from,
-      to,
-      served_through: servedThrough,
-      rev: revParam === null ? null : Number(revParam),
-      min_reports: USAGE_COUNTS_MIN_REPORTS,
-      install_days: installDays,
-      suppressed_days: suppressedDays,
-      suppressed_cells: suppressedCells,
-      totals,
-      days,
-    },
-    200,
-  );
-}
-
-const HOME_TEXT =
-  "Plannotator usage counts: daily totals of how often experimental features are used, sent by people who keep usage counts on. No IP addresses, no ids, no content. https://plannotator.ai/docs/privacy\n";
-
-export async function handleRequest(req: Request, env: Env, now: number = Date.now()): Promise<Response> {
-  const url = new URL(req.url);
-  if (url.pathname === USAGE_COUNTS_PATH) {
-    if (req.method !== "POST") return json({ code: "method_not_allowed" }, 405, { allow: "POST" });
-    return postCounts(req, env, now);
+  if (path === "/totals") {
+    if (req.method !== "GET") return empty(405);
+    const key = new Request(TOTALS_CACHE_KEY);
+    const hit = await cache?.match(key);
+    if (hit) return hit;
+    const from = utcDay(now - (TOTALS_DAYS - 1) * DAY_MS);
+    const users = await env.DB.prepare(USER_TOTALS_SQL).bind(from).all<UserRow>();
+    const tools = await env.DB.prepare(TOOL_TOTALS_SQL).bind(from).all<ToolRow>();
+    const favicons = await env.DB.prepare(FAVICON_TOTALS_SQL).bind(from).all<FaviconRow>();
+    const res = new Response(JSON.stringify({ days: sumDays(users.results, tools.results, favicons.results) }), {
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+        "cache-control": `public, max-age=${TOTALS_CACHE_SECONDS}`,
+        "access-control-allow-origin": "*",
+      },
+    });
+    await cache?.put(key, res.clone());
+    return res;
   }
-  if (url.pathname === "/v1/totals") {
-    if (req.method !== "GET") return json({ code: "method_not_allowed" }, 405, { allow: "GET" });
-    return getTotals(req, env, url, now);
-  }
-  if (url.pathname === "/" && (req.method === "GET" || req.method === "HEAD")) {
-    return new Response(req.method === "HEAD" ? null : HOME_TEXT, { status: 200, headers: { ...BASE_HEADERS, "content-type": "text/plain; charset=utf-8" } });
-  }
-  return json({ code: "not_found" }, 404);
-}
-
-/**
- * Retention, run once a day: a feature's totals go 180 days after its
- * counting ends; any day older than 400 days goes; a feature no longer in the
- * registry goes (keep a feature listed until its totals are gone).
- */
-export async function runRetention(db: D1Database, now: number = Date.now()): Promise<void> {
-  const today = utcDay(now);
-  const statements: D1PreparedStatement[] = [];
-  for (const feature of USAGE_COUNT_FEATURES) {
-    if (today > addUtcDays(feature.collectUntil, USAGE_COUNTS_RETENTION_DAYS)) {
-      statements.push(db.prepare("DELETE FROM daily_totals WHERE feature = ?1").bind(feature.id));
-    }
-  }
-  const ids = USAGE_COUNT_FEATURES.map((f) => f.id);
-  statements.push(db.prepare(`DELETE FROM daily_totals WHERE feature NOT IN (${ids.map((_, i) => `?${i + 1}`).join(", ")})`).bind(...ids));
-  statements.push(db.prepare("DELETE FROM daily_totals WHERE day < ?1").bind(addUtcDays(today, -MAX_KEEP_DAYS)));
-  await db.batch(statements);
+  return empty(404);
 }

@@ -10,6 +10,7 @@
 
 import { INBOX_SECTIONS, inboxRowArchived, type InboxListRow } from '@plannotator/core/inbox-types';
 import { waitCount } from './format';
+import { threadChipName } from './threadChip';
 
 /** What a pinned row's state signal is (Count): a pill, a count, a dot, or nothing. */
 export type PinnedStateKind = 'stop' | 'hold' | 'wait' | 'new' | 'sent' | 'quiet' | 'archived';
@@ -48,9 +49,26 @@ export function pinnedState(row: InboxListRow): PinnedState {
   }
 }
 
-/** A pinned row's name: "subject, project, state" ("Board step 2: names, plannotator, 3 questions"). */
-export function pinnedRowName(row: InboxListRow): string {
-  return `${row.subject ?? '(no subject)'}, ${row.project.name}, ${pinnedState(row).words}`;
+/**
+ * What a pinned row calls its thread: the thread's name when it has one (by the
+ * list's own rule, `threadChipName`: not when the subject already starts with
+ * it), else the subject.
+ */
+export function pinnedLabel(row: InboxListRow): string {
+  const subject = row.subject ?? '(no subject)';
+  return (row.thread_name?.trim() ? threadChipName(row.thread_name, subject) : null) ?? subject;
+}
+
+/**
+ * A pinned row's name: "label, project, state" ("Board names, plannotator, 3 questions"),
+ * or "label, subject, project, state" when the label is the thread's name and
+ * the subject says something else. `project`: the sidebar's name for it
+ * (shortProjectNames); absent, the server's.
+ */
+export function pinnedRowName(row: InboxListRow, project: string = row.project.name): string {
+  const label = pinnedLabel(row);
+  const subject = row.subject ?? '(no subject)';
+  return `${label}, ${label === subject ? '' : `${subject}, `}${project}, ${pinnedState(row).words}`;
 }
 
 /** The pins' order after moving one up (-1) or down (+1); unchanged at an end or for a thread not pinned. */
@@ -62,6 +80,20 @@ export function movePin(order: readonly string[], threadId: string, by: -1 | 1):
   next[at] = next[to]!;
   next[to] = threadId;
   return next;
+}
+
+/**
+ * The stars one machine keeps, in its order: those of the machine `row` is on. The merged list carries every linked
+ * machine's after this one's (approval "inbox-linked-marks"), and each machine orders and restores only its own.
+ */
+export function sameMachinePins(pins: readonly InboxListRow[], row: Pick<InboxListRow, 'machine'>): InboxListRow[] {
+  return pins.filter((pin) => (pin.machine ?? null) === (row.machine ?? null));
+}
+
+/** Whether the star at `index` is first or last of its machine's: a move stops there. */
+export function pinEnds(pins: readonly InboxListRow[], index: number): { first: boolean; last: boolean } {
+  const machine = pins[index]?.machine ?? null;
+  return { first: index === 0 || (pins[index - 1]!.machine ?? null) !== machine, last: index === pins.length - 1 || (pins[index + 1]!.machine ?? null) !== machine };
 }
 
 /** Where an unpinned thread still is, for the toast: "Still in Waiting on you", "Still in Archived". */

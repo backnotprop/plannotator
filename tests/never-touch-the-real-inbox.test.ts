@@ -69,7 +69,15 @@ const SCANNER_FILES = new Set(["tests/helpers/real-inbox-scan.ts", "tests/never-
 const SIGNAL_ALLOWED = new Set(["tests/helpers/inbox-process.ts", ...SCANNER_FILES]);
 const HOME_PATH_ALLOWED = new Set(["tests/helpers/real-data-dir.ts", ...SCANNER_FILES]);
 /** vibe-plan.test.ts only compares the default it resolves (~/.vibe/plans) with the expected path; it reads and writes nothing there. */
-const AGENT_HOME_ALLOWED = new Set(["apps/hook/server/vibe-plan.test.ts", ...SCANNER_FILES]);
+/**
+ * scripts/launch-smoke/{day1,claude,permission}.ts are manual smokes against the real `claude` (never in CI). They already
+ * sandbox the data dir, the Inbox (startInboxServer with dataDir, PLANNOTATOR_DATA_DIR, NO_BROWSER) and the login
+ * env; the one real-home path is a READ of ~/.claude/projects/<dir>/<session>.jsonl to count a session's
+ * permissionMode (permission.ts also checks the deny reason reached Claude), because a real `--bg` worker writes
+ * its transcript there and nothing else reports it.
+ * They write nothing under the agent's folder.
+ */
+const AGENT_HOME_ALLOWED = new Set(["apps/hook/server/vibe-plan.test.ts", "scripts/launch-smoke/day1.ts", "scripts/launch-smoke/claude.ts", "scripts/launch-smoke/permission.ts", ...SCANNER_FILES]);
 
 const isStandaloneScript = (rel: string) => !/\.(?:test|spec)\.(?:ts|tsx|mts|js|mjs)$/.test(rel);
 
@@ -113,6 +121,12 @@ describe("the source scan", () => {
     expect(signalFindings(inboxFile("process.kill(pid);"))).toHaveLength(1);
     expect(signalFindings(inboxFile("process.kill(pid, 0);"))).toEqual([]);
     expect(signalFindings(inboxFile("execSync(`kill -9 ${pid}`);"))).not.toEqual([]);
+    // `kill -0` is a probe, like process.kill(pid, 0); a probe followed by a real kill is still a signal.
+    expect(signalFindings(inboxFile("expect(command).toContain(`kill -0 ${pid}`);"))).toEqual([]);
+    expect(signalFindings(inboxFile('spawnSync("kill", ["-0", String(pid)]);'))).toEqual([]);
+    expect(signalFindings(inboxFile('Bun.spawnSync(["kill", "-0", String(pid)]);'))).toEqual([]);
+    expect(signalFindings(inboxFile("execSync(`kill -0 ${pid} && kill ${pid}`);"))).not.toEqual([]);
+    expect(signalFindings(inboxFile("execSync(`kill -05 ${pid}`);"))).not.toEqual([]);
     expect(signalFindings(inboxFile('spawnSync("kill", [String(pid)]);'))).not.toEqual([]);
     expect(signalFindings(inboxFile('Bun.spawnSync(["pkill", "-f", "plannotator inbox"]);'))).not.toEqual([]);
     expect(signalFindings(inboxFile("const { kill } = process;\nkill(pid, 9);"))).not.toEqual([]);
@@ -135,6 +149,9 @@ describe("the source scan", () => {
     expect(agentHomeFindings('const file = join(homedir(), ".codex", "config.toml");')).toHaveLength(1);
     expect(agentHomeFindings('const home = os.homedir();\nconst file = join(home, ".config", "opencode", "AGENTS.md");')).toHaveLength(1);
     expect(agentHomeFindings('writeFileSync("~/.cursor/mcp.json", "{}");')).toHaveLength(1);
+    // Qwen Code's folder holds its settings, session registry and controller tokens.
+    expect(agentHomeFindings('const file = join(homedir(), ".qwen", "settings.json");')).toHaveLength(1);
+    expect(agentHomeFindings('const file = join(fake.home, ".qwen", "settings.json");')).toEqual([]);
     expect(agentHomeFindings('const file = join(fake.home, ".codex", "config.toml");')).toEqual([]);
     expect(agentConnectFindings('await fetch(`${url}/api/inbox/control/connect`, { method: "POST" });')).toHaveLength(1);
     expect(agentConnectFindings('startInboxServer({ dataDir, agentEnvironment: env });\nawait s.connectAgents();')).toEqual([]);
@@ -227,7 +244,7 @@ describe("the import-time sandbox works with no bunfig", () => {
 
   test("a scratch value (CI's mktemp -d) is kept", async () => {
     const cwd = scratch("plannotator-no-bunfig-");
-    const result = await bun([probe], cwd, { ...baseEnv(), PLANNOTATOR_DATA_DIR: join(cwd, "data") });
+    const result = await bun([probe], cwd, { ...baseEnv(), PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: join(cwd, "data") });
     expect(result.code, result.stderr).toBe(0);
     expect(result.stdout.trim()).toBe(join(cwd, "data"));
   });
@@ -237,7 +254,7 @@ describe("the import-time sandbox works with no bunfig", () => {
     // The probe only prints: nothing is created or read at these paths.
     const values = ["~/.plannotator", join(accountHome, ".plannotator"), "/opt/plannotator-relocated-data-probe"];
     for (const value of values) {
-      const result = await bun([probe], cwd, { ...baseEnv(), PLANNOTATOR_DATA_DIR: value });
+      const result = await bun([probe], cwd, { ...baseEnv(), PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: value });
       expect(result.code, result.stderr).toBe(0);
       const dir = result.stdout.trim();
       expect(dir).not.toBe(value);
@@ -249,7 +266,7 @@ describe("the import-time sandbox works with no bunfig", () => {
   test("HOME pointed elsewhere does not hide the account's own ~/.plannotator", async () => {
     const cwd = scratch("plannotator-no-bunfig-");
     const value = join(accountHome, ".plannotator");
-    const result = await bun([probe], cwd, { ...baseEnv(), HOME: cwd, PLANNOTATOR_DATA_DIR: value });
+    const result = await bun([probe], cwd, { ...baseEnv(), HOME: cwd, PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: value });
     expect(result.code, result.stderr).toBe(0);
     expect(result.stdout.trim()).not.toBe(value);
     expect(isScratchDataDir(result.stdout.trim())).toBe(true);
@@ -277,7 +294,7 @@ describe("the import-time sandbox works with no bunfig", () => {
     const dom = await bun([join(repoRoot, "tests", "helpers", "inbox-dom-server.ts"), theDefault, cwd, "1"], cwd, env);
     expect(dom.code).not.toBe(0);
     expect(dom.stderr).toContain("real Plannotator data directory");
-    const dast = await bun([join(repoRoot, "scripts", "dast", "target.ts")], cwd, { ...env, PLANNOTATOR_DAST_ISOLATED: "1", PLANNOTATOR_DATA_DIR: theDefault });
+    const dast = await bun([join(repoRoot, "scripts", "dast", "target.ts")], cwd, { ...env, PLANNOTATOR_DAST_ISOLATED: "1", PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: theDefault });
     expect(dast.code).not.toBe(0);
     expect(dast.stderr).toContain("real Plannotator data directory");
     const dastUnset = await bun([join(repoRoot, "scripts", "dast", "target.ts")], cwd, { ...env, PLANNOTATOR_DAST_ISOLATED: "1" });

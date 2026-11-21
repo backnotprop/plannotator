@@ -9,7 +9,8 @@
  * that no browser is opened, and why.
  */
 import { browserNoneReason, resolveBrowserIntent } from "./generated/browser-intent.ts";
-import { isRemoteSession, isUrlHostOverridden } from "./server/network.ts";
+import { isLocalOnlyAdvertisedUrl } from "./generated/advertised-url.ts";
+import { isRemoteSession } from "./server/network.ts";
 
 export function sessionOpenedMessage(label: string, url: string): string {
 	const intent = resolveBrowserIntent(process.env);
@@ -17,9 +18,9 @@ export function sessionOpenedMessage(label: string, url: string): string {
 		? ` ${browserNoneReason(intent)} You can keep chatting while it runs.`
 		: " You can keep chatting while it runs.";
 	if (!isRemoteSession()) return `${label} at ${url}.${tail}`;
-	// With an advertised-URL host override the link is directly reachable
-	// (e.g. over a tailnet), so the port-forwarding advice would be wrong.
-	return isUrlHostOverridden()
+	// A non-local advertised URL (a tailnet host, a reverse-proxy origin) is
+	// directly reachable, so the port-forwarding advice would be wrong.
+	return !isLocalOnlyAdvertisedUrl(url)
 		? `${label} — open ${url} on your device.${tail}`
 		: `${label} — open ${url} on your local machine (forward the port if needed).${tail}`;
 }

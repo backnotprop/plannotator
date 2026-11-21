@@ -1,0 +1,911 @@
+/**
+ * One composer's dictation with no microphone, no timers and no browser: a scripted recorder, a scripted field, and a
+ * clock the test moves.
+ *
+ * What regresses: anything that sends by itself; a late answer writing into a box that was cancelled or closed; a hold
+ * that turns into a tap (or the other way round); a clip dropped when the design keeps it for Retry; a silent clip
+ * posted; a recording running past 2:00; two recordings at once.
+ */
+import { afterEach, describe, expect, test } from 'bun:test';
+import { createVoiceSession, VOICE_ASKING_GIVE_UP_MS, VOICE_CAP_MS, VOICE_OPENING_GIVE_UP_MS, VOICE_OPENING_SLOW_MS, VOICE_QUIET_STOP_MS, type VoiceAnswer, type VoiceLate, type VoiceDeps, type VoiceField, type VoiceSession } from './voiceSession';
+import { openVoiceRecorder, type VoiceRecorder } from './voiceRecorder';
+import { INBOX_VOICE_FAILURES, type InboxVoiceFailure } from '@plannotator/core/inbox-types';
+
+const LOUD = -20;
+const ROOM = -70;
+const TICK = 33;
+
+function script(options: { prompts?: boolean; refuseMic?: string; throwMic?: number; failStop?: boolean; open?: VoiceDeps['open']; late?: (outcome: VoiceLate) => void } = {}) {
+  let throwMic = options.throwMic ?? 0;
+  const log: string[] = [];
+  const posted: Blob[] = [];
+  const signals: AbortSignal[] = [];
+  const opens: AbortSignal[] = [];
+  let clock = 1000;
+  let db = LOUD;
+  let ticker: (() => void) | null = null;
+  const timers: { at: number; run: () => void }[] = [];
+  let answers: (VoiceAnswer | Error | Promise<VoiceAnswer>)[] = [{ text: 'hello there' }];
+  let ended: (() => void) | null = null;
+  const pending: { resolve: (recorder: VoiceRecorder) => void }[] = [];
+  let holdMic = false;
+  const recorder = (): VoiceRecorder => ({
+    rate: 24_000,
+    db: () => db,
+    stop: async () => {
+      log.push('mic stopped');
+      if (options.failStop) throw new Error('no samples');
+      return [new Float32Array(2400).fill(0.2)];
+    },
+    abort: () => {
+      log.push('mic aborted');
+    },
+    onEnded: (listener) => {
+      ended = listener;
+    },
+  });
+  const deps: VoiceDeps = {
+    open: (signal) => {
+      opens.push(signal);
+      if (options.open) return options.open(signal);
+      log.push('mic opened');
+      // `new AudioContext()` throws before any promise exists.
+      if (throwMic > 0) {
+        throwMic--;
+        throw Object.assign(new Error('refused'), { name: 'InvalidStateError' });
+      }
+      if (options.refuseMic) return Promise.reject(Object.assign(new Error('no'), { name: options.refuseMic }));
+      if (holdMic) return new Promise((resolve) => pending.push({ resolve }));
+      return Promise.resolve(recorder());
+    },
+    prompts: async () => options.prompts ?? false,
+    transcribe: async (clip, signal) => {
+      posted.push(clip);
+      signals.push(signal);
+      const next = answers.length > 1 ? answers.shift()! : answers[0]!;
+      if (next instanceof Error) throw next;
+      return next;
+    },
+    notReady: (state) => log.push(`not ready: ${state}`),
+    now: () => clock,
+    every: (_ms, run) => {
+      ticker = run;
+      return () => {
+        ticker = null;
+      };
+    },
+    after: (ms, run) => {
+      const timer = { at: clock + ms, run };
+      timers.push(timer);
+      // As clearTimeout: a timer that already ran, or was cleared, is left alone.
+      return () => {
+        const at = timers.indexOf(timer);
+        if (at >= 0) timers.splice(at, 1);
+      };
+    },
+  };
+  let value = 'Draft ';
+  let caret = value.length;
+  let onInput: (() => void) | null = null;
+  let locked = false;
+  const field: VoiceField = {
+    selection: () => ({ start: caret, end: caret }),
+    text: () => value,
+    readOnly: () => locked,
+    focus: () => log.push('focus'),
+    select: (start) => {
+      caret = start;
+    },
+    insert: (words) => {
+      const start = caret;
+      value = value.slice(0, caret) + words + value.slice(caret);
+      caret += words.length;
+      return { start, end: caret };
+    },
+    watch: (_onCaret, input) => {
+      onInput = input;
+      return () => {
+        onInput = null;
+      };
+    },
+  };
+  const session = createVoiceSession(deps, options.late);
+  return {
+    log,
+    posted,
+    signals,
+    /** The signal each open was given. */
+    opens,
+    session,
+    field,
+    detach: session.attach(field),
+    value: () => value,
+    type: (text: string) => {
+      value += text;
+      caret = value.length;
+      onInput?.();
+    },
+    level: (next: number) => {
+      db = next;
+    },
+    answer: (...next: (VoiceAnswer | Error | Promise<VoiceAnswer>)[]) => {
+      answers = next;
+    },
+    holdMic: () => {
+      holdMic = true;
+    },
+    lock: (next: boolean) => {
+      locked = next;
+    },
+    openMic: () => pending.shift()!.resolve(recorder()),
+    micEnded: () => ended?.(),
+    /** Move the clock, with the session's ticker running. */
+    pass: (ms: number) => {
+      for (let left = ms; left > 0; left -= TICK) {
+        clock += Math.min(TICK, left);
+        ticker?.();
+      }
+      for (const timer of [...timers]) {
+        if (timer.at <= clock) {
+          timers.splice(timers.indexOf(timer), 1);
+          timer.run();
+        }
+      }
+    },
+    ticking: () => ticker !== null,
+  };
+}
+
+const settle = async () => {
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+};
+
+/** A press that became a tap: recording, nothing held. */
+async function tapped(world: ReturnType<typeof script>) {
+  world.session.press();
+  world.session.release();
+  await settle();
+  expect(world.session.view()).toMatchObject({ phase: 'listening', mode: 'tap' });
+}
+
+async function held(world: ReturnType<typeof script>, ms = 500) {
+  world.session.press();
+  await settle();
+  world.pass(ms);
+  expect(world.session.view()).toMatchObject({ phase: 'listening', mode: 'hold' });
+}
+
+let last: VoiceSession | null = null;
+afterEach(() => {
+  last?.cancel();
+  last = null;
+});
+const world = (options?: Parameters<typeof script>[0]) => {
+  const made = script(options);
+  last = made.session;
+  return made;
+};
+
+describe('hold and tap', () => {
+  test('held past the threshold: letting go stops and the words land at the cursor; nothing is sent', async () => {
+    const w = world();
+    await held(w);
+    expect(w.session.view().phase).toBe('listening');
+    w.session.release();
+    expect(w.session.view().phase).toBe('sending');
+    await settle();
+    expect(w.value()).toBe('Draft hello there');
+    expect(w.session.view()).toMatchObject({ phase: 'idle', wash: { start: 6, end: 17 } });
+    expect(w.posted).toHaveLength(1);
+  });
+
+  test('let go quickly: it keeps listening, and the second press stops it when released', async () => {
+    const w = world();
+    await tapped(w);
+    w.pass(800);
+    w.session.press();
+    expect(w.session.view().phase).toBe('listening');
+    w.session.release();
+    expect(w.session.view().phase).toBe('sending');
+  });
+
+  test('a slow microphone: the time it took to open is not held time', async () => {
+    const w = world();
+    w.holdMic();
+    w.session.press();
+    w.pass(400);
+    w.openMic();
+    await settle();
+    w.pass(100);
+    w.session.release();
+    expect(w.session.view()).toMatchObject({ phase: 'listening', mode: 'tap' });
+  });
+
+  test('released before the microphone opened: a tap, recording once it does', async () => {
+    const w = world();
+    w.holdMic();
+    w.session.press();
+    w.session.release();
+    w.openMic();
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'listening', mode: 'tap' });
+  });
+
+  test('the browser asked first: the prompt took the press, so it is a tap', async () => {
+    const w = world({ prompts: true });
+    w.holdMic();
+    w.session.press();
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'opening', prompting: true });
+    w.openMic();
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'listening', mode: 'tap', prompting: false });
+  });
+
+  test('one letting go is one transcription, whatever the pointer does after it', async () => {
+    const w = world();
+    await held(w);
+    w.session.release();
+    w.session.release();
+    w.session.lost();
+    await settle();
+    expect(w.posted).toHaveLength(1);
+  });
+
+  test('the system taking the pointer ends a hold with nothing sent, and leaves a tap running with its Cancel', async () => {
+    const w = world();
+    await held(w);
+    w.session.lost();
+    expect(w.session.view().phase).toBe('idle');
+    await settle();
+    expect(w.posted).toHaveLength(0);
+    const tap = world();
+    await tapped(tap);
+    tap.session.lost();
+    expect(tap.session.view().phase).toBe('listening');
+    // Pressed again to stop, and the system took that pointer: still a tap, not a press waiting for a release.
+    tap.session.press();
+    tap.session.lost();
+    expect(tap.session.view()).toMatchObject({ phase: 'listening', mode: 'tap' });
+  });
+
+  test('the system taking the pointer while the microphone opens: a tap, not a hold waiting for a release', async () => {
+    const w = world();
+    w.holdMic();
+    w.session.press();
+    w.session.lost();
+    w.openMic();
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'listening', mode: 'tap' });
+  });
+
+  test('from the keyboard: starts and stops by toggle, and leaves focus on the button', async () => {
+    const w = world();
+    w.session.toggle();
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'listening', mode: 'tap' });
+    expect(w.log).not.toContain('focus');
+    w.pass(300);
+    w.session.toggle();
+    expect(w.session.view().phase).toBe('sending');
+  });
+
+  test('from the keyboard while the microphone opens: busy as a tap is, nothing cancelled, and it listens once it opens', async () => {
+    const w = world();
+    w.holdMic();
+    w.session.toggle();
+    expect(w.session.view().phase).toBe('opening');
+    w.pass(300);
+    w.session.toggle();
+    expect(w.session.view()).toMatchObject({ phase: 'opening', slow: true });
+    expect(w.opens[0]!.aborted).toBe(false);
+    w.openMic();
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'listening', mode: 'tap' });
+  });
+});
+
+describe('limits', () => {
+  test('stops itself at 2:00 and sends what it has, and a hold cannot run past it', async () => {
+    const w = world();
+    await held(w);
+    w.pass(VOICE_CAP_MS);
+    expect(w.session.view().phase).toBe('sending');
+    expect(w.ticking()).toBe(false);
+    await settle();
+    expect(w.value()).toBe('Draft hello there');
+  });
+
+  test('tap mode stops after quiet that follows speech', async () => {
+    const w = world();
+    await tapped(w);
+    w.pass(500);
+    w.level(ROOM);
+    w.pass(VOICE_QUIET_STOP_MS - 1000);
+    expect(w.session.view().phase).toBe('listening');
+    w.pass(1500);
+    expect(w.session.view().phase).toBe('sending');
+  });
+
+  test('a hold never stops for quiet', async () => {
+    const w = world();
+    await held(w);
+    w.level(ROOM);
+    w.pass(VOICE_QUIET_STOP_MS + 5000);
+    expect(w.session.view().phase).toBe('listening');
+  });
+
+  test('a clip with no voice is not posted', async () => {
+    const w = world();
+    w.level(ROOM);
+    await held(w);
+    w.session.release();
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'idle', trouble: 'notheard', kept: false });
+    expect(w.posted).toHaveLength(0);
+    expect(w.log).toContain('mic aborted');
+  });
+
+  test('a microphone that goes away ends the take with what was heard', async () => {
+    const w = world();
+    await held(w);
+    w.micEnded();
+    expect(w.session.view().phase).toBe('sending');
+  });
+});
+
+describe('cancel', () => {
+  test('while listening: the mic closes, nothing is posted, the text stands', async () => {
+    const w = world();
+    await tapped(w);
+    w.pass(200);
+    w.session.cancel();
+    await settle();
+    expect(w.session.view().phase).toBe('idle');
+    expect(w.log).toContain('mic aborted');
+    expect(w.posted).toHaveLength(0);
+    expect(w.value()).toBe('Draft ');
+  });
+
+  test('while transcribing: the post is aborted and a late answer writes nothing', async () => {
+    const w = world();
+    let answer: (value: VoiceAnswer) => void = () => {};
+    w.answer(new Promise<VoiceAnswer>((resolve) => (answer = resolve)));
+    await held(w);
+    w.session.release();
+    await settle();
+    expect(w.posted).toHaveLength(1);
+    w.session.cancel();
+    expect(w.signals[0]!.aborted).toBe(true);
+    answer({ text: 'too late' });
+    await settle();
+    expect(w.value()).toBe('Draft ');
+    expect(w.session.view().phase).toBe('idle');
+  });
+
+  test('the field going away ends the run, a kept clip included', async () => {
+    const w = world();
+    let answer: (value: VoiceAnswer) => void = () => {};
+    w.answer(new Promise<VoiceAnswer>((resolve) => (answer = resolve)));
+    await held(w);
+    w.session.release();
+    await settle();
+    w.detach();
+    answer({ text: 'too late' });
+    await settle();
+    expect(w.value()).toBe('Draft ');
+  });
+
+  test('something covering the box ends the take: nothing is posted, and focus stays out of the covered box', async () => {
+    const w = world();
+    await tapped(w);
+    w.pass(200);
+    const before = w.log.filter((line) => line === 'focus').length;
+    w.session.covered();
+    await settle();
+    w.pass(VOICE_CAP_MS);
+    await settle();
+    expect(w.session.view().phase).toBe('idle');
+    expect(w.log).toContain('mic aborted');
+    expect(w.posted).toHaveLength(0);
+    expect(w.log.filter((line) => line === 'focus')).toHaveLength(before);
+  });
+
+  test('being covered leaves a clip kept for Retry alone', async () => {
+    const w = world();
+    w.answer({ code: 'voice_unreachable' }, { text: 'second try' });
+    await held(w);
+    w.session.release();
+    await settle();
+    expect(w.session.view().kept).toBe(true);
+    w.session.covered();
+    w.session.retry();
+    await settle();
+    expect(w.value()).toBe('Draft second try');
+  });
+
+  test('a mic that never opens: a line with Cancel after a moment, and Cancel frees the box', async () => {
+    const w = world();
+    w.holdMic();
+    w.session.press();
+    await settle();
+    w.pass(VOICE_OPENING_SLOW_MS - 100);
+    expect(w.session.view().slow).toBe(false);
+    w.pass(200);
+    expect(w.session.view()).toMatchObject({ phase: 'opening', slow: true });
+    w.session.cancel();
+    expect(w.session.view()).toMatchObject({ phase: 'idle', slow: false });
+    w.session.press();
+    expect(w.session.view().phase).toBe('opening');
+  });
+
+  test('a slow mic that does open goes straight to listening, and a fast one never says it was slow', async () => {
+    const w = world();
+    w.holdMic();
+    w.session.press();
+    await settle();
+    w.pass(VOICE_OPENING_SLOW_MS + 100);
+    w.openMic();
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'listening', slow: false });
+    const fast = world();
+    await held(fast);
+    fast.pass(VOICE_OPENING_SLOW_MS + 100);
+    expect(fast.session.view().slow).toBe(false);
+  });
+
+  test('a mic that opens after a cancel is closed at once', async () => {
+    const w = world();
+    w.holdMic();
+    w.session.press();
+    w.session.cancel();
+    w.openMic();
+    await settle();
+    expect(w.session.view().phase).toBe('idle');
+    expect(w.log).toContain('mic aborted');
+    expect(w.ticking()).toBe(false);
+  });
+});
+
+describe('every path returns to rest, and no press does nothing', () => {
+  test('a microphone that throws as it opens: at rest with its line, Send free, and the next press opens again', async () => {
+    const w = world({ throwMic: 1 });
+    w.session.press();
+    w.session.release();
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'idle', trouble: 'micfailed' });
+    w.session.press();
+    w.session.release();
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'listening', mode: 'tap', trouble: null });
+  });
+
+  test('a second tap while the microphone opens is not a cancel: the take waits, in sight, and listens once it opens', async () => {
+    const w = world();
+    w.holdMic();
+    w.session.press();
+    w.session.release();
+    expect(w.session.view().phase).toBe('opening');
+    w.pass(300);
+    w.session.press();
+    w.session.release();
+    expect(w.session.view()).toMatchObject({ phase: 'opening', slow: true });
+    expect(w.log).not.toContain('mic aborted');
+    w.openMic();
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'listening', mode: 'tap' });
+  });
+
+  test('the first moment of opening has no line, and the line follows within a blink', async () => {
+    const w = world();
+    w.holdMic();
+    w.session.press();
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'opening', slow: false });
+    w.pass(VOICE_OPENING_SLOW_MS);
+    expect(VOICE_OPENING_SLOW_MS).toBeLessThanOrEqual(150);
+    expect(w.session.view()).toMatchObject({ phase: 'opening', slow: true });
+  });
+
+  test('a mic that never opens gives up after 10 s with the "didn\'t start" note; the next tap opens again', async () => {
+    const w = world();
+    w.holdMic();
+    w.session.press();
+    w.session.release();
+    await settle();
+    w.pass(VOICE_OPENING_GIVE_UP_MS - 100);
+    expect(w.session.view().phase).toBe('opening');
+    w.pass(200);
+    expect(w.session.view()).toMatchObject({ phase: 'idle', trouble: 'micfailed' });
+    // The mic that answers late is closed at once, never recorded from.
+    w.openMic();
+    await settle();
+    expect(w.session.view().phase).toBe('idle');
+    expect(w.log).toContain('mic aborted');
+    w.session.press();
+    w.session.release();
+    expect(w.session.view()).toMatchObject({ phase: 'opening', trouble: null });
+  });
+
+  test('ending a take before the microphone opens aborts the open: Cancel, the box closing, and giving up', async () => {
+    const cancelled = world();
+    cancelled.holdMic();
+    cancelled.session.press();
+    cancelled.session.cancel();
+    expect(cancelled.opens[0]!.aborted).toBe(true);
+    const closed = world();
+    closed.holdMic();
+    closed.session.press();
+    closed.detach();
+    expect(closed.opens[0]!.aborted).toBe(true);
+    const gaveUp = world();
+    gaveUp.holdMic();
+    gaveUp.session.press();
+    gaveUp.session.release();
+    await settle();
+    gaveUp.pass(VOICE_OPENING_GIVE_UP_MS - 100);
+    expect(gaveUp.opens[0]!.aborted).toBe(false);
+    gaveUp.pass(200);
+    expect(gaveUp.opens[0]!.aborted).toBe(true);
+  });
+
+  test('with the real recorder, a mic that answers after the give-up holds nothing: its context closed at once, its tracks stopped', async () => {
+    const contexts: { state: string; worklets: number }[] = [];
+    const tracks: { stopped: boolean }[] = [];
+    let answer: (stream: unknown) => void = () => {};
+    const audioBefore = Object.getOwnPropertyDescriptor(globalThis, 'AudioContext');
+    const devicesBefore = Object.getOwnPropertyDescriptor(globalThis.navigator, 'mediaDevices');
+    Object.defineProperty(globalThis, 'AudioContext', {
+      configurable: true,
+      writable: true,
+      value: class {
+        state = 'suspended';
+        worklets = 0;
+        audioWorklet = { addModule: async () => void this.worklets++ };
+        constructor() {
+          contexts.push(this);
+        }
+        resume = async () => {
+          if (this.state !== 'closed') this.state = 'running';
+        };
+        close = async () => {
+          this.state = 'closed';
+        };
+      },
+    });
+    Object.defineProperty(globalThis.navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: () => new Promise((resolve) => (answer = resolve)) },
+    });
+    try {
+      const w = world({ open: (signal) => openVoiceRecorder(signal, () => {}) });
+      w.session.press();
+      w.session.release();
+      await settle();
+      expect(contexts).toHaveLength(1);
+      expect(contexts[0]!.state).not.toBe('closed');
+      w.pass(VOICE_OPENING_GIVE_UP_MS + 100);
+      expect(w.session.view()).toMatchObject({ phase: 'idle', trouble: 'micfailed' });
+      // At once: getUserMedia has not settled, and may never.
+      expect(contexts[0]!.state).toBe('closed');
+      const track = { stopped: false, stop: () => void (track.stopped = true) };
+      tracks.push(track);
+      answer({ getTracks: () => tracks, getAudioTracks: () => tracks });
+      await settle();
+      expect(tracks.every((t) => t.stopped)).toBe(true);
+      expect(contexts[0]!.worklets).toBe(0);
+      expect(w.session.view()).toMatchObject({ phase: 'idle', trouble: 'micfailed' });
+    } finally {
+      if (audioBefore) Object.defineProperty(globalThis, 'AudioContext', audioBefore);
+      else delete (globalThis as { AudioContext?: unknown }).AudioContext;
+      if (devicesBefore) Object.defineProperty(globalThis.navigator, 'mediaDevices', devicesBefore);
+      else delete (globalThis.navigator as { mediaDevices?: unknown }).mediaDevices;
+    }
+  });
+
+  test("a cancelled take's give-up never reaches the next take, still opening", async () => {
+    const w = world();
+    w.holdMic();
+    w.session.press();
+    w.session.release();
+    await settle();
+    w.pass(1000);
+    w.session.cancel();
+    w.session.press();
+    w.session.release();
+    await settle();
+    // Past the first take's 10 s, short of the second's.
+    w.pass(VOICE_OPENING_GIVE_UP_MS - 500);
+    expect(w.session.view()).toMatchObject({ phase: 'opening', trouble: null });
+    expect(w.opens[1]!.aborted).toBe(false);
+    w.openMic();
+    w.openMic();
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'listening', mode: 'tap' });
+  });
+
+  test('while the browser asks for the microphone, it waits longer before giving up', async () => {
+    const w = world({ prompts: true });
+    w.holdMic();
+    w.session.press();
+    await settle();
+    expect(w.session.view().prompting).toBe(true);
+    w.pass(VOICE_OPENING_GIVE_UP_MS + 1000);
+    expect(w.session.view().phase).toBe('opening');
+    w.pass(VOICE_ASKING_GIVE_UP_MS - VOICE_OPENING_GIVE_UP_MS);
+    expect(w.session.view()).toMatchObject({ phase: 'idle', trouble: 'micfailed' });
+  });
+
+  test('a finger still down while the microphone opens is the same press, not a second tap', async () => {
+    const w = world();
+    w.holdMic();
+    w.session.press();
+    w.session.press();
+    expect(w.session.view().phase).toBe('opening');
+  });
+
+  test('a recorder that hands over no samples: at rest with its line, nothing posted, no spinner left', async () => {
+    const w = world({ failStop: true });
+    await tapped(w);
+    w.pass(800);
+    w.session.press();
+    w.session.release();
+    expect(w.session.view().phase).toBe('sending');
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'idle', trouble: 'badclip', kept: false });
+    expect(w.posted).toHaveLength(0);
+    expect(w.log).toContain('mic aborted');
+  });
+});
+
+describe('failures', () => {
+  test.each([
+    [{ code: 'voice_expired' }, 'expired'],
+    [{ code: 'voice_refused' }, 'refused'],
+    [{ code: 'voice_key_refused' }, 'keyrefused'],
+    [{ code: 'voice_unreachable' }, 'offline'],
+    [{ code: 'voice_codex_failed' }, 'codexfailed'],
+    [new Error('the Inbox went away'), 'inboxgone'],
+    [{ code: null }, 'inboxgone'],
+    // A newer Inbox's code: never a crash, a plain failure that keeps the clip.
+    [{ code: 'voice_from_a_newer_inbox' as string as InboxVoiceFailure }, 'failed'],
+  ] as const)('%p keeps the clip: only a press retries, and the same clip goes again', async (answer, trouble) => {
+    const w = world();
+    w.answer(answer as VoiceAnswer | Error, { text: 'second try' });
+    await held(w);
+    w.session.release();
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'idle', trouble, kept: true });
+    expect(w.posted).toHaveLength(1);
+    w.pass(5000);
+    expect(w.posted).toHaveLength(1);
+    w.session.retry();
+    await settle();
+    expect(w.posted).toHaveLength(2);
+    expect(w.posted[1]).toBe(w.posted[0]!);
+    expect(w.value()).toBe('Draft second try');
+    expect(w.session.view()).toMatchObject({ trouble: null, kept: false });
+  });
+
+  test('every code the server can send has its own reason, not the unknown-code fallback', async () => {
+    for (const code of INBOX_VOICE_FAILURES) {
+      const w = world();
+      w.answer({ code });
+      await held(w);
+      w.session.release();
+      await settle();
+      expect(w.session.view().phase).toBe('idle');
+      expect(w.session.view().trouble, code).not.toBeNull();
+      expect(w.session.view().trouble, code).not.toBe('failed');
+      w.detach();
+    }
+  });
+
+  test('Discard drops the clip, and Retry then does nothing', async () => {
+    const w = world();
+    w.answer({ code: 'voice_unreachable' });
+    await held(w);
+    w.session.release();
+    await settle();
+    w.session.discard();
+    expect(w.session.view()).toMatchObject({ trouble: null, kept: false });
+    w.session.retry();
+    await settle();
+    expect(w.posted).toHaveLength(1);
+  });
+
+  test('Retry waits while the box is read-only: the clip stays and no words land', async () => {
+    const w = world();
+    w.answer({ code: 'voice_unreachable' }, { text: 'second try' });
+    await held(w);
+    w.session.release();
+    await settle();
+    w.lock(true);
+    w.session.retry();
+    await settle();
+    expect(w.posted).toHaveLength(1);
+    expect(w.session.view().kept).toBe(true);
+    w.lock(false);
+    w.session.retry();
+    await settle();
+    expect(w.value()).toBe('Draft second try');
+  });
+
+  test('a clip the Inbox could not read is its own trouble, not silence, with nothing to retry', async () => {
+    const w = world();
+    w.answer({ code: 'voice_bad_clip' });
+    await held(w);
+    w.session.release();
+    await settle();
+    expect(w.session.view()).toMatchObject({ trouble: 'badclip', kept: false });
+  });
+
+  test('an empty transcript is said, with nothing to retry and nothing inserted; typing clears the line', async () => {
+    const w = world();
+    w.answer({ code: 'voice_empty' });
+    await held(w);
+    w.session.release();
+    await settle();
+    expect(w.session.view()).toMatchObject({ trouble: 'nothing', kept: false });
+    expect(w.value()).toBe('Draft ');
+    w.type('x');
+    expect(w.session.view().trouble).toBeNull();
+  });
+
+  test('typing leaves a line that still holds a clip', async () => {
+    const w = world();
+    w.answer({ code: 'voice_unreachable' });
+    await held(w);
+    w.session.release();
+    await settle();
+    w.type('x');
+    expect(w.session.view()).toMatchObject({ trouble: 'offline', kept: true });
+  });
+
+  test('not ready: the mic learns it too, and the clip waits', async () => {
+    const w = world();
+    w.answer({ code: 'voice_not_ready', reason: 'signedout', engine: 'codex' });
+    await held(w);
+    w.session.release();
+    await settle();
+    expect(w.session.view()).toMatchObject({ trouble: 'notready', kept: true });
+    expect(w.log).toContain('not ready: signedout');
+  });
+
+  test.each([
+    ['NotAllowedError', 'blocked'],
+    ['NotFoundError', 'micfailed'],
+    ['InvalidStateError', 'micfailed'],
+  ])('the microphone refusing with %s: %s, and the next press can start', async (name, trouble) => {
+    const w = world({ refuseMic: name });
+    w.session.press();
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'idle', trouble });
+    w.session.release();
+    expect(w.session.view().phase).toBe('idle');
+  });
+});
+
+describe('the field goes while the words are on their way', () => {
+  /** A take at its answer, held, with a host that takes the words once there is no field. */
+  const taken = async () => {
+    const late: VoiceLate[] = [];
+    const w = world({ late: (outcome) => late.push(outcome) });
+    let answer: (value: VoiceAnswer) => void = () => {};
+    w.answer(new Promise<VoiceAnswer>((resolve) => (answer = resolve)));
+    await held(w);
+    w.session.release();
+    await settle();
+    expect(w.session.view().phase).toBe('sending');
+    return { w, late, answer };
+  };
+
+  test('the host takes the words, and the field is left alone', async () => {
+    const { w, late, answer } = await taken();
+    w.detach();
+    expect(w.session.view().phase).toBe('sending');
+    expect(w.signals[0]!.aborted).toBe(false);
+    answer({ text: 'late words' });
+    await settle();
+    expect(late).toEqual([{ text: 'late words' }]);
+    expect(w.value()).toBe('Draft ');
+    expect(w.session.view().phase).toBe('idle');
+  });
+
+  test('a field back before the answer takes the words itself, and the host nothing', async () => {
+    const { w, late, answer } = await taken();
+    w.detach();
+    const again = w.session.attach(w.field);
+    // It reads this field as the first one was read: the wash and the caret follow what is typed here.
+    w.type('more ');
+    expect(w.session.view().caret).toBe(w.value().length);
+    answer({ text: 'words' });
+    await settle();
+    expect(late).toEqual([]);
+    expect(w.value()).toBe('Draft more words');
+    again();
+  });
+
+  test('a failed answer, the host gone: it says so. The host still drawn keeps the line and the clip for Retry', async () => {
+    const gone = await taken();
+    gone.w.detach();
+    gone.answer({ code: 'voice_refused' });
+    await settle();
+    expect(gone.late).toEqual([{ failed: true, retry: expect.any(Function) }]);
+    expect(gone.w.session.view().trouble).toBeNull();
+    // Retry resends the clip it kept, and the words go the same way.
+    gone.w.answer({ text: 'second try' });
+    (gone.late[0] as { retry: () => void }).retry();
+    await settle();
+    expect(gone.w.posted).toHaveLength(2);
+    expect(gone.late[1]).toEqual({ text: 'second try' });
+
+    // A clip that cannot be sent again: nothing to retry.
+    const empty = await taken();
+    empty.w.detach();
+    empty.answer({ code: 'voice_empty' });
+    await settle();
+    expect(empty.late).toEqual([{ failed: true, retry: null }]);
+
+    const drawn = await taken();
+    const stopListening = drawn.w.session.subscribe(() => {});
+    drawn.w.detach();
+    drawn.answer({ code: 'voice_refused' });
+    await settle();
+    expect(drawn.late).toEqual([]);
+    expect(drawn.w.session.view()).toMatchObject({ trouble: 'refused', kept: true });
+    stopListening();
+  });
+
+  test('a mic still listening stops, and nothing is sent or handed over', async () => {
+    const late: VoiceLate[] = [];
+    const w = world({ late: (outcome) => late.push(outcome) });
+    await held(w);
+    w.detach();
+    expect(w.log).toContain('mic aborted');
+    expect(w.session.view().phase).toBe('idle');
+    await settle();
+    expect(w.posted).toHaveLength(0);
+    expect(late).toEqual([]);
+  });
+
+  test('Cancel in the meantime: the answer goes nowhere', async () => {
+    const { w, late, answer } = await taken();
+    w.detach();
+    w.session.cancel();
+    answer({ text: 'too late' });
+    await settle();
+    expect(late).toEqual([]);
+    expect(w.value()).toBe('Draft ');
+  });
+});
+
+describe('the words', () => {
+  test('the wash fades, then goes; typing takes it away at once', async () => {
+    const w = world();
+    await held(w);
+    w.session.release();
+    await settle();
+    w.pass(1400);
+    expect(w.session.view().wash?.fading).toBe(true);
+    w.pass(1000);
+    expect(w.session.view().wash).toBeNull();
+
+    const typed = world();
+    await held(typed);
+    typed.session.release();
+    await settle();
+    typed.type('x');
+    expect(typed.session.view().wash).toBeNull();
+  });
+});
+
+test('starting in one composer cancels a recording in another', async () => {
+  const one = world();
+  await tapped(one);
+  const two = world();
+  await tapped(two);
+  expect(one.session.view().phase).toBe('idle');
+  expect(one.log).toContain('mic aborted');
+  expect(two.session.view().phase).toBe('listening');
+});

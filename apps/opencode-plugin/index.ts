@@ -23,6 +23,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig, resolveInboxReminder, resolveInboxReminderText, resolveSharingEnabled } from "@plannotator/shared/config";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
+import { isAskAiChild } from "@plannotator/shared/child-env";
 import {
   composeSystemPrompt,
   stripConflictingPlanModeRules,
@@ -245,6 +246,9 @@ async function runPlanReview(input: {
 }
 
 const PlannotatorPlugin: Plugin = async (ctx, rawOptions?: PlannotatorOpenCodeOptions) => {
+  // An `opencode serve` Plannotator's Ask AI started (PLANNOTATOR_ASK_AI_CHILD=1):
+  // no submit_plan, planning prompts, Inbox or agent tool in it.
+  if (isAskAiChild(process.env)) return {};
   const workflowOptions = normalizeWorkflowOptions(rawOptions);
 
   // Preload HTML in background: populates the sync cache before first use.
@@ -734,7 +738,7 @@ Do NOT proceed with implementation until your plan is approved.`;
   // The Plannotator Inbox tool (inbox.ts), decided once at plugin setup: only
   // where the inbox tool switch allows it for OpenCode and an Inbox was found.
   // OpenCode 1 gets the tool only: it has no way to wake an idle session, so
-  // replies are read with wait_for_reply or read_thread, and the description
+  // replies are read with read_thread, and the description
   // says nothing about them arriving by themselves.
   try {
     const inbox = await findInboxConnection();

@@ -1,5 +1,5 @@
 import React, { lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { diagramTargetText, type DiagramKind } from '@plannotator/core/diagram-anchor';
+import { diagramTargetText, type DiagramAnchor, type DiagramKind } from '@plannotator/core/diagram-anchor';
 import type { AnnotationRestoreReport } from '../hooks/useAnnotationHighlighter';
 import { AnnotationType, type Annotation, type Block } from '../types';
 import { useConfigValue } from '../config';
@@ -15,7 +15,10 @@ import { diagramAskAIContext } from '../utils/diagramAskAI';
 import { svgContentSize } from './diagram/svgContentSize';
 import type { DiagramComment, DiagramCreateComment } from './diagram/useDiagramComments';
 import type { DiagramRenderState } from './diagram/useDiagramRender';
+import type { DiagramReopenRequest } from './diagram/reopen';
 import { useTheme } from './ThemeProvider';
+import { sourceLineAttrs } from '../utils/sourceLineAttrs';
+import { LazyBlockBoundary, LazyLoadNotice } from './LazyBlockBoundary';
 
 /**
  * A diagram fence in the document: the fence's language picks the engine
@@ -86,6 +89,18 @@ export interface DiagramBlockProps {
   onAskAI?: CommentAskAIHandler;
   /** The document's path, sent with an Ask AI question (`sourcePath`). */
   askAISourcePath?: string;
+  /** Opt-in: a diagram whose source does not render shows that source as the
+   * plain fence, not the error panel (a host showing a diagram the person did
+   * not write, such as a guide's overview). A renderer that failed to load
+   * keeps the panel and its Retry. Absent: the error panel, as before. */
+  sourceOnError?: boolean;
+  /** Opt-in: a comment being written that the host kept, put back in the
+   * inline diagram's composer (see `DiagramReopenRequest`). */
+  reopenComment?: DiagramReopenRequest;
+  /** Opt-in: the part the diagram's composer is on as it opens, null as it
+   * closes (`where`: the inline diagram's or the popout's composer). Reads
+   * only. Absent: nothing changes. */
+  onComposerAnchor?: (blockId: string, where: 'inline' | 'popout', anchor: DiagramAnchor | null) => void;
 }
 
 const NO_ANNOTATIONS: readonly Annotation[] = [];
@@ -101,8 +116,15 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
   onRestoreReport,
   onAskAI,
   askAISourcePath,
+  sourceOnError = false,
+  reopenComment,
+  onComposerAnchor,
 }) => {
   const label = LABELS[kind];
+  const onComposerAnchorRef = useRef(onComposerAnchor);
+  onComposerAnchorRef.current = onComposerAnchor;
+  const inlineComposerAnchor = useCallback((anchor: DiagramAnchor | null) => onComposerAnchorRef.current?.(block.id, 'inline', anchor), [block.id]);
+  const popoutComposerAnchor = useCallback((anchor: DiagramAnchor | null) => onComposerAnchorRef.current?.(block.id, 'popout', anchor), [block.id]);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [showSource, setShowSource] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -291,6 +313,21 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
 
   const renderFallback = useCallback(
     (state: DiagramRenderState) => {
+      // A diagram-type chunk that did not load: the source, readable, under
+      // the same quiet Reload line as any other part that could not load.
+      if (state.error?.chunkFailed) {
+        return (
+          <>
+            <LazyLoadNotice error={state.error.message} />
+            <DiagramInlineSource block={block} kind={kind} />
+          </>
+        );
+      }
+      // Refused by the host's check before it reached the page: the source, as code.
+      if (state.error?.refused) return <DiagramInlineSource block={block} kind={kind} />;
+      if (state.error !== null && sourceOnError && !state.error.runtimeUnavailable) {
+        return <DiagramInlineSource block={block} kind={kind} />;
+      }
       if (state.error !== null) {
         return (
           <div className="rounded-lg border border-destructive/30 bg-destructive/5 overflow-hidden">
@@ -323,7 +360,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
       // so this shows only before the first diagram lands.
       return <DiagramPending block={block} kind={kind} />;
     },
-    [block, kind, label],
+    [block, kind, label, sourceOnError],
   );
 
   const viewerProps = {
@@ -343,7 +380,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
       {/* `annotation-exclude`: the text highlighter never enters a diagram,
           so a text restore (a reply that lost its anchor, a quote that also
           appears in a node label) can never wrap a <mark> inside the svg. */}
-      <div ref={rootRef} className="annotation-exclude my-5 group relative" data-block-id={block.id} data-pinpoint-ignore="" data-diagram-block={kind}>
+      <div ref={rootRef} className="annotation-exclude my-5 group relative" data-block-id={block.id} data-pinpoint-ignore="" data-diagram-block={kind} {...sourceLineAttrs(block)}>
         {svgReady && !showSource && (
           <div data-print-hide="" className="absolute top-2 right-2 z-10 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
             <button
@@ -395,26 +432,37 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
             <DiagramViewer
               {...viewerProps}
               renderId={`${kind}-${block.id}`}
+              // In the document a plain wheel scrolls the page past the
+              // diagram; Ctrl/Cmd+wheel and a pinch zoom it. The popout
+              // (below) zooms on a plain wheel.
+              wheelZoom="modifier"
               onAskAI={handleAskAI}
               onResolutionChange={setResolution}
               onRenderState={setRenderState}
               renderFallback={renderFallback}
+              reopenComment={reopenComment}
+              onComposerAnchor={inlineComposerAnchor}
             />
           </div>
         )}
       </div>
       {isExpanded && svgReady && typeof document !== 'undefined' && (
-        <Suspense fallback={null}>
-          <DiagramPopout
-            {...viewerProps}
-            open
-            onClose={() => setIsExpanded(false)}
-            title={`${label} diagram`}
-            renderId={`${kind}-${block.id}-popout`}
-            onAskAI={handlePopoutAskAI}
-            dataAttributes={{ 'data-block-id': block.id }}
-          />
-        </Suspense>
+        // A popout chunk that cannot load leaves the inline diagram as it is
+        // and says so under it.
+        <LazyBlockBoundary fallback={(notice) => <div className="mb-5">{notice}</div>}>
+          <Suspense fallback={null}>
+            <DiagramPopout
+              {...viewerProps}
+              open
+              onClose={() => setIsExpanded(false)}
+              title={`${label} diagram`}
+              renderId={`${kind}-${block.id}-popout`}
+              onAskAI={handlePopoutAskAI}
+              onComposerAnchor={popoutComposerAnchor}
+              dataAttributes={{ 'data-block-id': block.id }}
+            />
+          </Suspense>
+        </LazyBlockBoundary>
       )}
     </>
   );

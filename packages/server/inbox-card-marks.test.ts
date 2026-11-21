@@ -10,6 +10,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ForgeRefCardData } from "@plannotator/core/forge-ref-card";
 import type { InboxCardRef } from "@plannotator/core/inbox-types";
 import { inboxCardMarkRef } from "@plannotator/core/inbox-types";
 import { CARD_MARK_FAILURE_MS, CARD_MARK_FRESH_MS, CARD_MARK_REFRESH_MS, createCardMarks, githubMarksQuery } from "./inbox-card-marks";
@@ -128,7 +129,7 @@ describe("the marks reader", () => {
     expect(forge.graphql().map((c) => c.args[c.args.indexOf("--hostname") + 1])).toEqual(["github.corp.example"]);
   });
 
-  test("GitLab through the hover cards' lookup; Bitbucket has no reader and is unknown without running anything", async () => {
+  test("GitLab and Bitbucket pull requests through the hover cards' lookup; a Bitbucket issue is unknown without running anything", async () => {
     const asked: string[] = [];
     const refCards: RefCards = {
       async get(href) {
@@ -140,10 +141,12 @@ describe("the marks reader", () => {
     const marks = createCardMarks({ run: forge.run, refCards });
     const mr: InboxCardRef = { kind: "pr", source: "gitlab", ref: "grp/proj!7", url: "https://gitlab.com/grp/proj/-/merge_requests/7" };
     const bb: InboxCardRef = { kind: "pr", source: "bitbucket", ref: "ws/repo#2", url: "https://bitbucket.org/ws/repo/pull-requests/2" };
-    const out = await marks.marks([mr, bb]);
+    const bbIssue: InboxCardRef = { kind: "issue", source: "web", ref: "bitbucket.org/ws/repo/issues/3", url: "https://bitbucket.org/ws/repo/issues/3" };
+    const out = await marks.marks([mr, bb, bbIssue]);
     expect(out.get(mr.url)!.state).toBe("merged");
-    expect(out.get(bb.url)!.state).toBe("unknown");
-    expect(asked).toEqual([mr.url]);
+    expect(out.get(bb.url)!.state).toBe("merged");
+    expect(out.get(bbIssue.url)!.state).toBe("unknown");
+    expect(asked).toEqual([mr.url, bb.url]);
     expect(forge.calls).toEqual([]);
   });
 
@@ -203,8 +206,19 @@ async function world(board: boolean) {
   const dataDir = join(root, "data");
   mkdirSync(dataDir, { recursive: true });
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
-  const forge = scriptedGh({ "acme/widgets": { 12: pr("MERGED", "vite 8"), 14: pr("OPEN", "Delivery ticks"), 11: issue("OPEN", "Icon") } });
-  const server = await startInboxServer({ dataDir, binaryPath: null, refRunner: forge.run, phones: false, board });
+  const forge = scriptedGh({
+    "acme/widgets": { 12: pr("MERGED", "vite 8"), 13: pr("CLOSED", "abandoned"), 14: pr("OPEN", "Delivery ticks"), 15: pr("MERGED", "electron-forge 7"), 11: issue("OPEN", "Icon") },
+  });
+  // A stand-in for the Bitbucket Cloud API: pull request 7 is merged.
+  const bitbucketRefReader = async (ref: { workspace: string; repo: string; number: number }) => {
+    if (ref.number !== 7) throw Object.assign(new Error("not found"), { status: 404 });
+    return {
+      platform: "bitbucket", kind: "pull", repo: `${ref.workspace}/${ref.repo}`, number: 7, url: "https://bitbucket.org/ws/r/pull-requests/7",
+      title: "Shipped on Bitbucket", state: "merged", author: null, createdAt: "", updatedAt: "", closedAt: null, labels: [], assignees: [],
+      comments: 0, body: "", bodyCut: false, lastComment: null, linked: [],
+    } satisfies ForgeRefCardData;
+  };
+  const server = await startInboxServer({ dataDir, binaryPath: null, refRunner: forge.run, bitbucketRefReader, phones: false, board });
   servers.push(server);
   const base = `http://127.0.0.1:${server.port}`;
   const project = server.store.ensureProject({ name: "web", root: join(root, "web") });
@@ -231,8 +245,45 @@ describe("POST /api/inbox/cards/marks", () => {
     expect(marks[iss.id]).toMatchObject({ kind: "issue", state: "open" });
     expect(marks[plain.id]).toBeUndefined();
     expect(w.forge.graphql()).toHaveLength(1);
-    // A mark never moves a card.
-    expect(w.server.store.card(merged.id)!.column).toBe("backlog");
+    // The marks' own read ships a card whose every PR merged (columns v2, Q3), in that one query; an open PR stays put.
+    expect(w.server.store.card(merged.id)!.column).toBe("done");
+    expect(w.server.store.card(open.id)!.column).toBe("todo");
+    expect(w.server.store.card(iss.id)!.column).toBe("todo");
+  });
+
+  // Columns v2, Q3: "robust and simple. If PR state is unknown, do nothing." What regresses: a card moved to
+  // Done with a PR still open or unknown, a parked or cancelled card moved there, or a card the person
+  // moved back moved to Done again by the next Board read.
+  test("auto-ship: every own PR merged moves the card to Done once; open, closed, unknown, context-only, Backlog and Cancelled never do", async () => {
+    const w = await world(true);
+    const { store } = w.server;
+    const both = w.make("Two merged", ["acme/widgets#12", "acme/widgets#15"]);
+    const half = w.make("One open", ["acme/widgets#12", "acme/widgets#14"]);
+    // Closed without merging is not done, alone or beside a merged PR.
+    const closed = w.make("Closed", ["acme/widgets#13"]);
+    const closedAndMerged = w.make("Closed and merged", ["acme/widgets#12", "acme/widgets#13"]);
+    // A merged PR linked through `ref` is context, never the card's own.
+    const context = w.make("Context only", [], ["acme/widgets#12"]);
+    const unknown = w.make("Unknown repo", ["acme/gone#3"]);
+    const bitbucket = w.make("Merged on Bitbucket", ["https://bitbucket.org/ws/r/pull-requests/7"]);
+    const review = w.make("In review", ["acme/widgets#12"]);
+    store.updateCard(review.id, { by: { kind: "agent", host: "codex", session: "s", name: "Codex" }, column: "in_review", you: "merge" });
+    const parked = w.make("Parked", ["acme/widgets#12"]);
+    store.updateCard(parked.id, { by: { kind: "person" }, column: "backlog" });
+    const cancelled = w.make("Cancelled", ["acme/widgets#12"]);
+    store.updateCard(cancelled.id, { by: { kind: "person" }, column: "dropped" });
+    const all = [both, half, closed, closedAndMerged, context, unknown, bitbucket, review, parked, cancelled];
+    const ids = all.map((card) => card.id);
+    expect((await w.post({ cards: ids })).status).toBe(200);
+    const column = (id: string) => store.card(id)!.column;
+    expect(all.map((card) => column(card.id))).toEqual(["done", "todo", "todo", "todo", "todo", "todo", "done", "done", "backlog", "dropped"]);
+    const shipped = store.card(review.id)!;
+    expect(shipped).toMatchObject({ you: null, auto_shipped: { prs: ["https://github.com/acme/widgets/pull/12"] } });
+    expect(store.cardHistory(review.id)[0]).toMatchObject({ kind: "auto_shipped" });
+    // The person moves it back: the next read leaves it there.
+    store.updateCard(review.id, { by: { kind: "person" }, column: "in_progress" });
+    expect((await w.post({ cards: ids, refresh: true })).status).toBe(200);
+    expect(column(review.id)).toBe("in_progress");
   });
 
   test("refused while the Board is off, to another site, to a stale tab, and for bad ids; nothing runs", async () => {
@@ -252,8 +303,8 @@ describe("POST /api/inbox/cards/marks", () => {
     expect(on.forge.graphql()).toHaveLength(0);
   });
 
-  // What regresses: a page opened over the tailnet (another device) makes this computer run gh.
-  test("over the tailnet, even the owner is refused 403 local only, and nothing runs", async () => {
+  // What regresses: the owner's phone is left without marks.
+  test("over the tailnet the owner gets marks like this computer", async () => {
     const MAGIC = "macbook-pro.tail0000.ts.net";
     const OWNER = "ramos@example.com";
     const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-card-marks-tailnet-")));
@@ -271,14 +322,13 @@ describe("POST /api/inbox/cards/marks", () => {
     const listener = server.tailscale.listenerPort();
     expect(listener).not.toBeNull();
     const body = JSON.stringify({ serverSession: server.serverSession, cards: [card.id] });
-    const owner = { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": OWNER, Origin: `https://${MAGIC}:${server.port}`, "Content-Type": "application/json" };
-    const over = await fetch(`http://127.0.0.1:${listener}/api/inbox/cards/marks`, { method: "POST", headers: owner, body });
-    expect(over.status).toBe(403);
-    expect(((await over.json()) as { code: string }).code).toBe("local_only");
-    expect(forge.calls).toEqual([]);
-    // The same request from this computer's window answers.
+    const headers = (login: string) => ({ Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": login, Origin: `https://${MAGIC}:${server.port}`, "Content-Type": "application/json" });
+    // The owner's phone sees what this computer's window sees.
+    const owner = await fetch(`http://127.0.0.1:${listener}/api/inbox/cards/marks`, { method: "POST", headers: headers(OWNER), body });
+    expect(owner.status).toBe(200);
+    expect(((await owner.json()) as { marks: Record<string, { state: string }> }).marks[card.id]?.state).toBe("merged");
+    expect(forge.graphql()).toHaveLength(1);
     const local = await fetch(`http://127.0.0.1:${server.port}/api/inbox/cards/marks`, { method: "POST", headers: { "Content-Type": "application/json" }, body });
     expect(local.status).toBe(200);
-    expect(forge.graphql()).toHaveLength(1);
   });
 });

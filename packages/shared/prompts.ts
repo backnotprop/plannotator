@@ -26,6 +26,8 @@ export const PLAN_TOOL_NAMES: Record<PromptRuntime, string> = {
   "gemini-cli": "exit_plan_mode",
   "oh-my-pi": "ExitPlanMode",
   "mistral-vibe": "exit_plan_mode",
+  "qwen-code": "exit_plan_mode",
+  dsh: "exit_plan_mode",
 };
 
 export function getPlanToolName(runtime?: PromptRuntime | null): string {
@@ -271,6 +273,11 @@ export function getPlanApprovedPrompt(
 
 const PLAN_APPROVED_WITH_NOTES_RUNTIME_DEFAULTS: Partial<Record<PromptRuntime, string>> = {
   opencode: "Plan approved with notes!\n{{doneMsg}}\n\n## Implementation Notes\n\nThe user approved your plan but added the following notes to consider during implementation:\n\n{{feedback}}{{proceedSuffix}}",
+  // DeepSeek Harness: the notes reach the agent as a message after
+  // exit_plan_mode's own result ("Plan approved — plan mode exited"). The plan
+  // lives in that tool call, not a file, and DSH's plan mode gates no tools,
+  // so the default's plan path and "full tool access" lines do not apply.
+  dsh: "Plan approved with notes!{{doneMsg}}\n\n## Implementation Notes\n\nThe user approved your plan but added the following notes to consider during implementation:\n\n{{feedback}}\n\nProceed with implementation, incorporating these notes where applicable.",
 };
 
 export function getPlanApprovedWithNotesPrompt(

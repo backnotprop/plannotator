@@ -19,7 +19,7 @@ async function mountDialog(props: {
     root?.render(
       <LookAndFeelAnnouncementDialog
         isOpen
-        gridEnabled={props.gridEnabled ?? true}
+        gridEnabled={props.gridEnabled ?? false}
         onToggleGrid={props.onToggleGrid ?? (() => {})}
         onDismiss={props.onDismiss ?? (() => {})}
       />,
@@ -51,8 +51,8 @@ describe('LookAndFeelAnnouncementDialog', () => {
     expect(dialog?.textContent).not.toContain('0.20.0');
     expect(dialog?.textContent).not.toContain('release notes');
     expect(dialog?.querySelectorAll('button[aria-pressed]')).toHaveLength(2);
-    expect(option('Grid').getAttribute('aria-pressed')).toBe('true');
-    expect(option('Clean').getAttribute('aria-pressed')).toBe('false');
+    expect(option('Clean').getAttribute('aria-pressed')).toBe('true');
+    expect(option('Grid').getAttribute('aria-pressed')).toBe('false');
   });
 
   test.skipIf(!hasDom)('exposes the real choice and a single completion action', async () => {
@@ -60,8 +60,8 @@ describe('LookAndFeelAnnouncementDialog', () => {
     const onDismiss = mock(() => {});
     await mountDialog({ onToggleGrid, onDismiss });
 
-    await act(async () => option('Clean').click());
-    expect(onToggleGrid).toHaveBeenCalledWith(false);
+    await act(async () => option('Grid').click());
+    expect(onToggleGrid).toHaveBeenCalledWith(true);
 
     const continueButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
       .find((button) => button.textContent === 'Continue');

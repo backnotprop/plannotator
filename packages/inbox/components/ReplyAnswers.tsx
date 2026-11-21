@@ -1,5 +1,7 @@
 import { Fragment, useId } from 'react';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
+import { inboxActionCountWords } from '@plannotator/core/inbox-actions';
+import type { InboxActionOutcome } from '@plannotator/core/inbox-types';
 import { plural } from '../format';
 import { Icon } from '../icons';
 import { pickWords, type JumpTarget } from './ReplacedQuestion';
@@ -19,6 +21,11 @@ export interface DraftAnswer {
   answer: string;
   /** The asking message as a group heading shows it ("Claude Code's message, 2:58 PM"): used when answers span several messages. */
   messageName: string;
+  /**
+   * The attached file the question was asked in (issue #2828), absent for the message's body: its answers are a
+   * group of their own ("plan.md in Claude Code's message, 2:58 PM", `messageName`), as the file numbers its own cards.
+   */
+  fileId?: string;
 }
 
 /** The answer's words as the reply box lists them: the card's "Your pick" words, then a note. */
@@ -42,14 +49,17 @@ export function ReplyAnswers({ answers, onJump }: { answers: readonly DraftAnswe
   const headingId = useId();
   // Answers to several messages go as one reply each, and each message numbers its own
   // questions (Q1 twice): the rows are grouped under the message they answer.
-  const groups: { messageId: string; name: string; rows: DraftAnswer[] }[] = [];
+  // A file's questions (issue #2828) are a group of their own in their message's reply.
+  const groups: { id: string; messageId: string; name: string; rows: DraftAnswer[] }[] = [];
   for (const a of answers) {
     const last = groups.at(-1);
-    if (last && last.messageId === a.messageId) last.rows.push(a);
-    else groups.push({ messageId: a.messageId, name: a.messageName, rows: [a] });
+    const id = `${a.messageId}/${a.fileId ?? ''}`;
+    if (last && last.id === id) last.rows.push(a);
+    else groups.push({ id, messageId: a.messageId, name: a.messageName, rows: [a] });
   }
   const several = groups.length > 1;
-  const where = several ? 'your replies' : 'this reply';
+  // One reply per asking message: a message's file is in the same reply.
+  const where = new Set(groups.map((g) => g.messageId)).size > 1 ? 'your replies' : 'this reply';
   const heading = answers.length === 1 ? `Your answer goes with ${where}` : `Your ${plural(answers.length, 'answer')} go with ${where}`;
   const row = (a: DraftAnswer) => (
     <li key={a.id}>
@@ -79,7 +89,7 @@ export function ReplyAnswers({ answers, onJump }: { answers: readonly DraftAnswe
       <ul className="ib-ranswers-l">
         {several
           ? groups.map((g) => (
-              <Fragment key={g.messageId}>
+              <Fragment key={g.id}>
                 <li className="ib-ranswers-g" data-reply-answers-group={g.messageId} aria-hidden="true">
                   {g.name}
                 </li>
@@ -148,7 +158,7 @@ export function SentAnswers({ groups, onJump }: { groups: readonly SentAnswerGro
       <ul className="ib-ranswers-l">
         {several
           ? groups.map((g) => (
-              <Fragment key={g.messageId}>
+              <Fragment key={`${g.messageId}/${g.file?.id ?? ''}`}>
                 <li className="ib-ranswers-g" data-sent-answers-group={g.messageId} aria-hidden="true">
                   {g.name}
                 </li>
@@ -156,6 +166,88 @@ export function SentAnswers({ groups, onJump }: { groups: readonly SentAnswerGro
               </Fragment>
             ))
           : groups[0]!.answers.map((a) => row(a, groups[0]!))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * The action items a reply carries (their Done or Can't do it waits in the
+ * draft) or carried (sent), one row each, approval
+ * "inbox-action-items-in-reply": "A1 Approve the production deploy on Vercel
+ * → Done · Note: …". The rows use the answers' own look. `sent`: the person's
+ * sent message ("You did 1 action item"); else the reply box ("Your action
+ * item goes with this reply"). One the agent saw done itself carries the
+ * person's note: "Seen done · Note: …" (a Can't do it they had marked: "Seen
+ * done · Your reason: …"); the heading counts it by the person's mark.
+ */
+export interface ActionRow {
+  id: string;
+  messageId: string;
+  number: number;
+  prompt: string;
+  /** The person's mark. */
+  outcome: InboxActionOutcome;
+  note: string | null;
+  /** The agent saw it done itself; the person's note is what goes. */
+  seen?: boolean;
+}
+
+export function actionRowWords(a: Pick<ActionRow, 'outcome' | 'note' | 'seen'>): string {
+  if (a.seen) return a.note ? `Seen done · ${a.outcome === 'cant' ? 'Your reason' : 'Note'}: ${a.note}` : 'Seen done';
+  if (a.outcome === 'cant') return `Can't do it${a.note ? `: ${a.note}` : ''}`;
+  const word = a.outcome === 'skip' ? 'Skipped' : 'Done';
+  return a.note ? `${word} · Note: ${a.note}` : word;
+}
+
+export function ReplyActions({ actions, sent = false, onJump }: { actions: readonly ActionRow[]; sent?: boolean; onJump?: (target: JumpTarget) => void }) {
+  const headingId = useId();
+  if (actions.length === 0) return null;
+  // Counted by the person's own mark: a Can't do it the agent then saw done is one they couldn't do.
+  const count = (outcome: InboxActionOutcome) => actions.filter((a) => a.outcome === outcome).length;
+  const heading = sent
+    ? `You ${inboxActionCountWords({ done: count('done'), cant: count('cant'), skip: count('skip') })}`
+    : actions.length === 1
+      ? 'Your action item goes with this reply'
+      : `Your ${plural(actions.length, 'action item')} go with this reply`;
+  const inner = (a: ActionRow) => (
+    <>
+      <span className="ib-ranswer-n">A{a.number}</span>{' '}
+      <Tip content={a.prompt} cut>
+        <span className="ib-ranswer-p">{a.prompt}</span>
+      </Tip>{' '}
+      <Tip content={actionRowWords(a)} cut>
+        <span className="ib-ranswer-a" data-action-row-outcome={a.outcome}>
+          {actionRowWords(a)}
+        </span>
+      </Tip>
+    </>
+  );
+  return (
+    <div className={sent ? 'ib-ranswers ib-sentanswers' : 'ib-ranswers'} data-reply-actions={sent ? 'sent' : 'draft'} role="group" aria-labelledby={headingId}>
+      <p className="ib-ranswers-h" id={headingId}>
+        <Icon name="check" size={13} />
+        {heading}
+      </p>
+      <ul className="ib-ranswers-l">
+        {actions.map((a) => (
+          <li key={a.id}>
+            {onJump ? (
+              <button
+                type="button"
+                className="ib-ranswer"
+                aria-label={`A${a.number}, ${a.prompt}: ${actionRowWords(a)}. Show the action item.`}
+                onClick={() => onJump({ kind: 'message', messageId: a.messageId })}
+              >
+                {inner(a)}
+              </button>
+            ) : (
+              <div className="ib-ranswer" role="group" aria-label={`A${a.number}, ${a.prompt}: ${actionRowWords(a)}.`}>
+                {inner(a)}
+              </div>
+            )}
+          </li>
+        ))}
       </ul>
     </div>
   );

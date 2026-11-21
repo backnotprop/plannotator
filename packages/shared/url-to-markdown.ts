@@ -28,7 +28,7 @@ const MAX_BODY_BYTES = 10 * 1024 * 1024;
 /**
  * Skip Jina for local/private URLs — fetch them directly instead.
  *
- * IMPORTANT — IPv6 hostname format (verified empirically in Bun 1.3.11 and Node 22):
+ * IMPORTANT — IPv6 hostname format (verified empirically in Bun 1.3.11, 1.3.14 and 1.4.4, and Node 22 and 24):
  * The WHATWG URL `hostname` getter returns IPv6 addresses WITH brackets.
  * This is why PRIVATE_IPV6 uses `^\[` — it matches the actual runtime output.
  *

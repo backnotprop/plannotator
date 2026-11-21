@@ -385,7 +385,8 @@ export function startLiveAppProxy(opts: LiveAppProxyOptions): LiveAppProxy {
     },
   });
 
-  const selection = getLiveProxyPortSelection();
+  // `anyFreePort`: the Inbox runs one proxy per site at once, so PLANNOTATOR_LIVE_PORT (one port, for annotate) never applies.
+  const selection: ReturnType<typeof getLiveProxyPortSelection> = opts.anyFreePort ? { kind: "fixed", ports: [0] } : getLiveProxyPortSelection();
   const attempts = createLiveProxyPortAttempts(selection);
   const server = (() => {
     for (const port of selection.ports) {

@@ -1,0 +1,23 @@
+{
+  // The Guide tab's reader (src/guides/reader/**, a Vite build). It imports
+  // @plannotator/review-editor, which carries pre-existing type errors under
+  // every config in the repo, so like guides.show's `typecheck:viewer` this
+  // is for local use (`bun run typecheck:reader`), not a CI gate; the Vite
+  // build checks the rest.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "jsx": "react-jsx",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "types": ["vite/client"]
+  },
+  "include": ["src/guides/reader/**/*.ts", "src/guides/reader/**/*.tsx", "src/guides/reader-protocol.ts", "src/guides/reader-mapping.ts"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.test.tsx"]
+}

@@ -1,6 +1,6 @@
 /**
- * The Guides view's footprint in the main bundle: a tree view, a webview view
- * and command stubs, all of which load `dist/guides.cjs` the first time they
+ * The Guides view's footprint in the main bundle: a tree view and command
+ * stubs, all of which load `dist/guides.cjs` the first time they
  * are used. Someone who only uses the browser router never loads it.
  *
  * Typed with a few local shapes rather than `vscode`'s, because this file is
@@ -34,15 +34,7 @@ export const GUIDE_COMMANDS = [
   "plannotator.guides.nextFile",
   "plannotator.guides.toggleFileReviewed",
   "plannotator.guides.askAboutSelection",
-  "plannotator.guides.askAboutFile",
   "plannotator.guides.openAnswer",
-  "plannotator.guides.askThreadSubmit",
-  "plannotator.guides.askThreadCancel",
-  "plannotator.guides.askThreadClose",
-  "plannotator.guides.askThreadSettings",
-  "plannotator.guides.askThreadPick",
-  "plannotator.guides.askThreadAgain",
-  "plannotator.guides.askThreadStop",
   "plannotator.guides.changeDefaults",
   "plannotator.guides.updateAdapters",
   "plannotator.guides.openPullRequestOnGitHub",
@@ -51,7 +43,6 @@ export const GUIDE_COMMANDS = [
 ] as const;
 
 export const GUIDES_TREE_VIEW = "plannotator.guides.tree";
-export const GUIDES_CHAPTER_VIEW = "plannotator.guides.chapter";
 
 interface Disposable {
   dispose(): unknown;
@@ -74,7 +65,6 @@ export interface GuidesApi {
   getChildren(element?: unknown): unknown;
   getTreeItem(element: unknown): unknown;
   getParent(element: unknown): unknown;
-  resolveChapterView(view: unknown): void;
   runCommand(id: string, args: unknown[]): Promise<unknown>;
   dispose(): void;
 }
@@ -86,7 +76,6 @@ interface LoaderTreeView extends Disposable {
 
 interface LoaderWindow {
   createTreeView(id: string, options: { treeDataProvider: unknown; showCollapseAll?: boolean; manageCheckboxStateManually?: boolean }): LoaderTreeView;
-  registerWebviewViewProvider(id: string, provider: { resolveWebviewView(view: unknown): void }, options?: unknown): Disposable;
 }
 
 /**
@@ -163,9 +152,6 @@ export function registerGuidesLoader(
   });
   const visibility = view.onDidChangeVisibility?.((e) => onVisible(e.visible));
   if (visibility) context.subscriptions.push(visibility);
-  context.subscriptions.push(
-    win.registerWebviewViewProvider(GUIDES_CHAPTER_VIEW, { resolveWebviewView: (view) => safe(() => load().resolveChapterView(view), undefined) }, { webviewOptions: { retainContextWhenHidden: true } }),
-  );
   for (const id of GUIDE_COMMANDS) {
     context.subscriptions.push(
       vscode.commands.registerCommand(id, (...args: unknown[]) => {

@@ -8,9 +8,18 @@ import type { SessionBridge } from "../generated/ai/session-bridge.ts";
 import type { PullSessionBridgeConfig } from "../generated/ai/session-bridge-pull.ts";
 import { isLoopbackHostHeader } from "../generated/loopback-host.ts";
 import { handleApiNotFound, json, toWebRequest } from "./helpers.ts";
+import { getLocalUrlHostname, isSshDetectedRemote } from "./network.ts";
+import { isSshTunnelRequest } from "./this-machine.ts";
 
 export interface PiAIRuntime {
 	endpoints: Record<string, (req: Request) => Promise<Response>>;
+	/**
+	 * In a remote session only SSH turned on, with a bridge: what every request
+	 * that is not the session's own tunnel gets (Ask AI through the agent SDKs,
+	 * no bridge), which is what remote mode gives. Mirrors the Bun runtime's
+	 * peer endpoints (packages/server/ai-runtime.ts).
+	 */
+	peerEndpoints?: Record<string, (req: Request) => Promise<Response>>;
 	dispose: () => void;
 }
 
@@ -31,6 +40,12 @@ export interface CreatePiAIRuntimeOptions {
 	 */
 	getServerPort?: () => number | undefined;
 	/**
+	 * The localhost subdomain this session is advertised at (#2184), accepted by
+	 * the bridge beside the loopback names. Defaults to the configured one
+	 * (getLocalUrlHostname), read here once; null accepts none.
+	 */
+	localHostname?: string | null;
+	/**
 	 * "Ask this session" over HTTP (session-bridge-pull.ts) for a host that
 	 * cannot call this process directly. Pi itself always passes an in-process
 	 * `sessionBridge`; this exists so both runtimes serve the same protocol.
@@ -44,6 +59,7 @@ function whichCmd(cmd: string): string | null {
 		const bin = process.platform === "win32" ? "where" : "which";
 		const output = execFileSync(bin, [cmd], {
 			env: process.env,
+			windowsHide: true,
 			encoding: "utf-8",
 			stdio: ["pipe", "pipe", "pipe"],
 		});
@@ -57,6 +73,7 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 	try {
 		const ai = await import("../generated/ai/index.ts");
 		const cwd = options.cwd ?? process.cwd();
+		const localHostname = options.localHostname !== undefined ? options.localHostname : getLocalUrlHostname();
 		const registry = new ai.ProviderRegistry();
 		const sessionManager = new ai.SessionManager();
 		// Model discovery spawns the provider's CLI, so it runs on first explicit
@@ -138,6 +155,24 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 			} catch {
 				// OpenCode not available.
 			}
+
+			try {
+				await import("../generated/ai/providers/qwen-sdk.ts");
+				const qwenPath = whichCmd("qwen");
+				if (qwenPath) {
+					const provider = await ai.createProvider({
+						type: "qwen-sdk",
+						cwd,
+						qwenExecutablePath: qwenPath,
+					} as any);
+					const providerId = registry.register(provider);
+					// Discovery reads Qwen Code's settings.json (no process), and a
+					// session runs on qwen's own default model when none is picked.
+					deferModelDiscovery(providerId, provider, { blockSession: false });
+				}
+			} catch {
+				// Qwen Code not available.
+			}
 		};
 
 		const pullBridge = !options.sessionBridge && options.pullSessionBridge
@@ -157,7 +192,19 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 		if (bridgeProvider) registry.register(bridgeProvider, ai.SESSION_BRIDGE_PROVIDER_NAME);
 		await registerSdkProviders(catalogRegistry ?? registry);
 
+		const peerSessionManager = bridgeProvider && catalogRegistry && isSshDetectedRemote() ? new ai.SessionManager() : null;
+		const peerEndpoints = peerSessionManager && catalogRegistry
+			? ai.createAIEndpoints({
+				registry: catalogRegistry,
+				sessionManager: peerSessionManager,
+				getCwd: options.getCwd,
+				beforeProviderSession: discovery.beforeProviderSession,
+				authorizeSessionBridgeRequest: () => false,
+			})
+			: undefined;
+
 		return {
+			...(peerEndpoints ? { peerEndpoints } : {}),
 			endpoints: ai.createAIEndpoints({
 				registry,
 				...(catalogRegistry ? { catalogRegistry } : {}),
@@ -165,7 +212,7 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 				getCwd: options.getCwd,
 				beforeProviderSession: discovery.beforeProviderSession,
 				authorizeSessionBridgeRequest: (req: Request) =>
-					isLoopbackHostHeader(req.headers.get("host"), options.getServerPort?.()),
+					isLoopbackHostHeader(req.headers.get("host"), options.getServerPort?.(), localHostname),
 				...(pullBridge ? { pullBridge } : {}),
 			}),
 			dispose: () => {
@@ -173,6 +220,7 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 				// Pi session is already running for us (the decision goes there next).
 				bridgeProvider?.detach();
 				sessionManager.disposeAll();
+				peerSessionManager?.disposeAll();
 				registry.disposeAll();
 				catalogRegistry?.disposeAll();
 				pullBridge?.dispose();
@@ -190,7 +238,9 @@ export async function handlePiAIRequest(
 	runtime: PiAIRuntime | null,
 ): Promise<boolean> {
 	if (!url.pathname.startsWith("/api/ai/")) return false;
-	const handler = runtime?.endpoints[url.pathname];
+	// A remote session only SSH turned on: its own tunnel gets the bridge, every other address the peer endpoints.
+	const endpoints = runtime?.peerEndpoints && !isSshTunnelRequest(req) ? runtime.peerEndpoints : runtime?.endpoints;
+	const handler = endpoints?.[url.pathname];
 
 	if (handler) {
 		try {

@@ -1,0 +1,114 @@
+/* Plannotator Modern. Light colors from BoardUI's free theme tokens: thanks to BoardUI
+   (https://www.boardui.com, https://github.com/BoardUI/boardui).
+
+   Dark is the PaulMillr palette (themes/paulmillr.css: "PaulMillr — terminal color scheme"),
+   every color as that theme has it but its blue, which is the light half's blue, and the greys of its quiet
+   surfaces (muted, input, popover, border), which PaulMillr draws in its card's grey. The fonts stay Modern's.
+
+   Light, set on our tokens: BoardUI's secondary surface is the ground, its full surface the
+   card, its tertiary surface muted. Values are BoardUI's unless a comment says not.
+
+   Neutrals stay hex on purpose: a hex grey has no hue, so color-mix(in oklch) with the
+   blue keeps the blue's hue. `oklch(1 0 0)` has hue 0 and turns those mixes pink.
+
+   The color values from BoardUI's free source are used under its MIT License:
+
+   MIT License
+
+   Copyright (c) 2026 Mertcan Dundar Esmergul (BoardUI)
+
+   Permission is hereby granted, free of charge, to any person obtaining a copy
+   of this software and associated documentation files (the "Software"), to deal
+   in the Software without restriction, including without limitation the rights
+   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+   copies of the Software, and to permit persons to whom the Software is
+   furnished to do so, subject to the following conditions:
+
+   The above copyright notice and this permission notice shall be included in all
+   copies or substantial portions of the Software.
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE. */
+.theme-plannotator-modern {
+  /* Dark is the PaulMillr palette (see the header): the colors below are themes/paulmillr.css's, value for value,
+     but for the blue and four greys (muted, input, popover, border). utils/modernDarkPalette.test.ts fails when the
+     two drift. */
+  --background: #000000;
+  --foreground: #f2f2f2;
+  --card: #2a2a2a;
+  --card-foreground: #f2f2f2;
+  /* Not PaulMillr's #2a2a2a (its card): a menu or popover is a step above the card it opens on, as in
+     Plannotator's dark (oklch L +0.07 here, +0.06 there). */
+  --popover: #3c3c3c;
+  --popover-foreground: #f2f2f2;
+  /* Not PaulMillr's #396bd7: the blue of the light half below, so the theme has one blue. */
+  --primary: oklch(0.515 0.245 263);
+  --primary-foreground: #ffffff;
+  --secondary: #414141;
+  --secondary-foreground: #f2f2f2;
+  /* Not PaulMillr's #2a2a2a, its card: every quiet fill is muted over the card (the list's section bands, quiet
+     and foot buttons, hovers, chips, inline code, table rows), so with the two equal none of them showed. One step
+     above the card (oklch L +0.05; Plannotator's dark is +0.04, Graphite's +0.06). utils/modernDarkSurfaces.test.ts. */
+  --muted: #373737;
+  --muted-foreground: #bbbbbb;
+  --accent: #66ccff;
+  --accent-foreground: #000000;
+  --destructive: #ff0000;
+  --destructive-foreground: #ffffff;
+  /* Not PaulMillr's #414141: the step above the card Plannotator's dark has (oklch L +0.13; it was +0.09), so a
+     line at part strength still shows on the card. The input is the muted surface, as there. */
+  --border: #4c4c4c;
+  --input: #373737;
+  /* The primary, as PaulMillr's ring is its primary. */
+  --ring: oklch(0.515 0.245 263);
+  --success: #79ff0f;
+  --success-foreground: #000000;
+  --warning: #e7bf00;
+  --warning-foreground: #000000;
+
+  /* Modern's own, for both modes: the light block below sets no fonts. */
+  --font-sans: 'Inter Variable', 'Inter', system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', 'Geist Mono', 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #1a1a1a;
+  --focus-highlight: #66ccff;
+}
+
+.theme-plannotator-modern.light {
+  --background: #f7f7f7;
+  --foreground: #0a0a0a;
+  --card: #ffffff;
+  --card-foreground: #0a0a0a;
+  --popover: #ffffff;
+  --popover-foreground: #0a0a0a;
+  /* BoardUI's blue-600 (#155dfc), a hair darker: the Inbox and code review draw this as text on its own tint, 4.12:1 at blue-600. */
+  --primary: oklch(0.515 0.245 263);
+  --primary-foreground: #ffffff;
+  --secondary: oklch(0.45 0.085 224.283);
+  --secondary-foreground: #ffffff;
+  --muted: #ebebeb;
+  /* Not BoardUI's: its #737373 is 3.6:1 on the darkest chip it sits on (#e2e2e2). Lowered only as far as 4.5:1 there. */
+  --muted-foreground: #646464;
+  --accent: oklch(0.47 0.157 37.304);
+  --accent-foreground: #ffffff;
+  --destructive: oklch(0.505 0.213 27.518);
+  --destructive-foreground: #ffffff;
+  --border: #ebebeb;
+  --input: #ebebeb;
+  --ring: oklch(0.623 0.214 259.815);
+  /* lime-800. lime-700 would be brighter, but as success text on its own 15% tint it is 4.1:1. */
+  --success: oklch(0.453 0.124 130.933);
+  --success-foreground: #ffffff;
+  --warning: oklch(0.476 0.114 61.907);
+  --warning-foreground: #ffffff;
+
+  --code-bg: #f7f7f7;
+  /* What light drew before dark became Paul Miller's (it came from the block above). */
+  --focus-highlight: #3392ff;
+}

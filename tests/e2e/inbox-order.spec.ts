@@ -13,7 +13,7 @@
  * PNGs light and dark at 1440 by 900 land in .local/proof/order/.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -67,7 +67,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-order-e2e-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -133,7 +133,7 @@ test("a reply to A moves A to Sent; Waiting keeps C, B", async () => {
   const row = page.locator(`.ib-lbody [data-thread-id="${threads.pi}"]`);
   await expect(row).toHaveAttribute('data-section', 'sent');
   // Its own subject, and the delivery glyph before the time says where the reply is (approval "inbox-row-delivery").
-  await expect(row.locator('.ib-st')).toHaveText('Keep the CSV header row?');
+  await expect(row.locator('.ib-title')).toHaveText('Keep the CSV header row?');
   await expect(row.locator('.ib-tick')).toHaveAttribute('aria-label', 'Saved for Pi,');
   // While the thread is open the person's own Send does not reorder the list (owner ruling 2026-10-11).
   expect(await sectionOrder(page, 'waiting')).toEqual([threads.claude, threads.opencode, threads.pi]);
@@ -150,7 +150,7 @@ test('a newer agent message waits behind "N new"; shown, its row is first in its
   const before = await sectionOrder(page, 'waiting');
   await opencode!.send({ project_path: world.ledger, reply_to: world.opencodeMessage, body: question('Also gzip the file?') });
   // The held rule (PR 1772): the order on screen waits for an action.
-  await expect(page.locator('[data-inbox-notice]')).toContainText('1 new in ledger');
+  await expect(page.locator('[data-inbox-notice]')).toContainText(/^.+ (asked|replied) in “/);
   expect(await sectionOrder(page, 'waiting')).toEqual(before);
   await page.locator('[data-inbox-notice]').click();
   await expect.poll(() => sectionOrder(page, 'waiting')).toEqual([threads.opencode, threads.claude]);

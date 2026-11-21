@@ -49,6 +49,8 @@ describe("derivePersonThreadSubject: a thread the person starts gets a short nam
     expect(derivePersonThreadSubject("So, I want a board view for the inbox.")).toBe("I want a board view for the inbox");
     expect(derivePersonThreadSubject("okay so um the toolbar covers the first line of the file.")).toBe("The toolbar covers the first line of the file");
     expect(derivePersonThreadSubject("hey can you rerun the e2e suite")).toBe("Can you rerun the e2e suite");
+    // An agent's name needs no comma after it (Qwen Code is one the Inbox connects).
+    expect(derivePersonThreadSubject("Hey Qwen can you rerun the e2e suite")).toBe("Can you rerun the e2e suite");
     // "So" is kept where it is part of what the person says.
     expect(derivePersonThreadSubject("So many tests fail on CI today.")).toBe("So many tests fail on CI today");
     // A greeting alone is still a name.
@@ -60,7 +62,7 @@ describe("derivePersonThreadSubject: a thread the person starts gets a short nam
       "Can you check github.com/…/1934 and tell me what you think",
     );
     expect(derivePersonThreadSubject("https://example.com is down")).toBe("example.com is down");
-    const path = derivePersonThreadSubject("/Users/ramos/src/plannotator/packages/inbox/compose/ComposeDialog.tsx throws when I paste an image")!;
+    const path = derivePersonThreadSubject("/Users/sam/src/plannotator/packages/inbox/compose/ComposeDialog.tsx throws when I paste an image")!;
     expect(path.startsWith("…/compose/ComposeDialog.tsx throws")).toBe(true);
     expect(columns(path)).toBeLessThanOrEqual(PERSON_THREAD_SUBJECT_COLUMNS);
   });

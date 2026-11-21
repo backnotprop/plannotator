@@ -12,7 +12,7 @@ const okPayload = {
   status: 'ok' as const,
   snapshotId: 'snapshot',
   provider: 'calldiff' as const,
-  version: '0.4.1',
+  version: '0.6.0',
   from: 'before',
   to: 'after',
   raw: '',

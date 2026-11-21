@@ -17,7 +17,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { INBOX_NAME_THREAD_LINE, INBOX_NEW_THREAD_INSTRUCTION, INBOX_REMINDER_TEXT, INBOX_WAKE_INSTRUCTION, inboxWakeText } from "./generated/inbox/connection.ts";
+import { INBOX_NAME_THREAD_LINE, INBOX_NEW_THREAD_INSTRUCTION, INBOX_REMINDER_TEXT, INBOX_WAKE_CLOSING_LINE, INBOX_WAKE_INSTRUCTION, inboxWakeText } from "./generated/inbox/connection.ts";
 import { entriesCarryReminder, PI_INBOX_REMINDER_CUSTOM_TYPE } from "./inbox.ts";
 import { INBOX_INSTALL_TEXT } from "./generated/inbox/agent-link.ts";
 import {
@@ -219,7 +219,9 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		await ask(silent, "hello");
 		expect(m.requests.at(-1)?.tools).not.toContain("plannotator_inbox");
 		expect(existsSync(join(w.dataDir, "inbox"))).toBe(false);
-		expect(silent.events.filter((event) => event.type === "extension_ui_request" && event.method === "notify")).toEqual([]);
+		// The Inbox says nothing; the runtime TLS warning (runtime-tls.ts) is not the Inbox's and depends on the Node running the test.
+		const isRuntimeWarning = (event: { message?: unknown }) => typeof event.message === "string" && event.message.includes("TLS fixes");
+		expect(silent.events.filter((event) => event.type === "extension_ui_request" && event.method === "notify" && !isRuntimeWarning(event))).toEqual([]);
 		w.proof(`switch on, no inbox/inbox.json: tools sent to the model = ${JSON.stringify(m.requests.at(-1)?.tools)}; no inbox folder, no notice`);
 		await silent.client.stop();
 
@@ -369,14 +371,39 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		w.proof("inboxReminder.pi false: the tool, no reminder");
 	}, 180_000);
 
+	// The misfiled-thread AAR (2026-10-27): after a compaction the thread ids must come from the Inbox,
+	// not from the summary. The failure this catches: the reminder Pi sends again after a compaction
+	// without the session's open threads, or with them but read as a look (no project made, no read).
+	test("after a compaction that summarized the reminder away, the reminder comes back with the session's open threads", async () => {
+		const w = world("01c-threads-after-compaction");
+		const m = model(askingScript());
+		startInbox(w);
+		knob(w, true);
+		// Keep nothing but the newest turn, so the compaction summarizes the reminder away.
+		mkdirSync(join(w.root, "pi-agent"), { recursive: true });
+		writeFileSync(join(w.root, "pi-agent", "settings.json"), JSON.stringify({ compaction: { keepRecentTokens: 1 } }));
+		const pi = await openPi(w, m);
+		await ask(pi, "Ask the person which region to use.");
+		const sent = sentFrom(m);
+		await ask(pi, "Go on.");
+		const before = m.requests.length;
+		await pi.client.compact();
+		await ask(pi, "Next step.");
+		const after = m.requests.slice(before).at(-1)!;
+		const reminders = after.messages.map((message) => messageText(message.content)).filter((text) => text.includes(INBOX_REMINDER_TEXT));
+		expect(reminders).toHaveLength(1);
+		expect(reminders[0]).toContain("Your open Plannotator Inbox threads in this project (1).");
+		expect(reminders[0]).toContain(`- ${sent.thread_id} · `);
+		w.proof(`after the compaction, the reminder message reads:\n\n${reminders[0]}`);
+	}, 180_000);
+
 	// #2194: what the model reads at the session's first prompt, on the real Pi.
-	test("prompts.inbox: with none, the reminder message is today's text byte for byte; with Pi's own text, that text replaces it, once, in the same place", async () => {
+	test("prompts.inbox: with none, the reminder message is the built-in text byte for byte; with Pi's own text, that text replaces it, once, in the same place", async () => {
 		const w = world("01c-reminder-custom");
 		const m = model(askingScript());
 		startInbox(w);
 		const reminderOf = (request: ScriptedRequest, text: string) => request.messages.filter((message) => messageText(message.content) === text);
-		const MAIN =
-			"Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with plannotator_inbox send_message and keep going. Their reply comes back here. Run `plannotator inbox --help` for how it works.";
+		const MAIN = INBOX_REMINDER_TEXT;
 
 		// Other prompts set, but no usable prompts.inbox: the very same message.
 		writeFileSync(join(w.dataDir, "config.json"), JSON.stringify({ inboxTool: { pi: true }, prompts: { review: { denied: "Check." }, inbox: { reminder: "  " } } }));
@@ -434,12 +461,13 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		const replyId = await personSends(w, asked.message_id, words);
 		const wake = await waitFor("the wake turn", () => wakes(pi)[0]);
 		const lines = wake.split("\n");
-		expect(lines[0]).toBe(`Plannotator Inbox: ${SUBJECT} (${replyId})`);
+		// A plain reply in a thread with no short name: the subject stays out of the wake (#2464).
+		expect(lines[0]).toBe(`Plannotator Inbox: a reply (${replyId})`);
+		expect(wake).not.toContain(SUBJECT);
 		expect(lines[1]).toBe(INBOX_WAKE_INSTRUCTION);
-		const reply = (await thread(w, asked.thread_id)).messages.find((message) => message.id === replyId)!;
-		expect(wake).toBe(inboxWakeText({ id: replyId, thread_id: asked.thread_id, subject: SUBJECT, body: reply.body }));
-		// The closing line: the thread and the tool as this host registered it (plannotator_inbox).
-		expect(lines.at(-1)).toBe(`[thread ${asked.thread_id} · more: plannotator_inbox read_thread · how it works: plannotator inbox --help]`);
+		// The details line names the thread; the closing line ends the wake.
+		expect(lines[2]).toStartWith(`[Thread ${asked.thread_id}: 2 messages, `);
+		expect(lines.at(-1)).toBe(INBOX_WAKE_CLOSING_LINE);
 		expect(wake).toContain(words);
 		const wakeRequest = m.requests.find((request) => lastMessage(request).text === wake);
 		expect(wakeRequest && lastMessage(wakeRequest).role).toBe("user");
@@ -568,10 +596,10 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		await waitFor("a wake in either process", () => wakes(first).length + wakes(second).length > 0);
 		await Bun.sleep(5_000);
 		expect(wakes(first).length + wakes(second).length).toBe(1);
-		expect(readdirSync(join(w.dataDir, "inbox", "claims"))).toEqual([replyId]);
+		expect(readdirSync(join(w.dataDir, "inbox", "claims"))).toEqual([`${replyId}.${first.sessionId}`]);
 		const delivered = (await thread(w, asked.thread_id)).messages.find((message) => message.id === replyId)?.delivery;
 		expect(delivered?.session).toBe(first.sessionId);
-		w.proof(`two Pi processes on session ${first.sessionId}: wakes ${wakes(first).length} + ${wakes(second).length} = 1, one claim (${replyId}), delivered at ${delivered?.at}`);
+		w.proof(`two Pi processes on session ${first.sessionId}: wakes ${wakes(first).length} + ${wakes(second).length} = 1, one claim (${replyId}.${first.sessionId}), delivered at ${delivered?.at}`);
 	}, 120_000);
 
 	test("two Pi processes on one session: the reply goes to the one the person works in, once, and follows them back to the other", async () => {
@@ -607,7 +635,7 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		await Bun.sleep(5_000);
 		expect(wakes(a)).toEqual([]);
 		expect(wakes(b)).toHaveLength(1);
-		expect(readdirSync(join(w.dataDir, "inbox", "claims"))).toEqual([replyId]);
+		expect(readdirSync(join(w.dataDir, "inbox", "claims"))).toEqual([`${replyId}.${a.sessionId}`]);
 		const delivered = (await thread(w, asked.thread_id)).messages.find((message) => message.id === replyId)?.delivery;
 		expect(delivered).toMatchObject({ state: "delivered", host: "pi", session: a.sessionId });
 		w.proof(`B's turn ended: the reply was delivered in B, once (wakes A 0, B 1; one claim ${replyId}; delivered at ${delivered?.at})`);
@@ -670,7 +698,7 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		const asked = sentFrom(m);
 		const replyId = await personSends(w, asked.message_id, "Retry with the same key.");
 		const wake = await waitFor("the wake turn", () => wakes(pi)[0]);
-		expect(wake.split("\n", 1)[0]).toBe(`Plannotator Inbox: ${SUBJECT} (${replyId})`);
+		expect(wake.split("\n", 1)[0]).toBe(`Plannotator Inbox: a reply (${replyId})`);
 		await Bun.sleep(3_000);
 		expect(wakes(pi)).toHaveLength(1);
 		expect(pi.events.some((event) => event.type === "agent_settled")).toBe(false);

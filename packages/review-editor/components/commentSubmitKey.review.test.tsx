@@ -2,7 +2,7 @@
  * "Enter saves a comment" (#1934) on code review's comment composers,
  * against the REAL components (DOM-gated, DOM_TESTS=1): the line-comment
  * toolbar (also the Inbox's guide comments), its expanded dialog, a file
- * comment's edit box, the sidebar's "+ General comment", and an outdated
+ * comment's edit box, the sidebar's "+ Global comment", and an outdated
  * comment's edit box.
  *
  * Shared cases (off / on / Shift+Enter / Cmd+Enter / IME) come from
@@ -57,7 +57,7 @@ function must<T extends Element>(selector: string): T {
 
 // --- The line-comment toolbar ---
 
-function Toolbar({ onSubmit, showSuggestedCode = false }: { onSubmit: () => void; showSuggestedCode?: boolean }) {
+function Toolbar({ onSubmit, onDismiss = () => {}, showSuggestedCode = false }: { onSubmit: () => void; onDismiss?: () => void; showSuggestedCode?: boolean }) {
   const [comment, setComment] = useState('');
   const [code, setCode] = useState('');
   const ref = React.useRef<HTMLDivElement>(null);
@@ -76,7 +76,7 @@ function Toolbar({ onSubmit, showSuggestedCode = false }: { onSubmit: () => void
       setShowCodeModal={() => {}}
       setShowCommentModal={() => {}}
       onSubmit={onSubmit}
-      onDismiss={() => {}}
+      onDismiss={onDismiss}
       onCancel={() => {}}
       conventionalCommentsEnabled={false}
       conventionalLabel={null}
@@ -95,6 +95,18 @@ describeCommentSubmitKeys('review line comment toolbar', async (text) => {
   await typeInto(must<HTMLTextAreaElement>(COMMENT_FIELD), text);
   return { field: () => must(COMMENT_FIELD), saves: () => saves };
 }, { skip });
+
+test.skipIf(skip)('a composing Escape leaves the review line comment open', async () => {
+  let dismisses = 0;
+  await render(<Toolbar onSubmit={() => {}} onDismiss={() => { dismisses++; }} />);
+  const field = must<HTMLTextAreaElement>(COMMENT_FIELD);
+  await typeInto(field, 'draft');
+  const escape = await pressKey(field, 'Escape', { keyCode: 229 });
+  expect(escape.defaultPrevented).toBe(false);
+  expect(dismisses).toBe(0);
+  await pressKey(field, 'Escape');
+  expect(dismisses).toBe(1);
+});
 
 describe('review line comment toolbar: suggested code', () => {
   test.skipIf(skip)('on: Enter in the suggested code is a new line, not a save', async () => {
@@ -170,7 +182,7 @@ describeCommentSubmitKeys('review file comment edit', async (text) => {
   return { field: () => must('[data-annotation-id="f1"] textarea'), saves: () => edits.length };
 }, { skip });
 
-// --- The sidebar: "+ General comment" and an outdated comment's edit box ---
+// --- The sidebar: "+ Global comment" and an outdated comment's edit box ---
 
 describeCommentSubmitKeys('review sidebar general comment', async (text) => {
   const added: string[] = [];
@@ -185,7 +197,7 @@ describeCommentSubmitKeys('review sidebar general comment', async (text) => {
       onSelectAnnotation={() => {}}
       onNavigateToAnnotation={() => {}}
       onDeleteAnnotation={() => {}}
-      onAddGeneralComment={(value) => added.push(value)}
+      onAddGeneralComment={(value) => { added.push(value); }}
     />,
   );
   await act(async () => must<HTMLButtonElement>('[data-add-general-comment]').click());

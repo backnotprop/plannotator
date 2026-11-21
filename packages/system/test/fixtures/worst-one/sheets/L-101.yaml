@@ -1,0 +1,10 @@
+sheet: L-101
+scope: inside
+kind: logical
+title: Jo, inside
+question: Nothing drawn yet.
+bands:
+  - id: empty
+    label: Empty
+    row: [ ~ ]
+show: all

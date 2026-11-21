@@ -1,6 +1,6 @@
 import React from 'react';
 import type { CommitListEntry } from '@plannotator/shared/types';
-import { PanelViewToggle, type ReviewPanelView } from './PanelViewToggle';
+import { ReviewPanelHeader, reviewPanelBodyProps, type ReviewPanelHeaderModel } from './ReviewPanelHeader';
 import { Avatar } from './Avatar';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { formatRelativeTime } from '@plannotator/ui/utils/aiChatFormat';
@@ -30,10 +30,8 @@ interface CommitsPanelProps {
   onSelectCommit: (sha: string) => void;
   onShowMore: () => void;
   onRetry: () => void;
-  /** View switcher, same header slot as the other panels. */
-  onSelectPanelView: (view: ReviewPanelView) => void;
-  /** Whether the Git status segment is offered (since-base capable repos). */
-  showSectionsOption: boolean;
+  /** The top of the panel, the same header every view draws. */
+  header: ReviewPanelHeaderModel;
   /** Badge on the `isHead` row: `HEAD` for git, `@` (the working copy) for jj. */
   headLabel?: string;
 }
@@ -46,8 +44,8 @@ const CommitRow: React.FC<{
 }> = ({ commit, isActive, headLabel, onSelect }) => (
   <button
     onClick={onSelect}
-    className={`w-full text-left px-2 py-1.5 transition-colors ${
-      isActive ? 'bg-primary/10' : 'hover:bg-muted/50'
+    className={`w-full text-left px-2 py-1.5 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/70 ${
+      isActive ? 'bg-[var(--sidebar-fill-strong)]' : 'hover:bg-[var(--sidebar-fill)]'
     }`}
     title={`${commit.sha}\n${commit.author} <${commit.authorEmail}>\n${commit.subject}`}
   >
@@ -55,20 +53,20 @@ const CommitRow: React.FC<{
     <div className="flex items-center gap-1.5 min-w-0">
       <span className="text-xs truncate flex-1">{commit.subject}</span>
       {commit.isHead && (
-        <span className="text-[9px] leading-none px-1 py-0.5 rounded bg-primary/15 text-primary font-medium flex-shrink-0">
+        <span className="text-xs leading-none px-1 py-0.5 rounded bg-primary/15 text-primary font-medium flex-shrink-0">
           {headLabel}
         </span>
       )}
-      <span className="text-[10px] text-muted-foreground/70 tabular-nums flex-shrink-0">
+      <span className="text-xs text-muted-foreground/70 tabular-nums flex-shrink-0">
         {formatRelativeTime(commit.committedAt)}
       </span>
     </div>
     {/* Meta — avatar + author (always shown) + sha. */}
     <div className="mt-0.5 flex items-center gap-1.5 min-w-0">
       <Avatar src={commit.avatarUrl} name={commit.author} size={14} />
-      <span className="text-[11px] text-muted-foreground truncate">{commit.author}</span>
+      <span className="text-xs text-muted-foreground truncate">{commit.author}</span>
       <span className="flex-1" />
-      <span className="font-mono text-[10px] text-muted-foreground/70 flex-shrink-0">{commit.shortSha}</span>
+      <span className="font-mono text-xs text-muted-foreground/70 flex-shrink-0">{commit.shortSha}</span>
     </div>
   </button>
 );
@@ -81,7 +79,7 @@ const BaseBoundary: React.FC<{ base: string }> = ({ base }) => (
     title={`Commits from here down are already part of ${base} — shared history, not branch work.`}
   >
     <span className="h-px flex-1 bg-foreground/30" />
-    <span className="text-[11px] font-semibold text-foreground/80 truncate max-w-[160px]">
+    <span className="text-xs font-semibold text-foreground/80 truncate max-w-[160px]">
       In {base}
     </span>
     <span className="h-px flex-1 bg-foreground/30" />
@@ -89,7 +87,7 @@ const BaseBoundary: React.FC<{ base: string }> = ({ base }) => (
 );
 
 const GroupHeader: React.FC<{ label: string; title: string }> = ({ label, title }) => (
-  <div className="px-2 pt-1 pb-1 text-[11px] font-medium text-muted-foreground" title={title}>
+  <div className="px-2 pt-1 pb-1 text-xs font-medium text-muted-foreground" title={title}>
     {label}
   </div>
 );
@@ -106,8 +104,7 @@ export const CommitsPanel: React.FC<CommitsPanelProps> = ({
   onSelectCommit,
   onShowMore,
   onRetry,
-  onSelectPanelView,
-  showSectionsOption,
+  header,
   headLabel = 'HEAD',
 }) => {
   // isPastBase is a suffix of the linear walk (reachability from the base is
@@ -117,22 +114,14 @@ export const CommitsPanel: React.FC<CommitsPanelProps> = ({
 
   return (
     <aside
-      className="border-r border-border/50 bg-card/30 flex flex-col flex-shrink-0 overflow-hidden"
+      data-review-sidebar=""
+      className="review-sidebar border-r flex flex-col flex-shrink-0 overflow-hidden"
       style={{ width: width ?? 256 }}
     >
-      {/* Header — the view toggle owns the entire top row (full width), same
-          layout as the other panel views. The loaded-commit count moves to its
-          own sub-row since nothing else shares the toggle row. */}
-      <div className="px-3 flex items-center border-b border-border/50 flex-shrink-0" style={{ height: 'var(--panel-header-h)' }}>
-        <PanelViewToggle
-          view="commits"
-          onSelect={onSelectPanelView}
-          showSections={showSectionsOption}
-          showCommits
-        />
-      </div>
+      <ReviewPanelHeader model={header} width={width ?? 256} />
+      {/* The tabs' track is the panel's one line: no second line here. */}
       {commits.length > 0 && (
-        <div className="px-3 py-1 border-b border-border/30 flex items-center justify-end flex-shrink-0">
+        <div className="px-4 py-1 flex items-center justify-end flex-shrink-0">
           <span className="text-xs text-muted-foreground tabular-nums">
             {commits.length} {commits.length === 1 ? 'commit' : 'commits'}
           </span>
@@ -140,7 +129,8 @@ export const CommitsPanel: React.FC<CommitsPanelProps> = ({
       )}
 
       <OverlayScrollArea className="flex-1 min-h-0">
-        <div className="py-1">
+        {/* Containers on the panel's 8 px edge, text on its 16 px edge. */}
+        <div className="px-2 py-1" {...reviewPanelBodyProps(header)}>
           {error && commits.length === 0 ? (
             // Full-panel error only when there's nothing to show — an error
             // with a populated list renders inline below it instead, so a
@@ -149,7 +139,7 @@ export const CommitsPanel: React.FC<CommitsPanelProps> = ({
               <div className="text-xs text-destructive break-words">{error}</div>
               <button
                 onClick={onRetry}
-                className="text-[11px] text-primary/80 underline underline-offset-2 decoration-primary/40 hover:text-primary transition-colors"
+                className="text-xs text-primary/80 underline underline-offset-2 decoration-primary/40 hover:text-primary transition-colors"
               >
                 Retry
               </button>
@@ -181,13 +171,13 @@ export const CommitsPanel: React.FC<CommitsPanelProps> = ({
                 <button
                   onClick={onShowMore}
                   disabled={isLoadingMore}
-                  className="w-full text-left px-2 py-1 text-[11px] text-primary/80 underline underline-offset-2 decoration-primary/40 hover:text-primary hover:decoration-primary transition-colors disabled:opacity-50"
+                  className="w-full text-left px-2 py-1 text-xs text-primary/80 underline underline-offset-2 decoration-primary/40 hover:text-primary hover:decoration-primary transition-colors disabled:opacity-50"
                 >
                   {isLoadingMore ? 'Loading…' : 'Show more'}
                 </button>
               )}
               {error && (
-                <div className="px-2 py-1.5 flex items-center gap-2 text-[11px] text-destructive">
+                <div className="px-2 py-1.5 flex items-center gap-2 text-xs text-destructive">
                   <span className="truncate flex-1" title={error}>{error}</span>
                   <button
                     onClick={onRetry}

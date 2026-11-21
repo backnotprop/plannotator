@@ -27,16 +27,16 @@ In these sessions "Ask this session" is the only Ask AI option. There is no prov
 - Stopping a question stops only that question.
 - If the session closes or can't be reached, Plannotator says so. It does not switch to a different AI.
 - **OpenCode 2 plan review:** the agent is waiting for your plan decision, so it cannot run a full turn. You get a quick answer from the session's context ("Quick answer from this session"), and nothing is added to the conversation.
-- **Over your tailnet (`--tailscale`):** "Ask this session" works on this computer and, on your phone or another device, only for the Tailscale login that owns this computer. Nothing to set up: Plannotator asks Tailscale who owns the machine. Anyone else on your tailnet who opens the review gets the providers below instead, never the agent session.
+- **Over your tailnet (`--tailscale`):** "Ask this session" works on this computer and, on your phone or another device, only for the Tailscale login that owns this computer. Nothing to set up: Plannotator asks Tailscale who owns the machine. Any other Tailscale account gets a page saying the session belongs to this computer's owner.
 
 You pick a provider as before (see below) when:
 
-- the session is in remote mode, or you open a `--tailscale` session with a Tailscale login other than the one that owns the computer
+- the session is in remote mode
 - Plannotator was opened from OpenCode 1
-- the Claude Code mod is off, or Claude Code runs without it (older versions, `claude -p`, Windows)
+- the Claude Code mod is off, or Claude Code runs without it (older versions, `claude -p`)
 - you run the `plannotator` CLI yourself, outside an agent session
 
-Review Agents, Code Tour and Guided Review are separate from Ask AI. They always run their own Claude or Codex models (or another installed agent CLI), also in a session where Ask AI uses the session.
+Review Agents and Guided Review are separate from Ask AI. They always run their own Claude or Codex models (or another installed agent CLI), also in a session where Ask AI uses the session.
 
 ## Supported providers
 
@@ -44,13 +44,13 @@ Review Agents, Code Tour and Guided Review are separate from Ask AI. They always
 
 Requires the `claude` CLI installed and authenticated. Uses Claude Code's full system prompt, so the AI has the same capabilities as a Claude Code session — file reading, search, web access — plus the diff context.
 
-**Models:** whatever your installed `claude` offers (the same list its `/model` picker shows), plus a latest-resolving alias (`opus`, `sonnet`, `fable`, `haiku`) for each family it offers. Sonnet is the default. The effort control lists only the levels the selected model supports. The review agent, Code Tour, and Guided Review pickers show the same list.
+**Models:** whatever your installed `claude` offers (the same list its `/model` picker shows), plus a latest-resolving alias (`opus`, `sonnet`, `fable`, `haiku`) for each family it offers. Sonnet is the default. The effort control lists only the levels the selected model supports. The review agent and Guided Review pickers show the same list.
 
 ### Codex (via Codex SDK)
 
 Requires the `codex` CLI installed and authenticated. The AI operates in a sandboxed read-only mode with the diff context injected as a system prompt prefix.
 
-**Models:** whatever your installed `codex` offers (its `model/list`), with Codex's own default preselected. The reasoning control lists only the efforts the selected model supports. The review agent, Code Tour, and Guided Review pickers show the same list.
+**Models:** whatever your installed `codex` offers (its `model/list`), with Codex's own default preselected. The reasoning control lists only the efforts the selected model supports. The review agent and Guided Review pickers show the same list.
 
 ### Pi (via RPC subprocess)
 
@@ -62,13 +62,17 @@ No API keys are managed by Plannotator — Pi uses its own local configuration.
 
 Requires the `opencode` CLI installed and authenticated. Plannotator spawns `opencode serve` and communicates via HTTP + SSE. Models are discovered dynamically from your connected providers.
 
-OpenCode supports session forking, resuming, and runtime permission approvals — the richest capability set of all four providers.
+OpenCode supports session forking, resuming, and runtime permission approvals — the richest capability set of these providers.
+
+### Qwen Code (via the qwen CLI)
+
+Requires the `qwen` CLI installed and signed in. Each question runs `qwen` once in its plan mode with the file-writing and worktree tools turned off, and later questions continue the same Qwen Code session. The models come from your Qwen Code settings (`~/.qwen/settings.json`, or the folder `QWEN_HOME` names): the models configured for your current sign-in type, with your current model as the default. Ask AI conversations appear in your Qwen Code session list. Each one is the newest Qwen chat for the project, so `qwen --continue` resumes it rather than your own session; use `qwen --resume` to pick yours.
 
 ## Configuration
 
 Provider and model selection is available in **Settings > AI**. In a session where Ask AI is answered by the session itself, Settings > AI shows only that session. These persist via cookies across sessions.
 
-By default, Plannotator prefers the provider that matches the detected agent origin: Claude Code uses Claude, Codex uses Codex, OpenCode uses OpenCode, and Pi uses Pi when those providers are available. GitHub Copilot CLI and Gemini CLI do not have dedicated Ask AI providers yet, so they fall back to your saved provider or the server default.
+By default, Plannotator prefers the provider that matches the detected agent origin: Claude Code uses Claude, Codex uses Codex, OpenCode uses OpenCode, Pi uses Pi, and Qwen Code uses Qwen Code when those providers are available. GitHub Copilot CLI and Gemini CLI do not have dedicated Ask AI providers yet, so they fall back to your saved provider or the server default.
 
 You can also override the provider and model per-session using the config bar at the bottom of the AI sidebar. Changing the provider or model starts a new session — old messages stay visible but the conversation resets.
 
@@ -96,11 +100,13 @@ OpenCode supports the same permission approval flow as Claude — tool calls tha
 
 Pi does not expose a permission approval gate over RPC, so tool execution is handled entirely by Pi's own runtime.
 
+Qwen Code runs in its plan mode, and Plannotator also turns off Qwen's file-editing, file-writing, memory and worktree tools for these runs, so no approval cards appear. Plan mode alone is not enough: Qwen runs a tool your settings auto-approve before plan mode can block it. Other tools your Qwen settings auto-approve (a trusted MCP server, or an allow rule) can still run. Each answer has a 10-minute limit.
+
 ## Reasoning effort
 
 Codex supports a reasoning effort setting with four levels: **Low**, **Medium**, **High**, and **Max**. This is available in the config bar at the bottom of the AI sidebar. Higher effort means slower but more thorough responses.
 
-This setting only applies to Codex — Claude, Pi, and OpenCode do not expose a reasoning effort control.
+This setting only applies to Codex — Claude, Pi, OpenCode, and Qwen Code do not expose a reasoning effort control.
 
 ## Available settings
 

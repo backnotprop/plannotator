@@ -113,11 +113,15 @@ export interface PullSessionBridgeOptions extends PullSessionBridgeConfig {
 	interruptTimeoutMs?: number;
 	/** Default 15s: after a cancel, how long to wait for the host to confirm before freeing the slot. */
 	cancelGraceMs?: number;
+	/** Default 1,000,000: the most characters one request may carry. A `done` repeats the whole answer. */
+	maxBodyChars?: number;
 	now?: () => number;
 }
 
 export interface PullSessionBridge {
 	readonly bridge: SessionBridge;
+	/** The host has polled, so `status()` is what it reported, not a new bridge's `ready`. */
+	readonly connected: boolean;
 	/** Handle a request to one of the two bridge paths. `null` for any other path. */
 	handle(req: Request): Promise<Response> | null;
 	/** Server shutdown: answer open polls with `closing`, fail anything still waiting. */
@@ -210,11 +214,14 @@ export function createPullSessionBridge(options: PullSessionBridgeOptions): Pull
 	const resendAfterMs = options.resendAfterMs ?? 5_000;
 	const interruptTimeoutMs = options.interruptTimeoutMs ?? 15_000;
 	const cancelGraceMs = options.cancelGraceMs ?? 15_000;
+	const maxBodyChars = options.maxBodyChars ?? MAX_EVENT_BODY_BYTES;
 	const createdAt = now();
 	const modes = { ...options.modes };
 
 	let hostStatus: SessionBridgeStatus = "ready";
 	let connected = false;
+	/** A poll came: an event alone reports no status, however late it is. */
+	let polled = false;
 	let lastSeen = createdAt;
 	let openPoll: OpenPoll | null = null;
 	let active: ActiveAsk | null = null;
@@ -403,7 +410,7 @@ export function createPullSessionBridge(options: PullSessionBridgeOptions): Pull
 
 	const readJson = async (req: Request): Promise<unknown> => {
 		const text = await req.text();
-		if (text.length > MAX_EVENT_BODY_BYTES) throw new Error("Request body too large.");
+		if (text.length > maxBodyChars) throw new Error("Request body too large.");
 		return text ? JSON.parse(text) : {};
 	};
 
@@ -424,6 +431,7 @@ export function createPullSessionBridge(options: PullSessionBridgeOptions): Pull
 			return json({ error: "Invalid JSON body." }, 400);
 		}
 		noteContact();
+		polled = true;
 		if (isRecord(body)) {
 			applyStatus(body.status);
 			if (isRecord(body.modes)) {
@@ -542,6 +550,9 @@ export function createPullSessionBridge(options: PullSessionBridgeOptions): Pull
 
 	return {
 		bridge,
+		get connected() {
+			return polled;
+		},
 		handle(req) {
 			const path = new URL(req.url).pathname;
 			if (path !== SESSION_BRIDGE_POLL_PATH && path !== SESSION_BRIDGE_EVENT_PATH) return null;

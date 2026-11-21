@@ -4,10 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Code Review</title>
-    <!-- No type/sizes: /favicon.png is served by the Plannotator server, which
-         picks the bytes from the persisted favicon style, so the response
-         Content-Type is the only truthful declaration. See handleFavicon(). -->
-    <link rel="icon" href="/favicon.png">
+    <!-- No type: /favicon.ico is served by the Plannotator server, which picks the
+         bytes from the persisted favicon style (Glass and Yellow are multi-size .ico
+         files, Face is a PNG), so the response Content-Type is the truthful
+         declaration. The sizes let the tab take Glass's hand-pixelled 16 or
+         32 frame instead of a resample. See handleFavicon(). -->
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+    <!-- The person's own themes (plannotator theme add): the server answers this from its data
+         dir with their stylesheet and registry entries. A classic script, so it runs before the
+         app's module script and the first frame is drawn in a custom theme too. With none it adds
+         nothing; on a page with no server behind it, it is a harmless 404. See
+         packages/shared/theme-files.ts. vite-ignore: Vite leaves it as written (and drops the attribute). -->
+    <script vite-ignore src="/plannotator-themes.js"></script>
 
   </head>
   <body class="overflow-hidden overscroll-none antialiased">

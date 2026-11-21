@@ -4,7 +4,7 @@
  * The lightbox's own cases are in ImageLightbox.test.tsx.
  */
 import { describe, expect, test } from 'bun:test';
-import { atFit, fitScale, fitViewport, paddingInset, zoomLimits } from './imageZoom';
+import { atFit, canPanToward, fitScale, fitViewport, paddingInset, zoomLimits } from './imageZoom';
 
 const stage = { width: 1000, height: 600 };
 
@@ -40,5 +40,20 @@ describe('imageZoom: fit axis and padding', () => {
     expect(atFit({ x: 0, y: 0, scale: 0.5 }, { min: 0.5, max: 8 })).toBe(true);
     expect(atFit({ x: 0, y: 0, scale: 0.5 }, 0.25)).toBe(false);
     expect(atFit({ x: 0, y: 0, scale: 0.25 }, 0.25)).toBe(true);
+  });
+});
+
+describe('imageZoom: a swipe over a zoomed image pans to its edge first (approval "inbox-image-swipe")', () => {
+  test('more of the image that way: the swipe pans; at that edge it steps; nothing on screen yet: it steps', () => {
+    // 2000 px wide, 600 of it on screen from x = 700: more both ways.
+    expect(canPanToward({ x: 700, w: 600 }, 2000, 1)).toBe(true);
+    expect(canPanToward({ x: 700, w: 600 }, 2000, -1)).toBe(true);
+    // At its right edge: toward more of the right steps; back toward the left pans.
+    expect(canPanToward({ x: 1400, w: 600 }, 2000, 1)).toBe(false);
+    expect(canPanToward({ x: 1400, w: 600 }, 2000, -1)).toBe(true);
+    // The whole image (Fit): steps either way.
+    expect(canPanToward({ x: 0, w: 2000 }, 2000, 1)).toBe(false);
+    expect(canPanToward({ x: 0, w: 2000 }, 2000, -1)).toBe(false);
+    expect(canPanToward(null, 2000, 1)).toBe(false);
   });
 });

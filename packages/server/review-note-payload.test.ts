@@ -1,7 +1,7 @@
 /**
  * The review-level note ("Send with additional feedback") rides the EXISTING
  * /api/feedback payload: one extra `scope: 'general'` entry in the annotations
- * array plus a `## General` section already inside the feedback markdown. That
+ * array plus a `## Global comments` section already inside the feedback markdown. That
  * is the whole reason the feature needs no server change.
  *
  * Regression guarded: a future body validator, field whitelist, or
@@ -28,7 +28,7 @@ const MINIMAL_HTML = "<html><body>Plannotator</body></html>";
 const PATCH = "diff --git a/src/parse.ts b/src/parse.ts\n@@ -1 +1 @@\n-a\n+b\n";
 
 const NOTE_TEXT = "Rebase on main before merging; the migration should be its own PR.";
-const FEEDBACK = `# Code Review Feedback\n\n## src/parse.ts\n\n- L1: still drops null\n\n## General\n\n${NOTE_TEXT}\n`;
+const FEEDBACK = `# Code Review Feedback\n\n## Global comments\n\n${NOTE_TEXT}\n\n## src/parse.ts\n\n- L1: still drops null\n`;
 
 /** Exactly what the client commits for a review-level note. */
 const NOTE = {
@@ -137,7 +137,7 @@ for (const runtime of runtimes) {
 
         const result = await decision;
         expect(result.approved).toBe(false);
-        // Byte-identical: the ## General section the note lives in is what the
+        // Byte-identical: the ## Global comments section the note lives in is what the
         // agent actually reads.
         expect(result.feedback).toBe(FEEDBACK);
         expect(result.annotations.length).toBe(2);

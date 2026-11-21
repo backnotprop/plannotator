@@ -19,7 +19,7 @@
  * .local/proof/mobile/.
  */
 
-import { chromium, devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { chromium, devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
@@ -93,7 +93,7 @@ test.beforeAll(async () => {
   mkdirSync(join(billing, 'docs'));
   writeFileSync(join(billing, 'docs', 'retry-policy.md'), '# Retry policy\n\nFailed refunds are retried with exponential backoff, five times at most.\n');
   writeFileSync(join(billing, 'docs', 'on-call.md'), '# On-call\n\nThe on-call is paged once per refund, not once per attempt.\n');
-  // One agent session per thread: a session's unnamed messages join its own thread.
+  // One agent session per thread.
   const agents: SimAgent[] = [];
   const agent = async (name: string, host: string) => {
     const made = await SimAgent.connect({ binary, env, name, host });
@@ -276,7 +276,7 @@ async function shortHitAreas(page: Page, selector: string): Promise<{ measured: 
   });
 }
 
-const ROW_PARTS = '.ib-mk, .ib-p, .ib-t, .ib-m2, .ib-badge, .ib-key, .ib-c, .ib-att';
+const ROW_PARTS = '.ib-mk, .ib-agplus, .ib-p, .ib-t, .ib-m2, .ib-pv, .ib-badge, .ib-c, .ib-att';
 
 for (const phone of [
   { name: 'iPhone 15 (WebKit)', device: devices['iPhone 15'], browserName: 'webkit' as const },
@@ -381,7 +381,7 @@ for (const phone of [
       await expect(page.locator(".ib-listcol")).toBeHidden();
       await shot(page, '4-thread');
       expect(await sideways(page)).toEqual([]);
-      expect(await overlaps(page, '.ib-phead', '.ib-pback, .ib-phsubj[data-on], .ib-iconbtn, .ib-ptool')).toEqual([]);
+      expect(await overlaps(page, '.ib-phead', '.ib-pback, .ib-phsubj, .ib-iconbtn, .ib-ptool')).toEqual([]);
       expect(await overlaps(page, '.ib-fline.ib-is-open', '.ib-mk, .ib-fl-nm, .ib-fl-meta, .ib-fl-tm')).toEqual([]);
       const back = pane.getByRole('button', { name: 'Back to Inbox' });
       await expect(back).toBeVisible();
@@ -396,8 +396,16 @@ for (const phone of [
       expect(await box.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(16);
       await shot(page, '5-reply');
       expect(await sideways(page)).toEqual([]);
-      expect(await smallTargets(page, '.ib-pfoot .ib-btn')).toEqual([]);
-      await pane.locator('.ib-pfoot').getByRole('button', { name: 'Cancel' }).click();
+      // The box's Send is a round 36 px arrow that takes a 44 px tap (approval "inbox-phone-composer-picker"), still
+      // named "Send"; every other action in the foot is 44 px as drawn.
+      expect(await smallTargets(page, '.ib-pfoot .ib-btn:not([data-reply-send])')).toEqual([]);
+      const send = pane.locator('.ib-rbox [data-reply-send]');
+      await expect(send).toHaveAccessibleName('Send');
+      expect(await send.evaluate((el) => [el.getBoundingClientRect().width, el.getBoundingClientRect().height])).toEqual([36, 36]);
+      const sendHit = await shortHitAreas(page, '.ib-rbox [data-reply-send]');
+      expect(sendHit.measured).toBe(1);
+      expect(sendHit.short).toEqual([]);
+      await pane.locator('.ib-pfoot [data-reply-close]').click();
 
       // Back: the list, and the address of the list (the history is the stack it looks like).
       await back.click();
@@ -577,20 +585,24 @@ for (const phone of [
       await page.goto(`${world.url}#thread=${world.threads.stopped}`);
       const pane = page.locator('section.ib-pane');
       await expect(pane.getByRole('heading', { name: /Stripe 409/ })).toBeVisible();
-      // One of the two questions picked: the reply box's chip offers Skip it for the other (approval "inbox-explicit-skip").
+      // One of the two questions picked: on a phone the reply box's summary line ("1 question open", over its row) opens a
+      // sheet that offers Skip it for the other (approvals "inbox-explicit-skip", "inbox-reply-foot-phone", "inbox-reply-box").
       await pane.getByText('Retry with the same idempotency key').click();
       await pane.locator('.ib-pfoot').getByRole('button', { name: 'Edit draft' }).click();
-      const chip = pane.locator('.ib-skipchip').first();
-      await expect(chip).toBeVisible();
-      const skipButton = chip.getByRole('button', { name: /^Skip/ });
-      // The look is unchanged (a 22 px button inside a 26 px chip); the tap lands on it 21 px above and below its middle.
-      expect((await skipButton.boundingBox())!.height).toBeLessThan(30);
-      const skip = await shortHitAreas(page, '.ib-skipchip button');
-      expect(skip.measured).toBeGreaterThan(0);
+      const line = pane.locator('.ib-rbox [data-reply-line] [data-foot-summary]');
+      await expect(line).toHaveText('1 question open');
+      const lineHit = await shortHitAreas(page, '.ib-rbox [data-reply-line] [data-foot-summary]');
+      expect(lineHit.measured).toBe(1);
+      expect(lineHit.short).toEqual([]);
+      await line.click();
+      const sheet = page.getByRole('dialog', { name: 'Goes with this reply' });
+      const skip = await shortHitAreas(page, '[data-foot-sheet] [role="dialog"] button');
+      expect(skip.measured).toBeGreaterThanOrEqual(2);
       expect(skip.short).toEqual([]);
-      await skipButton.click();
-      await expect(chip.getByRole('button', { name: 'Keep open' })).toBeVisible();
-      await pane.locator('.ib-pfoot').getByRole('button', { name: 'Cancel' }).click();
+      await sheet.getByRole('button', { name: 'Skip it' }).click();
+      await expect(sheet.getByRole('button', { name: 'Keep open' })).toBeVisible();
+      await sheet.getByRole('button', { name: 'Close' }).click();
+      await pane.locator('.ib-pfoot [data-reply-close]').click();
 
       // An open file: ui's toolstrip and the viewer's Global comment and Copy file.
       await page.goto(`${world.url}#thread=${world.threads.attach}`);
@@ -628,9 +640,24 @@ for (const phone of [
       await page.goto(`${world.url}#thread=${world.threads.holding}`);
       const pane = page.locator('section.ib-pane');
       await expect(pane.getByRole('heading', { name: /Install page/ })).toBeVisible();
-      const read = pane.locator('.ib-phead .ib-hbtn');
-      await expect(read).toHaveAttribute('aria-pressed', 'false');
-      await read.click();
+      // A phone's Mark read leads the ⋯ sheet (approval "inbox-thread-header"); the bar has no read button.
+      await expect(pane.locator('.ib-phead [data-mark-read]')).toHaveCount(0);
+      // Read is the body's read line (its Move back puts the thread back); the sheet has no pressed Read.
+      const readLine = pane.locator('[data-read-line]');
+      const markRead = async () => {
+        await pane.locator('[data-thread-more]').click();
+        await page.locator('[data-thread-menu] [data-thread-read-item]').click();
+      };
+      const moveBack = () => readLine.locator('[data-move-back]').click();
+      // Undo and Move back are done once the live region says "Moved back." (Undo's toast is gone by then). The read
+      // line alone proves nothing: it is hidden while a Mark read still writes, and an event's list read can take it
+      // away before the Undo ends, whose late close would then take the next Mark read's toast.
+      const live = page.locator('[data-inbox-live]');
+      const movedBack = async () => {
+        await expect(readLine).toHaveCount(0);
+        await expect(live).toHaveText('Moved back.');
+      };
+      await markRead();
       const toast = page.locator('[data-inbox-toast]');
       await expect(toast).toBeVisible();
       await expect(toast.getByRole('button', { name: 'Undo' })).toBeVisible();
@@ -673,36 +700,47 @@ for (const phone of [
       // The thread's banner says the rest; Undo puts it back.
       await expect(pane.locator('[data-read-line]')).toBeVisible();
       await toast.getByRole('button', { name: 'Undo' }).click();
-      await expect(read).toHaveAttribute('aria-pressed', 'false');
+      await movedBack();
 
       // With the reply box open the foot is much taller: the toast still sits above it.
-      await pane.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ }).click();
+      await pane.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).click();
       await expect(pane.locator('.ib-pfoot textarea')).toBeVisible();
-      await read.click();
+      await markRead();
       await expect(toast).toBeVisible();
       const [tallFoot, tallToast] = await Promise.all([pane.locator('.ib-pfoot').boundingBox(), toast.boundingBox()]);
       expect(tallFoot!.height).toBeGreaterThan(120);
       expect(tallToast!.y + tallToast!.height).toBeLessThanOrEqual(tallFoot!.y);
       await shot(page, '14b-toast-reply-open');
       await toast.getByRole('button', { name: 'Undo' }).click();
-      await expect(read).toHaveAttribute('aria-pressed', 'false');
+      await movedBack();
 
       // Undo and the × are 8 px apart and their 44 px targets meet in the middle: a tap 2 px past the Undo pill
       // is still Undo (the thread moves back); one 6 px past it is the × (the toast goes, the thread stays read).
       const tapPast = async (px: number) => {
-        await read.click();
-        await expect(read).toHaveAttribute('aria-pressed', 'true');
+        await markRead();
+        await expect(readLine).toBeVisible();
         await expect(toast).toBeVisible();
+        // A raw tap does not wait for the toast to hold still, as a click does. The toast comes up over the foot as it
+        // was; the foot then loses the reply box's line for the question Mark read closed, and the toast drops to 8 px
+        // above it, which can be after the read line shows. Tap where it rests.
+        const gap = () =>
+          page.evaluate(() => {
+            const foot = document.querySelector('section.ib-pane .ib-pfoot')!.getBoundingClientRect();
+            const box = document.querySelector('[data-inbox-toast]')!.getBoundingClientRect();
+            return Math.round(foot.top - box.bottom);
+          });
+        await expect.poll(gap).toBeGreaterThanOrEqual(0);
+        await expect.poll(gap).toBeLessThanOrEqual(12);
         const undoBox = (await toast.locator('[data-toast-undo]').boundingBox())!;
         await page.touchscreen.tap(undoBox.x + undoBox.width + px, undoBox.y + undoBox.height / 2);
       };
       await tapPast(2);
-      await expect(read).toHaveAttribute('aria-pressed', 'false');
+      await movedBack();
       await tapPast(6);
       await expect(toast).toHaveCount(0);
-      await expect(read).toHaveAttribute('aria-pressed', 'true');
-      await read.click();
-      await expect(read).toHaveAttribute('aria-pressed', 'false');
+      await expect(readLine).toBeVisible();
+      await moveBack();
+      await movedBack();
 
       // Swipe it away with a finger (touch pointer events): a short drag springs back, one past 40% of its
       // width dismisses it, and its Undo goes with it (the thread stays read).
@@ -728,8 +766,8 @@ for (const phone of [
           fire('pointerup', x0 + distance);
           return mid;
         }, distance);
-      await read.click();
-      await expect(read).toHaveAttribute('aria-pressed', 'true');
+      await markRead();
+      await expect(readLine).toBeVisible();
       await expect(toast).toBeVisible();
       const short = await swipe(60);
       expect(short.translate).toBe('60px');
@@ -741,11 +779,11 @@ for (const phone of [
       await swipe(Math.round(width * 0.55));
       await expect(toast).toHaveCount(0);
       await expect(page.locator('[data-toast-ghost]')).toHaveCount(0);
-      await expect(read).toHaveAttribute('aria-pressed', 'true');
+      await expect(readLine).toBeVisible();
       // Back for the tests after this one.
       await page.emulateMedia({ reducedMotion: 'reduce' });
-      await read.click();
-      await expect(read).toHaveAttribute('aria-pressed', 'false');
+      await moveBack();
+      await movedBack();
     });
 
     test('Settings fits the window', async () => {
@@ -832,14 +870,14 @@ for (const narrow of [
         await page.screenshot({ path: join(proofDir, `${tag}-2-thread.png`) });
         expect(await sideways(page)).toEqual([]);
         expect(await overlaps(page, '.ib-fline.ib-is-open', '.ib-mk, .ib-fl-nm, .ib-fl-meta, .ib-fl-tm')).toEqual([]);
-        expect(await overlaps(page, '.ib-phead', '.ib-pback, .ib-hbtn, .ib-phsubj[data-on], .ib-ptool')).toEqual([]);
+        expect(await overlaps(page, '.ib-phead', '.ib-pback, .ib-readbtn, .ib-phsubj, .ib-ptool')).toEqual([]);
         expect(await cardFits(page)).toEqual([]);
-        // A pick: the foot gains "Draft · 1 pick" and the skip chip, and wraps rather than running past the pane.
+        // A pick: the foot gains Send and "Draft · 1 pick", and wraps rather than running past the pane.
         await pane.getByText('Retry with the same idempotency key').click();
-        await expect(pane.locator('.ib-pfoot .ib-skipchip')).toBeVisible();
+        await expect(pane.locator('.ib-pfoot [data-foot-status] [data-draft-foot]')).toBeVisible();
         const foot = await pane.locator('.ib-pfoot').evaluate((el) => {
           const box = el.getBoundingClientRect();
-          return [...el.querySelectorAll('button, .ib-skipchip')].filter((b) => b.getBoundingClientRect().width > 0).map((b) => b.getBoundingClientRect().right - box.right).filter((past) => past > 1);
+          return [...el.querySelectorAll('button, [data-foot-status]')].filter((b) => b.getBoundingClientRect().width > 0).map((b) => b.getBoundingClientRect().right - box.right).filter((past) => past > 1);
         });
         expect(foot).toEqual([]);
         // The desktop header, led by the way back (no phone header, no close beside it).
@@ -868,11 +906,15 @@ for (const narrow of [
         // Full screen is all the window can do here, so there is no Exit full screen: Back to the thread leads instead.
         await expect(view.getByRole('button', { name: /full screen/i })).toHaveCount(0);
         await expect(view.locator('[data-full-view-bar]')).toBeVisible();
-        // The comments drawer docks beside the page (not a phone): the page narrows.
+        // The comments panel floats over the page's right side (not a phone's sheet): the page keeps its width, and the
+        // panel sits inside the window, under the toolbar.
         await view.locator('[data-full-view-comments]').click();
         await expect(view.locator('.ib-apanel')).toBeVisible();
-        const [drawerBox, docBox] = await Promise.all([view.locator('.ib-apanel').boundingBox(), view.locator('.ib-docarea').boundingBox()]);
-        expect(docBox!.x + docBox!.width).toBeLessThanOrEqual(drawerBox!.x + 1);
+        const [drawerBox, docBox, barBox] = await Promise.all([view.locator('.ib-apanel').boundingBox(), view.locator('.ib-docarea').boundingBox(), view.locator('[data-full-view-bar]').boundingBox()]);
+        expect(docBox!.width).toBeGreaterThan(page.viewportSize()!.width - 2);
+        expect(drawerBox!.x).toBeGreaterThan(0);
+        expect(drawerBox!.x + drawerBox!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+        expect(drawerBox!.y).toBeGreaterThanOrEqual(barBox!.y + barBox!.height);
         await page.screenshot({ path: join(proofDir, `${tag}-3-file.png`) });
         expect(await sideways(page)).toEqual([]);
         expect(await overlaps(page, '[data-full-view-bar]', '.ib-fvb')).toEqual([]);
@@ -935,7 +977,7 @@ test.describe('a desktop window', () => {
     expect(await page.evaluate(() => window.location.hash)).toBe(`#thread=${world.threads.holding}`);
   });
 
-  test('a pick with a question left unanswered: the foot keeps Send and the skip chip whole at 1280 and 1440, by default and after Skip it (it ran past the pane in 0.28.16)', async ({ page }) => {
+  test('a pick with a question left unanswered: the foot keeps Send, the open questions and the draft status whole at 1280 and 1440, by default and after Skip it (it ran past the pane in 0.28.16)', async ({ page }) => {
     for (const width of [1280, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       await page.goto(`${world.url}#thread=${world.threads.stopped}`);
@@ -945,24 +987,23 @@ test.describe('a desktop window', () => {
       await expect(page.locator('.ib-listcol.ib-narrow')).toBeVisible();
       await pane.getByText('Retry with the same idempotency key').click();
       const foot = pane.locator('.ib-pfoot');
-      const chip = foot.locator('[data-skip-chip]');
       const send = foot.getByRole('button', { name: 'Send', exact: true });
-      // The default (approval "inbox-explicit-skip"): the other question stays open; Skip it is offered.
+      const questions = foot.locator('[data-open-questions]');
+      // The default (approval "inbox-explicit-skip"): the other question stays open; one count for it (approval
+      // "reply-bar-pairs"), and this Send's skip is the list's first row.
       await expect(send).toBeVisible();
-      await expect(chip).toHaveAttribute('data-skip-chip', 'keep');
-      await expect(chip).toContainText('1 question stays open');
-      const fits = async (toggle: ReturnType<typeof foot.getByRole>, label: string) => {
-        await expect(toggle).toBeVisible();
-        const [paneBox, footBox, sendBox, toggleBox, chipBox, notSent] = await Promise.all([
+      await expect(questions).toHaveAccessibleName('1 open question');
+      await expect(foot.locator('[data-skip-chip]')).toHaveCount(0);
+      const fits = async () => {
+        const [paneBox, footBox, sendBox, questionsBox, notSent] = await Promise.all([
           pane.boundingBox(),
           foot.boundingBox(),
           send.boundingBox(),
-          toggle.boundingBox(),
-          foot.locator('.ib-skipchip').boundingBox(),
+          questions.boundingBox(),
           foot.locator('[data-draft-foot]').boundingBox(),
         ]);
         const right = Math.min(paneBox!.x + paneBox!.width, width);
-        for (const [name, box] of [['Send', sendBox], [label, toggleBox], ['the skip chip', chipBox]] as const) {
+        for (const [name, box] of [['Send', sendBox], ['the open questions', questionsBox], ['the draft status', notSent]] as const) {
           expect(box!.x, `${name} at ${width}px`).toBeGreaterThanOrEqual(footBox!.x);
           expect(box!.x + box!.width, `${name} at ${width}px`).toBeLessThanOrEqual(right);
           expect(box!.y + box!.height, `${name} at ${width}px`).toBeLessThanOrEqual(footBox!.y + footBox!.height);
@@ -970,18 +1011,22 @@ test.describe('a desktop window', () => {
         // "Draft · 1 pick" stays one line ("Not sent" was once squeezed to two).
         expect(notSent!.height, `at ${width}px`).toBeLessThan(24);
       };
-      const skipIt = foot.getByRole('button', { name: 'Skip it' });
-      await fits(skipIt, 'Skip it');
-      // A tap on Skip it lands on it; the chip then says what the Send skips, and offers Keep open.
-      await skipIt.click();
-      await expect(chip).toHaveAttribute('data-skip-chip', 'skip');
-      await expect(chip).toContainText('1 question will be skipped');
-      const keep = foot.getByRole('button', { name: 'Keep open' });
-      await fits(keep, 'Keep open');
+      await fits();
+      // Skip it from the list: the button then says what the Send skips; the row offers Keep open.
+      await questions.click();
+      const row = page.locator('[data-open-questions-list] [data-open-questions-skip-row]');
+      await row.getByRole('menuitem', { name: /^Skip it/ }).click();
+      await expect(row).toHaveAttribute('data-open-questions-skip-row', 'skip');
+      await page.keyboard.press('Escape');
+      await expect(questions).toHaveText(/1 to skip/);
+      await fits();
       await page.screenshot({ path: join(proofDir, `desktop-${width}-foot.png`) });
       // Back to the default, for the next width.
-      await keep.click();
-      await expect(skipIt).toBeVisible();
+      await questions.click();
+      await row.getByRole('menuitem', { name: /^Keep open/ }).click();
+      await expect(row).toHaveAttribute('data-open-questions-skip-row', 'keep');
+      await page.keyboard.press('Escape');
+      await expect(questions).toHaveAccessibleName('1 open question');
     }
   });
 

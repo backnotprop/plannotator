@@ -24,7 +24,7 @@
  * PNGs land in PLANNOTATOR_E2E_SHOTS_DIR (default .local/proof/attachments-kinds).
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -272,9 +272,23 @@ test('the thread shows the images inline and as tiles with thumbnails; the PDF a
   expect(await imagesLoaded(page, '[data-image-gallery] img')).toBe(4);
   // The same images as tiles, each with its thumbnail.
   expect(await imagesLoaded(page, '.ib-att-t .ib-thumb img')).toBe(4);
-  // Every image comes from the attachment's own route, by id.
-  const srcs = await page.locator('[data-image-gallery] img').evaluateAll((imgs) => imgs.map((img) => img.getAttribute('src')));
-  expect(srcs.every((src) => /^\/api\/inbox\/attachments\/att_[0-9A-Z]+\/image$/.test(src ?? ''))).toBe(true);
+  // Every image comes from the attachment's own route, by id. A frame is at most 800 px wide, so the two 1280-wide
+  // screenshots load the server's 800-wide copy (`?w=800`, #2948: a big screenshot decoded whole in every frame is
+  // what crashed a heavy thread's tab); the 390-wide phone shot and the SVG load as they are.
+  const frames = await page.locator('[data-image-gallery] [data-gallery-image]').evaluateAll((items) =>
+    items.map((item) => {
+      const img = item.querySelector('img')!;
+      return { id: item.getAttribute('data-gallery-image'), src: img.getAttribute('src'), naturalWidth: img.naturalWidth };
+    }),
+  );
+  const byName = (name: string) => frames.find((frame) => frame.id === world.ids[name])!;
+  for (const name of ['retry-policy-desktop.png', 'Screen Shot 2026-10-10 at 4.12.png']) {
+    expect(byName(name).src).toBe(`/api/inbox/attachments/${world.ids[name]}/image?w=800`);
+    expect(byName(name).naturalWidth).toBe(800);
+  }
+  expect(byName('retry-policy-phone.png').src).toBe(`/api/inbox/attachments/${world.ids['retry-policy-phone.png']}/image`);
+  expect(byName('retry-policy-phone.png').naturalWidth).toBe(390);
+  expect(byName('refund-states.svg').src).toBe(`/api/inbox/attachments/${world.ids['refund-states.svg']}/image`);
   // An SVG drawn by <img> runs no script.
   expect(await page.title()).not.toContain('svg script ran');
   // Downloads, never opened in the window.
@@ -332,10 +346,10 @@ test('an image opens beside the thread; it is marked up with the image annotator
   await page.mouse.up();
   await shot('4-image-annotator');
   await page.keyboard.press('Enter');
-  await expect(pane.locator('.ib-imgcompose .ib-markup img')).toBeVisible();
-  await pane.getByRole('textbox', { name: 'Comment on retry-policy-phone.png' }).fill('The on-call note wraps onto three lines on a phone. Can it sit under the field instead?');
+  await expect(pane.locator('[data-image-composer] [data-markup-kept] img')).toBeVisible();
+  await pane.getByRole('textbox', { name: 'A note with your drawing on retry-policy-phone.png' }).fill('The on-call note wraps onto three lines on a phone. Can it sit under the field instead?');
   await shot('5-image-comment-with-markup');
-  await pane.getByRole('button', { name: 'Comment', exact: true }).click();
+  await pane.getByRole('button', { name: 'Add note', exact: true }).click();
   await expect(pane.locator('.ib-apanel')).toContainText('The on-call note wraps');
   // Selecting the comment shows the marked-up copy on the stage.
   await pane.locator('.ib-apanel').getByText('The on-call note wraps').click();
@@ -352,7 +366,7 @@ test('the code file opens in the code view and takes a line comment', async () =
   await expect(line).toBeVisible();
   await line.click();
   await page.locator('[data-comment-popover] textarea[data-pn-mobile-editable="true"]').last().fill('Five attempts with doubling means the last retry waits eight minutes. Three is enough.');
-  await page.getByRole('button', { name: 'Save' }).click();
+  await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
   await expect(pane.locator('.ib-apanel')).toContainText('Three is enough');
   await shot('7-code-line-comment');
 });
@@ -360,15 +374,13 @@ test('the code file opens in the code view and takes a line comment', async () =
 test('Send carries the image comment with its marked-up copy and the code comment with its lines; the agent reads both', async () => {
   const page = world.page;
   await page.locator('[data-attachment-pane]').getByRole('button', { name: /^Close / }).click();
-  const waiting = world.claude.waitForReply(world.threadId, 40);
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Edit draft' }).click();
-  await expect(page.locator('[data-annotations-chip]')).toHaveText('2 annotations');
+  await expect(page.locator('[data-annotations-chip]')).toHaveText('2 comments');
   await page.getByRole('textbox', { name: 'Reply to Claude Code' }).fill('Two notes, one on the phone shot and one on the worker.');
   await shot('8-reply-with-annotations');
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-  const reply = await waiting;
-  expect(reply.status).toBe('replied');
-  const body = reply.reply.body as string;
+  const reply = await world.claude.nextReply(world.threadId, 40);
+  const body = reply.body as string;
   expect(body).toContain('## shots/retry-policy-phone.png');
   expect(body).toContain('The on-call note wraps onto three lines');
   const markup = /- \[retry-policy-phone, marked up\] `([^`]+)`/.exec(body);

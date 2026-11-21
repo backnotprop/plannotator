@@ -15,9 +15,10 @@
  * are kept here too, as blob URLs under `inbox-tour-markup:<n>` (images.ts maps
  * the path), and revoked when the tour ends.
  */
+import { inboxUrl } from '../inboxUrl';
 import type { TourFixture } from './model';
 
-const ASSET_BASE = '/api/inbox/tour/assets/';
+const ASSET_BASE = inboxUrl('/tour/assets/');
 export const TOUR_MOCK = 'vscode-mockups.html';
 const NAME_RE = /^[a-z0-9][a-z0-9.-]*\.(webp|html|mp4|md)$/;
 const BODY_IMAGE_RE = /\]\(([a-z0-9][a-z0-9.-]*\.webp)\)/g;

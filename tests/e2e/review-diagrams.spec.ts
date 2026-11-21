@@ -83,6 +83,7 @@ async function review(after: string) {
   const env = {
     PATH: process.env.PATH ?? '',
     HOME: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_READY_FILE: readyFile,
     PLANNOTATOR_BROWSER: NO_BROWSER,
@@ -145,6 +146,7 @@ async function open(
     ['plannotator-plan-look-choice-resolved', 'true'],
     ['plannotator-edit-mode-announcement-seen', '3'],
     ['plannotator-announce-tui-herdr-seen', '1'],
+    ['plannotator-announce-inbox-seen', '1'],
     ['plannotator-announce-ask-session-seen', '1'],
     ['plannotator-announce-agent-tool-seen', '1'],
     ['plannotator-guide-intro-seen', '1'],
@@ -167,7 +169,7 @@ async function open(
     if ((await page.locator('.fixed.inset-0').count()) === 0) break;
     await page.keyboard.press('Escape');
   }
-  await page.getByText('doc.md', { exact: true }).first().click();
+  await page.locator('[data-review-sidebar] [data-item-type="file"][title$="doc.md"]').first().click();
   return { context, page, engineRequests };
 }
 

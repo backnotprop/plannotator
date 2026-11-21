@@ -9,13 +9,16 @@
  *    an agent was stopped, and Z undoes the whole batch;
  *  - Archive all from the keyboard hides the project, focus lands on Inbox
  *    (never the page), and the agent's next reply brings the project back;
+ *  - the list: a group band's right-click menu marks that band read or
+ *    archives it (its rows only; the band does not toggle), the list ⋮'s
+ *    Mark all as read every row shown, and Z undoes each;
  *  - a phone: ⋯ always shown in the navigation sheet, the menu a sheet.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  * PNGs land in .local/proof/project-menu/.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -57,7 +60,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   rmSync(proofDir, { recursive: true, force: true });
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-projmenu-e2e-');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -115,10 +118,10 @@ test('the keyboard reaches ⋯, Enter opens the menu, Escape gives focus back', 
   await page.keyboard.press('Enter');
   const menu = page.locator('[data-project-menu]');
   await expect(menu).toBeVisible();
-  await expect(menu.getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all', 'Add tag', 'Rename…']);
   await expect(menu.getByRole('menuitem').first()).toBeFocused();
   await page.keyboard.press('ArrowDown');
-  await expect(menu.getByRole('menuitem').last()).toBeFocused();
+  await expect(menu.getByRole('menuitem').nth(1)).toBeFocused();
   await page.screenshot({ path: join(proofDir, '01-menu-keyboard.png') });
   await page.keyboard.press('Escape');
   await expect(menu).toHaveCount(0);
@@ -135,11 +138,22 @@ test('Mark all as read takes every waiting thread, warns, and Z undoes the batch
   await expect(toast.locator('.ib-tdetail')).toHaveText('Claude Code was stopped');
   await expect(page.locator('[data-inbox-live]')).toHaveText('Marked 3 threads read in billing. Claude Code was stopped. Press Z to undo.');
   await page.screenshot({ path: join(proofDir, '02-mark-all-read.png') });
+  // The list holds still (approval "inbox-list-view", R7): every row read in place, none moved.
+  for (const [id, group] of [[threads.worker, 'stopped'], [threads.search, 'waiting'], [threads.news, 'new']] as const) {
+    await expect(page.locator(`.ib-lbody [data-thread-id="${id}"]`)).not.toHaveClass(/\bib-u\b/);
+    expect(await sectionOf(page, id)).toBe(group);
+  }
+  // The list's title tidies it: each in Quiet.
+  await page.locator('[data-list-refresh]').click();
   await page.locator('[data-section-id="quiet"] .ib-band').click();
   for (const id of [threads.worker, threads.search, threads.news]) await expect.poll(() => sectionOf(page, id)).toBe('quiet');
   // The other project is untouched.
   await expect.poll(() => sectionOf(page, threads.docs)).toBe('waiting');
+  await page.locator('body').focus();
   await page.keyboard.press('z');
+  // Undone in place (bold again in Quiet); the next tidy puts each back where it was.
+  await expect(page.locator(`.ib-lbody [data-thread-id="${threads.news}"]`)).toHaveClass(/\bib-u\b/);
+  await page.locator('[data-list-refresh]').click();
   await expect.poll(() => sectionOf(page, threads.worker)).toBe('stopped');
   await expect.poll(() => sectionOf(page, threads.search)).toBe('waiting');
   await expect.poll(() => sectionOf(page, threads.news)).toBe('new');
@@ -155,7 +169,7 @@ test('Archive all hides the project, focus lands on Inbox, and the next reply br
   await expect(page.locator('[data-project-menu]')).toBeVisible();
   // Focus moves into the menu (its first item) a frame after it opens.
   await expect(page.locator('[data-project-action="read"]')).toBeFocused();
-  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowDown');
   await expect(page.locator('[data-project-action="archive"]')).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.locator('[data-inbox-toast]')).toContainText('Archived 3 threads');
@@ -167,6 +181,70 @@ test('Archive all hides the project, focus lands on Inbox, and the next reply br
   await page.reload();
   await expect(row(page, 'billing')).toBeVisible();
   await expect.poll(() => sectionOf(page, threads.search)).toBe('new');
+  expect(world.errors).toEqual([]);
+});
+
+test('the list: a band’s right-click menu marks that band read or archives it, the ⋮’s Mark all as read every row shown, Z undoes each', async () => {
+  const { page, threads } = world;
+  const band = (id: string) => page.locator(`[data-section-id="${id}"] > button.ib-band`);
+  const bandMenu = page.locator('[data-band-menu]');
+  const toast = page.locator('[data-inbox-toast]');
+  const rowButton = (id: string) => page.locator(`.ib-lbody [data-thread-id="${id}"]`);
+  const archived = (id: string) => page.locator(`.ib-lbody [data-row="${id}"][data-archived]`);
+  const undo = async () => {
+    await page.locator('body').focus();
+    await page.keyboard.press('z');
+  };
+  await expect.poll(() => sectionOf(page, threads.search)).toBe('new');
+  // At rest the band is its header alone: no button beside it.
+  await expect(page.locator('[data-section-id="new"] > button:not(.ib-band)')).toHaveCount(0);
+  await page.screenshot({ path: join(proofDir, '05-band-at-rest.png') });
+  // A right-click opens the band's menu and never toggles the band.
+  await band('new').click({ button: 'right' });
+  await expect(bandMenu).toHaveAttribute('data-band-menu', 'new');
+  await expect(bandMenu.getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all']);
+  await expect(band('new')).toHaveAttribute('aria-expanded', 'true');
+  await page.screenshot({ path: join(proofDir, '06-band-menu.png') });
+  await bandMenu.locator('[data-band-action="read"]').click();
+  await expect(toast).toContainText('Marked 1 thread read');
+  await expect(rowButton(threads.search)).not.toHaveClass(/\bib-u\b/);
+  // The other groups' rows are not the band's.
+  await expect(rowButton(threads.docs)).toHaveClass(/\bib-u\b/);
+  await undo();
+  await expect(rowButton(threads.search)).toHaveClass(/\bib-u\b/);
+  // The list's ⋮: right after Select threads, every row the list shows. (Its items are read once the menu is open:
+  // `allTextContents` does not wait, and read before the popup it found no item at all.)
+  await page.locator('[data-tidy-menu]').click();
+  await expect(page.locator('[data-list-mark-all-read]')).toBeVisible();
+  const labels = await page.locator('[data-tidy-menu-popup] [role="menuitem"]').allTextContents();
+  expect(labels.findIndex((label) => label.startsWith('Select threads'))).toBeGreaterThanOrEqual(0);
+  expect(labels.indexOf('Mark all as read')).toBe(labels.findIndex((label) => label.startsWith('Select threads')) + 1);
+  await page.screenshot({ path: join(proofDir, '07-list-menu.png') });
+  await page.locator('[data-list-mark-all-read]').click();
+  await expect(toast).toContainText('Marked 2 threads read');
+  await expect(toast.locator('.ib-tdetail')).toHaveText('Closed 1 question');
+  for (const id of [threads.search, threads.docs]) await expect(rowButton(id)).not.toHaveClass(/\bib-u\b/);
+  await undo();
+  for (const id of [threads.search, threads.docs]) await expect(rowButton(id)).toHaveClass(/\bib-u\b/);
+  // Archive all on Waiting: its one thread, shown archived in place until the list settles, its question counted.
+  await band('waiting').click({ button: 'right' });
+  await expect(bandMenu).toHaveAttribute('data-band-menu', 'waiting');
+  await bandMenu.locator('[data-band-action="archive"]').click();
+  await expect(toast).toContainText('Archived 1 thread');
+  await expect(toast.locator('.ib-tdetail')).toHaveText('Closed 1 question');
+  await expect(archived(threads.docs)).toHaveCount(1);
+  await expect(archived(threads.search)).toHaveCount(0);
+  await page.screenshot({ path: join(proofDir, '08-band-archive-all.png') });
+  await undo();
+  await expect(page.locator('[data-inbox-live]')).toContainText('Moved back.');
+  // The list's title tidies it: the thread is back in Waiting, not archived.
+  await expect
+    .poll(async () => {
+      await page.locator('[data-list-refresh]').click();
+      return sectionOf(page, threads.docs);
+    })
+    .toBe('waiting');
+  await expect(archived(threads.docs)).toHaveCount(0);
   expect(world.errors).toEqual([]);
 });
 

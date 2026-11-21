@@ -12,7 +12,7 @@
  * The PNGs land in .local/proof/list-resize/.
  */
 
-import { chromium, expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { chromium, expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -82,7 +82,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const dataDir = join(root, 'data');
   const home = join(root, 'home');
   mkdirSync(home);
-  const env = { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER };
+  const env = { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER };
   // The data dir this run hands the binary is its own temp folder, never the person's.
   expect(env.PLANNOTATOR_DATA_DIR.startsWith(root)).toBe(true);
   const started = spawnSync(builtBinary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
@@ -167,15 +167,21 @@ test('a drag widens it; the rows switch to the wide shape once, as it crosses 90
   const x0 = LIST_X + LIST_MIN + 4;
   const target = 1000;
   // Every frame of the drag: the list's width and which row shape is drawn.
+  // Sampling runs until the drag has finished (mouse.up resolved, flagged below)
+  // and two more frames have been drawn, not for a fixed time: a slow runner
+  // stretches the drag past any fixed window.
   const sampling = page.evaluate(
     () =>
       new Promise<Array<[number, boolean]>>((done) => {
+        const w = window as unknown as { dragSettled?: boolean };
+        w.dragSettled = false;
         const out: Array<[number, boolean]> = [];
-        const t0 = performance.now();
+        let framesAfter = 0;
         const tick = () => {
           const el = document.querySelector('.ib-listcol');
           if (el) out.push([el.getBoundingClientRect().width, el.querySelector('.ib-lbody .ib-row') !== null]);
-          if (performance.now() - t0 < 2500) requestAnimationFrame(tick);
+          if (w.dragSettled) framesAfter++;
+          if (framesAfter < 2) requestAnimationFrame(tick);
           else done(out);
         };
         requestAnimationFrame(tick);
@@ -185,6 +191,9 @@ test('a drag widens it; the rows switch to the wide shape once, as it crosses 90
   await page.mouse.down();
   await page.mouse.move(LIST_X + target + 4, 500, { steps: 60 });
   await page.mouse.up();
+  await page.evaluate(() => {
+    (window as unknown as { dragSettled?: boolean }).dragSettled = true;
+  });
   const samples = await sampling;
   const flips = samples.filter((s, i) => i > 0 && s[1] !== samples[i - 1]![1]).length;
   expect(flips).toBe(1);
@@ -256,15 +265,16 @@ test('a narrower window draws it clamped, keeping the thread pane its 480px', as
   await page.setViewportSize(VIEWPORT);
 });
 
-test('a window that leaves no room to widen into shows no separator', async () => {
+test('a window that leaves no room to widen into keeps the edge beside a thread only to hide the list', async () => {
   const { page } = world;
-  // 232 + 380 + 480 and three 8px gutters = 1116: at 1080 there is nothing to drag.
+  // 232 + 380 + 480 and three 8px gutters = 1116: at 1080 there is nothing to drag, but a click still hides the list.
   await page.setViewportSize({ width: 1080, height: 900 });
-  await expect(edge(page)).toHaveCount(0);
+  await expect(edge(page)).toHaveAttribute('aria-valuemax', String(LIST_MIN));
+  await expect(edge(page)).toHaveAttribute('aria-valuenow', String(LIST_MIN));
   expect(await width(page, '.ib-listcol')).toBe(LIST_MIN);
   await page.setViewportSize(VIEWPORT);
-  // Back with the room (the separator itself is a zero-width line).
   await expect(edge(page)).toHaveCount(1);
+  await expect.poll(async () => Number(await edge(page).getAttribute('aria-valuemax'))).toBeGreaterThan(LIST_MIN);
 });
 
 test('with a classic scrollbar on the list, the whole scrollbar stays the list’s, and the grab area is beside it', async () => {

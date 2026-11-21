@@ -8,9 +8,10 @@ import { Callout } from './Callout';
 // BlockRenderer: a cycle that only meets at render time, after both modules
 // have loaded (the QuestionContext precedent).
 import { BlockRenderer } from '../BlockRenderer';
+import { sourceLineAttrs } from '../../utils/sourceLineAttrs';
 
 /** The quote's look. Shared by both render paths so they cannot drift. */
-export const BLOCKQUOTE_CLASS_NAME = 'border-l-2 border-primary/50 pl-4 my-4 text-muted-foreground italic';
+export const BLOCKQUOTE_CLASS_NAME = 'relative border-l-2 border-primary/50 pl-4 my-4 text-muted-foreground italic [overflow-wrap:anywhere]';
 
 /**
  * Spacing and tone for a quote whose content has block structure. A
@@ -52,6 +53,9 @@ export const MAX_QUOTE_DEPTH = 12;
 /** The number of quotes around the one rendering (0 at the top). */
 const QuoteDepthContext = createContext(0);
 
+/** Whether a quote or callout rendering here is at MAX_QUOTE_DEPTH and must not parse its body. */
+export const useAtQuoteDepthCap = (): boolean => useContext(QuoteDepthContext) + 1 >= MAX_QUOTE_DEPTH;
+
 export interface BlockquoteBlockProps {
   block: Block;
   onOpenLinkedDoc?: (path: string) => void;
@@ -90,7 +94,7 @@ export const BlockquoteBlock: React.FC<BlockquoteBlockProps> = ({ block, ...inli
       .join('\n')
       .split(/\n\n+/);
     return (
-      <blockquote className={BLOCKQUOTE_CLASS_NAME} data-block-id={block.id}>
+      <blockquote className={BLOCKQUOTE_CLASS_NAME} data-block-id={block.id} {...sourceLineAttrs(block)}>
         {paragraphs.map((para, i) => (
           <p key={i} className={i > 0 ? 'mt-2' : ''}>
             <InlineMarkdown text={para} {...inlineProps} />
@@ -101,7 +105,7 @@ export const BlockquoteBlock: React.FC<BlockquoteBlockProps> = ({ block, ...inli
   }
 
   return (
-    <blockquote className={`${BLOCKQUOTE_CLASS_NAME} pn-quote-body`} data-block-id={block.id}>
+    <blockquote className={`${BLOCKQUOTE_CLASS_NAME} pn-quote-body`} data-block-id={block.id} {...sourceLineAttrs(block)}>
       {/* React hoists this into <head> once for every quote. */}
       <style href="plannotator-quote-body" precedence="default">{QUOTE_BODY_CSS}</style>
       <QuoteDepthContext.Provider value={depth + 1}>
@@ -157,3 +161,24 @@ const QuoteBody: React.FC<Omit<BlockquoteBlockProps, 'block'> & { inner: Block[]
     })}
   </>
 );
+
+/** Whether a callout body needs block layout: anything beyond paragraphs and list items. */
+export const calloutNeedsBlocks = (inner: readonly Block[]): boolean =>
+  inner.some((block) => block.type !== 'paragraph' && block.type !== 'list-item');
+
+/**
+ * A callout body that holds more than prose (a fence, a table, a heading, a
+ * nested quote): its blocks laid out as a quote's are, one quote level
+ * deeper and without ids of their own, so the callout stays one block.
+ */
+export const CalloutBlocks: React.FC<Omit<BlockquoteBlockProps, 'block'> & { inner: Block[]; className?: string }> = ({ inner, className, ...inlineProps }) => {
+  const depth = useContext(QuoteDepthContext);
+  return (
+    <div className={className ? `pn-quote-body ${className}` : 'pn-quote-body'}>
+      <style href="plannotator-quote-body" precedence="default">{QUOTE_BODY_CSS}</style>
+      <QuoteDepthContext.Provider value={depth + 1}>
+        <QuoteBody inner={inner} {...inlineProps} />
+      </QuoteDepthContext.Provider>
+    </div>
+  );
+};

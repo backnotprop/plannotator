@@ -1,14 +1,12 @@
 /**
- * The Worker's entry: only the handlers (workerd refuses any other named
+ * The Worker's entry: only the fetch handler (workerd refuses any other named
  * export of the main module). Everything else is in handler.ts.
  */
-import { handleRequest, runRetention, type Env } from "./handler";
+import { handleRequest } from "./handler";
 
 export default {
-  fetch(req: Request, env: Env): Promise<Response> {
-    return handleRequest(req, env);
+  fetch(req: Request, env: { DB: D1Database }): Promise<Response> {
+    // GET /totals is answered from the Cache API for 5 minutes (handler.ts).
+    return handleRequest(req, env, Date.now(), caches.default);
   },
-  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(runRetention(env.COUNTS).catch(() => console.error("counts: retention_failed")));
-  },
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler<{ DB: D1Database }>;

@@ -1,0 +1,44 @@
+# Logical, nine notes, a band of twelve, fourteen lines into the gateway.
+sheet: L-101
+scope: core
+kind: logical
+title: Dispatch and billing core
+question: What talks to what, by layer, and which single door every request goes through.
+bands:
+  - id: clients
+    label: People, partners and machines that send us work
+    means: twelve ways in, one door
+    tone: sand
+    row: [ web, ios, android, kiosk, partnerapi, edi, sftp, email, sms, voice, rtl, slackbot ]
+  - id: doors
+    label: Doors
+    means: the only ways in
+    tone: mist
+    row: [ auth 2, ~, gateway 4, ~, webhooks 2, scheduler 2 ]
+  - id: services
+    label: Services
+    means: one team each
+    tone: stone
+    row: [ dispatch, recon, routing, notify, ledger, unnamed ]
+  - id: storage
+    label: Storage
+    means: what survives a region failover
+    tone: sage
+    row: [ pg 5, s3, redis, warehouse ]
+right:
+  - label: Third-party processors and sub-processors
+    means: contracted under the data processing agreement
+    stack: [ kafka, twilio, sfsl, sap, snow ]
+brace: { over: [ doors, services ], text: "Kotlin and Python on Kubernetes in five regions", marks: [ kotlin, kubernetes ] }
+show: all
+quiet: [ g1, g2 ]
+notes:
+  a: { on: gateway, text: "Every one of the twelve ways in lands on the gateway. Nothing reaches a service without passing it." }
+  b: { on: g13, text: "Carrier callbacks are signed and retried with backoff for 72 hours, then dead-lettered." }
+  c: { on: recon, text: "Reconciliation runs nightly at 02:00 UTC across 31 currencies. A failed run blocks the month-end close, so it pages the billing on-call, not the platform on-call, and the ledger refuses to post until it is re-run by hand." }
+  d: { on: pg, text: "**Bold** and <b>tags</b> and &amp; stay literal." }
+  e: { on: routing, text: "経路最適化は夜間に全国のルートを再計算します。" }
+  f: { on: rtl, text: "يستخدم السائقون في الخليج هذا التطبيق باللغة العربية." }
+  g: { on: unnamed, text: "Nobody named this part yet." }
+  h: { on: sms, text: "STOP replies unsubscribe the number from every shipper." }
+  i: { on: ledger, text: "0 deletes, ever." }

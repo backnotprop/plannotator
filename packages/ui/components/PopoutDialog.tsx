@@ -1,5 +1,6 @@
 import React, { useCallback } from 'react';
 import { Dialog } from '@base-ui/react/dialog';
+import { getPageMarks, holdPageMark } from '../utils/pageMarks';
 
 export const ANNOTATION_SELECTORS = [
   '.annotation-toolbar',
@@ -11,6 +12,12 @@ export const ANNOTATION_SELECTORS = [
   // whenever a copy button inside it falls back to execCommand.
   '[data-clipboard-fallback="true"]',
 ];
+
+/**
+ * With `pageMarks` on (utils/pageMarks), the dialog marks `<body data-pn-popout>` while it is in the page: what
+ * theme.css's `body:has([data-popout="true"])` matches, for a host that keys on the mark instead.
+ */
+const markPopoutOpen = (el: HTMLElement | null) => (el ? holdPageMark(el.ownerDocument.body, 'data-pn-popout') : undefined);
 
 interface PopoutDialogProps {
   open: boolean;
@@ -85,6 +92,7 @@ export const PopoutDialog: React.FC<PopoutDialogProps> = ({
         <Dialog.Popup
           className={`fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 bg-background border border-border rounded-xl shadow-2xl flex flex-col overflow-hidden ${className ?? 'w-[calc(100vw-4rem)] max-w-[min(calc(100vw-4rem),1500px)] max-h-[calc(100vh-4rem)]'}`}
           data-popout="true"
+          ref={getPageMarks() ? markPopoutOpen : undefined}
           initialFocus={false}
           {...dataAttributes}
         >

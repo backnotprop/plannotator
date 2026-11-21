@@ -5,6 +5,9 @@
  * "Ticks"), so a row and its thread never disagree. Pure, browser-safe.
  */
 
+import { isInboxPermissionSession } from "./inbox-permission";
+import type { InboxT3WaitReason } from "./inbox-t3";
+
 /**
  * How long a reply (a message, a Re-ask note) waits on a busy session before it
  * goes into the running turn by itself, exactly as if the person pressed Send
@@ -37,16 +40,20 @@ export type InboxDeliveryState = "delivered" | "undelivered" | "saved" | "queued
 /**
  * Which case of the rule decided the state, so a client words it exactly as
  * the thread does: `delivered`, `undelivered` (the addressed session stopped
- * before it took it), `ended` (saved: the session that asked has ended),
+ * before it took it), `stuck` (not delivered: its session's connection took
+ * it and stopped mid-delivery, so that session never gets it), `ended` (saved: the session that asked has ended),
  * `reads` (saved: an agent that reads the thread), `sending_now` (Send now
  * pressed), `working` (queued: its session is in a turn), `idle` (sending:
  * the session is idle, the turn goes now), `away` (queued: its session does
  * not poll now), `next_turn` (queued: the Inbox does not know the session's
- * state), `ack_pending` (a 👍 inside its Undo window).
+ * state), `ack_pending` (a 👍 inside its Undo window), `stopped` (queued:
+ * Claude Code refused it after the person stopped that session, and holds it
+ * until they type there; #2780, approval "inbox-stopped-reply").
  */
 export type InboxDeliveryReason =
   | "delivered"
   | "undelivered"
+  | "stuck"
   | "ended"
   | "reads"
   | "sending_now"
@@ -54,7 +61,9 @@ export type InboxDeliveryReason =
   | "idle"
   | "away"
   | "next_turn"
-  | "ack_pending";
+  | "ack_pending"
+  | "stopped"
+  | "handed";
 
 /** How the session the item goes to is connected now: the fields the rule reads. */
 export interface InboxDeliveryConnection {
@@ -62,6 +71,9 @@ export interface InboxDeliveryConnection {
   busy: boolean | null;
   /** Its connection can deliver into a running turn. */
   send_now: boolean;
+  /** Claude Code refused a reply and holds the session's replies until the person types there (`held`). Absent: no. */
+  held?: boolean;
+  polls?: boolean;
 }
 
 export interface InboxDeliveryInput {
@@ -69,6 +81,14 @@ export interface InboxDeliveryInput {
   delivered: boolean;
   /** A message addressed to a session that stopped before it took it (after the asker grace). */
   undelivered: boolean;
+  /** Its session's connection took it and stopped while delivering it: that session never gets it. Absent: no. */
+  stuck?: boolean;
+  handed?: boolean;
+  /**
+   * The T3 wake found no way in for it now and said why (`t3_wait`): it waits on T3, whatever the session's last
+   * poll says (a T3 that quit took its Claude with it while that poll still reads as live). Absent: no.
+   */
+  waitsOnT3?: boolean;
   /** The session that asked has ended (a reply). */
   askerEnded: boolean;
   /** The session it goes to is woken by its connection. */
@@ -128,12 +148,19 @@ export function inboxDeliveryState(input: InboxDeliveryInput): InboxDeliveryDeci
   const marked = input.nowBy === "auto" && !!input.nowAt && !!input.waitingSince;
   const auto = marked && input.intoTurn !== false ? { autoAfterMin: wholeMinutes(input.waitingSince!, input.nowAt!) } : {};
   if (input.delivered) return { state: "delivered", reason: "delivered", ...no, ...auto, ...(marked && input.intoTurn === false ? { turnEnded: true } : {}) };
+  if (input.stuck) return { state: "undelivered", reason: "stuck", ...no };
   if (input.undelivered) return { state: "undelivered", reason: "undelivered", ...no };
+  if (input.handed) return { state: "queued", reason: "handed", ...no };
+  // Queued, never "Sending": the thread's line and the row then say it waits on T3 (approval "inbox-t3-reply-waiting-line").
+  if (input.waitsOnT3) return { state: "queued", reason: "next_turn", ...no };
   if (input.askerEnded) return { state: "saved", reason: "ended", ...no };
-  if (!input.wakes) return { state: "saved", reason: "reads", ...no };
+  if (!input.wakes || input.connection?.polls === true) return { state: "saved", reason: "reads", ...no };
   const connection = input.connection;
   // Its session does not poll now: it waits for the session to come back, whatever was pressed before.
   if (connection === null) return { state: "queued", reason: "away", ...no };
+  // Claude Code holds this session's replies until the person types there (they stopped it): nothing goes in
+  // before that, Send now included, so the line says so instead of Queued or Sending.
+  if (connection?.held === true) return { state: "queued", reason: "stopped", ...no };
   // Pressed, and the session can take it now. While it cannot (its own Ask this session question holds
   // it), the item waits for the turn to end: it reads as queued.
   if (input.sendingNow && !(connection?.busy === true && !connection.send_now)) return { state: "sending", reason: "sending_now", ...no, ...auto };
@@ -201,17 +228,48 @@ export function inboxDefaultSkip<M>(_messages: readonly M[], _statesOf: (message
 }
 
 /**
+ * An agent message sent with no session, no host, no name and no wake: what `plannotator inbox call` sends from a
+ * shell that names no session and carries no agent's marker (a script, a hook, a cron job), or a raw MCP call naming
+ * none of them. Nothing can be woken for it, and no session reads as its sender. A sender with any session id (a
+ * stdio shim's `ses_…` included), or an agent's shell the CLI names (`inboxShellAgentOf`), is not one.
+ */
+export function inboxSessionlessSend(message: { author: { kind: string; host?: string | null; session?: string | null; name?: string | null }; wakes?: boolean }): boolean {
+  return message.author.kind === "agent" && !message.author.session && !message.author.host && !message.author.name && message.wakes !== true;
+}
+
+/** The author fields the words rule reads. */
+type WordsAuthorMessage = { author: { kind: string; host?: string | null; session?: string | null; name?: string | null }; wakes?: boolean; scheduled_change?: unknown };
+
+/**
+ * The agent message a plain reply's words answer by default, one rule for the window's `wordsMessage`, the
+ * phone's mirror and `inboxAskingMessage`: the latest agent message that is not a permission prompt's (`perm:…`)
+ * and not a routine's change line. When that is a sessionless send (`inboxSessionlessSend`), the latest such
+ * message that has a session instead (a script's post does not steal the thread), unless `answersItself` (the
+ * person answered its own questions or action items in the draft) or no session wrote. Null when none is left.
+ */
+export function inboxWordsDefault<M extends WordsAuthorMessage>(messages: readonly M[], answersItself: (message: M) => boolean): M | null {
+  const agents = messages.filter((m) => m.author.kind === "agent" && !isInboxPermissionSession(m.author.session) && !m.scheduled_change);
+  const latest = agents.at(-1);
+  if (!latest) return null;
+  if (!inboxSessionlessSend(latest) || answersItself(latest)) return latest;
+  return agents.filter((m) => !!m.author.session).at(-1) ?? latest;
+}
+
+/**
  * The agent message whose session a Send with nothing riding on the latest
  * message reaches (the thread's `askingSessionOf` without words or files):
  * the last agent message a pick answers or, when the Send skips (`skip`),
- * an open question it skips; with none, the latest agent message. Null when
- * no agent wrote. One rule for the thread's "the session that asked" and the
- * list row's delivery, so the two name the same session.
+ * an open question it skips; with none, the message the words would answer
+ * (`inboxWordsDefault`, with `answersItself`: by default a pick on it), else
+ * the latest agent message. Null when no agent wrote. One rule for the
+ * thread's "the session that asked", the list row's delivery and the Send,
+ * so the three name the same session.
  */
-export function inboxAskingMessage<M extends { author: { kind: string } }>(
+export function inboxAskingMessage<M extends WordsAuthorMessage>(
   messages: readonly M[],
   statesOf: (message: M) => readonly AskingQuestionState[],
   skip: boolean,
+  answersItself: (message: M) => boolean = (message) => statesOf(message).includes("picked"),
 ): M | null {
   let latest: M | null = null;
   let answered: M | null = null;
@@ -220,7 +278,7 @@ export function inboxAskingMessage<M extends { author: { kind: string } }>(
     latest = message;
     if (statesOf(message).some((state) => state === "picked" || (skip && state === "open"))) answered = message;
   }
-  return answered ?? latest;
+  return answered ?? inboxWordsDefault(messages, answersItself) ?? latest;
 }
 
 /**
@@ -238,6 +296,8 @@ export interface InboxRowDelivery {
   send_now: boolean;
   /** The person's message (a reply or message), or the agent message the 👍 is on. */
   message_id: string;
+  /** Settled by a read of another agent than the one it was for: that agent's host. */
+  read_by?: string;
   /** Delivered at (`delivered`), else null. */
   at: string | null;
   /** Whom it goes to: the host of the session (null for an agent without one). */
@@ -267,4 +327,6 @@ export interface InboxRowDelivery {
   auto_after_min?: number;
   /** Delivered after an automatic mark, but when the turn ended (the session's own Ask question held it). */
   turn_ended?: boolean;
+  /** It waits on T3 (`waitsOnT3`): why, as the thread's line words it (`inboxT3WaitLine`). Absent otherwise. Additive. */
+  t3_wait?: InboxT3WaitReason;
 }

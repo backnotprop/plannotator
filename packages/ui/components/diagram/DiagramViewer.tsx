@@ -3,12 +3,14 @@ import { buildDiagramAnchorValue, type DiagramAnchor, type DiagramKind, type Dia
 import { cn } from '../../lib/utils';
 import { diagramFamilyOf } from '../../utils/diagram-anchor';
 import { diagramFinder, type DiagramTheme } from '../../utils/diagram-render';
-import { DiagramCanvas, type DiagramCanvasHandle, type DiagramEscapeOutcome } from './DiagramCanvas';
+import { DiagramCanvas, type DiagramCanvasHandle, type DiagramEscapeOutcome, type DiagramWheelZoom } from './DiagramCanvas';
 import { DiagramComposer } from './DiagramComposer';
 import { DiagramOverlay } from './DiagramOverlay';
 import { useDiagramComments, type DiagramComment, type DiagramCreateComment } from './useDiagramComments';
 import { useDiagramRender, type DiagramRenderState } from './useDiagramRender';
 import { useDiagramSourceDraft, type SaveResult } from './useDiagramSourceDraft';
+import { LazyBlockBoundary } from '../LazyBlockBoundary';
+import type { DiagramReopenRequest } from './reopen';
 
 /**
  * The one diagram viewer: the canvas with its overlay, the Source pane on
@@ -109,7 +111,22 @@ export interface DiagramViewerProps {
    * past it (`touch-action: pan-y`); a viewer that owns the whole screen
    * passes `touch-none`. */
   readonly canvasClassName?: string;
+  /** What a plain wheel does over the canvas. Default `always`: it zooms
+   * (a popout, a diagram file). `modifier`: it scrolls the page, and only
+   * Ctrl/Cmd+wheel or a pinch zooms (an inline diagram in a document). */
+  readonly wheelZoom?: DiagramWheelZoom;
+  /** Opt-in: a comment being written that the host kept, put back (see
+   * `DiagramReopenRequest`): the composer opens at its part once the diagram
+   * is drawn, holding its words. Absent: nothing changes. */
+  readonly reopenComment?: DiagramReopenRequest;
+  /** Opt-in: told the part the composer is on as it opens (and as it moves),
+   * null as it closes, so a host can keep the words (read from the box) if
+   * the viewer is taken away. Reads only. Absent: nothing changes. */
+  readonly onComposerAnchor?: (anchor: DiagramAnchor | null) => void;
 }
+
+/** A part's identity, as the composer's key names it. */
+const diagramPartKey = (target: DiagramTarget): string => `${target.kind}:${target.id ?? ''}:${target.from ?? ''}:${target.to ?? ''}`;
 
 export function DiagramViewer({
   kind,
@@ -118,6 +135,7 @@ export function DiagramViewer({
   comments,
   onCreateComment,
   onHostDraft,
+  onComposerAnchor,
   onAskAI,
   onSave,
   readOnlySource = false,
@@ -137,6 +155,8 @@ export function DiagramViewer({
   autoFocus,
   className,
   canvasClassName,
+  wheelZoom,
+  reopenComment,
 }: DiagramViewerProps) {
   const finder = diagramFinder(kind);
   const familyOf = useCallback((svg: Element) => (kind === 'graphviz' ? ('graphviz' as const) : diagramFamilyOf(svg)), [kind]);
@@ -175,6 +195,27 @@ export function DiagramViewer({
     familyOf,
   });
 
+  // A comment put back by the host: once the render is in, the composer opens
+  // at its part holding its words (each request once), or the host hears the
+  // part is gone.
+  const [reopenedText, setReopenedText] = useState<{ part: string; text: string } | null>(null);
+  const reopenDoneRef = useRef<DiagramReopenRequest | null>(null);
+  const openAt = commentsState.openAt;
+  useEffect(() => {
+    if (reopenComment === undefined || reopenDoneRef.current === reopenComment) return;
+    if (svgRoot === null || render.renderId === null) return;
+    reopenDoneRef.current = reopenComment;
+    if (openAt(reopenComment.anchor)) setReopenedText({ part: diagramPartKey(reopenComment.anchor), text: reopenComment.text });
+    else reopenComment.onMissing?.();
+  }, [openAt, reopenComment, render.renderId, svgRoot]);
+  // The words go with the composer they were put back in; a composer opened afterwards starts empty.
+  const hadComposerRef = useRef(false);
+  useEffect(() => {
+    const open = commentsState.composer !== null;
+    if (hadComposerRef.current && !open) setReopenedText(null);
+    hadComposerRef.current = open;
+  }, [commentsState.composer]);
+
   // The selected comment's source line for the pane's gutter mark. The
   // anchor names DOCUMENT lines; the pane shows the diagram text.
   const markedLines = useMemo(() => {
@@ -204,6 +245,12 @@ export function DiagramViewer({
     if (!sourceOpen) cancelComposer();
   }, [cancelComposer, sourceOpen]);
 
+  // A host that takes commenting away (no handler, no reason) closes an open
+  // composer: left open it became a Comment form nothing could save.
+  useEffect(() => {
+    if (!canCreate) cancelComposer();
+  }, [cancelComposer, canCreate]);
+
   // The composer handed to the host: the draft's part goes out, and the
   // host's cancel closes it only while it is still the open one.
   const onHostDraftRef = useRef(onHostDraft);
@@ -212,6 +259,11 @@ export function DiagramViewer({
   const openComposerRef = useRef(openComposer);
   openComposerRef.current = openComposer;
   const hostComposes = onHostDraft !== undefined;
+  const onComposerAnchorRef = useRef(onComposerAnchor);
+  onComposerAnchorRef.current = onComposerAnchor;
+  useEffect(() => {
+    onComposerAnchorRef.current?.(openComposer === null ? null : buildDiagramAnchorValue(openComposer.primary.target, openComposer.sourceLine));
+  }, [openComposer]);
   useEffect(() => {
     const report = onHostDraftRef.current;
     if (!report) return;
@@ -258,6 +310,7 @@ export function DiagramViewer({
               draft={commentsState.composer}
               anchorRect={anchorRect}
               hostWidth={handle.hostRef.current?.getBoundingClientRect().width ?? 0}
+              hostHeight={handle.hostRef.current?.getBoundingClientRect().height ?? 0}
               sourceDirty={sourceDirty}
               submitting={commentsState.submitting}
               error={commentsState.submitError}
@@ -265,12 +318,13 @@ export function DiagramViewer({
               onSubmit={(text) => void commentsState.submit(text)}
               onCancel={commentsState.cancel}
               onAskAI={askFromComposer}
+              initialText={reopenedText?.part === diagramPartKey(commentsState.composer.primary.target) ? reopenedText.text : undefined}
             />
           )
         }
       />
     ),
-    [askFromComposer, commentingDisabledReason, commentsState, hostComposes, onSelectComment, selectedCommentId, sourceDirty],
+    [askFromComposer, commentingDisabledReason, commentsState, hostComposes, onSelectComment, reopenedText, selectedCommentId, sourceDirty],
   );
 
   const showFallback = render.svgNode === null;
@@ -284,9 +338,18 @@ export function DiagramViewer({
           column and the pane stays stacked UNDER the canvas, which
           `order-last` keeps while `md:order-first` puts it left from `md`. */}
       {hasPane && sourceOpen && (
-        <Suspense fallback={<div data-diagram-source-pane-pending="" aria-hidden="true" className={PANE_CLASS} />}>
-          <DiagramSourcePane draft={draft} editable={editable} markedLines={markedLines} className={PANE_CLASS} />
-        </Suspense>
+        <LazyBlockBoundary
+          fallback={(notice) => (
+            <div data-diagram-source-pane-failed="" className={cn(PANE_CLASS, 'overflow-auto p-3')}>
+              {notice}
+              <pre className="text-xs text-muted-foreground"><code className="font-mono">{draft.draft}</code></pre>
+            </div>
+          )}
+        >
+          <Suspense fallback={<div data-diagram-source-pane-pending="" aria-hidden="true" className={PANE_CLASS} />}>
+            <DiagramSourcePane draft={draft} editable={editable} markedLines={markedLines} className={PANE_CLASS} />
+          </Suspense>
+        </LazyBlockBoundary>
       )}
       <div className="relative min-h-0 min-w-0 flex-1">
         {showFallback ? (
@@ -316,6 +379,7 @@ export function DiagramViewer({
             onEscape={onEscape}
             overlay={overlay}
             autoFocus={autoFocus}
+            wheelZoom={wheelZoom}
           >
             {render.error !== null && (
               <div

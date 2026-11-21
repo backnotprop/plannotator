@@ -9,9 +9,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import type { InboxDecisionsModel } from "@plannotator/core/inbox-types";
+import type { InboxDecisionsModel, InboxProjectRepo } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
 
 const roots: string[] = [];
@@ -30,7 +30,7 @@ afterEach(async () => {
 });
 
 /** A fresh Inbox whose config.json is its own (the Inbox reads config through PLANNOTATOR_DATA_DIR). */
-async function setup(options: { on?: boolean; phones?: boolean } = {}) {
+async function setup(options: { on?: boolean; phones?: boolean; readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null> } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-decisions-")));
   roots.push(root);
   const dataDir = join(root, "data");
@@ -40,7 +40,7 @@ async function setup(options: { on?: boolean; phones?: boolean } = {}) {
   if (options.on) writeFileSync(join(dataDir, "config.json"), JSON.stringify({ experimental: { decisionMode: true } }));
   const project = join(root, "billing");
   mkdirSync(project, { recursive: true });
-  const server = await startInboxServer({ dataDir, binaryPath: null, ...(options.phones ? { phones: true } : {}) });
+  const server = await startInboxServer({ dataDir, binaryPath: null, ...(options.phones ? { phones: true } : {}), ...(options.readProjectRepo ? { readProjectRepo: options.readProjectRepo } : {}) });
   servers.push(server);
   const client = new Client({ name: "inbox-decisions-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -166,6 +166,46 @@ describe("GET /api/inbox/decisions", () => {
     // The project filter keeps the order.
     const filtered = await decisions(server, `?project=${stopped.thread.project.id}`);
     expect(filtered.decisions.map((d) => d.id)).toEqual(model.decisions.map((d) => d.id));
+  });
+
+  test("each decision carries its thread project's repo, so a card links refs on that forge", async () => {
+    const seen: string[] = [];
+    const { server, client, project } = await setup({
+      on: true,
+      readProjectRepo: async (root) => {
+        seen.push(root);
+        return { display: "acme/billing", host: "gitlab.example.com" };
+      },
+    });
+    await send(client, project, "ses-a", "claude-code", { body: block("Ship it?") });
+    let repo: InboxProjectRepo | null | undefined;
+    for (let i = 0; i < 50 && !repo; i++) {
+      repo = (await decisions(server)).decisions[0]?.thread.project.repo;
+      if (!repo) await Bun.sleep(20);
+    }
+    expect(repo).toEqual({ display: "acme/billing", host: "gitlab.example.com" });
+    expect(seen).toContain(project);
+  });
+
+  test("a decision in the other folder of a combined project carries that folder's repo, as its thread does", async () => {
+    const { server, client, project } = await setup({
+      on: true,
+      readProjectRepo: async (root) => ({ display: `acme/${basename(root)}`, host: "github.com" }),
+    });
+    const site = join(dirname(project), "site");
+    mkdirSync(site, { recursive: true });
+    const here = (await client.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses-a", body: "Billing." } })) as { structuredContent: { project: { id: string } } };
+    await send(client, site, "ses-b", "claude-code", { body: block("Ship the site?") });
+    const from = server.store.projectByRoot(site)!;
+    expect(server.store.project(here.structuredContent.project.id)?.root).toBe(project);
+    server.store.combineProject(from.id, here.structuredContent.project.id);
+    let shown: Awaited<ReturnType<typeof decisions>>["decisions"][number]["thread"]["project"] | undefined;
+    for (let i = 0; i < 50 && !shown?.repo; i++) {
+      shown = (await decisions(server)).decisions[0]?.thread.project;
+      if (!shown?.repo) await Bun.sleep(20);
+    }
+    expect(shown?.id).toBe(here.structuredContent.project.id);
+    expect(shown?.repo).toEqual({ display: "acme/site", host: "github.com" });
   });
 
   test("follows the existing picks and reply routes: a pick stays with its revision, a Send takes it out", async () => {

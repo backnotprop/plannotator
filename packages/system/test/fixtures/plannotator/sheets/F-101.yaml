@@ -1,0 +1,60 @@
+# One plan review in Claude Code with the mod on (the default in interactive
+# sessions), hop by hop: the mod denies ExitPlanMode at once, runs the review
+# detached, and the decision comes back as a new turn. The classic
+# PermissionRequest hook is not reached while the mod is on
+# (apps/hook/hooks/mod/register.ts).
+sheet: F-101
+scope: local
+kind: flow
+title: The plannotator binary
+question: One plan review in Claude Code, from ExitPlanMode to the decision, hop by hop.
+time: in order
+lanes: [hkclaude, cliEntry, planSrv, editorUI, dataDir]
+places:
+  - { label: Claude Code, means: and the Plannotator mod, tone: sand, lanes: [hkclaude] }
+  - { label: A detached plannotator, means: "one process, loopback", tone: stone, lanes: [cliEntry, planSrv] }
+  - { label: Your browser, tone: mist, lanes: [editorUI] }
+  - { label: Disk, tone: sage, lanes: [dataDir] }
+hops:
+  - { id: exit, on: hkclaude, do: "Claude calls ExitPlanMode with the plan", at: "1" }
+  - { id: wait, on: hkclaude, do: "The mod denies the call at once: waiting for review", at: "2" }
+  - id: start
+    from: hkclaude
+    to: cliEntry
+    says: plannotator claude-mod-plan, detached
+    flow: h-claude
+    at: "3"
+    payload: { name: stdin, lines: ['{ "plan": "...",', '  "planFilePath": "/abs/plan.md",', '  "permissionMode": "..." }', 'env PLANNOTATOR_HOST_RESULT_FILE'] }
+  - id: serve
+    from: cliEntry
+    to: planSrv
+    says: startPlannotatorServer
+    flow: s-plan
+    at: "4"
+    payload: { name: options, lines: ['{ plan, origin: "claude-code",', '  planFilePath, historyRoot }'] }
+  - { id: hist, from: planSrv, to: dataDir, says: save this version, flow: d-plan, at: "5", payload: { name: saveToHistory, lines: ['history/<project>/<slug>/NNN.md'] } }
+  - { id: open, from: planSrv, to: editorUI, says: open the browser, flow: p-plan, at: "6", payload: { name: openBrowser, lines: ['http://127.0.0.1:<free port>/'] } }
+  - { id: read, from: editorUI, to: planSrv, says: GET /api/plan, flow: p-plan, at: "7" }
+  - { id: you, on: editorUI, do: "You read, annotate, approve or send feedback", at: "8" }
+  - id: approve
+    from: editorUI
+    to: planSrv
+    says: POST /api/approve
+    flow: p-plan
+    at: "9"
+    payload: { name: or POST /api/deny, lines: ['{ feedback, permissionMode,', '  planSave }'] }
+  - { id: snap, from: planSrv, to: dataDir, says: the final snapshot, flow: d-plan, at: "10", payload: { name: saveFinalSnapshot, lines: ['plans/<slug>-approved.md'] } }
+  - id: result
+    from: cliEntry
+    to: hkclaude
+    reply: true
+    says: result.json, by temp file and rename
+    flow: h-claude
+    at: "11"
+    payload: { name: HostResultRecord v1, lines: ['{ "v": 1, "surface": "plan",', '  "decision": "approved",', '  "message": "...",', '  "approvedPlan": "..." }'] }
+  - { id: turn, on: hkclaude, do: "The mod submits the decision as a new turn ($.prompt.submit) once Claude is idle", at: "12" }
+  - { id: pass, on: hkclaude, do: "Claude calls ExitPlanMode again; the approved plan passes", at: "13" }
+notes:
+  a: { on: start, text: "With the mod off (PLANNOTATOR_CLAUDE_MOD=0) or in -p and SDK sessions, the classic PermissionRequest hook runs plannotator in the foreground and the decision is its stdout." }
+  b: { on: result, text: "The record is written once, atomically. A deny carries your feedback as the message, and Claude revises the plan." }
+  c: { on: serve, text: "The port is free and random on loopback; with PLANNOTATOR_REMOTE or over SSH it binds 0.0.0.0 on 19432." }

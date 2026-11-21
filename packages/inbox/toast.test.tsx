@@ -1,7 +1,7 @@
 /**
  * The window's one toast (design record "inbox-toast", approved 2026-10-14):
  * its approved words (pure, always run), and under DOM_TESTS=1 (happy-dom,
- * from the test.yml DOM list) its shape, its actions, that a desktop toast
+ * from tests/dom-test-list.txt) its shape, its actions, that a desktop toast
  * never moves for what is open (its place, the window's bottom center, is
  * CSS and is measured in tests/e2e/inbox-mark-read.spec.ts), and the phone's
  * short form.
@@ -11,7 +11,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { markReadToast } from './markRead';
-import { InboxToast, toastSpeech, type InboxToastModel } from './components/Toast';
+import { InboxToast, splitErrorAction, toastSpeech, type InboxToastModel } from './components/Toast';
 
 const hasDom = typeof document !== 'undefined';
 
@@ -38,9 +38,22 @@ describe('markReadToast: the approved words', () => {
     expect(markReadToast(row({ questions: questions({ stopped: true }) }), 'held')).toEqual({ lead: 'Marked read', phoneLead: 'Read', detail: '“Invoice list layout”', warn: true });
   });
 
+  test('a long agent name is cut to 40 in the toast, and said whole', () => {
+    const long = { ...author, name: 'Claude Code (worktree agent-a0316994da8440ab5)' } as InboxListRow['author'];
+    expect(markReadToast(row({ author: long, questions: questions({ stopped: true }) }), 'open')).toEqual({
+      lead: 'Marked read',
+      phoneLead: 'Read',
+      detail: 'Claude Code (worktree agent-a0316994da8… was stopped',
+      // A phone: what happened first, so the line's "…" only ever cuts the name.
+      phoneDetail: 'Stopped · Claude Code (worktree agent-a0316994da8…',
+      warn: true,
+      speech: 'Marked read. Claude Code (worktree agent-a0316994da8440ab5) was stopped.',
+    });
+  });
+
   test('an agent stopped or held up on it: a warning, in the open thread or from a row', () => {
     for (const place of ['open', 'list'] as const) {
-      expect(markReadToast(row({ questions: questions({ stopped: true }) }), place)).toEqual({ lead: 'Marked read', phoneLead: 'Read', detail: 'Claude Code was stopped', warn: true });
+      expect(markReadToast(row({ questions: questions({ stopped: true }) }), place)).toEqual({ lead: 'Marked read', phoneLead: 'Read', detail: 'Claude Code was stopped', phoneDetail: 'Stopped · Claude Code', warn: true });
       const held = markReadToast(row({ questions: questions({ holds_up: ['the deploy', 'the release'] }) }), place);
       expect(held).toEqual({ lead: 'Marked read', phoneLead: 'Read', detail: 'Held up 2 things', warn: true });
     }
@@ -62,8 +75,24 @@ test('toastSpeech: the live region reads the lead and the detail as sentences, a
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
+const realMatchMedia = hasDom ? window.matchMedia : undefined;
+
+/** The window as a phone: a narrow one (the phone layout), and with `touch` a touch screen with no hover. */
+function phoneWindow(touch: boolean) {
+  window.matchMedia = ((query: string) => ({
+    matches: query.includes('max-width: 767px') || (touch && query.includes('pointer: coarse')),
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+}
 
 afterEach(() => {
+  if (hasDom) window.matchMedia = realMatchMedia!;
   if (hasDom) delete (document.documentElement as { clientWidth?: number }).clientWidth;
   act(() => root?.unmount());
   host?.remove();
@@ -144,7 +173,8 @@ test.skipIf(!hasDom)('desktop warning: one line (icon, lead, detail), Reply and 
   expect(toast.querySelector('.ib-tlead')?.textContent).toBe('Marked read');
   expect(toast.querySelector('.ib-tdetail')?.textContent).toBe('Claude Code was stopped');
   // Reply, Undo, and the × last (owner, 2026-10-20: a toast can be closed early).
-  expect(buttons(toast)).toEqual(['Reply', 'UndoZ', '']);
+  expect(buttons(toast)).toEqual(['Reply', 'Undo', '']);
+  expect(toast.querySelector('[data-toast-undo] kbd')?.getAttribute('data-keycap')).toBe('Z');
   expect([...toast.querySelectorAll('button')].at(-1)?.getAttribute('aria-label')).toBe('Dismiss');
   // The Z hint is for the eye; the button's name stays "Undo" and it says its key.
   const undo = toast.querySelector('[data-toast-undo]') as HTMLButtonElement;
@@ -273,17 +303,210 @@ test.skipIf(!hasDom)('a desktop toast stays where it is whatever opens: a thread
 });
 
 test.skipIf(!hasDom)('a phone: "Read" for "Marked read", no Reply and no Z hint, Undo undoes, and the × closes it', () => {
+  phoneWindow(true);
   let undone = 0;
   const { warn, ...copy } = markReadToast(row({ questions: questions({ stopped: true }) }), 'open');
   const toast = show({ ...copy, icon: warn ? 'warn' : 'check', onUndo: () => undone++, onReply: () => {} }, true, undefined, () => {});
   expect(toast.classList.contains('ib-toast-phone')).toBe(true);
   expect(toast.querySelector('.ib-tlead')?.textContent).toBe('Read');
-  expect(toast.querySelector('.ib-tdetail')?.textContent).toBe('Claude Code was stopped');
+  expect(toast.querySelector('.ib-tdetail')?.textContent).toBe('Stopped · Claude Code');
   expect(buttons(toast)).toEqual(['Undo', '']);
   expect(toast.querySelector('[data-toast-dismiss]')?.getAttribute('aria-label')).toBe('Dismiss');
   expect(toast.querySelector('kbd')).toBeNull();
   act(() => (toast.querySelector('[data-toast-undo]') as HTMLButtonElement).click());
   expect(undone).toBe(1);
+});
+
+// A browser can drop the click of a tap that comes right after a flick (a row's swipe): one tap on Undo still undoes,
+// from the touch itself, and the click that may follow it undoes nothing more. A finger that slides off is no tap.
+test.skipIf(!hasDom)('a phone: one tap of a finger on Undo undoes, with or without its click', () => {
+  phoneWindow(true);
+  let undone = 0;
+  const toast = show({ icon: 'check', lead: 'Marked read', phoneLead: 'Read', onUndo: () => undone++ }, true, undefined, () => {});
+  const undo = toast.querySelector('[data-toast-undo]') as HTMLButtonElement;
+  const finger = (type: string, x: number, y: number) => {
+    const point = { identifier: 1, clientX: x, clientY: y, pageX: x, pageY: y, target: undo };
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'touches', { value: type === 'touchend' ? [] : [point] });
+    Object.defineProperty(event, 'changedTouches', { value: [point] });
+    act(() => void undo.dispatchEvent(event));
+    return event;
+  };
+  finger('touchstart', 20, 10);
+  const lift = finger('touchend', 22, 11);
+  expect(undone).toBe(1);
+  expect(lift.defaultPrevented).toBe(true);
+  act(() => undo.click());
+  expect(undone).toBe(1);
+  finger('touchstart', 20, 10);
+  finger('touchmove', 60, 10);
+  finger('touchend', 60, 10);
+  expect(undone).toBe(1);
+});
+
+test.skipIf(!hasDom)('a narrow desktop window (the phone layout, a mouse) keeps Reply and Undo\'s Z: no foot holds Reply there, and the keys work', () => {
+  phoneWindow(false);
+  let replied = 0;
+  const toast = show({ icon: 'check', lead: 'Marked read', phoneLead: 'Read', detail: 'Moves to Quiet', onUndo: () => {}, onReply: () => replied++ }, true, undefined, () => {});
+  expect(toast.classList.contains('ib-toast-phone')).toBe(true);
+  expect(buttons(toast)).toEqual(['Reply', 'Undo', '']);
+  const undo = toast.querySelector('[data-toast-undo]')!;
+  expect(undo.querySelector('kbd')?.getAttribute('data-keycap')).toBe('Z');
+  expect(undo.getAttribute('aria-keyshortcuts')).toBe('Z');
+  act(() => ([...toast.querySelectorAll('button')].find((b) => b.textContent === 'Reply') as HTMLButtonElement).click());
+  expect(replied).toBe(1);
+});
+
+test.skipIf(!hasDom)('a phone toast sits above a full-screen file\'s bar, and moves when a thread\'s foot appears under it', async () => {
+  phoneWindow(true);
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
+  const page = document.createElement('div');
+  document.body.appendChild(page);
+  host = page;
+  // A file open full screen on a phone: its bar starts at y 740.
+  const dock = document.createElement('div');
+  dock.className = 'ib-fvdock-phone';
+  const bar = document.createElement('div');
+  bar.className = 'ib-fvbar';
+  boxAt(bar, 0, 740, 390, 60);
+  dock.appendChild(bar);
+  page.appendChild(dock);
+  const toast = show({ icon: 'check', lead: 'Marked read', onUndo: () => {} }, true, page, () => {});
+  expect(toast.style.bottom).toBe('68px');
+  // The file closes, a thread opens under the toast: its foot (y 700) is measured once it is there.
+  dock.remove();
+  const pane = document.createElement('section');
+  pane.className = 'ib-pane';
+  const foot = document.createElement('div');
+  foot.className = 'ib-pfoot';
+  boxAt(foot, 0, 700, 390, 100);
+  pane.appendChild(foot);
+  act(() => page.appendChild(pane));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(toast.style.bottom).toBe('108px');
+  delete (window as { innerHeight?: number }).innerHeight;
+});
+
+// A file full screen on a phone with its Comment / Reply card open (iPhone 15 and SE widths, as drawn there): "Added to
+// your reply" goes above the card, never over its tabs; minimized, above its pill. A fixed 148 px covered the tabs.
+for (const phone of [
+  { width: 393, height: 852, card: { left: 8, top: 644, width: 377, height: 200 }, tabsTop: 649 },
+  { width: 320, height: 568, card: { left: 8, top: 352, width: 304, height: 208 }, tabsTop: 357 },
+]) {
+  test.skipIf(!hasDom)(`a phone toast at ${phone.width} px sits above a full-screen file's Comment / Reply card and never over its tabs`, () => {
+    phoneWindow(true);
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: phone.height });
+    const page = document.createElement('div');
+    document.body.appendChild(page);
+    host = page;
+    const view = document.createElement('section');
+    view.className = 'ib-view ib-fullview ib-phone';
+    const card = document.createElement('div');
+    card.className = 'ib-fcomp ib-mode-reply ib-phone';
+    boxAt(card, phone.card.left, phone.card.top, phone.card.width, phone.card.height);
+    view.appendChild(card);
+    page.appendChild(view);
+    const toast = show({ icon: 'check', lead: 'Markup added to your reply', phoneLead: 'Added to your reply', onUndo: () => {} }, true, page, () => {});
+    const bottom = parseFloat(toast.style.bottom);
+    // The toast's lowest pixel, 44 px tall at the least: above the card's top, so above the tabs inside it.
+    const toastBottomEdge = phone.height - bottom;
+    expect(toastBottomEdge).toBeLessThanOrEqual(phone.card.top);
+    expect(toastBottomEdge).toBeLessThan(phone.tabsTop);
+    expect(toastBottomEdge - 44).toBeGreaterThan(0);
+    delete (window as { innerHeight?: number }).innerHeight;
+  });
+}
+
+test.skipIf(!hasDom)("a phone toast ignores a card gathered into the corner (from the moment the tools tuck, its box kept), and moves when they come back", async () => {
+  phoneWindow(true);
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 852 });
+  const page = document.createElement('div');
+  document.body.appendChild(page);
+  host = page;
+  const view = document.createElement('section');
+  view.className = 'ib-view ib-fullview ib-phone';
+  view.setAttribute('data-tools', 'tucked');
+  const dock = document.createElement('div');
+  dock.className = 'ib-fvdock-phone';
+  const handle = document.createElement('div');
+  handle.className = 'ib-fvhandle';
+  boxAt(handle, 330, 790, 48, 48);
+  dock.appendChild(handle);
+  const card = document.createElement('div');
+  card.className = 'ib-fcomp ib-mode-reply ib-phone';
+  boxAt(card, 8, 644, 377, 200);
+  view.append(dock, card);
+  page.appendChild(view);
+  const toast = show({ icon: 'check', lead: 'Added to your reply', onUndo: () => {} }, true, page, () => {});
+  // Only the corner control is on screen: the toast sits over it, not 200 px up over an invisible card.
+  expect(toast.style.bottom).toBe(`${852 - 790 + 8}px`);
+  // The tools come back (an attribute, no node added): the card is measured again.
+  act(() => view.setAttribute('data-tools', 'shown'));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(toast.style.bottom).toBe(`${852 - 644 + 8}px`);
+  delete (window as { innerHeight?: number }).innerHeight;
+});
+
+test.skipIf(!hasDom)("a phone toast sits above a full-screen file's minimized card (its pill), not over it", () => {
+  phoneWindow(true);
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 852 });
+  const page = document.createElement('div');
+  document.body.appendChild(page);
+  host = page;
+  const wrap = document.createElement('div');
+  wrap.className = 'ib-fcomp-pillwrap ib-phone';
+  boxAt(wrap, 12, 732, 52, 52);
+  page.appendChild(wrap);
+  const toast = show({ icon: 'check', lead: 'Added to your reply', onUndo: () => {} }, true, page, () => {});
+  expect(toast.style.bottom).toBe(`${852 - 732 + 8}px`);
+  delete (window as { innerHeight?: number }).innerHeight;
+});
+
+test.skipIf(!hasDom)("a phone toast sits above a Shape board's dock in its thread, whose foot is hidden under the board", () => {
+  phoneWindow(true);
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
+  const page = document.createElement('div');
+  document.body.appendChild(page);
+  host = page;
+  // The thread's foot is display:none while the board shows (it measures 0): the board's dock (y 790) is the floor.
+  const pane = document.createElement('section');
+  pane.className = 'ib-pane';
+  const foot = document.createElement('div');
+  foot.className = 'ib-pfoot';
+  boxAt(foot, 0, 0, 0, 0);
+  const board = document.createElement('section');
+  board.setAttribute('data-shape-layer', '');
+  const dock = document.createElement('div');
+  dock.className = 'shp-dock';
+  boxAt(dock, 55, 790, 280, 42);
+  board.appendChild(dock);
+  pane.append(foot, board);
+  page.appendChild(pane);
+  const toast = show({ icon: 'check', lead: 'Added to your reply', onUndo: () => {} }, true, page, () => {});
+  expect(toast.style.bottom).toBe('62px');
+  delete (window as { innerHeight?: number }).innerHeight;
+});
+
+test('splitErrorAction: what happened, then what to do (the last sentence), together the message itself', () => {
+  const two = 'The Inbox could not save your reply because the disk is full. Free some space and try again.';
+  expect(splitErrorAction(two)).toEqual({ head: 'The Inbox could not save your reply because the disk is full. ', action: 'Free some space and try again.' });
+  const three = 'It stopped. Nothing was lost! Try again?';
+  expect(splitErrorAction(three).action).toBe('Try again?');
+  expect(splitErrorAction(three).head + splitErrorAction(three).action).toBe(three);
+  // One sentence, or a dot that ends no sentence (a version, a file name): nothing to split.
+  expect(splitErrorAction('The thread did not change.')).toEqual({ head: 'The thread did not change.', action: '' });
+  expect(splitErrorAction('Could not open notes.v2.md')).toEqual({ head: 'Could not open notes.v2.md', action: '' });
+});
+
+test.skipIf(!hasDom)('an error of two sentences keeps its last, what to do, in its own span (inbox.css keeps it whole when the rest is cut)', () => {
+  const message = 'The Inbox could not save your reply because the disk is full. Free some space and try again.';
+  const toast = show({ icon: 'warn', lead: message, wrap: true }, false, undefined, () => {});
+  expect(toast.querySelector('.ib-tlead')?.textContent).toBe(message);
+  expect(toast.querySelector('.ib-taction')?.textContent).toBe('Free some space and try again.');
 });
 
 test.skipIf(!hasDom)('an error keeps its message whole and may wrap, with no actions but the ×', () => {

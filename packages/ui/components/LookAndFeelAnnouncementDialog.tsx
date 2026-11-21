@@ -12,6 +12,12 @@ interface LookAndFeelAnnouncementDialogProps {
   onToggleGrid: (value: boolean) => void;
   /** Persists the current choice and closes the dialog. */
   onDismiss: () => void;
+  /**
+   * `first-run` (default): the first-use choice. `moved`: the one-time notice
+   * for someone moved from Grid to Clean when Clean became the default; the
+   * same chooser, with a line saying what changed.
+   */
+  variant?: 'first-run' | 'moved';
 }
 
 const LOOK_OPTIONS: {
@@ -48,6 +54,7 @@ export const LookAndFeelAnnouncementDialog: React.FC<LookAndFeelAnnouncementDial
   gridEnabled,
   onToggleGrid,
   onDismiss,
+  variant = 'first-run',
 }) => {
   const dialogRef = useRef<HTMLDivElement>(null);
   const continueRef = useRef<HTMLButtonElement>(null);
@@ -115,6 +122,7 @@ export const LookAndFeelAnnouncementDialog: React.FC<LookAndFeelAnnouncementDial
       <div
         ref={dialogRef}
         role="dialog"
+        data-plan-look-prompt={variant}
         aria-modal="true"
         aria-labelledby="plan-look-choice-title"
         aria-describedby="plan-look-choice-description"
@@ -129,13 +137,15 @@ export const LookAndFeelAnnouncementDialog: React.FC<LookAndFeelAnnouncementDial
             id="plan-look-choice-title"
             className="text-balance text-xl font-semibold tracking-tight sm:text-2xl"
           >
-            Choose how plans look
+            {variant === 'moved' ? 'Plans now open in Clean' : 'Choose how plans look'}
           </h2>
           <p
             id="plan-look-choice-description"
             className="mt-1 text-sm leading-relaxed text-muted-foreground"
           >
-            Pick a starting view. You can change it anytime in Settings.
+            {variant === 'moved'
+              ? "Grid is one switch away in Settings, or pick it here."
+              : "Pick a starting view. You can change it anytime in Settings."}
           </p>
         </header>
 

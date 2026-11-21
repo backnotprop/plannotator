@@ -1,4 +1,5 @@
 import type { Block, Annotation } from '../types';
+import { footnoteKeysOf, withoutFootnoteRefs } from './footnotes';
 
 /**
  * Calculate annotation counts per section (grouped by headings)
@@ -60,13 +61,43 @@ export interface TocItem {
   annotationCount: number;
 }
 
+/**
+ * The headings a Contents list shows, in document order: levels 1 to
+ * `maxLevel` (3 by default, plan review's list). The one place that picks
+ * them: `TableOfContents`, plan review's "has entries" check and the contents
+ * rail (`MarkdownContentsRail`, levels 1 to 4) all read it.
+ */
+export function tocHeadings(blocks: readonly Block[], maxLevel = 3): Block[] {
+  return blocks
+    .filter(b => b.type === 'heading' && (b.level ?? 0) <= maxLevel)
+    .sort((a, b) => a.order - b.order);
+}
+
+/** The contents rail lists headings of levels 1 to this (`MarkdownContentsRail`). */
+export const CONTENTS_RAIL_MAX_LEVEL = 4;
+/** The contents rail shows for a document with at least this many of them. */
+export const CONTENTS_RAIL_MIN_HEADINGS = 4;
+/** The contents rail shows in a scroll element at least this wide (and with a 68 px gutter). */
+export const CONTENTS_RAIL_MIN_PANE_WIDTH = 480;
+
+/**
+ * Whether a document gets the contents rail: at least
+ * `CONTENTS_RAIL_MIN_HEADINGS` headings of levels 1 to
+ * `CONTENTS_RAIL_MAX_LEVEL` (or `minHeadings`, the rail's prop of that name).
+ * Kept out of the rail's own module, so a host can decide without loading the
+ * (lazy) rail.
+ */
+export function hasContentsRailHeadings(blocks: readonly Block[], minHeadings = CONTENTS_RAIL_MIN_HEADINGS): boolean {
+  return tocHeadings(blocks, CONTENTS_RAIL_MAX_LEVEL).length >= minHeadings;
+}
+
 export function buildTocHierarchy(
   blocks: Block[],
-  annotationCounts: Map<string, number>
+  annotationCounts: Map<string, number>,
+  maxLevel = 3
 ): TocItem[] {
-  const headings = blocks
-    .filter(b => b.type === 'heading' && (b.level ?? 0) <= 3)
-    .sort((a, b) => a.order - b.order);
+  const headings = tocHeadings(blocks, maxLevel);
+  const notes = footnoteKeysOf(blocks);
   
   const root: TocItem[] = [];
   const stack: TocItem[] = [];
@@ -74,7 +105,7 @@ export function buildTocHierarchy(
   for (const heading of headings) {
     const item: TocItem = {
       id: heading.id,
-      content: heading.content,
+      content: withoutFootnoteRefs(heading.content, notes),
       level: heading.level ?? 1,
       order: heading.order,
       children: [],

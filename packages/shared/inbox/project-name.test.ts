@@ -33,7 +33,7 @@ describe("inboxProjectLabels", () => {
     expect(labels.get("e")).toBe(long);
     // What the slug made of them, for the record: what the window showed before.
     expect(sanitizeTag("請求サービス")).toBeNull();
-    expect(sanitizeTag(long)).toBe("northwind-industries-holdings-");
+    expect(sanitizeTag(long)).toBe("northwind-industries-holdings");
   });
 
   test("two folders with one name each name their parent folder", () => {
@@ -84,5 +84,36 @@ describe("the store reads the real name, without rewriting the project", () => {
     const again = InboxStore.open(dir);
     expect(again.project(work.id)!.name).toBe("api · work");
     expect(again.project(project.id)!.name).toBe("請求サービス");
+  });
+});
+
+// Rename… in the project menu: agents, search and every server read get the person's name as it is.
+describe("inboxProjectLabels with a display_name", () => {
+  test("the display_name as it is, no parent added, and it takes no part in the others' clashes", () => {
+    const labels = inboxProjectLabels([
+      { ...p("a", "/code/acme/main"), display_name: "acme" },
+      p("b", "/code/initech/main"),
+      { ...p("c", "/code/globex/api"), display_name: "billing" },
+      p("d", "/code/billing"),
+    ]);
+    expect(labels.get("a")).toBe("acme");
+    expect(labels.get("b")).toBe("main");
+    expect(labels.get("c")).toBe("billing");
+    expect(labels.get("d")).toBe("billing");
+  });
+
+  test("an empty display_name (or none) reads the folder, exactly as before", () => {
+    const labels = inboxProjectLabels([{ ...p("a", "/code/acme/main"), display_name: "" }, p("b", "/code/initech/main")]);
+    expect(labels.get("a")).toBe("main · acme");
+    expect(labels.get("b")).toBe("main · initech");
+  });
+
+  test("a display_name that is not a string (a hand-edited file, another machine's list) is ignored, so a label is always a string", () => {
+    const labels = inboxProjectLabels([
+      { ...p("a", "/code/acme/main"), display_name: 42 },
+      { ...p("b", "/code/initech/main"), display_name: { name: "x" } },
+    ]);
+    expect(labels.get("a")).toBe("main · acme");
+    expect(labels.get("b")).toBe("main · initech");
   });
 });

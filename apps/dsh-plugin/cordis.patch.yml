@@ -1,0 +1,8 @@
+# Loads Plannotator's DeepSeek Harness plugin into the profile. Optional config,
+# set by overriding this row (id: plannotator) in the profile's own patch:
+#   binary: absolute path to the plannotator CLI (default: PLANNOTATOR_BIN,
+#           then plannotator on PATH, then ~/.local/bin/plannotator)
+#   planReview: false leaves exit_plan_mode to DSH's own review card
+- insert:
+    - id: plannotator
+      name: '@plannotator/dsh'

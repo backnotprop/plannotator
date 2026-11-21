@@ -24,9 +24,11 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { inboxAgentTool, inboxToolCall, parseInboxToolList } from "@plannotator/shared/inbox/connection";
+import { INBOX_AGENT_RULES, INBOX_TOOL_BOARD_OFF_NOTE, inboxAgentTool, inboxToolCall, parseInboxToolList } from "@plannotator/shared/inbox/connection";
+import { inboxAgentTool as modAgentTool } from "../../apps/hook/hooks/mod/inbox-contract";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { INBOX_BOARD_OFF_TEXT } from "./inbox-mcp";
+import { INBOX_TOOL_COST_WITH_BOARD } from "@plannotator/core/inbox-types";
 import { INBOX_DEFAULT_TOOLS } from "../../apps/hook/hooks/mod/inbox-default-tools";
 
 const roots: string[] = [];
@@ -91,6 +93,13 @@ test("off by default: no card tool, a card call answers board_off and writes not
   expect(await intro.json()).toEqual({ show: false });
   // The Claude Code mod's bundled list (from a default Inbox) has no card action either.
   expect(INBOX_DEFAULT_TOOLS.map((tool) => tool.name)).not.toContain("card");
+  // Off, the agent tool says once that the Board exists and where to read about it (the owner, 2026-10-27):
+  // built from the live list (Pi, OpenCode) and from the mod's bundled one.
+  for (const tool of [inboxAgentTool(parseInboxToolList((await w.rpc("tools/list", {})).result))!, modAgentTool(INBOX_DEFAULT_TOOLS)!]) {
+    expect(tool.description.split(INBOX_TOOL_BOARD_OFF_NOTE)).toHaveLength(2);
+    // Claude Code cuts a description at 2,048 characters: the last line (the help pointer) must survive.
+    expect(tool.description.length).toBeLessThan(2048);
+  }
 });
 
 test("off → on → off → on: the next tools/list follows; a session's cached list gets board_off; cards kept; the Inbox untouched", async () => {
@@ -102,7 +111,7 @@ test("off → on → off → on: the next tools/list follows; a session's cached
   expect(JSON.parse(readFileSync(join(w.dataDir, "config.json"), "utf8")).inboxBoard).toBe(true);
   const listed = parseInboxToolList((await w.rpc("tools/list", {})).result);
   expect(listed.map((tool) => tool.name)).toContain("card");
-  const made = await w.card({ op: "create", title: "Hero scene timers", column: "building", say: "lane started" });
+  const made = await w.card({ op: "create", title: "Hero scene timers", column: "in_progress", say: "lane started" });
   expect(made.isError).toBeFalsy();
   const cardId = made.structuredContent!.card.id as string;
 
@@ -110,6 +119,11 @@ test("off → on → off → on: the next tools/list follows; a session's cached
   // (the Claude Code mod reads it once per process; Pi and OpenCode at session start).
   const cached = inboxAgentTool(listed)!;
   expect((cached.inputSchema.properties as Record<string, { enum?: string[] }>).action!.enum).toContain("card");
+  // On, the card action's own line says it: no Board-off line.
+  expect(cached.description).not.toContain(INBOX_TOOL_BOARD_OFF_NOTE);
+  // With the card action's line, still every rule (the work-stream one too) inside Claude Code's 2,048 characters.
+  expect(cached.description).toContain(INBOX_AGENT_RULES);
+  expect(cached.description.length).toBeLessThan(2048);
 
   // on → off: every card kept, the tool gone from the next list, the cached call refused, nothing written.
   expect((await (await w.setBoard(false)).json()) as { board: { on: boolean } }).toMatchObject({ board: { on: false } });
@@ -121,7 +135,7 @@ test("off → on → off → on: the next tools/list follows; a session's cached
   expect(refused.content[0]!.text).toStartWith("board_off: ");
   expect(w.server.store.cursor()).toBe(cursor);
   const kept = await w.cards();
-  expect(kept.map((c) => [c.id, c.column, c.said])).toEqual([[cardId, "building", "lane started"]]);
+  expect(kept.map((c) => [c.id, c.column, c.said])).toEqual([[cardId, "in_progress", "lane started"]]);
 
   // The rest of the Inbox goes on as before while it is off.
   const sent = await w.call("send_message", { ...w.agent, body: "an update while the Board is off" });
@@ -129,7 +143,7 @@ test("off → on → off → on: the next tools/list follows; a session's cached
 
   // off → on again: the card is as it was, and its agent can keep it current.
   await w.setBoard(true);
-  expect((await w.cards()).find((c) => c.id === cardId)).toMatchObject({ column: "building", said: "lane started" });
+  expect((await w.cards()).find((c) => c.id === cardId)).toMatchObject({ column: "in_progress", said: "lane started" });
   expect((await w.card({ op: "say", card_id: cardId, say: "back on" })).isError).toBeFalsy();
 
   // The switch never touched the person's list: the rows are the seed's, plus the update the agent sent.
@@ -164,4 +178,68 @@ test("the switch is a boolean, and only from this computer's page", async () => 
   });
   expect(cross.status).toBe(403);
   expect((await w.settings()).board).toEqual({ on: false });
+});
+
+/** An event stream's `event: capabilities` frames, as they arrive, and whether it said hello. */
+function capabilityFrames(response: Response) {
+  const frames: Record<string, unknown>[] = [];
+  const state = { hello: false };
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const done = (async () => {
+    for (;;) {
+      const { value, done } = await reader.read().catch(() => ({ value: undefined, done: true }));
+      if (done) return;
+      buffer += decoder.decode(value, { stream: true });
+      let cut: number;
+      while ((cut = buffer.indexOf("\n\n")) >= 0) {
+        const block = buffer.slice(0, cut);
+        buffer = buffer.slice(cut + 2);
+        const event = /^event: (.+)$/m.exec(block)?.[1];
+        if (event === "hello") state.hello = true;
+        if (event === "capabilities") frames.push(JSON.parse(/^data: (.*)$/m.exec(block)![1]!) as Record<string, unknown>);
+      }
+    }
+  })();
+  return { frames, state, stop: async () => (await reader.cancel().catch(() => {}), await done) };
+}
+
+async function until(ready: () => boolean): Promise<void> {
+  const end = Date.now() + 5_000;
+  while (!ready()) {
+    if (Date.now() > end) throw new Error("timed out waiting for the event stream");
+    await Bun.sleep(5);
+  }
+}
+
+// Review of #2598, finding 4 (the owner: settings sync everywhere): a Board turned on in one window (Settings, or a
+// reveal's "Turn it on") shows its row in every other one (the phone, another tab) without a reload.
+test("the switch tells every window at once (`event: capabilities` carries the Board), only on a change, never an agent's stream", async () => {
+  const w = await world();
+  const phone = capabilityFrames(await fetch(`${w.base}/api/inbox/events?window=board-phone`, { headers: { "Sec-Fetch-Site": "same-origin" } }));
+  const agent = capabilityFrames(await fetch(`${w.base}/api/inbox/events`));
+  await until(() => phone.state.hello && agent.state.hello);
+  expect((await w.setBoard(true)).status).toBe(200);
+  await until(() => phone.frames.length >= 1);
+  expect(phone.frames[0]!.board).toEqual({ on: true });
+  // The same state again says nothing; a change does, so the stream has caught up past the repeat.
+  expect((await w.setBoard(true)).status).toBe(200);
+  expect((await w.setBoard(false)).status).toBe(200);
+  await until(() => phone.frames.length >= 2);
+  expect(phone.frames.map((frame) => frame.board)).toEqual([{ on: true }, { on: false }]);
+  expect(agent.frames).toHaveLength(0);
+  await Promise.all([phone.stop(), agent.stop()]);
+});
+
+// Review of #2522, finding 7: the window states the tool's size with the Board on (INBOX_TOOL_COST_WITH_BOARD);
+// what regresses is card text that grows the entry every request carries while that number goes stale.
+test("the agent tool's entry with the Board on stays within 5% of the size the window states", async () => {
+  const w = await world();
+  await w.setBoard(true);
+  const tool = inboxAgentTool(parseInboxToolList((await w.rpc("tools/list", {})).result))!;
+  expect(tool.description).toContain("Board card");
+  // Pi's request shape: name, description, parameters.
+  const bytes = Buffer.byteLength(JSON.stringify({ name: tool.name, description: tool.description, parameters: tool.inputSchema }));
+  expect(Math.abs(bytes - INBOX_TOOL_COST_WITH_BOARD.bytes) / INBOX_TOOL_COST_WITH_BOARD.bytes).toBeLessThanOrEqual(0.05);
 });

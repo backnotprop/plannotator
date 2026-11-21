@@ -6,7 +6,7 @@
  * put it over the icon under dir="rtl".
  *
  * Runs in two projects of playwright.config.ts: `chromium` (every spec) and
- * `webkit` (this spec only). Build the binary first (see inbox.spec.ts).
+ * `webkit` (the WebKit-only specs and this one). Build the binary first (see inbox.spec.ts).
  * Screenshots land in .local/proof/toolstrip-rtl/ (or
  * $PLANNOTATOR_E2E_PROOF_DIR/toolstrip-rtl).
  */
@@ -58,6 +58,7 @@ test('Annotate: the toolstrip label sits after its icon, left to right and right
   const env = {
     PATH: process.env.PATH ?? '',
     HOME: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_READY_FILE: readyFile,
     PLANNOTATOR_SKIP_BROWSER_OPEN: '1',
@@ -74,6 +75,7 @@ test('Annotate: the toolstrip label sits after its icon, left to right and right
       [
         ['plannotator-plan-look-choice-resolved', 'true'],
         ['plannotator-announce-tui-herdr-seen', '1'],
+        ['plannotator-announce-inbox-seen', '1'],
         ['plannotator-announce-ask-session-seen', '1'],
         ['plannotator-announce-agent-tool-seen', '1'],
       ].map(([name, value]) => ({ name: name!, value: value!, url })),

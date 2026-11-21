@@ -6,7 +6,8 @@
 import { expect, test } from 'bun:test';
 import type { InboxAuthor, InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import { QUESTION_ANSWERS_HEADING } from '@plannotator/core/question-block';
-import { SNIPPET_PROMPT_MAX, cleanInline, cutAtWord, firstWords, foldSnippet, lookBoundary, newSinceLook, planFolds, replyWords } from './folding';
+import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
+import { KEPT_CHARS_MAX, SNIPPET_PROMPT_MAX, answerWords, cleanInline, cutAtWord, firstWords, foldSnippet, keptFirstWords, keptFirstWordsChars, lookBoundary, newSinceLook, plainLabel, planFolds, replyWords, snippetText } from './folding';
 
 const AGENT: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 'ses_a', name: null };
 const PERSON: InboxAuthor = { kind: 'person' };
@@ -59,6 +60,25 @@ test('the fold plan: open when new, holding an unsent pick, or last; each read r
   expect(planFolds(messages, new Set(), null).folded.size).toBe(0);
 });
 
+test('past 20 new, only the newest 20 open: the older new ones hide behind one fold (the first message stays a line), a pick not sent stays open', () => {
+  const ids = Array.from({ length: 26 }, (_, i) => `m${i + 1}`);
+  const messages = ids.map((id, i) => msg(id, AGENT, i + 1));
+  // m1, m2 read; m3..m26 (24) new: m3..m6 hide, m7..m26 open.
+  const fresh = newSinceLook(messages, 2);
+  const plan = planFolds(messages, fresh, 2);
+  expect(plan.hidden).toEqual([['m3', 'm4', 'm5', 'm6']]);
+  expect([...plan.folded]).toEqual(['m1', 'm2', 'm3', 'm4', 'm5', 'm6']);
+  // Every message new: the first stays as its line above the fold.
+  expect(planFolds(messages, newSinceLook(messages, 0), 0).hidden).toEqual([['m2', 'm3', 'm4', 'm5', 'm6']]);
+  // An unsent pick among the older new ones stays open and splits the fold.
+  const picked = messages.map((m) => (m.id === 'm4' ? { ...m, questions: [{ state: 'picked' } as never] } : m));
+  const split = planFolds(picked, fresh, 2);
+  expect(split.hidden).toEqual([['m3'], ['m5', 'm6']]);
+  expect(split.folded.has('m4')).toBe(false);
+  // Exactly 20 new: as before, every one open.
+  expect(planFolds(messages.slice(0, 22), fresh, 2).hidden).toEqual([]);
+});
+
 test("a folded line's first words: question blocks, fences, tables and images out; marks and link targets gone; cut at a word", () => {
   const body = [
     '## Search',
@@ -84,6 +104,10 @@ test("a folded line's first words: question blocks, fences, tables and images ou
   ].join('\n');
   expect(firstWords(body)).toBe('Search I looked at three ways: see the plan and docs-search. Built at deploy Quoted');
   expect(firstWords('word '.repeat(100), 40)).toBe(`${'word '.repeat(8).trim()}…`);
+});
+
+test("an author's coloured words (#3345) preview as words, with no tag or style", () => {
+  expect(firstWords('Coverage fell to <span style="color: #d00000">73.0%</span> and <font color=green>**ok**</font>.')).toBe('Coverage fell to 73.0% and ok.');
 });
 
 test('emphasis marks go only where they pair at word boundaries; snake_case, arithmetic and inline code keep their characters', () => {
@@ -126,6 +150,80 @@ test('a long prompt is cut at a word near 40 characters, so the answer after it 
   expect(cutAtWord('short', 40)).toBe('short');
 });
 
+test("a picked label's markdown (a link, code, bold) reads as its words on the line; Other and free text stay as typed", () => {
+  const prompt = 'Which discount should the promo run?';
+  const message = msg('m1', AGENT, 2, {
+    body: `:::question-multi\n${prompt}\n\n- [ ] [15% off](forecast-15.html)\n- [ ] \`FLAT10\` code\n- [ ] **20%** for members\n- [ ] No discount\n:::`,
+    questions: [
+      {
+        key: 'q-1',
+        prompt,
+        state: 'sent',
+        orphaned: false,
+        answer: { v: 1, key: 'q-1', kind: 'multi', prompt, selected: ['[15% off](forecast-15.html)', '`FLAT10` code', '**20%** for members', 'No discount'], other: 'a **custom** deal' },
+      } as never,
+    ],
+  });
+  const snippet = foldSnippet(message);
+  expect(snippet).toEqual({
+    kind: 'answers',
+    parts: [{ prompt: 'Which discount should the promo run', full: 'Which discount should the promo run', answer: '15% off, FLAT10 code, 20% for members, No discount, a **custom** deal' }],
+  });
+  expect(snippetText(snippet)).toBe('Which discount should the promo run: 15% off, FLAT10 code, 20% for members, No discount, a **custom** deal');
+  // A label that is only a picture reads as its alt text, never as nothing.
+  expect(plainLabel('![The dark mock](dark.png)')).toBe('The dark mock');
+  expect(plainLabel('snake_case and 2 * 3')).toBe('snake_case and 2 * 3');
+});
+
+test('a picked label keeps <…> text, as the live card shows it; a prompt still drops tags', () => {
+  expect(plainLabel('Array<string> type')).toBe('Array<string> type');
+  expect(plainLabel('Use <Button> component')).toBe('Use <Button> component');
+  expect(plainLabel('Return Result<T, E>')).toBe('Return Result<T, E>');
+  expect(plainLabel('x<y>z')).toBe('x<y>z');
+  expect(cleanInline('Ship <b>now</b>?')).toBe('Ship now?');
+  // An autolink reads as its address.
+  expect(plainLabel('Mail <ops@example.com>')).toBe('Mail ops@example.com');
+  expect(plainLabel('See <https://example.com/a>')).toBe('See https://example.com/a');
+});
+
+test('a picked label reads a backslash escape as its character, as the live card does', () => {
+  expect(plainLabel('\\*literal stars\\*')).toBe('*literal stars*');
+  expect(plainLabel('C\\+\\+')).toBe('C++');
+  expect(plainLabel('a \\_b\\_ c')).toBe('a _b_ c');
+});
+
+test('a picked label that links to an address with parentheses reads as its link text', () => {
+  expect(plainLabel('[Wiki](https://en.wikipedia.org/wiki/Foo_(bar))')).toBe('Wiki');
+  expect(plainLabel('![Mock](shots/mock_(dark).png)')).toBe('Mock');
+});
+
+test('a picked label: a link with brackets in its text, and a picture with no alt text', () => {
+  expect(plainLabel('[a [nested] label](x.html)')).toBe('a [nested] label');
+  expect(plainLabel('![](shots/dark.png)')).toBe('dark.png');
+});
+
+test('a picked label keeps names and arithmetic whole', () => {
+  expect(plainLabel('snake_case')).toBe('snake_case');
+  expect(plainLabel('`__init__.py`')).toBe('__init__.py');
+  expect(plainLabel('__init__.py')).toBe('__init__.py');
+  expect(plainLabel('2*3*4')).toBe('2*3*4');
+  expect(plainLabel('`*args` and `**kwargs`')).toBe('*args and **kwargs');
+  expect(plainLabel('*args and **kwargs')).toBe('*args and **kwargs');
+  expect(plainLabel('Inline `a\\*b` code')).toBe('Inline a\\*b code');
+});
+
+test('a markdown label written with a (Recommended) marker answers as its plain words, with no marker', () => {
+  // The parser takes the marker out of the label it stores; the folded line shows that label's words.
+  for (const choice of ['[Pagefind](x.html) (Recommended)', '[Recommended] [Pagefind](x.html)']) {
+    for (const line of ['', '\nRecommended: Pagefind\n']) {
+      const body = `:::question\nWhich search?\n\n- [ ] ${choice}\n- [ ] [Algolia](y.html)\n${line}:::`;
+      const stored = parseInboxQuestionBlocks(body)[0]!.parsed.choices[0]!.label;
+      expect(stored).toBe('[Pagefind](x.html)');
+      expect(answerWords({ v: 1, key: 'q-1', kind: 'single', prompt: 'Which search?', selected: [stored] })).toBe('Pagefind');
+    }
+  }
+});
+
 test("a reply of skips or of answers and skips: the store's first line is dropped too", () => {
   expect(replyWords('Skipped 3 questions.\n\nRedo the design.')).toBe('Redo the design.');
   expect(replyWords('Answered 1 question, skipped 2.\n\nRedo the design.')).toBe('Redo the design.');
@@ -157,4 +255,50 @@ test('a reply of pasted files alone: the snippet names the files, never the stil
   expect(foldSnippet(reply)).toEqual({ kind: 'words', text: 'pasted-image-2026-10-16-0912.png, notes.md' });
   // With words, the words.
   expect(foldSnippet({ ...reply, body: `See these.\n\n${line}` })).toEqual({ kind: 'words', text: 'See these.' });
+});
+
+test('a long thread’s folded lines read through keptFirstWords say what a fresh read says, and an edited body gets its own words', () => {
+  const line = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.";
+  const file = (name: string) => ({ id: `att_${name}`, name }) as NonNullable<InboxMessageWire['attachments']>[number];
+  const long = Array.from({ length: 400 }, (_, i) => `Line ${i} of the trace, with **bold** and a [link](https://x.test/${i}).`).join('\n');
+  const messages = [
+    msg('m1', AGENT, 1, { body: '```ts\nconst a = 1;\n```\n\nThe retry worker charges twice.' }),
+    msg('m2', AGENT, 2, { body: long }),
+    msg('m3', PERSON, 3, { body: `See these.\n\n${line}` }),
+    msg('m4', PERSON, 4, { body: line, attachments: [file('notes.md')] }),
+    msg('m5', AGENT, 5, { body: '' }),
+    msg('m6', PERSON, 6, { body: '' }),
+  ];
+  for (let pass = 0; pass < 2; pass++) {
+    for (const message of messages) expect(foldSnippet(message, messages, keptFirstWords)).toEqual(foldSnippet(message, messages));
+  }
+  // The same message with new words (an edit, a refresh): the line follows the words, never the kept ones.
+  const edited = { ...messages[1]!, body: `Fixed: one charge now.\n${long}` };
+  expect(snippetText(foldSnippet(edited, messages, keptFirstWords))).toBe(snippetText(foldSnippet(edited, messages)));
+  expect(snippetText(foldSnippet(edited, messages, keptFirstWords)).startsWith('Fixed: one charge now.')).toBe(true);
+});
+
+test('keptFirstWords holds no more than its character cap, however many long bodies a window reads', () => {
+  const plan = (i: number) => `Plan ${i}: move the retry worker.\n${'A long step of the plan, read once. '.repeat(30_000)}`;
+  const count = Math.ceil((3 * KEPT_CHARS_MAX) / plan(0).length);
+  for (let i = 0; i < count; i++) {
+    expect(keptFirstWords(plan(i))).toBe(firstWords(plan(i)));
+    expect(keptFirstWordsChars()).toBeLessThanOrEqual(KEPT_CHARS_MAX);
+  }
+  // A body longer than the cap on its own still gets its words, and is not kept.
+  const huge = `Huge.\n${'x '.repeat(KEPT_CHARS_MAX)}`;
+  const before = keptFirstWordsChars();
+  expect(keptFirstWords(huge)).toBe(firstWords(huge));
+  expect(keptFirstWordsChars()).toBe(before);
+});
+
+test("an agent's message with a run or secret card stays open, like one with a pick not sent", () => {
+  const card = [':::run', 'Check', '```', 'ls', '```', ':::'].join('\n');
+  const messages = [msg('m1', AGENT, 1), msg('m2', AGENT, 2, { body: card }), msg('m3', PERSON, 3, { body: 'Command you asked the person to run' }), msg('m4', AGENT, 4), msg('m5', PERSON, 5)];
+  const plan = planFolds(messages, new Set(), 9);
+  expect(plan.folded.has('m2')).toBe(false);
+  expect(plan.folded.has('m1')).toBe(true);
+  expect(plan.folded.has('m3')).toBe(true);
+  // A person's message quoting a block is not a card.
+  expect(planFolds([msg('m1', AGENT, 1), msg('m2', PERSON, 2, { body: card }), msg('m3', AGENT, 3)], new Set(), 9).folded.has('m2')).toBe(true);
 });

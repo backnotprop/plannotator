@@ -1,4 +1,5 @@
 #!/bin/bash
+# Manual QA: starts from your real HOME on purpose (it copies the OpenCode login; the session gets a scratch HOME). For an isolated test run, use `bun run test:sandbox`.
 # One-command isolated OpenCode sandbox for Plannotator local development.
 #
 # Usage:

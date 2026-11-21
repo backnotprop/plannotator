@@ -32,6 +32,7 @@ const hasDom = typeof document !== "undefined";
 if (hasDom) {
   document.cookie = "plannotator-look-feel-announcement-seen=2; path=/";
   document.cookie = "plannotator-announce-tui-herdr-seen=1; path=/";
+  document.cookie = "plannotator-announce-inbox-seen=1; path=/";
   document.cookie = "plannotator-vim-mode-announcement-seen=2; path=/";
   document.cookie = "plannotator-plan-ai-announcement-seen=1; path=/";
 }
@@ -175,6 +176,7 @@ async function mount(): Promise<void> {
   setStorageBackend(memoryBackend);
   memory.set("plannotator-look-feel-announcement-seen", "2");
   memory.set("plannotator-announce-tui-herdr-seen", "1");
+  memory.set("plannotator-announce-inbox-seen", "1");
   globalThis.fetch = makeFetch();
   // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = StubEventSource as unknown as typeof EventSource;

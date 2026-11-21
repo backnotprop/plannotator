@@ -1,0 +1,256 @@
+/* Routines (packages/inbox/scheduled/): the page's table and narrow list, the editor, a thread's run lines and
+   foot mark, and a list row's tile and marks. Everything here is the Inbox's own tokens; no new colours. */
+
+/* The running mark: six dots in two columns that light in turn (the Inbox's ib-dots keyframes). Reduced motion holds
+   them still, three lit. */
+.st-dots { display: inline-grid; grid-template-columns: 3px 3px; grid-template-rows: repeat(3, 3px); grid-auto-flow: column; gap: 2px; width: 8px; height: 13px; flex: none; color: var(--primary); }
+.st-dots i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: 0.3; animation: ib-dots 1.2s ease-in-out infinite; }
+.st-dots i:nth-child(2) { animation-delay: 0.2s; }
+.st-dots i:nth-child(3) { animation-delay: 0.4s; }
+.st-dots i:nth-child(6) { animation-delay: 0.6s; }
+.st-dots i:nth-child(5) { animation-delay: 0.8s; }
+.st-dots i:nth-child(4) { animation-delay: 1s; }
+@media (prefers-reduced-motion: reduce) {
+  .st-dots i { animation: none; }
+  .st-dots i:nth-child(1), .st-dots i:nth-child(2), .st-dots i:nth-child(6) { opacity: 1; }
+}
+
+.st-link { padding: 0; border: 0; background: none; font: inherit; color: var(--foreground); text-decoration: underline; text-decoration-color: color-mix(in oklch, var(--foreground) 30%, transparent); text-underline-offset: 3px; cursor: pointer; border-radius: 3px; }
+.st-bad { color: var(--ib-badge-stop-fg, var(--destructive)); }
+.st-mut { color: var(--muted-foreground); }
+.st-note { margin: 4px 14px 14px; font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); }
+
+/* The page: the list column's head with one New button where the list's menu sits. */
+.st-list .ib-lhead .st-new { margin-left: auto; flex: none; }
+.st-list .ib-lhead h1 { outline: none; }
+.st-list.st-list-split { flex: none; width: 500px; border-right: 1px solid var(--ib-pane-line); }
+.st-lbody { padding: 0 10px 20px; }
+
+/* The wide table (Name, Run, Runs, Last run, Next run, Created, the menu) and the Off table under it. Both tables and
+   every row are subgrids of one grid, so Name is as wide as the longest name (capped) and Run sits just right of it.
+   The tables' margin and border and a row's padding lie inside the edge tracks: the menu's track is its 40px plus 13px.
+   Grid margins do not collapse, so the Off heading's margins are what is left after the tables' own. */
+.st-wide { container: st-table / inline-size; }
+.st-wgrid { display: grid; grid-template-columns: fit-content(max(200px, 34%)) auto minmax(56px, 0.45fr) minmax(150px, 1.1fr) minmax(110px, 1fr) minmax(56px, 0.5fr) 53px; column-gap: 14px; }
+.st-table { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; margin: 6px 4px 24px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.st-cols { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; padding: 0 8px 0 20px; }
+.st-head { height: 44px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; color: var(--muted-foreground); }
+.st-sort { display: inline-flex; align-items: center; gap: 4px; color: var(--foreground); }
+.st-row { height: 52px; border-top: 1px solid var(--border); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; cursor: pointer; }
+.st-table-off .st-row:first-child { border-top: 0; }
+.st-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.st-row:hover { background: color-mix(in oklch, var(--muted) 45%, transparent); }
+.st-open { display: block; max-width: 100%; padding: 0; border: 0; background: none; font: inherit; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 550; color: var(--foreground); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; border-radius: 4px; }
+.st-dim { opacity: 0.6; }
+.st-end { justify-self: end; }
+.st-offh { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 8px; margin: 2px 4px 4px; font-size: var(--ib-fs-13, 13px); font-weight: 600; color: var(--foreground); }
+.st-offh .ib-n { font-weight: 500; color: var(--muted-foreground); }
+.st-live { display: inline-flex; align-items: center; gap: 7px; color: var(--foreground); vertical-align: top; }
+.st-row > span:has(> .st-live) { display: flex; align-items: center; }
+.st-num .st-live { gap: 6px; height: 20px; }
+/* A narrower window drops Created, then Next run, so Name and Last run keep their room. */
+@container st-table (max-width: 760px) {
+  .st-wgrid { grid-template-columns: fit-content(max(160px, 34%)) auto minmax(48px, 0.45fr) minmax(140px, 1.1fr) minmax(100px, 1fr) 53px; }
+  .st-cols > :nth-child(6) { display: none; }
+}
+@container st-table (max-width: 600px) {
+  .st-wgrid { grid-template-columns: fit-content(max(140px, 34%)) auto minmax(48px, 0.45fr) minmax(130px, 1.1fr) 53px; }
+  .st-cols > :nth-child(5) { display: none; }
+  .st-row .st-open { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 18px; }
+}
+
+/* Run and Stop: a quiet bordered button; dimmed on an Off row, where it still runs once. */
+.st-run { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 11px 0 9px; border: 1px solid var(--border); border-radius: 7px; background: transparent; font: inherit; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; color: var(--foreground); cursor: pointer; }
+.st-run svg.ib-ic { width: 12px; height: 12px; stroke-width: 1.9px; }
+/* Off: quieter, still a button (Run now works while off). */
+.st-run[data-off] { color: var(--muted-foreground); }
+.st-run[data-off]:hover { color: var(--foreground); }
+.st-run:hover { background: var(--muted); }
+.st-run.st-run-ic { width: 24px; height: 24px; padding: 0; justify-content: center; }
+.st-stop { width: 9px; height: 9px; border-radius: 2px; background: currentColor; }
+.st-more { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; background: none; border-radius: 7px; color: var(--muted-foreground); cursor: pointer; }
+.st-more:hover, .st-more[data-popup-open] { background: var(--muted); color: var(--foreground); }
+.st-more svg.ib-ic { width: 15px; height: 15px; }
+
+/* The narrow list beside an open one (and on a phone): Routine, Run, Runs, Last run. One grid for the whole list; the
+   heading and every row (On and Off) are subgrids of it, so the name column is as wide as the longest name (capped so
+   the rest fits) and every Run button sits on one line, a gap right of the names. A row's 12px padding lies inside the
+   edge tracks, so the menu's track is its 28px plus that padding. */
+.st-short { display: grid; grid-template-columns: [name] fit-content(calc(100% - 286px)) [btn] 24px [space] minmax(0, 1fr) [runs] 40px [last] 112px [more] 40px [end]; column-gap: 10px; align-items: start; padding: 2px 0 20px; }
+.st-scols { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: start; }
+.st-scols > .st-sname { grid-column: name; }
+.st-scols > .st-sbtn { grid-column: btn; }
+.st-scols > .st-count { grid-column: runs; }
+.st-scols > .st-last { grid-column: last; }
+.st-scols > .st-end { grid-column: more; }
+.st-shead > * { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-shead { padding: 0 12px; height: 30px; align-content: center; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; color: var(--muted-foreground); }
+/* Every heading on one baseline, in one size and colour: Runs centred over its counts, Last run flush with the times. */
+.st-shead > [role="columnheader"] { font-size: inherit; line-height: 18px; color: inherit; }
+.st-num.st-count { text-align: center; }
+.st-srow { padding: 9px 12px; border-radius: 8px; cursor: pointer; }
+.st-srow + .st-srow { margin-top: 2px; }
+.st-srow:hover { background: color-mix(in oklch, var(--muted) 45%, transparent); }
+.st-srow[data-selected] { background: var(--ib-sel); }
+.st-sname { min-width: 0; }
+/* A name longer than the column takes a second line, then truncates. */
+.st-sname .st-open { font-weight: 500; line-height: 20px; white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+/* The 24px button centred on the name's 20px first line. */
+.st-sbtn { display: flex; height: 20px; align-items: center; }
+.st-run:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* The schedule line never widens the name column: it truncates to it. */
+.st-when { display: block; contain: inline-size; font-size: var(--ib-fs-12-5, 12.5px); line-height: 18px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-num { font-size: var(--ib-fs-13, 13px); line-height: 20px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.st-srow .st-more { width: 24px; height: 20px; }
+.st-offh.st-offh-short { grid-column: 1 / -1; margin: 18px 12px 6px; }
+
+/* The editor. */
+.st-body .st-title { display: block; width: 100%; padding: 0; border: 0; background: none; font: inherit; font-size: var(--ib-fs-20, 20px); font-weight: 650; letter-spacing: -0.01em; color: var(--foreground); outline: none; margin-bottom: 8px; }
+.st-body .st-title::placeholder { color: var(--muted-foreground); }
+.st-meta { align-items: center; margin: 0 0 4px; }
+.st-meta .ib-sw { margin-right: 2px; }
+.st-meta > .st-wrap { white-space: normal; }
+.st-group { margin-top: 22px; }
+.st-group > h2 { margin-bottom: 8px; }
+.st-sched { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px 8px 12px; min-height: 46px; border: 1px solid var(--border); border-radius: 8px; font-size: var(--ib-fs-13-5, 13.5px); }
+.st-sched > svg.ib-ic { width: 16px; height: 16px; flex: none; color: var(--muted-foreground); }
+.st-pick { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px 0 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--background); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1; white-space: nowrap; cursor: pointer; }
+.st-pick svg.ib-ic { width: 12px; height: 12px; color: var(--muted-foreground); flex: none; }
+.st-pick[data-popup-open] { outline: 2px solid var(--ring); outline-offset: -1px; }
+:root:not(.light) .pn-inbox .st-pick { color-scheme: dark; }
+.st-time { padding: 0 6px 0 8px; }
+.st-cron { width: 13ch; cursor: text; }
+.st-w { color: var(--muted-foreground); }
+.st-tz { position: relative; display: inline-flex; align-items: center; height: 28px; padding: 0 4px; border-radius: 6px; }
+.st-tz select { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.st-tz:has(select:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
+.st-next { margin-left: auto; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; }
+.ib-sgroup > p.st-err { margin: 6px 0 2px 2px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--ib-badge-stop-fg, var(--destructive)); }
+.ib-sgroup > p.st-echo { margin: 6px 0 2px 2px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.st-kinds { min-width: 200px; }
+.st-miss { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.st-box { position: relative; border: 1px solid var(--border); border-radius: 10px; background: var(--background); padding: 12px 14px 8px; }
+.st-prompt { display: block; width: 100%; min-height: 92px; padding: 0; border: 0; background: none; resize: none; font: inherit; font-size: var(--ib-fs-14, 14px); line-height: 22px; color: var(--foreground); outline: none; field-sizing: content; }
+.st-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 10px -6px 0; padding-top: 8px; border-top: 1px solid var(--border); }
+.st-lbl { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); margin: 0 4px 0 6px; }
+.st-gh { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 7px; border: 0; border-radius: 6px; background: none; font: inherit; font-size: var(--ib-fs-13, 13px); font-weight: 500; color: var(--foreground); cursor: pointer; }
+.st-gh:hover, .st-gh[data-popup-open] { background: var(--muted); }
+.st-gh svg.ib-ic { width: 11px; height: 11px; color: var(--muted-foreground); }
+.st-sep { width: 1px; height: 14px; background: var(--border); margin: 0 4px; }
+/* New message's pickers, anchored under what opened them here; on a phone they keep New message's full-screen sheet. */
+.st-box .ib-cp-picker.ib-cp-lch:not([data-phone]) { top: calc(100% + 4px); left: 0; right: auto; }
+.st-folder { position: relative; }
+.st-folder .ib-cp-picker.ib-cp-folders:not([data-phone]) { top: calc(100% + 4px); left: 0; width: min(480px, calc(100vw - 48px)); }
+/* The body is its own layer under the Run now bar; a phone sheet open in it has to cover that bar too. */
+.st-body:has(.ib-cp-picker[data-phone]) { z-index: 2; }
+/* The labels' column fits its longest label ("Repo or folder"). */
+.st-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: start; gap: 14px 12px; }
+.st-k { font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); line-height: 28px; }
+.st-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.st-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: transparent; font: inherit; font-size: var(--ib-fs-13, 13px); color: var(--foreground); }
+button.st-chip { cursor: pointer; }
+.st-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-chip svg.ib-ic { width: 14px; height: 14px; color: var(--muted-foreground); flex: none; }
+.st-chip-x { display: inline-flex; padding: 2px; margin-right: -6px; border: 0; background: none; color: var(--muted-foreground); border-radius: 4px; cursor: pointer; }
+.st-path { width: 28ch; outline: none; }
+.st-add { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 8px; border: 0; background: none; font: inherit; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); cursor: pointer; border-radius: 6px; }
+.st-add:hover { color: var(--foreground); }
+.st-runs { margin-top: 6px; }
+.st-runrow { display: grid; width: calc(100% + 20px); grid-template-columns: 64px minmax(0, 1fr) auto 14px; align-items: baseline; gap: 10px; height: 36px; align-content: center; padding: 0 10px; margin: 0 -10px; border: 0; border-radius: 7px; background: none; font: inherit; font-size: var(--ib-fs-13-5, 13.5px); color: var(--foreground); text-align: left; cursor: pointer; }
+.st-runrow:hover { background: color-mix(in oklch, var(--muted) 45%, transparent); }
+.st-runrow b { font-weight: 550; }
+.st-runrow > .st-mut:nth-child(3) { font-size: var(--ib-fs-12-5, 12.5px); font-variant-numeric: tabular-nums; }
+.st-runrow svg.ib-ic { color: var(--muted-foreground); }
+.st-all { margin: 6px 0 0 -8px; height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: none; font: inherit; font-size: var(--ib-fs-13, 13px); font-weight: 500; color: var(--foreground); cursor: pointer; }
+.st-all:hover { background: var(--muted); }
+.st-error { margin: 12px 0 0; }
+/* The header's quiet save status ("Saved", "Saving…"), red with its mark when a save failed. */
+.st-saved { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; flex: none; font-variant-numeric: tabular-nums; }
+.st-saved svg.ib-ic { width: 13px; height: 13px; color: var(--muted-foreground); }
+.st-saved[data-bad] { color: var(--ib-badge-stop-fg, var(--destructive)); }
+.st-saved[data-bad] svg.ib-ic { color: currentColor; }
+/* The foot: where it stands, then Run once now (quiet) and Turn on (the filled next step while it is off). */
+.st-pfoot { display: flex; align-items: center; gap: 10px; }
+.st-footline { flex: 1; min-width: 0; font-size: var(--ib-fs-13, 13px); line-height: 18px; color: var(--muted-foreground); }
+.st-footline b { font-weight: 550; color: var(--foreground); }
+.st-once svg.ib-ic { width: 12px; height: 12px; }
+
+/* A thread's run line: the play mark, the run and a hairline; a click shows its prompt. The skip line is quieter: no
+   mark, regular weight, a fainter colour, no trailing hairline, because nothing ran. */
+.st-line { display: flex; width: 100%; align-items: center; gap: 10px; height: 30px; margin-top: 6px; padding: 0; border: 0; background: none; font: inherit; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; color: var(--muted-foreground); font-variant-numeric: tabular-nums; text-align: left; }
+button.st-line { cursor: pointer; border-radius: 4px; }
+button.st-line:hover { color: var(--foreground); }
+.st-line::before, .st-line::after { content: ""; height: 1px; background: var(--ib-hair); }
+.st-line::before { width: 14px; flex: none; }
+.st-line::after { flex: 1; }
+.st-line > svg.ib-ic { width: 14px; height: 14px; stroke-width: 1.7px; margin-right: -3px; flex: none; }
+.st-line > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-line.st-skip { font-weight: 400; color: color-mix(in oklch, var(--muted-foreground) 80%, transparent); }
+.st-line.st-skip::after { background: transparent; }
+.st-prompt-shown { margin: 4px 0 10px 34px; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.55; color: var(--muted-foreground); white-space: pre-wrap; overflow-wrap: anywhere; }
+.st-note.st-unfinished { margin: 0; padding: 12px 0 18px 34px; }
+.ib-pbody .st-run-at + .ib-message, .ib-pbody.ib-folding .st-run-at + .ib-message { border-top: 0; margin-top: 0; }
+
+/* The Reply row's mark: "Routine · next Mon 9:00 AM · Edit", or on another machine's thread, where to manage it. */
+.st-foot-mark { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 8px; margin-left: auto; margin-right: -8px; border: 0; border-radius: 7px; background: none; font: inherit; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
+button.st-foot-mark { cursor: pointer; }
+button.st-foot-mark:hover { background: var(--muted); }
+.st-foot-mark svg.ib-ic { width: 14px; height: 14px; stroke-width: 1.7px; }
+.st-foot-mark .st-edit { color: var(--foreground); font-weight: 500; }
+.st-foot-mark.st-far { white-space: normal; }
+
+/* A list row: the play mark in the agent tile, the Running pill and the warn mark. */
+.st-tile { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 6px; flex: none; background: color-mix(in oklch, var(--muted) 85%, var(--foreground) 6%); color: var(--foreground); order: -1; }
+.st-tile svg.ib-ic { width: 12px; height: 12px; stroke-width: 2px; }
+.ib-badge.st-pill { gap: 6px; }
+.ib-badge.st-warn svg.ib-ic { width: 14px; height: 14px; }
+
+/* Beside the editor the list gives the Runs column's room to the name (the editor lists the runs, as on a phone), so a
+   name like "Inbox Usage Data and Feedback" keeps one line. Run stays right of the name, every row in one column. */
+@media (min-width: 761px) {
+  .st-list-split .st-short { grid-template-columns: [name] fit-content(calc(100% - 236px)) [btn] 24px [space] minmax(0, 1fr) [last] 112px [more] 40px [end]; }
+  .st-list-split .st-scols > .st-count { display: none; }
+}
+
+@media (max-width: 760px) {
+  .st-list.st-list-split { width: 100%; }
+  /* A phone gives the name the room: Runs is in the editor, and a long name takes two lines. */
+  .st-short { grid-template-columns: [name] fit-content(50%) [btn] 24px [space] minmax(0, 1fr) [last] auto [more] 36px [end]; column-gap: 8px; }
+  .st-scols > .st-count { display: none; }
+  .st-kv { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .st-next { margin-left: 0; width: 100%; }
+  .st-pfoot { flex-wrap: wrap; }
+  .st-footline { flex-basis: 100%; }
+  .st-pfoot .ib-btn { flex: 1; }
+}
+
+/* The editor's tabs under the routine's name (RoutineTabs.tsx): the Inbox's segmented control, and on Edit one quiet
+   line with the last run, which opens Runs. The pane's width (the row is a container) puts the line beside the tabs,
+   where on Runs it keeps its place unseen, or under them, where on Runs it takes no space (the runs below say it).
+   Always one line, so a run ending never changes its height; the tabs never move on a switch. */
+.st-tabsrow { container-type: inline-size; margin-top: 18px; }
+.st-tabsin { display: flex; align-items: center; gap: 8px 14px; }
+@container (max-width: 560px) {
+  .st-tabsin { flex-direction: column; align-items: flex-start; }
+  .st-tabsin .st-lastrun { max-width: 100%; }
+  .st-tabsin .st-lastrun[data-off] { display: none; }
+}
+.st-tabs .ib-seg-o { gap: 7px; }
+.st-tabs .ib-seg-o:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.st-tabs .ib-n { font-weight: 500; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.st-tabdot { width: 6px; height: 6px; border-radius: 3px; flex: none; background: var(--ib-badge-stop-fg, var(--destructive)); }
+.st-lastrun { display: inline-flex; align-items: center; gap: 7px; min-width: 0; height: 28px; padding: 0 8px; margin-left: -8px; border: 0; border-radius: 7px; background: none; font: inherit; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; cursor: pointer; }
+.st-lastrun:hover { background: var(--muted); color: var(--foreground); }
+.st-lastrun > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-lastrun svg.ib-ic { flex: none; }
+.st-lastrun:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.st-lastrun[data-off] { visibility: hidden; }
+.st-runspanel { margin-top: 14px; }
+.st-norun { padding: 22px 0 8px; font-size: var(--ib-fs-13-5, 13.5px); }
+.st-norun p { margin: 0; }
+.st-norun p + p { margin-top: 4px; }
+@media (max-width: 760px) {
+  /* The tabs span the screen, a thumb's height each half (Feedback's sheet); the last run is under them. */
+  .st-tabs.ib-seg { display: flex; flex-wrap: nowrap; align-self: stretch; }
+  .st-tabs .ib-seg-o { flex: 1; justify-content: center; font-size: var(--ib-fs-15, 15px); }
+}

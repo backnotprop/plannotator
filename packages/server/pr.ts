@@ -6,6 +6,7 @@
  */
 
 import { childEnv } from "@plannotator/shared/child-env";
+import { refRunnerKill } from "@plannotator/shared/ref-cards";
 import type {
   PRRef,
   PRMetadata,
@@ -38,6 +39,7 @@ import {
   fetchPRContext as fetchPRContextCore,
   fetchPRFileContent as fetchPRFileContentCore,
   fetchPRFileBytes as fetchPRFileBytesCore,
+  fetchPRTree as fetchPRTreeCore,
   submitPRReview as submitPRReviewCore,
   fetchPRViewedFiles as fetchPRViewedFilesCore,
   markPRFilesViewed as markPRFilesViewedCore,
@@ -51,20 +53,32 @@ export type { GithubPRMetadata } from "@plannotator/shared/pr-types";
 
 const bunCommandRuntime: PRRuntime = {
   async runCommand(cmd, args, options) {
+    const signal = options?.signal;
+    // With a signal, its own process group (POSIX), so an abort also ends what the command started.
+    const group = !!signal && process.platform !== "win32";
     const proc = Bun.spawn([cmd, ...args], {
       // The live env, plus (never replacing it) another gh account's token (#2157).
       env: childEnv(options?.env),
       stdout: "pipe",
       stderr: "pipe",
+      detached: group,
+      windowsHide: true,
     });
+    const stop = () => refRunnerKill((sig) => (group ? process.kill(-proc.pid, sig) : proc.kill(sig)));
+    if (signal?.aborted) stop();
+    else signal?.addEventListener("abort", stop, { once: true });
 
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
+    try {
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
 
-    return { stdout, stderr, exitCode };
+      return { stdout, stderr, exitCode };
+    } finally {
+      signal?.removeEventListener("abort", stop);
+    }
   },
 
   async runCommandWithInput(cmd, args, input, options) {
@@ -73,6 +87,7 @@ const bunCommandRuntime: PRRuntime = {
       stdout: "pipe",
       stderr: "pipe",
       stdin: "pipe",
+      windowsHide: true,
     });
 
     proc.stdin.write(input);
@@ -153,6 +168,11 @@ export function fetchPRFileContent(
 
 export function fetchPRFileBytes(ref: PRRef, sha: string, filePath: string, maxBytes: number) {
   return fetchPRFileBytesCore(runtime, ref, sha, filePath, maxBytes);
+}
+
+/** Every file of one commit from the platform tree API (All files without a checkout). */
+export function fetchPRTree(ref: PRRef, sha: string) {
+  return fetchPRTreeCore(runtime, ref, sha);
 }
 
 /** Submit a review through the Bun command runtime. */

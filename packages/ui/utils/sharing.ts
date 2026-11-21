@@ -16,10 +16,10 @@ import { encrypt, decrypt } from '@plannotator/core/crypto';
 // Image in shareable format: plain string (old) or [path, name] tuple (new)
 type ShareableImage = string | [string, string];
 
-// Minimal shareable annotation format: [type, originalText, text?, author?, images?, quickLabel?]
+// Minimal shareable annotation format: [type, originalText, text?, author?, images?, quickLabel?, quickLabelTip?]
 export type ShareableAnnotation =
   | ['D', string, string | null, ShareableImage[]?]                    // Deletion: type, original, author, images
-  | ['C', string, string, string | null, ShareableImage[]?, (1)?]      // Comment: type, original, comment, author, images, isQuickLabel
+  | ['C', string, string, string | null, ShareableImage[]?, (1)?, string?] // Comment: type, original, comment, author, images, isQuickLabel, quickLabelTip (a label's tip; older links end before it)
   | ['G', string, string | null, ShareableImage[]?];                   // Global Comment: type, comment, author, images
 
 export interface SharePayload {
@@ -29,7 +29,7 @@ export interface SharePayload {
   d?: (string | null)[];  // diffContext per annotation, parallel to `a`
   s?: (string | undefined)[];  // source per annotation (external tool identifier), parallel to `a`
   h?: string;  // raw HTML content (direct HTML rendering mode)
-  r?: 'html';  // render mode flag (omitted = markdown)
+  r?: 'html' | 'asciidoc';  // render mode flag (omitted = markdown)
 }
 
 /**
@@ -103,6 +103,11 @@ export function toShareable(annotations: Annotation[]): ShareableAnnotation[] {
 
     // COMMENT
     if (ann.isQuickLabel) {
+      // The tip rides an optional 7th slot: readers that predate it stop at
+      // the flag, and a label without a tip encodes exactly as before.
+      if (ann.quickLabelTip) {
+        return ['C', ann.originalText, ann.text || '', author, images ?? undefined, 1, ann.quickLabelTip] as ShareableAnnotation;
+      }
       return ['C', ann.originalText, ann.text || '', author, images ?? undefined, 1] as ShareableAnnotation;
     }
     return ['C', ann.originalText, ann.text || '', author, images] as ShareableAnnotation;
@@ -153,6 +158,8 @@ export function fromShareable(data: ShareableAnnotation[], diffContexts?: (strin
     const rawImages = type === 'D' ? item[3] as ShareableImage[] | undefined : item[4] as ShareableImage[] | undefined;
     // Comment annotations may have isQuickLabel flag at index 5
     const isQuickLabel = type === 'C' && item.length > 5 && item[5] === 1 ? true : undefined;
+    // ...and its tip at index 6 (links made before the tip was shared end at 5)
+    const quickLabelTip = isQuickLabel && typeof item[6] === 'string' && item[6] ? item[6] : undefined;
 
     return {
       id: `shared-${index}-${Date.now()}`,
@@ -166,6 +173,7 @@ export function fromShareable(data: ShareableAnnotation[], diffContexts?: (strin
       author: author || undefined,
       images: parseShareableImages(rawImages),
       ...(isQuickLabel ? { isQuickLabel } : {}),
+      ...(quickLabelTip ? { quickLabelTip } : {}),
       ...(diffContexts?.[index] ? { diffContext: diffContexts[index] as Annotation['diffContext'] } : {}),
       ...(sources?.[index] ? { source: sources[index] } : {}),
       // startMeta/endMeta will be set by web-highlighter
@@ -192,6 +200,7 @@ export async function generateShareUrl(
   globalAttachments?: ImageAttachment[],
   baseUrl: string = DEFAULT_SHARE_BASE,
   rawHtml?: string,
+  renderAs?: DocumentRenderAs,
 ): Promise<string | null> {
   // HTML content is too large for URL hashes — force paste service path
   if (rawHtml) return null;
@@ -203,6 +212,7 @@ export async function generateShareUrl(
     g: globalAttachments?.length ? toShareableImages(globalAttachments) : undefined,
     ...(diffContexts ? { d: diffContexts } : {}),
     ...(sources ? { s: sources } : {}),
+    ...(renderAs === 'asciidoc' ? { r: 'asciidoc' as const } : {}),
   };
 
   const hash = await compress(payload);
@@ -274,6 +284,7 @@ export async function createShortShareUrl(
     shareBaseUrl?: string;
   },
   rawHtml?: string,
+  renderAs?: DocumentRenderAs,
 ): Promise<{ shortUrl: string; id: string } | null> {
   const pasteApi = options?.pasteApiUrl ?? DEFAULT_PASTE_API;
   const shareBase = options?.shareBaseUrl ?? DEFAULT_SHARE_BASE;
@@ -287,7 +298,7 @@ export async function createShortShareUrl(
       g: globalAttachments?.length ? toShareableImages(globalAttachments) : undefined,
       ...(diffContexts ? { d: diffContexts } : {}),
       ...(sources ? { s: sources } : {}),
-      ...(rawHtml ? { h: rawHtml, r: 'html' as const } : {}),
+      ...(rawHtml ? { h: rawHtml, r: 'html' as const } : renderAs === 'asciidoc' ? { r: 'asciidoc' as const } : {}),
     };
 
     const compressed = await compress(payload);

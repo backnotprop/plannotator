@@ -7,6 +7,7 @@ import {
 	sendUserMessageToCurrentPiSession,
 	type CurrentPiSessionRegistration,
 } from "./current-pi-session.ts";
+import { setPiHost } from "./pi-host.ts";
 
 const registrations: CurrentPiSessionRegistration[] = [];
 
@@ -14,7 +15,7 @@ afterEach(() => {
 	for (const registration of registrations.splice(0)) registration.clear();
 });
 
-function createContext(sessionId: string, notifications: string[]): ExtensionContext {
+function createContext(sessionId: string, notifications: string[], idle = true): ExtensionContext {
 	return {
 		cwd: "/tmp",
 		mode: "tui",
@@ -24,6 +25,7 @@ function createContext(sessionId: string, notifications: string[]): ExtensionCon
 			getSessionName: () => sessionId,
 		},
 		ui: { notify: (message: string) => notifications.push(message) },
+		isIdle: () => idle,
 	} as unknown as ExtensionContext;
 }
 
@@ -67,4 +69,36 @@ describe("current Pi session feedback routing", () => {
 		expect(replacementMessages).toEqual(["annotation feedback"]);
 		expect(replacementNotifications).toEqual(["feedback delivered"]);
 	});
+});
+
+describe("a message sent after a reload, while the agent is idle", () => {
+	// Oh My Pi only queues a message that names `deliverAs`, even when idle, so
+	// there the message must go without it to start a turn. Pi starts a turn
+	// either way and keeps its options exactly as before.
+	const cases = [
+		{ host: "oh-my-pi", idle: true, expected: undefined },
+		{ host: "oh-my-pi", idle: false, expected: { deliverAs: "followUp" } },
+		{ host: "pi", idle: true, expected: { deliverAs: "followUp" } },
+	] as const;
+	for (const { host, idle, expected } of cases) {
+		test(`${host}, ${idle ? "idle" : "busy"}: ${expected ? "keeps followUp" : "starts a turn"}`, () => {
+			setPiHost(host);
+			try {
+				const oldRuntime = registerSessionRuntime("same-session", [], []);
+				const origin = getPiSessionIdentity(oldRuntime.ctx);
+				const sent: unknown[] = [];
+				const replacement = registerCurrentPiSession({
+					sendUserMessage: (_content: unknown, options?: unknown) => sent.push(options),
+				} as unknown as ExtensionAPI);
+				registrations.push(replacement);
+				replacement.update(createContext("same-session", [], idle));
+				oldRuntime.registration.clear();
+
+				expect(sendUserMessageToCurrentPiSession("feedback", { deliverAs: "followUp" }, origin)).toEqual({ ok: true });
+				expect(sent).toEqual([expected]);
+			} finally {
+				setPiHost("pi");
+			}
+		});
+	}
 });

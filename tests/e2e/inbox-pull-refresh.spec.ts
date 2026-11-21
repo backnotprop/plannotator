@@ -27,7 +27,7 @@
  * PNGs land in PLANNOTATOR_PULL_REFRESH_SHOTS (default /tmp/pull-refresh-shots).
  */
 
-import { chromium, devices, expect, test, webkit, type Browser, type Page } from '@playwright/test';
+import { chromium, devices, expect, test, webkit, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -60,7 +60,7 @@ test.beforeAll(async () => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   mkdirSync(shots, { recursive: true });
   const root = inboxScratch('plannotator-inbox-pull-refresh-e2e-');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
@@ -175,8 +175,10 @@ for (const phone of [
         // The list's read can be held for a moment, so the spin while it is in flight is seen.
         let holdRead = false;
         let reads = 0;
-        await page.route('**/api/inbox/threads?archived=exclude', async (route) => {
+        let lastReadAt = 0;
+        await page.route('**/api/inbox/threads?archived=exclude*', async (route) => {
           reads += 1;
+          lastReadAt = Date.now();
           if (holdRead) {
             holdRead = false;
             await new Promise((r) => setTimeout(r, 1200));
@@ -187,9 +189,9 @@ for (const phone of [
         await expect(body(page).locator('[data-thread-id]').first()).toBeVisible();
         await expect(indicator(page)).toHaveAttribute('aria-hidden', 'true');
 
-        // An agent writes while the person reads: held behind "1 new".
+        // An agent writes while the person reads: held behind "New from …".
         const late = await agentWrites(`Release notes (${tag})`);
-        await expect(notice(page)).toContainText('1 new');
+        await expect(notice(page)).toContainText(/^New from .+: “/);
         await expect(row(page, late)).toHaveCount(0);
 
         const box = (await body(page).boundingBox())!;
@@ -197,7 +199,9 @@ for (const phone of [
         const y = box.y + 90;
         const touch = await finger(page, phone.browserName);
 
-        // A short pull springs back and reads nothing.
+        // A short pull springs back and reads nothing. The stream's connect and the agent's write each owe the list a
+        // read 60 to 120 ms after their frame (App.tsx, listAfterEvents), in either order: those land first.
+        await expect.poll(() => Date.now() - lastReadAt).toBeGreaterThan(1000);
         let before = reads;
         await touch.down(x, y);
         await touch.move(x, y + 70);
@@ -206,7 +210,7 @@ for (const phone of [
         await expect(indicator(page)).not.toHaveAttribute('data-state', /./);
         await page.waitForTimeout(300);
         expect(reads).toBe(before);
-        await expect(notice(page)).toContainText('1 new');
+        await expect(notice(page)).toContainText(/^New from .+: “/);
 
         // Mid-pull: the ↻ shows under the header, the list follows the finger.
         await touch.down(x, y);
@@ -269,7 +273,7 @@ for (const phone of [
           await expect(indicator(page)).toHaveAttribute('data-state', 'ready');
           const old = await row(page, late).elementHandle();
           await world.agent.send({ project_path: world.path, reply_to: late, body: ':::question\nShip it today?\n- Yes\n- No\n:::', agent_session: `ses_pull_ask_${tag}` } as Parameters<SimAgent['send']>[0]);
-          await expect(notice(page)).toContainText('1 new');
+          await expect(notice(page)).toContainText(/^.+ asked in “/);
           // Show, taken in without lifting the finger (as a second finger could).
           await notice(page).evaluate((el) => (el as HTMLElement).click());
           await expect.poll(() => old!.evaluate((el) => el.isConnected)).toBe(false);

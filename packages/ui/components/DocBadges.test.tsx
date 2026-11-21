@@ -80,7 +80,8 @@ describe('DocBadges open-in placement', () => {
     const repository = exactText('plannotator/workspaces');
     const branch = exactText('rooms/resurrect');
     const button = openInButton();
-    const repositoryRow = repository.parentElement;
+    // The repository and branch share a box of their own, so the branch can give way first.
+    const repositoryRow = repository.parentElement?.parentElement;
 
     expect(repositoryRow).not.toBeNull();
     expect(repositoryRow?.contains(branch)).toBe(true);
@@ -175,5 +176,23 @@ describe('DocBadges open-in placement', () => {
 
     expect(filename.parentElement?.contains(button)).toBe(true);
     expect(appearsBefore(filename, button)).toBe(true);
+  });
+
+  test.skipIf(!hasDom)('names a folder file by its file name when the path is a Windows path', async () => {
+    const filepath = 'L:\\repos.ws\\workflows.ws\\openspec\\changes\\v3-initiative\\proposal.md';
+    await renderBadges({
+      linkedDocInfo: { filepath, onBack: () => {}, variant: 'folder-file' },
+    });
+
+    expect(exactText('proposal.md').title).toBe(filepath);
+  });
+
+  test.skipIf(!hasDom)('names a linked document by its file name when the path is a Windows path', async () => {
+    const filepath = 'C:\\Users\\dev\\payments\\docs\\refunds.md';
+    await renderBadges({
+      linkedDocInfo: { filepath, onBack: () => {}, variant: 'breadcrumb' },
+    });
+
+    expect(exactText('refunds.md').title).toBe(filepath);
   });
 });

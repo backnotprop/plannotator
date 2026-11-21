@@ -1,0 +1,5 @@
+revision: W-06
+scope: core
+title: Small plan 6
+change:
+  routing: "Small change number 6."

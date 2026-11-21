@@ -249,6 +249,12 @@ export interface MarkerEngine {
   parseModels: (stdout: string) => MarkerModel[];
   /** Format one stream line for the live log, or null to skip it. */
   formatLogEvent: (event: MarkerStreamEvent) => string | null;
+  /**
+   * The same run with its prompt on stdin instead of in the argv, or null when
+   * the argv is not this engine's. Used only where the prompt cannot be an
+   * argument: a Windows `.cmd` shim, which runs through cmd.exe (#2372).
+   */
+  promptOnStdin?: (argv: string[]) => { command: string[]; stdin: string } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -755,7 +761,7 @@ function piBuildArgv(prompt: string, model?: string, cwd?: string, opts?: Marker
     "--no-session",
     "--no-approve",
     // Full read-only (`--tools read,grep,find,ls`) would break these jobs:
-    // the review/guide/tour prompt tells the agent to inspect the diff itself
+    // the review/guide prompt tells the agent to inspect the diff itself
     // (git diff/log, gh pr view, etc. per buildAgentReviewUserMessage), which
     // needs Bash, not just file-read tools. `--exclude-tools edit,write`
     // instead removes only Pi's purpose-built mutation tools while keeping
@@ -774,6 +780,16 @@ function piBuildArgv(prompt: string, model?: string, cwd?: string, opts?: Marker
     "-p",
     prompt,
   ];
+}
+
+/**
+ * Pi reads piped stdin as the message (`readPipedStdin`, in every release
+ * since the 0.79.1 peer floor), so `pi … -p <prompt>` runs the same as
+ * `pi … -p` with the prompt on stdin.
+ */
+function piPromptOnStdin(argv: string[]): { command: string[]; stdin: string } | null {
+  if (argv.length < 2 || argv[argv.length - 2] !== "-p") return null;
+  return { command: argv.slice(0, -1), stdin: argv[argv.length - 1]! };
 }
 
 // ---------------------------------------------------------------------------
@@ -981,6 +997,7 @@ const PI_ENGINE: MarkerEngine = {
   modelsArgv: ["--list-models"],
   parseModels: piParseModels,
   formatLogEvent: piFormatLogEvent,
+  promptOnStdin: piPromptOnStdin,
 };
 
 const COPILOT_ENGINE: MarkerEngine = {
@@ -1194,8 +1211,8 @@ breaks, and why it isn't already handled.
 
 ## Do NOT report
   - Formatting, naming, or style preferences (unless a repo guideline requires).
-  - "Consider adding tests" — unless the change adds non-trivial logic with no
-    test coverage at all.
+  - Missing tests, unless the change adds non-trivial logic with no test
+    coverage at all.
   - Hypothetical problems needing exotic conditions with no real code path.
   - Speculative refactors or "this could be cleaner" outside the change's scope.
 

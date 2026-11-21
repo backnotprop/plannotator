@@ -1,0 +1,7 @@
+M	docs/agent-guides/inbox-notifications-and-agents.md
+M	packages/inbox/App.tsx
+M	packages/inbox/history.test.ts
+M	packages/inbox/history.ts
+M	packages/inbox/notify.ts
+M	packages/inbox/notifyHook.test.tsx
+M	tests/e2e/notifications.spec.ts

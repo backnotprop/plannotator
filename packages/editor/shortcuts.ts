@@ -37,6 +37,13 @@ export const planEditorShortcuts = defineShortcutScope({
       hint: 'Fires the adaptive header primary: Done (or Approve in gate mode) with nothing to send, Send Feedback otherwise.',
       displayOrder: 10,
     },
+    openDecisionNote: {
+      description: 'Send with a note',
+      bindings: ['Mod+Shift+Enter'],
+      section: 'Actions',
+      hint: 'Opens the note composer of the send menu; Mod+Enter then sends feedback and note together.',
+      displayOrder: 15,
+    },
     quickSave: {
       description: 'Save to notes app',
       bindings: ['Mod+S'],
@@ -68,6 +75,7 @@ const planReviewEditorSettingsShortcuts = defineShortcutScope({
   title: 'Plan Editor',
   shortcuts: {
     submitPlan: planEditorShortcuts.shortcuts.submitPlan,
+    openDecisionNote: planEditorShortcuts.shortcuts.openDecisionNote,
     quickSave: planEditorShortcuts.shortcuts.quickSave,
     exitPlanDiff: planEditorShortcuts.shortcuts.exitPlanDiff,
     printPlan: planEditorShortcuts.shortcuts.printPlan,
@@ -79,6 +87,7 @@ const annotateEditorSettingsShortcuts = defineShortcutScope({
   title: 'Annotate Editor',
   shortcuts: {
     submitAnnotations: planEditorShortcuts.shortcuts.submitAnnotations,
+    openDecisionNote: planEditorShortcuts.shortcuts.openDecisionNote,
     quickSave: planEditorShortcuts.shortcuts.quickSave,
     printPlan: planEditorShortcuts.shortcuts.printPlan,
   },

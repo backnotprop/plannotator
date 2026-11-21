@@ -21,7 +21,7 @@
  * PNGs at 1440 by 900 land in .local/proof/archived/.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -96,7 +96,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   rmSync(proofDir, { recursive: true, force: true });
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-archived-e2e-');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -172,7 +172,8 @@ test('the archived open thread keeps its row until the person leaves; then no se
   await shot('02-list-before');
 
   await page.locator(`.ib-lbody [data-thread-id="${threads.build}"]`).click();
-  await page.locator('section.ib-pane').getByRole('button', { name: 'Archive the thread' }).click();
+  await page.locator('section.ib-pane [data-thread-more]').click();
+  await page.getByRole('menuitem', { name: 'Archive thread' }).click();
   await expect(page.locator('.ib-pfoot')).toContainText('Archived. The next message from');
   const held = page.locator(`.ib-lbody [data-row="${threads.build}"]`);
   await expect(held).toBeVisible();

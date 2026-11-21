@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/server",
-  "version": "0.28.31",
+  "version": "0.29.1",
   "private": true,
   "description": "Shared server implementation for Plannotator plugins",
   "main": "index.ts",
@@ -24,21 +24,34 @@
     "./tailscale-serve": "./tailscale-serve.ts",
     "./ai-runtime": "./ai-runtime.ts",
     "./session-tailnet": "./session-tailnet.ts",
+    "./session-cf-access": "./session-cf-access.ts",
+    "./cf-tunnel": "./cf-tunnel.ts",
+    "./cf-access-checks": "./cf-access-checks.ts",
+    "./cf-access-flow": "./cf-access-flow.ts",
+    "./inbox-cf-access": "./inbox-cf-access.ts",
     "./qr": "./qr.ts",
     "./sessions": "./sessions.ts",
     "./auto-update": "./auto-update.ts",
+    "./update-prepare": "./update-prepare.ts",
+    "./update-log": "./update-log.ts",
     "./project": "./project.ts",
     "./pr": "./pr.ts",
     "./html-assets": "./html-assets.ts",
     "./guide-cli": "./guide/guide-cli.ts",
     "./live-proxy": "./live-proxy.ts",
     "./inbox": "./inbox.ts",
+    "./shape": "./shape.ts",
+    "./inbox-project-root": "./inbox-project-root.ts",
     "./inbox-tailscale": "./inbox-tailscale.ts",
     "./inbox-mcp": "./inbox-mcp.ts",
     "./inbox-mcp-read": "./inbox-mcp-read.ts",
     "./inbox-mcp-search": "./inbox-mcp-search.ts",
     "./inbox-agents": "./inbox-agents.ts",
-    "./inbox-agent-notes": "./inbox-agent-notes.ts"
+    "./test-home-guard": "./test-home-guard.ts",
+    "./inbox-codex-wake": "./inbox-codex-wake.ts",
+    "./inbox-agent-notes": "./inbox-agent-notes.ts",
+    "./inbox-launch-env": "./inbox-launch-env.ts",
+    "./inbox-rex-where": "./inbox-rex-where.ts"
   },
   "files": [
     "*.ts",
@@ -46,21 +59,21 @@
   ],
   "dependencies": {
     "@modelcontextprotocol/server": "2.3.1",
-    "@pierre/diffs": "1.5.2",
+    "@pierre/diffs": "1.7.0-beta.3",
     "@plannotator/ai": "workspace:*",
     "@plannotator/core": "workspace:*",
     "@plannotator/shared": "workspace:*",
+    "@plannotator/system": "workspace:*",
+    "@plannotator/t3-code": "workspace:*",
     "@plannotator/webtui": "0.1.0",
     "chokidar": "^5.0.0",
     "jsonc-parser": "^3.3.1",
     "uqr": "^0.1.3",
     "zod": "4.6.7"
   },
-  "peerDependencies": {
-    "bun": ">=1.0.0"
-  },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.3.1",
+    "fast-check": "4.10.2",
     "glimpseui": "^0.8.0"
   }
 }

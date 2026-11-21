@@ -4,8 +4,8 @@
  * official MCP SDK client over streamable HTTP for the agent side, and real
  * `fetch` for the window's list. Every test uses its own temp data dir.
  *
- *  - routing: an agent session's messages land in one thread; `thread`
- *    splits or joins by name; resolved means done; reply_to wins;
+ *  - routing: a send without reply_to or `thread` starts a thread; `thread`
+ *    joins by name; resolved means done; reply_to wins;
  *  - the list: one row per thread with its project label, placed in the
  *    approved sections, with and without the project filter;
  *  - a store written by step 1 replays, lists and routes.
@@ -96,7 +96,7 @@ function rowsOf(model: ListModel): InboxListRow[] {
 }
 
 describe("send_message routing: a row is a thread", () => {
-  test("a session's sends share a thread; `thread` splits and joins by name; resolved starts anew; reply_to wins", async () => {
+  test("an unnamed send starts a thread; `thread` splits and joins by name; resolved starts anew; reply_to wins", async () => {
     const root = tempRoot();
     const repo = gitProject(root, "api");
     const server = await start(join(root, "data"));
@@ -104,9 +104,9 @@ describe("send_message routing: a row is a thread", () => {
     const send = async (args: Record<string, unknown>) =>
       structured<Sent>(await client.callTool({ name: "send_message", arguments: { project_path: repo, ...args } }));
 
-    // Two sends from one session: one thread, which keeps its first subject.
+    // A send and a reply to it: one thread, which keeps its first subject.
     const a1 = await send({ body: "Starting the retry worker.", subject: "Retry worker", agent_session: "ses_A" });
-    const a2 = await send({ body: "Half way there.", subject: "Ignored subject", agent_session: "ses_A" });
+    const a2 = await send({ body: "Half way there.", subject: "Ignored subject", reply_to: a1.message_id, agent_session: "ses_A" });
     expect(a1.new_thread).toBe(true);
     expect(a2).toMatchObject({ thread_id: a1.thread_id, new_thread: false, thread_name: null });
 
@@ -118,12 +118,15 @@ describe("send_message routing: a row is a thread", () => {
     // Another session naming "b" (any case, extra spaces) joins it.
     const b1 = await send({ body: "I can take the docs.", thread: "  B ", agent_session: "ses_B" });
     expect(b1).toMatchObject({ thread_id: a3.thread_id, new_thread: false, thread_name: "b" });
-    // ...while its own unnamed message starts its own default thread.
+    // ...while its own unnamed message starts a new thread.
     const b2 = await send({ body: "My own work.", subject: "B's work", agent_session: "ses_B" });
     expect(b2.new_thread).toBe(true);
     expect([a1.thread_id, a3.thread_id]).not.toContain(b2.thread_id);
-    // And ses_A's next unnamed message is back in its default thread.
-    expect((await send({ body: "Done with the worker.", agent_session: "ses_A" })).thread_id).toBe(a1.thread_id);
+    // So does ses_A's next unnamed message: it never joins the session's earlier thread.
+    const a4 = await send({ body: "Unrelated news.", agent_session: "ses_A" });
+    expect(a4.new_thread).toBe(true);
+    expect([a1.thread_id, a3.thread_id, b2.thread_id]).not.toContain(a4.thread_id);
+    expect((await send({ body: "Done with the worker.", reply_to: a2.message_id, agent_session: "ses_A" })).thread_id).toBe(a1.thread_id);
 
     // The thread holds every message, with its first subject.
     const thread = structured<{ thread: { subject: string; thread_name: string | null; messages: { body: string }[] } }>(
@@ -137,13 +140,9 @@ describe("send_message routing: a row is a thread", () => {
     expect(named).toMatchObject({ thread_name: "b" });
     expect(named.messages).toHaveLength(2);
 
-    // Resolved = done: the session's next message starts a new thread, and stays in it.
+    // Resolved = done: the worker's thread is resolved (a reply below still lands in it),
+    // and a named thread resolved, the name starts a new thread under it.
     await client.callTool({ name: "resolve_message", arguments: { message_id: a2.message_id } });
-    const a5 = await send({ body: "Something new came up.", subject: "Follow-up", agent_session: "ses_A" });
-    expect(a5.new_thread).toBe(true);
-    expect(a5.thread_id).not.toBe(a1.thread_id);
-    expect((await send({ body: "More on it.", agent_session: "ses_A" })).thread_id).toBe(a5.thread_id);
-    // Same for a named thread: resolved, the name starts a new thread under it.
     await client.callTool({ name: "resolve_message", arguments: { message_id: a3.thread_id } });
     const b3 = await send({ body: "Docs, round two.", thread: "b", agent_session: "ses_B" });
     expect(b3).toMatchObject({ new_thread: true, thread_name: "b" });
@@ -159,7 +158,7 @@ describe("send_message routing: a row is a thread", () => {
     ).thread.messages.at(-1)!;
     expect(replied).toMatchObject({ id: reply.message_id, reply_to: a2.message_id });
 
-    // No session: nothing to join, each message is its own thread (step 1's behaviour).
+    // No session: each message is its own thread too.
     const anon1 = structured<Sent>(await client.callTool({ name: "send_message", arguments: { body: "anon one", project_path: repo } }));
     const anon2 = structured<Sent>(await client.callTool({ name: "send_message", arguments: { body: "anon two", project_path: repo } }));
     expect(anon1.thread_id).not.toBe(anon2.thread_id);
@@ -188,6 +187,44 @@ describe("send_message routing: a row is a thread", () => {
     expect(new Set(mine.map((t) => t.thread_id))).toEqual(new Set([a3.thread_id, b2.thread_id, b3.thread_id, a1.thread_id]));
     expect(listed.project.name).toBe("api");
     expect(mine.every((t) => typeof t.section === "string")).toBe(true);
+  });
+});
+
+describe("read_thread's list over a folder with no project of its own", () => {
+  test("names the repo projects inside it, and not a sibling that shares the prefix", async () => {
+    const root = tempRoot();
+    const saved = { HOME: process.env.HOME, CONNECT: process.env.PLANNOTATOR_INBOX_CONNECT };
+    process.env.HOME = join(root, "home");
+    process.env.PLANNOTATOR_INBOX_CONNECT = "0";
+    try {
+      const parent = join(root, "work", "herdr");
+      const repo = gitProject(parent, "herdr");
+      const sibling = gitProject(join(root, "work"), "herdr-other");
+      mkdirSync(join(root, "work", "herd"), { recursive: true });
+      const server = await start(join(root, "data"));
+      const client = await mcpClient(server);
+      for (const dir of [repo, sibling]) {
+        await client.callTool({ name: "send_message", arguments: { body: "hello", project_path: dir, agent_session: "ses_A" } });
+      }
+
+      const outer = await client.callTool({ name: "read_thread", arguments: { project_path: parent } });
+      const found = structured<{ total: number; projects_inside?: { root: string; threads: number }[] }>(outer);
+      expect(found.total).toBe(0);
+      expect(found.projects_inside?.map((p) => [p.root, p.threads])).toEqual([[repo, 1]]);
+      expect(JSON.stringify(outer)).toContain(repo);
+      expect(JSON.stringify(outer)).not.toContain(sibling);
+      const projects = server.store.listProjects().length;
+
+      // /work/herd is a string prefix of /work/herdr but holds no project: nothing is named, nothing is made.
+      const prefixOnly = structured<{ projects_inside?: unknown }>(await client.callTool({ name: "read_thread", arguments: { project_path: join(root, "work", "herd") } }));
+      expect(prefixOnly.projects_inside).toBeUndefined();
+      expect(server.store.listProjects().length).toBe(projects); // a list never makes a project (not even for the folder asked), and the hint makes none
+    } finally {
+      for (const [key, value] of [["HOME", saved.HOME], ["PLANNOTATOR_INBOX_CONNECT", saved.CONNECT]] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
   });
 });
 
@@ -282,16 +319,18 @@ describe("the list: per-thread sections across projects", () => {
     expect((await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads?project=nope`)).status).toBe(422);
     expect((await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads?project=prj_01ARZ3NDEKTSV4RRFFQ69G5FAV`)).status).toBe(404);
 
-    // The agent reads the reply: Sent moves to Quiet.
-    const got = structured<{ status: string }>(await client.callTool({ name: "wait_for_reply", arguments: { thread_id: sentRow.thread_id, timeout_seconds: 5 } }));
-    expect(got.status).toBe("replied");
+    // The agent reads the reply (its own session: only the recipient's read settles it): Sent moves to Quiet.
+    await client.callTool({ name: "read_thread", arguments: { thread_id: sentRow.thread_id, agent_session: "s5" } });
     // The person opens the news: it leaves "New since you looked"...
     const seen = await post(server, `/api/inbox/threads/${news.thread_id}/seen`, {});
     expect(seen.status).toBe(200);
     expect((await seen.json()).thread.section).toBe("quiet");
     expect(placed(await list(server))).toMatchObject({ sent: [], new: ["SDK bump"], quiet: ["Web PR", "Finished", "Nightly build"] });
     // ...until the same agent session writes again into that thread.
-    expect((await send(api, "s6", "And the deploy is out.", "ignored")).thread_id).toBe(news.thread_id);
+    const more = structured<Sent>(
+      await client.callTool({ name: "send_message", arguments: { project_path: api, agent_session: "s6", body: "And the deploy is out.", reply_to: news.message_id } }),
+    );
+    expect(more.thread_id).toBe(news.thread_id);
     expect(placed(await list(server, apiId)).new).toEqual(["Nightly build"]);
 
     // A stale tab's seen is refused like any other window write.
@@ -350,7 +389,7 @@ describe("routing edges, through the real doors", () => {
     expect(await send("three")).toMatchObject({ thread_id: t1.thread_id, new_thread: false });
   });
 
-  test("sessions racing on one name, and one session's parallel sends, each land in ONE thread, and stay so after a restart", async () => {
+  test("sessions racing on one name land in ONE thread, one session's parallel unnamed sends each start their own, and stay so after a restart", async () => {
     const root = tempRoot();
     const repo = gitProject(root, "api");
     const dataDir = join(root, "data");
@@ -365,52 +404,15 @@ describe("routing edges, through the real doors", () => {
     expect(new Set(raced.map((r) => r.thread_id)).size).toBe(1);
     expect(raced.filter((r) => r.new_thread)).toHaveLength(1);
     const burst = await Promise.all(Array.from({ length: 10 }, (_, i) => sendVia(i % 2 ? c1 : c2, { body: `burst ${i}`, agent_session: "ses_P" })));
-    expect(new Set(burst.map((r) => r.thread_id)).size).toBe(1);
-    expect(burst.filter((r) => r.new_thread)).toHaveLength(1);
+    expect(new Set(burst.map((r) => r.thread_id)).size).toBe(10);
+    expect(burst.filter((r) => r.new_thread)).toHaveLength(10);
 
     const before = await list(server);
-    expect(rowsOf(before)).toHaveLength(2);
+    expect(rowsOf(before)).toHaveLength(11);
     server.stop();
     servers.splice(servers.indexOf(server), 1);
     server = await start(dataDir);
     expect((await list(server)).sections).toEqual(before.sections);
-  });
-
-  test("wait_for_reply in a shared thread: another session writing after the reply does not hide it; a returned reply checks only itself", async () => {
-    const root = tempRoot();
-    const repo = gitProject(root, "api");
-    const server = await start(join(root, "data"));
-    const client = await mcpClient(server);
-    const send = async (args: Record<string, unknown>) =>
-      structured<Sent>(await client.callTool({ name: "send_message", arguments: { project_path: repo, ...args } }));
-    const wait = async (args: Record<string, unknown>) =>
-      structured<{ status: string; cursor: number; reply?: { body: string } }>(
-        await client.callTool({ name: "wait_for_reply", arguments: { timeout_seconds: 1, ...args } }),
-      );
-
-    // ses_A asks in "shared"; the person answers; ses_B then writes in the same thread.
-    const asked = await send({ body: PLAIN_Q("Use the new schema?"), thread: "shared", agent_session: "ses_A" });
-    expect((await post(server, `/api/inbox/messages/${asked.message_id}/reply`, { idempotency_key: "r-shared", words: "Yes, the new one." })).status).toBe(200);
-    await send({ body: "I am on the migration.", thread: "shared", agent_session: "ses_B" });
-    // ses_A still gets the answer at once: the threshold is ITS last message, not ses_B's.
-    expect(await wait({ thread_id: asked.thread_id, agent_session: "ses_A" })).toMatchObject({
-      status: "replied",
-      reply: { body: expect.stringContaining("Yes, the new one.") },
-    });
-
-    // Two replies before the agent looks: the first one returned leaves the row in Sent.
-    const q = await send({ body: "Ready to merge?", agent_session: "ses_C" });
-    for (const [key, words] of [["r1", "First thought."], ["r2", "Second thought."]]) {
-      expect((await post(server, `/api/inbox/messages/${q.message_id}/reply`, { idempotency_key: key, words })).status).toBe(200);
-    }
-    const rowOf = async () => rowsOf(await list(server)).find((r) => r.thread_id === q.thread_id)!;
-    expect(await rowOf()).toMatchObject({ section: "sent", sent: { checked_at: null } });
-    const got1 = await wait({ thread_id: q.thread_id, agent_session: "ses_C" });
-    expect(got1.reply?.body).toContain("First thought.");
-    expect(await rowOf()).toMatchObject({ section: "sent", sent: { checked_at: null } });
-    const got2 = await wait({ thread_id: q.thread_id, agent_session: "ses_C", cursor: got1.cursor });
-    expect(got2.reply?.body).toContain("Second thought.");
-    expect((await rowOf()).section).toBe("quiet");
   });
 
   test("/seen: a look with nothing new writes nothing; the window guards refuse before anything is written", async () => {
@@ -432,7 +434,7 @@ describe("routing edges, through the real doors", () => {
     const start0 = lineCount();
     expect((await post(server, seenPath, {})).status).toBe(200);
     expect(lineCount()).toBe(start0 + 1);
-    await send(client, repo, "More news.");
+    await send(client, repo, "More news.", "ses_A", sent.message_id);
     const afterNews = lineCount();
     // Refused: a cross-site page, a foreign Host (DNS rebinding), a stale tab. Nothing is written.
     const crossSite = await fetch(`http://127.0.0.1:${server.port}${seenPath}`, {
@@ -478,14 +480,15 @@ function rawPost(port: number, path: string, headers: string[], body: string): P
   });
 }
 
-async function send(client: Client, repo: string, body: string, session = "ses_A"): Promise<Sent> {
-  return structured<Sent>(await client.callTool({ name: "send_message", arguments: { project_path: repo, body, agent_session: session } }));
+async function send(client: Client, repo: string, body: string, session = "ses_A", replyTo?: string): Promise<Sent> {
+  const args = { project_path: repo, body, agent_session: session, ...(replyTo ? { reply_to: replyTo } : {}) };
+  return structured<Sent>(await client.callTool({ name: "send_message", arguments: args }));
 }
 
 describe("a store written by step 1", () => {
   const FIXTURE = join(import.meta.dir, "..", "..", "tests", "test-fixtures", "inbox-step1");
 
-  test("replays unchanged, lists one row per thread in its section, and routes the session's next message", async () => {
+  test("replays unchanged, lists one row per thread in its section, and the session's next message starts a thread", async () => {
     const root = tempRoot();
     const dataDir = join(root, "data");
     cpSync(FIXTURE, dataDir, { recursive: true });
@@ -522,14 +525,15 @@ describe("a store written by step 1", () => {
     const webId = model.projects.find((p) => p.name === "web")!.id;
     expect(placed(await list(server, webId))).toMatchObject({ quiet: ["Web build is green."], new: [], sent: [] });
 
-    // ses_old1's next unnamed message joins its newest open thread (step 1's m2).
+    // ses_old1's next unnamed message starts a new thread, beside its open ones.
     const second = rows.find((r) => r.subject === "Second thought, separate in step 1.")!;
-    const joined = server.store.sendMessage({
+    const next = server.store.sendMessage({
       project_id: second.project_id,
       author: { kind: "agent", host: "claude-code", session: "ses_old1", name: null },
       body: "Picking it back up.",
     });
-    expect(joined.message.thread_id).toBe(second.thread_id);
+    expect(next.message.thread_id).toBe(next.message.id);
+    expect(rows.map((r) => r.thread_id)).not.toContain(next.message.thread_id);
 
     // A restart replays the mixed old/new log to the same list.
     const before = await list(server);

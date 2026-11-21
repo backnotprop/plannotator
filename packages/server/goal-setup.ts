@@ -6,7 +6,8 @@
  * launch a browser session, wait, and receive a structured JSON result.
  */
 
-import { appHtmlResponse, likelyAppHtmlEncoding, prewarmAppHtml } from "@plannotator/shared/app-html";
+import { likelyAppHtmlEncoding, prewarmAppHtml } from "@plannotator/shared/app-html";
+import { openPackedApp, packedAppResponse } from "@plannotator/shared/packed-app";
 import type { Origin } from "@plannotator/shared/agents";
 import {
   createFactsResult,
@@ -22,6 +23,8 @@ import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { refuseCrossOriginWrite } from "./request-origin-guard";
 import { getRepoInfo } from "./repo";
 import {
+  handleCustomThemesScript,
+  customThemesPage,
   handleFavicon,
   handleImage,
   handleServerReady,
@@ -83,6 +86,7 @@ export async function startGoalSetupServer(
 ): Promise<GoalSetupServerResult> {
   const { bundle, htmlContent, origin = "claude-code", onReady } = options;
   const isRemote = isRemoteSession();
+  const app = openPackedApp(htmlContent, { page: (html) => customThemesPage(html) });
   const wslFlag = await isWSL();
   const repoInfo = await getRepoInfo();
   const gitUser = detectGitUser();
@@ -208,9 +212,10 @@ export async function startGoalSetupServer(
             return Response.json({ ok: true });
           }
 
-          if (url.pathname === "/favicon.png") return handleFavicon();
+          if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") return handleFavicon(url.pathname);
+          if (url.pathname === "/plannotator-themes.js" && req.method === "GET") return handleCustomThemesScript(url.searchParams);
 
-          return appHtmlResponse(req, htmlContent, isRemote);
+          return packedAppResponse(app, req, url.pathname, isRemote);
         },
 
         error(err) {
@@ -227,7 +232,7 @@ export async function startGoalSetupServer(
   const serverUrl = buildAdvertisedUrl(port);
   // Remote sessions serve the app page compressed (#1617); start the likely
   // encoding (gzip over plain http) now so the first load does not wait.
-  if (isRemote) prewarmAppHtml(htmlContent, likelyAppHtmlEncoding(false));
+  if (isRemote) prewarmAppHtml(app.page(), likelyAppHtmlEncoding(false));
   onReady?.(serverUrl, isRemote, port);
 
   return {

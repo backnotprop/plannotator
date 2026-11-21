@@ -4,7 +4,7 @@ import { Menu } from '@base-ui/react/menu';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { formatCount } from '../format';
 import { AuthorMark, Icon } from '../icons';
-import { pinnedRowName, pinnedState } from '../pins';
+import { pinnedLabel, pinnedRowName, pinnedState } from '../pins';
 import { rowAgent } from './InboxList';
 import { Tip } from './Tip';
 
@@ -13,12 +13,14 @@ export type PinnedAction = 'unpin' | 'up' | 'down' | 'copy-link';
 
 export interface PinnedRowProps {
   row: InboxListRow;
+  /** The project as the sidebar names it (shortProjectNames). Absent: the server's name. */
+  project?: string;
   /** The thread on screen: the list's selection pill and `aria-current`. */
   on: boolean;
   /** First or last pin: Move up or Move down is disabled. */
   first: boolean;
   last: boolean;
-  /** A phone: ⋯ always shown, the menu a sheet from the bottom edge titled by the subject, no right-click. */
+  /** A phone: ⋯ always shown, the menu a sheet from the bottom edge titled by the row's label, no right-click. */
   phone: boolean;
   onOpen: () => void;
   onAction: (action: PinnedAction) => void;
@@ -26,15 +28,16 @@ export interface PinnedRowProps {
 
 /**
  * One pinned thread in the sidebar (approval "inbox-pinned-threads", variant
- * Count): the agent's mark, the subject (cut with "…"; the whole subject and
- * its project in a component tooltip), then the state, the way a project row
+ * Count): the agent's mark, the thread's name or else the subject (cut with
+ * "…"; the whole label, the subject if it differs, and its project in a component tooltip), then the state, the way a project row
  * shows its count: a Stopped or Holds N pill in the badges' tints, the open
  * questions, a dot for news, or nothing when nothing waits on the person (the
  * row steps back); an archived thread shows the archive glyph. Bold when the
  * list row would be. ⋯ beside it (the project row's pattern: two buttons side
  * by side) opens Unpin, Move up, Move down and Copy link; a right-click on the
  * row opens the same menu. On a phone ⋯ is always shown, 44 px, and the menu
- * is a bottom sheet titled by the subject.
+ * is a bottom sheet titled by the row's label, and the row has two lines: the
+ * name in full (up to two lines), then its project and its state in words.
  */
 export function PinnedRow(props: PinnedRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -43,11 +46,13 @@ export function PinnedRow(props: PinnedRowProps) {
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => setPortal(more.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
   const { row } = props;
+  const project = props.project ?? row.project.name;
   const state = pinnedState(row);
   const subject = row.subject ?? '(no subject)';
+  const label = pinnedLabel(row);
   const items = (
     <PinnedMenuItems
-      subject={subject}
+      subject={label}
       first={props.first}
       last={props.last}
       onAction={(action) => {
@@ -77,6 +82,16 @@ export function PinnedRow(props: PinnedRowProps) {
         <Icon name="archive" size={13} />
       </span>
     ) : null;
+  // On a phone the state is said in words after the project: the pills as they are, a count as its words, news as "New".
+  const phoneState =
+    state.kind === 'stop' || state.kind === 'hold' ? (
+      tail
+    ) : state.kind === 'wait' || state.kind === 'new' || state.kind === 'archived' ? (
+      <span className="ib-pin-st" data-k={state.kind}>
+        {/* One open question has no words of its own in the list (`questionCount`); here it is said. */}
+        {state.words || '1 question'}
+      </span>
+    ) : null;
   const row_ = (children: ReactNode, extra: Record<string, unknown> = {}) => (
     <div className="ib-pinrow" data-pin={row.thread_id} data-menu={menuOpen || contextOpen ? '' : undefined} {...extra}>
       {children}
@@ -84,31 +99,47 @@ export function PinnedRow(props: PinnedRowProps) {
   );
   const content = (
     <>
-      <Tip side="right" content={<PinnedTipText subject={subject} project={row.project.name} state={state.words} />}>
+      <Tip side="right" content={<PinnedTipText label={label} subject={subject} project={project} state={state.words} />}>
         <button
           type="button"
           className={`ib-pin${row.unread ? ' ib-u' : ''}${state.calm ? ' ib-calm' : ''}${props.on ? ' ib-on' : ''}`}
           onClick={props.onOpen}
-          aria-label={pinnedRowName(row)}
+          aria-label={pinnedRowName(row, project)}
           aria-current={props.on ? 'true' : undefined}
           data-pinned-row={row.thread_id}
           data-state={state.kind}
         >
           <AuthorMark author={rowAgent(row)} />
-          <span className="ib-name" dir="auto">
-            {subject}
-          </span>
-          {tail}
+          {props.phone ? (
+            // A phone's sheet (approval "inbox-phone-sidebar-sheet"): the name in full on up to two lines, then its project and state.
+            <span className="ib-pin-t">
+              <span className="ib-name" dir="auto">
+                {label}
+              </span>
+              <span className="ib-pin-sub" aria-hidden="true">
+                <bdi className="ib-pin-proj">{project}</bdi>
+                {phoneState && <span className="ib-pin-dot">·</span>}
+                {phoneState}
+              </span>
+            </span>
+          ) : (
+            <>
+              <span className="ib-name" dir="auto">
+                {label}
+              </span>
+              {tail}
+            </>
+          )}
         </button>
       </Tip>
       <Menu.Root open={menuOpen} onOpenChange={setMenuOpen} modal={false}>
-        <Menu.Trigger ref={more} className="ib-pmore" aria-label={`${subject} options`} data-pin-more={row.thread_id}>
+        <Menu.Trigger ref={more} className="ib-pmore" aria-label={`${label} options`} data-pin-more={row.thread_id}>
           <Icon name="dots" size={16} />
         </Menu.Trigger>
         <Menu.Portal container={portal ?? undefined}>
           {props.phone && <Menu.Backdrop className="ib-pm-scrim" />}
           <Menu.Positioner className="ib-pm-pos" side="bottom" align="start" sideOffset={4} data-phone={props.phone ? '' : undefined}>
-            <Menu.Popup className="ib-pm" aria-label={subject} data-pin-menu={row.thread_id}>
+            <Menu.Popup className="ib-pm" aria-label={label} data-pin-menu={row.thread_id}>
               {items}
             </Menu.Popup>
           </Menu.Positioner>
@@ -123,7 +154,7 @@ export function PinnedRow(props: PinnedRowProps) {
       <ContextMenu.Portal container={portal ?? undefined}>
         <ContextMenu.Positioner className="ib-pm-pos">
           {/* Focus goes back to the row's ⋯, never the page. */}
-          <ContextMenu.Popup className="ib-pm" aria-label={subject} data-pin-menu={row.thread_id} finalFocus={more}>
+          <ContextMenu.Popup className="ib-pm" aria-label={label} data-pin-menu={row.thread_id} finalFocus={more}>
             {items}
           </ContextMenu.Popup>
         </ContextMenu.Positioner>
@@ -135,13 +166,13 @@ export function PinnedRow(props: PinnedRowProps) {
 function PinnedMenuItems({ subject, first, last, onAction }: { subject: string; first: boolean; last: boolean; onAction: (action: PinnedAction) => void }) {
   return (
     <>
-      {/* The popup is named by the subject already (aria-label): the title is for the eye only (a phone's sheet). */}
+      {/* The popup is named by the label already (aria-label): the title is for the eye only (a phone's sheet). */}
       <div className="ib-pm-title" dir="auto" aria-hidden="true">
         {subject}
       </div>
-      <Menu.Item className="ib-pmi" label="Unpin" onClick={() => onAction('unpin')} data-pin-action="unpin">
-        <Icon name="pinOff" size={15} />
-        Unpin
+      <Menu.Item className="ib-pmi" label="Unstar" onClick={() => onAction('unpin')} data-pin-action="unpin">
+        <Icon name="star" size={15} className="ib-star-on" />
+        Unstar
       </Menu.Item>
       <Menu.Item className="ib-pmi" label="Move up" disabled={first} onClick={() => onAction('up')} data-pin-action="up">
         <Icon name="arrowUp" size={15} />
@@ -160,11 +191,16 @@ function PinnedMenuItems({ subject, first, last, onAction }: { subject: string; 
   );
 }
 
-/** A pinned row's tooltip: the whole subject (the row may cut it) over its project and state. */
-function PinnedTipText({ subject, project, state }: { subject: string; project: string; state: string }) {
+/** A pinned row's tooltip: the whole label (the row may cut it), the subject when it differs, then project and state. */
+function PinnedTipText({ label, subject, project, state }: { label: string; subject: string; project: string; state: string }) {
   return (
     <span className="ib-tip-proj" data-pin-tip="">
-      <bdi className="ib-tip-name">{subject}</bdi>
+      <bdi className="ib-tip-name">{label}</bdi>
+      {label !== subject && (
+        <span className="ib-tip-sub" data-pin-tip-subject="">
+          <bdi>{subject}</bdi>
+        </span>
+      )}
       <span className="ib-tip-sub">
         <bdi>{project}</bdi> · {state}
       </span>

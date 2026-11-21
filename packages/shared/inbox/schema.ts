@@ -3,7 +3,9 @@
  *
  *   inbox/
  *     inbox.json                       the registry (registry.ts)
- *     projects/<key>/project.json      one line: the project snapshot
+ *     projects/<key>/project.json      the project's snapshots, one line each:
+ *                                      the first, then one per rename or
+ *                                      reset (renameProject); the last wins
  *     projects/<key>/messages.jsonl    messages and replies
  *     projects/<key>/questions.jsonl   one record per question block
  *     projects/<key>/decisions.jsonl   an older store's decisions: never applied,
@@ -13,7 +15,17 @@
  *     projects/<key>/cards.jsonl       the Board's cards (approval "inbox-board"):
  *                                      their own records, never read by thread
  *                                      routing or the list
- *     blobs/<sha256>                   the bytes of each attachment as sent
+ *     projects/<key>/steps.jsonl       each agent session's steps per thread
+ *                                      (approval "inbox-thread-steps"): their
+ *                                      own records, read by nothing that
+ *                                      routes, lists or notifies
+ *     initiatives.jsonl                the Board's initiatives (approval
+ *                                      "board-initiatives"): one file for every
+ *                                      project, read by the Board only
+ *     scheduled.jsonl                  routines (inbox-scheduled-types.ts):
+ *                                      one file for every project, read by the clock
+ *                                      and the scheduled routes only
+ *     blobs/<sha256>                  the bytes of each attachment as sent
  *     seq.json                         the highest seq ever written (kept
  *                                      across a deletion, so seq never repeats)
  *
@@ -38,13 +50,25 @@ export const LEGACY_DECISIONS_FILE = "decisions.jsonl";
 export const ANNOTATIONS_FILE = "annotations.jsonl";
 /** The Board's cards (approval "inbox-board"): never read by thread routing or the list. */
 export const CARDS_FILE = "cards.jsonl";
+/** Each agent session's steps per thread (approval "inbox-thread-steps"): never read by routing, the list, unread or notifications. */
+export const STEPS_FILE = "steps.jsonl";
+/** Each thread's PRs (approval "inbox-pr-binding"), kind `thread_pull`: never read by routing, the list's sections, unread or notifications. */
+export const PULLS_FILE = "pulls.jsonl";
+/**
+ * The Board's initiatives (approval "board-initiatives"): one file in the
+ * inbox folder, not per project (an initiative crosses projects), on the
+ * store's one seq counter. Never read by routing, the list, unread or notifications.
+ */
+export const INITIATIVES_FILE = "initiatives.jsonl";
 export const SEQ_FLOOR_FILE = "seq.json";
+/** Routines (inbox-scheduled-types.ts): one file in the inbox folder, like initiatives, so one with no project yet has a place. */
+export const SCHEDULED_FILE = "scheduled.jsonl";
 
 export function inboxDir(dataDir: string): string {
   return join(dataDir, INBOX_DIR_NAME);
 }
 
-const KINDS: ReadonlySet<InboxRecordKind> = new Set(["project", "message", "question", "annotation", "card"]);
+const KINDS: ReadonlySet<InboxRecordKind> = new Set(["project", "message", "question", "annotation", "card", "steps", "initiative", "thread_pull", "scheduled"]);
 
 /**
  * One line of a store file, or null when it is not a line this reader can

@@ -5,7 +5,7 @@
  * The failure this catches is the folder sharing a class with any question
  * card style again: it must not match `.pn-inbox .ib-q`.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';

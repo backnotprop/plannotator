@@ -13,11 +13,13 @@ import {
   PlanDiffModeSwitcher,
   type PlanDiffMode,
 } from "./PlanDiffModeSwitcher";
-import { PlanCleanDiffView } from "./PlanCleanDiffView";
+import { PlanCleanDiffView, type PlanDiffCodeDocument } from "./PlanCleanDiffView";
 import { PlanRawDiffView } from "./PlanRawDiffView";
 import { PlanDiffBadge } from "./PlanDiffBadge";
 import { VSCodeIcon } from "./VSCodeIcon";
 import { noteServerSessionMismatch, withServerSession } from "../../utils/serverSession";
+import { useConfigValue } from "../../config";
+import { repoLabel } from "../../utils/repoLabel";
 
 interface PlanDiffViewerProps {
   diffBlocks: PlanDiffBlock[];
@@ -36,6 +38,18 @@ interface PlanDiffViewerProps {
   selectedAnnotationId?: string | null;
   mode?: EditorMode;
   onOpenVscodeDiff?: (baseVersion: number) => Promise<{ ok?: boolean; error?: string }>;
+  /**
+   * Grow the diff card to the full height the parent gives it, like Viewer's
+   * `fillHeight`, so a short diff's card still runs to the bottom of the view.
+   * Default false: the card sizes to its content.
+   */
+  fillHeight?: boolean;
+  /**
+   * The document is a config or data file (`renderAs: "code"`): the Rendered
+   * and Classic modes show its chunks as code in `language` instead of
+   * parsing them as markdown. Absent, the diff renders as markdown.
+   */
+  codeDocument?: PlanDiffCodeDocument;
 }
 
 const defaultOpenVscodeDiff = async (
@@ -77,7 +91,10 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
   selectedAnnotationId,
   mode,
   onOpenVscodeDiff,
+  fillHeight = false,
+  codeDocument,
 }) => {
+  const hideRepoOwner = useConfigValue('hideRepoOwner');
   const [vscodeDiffLoading, setVscodeDiffLoading] = useState(false);
   const [vscodeDiffError, setVscodeDiffError] = useState<string | null>(null);
 
@@ -102,8 +119,12 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
   };
 
   return (
-    <div className="relative z-50 w-full" style={maxWidth ? { maxWidth } : { maxWidth: 832 }}>
-      <article className="w-full bg-card border border-border/50 rounded-xl shadow-xl p-5 md:p-8 lg:p-10 xl:p-12 relative" data-doc-text-root="">
+    <div
+      className={`relative z-50 w-full${fillHeight ? ' flex flex-col print:block' : ''}`}
+      data-viewer-fill-height={fillHeight ? '' : undefined}
+      style={maxWidth ? { maxWidth } : { maxWidth: 832 }}
+    >
+      <article className={`w-full ${fillHeight ? 'flex-1 ' : ''}bg-card border border-border/50 rounded-xl shadow-xl p-5 md:p-8 lg:p-10 xl:p-12 relative`} data-doc-text-root="">
         {/* Top-left: repo info + diff badge — matches Viewer layout (flex-col) so badge doesn't jump position */}
         <div className="absolute top-3 left-3 md:top-4 md:left-5 flex flex-col items-start gap-1 text-[9px] text-muted-foreground/50 font-mono">
           {repoInfo && (
@@ -112,7 +133,7 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
                 className="px-1.5 py-0.5 bg-muted/50 rounded truncate max-w-[140px]"
                 title={repoInfo.display}
               >
-                {repoInfo.display}
+                {repoLabel(repoInfo.display, hideRepoOwner)}
               </span>
               {repoInfo.branch && (
                 <span
@@ -211,6 +232,7 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
             selectedAnnotationId={selectedAnnotationId}
             mode={mode}
             wordLevel={diffMode === "clean"}
+            codeDocument={codeDocument}
           />
         )}
       </article>

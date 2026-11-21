@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { classifyForgeHost, forgeRefLinks, normalizeForgeHost } from "./forge-refs";
+import { classifyForgeHost, findCrossRepoRef, forgeRefLinks, gitlabHostsSnapshot, learnGitlabHosts, matchCrossRepoRef, normalizeForgeHost } from "./forge-refs";
 
 describe("forgeRefLinks", () => {
   const cases: Array<{
@@ -101,5 +101,70 @@ describe("classifyForgeHost", () => {
     expect(classifyForgeHost("sub.gitlab.example.io")).toBe("gitlab");
     expect(classifyForgeHost("mygitlabproxy.example.com")).toBeNull();
     expect(classifyForgeHost("notgithub.com")).toBeNull();
+  });
+
+  test("a label that is gitlab or starts gitlab- names a GitLab; a look-alike or a gitlab inside a word does not", () => {
+    for (const host of ["gitlab-master.example.com", "gitlab-ce.corp.net", "code.gitlab-prod.example.org", "gitlab.acme.dev", "gitlab.com", "gitlab-acme.example.com:8443"]) {
+      expect(classifyForgeHost(host)).toBe("gitlab");
+    }
+    for (const host of ["mygitlabproxy.example.com", "corp-gitlab.example.com", "notgitlab.example.com", "example.gitlab", "gitlab"]) {
+      expect(classifyForgeHost(host)).toBeNull();
+    }
+    expect(classifyForgeHost("github-enterprise.corp.net")).toBeNull();
+    // A look-alike of gitlab.com is a host of its own: never gitlab.com, and its links go to it, not to gitlab.com.
+    for (const host of ["gitlab.com-evil.example", "gitlab.com.evil.example"]) {
+      expect(normalizeForgeHost(host)).toBe(host);
+      expect(forgeRefLinks({ display: "g/p", host })?.issue(1)).toBe(`https://${host}/g/p/-/issues/1`);
+    }
+  });
+
+  test("bitbucket.org is Bitbucket Cloud, and its bare #N refs stay unlinked as before", () => {
+    expect(classifyForgeHost("bitbucket.org")).toBe("bitbucket");
+    // Bitbucket Data Center has another API: an opaque self-hosted name, not Bitbucket.
+    expect(classifyForgeHost("bitbucket.example.com")).toBeNull();
+    // A Bitbucket repository's #N may be a pull request or an issue (numbered apart): no guessed link.
+    expect(forgeRefLinks({ display: "ws/repo", host: "bitbucket.org" })).toBeNull();
+    expect(matchCrossRepoRef("ws/repo#3", "", { host: "bitbucket.org" })?.href ?? null).toBeNull();
+  });
+});
+
+describe("matchCrossRepoRef", () => {
+  test("links on the project's forge host: GitHub Enterprise keeps its host", () => {
+    expect(matchCrossRepoRef("team/app#9 done", "", { host: "github.acme.com" })).toEqual({
+      label: "team/app#9",
+      path: "team/app",
+      href: "https://github.acme.com/team/app/issues/9",
+    });
+  });
+
+  test("never continues a word, path or URL", () => {
+    for (const prev of ["a", "/", ".", "-", "_"]) {
+      expect(matchCrossRepoRef("owner/repo#1", prev, {})).toBeNull();
+    }
+    expect(matchCrossRepoRef("owner/repo#1", "(", {})?.href).toBe("https://github.com/owner/repo/issues/1");
+  });
+
+  test("findCrossRepoRef skips a ref that starts inside a path", () => {
+    expect(findCrossRepoRef("see a/owner/repo#1", 18, {})).toBe(-1);
+    expect(findCrossRepoRef("see owner/repo#1", 14, {})).toBe(4);
+  });
+});
+
+describe("a self-managed GitLab at any address", () => {
+  test("#12 and owner/repo#12 link on the project's host once it is known as a GitLab, and stay plain before", () => {
+    const before = [...gitlabHostsSnapshot()];
+    try {
+      expect(forgeRefLinks({ display: "acme/api", host: "git.acme.com" })).toBeNull();
+      expect(matchCrossRepoRef("acme/web#4", "", { host: "git.acme.com" })?.href ?? null).toBeNull();
+      learnGitlabHosts(["Git.Acme.com"]);
+      expect(forgeRefLinks({ display: "acme/api", host: "git.acme.com" })?.issue(12)).toBe("https://git.acme.com/acme/api/-/issues/12");
+      expect(matchCrossRepoRef("acme/web#4", "", { host: "git.acme.com" })?.href).toBe("https://git.acme.com/acme/web/-/issues/4");
+      expect(forgeRefLinks({ display: "acme/api", host: "source.acme.io" })).toBeNull();
+      expect(forgeRefLinks({ display: "acme/api", host: "github.com" })?.issue(12)).toBe("https://github.com/acme/api/issues/12");
+      expect(forgeRefLinks({ display: "acme/api", host: "gitlab.com" })?.issue(12)).toBe("https://gitlab.com/acme/api/-/issues/12");
+      expect(forgeRefLinks({ display: "ws/repo", host: "bitbucket.org" })).toBeNull();
+    } finally {
+      learnGitlabHosts(before);
+    }
   });
 });

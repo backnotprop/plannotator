@@ -145,7 +145,7 @@ export function defineAnnotateBundleScenarios(runtime: string, start: StartBundl
       expect(diagram.renderAs).toBe("mermaid");
     });
 
-    test("linked documents follow the single-file rule: a bundle file's directory is served, outside it is refused", async () => {
+    test("linked documents follow the single-file rule: a bundle file's directory is served, and for a tab on this machine outside it too", async () => {
       const outside = join(root, "elsewhere.md");
       writeFileSync(outside, "# Elsewhere\n");
       const server = await openBundle();
@@ -154,7 +154,9 @@ export function defineAnnotateBundleScenarios(runtime: string, start: StartBundl
       const linked = await fetch(`${server.url}/api/doc?path=unlisted.md&base=${encodeURIComponent(join(root, "work/docs"))}`);
       expect(linked.status).toBe(200);
       expect((await linked.json()).filepath).toBe(sibling);
-      expect((await doc(server, outside)).status).toBe(403);
+      // Outside every root: served to this machine (#2291); doc-any-path.scenarios.ts
+      // covers the readers that keep the roots.
+      expect((await doc(server, outside)).status).toBe(200);
     });
 
     test("the host's status lists the bundle's files in order", async () => {

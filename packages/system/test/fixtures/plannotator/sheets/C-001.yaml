@@ -1,0 +1,28 @@
+# The landing: what Plannotator is, who uses it, where each piece runs.
+sheet: C-001
+scope: root
+kind: conceptual
+title: Plannotator
+question: What it is, who uses it, and where each piece runs.
+bands:
+  - id: people
+    label: Who uses it
+    means: you, your agents, your team
+    tone: sand
+    row: [you, agents, team]
+  - id: local
+    label: On your computer
+    means: one binary, one Inbox, one window
+    tone: stone
+    row: [cli, inbox, desktop]
+  - id: cloud
+    label: Hosted
+    means: small services, and the Workspaces product
+    tone: mist
+    row: [share, guides, ping, workspaces]
+show: [review, decision, reviewpage, ask, wake, answer, hostsinbox, shareflow, guideshare, cliping, inboxping, mcpws, teamws]
+notes:
+  a: { on: cli, text: "Plan review has no daemon. The agent's hook runs plannotator, which serves the page, waits for your decision, prints it on stdout and exits." }
+  b: { on: inbox, text: "One Inbox per computer, on loopback. Agents call its /mcp; plugin hosts long-poll its bridge for your replies. Phones and the relay are built but off by default (see The Inbox)." }
+  c: { on: desktop, text: "The desktop app is built in another repo. It shows this computer's Inbox page." }
+  d: { on: workspaces, text: "Workspaces is a hosted product built in another repo. This drawing draws only where Plannotator meets it." }

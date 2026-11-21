@@ -53,7 +53,7 @@ describe("createAIRuntime (Bun) with a session bridge", () => {
         body: JSON.stringify({ providerId: "session-bridge", context: { mode: "code-review", review: { patch: "" } } }),
       }));
       const hostStatus = {};
-      for (const host of ["localhost:4321", "127.0.0.1:4321", "127.9.8.7:4321", "[::1]:4321", "evil.example:4321", "localhost:9999", "localhost", "127.0.0.1.evil.example:4321"]) {
+      for (const host of ["localhost:4321", "127.0.0.1:4321", "127.9.8.7:4321", "[::1]:4321", "evil.example:4321", "localhost:9999", "localhost", "127.0.0.1.evil.example:4321", "plannotator.localhost:4321"]) {
         hostStatus[host] = (await createWithHost(host)).status;
       }
       const created = await (await runtime.endpoints["/api/ai/session"](new Request("http://localhost/api/ai/session", {
@@ -78,6 +78,17 @@ describe("createAIRuntime (Bun) with a session bridge", () => {
       while (asks.length === 0) await new Promise((r) => setTimeout(r, 2));
       runtime.dispose();
       await new Promise((r) => setTimeout(r, 10));
+      // A session advertised at a localhost subdomain (#2184) accepts that one name too.
+      const named = await createAIRuntime({ cwd: ${JSON.stringify(dir)}, sessionBridge: bridge, getServerPort: () => 4321, localHostname: "plannotator.localhost" });
+      const namedStatus = {};
+      for (const host of ["plannotator.localhost:4321", "other.localhost:4321", "localhost:4321"]) {
+        namedStatus[host] = (await named.endpoints["/api/ai/session"](new Request("http://localhost/api/ai/session", {
+          method: "POST",
+          headers: { host },
+          body: JSON.stringify({ providerId: "session-bridge", context: { mode: "code-review", review: { patch: "" } } }),
+        }))).status;
+      }
+      named.dispose();
       const bridgeEntry = caps.providers.find((p) => p.id === "session-bridge");
       const { existsSync } = await import("node:fs");
       console.log(JSON.stringify({
@@ -92,11 +103,13 @@ describe("createAIRuntime (Bun) with a session bridge", () => {
         hostStatus,
         reboundStatus,
         asksFromRebound: asks.length,
+        namedStatus,
       }));
     `);
     const proc = Bun.spawn([process.execPath, runner], {
       cwd: import.meta.dir,
-      env: { ...process.env, PATH: `${dir}:/usr/bin:/bin` },
+      // No url host: without one, no localhost subdomain counts (#2184).
+      env: { ...process.env, PATH: `${dir}:/usr/bin:/bin`, PLANNOTATOR_URL_HOST: "" },
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -129,13 +142,15 @@ describe("createAIRuntime (Bun) with a session bridge", () => {
         "localhost:9999": 403,
         localhost: 403,
         "127.0.0.1.evil.example:4321": 403,
+        "plannotator.localhost:4321": 403,
       },
       reboundStatus: 403,
       asksFromRebound: 1,
+      namedStatus: { "plannotator.localhost:4321": 200, "other.localhost:4321": 403, "localhost:4321": 200 },
     });
   }, 15_000);
 
-  // The agent-job launchers (Review Agents, Code Tour, Guided Review) read
+  // The agent-job launchers (Review Agents, Guided Review) read
   // their Claude / Codex model lists from ?activate=<id>. A bridge makes Ask
   // AI bridge-only, but those launchers must keep the discovered lists; the
   // SDK providers are reported under `catalogProviders` and still refuse
@@ -309,6 +324,55 @@ describe("createAIRuntime (Bun) with a session bridge", () => {
     expect(result.providerIds).toContain("claude-agent-sdk");
     expect(result.statuses.ok).toBe(404);
     expect(result.tokenLeftInEnv).toBeNull();
+  }, 15_000);
+
+  // Remote mode only SSH turned on (PLANNOTATOR_REMOTE unset): the bridge is
+  // kept, and answered only for a request whose TCP peer is loopback (the
+  // person's own tunnel); any other address gets what remote mode gives.
+  test("SSH: its own tunnel gets Ask this session, another address gets the SDK providers and no bridge", async () => {
+    if (process.platform === "win32") return;
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-ssh-runtime-"));
+    tempDirs.push(dir);
+    const runner = join(dir, "runner.ts");
+    const runtimeUrl = pathToFileURL(join(import.meta.dir, "ai-runtime.ts")).href;
+    const thisMachineUrl = pathToFileURL(join(import.meta.dir, "this-machine.ts")).href;
+    writeFileSync(runner, `
+      import { createAIRuntime } from ${JSON.stringify(runtimeUrl)};
+      import { notePeer } from ${JSON.stringify(thisMachineUrl)};
+      const runtime = await createAIRuntime({ cwd: ${JSON.stringify(dir)}, getServerPort: () => 4321 });
+      const from = (address, url, init) => {
+        const req = new Request(url, init);
+        notePeer(req, { requestIP: () => ({ address }) });
+        return req;
+      };
+      const caps = async (address) => (await (await runtime.endpoints["/api/ai/capabilities"](from(address, "http://localhost/api/ai/capabilities", { headers: { host: "127.0.0.1:4321" } }))).json()).providers.map((p) => p.id);
+      const poll = async (address) => (await runtime.endpoints["/api/ai/bridge/poll"](from(address, "http://localhost/api/ai/bridge/poll", {
+        method: "POST",
+        headers: { host: "127.0.0.1:4321", authorization: "Bearer " + ${JSON.stringify("k".repeat(43))} },
+        body: JSON.stringify({ status: "ready", waitMs: 0 }),
+      }))).status;
+      const result = { tunnel: await caps("127.0.0.1"), lan: await caps("192.168.1.20"), pollTunnel: await poll("::ffff:127.0.0.1"), pollLan: await poll("192.168.1.20") };
+      runtime.dispose();
+      console.log(JSON.stringify(result));
+    `);
+    const env: Record<string, string | undefined> = {
+      ...process.env,
+      PATH: `${dir}:/usr/bin:/bin`,
+      SSH_CONNECTION: "10.0.0.2 51000 10.0.0.1 22",
+      PLANNOTATOR_SESSION_BRIDGE_TOKEN: "k".repeat(43),
+      PLANNOTATOR_SESSION_BRIDGE_HOST: "opencode",
+      PLANNOTATOR_SESSION_BRIDGE_MODES: "turn,transient",
+    };
+    delete env.PLANNOTATOR_REMOTE;
+    const proc = Bun.spawn([process.execPath, runner], { cwd: import.meta.dir, env: env as Record<string, string>, stdout: "pipe", stderr: "pipe" });
+    const [stdout, stderr, exitCode] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+    expect(exitCode, stderr).toBe(0);
+    const result = JSON.parse(stdout.trim().split("\n").at(-1)!);
+    expect(result.tunnel).toEqual(["session-bridge"]);
+    expect(result.lan).not.toContain("session-bridge");
+    expect(result.lan).toContain("claude-agent-sdk");
+    expect(result.pollTunnel).toBe(200);
+    expect(result.pollLan).toBe(404);
   }, 15_000);
 
   // The CLI's --tailscale path: the session is reachable from the tailnet, so

@@ -1,20 +1,18 @@
 {
   "name": "@plannotator/telemetry",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Usage counts for Plannotator's experimental features: a Cloudflare Worker that adds daily counts into anonymous totals in D1 (no IP, no per-request row, no time beyond the day).",
+  "description": "Plannotator's daily ping: a Cloudflare Worker that adds 1 to a daily total in D1 per (day, version, age bucket). No IP, no headers, no per-request row.",
   "scripts": {
     "dev": "wrangler dev --local",
-    "migrate:local": "wrangler d1 migrations apply COUNTS --local",
-    "deploy": "wrangler deploy",
-    "test": "bun test",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "db:create": "wrangler d1 create plannotator-ping",
+    "migrate:local": "wrangler d1 migrations apply plannotator-ping --local",
+    "migrate": "wrangler d1 migrations apply plannotator-ping --remote",
+    "deploy": "wrangler deploy"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241218.0",
-    "@plannotator/core": "workspace:*",
-    "typescript": "~5.8.2",
     "wrangler": "^4.151.2"
   }
 }

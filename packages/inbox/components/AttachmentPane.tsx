@@ -1,5 +1,8 @@
-import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { MentionSource } from '@plannotator/ui/utils/mentions';
+import type { SelectionActionContext } from '@plannotator/ui/utils/selectionActions';
+import { fileSideSource } from '../ask/sideSource';
+import { useSideButton } from '../ask/sideButton';
 import {
   formatInboxVideoTime,
   inboxAttachmentKindLabel,
@@ -12,15 +15,19 @@ import {
 } from '@plannotator/core/inbox-types';
 import { CodeFileView } from '@plannotator/ui/components/CodeFilePopout';
 import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
+import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
+import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
-import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
+import { PaneToolstrip } from '../parts/PaneToolstrip';
 import { HtmlSurfaceControls } from '@plannotator/ui/components/HtmlSurfaceControls';
-import { HtmlViewer } from '@plannotator/ui/components/html-viewer';
+import { HtmlViewer, type HtmlViewerFrame } from '@plannotator/ui/components/html-viewer';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
+import { ScrollViewportProvider } from '@plannotator/ui/hooks/useScrollViewport';
 import type { Annotation, EditorMode, InputMethod } from '@plannotator/ui/types';
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
 import { groupAnnotationsByDocument, type AnnotationScope } from '@plannotator/ui/utils/annotationScope';
-import { InboxApiError, type AttachmentView, type LinkedPageView } from '../api';
+import { InboxApiError, type AttachmentView } from '../api';
+import { attachmentDrawReady } from '../threadDrawReady';
 import { selectionOnPhrase, useInboxFileSource } from '../fileSource';
 import { folderOf, resolveInboxHtmlLink } from '../htmlLinks';
 import { htmlAssetRouteFromDocument } from '@plannotator/ui/utils/htmlLinkNavigation';
@@ -40,10 +47,14 @@ import {
   codeRangeOf,
   compareVideoTimes,
   inboxViewKind,
+  relocateCodeRange,
 } from '../attachments';
 import { whenTime, formatBytes } from '../format';
+export { relocateCodeRange };
 import { useRefRepo } from '../links';
-import { ImageAttachmentView } from './ImageAttachmentView';
+import { inboxMarkdownImageBase } from '../images';
+import { useCommentPictures } from '../commentPictures';
+import { ImageAttachmentView, type ImageSwipeEdges } from './ImageAttachmentView';
 import type { WheelHintGate } from '@plannotator/ui/components/ImageZoomStage';
 import { VideoAttachmentView, type VideoAttachmentViewHandle } from './VideoAttachmentView';
 import { OpenInControl, type OpenInSurface } from './OpenIn';
@@ -52,43 +63,65 @@ import { FIRST_NOTE, LAST_NOTE, stepAnnouncement, stepIndexOf, stepKeyIntent, ty
 import { Icon } from '../icons';
 import { FileName } from './FileName';
 import { useNarrowerThan } from '../narrower';
-import { FullViewBar, type FullViewBarHandle, type ToolbarState } from './FullViewBar';
+import { contentsButtonMode, showsContents, useContentsRailWaited, useContentsShown } from '../contents';
+import { scrollerOf } from './fileScroller';
+import { CONTENTS_RAIL_MIN_PANE_WIDTH as RAIL_MIN_PAGE_WIDTH } from '@plannotator/ui/utils/annotationHelpers';
+import { ContentsPanel, type ContentsButtonMode } from './ContentsPanel';
+import { FileContentsRail } from '../parts/FileContentsRail';
+import { FullViewBar, GATHERED, type FullViewBarHandle, type ToolbarState } from './FullViewBar';
+import { ArtifactPinButton } from './ArtifactPinButton';
+import { ReuseButton } from '../reuse';
+import { FullScreenComposer, FullScreenComposerContext, type FullScreenComposerValue } from './FullScreenComposer';
+import { forgetComposerOpened, useComposerFolded } from '../fullScreenComposer';
+import { HtmlPageCommentRow, useHtmlPageComment, type PageCommentParking } from './HtmlPageComment';
+import { anchorKeyOf, draftHasWords, FileDraftContext, fileDraftKey, keepFileDrafts, peekFileDrafts, takeFileDrafts, type FileCommentDraft, type FileDraftSeat, type RowDraft } from '../fileCommentDrafts';
+import { releaseWindowZoom, useWindowPinched } from '../windowPinch';
 import { FilePeek, peekSheetHost } from './AttachmentStepper';
+import { CommentCount, EarlierSection, commentsLabel } from './EarlierSection';
+import { earlierCommentsOn } from '../earlierComments';
 import { FullScreenMore } from './OpenIn';
-import { fileSwipeMode, useFileSwipe } from '../fileSwipe';
+import { fileSwipeMode, prefersReducedMotion, useFileSwipe } from '../fileSwipe';
+import { useTouchStepBar } from '../touchStepBar';
 import { FileSwipeCard } from './FileSwipeCard';
+import { ImageSwipePeek, isImageStep } from './ImageSwipePeek';
+import { OptionCaption } from './OptionCaption';
+import { FIRST_OPTION_NOTE, LAST_OPTION_NOTE, optionAnnouncement, type OptionSet } from '../optionSets';
 import { createPortal } from 'react-dom';
-import { useShortcutScope } from '@plannotator/ui/shortcuts';
+import type { Notice } from './Markup';
+import { MarkupPicture } from './Markup';
+import { isWordlessMarkup, MARKUP_ONLY_TEXT } from '../markup';
+import { useShortcutScope } from '../panes/scope';
 import { inboxFileViewerShortcuts } from '../shortcuts/fileViewer.shortcuts';
+import { ShortcutHint, withShortcut } from '../shortcuts/hint';
+import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { inOverlay, isComposingKey, isEditableTarget, keyTarget, modalOpen } from '../shortcuts/guards';
 import { escapeRung, type EscapeRung } from '../escapeLadder';
-import { storage } from '@plannotator/ui/utils/storage';
 import { Tip } from './Tip';
+import { CopyFileButton } from './CopyFileButton';
+import { LinkedMarkdown } from './LinkedMarkdown';
+import { PAGE_DESKTOP_WIDTH, desktopFitScale, pageIsWide, readPageSize, shownPageSize, writePageSize, type PageSize } from '../pageSize';
+import { tapNearSizeIcon, useSizeIconFade } from '../sizeIconFade';
+import { useFileQuestionViewerProps, type FileQuestions } from '../fileQuestions';
+import { whenStill } from '../whenStill';
+import { unsavedComposer, unsavedComposers } from './unsavedComposers';
+import { linkedValue, pageStartAt, splitLinked, usePageClear, usePageStart, type LinkedPage, type PageStart } from './htmlPageFrame';
+import { versionLineWords } from './versionLineWords';
+export { unsavedComposer, unsavedComposers };
 
 /**
  * The pane width below which the 300 px comments panel beside the thread
  * folds into the header's Comments button and opens over the file (as a
  * phone's sheet does): beside it the file would keep under 480 px. A file
  * beside the thread at 1280 px and wider keeps the panel docked; full screen
- * has its own drawer.
+ * has its own panel, floating over the page.
  */
 export const FOLD_PANEL_BELOW = 780;
 
 /** How long the note says why a link in an attached page opened nothing. */
 export const LINK_NOTE_MS = 5000;
 
-/** A page an attached HTML page links to, shown read-only over it: its path in the page's folder and the fragment its link named. */
-type LinkedPage = LinkedPageView & { relative: string; hash: string; attachmentId: string };
-
-/** The route's `linked=` value: the page's path in the folder, then `#fragment`. */
-export function linkedValue(relative: string, hash: string): string {
-  return hash ? `${relative}#${hash}` : relative;
-}
-
-export function splitLinked(value: string): { relative: string; hash: string } {
-  const at = value.indexOf('#');
-  return at < 0 ? { relative: value, hash: '' } : { relative: value.slice(0, at), hash: value.slice(at + 1) };
-}
+/** The space between full screen's changed note and the code's top row, which grows under the note (Copy file stays clear of it). */
+export const CODE_ROW_BELOW_NOTE = 8;
 
 /** How long full screen's step chip names the new file. */
 export const FULL_VIEW_CHIP_MS = 1600;
@@ -96,43 +129,39 @@ export const FULL_VIEW_CHIP_MS = 1600;
 /** What sits at a file's foot in full screen (an image's or a film's comment row, a phone's "Comment at"): the toolbar, the chips and the toast keep above it. */
 export const FILE_FOOT_ROW = '[data-image-composer], [data-file-foot]';
 
+/**
+ * The file's foot row as drawn: the first FILE_FOOT_ROW that is not hidden (full screen's composer keeps
+ * the comment row drawn but `hidden` while the card is minimized, and the pill is then the foot).
+ */
+export function fileFootRow(section: ParentNode): HTMLElement | null {
+  for (const row of section.querySelectorAll<HTMLElement>(FILE_FOOT_ROW)) if (!row.closest('[hidden]')) return row;
+  return null;
+}
+
 /** Hide / Show tools: the html-annotate scope's existing chord (⌘⇧X), HTML files only, through the file viewer's scope. */
 const TOOLS_CHORD = inboxFileViewerShortcuts.shortcuts.toggleTools.bindings[0]!;
-
-/**
- * Composers that close on Escape and would drop what was typed: a comment
- * popover (text, HTML pinpoint, a code line's new comment), a diagram's
- * composer, and an existing comment being edited (the panel's card, a code
- * line's inline comment).
- */
-const CLOSING_COMPOSERS = '[data-comment-popover], [data-diagram-composer], [data-annotation-id], [data-code-annotation-id]';
 
 /** Drafts that close themselves on this same Escape (their own window listener): the selection toolbar, the quick-label picker. */
 const SELF_CLOSING_DRAFTS = '[data-pn-annotation-toolbar-row], [data-quick-label-picker]';
 
-/** Escapes the pane sends to a composer itself (to close it): never asked about, never a rung of their own. */
+/** Escapes the pane sends to a composer itself (to close it): never a rung of their own. */
 const paneEscapes = new WeakSet<Event>();
-
-/** The element a node lives under in the page: its shadow host when it is inside a shadow root (Pierre's code view). */
-function hostOf(node: Node): Node {
-  const root = node.getRootNode();
-  return root instanceof ShadowRoot ? root.host : node;
-}
-
-/**
- * Whether full screen's comments drawer was left open (approval
- * "inbox-one-fullscreen": remembered, never opened by itself). Cookie only.
- */
-export const COMMENTS_DRAWER_COOKIE = 'plannotator-inbox-file-comments';
 
 export interface AttachmentPaneProps {
   attachment: InboxAttachmentState;
+  /**
+   * The file's pin (approval "inbox-artifact-stars"): its thread and its artifact key (the shown image's id for an
+   * image both shown and attached). Pin / Unpin sits in the viewer's bar and the pane's header. Absent (the tour): none.
+   */
+  pin?: { threadId: string; key: string } | null;
   /** The file is in the person's own message (an image their reply shows): the header and the changed line say "You", not the agent. */
   fromPerson?: boolean;
   /** Every attachment of the thread, for the panel's files and the strip. */
   attachments: readonly InboxAttachmentState[];
   /** The thread's annotations waiting for a Send. */
   records: readonly InboxAnnotationRecord[];
+  /** The person's comments on the thread's files that a Send already carried (earlierComments.ts). */
+  earlierRecords?: readonly InboxAnnotationRecord[];
   /**
    * Tag agents with `@` in a comment (approval "inbox-tag-agents"): markdown, text and HTML files. The
    * image, video, code and diagram comment boxes take none yet.
@@ -148,12 +177,23 @@ export interface AttachmentPaneProps {
   /**
    * Full screen (approval "inbox-one-fullscreen"): the file fills the window
    * and one floating toolbar is left (FullViewBar), with the comments in a
-   * drawer beside the page. Otherwise the file sits beside the thread with
+   * panel floating over the page. Otherwise the file sits beside the thread with
    * its header.
    */
   full: boolean;
   /** Full screen is the only way the window can show the file (a phone, a narrow window: stack.ts): the toolbar leads with Back to the thread instead of Side by side. */
   fullLocked?: boolean;
+  /**
+   * × and Escape's last rung close the file, back to the thread (fullScreenOrigin.ts): a full screen opened from
+   * the thread alone, and wherever the file can only be full screen. False: they put the file back beside the
+   * thread, where it was before full screen. Absent: only where it can only be full screen.
+   */
+  exitCloses?: boolean;
+  /**
+   * The name of the file × and Escape's last rung go back to when it is another file than this one (a full screen
+   * opened over a file beside the thread): leaving this file, they ask first about a comment not saved yet.
+   */
+  exitLeavesFor?: string | null;
   /** `pick`: the person chose with a button (remembered); Escape's last rung is not a pick. */
   onToggleFull: (pick: boolean) => void;
   /** The view switch's pressed half: the view on screen becomes the remembered one; the frame stays. */
@@ -169,6 +209,13 @@ export interface AttachmentPaneProps {
   /** Full screen's comments foot: what rides the next Send, and the way to the reply. */
   strip: { picks: number; annotations: number; onWriteReply: () => void };
   /**
+   * Full screen's composer (approval "inbox-fullscreen-composer"): the thread's
+   * reply, and the file's comment row, in one card floating at the foot of an
+   * image, a film or an HTML page. Null or absent: none (the thread is
+   * archived, or the file is beside the thread).
+   */
+  composer?: FullScreenComposerValue | null;
+  /**
    * Bumped each time the person opens a file (its tile, or a link to it in
    * a message): keyboard focus moves into the pane, so a file opened full
    * screen is not left behind the control that opened it.
@@ -182,23 +229,58 @@ export interface AttachmentPaneProps {
   /**
    * Open another file of the thread in this pane, in the frame it is in now
    * (full screen stays full screen). The route is replaced, not pushed, so
-   * Back returns to the thread in one press.
+   * Back returns to the thread in one press. `at`: the step's place in
+   * `steps` (null for a step from the sheet's `allSteps`), so a host can tell
+   * apart two steps that show the same file (a picture two choices share).
    */
-  onStep?: (attachmentId: string, version: 'current' | 'sent') => void;
+  onStep?: (attachmentId: string, version: 'current' | 'sent', at?: number | null) => void;
+  /**
+   * Every file of the thread, when `steps` is fewer (a question's picture
+   * choices, `optionSet`): the pill's sheet and the stepper's peek list these,
+   * so the thread's other files are a tap away. Absent: `steps`.
+   */
+  allSteps?: readonly AttachmentStep[];
+  /**
+   * The question's picture choices `steps` are (optionSets.ts, approval
+   * "inbox-image-swipe"): full screen captions the choice on screen, and the
+   * ends say "Last option" / "First option". Absent: the thread's files.
+   */
+  optionSet?: OptionSet | null;
+  /**
+   * The file's place in `steps` when the host knows it: a picture two choices
+   * share is in an option set twice, and only the host knows which choice was
+   * opened. Ignored unless that step shows this file. Absent: the first step
+   * that shows it.
+   */
+  stepAt?: number | null;
   /**
    * A phone (phone.ts): always full screen; the toolbar sits bottom right
    * with 44 px targets and leads with Back to the thread, its `4/9 ⌄` pill
    * opens every file of the thread, a sideways swipe on the file steps
-   * (fileSwipe.ts; a fitted image keeps its own), and the comments open as a
+   * (fileSwipe.ts; an image too: approval "inbox-image-swipe"), and the comments open as a
    * bottom sheet instead of a drawer.
    */
   phone?: boolean;
+  /**
+   * An HTML file's Annotate (true) or Interact (false) as a file opens in this pane: the thread's last choice,
+   * which `onArmed` reports. Absent: Interact.
+   */
+  armedStart?: boolean;
+  /** The person chose Annotate (true) or Interact (false) on an HTML file. */
+  onArmed?: (armed: boolean) => void;
   /**
    * A link in an attached HTML page names another file of the thread: open it
    * in this pane as a new history entry (Back returns to the page), in the
    * frame it is in now. Absent: `onStep`.
    */
   onOpenLinked?: (attachmentId: string) => void;
+  /** The `?…#…` an HTML page opens with, from a message's link (`mock.html?variant=2`): attachment `id` only; a new object applies again. */
+  pageStart?: PageStart | null;
+  /**
+   * How a link to this Inbox opens in this window, or null when it does not (App.tsx's `inboxLink`). Absent (the
+   * tour): every link is another site's.
+   */
+  onInboxLink?: (href: string) => (() => void) | null;
   /**
    * The page the attached HTML page links to that is on screen (the route's
    * `linked=`: its path in the page's folder, `#fragment` kept), or null.
@@ -211,56 +293,38 @@ export interface AttachmentPaneProps {
    * new-tab icon through the tailnet or on a phone (`tab`). Absent: neither.
    */
   openIn?: OpenInSurface;
+  /**
+   * Ask AI's Side in the file's selection bar (ask/useInboxAsk.tsx `side`): the selected words go to the thread's chat.
+   * Absent while this thread cannot ask: no Side. No top bar has an Ask icon (the owner, 2026-11-09).
+   */
+  onSide?: (words: string, source?: string) => void;
+  /** The window's toast: a drawing added to the reply says so, with Undo. */
+  onToast?: Notice;
+  /**
+   * The questions inside this Markdown file (issue #2828; fileQuestions.tsx): its cards answer like the message
+   * body's. Absent or null (a file whose message recorded none, the tour): the cards stay read-only.
+   */
+  questions?: FileQuestions | null;
 }
 
 /**
  * What the thread asks of an open pane: leave it (open another file, or close
- * it) once nothing unsaved would be lost. A typed comment raises the question
- * row first; `go` runs after "Save it and go on" or "Discard".
+ * it). It never asks: a comment being written is kept as the file's draft
+ * (fileCommentDrafts.ts), back in its comment box when the file opens again,
+ * and `go` runs at once. `to` names where it goes (another file), or null.
  */
 export interface AttachmentPaneHandle {
   leave: (to: string | null, go: () => void) => void;
+  /** Out of full screen the way × goes (back beside the thread, or the file closes); a typed comment waits as the file's draft. */
+  exitFull: () => void;
 }
 
-/**
- * A composer in the open file with words (or a drawing) not yet saved, or an
- * existing comment being edited whose words differ from the saved ones: its
- * textarea. `savedText` answers an annotation's saved words by id.
- */
-export function unsavedComposer(pane: HTMLElement | null, savedText: (id: string) => string | undefined = () => undefined): HTMLTextAreaElement | null {
-  const typed = (area: HTMLTextAreaElement) => area.value.trim() !== '';
-  // Plannotator's comment popover (text, HTML pinpoint, code lines) draws in a portal on the page.
-  for (const area of document.querySelectorAll<HTMLTextAreaElement>('[data-comment-popover] textarea')) {
-    if (typed(area)) return area;
-  }
-  if (!pane) return null;
-  for (const area of pane.querySelectorAll<HTMLTextAreaElement>('[data-diagram-composer] textarea, [data-image-composer] textarea')) {
-    if (typed(area)) return area;
-  }
-  // An image drawn on but not yet commented.
-  const drawn = pane.querySelector<HTMLElement>('[data-image-composer] .ib-markup');
-  if (drawn) return pane.querySelector<HTMLTextAreaElement>('[data-image-composer] textarea');
-  // A comment being edited (the annotation panel's card, a code line's inline comment, which Pierre may draw in its shadow root).
-  const roots: ParentNode[] = [pane];
-  for (const container of pane.querySelectorAll('diffs-container')) if (container.shadowRoot) roots.push(container.shadowRoot);
-  for (const scope of roots) {
-    for (const area of scope.querySelectorAll<HTMLTextAreaElement>('[data-annotation-id] textarea, [data-code-annotation-id] textarea')) {
-      const owner = area.closest('[data-annotation-id], [data-code-annotation-id]');
-      const id = owner?.getAttribute('data-annotation-id') ?? owner?.getAttribute('data-code-annotation-id') ?? '';
-      if (area.value.trim() !== (savedText(id) ?? '').trim()) return area;
-    }
-  }
-  return null;
-}
+/** The panes on screen (one per thread pane), each as whether it holds a comment not saved yet. */
+const openPanes = new Set<{ unsaved: () => boolean }>();
 
-/** The element that scrolls the open file (a document, code, or an image at its own size). */
-function scrollerOf(pane: HTMLElement | null): HTMLElement | null {
-  if (!pane) return null;
-  const doc = pane.querySelector<HTMLElement>('.ib-docscroll');
-  if (doc) return doc;
-  const code = pane.querySelector('.ib-codeview diffs-container')?.shadowRoot?.querySelector<HTMLElement>('[data-code]');
-  if (code) return code;
-  return pane.querySelector<HTMLElement>('.ib-imgstage');
+/** Whether a file open now holds a comment not saved yet (saved words compared: an edit not changed is not unsaved). */
+export function openPaneUnsaved(): boolean {
+  return [...openPanes].some((pane) => pane.unsaved());
 }
 
 /**
@@ -280,6 +344,14 @@ interface FileMemory {
 
 const NO_ANNOTATIONS: Annotation[] = [];
 const noop = () => {};
+/** Focus that shows its ring (the keyboard's), not a finger's press. Where `:focus-visible` is unknown, counted as shown. */
+const focusVisible = (el: Element) => {
+  try {
+    return el.matches(':focus-visible');
+  } catch {
+    return true;
+  }
+};
 
 const recordKey = (path: string, version: string) => (version === 'current' ? path : `${path}#${version.slice(0, 12)}`);
 
@@ -298,15 +370,33 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const [unanchored, setUnanchored] = useState<ReadonlySet<string>>(new Set());
   const [inputMethod, setInputMethod] = useState<InputMethod>('drag');
   const [mode, setMode] = useState<EditorMode>('selection');
-  const [armed, setArmed] = useState(true);
+  // The pen. It starts off (a click does what the page says) unless the person turned it on in this thread.
+  const [armed, setArmed] = useState(props.armedStart === true);
+  const armedStartRef = useRef(props.armedStart === true);
+  armedStartRef.current = props.armedStart === true;
+  const onArmedRef = useRef(props.onArmed);
+  onArmedRef.current = props.onArmed;
+  useEffect(() => onArmedRef.current?.(armed), [armed]);
+  // A read-only file takes no comments, and has no pen to turn Annotate off: it always runs in Interact.
+  const annotating = armed && !props.readOnly;
   const [scope, setScope] = useState<AnnotationScope>('all');
   const viewerRef = useRef<ViewerHandle>(null);
+  const [scrollViewport, setScrollViewport] = useState<HTMLDivElement | null>(null);
   const source = useInboxFileSource();
+  const pictures = useCommentPictures();
   const suggestion = source.suggestion?.(attachment) ?? null;
 
   // The current file cannot be read (gone, or no longer the file that was sent): the sent version opens.
   const currentUnavailable = attachment.unavailable !== null;
   const effectiveVersion = currentUnavailable ? 'sent' : version;
+  const downloadName = `Download ${attachment.name}${effectiveVersion === 'sent' ? ' (the version it sent)' : ''}`;
+  // Images in a Markdown file load relative to its folder, for the version on screen (#2228); one
+  // that cannot load is drawn as its alt text, as in a message body (Thread.tsx).
+  const imageBaseDir = inboxMarkdownImageBase(attachment.id, effectiveVersion);
+  const resolveImage = useCallback<ImageResolver>(
+    (src) => source.markdownImage?.(src) ?? { kind: 'src', src: /^(https?:|data:|blob:)/i.test(src) ? src : getImageSrc(src, imageBaseDir) },
+    [imageBaseDir, source],
+  );
   // Data and log files are drawn as code (inboxViewKind).
   const kind = inboxViewKind(attachment.kind, attachment.name);
   // Text kinds read through the view route; an image draws from its own route, a PDF or a file downloads.
@@ -321,7 +411,10 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     if (!readsText) return;
     source
       .view(attachment, effectiveVersion)
-      .then((next) => {
+      .then(async (next) => {
+        // Its code's grammars and KaTeX are chunks loaded on first use (#2593): the file draws once they are in,
+        // so its code paints highlighted and its math typeset, never plain first (threadDrawReady.ts).
+        await attachmentDrawReady(kind, attachment.name, next.text, next.text.length <= CODE_HIGHLIGHT_MAX_CHARS);
         if (!cancelled) setView(next);
       })
       .catch((cause) => {
@@ -346,20 +439,109 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
 
   // ── Stepping (design record "inbox-attachment-stepping", v2) ──────────────
   const steps = props.steps ?? [];
-  const index = stepIndexOf(steps, attachment.id);
+  const named = props.stepAt ?? null;
+  const index = named !== null && steps[named] && stepIndexOf([steps[named]!], attachment.id) === 0 ? named : stepIndexOf(steps, attachment.id);
   const multi = steps.length > 1 && index >= 0;
+  /** A question's picture choices (optionSets.ts): what the pane steps through; the sheet still lists `allSteps`. */
+  const optionSet = multi && props.optionSet ? props.optionSet : null;
+  const optionSetRef = useRef(optionSet);
+  optionSetRef.current = optionSet;
+  const allSteps = props.allSteps ?? steps;
+  const allIndex = stepIndexOf(allSteps, attachment.id);
+  /** The thread's files outside the set being stepped through (the pill's sheet lists them). */
+  const outsideSet = Math.max(0, allSteps.length - steps.length);
   const phone = props.phone === true;
   const [menuOpen, setMenuOpen] = useState(false);
   /** Full screen (approval "inbox-one-fullscreen"): the file fills the window under one floating toolbar. */
   const full = props.full;
-  /** The toolbar: showing (pinned), tucked into its corner handle, or out for a moment (revealed). Every opening of full screen starts showing. */
+  const touch = useTouchStepBar(phone, multi && !(full && optionSet));
+  /** Full screen's composer: an image, a film, a recording and an HTML page draw it (the comment row of the first three goes inside it). */
+  const hasComposer = full && !!props.composer && (kind === 'image' || kind === 'video' || kind === 'audio' || kind === 'html');
+  /**
+   * The tools: showing (pinned), or gathered into the corner control (tucked) by » or the composer's ⌄. Every opening
+   * of full screen starts showing.
+   */
   const [toolbar, setToolbar] = useState<ToolbarState>('pinned');
+  // Earlier comments: what the person said about this file before, under the current ones in the comments column.
+  const earlierReplies = useMemo(() => earlierCommentsOn(props.earlierRecords ?? [], attachment), [props.earlierRecords, attachment]);
+  const earlierCount = useMemo(() => earlierReplies.reduce((sum, reply) => sum + reply.comments.length, 0), [earlierReplies]);
   const barRef = useRef<FullViewBarHandle>(null);
-  /** ⋯ is open (a popover of the toolbar: it does not tuck while open). */
+  /** What gathered the tools: back from the corner, focus returns there (the composer's field, else »). */
+  const gatheredFrom = useRef<'bar' | 'composer'>('bar');
+  /**
+   * How far each floating control is from the corner control, and how small it must get to match it (`--ib-gx`,
+   * `--ib-gy`, `--ib-gs`, read by inbox.css), measured where they rest:
+   * - `rest`: the tools are showing (before » or ⌄ gathers them, and after a resize);
+   * - `gathered`: after a resize while gathered, each read with its flight's transform taken off for the moment (no
+   *   transition), so the way back starts from where it rests now;
+   * - `tucking`: a pinch's tuck is committed but not drawn yet: read with the pane showing its tools for the moment,
+   *   so nothing has moved and the tuck still animates from where they rest.
+   * The Contents rail flies by its ticks (its dock), not by the whole box that holds its panel.
+   */
+  const measureGather = (mode: 'rest' | 'gathered' | 'tucking' = 'rest') => {
+    const section = sectionRef.current;
+    const target = section?.querySelector<HTMLElement>('[data-full-view-handle]');
+    if (!section || !target) return;
+    const floating = [...section.querySelectorAll<HTMLElement>(GATHERED)];
+    const anchorOf = (el: HTMLElement) => (el.matches('.pn-contents-rail') ? el.querySelector<HTMLElement>('.pn-contents-rail-dock') : null) ?? el;
+    if (mode === 'gathered') {
+      for (const el of floating) {
+        el.style.setProperty('transition', 'none');
+        el.style.setProperty('transform', 'none');
+      }
+    }
+    const drawn = section.getAttribute('data-tools');
+    if (mode === 'tucking') section.setAttribute('data-tools', 'pinned');
+    const to = target.getBoundingClientRect();
+    const boxes = floating.map((el) => anchorOf(el).getBoundingClientRect());
+    if (mode === 'tucking' && drawn !== null) section.setAttribute('data-tools', drawn);
+    if (mode === 'gathered') {
+      for (const el of floating) el.style.removeProperty('transform');
+      // The flight's transform is back before the transition is, so it does not animate.
+      void section.offsetWidth;
+      for (const el of floating) el.style.removeProperty('transition');
+    }
+    const tx = to.left + to.width / 2;
+    const ty = to.top + to.height / 2;
+    const size = Math.max(target.offsetWidth, 32);
+    floating.forEach((el, i) => {
+      const at = boxes[i]!;
+      if (!at.width || !at.height) return;
+      el.style.setProperty('--ib-gx', `${Math.round(tx - (at.left + at.width / 2))}px`);
+      el.style.setProperty('--ib-gy', `${Math.round(ty - (at.top + at.height / 2))}px`);
+      el.style.setProperty('--ib-gs', Math.min(0.6, Math.max(0.05, size / at.width)).toFixed(3));
+    });
+  };
+  /** The tools as drawn now (the pinch's tuck included), for the listeners below. */
+  const shownToolbarRef = useRef<ToolbarState>('pinned');
+  // A resize or a rotation (or a phone's keyboard closing as ⌄ takes focus out of the field) moves where things rest:
+  // measured again once per frame, however many resize events the frame brings.
+  useEffect(() => {
+    if (!full) return;
+    let frame = 0;
+    const remeasure = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        measureGather(shownToolbarRef.current === 'tucked' ? 'gathered' : 'rest');
+      });
+    };
+    remeasure();
+    window.addEventListener('resize', remeasure);
+    window.addEventListener('orientationchange', remeasure);
+    window.visualViewport?.addEventListener('resize', remeasure);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('resize', remeasure);
+      window.removeEventListener('orientationchange', remeasure);
+      window.visualViewport?.removeEventListener('resize', remeasure);
+    };
+  }, [full, attachment.id]);
+  /** ⋯ is open (a popover in the toolbar). */
   const [moreOpen, setMoreOpen] = useState(false);
   /** Beside the thread in a narrow pane: the header's button opens the panel as a sheet over the file (inbox.css). */
   const folded = !full && (phone || narrowPane);
-  /** Full screen on a desktop: the comments are a drawer beside the page, which narrows (not covered). */
+  /** Full screen on a desktop: the comments float over the page at its right (the page keeps its width). */
   const drawerMode = full && !phone;
   /** Where the panel is a sheet over the file: folded beside the thread, or full screen on a phone (a bottom sheet). */
   const sheetMode = folded || (full && phone);
@@ -367,13 +549,14 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   useEffect(() => {
     if (!sheetMode) setSheet(false);
   }, [sheetMode]);
-  /** The drawer: remembered open or closed, never opened by itself (a new comment only bumps the count). */
-  const [drawer, setDrawerOpen] = useState(() => storage.getItem(COMMENTS_DRAWER_COOKIE) === 'open');
-  const setDrawer = (open: boolean) => {
-    setDrawerOpen(open);
-    storage.setItem(COMMENTS_DRAWER_COOKIE, open ? 'open' : 'closed');
-  };
-  /** The panel is open: the drawer in full screen on a desktop, else the sheet. */
+  /**
+   * Full screen's floating comments panel: never opened by itself (a new comment only bumps the count), and closed
+   * again when the person leaves the file: full screen ends, another file opens, or the file closes (the pane goes).
+   */
+  const [drawer, setDrawer] = useState(false);
+  /** A comment on another file picked in the open panel: the panel stays open there, focus on that comment's card. */
+  const keepPanelFor = useRef<string | null>(null);
+  /** The panel is open: the floating panel in full screen on a desktop, else the sheet. */
   const panelOpen = drawerMode ? drawer : sheetMode && sheet;
   const sheetButtonRef = useRef<HTMLButtonElement>(null);
   const sheetId = useId();
@@ -390,6 +573,15 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     focusPanelButton();
     // A phone's toolbar is hidden under its open sheet: focus lands once it shows again.
     if (phone) requestAnimationFrame(focusPanelButton);
+  };
+  /** Where the open floating panel covers the HTML page, in the frame's pixels (null when it is not on screen). */
+  const panelOverFrame = () => {
+    const section = sectionRef.current;
+    if (!section?.classList.contains('ib-drawer') || section.getAttribute('data-tools') === 'tucked') return null;
+    const panel = section.querySelector<HTMLElement>('.ib-apanel')?.getBoundingClientRect();
+    const frame = section.querySelector<HTMLElement>('.ib-htmlframe iframe')?.getBoundingClientRect();
+    if (!panel || !frame || !panel.width) return null;
+    return { left: panel.left - frame.left, top: panel.top - frame.top, bottom: panel.bottom - frame.top };
   };
   const togglePanel = () => {
     setMenuOpen(false);
@@ -409,12 +601,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     },
     [],
   );
-  /** The question row: a typed comment would be lost by what the person just did. */
-  const [guard, setGuard] = useState<{ to: string | null; go: () => void; escape?: HTMLTextAreaElement } | null>(null);
-  /** "Save it and go on" is waiting for the save to answer. */
-  const [guardSaving, setGuardSaving] = useState(false);
-  /** Every save the pane makes, counted, with the last one's answer: the question row waits on it. */
-  const saves = useRef<{ count: number; last: Promise<boolean> | null }>({ count: 0, last: null });
   /** An annotation's saved words by id (an edit box differs from them when it holds unsaved words). */
   const savedTextRef = useRef<(id: string) => string | undefined>(() => undefined);
   savedTextRef.current = (id) => {
@@ -423,38 +609,94 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     const text = (record.annotation as { text?: unknown }).text;
     return typeof text === 'string' ? text : '';
   };
-  const guardRef = useRef<HTMLDivElement>(null);
   const memory = useRef(new Map<string, FileMemory>());
   // The image viewer's "⌘ + scroll to zoom" hint shows once while the pane is open, not once per file (#2127).
   const wheelHint = useRef<WheelHintGate>({ shown: false }).current;
   const remember = (id: string, patch: FileMemory) => memory.current.set(id, { ...memory.current.get(id), ...patch });
   /** How the last step was asked for, so focus lands in the right place once the next file is in. */
   const pendingStep = useRef<StepSource | null>(null);
+  /** Which of the option card's arrows asked for the step in flight, so focus can go back to it. */
+  const cardArrow = useRef<1 | -1 | null>(null);
 
   const rememberPlace = () => {
     const scroller = scrollerOf(sectionRef.current);
     if (scroller) remember(attachment.id, { scroll: { top: scroller.scrollTop, left: scroller.scrollLeft } });
   };
-  /** Leave the open file for `to` (a name), or close it (null), unless a typed comment would be lost. */
-  const leave = (to: string | null, go: () => void) => {
-    if (!props.readOnly && unsavedComposer(sectionRef.current, savedTextRef.current)) {
-      setMenuOpen(false);
-      setGuard({ to, go });
-      return;
-    }
+  /**
+   * Leave the open file for `to` (a name), or close it (null). Never asks: a
+   * comment being written is kept as this file's draft first (`keepDrafts`).
+   * Still on the file once `go` has run (full screen went back beside the
+   * thread): its words come back at once.
+   */
+  const leave = (_to: string | null, go: () => void) => {
+    setMenuOpen(false);
+    const key = draftKeyRef.current;
+    keepDraftsRef.current();
     rememberPlace();
     go();
+    requestAnimationFrame(() => {
+      if (mountedRef.current && draftKeyRef.current === key) putBackRef.current();
+    });
   };
   const leaveRef = useRef(leave);
   leaveRef.current = leave;
-  useImperativeHandle(ref, () => ({ leave: (to, go) => leaveRef.current(to, go) }), []);
+  const readOnlyRef = useRef(props.readOnly);
+  readOnlyRef.current = props.readOnly;
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  /** Filled once the drafts are wired (below `edit`): keep the file's drafts; put them back while it is still open; set one aside. */
+  const keepDraftsRef = useRef<(tearing?: boolean) => void>(() => {});
+  const putBackRef = useRef<() => void>(() => {});
+  const setAsideRef = useRef<(area: HTMLTextAreaElement) => boolean>(() => false);
+  /** The open file's draft key (fileCommentDrafts.ts): its attachment at the version its comments are on. */
+  const draftKeyRef = useRef('');
+  /** Set while the pane takes the composers' words as drafts: their "save" lands here, never in the reply. */
+  const capturing = useRef<FileCommentDraft[] | null>(null);
+  /** Drafts of this file not on screen: waiting since it opened (not shown yet), or set aside by Escape. */
+  const waiting = useRef<FileCommentDraft[]>([]);
+  /** The file's own comment row (an image's, a film's, an HTML page's), read as the file closes (`useRowDraft`). */
+  const rowReaders = useRef(new Set<() => FileCommentDraft | null>());
+  /** An HTML page's row words while the row is off screen and the file still open (out of full screen, a linked page over it). */
+  const pageParking = useRef<{ key: string; text: string } | null>(null) as PageCommentParking;
+  /** The comment popovers' boxes this pane opened (focused, typed in, or shown with put-back words). */
+  const ownBoxes = useRef(new WeakSet<HTMLTextAreaElement>());
+  /** The comment box last typed in, with what it is on then: read if the pane goes without `leave`. */
+  const live = useRef<{ area: HTMLTextAreaElement; anchor: Annotation | null } | null>(null);
+  /** The lines of the code view's comment being written (CodeFileView's onComposerLines). */
+  const codeLines = useRef<{ lineStart: number; lineEnd: number; originalCode: string } | null>(null);
+  /** The row draft the file's own row took as it mounted: the row holds those words now, so nothing keeps them twice. */
+  const rowTook = useRef<{ key: string; draft: RowDraft } | null>(null);
+  /** Whose drafts `waiting` holds (the file's key, set as it opens). */
+  const waitingKey = useRef('');
+  /** This file's drafts were kept since it opened: leaving and the pane going never keep them twice. */
+  const kept = useRef(false);
+  /**
+   * The comments saved from this file since it opened (what each is on, its id, its words). A box still showing
+   * saved words as the file closes (a host that closes the file on the save, as the tour does) holds no draft.
+   */
+  const savedHere = useRef<{ at: string; id: string; text: string }[]>([]);
+  const recordsRef = useRef(props.records);
+  // Whether the file holds a comment not saved yet, for the window's link listener (App.tsx): an edit not changed is not unsaved.
+  useEffect(() => {
+    const entry = { unsaved: () => !readOnlyRef.current && unsavedComposer(sectionRef.current, savedTextRef.current) !== null };
+    openPanes.add(entry);
+    return () => void openPanes.delete(entry);
+  }, []);
+  const exitFullRef = useRef<() => void>(() => {});
+  useImperativeHandle(ref, () => ({ leave: (to, go) => leaveRef.current(to, go), exitFull: () => exitFullRef.current() }), []);
 
   const showEnd = (text: string) => {
     setEndNote(text);
     announce(text);
     if (endTimer.current) clearTimeout(endTimer.current);
     endTimer.current = setTimeout(() => setEndNote(null), 1800);
-    if (fullRef.current) showChip(text);
+    // In a set of picture choices nothing on screen says it (the card is the choice, the live region says the end); else the chip.
+    if (fullRef.current && !optionSetRef.current) showChip(text);
   };
 
   // ── Full screen (approval "inbox-one-fullscreen", Drawer) ─────────────────
@@ -482,32 +724,35 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       setMoreOpen(false);
       // Leaving full screen forgets a tucked toolbar: the next entry draws it showing from its first frame (no tucked frame, no slide-in, focus never lands on something inert).
       setToolbar('pinned');
+      // The comments panel floats over full screen only: it closes as full screen ends.
+      setDrawer(false);
     }
   }, [full]);
   // An image's or a film's comment row (a phone's "Comment at" button for a film) stays at the file's foot in full screen: the chip and a phone's toolbar sit above it.
   useEffect(() => {
     const section = sectionRef.current;
-    if (!full || !section || (kind !== 'image' && kind !== 'video')) return;
+    if (!full || !section || (kind !== 'image' && kind !== 'video' && kind !== 'audio' && !(kind === 'html' && hasComposer))) return;
     const place = () => {
-      const row = section.querySelector<HTMLElement>(FILE_FOOT_ROW);
-      section.style.setProperty('--ib-fvfoot', `${row ? Math.round(row.getBoundingClientRect().height) : 0}px`);
+      const row = fileFootRow(section);
+      // The layout height (offsetHeight), not the box on screen: a card flying into the corner control is scaled down.
+      section.style.setProperty('--ib-fvfoot', `${row ? row.offsetHeight : 0}px`);
     };
     place();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
     const mutations = new MutationObserver(() => {
       place();
-      const row = section.querySelector(FILE_FOOT_ROW);
+      const row = fileFootRow(section);
       if (row && observer) observer.observe(row);
     });
     mutations.observe(section, { childList: true, subtree: true });
-    const row = section.querySelector(FILE_FOOT_ROW);
+    const row = fileFootRow(section);
     if (row && observer) observer.observe(row);
     return () => {
       observer?.disconnect();
       mutations.disconnect();
       section.style.removeProperty('--ib-fvfoot');
     };
-  }, [full, attachment.id, kind]);
+  }, [full, attachment.id, kind, hasComposer]);
   const fullViewPeekId = `ib-fvpeek-${useId().replace(/:/g, '')}`;
   /** A phone's position in the Comments sheet's foot: its peek is the bottom sheet, drawn in the Inbox's root. */
   const phonePosRef = useRef<HTMLButtonElement>(null);
@@ -555,23 +800,31 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       announce('Side by side: the file is beside the thread.');
     }
   }, [full, announce]);
-  const goTo = (target: number, source: StepSource) => {
-    const next = steps[target];
-    if (!next || target === index) {
+  /** Open the file at `target` in `list` (the files stepped through; the sheet's `allSteps`). */
+  const goTo = (target: number, source: StepSource, list: readonly AttachmentStep[] = steps) => {
+    const next = list[target];
+    const inSteps = list === steps;
+    // The same file at another place in `steps` is another step (a picture two choices share); in the sheet's list it is this one.
+    const sameFile = next !== undefined && next.attachment.id === attachment.id;
+    if (!next || (inSteps ? target === index : sameFile)) {
       setMenuOpen(false);
       return;
     }
-    leave(next.attachment.name, () => {
+    const go = () => {
       pendingStep.current = source;
       setMenuOpen(false);
-      props.onStep?.(next.attachment.id, memory.current.get(next.attachment.id)?.version ?? 'current');
-    });
+      props.onStep?.(next.attachment.id, memory.current.get(next.attachment.id)?.version ?? 'current', inSteps ? target : null);
+    };
+    if (!sameFile) return leave(next.attachment.name, go);
+    // Nothing is left behind on the same file (no draft to keep), and no new picture loads to end a swipe's handoff.
+    go();
+    requestAnimationFrame(() => swipe.settle());
   };
   const step = (dir: 1 | -1, source: StepSource) => {
     if (!multi) return;
     const target = index + dir;
     if (target < 0 || target >= steps.length) {
-      showEnd(dir > 0 ? LAST_NOTE : FIRST_NOTE);
+      showEnd(optionSet ? (dir > 0 ? LAST_OPTION_NOTE : FIRST_OPTION_NOTE) : dir > 0 ? LAST_NOTE : FIRST_NOTE);
       return;
     }
     goTo(target, source);
@@ -579,43 +832,128 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const stepRef = useRef(step);
   stepRef.current = step;
 
-  // Each file opens armed (Annotate) and without the last file's note; a step is announced once.
+  // Each file opens in the thread's Annotate or Interact (another thread's file in Interact) and without the last
+  // file's note; a step is announced once.
   const stepsRef = useRef(steps);
   stepsRef.current = steps;
+  const indexRef = useRef(index);
+  indexRef.current = index;
   useEffect(() => {
-    setArmed(true);
+    setArmed(armedStartRef.current);
     setEndNote(null);
-    setGuard(null);
     setSheet(false);
+    // The comments panel was about the file left: the next one opens without it, unless a pick in it opened this file.
+    const kept = keepPanelFor.current;
+    keepPanelFor.current = null;
+    if (kept === null) setDrawer(false);
+    else
+      requestAnimationFrame(() => {
+        const card = sectionRef.current?.querySelector<HTMLElement>(`.ib-apanel [data-annotation-id="${CSS.escape(kept)}"]`);
+        (card ?? sheetButtonRef.current)?.focus({ preventScroll: true });
+      });
     const source = pendingStep.current;
     pendingStep.current = null;
     if (!source) return;
-    const at = stepIndexOf(stepsRef.current, attachment.id);
-    if (at >= 0) announce(stepAnnouncement(stepsRef.current, at));
-    // Full screen keeps on through a step; with no bar under the file, a chip names the file for a moment.
-    if (fullRef.current) showChipRef.current(null);
+    const at = indexRef.current;
+    const set = optionSetRef.current;
+    if (at >= 0) announce(set ? optionAnnouncement(set, at, outsideSet) : stepAnnouncement(stepsRef.current, at));
+    // Full screen keeps on through a step; with no bar under the file, a chip names the file for a moment (a set's caption names the choice).
+    if (fullRef.current && !set) showChipRef.current(null);
     // A key pressed in the document (or the HTML page) leaves focus on the pane; a bar button keeps it.
     if (source === 'key') sectionRef.current?.focus({ preventScroll: true });
+    // The card's arrow keeps it too; should focus have gone nowhere on the way, back on the arrow.
+    const arrow = cardArrow.current;
+    cardArrow.current = null;
+    if (source === 'button' && arrow !== null) {
+      requestAnimationFrame(() => {
+        if (document.activeElement && document.activeElement !== document.body) return;
+        sectionRef.current?.querySelector<HTMLElement>(`[data-option-step="${arrow < 0 ? 'prev' : 'next'}"]`)?.focus({ preventScroll: true });
+      });
+    }
     // The sheet's Previous / Next closed the sheet with the step: focus back on what opened it.
     if (steppedFromSheet.current) {
       steppedFromSheet.current = false;
       requestAnimationFrame(focusPeekOpener);
     }
-  }, [attachment.id, announce]);
+    // A step between two choices that share a picture keeps the file: their place in the set is what changed.
+  }, [attachment.id, named, announce]);
 
   // `]` `[` `→` `←` (stepping.ts has the rules for when they stand down).
-  const blocked = guard !== null || menuOpen || moreOpen;
+  const blocked = menuOpen || moreOpen;
   const blockedRef = useRef(blocked);
   blockedRef.current = blocked;
-  // A phone's swipe over the file (fileSwipe.ts): documents, text, code, PDFs and the download card follow the finger; an image keeps its own at Fit.
+  // A phone's swipe over the file (fileSwipe.ts): documents, text, code, PDFs, the download card and images follow the finger.
+  // It is heard on the body around the file (`bodyRef`), which never moves, so a finger that comes back while the last
+  // step is still sliding is heard; what moves is the file area, or for an image only the picture (`swipeMoves`).
   const docAreaRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  /** The controls a drag down fades (the dock, the caption, the size bar, the comment box), found once when it starts. */
+  const dismissFades = useRef<HTMLElement[]>([]);
   const swipeMode = fileSwipeMode(kind, tooLarge);
-  const swipe = useFileSwipe(docAreaRef, {
-    enabled: full && phone && multi && swipeMode === 'follow' && !blocked && !sheet,
-    canStep: (dir) => index + dir >= 0 && index + dir < steps.length,
+  // An image (approval "inbox-image-swipe"): a zoomed image or a panorama pans to its edge first, the next image
+  // peeks in beside it, and a drag down closes, even with one file.
+  const imageEdges = useRef<ImageSwipeEdges | null>(null);
+  const isImageFile = kind === 'image';
+  const swipeOn = (full && phone ? multi || isImageFile : touch.tablet && multi) && swipeMode === 'follow' && !blocked && !sheet;
+  /** The neighbour that way is an image drawn whole beside this one (ImageSwipePeek), not the "Next · name" card. */
+  const peeks = (dir: 1 | -1) => {
+    const neighbour = steps[index + dir];
+    return isImageFile && multi && neighbour !== undefined && isImageStep(neighbour) && !prefersReducedMotion() && memory.current.get(neighbour.attachment.id)?.fit !== 'actual';
+  };
+  const canStepTo = (dir: 1 | -1) => index + dir >= 0 && index + dir < steps.length;
+  /**
+   * What follows the finger. An image stepping to the image beside it, resisting at an end, or dragged down: only the
+   * picture (and the neighbours drawn beside it), so its size bar and comment box stay put (approval
+   * "inbox-image-swipe", mock 2). Toward a file that is not an image, and for every other file: the whole file area.
+   */
+  const swipeMoves = (gesture: 'step' | 'dismiss', dir: 1 | -1): HTMLElement[] => {
+    const area = docAreaRef.current;
+    if (!area) return [];
+    const picture = isImageFile ? area.querySelector<HTMLElement>('.ib-imgstage > .ib-zoomstage') : null;
+    if (!picture) return [area];
+    if (gesture === 'dismiss') return [picture];
+    if (!peeks(dir) && canStepTo(dir)) return [area];
+    const beside = area.querySelector<HTMLElement>('.ib-imgpeeks');
+    return beside ? [picture, beside] : [picture];
+  };
+  const swipe = useFileSwipe(bodyRef, {
+    enabled: swipeOn,
+    canStep: canStepTo,
+    move: swipeMoves,
     onStep: (dir) => stepRef.current(dir, 'key'),
-    wouldAsk: () => !props.readOnly && unsavedComposer(sectionRef.current, savedTextRef.current) !== null,
+    // Nothing asks before a step: a comment being written waits as the file's draft, so the swipe always follows through.
+    wouldAsk: () => false,
+    // One image alone has nowhere to step: a sideways drag is the image's own.
+    keeps: isImageFile ? (dir) => !multi || (imageEdges.current?.keeps(dir) ?? false) : undefined,
+    peek: peeks,
+    dismiss: isImageFile && phone
+      ? {
+          can: () => imageEdges.current?.canDismiss() ?? false,
+          onDismiss: () => closeRef.current(),
+          // The backdrop fades with the drag (`--ib-dismiss`, registered as not inherited, so the pane's contents are not
+          // restyled on every move) and the controls fade faster, by their own opacity.
+          onProgress: (share) => {
+            const pane = sectionRef.current;
+            if (!pane) return;
+            if (share > 0) {
+              if (!pane.hasAttribute('data-dismissing')) {
+                pane.setAttribute('data-dismissing', '');
+                dismissFades.current = Array.from(pane.querySelectorAll<HTMLElement>('.ib-fvdock, .ib-optcap, .ib-imgbar, .ib-imgcompose, .ib-fcomp, .ib-fcomp-pillwrap'));
+              }
+              pane.style.setProperty('--ib-dismiss', share.toFixed(3));
+              const opacity = Math.max(0, 1 - share * 2.5).toFixed(3);
+              for (const control of dismissFades.current) control.style.opacity = opacity;
+            } else {
+              pane.removeAttribute('data-dismissing');
+              pane.style.removeProperty('--ib-dismiss');
+              for (const control of dismissFades.current) control.style.opacity = '';
+              dismissFades.current = [];
+            }
+          },
+        }
+      : undefined,
   });
+  const closeRef = useRef<() => void>(() => {});
   // A file a swipe cannot step (`swipeMode === 'none'`: HTML pages, diagrams, videos; and code that scrolls sideways)
   // steps through the sheet the pill opens: its ‹ Previous and Next › (the owner's answer; no floating tabs), shown for
   // every file so the sheet is the same everywhere (the phone's FilePeek below, `onStep`).
@@ -628,22 +966,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     return stepKeyIntent(event, { full, pane, blocked }) === dir;
   };
 
-  // The question row takes focus on its first choice.
-  useEffect(() => {
-    if (guard) guardRef.current?.querySelector<HTMLButtonElement>('[data-guard-save]')?.focus();
-  }, [guard]);
-  const focusComposer = () => {
-    const area = unsavedComposer(sectionRef.current, savedTextRef.current);
-    if (area) {
-      area.focus();
-      area.setSelectionRange(area.value.length, area.value.length);
-    }
-  };
-  const keepWriting = () => {
-    steppedFromSheet.current = false;
-    setGuard(null);
-    focusComposer();
-  };
   /**
    * Close a composer the way its own Escape does (the pane sends the key to
    * it): a comment popover hands focus back to what opened it; anything that
@@ -658,76 +980,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       if (!active || active === document.body || !active.isConnected) sectionRef.current?.focus({ preventScroll: true });
     });
   };
-  /** Escape on a composer holding typed words: never lost, the question row asks first (Save it, Discard it, Keep writing). */
-  const askBeforeEscape = (area: HTMLTextAreaElement) => {
-    setMenuOpen(false);
-    setMoreOpen(false);
-    setGuard({ to: null, go: () => {}, escape: area });
-  };
-  /**
-   * Save the typed comment, then go on only once the save answered. Every
-   * composer saves on Cmd/Ctrl+Enter (the comment popover, the diagram's, the
-   * image's own, an edit box). Nothing saved (the composer refused it): the
-   * row stays and the words get focus. A failed save stays on the file with
-   * the error.
-   */
-  const saveAndGo = async () => {
-    const pending = guard;
-    if (!pending || guardSaving) return;
-    const area = unsavedComposer(sectionRef.current, savedTextRef.current);
-    const before = saves.current.count;
-    area?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', metaKey: true, ctrlKey: true, bubbles: true, cancelable: true }));
-    setGuardSaving(true);
-    // The composer submits and React draws its answer before the save is read.
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    const started = saves.current.count > before ? saves.current.last : null;
-    const ok = started ? await started : false;
-    setGuardSaving(false);
-    if (pending.escape) {
-      // Escape asked: the composer saved (and closed) or refused; nothing else to go to.
-      if (!started && unsavedComposer(sectionRef.current, savedTextRef.current)) {
-        focusComposer();
-        return;
-      }
-      setGuard(null);
-      if (started && !ok) focusComposer();
-      else announce('Comment saved.');
-      return;
-    }
-    if (!started) {
-      // Still typed and not saved: never lost. The row stays open over the words.
-      if (unsavedComposer(sectionRef.current, savedTextRef.current)) {
-        focusComposer();
-        return;
-      }
-      setGuard(null);
-      rememberPlace();
-      pending.go();
-      return;
-    }
-    setGuard(null);
-    if (!ok) {
-      focusComposer();
-      return;
-    }
-    rememberPlace();
-    pending.go();
-  };
-  const discardAndGo = () => {
-    const pending = guard;
-    if (guardSaving) return;
-    setGuard(null);
-    if (pending?.escape) {
-      dismissComposer(pending.escape);
-      announce('Comment discarded.');
-      return;
-    }
-    if (pending) {
-      rememberPlace();
-      pending.go();
-    }
-  };
-
   // Back on a file read before in this pane: where it was read to.
   useEffect(() => {
     const saved = memory.current.get(attachment.id)?.scroll;
@@ -763,22 +1015,22 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         when: (event) => isHtml && full && !modalOpen() && !isEditableTarget(keyTarget(event)),
         handle: () => barRef.current?.toggle(),
       },
-    },
-  });
-  // Escape on a composer holding typed words, before the composer's own Escape drops them (capture): the question row asks.
-  const escapeAsk = useRef<HTMLTextAreaElement | null>(null);
-  useShortcutScope({
-    scope: inboxFileViewerShortcuts,
-    capture: true,
-    handlers: {
-      escape: {
+      toggleAnnotate: {
+        // ⌘⇧A / Ctrl+Shift+A (approval "inbox-keyboard-keys-2026-11-07", item 6): Annotate ↔ Interact from anywhere in
+        // the open HTML file, as its tooltip says; inside the page the frame's bridge forwards it (onAnnotateModeToggle).
+        // Not while typing, under a modal, on a read-only file, or under a linked page. Beside the thread, only a key
+        // from inside the file (a thread key is the thread's); in full screen the file is all there is.
         when: (event) => {
-          escapeAsk.current = props.readOnly || paneEscapes.has(event) || isComposingKey(event) ? null : composerAskedAbout(keyTarget(event));
-          return escapeAsk.current !== null;
+          if (!isHtml || !view || view.html === null || props.readOnly || linkedTop || modalOpen()) return false;
+          const target = keyTarget(event);
+          if (isEditableTarget(target) || inOverlay(target)) return false;
+          return full || (!!target && !!sectionRef.current?.contains(target));
         },
         handle: (event) => {
-          event.stopPropagation();
-          if (escapeAsk.current) askBeforeEscape(escapeAsk.current);
+          // A held chord toggles once: its repeats are swallowed (still cancelled, so the browser's ⌘⇧A stays shut).
+          if (event.repeat) return;
+          announce(armed ? 'Interact: clicks reach the page.' : 'Annotate: click or select to comment.');
+          setArmed(!armed);
         },
       },
     },
@@ -802,19 +1054,22 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     },
   });
 
-  /** The textarea of a composer this pane owns that holds unsaved words, when the key came from inside that composer. */
-  function composerAskedAbout(target: Element | null): HTMLTextAreaElement | null {
-    const container = target?.closest(CLOSING_COMPOSERS);
-    if (!container) return null;
-    const area = target instanceof HTMLTextAreaElement && container.contains(target) ? target : container.querySelector('textarea');
-    // A skill or mention menu open in the composer takes this Escape first.
-    if (!area || area.getAttribute('aria-expanded') === 'true') return null;
-    // A comment popover draws on the page (a portal); everything else is in the pane (Pierre's code view in its shadow root).
-    if (!container.matches('[data-comment-popover]') && !sectionRef.current?.contains(hostOf(container))) return null;
-    if (container.matches('[data-comment-popover], [data-diagram-composer]')) return area.value.trim() !== '' ? area : null;
-    const id = container.getAttribute('data-annotation-id') ?? container.getAttribute('data-code-annotation-id') ?? '';
-    return area.value.trim() !== (savedTextRef.current(id) ?? '').trim() ? area : null;
-  }
+  // Beside the thread, an Escape nothing else used closes the file (approval "inbox-keyboard-shortcuts": Escape
+  // takes off the top layer). Last of all: on the window, bubbling, after the ladder, the thread and every control.
+  useShortcutScope({
+    scope: inboxFileViewerShortcuts,
+    handlers: {
+      escape: {
+        when: (event) => {
+          if (full || props.fullLocked || linkedTop || event.defaultPrevented || paneEscapes.has(event) || isComposingKey(event) || modalOpen()) return false;
+          if (document.querySelector(SELF_CLOSING_DRAFTS)) return false;
+          const target = keyTarget(event);
+          return !(target && (isEditableTarget(target) || inOverlay(target) || target.closest('[role="menu"], [role="listbox"], [aria-expanded="true"]')));
+        },
+        handle: () => close(),
+      },
+    },
+  });
 
   /** An open comment composer of this file (a comment popover, a diagram's composer): its textarea. */
   function openComposer(): HTMLTextAreaElement | null {
@@ -837,17 +1092,17 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       return 'linked';
     }
     if (document.querySelector(SELF_CLOSING_DRAFTS)) return null;
-    const inField = !!target && isEditableTarget(target) && !!target.closest('[data-image-composer]') && !!sectionRef.current?.contains(target);
+    const inField = !!target && isEditableTarget(target) && !!target.closest('[data-image-composer], [data-fcomp-field]') && !!sectionRef.current?.contains(target);
     if (target && !inField && (isEditableTarget(target) || inOverlay(target))) return null;
     return escapeRung({
       full: true,
-      popoverOpen: menuOpen || moreOpen,
+      popoverOpen: menuOpen || moreOpen || !!props.composer?.reply.comments.list,
       composerOpen: !props.readOnly && openComposer() !== null,
       inField,
-      panelOpen: panelOpen,
+      // Gathered with the tools, the panel is not on screen: Escape has nothing of it to close.
+      panelOpen: panelOpen && !(drawerMode && toolbar === 'tucked'),
       linkedOpen: linkedTop !== null,
-      annotating: isHtml && armed && !props.readOnly,
-      questionOpen: guard !== null,
+      annotating: isHtml && annotating,
     });
   }
 
@@ -860,6 +1115,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       case 'popover': {
         setMenuOpen(false);
         setMoreOpen(false);
+        // Reached only from inside the page: the list takes a key from this window itself, and focus stays in the page.
+        props.composer?.reply.comments.onList(null);
         // The peek hands focus back to N/M itself; a menu whose item held focus leaves it on ⋯.
         requestAnimationFrame(() => {
           const active = document.activeElement;
@@ -870,18 +1127,25 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       case 'composer': {
         const area = openComposer();
         if (!area) return;
-        if (area.value.trim() !== '') {
-          askBeforeEscape(area);
+        // Typed words wait as the file's draft (as closing the file keeps them), back in the box when it opens again.
+        if (area.value.trim() !== '' && setAsideRef.current(area)) {
+          announce('Comment closed. Your words are kept for when you open this file again.');
+          requestAnimationFrame(() => {
+            const active = document.activeElement;
+            if (!active || active === document.body || !active.isConnected) sectionRef.current?.focus({ preventScroll: true });
+          });
           return;
         }
         dismissComposer(area);
         announce('Comment closed.');
         return;
       }
-      case 'field':
+      case 'field': {
+        const fromReply = !!document.activeElement?.closest('[data-fcomp-field]');
         sectionRef.current?.focus({ preventScroll: true });
-        announce('Left the comment box.');
+        announce(fromReply ? 'Left the reply box. Your words are kept.' : 'Left the comment box.');
         return;
+      }
       case 'drawer':
         if (fromPage) {
           if (drawerMode) setDrawer(false);
@@ -896,12 +1160,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         setArmed(false);
         announce('Interact: clicks reach the page.');
         return;
-      case 'question':
-        keepWriting();
-        return;
       case 'leave':
-        if (props.fullLocked) close();
-        else toggleFull(false);
+        if (exitCloses) close();
+        else exitFull();
         return;
     }
   }
@@ -918,7 +1179,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     return true;
   }
 
-  // ── Links inside an attached HTML page (htmlLinks.ts) ─────────────────────
+  // ── Links inside an attached document (htmlLinks.ts) ─────────────────────
   /**
    * Pages the person followed from the attached page, not attached themselves:
    * shown read-only over it, newest last. The route holds the page on screen
@@ -937,6 +1198,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const [linkImage, setLinkImage] = useState<{ src: string; alt: string } | null>(null);
   /** The fragment a link named on an attached page it opened (`SHEET.html#pr1`): cleared once used. */
   const [linkFragment, setLinkFragment] = useState<{ id: string; hash: string } | null>(null);
+  const [pageStart, setPageStart] = usePageStart(props.pageStart, attachment.id);
   useEffect(() => {
     setLinkNote(null);
     setLinkImage(null);
@@ -966,7 +1228,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     focusLinkedBack.current = false;
   }, [attachment.id, effectiveVersion]);
   // The page the route names: back to one already in the stack, or read and pushed.
-  const linkedRequest = isHtml ? (props.linked ?? null) : null;
+  const linkedRequest = isHtml || kind === 'markdown' ? (props.linked ?? null) : null;
   useEffect(() => {
     if (!linkedRequest) {
       setLinkedStack([]);
@@ -983,7 +1245,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     let cancelled = false;
     source
       .linkedPage(attachment, relative)
-      .then((page) => {
+      .then(async (page) => {
+        // A linked Markdown page waits for its code and math as the file does.
+        if (page.html === null) await attachmentDrawReady('markdown', page.name, page.text);
         if (cancelled) return;
         setLinkedStack((stack) => [...stack.filter((p) => p.attachmentId === attachment.id), { ...page, relative, hash, attachmentId: attachment.id }]);
         announce(`${page.name}. It is not attached, so comments are off.`);
@@ -1013,6 +1277,10 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     if (isEditableTarget(document.activeElement)) return;
     back.focus({ preventScroll: true });
   }, [linkedTop, view]);
+  // A fragment a link named on an attached Markdown file (`notes.md#setup`): scrolled once the file is drawn.
+  useEffect(() => {
+    if (kind === 'markdown' && view && linkFragment?.id === attachment.id && !linkedTop) viewerRef.current?.scrollToAnchor?.(linkFragment.hash);
+  }, [kind, view, linkFragment, attachment.id, linkedTop]);
   // A fragment is replayed once: cleared after the page had time to take it, so a remount does not scroll again and the same #hash works twice.
   useEffect(() => {
     if (!linkFragment || linkFragment.id !== attachment.id || !view) return;
@@ -1050,17 +1318,35 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     props.onLinked?.(before ? linkedValue(before.relative, before.hash) : null, { back: true });
     requestAnimationFrame(() => sectionRef.current?.focus({ preventScroll: true }));
   };
-  /** A link the page's bridge handed over (a plain click, armed or not; ⌘/Ctrl-click while armed pins it instead). `baseDir`: the folder of the page it is in. */
-  const followLink = (href: string, baseDir: string) => {
+  /** A link the page's bridge handed over (a plain click, armed or not; ⌘/Ctrl-click while armed pins it instead). `baseDir`: the folder of the page it is in; `page`: its path and frame, for a link to itself (a query). */
+  const followLink = (href: string, baseDir: string, page?: { path: string; frame?: HtmlViewerFrame }) => {
+    // Ahead of the page's own rules, which read the window's own origin as the page's folder, not as 'external'. Only
+    // a full address: `/#thread=…` and `./#thread=…` are the page's folder, as those rules say. And only after a
+    // person's click: the page's own script can post this message too, and must not move the window
+    // (HtmlEmbedBlock's rule: the frame holds focus, which a click in it gives, and the window has the click's
+    // activation). Without one, the page's rules below decide, as before links opened in place.
+    const activation = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation;
+    const focused = document.activeElement instanceof HTMLIFrameElement && !!sectionRef.current?.contains(document.activeElement);
+    const clicked = focused && activation?.isActive === true;
+    const inPlace = /^\s*https?:\/\//i.test(href) && clicked ? props.onInboxLink?.(href) : null;
+    if (inPlace) {
+      leave(null, inPlace);
+      return;
+    }
     const link = resolveInboxHtmlLink(href, {
       folder: pageFolder,
       baseDir,
       attachments: linkables,
       assetRoute: pageAssetRoute,
       serverOrigin: window.location.origin,
+      markdown: kind === 'markdown',
+      selfPath: page?.path,
     });
     switch (link.kind) {
       case 'ignored':
+        return;
+      case 'self': // The page again with that query, in its own frame (as a tab loads `?variant=2`).
+        page?.frame?.reload(link.search, link.hash);
         return;
       case 'external':
         window.open(link.url, '_blank', 'noopener,noreferrer');
@@ -1081,6 +1367,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         }
         leave(link.name, () => {
           if (link.hash) setLinkFragment({ id: link.id, hash: link.hash });
+          setPageStart(linkables.find((a) => a.id === link.id)?.kind === 'html' ? pageStartAt(link.id, link.search, link.hash) : null);
           pendingStep.current = 'key';
           if (props.onOpenLinked) props.onOpenLinked(link.id);
           else props.onStep?.(link.id, 'current');
@@ -1088,18 +1375,28 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         return;
       }
       case 'page':
-        // A typed comment on the attached page asks first, as for any file it would leave.
+        // A typed comment on the attached page waits as its draft, as for any file it leaves.
         leave(link.name, () => props.onLinked?.(linkedValue(link.relative, link.hash)));
         return;
     }
   };
   const followLinkRef = useRef(followLink);
   followLinkRef.current = followLink;
+  // Stable across renders: ui's HtmlBlock redraws a raw HTML block whenever its link resolver changes.
+  const resolveFileLink = useCallback<LocalLinkResolver>(
+    (href) => source.markdownLink?.(href) ?? { kind: 'open', open: () => followLinkRef.current(href, pageFolder) },
+    [pageFolder, source],
+  );
+  const linkedPath = linkedTop?.path ?? null;
+  const openFromLinked = useCallback((href: string) => {
+    if (linkedPath) followLinkRef.current(href, folderOf(linkedPath));
+  }, [linkedPath]);
 
   const isText = kind === 'markdown' || kind === 'text';
   const isCode = kind === 'code';
   const isImage = kind === 'image';
-  const isVideo = kind === 'video';
+  /** A video or a recording: one player view, comments at moments (contract 4). */
+  const isVideo = kind === 'video' || kind === 'audio';
   const videoRef = useRef<VideoAttachmentViewHandle>(null);
   // A PDF, any other file, and a kind this window does not know: offered as a download.
   const isDownload = kind === 'pdf' || kind === 'file' || tooLarge;
@@ -1110,9 +1407,111 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const annotations = useMemo(() => fileRecords.map(annotationOf), [fileRecords]);
   // The document's blocks keep their identity across saves (the Viewer re-renders on a new array);
   // only code comments, which carry their own lines, derive blocks from the annotations.
-  const documentBlocks = useMemo(() => (view && !isCode ? attachmentBlocks(kind, view.text, attachment.name) : []), [view, kind, isCode, attachment.name]);
+  const documentBlocks = useMemo(() => (view && !isCode ? (source.textBlocks ?? attachmentBlocks)(kind, view.text, attachment.name) : []), [view, kind, isCode, attachment.name, source]);
   const commentBlocks = useMemo(() => (isCode ? codeCommentBlocks(annotations) : []), [isCode, annotations]);
   const blocks = isCode ? commentBlocks : documentBlocks;
+  // The file's question cards, answerable like the body's (issue #2828).
+  const fileQuestionProps = useFileQuestionViewerProps(kind === 'markdown' ? props.questions : null);
+  // A card asked for (the open questions list, a reply's answer row): brought into view and ringed, as the
+  // thread's jump does for a card in a message, once the file's text is drawn.
+  const questionFocus = kind === 'markdown' ? props.questions?.focus : null;
+  const questionFocusKey = questionFocus ? (props.questions?.records.find((r) => r.key === questionFocus.key)?.attachment?.key ?? null) : null;
+  const questionFocusDone = useRef<number | null>(null);
+  useEffect(() => {
+    if (!questionFocus || !questionFocusKey || !view || questionFocusDone.current === questionFocus.seq) return;
+    let frames = 0;
+    let ring: ReturnType<typeof setTimeout> | null = null;
+    let frame = requestAnimationFrame(function find() {
+      const card = scrollViewport?.querySelector<HTMLElement>(`[data-question-key="${CSS.escape(questionFocusKey)}"]`);
+      if (!card) {
+        frames += 1;
+        if (frames < 30) frame = requestAnimationFrame(find);
+        return;
+      }
+      questionFocusDone.current = questionFocus.seq;
+      card.scrollIntoView?.({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+      if (!card.hasAttribute('tabindex')) card.setAttribute('tabindex', '-1');
+      card.focus({ preventScroll: true });
+      card.classList.remove('ib-q-target-out');
+      card.classList.add('ib-q-target');
+      ring = setTimeout(() => {
+        card.classList.add('ib-q-target-out');
+        card.classList.remove('ib-q-target');
+        ring = setTimeout(() => card.classList.remove('ib-q-target-out'), 700);
+      }, 1400);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      if (ring) clearTimeout(ring);
+    };
+    // Once per ask (its seq), and again when the text it waits for is drawn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [questionFocus?.seq, questionFocusKey, view, scrollViewport]);
+  // Side: the words, and where they came from (the file, its version, the line and heading; ask/sideSource.ts).
+  const sideButton = useSideButton();
+  const sideFrom = props.onSide
+    ? (text: string, context: SelectionActionContext) =>
+        props.onSide!(text, fileSideSource(attachment, props.version, { selected: text, blockId: context.blockId, blocks: isHtml ? [] : blocks, annotations }))
+    : undefined;
+  // A Markdown file with 2 or more headings has Contents (contents.ts). On a desktop, Side by side and Full screen
+  // alike: ui's contents rail in the page's right gutter. Where the rail yields (its own rule: a gutter under 68 px,
+  // a pane under 480 px), when it is hidden, and on a phone: a Contents button over the file (ContentsPanel.tsx).
+  const [contentsShown, setContentsShown] = useContentsShown();
+  const hasContents = view !== null && kind === 'markdown' && showsContents(documentBlocks);
+  const docKey = `${attachment.id}:${view?.version ?? ''}:${view?.attachment.current?.sha256 ?? ''}`;
+  // What the rail last said about this document (null: not measured yet).
+  const [railFit, setRailFit] = useState<{ key: string; fits: boolean } | null>(null);
+  const railFits = railFit?.key === docKey ? railFit.fits : null;
+  // Side by side on a laptop (owner's pick, 2026-10-30): the page's column keeps its left edge and gives up just
+  // enough on its right for the rail's 68 px gutter (inbox.css `data-contents-gutter`), so the rail shows beside
+  // it. Only for a file with a rail that is not hidden, and only where the rail can show at all (a page at least
+  // 480 px wide, its own rule, measured on the same box: the scroll element's border box); elsewhere the column
+  // is today's. So in Side by side the layout, not the rail's last measure, says whether the rail fits: a hidden
+  // rail measures a column without the gutter.
+  const [docWidth, setDocWidth] = useState(0);
+  useLayoutEffect(() => {
+    if (!scrollViewport) return;
+    const measure = () => setDocWidth(scrollViewport.getBoundingClientRect().width);
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(scrollViewport);
+    return () => observer?.disconnect();
+  }, [scrollViewport]);
+  const sideFits = !full && !phone && docWidth >= RAIL_MIN_PAGE_WIDTH;
+  const railGutter = hasContents && sideFits && contentsShown;
+  // The rail loads once the page is idle (2 s at most) and then measures (contents.ts, shared with a plan's page):
+  // the wait starts again for each file and each Hide or Show.
+  const waited = useContentsRailWaited(hasContents && !phone, `${docKey}:${contentsShown}`);
+  // The Contents button over the file (Side by side decides by its layout, Full screen by the rail's measure).
+  const contentsButton: ContentsButtonMode | null = contentsButtonMode({ hasContents, phone, shown: contentsShown, sideFits, railFits, waited });
+  // Hide and Show remove the control that has focus: focus moves to the one that takes its place (the Show
+  // button; the rail's current tick).
+  const contentsFocusRef = useRef<'show' | 'rail' | null>(null);
+  const hideContents = useCallback(() => {
+    contentsFocusRef.current = 'show';
+    setContentsShown(false);
+  }, [setContentsShown]);
+  const showContents = useCallback(() => {
+    contentsFocusRef.current = 'rail';
+    setContentsShown(true);
+  }, [setContentsShown]);
+  // The request waits until its target has drawn: Side by side, a shown rail measures again (the gutter is back)
+  // before its ticks draw. A new file drops it.
+  useEffect(() => {
+    contentsFocusRef.current = null;
+  }, [docKey]);
+  useEffect(() => {
+    const want = contentsFocusRef.current;
+    if (want === null) return;
+    const area = docAreaRef.current;
+    const target =
+      want === 'show'
+        ? area?.querySelector<HTMLElement>('[data-contents-show]')
+        : area?.querySelector<HTMLElement>('.pn-contents-rail [data-contents-index][tabindex="0"]');
+    if (!target) return;
+    contentsFocusRef.current = null;
+    target.focus({ preventScroll: true });
+  }, [contentsShown, railFits, contentsButton]);
   const refRepo = useRefRepo(props.repo);
   const wrapCode = useMemo(() => view !== null && isCode && hasLineLongerThan(view.text, CODE_WRAP_LINE_CHARS), [view, isCode]);
   // Code comments drawn under their lines; one whose lines no longer read as they did is unanchored, and so is a text
@@ -1143,8 +1542,31 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     return () => cancelAnimationFrame(id);
   }, [view, attachment.kind, attachment.id, annotations]);
 
+  // A comment that left the records another way than this pane's Remove (a Send took it, the comments list's Remove,
+  // another window) leaves the page too.
+  const listedIds = useRef<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    const ids = new Set(annotations.map((annotation) => annotation.id));
+    for (const id of listedIds.current) if (!ids.has(id)) viewerRef.current?.removeHighlight(id);
+    listedIds.current = ids;
+  }, [annotations]);
+
   const save = useCallback(
     (annotation: Annotation): Promise<boolean> => {
+      // The file is closing (or Escape set a comment aside): the composer's words become its draft, not a comment.
+      const caught = capturing.current;
+      if (caught) {
+        caught.push(recordsRef.current.some((r) => r.id === annotation.id) ? { kind: 'edit', id: annotation.id, text: annotation.text ?? '' } : { kind: 'comment', annotation });
+        return Promise.resolve(true);
+      }
+      savedHere.current.push({ at: anchorKeyOf(annotation), id: annotation.id, text: (annotation.text ?? '').trim() });
+      // Written again on what a set-aside draft was on: that draft is spent.
+      if (waiting.current.length > 0 || reopening.current.length > 0) {
+        const at = anchorKeyOf(annotation);
+        const spent = (d: FileCommentDraft) => (d.kind === 'comment' && anchorKeyOf(d.annotation) === at) || (d.kind === 'edit' && d.id === annotation.id);
+        waiting.current = waiting.current.filter((d) => !spent(d));
+        reopening.current = reopening.current.filter((entry) => !spent(entry.draft));
+      }
       const answer = (async () => {
         try {
           const record = await source.saveAnnotation(attachment, annotationVersion, annotation);
@@ -1155,12 +1577,148 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           return false;
         }
       })();
-      saves.current = { count: saves.current.count + 1, last: answer };
       return answer;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [attachment.id, annotationVersion, props.onSaved, source],
   );
+
+  // ── An HTML page on a phone (approval "inbox-html-attachments-phone") ──────
+  const phoneHtml = full && phone && isHtml;
+  /** A phone's HTML page: Pin / Unpin lives in full screen's ⋯, not in the bar (no room for it at 320 px). */
+  const pinInMenu = phoneHtml;
+  const threadId = props.composer?.threadId ?? null;
+  // Part B, "Fit the page" (pageSize.ts): Desktop size lays the page out at a laptop's width and scales it to the
+  // phone's. A press is remembered per file; until then a page wider than the phone opens on Desktop size by itself.
+  const pageKey = `${attachment.id}:${view?.version ?? ''}`;
+  const storedSize = useMemo(() => (isHtml ? readPageSize(attachment.path) : null), [isHtml, attachment.path]);
+  const [pickedNow, setPickedNow] = useState<{ file: string; size: PageSize } | null>(null);
+  const pickedSize = pickedNow?.file === attachment.path ? pickedNow.size : storedSize;
+  /** The page reported itself wider than the phone, for this file as it is open now. */
+  const [widePage, setWidePage] = useState<string | null>(null);
+  const pageSize = shownPageSize(pickedSize, widePage === pageKey);
+  const fitted = phoneHtml && pageSize === 'desktop';
+  const [fitBox, setFitBox] = useState<HTMLDivElement | null>(null);
+  const [fitScale, setFitScale] = useState(1);
+  useLayoutEffect(() => {
+    if (!fitBox || !phoneHtml) return;
+    const measure = () => setFitScale(desktopFitScale(fitBox.clientWidth));
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(fitBox);
+    return () => observer.disconnect();
+  }, [fitBox, phoneHtml]);
+  // A pick wins over this flag (shownPageSize), and a frame already at the laptop's width never reports itself wide.
+  const onContentWidth = useCallback(
+    (report: { width: number; viewport: number }) => {
+      if (pageIsWide(report)) setWidePage(pageKey);
+    },
+    [pageKey],
+  );
+  const togglePageSize = () => {
+    const next: PageSize = pageSize === 'desktop' ? 'phone' : 'desktop';
+    writePageSize(attachment.path, next);
+    setPickedNow({ file: attachment.path, size: next });
+    announce(next === 'desktop' ? 'Desktop size' : 'Phone size');
+  };
+  // The icon gets out of the way (sizeIconFade.ts): shown when the page opens, faded after about 3 seconds, back on a
+  // scroll up or a tap near the top. Faded, it takes no taps, so they reach the page.
+  const sizeIconOn = phoneHtml && !linkedTop && !!view && view.html !== null;
+  const sizeIcon = useSizeIconFade(sizeIconOn, pageKey);
+  const sizeBtnRef = useRef<HTMLButtonElement | null>(null);
+  const onPageTap = useCallback(
+    (clientY: number) => {
+      const bottom = sizeBtnRef.current?.getBoundingClientRect().bottom ?? 0;
+      if (tapNearSizeIcon(clientY, bottom)) sizeIcon.wake();
+    },
+    [sizeIcon.wake],
+  );
+  // It opens clear, like Markdown: the reply is the pill in the toolbar's row, whatever the last file left open.
+  useLayoutEffect(() => {
+    if (phoneHtml && threadId) forgetComposerOpened(threadId);
+  }, [phoneHtml, threadId, attachment.id]);
+  const htmlComment = useHtmlPageComment({
+    enabled: phoneHtml && hasComposer && !props.readOnly && !linkedTop,
+    fileKey: `${attachment.id}:${annotationVersion}`,
+    threadId,
+    name: attachment.name,
+    viewer: viewerRef,
+    tags: props.composer?.reply.tags,
+    onSave: save,
+    covered: () => {
+      const frame = sectionRef.current?.querySelector('.ib-htmlframe iframe');
+      const card = sectionRef.current?.querySelector('[data-fcomp]');
+      return frame && card ? Math.max(0, frame.getBoundingClientRect().bottom - card.getBoundingClientRect().top) : 0;
+    },
+    onDone: (saying) => {
+      if (saying) announce(saying);
+      sectionRef.current?.focus({ preventScroll: true });
+    },
+  });
+  // Pinching zooms the whole window (windowPinch.ts): the tools tuck while it is zoomed, unless a comment is open.
+  const pinched = useWindowPinched(phoneHtml);
+  /** The handle was tapped while zoomed: the tools stay out until the next pinch. */
+  const [pinchShown, setPinchShown] = useState(false);
+  useEffect(() => {
+    if (!pinched) setPinchShown(false);
+  }, [pinched]);
+  const pinchTucks = pinched && !pinchShown && !htmlComment.open;
+  const shownToolbar: ToolbarState = pinchTucks ? 'tucked' : toolbar;
+  // Tools gathered into the corner while a comment holds words (they stay, hidden): the corner control carries a dot.
+  // Read as they gather; nothing can be typed while they are away.
+  const [commentWaits, setCommentWaits] = useState(false);
+  useLayoutEffect(() => {
+    setCommentWaits(full && shownToolbar === 'tucked' && !props.readOnly && unsavedComposer(sectionRef.current, savedTextRef.current) !== null);
+  }, [full, shownToolbar, props.readOnly]);
+  shownToolbarRef.current = shownToolbar;
+  usePageClear(sectionRef, full && kind === 'html', phone ? 'bar' : shownToolbar === 'tucked' ? 'handle' : null);
+  // Every way back to showing (the corner control, ⌘⇧X, leaving full screen, a pinch let go) forgets
+  // what gathered the tools, once the corner control's press has put focus back: the next » brings focus back to ».
+  useEffect(() => {
+    if (shownToolbar === 'pinned') gatheredFrom.current = 'bar';
+  }, [shownToolbar]);
+  // The size icon comes back with the other tools (» or a pinch let go), even if it had faded before they went.
+  const toolsWereTucked = useRef(false);
+  useEffect(() => {
+    const tucked = shownToolbar === 'tucked';
+    if (toolsWereTucked.current && !tucked && sizeIconOn) sizeIcon.wake();
+    toolsWereTucked.current = tucked;
+  }, [shownToolbar, sizeIconOn, sizeIcon.wake]);
+  // A pinch's tuck does not pass through the toolbar's state: measured as it is committed, before it is drawn. (A tuck
+  // by hand is measured in onState; with the tools already gathered there is nothing to fly.)
+  const pinchFromShowing = pinchTucks && toolbar === 'pinned';
+  useLayoutEffect(() => {
+    if (pinchFromShowing) measureGather('tucking');
+  }, [pinchFromShowing]);
+  // A zoom does not follow the person to the next file, where the browser lets go of it.
+  useEffect(() => {
+    if (phoneHtml) return releaseWindowZoom;
+  }, [phoneHtml, attachment.id]);
+  /** The composer's ⌄: the same gather as », and back from the corner focus returns to the card's field. */
+  const gatherFromComposer = useCallback(() => {
+    gatheredFrom.current = 'composer';
+    barRef.current?.hide();
+  }, []);
+  // The file the card was dragged on (composerDrag.ts): this file's draft key, as `draftKey` below.
+  const composerFileKey = fileDraftKey(attachment.id, effectiveVersion === 'sent' ? attachment.sent_sha256 : 'current');
+  const composerValue = useMemo<FullScreenComposerValue | null>(
+    () => (hasComposer && props.composer ? { ...props.composer, tucked: shownToolbar === 'tucked', covered: phone && sheet, onGather: gatherFromComposer, fileKey: composerFileKey } : null),
+    [hasComposer, props.composer, shownToolbar, phone, sheet, gatherFromComposer, composerFileKey],
+  );
+  /**
+   * A phone's composer folded to its pill shares the toolbar's row (an HTML page opens that way): the bar draws
+   * no reuse button until the card opens. Not drawn rather than hidden, so every button in the bar is a 44 px target.
+   */
+  const phonePillShown = useComposerFolded(threadId, phoneHtml) && phone && composerValue !== null;
+  /** Back from the corner: focus where the person gathered from. The card's field, when it was the card's ⌄. */
+  const restoreTarget = () => {
+    const from = gatheredFrom.current;
+    gatheredFrom.current = 'bar';
+    if (from !== 'composer') return null;
+    const card = sectionRef.current?.querySelector<HTMLElement>('[data-fcomp]');
+    return card?.querySelector<HTMLElement>('[data-fcomp-body] > :not([hidden]) textarea') ?? sectionRef.current?.querySelector<HTMLElement>('[data-fcomp-pill]') ?? card ?? null;
+  };
 
   const remove = async (id: string) => {
     viewerRef.current?.removeHighlight(id);
@@ -1174,8 +1732,409 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
 
   const edit = (id: string, updates: Partial<Annotation>) => {
     const record = props.records.find((r) => r.id === id);
-    if (record) void save({ ...annotationOf(record), ...updates });
+    if (!record) return;
+    const annotation = annotationOf(record);
+    // A drawing's words emptied again: the agent's stand-in comes back.
+    const text = updates.text !== undefined && updates.text.trim() === '' && isWordlessMarkup(annotation) ? MARKUP_ONLY_TEXT : updates.text;
+    void save({ ...annotation, ...updates, ...(text !== undefined ? { text } : {}) });
   };
+
+  // ── A comment being written when the file closes (approval "inbox-file-close-keeps-comment-draft") ──
+  // Closing the file, or going to another, never asks: what is typed waits as this file's draft
+  // (fileCommentDrafts.ts) and is back in its comment box when the file opens again. Escape that reaches a
+  // comment being written in full screen sets it aside the same way. The composers save on Cmd/Ctrl+Enter;
+  // while `capturing` is set, that save lands here (`save` above) and the composer closes as if saved.
+  // From the props, never from `view`: on the first render after a step `view` is still the last file's.
+  const draftVersion = effectiveVersion === 'sent' ? attachment.sent_sha256 : 'current';
+  const draftKey = fileDraftKey(attachment.id, draftVersion);
+  draftKeyRef.current = draftKey;
+  const isCodeRef = useRef(isCode);
+  isCodeRef.current = isCode;
+  recordsRef.current = props.records;
+  /** Whether a comment popover's box is this pane's (popovers draw in a portal on the page, outside the section). */
+  const ownsBox = (area: HTMLTextAreaElement) => ownBoxes.current.has(area);
+  /** The words of every composer open in the file, as drafts: the file's own row read, the others "saved" into `capturing`. */
+  const takeComposers = (): FileCommentDraft[] => {
+    if (readOnlyRef.current) return [];
+    const taken: FileCommentDraft[] = [];
+    for (const read of rowReaders.current) {
+      const row = read();
+      if (row && draftHasWords(row)) taken.push(row);
+    }
+    // An HTML page's row words, its row off screen (out of full screen): kept as the row's draft, as if it were drawn.
+    const parked = pageParking.current;
+    if (parked?.key === draftKeyRef.current && parked.text.trim() !== '') taken.push({ kind: 'row', text: parked.text, markup: null });
+    pageParking.current = null;
+    const page = htmlComment.kept() ?? null;
+    if (page) taken.push({ kind: 'comment', annotation: page });
+    const caught: FileCommentDraft[] = [];
+    capturing.current = caught;
+    try {
+      for (const area of unsavedComposers(sectionRef.current, savedTextRef.current, ownsBox)) {
+        // The file's own row (and a phone page's card) was read above.
+        if (area.closest('[data-image-composer]')) continue;
+        area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', metaKey: true, ctrlKey: true, bubbles: true, cancelable: true, composed: true }));
+      }
+    } finally {
+      capturing.current = null;
+    }
+    // A comment kept is no comment yet: the highlight its "save" drew goes (the composer may stay on screen).
+    for (const draft of caught) if (draft.kind === 'comment') viewerRef.current?.removeHighlight(draft.annotation.id);
+    return [...taken, ...caught.filter(draftHasWords)];
+  };
+  /**
+   * The pane is being taken away without `leave` (another thread picked, the window's route moved): its composers
+   * answer no key now, so their words are read from the boxes still on the page, with what each is on from the
+   * viewer (`peekComment`: a selection, a pin, a global comment, a code block, a diagram part), the code view
+   * (`codeLines`) or the last words typed (`live`).
+   */
+  const readComposers = (): FileCommentDraft[] => {
+    if (readOnlyRef.current) return [];
+    const read: FileCommentDraft[] = [];
+    const peek = isCodeRef.current ? null : (viewerRef.current?.peekComment?.() ?? null);
+    const box = [...document.querySelectorAll<HTMLTextAreaElement>('[data-comment-popover] textarea')].find((area) => ownsBox(area) && area.value.trim() !== '');
+    if (box) {
+      const lines = isCodeRef.current ? codeLines.current : null;
+      const anchor = lines
+        ? codeCommentAnnotation({ id: 'ann-code-kept', lineStart: lines.lineStart, lineEnd: lines.lineEnd, text: '', code: lines.originalCode })
+        : peek && peek.diagramAnchor == null
+          ? peek
+          : live.current?.area === box
+            ? live.current.anchor
+            : null;
+      if (anchor) read.push({ kind: 'comment', annotation: { ...anchor, text: box.value } });
+    }
+    const scope = sectionRef.current;
+    if (scope) {
+      // A diagram part's box: in the file, or in its popout (drawn outside the section, the pane's own when used here).
+      const part = [...document.querySelectorAll<HTMLTextAreaElement>('[data-diagram-composer] textarea')].find(
+        (area) => (scope.contains(area) || ownsBox(area)) && area.value.trim() !== '',
+      );
+      if (part && peek?.diagramAnchor != null) read.push({ kind: 'comment', annotation: { ...peek, text: part.value } });
+      const roots: ParentNode[] = [scope];
+      for (const container of scope.querySelectorAll('diffs-container')) if (container.shadowRoot) roots.push(container.shadowRoot);
+      for (const root of roots) {
+        for (const area of root.querySelectorAll<HTMLTextAreaElement>('[data-annotation-id] textarea, [data-code-annotation-id] textarea')) {
+          const owner = area.closest('[data-annotation-id], [data-code-annotation-id]');
+          const id = owner?.getAttribute('data-annotation-id') ?? owner?.getAttribute('data-code-annotation-id') ?? '';
+          const saved = savedTextRef.current(id);
+          if (id && saved !== undefined && area.value.trim() !== saved.trim()) read.push({ kind: 'edit', id, text: area.value });
+        }
+      }
+    }
+    return read;
+  };
+  /**
+   * Drafts put back whose box has not been seen open yet (a comment the page or the code view is still placing, an
+   * edit whose card has not drawn its box): a close or Back before then keeps them as they were.
+   */
+  const reopening = useRef<{ draft: FileCommentDraft; seen: () => boolean }[]>([]);
+  const reopeningWatch = useRef<number | null>(null);
+  /** Track a draft put back until its box shows (or the pane forgets it), checking once a frame for a few seconds. */
+  const trackReopen = (draft: FileCommentDraft, seen: () => boolean) => {
+    reopening.current = [...reopening.current, { draft, seen }];
+    if (reopeningWatch.current !== null) return;
+    let frames = 0;
+    const tick = () => {
+      reopening.current = reopening.current.filter((entry) => !entry.seen());
+      if (reopening.current.length === 0 || ++frames > 300) {
+        reopeningWatch.current = null;
+        return;
+      }
+      reopeningWatch.current = requestAnimationFrame(tick);
+    };
+    reopeningWatch.current = requestAnimationFrame(tick);
+  };
+  const stopReopenWatch = () => {
+    if (reopeningWatch.current !== null) cancelAnimationFrame(reopeningWatch.current);
+    reopeningWatch.current = null;
+  };
+  /**
+   * Whether a put-back comment's box shows: a popover box with words that is the pane's own (it takes focus as it
+   * opens, which reaches the section through React's tree: `claimBox`). Never another surface's popover.
+   */
+  const popoverShown = () =>
+    [...document.querySelectorAll<HTMLTextAreaElement>('[data-comment-popover] textarea')].some((a) => ownsBox(a) && a.value.trim() !== '');
+  /** Whether an edit box for the comment `id` shows (the panel's card, or under a code line in Pierre's shadow root). */
+  const editShown = (id: string) => {
+    const scope = sectionRef.current;
+    if (!scope) return false;
+    const selector = `[data-annotation-id="${CSS.escape(id)}"] textarea, [data-code-annotation-id="${CSS.escape(id)}"] textarea`;
+    if (scope.querySelector(selector)) return true;
+    for (const container of scope.querySelectorAll('diffs-container')) if (container.shadowRoot?.querySelector(selector)) return true;
+    return false;
+  };
+  /** Keep what the file holds as its draft, once per time it is left. `tearing`: the pane is going without `leave`. */
+  const keepDrafts = (tearing = false) => {
+    if (kept.current) return;
+    kept.current = true;
+    stopReopenWatch();
+    // Words just saved (the box may still show them as the file closes) are a comment, not a draft too.
+    const saved = savedHere.current;
+    const unsaved = (d: FileCommentDraft) =>
+      d.kind === 'comment'
+        ? !saved.some((s) => s.at === anchorKeyOf(d.annotation) && s.text === (d.annotation.text ?? '').trim())
+        : d.kind === 'edit'
+          ? !saved.some((s) => s.id === d.id && s.text === d.text.trim())
+          : true;
+    const taken = takeComposers().filter(unsaved);
+    const read = tearing && !taken.some((d) => d.kind !== 'row') ? readComposers().filter(unsaved) : [];
+    // A kept comment not back in its box yet (the pane was still moving, or the text still loading) waits on, and so
+    // does anything put back whose box has not shown yet.
+    const notShown: FileCommentDraft[] = reopenNext.current ? [{ kind: 'comment', annotation: reopenNext.current }] : [];
+    reopenNext.current = null;
+    for (const entry of reopening.current) if (!entry.seen()) notShown.push(entry.draft);
+    reopening.current = [];
+    // The row holds the words it took as it mounted (read above), so they are not kept twice.
+    const took = rowTook.current?.key === draftKeyRef.current ? rowTook.current.draft : null;
+    const waited = waiting.current.filter((d) => d !== took);
+    keepFileDrafts(draftKeyRef.current, [...waited, ...notShown, ...taken, ...read]);
+    waiting.current = [];
+  };
+  keepDraftsRef.current = keepDrafts;
+  /** Escape set the composer of `area` aside: its words wait as the file's draft. False: it would not give them up. */
+  setAsideRef.current = (area: HTMLTextAreaElement) => {
+    if (readOnlyRef.current) return false;
+    const caught: FileCommentDraft[] = [];
+    capturing.current = caught;
+    try {
+      area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', metaKey: true, ctrlKey: true, bubbles: true, cancelable: true, composed: true }));
+    } finally {
+      capturing.current = null;
+    }
+    const words = caught.filter(draftHasWords);
+    if (words.length === 0) return false;
+    for (const draft of words) if (draft.kind === 'comment') viewerRef.current?.removeHighlight(draft.annotation.id);
+    waiting.current = [...waiting.current, ...words];
+    return true;
+  };
+  /** A kept code-lines comment or code edit to put back (CodeFileView opens each new one once). */
+  const [codeReopen, setCodeReopen] = useState<{ lineStart: number; lineEnd: number; text: string } | null>(null);
+  const [codeReopenEdit, setCodeReopenEdit] = useState<{ id: string; text: string } | null>(null);
+  /** A kept edit of a comment in the panel, put back in its card's edit box. */
+  const [panelReopenEdit, setPanelReopenEdit] = useState<{ id: string; text: string } | null>(null);
+  /** A kept comment waiting for the viewer to be drawn (the document loads after the pane mounts). */
+  const reopenNext = useRef<Annotation | null>(null);
+  /** A comment box waiting for the pane to stop moving before it opens (`whenStill`): its way to stop waiting. */
+  const settling = useRef<(() => void) | null>(null);
+  /** Open a kept comment's box once the pane is still, so it opens where a click on the same words opens one. */
+  const afterSettle = (then: () => void) => {
+    settling.current?.();
+    settling.current = whenStill(
+      () => sectionRef.current,
+      () => {
+        settling.current = null;
+        if (mountedRef.current) then();
+      },
+    );
+  };
+  /**
+   * Put this file's waiting drafts back in their boxes: the newest comment on what it was on, each edit in its
+   * card. Anything that cannot be shown (a second comment: one composer opens at a time) keeps waiting.
+   * `rowOnScreen`: the file's own row still holds its words (the file never closed).
+   */
+  const putBack = (drafts: FileCommentDraft[], rowOnScreen: boolean) => {
+    const rest: FileCommentDraft[] = [];
+    const comments = drafts.filter((d): d is Extract<FileCommentDraft, { kind: 'comment' }> => d.kind === 'comment');
+    const newest = comments.at(-1) ?? null;
+    const took = rowTook.current?.key === draftKeyRef.current ? rowTook.current.draft : null;
+    for (const draft of drafts) {
+      if (draft.kind === 'row') {
+        // The row still holds it, or took it as it mounted; else it waits for the row (drawn once the picture loads).
+        if (!rowOnScreen && draft !== took) rest.push(draft);
+        continue;
+      }
+      if (draft.kind === 'edit') {
+        const record = recordsRef.current.find((r) => r.id === draft.id);
+        // Its comment went meanwhile: so do the words.
+        if (!record) continue;
+        if (isCode && codeRangeOf(annotationOf(record))) setCodeReopenEdit({ id: draft.id, text: draft.text });
+        else {
+          setPanelReopenEdit({ id: draft.id, text: draft.text });
+          if (drawerMode) setDrawer(true);
+          else if (sheetMode) setSheet(true);
+        }
+        trackReopen(draft, () => editShown(draft.id));
+        continue;
+      }
+      if (draft !== newest) {
+        rest.push(draft);
+        continue;
+      }
+      reopenNext.current = draft.annotation;
+    }
+    waiting.current = [...waiting.current, ...rest];
+    // Still on the file: its viewer is drawn. A file just opened waits for its text (the effect on `view` below).
+    if (rowOnScreen && reopenNext.current) reopenInViewer();
+  };
+  /** The waiting comment, into the viewer once it is drawn and the pane is still (a phone page's card takes the words when the page hands it the pin). */
+  const reopenInViewer = () => {
+    if (!reopenNext.current) return;
+    afterSettle(() => reopenNowRef.current());
+  };
+  const reopenNow = () => {
+    const annotation = reopenNext.current;
+    // The file's own text, not the last file's (the view is reset just after a step).
+    if (!annotation || !view || view.attachment.id !== attachment.id) return;
+    reopenNext.current = null;
+    const draft: FileCommentDraft = { kind: 'comment', annotation };
+    const key = draftKeyRef.current;
+    let missed = false;
+    const missing = () => {
+      // Not on the file any more (the file changed): the words still wait, on nothing. Told after the pane went or
+      // moved to another file, it is too late: what this file held was kept as it left (`reopening`).
+      if (missed || !mountedRef.current || draftKeyRef.current !== key) return;
+      missed = true;
+      reopening.current = reopening.current.filter((entry) => entry.draft !== draft);
+      waiting.current = [...waiting.current, draft];
+    };
+    const range = isCode ? codeRangeOf(annotation) : null;
+    if (range) {
+      // The lines it was on, where they are now (the file may have changed since): never other code under the words.
+      const at = relocateCodeRange(range, view.text);
+      if (!at) {
+        missing();
+        return;
+      }
+      trackReopen(draft, popoverShown);
+      setCodeReopen({ lineStart: at.lineStart, lineEnd: at.lineEnd, text: annotation.text ?? '' });
+      return;
+    }
+    const viewer = viewerRef.current;
+    if (!viewer) {
+      reopenNext.current = annotation;
+      return;
+    }
+    trackReopen(draft, () => popoverShown() || (annotation.diagramAnchor != null && sectionRef.current?.querySelector('[data-diagram-composer] textarea') != null) || htmlComment.open);
+    if (phoneHtml && hasComposer) htmlComment.expectWords(annotation.text ?? '');
+    if (!viewer.reopenComment?.(annotation, missing)) missing();
+  };
+  const reopenInViewerRef = useRef(reopenInViewer);
+  reopenInViewerRef.current = reopenInViewer;
+  const reopenNowRef = useRef(reopenNow);
+  reopenNowRef.current = reopenNow;
+  putBackRef.current = () => {
+    if (!kept.current) return;
+    kept.current = false;
+    putBack(takeFileDrafts(draftKeyRef.current), true);
+  };
+  // The browser's Back or Forward (a phone's back) moves the route, not `leave`: what the file holds is kept now, while
+  // its composers still answer (the route's own listener only asks React to draw). Still on the file: put back.
+  useEffect(() => {
+    const onTraverse = () => {
+      const key = draftKeyRef.current;
+      keepDraftsRef.current();
+      requestAnimationFrame(() => {
+        if (mountedRef.current && draftKeyRef.current === key) putBackRef.current();
+      });
+    };
+    // Capture: at the window, ahead of the route's own listener (App.tsx), whose draw may take the pane away first.
+    window.addEventListener('popstate', onTraverse, true);
+    return () => window.removeEventListener('popstate', onTraverse, true);
+  }, []);
+  // The pane goes any other way without `leave` (another thread picked): a composer answers no key while React
+  // removes it, so its words are read from its box, still on the page here (`readComposers`), with the rows, a
+  // phone page's card and what waited. Declared before the effect below, so on unmount it runs first.
+  useLayoutEffect(
+    () => () => {
+      settling.current?.();
+      keepDraftsRef.current(true);
+      stopReopenWatch();
+    },
+    [],
+  );
+  // What each comment box is on, as it is typed in (a fallback for `readComposers` when the viewer is gone first).
+  useEffect(() => {
+    const onInput = (event: Event) => {
+      const area = event.target;
+      if (!(area instanceof HTMLTextAreaElement) || !area.closest('[data-comment-popover]')) return;
+      live.current = { area, anchor: isCodeRef.current ? null : (viewerRef.current?.peekComment?.() ?? null) };
+    };
+    document.addEventListener('input', onInput, true);
+    return () => document.removeEventListener('input', onInput, true);
+  }, []);
+  /** A comment popover box focused, typed in or pressed through the pane's own tree is the pane's. */
+  const claimBox = (event: React.SyntheticEvent) => {
+    const area = event.target;
+    if (area instanceof HTMLTextAreaElement && area.closest('[data-comment-popover], [data-diagram-composer]')) ownBoxes.current.add(area);
+  };
+  // Escape typed in a diagram part's box, or in a comment's edit box holding changed words, would throw the words
+  // away: they wait as the file's draft instead, as every other box keeps them (its Cancel still discards).
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return;
+      const area = event.composedPath()[0];
+      if (!(area instanceof HTMLTextAreaElement) || area.value.trim() === '') return;
+      const owner = area.closest('[data-annotation-id], [data-code-annotation-id]');
+      if (owner) {
+        const id = owner.getAttribute('data-annotation-id') ?? owner.getAttribute('data-code-annotation-id') ?? '';
+        if (area.value.trim() === (savedTextRef.current(id) ?? '').trim()) return;
+      } else if (!area.closest('[data-diagram-composer]')) return;
+      if (!setAsideRef.current(area)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      announce('Comment closed. Your words are kept for when you open this file again.');
+      requestAnimationFrame(() => {
+        const active = document.activeElement;
+        if (!active || active === document.body || !active.isConnected) sectionRef.current?.focus({ preventScroll: true });
+      });
+    };
+    section.addEventListener('keydown', onKey, true);
+    return () => section.removeEventListener('keydown', onKey, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Each file (and version) as it opens: what waited for it is its own again, back in its boxes.
+  useLayoutEffect(() => {
+    kept.current = false;
+    // The last file's parked page words went with its drafts (`takeComposers`), or with the file.
+    if (pageParking.current?.key !== draftKey) pageParking.current = null;
+    savedHere.current = [];
+    waiting.current = [];
+    waitingKey.current = draftKey;
+    reopenNext.current = null;
+    reopening.current = [];
+    stopReopenWatch();
+    settling.current?.();
+    settling.current = null;
+    live.current = null;
+    codeLines.current = null;
+    setCodeReopen(null);
+    setCodeReopenEdit(null);
+    setPanelReopenEdit(null);
+    if (!readOnlyRef.current) putBack(takeFileDrafts(draftKey), false);
+    return () => {
+      // Another file came in without `leave` (the route moved): what still waited is kept for this one.
+      if (!kept.current && waiting.current.length > 0) keepFileDrafts(draftKey, [...peekFileDrafts(draftKey), ...waiting.current]);
+      kept.current = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey]);
+  // The viewer is drawn once the file's text is in: a waiting comment opens on it then.
+  useEffect(() => {
+    if (view) reopenInViewerRef.current();
+  }, [view]);
+  const draftSeat = useMemo<FileDraftSeat>(
+    () => ({
+      peekRow: () => {
+        if (readOnlyRef.current) return null;
+        const key = draftKeyRef.current;
+        // A row that mounts after the file opened (the picture loads first) takes what waits for it.
+        const pool = waitingKey.current === key ? [...waiting.current, ...peekFileDrafts(key)] : peekFileDrafts(key);
+        const draft = (pool.find((d) => d.kind === 'row') as RowDraft | undefined) ?? null;
+        if (draft) rowTook.current = { key, draft };
+        return draft;
+      },
+      register: (read) => {
+        rowReaders.current.add(read);
+        return () => {
+          rowReaders.current.delete(read);
+        };
+      },
+    }),
+    [],
+  );
 
   // The panel lists the thread's other files too, each under its own name (record 2.4).
   const documents = useMemo(() => {
@@ -1195,8 +2154,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   }, [props.records, props.attachments, props.projectRoot, attachment]);
   const currentKey = recordKey(attachment.path, annotationVersion);
   const otherFiles = documents.some((d) => d.path !== currentKey);
-  // A PDF or any other download takes no comments: no panel (nor a Comments button) unless other files have comments to list.
-  const hasPanel = !isDownload || otherFiles;
+  // A PDF or any other download takes no comments: no panel (nor a Comments button) unless other files have comments to list, or it has earlier ones.
+  const hasPanel = !isDownload || otherFiles || earlierCount > 0;
   const groups = useMemo(() => groupAnnotationsByDocument(documents, currentKey), [documents, currentKey]);
   const openInDocument = (_path: string, id: string) => {
     const record = props.records.find((r) => r.id === id);
@@ -1204,76 +2163,80 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     if (recordKey(record.path, record.version) === currentKey) setSelectedId(id);
     else {
       const owner = props.attachments.find((a) => a.id === record.attachment_id);
-      leave(owner?.name ?? 'that file', () => props.onOpenAt(record.attachment_id, record.version === 'current' ? 'current' : 'sent', id));
+      leave(owner?.name ?? 'that file', () => {
+        // Picked in the open floating panel: the person is using it, so it stays open on the file it opens.
+        if (drawerMode && drawer) keepPanelFor.current = id;
+        props.onOpenAt(record.attachment_id, record.version === 'current' ? 'current' : 'sent', id);
+      });
     }
   };
 
   const chooseVersion = (next: 'current' | 'sent') => {
-    remember(attachment.id, { version: next });
-    props.onVersion(next);
+    const go = () => {
+      remember(attachment.id, { version: next });
+      props.onVersion(next);
+    };
+    // Comments are on a version: what is typed on this one waits for it, as for another file.
+    leave(`the ${next} version`, go);
   };
   const close = () => leave(null, props.onClose);
+  closeRef.current = close;
+  /** Where × and Escape's last rung go: the thread (the file closes), or back beside it. */
+  const exitCloses = props.exitCloses ?? props.fullLocked === true;
+  /** × and Escape's last rung back beside the thread: through `leave` when that shows another file (a typed comment is asked about). */
+  const exitFull = () => {
+    const to = props.exitLeavesFor ?? null;
+    if (to !== null) leave(to, () => toggleFull(false));
+    else toggleFull(false);
+  };
+  exitFullRef.current = () => {
+    if (!props.full || props.fullLocked) return;
+    if (exitCloses) close();
+    else exitFull();
+  };
 
   const sentAt = whenTime(attachment.sent_at);
   /** An image the message's text shows (approval "inbox-image-viewer"). */
   const inline = attachment.ref !== undefined;
   /** Its copy was taken the first time the thread was read (a message sent before capture), not when it was sent. */
   const onOpen = attachment.captured === 'on_open';
-  /** Who sent the message the file is in: the agent, or the person themself. */
-  const sender = props.fromPerson ? 'you' : props.agent;
   const firstOpened = whenTime(attachment.captured_at ?? attachment.sent_at);
-  let line: React.ReactNode = null;
-  if (currentUnavailable) {
-    line = (
-      <>
-        {attachment.unavailable!.message} {onOpen ? `This is the copy taken when you first opened it, ${firstOpened}.` : `This is the version ${sender} sent at ${sentAt}.`}
-      </>
-    );
-  } else if (effectiveVersion === 'sent') {
-    line = (
-      <>
-        {onOpen ? `The copy taken when you first opened it, ${firstOpened}.` : `The version ${sender} sent at ${sentAt}.`}
-        <button type="button" className="ib-vlink" onClick={() => chooseVersion('current')}>
-          Open the file as it is now
+  const shown = view?.attachment ?? attachment;
+  /** The version line's words (versionLineWords.ts): the line beside the thread and full screen's chip say the same. */
+  const words = versionLineWords({
+    unavailable: currentUnavailable ? attachment.unavailable!.message : null,
+    version: effectiveVersion,
+    changed: shown.changed_since_sent,
+    onOpen,
+    fromPerson: props.fromPerson === true,
+    agent: props.agent,
+    sentAt,
+    firstOpened,
+    editedAt: shown.current ? whenTime(shown.current.mtime) : null,
+  });
+  const line: React.ReactNode = words && (
+    <span className="ib-changed-b">
+      <span className="ib-changed-t">{words.sentence}</span>
+      {words.link && (
+        <button type="button" className="ib-vlink" onClick={() => chooseVersion(words.link!.to)}>
+          {words.link.label}
         </button>
-      </>
-    );
-  } else if ((view?.attachment ?? attachment).changed_since_sent) {
-    const current = (view?.attachment ?? attachment).current;
-    line = (
-      <>
-        {onOpen ? 'Changed since you first opened it.' : `Changed since ${sender} sent it at ${sentAt}.`}
-        {current ? ` Edited ${whenTime(current.mtime)}.` : ''}
-        <button type="button" className="ib-vlink" onClick={() => chooseVersion('sent')}>
-          {onOpen ? 'Open the version you first saw' : props.fromPerson ? 'Open the version you sent' : 'Open the version it sent'}
-        </button>
-      </>
-    );
-  }
+      )}
+    </span>
+  );
   /**
    * The changed line, compact, for full view (which drops the line): the same
    * facts and actions as a persistent chip at the file's top left, so a file
    * that opens in full view still says it changed, or which version is shown.
    */
   let versionChip: { text: string; action: { label: string; to: 'current' | 'sent' } | null; full: string } | null = null;
-  if (currentUnavailable) {
-    versionChip = {
-      text: attachment.unavailable!.code === 'attachment_missing' ? 'The file is gone; showing the sent copy' : 'The file is not that kind any more; showing the sent copy',
-      action: null,
-      full: `${attachment.unavailable!.message} ${onOpen ? `This is the copy taken when you first opened it, ${firstOpened}.` : `This is the version ${sender} sent at ${sentAt}.`}`,
-    };
-  } else if (effectiveVersion === 'sent') {
-    versionChip = {
-      text: onOpen ? 'Showing the copy from when you first opened it' : 'Showing the sent version',
-      action: { label: 'Open the file as it is now', to: 'current' },
-      full: onOpen ? `The copy taken when you first opened it, ${firstOpened}.` : `The version ${sender} sent at ${sentAt}.`,
-    };
-  } else if ((view?.attachment ?? attachment).changed_since_sent) {
-    versionChip = {
-      text: onOpen ? 'Changed since you first opened it' : 'Changed since sent',
-      action: { label: onOpen ? 'Open the version you first saw' : props.fromPerson ? 'Open the version you sent' : 'Open the version it sent', to: 'sent' },
-      full: onOpen ? 'Changed since you first opened it.' : `Changed since ${sender} sent it at ${sentAt}.`,
-    };
+  if (words) {
+    const text = currentUnavailable
+      ? attachment.unavailable!.code === 'attachment_missing' ? 'The file is gone; showing the sent copy' : 'The file is not that kind any more; showing the sent copy'
+      : effectiveVersion === 'sent'
+        ? onOpen ? 'Showing the copy from when you first opened it' : 'Showing the sent version'
+        : onOpen ? 'Changed since you first opened it' : 'Changed since sent';
+    versionChip = { text, action: words.link, full: words.sentence };
   }
 
   const annotationCounts = useMemo(() => {
@@ -1290,27 +2253,86 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     .join(', ');
   /** The thread's annotations on files other than this one (the foot of the drawer says so). */
   const elsewhere = props.records.filter((r) => recordKey(r.path, r.version) !== currentKey).length;
+  /** This file has earlier comments and no current ones: nothing may read as if they are gone ("Comments 0", "No annotations yet"). */
+  const onlyEarlier = earlierCount > 0 && annotations.length === 0;
   /** Full screen's ⋯ offers the other version, as the changed chip does. */
   const versionAction = versionChip?.action ? { label: versionChip.action.label, onSelect: () => chooseVersion(versionChip!.action!.to) } : null;
   /** The file changed since it was sent, or is gone: the tucked handle carries an amber dot. */
   const changedSinceSent = currentUnavailable || (view?.attachment ?? attachment).changed_since_sent;
 
+  /**
+   * Full screen's changed note floats at the file's top left, where a code file's top row starts (Copy file, the hint):
+   * the row grows under the note, measured, so the note never covers it. Null: nothing to clear.
+   */
+  const noteShown = full && versionChip !== null && !linkedTop;
+  const [codeClear, setCodeClear] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const section = sectionRef.current;
+    const note = noteShown && isCode && view ? section?.querySelector<HTMLElement>('[data-full-view-changed]') : null;
+    const code = note ? section?.querySelector<HTMLElement>('[data-code-view]') : null;
+    if (!note || !code) {
+      setCodeClear(null);
+      return;
+    }
+    const place = () => {
+      const below = Math.ceil(note.getBoundingClientRect().bottom - code.getBoundingClientRect().top) + CODE_ROW_BELOW_NOTE;
+      setCodeClear(below > CODE_ROW_BELOW_NOTE ? below : null);
+    };
+    place();
+    // The note wraps onto more lines as the window narrows (a phone).
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    observer?.observe(note);
+    observer?.observe(code);
+    window.addEventListener('resize', place);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', place);
+    };
+  }, [noteShown, isCode, view]);
+
   return (
     <section
       ref={sectionRef}
       tabIndex={-1}
-      className={`ib-view${full ? ' ib-full ib-fullview' : ''}${phone ? ' ib-phone' : ''}${folded && !phone ? ' ib-fold' : ''}${hasPanel ? '' : ' ib-nopanel'}${sheetMode && sheet ? ' ib-panel-open' : ''}${drawerMode && drawer && hasPanel ? ' ib-drawer' : ''}`}
-      aria-label={multi ? `${attachment.name}, file ${index + 1} of ${steps.length}` : attachment.name}
+      className={`ib-view${full ? ' ib-full ib-fullview ib-wlayer' : ''}${phone ? ' ib-phone' : ''}${folded && !phone ? ' ib-fold' : ''}${hasPanel ? '' : ' ib-nopanel'}${sheetMode && sheet ? ' ib-panel-open' : ''}${drawerMode && drawer && hasPanel ? ' ib-drawer' : ''}`}
+      aria-label={multi ? `${attachment.name}, ${optionSet ? 'option' : 'file'} ${index + 1} of ${steps.length}` : attachment.name}
       data-attachment-pane={attachment.id}
       data-version={effectiveVersion}
       data-full-view={full ? '' : undefined}
+      // Hide (») or the composer's ⌄ gathers what floats over the file into the corner control (inbox.css).
+      data-tools={full ? shownToolbar : undefined}
+      // A comment popover draws in a portal outside the section; its events still come through here (React's tree),
+      // which is how the pane knows the popovers that are its own.
+      onFocusCapture={claimBox}
+      onInputCapture={claimBox}
+      onPointerDownCapture={claimBox}
     >
+      <FileDraftContext.Provider value={draftSeat}>
+      <FullScreenComposerContext.Provider value={composerValue}>
       {full ? (
         <FullViewBar
           ref={barRef}
           phone={phone}
-          state={toolbar}
-          onState={setToolbar}
+          reuse={
+            <>
+              {/* Pin stays on a phone's page too: the bar is where a phone pins (its cards have no hover). A phone's HTML
+                  page has it in the ⋯ menu instead (`pinInMenu`): its bar, the widest, must fit at 320 px with the reply's
+                  pill on its row or its card open. */}
+              {props.pin && !pinInMenu && <ArtifactPinButton threadId={props.pin.threadId} artifactKey={props.pin.key} name={attachment.name} surface="bar" big={phone} />}
+              {phonePillShown ? null : <ReuseButton file={attachment} surface="bar" version={effectiveVersion} big={phone} />}
+            </>
+          }
+          state={shownToolbar}
+          onState={(next) => {
+            // Each control flies from where it rests: measured before the state changes.
+            if (next === 'tucked' && shownToolbar !== 'tucked') measureGather();
+            // Over a pinch's tuck: only the corner control's tap comes here, and the person's own state stays what it was.
+            if (pinchTucks) setPinchShown(true);
+            if (!pinchTucks || toolbar === 'tucked') setToolbar(next);
+          }}
+          draft={hasComposer && !!props.composer && ((props.composer.reply.hasWords ?? props.composer.reply.value.trim() !== '') || props.composer.reply.files.length > 0)}
+          commentDraft={commentWaits}
+          restoreTarget={restoreTarget}
           announce={announce}
           armed={armed}
           // A linked page takes no comments: no pen while it is shown.
@@ -1319,6 +2341,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             hasPanel
               ? {
                   count: annotations.length,
+                  earlier: earlierCount,
                   open: panelOpen,
                   controls: sheetId,
                   onToggle: togglePanel,
@@ -1334,6 +2357,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   index,
                   total: steps.length,
                   name: attachment.name,
+                  noun: optionSet ? 'option' : 'file',
                   open: menuOpen,
                   peekId: fullViewPeekId,
                   onOpenChange: (open) => {
@@ -1348,12 +2372,12 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   renderPeek: phone ? undefined : (closePeek) => (
                     <FilePeek
                       id={fullViewPeekId}
-                      steps={steps}
-                      index={index}
+                      steps={allSteps}
+                      index={allIndex}
                       phone={false}
                       annotationCounts={annotationCounts}
                       onClose={closePeek}
-                      onGo={(target) => goTo(target, 'menu')}
+                      onGo={(target) => goTo(target, 'menu', allSteps)}
                     />
                   ),
                 }
@@ -1371,14 +2395,16 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 setMoreOpen(open);
               }}
               versionAction={versionAction}
+              pin={pinInMenu && props.pin ? { threadId: props.pin.threadId, key: props.pin.key, name: attachment.name } : null}
             />
           }
           moreOpen={moreOpen}
           leave={props.fullLocked ? { kind: 'back', onLeave: close } : { kind: 'exit', onLeave: () => toggleFull() }}
-          // × does what Escape's last step does: back beside the thread, not a pick (Side by side is the pick).
-          onExitFull={props.fullLocked ? undefined : () => toggleFull(false)}
+          // × does what Escape's last step does, never a pick (Side by side is the pick): back where full screen
+          // was opened from, the thread alone (the file closes) or the file beside the thread.
+          onExitFull={props.fullLocked ? undefined : exitCloses ? close : exitFull}
+          exitCloses={exitCloses}
           chord={isHtml ? TOOLS_CHORD : null}
-          shifted={drawerMode && drawer && hasPanel}
         />
       ) : (
         <div className="ib-vhead">
@@ -1398,18 +2424,15 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           </span>
           <span className="ib-sp" />
           {isHtml && !props.readOnly && !linkedTop && <HtmlSurfaceControls armed={armed} onToggleArmed={() => setArmed((v) => !v)} />}
+          {props.pin && <ArtifactPinButton threadId={props.pin.threadId} artifactKey={props.pin.key} name={attachment.name} surface="bar" />}
+          <ReuseButton file={attachment} surface="pane" version={effectiveVersion} />
           {props.openIn && <OpenInControl attachment={attachment} version={effectiveVersion} surface={props.openIn} label={!folded} big={phone} />}
           {/* A source that writes nothing (the tour) offers no Download: nothing leaves the window. */}
           {source.writes && (
-            <Tip content={`Download ${attachment.name}${effectiveVersion === 'sent' ? ' (the version it sent)' : ''}`}>
-              <a
-                className="ib-btn ib-sm ib-ghost"
-                href={source.downloadUrl(attachment, effectiveVersion)}
-                download={attachment.name}
-                data-attachment-download=""
-              >
-                <Icon name="download" size={14} />
-                Download
+            // Icon only, as × is: the aria-label names it (Tip adds no name). The Download card, the video card and full screen's ⋯ keep the word.
+            <Tip content={downloadName}>
+              <a className="ib-iconbtn" href={source.downloadUrl(attachment, effectiveVersion)} download={attachment.name} aria-label={downloadName} data-attachment-download="">
+                <Icon name="download" size={16} />
               </a>
             </Tip>
           )}
@@ -1427,11 +2450,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               }}
               aria-expanded={sheet}
               aria-controls={sheetId}
-              aria-label={`Comments, ${annotations.length}`}
+              aria-label={commentsLabel(annotations.length, earlierCount)}
               data-annotations-sheet=""
             >
               <Icon name="comment" size={15} />
-              {annotations.length}
+              <CommentCount count={annotations.length} earlier={earlierCount} />
             </button>
           )}
           {!props.fullLocked && (
@@ -1443,7 +2466,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   {!folded && 'Side by side'}
                 </button>
               </Tip>
-              <Tip content="Full screen: files open this way until you choose again">
+              {/* F names full screen here (approved hint placement); the key, unlike this button, saves nothing. */}
+              <Tip content={withShortcut('Full screen: files open this way until you choose again', { scope: inboxThreadShortcuts, action: 'fullScreen' })}>
                 <button type="button" className="ib-seg-o" aria-pressed="false" onClick={() => toggleFull()} aria-label={folded ? 'Full screen' : undefined} data-full-screen-toggle="">
                   <Icon name="frame" size={14} />
                   {!folded && 'Full screen'}
@@ -1481,8 +2505,13 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       ) : (
         <div />
       )}
-      <div className="ib-vbody">
-        <div ref={docAreaRef} className={`ib-docarea${isHtml ? ' ib-html' : ''}`} data-file-swipe={full && phone && multi ? swipeMode : undefined}>
+      <div className="ib-vbody" ref={bodyRef}>
+        <div
+          ref={docAreaRef}
+          className={`ib-docarea${isHtml ? ' ib-html' : ''}`}
+          data-file-swipe={((full && phone) || touch.tablet) && multi ? swipeMode : undefined}
+          data-image-peek={swipeOn && isImage && multi ? '' : undefined}
+        >
           {error && (
             <div className="ib-error ib-view-error" role="alert">
               {error}
@@ -1490,19 +2519,41 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           )}
           {view && isHtml && view.html !== null && (
             // Kept mounted under a linked page (inert, hidden), so Back finds it as it was left.
-            <div className={`ib-htmlframe${linkedTop ? ' ib-covered' : ''}`} inert={linkedTop ? true : undefined}>
+            <div
+              ref={setFitBox}
+              className={`ib-htmlframe${linkedTop ? ' ib-covered' : ''}${fitted ? ' ib-fitdesk' : ''}`}
+              inert={linkedTop ? true : undefined}
+              data-page-size={phoneHtml ? pageSize : undefined}
+              style={fitted ? ({ '--ib-fit-scale': String(fitScale), '--ib-fit-width': `${PAGE_DESKTOP_WIDTH}px` } as CSSProperties) : undefined}
+            >
             <HtmlViewer
+              ref={viewerRef}
               key={`${attachment.id}:${view.version}:${view.attachment.current?.sha256 ?? ''}`}
+              // A phone's comment goes in the composer's card (HtmlPageComment.tsx), and a selection made with a finger counts.
+              onHostDraft={phoneHtml && hasComposer ? htmlComment.onHostDraft : undefined}
+              touchSelection={phoneHtml && hasComposer}
+              allowCommentImages={pictures}
+              // Desktop size scales the page down: what the page measures converts through it.
+              frameScale={fitted ? fitScale : undefined}
+              onContentWidth={phoneHtml ? onContentWidth : undefined}
+              onPageScrollUp={phoneHtml ? sizeIcon.wake : undefined}
+              onPageTap={phoneHtml ? onPageTap : undefined}
               rawHtml={view.html}
+              // Its own document, served under its own policy: web pictures load in the page, never in the window.
+              frameUrl={source.pageFrameUrl}
               title={attachment.name}
               annotations={annotations}
               onAddAnnotation={(annotation) => void save(annotation)}
               onSelectAnnotation={setSelectedId}
               selectedAnnotationId={selectedId}
+              // The floating comments panel covers the page's right side: a comment picked there scrolls its mark clear of it.
+              scrollClear={panelOverFrame}
               mentionSource={props.mentionSource}
+              onSide={sideFrom}
+              sideButton={sideButton}
               mode="selection"
               inputMethod="pinpoint"
-              annotateModeActive={armed}
+              annotateModeActive={annotating}
               // Annotate's Escape (from the page, or the viewer's own rung with focus out here): in full screen it is a
               // rung of the ladder (the drawer closes first); beside the thread it goes to Interact, as before.
               onAnnotateModeExit={() => {
@@ -1510,13 +2561,16 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               }}
               // In Interact, an Escape the page did not use climbs the ladder (full screen only).
               onPageEscape={full ? () => void escapeFromPage() : undefined}
-              onAnnotateModeToggle={() => setArmed((v) => !v)}
+              onAnnotateModeToggle={props.readOnly ? undefined : () => setArmed((v) => !v)}
               // ⌘⇧X pressed inside the page: the bridge forwards it (Hide / Show the full-screen toolbar).
               onToolsToggle={full ? () => barRef.current?.toggle() : undefined}
-              // A plain ] or [ pressed in the page while armed (the bridge forwards nothing in Interact).
-              onStep={multi ? (dir) => !blockedRef.current && armed && stepRef.current(dir, 'key') : undefined}
+              // A plain ] or [ pressed in the page: in Annotate, and in Interact when the page did not use it.
+              onStep={multi ? (dir) => !blockedRef.current && stepRef.current(dir, 'key') : undefined}
+              stepInInteract
               // A link the page's bridge handed over: another file of the thread, a page or image beside it, another site (htmlLinks.ts).
-              onOpenLink={(href) => followLinkRef.current(href, pageFolder)}
+              onOpenLink={(href, frame) => followLinkRef.current(href, pageFolder, { path: attachment.path, frame })}
+              pageNavigation
+              frameStart={pageStart?.id === attachment.id ? pageStart.start : undefined}
               initialFragment={linkFragment?.id === attachment.id ? linkFragment.hash : undefined}
               onUnanchoredChange={(ids) => setUnanchored(new Set(ids))}
               fullViewport
@@ -1526,7 +2580,31 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             />
             </div>
           )}
-          {view && isHtml && linkedTop && (
+          {view && isHtml && view.html !== null && phoneHtml && !linkedTop && (
+            // One size control (pageSize.ts; the owner's pick, 2026-11-07: "Just the icon no words"): a small icon in
+            // the page's top right corner showing the size the page is at. Its name says what a press does.
+            <div className="ib-sizecorner" data-page-size-corner="" data-faded={sizeIcon.shown ? undefined : ''}>
+              <button
+                ref={sizeBtnRef}
+                type="button"
+                className="ib-sizebtn"
+                onClick={() => {
+                  togglePageSize();
+                  sizeIcon.wake();
+                }}
+                // Keyboard focus holds it shown; a finger's press does not (a tapped button may keep focus), and
+                // leaving lets it fade again only after keyboard focus held it (hold(false) wakes only then).
+                onFocus={(e) => (focusVisible(e.currentTarget) ? sizeIcon.hold(true) : sizeIcon.wake())}
+                onBlur={() => sizeIcon.hold(false)}
+                aria-label={pageSize === 'desktop' ? 'Phone size' : 'Desktop size'}
+                title={pageSize === 'desktop' ? 'Phone size' : 'Desktop size'}
+                data-page-size-toggle={pageSize}
+              >
+                <Icon name={pageSize === 'desktop' ? 'laptop' : 'phone'} size={18} />
+              </button>
+            </div>
+          )}
+          {view && linkedTop && (
             // A page the attached page links to, not attached: read-only (comments belong to attachments).
             <div className="ib-linked" data-linked-page={linkedTop.name}>
               <div className="ib-linkband" ref={linkBandRef} role="group" aria-label={`${linkedTop.name}, linked from ${attachment.name}`}>
@@ -1544,9 +2622,12 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 )}
               </div>
               <div className="ib-linkedframe">
-                <HtmlViewer
+                {linkedTop.html === null ? (
+                  <LinkedMarkdown key={`${linkedStack.length}:${linkedTop.path}`} page={linkedTop} attachmentId={attachment.id} onOpenLink={openFromLinked} />
+                ) : <HtmlViewer
                   key={`${linkedStack.length}:${linkedTop.path}`}
                   rawHtml={linkedTop.html}
+                  frameUrl={source.pageFrameUrl}
                   title={linkedTop.name}
                   annotations={NO_ANNOTATIONS}
                   onAddAnnotation={noop}
@@ -1558,39 +2639,42 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   annotateModeActive={false}
                   // An Escape the page did not use: one page back (full screen: the ladder, whose next rung is that).
                   onPageEscape={() => void escapeFromPage()}
-                  onOpenLink={(href) => followLinkRef.current(href, folderOf(linkedTop.path))}
+                  onOpenLink={(href, frame) => followLinkRef.current(href, folderOf(linkedTop.path), { path: linkedTop.path, frame })}
+                  pageNavigation
                   initialFragment={linkedTop.hash || undefined}
                   fullViewport
                   hideControls
                   maxAdditionalTargets={0}
                   readOnly
-                />
+                />}
               </div>
             </div>
           )}
-          {isHtml && (
+          {(isHtml || kind === 'markdown') && (
             <div className={`ib-linknote${linkNote ? ' ib-on' : ''}`} aria-hidden={linkNote ? undefined : true} data-link-note={linkNote ? 'shown' : 'hidden'}>
               <Icon name="info" size={13} />
               <span>{linkNote}</span>
             </div>
           )}
-          {view && isText && !props.readOnly && (
-            <div className="ib-toolstrip">
-              <AnnotationToolstrip
-                inputMethod={inputMethod}
-                onInputMethodChange={setInputMethod}
-                mode={mode}
-                onModeChange={setMode}
-                showHelpLink={false}
-                hideQuickLabel
-                compact
-              />
-            </div>
+          {view && isText && !linkedTop && !props.readOnly && (
+            <PaneToolstrip inputMethod={inputMethod} onInputMethodChange={setInputMethod} mode={mode} onModeChange={setMode} phone={phone} contents={contentsButton !== null} />
+          )}
+          {view && contentsButton && !linkedTop && (
+            <ContentsPanel
+              key={`contents:${docKey}`}
+              mode={contentsButton}
+              blocks={blocks}
+              annotations={annotations}
+              scrollViewport={scrollViewport}
+              onShow={showContents}
+              phone={phone}
+            />
           )}
           {isImage && (
             <ImageAttachmentView
-              // Its own comment box per file: typed text never carries over to the next image.
-              key={attachment.id}
+              // Its own comment box per file and version: typed text never carries over to the next image, or to the
+              // other version (each version keeps its own draft).
+              key={draftKey}
               attachment={attachment}
               version={effectiveVersion}
               annotations={annotations}
@@ -1600,15 +2684,30 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               onError={setError}
               initialFit={memory.current.get(attachment.id)?.fit}
               onFitChange={(fit) => remember(attachment.id, { fit })}
-              onSwipe={multi ? (dir) => step(dir, 'key') : undefined}
+              // A phone in full screen and a touch tablet: the pane's follow swipe (above); elsewhere a touch screen's swipe at Fit.
+              onSwipe={multi && !(full && phone) && !touch.tablet ? (dir) => step(dir, 'key') : undefined}
+              edgesRef={imageEdges}
+              onShown={swipe.settle}
               wheelHint={wheelHint}
               suggestion={suggestion?.comment}
+              onSelect={setSelectedId}
+              onRemove={remove}
+              onNotice={props.onToast}
+            />
+          )}
+          {swipeOn && isImage && multi && !prefersReducedMotion() && (
+            <ImageSwipePeek
+              swipe={swipe}
+              steps={steps}
+              index={index}
+              area={docAreaRef}
+              urlOf={(file) => source.imageUrl(file, file.unavailable !== null ? 'sent' : (memory.current.get(file.id)?.version ?? 'current'))}
             />
           )}
           {isVideo && (
             <VideoAttachmentView
-              // Its own comment row per file: a typed comment never carries over to the next film.
-              key={attachment.id}
+              // Its own comment row per file and version: a typed comment never carries over to the next film or version.
+              key={draftKey}
               ref={videoRef}
               attachment={attachment}
               version={effectiveVersion}
@@ -1621,6 +2720,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               phone={phone}
               poster={source.posterUrl?.(attachment) ?? undefined}
               suggestion={suggestion ?? undefined}
+              onRemove={remove}
+              onNotice={props.onToast}
             />
           )}
           {isDownload && (
@@ -1646,10 +2747,19 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           )}
           {view && isCode && (
             <div className="ib-codeview" data-code-view="">
-              {!props.readOnly && <div className="ib-codehint">Click a line number, drag across lines, or select code to comment.</div>}
+              {/* The code's top row: Copy file first (approval "inbox-copy-file"), then how to comment. */}
+              <div className="ib-codehint" style={codeClear === null ? undefined : { paddingTop: codeClear }} data-code-row="">
+                <CopyFileButton text={view.text} name={attachment.name} sent={view.version !== 'current'} announce={announce} />
+                {!props.readOnly && (
+                  <span className="ib-codehint-t">{phone ? 'Tap a line to comment.' : 'Click a line number, drag across lines, or select code to comment.'}</span>
+                )}
+              </div>
               <CodeFileView
                 key={`${attachment.id}:${view.version}:${view.attachment.current?.sha256 ?? ''}`}
                 filepath={attachment.name}
+                lineScroll="vertical"
+                commentCard="plain"
+                commentMarkers="bubble"
                 contents={view.text}
                 annotations={codeAnnotations}
                 selectedAnnotationId={selectedId}
@@ -1658,19 +2768,25 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   props.readOnly
                     ? undefined
                     : (input) =>
-                        void save(
-                          codeCommentAnnotation({
+                        void save({
+                          ...codeCommentAnnotation({
                             id: `ann-code-${typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : Date.now().toString(36)}`,
                             lineStart: input.lineStart,
                             lineEnd: input.lineEnd,
                             text: input.text,
                             code: input.originalCode,
                           }),
-                        )
+                          ...(input.images?.length ? { images: input.images } : {}),
+                        })
                 }
                 onEditAnnotation={props.readOnly ? undefined : (id, updates) => edit(id, { text: updates.text })}
+                reopenComment={codeReopen}
+                reopenEdit={codeReopenEdit}
+                onComposerLines={(lines) => {
+                  codeLines.current = lines;
+                }}
                 onDeleteAnnotation={props.readOnly ? undefined : (id) => void remove(id)}
-                allowImages={false}
+                allowImages={pictures}
                 lang={view.text.length > CODE_HIGHLIGHT_MAX_CHARS ? 'text' : undefined}
                 // A minified file's one line wraps (no toggle: a line this long is never read by scrolling sideways).
                 overflow={wrapCode ? 'wrap' : undefined}
@@ -1679,13 +2795,24 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             </div>
           )}
           {view && !isHtml && !isCode && (
-            <div className="ib-docscroll bg-card" data-look="clean">
+            <div
+              className={`ib-docscroll bg-card${linkedTop ? ' ib-covered' : ''}`}
+              inert={linkedTop ? true : undefined}
+              data-look="clean"
+              data-contents-gutter={railGutter ? '' : undefined}
+              ref={setScrollViewport}
+            >
+              <ScrollViewportProvider viewport={scrollViewport}>
+              <ImageResolverContext.Provider value={resolveImage}>
               <Viewer
                 key={`${attachment.id}:${view.version}:${view.attachment.current?.sha256 ?? ''}`}
                 ref={viewerRef}
                 blocks={blocks}
                 markdown={view.text}
+                imageBaseDir={imageBaseDir}
+                resolveLocalLink={kind === 'markdown' ? resolveFileLink : undefined}
                 questionDecisionLines={false}
+                {...fileQuestionProps}
                 annotations={annotations}
                 mentionSource={props.mentionSource}
                 onAddAnnotation={(annotation) => void save(annotation)}
@@ -1695,17 +2822,37 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 inputMethod={isText ? inputMethod : 'drag'}
                 taterMode={false}
                 gridEnabled={false}
-                maxWidth={full ? 760 : 640}
+                // With the rail's gutter, inbox.css sizes the column (640 px at most, as here).
+                maxWidth={railGutter ? null : full ? 760 : 640}
                 stickyActions={false}
                 disableCodePathValidation
                 copyLabel="Copy file"
-                allowImages={false}
+                allowImages={pictures}
+                quickLabels={false}
+                onSide={sideFrom}
+                sideButton={sideButton}
                 refRepo={refRepo}
                 readOnly={props.readOnly}
                 onRestoreReport={(report) => setUnanchored(new Set(report.unanchored))}
                 suggestComment={suggestion?.phrase ? (selected) => suggestionFor(view.text, suggestion, selected) : undefined}
               />
+              </ImageResolverContext.Provider>
+              </ScrollViewportProvider>
             </div>
+          )}
+          {view && hasContents && !phone && (
+            <FileContentsRail
+              key={`rail:${docKey}`}
+              blocks={documentBlocks}
+              scrollViewport={scrollViewport}
+              // A linked document over the file hides the file's Contents with it.
+              hidden={!contentsShown || linkedTop !== null}
+              onAvailableChange={(fits) => setRailFit({ key: docKey, fits })}
+              onHide={hideContents}
+              annotations={annotations}
+              selectedAnnotationId={selectedId}
+              onSelectAnnotation={setSelectedId}
+            />
           )}
         </div>
         <div
@@ -1714,6 +2861,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           role={folded || full ? 'region' : undefined}
           aria-label={folded || full ? 'Comments' : undefined}
           data-comments-drawer={drawerMode ? (drawer ? 'open' : 'closed') : undefined}
+          // The floating panel gathers into the corner control with the tools (inbox.css), and comes back with them.
+          inert={drawerMode && drawer && shownToolbar === 'tucked' ? true : undefined}
           onKeyDown={(event) => {
             // Escape closes the open sheet or drawer, unless something inside (an edit box) already used it.
             if (event.key === 'Escape' && panelOpen && (folded || full) && !event.defaultPrevented) {
@@ -1722,11 +2871,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             }
           }}
         >
-          {/* The sheet's (and full screen's drawer's) own title and close (a phone's touch presentation has neither). */}
+          {/* The sheet's (and full screen's floating panel's) own title and close (a phone's touch presentation has neither). */}
           {(folded || full) && (
             <div className="ib-sheet-h">
               <b>Comments</b>
-              <span className="ib-mut">{annotations.length}</span>
+              {!onlyEarlier && <span className="ib-mut">{annotations.length}</span>}
               <span className="ib-sp" />
               {isVideo && <span className="ib-mut ib-sheet-note">By time</span>}
               <button type="button" className="ib-iconbtn" onClick={closeSheet} aria-label="Close the comments">
@@ -1735,11 +2884,28 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             </div>
           )}
           <AnnotationPanel
-            // The sheet and the drawer draw the timeline under their own title and close (and a phone's window-wide overlay below 768 px would have no close here).
+            // The sheet and the floating panel draw the timeline under their own title and close (and a phone's window-wide overlay below 768 px would have no close here).
             presentation={folded || full ? 'embedded' : undefined}
+            // An edit kept when the file closed, back in its card's edit box.
+            reopenEdit={panelReopenEdit}
             // A linked page takes no comments: the hint says where they can be written instead.
-            emptyHint={linkedTop ? `Comment on ${attachment.name}, not on this page` : isImage ? 'Comment below the image' : isVideo ? 'Pause at a moment and comment below the film' : isCode ? 'Click a line to comment' : undefined}
+            emptyHint={linkedTop ? `Comment on ${attachment.name}, not on this page` : isImage ? 'Comment below the image' : isVideo ? `Pause at a moment and comment below the ${kind === 'audio' ? 'player' : 'film'}` : isCode ? 'Click a line to comment' : undefined}
             isOpen
+            hideEmptyMessage={earlierCount > 0}
+            timelineFooter={
+              earlierCount > 0 ? (
+                <EarlierSection
+                  // Each file and version starts by the fold rule.
+                  key={`${attachment.id}:${annotationVersion}`}
+                  replies={earlierReplies}
+                  count={earlierCount}
+                  current={annotations.length}
+                  // Closed, the column is hidden: a long list waits to be seen before it is drawn.
+                  shown={!(drawerMode || sheetMode) || panelOpen}
+                  inAllFiles={otherFiles && scope === 'all'}
+                />
+              ) : undefined
+            }
             annotations={annotations}
             blocks={blocks}
             // A film's comments read by the moment they are at, each with its time (a click seeks there).
@@ -1766,7 +2932,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                             {formatInboxVideoTime(time)}
                           </button>
                         </Tip>
-                        {frame && (
+                        {frame && !isWordlessMarkup(annotation) && (
                           <Tip content={frame.name}>
                           <span className="ib-vframe ib-vframe-sm" data-video-card-frame={annotation.id}>
                             <img src={getImageSrc(frame.path)} alt="" />
@@ -1784,8 +2950,14 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 : undefined
             }
             // The moment and the frame are in the card's header; the quote ("cut.mp4 at 1:42") and the image row would repeat them.
-            cardParts={isVideo ? (annotation) => (readInboxVideoTime(annotation) === null ? {} : { quote: false, images: false }) : undefined}
-            title={isVideo ? 'Comments' : undefined}
+            // A drawing with no words is drawn as its picture: no quote, no image row, not the stand-in words the agent gets.
+            cardParts={(annotation) => {
+              const wordless = isWordlessMarkup(annotation);
+              if (isVideo && readInboxVideoTime(annotation) !== null) return wordless ? { quote: false, images: false, text: false } : { quote: false, images: false };
+              return wordless ? { quote: false, images: false, text: false } : {};
+            }}
+            renderCardBody={(annotation) => (isWordlessMarkup(annotation) ? <MarkupPicture image={annotation.images![0]!} /> : null)}
+            title="Comments"
             // A linked page takes no comments: the panel lists the attached page's, and says so.
             titleNote={isVideo ? 'By time' : linkedTop ? `Off on ${linkedTop.name}` : undefined}
             onSelect={(id) => {
@@ -1809,7 +2981,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             onDeleteInDocument={(_path, id) => void remove(id)}
             onEditInDocument={(_path, id, updates) => edit(id, updates)}
           />
-          {/* Full screen has no bottom bar: the drawer's foot says where the comments go, and the way to the reply (a phone's position lives here too). */}
+          {/* Full screen has no bottom bar: the panel's foot says where the comments go, and the way to the reply (a phone's position lives here too). */}
           {full && (
             <div className="ib-fvfoot" data-full-view-foot="">
               {phone && multi && (
@@ -1837,10 +3009,12 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   <Icon name="chevD" size={13} />
                 </button>
               )}
+              {!(onlyEarlier && props.strip.picks === 0 && props.strip.annotations === 0) && (
               <p className="ib-fvsend" data-strip-chip="">
                 <b>{chipText}</b> {props.strip.picks === 0 && props.strip.annotations === 1 ? 'rides' : 'ride'} your next Send to {props.agent}.
                 {elsewhere > 0 && ` ${elsewhere} ${elsewhere === 1 ? 'is' : 'are'} on other files.`}
               </p>
+              )}
               <div className="ib-fvacts">
                 <button type="button" className="ib-btn ib-sm ib-pri" onClick={() => leave(null, props.strip.onWriteReply)}>
                   <Icon name="reply" size={14} />
@@ -1851,43 +3025,41 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           )}
         </div>
       </div>
-      {guard ? (
-        <div
-          className="ib-stepguard"
-          role="group"
-          aria-labelledby="ib-guard-text"
-          ref={guardRef}
-          data-step-guard=""
-          onKeyDown={(event) => {
-            if (event.key !== 'Escape') return;
-            event.preventDefault();
-            event.stopPropagation();
-            keepWriting();
-          }}
-        >
-          <Icon name="comment" size={15} />
-          <span className="ib-gt" id="ib-guard-text">
-            Your comment on <b>{attachment.name}</b> is not saved yet.
-          </span>
-          <button type="button" className="ib-btn ib-sm ib-pri" onClick={() => void saveAndGo()} disabled={guardSaving} aria-busy={guardSaving || undefined} data-guard-save="">
-            {guard.escape ? 'Save it' : guard.to === null ? 'Save it and close' : 'Save it and go on'}
-          </button>
-          <button type="button" className="ib-btn ib-sm" onClick={discardAndGo} disabled={guardSaving} data-guard-discard="">
-            {guard.escape ? 'Discard it' : guard.to === null ? 'Discard and close the file' : <span className="ib-gto">Discard and go to <FileName name={guard.to} /></span>}
-          </button>
-          <button type="button" className="ib-btn ib-sm ib-ghost" onClick={keepWriting} data-guard-keep="">
-            Keep writing
-          </button>
-        </div>
-      ) : full ? null : (
-        <div />
+      {hasComposer && isHtml && composerValue && (
+        <FullScreenComposer
+          value={composerValue}
+          noun="page"
+          // Comment and Reply, Comment first, as on an image: the Comment tab is a comment on the whole page, or a
+          // phone's pin or selection while one is open (its row stays drawn under it, hidden, words kept). A linked page
+          // over the file is read-only (comments belong to attachments): Reply only, the row's words parked.
+          comment={
+            props.readOnly || linkedTop ? null : (
+              <>
+                {htmlComment.card}
+                <HtmlPageCommentRow
+                  key={draftKey}
+                  fileKey={draftKey}
+                  name={attachment.name}
+                  tags={props.composer?.reply.tags}
+                  parking={pageParking}
+                  hidden={htmlComment.card !== null}
+                  onSave={save}
+                />
+              </>
+            )
+          }
+          foldedByDefault={phoneHtml}
+          onMinimized={htmlComment.onMinimized}
+        />
       )}
-      {!full && multi ? (
-        // Beside the thread: the stepper in the bar under the file.
-        <div className="ib-vfoot" data-view-foot="">
+      {full ? null : <div />}
+      {multi && (!full || touch.bar) ? (
+        // Beside the thread, and full screen on a touch tablet (touchStepBar.ts): the stepper in the bar under the file.
+        <div className="ib-vfoot" data-view-foot="" data-touch-bar={touch.bar ?? undefined}>
           <AttachmentStepper
             steps={steps}
             index={index}
+            peek={optionSet ? { steps: allSteps, index: allIndex, onGo: (target) => goTo(target, 'menu', allSteps) } : undefined}
             menuOpen={menuOpen}
             onMenuOpenChange={setMenuOpen}
             onStep={step}
@@ -1896,11 +3068,17 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             annotationCounts={annotationCounts}
           />
         </div>
-      ) : full ? null : (
-        <div />
+      ) : full ? null : <div />}
+      {full && optionSet && (
+        // A question's picture choices: the caption names the choice on screen for as long as the set is open (in place of the chip).
+        <OptionCaption set={optionSet} index={index} phone={phone} onStep={(dir) => {
+          cardArrow.current = dir;
+          step(dir, 'button');
+        }}
+        />
       )}
-      {full && (
-        // The step chip (full screen only): names the new file for a moment, the end note at the ends (a one-file thread: its name once, as full screen starts). The live region says it.
+      {full && !optionSet && !touch.bar && (
+        // The step chip (full screen without a touch bar): names the new file for a moment, the end note at the ends (a one-file thread: its name once, as full screen starts). The live region says it.
         <div className={`ib-fvchip${chip ? ' ib-on' : ''}`} aria-hidden="true" data-full-view-chip={chip ? 'shown' : 'hidden'}>
           {multi && (
             <span className="ib-stepn">
@@ -1913,20 +3091,21 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           {chip?.note && <span className="ib-fvchip-note">{chip.note}</span>}
           {multi && !phone && (
             <span className="ib-fvchip-keys">
-              <kbd>[</kbd>
-              <kbd>]</kbd>
+              <ShortcutHint scope={inboxFileViewerShortcuts} action="previous" className="" />
+              <ShortcutHint scope={inboxFileViewerShortcuts} action="next" className="" />
             </span>
           )}
         </div>
       )}
-      {full && phone && multi && <FileSwipeCard swipe={swipe} steps={steps} index={index} />}
+      {((full && phone) || touch.tablet) && multi && <FileSwipeCard swipe={swipe} steps={steps} index={index} skip={peeks} />}
       {full && phone && menuOpen && phonePeekHost
         ? createPortal(
             <div className="pn-inbox-peek">
               <FilePeek
                 id={fullViewPeekId}
-                steps={steps}
-                index={index}
+                steps={allSteps}
+                index={allIndex}
+                within={optionSet ? { steps, index, noun: 'option' } : undefined}
                 phone
                 annotationCounts={annotationCounts}
                 onClose={() => {
@@ -1934,7 +3113,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   // The sheet's backdrop covered everything: focus back on what opened it (the toolbar's pill, or the position in the comments sheet).
                   requestAnimationFrame(focusPeekOpener);
                 }}
-                onGo={(target) => goTo(target, 'menu')}
+                onGo={(target) => goTo(target, 'menu', allSteps)}
                 // The step for every file, swipeable or not (the owner's answer for HTML pages and code that scrolls
                 // sideways): one tap steps and closes the sheet, so the new file is what you see; at an end only the note.
                 onStep={(dir) => {
@@ -1956,6 +3135,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       <div className="ib-sr" aria-live="polite" data-step-live="">
         {announced}
       </div>
+      </FullScreenComposerContext.Provider>
+      </FileDraftContext.Provider>
     </section>
   );
 });

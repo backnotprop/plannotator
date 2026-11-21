@@ -1,10 +1,17 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { SemanticFileBadge } from './SemanticFileBadge';
+import { SemanticFileBadge, type SemanticFileSwitch } from './SemanticFileBadge';
+import { COMPACT_FILE_HEADER_HEIGHT } from '../utils/diffChromeMetrics';
+import { EllipsisName } from './EllipsisName';
+import React, { useRef } from 'react';
 import { CallFlowFileBadge } from './CallFlowFileBadge';
 import { OpenInAppButton } from '@plannotator/ui/components/OpenInAppButton';
 import { useReviewStateOptional } from '../dock/ReviewStateContext';
+import { useRovingToolbar } from '../hooks/useRovingToolbar';
+import { CompactFileActions } from './CompactFileActions';
 import type { DiffFileStatus } from '../types';
 import { FileKindIcon } from '@plannotator/guide-viewer/FileKindIcon';
+import { fileStatusLetter } from '@plannotator/ui/utils/fileStatusLetter';
+import { formatCount } from '@plannotator/ui/utils/countFormat';
+import { countPatchChanges } from '@plannotator/core/diff-files';
 
 interface FileHeaderProps {
   /** Read-only host: no open-in affordance (it probes the review server). */
@@ -20,6 +27,8 @@ interface FileHeaderProps {
   /** Chrome preference: false hides the Viewed button (the `V` shortcut and
    *  viewed state are unaffected). */
   showViewedControl?: boolean;
+  /** The review app's keys work here: the Viewed tooltip names its key (V). Off where they do not (the Inbox). */
+  viewedKeyHint?: boolean;
   isStaged?: boolean;
   isStaging?: boolean;
   onStage?: () => void;
@@ -60,6 +69,21 @@ interface FileHeaderProps {
    * `iconOnly` on a tight header; `touch` in the compact touch shell.
    */
   renderMarkdownView?: (fit: { iconOnly: boolean; touch: boolean }) => React.ReactNode;
+  /** A host control drawn before the view menu (code review's Changes | Whole file switch). */
+  accessory?: React.ReactNode;
+  semantic?: SemanticFileSwitch;
+  /** A host's own "Open in" (the Inbox's, where a read-only header has none), in the place the app's sits. */
+  openIn?: React.ReactNode;
+  /**
+   * A narrow header keeps the folder, dimmed and cut from its start, before the whole name, so two files of one name
+   * read apart (the Inbox's PR page on a phone). Off: a narrow header shows the name alone, as before.
+   */
+  keepsFolder?: boolean;
+  /**
+   * The line "Open in" opens the file at, read at the click (openInLineForDiff):
+   * the picked lines or comment, else the file's first change.
+   */
+  openInLine?: () => number | undefined;
 }
 
 function splitFilePath(filePath: string): { directory: string; name: string } {
@@ -74,53 +98,24 @@ function splitFilePath(filePath: string): { directory: string; name: string } {
   };
 }
 
-function frontEllipsize(text: string, visibleChars: number): string {
-  if (text.length <= visibleChars) return text;
-  return `...${text.slice(-visibleChars)}`;
-}
-
-/**
- * Change-type letter shown to the right of the +/- counts (matches the file
- * tree): A added · D deleted · R renamed, colored so the critical changes pop.
- * Modified is bare — the +/- counts already say it changed within the file.
- */
-const STATUS_LETTER: Record<DiffFileStatus, { letter: string; className: string; title: string }> = {
-  added: { letter: 'A', className: 'text-success', title: 'Added file' },
-  modified: { letter: 'M', className: 'text-muted-foreground', title: 'Modified file' },
-  deleted: { letter: 'D', className: 'text-destructive', title: 'Deleted file' },
-  renamed: { letter: 'R', className: 'text-[#007aff]', title: 'Renamed file' },
-};
 
 const FileStatusLetter: React.FC<{ status: DiffFileStatus; oldPath?: string }> = ({ status, oldPath }) => {
-  // Match the file tree: only added/deleted/renamed get a badge; modified is
-  // bare (the +/- counts already convey that it changed within the file).
   if (status === 'modified') return null;
-  const meta = STATUS_LETTER[status];
-  const title = status === 'renamed' && oldPath ? `Renamed from ${oldPath}` : meta.title;
+  const meta = fileStatusLetter(status, { oldPath });
   return (
-    <span
-      className={`flex-none font-semibold leading-none ${meta.className}`}
-      title={title}
-      aria-label={title}
-    >
+    <span className={`flex-none leading-none ${meta.className}`} title={meta.title} aria-label={meta.title} data-file-header-status={meta.letter}>
       {meta.letter}
     </span>
   );
 };
 
-/** Count +/- lines in a unified patch (ignores the +++/--- file headers). */
-function countChanges(patch: string): { additions: number; deletions: number } {
-  let additions = 0;
-  let deletions = 0;
-  for (const line of patch.split('\n')) {
-    if (line[0] === '+' && !line.startsWith('+++')) additions++;
-    else if (line[0] === '-' && !line.startsWith('---')) deletions++;
-  }
-  return { additions, deletions };
-}
-
 /** Sticky file header with file path, Viewed toggle, Git Add, and Copy Diff button */
-export const FileHeader: React.FC<FileHeaderProps> = ({
+const TIGHT_LABEL = '@max-[479px]/file-header:hidden';
+const TIGHT_PAD = 'gap-1 px-2 py-1 @max-[479px]/file-header:px-1.5';
+const ACTIONS_FOLD_WIDTH = 360;
+const ACTIONS_FOLD = '@max-[359px]/file-header:hidden';
+
+const FileHeaderView: React.FC<FileHeaderProps> = ({
   filePath,
   patch,
   status,
@@ -128,6 +123,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   isViewed = false,
   onToggleViewed,
   showViewedControl = true,
+  viewedKeyHint = true,
   isStaged = false,
   isStaging = false,
   onStage,
@@ -146,61 +142,50 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   isGenerated = false,
   isTest = false,
   renderMarkdownView,
+  accessory,
+  semantic,
+  openIn,
+  keepsFolder = false,
+  openInLine,
 }) => {
-  const [headerWidth, setHeaderWidth] = useState<number>(0);
   const state = useReviewStateOptional();
   const isCompactTouchLayout = compactTouchLayout ?? state?.isCompactTouchLayout ?? false;
   const headerRef = useRef<HTMLDivElement>(null);
   const fileCommentRef = useRef<HTMLButtonElement>(null);
+  useRovingToolbar(headerRef, viewedKeyHint);
   const { directory, name } = splitFilePath(filePath);
-  const isCompact = headerWidth > 0 && headerWidth < 760;
-  const isVeryTight = headerWidth > 0 && headerWidth < 480;
-  const showFilenameOnly = headerWidth > 0 && headerWidth < 560;
-  const truncatedName = showFilenameOnly
-    ? frontEllipsize(
-        name,
-        headerWidth < 360 ? 14 : headerWidth < 420 ? 18 : headerWidth < 500 ? 24 : 32,
-      )
-    : name;
-
-  useEffect(() => {
-    if (!headerRef.current || typeof ResizeObserver === 'undefined') return;
-
-    const node = headerRef.current;
-    const observer = new ResizeObserver(([entry]) => {
-      setHeaderWidth(entry.contentRect.width);
-    });
-
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
-
-  const stageLabel = isVeryTight ? '' : isCompact ? (isStaging ? 'Adding' : isStaged ? 'Added' : 'Add') : (isStaging ? 'Adding...' : isStaged ? 'Added' : 'Git Add');
-  const commentLabel = isVeryTight ? '' : 'Comment';
-  const viewedLabel = isVeryTight ? '' : 'Viewed';
-  const { additions, deletions } = React.useMemo(() => countChanges(patch), [patch]);
+  const stageLabel = '';
+  const commentLabel = '';
+  const headerWidthNow = () => headerRef.current?.clientWidth ?? Infinity;
+  const tinyNow = () => !readOnly && headerWidthNow() < ACTIONS_FOLD_WIDTH;
+  const actionFold = readOnly ? '' : ACTIONS_FOLD;
+  const { additions, deletions } = React.useMemo(() => countPatchChanges(patch), [patch]);
 
   return (
     <div
       ref={headerRef}
-      className={`flex-shrink-0 border-b border-border/50 flex items-center justify-between gap-2 transition-colors duration-150 hover:bg-muted/30 ${isCompactTouchLayout ? 'pr-3' : 'px-3'}`}
-      style={{ height: isCompactTouchLayout ? '44px' : 'var(--panel-header-h)' }}
+      data-file-header=""
+      className={`@container/file-header group/file-header flex-shrink-0 border-b border-border flex items-center justify-between gap-2 transition-colors duration-150 hover:bg-muted/30 ${isCompactTouchLayout ? 'pl-3 pr-1' : 'pl-2 pr-2'}`}
+      style={{ height: isCompactTouchLayout ? `${COMPACT_FILE_HEADER_HEIGHT}px` : 'var(--panel-header-h)' }}
+      data-file-header-path={filePath}
+      role={viewedKeyHint ? 'toolbar' : undefined}
+      aria-label={viewedKeyHint ? filePath : undefined}
     >
-      <div className="min-w-0 flex flex-1 items-center" onClick={onCollapseToggle} style={onCollapseToggle ? { cursor: 'pointer' } : undefined}>
+      <div className="min-w-0 flex flex-1 items-center overflow-hidden" onClick={onCollapseToggle} style={onCollapseToggle ? { cursor: 'pointer' } : undefined}>
         {collapseToggle}
         <span
-          className={`min-w-0 flex items-center text-xs font-semibold leading-normal whitespace-nowrap ${isCompactTouchLayout ? 'flex-1' : ''}`}
+          className={`min-w-0 flex items-center text-[13px] font-medium leading-normal whitespace-nowrap [font-variant-ligatures:no-contextual] ${isCompactTouchLayout ? 'flex-1' : ''}`}
           title={status === 'renamed' && oldPath ? `${oldPath} → ${filePath}` : filePath}
         >
           {/* Rename: dimmed old path → new path (diffshub treatment). Dropped
               under tight widths — the icon + tooltip still carry it. */}
-          {status === 'renamed' && oldPath && !showFilenameOnly && !isCompactTouchLayout && (
+          {status === 'renamed' && oldPath && !isCompactTouchLayout && (
             <>
-              <span className="min-w-0 overflow-hidden text-ellipsis text-muted-foreground/60">
+              <span className="@max-[559px]/file-header:hidden min-w-0 overflow-hidden text-ellipsis text-muted-foreground/60">
                 {oldPath}
               </span>
               <svg
-                className="w-3 h-3 mx-1 flex-none text-muted-foreground/60"
+                className="@max-[559px]/file-header:hidden w-3 h-3 mx-1 flex-none text-muted-foreground/60"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -216,35 +201,31 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
              * the basename/extension receive the available phone width. */
             <span
               data-pn-compact-file-path
-              className="block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-foreground [direction:rtl]"
+              className="block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left text-foreground [direction:rtl]"
             >
               <bdi>{filePath}</bdi>
             </span>
           ) : (
             <>
-              {!showFilenameOnly && directory && (
-                <span className="min-w-0 overflow-hidden text-ellipsis text-muted-foreground/70">
-                  {directory}
+              {directory && (
+                <span data-file-header-folder={keepsFolder ? '' : undefined} className={`${keepsFolder ? '' : '@max-[559px]/file-header:hidden '}min-w-0 shrink-[1000] overflow-hidden text-ellipsis whitespace-nowrap font-normal text-muted-foreground [direction:rtl]`}>
+                  <bdi>{directory}</bdi>
                 </span>
               )}
-              <span
-                className={showFilenameOnly ? 'block min-w-0 overflow-hidden whitespace-nowrap text-foreground' : 'flex-none whitespace-nowrap text-foreground'}
-              >
-                {truncatedName}
-              </span>
+              <EllipsisName text={name} className="text-foreground" />
             </>
           )}
         </span>
         {isTest && <FileKindIcon kind="test" size={13} className="ml-1.5 flex-none text-muted-foreground" title="Test file" />}
         {(additions > 0 || deletions > 0 || (status && status !== 'modified') || isGenerated) && (
-          <span className="flex-none ml-2 flex items-center gap-1.5 text-xs leading-none">
-            {additions > 0 && <span className="font-mono text-success">+{additions}</span>}
-            {deletions > 0 && <span className="font-mono text-destructive">-{deletions}</span>}
+          <span className="min-w-0 shrink-[1000] ml-3 flex h-4 flex-wrap items-center gap-x-1.5 overflow-hidden text-[12px] leading-4 tabular-nums" data-file-header-counts="">
+            {additions > 0 && <span className="text-success">+{formatCount(additions)}</span>}
+            {deletions > 0 && <span className="text-destructive">−{formatCount(deletions)}</span>}
             {status && <FileStatusLetter status={status} oldPath={oldPath} />}
             {isGenerated && (
               <span
                 data-pn-generated-badge
-                className="flex-none rounded-sm border border-border/60 bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground"
+                className="flex-none rounded-sm border border-border/60 bg-muted/60 px-1.5 py-0.5 text-xs font-medium leading-none text-muted-foreground"
                 title="Marked linguist-generated in .gitattributes"
               >
                 generated
@@ -253,17 +234,41 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           </span>
         )}
       </div>
-      {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 ${isCompact ? 'gap-1' : 'gap-2'}`}>
-        {renderMarkdownView?.({ iconOnly: isVeryTight, touch: false })}
+      {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 gap-1`}>
+        <CallFlowFileBadge filePath={filePath} oldPath={oldPath} />
+        <SemanticFileBadge filePath={filePath} semantic={semantic} />
+        {openIn}
+        {!readOnly && <OpenInAppButton
+          quiet
+          extraItems={() => [
+            ...(tinyNow() && showStageControl && canStage && onStage ? [{ label: isStaged ? 'Unstage this file' : 'Stage this file', onSelect: onStage }] : []),
+            ...(tinyNow() && onFileComment ? [{ label: 'Comment on this file', onSelect: () => headerRef.current && onFileComment(headerRef.current) }] : []),
+            ...(tinyNow() && onEditFile && !isEditing && !editDisabledReason ? [{ label: 'Edit to suggest a change', onSelect: onEditFile }] : []),
+            ...(state?.onOpenToSide ? [{ label: 'Open to the side', onSelect: () => state.onOpenToSide!(filePath), icon: <OpenToSideIcon /> }] : []),
+          ]}
+          filePath={filePath}
+          base={state?.agentCwd ?? null}
+          diffText={patch}
+          line={openInLine}
+          canOpen={
+            state?.canUseLiveWorkspaceActions !== false &&
+            !(state?.prMetadata && !state?.agentCwd) &&
+            status !== 'deleted'
+          }
+        />}
+        {accessory}
+        {renderMarkdownView?.({ iconOnly: false, touch: false })}
         {showViewedControl && onToggleViewed && (
           <button
             onClick={onToggleViewed}
-            className={`text-xs rounded transition-colors flex items-center ${viewedLabel ? 'gap-1 px-2 py-1' : 'px-1.5 py-1'} ${
+            className={`text-xs rounded transition-colors flex items-center ${TIGHT_PAD} ${
               isViewed
-                ? 'bg-success/15 text-success'
+                ? 'text-foreground hover:bg-muted'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             }`}
-            title={isViewed ? "Mark as not viewed (V)" : "Mark as viewed (V)"}
+            title={`${isViewed ? 'Mark as not viewed' : 'Mark as viewed'}${viewedKeyHint ? ' (V)' : ''}`}
+            aria-pressed={isViewed}
+            data-file-header-viewed=""
           >
             {isViewed ? (
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -274,14 +279,14 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
                 <circle cx="12" cy="12" r="9" />
               </svg>
             )}
-            {viewedLabel && <span>{viewedLabel}</span>}
+            <span className={TIGHT_LABEL}>Viewed</span>
           </button>
         )}
         {showStageControl && canStage && onStage && (
           <button
             onClick={onStage}
             disabled={isStaging}
-            className={`text-xs rounded transition-colors flex items-center ${stageLabel ? 'gap-1 px-2 py-1' : 'px-1.5 py-1'} ${
+            className={`${actionFold} text-xs rounded transition-colors flex items-center ${stageLabel ? 'gap-1 px-2 py-1' : 'px-1.5 py-1'} ${
               isStaging
                 ? 'opacity-50 cursor-not-allowed text-muted-foreground'
                 : isStaged
@@ -289,6 +294,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             }`}
             title={isStaged ? "Unstage this file (A)" : "Stage this file (A)"}
+            aria-label={isStaged ? "Unstage this file" : "Stage this file"}
           >
             {isStaging ? (
               <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -319,8 +325,9 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
               fileCommentButtonRef?.(el);
             }}
             onClick={() => fileCommentRef.current && onFileComment(fileCommentRef.current)}
-            className={`text-xs rounded transition-colors flex items-center text-muted-foreground hover:text-foreground hover:bg-muted ${commentLabel ? 'gap-1 px-2 py-1' : 'px-1.5 py-1'}`}
+            className={`${actionFold} text-xs rounded transition-colors flex items-center text-muted-foreground hover:text-foreground hover:bg-muted ${commentLabel ? 'gap-1 px-2 py-1' : 'px-1.5 py-1'}`}
             title="Add file-scoped comment"
+            aria-label="Comment on this file"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-4l-4 4v-4z" />
@@ -328,8 +335,6 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             {commentLabel && <span>{commentLabel}</span>}
           </button>
         )}
-        <CallFlowFileBadge filePath={filePath} oldPath={oldPath} />
-        <SemanticFileBadge filePath={filePath} />
         {/* Edit entry lives at the far right of the row, next to the file
             actions dropdown, so the experimental affordance stays out of the
             everyday Viewed/Add/Comment cluster. */}
@@ -340,7 +345,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
               if (!editDisabledReason) onEditFile();
             }}
             disabled={!!editDisabledReason}
-            className={`text-xs rounded transition-colors flex items-center ${isVeryTight ? 'px-1.5 py-1' : 'gap-1 px-2 py-1'} ${
+            className={`${actionFold} text-xs rounded transition-colors flex items-center ${TIGHT_PAD} ${
               editDisabledReason
                 ? 'opacity-50 cursor-not-allowed text-muted-foreground'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted'
@@ -351,26 +356,36 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
             </svg>
-            {!isVeryTight && <span>Edit</span>}
+            <span className={TIGHT_LABEL}>Edit</span>
           </button>
         )}
-        {/* File actions: open in app (when the live checkout matches this
-            snapshot), copy path, copy file diff. Copy actions remain when a
-            PR has no checkout or a committed GitButler layer is selected. */}
-        {/* Icon-only in the header (the picked app's name shows in the dropdown),
-            matching the plan/annotate side. */}
-        {!readOnly && <OpenInAppButton
-          filePath={filePath}
-          base={state?.agentCwd ?? null}
-          diffText={patch}
-          canOpen={
-            state?.canUseLiveWorkspaceActions !== false &&
-            !(state?.prMetadata && !state?.agentCwd) &&
-            status !== 'deleted'
-          }
-        />}
       </div>}
-      {isCompactTouchLayout && renderMarkdownView?.({ iconOnly: false, touch: true })}
+      {isCompactTouchLayout && semantic && <SemanticFileBadge filePath={filePath} semantic={semantic} touch />}
+      {isCompactTouchLayout && readOnly && renderMarkdownView?.({ iconOnly: false, touch: true })}
+      {isCompactTouchLayout && !readOnly && (
+        <CompactFileActions
+          filePath={filePath}
+          patch={patch}
+          line={openInLine}
+          canOpen={state?.canUseLiveWorkspaceActions !== false && !(state?.prMetadata && !state?.agentCwd) && status !== 'deleted'}
+          base={state?.agentCwd ?? null}
+          markdownView={renderMarkdownView?.({ iconOnly: true, touch: isCompactTouchLayout })}
+          viewSwitch={accessory}
+          viewed={showViewedControl && onToggleViewed ? { isViewed, onToggle: onToggleViewed } : null}
+          onComment={onFileComment ? () => headerRef.current && onFileComment(headerRef.current) : undefined}
+          stage={showStageControl && canStage && onStage ? { isStaged, isStaging, onStage } : null}
+          onEdit={onEditFile && !isEditing && !editDisabledReason ? onEditFile : undefined}
+        />
+      )}
     </div>
   );
 };
+
+const OpenToSideIcon: React.FC = () => (
+  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M12 4v16" />
+  </svg>
+);
+
+export const FileHeader = React.memo(FileHeaderView);

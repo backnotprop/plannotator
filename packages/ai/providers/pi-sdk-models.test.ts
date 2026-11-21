@@ -22,6 +22,15 @@ if (process.argv.includes("--version")) {
   process.stdout.write(__VERSION__ + "\\n");
   process.exit(0);
 }
+// The switches the Plannotator Pi extension would read in this process.
+appendFileSync(
+  LOG + ".env",
+  JSON.stringify({
+    PLANNOTATOR_INBOX_TOOL: process.env.PLANNOTATOR_INBOX_TOOL ?? null,
+    PLANNOTATOR_AGENT_TOOL: process.env.PLANNOTATOR_AGENT_TOOL ?? null,
+    PLANNOTATOR_ASK_AI_CHILD: process.env.PLANNOTATOR_ASK_AI_CHILD ?? null,
+  }) + "\\n",
+);
 let buffer = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => {
@@ -181,6 +190,38 @@ for (const [runtime, Provider] of [
 			// follow the model, never precede it.
 			expect(levelIndex).toBeGreaterThan(modelIndex);
 		});
+	});
+
+	// Pi's RPC mode reports `ctx.hasUI === true`, so without these switches the
+	// Plannotator Pi extension inside Ask AI's Pi would offer its model the
+	// Inbox tool and connect the throwaway process to the person's Inbox.
+	test(`${runtime}: every Pi Ask AI starts runs with Plannotator's Inbox and agent tools off`, async () => {
+		const saved = { inbox: process.env.PLANNOTATOR_INBOX_TOOL, agent: process.env.PLANNOTATOR_AGENT_TOOL };
+		// The person turned both on (the env wins over config.json).
+		process.env.PLANNOTATOR_INBOX_TOOL = "1";
+		process.env.PLANNOTATOR_AGENT_TOOL = "1";
+		try {
+			await withProvider(SESSION_SCOPED, async (provider, logPath) => {
+				await provider.fetchModels();
+				await ask(provider);
+				const spawned = readFileSync(`${logPath}.env`, "utf8")
+					.split("\n")
+					.filter((line) => line.trim())
+					.map((line) => JSON.parse(line));
+				// The model probe and the session.
+				expect(spawned.length).toBe(2);
+				for (const env of spawned) {
+					expect(env).toEqual({ PLANNOTATOR_INBOX_TOOL: "0", PLANNOTATOR_AGENT_TOOL: "0", PLANNOTATOR_ASK_AI_CHILD: "1" });
+				}
+			});
+			// Only the child's env: the host's own switches are untouched.
+			expect(process.env.PLANNOTATOR_INBOX_TOOL).toBe("1");
+		} finally {
+			if (saved.inbox === undefined) delete process.env.PLANNOTATOR_INBOX_TOOL;
+			else process.env.PLANNOTATOR_INBOX_TOOL = saved.inbox;
+			if (saved.agent === undefined) delete process.env.PLANNOTATOR_AGENT_TOOL;
+			else process.env.PLANNOTATOR_AGENT_TOOL = saved.agent;
+		}
 	});
 
 	test(`${runtime}: Auto sends no level, leaving pi's own default`, async () => {

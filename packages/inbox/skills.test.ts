@@ -7,9 +7,13 @@
  * own plan-review export changing.
  */
 import { describe, expect, test } from 'bun:test';
+import { GRILL_ME_NOTE_TEXT } from '@plannotator/core/grill-me';
 import { INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE, splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 import type { SkillCatalogEntry, SkillExportContent } from '@plannotator/ui/utils/skillReferences';
-import { composeInboxSkillsBlock, inboxSkillReferences, inboxSkillsBlock, INBOX_SKILL_INSTRUCTIONS_BUDGET, withSkillsBlock } from './skills';
+import { CREATE_ROUTINE_SKILL } from '@plannotator/core/create-routine-skill';
+import { PICTURE_IT_SKILL } from '@plannotator/core/picture-it-skill';
+import { INBOX_BUILTIN_SKILL_ROOT } from '@plannotator/core/inbox-review';
+import { builtinSkillContent, composeInboxSkillsBlock, inboxSkillReferences, inboxSkillsBlock, INBOX_SKILL_INSTRUCTIONS_BUDGET, withSkillsBlock } from './skills';
 import { replyWords } from './folding';
 import { attachmentFeedback, guideCommentSections } from './attachments';
 import type { CodeAnnotation } from '@plannotator/ui/types';
@@ -228,5 +232,112 @@ describe('the window reads it back', () => {
     expect(splitInboxSkillsBlock('**Skills referenced** (the reviewer is asking you to invoke these skills when acting on this feedback):\n- `x`')).toBeNull();
     expect(splitInboxSkillsBlock('Look:\n**Skills referenced** (the person is asking you to invoke these skills when acting on this reply):\n- `x`')).toBeNull();
     expect(splitInboxSkillsBlock('No list.\n\n**Skills referenced** (the person is asking you to invoke these skills when acting on this reply):\nplain')).toBeNull();
+  });
+});
+
+// The grill-me note (`@plannotator/core/grill-me`): added only when the person
+// picks a grill-me skill in the Inbox's own skill UI (the reply box, New
+// message, a comment on an attached file), the one place the owner wants it.
+// The failures this catches: a grill-me picked here going out without the
+// note, another skill getting it, or the note breaking the folded line.
+describe('the grill-me note rides a grill-me skill picked in the Inbox', () => {
+  const GRILL_CATALOG: SkillCatalogEntry[] = [
+    ...CATALOG,
+    { name: 'grill-me', root: 'claude', humanOnly: true, dir: '/home/me/.claude/skills/grill-me' },
+    { name: 'grilled-cheese', root: 'claude', humanOnly: false, dir: '/home/me/.claude/skills/grilled-cheese' },
+    { name: 'grill_me', root: 'universal', humanOnly: false, dir: '/home/me/.agents/skills/grill_me' },
+  ];
+  const GRILL: SkillExportContent = {
+    content: 'Interview me relentlessly about every aspect of this plan.',
+    truncated: false,
+    dir: '/home/me/.claude/skills/grill-me',
+    path: '/home/me/.claude/skills/grill-me/SKILL.md',
+  };
+  const grillSources = { catalog: async () => GRILL_CATALOG, content: async (name: string) => (name === 'grill-me' ? GRILL : undefined) };
+  const note = `--- BEGIN PLANNOTATOR NOTE: grill-me ---\n${GRILL_ME_NOTE_TEXT}\n--- END PLANNOTATOR NOTE: grill-me ---`;
+
+  test('New message and reply: the note closes the block, after the skill\'s own instructions', async () => {
+    for (const audience of [INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE]) {
+      const block = await inboxSkillsBlock(['/grill-me on my plan to add dark mode'], audience, grillSources);
+      expect(block.endsWith(`--- END SKILL INSTRUCTIONS: grill-me ---\n\n${note}`)).toBe(true);
+      expect(block.split(GRILL_ME_NOTE_TEXT).length).toBe(2);
+    }
+  });
+
+  test('a comment on an attached file, and another author\'s spelling (grill_me), carry it too; once per message', async () => {
+    const block = await inboxSkillsBlock(['Looks fine.', 'Use /grill_me here, and /grill-me later.'], INBOX_REPLY_SKILL_AUDIENCE, grillSources);
+    expect(block).toContain(`--- BEGIN PLANNOTATOR NOTE: grill_me ---\n${GRILL_ME_NOTE_TEXT}\n--- END PLANNOTATOR NOTE: grill_me ---`);
+    expect(block.split(GRILL_ME_NOTE_TEXT).length).toBe(2);
+  });
+
+  test('another skill gets no note', async () => {
+    for (const words of ['/grilled-cheese please', 'Tighten it with $write-better and /readback.']) {
+      const block = await inboxSkillsBlock([words], INBOX_REPLY_SKILL_AUDIENCE, { ...grillSources, content: async (name: string) => (name === 'readback' ? READBACK : undefined) });
+      expect(block).not.toBe('');
+      expect(block).not.toContain('PLANNOTATOR NOTE');
+      expect(block).not.toContain(GRILL_ME_NOTE_TEXT);
+    }
+  });
+
+  test('the window still folds the whole block: the person\'s words alone, the skill named', async () => {
+    const block = await inboxSkillsBlock(['/grill-me on dark mode'], INBOX_MESSAGE_SKILL_AUDIENCE, grillSources);
+    const body = withSkillsBlock('/grill-me on dark mode', block);
+    const split = splitInboxSkillsBlock(body)!;
+    expect(split.before).toBe('/grill-me on dark mode');
+    expect(split.block).toBe(block);
+    expect(split.skills.map((s) => s.name)).toEqual(['grill-me']);
+    expect(replyWords(body).trim()).toBe('/grill-me on dark mode');
+  });
+
+  test('a note for a skill the list does not name, or a second one, is not the window\'s block', () => {
+    const head = '**Skills referenced** (the person is asking you to invoke these skills when acting on this reply):\n- `write-better`\n\n';
+    expect(splitInboxSkillsBlock(`Hi.\n\n${head}--- BEGIN PLANNOTATOR NOTE: grill-me ---\nx\n--- END PLANNOTATOR NOTE: grill-me ---`)).toBeNull();
+    const ok = `${head}--- BEGIN PLANNOTATOR NOTE: write-better ---\nx\n--- END PLANNOTATOR NOTE: write-better ---`;
+    expect(splitInboxSkillsBlock(`Hi.\n\n${ok}`)?.before).toBe('Hi.');
+    expect(splitInboxSkillsBlock(`Hi.\n\n${ok}\n\n--- BEGIN PLANNOTATOR NOTE: write-better ---\ny\n--- END PLANNOTATOR NOTE: write-better ---`)).toBeNull();
+  });
+});
+
+describe('/create-routine, the built-in the Inbox lists while Routines are on', () => {
+  const entry: SkillCatalogEntry = { name: CREATE_ROUTINE_SKILL.name, root: INBOX_BUILTIN_SKILL_ROOT, humanOnly: true, description: CREATE_ROUTINE_SKILL.description };
+  // Its text is the window's own: a content source that answers would be a folder read, which a built-in never is.
+  const routineSources = { catalog: async () => [entry, ...CATALOG], content: async () => READBACK };
+
+  test('picked in New message or a reply, its whole text rides the message for the agent, and the window still folds it', async () => {
+    for (const audience of [INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE]) {
+      const words = '/create-routine every weekday at 9 check for outdated dependencies';
+      const block = await inboxSkillsBlock([words], audience, routineSources);
+      expect(block).toContain('--- BEGIN SKILL INSTRUCTIONS: create-routine ---\n');
+      expect(block).toEndWith(`${CREATE_ROUTINE_SKILL.body.trim()}\n\n--- END SKILL INSTRUCTIONS: create-routine ---`);
+      expect(block).not.toContain(READBACK.content);
+      const split = splitInboxSkillsBlock(withSkillsBlock(words, block))!;
+      expect(split.before).toBe(words);
+      expect(split.skills.map((s) => s.name)).toEqual(['create-routine']);
+    }
+  });
+
+  test('the text is the window\'s own, not a folder read', () => {
+    expect(builtinSkillContent(entry)).toEqual({ content: CREATE_ROUTINE_SKILL.body, truncated: false, dir: '', path: '' });
+    expect(builtinSkillContent({ ...entry, root: 'claude' })).toBeUndefined();
+  });
+});
+
+describe('/picture-it, the built-in every thread lists', () => {
+  const entry: SkillCatalogEntry = { name: PICTURE_IT_SKILL.name, root: INBOX_BUILTIN_SKILL_ROOT, humanOnly: true, description: PICTURE_IT_SKILL.description };
+  const pictureItSources = { catalog: async () => [entry, ...CATALOG], content: async () => READBACK };
+
+  test('picked with a focus, its whole text rides the message once, and the window still folds it', async () => {
+    const words = '/picture-it the retry timeline, before and after';
+    const block = await inboxSkillsBlock([words], INBOX_REPLY_SKILL_AUDIENCE, pictureItSources);
+    expect(block.split('--- BEGIN SKILL INSTRUCTIONS: picture-it ---')).toHaveLength(2);
+    expect(block).toEndWith(`${PICTURE_IT_SKILL.body.trim()}\n\n--- END SKILL INSTRUCTIONS: picture-it ---`);
+    expect(block).not.toContain(READBACK.content);
+    const split = splitInboxSkillsBlock(withSkillsBlock(words, block))!;
+    expect(split.before).toBe(words);
+    expect(split.skills.map((s) => s.name)).toEqual(['picture-it']);
+  });
+
+  test('the text is the window\'s own, not a folder read', () => {
+    expect(builtinSkillContent(entry)).toEqual({ content: PICTURE_IT_SKILL.body, truncated: false, dir: '', path: '' });
   });
 });

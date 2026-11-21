@@ -15,7 +15,7 @@
  * PLANNOTATOR_ROW_MENU_SHOTS).
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -55,7 +55,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   rmSync(shots, { recursive: true, force: true });
   mkdirSync(shots, { recursive: true });
   const root = inboxScratch('plannotator-inbox-rowmenu-e2e-');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -98,7 +98,7 @@ test('a right-click opens the menu without opening the thread; Copy link copies 
   await expect(row).toBeVisible();
   await row.click({ button: 'right' });
   await expect(menu(page)).toBeVisible();
-  await expect(menu(page).getByRole('menuitem')).toHaveText(['Pin thread', 'Copy link', 'Copy thread ID', 'Mark read', 'Archive']);
+  await expect(menu(page).getByRole('menuitem')).toHaveText(['Select', 'Star thread', 'Add to Priority', 'Add tag', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Archive']);
   await expect(page.locator(`[data-row="${threads.search}"]`)).toHaveAttribute('data-menu', '');
   expect(page.url()).not.toContain('thread=');
   await shot(page, '01-menu-light.png');
@@ -130,8 +130,16 @@ test('the keyboard: Shift+F10 on a focused row opens the menu, Escape and Tab gi
   // Focus moves into the menu; the arrows walk its items.
   await expect(menu(page)).toBeFocused();
   await page.keyboard.press('ArrowDown');
-  // Pin thread leads (approval "inbox-pinned-threads"), then Copy link.
-  await expect(page.locator('[data-row-action="pin"]')).toBeFocused();
+  // Select leads (approval "inbox-multi-select"), then Star thread, Add to Priority, Add tag, Copy thread and Copy link.
+  await expect(menu(page).getByRole('menuitem', { name: 'Select' })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(menu(page).getByRole('menuitem', { name: 'Star thread' })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('[data-row-action="priority-add"]')).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('[data-add-tag-item]')).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('[data-row-action="copy-thread"]')).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(page.locator('[data-row-action="copy-link"]')).toBeFocused();
   await shot(page, '03-menu-keyboard-light.png');
@@ -163,17 +171,21 @@ test('focus held elsewhere (Search): Escape and Copy put it on the row, not back
   await expect(rowButton(page, threads.search)).toHaveAttribute('aria-keyshortcuts', 'Shift+F10');
 });
 
-test('Mark read from the menu moves the row to Quiet with its toast', async () => {
+test('Mark read from the menu reads the row in place with its toast; the list’s next tidy moves it to Quiet', async () => {
   const { page, threads } = world;
   await rowButton(page, threads.news).click({ button: 'right' });
   await page.locator('[data-row-action="read"]').click();
   const toast = page.locator('[data-inbox-toast]');
-  await expect(toast).toContainText('Moved to Quiet');
+  await expect(toast).toContainText('Marked read');
   await expect(toast).toContainText('Nightly is green');
+  // The list holds still (approval "inbox-list-view", R7): the row stays where it was, not bold; no Quiet yet.
+  await expect(rowButton(page, threads.news)).not.toHaveClass(/\bib-u\b/);
+  await expect(page.locator('[data-section-id="quiet"]')).toHaveCount(0);
+  await page.locator('[data-list-refresh]').click();
   await expect(page.locator('[data-section-id="quiet"]')).toBeVisible();
 });
 
-test('Archive from the menu takes the row out with the Archived toast; dark look', async () => {
+test('Archive from the menu shows the row archived in place with the Archived toast, out at the tidy; dark look', async () => {
   const { page, threads } = world;
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.reload();
@@ -186,6 +198,9 @@ test('Archive from the menu takes the row out with the Archived toast; dark look
   const toast = page.locator('[data-inbox-toast]');
   await expect(toast).toContainText('Archived');
   await expect(toast).toContainText('Release notes drafted');
+  // Archived in place, faded, until the list settles (R7); the list's title tidies it away.
+  await expect(page.locator(`.ib-lbody [data-row="${threads.release}"]`)).toHaveAttribute('data-archived', '');
+  await page.locator('[data-list-refresh]').click();
   await expect(rowButton(page, threads.release)).toHaveCount(0);
   await shot(page, '05-archived-dark.png');
   // The search row's menu in dark, opened on the row at its right edge.

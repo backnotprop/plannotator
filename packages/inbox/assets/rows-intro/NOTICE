@@ -1,0 +1,22 @@
+Logos in this folder
+
+These small images are example art in the Inbox's one-time "Choose how your list looks" dialog. They draw an
+example Inbox window with well-known open-source projects in it. They are used nowhere else.
+
+plannotator.webp is Plannotator's own mark.
+
+The other files are the GitHub profile pictures of these organizations, from https://github.com/<organization>.png,
+made smaller and saved as WebP:
+
+  oven-sh.webp          oven-sh (Bun)
+  supabase.webp         supabase (Supabase)
+  vitejs.webp           vitejs (Vite)
+  docker.webp           docker (Docker)
+  zed-industries.webp   zed-industries (Zed)
+  huggingface.webp      huggingface (Hugging Face)
+  redis.webp            redis (Redis)
+  vercel.webp           vercel (Vercel, Next.js)
+
+Each logo is a trademark of its owner. They are shown only as examples of projects, and showing them does not
+mean that any of these projects uses or endorses Plannotator. They are not covered by this repository's MIT
+license, and no right to use them is given with it.

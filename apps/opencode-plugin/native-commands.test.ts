@@ -978,17 +978,19 @@ describe.skipIf(process.platform === "win32")("V2 /plannotator-inbox", () => {
     const synthetic = mock(async (_input: unknown) => ({}));
     const prompt = mock(async (_input: unknown) => ({}));
     const ctx = { session: { synthetic, prompt } } as any;
+    const marked: string[] = [];
     await runNativeCommand("plannotator-inbox", { sessionID: "session-1" } as never, {
       ctx,
       getAgents: async () => [],
       getBridgeContext: async () => ({}),
+      inboxBriefings: { mark: (sessionID: string) => void marked.push(sessionID) },
     });
-    return { synthetic, prompt };
+    return { synthetic, prompt, marked };
   }
 
   test("opens the Inbox and posts its address as a notice, with no model turn", async () => {
     const calls = stubCli("echo 'http://localhost:61234/'");
-    const { synthetic, prompt } = await runInbox();
+    const { synthetic, prompt, marked } = await runInbox();
     expect(readFileSync(calls, "utf8").trim()).toBe("inbox --open");
     expect(synthetic).toHaveBeenCalledTimes(1);
     const notice = synthetic.mock.calls[0]![0] as { description: string; resume: boolean };
@@ -996,13 +998,16 @@ describe.skipIf(process.platform === "win32")("V2 /plannotator-inbox", () => {
     expect(notice.description).toBe(formatInboxNotice("http://localhost:61234/"));
     expect(notice.resume).toBe(false);
     expect(prompt).not.toHaveBeenCalled();
+    // The session's later requests carry the Inbox briefing (server.ts addInboxBriefing).
+    expect(marked).toEqual(["session-1"]);
   });
 
   test("an older plannotator without --open shows that it needs updating", async () => {
     stubCli("echo 'Unknown inbox option: --open' >&2; exit 1");
-    const { synthetic, prompt } = await runInbox();
+    const { synthetic, prompt, marked } = await runInbox();
     expect(JSON.stringify(synthetic.mock.calls)).toContain("plannotator update");
     expect(prompt).not.toHaveBeenCalled();
+    expect(marked).toEqual([]);
   });
 });
 

@@ -1,15 +1,20 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useId, useLayoutEffect, useMemo, useRef, useCallback, useSyncExternalStore } from 'react';
 import { File, type LineAnnotation } from '@pierre/diffs/react';
 import type { SelectedLineRange as PierreSelectedLineRange, LineEventBaseProps } from '@pierre/diffs';
+import { normalizeBrowserPath } from '@plannotator/core/browser-paths';
+import { basenameFromPath } from '@plannotator/core/source-save';
 import { PopoutDialog } from './PopoutDialog';
 import { isCommentSubmitKey } from '../utils/commentSubmitKey';
 import { useConfigValue } from '../config/useConfig';
-import { useTheme } from './ThemeProvider';
-import { CommentPopover } from './CommentPopover';
+import { extendThemeSwitch, useTheme } from './ThemeProvider';
+import { CommentPopover, type CommentExtraAction } from './CommentPopover';
 import { ImageThumbnail } from './ImageThumbnail';
 import type { CodeAnnotation, ImageAttachment } from '../types';
 import { copyTextToClipboard } from '../utils/clipboard';
-import { whenCodeLineRendered } from '../utils/codeLineScroll';
+import { useHighlightCopy } from '../utils/highlightCopy';
+import { scrollCodeLineIntoView, whenCodeLineRendered } from '../utils/codeLineScroll';
+import { hashDraftScope } from '../utils/draftScopeHash';
+import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
 
 export interface CodeFileAnnotationInput {
   filePath: string;
@@ -39,14 +44,20 @@ interface CodeFilePopoutProps {
   onDeleteAnnotation?: (id: string) => void;
   onSelectAnnotation?: (id: string | null) => void;
   container?: HTMLElement | null;
+  /** A host's control in the header, before the line count (Shape's "open in"). */
+  headerAction?: React.ReactNode;
 }
 
 interface PendingComment {
   range: { start: number; end: number };
   contextText: string;
   originalCode: string;
+  /** The composer's kept-draft key: this file (its path and a hash of its contents) and these lines. */
+  draftKey: string;
   anchorEl?: HTMLElement;
   anchorRect?: DOMRect;
+  /** The words it opens with: a comment the host kept and put back (`reopenComment`). */
+  initialText?: string;
 }
 
 const gutterButtonStyle: React.CSSProperties = {
@@ -148,20 +159,42 @@ const CodeInlineAnnotation: React.FC<{
   onSelect?: (id: string | null) => void;
   onEdit?: (id: string, updates: Partial<CodeAnnotation>) => void;
   onDelete?: (id: string) => void;
-}> = ({ annotation, isSelected, onSelect, onEdit, onDelete }) => {
+  plain?: boolean;
+  /** In a fold (`commentMarkers="bubble"`), where an X would read as "close": delete is a bin. */
+  inFold?: boolean;
+  /** In a fold: a Hide control beside edit and delete folds the comments back. */
+  onHide?: () => void;
+  /** An edit the host kept and put back (`CodeFileViewProps.reopenEdit`): for this card, its edit box opens holding those words. */
+  reopenEdit?: { id: string; text: string } | null;
+}> = ({ annotation, isSelected, onSelect, onEdit, onDelete, plain = false, inFold = false, onHide, reopenEdit }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(annotation.text ?? '');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const enterSavesComment = useConfigValue('enterSavesComment');
+  const reopenedRef = useRef<{ id: string; text: string } | null>(null);
+  const caretAtEndRef = useRef(false);
 
   useEffect(() => {
     if (!isEditing) setEditText(annotation.text ?? '');
   }, [annotation.text, isEditing]);
 
+  // Each put-back edit opens once, on its own card.
+  useEffect(() => {
+    if (!reopenEdit || !onEdit || reopenEdit.id !== annotation.id || reopenedRef.current === reopenEdit) return;
+    reopenedRef.current = reopenEdit;
+    caretAtEndRef.current = true;
+    setEditText(reopenEdit.text);
+    setIsEditing(true);
+  }, [annotation.id, onEdit, reopenEdit]);
+
   useEffect(() => {
     if (isEditing) {
-      textareaRef.current?.focus();
-      textareaRef.current?.select();
+      const area = textareaRef.current;
+      area?.focus();
+      // Words put back: the caret after them (selecting them would let one key replace them all).
+      if (caretAtEndRef.current && area) area.setSelectionRange(area.value.length, area.value.length);
+      else area?.select();
+      caretAtEndRef.current = false;
     }
   }, [isEditing]);
 
@@ -174,21 +207,35 @@ const CodeInlineAnnotation: React.FC<{
     <div
       data-code-annotation-id={annotation.id}
       onClick={() => onSelect?.(annotation.id)}
-      className={`group my-2 mx-3 rounded-lg border px-3 py-2 text-xs shadow-sm cursor-pointer transition-colors ${
-        isSelected ? 'border-primary/50' : 'border-border hover:border-border/80'
-      }`}
+      className={plain
+        ? `group my-2 mx-3 rounded-lg border px-3 py-2.5 font-sans text-[length:var(--ib-fs-13,13px)] leading-normal cursor-pointer shadow-[0_1px_2px_rgb(0_0_0/0.04),0_4px_10px_rgb(0_0_0/0.04)] ${
+            isSelected ? 'border-primary/60' : 'border-border hover:border-muted-foreground/50'
+          }`
+        : `group my-2 mx-3 rounded-lg border px-3 py-2 text-xs shadow-sm cursor-pointer transition-colors ${
+            isSelected ? 'border-primary/50' : 'border-border hover:border-border/80'
+          }`}
       style={{
         backgroundColor: isSelected ? 'color-mix(in oklab, var(--primary) 12%, var(--popover))' : 'var(--popover)',
         color: 'var(--foreground)',
         opacity: 1,
       }}
     >
-      <div className="flex items-center gap-2 text-[10px] uppercase tracking-wide text-muted-foreground">
-        <span className="font-semibold text-primary">Comment</span>
-        <span className="rounded bg-muted px-1.5 py-0.5 font-mono normal-case text-foreground">
+      <div className={`flex items-center gap-2 text-muted-foreground ${plain ? 'text-[length:var(--ib-fs-11,11px)]' : 'text-[10px] uppercase tracking-wide'}`}>
+        <span className={plain ? 'font-medium text-foreground/80' : 'font-semibold text-primary'}>Comment</span>
+        <span className={plain ? 'tabular-nums' : 'rounded bg-muted px-1.5 py-0.5 font-mono normal-case text-foreground'}>
           {lineLabel(annotation.lineStart, annotation.lineEnd)}
         </span>
         {annotation.author && <span className="truncate normal-case">by <bdi>{annotation.author}</bdi></span>}
+        {annotation.outsideDiff && (
+          <span
+            className="rounded px-1.5 py-0.5 normal-case font-medium"
+            style={{ background: 'color-mix(in oklab, var(--warning) 18%, transparent)', color: 'var(--warning)' }}
+            data-code-annotation-outside-diff=""
+            title="A comment on lines outside the diff"
+          >
+            not in the diff
+          </span>
+        )}
         <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
           {onEdit && !isEditing && (
             <button
@@ -214,13 +261,37 @@ const CodeInlineAnnotation: React.FC<{
               }}
               className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
               title="Delete comment"
+              aria-label="Delete comment"
             >
-              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              {inFold ? (
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 002 2h8a2 2 0 002-2l1-12M9 7V4h6v3" />
+                </svg>
+              ) : (
+                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              )}
             </button>
           )}
         </div>
+        {onHide && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onHide();
+            }}
+            className="-my-1 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            title="Hide comment"
+            aria-label="Hide comment"
+            data-code-comment-hide=""
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 15l6-6 6 6" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {isEditing ? (
@@ -241,7 +312,7 @@ const CodeInlineAnnotation: React.FC<{
               }
             }}
             rows={Math.min(editText.split('\n').length + 1, 8)}
-            className="w-full resize-none rounded border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className={`w-full resize-none rounded border border-border bg-background px-2 py-1.5 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 ${plain ? 'text-[length:var(--ib-fs-13,13px)]' : 'text-xs'}`}
           />
           <div className="flex items-center gap-2">
             <button
@@ -250,7 +321,7 @@ const CodeInlineAnnotation: React.FC<{
                 e.stopPropagation();
                 save();
               }}
-              className="rounded bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground hover:opacity-90"
+              className={`rounded bg-primary px-2 py-1 font-medium text-primary-foreground hover:opacity-90 ${plain ? 'text-[length:var(--ib-fs-12,12px)]' : 'text-[10px]'}`}
             >
               Save
             </button>
@@ -261,7 +332,7 @@ const CodeInlineAnnotation: React.FC<{
                 setIsEditing(false);
                 setEditText(annotation.text ?? '');
               }}
-              className="rounded bg-muted px-2 py-1 text-[10px] font-medium text-muted-foreground hover:bg-muted/80"
+              className={`rounded bg-muted px-2 py-1 font-medium text-muted-foreground hover:bg-muted/80 ${plain ? 'text-[length:var(--ib-fs-12,12px)]' : 'text-[10px]'}`}
             >
               Cancel
             </button>
@@ -269,7 +340,7 @@ const CodeInlineAnnotation: React.FC<{
         </div>
       ) : (
         annotation.text && (
-          <div className="mt-1.5 whitespace-pre-wrap border-l-2 border-primary/50 pl-2 text-foreground/90">
+          <div className={`mt-1.5 whitespace-pre-wrap text-foreground/90 ${plain ? '[overflow-wrap:anywhere]' : 'border-l-2 border-primary/50 pl-2'}`}>
             {annotation.text}
           </div>
         )
@@ -279,7 +350,7 @@ const CodeInlineAnnotation: React.FC<{
         <div className="mt-2 flex flex-wrap gap-1.5">
           {annotation.images.map((img) => (
             <div key={img.path} className="text-center">
-              <ImageThumbnail path={img.path} size="sm" showRemove={false} />
+              <ImageThumbnail path={img.path} size="sm" showRemove={false} file={img.kind === 'file'} />
               <div className="max-w-[3rem] truncate text-[9px] text-muted-foreground" title={img.name}>
                 {img.name}
               </div>
@@ -290,6 +361,210 @@ const CodeInlineAnnotation: React.FC<{
     </div>
   );
 };
+
+/** Whether an event started inside a comment fold (across Pierre's shadow root). */
+function isInFold(event: Event): boolean {
+  return event.composedPath().some((el) => el instanceof HTMLElement && el.hasAttribute('data-code-comment-fold'));
+}
+
+/** How long a fold takes to open or close. */
+const FOLD_MS = 220;
+
+/** The fold's motion: a strong ease-out, so it answers the click at once and settles softly. Inline, because the
+ *  theme's global `*` transition (unlayered) wins over a Tailwind transition utility. */
+const FOLD_EASE = 'cubic-bezier(0.23, 1, 0.32, 1)';
+const FOLD_TRANSITION = `height ${FOLD_MS}ms ${FOLD_EASE}, opacity 180ms ${FOLD_EASE}`;
+
+/**
+ * Which lines' folds are open. Kept outside React state on purpose: a change of
+ * CodeFileView's state redraws Pierre's whole shadow DOM (a new `file` object
+ * each render), which re-slots every annotation and cuts the fold's animation
+ * short. Only the folds subscribe, so a click moves just the one fold.
+ */
+interface FoldStore {
+  isOpen: (line: number) => boolean;
+  set: (next: ReadonlySet<number>) => void;
+  get: () => ReadonlySet<number>;
+  subscribe: (listener: () => void) => () => void;
+}
+
+function createFoldStore(): FoldStore {
+  let open: ReadonlySet<number> = new Set();
+  const listeners = new Set<() => void>();
+  return {
+    isOpen: (line) => open.has(line),
+    get: () => open,
+    set: (next) => {
+      open = next;
+      for (const listener of listeners) listener();
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
+
+/**
+ * One line's saved comments behind a bubble (`commentMarkers="bubble"`): the
+ * bubble sits in the gutter beside the line's number, and a click opens the
+ * comments in a row under the line, pushing the lines below down, never over
+ * them. Drawn in Pierre's annotation row for the line; the row is kept as tall
+ * as the fold (FOLD_ROW_CSS) and the fold animates its own height.
+ */
+const CodeCommentFold: React.FC<{
+  line: number;
+  annotations: CodeAnnotation[];
+  store: FoldStore;
+  onToggle: (line: number) => void;
+  selectedAnnotationId?: string | null;
+  onSelect?: (id: string | null) => void;
+  onEdit?: (id: string, updates: Partial<CodeAnnotation>) => void;
+  onDelete?: (id: string) => void;
+  /** Before the line's last comment goes (the fold goes with it): where keyboard focus lands instead. */
+  onLastDelete?: (line: number) => void;
+  plain: boolean;
+  /** An edit put back (`CodeFileViewProps.reopenEdit`), for whichever of this line's cards it names. */
+  reopenEdit?: { id: string; text: string } | null;
+}> = ({ line, annotations, store, onToggle, selectedAnnotationId, onSelect, onEdit, onDelete, onLastDelete, plain, reopenEdit }) => {
+  const open = useSyncExternalStore(store.subscribe, () => store.isOpen(line), () => store.isOpen(line));
+  const innerRef = useRef<HTMLDivElement>(null);
+  const bubbleRef = useRef<HTMLButtonElement>(null);
+  const revealId = useId();
+  const [height, setHeight] = useState(0);
+  // No motion on the first frame: a fold that mounts open (a comment chosen in
+  // the panel, a link to it) is simply there.
+  const [animate, setAnimate] = useState(false);
+  const reducedMotion = usePrefersReducedMotion();
+  // The height eases only while the fold opens or closes; open and still, it follows the card at once (an edit's
+  // textarea growing never lags behind a clip).
+  const [moving, setMoving] = useState(false);
+  const [lastOpen, setLastOpen] = useState(open);
+  if (open !== lastOpen) {
+    setLastOpen(open);
+    setMoving(true);
+  }
+  useEffect(() => {
+    if (!moving) return;
+    const timer = setTimeout(() => setMoving(false), FOLD_MS + 60);
+    return () => clearTimeout(timer);
+  }, [moving, open]);
+  useLayoutEffect(() => {
+    const inner = innerRef.current;
+    if (!inner) return;
+    setHeight(inner.offsetHeight);
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => setHeight(inner.offsetHeight));
+    observer.observe(inner);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setAnimate(true));
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  const count = annotations.length;
+  const where = annotations.length === 1 && annotations[0].lineStart !== annotations[0].lineEnd
+    ? lineLabel(annotations[0].lineStart, annotations[0].lineEnd)
+    : `line ${line}`;
+  const toggle = () => onToggle(line);
+  // Hide and a delete sit in the part that folds away (inert once closed): keyboard focus goes to the bubble, not to
+  // the page.
+  const hide = () => {
+    toggle();
+    bubbleRef.current?.focus({ preventScroll: true });
+  };
+  const remove = onDelete
+    ? (id: string) => {
+        if (annotations.length > 1) bubbleRef.current?.focus({ preventScroll: true });
+        else onLastDelete?.(line);
+        onDelete(id);
+      }
+    : undefined;
+  return (
+    <div className="relative" data-code-comment-fold={line}>
+      <button
+        ref={bubbleRef}
+        type="button"
+        data-code-comment-bubble={line}
+        aria-expanded={open}
+        aria-controls={revealId}
+        aria-label={`${count === 1 ? 'Comment' : `${count} comments`} on ${where}`}
+        title={open ? 'Hide comment' : count === 1 ? 'Show comment' : `Show ${count} comments`}
+        onClick={(e) => {
+          e.stopPropagation();
+          toggle();
+        }}
+        // A phone's finger needs 44 px: the drawing keeps its size and an invisible 44 × 44 area takes the tap, inside
+        // the gutter's room left of the numbers (FOLD_GUTTER_CSS), so a number's tap still chooses its line.
+        className={`absolute z-[5] flex items-center justify-center gap-0.5 rounded-md px-1 font-sans text-[length:var(--ib-fs-10,10px)] font-semibold tabular-nums leading-none transition-colors duration-150 before:absolute before:content-[''] [@media(pointer:coarse)]:before:-inset-y-[13px] [@media(pointer:coarse)]:before:-left-1 [@media(pointer:coarse)]:before:-right-5 ${
+          open
+            ? 'bg-primary text-primary-foreground'
+            : 'bg-primary/15 text-primary hover:bg-primary/25'
+        }`}
+        style={{
+          // Line `line`'s band (the row this fold draws in starts right under it), at the gutter's left edge.
+          bottom: 'calc(100% + (var(--diffs-line-height, 20px) - 18px) / 2)',
+          left: 'calc(var(--diffs-column-number-width, 40px) * -1 + 4px)',
+          height: 18,
+          minWidth: 20,
+        }}
+      >
+        <svg className="h-3 w-3 flex-none" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M5 4h14a2 2 0 012 2v9a2 2 0 01-2 2h-7l-4.5 3.6A.5.5 0 016.7 20.2V17H5a2 2 0 01-2-2V6a2 2 0 012-2z" />
+        </svg>
+        {count > 1 && <span>{count}</span>}
+      </button>
+      <div
+        id={revealId}
+        data-code-comment-reveal=""
+        data-open={open ? '' : undefined}
+        aria-hidden={open ? undefined : true}
+        inert={open ? undefined : true}
+        className="overflow-clip"
+        style={{ height: open ? height : 0, opacity: open ? 1 : 0, transition: moving && animate && !reducedMotion ? FOLD_TRANSITION : 'none' }}
+        onTransitionEnd={(e) => {
+          if (e.target === e.currentTarget && e.propertyName === 'height') setMoving(false);
+        }}
+      >
+        <div ref={innerRef} className="flow-root">
+          {annotations.map((annotation, index) => (
+            <CodeInlineAnnotation
+              key={annotation.id}
+              annotation={annotation}
+              isSelected={selectedAnnotationId === annotation.id}
+              onSelect={onSelect}
+              onEdit={onEdit}
+              onDelete={remove}
+              plain={plain}
+              reopenEdit={reopenEdit}
+              inFold
+              // One Hide per fold, on its first card.
+              onHide={index === 0 ? hide : undefined}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * `commentMarkers="bubble"`'s rules inside the file's shadow root. In a pane of
+ * fixed height Pierre's grid gives an annotation row no height of its own (the
+ * card then covers the next lines); `height: max-content` keeps the row exactly
+ * as tall as its fold. The row paints above the gutter (a grid item's z-index
+ * makes its own layer) so the bubble can sit there, and the line numbers make
+ * room for it (and for its 44 px tap area on a phone) whenever the file can
+ * have comments, so the code never shifts when the first comment comes or the
+ * last one goes.
+ */
+const FOLD_ROW_CSS = `
+    [data-line-annotation] { height: max-content; z-index: 4; }
+`;
+const FOLD_GUTTER_CSS = `
+    [data-column-number] { padding-left: calc(2ch + 20px); }
+    @media (pointer: coarse) { [data-column-number] { padding-left: calc(2ch + 30px); } }
+`;
 
 export interface CodeFileViewProps {
   filepath: string;
@@ -302,6 +577,13 @@ export interface CodeFileViewProps {
   annotations?: CodeAnnotation[];
   selectedAnnotationId?: string | null;
   onAddAnnotation?: (annotation: CodeFileAnnotationInput) => void;
+  /** Opt-in: an Ask action in the line composer, beside Save (Shape's "Ask"). Absent → Save only, as always. */
+  onAskAnnotation?: (annotation: CodeFileAnnotationInput) => void;
+  /** Opt-in: the line composer's labels (Shape: "Change it" / "Ask"). Absent → "Save" / "Ask AI". */
+  commentSubmitLabel?: string;
+  commentAskLabel?: string;
+  /** The comment box's third action (Shape's Show me): these lines, and the words typed. */
+  commentExtraAction?: (lines: { filePath: string; lineStart: number; lineEnd: number; originalCode: string }) => CommentExtraAction | undefined;
   onEditAnnotation?: (id: string, updates: Partial<CodeAnnotation>) => void;
   onDeleteAnnotation?: (id: string) => void;
   onSelectAnnotation?: (id: string | null) => void;
@@ -313,6 +595,57 @@ export interface CodeFileViewProps {
   lang?: string;
   /** Long lines: `'scroll'` sideways (the default) or `'wrap'` onto the next row, for a minified file. */
   overflow?: 'scroll' | 'wrap';
+  /** CSS added inside the file's shadow root after the theme (a host's line
+   *  marks, e.g. code review's change bars on `[data-column-number="12"]`). */
+  extraCss?: string;
+  /** Scroll this line to the middle and mark it, once per `token` (a jump to
+   *  a definition, a reference or a line). */
+  revealLine?: { line: number; token: number };
+  /** Opt-in (the Inbox's file panes): `'vertical'` scrolls to a referenced or revealed line up and down only, never
+   *  sliding a long row sideways, even in a short file (`scrollCodeLineIntoView`). Absent: exactly as before. */
+  lineScroll?: 'vertical';
+  /** Opt-in (the Inbox's file panes): `'plain'` draws a saved comment's card with its words as plain text (no
+   *  left bar, which reads as a quote) and a sentence-case "Comment" label. Absent: exactly as before. */
+  commentCard?: 'plain';
+  /** Opt-in (the Inbox's file panes): `'bubble'` folds each line's saved comments behind a bubble in the gutter of
+   *  the comment's last line (one bubble per line, with a count when there are several). A click on the bubble
+   *  opens them in a row under the line, pushing the lines below down (never over the code), with a short
+   *  ease-out (none under reduced motion); a second click, or the card's Hide, folds them. Choosing a comment
+   *  (`selectedAnnotationId`) opens its fold. Absent: every comment is drawn open under its line, as before. */
+  commentMarkers?: 'bubble';
+  /** The token under the pointer (`enter` / `leave`) and the last one clicked
+   *  (`click`): a host's "go to definition" looks there. Turning it on wraps
+   *  the file's tokens (Pierre's token transformer). */
+  onTokenTarget?: (kind: 'enter' | 'leave' | 'click', target: CodeFileTokenTarget) => void;
+  /** Cmd/Ctrl-click (or Alt-click) on a token: a host's references. */
+  onTokenNavigate?: (target: CodeFileTokenTarget) => void;
+  /**
+   * Opt-in: a line comment being written that the host kept (its file
+   * closed) and puts back. Each new object opens the line composer once on
+   * those lines, holding those words, when Pierre has drawn the first line.
+   * Nothing is saved until the person saves. Absent: nothing changes.
+   */
+  reopenComment?: { lineStart: number; lineEnd: number; text: string } | null;
+  /**
+   * Opt-in: an edit of a saved comment that the host kept and puts back. Each
+   * new object opens that inline comment's edit box once, holding those
+   * words (not saved). Absent: nothing changes.
+   */
+  reopenEdit?: { id: string; text: string } | null;
+  /**
+   * Opt-in: told which lines the line comment being written is on as its
+   * composer opens, and null as it closes, so a host can keep its words
+   * (read from the box) if the view is taken away. Absent: nothing changes.
+   */
+  onComposerLines?: (lines: { lineStart: number; lineEnd: number; originalCode: string } | null) => void;
+}
+
+/** A token of a file drawn by `CodeFileView` (Pierre's token event, file mode). */
+export interface CodeFileTokenTarget {
+  tokenText: string;
+  tokenElement: HTMLElement;
+  lineNumber: number;
+  lineCharStart: number;
 }
 
 /**
@@ -331,6 +664,10 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
   annotations = [],
   selectedAnnotationId,
   onAddAnnotation,
+  onAskAnnotation,
+  commentSubmitLabel,
+  commentAskLabel,
+  commentExtraAction,
   onEditAnnotation,
   onDeleteAnnotation,
   onSelectAnnotation,
@@ -338,6 +675,16 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
   className = 'flex-1 min-h-0',
   lang,
   overflow = 'scroll',
+  extraCss,
+  revealLine,
+  lineScroll,
+  commentCard,
+  commentMarkers,
+  onTokenTarget,
+  onTokenNavigate,
+  reopenComment,
+  reopenEdit,
+  onComposerLines,
 }) => {
   const { resolvedMode } = useTheme();
   const mode = resolvedMode ?? 'dark';
@@ -347,6 +694,19 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     css: buildPierreCSS(mode, colors.bg, colors.fg),
   }));
   const [pendingComment, setPendingComment] = useState<PendingComment | null>(null);
+  // The selected lines stay marked while their composer has the focus, but
+  // the browser's copy has no selection then: Ctrl+C copies the lines' code
+  // (`utils/highlightCopy`). Text selected in the composer still wins.
+  useHighlightCopy(onAddAnnotation ? pendingComment?.originalCode : null);
+  const onComposerLinesRef = useRef(onComposerLines);
+  onComposerLinesRef.current = onComposerLines;
+  useEffect(() => {
+    onComposerLinesRef.current?.(
+      pendingComment
+        ? { lineStart: pendingComment.range.start, lineEnd: pendingComment.range.end, originalCode: pendingComment.originalCode }
+        : null,
+    );
+  }, [pendingComment]);
   const fileAreaRef = useRef<HTMLDivElement>(null);
   const lastPointerRectRef = useRef<DOMRect | null>(null);
   const suppressLineClickUntilRef = useRef(0);
@@ -354,6 +714,8 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
   useEffect(() => {
     requestAnimationFrame(() => {
       const c = getThemeColors();
+      // A frame after a theme switch: keep the switch's no-fade hold over this redraw too.
+      extendThemeSwitch();
       setPierreTheme({
         type: mode,
         css: buildPierreCSS(mode, c.bg, c.fg),
@@ -365,23 +727,94 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     setPendingComment(null);
   }, [filepath]);
 
-  const displayName = filepath.split('/').pop() || filepath;
-  const relativePath = filepath.replace(/.*\/(?=.*\/)/, '');
+  const displayName = basenameFromPath(filepath);
+  const relativePath = normalizeBrowserPath(filepath).replace(/.*\/(?=.*\/)/, '');
   const selectedCodeAnnotation = useMemo(
     () => annotations.find((ann) => ann.id === selectedAnnotationId),
     [annotations, selectedAnnotationId],
   );
 
   // TODO: add token-level annotation support (charStart/charEnd) — for now only line-scope
-  const lineAnnotations = useMemo((): LineAnnotation<CodeAnnotation>[] => {
-    return annotations
-      .filter((ann) => (ann.scope ?? 'line') === 'line')
-      .map((ann) => ({
-        lineNumber: ann.lineEnd,
-        metadata: ann,
-      }));
-  }, [annotations]);
+  const folds = commentMarkers === 'bubble';
+  // Each annotation its own row, as always; in folds, one row per last line.
+  const lineAnnotations = useMemo((): LineAnnotation<CodeAnnotation[]>[] => {
+    const lineScoped = annotations.filter((ann) => (ann.scope ?? 'line') === 'line');
+    if (!folds) return lineScoped.map((ann) => ({ lineNumber: ann.lineEnd, metadata: [ann] }));
+    const byLine = new Map<number, CodeAnnotation[]>();
+    for (const ann of lineScoped) byLine.set(ann.lineEnd, [...(byLine.get(ann.lineEnd) ?? []), ann]);
+    return [...byLine].map(([lineNumber, group]) => ({ lineNumber, metadata: group }));
+  }, [annotations, folds]);
 
+  // The lines whose folds are open. Choosing a comment (the panel, a link to it, a save) opens its fold.
+  const foldStore = useMemo(createFoldStore, []);
+  const openFold = useCallback((lines: number[]) => {
+    const prev = foldStore.get();
+    if (lines.every((l) => prev.has(l))) return;
+    foldStore.set(new Set([...prev, ...lines]));
+  }, [foldStore]);
+  // Letting go of a folded comment waits for the fold to close; a file switch or unmount cancels it.
+  const deselectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelDeselect = useCallback(() => {
+    if (deselectTimerRef.current != null) clearTimeout(deselectTimerRef.current);
+    deselectTimerRef.current = null;
+  }, []);
+  useEffect(() => {
+    foldStore.set(new Set());
+    return cancelDeselect;
+  }, [filepath, foldStore, cancelDeselect]);
+  const selectedFoldLine = folds ? selectedCodeAnnotation?.lineEnd : undefined;
+  useEffect(() => {
+    if (selectedFoldLine != null) openFold([selectedFoldLine]);
+  }, [selectedFoldLine, selectedAnnotationId, openFold]);
+  // An edit put back opens its comment's fold, so its edit box is in sight.
+  const reopenFoldLine = folds && reopenEdit ? annotations.find((ann) => ann.id === reopenEdit.id)?.lineEnd : undefined;
+  useEffect(() => {
+    if (reopenFoldLine != null) openFold([reopenFoldLine]);
+  }, [reopenFoldLine, reopenEdit, openFold]);
+  const selectedFoldLineRef = useRef(selectedFoldLine);
+  selectedFoldLineRef.current = selectedFoldLine;
+  const onSelectAnnotationRef = useRef(onSelectAnnotation);
+  onSelectAnnotationRef.current = onSelectAnnotation;
+  const toggleFold = useCallback((foldLine: number) => {
+    const next = new Set(foldStore.get());
+    if (next.has(foldLine)) {
+      next.delete(foldLine);
+      // Folding a chosen comment away lets go of it, so its lines lose the mark: after the fold has closed, since
+      // the host's redraw redraws Pierre's rows.
+      if (selectedFoldLineRef.current === foldLine) {
+        cancelDeselect();
+        deselectTimerRef.current = setTimeout(() => {
+          deselectTimerRef.current = null;
+          if (selectedFoldLineRef.current === foldLine && !foldStore.isOpen(foldLine)) onSelectAnnotationRef.current?.(null);
+        }, FOLD_MS);
+      }
+    } else {
+      next.add(foldLine);
+    }
+    foldStore.set(next);
+  }, [foldStore, cancelDeselect]);
+  // A line's last comment takes its fold and bubble with it: once it is gone, keyboard focus (left on the page by
+  // then) moves to the nearest other bubble, or to the file. A delete still in flight, or refused, moves nothing.
+  const focusAfterDeleteRef = useRef<number | null>(null);
+  const focusAfterLastDelete = useCallback((foldLine: number) => {
+    focusAfterDeleteRef.current = foldLine;
+  }, []);
+  useLayoutEffect(() => {
+    const foldLine = focusAfterDeleteRef.current;
+    const area = fileAreaRef.current;
+    if (foldLine == null || !area) return;
+    if (area.querySelector(`[data-code-comment-bubble="${foldLine}"]`)) return;
+    focusAfterDeleteRef.current = null;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    const bubbles = [...area.querySelectorAll<HTMLElement>('[data-code-comment-bubble]')];
+    const next = bubbles.find((el) => Number(el.getAttribute('data-code-comment-bubble')) > foldLine) ?? bubbles[bubbles.length - 1];
+    (next ?? area).focus({ preventScroll: true });
+  }, [lineAnnotations]);
+
+  // The line a host jumped to stays marked until a comment or a selection
+  // takes the mark (or the next jump moves it).
+  const [revealedLine, setRevealedLine] = useState<number | null>(null);
   const selectedLines = useMemo((): PierreSelectedLineRange | null => {
     if (pendingComment) {
       return { start: pendingComment.range.start, end: pendingComment.range.end };
@@ -389,11 +822,53 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     if (selectedCodeAnnotation) {
       return { start: selectedCodeAnnotation.lineStart, end: selectedCodeAnnotation.lineEnd };
     }
+    // A jump (Go to Definition, a reference) marks its line until a comment
+    // or a selection takes the mark; otherwise the host's line, if any.
+    if (revealedLine != null) return { start: revealedLine, end: revealedLine };
     if (line != null) {
       return { start: line, end: lineEnd ?? line };
     }
     return null;
-  }, [pendingComment, selectedCodeAnnotation, line, lineEnd]);
+  }, [pendingComment, selectedCodeAnnotation, revealedLine, line, lineEnd]);
+
+  useEffect(() => {
+    if (!revealLine) return;
+    setRevealedLine(revealLine.line);
+    // Pierre renders after mount (and again after highlighting): look for the
+    // line for a moment.
+    let frame = 0;
+    let attempts = 0;
+    const find = () => {
+      const root = fileAreaRef.current?.querySelector('diffs-container')?.shadowRoot;
+      const row = root?.querySelector(`[data-line="${revealLine.line}"]`);
+      if (row instanceof HTMLElement && lineScroll === 'vertical') {
+        scrollCodeLineIntoView(row);
+        return;
+      }
+      if (row) {
+        // Vertically only: scrollIntoView would also scroll a long line sideways.
+        let node: Element | null = fileAreaRef.current;
+        while (node) {
+          if (node instanceof HTMLElement && node.scrollHeight > node.clientHeight && /(auto|scroll)/.test(getComputedStyle(node).overflowY)) {
+            const box = node.getBoundingClientRect();
+            const rect = row.getBoundingClientRect();
+            node.scrollTop += rect.top - (box.top + box.height / 2) + rect.height / 2;
+            return;
+          }
+          node = node.parentElement;
+        }
+        row.scrollIntoView({ block: 'center', inline: 'nearest' });
+        return;
+      }
+      attempts += 1;
+      if (attempts < 120) frame = requestAnimationFrame(find);
+    };
+    frame = requestAnimationFrame(find);
+    return () => cancelAnimationFrame(frame);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealLine?.token, revealLine?.line]);
+  // Another file drops the mark (cleanups run before the next jump sets one).
+  useEffect(() => () => setRevealedLine(null), [filepath]);
   const effectivePrerenderedHTML = lineAnnotations.length === 0 ? prerenderedHTML : undefined;
 
   useEffect(() => {
@@ -415,7 +890,8 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     const area = fileAreaRef.current;
     if (line == null || !area || selectedAnnotationIdRef.current) return;
     return whenCodeLineRendered(area, line, (lineEl) => {
-      lineEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (lineScroll === 'vertical') scrollCodeLineIntoView(lineEl, { smooth: true });
+      else lineEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, { lineCount });
   }, [line, filepath, lineCount, revealKey]);
 
@@ -423,17 +899,39 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     range: { start: number; end: number },
     anchorEl?: HTMLElement,
     anchorRect?: DOMRect,
+    initialText?: string,
   ) => {
     const start = Math.min(range.start, range.end);
     const end = Math.max(range.start, range.end);
     setPendingComment({
       range: { start, end },
+      ...(initialText !== undefined ? { initialText } : {}),
       anchorEl,
       anchorRect: anchorRect ?? anchorEl?.getBoundingClientRect() ?? lastPointerRectRef.current ?? undefined,
       contextText: `${relativePath} ${lineLabel(start, end)}`,
       originalCode: getLineSlice(contents, start, end),
+      // The path alone is not the file: the Inbox passes a basename, so two
+      // threads' `index.ts` would share a draft. The contents hash, taken only
+      // when the composer opens, keeps one draft per file and range.
+      draftKey: `code-file:${filepath}:${hashDraftScope(contents)}:${start}-${end}`,
     });
-  }, [contents, relativePath]);
+  }, [contents, filepath, relativePath]);
+
+  // A comment put back by the host: the composer opens on its lines once the
+  // first of them is drawn (each request once).
+  const reopenedCommentRef = useRef<CodeFileViewProps['reopenComment']>(null);
+  useEffect(() => {
+    const area = fileAreaRef.current;
+    if (!reopenComment || !area || !onAddAnnotation || reopenedCommentRef.current === reopenComment) return;
+    const start = Math.min(reopenComment.lineStart, reopenComment.lineEnd);
+    const end = Math.max(reopenComment.lineStart, reopenComment.lineEnd);
+    if (start < 1 || end > lineCount) return;
+    const request = reopenComment;
+    return whenCodeLineRendered(area, start, (lineEl) => {
+      reopenedCommentRef.current = request;
+      openCommentForRange({ start, end }, undefined, lineEl.getBoundingClientRect(), request.text);
+    }, { lineCount });
+  }, [reopenComment, onAddAnnotation, openCommentForRange, lineCount]);
 
   const openCommentForBrowserSelection = useCallback(() => {
     if (!onAddAnnotation) return;
@@ -455,18 +953,41 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     selection.removeAllRanges();
   }, [onAddAnnotation, openCommentForRange]);
 
-  const renderAnnotation = useCallback((annotation: LineAnnotation<CodeAnnotation>) => {
-    if (!annotation.metadata) return null;
+  const renderAnnotation = useCallback((annotation: LineAnnotation<CodeAnnotation[]>) => {
+    const group = annotation.metadata;
+    if (!group || group.length === 0) return null;
+    if (folds) {
+      return (
+        <CodeCommentFold
+          // Pierre keys its rows by position: a line's own key keeps one line's fold from inheriting another's
+          // state when a line above loses its last comment.
+          key={annotation.lineNumber}
+          line={annotation.lineNumber}
+          annotations={group}
+          store={foldStore}
+          onToggle={toggleFold}
+          selectedAnnotationId={selectedAnnotationId}
+          onSelect={onSelectAnnotation}
+          onEdit={onEditAnnotation}
+          onDelete={onDeleteAnnotation}
+          onLastDelete={focusAfterLastDelete}
+          plain={commentCard === 'plain'}
+          reopenEdit={reopenEdit}
+        />
+      );
+    }
     return (
       <CodeInlineAnnotation
-        annotation={annotation.metadata}
-        isSelected={selectedAnnotationId === annotation.metadata.id}
+        annotation={group[0]}
+        isSelected={selectedAnnotationId === group[0].id}
         onSelect={onSelectAnnotation}
         onEdit={onEditAnnotation}
         onDelete={onDeleteAnnotation}
+        plain={commentCard === 'plain'}
+        reopenEdit={reopenEdit}
       />
     );
-  }, [onDeleteAnnotation, onEditAnnotation, onSelectAnnotation, selectedAnnotationId]);
+  }, [commentCard, folds, foldStore, focusAfterLastDelete, onDeleteAnnotation, onEditAnnotation, onSelectAnnotation, reopenEdit, selectedAnnotationId, toggleFold]);
 
   const renderGutterUtility = useCallback((getHoveredLine: () => { lineNumber: number } | undefined) => {
     return (
@@ -492,24 +1013,55 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     );
   }, [openCommentForRange]);
 
+  // Pierre maps a press or a click inside an annotation row to the line above it (a line click, a selection): one in
+  // a fold (its bubble, its card) is the fold's, never a new comment on that line.
+  const pointerInFoldRef = useRef(false);
   const handleLineSelectionEnd = useCallback((range: PierreSelectedLineRange | null) => {
     if (!onAddAnnotation) return;
     if (!range) return;
+    if (pointerInFoldRef.current) return;
     if (range.start !== range.end) {
       suppressLineClickUntilRef.current = Date.now() + 300;
     }
     openCommentForRange({ start: range.start, end: range.end }, undefined, lastPointerRectRef.current ?? undefined);
   }, [onAddAnnotation, openCommentForRange]);
 
+  const tokenTargetOf = (props: { tokenText: string; tokenElement: HTMLElement; lineNumber: number; lineCharStart: number }): CodeFileTokenTarget => ({
+    tokenText: props.tokenText,
+    tokenElement: props.tokenElement,
+    lineNumber: props.lineNumber,
+    lineCharStart: props.lineCharStart,
+  });
+  const tokenOptions = onTokenTarget || onTokenNavigate
+    ? {
+        useTokenTransformer: true,
+        onTokenEnter: (props: CodeFileTokenTarget) => onTokenTarget?.('enter', tokenTargetOf(props)),
+        onTokenLeave: (props: CodeFileTokenTarget) => onTokenTarget?.('leave', tokenTargetOf(props)),
+        onTokenClick: (props: CodeFileTokenTarget, event: MouseEvent) => {
+          const target = tokenTargetOf(props);
+          onTokenTarget?.('click', target);
+          if (onTokenNavigate && (event.metaKey || event.ctrlKey || event.altKey)) {
+            suppressLineClickUntilRef.current = Date.now() + 300;
+            onTokenNavigate(target);
+          }
+        },
+      }
+    : {};
+
   const handleLineClick = useCallback((props: LineEventBaseProps & { event: PointerEvent }) => {
     if (!onAddAnnotation) return;
     if (Date.now() < suppressLineClickUntilRef.current) return;
+    if (pointerInFoldRef.current || isInFold(props.event)) return;
     openCommentForRange(
       { start: props.lineNumber, end: props.lineNumber },
       undefined,
       props.lineElement.getBoundingClientRect(),
     );
   }, [onAddAnnotation, openCommentForRange]);
+
+  const themeCss = folds
+    ? `${pierreTheme.css}${FOLD_ROW_CSS}${onAddAnnotation || lineAnnotations.length > 0 ? FOLD_GUTTER_CSS : ''}`
+    : pierreTheme.css;
 
   return (
     <>
@@ -519,6 +1071,12 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
         onPointerMove={(e) => {
           lastPointerRectRef.current = new DOMRect(e.clientX, e.clientY, 0, 0);
         }}
+        // Where focus lands when the last comment's fold goes (programmatic only, never a Tab stop).
+        tabIndex={folds ? -1 : undefined}
+        style={folds ? { outline: 'none' } : undefined}
+        onPointerDownCapture={folds ? (e) => {
+          pointerInFoldRef.current = isInFold(e.nativeEvent);
+        } : undefined}
         onMouseUp={() => {
           requestAnimationFrame(openCommentForBrowserSelection);
         }}
@@ -540,7 +1098,7 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
           } as React.CSSProperties}
           options={{
             themeType: pierreTheme.type,
-            unsafeCSS: pierreTheme.css,
+            unsafeCSS: extraCss ? `${themeCss}\n${extraCss}` : themeCss,
             overflow,
             disableFileHeader: true,
             enableLineSelection: true,
@@ -548,6 +1106,7 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
             lineHoverHighlight: onAddAnnotation ? 'line' : 'disabled',
             onLineClick: handleLineClick,
             onLineSelectionEnd: handleLineSelectionEnd,
+            ...tokenOptions,
           }}
         />
       </div>
@@ -559,7 +1118,13 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
           isGlobal={false}
           skillReferences
           allowImages={allowImages}
+          // The words typed for these lines survive a close (Escape, X) and come back when they are chosen again.
+          draftKey={pendingComment.draftKey}
+          initialText={pendingComment.initialText}
           onSubmit={(text, images) => {
+            // The comment just saved shows where it landed: its line's fold opens (the ones there before stay as
+            // they were).
+            if (folds) openFold([pendingComment.range.end]);
             onAddAnnotation({
               filePath: filepath,
               lineStart: pendingComment.range.start,
@@ -570,6 +1135,21 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
             });
             setPendingComment(null);
           }}
+          submitLabel={commentSubmitLabel}
+          askAILabel={commentAskLabel}
+          extraAction={commentExtraAction?.({ filePath: filepath, lineStart: pendingComment.range.start, lineEnd: pendingComment.range.end, originalCode: pendingComment.originalCode })}
+          onAskAI={onAskAnnotation ? (question) => {
+            onAskAnnotation({
+              filePath: filepath,
+              lineStart: pendingComment.range.start,
+              lineEnd: pendingComment.range.end,
+              text: question,
+              originalCode: pendingComment.originalCode,
+            });
+            setPendingComment(null);
+            return true;
+          } : undefined}
+          askAIContext={onAskAnnotation ? { kind: 'selection', label: pendingComment.contextText, text: pendingComment.originalCode } : undefined}
           onClose={() => setPendingComment(null)}
         />
       )}
@@ -595,11 +1175,12 @@ export const CodeFilePopout: React.FC<CodeFilePopoutProps> = ({
   onDeleteAnnotation,
   onSelectAnnotation,
   container,
+  headerAction,
 }) => {
   const [copied, setCopied] = useState(false);
 
-  const displayName = filepath.split('/').pop() || filepath;
-  const relativePath = filepath.replace(/.*\/(?=.*\/)/, '');
+  const displayName = basenameFromPath(filepath);
+  const relativePath = normalizeBrowserPath(filepath).replace(/.*\/(?=.*\/)/, '');
   const lineCount = useMemo(() => contents.split('\n').length, [contents]);
 
   const handleCopy = async () => {
@@ -660,6 +1241,7 @@ export const CodeFilePopout: React.FC<CodeFilePopoutProps> = ({
           </span>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          {headerAction}
           <span className="text-xs text-muted-foreground tabular-nums">
             {lineCount} lines
           </span>

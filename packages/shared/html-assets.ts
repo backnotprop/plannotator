@@ -195,6 +195,16 @@ interface HtmlNode {
 
 type HtmlAssetUrlMapper = (assetPath: string) => string | null;
 
+/**
+ * Where a host sends a local reference that leads OUTSIDE the asset root:
+ * `../shots/a.png` (given as a path relative to the root, starting `../`),
+ * `/Users/me/a.png` or `file:///Users/me/a.png` (given as the absolute
+ * path). Null leaves it as written. Only the Inbox passes one (its pictures
+ * from anywhere); annotate and the Pi server pass none and rewrite nothing
+ * outside the root, as before.
+ */
+export type HtmlOutsideAssetUrlMapper = (path: string) => string | null;
+
 export function htmlAssetContentType(assetPath: string): string | null {
   return CONTENT_TYPES_BY_EXT[pathPosix.extname(assetPath).toLowerCase()] ?? null;
 }
@@ -390,6 +400,45 @@ export interface RewriteHtmlAssetOptions {
    * relative resolution.
    */
   inertBase?: boolean;
+  /** References outside the root: see `HtmlOutsideAssetUrlMapper`. Absent: left as written. */
+  outsideAssetUrlFor?: HtmlOutsideAssetUrlMapper;
+  /**
+   * The document was opened outside the session's roots: mark it with
+   * {@link HTML_NO_NETWORK_MARKER}, which the HTML viewer turns into
+   * `connect-src 'none'` for its srcdoc frame (the asset route's own
+   * OUTSIDE_ROOT_HTML_DOCUMENT_CSP covers only a document loaded by URL).
+   */
+  noNetwork?: boolean;
+}
+
+/**
+ * Marks a document a server opened outside the session's roots. A srcdoc
+ * document gets no response header, and the viewer removes every CSP `<meta>`
+ * a page carries, so the server cannot hand it a policy directly: the viewer
+ * (`hasNoNetworkMarker` in `packages/ui/components/html-viewer/srcdoc.ts`)
+ * reads this tag and puts `connect-src 'none'` at the top of the frame's
+ * document. A page that carries the tag itself only restricts itself.
+ */
+export const HTML_NO_NETWORK_MARKER = '<meta name="plannotator-network" content="none">';
+
+/**
+ * `html` with {@link HTML_NO_NETWORK_MARKER} added without parsing it: right
+ * after a leading doctype (only a BOM, ASCII whitespace, comments and `<?...>`
+ * prologs before it), so the page keeps standards mode, else first. For a
+ * document the rewrite could not read. Comments end as the HTML tokenizer ends
+ * them (`<!-->`, `<!--->`, the first `-->` or `--!>`), the same reading as
+ * `documentStart` in packages/ui/components/html-viewer/srcdoc.ts, which puts
+ * the viewer's policy at the same place.
+ */
+const LEADING_DOCTYPE_RE = new RegExp(
+  "^\\uFEFF?(?:[\\t\\n\\f\\r ]|<!--(?:>|->|(?!-?>)(?:(?!--!?>)[\\s\\S])*--!?>)|<\\?[^>]*>)*<!doctype[^>]*>",
+  "i",
+);
+
+export function prependNoNetworkMarker(html: string): string {
+  const doctype = LEADING_DOCTYPE_RE.exec(html);
+  const at = doctype ? doctype[0].length : 0;
+  return html.slice(0, at) + HTML_NO_NETWORK_MARKER + html.slice(at);
 }
 
 /** A base URL that no relative reference can resolve against. */
@@ -406,9 +455,17 @@ export function rewriteHtmlAssetReferences(
   const root = tree as unknown as HtmlNode;
   let hasFrame = false;
   visit(root, (node) => {
-    rewriteNodeAssetReferences(node, assetUrlFor, options.assetBasePath ?? "");
+    rewriteNodeAssetReferences(node, assetUrlFor, options.assetBasePath ?? "", options.outsideAssetUrlFor);
     const tagName = node.tagName?.toLowerCase();
     if (tagName && tagName in FRAME_URL_ATTRS) hasFrame = true;
+  });
+  // Before the base goes in, so the base stays first in <head>.
+  if (options.noNetwork) prependToHead(root, {
+    nodeName: "meta",
+    tagName: "meta",
+    attrs: [{ name: "name", value: "plannotator-network" }, { name: "content", value: "none" }],
+    namespaceURI: "http://www.w3.org/1999/xhtml",
+    childNodes: [],
   });
   const baseHref = options.baseHref ?? (options.inertBase && hasFrame ? INERT_HTML_BASE_HREF : null);
   if (baseHref) applyDocumentBase(root, baseHref);
@@ -444,15 +501,19 @@ function applyDocumentBase(root: HtmlNode, baseHref: string): void {
     return;
   }
 
-  const head = findElement(root, "head") ?? root;
-  const node: HtmlNode = {
+  prependToHead(root, {
     nodeName: "base",
     tagName: "base",
     attrs: [{ name: "href", value: baseHref }],
     namespaceURI: "http://www.w3.org/1999/xhtml",
     childNodes: [],
-    parentNode: head,
-  };
+  });
+}
+
+/** Insert an element first in `<head>` (first in a fragment, which has none). */
+function prependToHead(root: HtmlNode, node: HtmlNode): void {
+  const head = findElement(root, "head") ?? root;
+  node.parentNode = head;
   if (!head.childNodes) head.childNodes = [];
   head.childNodes.unshift(node);
 }
@@ -469,11 +530,12 @@ export function rewriteCssAssetReferences(
   css: string,
   assetUrlFor: HtmlAssetUrlMapper,
   basePath = "",
+  outside?: HtmlOutsideAssetUrlMapper,
 ): string {
   let rewritten = css.replace(
     /url\(\s*(["']?)([^"')]+)\1\s*\)/gi,
     (match, _quote: string, value: string) => {
-      const next = rewriteLocalAssetUrl(value, assetUrlFor, basePath);
+      const next = rewriteLocalAssetUrl(value, assetUrlFor, basePath, outside);
       return next === null ? match : `url("${next}")`;
     },
   );
@@ -481,7 +543,7 @@ export function rewriteCssAssetReferences(
   rewritten = rewritten.replace(
     /@import\s+(?:url\(\s*)?(["'])([^"']+)\1\s*\)?/gi,
     (match, _quote: string, value: string) => {
-      const next = rewriteLocalAssetUrl(value, assetUrlFor, basePath);
+      const next = rewriteLocalAssetUrl(value, assetUrlFor, basePath, outside);
       return next === null ? match : `@import url("${next}")`;
     },
   );
@@ -493,42 +555,43 @@ function rewriteNodeAssetReferences(
   node: HtmlNode,
   assetUrlFor: HtmlAssetUrlMapper,
   basePath: string,
+  outside?: HtmlOutsideAssetUrlMapper,
 ): void {
   const tagName = node.tagName?.toLowerCase();
   if (!tagName) return;
 
-  rewriteStyleAttr(node, assetUrlFor, basePath);
+  rewriteStyleAttr(node, assetUrlFor, basePath, outside);
 
   if (tagName === "style") {
-    rewriteStyleContent(node, assetUrlFor, basePath);
+    rewriteStyleContent(node, assetUrlFor, basePath, outside);
     return;
   }
 
   if (tagName === "img") {
-    rewriteAttr(node, "src", assetUrlFor, basePath);
-    rewriteSrcsetAttr(node, "srcset", assetUrlFor, basePath);
+    rewriteAttr(node, "src", assetUrlFor, basePath, outside);
+    rewriteSrcsetAttr(node, "srcset", assetUrlFor, basePath, outside);
     return;
   }
 
   if (tagName === "source") {
-    rewriteAttr(node, "src", assetUrlFor, basePath);
-    rewriteSrcsetAttr(node, "srcset", assetUrlFor, basePath);
+    rewriteAttr(node, "src", assetUrlFor, basePath, outside);
+    rewriteSrcsetAttr(node, "srcset", assetUrlFor, basePath, outside);
     return;
   }
 
   if (tagName === "video") {
-    rewriteAttr(node, "src", assetUrlFor, basePath);
-    rewriteAttr(node, "poster", assetUrlFor, basePath);
+    rewriteAttr(node, "src", assetUrlFor, basePath, outside);
+    rewriteAttr(node, "poster", assetUrlFor, basePath, outside);
     return;
   }
 
   if (tagName === "audio" || tagName === "script") {
-    rewriteAttr(node, "src", assetUrlFor, basePath);
+    rewriteAttr(node, "src", assetUrlFor, basePath, outside);
     return;
   }
 
   if (tagName === "link" && isSupportLink(node)) {
-    rewriteAttr(node, "href", assetUrlFor, basePath);
+    rewriteAttr(node, "href", assetUrlFor, basePath, outside);
   }
 }
 
@@ -542,10 +605,11 @@ function rewriteAttr(
   name: string,
   assetUrlFor: HtmlAssetUrlMapper,
   basePath: string,
+  outside?: HtmlOutsideAssetUrlMapper,
 ): void {
   const attr = findAttr(node, name);
   if (!attr) return;
-  const rewritten = rewriteLocalAssetUrl(attr.value, assetUrlFor, basePath);
+  const rewritten = rewriteLocalAssetUrl(attr.value, assetUrlFor, basePath, outside);
   if (rewritten !== null) attr.value = rewritten;
 }
 
@@ -554,10 +618,11 @@ function rewriteSrcsetAttr(
   name: string,
   assetUrlFor: HtmlAssetUrlMapper,
   basePath: string,
+  outside?: HtmlOutsideAssetUrlMapper,
 ): void {
   const attr = findAttr(node, name);
   if (!attr) return;
-  const rewritten = rewriteSrcset(attr.value, assetUrlFor, basePath);
+  const rewritten = rewriteSrcset(attr.value, assetUrlFor, basePath, outside);
   if (rewritten !== attr.value) attr.value = rewritten;
 }
 
@@ -570,16 +635,16 @@ function attrValue(node: HtmlNode, name: string): string | null {
   return findAttr(node, name)?.value.trim() ?? null;
 }
 
-function rewriteStyleAttr(node: HtmlNode, assetUrlFor: HtmlAssetUrlMapper, basePath: string): void {
+function rewriteStyleAttr(node: HtmlNode, assetUrlFor: HtmlAssetUrlMapper, basePath: string, outside?: HtmlOutsideAssetUrlMapper): void {
   const attr = findAttr(node, "style");
   if (!attr) return;
-  attr.value = rewriteCssAssetReferences(attr.value, assetUrlFor, basePath);
+  attr.value = rewriteCssAssetReferences(attr.value, assetUrlFor, basePath, outside);
 }
 
-function rewriteStyleContent(node: HtmlNode, assetUrlFor: HtmlAssetUrlMapper, basePath: string): void {
+function rewriteStyleContent(node: HtmlNode, assetUrlFor: HtmlAssetUrlMapper, basePath: string, outside?: HtmlOutsideAssetUrlMapper): void {
   for (const child of node.childNodes ?? []) {
     if (typeof child.value === "string") {
-      child.value = rewriteCssAssetReferences(child.value, assetUrlFor, basePath);
+      child.value = rewriteCssAssetReferences(child.value, assetUrlFor, basePath, outside);
     }
   }
 }
@@ -603,17 +668,17 @@ function rewriteLocalAssetUrl(
   value: string,
   assetUrlFor: HtmlAssetUrlMapper,
   basePath = "",
+  outside?: HtmlOutsideAssetUrlMapper,
 ): string | null {
   const trimmed = value.trim();
-  if (shouldSkipUrl(trimmed)) return null;
+  if (shouldSkipUrl(trimmed)) return outside ? rewriteAbsoluteAssetUrl(trimmed, outside) : null;
 
   const { path, suffix } = splitPathSuffix(trimmed);
   const decoded = decodeUrlPath(path);
   if (decoded === null) return null;
-  const normalized = normalizeDecodedLocalAssetPath(
-    basePath ? pathPosix.join(basePath, decoded) : decoded,
-  );
-  if (normalized === null) return null;
+  const joined = basePath ? pathPosix.join(basePath, decoded) : decoded;
+  const normalized = normalizeDecodedLocalAssetPath(joined);
+  if (normalized === null) return outside ? outsideAssetUrl(joined, suffix, outside) : null;
   if (htmlAssetContentType(normalized) === null) return null;
 
   const next = assetUrlFor(normalized);
@@ -625,6 +690,7 @@ function rewriteSrcset(
   srcset: string,
   assetUrlFor: HtmlAssetUrlMapper,
   basePath: string,
+  outside?: HtmlOutsideAssetUrlMapper,
 ): string {
   const rewritten: string[] = [];
   let changed = false;
@@ -646,7 +712,7 @@ function rewriteSrcset(
     while (i < srcset.length && srcset[i] !== ",") i++;
     const descriptor = srcset.slice(descriptorStart, i).trim();
 
-    const nextUrl = rewriteLocalAssetUrl(originalUrl, assetUrlFor, basePath) ?? originalUrl;
+    const nextUrl = rewriteLocalAssetUrl(originalUrl, assetUrlFor, basePath, outside) ?? originalUrl;
     if (nextUrl !== originalUrl) changed = true;
     rewritten.push(descriptor ? `${nextUrl} ${descriptor}` : nextUrl);
 
@@ -654,6 +720,30 @@ function rewriteSrcset(
   }
 
   return changed ? rewritten.join(", ") : srcset;
+}
+
+/**
+ * A reference `shouldSkipUrl` passes over that still names a file on this
+ * computer: an absolute path (`/Users/me/a.png`) or a `file:` URL
+ * (`file:///Users/me/a.png`). Anything else (`#x`, `//host/x`, `https:`,
+ * `data:`) stays as written.
+ */
+function rewriteAbsoluteAssetUrl(value: string, outside: HtmlOutsideAssetUrlMapper): string | null {
+  const local = /^file:\/\/(?:localhost)?(?=\/)/i.exec(value);
+  const rest = local ? value.slice(local[0].length) : value;
+  if (!rest.startsWith("/") || rest.startsWith("//")) return null;
+  const { path, suffix } = splitPathSuffix(rest);
+  const decoded = decodeUrlPath(path);
+  return decoded === null ? null : outsideAssetUrl(decoded, suffix, outside);
+}
+
+/** A decoded path outside the root (`../x.png` under it, or absolute) through the host's mapper. */
+function outsideAssetUrl(path: string, suffix: string, outside: HtmlOutsideAssetUrlMapper): string | null {
+  const normalized = pathPosix.normalize(path.trim().replace(/\\/g, "/"));
+  if (!(normalized.startsWith("../") || normalized.startsWith("/")) || normalized.startsWith("//")) return null;
+  if (/[\u0000-\u001f]/u.test(normalized)) return null;
+  const next = outside(normalized);
+  return next === null ? null : `${next}${suffix}`;
 }
 
 function shouldSkipUrl(value: string): boolean {

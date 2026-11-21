@@ -7,9 +7,10 @@
  *
  * Mirrors OpenCode's "Open in" app list. Each entry declares how to launch the
  * app per platform:
- *   - mac.appName  -> `open -a "<appName>" <target>`
- *   - win.bin      -> `<bin> <target>` (resolved against PATH)
+ *   - mac.appName  -> `open -a "<appName>" <target>` (or `open -na … --args`, openInMacArgv)
+ *   - win.bin      -> `<bin> <target>` (resolved against PATH; `exeOnly`: a real .exe only)
  *   - linux.bin    -> `<bin> <target>`
+ * Where each is installed is decided by `locateOpenInApp` (packages/shared/open-in-locate.ts).
  *
  * `kind` drives launch semantics:
  *   - file-manager -> reveal the file (mac: `open -R`, win: `explorer /select,`,
@@ -31,12 +32,60 @@ export interface OpenInApp {
   kind: OpenInKind;
   /** Icon id understood by AppIcon. For 'reveal' this is resolved per-platform. */
   icon: string;
-  /** macOS application bundle/display name passed to `open -a`. */
-  mac?: { appName: string };
-  /** Windows PATH binary. */
-  win?: { bin: string };
-  /** Linux PATH binary. */
-  linux?: { bin: string };
+  /**
+   * macOS application bundle/display name passed to `open -a`. `also`: other
+   * bundle names the same app installs under, tried in order after `appName`.
+   */
+  mac?: { appName: string; also?: readonly string[] };
+  /**
+   * Windows PATH binary. `also`: other names, tried in order after `bin`.
+   * `exeOnly`: only a real `.exe` is ever launched, by its absolute path, never
+   * a `.cmd`/`.bat` (those run through cmd.exe, which parses the file path), and
+   * it is also looked for in the JetBrains install folders (`openInWinInstallRoots`).
+   */
+  win?: { bin: string; also?: readonly string[]; exeOnly?: boolean };
+  /** Linux PATH binary. `also`: other names (snap commands), tried in order after `bin`. */
+  linux?: { bin: string; also?: readonly string[] };
+  /**
+   * How it opens a file at a line. `mac`: the app's URL scheme, `<scheme>://file/<path>:<line>`
+   * through `open -a`. `macArgs: 'line-flag'`: `open -na <app> --args --line <n> <path>`, which
+   * hands the arguments to the app's own launcher (it forwards them to a running instance).
+   * `cli`: `--goto <path>:<line>`, `<path>:<line>`, or `--line n <path>` on its Windows and
+   * Linux binary. Absent: the file opens at its top.
+   */
+  line?: { mac?: string; macArgs?: 'line-flag'; cli?: 'goto' | 'suffix' | 'line-flag' };
+}
+
+/**
+ * One JetBrains IDE in the catalog. Names are JetBrains' documented ones:
+ *  - macOS: the app bundle (`/Applications` or the Toolbox App's `~/Applications`),
+ *    then the older names the same IDE installed under (`also`).
+ *  - Windows: the IDE's own `.exe` launcher (`idea64.exe --line 42 <file>` in the docs),
+ *    on PATH (the installer's "add launchers dir to PATH") or in a JetBrains install
+ *    folder. Never the Toolbox `idea.cmd` script or the installer's `idea.bat`.
+ *  - Linux: the launcher script on PATH (Toolbox, "Create Command-line Launcher"),
+ *    then the snap commands.
+ * `--line <n> <path>` is the documented way to open a file at a line, on every platform.
+ */
+function jetbrainsIde(
+  id: string,
+  label: string,
+  icon: string,
+  names: { mac: readonly string[]; win: readonly string[]; linux: readonly string[] },
+): OpenInApp {
+  const [appName, ...macAlso] = names.mac;
+  const [winBin, ...winAlso] = names.win;
+  const [linuxBin, ...linuxAlso] = names.linux;
+  return {
+    id,
+    label,
+    kind: 'editor',
+    icon,
+    mac: { appName, ...(macAlso.length ? { also: macAlso } : {}) },
+    win: { bin: winBin, ...(winAlso.length ? { also: winAlso } : {}), exeOnly: true },
+    linux: { bin: linuxBin, ...(linuxAlso.length ? { also: linuxAlso } : {}) },
+    line: { macArgs: 'line-flag', cli: 'line-flag' },
+  };
 }
 
 /**
@@ -61,6 +110,7 @@ export const OPEN_IN_APPS: OpenInApp[] = [
     mac: { appName: 'Visual Studio Code' },
     win: { bin: 'code' },
     linux: { bin: 'code' },
+    line: { mac: 'vscode', cli: 'goto' },
   },
   {
     id: 'cursor',
@@ -70,6 +120,7 @@ export const OPEN_IN_APPS: OpenInApp[] = [
     mac: { appName: 'Cursor' },
     win: { bin: 'cursor' },
     linux: { bin: 'cursor' },
+    line: { mac: 'cursor', cli: 'goto' },
   },
   {
     id: 'zed',
@@ -79,6 +130,7 @@ export const OPEN_IN_APPS: OpenInApp[] = [
     mac: { appName: 'Zed' },
     win: { bin: 'zed' },
     linux: { bin: 'zed' },
+    line: { cli: 'suffix' },
   },
   {
     id: 'zed-preview',
@@ -98,6 +150,7 @@ export const OPEN_IN_APPS: OpenInApp[] = [
     mac: { appName: 'Sublime Text' },
     win: { bin: 'subl' },
     linux: { bin: 'subl' },
+    line: { cli: 'suffix' },
   },
   {
     id: 'textmate',
@@ -127,6 +180,32 @@ export const OPEN_IN_APPS: OpenInApp[] = [
     icon: 'android-studio',
     mac: { appName: 'Android Studio' },
   },
+  // IntelliJ IDEA and PyCharm were two editions until 2025.3 / 2025.1: the older
+  // bundles ("IntelliJ IDEA Ultimate" in JetBrains' 2024.3-2025.2 docs, the
+  // Community "IntelliJ IDEA CE" / "PyCharm CE") and snaps (`intellij-idea-ultimate`,
+  // `-community`, `pycharm-professional`, `-community`) still open the same way.
+  jetbrainsIde('intellij-idea', 'IntelliJ IDEA', 'jetbrains-ij', {
+    mac: ['IntelliJ IDEA', 'IntelliJ IDEA Ultimate', 'IntelliJ IDEA CE'],
+    win: ['idea64.exe'],
+    linux: ['idea', 'intellij-idea', 'intellij-idea-ultimate', 'intellij-idea-community'],
+  }),
+  jetbrainsIde('webstorm', 'WebStorm', 'jetbrains-ws', { mac: ['WebStorm'], win: ['webstorm64.exe'], linux: ['webstorm'] }),
+  jetbrainsIde('pycharm', 'PyCharm', 'jetbrains-pc', {
+    mac: ['PyCharm', 'PyCharm CE'],
+    win: ['pycharm64.exe'],
+    linux: ['pycharm', 'pycharm-professional', 'pycharm-community'],
+  }),
+  jetbrainsIde('goland', 'GoLand', 'jetbrains-go', { mac: ['GoLand'], win: ['goland64.exe'], linux: ['goland'] }),
+  jetbrainsIde('rider', 'Rider', 'jetbrains-rd', { mac: ['Rider'], win: ['rider64.exe'], linux: ['rider'] }),
+  jetbrainsIde('phpstorm', 'PhpStorm', 'jetbrains-ps', { mac: ['PhpStorm'], win: ['phpstorm64.exe'], linux: ['phpstorm'] }),
+  jetbrainsIde('rubymine', 'RubyMine', 'jetbrains-rm', { mac: ['RubyMine'], win: ['rubymine64.exe'], linux: ['rubymine'] }),
+  jetbrainsIde('clion', 'CLion', 'jetbrains-cl', { mac: ['CLion'], win: ['clion64.exe'], linux: ['clion'] }),
+  // RustRover's docs name `rustrover.exe`; `rustrover64.exe` is its siblings' pattern.
+  jetbrainsIde('rustrover', 'RustRover', 'jetbrains-rr', {
+    mac: ['RustRover'],
+    win: ['rustrover.exe', 'rustrover64.exe'],
+    linux: ['rustrover'],
+  }),
 
   // ── Terminals ──────────────────────────────────────────────────────────
   {
@@ -218,4 +297,71 @@ export function checkOpenInAppId(raw: unknown): OpenInAppIdCheck {
   const app = getOpenInApp(raw);
   if (!app) return { ok: false, error: 'Unknown app' };
   return { ok: true, app };
+}
+
+/**
+ * The catalog binary's argv for a file, at `line` when the app's launcher takes one.
+ * Shared so the Bun and Pi launchers cannot drift.
+ */
+export function openInFileArgv(app: OpenInApp, target: string, line?: number): string[] {
+  if (!line || app.kind !== 'editor') return [target];
+  if (app.line?.cli === 'goto') return ['--goto', `${target}:${line}`];
+  if (app.line?.cli === 'suffix') return [`${target}:${line}`];
+  if (app.line?.cli === 'line-flag') return ['--line', String(line), target];
+  return [target];
+}
+
+/**
+ * What macOS `open -a` is handed: a URL with the line when the app has a scheme,
+ * otherwise the path (which opens at the top).
+ */
+export function openInMacOpened(app: OpenInApp, target: string, line?: number): string {
+  const scheme = line && app.kind === 'editor' ? app.line?.mac : undefined;
+  if (!scheme) return target;
+  return `${scheme}://file${target.split('/').map(encodeURIComponent).join('/')}:${line}`;
+}
+
+/**
+ * The argv for macOS `open` that opens `target` in the bundle `appName`.
+ *  - an app with `line.macArgs` and a line: `-na <app> --args --line <n> <target>`
+ *    (JetBrains' documented `open -na "<App>.app" --args …`; `-n` makes `open` start
+ *    the app's launcher even when the app runs, and the launcher hands the file
+ *    and line to the running instance);
+ *  - otherwise `-a <app> <opened>`, `<opened>` from openInMacOpened.
+ * No shell is involved; `target` is the server's validated absolute path.
+ */
+export function openInMacArgv(app: OpenInApp, appName: string, target: string, line?: number): string[] {
+  if (line && app.kind === 'editor' && app.line?.macArgs === 'line-flag') {
+    return ['-na', appName, '--args', '--line', String(line), target];
+  }
+  return ['-a', appName, openInMacOpened(app, target, line)];
+}
+
+/** The names a catalog app is looked for under on `platform`, in order. */
+export function openInCandidateNames(app: OpenInApp, platform: OpenInPlatform): string[] {
+  if (platform === 'mac') return app.mac ? [app.mac.appName, ...(app.mac.also ?? [])] : [];
+  if (platform === 'win') return app.win ? [app.win.bin, ...(app.win.also ?? [])] : [];
+  return app.linux ? [app.linux.bin, ...(app.linux.also ?? [])] : [];
+}
+
+/**
+ * Windows folders an `exeOnly` app's launcher is looked for in, one level down:
+ * `<root>\<any folder>\bin\<exe>`. They are the folders JetBrains' Toolbox App
+ * documents as where IDEs are installed and detected (`%LOCALAPPDATA%\Programs`,
+ * and `%PROGRAMFILES%`, where the standalone installer puts `JetBrains\<IDE>`).
+ * Each entry is an environment variable and the path below it.
+ */
+export const OPEN_IN_WIN_INSTALL_ROOTS: ReadonlyArray<{ env: string; sub: string }> = [
+  { env: 'LOCALAPPDATA', sub: 'Programs' },
+  { env: 'ProgramFiles', sub: 'JetBrains' },
+];
+
+/** A Windows path that names a `.exe` (what an `exeOnly` app may launch). */
+export function isWindowsExePath(p: string): boolean {
+  return /\.exe$/i.test(p);
+}
+
+/** A 1-based line from a POST body. Anything else is ignored (open at the top). */
+export function parseOpenInLine(raw: unknown): number | undefined {
+  return typeof raw === 'number' && Number.isSafeInteger(raw) && raw > 0 ? raw : undefined;
 }

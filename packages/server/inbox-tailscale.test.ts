@@ -12,9 +12,14 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { brotliDecompressSync, gunzipSync } from "node:zlib";
-import type { TailscaleRunner } from "@plannotator/shared/tailscale";
+import { packApp } from "@plannotator/shared/packed-app";
+import { describeTailscaleFailure, type TailscaleRunner } from "@plannotator/shared/tailscale";
+import { writeReleaseNotes } from "@plannotator/shared/update-check";
 import { startInboxServer, type InboxServer } from "./inbox";
-import { takeDownInboxTailscale } from "./inbox-tailscale";
+import { fetchReleaseImagesFor } from "./inbox-whats-new-images";
+import { takeDownInboxTailscale, type InboxTailscaleTimers } from "./inbox-tailscale";
+import { inboxLiveSiteId } from "./inbox-live";
+import { savedConfig } from "../../tests/helpers/saved-config";
 
 type Json = Record<string, any>;
 
@@ -65,6 +70,7 @@ function fakeTailscale(options: { tagged?: boolean } = {}) {
       if (down.status) return fail;
       return ok(
         JSON.stringify({
+          BackendState: "Running",
           Self: { DNSName: `${MAGIC}.`, UserID: 42, ...(self.tagged ? { Tags: ["tag:server"] } : {}) },
           User: { "42": { ID: 42, LoginName: self.tagged ? "tagged-devices" : OWNER, DisplayName: "Ramos" } },
         }),
@@ -122,7 +128,14 @@ describe("Inbox over your tailnet", () => {
     expect(ts.serve.get(inbox.port)).toBe(`http://127.0.0.1:${listener}`);
     expect(listener).not.toBe(inbox.port);
     expect(ts.calls.some((args) => args.includes("funnel"))).toBe(false);
-    expect(registryOf(dataDir).tailscale).toEqual({ url: `https://${MAGIC}:${inbox.port}/`, error: null, https_port: inbox.port, proxy_port: listener });
+    // `made`: the proxy ports this Inbox pointed its mapping on this port at (its own leftovers, inbox-tailscale.ts).
+    expect(registryOf(dataDir).tailscale).toEqual({
+      url: `https://${MAGIC}:${inbox.port}/`,
+      error: null,
+      https_port: inbox.port,
+      proxy_port: listener,
+      made: { https_port: inbox.port, proxy_ports: [listener] },
+    });
 
     // The owner, through serve: the window and its data.
     expect((await throughServe(inbox, "/")).status).toBe(200);
@@ -137,7 +150,8 @@ describe("Inbox over your tailnet", () => {
     expect(await codeOf(await throughServe(inbox, "/api/inbox/threads", { headers: { "Tailscale-Funnel-Request": "?1" } }))).toEqual([403, "tailnet_funnel_refused"]);
     const page = await throughServe(inbox, "/", { login: "someone@example.com" });
     expect(page.status).toBe(403);
-    expect(await page.text()).toContain("only its owner's Tailscale login");
+    expect(page.headers.get("content-type")).toContain("text/html");
+    expect(await page.text()).toContain("only for the Tailscale account that owns this computer");
 
     // Host is the client's own through serve: only the served name and port pass, never a loopback claim.
     for (const host of [`127.0.0.1:${inbox.port}`, `localhost:${inbox.port}`, MAGIC, `${MAGIC}:443`, `evil.example:${inbox.port}`]) {
@@ -149,7 +163,7 @@ describe("Inbox over your tailnet", () => {
     expect((await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/threads`, { headers: { Host: `${MAGIC}:${inbox.port}` } })).status).toBe(403);
   });
 
-  test("the window page (#2032): compressed through the tailnet (br and gzip, Vary, a weak ETag and 304, private no-cache), unchanged on loopback, and the listener's checks still run first", async () => {
+  test("the window page (#2032): compressed through the tailnet (br and gzip, Vary, a weak ETag and 304, private no-cache), the same on loopback, and the listener's checks still run first", async () => {
     const dataDir = world({ inboxTailscale: true });
     const ts = fakeTailscale();
     const page = `<!doctype html><title>Inbox</title>${"<p>the window, a large single-file page</p>\n".repeat(20000)}`;
@@ -208,19 +222,55 @@ describe("Inbox over your tailnet", () => {
     expect((await raw("/", { "Accept-Encoding": "br", "If-None-Match": etag }, "GET", null)).status).toBe(403);
     expect((await raw("/", { "Accept-Encoding": "br", "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty" })).status).toBe(403);
 
-    // The data routes stay no-store and uncompressed.
+    // The data routes stay no-store, and a JSON read takes the same encoding path as on loopback (inbox-encoding.ts).
+    const project = inbox.store.ensureProject({ name: "shop", root: dataDir });
+    for (let i = 0; i < 8; i++) {
+      inbox.store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: "s1", name: "Claude Code" }, subject: `Thread ${i}`, body: "Words for the list. ".repeat(40) });
+    }
     const threads = await raw("/api/inbox/threads", { "Accept-Encoding": "br" });
     expect(threads.headers.get("cache-control")).toBe("no-store");
-    expect(threads.headers.get("content-encoding")).toBeNull();
+    expect(threads.headers.get("content-encoding")).toBe("br");
+    expect(threads.headers.get("vary")).toBe("Accept-Encoding");
+    expect(threads.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(JSON.parse(brotliDecompressSync(Buffer.from(await threads.arrayBuffer())).toString("utf8"))).toBeTruthy();
 
-    // The window's own loopback port: exactly as before.
+    // The window's own loopback port answers the same page the same way: one tag, compressed, revalidated.
     const local = await fetch(`http://127.0.0.1:${inbox.port}/`, { headers: { "Accept-Encoding": "gzip, deflate, br" }, decompress: false } as RequestInit);
     expect(local.status).toBe(200);
-    expect(local.headers.get("content-encoding")).toBeNull();
-    expect(local.headers.get("vary")).toBeNull();
-    expect(local.headers.get("etag")).toBeNull();
-    expect(local.headers.get("cache-control")).toBe("no-store");
-    expect(await local.text()).toBe(page);
+    expect(local.headers.get("content-encoding")).toBe("br");
+    expect(local.headers.get("vary")).toBe("Accept-Encoding");
+    expect(local.headers.get("etag")).toBe(etag);
+    expect(local.headers.get("cache-control")).toBe("private, no-cache");
+    expect(brotliDecompressSync(Buffer.from(await local.arrayBuffer())).toString("utf8")).toBe(page);
+  });
+
+  test("the window's packed scripts (#2593) pass the same listener checks as the page and go out compressed, as the page does", async () => {
+    const dataDir = world({ inboxTailscale: true });
+    const ts = fakeTailscale();
+    const entry = `export const sentinel = "entry-sentinel";\n${"// the window's entry script\n".repeat(20000)}`;
+    const page = '<!doctype html><script type="module" crossorigin src="/assets/entry-a.js"></script>';
+    const inbox = await start(dataDir, ts.run, { htmlContent: packApp(page, { "/assets/entry-a.js": { type: "text/javascript; charset=utf-8", text: entry } }) });
+    const listener = inbox.tailscale.listenerPort()!;
+    const raw = (path: string, headers: Record<string, string>, login: string | null = OWNER) =>
+      fetch(`http://127.0.0.1:${listener}${path}`, {
+        headers: { Host: `${MAGIC}:${inbox.port}`, ...(login ? { "Tailscale-User-Login": login } : {}), ...headers },
+        decompress: false,
+      } as RequestInit);
+
+    expect(await (await raw("/", {})).text()).toBe(page);
+    const script = await raw("/assets/entry-a.js", { "Accept-Encoding": "gzip, deflate, br", "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "script" });
+    expect(script.status).toBe(200);
+    expect(script.headers.get("content-encoding")).toBe("br");
+    expect(script.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
+    expect(brotliDecompressSync(Buffer.from(await script.arrayBuffer())).toString("utf8")).toBe(entry);
+    // Another login, a loopback Host claim, another site's fetch: refused before any script is read.
+    expect((await raw("/assets/entry-a.js", {}, "someone@example.com")).status).toBe(403);
+    expect((await raw("/assets/entry-a.js", { Host: `127.0.0.1:${inbox.port}` })).status).toBe(403);
+    expect((await raw("/assets/entry-a.js", { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "script" })).status).toBe(403);
+    // On loopback, compressed the same way.
+    const local = await fetch(`http://127.0.0.1:${inbox.port}/assets/entry-a.js`, { headers: { "Accept-Encoding": "gzip, deflate, br" }, decompress: false } as RequestInit);
+    expect(local.headers.get("content-encoding")).toBe("br");
+    expect(brotliDecompressSync(Buffer.from(await local.arrayBuffer())).toString("utf8")).toBe(entry);
   });
 
   test("through the tailnet the connection surface is unreachable, even with the token and a loopback Host claim, and the window's guards still apply", async () => {
@@ -250,25 +300,14 @@ describe("Inbox over your tailnet", () => {
     // A link that opens the Inbox still works.
     expect((await throughServe(inbox, "/", { headers: { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate" } })).status).toBe(200);
 
-    // The tailnet cannot widen the exposure: the switch cannot be turned on from there, nor a phone paired.
+    // The owner over the tailnet has the switch as on the computer (owner ruling 2026-11-11); the page still says where it is.
     const settings = (await (await throughServe(inbox, "/api/inbox/settings")).json()) as Json;
     expect(settings.via).toBe("tailnet");
     expect(settings.tailscale.url).toBe(`https://${MAGIC}:${inbox.port}/`);
     const on = await throughServe(inbox, "/api/inbox/settings", { method: "POST", headers: own, body: JSON.stringify({ tailscale: { on: true } }) });
-    expect(await codeOf(on)).toEqual([403, "local_only"]);
-    expect(await codeOf(await throughServe(inbox, "/api/inbox/pairing", { method: "POST", headers: own, body: "{}" }))).toEqual([403, "local_only"]);
+    expect(on.status).toBe(200);
     expect(((await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/settings`)).json()) as Json).via).toBe("local");
 
-    // The agents on this computer (their files, their switches, the card): this computer only, read or write.
-    expect(await codeOf(await throughServe(inbox, "/api/inbox/agents"))).toEqual([403, "local_only"]);
-    for (const [path, body] of [
-      ["/api/inbox/agents", { agent: "codex", reach: true }],
-      ["/api/inbox/agents/notes", { add: ["codex"] }],
-      ["/api/inbox/agents/seen", {}],
-    ] as const) {
-      const response = await throughServe(inbox, path, { method: "POST", headers: own, body: JSON.stringify({ ...body, serverSession: inbox.serverSession }) });
-      expect([path, ...(await codeOf(response))]).toEqual([path, 403, "local_only"]);
-    }
   });
 
   test("a message's image (#1813) reads through the tailnet for the owner like the other read routes; a wrong login, no login and another site are refused", async () => {
@@ -412,6 +451,17 @@ describe("Inbox over your tailnet", () => {
     expect(atRestart).toBeUndefined();
   });
 
+  test("the stop route says whether the run was published by the flag alone, so `plannotator inbox restart` publishes the next run again", async () => {
+    const stopAnswer = async (inbox: InboxServer) =>
+      (await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/control/stop`, { method: "POST", headers: { Authorization: `Bearer ${inbox.token}` } })).json()) as Json;
+    const ts = fakeTailscale();
+    const flagged = await start(world(), ts.run, { publishTailnet: true, onStopRequested: () => {} });
+    expect(await stopAnswer(flagged)).toMatchObject({ stopping: true, tailscale_run_only: true });
+    // Kept on in config.json: the next start publishes by itself, so the restart adds no flag.
+    const kept = await start(world({ inboxTailscale: true }), ts.run, { onStopRequested: () => {} });
+    expect(await stopAnswer(kept)).toMatchObject({ stopping: true, tailscale_run_only: false });
+  });
+
   test("the run's flag and the control route publish for this run only, and say so", async () => {
     const dataDir = world();
     const ts = fakeTailscale();
@@ -447,11 +497,69 @@ describe("Inbox over your tailnet", () => {
     const state = inbox.tailscale.state();
     expect(state.on).toBe(true);
     expect(state.url).toBeNull();
-    expect(state.error).toContain("Tailscale is stopped.");
+    // Tailscale's reason, as describeTailscaleFailure words it, reaches the window.
+    expect(state.error).toContain(describeTailscaleFailure({ status: 1, stdout: "", stderr: "Tailscale is stopped." }));
     expect(inbox.tailscale.listenerPort()).toBeNull();
     expect(registryOf(dataDir).tailscale).toMatchObject({ url: null, error: state.error });
     const settings = (await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/settings`)).json()) as Json;
     expect(settings.tailscale.error).toBe(state.error);
+  });
+
+  test("published by itself once Tailscale is back: every window's stream hears the new state, an agent's stream nothing", async () => {
+    const dataDir = world({ inboxTailscale: true });
+    const ts = fakeTailscale();
+    ts.down.status = true;
+    // The retry's clock, driven here (INBOX_TAILSCALE_REPUBLISH).
+    const pending: (() => void)[] = [];
+    const timers: InboxTailscaleTimers = { set: (fn) => pending.push(fn), clear: () => void pending.splice(0) };
+    const inbox = await start(dataDir, ts.run, { tailscaleTimers: timers });
+    expect(inbox.tailscale.state().url).toBeNull();
+    expect(inbox.tailscale.retrying()).toBe(true);
+
+    const frames = (response: Response) => {
+      const seen: Json[] = [];
+      const said = { hello: false };
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const done = (async () => {
+        for (;;) {
+          const { value, done } = await reader.read().catch(() => ({ value: undefined, done: true }));
+          if (done) return;
+          buffer += decoder.decode(value, { stream: true });
+          let cut: number;
+          while ((cut = buffer.indexOf("\n\n")) >= 0) {
+            const block = buffer.slice(0, cut);
+            buffer = buffer.slice(cut + 2);
+            const event = /^event: (.+)$/m.exec(block)?.[1];
+            if (event === "hello") said.hello = true;
+            if (event === "tailscale") seen.push(JSON.parse(/^data: (.*)$/m.exec(block)![1]!) as Json);
+          }
+        }
+      })();
+      return { seen, said, stop: async () => (await reader.cancel().catch(() => {}), await done) };
+    };
+    const until = async (ready: () => boolean) => {
+      const end = Date.now() + 5_000;
+      while (!ready()) {
+        if (Date.now() > end) throw new Error("timed out waiting for the event stream");
+        await Bun.sleep(5);
+      }
+    };
+    const window = frames(await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/events?window=ts-window`, { headers: { "Sec-Fetch-Site": "same-origin" } }));
+    const agent = frames(await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/events`));
+    await until(() => window.said.hello && agent.said.hello);
+
+    ts.down.status = false;
+    for (const fn of pending.splice(0)) fn();
+    await until(() => window.seen.length >= 1);
+    const url = `https://${MAGIC}:${inbox.port}/`;
+    expect(window.seen[0]!.tailscale).toMatchObject({ on: true, url, error: null });
+    expect(inbox.tailscale.retrying()).toBe(false);
+    const settings = (await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/settings`)).json()) as Json;
+    expect(settings.tailscale.url).toBe(url);
+    expect(agent.seen).toHaveLength(0);
+    await Promise.all([window.stop(), agent.stop()]);
   });
 
   test("a mapping someone else made on the Inbox's port is never replaced", async () => {
@@ -674,6 +782,19 @@ describe("Inbox over your tailnet", () => {
     expect(ts.serve.size).toBe(0);
   });
 
+  test("the window's port is never one the door may take (8443 to 8450), even when it is the port kept from last time", async () => {
+    const dataDir = world({ inboxTailscale: true });
+    const ts = fakeTailscale();
+    const probe = await start(dataDir, ts.run);
+    probe.stop();
+    servers.splice(0);
+    writeFileSync(join(dataDir, "inbox", "inbox.json"), JSON.stringify({ ...registryOf(dataDir), port: 8445 }));
+    const inbox = await start(dataDir, ts.run);
+    expect(inbox.port).not.toBe(8445);
+    expect([8443, 8444, 8445, 8446, 8447, 8448, 8449, 8450]).not.toContain(inbox.port);
+    expect([...ts.serve.keys()]).toEqual([inbox.port]);
+  });
+
   test("with Phones on, the two publications never meet: Phones on 8443 to its door, the window on its own port to its own listener", async () => {
     const dataDir = world({ inboxTailscale: true });
     const ts = fakeTailscale();
@@ -691,47 +812,209 @@ describe("Inbox over your tailnet", () => {
   });
 });
 
-describe("the update control never answers through the tailnet", () => {
-  test("Update now, snooze, Check now, the facts, What's new and the update switches are local only; nothing is launched or written", async () => {
+describe("running-app prototypes on the owner's phone, through the prototype relay", () => {
+  test("the owner opens a question's running app through the tailnet: one more mapping, the app at its own root, framed only by the window; another account, an unnamed site, another site and a stale key are refused", async () => {
     const dataDir = world({ inboxTailscale: true });
-    writeFileSync(join(dataDir, "update-state.json"), JSON.stringify({ latestRelease: { tag: "0.28.12", fetchedAt: Date.now() } }));
     const ts = fakeTailscale();
-    const launches: unknown[] = [];
-    const inbox = await start(dataDir, ts.run, {
-      version: "0.28.10",
-      updates: {
-        fetchRelease: async () => ({ ok: true, release: { tag: "v0.28.12" } }),
-        isManaged: () => true,
-        listSessions: () => [],
-        launchInstaller: (launch) => void launches.push(launch),
+    // The agent's running app: a page that loads an absolute-path asset, and a redirect to a loopback address.
+    const app = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(req) {
+        const path = new URL(req.url).pathname;
+        if (path === "/assets/app.js") return new Response("window.appLoaded = true;", { headers: { "Content-Type": "text/javascript" } });
+        if (path === "/old") return new Response(null, { status: 302, headers: { Location: `http://127.0.0.1:${app.port}/checkout?v=b` } });
+        return new Response('<!doctype html><html><head><title>Checkout</title><script src="/assets/app.js"></script></head><body><button id="pay">Pay now</button></body></html>', {
+          headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "frame-ancestors 'none'" },
+        });
       },
     });
-    const own = { Origin: `https://${MAGIC}:${inbox.port}`, "Content-Type": "application/json" };
-    const calls: [string, string, Json | undefined][] = [
-      ["POST", "/api/inbox/update", { serverSession: inbox.serverSession }],
-      ["POST", "/api/inbox/update/snooze", { serverSession: inbox.serverSession }],
-      ["POST", "/api/inbox/update/check", { serverSession: inbox.serverSession }],
-      ["GET", "/api/inbox/update", undefined],
-      ["GET", "/api/inbox/whats-new?version=0.28.12", undefined],
-      ["GET", "/api/inbox/whats-new/image?version=0.28.12&src=https%3A%2F%2Fgithub.com%2Fuser-attachments%2Fassets%2Fa", undefined],
-      ["POST", "/api/inbox/settings", { serverSession: inbox.serverSession, auto_update: true }],
-      ["POST", "/api/inbox/settings", { serverSession: inbox.serverSession, update_check: false }],
-    ];
-    for (const [method, path, body] of calls) {
-      const response = await throughServe(inbox, path, { method, headers: own, ...(body ? { body: JSON.stringify(body) } : {}) });
-      expect([method, path, ...(await codeOf(response))]).toEqual([method, path, 403, "local_only"]);
+    try {
+      const inbox = await start(dataDir, ts.run, {
+        htmlContent: "<!doctype html><title>Inbox</title>",
+        liveBridge: { bridgeScript: "/* bridge */", bridgeBootstrap: "", annotationCss: "" },
+      });
+      const project = inbox.store.ensureProject({ name: "shop", root: join(dataDir, "shop") });
+      const author = { kind: "agent" as const, host: "claude-code", session: "ses_shop", name: "Claude Code" };
+      const url = `http://127.0.0.1:${app.port}/checkout?v=b`;
+      const site = { id: inboxLiveSiteId(url), url, opened_by: "agent" as const };
+      const sent = inbox.store.sendMessage({ project_id: project.id, author, body: `:::question\nWhich checkout?\n- [ ] A\n- [ ] B\n    Prototype: ${url}\n:::`, live_sites: [site] }).message;
+      const live = `/api/inbox/threads/${sent.thread_id}/live`;
+      const windowOrigin = `https://${MAGIC}:${inbox.port}`;
+      const own = { Origin: windowOrigin };
+
+      // A site no Prototype line named: refused, and no relay is made.
+      expect(await codeOf(await throughServe(inbox, `${live}/liv_0123456789abcdef`, { headers: own }))).toEqual([404, "live_site_not_found"]);
+      expect(inbox.tailscale.relayPort()).toBeNull();
+      expect(ts.serve.size).toBe(1);
+      // #2258's list and open stay closed.
+      expect((await throughServe(inbox, live, { headers: own })).status).toBe(404);
+
+      // The owner: the relay is mapped (port R to the listener on R, recorded first), and the window frames its entry.
+      const opened = await throughServe(inbox, `${live}/${site.id}`, { headers: own });
+      expect(opened.status).toBe(200);
+      const wire = ((await opened.json()) as { site: { app_url: string; proxy_origin: string; token: string } }).site;
+      const relayPort = inbox.tailscale.relayPort()!;
+      const relayOrigin = `https://${MAGIC}:${relayPort}`;
+      expect(ts.serve.get(relayPort)).toBe(`http://127.0.0.1:${relayPort}`);
+      expect(registryOf(dataDir).tailscale.relay_port).toBe(relayPort);
+      expect(wire.proxy_origin).toBe(relayOrigin);
+      expect(wire.app_url.startsWith(`${relayOrigin}/__plannotator__/relay?k=`)).toBe(true);
+      const frame = await throughServe(inbox, `${live}/${site.id}/frame`, { headers: own });
+      expect(frame.headers.get("content-security-policy")).toContain(`frame-src ${relayOrigin}`);
+      expect(await frame.text()).toContain("/__plannotator__/relay?k=");
+
+      // Through the relay, as serve hands it over: Host is the relay's name and port, the login the owner's.
+      const relay = (path: string, init: { login?: string | null; host?: string; headers?: Record<string, string> } = {}) => {
+        const headers: Record<string, string> = { Host: init.host ?? `${MAGIC}:${relayPort}`, ...(init.headers ?? {}) };
+        const login = init.login === undefined ? OWNER : init.login;
+        if (login !== null) headers["Tailscale-User-Login"] = login;
+        return fetch(`http://127.0.0.1:${relayPort}${path}`, { headers, redirect: "manual" });
+      };
+      const entry = new URL(wire.app_url);
+      const frameLoad = { "Sec-Fetch-Site": "same-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "iframe" };
+      const entered = await relay(entry.pathname + entry.search, { headers: frameLoad });
+      expect(entered.status).toBe(302);
+      expect(entered.headers.get("location")).toBe("/checkout?v=b");
+      const cookie = entered.headers.get("set-cookie")!.split(";")[0]!;
+      expect(entered.headers.get("set-cookie")).toContain("Secure; HttpOnly; SameSite=Strict");
+      const signedIn = { ...frameLoad, Cookie: cookie };
+
+      // The app's page, at its own root: the bridge in it, framed only by the window's tailnet origin.
+      const page = await relay("/checkout?v=b", { headers: signedIn });
+      expect(page.status).toBe(200);
+      expect(page.headers.get("content-security-policy")).toBe(`frame-ancestors ${windowOrigin}`);
+      const html = await page.text();
+      expect(html).toContain('<button id="pay">Pay now</button>');
+      expect(html).toContain('<script src="/__plannotator__/bridge.js"></script>');
+      const asset = await relay("/assets/app.js", { headers: { "Sec-Fetch-Site": "same-origin", Cookie: cookie } });
+      expect(await asset.text()).toBe("window.appLoaded = true;");
+      const bridge = await (await relay("/__plannotator__/bridge.js", { headers: { "Sec-Fetch-Site": "same-origin", Cookie: cookie } })).text();
+      expect(bridge).toContain(JSON.stringify([windowOrigin]));
+      expect(bridge).toContain(wire.token);
+      // A loopback redirect stays on the relay.
+      expect((await relay("/old", { headers: signedIn })).headers.get("location")).toBe("/checkout?v=b");
+
+      // Refused: another account, a wrong Host, no login, another site, a key no running proxy has, no cookie.
+      expect((await relay("/checkout?v=b", { login: "someone@example.com", headers: signedIn })).status).toBe(403);
+      expect((await relay("/checkout?v=b", { host: `127.0.0.1:${relayPort}`, headers: signedIn })).status).toBe(403);
+      expect((await relay("/checkout?v=b", { login: null, headers: signedIn })).status).not.toBe(200);
+      expect((await relay("/checkout?v=b", { headers: { ...signedIn, "Sec-Fetch-Site": "cross-site" } })).status).toBe(403);
+      expect((await relay("/assets/app.js", { headers: { "Sec-Fetch-Site": "same-site", "Sec-Fetch-Mode": "no-cors", Cookie: cookie } })).status).toBe(403);
+      expect((await relay(`/__plannotator__/relay?k=${"0".repeat(32)}&to=%2F`, { headers: frameLoad })).status).toBe(403);
+      expect((await relay("/checkout?v=b", { headers: { ...frameLoad, Cookie: "__Host-plannotator-relay=nope" } })).status).toBe(403);
+      expect((await relay("/checkout?v=b", { headers: frameLoad })).status).toBe(403);
+
+      // A clean stop takes both mappings down.
+      servers.splice(servers.indexOf(inbox), 1);
+      inbox.stop();
+      expect(ts.serve.size).toBe(0);
+    } finally {
+      app.stop(true);
     }
-    expect(launches).toEqual([]);
-    const config = JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8"));
-    expect(config.autoUpdate).toBeUndefined();
-    expect(config.updateCheck).toBeUndefined();
-    // The same Update now works on this computer.
-    const local = await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/update`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-    expect(local.status).toBe(200);
-    expect(launches).toHaveLength(1);
   });
 
-  test("the one-time sound dialog is never claimed through the tailnet; it waits for a page on this computer", async () => {
+  test("a relay mapping a run before left is taken down at the next start, and by uninstall --purge", async () => {
+    const dataDir = world({ inboxTailscale: true });
+    const ts = fakeTailscale();
+    const crashed = await start(dataDir, ts.run);
+    const port = crashed.port;
+    const deadTarget = ts.serve.get(port)!;
+    const deadRegistry = registryOf(dataDir);
+    crashed.stop();
+    servers.splice(0);
+    // kill -9 while a phone had a prototype open: the window's mapping, the relay's and the record stay.
+    const relayPort = 61234;
+    deadRegistry.tailscale.relay_port = relayPort;
+    ts.serve.set(port, deadTarget);
+    ts.serve.set(relayPort, `http://127.0.0.1:${relayPort}`);
+    writeFileSync(join(dataDir, "inbox", "inbox.json"), JSON.stringify(deadRegistry));
+    const next = await start(dataDir, ts.run);
+    expect(ts.serve.has(relayPort)).toBe(false);
+    expect(registryOf(dataDir).tailscale.relay_port).toBeUndefined();
+    expect(ts.serve.get(port)).toBe(`http://127.0.0.1:${next.tailscale.listenerPort()}`);
+    next.stop();
+    servers.splice(0);
+
+    ts.serve.set(relayPort, `http://127.0.0.1:${relayPort}`);
+    writeFileSync(join(dataDir, "inbox", "inbox.json"), JSON.stringify(deadRegistry));
+    expect(takeDownInboxTailscale(dataDir, ts.run)).toBe("removed");
+    expect(ts.serve.has(relayPort)).toBe(false);
+  });
+});
+
+// Who may use the update control, the agents and the other owner settings is inbox-tailnet-owner.test.ts.
+describe("what the owner reads through the tailnet, and what a page there never claims", () => {
+  test("What's new and its images answer the owner over the tailnet, read only", async () => {
+    const dataDir = world({ inboxTailscale: true });
+    let githubRequests = 0;
+    const github = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch() {
+        githubRequests++;
+        const png = new Uint8Array(33);
+        png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+        new DataView(png.buffer).setUint32(16, 4);
+        new DataView(png.buffer).setUint32(20, 5);
+        png.set([8, 6, 0, 0, 0], 24);
+        return new Response(png);
+      },
+    });
+    try {
+      setEnv("PLANNOTATOR_UPDATE_API_URL", `http://127.0.0.1:${github.port}/repos/backnotprop/plannotator/releases/latest`);
+      const src = `http://127.0.0.1:${github.port}/user-attachments/assets/a`;
+      writeFileSync(join(dataDir, "update-state.json"), JSON.stringify({ latestRelease: { tag: "0.28.12", fetchedAt: Date.now() } }));
+      writeReleaseNotes({ version: "0.28.12", notes: `Notes.\n\n![a](${src})`, highlights: [] }, dataDir);
+      await fetchReleaseImagesFor({ version: "0.28.12", dataDir, enabled: () => true });
+      const ts = fakeTailscale();
+      const launches: unknown[] = [];
+      const inbox = await start(dataDir, ts.run, {
+        version: "0.28.10",
+        updates: { fetchRelease: async () => ({ ok: false, error: "offline" }), isManaged: () => true, listSessions: () => [], launchInstaller: (l) => void launches.push(l) },
+      });
+      const own = { Origin: `https://${MAGIC}:${inbox.port}`, "Content-Type": "application/json" };
+      const page = "/api/inbox/whats-new?version=0.28.12";
+      const image = `/api/inbox/whats-new/image?version=0.28.12&src=${encodeURIComponent(src)}`;
+      const before = githubRequests;
+      const stateBefore = readFileSync(join(dataDir, "update-state.json"), "utf8");
+
+      // This computer: as before.
+      const local = await fetch(`http://127.0.0.1:${inbox.port}${page}`);
+      expect(local.status).toBe(200);
+      expect(((await local.json()) as Json).images).toEqual([src]);
+      expect((await fetch(`http://127.0.0.1:${inbox.port}${image}`)).status).toBe(200);
+
+      // The owner over the tailnet: the notes, and the image with the route's own headers.
+      const owner = await throughServe(inbox, page, { headers: own });
+      expect(owner.status).toBe(200);
+      expect(await owner.json()).toMatchObject({ version: "0.28.12", current: "0.28.10", images: [src] });
+      const picture = await throughServe(inbox, image, { headers: own });
+      expect(picture.status).toBe(200);
+      expect(picture.headers.get("content-type")).toBe("image/png");
+      expect(picture.headers.get("cross-origin-resource-policy")).toBe("same-origin");
+      // The route's guards still hold there.
+      expect(await codeOf(await throughServe(inbox, image, { headers: { ...own, "Sec-Fetch-Site": "cross-site" } }))).toEqual([403, "cross_site"]);
+      expect(await codeOf(await throughServe(inbox, `${image}x`, { headers: own }))).toEqual([404, "image_not_referenced"]);
+      // Read only: nothing else gets in.
+      expect((await throughServe(inbox, page, { method: "POST", headers: own, body: "{}" })).status).toBe(405);
+      expect((await throughServe(inbox, image, { method: "POST", headers: own, body: "{}" })).status).toBe(405);
+
+      // The window is told where it is.
+      const settings = async (login: string | null) =>
+        (await (login === null ? fetch(`http://127.0.0.1:${inbox.port}/api/inbox/settings`) : throughServe(inbox, "/api/inbox/settings", { login, headers: own }))).json() as Promise<Json>;
+      expect(await settings(OWNER)).toMatchObject({ via: "tailnet", version: "0.28.10" });
+      expect(await settings(null)).toMatchObject({ via: "local" });
+      expect(launches).toEqual([]);
+      // Nothing was fetched or written by reading it.
+      expect(githubRequests).toBe(before);
+      expect(readFileSync(join(dataDir, "update-state.json"), "utf8")).toBe(stateBefore);
+    } finally {
+      github.stop(true);
+    }
+  });
+
+  test("the one-time sound dialog is claimed by the owner's page over the tailnet as on this computer, once", async () => {
     const dataDir = world({ inboxTailscale: true });
     writeFileSync(join(dataDir, "update-state.json"), JSON.stringify({ inboxVersion: "0.28.9" }));
     const ts = fakeTailscale();
@@ -742,34 +1025,13 @@ describe("the update control never answers through the tailnet", () => {
     const own = { Origin: `https://${MAGIC}:${inbox.port}`, "Content-Type": "application/json" };
     const remote = await throughServe(inbox, "/api/inbox/sound/dialog", { method: "POST", headers: own, body: JSON.stringify({ serverSession: inbox.serverSession }) });
     expect(remote.status).toBe(200);
-    expect(((await remote.json()) as Json).show).toBe(false);
-    expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxSound).toEqual({ dialogDueFor: "0.28.10" });
+    expect(((await remote.json()) as Json).show).toBe(true);
+    expect(savedConfig(dataDir).inboxSound).toMatchObject({ dialogShownFor: "0.28.10" });
     const local = await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/sound/dialog`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ serverSession: inbox.serverSession }),
     });
-    expect(((await local.json()) as Json).show).toBe(true);
-  });
-
-  // The Inbox reminder goes into every agent session on this computer: the
-  // owner's page over the tailnet reads Settings → Prompts but cannot change it.
-  test("Settings → Prompts is read-only through the tailnet", async () => {
-    const dataDir = world({ inboxTailscale: true });
-    const ts = fakeTailscale();
-    const inbox = await start(dataDir, ts.run);
-    const own = { Origin: `https://${MAGIC}:${inbox.port}`, "Content-Type": "application/json" };
-    const read = await throughServe(inbox, "/api/inbox/settings", { headers: own });
-    expect(read.status).toBe(200);
-    expect((((await read.json()) as Json).prompts as { reminder: { editable: boolean } }).reminder.editable).toBe(false);
-    const write = await throughServe(inbox, "/api/inbox/settings", {
-      method: "POST",
-      headers: own,
-      body: JSON.stringify({ serverSession: inbox.serverSession, prompts: { inbox: { reminder: "Mine." } } }),
-    });
-    expect(await codeOf(write)).toEqual([403, "local_only"]);
-    expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).prompts).toBeUndefined();
-    const local = await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/settings`);
-    expect((((await local.json()) as Json).prompts as { reminder: { editable: boolean } }).reminder.editable).toBe(true);
+    expect(((await local.json()) as Json).show).toBe(false);
   });
 });

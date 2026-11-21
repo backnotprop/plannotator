@@ -8,7 +8,7 @@
  */
 
 import { join, resolve, sep } from "path";
-import { mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, existsSync } from "fs";
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, existsSync, rmSync } from "fs";
 import { sanitizeTag } from "./project";
 import { resolveUserPath } from "./resolve-file";
 import { getPlannotatorDataDir } from "./data-dir";
@@ -219,15 +219,29 @@ function getNextVersionNumber(historyDir: string): number {
   }
 }
 
+/** The agent session that submitted a plan version, as plan review knows it (its host, session id and name). */
+export interface HistoryAgent {
+  host: string;
+  session: string;
+  name: string | null;
+}
+
+/** A version's agent file beside it: `NNN.agent.json` (never matched by the `NNN.md` scans). */
+export const historyAgentFile = (version: number) => `${String(version).padStart(3, "0")}.agent.json`;
+
 /**
  * Save a plan version to the history directory.
  * Deduplication: if the latest version has identical content, skip saving.
  * Returns the version number, file path, and whether a new file was created.
+ * `agent`: the session that submitted it, written first beside it (`NNN.agent.json`), so the Inbox can say that
+ * agent is working on the plan while that session is live; none known, no file (and none left from before). Plan
+ * review passes one only while Plans is on (apps/hook/server/index.ts), so off it writes nothing new.
  */
 export function saveToHistory(
   project: string,
   slug: string,
-  plan: string
+  plan: string,
+  options: { agent?: HistoryAgent | null } = {},
 ): { version: number; path: string; isNew: boolean } {
   const historyDir = getHistoryDir(project, slug);
   const nextVersion = getNextVersionNumber(historyDir);
@@ -247,6 +261,13 @@ export function saveToHistory(
 
   const fileName = `${String(nextVersion).padStart(3, "0")}.md`;
   const filePath = join(historyDir, fileName);
+  const agentPath = join(historyDir, historyAgentFile(nextVersion));
+  try {
+    if (options.agent) writeFileSync(agentPath, JSON.stringify({ host: options.agent.host, session: options.agent.session, name: options.agent.name }), "utf-8");
+    else rmSync(agentPath, { force: true });
+  } catch {
+    // The version without its agent: the Inbox only says less.
+  }
   writeFileSync(filePath, plan, "utf-8");
   return { version: nextVersion, path: filePath, isNew: true };
 }
@@ -479,4 +500,33 @@ export function resolveHistorySlug(
 
   if (best && best.mtime > 0 && now - best.mtime <= PLAN_HISTORY_CONTINUE_WINDOW_MS) return best.slug;
   return datedSlug;
+}
+
+/**
+ * Pick the history project AND slug a plan appends to (#2197). `projects` is
+ * the order to look for an EXISTING chain in; the first one is also where a
+ * new chain starts. The Claude Code hosts pass the CLI's current folder's
+ * project first and the session root's second: a session that `cd`s into
+ * another repository between two submits keeps one chain (the second submit
+ * finds the first's chain under the root's project), while a plan whose chain
+ * the current folder's project holds, and every new plan, land exactly where
+ * they did before this rule. So a nested clone keeps its own new plans, and
+ * two clones' same-heading plans never merge.
+ *
+ * Each candidate runs `resolveHistorySlug` unchanged (its 48 h rule applies
+ * per project). One candidate (every other host) is exactly
+ * `resolveHistorySlug`.
+ */
+export function resolveHistoryChain(
+  projects: readonly string[],
+  datedSlug: string,
+  options: { now?: Date; current?: string } = {},
+): { project: string; slug: string } {
+  const candidates = [...new Set(projects.filter((project) => project))];
+  const home = candidates[0] ?? "_unknown";
+  for (const project of candidates) {
+    const slug = resolveHistorySlug(project, datedSlug, options);
+    if (getVersionCount(project, slug) > 0) return { project, slug };
+  }
+  return { project: home, slug: resolveHistorySlug(home, datedSlug, options) };
 }

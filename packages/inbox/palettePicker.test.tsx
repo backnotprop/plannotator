@@ -19,7 +19,7 @@
  * The root's mode is the `light` class on <html> (ThemeProvider's
  * applyThemeClasses); dark is its absence.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -138,8 +138,10 @@ beforeEach(() => {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     const method = init?.method ?? 'GET';
-    if (path === '/api/inbox/settings' && method === 'GET' && settingsGate) await settingsGate;
-    if (path === '/api/inbox/settings' && method === 'POST' && init?.body) posted.push(JSON.parse(String(init.body)));
+    // The route without its query: the window reads `/api/inbox/settings?store=0`.
+    const route = path.split('?')[0];
+    if (route === '/api/inbox/settings' && method === 'GET' && settingsGate) await settingsGate;
+    if (route === '/api/inbox/settings' && method === 'POST' && init?.body) posted.push(JSON.parse(String(init.body)));
     const answer = await loopback(path, method, init?.body ? String(init.body) : undefined);
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;

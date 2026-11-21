@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { compress, decompress } from '@plannotator/core/compress';
 import { decrypt, encrypt } from '@plannotator/core/crypto';
 import { useSharing } from './useSharing';
-import { AnnotationType, type Annotation, type ImageAttachment } from '../types';
+import { AnnotationType, type Annotation, type DocumentRenderAs, type ImageAttachment } from '../types';
 import { fromShareable, loadFromPasteId, type SharePayload } from '../utils/sharing';
 import { ExportModal } from '../components/ExportModal';
 
@@ -70,7 +70,7 @@ function Harness({
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
   const [rawHtml, setRawHtml] = useState('');
   const [shareHtml, setShareHtml] = useState('');
-  const [, setRenderAs] = useState<'markdown' | 'html'>('markdown');
+  const [, setRenderAs] = useState<DocumentRenderAs>('markdown');
   const result = useSharing(
     markdown,
     annotations,

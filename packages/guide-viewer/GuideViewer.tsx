@@ -27,6 +27,8 @@ export interface GuideViewerProps<P extends object> {
   headerActions?: React.ReactNode;
   /** Draws the overview's diagram (format version 2); see `GuideHostValue.renderOverviewDiagram`. */
   renderOverviewDiagram?: GuideHostValue['renderOverviewDiagram'];
+  /** Draws a chapter's diagram (format version 5); see `GuideHostValue.renderChapterDiagram`. */
+  renderChapterDiagram?: GuideHostValue['renderChapterDiagram'];
   className?: string;
 }
 
@@ -57,7 +59,7 @@ export function engineLabel(engine: string | undefined, model: string | undefine
   return model ? `${label} · ${model}` : label;
 }
 
-export function GuideViewer<P extends object>({ snapshot, DiffRenderer, getDiffRendererProps, sourceLine, headerActions, renderOverviewDiagram, className }: GuideViewerProps<P>) {
+export function GuideViewer<P extends object>({ snapshot, DiffRenderer, getDiffRendererProps, sourceLine, headerActions, renderOverviewDiagram, renderChapterDiagram, className }: GuideViewerProps<P>) {
   const files = useMemo<DiffFile[]>(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
   const guide = useMemo<CodeGuideData>(
     () => ({
@@ -77,8 +79,8 @@ export function GuideViewer<P extends object>({ snapshot, DiffRenderer, getDiffR
   }, []);
 
   const host = useMemo(
-    () => ({ files, DiffRenderer, getDiffRendererProps, renderOverviewDiagram }),
-    [files, DiffRenderer, getDiffRendererProps, renderOverviewDiagram],
+    () => ({ files, DiffRenderer, getDiffRendererProps, renderOverviewDiagram, renderChapterDiagram }),
+    [files, DiffRenderer, getDiffRendererProps, renderOverviewDiagram, renderChapterDiagram],
   );
 
   return (

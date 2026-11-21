@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useTheme } from "@plannotator/ui/components/ThemeProvider";
-import { BUILT_IN_THEMES } from "@plannotator/ui/utils/themeRegistry";
+import { findTheme } from "@plannotator/ui/utils/themeRegistry";
 import type { CreateAgentTerminalSessionOptions } from "@plannotator/webtui/browser";
 
 type TerminalOptions = NonNullable<CreateAgentTerminalSessionOptions["terminalOptions"]>;
@@ -446,6 +446,33 @@ const TERMINAL_THEME_PRESETS: Record<string, Partial<Record<TerminalThemeMode, A
       brightWhite: "#c0caf5",
     },
   },
+  "tokyo-night-moon": {
+    dark: {
+      background: "#222436",
+      foreground: "#c8d3f5",
+      cursor: "#c8d3f5",
+      cursorAccent: "#222436",
+      selectionBackground: "#2d3f76",
+      selectionForeground: "#c8d3f5",
+      selectionInactiveBackground: "#2f334d",
+      black: "#1b1d2b",
+      red: "#ff757f",
+      green: "#c3e88d",
+      yellow: "#ffc777",
+      blue: "#82aaff",
+      magenta: "#c099ff",
+      cyan: "#86e1fc",
+      white: "#828bb8",
+      brightBlack: "#444a73",
+      brightRed: "#ff757f",
+      brightGreen: "#c3e88d",
+      brightYellow: "#ffc777",
+      brightBlue: "#82aaff",
+      brightMagenta: "#c099ff",
+      brightCyan: "#86e1fc",
+      brightWhite: "#c8d3f5",
+    },
+  },
 };
 
 for (const themeId of ["everforest", "everforest-hard", "everforest-soft"]) {
@@ -543,7 +570,7 @@ export function resolveAnnotateAgentTerminalMode(
   colorTheme: string,
   requestedMode: TerminalThemeMode,
 ): TerminalThemeMode {
-  const themeInfo = BUILT_IN_THEMES.find((theme) => theme.id === colorTheme);
+  const themeInfo = findTheme(colorTheme);
   if (themeInfo?.modeSupport === "dark-only") return "dark";
   if (themeInfo?.modeSupport === "light-only") return "light";
   return requestedMode;
@@ -713,8 +740,7 @@ function createFallbackTerminalPalette(
   colorTheme: string,
   mode: TerminalThemeMode,
 ): ResolvedTerminalPalette {
-  const themeInfo = BUILT_IN_THEMES.find((theme) => theme.id === colorTheme)
-    ?? BUILT_IN_THEMES.find((theme) => theme.id === "plannotator");
+  const themeInfo = findTheme(colorTheme) ?? findTheme("plannotator");
   const colors = themeInfo?.colors[mode] ?? themeInfo?.colors.dark;
   const defaultTheme = mode === "light"
     ? PLANNOTATOR_LIGHT_TERMINAL_THEME

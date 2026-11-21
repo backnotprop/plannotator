@@ -35,7 +35,7 @@
  * .local/proof/shared-events/results.json.
  */
 
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type CDPSession, type Page } from './inbox-test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { removeInboxScratch, stopScratchInbox } from './inbox-scratch';
@@ -58,6 +58,7 @@ import {
   startInbox,
   streams,
   waitFor,
+  WORK_THREAD,
   type World,
 } from './inbox-shared-events-world';
 
@@ -88,12 +89,12 @@ async function world(browser: Browser, options: Parameters<typeof newWorld>[1] =
 /** One message so the list has a row to wait for. */
 async function seed(w: World): Promise<void> {
   const sim = await agent(w);
-  await sim.send({ project_path: w.project, body: 'Starting on the billing work.' });
+  await sim.send({ project_path: w.project, thread: WORK_THREAD, body: 'Starting on the billing work.' });
 }
 
 async function sendSome(w: World, count: number): Promise<void> {
   const sim = w.agents[0]!;
-  for (let i = 0; i < count; i++) await sim.send({ project_path: w.project, body: `Update ${Date.now()}-${i}` });
+  for (let i = 0; i < count; i++) await sim.send({ project_path: w.project, thread: WORK_THREAD, body: `Update ${Date.now()}-${i}` });
 }
 
 
@@ -153,6 +154,21 @@ test('the code before this change stalls the seventh tab; the shared stream load
   results.stall = { oldLoadsMs: oldLoads, oldSeventhStalledForMs: stalledMs, oldSeventhLoadedAfterOneClosedMs: afterFreeMs, newLoadsMs: newLoads, newNinthMs: ninth.ms };
 });
 
+/** Hold even an idle page: Debugger.pause only schedules a pause at the next script. */
+async function holdMainThread(cdp: CDPSession): Promise<() => Promise<void>> {
+  await cdp.send('Debugger.enable');
+  const paused = new Promise<void>((resolve) => cdp.once('Debugger.paused', () => resolve()));
+  const evaluation = cdp.send('Runtime.evaluate', { expression: 'debugger;' });
+  await Promise.race([
+    paused,
+    evaluation.then(() => { throw new Error('Debugger evaluation completed without pausing'); }),
+  ]);
+  return async () => {
+    await cdp.send('Debugger.resume');
+    await evaluation;
+  };
+}
+
 /**
  * Close, reload, crash, freeze or stall the leader while an agent writes;
  * measure how fast another tab leads and the longest a tab in front went
@@ -174,6 +190,7 @@ async function handover(browser: Browser, how: 'close' | 'reload' | 'crash' | 'f
   await new Promise((done) => setTimeout(done, 600));
   const at = Date.now();
   let cdp: Awaited<ReturnType<typeof w.context.newCDPSession>> | null = null;
+  let resumeMainThread: (() => Promise<void>) | null = null;
   if (how === 'close') {
     await leader!.close();
     forget(w, leader!);
@@ -184,26 +201,28 @@ async function handover(browser: Browser, how: 'close' | 'reload' | 'crash' | 'f
     void cdp.send('Page.crash').catch(() => {});
     forget(w, leader!);
   } else if (how === 'stall') {
-    // No freeze event: the debugger holds the page's main thread from its next script on (its stream's next frame).
+    // No freeze event: the debugger holds the page's main thread while its stream keeps receiving frames.
     cdp = await w.context.newCDPSession(leader!);
-    await cdp.send('Debugger.enable');
-    await cdp.send('Debugger.pause');
+    resumeMainThread = await holdMainThread(cdp);
   } else {
     // Chrome freezes a page by dispatching `freeze`, running its microtasks, then running nothing more until
     // `resume`. Headless pages are always visible, so CDP's Page.setWebLifecycleState does not freeze them
     // (checked: no freeze event fires); the same sequence is played instead: the event, then the debugger
     // holds the page's main thread (its stream's frames and the channel's messages queue up), then resume.
     cdp = await w.context.newCDPSession(leader!);
-    await cdp.send('Debugger.enable');
     await leader!.evaluate(() => document.dispatchEvent(new Event('freeze')));
-    await cdp.send('Debugger.pause');
+    resumeMainThread = await holdMainThread(cdp);
   }
   // Streams on the server, sampled until the leader runs again (never more than two: the stalled one and the new).
   const streamSamples: number[] = [];
+  /** When (ms after the leader went) the server last counted more than one stream. */
+  let lastTwoMs = 0;
   let sampling = true;
   const sampler = (async () => {
     while (sampling) {
-      streamSamples.push(await streams(w));
+      const n = await streams(w);
+      streamSamples.push(n);
+      if (n > 1) lastTwoMs = Date.now() - at;
       await new Promise((done) => setTimeout(done, 100));
     }
   })();
@@ -230,11 +249,11 @@ async function handover(browser: Browser, how: 'close' | 'reload' | 'crash' | 'f
   if (how === 'freeze') {
     await expect.poll(() => streams(w)).toBe(1);
     // It wakes: it fetches what it missed and follows.
-    await cdp!.send('Debugger.resume');
+    await resumeMainThread!();
     await leader!.evaluate(() => document.dispatchEvent(new Event('resume')));
   }
   if (how === 'stall') {
-    await cdp!.send('Debugger.resume');
+    await resumeMainThread!();
     // It runs again: it learns the lock was taken, closes its stream and follows.
     const rejoin = await waitFor(
       async () => (await logOf(leader!)).filter((e) => e.at >= at).map((e) => e.type),
@@ -250,6 +269,8 @@ async function handover(browser: Browser, how: 'close' | 'reload' | 'crash' | 'f
     // It is a follower now: what is written next reaches it too.
     await sendSome(w, 3);
   }
+  // Sampled to 2.5 s past the takeover, so a second stream still open 2 s after it is seen (and fails below).
+  if (how === 'close' || how === 'reload') while (Date.now() - at < takeover.value! + 2500) await new Promise((done) => setTimeout(done, 100));
   sampling = false;
   await sampler;
   // The tab in front never waited long for a record: its longest gap from the stall on.
@@ -260,6 +281,12 @@ async function handover(browser: Browser, how: 'close' | 'reload' | 'crash' | 'f
   const checked = await expectEveryRecordOnce(w, w.pages, { exact: false });
   await expect.poll(() => streams(w)).toBe(1);
   expect(await leaders(w.pages)).toHaveLength(1);
+  if (how === 'close' || how === 'reload') {
+    // By the tabs' own logs: one tab took the stream and none gave it up since (two leading at once ends in a step-down).
+    const since = (await Promise.all(w.pages.map(async (page) => (await logOf(page)).filter((e) => e.at >= at)))).flat();
+    expect(since.filter((e) => e.type === 'lead')).toHaveLength(1);
+    expect(since.filter((e) => e.type === 'step-down' || e.type === 'stolen')).toEqual([]);
+  }
   // A leader that closes or reloads frees its lock at once: the next tab leads within a second. A frozen one steps
   // down at its freeze event (2 s on a slow machine). A crashed one frees its lock when the browser notices the
   // renderer died: at once on macOS (2 ms), about 3 s on GitHub's Linux runners; were it longer, the tab in front
@@ -267,8 +294,12 @@ async function handover(browser: Browser, how: 'close' | 'reload' | 'crash' | 'f
   const bound = how === 'stall' || how === 'crash' ? 7000 : how === 'freeze' ? 2000 : 1000;
   expect(takeover.value!).toBeLessThan(bound);
   expect(frontLongestGapMs).toBeLessThan(bound + 500);
-  // A crashed tab's connection can outlive its lock for a moment (the tab in front may lead first): two then.
-  expect(Math.max(...streamSamples)).toBeLessThanOrEqual(how === 'stall' || how === 'crash' ? 2 : 1);
+  // The server counts a stream until it hears the socket close. A closed or reloaded tab's lock goes at pagehide, so
+  // the next tab's stream can reach the server first; a crashed tab's connection can outlive its lock for longer.
+  // Two then, never three.
+  expect(Math.max(...streamSamples)).toBeLessThanOrEqual(how === 'freeze' ? 1 : 2);
+  // And only for that moment: a second stream still open 2 s after the new leader led is a second leader, not a socket the server has yet to see close.
+  if (how === 'close' || how === 'reload') expect(lastTwoMs).toBeLessThan(takeover.value! + 2000);
   // A crashed target answers nothing more: never wait on it.
   if (cdp && how !== 'crash') await cdp.detach().catch(() => {});
   if (how === 'crash') void leader!.close().catch(() => {});
@@ -502,14 +533,13 @@ test('soak: tabs open, close, reload, crash, come to the front and stall at rand
       if (leader) {
         if (!front || front === leader) await bringToFront(w.pages.find((p) => p !== leader)!);
         const cdp = await w.context.newCDPSession(leader);
-        await cdp.send('Debugger.enable');
-        await cdp.send('Debugger.pause');
+        const resumeMainThread = await holdMainThread(cdp);
         const stallUntil = Date.now() + 3000 + Math.floor(random() * 6000);
         while (Date.now() < stallUntil) {
           await new Promise((done) => setTimeout(done, 300));
           stallSamples.push(await streams(w));
         }
-        await cdp.send('Debugger.resume');
+        await resumeMainThread();
         await cdp.detach().catch(() => {});
         actions.stall++;
         if ((await logOf(leader)).some((e) => e.type === 'stolen')) actions.stallTakenOver++;

@@ -6,8 +6,11 @@
  * "plannotator-bridge-*" message protocol.
  *
  * This is a string constant — it gets prepended to the iframe's srcdoc.
- * No external dependencies.
+ * Its one import, ./sandboxShim, is a dependency-free string constant as well;
+ * the Pi extension vendors both files (apps/pi-extension/vendor.sh).
  */
+import { SANDBOX_SHIM_SCRIPT } from "./sandboxShim";
+import { LINK_GUARD_FUNCTION } from "./linkGuard";
 
 /**
  * Reads only viewer-namespaced \`--pn-*\` variables (with fallbacks): arbitrary
@@ -59,6 +62,10 @@ export const ANNOTATION_HIGHLIGHT_CSS = `
 body[data-plannotator-pinpoint-cursor],
 body[data-plannotator-pinpoint-cursor] * {
   cursor: crosshair !important;
+}
+/* Armed, body listens for clicks so a tap pins (setTapTarget): no grey flash over the whole page on each tap. */
+body[data-plannotator-pinpoint-cursor] {
+  -webkit-tap-highlight-color: transparent;
 }
 /* A plain click on a link with a real destination follows it while armed
  * (Cmd/Ctrl-click pins it), so such a link keeps the pointer that says so,
@@ -272,8 +279,12 @@ body[data-plannotator-vim-focus-owner]:focus {
  * they match by construction; the check exists for hosts that serve the
  * generated `bridge-script.asset.js` separately (`bridgeScriptUrl`), where a
  * cached asset from a previous package version can outlive the parent code.
+ *
+ * 2: link-clicks travel only on the link guard's MessagePort (linkGuard.ts),
+ * offered once per load in a `link-offer` message with that load's key,
+ * never on the window.
  */
-export const BRIDGE_PROTOCOL_VERSION = 1;
+export const BRIDGE_PROTOCOL_VERSION = 2;
 
 export const BRIDGE_SCRIPT = `(function() {
   var PREFIX = 'plannotator-bridge-';
@@ -286,7 +297,18 @@ export const BRIDGE_SCRIPT = `(function() {
   // nested same-origin subframes: only the frame whose parent IS the editor
   // may run.
   var LIVE = window.__plannotatorLiveConfig || null;
-  if (LIVE && (window === window.parent || window.parent !== window.top)) return;
+  // The editor's window. A host whose window frames the app through a
+  // same-origin wrapper page (LIVE.nested: the Inbox, whose own policy names
+  // no proxy port) is the grandparent; everywhere else it is the parent.
+  // (typeof: a harness that runs the bridge with no parent at all gets as far as the shim, as before.)
+  var EDITOR = typeof parent === 'undefined' ? null : LIVE && LIVE.nested ? parent.parent : parent;
+  if (LIVE && (window === window.parent || (LIVE.nested ? window.parent.parent : window.parent) !== window.top || (LIVE.nested && window.parent === window.top))) return;
+  // The sandboxed frame's history and storage, made safe for a page that uses
+  // them as it builds itself (sandboxShim.ts). A no-op when the inline path
+  // already ran it first in <head>.
+  if (!LIVE) {
+${SANDBOX_SHIM_SCRIPT}
+  }
   // The server cannot know which origin form (localhost or 127.0.0.1) the
   // editor tab was opened on, so live outbound messages are posted once per
   // listed editor origin: the browser delivers only the post whose
@@ -303,10 +325,32 @@ export const BRIDGE_SCRIPT = `(function() {
     if (LIVE) {
       msg.token = LIVE.token;
       var origins = LIVE.editorOrigins || [];
-      for (var o = 0; o < origins.length; o++) parent.postMessage(msg, origins[o]);
+      for (var o = 0; o < origins.length; o++) EDITOR.postMessage(msg, origins[o]);
       return;
     }
     parent.postMessage(msg, '*');
+  }
+
+  // --- Links go out through the link guard (linkGuard.ts; never live) ---
+  // A link the person followed moves the host (in the Inbox: to another
+  // thread), so it never rides the window-wide postMessage the page's own
+  // script can forge. The guard runs first in the document (the inline path
+  // injects it before any page script), holds the only port the host takes
+  // links on, and sends on it only while a person's click is being dispatched,
+  // for the link that click is on. The bridge only decides WHETHER a click
+  // follows (Interact, Annotate's pin rules, forms) and hands it to the guard.
+  // On the URL path (bridgeScriptUrl) the guard is installed here, from the
+  // key on this script's tag; there a script the page put before the bridge
+  // in <head> runs first and is not covered.
+  if (!LIVE && !window.__plannotatorLinkGuard) {
+    var guardKey = null;
+    try { guardKey = document.currentScript && document.currentScript.getAttribute('data-plannotator-link-key'); } catch (ex) {}
+    if (guardKey) ${LINK_GUARD_FUNCTION}(guardKey);
+  }
+  var linkGuard = LIVE ? null : window.__plannotatorLinkGuard || null;
+  function sendOnLinkPort(msg, kind) {
+    if (!linkGuard || typeof linkGuard.follow !== 'function') return;
+    try { linkGuard.follow(kind, msg); } catch (ex) {}
   }
   // Page identity for multi-page live sessions: annotations are stamped with
   // the page they were made on, and restore filters to the current page.
@@ -346,7 +390,7 @@ export const BRIDGE_SCRIPT = `(function() {
   // (hostTheme), only viewer-namespaced --pn-* properties may be written to its
   // root, and its class list is never touched.
   window.addEventListener('message', function(e) {
-    if (e.source !== parent) return;
+    if (e.source !== EDITOR) return;
     if (LIVE && (!isEditorOrigin(e.origin) || !e.data || e.data.token !== LIVE.token)) return;
     if (!e.data) return;
     if (e.data.type === PREFIX + 'set-vim-help') {
@@ -457,6 +501,98 @@ export const BRIDGE_SCRIPT = `(function() {
   // The frame resizing is what tells the guard its last grow was applied.
   window.addEventListener('resize', postResize, { passive: true });
 
+  // Reports for a host's own controls (HtmlViewer onContentWidth,
+  // onPageScrollUp, onPageTap; the Inbox's size icon on a phone). Opt-in:
+  // nothing here listens or posts until the host asks with set-page-reports,
+  // so a host that never asks gets exactly what it got before.
+  var pageReports = { contentWidth: false, scrollUp: false, tap: false, scale: 1 };
+  var pageReportListeners = { contentWidth: false, motion: false };
+
+  // How wide the page lays out against the frame's own width: a host that can
+  // show the page at another width (the Inbox on a phone: "Desktop size") reads
+  // a page wider than its frame as one made for a wider screen. Posted when
+  // either number changes.
+  var lastContentWidth = '';
+  function postContentWidth() {
+    if (LIVE || !pageReports.contentWidth) return;
+    var root = document.documentElement;
+    if (!root) return;
+    var width = Math.max(root.scrollWidth || 0, document.body ? document.body.scrollWidth || 0 : 0);
+    var viewport = root.clientWidth || window.innerWidth || 0;
+    var key = width + 'x' + viewport;
+    if (key === lastContentWidth) return;
+    lastContentWidth = key;
+    postToParent({ type: PREFIX + 'content-width', width: Math.ceil(width), viewport: Math.ceil(viewport) });
+  }
+
+  // The person scrolling back up, and a tap: a host with a control that fades
+  // over the page shows it again on either. Distances are the person's: on
+  // screen, through the host's scale (a page drawn at 0.3 moves 3 screen px
+  // for 10 of its own). The page or any scroller in it, at least 16 px up in
+  // one go, at most every 200 ms. A tap is a press and a lift within 10 px and
+  // 600 ms, posted with where it landed (the page's own pixels).
+  var scrollTops = typeof WeakMap === 'function' ? new WeakMap() : null;
+  var scrollUpRun = 0;
+  var lastScrollUpPost = 0;
+  function noteScrollForHost(e) {
+    if (LIVE || !pageReports.scrollUp || !scrollTops) return;
+    var t = e.target;
+    var el = t && t.nodeType === 1 ? t : (document.scrollingElement || document.documentElement);
+    if (!el) return;
+    var top = el.scrollTop || 0;
+    var prev = scrollTops.get(el);
+    scrollTops.set(el, top);
+    if (prev === undefined) return;
+    if (top >= prev) { scrollUpRun = 0; return; }
+    scrollUpRun += prev - top;
+    var now = Date.now();
+    if (scrollUpRun * pageReports.scale < 16 || now - lastScrollUpPost < 200) return;
+    scrollUpRun = 0;
+    lastScrollUpPost = now;
+    postToParent({ type: PREFIX + 'page-scroll-up' });
+  }
+  var tapStart = null;
+  function noteTapStart(e) {
+    tapStart = e.isPrimary === false ? null : { x: e.clientX, y: e.clientY, t: Date.now() };
+  }
+  function noteTapEnd(e) {
+    var s = tapStart;
+    tapStart = null;
+    if (LIVE || !pageReports.tap || !s || !e) return;
+    var k = pageReports.scale;
+    if (Math.abs(e.clientX - s.x) * k > 10 || Math.abs(e.clientY - s.y) * k > 10 || Date.now() - s.t > 600) return;
+    postToParent({ type: PREFIX + 'page-tap', y: Math.round(e.clientY) });
+  }
+
+  // The host's set-page-reports: which reports it wants, and how much it
+  // scales the frame on screen. Listeners go on at the first ask and stay
+  // (each report checks its flag), so a repeated ask never stacks them.
+  function setPageReports(data) {
+    var scale = data && data.scale;
+    pageReports.contentWidth = !!data && data.contentWidth === true;
+    pageReports.scrollUp = !!data && data.scrollUp === true;
+    pageReports.tap = !!data && data.tap === true;
+    pageReports.scale = typeof scale === 'number' && isFinite(scale) && scale > 0 ? Math.min(Math.max(scale, 0.05), 20) : 1;
+    if (LIVE) return;
+    if (pageReports.contentWidth && !pageReportListeners.contentWidth) {
+      pageReportListeners.contentWidth = true;
+      window.addEventListener('load', postContentWidth);
+      window.addEventListener('resize', postContentWidth, { passive: true });
+    }
+    if ((pageReports.scrollUp || pageReports.tap) && !pageReportListeners.motion) {
+      pageReportListeners.motion = true;
+      window.addEventListener('scroll', noteScrollForHost, { passive: true, capture: true });
+      window.addEventListener('pointerdown', noteTapStart, { passive: true, capture: true });
+      window.addEventListener('pointercancel', function() { tapStart = null; }, { passive: true, capture: true });
+      window.addEventListener('pointerup', noteTapEnd, { passive: true, capture: true });
+    }
+    if (pageReports.contentWidth) {
+      // A fresh ask always hears the current width, even if it has not changed.
+      lastContentWidth = '';
+      postContentWidth();
+    }
+  }
+
   // --- Selection ---
   var pendingSelection = null;
   var pendingRange = null; // live range for the pending selection (scroll tracking)
@@ -469,6 +605,9 @@ export const BRIDGE_SCRIPT = `(function() {
   var pendingPinKey = null; // target key for the primary pinpoint target (multi-select)
   var pendingPinLabel = null; // semantic label captured for the primary target
   var pendingPinPoint = null; // normalized {x,y} click point inside the pinned element's rect
+  // A host's restore-draft in flight: stamped on the one selection it posts, so
+  // the parent opens its composer for that draft and no other selection.
+  var restoreDraftId = null;
   var pendingPinContext = null; // agent-facing element context for the primary target (see buildElementContext)
   var pendingPinViaPinpoint = false; // pinpoint drafts survive scroll-out (see postSelectionRect)
   // Multi-select is ARMED EXPLICITLY by the parent (arm-multi-select), and only
@@ -508,14 +647,33 @@ export const BRIDGE_SCRIPT = `(function() {
   var annotateModeActive = true;
   // A native host decides link navigations itself (HtmlViewer hostNavigates).
   var hostNavigates = false;
+  // Forms and in-page links work as in a tab (the host's opt-in, \`pageNavigation\`).
+  var pageNavigation = false;
+  // WebKit's touch model (iOS, and Playwright's WebKit on Linux) turns a tap
+  // into mouse events and a click only when the tapped element or an ancestor
+  // up to <body> listens for a click; listeners on document and window (all
+  // of the bridge's) do not count. Without this, a tap on plain text while
+  // armed sends no click and pins nothing. So while armed in pinpoint, body
+  // listens (a no-op), and its tap highlight is off: the pin draws its own box.
+  var tapTargetBody = null;
+  function noteTap() {}
+  function setTapTarget(on) {
+    var body = on ? document.body : null;
+    if (body === tapTargetBody) return;
+    if (tapTargetBody) tapTargetBody.removeEventListener('click', noteTap);
+    tapTargetBody = body;
+    if (body) body.addEventListener('click', noteTap);
+  }
   function updatePinpointCursor() {
     if (!document.body) return;
     if (annotateModeActive && currentInputMethod === 'pinpoint') {
       document.body.setAttribute('data-plannotator-pinpoint-cursor', '');
       if (!LIVE) document.body.setAttribute('data-plannotator-frame-inert', '');
+      setTapTarget(true);
     } else {
       document.body.removeAttribute('data-plannotator-pinpoint-cursor');
       document.body.removeAttribute('data-plannotator-frame-inert');
+      setTapTarget(false);
     }
   }
   var pinpointHover = null;
@@ -610,6 +768,7 @@ export const BRIDGE_SCRIPT = `(function() {
       // The quote above was cut to MAX_SELECTION_TEXT: a plain-text copy made
       // from it alone (no answer to rich-copy-request) says so.
       textCut: text.length < fullText.length ? true : undefined,
+      restoreId: restoreDraftId || undefined,
       rect: { top: rect.top, left: rect.left, width: rect.width, height: rect.height }
     });
     renderAnnotationOverlay(); // draft selection highlight (overlay-projected)
@@ -653,10 +812,17 @@ export const BRIDGE_SCRIPT = `(function() {
 
   // --- Mark Creation ---
   window.addEventListener('message', function(e) {
-    if (e.source !== parent) return;
+    if (e.source !== EDITOR) return;
     if (LIVE && (!isEditorOrigin(e.origin) || !e.data || e.data.token !== LIVE.token)) return;
     if (!e.data || !e.data.type) return;
     var type = e.data.type;
+
+    // Print this document, not the host's viewport-sized iframe. Live apps
+    // keep their own print behavior; no parent DOM access or sandbox change.
+    if (!LIVE && type === PREFIX + 'print') {
+      window.print();
+      return;
+    }
 
     // Copy (rich text) was pressed in the parent: build the pending text
     // range's markup now (never on selection). A throw or an oversized range
@@ -768,7 +934,21 @@ export const BRIDGE_SCRIPT = `(function() {
       renderAnnotationOverlay();
     }
 
+    else if (type === PREFIX + 'set-structural-anchors') {
+      structuralAnchors = e.data.active === true;
+    }
+
+    else if (type === PREFIX + 'set-markers-above') {
+      var above = e.data.active === true;
+      if (above !== markersAbove) {
+        markersAbove = above;
+        renderAnnotationOverlay();
+      }
+    }
+
     else if (type === PREFIX + 'find-and-mark') {
+      // The host's word that this document is the one the comment was made on (structural anchors).
+      if (e.data.structural === true) structuralAnchors = true;
       var found = restoreAnnotation(
         e.data.id,
         e.data.annotationType || 'comment',
@@ -862,6 +1042,10 @@ export const BRIDGE_SCRIPT = `(function() {
       flashMultiTarget(typeof e.data.key === 'string' ? e.data.key : '');
     }
 
+    else if (type === PREFIX + 'restore-draft') {
+      restoreDraft(e.data);
+    }
+
     else if (type === PREFIX + 'step-pin') {
       // A host's Parent or Child (a phone's comment sheet): move the pinned
       // draft to the element around it, or back in. Re-pins through
@@ -872,9 +1056,19 @@ export const BRIDGE_SCRIPT = `(function() {
     else if (type === PREFIX + 'reveal-pin') {
       // A host whose own panel covers the page's lower part (a phone's comment
       // sheet) shrank the frame: bring the pinned draft back into view.
+      // clearBottom: the panel floats over the frame instead (the Inbox's card).
       if (pendingPinEl && pendingPinEl.isConnected) {
-        try { pendingPinEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (ex) {}
+        var clearBottom = e.data.clearBottom;
+        if (typeof clearBottom === 'number' && isFinite(clearBottom) && clearBottom > 0) {
+          revealAbove(pendingPinEl, Math.min(clearBottom, window.innerHeight));
+        } else {
+          try { pendingPinEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (ex) {}
+        }
       }
+    }
+
+    else if (type === PREFIX + 'set-touch-selection') {
+      setTouchSelection(e.data.active === true);
     }
 
     else if (type === PREFIX + 'scroll-to') {
@@ -884,7 +1078,9 @@ export const BRIDGE_SCRIPT = `(function() {
       // first fragment of a multi-paragraph selection. The optional
       // behavior lets the parent pass its reduced-motion preference across
       // the boundary; absent means smooth, as before.
-      scrollToAnnotation(e.data.id, e.data.behavior === 'auto' ? 'auto' : 'smooth');
+      // clear: a host panel floats over the frame's right side (HtmlViewer
+      // scrollClear); a mark under it goes below it where the page scrolls.
+      scrollToAnnotation(e.data.id, e.data.behavior === 'auto' ? 'auto' : 'smooth', panelClear(e.data.clear));
     }
 
     else if (type === PREFIX + 'scroll-to-fragment') {
@@ -922,6 +1118,14 @@ export const BRIDGE_SCRIPT = `(function() {
 
     else if (type === PREFIX + 'set-host-navigates') {
       hostNavigates = e.data.active === true;
+    }
+
+    else if (type === PREFIX + 'set-page-navigation') {
+      pageNavigation = e.data.active === true;
+    }
+
+    else if (type === PREFIX + 'set-page-reports') {
+      setPageReports(e.data);
     }
 
     else if (type === PREFIX + 'set-annotate-mode') {
@@ -1601,6 +1805,11 @@ export const BRIDGE_SCRIPT = `(function() {
   var MARKER_SPREAD_STEP = 12.5;   // horizontal step for coincident markers
   var MARKER_SPREAD_EDGE = 28.5;   // effective edge clamp while spreading
   var MARKER_ASSOC_TOLERANCE = 16; // clamped point must stay this close to the visible target
+  var MARKER_ABOVE_LIFT = 13;      // markersAbove: the bubble's tail just over the element's top edge
+  // The host's opt-in (set-markers-above): an element's marker sits on its
+  // top edge, above it, at the clicked x, so it never covers a small element
+  // (a chart's bar). Where that is not shown, the clicked point, as always.
+  var markersAbove = false;
   var MAX_HIGHLIGHT_RECTS = 48;    // highlight rects drawn per range target
   var MAX_SYNC_ANNOTATIONS = 512;  // parent-synced numbering entries
 
@@ -2713,11 +2922,11 @@ export const BRIDGE_SCRIPT = `(function() {
           var zeroSize = layoutActive() && !(rect.width || 0) && !(rect.height || 0);
           var styleHidden = !zeroSize && targetStyleHidden(el);
           var point = target.point || { x: 0.5, y: 0.5 };
-          var placed = zeroSize || styleHidden ? null : markerViewportPoint(
-            clippedTargetRect(el, rect),
-            rect.left + point.x * (rect.width || 0),
-            rect.top + point.y * (rect.height || 0)
-          );
+          var markerX = rect.left + point.x * (rect.width || 0);
+          var visibleRect = zeroSize || styleHidden ? null : clippedTargetRect(el, rect);
+          var placed = !visibleRect ? null
+            : (markersAbove && markerViewportPoint(visibleRect, markerX, rect.top - MARKER_ABOVE_LIFT))
+              || markerViewportPoint(visibleRect, markerX, rect.top + point.y * (rect.height || 0));
           if (placed && seenRecordElements.indexOf(el) >= 0) placed = null;
           if (placed) {
             seenRecordElements.push(el);
@@ -2818,25 +3027,71 @@ export const BRIDGE_SCRIPT = `(function() {
     }
   }
 
-  function scrollToAnnotation(id, behavior) {
+  function scrollToAnnotation(id, behavior, clear) {
     var record = findAnnRecord(id);
     if (!record) return;
     beginDeadSearchPass(Infinity); // user-initiated one-shot: never budget-starved
     refreshRecordTargets(record);
     var scrollEl = null;
+    var box = null;
     for (var i = 0; i < record.targets.length && !scrollEl; i++) {
       var target = record.targets[i];
       if (target.kind === 'element' && target.element && target.element.isConnected) {
         scrollEl = target.element;
+        box = scrollEl.getBoundingClientRect();
       } else if (target.kind === 'range' && rangeAlive(target.range)) {
         var node = target.range.startContainer;
         scrollEl = node.nodeType === 1 ? node : node.parentElement;
+        try { box = target.range.getBoundingClientRect(); } catch (ex) { box = null; }
       }
     }
     if (scrollEl) {
-      try { scrollEl.scrollIntoView({ behavior: behavior || 'smooth', block: 'center' }); } catch (ex) {}
+      var by = clear && box ? clearOfPanelBy(box, clear) : null;
+      if (by === null) {
+        try { scrollEl.scrollIntoView({ behavior: behavior || 'smooth', block: 'center' }); } catch (ex) {}
+      } else if (by !== 0) {
+        scrollPageBy(scrollEl, by, behavior || 'smooth');
+      }
     }
     focusAnnotationRecord(id, true);
+  }
+
+  // A host's panel over the frame's right side: { left, top, bottom } in frame
+  // pixels, or null when the message carries none (or a malformed one).
+  function panelClear(value) {
+    if (!value || typeof value !== 'object') return null;
+    var left = value.left, top = value.top, bottom = value.bottom;
+    if (typeof left !== 'number' || typeof top !== 'number' || typeof bottom !== 'number') return null;
+    if (!isFinite(left) || !isFinite(top) || !isFinite(bottom) || bottom <= top) return null;
+    return { left: left, top: top, bottom: bottom };
+  }
+
+  // How far to scroll so a mark is not under the host's panel: null to
+  // centre it as before (it is clear of the panel there, or there is no room
+  // below the panel), 0 to leave it where it is (on screen and clear), else
+  // the distance that puts it just below the panel.
+  function clearOfPanelBy(box, clear) {
+    var shown = window.innerHeight;
+    var under = function (top) { return top < clear.bottom && top + box.height > clear.top; };
+    if (box.right <= clear.left) return null;
+    if (!under((shown - box.height) / 2)) return null;
+    if (box.top >= 0 && box.bottom <= shown && !under(box.top)) return 0;
+    var below = clear.bottom + 16;
+    if (below + box.height > shown - 16) return null;
+    return box.top - below;
+  }
+
+  // Scroll the mark's scrolling ancestors by that distance, as far as each can go.
+  function scrollPageBy(el, by, behavior) {
+    var root = document.scrollingElement;
+    for (var node = el.parentElement; node && by; node = node.parentElement) {
+      if (node !== root && !/auto|scroll/.test(getComputedStyle(node).overflowY)) continue;
+      var before = node.scrollTop;
+      var to = Math.max(0, Math.min(node.scrollHeight - node.clientHeight, before + by));
+      if (to === before) continue;
+      try { node.scrollTo({ top: to, behavior: behavior }); } catch (ex) { node.scrollTop = to; }
+      by -= to - before;
+    }
   }
 
   // --- Element anchors: verified-unique CSS selectors for restoration ---
@@ -3023,6 +3278,107 @@ export const BRIDGE_SCRIPT = `(function() {
     return null;
   }
 
+  // --- Structural anchors (opt-in: the parent's set-structural-anchors, or
+  // the flag on its find-and-mark). The host has checked that this document
+  // is, byte for byte, the one the comments were made on (the Inbox: a live
+  // html block's source hash). Only then may an element with no text and no
+  // stable identity be anchored by where it sits: the child index at each
+  // level from the root element down, saved with a signature of the element
+  // (tag, namespace, its own attributes). Restore follows the path and takes
+  // the element ONLY when the signature is exactly the same. It never takes
+  // an element nearby, and a page that builds its DOM differently on each
+  // load fails the check: unanchored. Off (every other host), the rule above
+  // stands: no anchor.
+  var structuralAnchors = false;
+  var STRUCTURE_MAX_DEPTH = 64;
+  var STRUCTURE_MAX_ATTRS = 24;
+  var STRUCTURE_MAX_NAME = 64;
+  var STRUCTURE_MAX_VALUE = 160;
+
+  // The viewer's own overlays are not the page's: they are not counted.
+  function structureChildren(parent) {
+    var out = [];
+    var kids = parent.children || [];
+    for (var i = 0; i < kids.length; i++) {
+      if (!overlayNodes.has(kids[i])) out.push(kids[i]);
+    }
+    return out;
+  }
+
+  function structurePath(el) {
+    var path = [];
+    var current = el;
+    while (current && current !== document.documentElement) {
+      var parent = current.parentElement;
+      if (!parent || path.length >= STRUCTURE_MAX_DEPTH) return null;
+      var index = structureChildren(parent).indexOf(current);
+      if (index < 0) return null;
+      path.unshift(index);
+      current = parent;
+    }
+    return current === document.documentElement && path.length ? path : null;
+  }
+
+  // A long value (a path's d) is kept as a digest and its length.
+  function structureDigest(value) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < value.length; i++) {
+      h ^= value.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h.toString(16);
+  }
+
+  // Null: an element whose attributes are past the caps gets no anchor
+  // (nothing is cut to fit: a shortened signature could match another).
+  function structureSignature(el) {
+    var list = el.attributes;
+    if (!list) return null;
+    var attrs = [];
+    for (var i = 0; i < list.length; i++) {
+      var name = list[i].name;
+      // The viewer's own marks on the page (the armed cursor on body).
+      if (name.indexOf('data-plannotator-') === 0) continue;
+      if (!name || name.length > STRUCTURE_MAX_NAME || attrs.length >= STRUCTURE_MAX_ATTRS) return null;
+      var value = String(list[i].value);
+      // The keyboard pinpoint's hover class on the element is the viewer's, not the page's.
+      if (name === 'class' && value.indexOf('plannotator-pinpoint-hover') >= 0) {
+        var own = value.split(/\\s+/).filter(function(c) { return c && c !== 'plannotator-pinpoint-hover'; });
+        if (!own.length) continue;
+        value = own.join(' ');
+      }
+      attrs.push(value.length <= STRUCTURE_MAX_VALUE ? [name, value] : [name, structureDigest(value), value.length]);
+    }
+    attrs.sort(function(a, b) { return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0; });
+    return { ns: el.namespaceURI || '', attrs: attrs };
+  }
+
+  function buildAnchorStructure(el) {
+    if (!structuralAnchors || isViewerOverlayNode(el)) return null;
+    var path = structurePath(el);
+    var signature = path && structureSignature(el);
+    if (!signature) return null;
+    return { path: path, ns: signature.ns, attrs: signature.attrs };
+  }
+
+  function resolveAnchorStructure(anchor) {
+    var structure = anchor.structure;
+    if (!structuralAnchors || !structure || typeof structure !== 'object') return null;
+    var path = structure.path;
+    if (!Array.isArray(path) || !path.length || path.length > STRUCTURE_MAX_DEPTH || !Array.isArray(structure.attrs)) return null;
+    var current = document.documentElement;
+    for (var i = 0; i < path.length; i++) {
+      if (typeof path[i] !== 'number') return null;
+      current = structureChildren(current)[path[i]];
+      if (!current) return null;
+    }
+    if (current.tagName.toLowerCase() !== anchor.tagName.toLowerCase()) return null;
+    var signature = structureSignature(current);
+    if (!signature || signature.ns !== structure.ns) return null;
+    if (JSON.stringify(signature.attrs) !== JSON.stringify(structure.attrs)) return null;
+    return current;
+  }
+
   function buildElementAnchor(el) {
     if (!el || el.nodeType !== 1) return null;
     var selector = buildAnchorSelector(el);
@@ -3036,7 +3392,12 @@ export const BRIDGE_SCRIPT = `(function() {
     // derived signature would validate the WRONG element after a sibling is
     // inserted or removed. A wrong-binding anchor is worse than no anchor:
     // ship none and fail closed (the pin simply doesn't restore).
-    if (!snapshot && !anchorHasStableIdentity(selector, el)) return null;
+    if (!snapshot && !anchorHasStableIdentity(selector, el)) {
+      // ...unless the host vouches for the document (structural anchors):
+      // then its place and its exact signature, never the selector.
+      var structure = buildAnchorStructure(el);
+      return structure ? { selector: selector, tagName: el.tagName.toLowerCase(), structure: structure } : null;
+    }
     return {
       selector: selector,
       tagName: el.tagName.toLowerCase(),
@@ -3068,6 +3429,8 @@ export const BRIDGE_SCRIPT = `(function() {
 
   function resolveAnchorElement(anchor) {
     if (!anchor || typeof anchor.selector !== 'string' || !anchor.selector || typeof anchor.tagName !== 'string') return null;
+    // A structural anchor resolves by its path and signature or not at all.
+    if (anchor.structure) return resolveAnchorStructure(anchor);
     return resolveAnchorSelector(anchor) || relocateBySource(anchor);
   }
 
@@ -4120,8 +4483,107 @@ export const BRIDGE_SCRIPT = `(function() {
       targetKey: pendingPinKey || undefined,
       targetLabel: pendingPinLabel || undefined,
       context: pendingPinContext || undefined,
+      restoreId: restoreDraftId || undefined,
       rect: { top: r.top, left: r.left, width: r.width, height: r.height } });
     return true;
+  }
+
+  // A host putting back a comment it kept when its file closed (HtmlViewer
+  // reopenComment): pin the element again by its anchor, else select the
+  // quoted words again (their first match), so the parent sees an ordinary
+  // selection carrying this id. Nothing found: restore-draft-missing.
+  function restoreDraft(data) {
+    var id = typeof data.id === 'string' && data.id.length > 0 && data.id.length <= 64 ? data.id : '';
+    if (!id) return;
+    var done = false;
+    restoreDraftId = id;
+    try {
+      var anchor = data.anchor && typeof data.anchor === 'object' ? data.anchor : null;
+      var el = anchor ? resolveAnchorElement(anchor) : null;
+      if (el) {
+        var point = anchor.point;
+        var clickPoint = null;
+        if (point && typeof point.x === 'number' && typeof point.y === 'number' && isFinite(point.x) && isFinite(point.y)) {
+          var box = el.getBoundingClientRect();
+          clickPoint = { x: box.left + point.x * box.width, y: box.top + point.y * box.height };
+        }
+        done = annotateElement(el, undefined, true, clickPoint) === true;
+      }
+      if (!done && typeof data.text === 'string' && data.text) {
+        var range = findTextRange(data.text, null);
+        if (range) {
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          done = handleSelection(undefined, null) === true;
+        }
+      }
+    } catch (ex) {
+      done = false;
+    }
+    restoreDraftId = null;
+    if (!done) postToParent({ type: PREFIX + 'restore-draft-missing', id: id });
+  }
+
+  // The pinned element in the frame's top part, a host's panel over the last
+  // covered pixels: its middle in the middle of what shows, or its top when it
+  // is taller. Already in sight, nothing moves.
+  function revealAbove(el, covered) {
+    var shown = window.innerHeight - covered;
+    var box = el.getBoundingClientRect();
+    if (box.top >= 0 && box.bottom <= shown) return;
+    var by = box.height > shown ? box.top : box.top + box.height / 2 - shown / 2;
+    var root = document.scrollingElement;
+    for (var node = el.parentElement; node && by; node = node.parentElement) {
+      if (node !== root && !/auto|scroll/.test(getComputedStyle(node).overflowY)) continue;
+      var before = node.scrollTop;
+      node.scrollTop = before + by;
+      by -= node.scrollTop - before;
+    }
+  }
+
+  // --- Touch: a selection made with a finger ---
+  // A long press and its handles send no mouseup, so the capture-phase mouseup
+  // listener above never sees them. Where the host asks for it (HtmlViewer
+  // touchSelection) and the main pointer is a finger, the selection is read
+  // from selectionchange once it rests, as the Markdown viewer does. A collapsed
+  // selection is not taken: moving focus out of the frame can collapse it, and
+  // a tap on the page already closes the draft through mouseup. What the bridge
+  // reported already (a pin's own selection, a draft that did not change) is
+  // not reported again. The query and the wait are utils/touchSelection.ts's
+  // (this file is vendored whole and imports nothing; a test keeps them equal).
+  var touchSelectionOn = false;
+  var touchSelectionTimer = 0;
+  function isReportedRange(range) {
+    if (!pendingRange) return false;
+    try {
+      return pendingRange.compareBoundaryPoints(Range.START_TO_START, range) === 0
+        && pendingRange.compareBoundaryPoints(Range.END_TO_END, range) === 0;
+    } catch (ex) {
+      return false;
+    }
+  }
+  function takeTouchSelection() {
+    var sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+    if (isReportedRange(sel.getRangeAt(0))) return;
+    if (!(sel.toString() || '').trim()) return;
+    // New words chosen over a pin: the selection is the draft now.
+    clearMultiTargets();
+    clearPendingPin();
+    handleSelection();
+  }
+  function onTouchSelectionChange() {
+    clearTimeout(touchSelectionTimer);
+    touchSelectionTimer = setTimeout(takeTouchSelection, 400);
+  }
+  function setTouchSelection(active) {
+    var on = active && window.matchMedia('(pointer: coarse)').matches;
+    if (on === touchSelectionOn) return;
+    touchSelectionOn = on;
+    clearTimeout(touchSelectionTimer);
+    if (on) document.addEventListener('selectionchange', onTouchSelectionChange);
+    else document.removeEventListener('selectionchange', onTouchSelectionChange);
   }
 
   // --- Touch: a tap on a link follows it, press-and-hold pins it ---
@@ -4389,6 +4851,26 @@ export const BRIDGE_SCRIPT = `(function() {
     return true;
   }
 
+  // The host's opt-in (pageNavigation): an in-page link also sets the page's
+  // own hash, replacing the entry (a new one would land in the host window's
+  // history), and fires hashchange, so a page that routes on its hash follows
+  // it. Only where the browser lets the page change it (the shim's
+  // replaceState: a served page's own address; a srcdoc keeps its own rules):
+  // when it did not change, nothing fires.
+  function setOwnFragment(hash) {
+    try {
+      var before = location.href;
+      if (location.hash === hash || (hash === '#' && !location.hash)) return;
+      history.replaceState(history.state, '', before.split('#')[0] + (hash === '#' ? '' : hash));
+      var after = location.href;
+      if (after === before) return;
+      var changed;
+      try { changed = new HashChangeEvent('hashchange', { oldURL: before, newURL: after }); }
+      catch (ex) { changed = new Event('hashchange'); }
+      window.dispatchEvent(changed);
+    } catch (ex) {}
+  }
+
   // While armed, whether a click on a link pins it instead of following it:
   // the platform modifier (Cmd or Ctrl), a shift-click adding to an open
   // multi-select draft, or the trailing click of a drag that selected text.
@@ -4437,6 +4919,7 @@ export const BRIDGE_SCRIPT = `(function() {
       if (raw.charAt(0) === '#') {
         e.preventDefault();
         scrollToLocalFragment(raw.slice(1));
+        if (pageNavigation && e.isTrusted) setOwnFragment(raw);
         return;
       }
       e.preventDefault();
@@ -4451,9 +4934,59 @@ export const BRIDGE_SCRIPT = `(function() {
         try { window.open(target && target.href ? target.href : raw, '_blank', 'noopener'); } catch (ex) {}
         return;
       }
-      postToParent({ type: PREFIX + 'link-click', href: raw.slice(0, 2048) });
+      // Through the link guard only (see "Links go out through the link
+      // guard"): the host takes a link from nowhere else.
+      sendOnLinkPort({ type: PREFIX + 'link-click', href: raw.slice(0, 2048) }, 'link');
     }, true);
   }
+
+  // --- Forms (the host's opt-in, pageNavigation; srcdoc and served frames only) ---
+  // The frame's sandbox has no allow-forms, so a press on a submit button
+  // neither fires \`submit\` nor submits. With the host's opt-in, a person's
+  // press fires \`submit\` here (the page's own handlers run and may cancel
+  // it), and a GET form nobody cancelled is handed to the host as its address
+  // with the fields as the query, the same message a link sends: the host
+  // decides (the Inbox loads the page again with that query). Nothing is ever
+  // posted. On the window in the bubble phase, after the page's own click
+  // handlers, so one that cancelled the click wins. Never while Annotate is
+  // armed: there the press pins the button.
+  function submitterOf(node) {
+    var el = node && node.closest ? node.closest('button, input') : null;
+    if (!el || !el.form || el.disabled) return null;
+    var type = (el.getAttribute('type') || '').toLowerCase();
+    if (el.tagName === 'BUTTON') return type === '' || type === 'submit' ? el : null;
+    return type === 'submit' || type === 'image' ? el : null;
+  }
+  function submitPageForm(e) {
+    if (!pageNavigation || annotateModeActive || e.defaultPrevented || e.button !== 0 || !e.isTrusted) return;
+    var submitter = submitterOf(e.target);
+    if (!submitter) return;
+    var form = submitter.form;
+    // The browser's own submission is refused by the sandbox: this is the only one.
+    e.preventDefault();
+    if (!form.noValidate && !submitter.formNoValidate && form.checkValidity && !form.checkValidity()) {
+      try { form.reportValidity(); } catch (ex) {}
+      return;
+    }
+    var event;
+    try { event = new SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: submitter }); }
+    catch (ex) { event = new Event('submit', { bubbles: true, cancelable: true }); }
+    if (!form.dispatchEvent(event)) return;
+    var method = (submitter.getAttribute('formmethod') || form.getAttribute('method') || 'get').toLowerCase();
+    if (method !== 'get') return;
+    var action = submitter.getAttribute('formaction');
+    if (action === null) action = form.getAttribute('action');
+    action = (action || '').trim();
+    if (/^javascript:/i.test(action)) return;
+    var data;
+    try { data = new FormData(form, submitter); } catch (ex) { data = new FormData(form); }
+    var query = new URLSearchParams();
+    data.forEach(function(value, key) { if (typeof value === 'string') query.append(key, value); });
+    var path = action.split('#')[0].split('?')[0];
+    // Through the link guard, as a form's address (see "Links go out through the link guard").
+    sendOnLinkPort({ type: PREFIX + 'link-click', href: (path + '?' + query.toString()).slice(0, 2048) }, 'form');
+  }
+  if (!LIVE) window.addEventListener('click', submitPageForm, false);
 
   document.addEventListener('click', function(e) {
     if (!annotateModeActive || currentInputMethod !== 'pinpoint') return;
@@ -4579,15 +5112,21 @@ export const BRIDGE_SCRIPT = `(function() {
     postToParent({ type: PREFIX + message });
   }, true);
 
-  // A plain ] or [ while armed (Annotate): the host may step to its next or
-  // previous file (the Inbox steps through a thread's attachments). Never in
-  // Interact (the page owns its keys), never while the page's focus is in a
-  // text field, with a modifier, on auto-repeat or mid-composition. The page
-  // still receives the key; a host without a step handler ignores the
-  // message. Capture phase, like the chords above.
-  document.addEventListener('keydown', function(e) {
+  // A plain ] or [: the host may step to its next or previous file (the
+  // Inbox steps through a thread's attachments). While armed (Annotate), at
+  // once; in Interact only one the page did not use (no handler cancelled it
+  // or stopped it on its way up), offered after every handler had its turn,
+  // as an unused Escape is. Never while the page's focus is in a text field,
+  // with a modifier, on auto-repeat or mid-composition. The page still
+  // receives the key; a host without a step handler ignores the message.
+  // Capture phase, like the chords above.
+  var stepKeyReachedWindow = null;
+  window.addEventListener('keydown', function(e) {
+    if (e.key === ']' || e.key === '[') stepKeyReachedWindow = e;
+  });
+  function offerStepKey(e) {
     if (e.key !== ']' && e.key !== '[') return;
-    if (!annotateModeActive || vimEnabled) return;
+    if (vimEnabled) return;
     if (e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.isComposing) return;
     var t = e.target;
     if (t && t.nodeType === 1) {
@@ -4595,8 +5134,17 @@ export const BRIDGE_SCRIPT = `(function() {
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable) return;
       if (t.closest && t.closest('[contenteditable]:not([contenteditable="false"])')) return;
     }
-    postToParent({ type: PREFIX + 'step', dir: e.key === ']' ? 1 : -1 });
-  }, true);
+    var message = { type: PREFIX + 'step', dir: e.key === ']' ? 1 : -1 };
+    if (annotateModeActive) {
+      postToParent(message);
+      return;
+    }
+    setTimeout(function() {
+      if (stepKeyReachedWindow !== e || e.defaultPrevented) return;
+      postToParent(message);
+    }, 0);
+  }
+  document.addEventListener('keydown', offerStepKey, true);
 
   // Author opt-in: a plain click on any element tagged [data-annotate] pops the
   // toolbar — no pinpoint mode. Lets an HTML doc (e.g. a flow graph) wire its own
@@ -5813,7 +6361,7 @@ export const BRIDGE_SCRIPT = `(function() {
     // document keeps focus — so the iframe must relinquish it. parent.focus() is
     // allowed cross-origin (like postMessage); also drop the active element.
     try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (ex) {}
-    try { parent.focus(); } catch (ex) {}
+    try { EDITOR.focus(); } catch (ex) {}
   });
 
   // --- Helpers ---
@@ -6043,6 +6591,7 @@ export const BRIDGE_SCRIPT = `(function() {
     if (typeof ResizeObserver !== 'undefined' && document.body) {
       var resizeObserver = new ResizeObserver(function() {
         postResize();
+        postContentWidth();
         scheduleVimUiUpdate();
         schedulePinpointReconcile();
       });

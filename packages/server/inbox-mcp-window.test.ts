@@ -78,6 +78,19 @@ function olderConnectionText(result: Result): string {
 }
 
 describe("read_thread reads a window", () => {
+  test("two sessions of one agent in a thread: the reader's own messages say you, the other's do not; nothing stored changes", async () => {
+    const w = await world();
+    const first = (await call(w.client, "send_message", { project_path: w.project, agent_session: "ses_mine", agent_name: "Claude Code", agent_host: "claude-code", body: "I started the migration." })).structuredContent;
+    await call(w.client, "send_message", { project_path: w.project, agent_session: "ses_other", agent_name: "Claude Code", agent_host: "claude-code", body: "I took the API half.", reply_to: first.message_id });
+    const read = await call(w.client, "read_thread", { thread_id: first.thread_id, project_path: w.project, agent_session: "ses_mine" });
+    const authors = read.structuredContent.thread.messages.map((m: any) => m.author);
+    expect(authors).toEqual([{ kind: "agent", name: "Claude Code", you: true }, { kind: "agent", name: "Claude Code" }]);
+    expect(read.content[0]!.text).toContain(`[${first.message_id} · Claude Code (you)`);
+    const theirs = await call(w.client, "read_thread", { thread_id: first.thread_id, project_path: w.project, agent_session: "ses_other" });
+    expect(theirs.structuredContent.thread.messages.map((m: any) => !!m.author.you)).toEqual([false, true]);
+    expect(w.server.store.message(first.message_id)!.author).toMatchObject({ kind: "agent", session: "ses_mine", name: "Claude Code" });
+  });
+
   test("a 60-message thread: the transcript stays small, and each message past the window adds at most a line", async () => {
     const w = await world();
     const sizes: number[] = [];
@@ -141,7 +154,8 @@ describe("read_thread reads a window", () => {
       [seeded.lastAgentMessageId, "open", ["Yes", "No"]],
     ]);
     expect(thread.participants).toEqual([
-      { kind: "agent", name: "Claude Code", messages: 10 },
+      // The seeded agent's session is the reader's own.
+      { kind: "agent", name: "Claude Code", messages: 10, you: true },
       { kind: "person", name: "the person", messages: 9 },
     ]);
     // The transcript: the summary line first, the open questions, every message once, oldest first.
@@ -354,16 +368,13 @@ describe("no question's state is ever lost from a windowed read", () => {
 });
 
 describe("connections render a complete transcript as text alone; an older one still gets the JSON", () => {
-  test("marked results (read_thread, its list, wait_for_reply) hand the model text only; an older connection appends the trimmed JSON, and send_message is unmarked", async () => {
+  test("marked results (read_thread, its list) hand the model text only; an older connection appends the trimmed JSON, and send_message is unmarked", async () => {
     const w = await world();
     const seeded = await seedLongThread({ client: w.client, port: w.server.port, project: w.project, rounds: 10 });
     const read = await call(w.client, "read_thread", { thread_id: seeded.threadId, agent_session: "ses_long" });
     const list = await call(w.client, "read_thread", { project_path: w.project, agent_session: "ses_long" });
-    const waiting = call(w.client, "wait_for_reply", { thread_id: seeded.threadId, agent_session: "ses_long", timeout_seconds: 10 });
-    await Bun.sleep(100);
     const replyId = await seeded.answerLast();
-    const waited = await waiting;
-    for (const result of [read, list, waited]) {
+    for (const result of [read, list]) {
       expect(result._meta?.[INBOX_TEXT_COMPLETE_META_KEY]).toBe(true);
       expect(inboxToolResultText(result).text).toBe(result.content[0]!.text);
       // An older connection: the same text, then the JSON (trimmed: no sha256s, no idempotency keys).
@@ -377,13 +388,7 @@ describe("connections render a complete transcript as text alone; an older one s
     // The list's text names every row's facts.
     const row = list.structuredContent.threads[0];
     expect(list.content[0]!.text).toContain(`- ${row.thread_id} · ${JSON.stringify(row.subject)} · ${row.section} · ${row.message_count} messages`);
-    // wait_for_reply's text holds what its JSON holds: the reply's id, what it answers, each question's state, the cursor.
-    const waitText = waited.content[0]!.text;
-    expect(waitText).toContain(`[reply ${replyId} · to ${seeded.lastAgentMessageId} · `);
-    for (const q of waited.structuredContent.questions) expect(waitText).toContain(`${q.key} sent`);
-    expect(waitText).toContain(`cursor ${waited.structuredContent.cursor}`);
-    // The phone proofs' fields stay: status, reply.body; send_message's questions[].key.
-    expect(waited.structuredContent).toMatchObject({ status: "replied", reply: { message_id: replyId, body: expect.any(String) } });
+    // send_message's questions[].key stays.
     const sent = await call(w.client, "send_message", { reply_to: replyId, body: "Thanks.\n\n:::question\nAnything else?\n\n- [ ] No\n:::", agent_session: "ses_long" });
     expect(sent._meta?.[INBOX_TEXT_COMPLETE_META_KEY]).toBeUndefined();
     expect(sent.structuredContent.questions[0].key).toEqual(expect.any(String));

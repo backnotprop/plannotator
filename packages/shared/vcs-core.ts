@@ -5,8 +5,10 @@ import {
   type FileBytesRead,
   type GitContext,
   type GitDiffOptions,
+  type RepoFileListing,
   type ReviewGitRuntime,
   detectRemoteDefaultBranch,
+  listGitFilesForDiff,
   getFileBytesForDiff as getGitFileBytesForDiff,
   getCurrentUpstreamBranch,
   getFileContentsForDiff as getGitFileContentsForDiff,
@@ -14,6 +16,7 @@ import {
   getGitDiffFingerprint,
   getGitSnapshotMaterializationPatch,
   gitAddFile,
+  isP4DiffType,
   parseJjCommitDiffType,
   gitResetFile,
   parseWorktreeDiffType,
@@ -32,6 +35,7 @@ import {
   getJjFileBytesForDiff,
   getJjFileContentsForDiff,
   isJjSnapshotDiffType,
+  listJjFilesForDiff,
   resolveJjSnapshotEndpoint,
   runJjDiff,
 } from "./jj-core";
@@ -42,6 +46,7 @@ import {
   getGitButlerDiffFingerprint,
   getGitButlerFileBytesForDiff,
   getGitButlerFileContentsForDiff,
+  listGitButlerFilesForDiff,
   parseGitButlerDiffType,
   runGitButlerDiff,
 } from "./gitbutler-core";
@@ -93,6 +98,9 @@ export interface VcsProvider {
     maxBytes: number,
     cwd?: string,
   ): Promise<FileBytesRead>;
+  /** Every file of the repository at the diff's new side (the review tree's
+   * All files). Providers without it (e.g. p4) offer no All files. */
+  listFiles?(diffType: DiffType, defaultBranch: string, cwd?: string): Promise<RepoFileListing | null>;
   /** Cheap staleness fingerprint for a diff (see review-core/jj-core). Providers
    * without an implementation (e.g. p4) are treated as always-fresh. */
   getDiffFingerprint?(
@@ -157,6 +165,8 @@ export interface VcsApi {
     maxBytes: number,
     cwd?: string,
   ): Promise<FileBytesRead>;
+  /** The repository at the diff's new side; null when the provider cannot list it. */
+  listVcsFiles(diffType: DiffType, defaultBranch: string, cwd?: string): Promise<RepoFileListing | null>;
   /** Best-effort staleness fingerprint for the given diff parameters. `null`
    * means "cannot fingerprint" and must be treated as always-fresh. */
   getVcsDiffFingerprint(
@@ -286,6 +296,10 @@ export function createGitProvider(runtime: ReviewGitRuntime): VcsProvider {
       return getGitFileBytesForDiff(runtime, diffType, defaultBranch, filePath, oldPath, side, maxBytes, cwd);
     },
 
+    listFiles(diffType, defaultBranch, cwd?) {
+      return listGitFilesForDiff(runtime, diffType, defaultBranch, cwd);
+    },
+
     getDiffFingerprint(diffType, defaultBranch, cwd?, options?) {
       return getGitDiffFingerprint(runtime, diffType, defaultBranch, cwd, options);
     },
@@ -347,6 +361,10 @@ export function createJjProvider(runtime: ReviewJjRuntime, gitRuntime: ReviewGit
       return getJjFileBytesForDiff(runtime, diffType, defaultBranch, filePath, oldPath, side, maxBytes, cwd);
     },
 
+    listFiles(diffType, defaultBranch, cwd?) {
+      return listJjFilesForDiff(runtime, diffType, defaultBranch, cwd);
+    },
+
     getDiffFingerprint(diffType, defaultBranch, cwd?) {
       return getJjDiffFingerprint(runtime, diffType, defaultBranch, cwd);
     },
@@ -390,6 +408,10 @@ export function createGitButlerProvider(runtime: ReviewGitButlerRuntime): VcsPro
 
     getFileBytes(diffType, _defaultBranch, filePath, oldPath, side, maxBytes, cwd?) {
       return getGitButlerFileBytesForDiff(runtime, diffType, filePath, oldPath, side, maxBytes, cwd);
+    },
+
+    listFiles(diffType, _defaultBranch, cwd?) {
+      return listGitButlerFilesForDiff(runtime, diffType, cwd);
     },
 
     getDiffFingerprint(diffType, _defaultBranch, cwd?, options?) {
@@ -532,6 +554,11 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
       if (diffType === "jj-line" && ownsRequestedDiffType && requestedBase) {
         return requestedBase;
       }
+      // Evolution diff compares against the change's previous state, never
+      // the line base (the same base the UI picks when switching to it).
+      if (diffType === "jj-evolog" && gitContext.jjEvologs?.[1]) {
+        return gitContext.jjEvologs[1].commitId;
+      }
       return gitContext.defaultBranch;
     }
     return requestedBase ?? gitContext.defaultBranch;
@@ -632,6 +659,12 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
       return provider.getFileBytes(diffType, defaultBranch, filePath, oldPath, side, maxBytes, cwd);
     },
 
+    async listVcsFiles(diffType: DiffType, defaultBranch: string, cwd?: string): Promise<RepoFileListing | null> {
+      const provider = await getProviderForOperation(diffType, cwd);
+      if (!provider.listFiles) return null;
+      return provider.listFiles(diffType, defaultBranch, cwd);
+    },
+
     async getVcsDiffFingerprint(
       diffType: DiffType,
       defaultBranch: string = "main",
@@ -709,11 +742,13 @@ export function resolveInitialDiffType(
   configuredDiffType: DiffType,
 ): DiffType {
   if (gitContext.vcsType === "p4") {
-    return "p4-default";
+    const { diffOptions } = gitContext;
+    if (diffOptions.some((option) => option.id === "p4-default")) return "p4-default";
+    const firstChangelist = diffOptions.find((option) => isP4DiffType(option.id));
+    return (firstChangelist?.id ?? "p4-default") as DiffType;
   }
-  if (gitContext.vcsType === "jj") {
-    return "jj-current";
-  }
+  // jj: a saved jj mode the change offers wins; anything else (a Git mode,
+  // or Evolution diff with no history) falls to the first option, Current change.
   if (gitContext.diffOptions.some((option) => option.id === configuredDiffType)) {
     return configuredDiffType;
   }

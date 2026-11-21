@@ -26,6 +26,7 @@
  * Node-only (node:fs + global fetch), vendored to Pi.
  */
 
+import { createHash } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getPlannotatorDataDir } from "./data-dir";
@@ -83,6 +84,15 @@ const RELEASE_CHECK_TIMEOUT_MS = 8_000;
  */
 export const RELEASE_ASSETS_FETCH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 export const RELEASE_ASSETS_FETCH_RETRY_MS = 6 * 60 * 60 * 1000;
+/**
+ * A release's notes answered with no "What's New" part while the release is
+ * young (published under RELEASE_NOTES_YOUNG_MS ago): GitHub's generated
+ * body, read in the minutes before the written notes replaced it. Asked again
+ * after this instead of RELEASE_ASSETS_FETCH_INTERVAL_MS, so the "What's new"
+ * link shows within the hour, not a day later.
+ */
+export const RELEASE_NOTES_PENDING_RETRY_MS = 15 * 60 * 1000;
+export const RELEASE_NOTES_YOUNG_MS = 2 * 24 * 60 * 60 * 1000;
 /** "Remind me tomorrow" in the Inbox. */
 export const UPDATE_SNOOZE_MS = 24 * 60 * 60 * 1000;
 /** The terminal hint shows at most this often. */
@@ -143,6 +153,34 @@ export function releaseUrlFor(version: string): string {
 // ---------------------------------------------------------------------------
 // State (update-state.json, shared with auto-update)
 // ---------------------------------------------------------------------------
+
+/** One version's notes fetch (`notesFetch[<version>]`). */
+export interface NotesFetchRecord {
+  attemptedAt: number;
+  failedAt?: number;
+  error?: string;
+  /**
+   * The release's `published_at` (epoch ms), kept when its answer carried no
+   * "What's New" part: while it is under RELEASE_NOTES_YOUNG_MS old, the next
+   * try waits RELEASE_NOTES_PENDING_RETRY_MS instead of a day.
+   */
+  publishedAt?: number;
+  /**
+   * Set on the claim, gone once GitHub answers: a claim still marked was
+   * abandoned (its process quit mid-request), and is asked again after
+   * RELEASE_NOTES_PENDING_RETRY_MS, not read as an empty answer (24 h).
+   */
+  inFlight?: boolean;
+  /**
+   * Set on a failure that may have been the network (not a rate limit, and
+   * no release check answered between the failure before it and this one):
+   * asked again RELEASE_NOTES_PENDING_RETRY_MS after it once a release check
+   * has answered since (the network is back), not after 6 h. One quick retry,
+   * then 6 h: a source that keeps failing while the network is up (or a
+   * network that drops again before the quick retry) waits 6 h.
+   */
+  retryOnline?: boolean;
+}
 
 export interface UpdateState {
   /** Auto-update's install window (epoch ms of the last check that got past its gates). */
@@ -217,16 +255,31 @@ export interface UpdateState {
    */
   inboxPreviousVersion?: string;
   /**
+   * The version an Inbox start found newer than `inboxVersion`, kept until its
+   * "What's new" link was offered with readable notes: a start on that same
+   * version shows the link too, so a restart before the notes were readable
+   * does not lose it.
+   */
+  whatsNewPending?: string;
+  /**
    * One release's notes fetched by its tag (fetchReleaseNotesFor), per
    * version: claimed before the request, so concurrent processes ask once.
    */
-  notesFetch?: Record<string, { attemptedAt: number; failedAt?: number; error?: string }>;
+  notesFetch?: Record<string, NotesFetchRecord>;
   /**
    * The Inbox's fetch of one release's images (packages/server/inbox-whats-new-images.ts),
-   * per version, with the same claim and back-off as `notesFetch`. Only the
-   * Inbox writes it; nothing here fetches an image.
+   * per version, with the same claim and back-off as `notesFetch` (its
+   * `inFlight` mark too). Only the Inbox writes it; nothing here fetches an image.
    */
-  releaseImagesFetch?: Record<string, { attemptedAt: number; failedAt?: number; error?: string }>;
+  releaseImagesFetch?: Record<string, Pick<NotesFetchRecord, "attemptedAt" | "failedAt" | "error" | "inFlight">>;
+  /**
+   * Safe updates: installs of `version` whose download did not match the
+   * checksum Plannotator fetched (install.sh exit 113), counted once each.
+   * Background auto-update waits 1, then 3, then 7 days (and 7 after that)
+   * from the last one before trying that version again; a newer release is
+   * tried at once, and Update now / `plannotator update` always try.
+   */
+  mismatchBackoff?: { version: string; attempts: number; lastAttemptAt: number };
 }
 
 export function updateCheckPaths(dataDir: string = getPlannotatorDataDir()) {
@@ -490,13 +543,39 @@ export interface ReleaseHighlight {
   text: string;
 }
 
+/** One line of a release's TL;DR (`- **New:** Start an agent in a new folder`). */
+export interface TldrLine {
+  /** One of TLDR_LABELS as written there; any other label as written; "" for a line with none. */
+  label: string;
+  /** The line's words: links reduced to their text, bold dropped, `code` kept. */
+  text: string;
+}
+
+/** The labels a TL;DR line may carry (the release skill's set), in their canonical spelling. */
+export const TLDR_LABELS = ["New", "Changed", "Fixed", "Removed", "Off by default"] as const;
+/** More lines than this are dropped (the release skill asks for 3 to 5). */
+export const TLDR_MAX_LINES = 8;
+const TLDR_MAX_TEXT = 300;
+
 export interface ReleaseNotes {
   version: string;
   publishedAt?: string;
-  /** Markdown: the release body from "## What's New in" up to "## Install / Update", capped. */
+  /** Markdown: the release body from "## What's New in" up to "## Install / Update", capped, without its TL;DR. */
   notes: string;
   /** The release body's "Missed recent releases?" table, newest first. */
   highlights: ReleaseHighlight[];
+  /**
+   * The `### TL;DR` right under "What's New in vX" (splitTldr); empty when the
+   * body has none. Absent from notes an older version saved: read from the
+   * notes then.
+   */
+  tldr?: TldrLine[];
+  /**
+   * A hash of the release body these notes were read from (releaseBodyStamp).
+   * The Inbox's release list compares it to tell a body edited since (a TL;DR
+   * added to an older release). Absent from notes an older version saved.
+   */
+  stamp?: string;
 }
 
 /** Cut a byte cap on a code point boundary. */
@@ -506,9 +585,62 @@ function capUtf8(text: string, maxBytes: number): string {
   return new TextDecoder().decode(bytes.slice(0, maxBytes)).replace(/�+$/, "");
 }
 
+/** A TL;DR line's words as plain text: links to their text, bold and italics markers dropped, `code` kept. */
+function tldrText(raw: string): string {
+  return raw
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\*\*|__/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, TLDR_MAX_TEXT);
+}
+
+/**
+ * The TL;DR at the top of a release's notes, and the notes without it. The
+ * section is a `### TL;DR` heading as the first thing under "What's New in
+ * vX", then a list of `- **Label:** text` lines (labels: TLDR_LABELS, matched
+ * without regard to case; any other label is kept as written; a line with no
+ * bold label keeps its words with an empty label). The list ends at the first
+ * line that is neither blank nor an item. A heading with no list under it,
+ * or a TL;DR anywhere else, is not one: the notes stay as they are.
+ */
+export function splitTldr(notes: string): { tldr: TldrLine[]; notes: string } {
+  const text = notes.replace(/\r\n/g, "\n").replace(/^\s+/, "");
+  const head = /^#{2,4}[ \t]+TL;?DR[ \t]*:?[ \t]*(?:\n|$)/i.exec(text);
+  if (!head) return { tldr: [], notes };
+  const lines = text.slice(head[0].length).split("\n");
+  const tldr: TldrLine[] = [];
+  let i = 0;
+  for (; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (line.trim() === "") continue;
+    const item = /^\s{0,3}[-*+][ \t]+(.*)$/.exec(line);
+    if (!item) break;
+    const labelled = /^(?:\*\*|__)([^*_]{1,40}?)[ \t]*:?[ \t]*(?:\*\*|__)[ \t]*:?[ \t]*(.*)$/.exec(item[1]!);
+    const rawLabel = labelled ? labelled[1]!.trim() : "";
+    const words = tldrText(labelled ? labelled[2]! : item[1]!);
+    if (!words) continue;
+    const known = TLDR_LABELS.find((l) => l.toLowerCase() === rawLabel.toLowerCase());
+    if (tldr.length < TLDR_MAX_LINES) tldr.push({ label: known ?? rawLabel, text: words });
+  }
+  if (tldr.length === 0) return { tldr: [], notes };
+  return { tldr, notes: lines.slice(i).join("\n").trim() };
+}
+
+/** A short, stable hash of a release body (ReleaseNotes.stamp). */
+export function releaseBodyStamp(body: unknown): string {
+  return createHash("sha256").update(typeof body === "string" ? body.replace(/\r\n/g, "\n") : "").digest("hex").slice(0, 16);
+}
+
+/** The notes to save for a release GitHub answered with. */
+export function releaseNotesFrom(version: string, release: Pick<FetchedRelease, "publishedAt" | "body">): ReleaseNotes {
+  const { notes, highlights, tldr } = extractReleaseNotes(release.body);
+  return { version, ...(release.publishedAt && { publishedAt: release.publishedAt }), notes, highlights, tldr, stamp: releaseBodyStamp(release.body) };
+}
+
 /** The part of a release body a person reads as "what's new". */
-export function extractReleaseNotes(body: unknown): { notes: string; highlights: ReleaseHighlight[] } {
-  if (typeof body !== "string") return { notes: "", highlights: [] };
+export function extractReleaseNotes(body: unknown): { notes: string; highlights: ReleaseHighlight[]; tldr: TldrLine[] } {
+  if (typeof body !== "string") return { notes: "", highlights: [], tldr: [] };
   const text = body.replace(/\r\n/g, "\n");
   const highlights: ReleaseHighlight[] = [];
   for (const m of text.matchAll(/^\|\s*\[v?(\d+\.\d+\.\d+)\]\([^)]*\)\s*\|\s*(.+?)\s*\|\s*$/gm)) {
@@ -523,7 +655,8 @@ export function extractReleaseNotes(body: unknown): { notes: string; highlights:
     const end = notes.search(/^## Install \/ Update\b/m);
     if (end >= 0) notes = notes.slice(0, end);
   }
-  return { notes: capUtf8(notes.trim(), RELEASE_NOTES_MAX_BYTES), highlights };
+  const split = splitTldr(notes.trim());
+  return { notes: capUtf8(split.notes, RELEASE_NOTES_MAX_BYTES), highlights, tldr: split.tldr };
 }
 
 function notesPath(version: string, dataDir?: string): string | null {
@@ -546,15 +679,27 @@ export function readReleaseNotes(version: string, dataDir?: string): ReleaseNote
   try {
     const raw = JSON.parse(readFileSync(path, "utf-8")) as Partial<ReleaseNotes>;
     if (!raw || typeof raw.notes !== "string" || normalizeStableVersion(raw.version) === null) return null;
+    // Notes saved before the TL;DR was read apart keep it at their top: read it from there.
+    const split = Array.isArray(raw.tldr)
+      ? {
+          notes: raw.notes,
+          tldr: raw.tldr
+            .filter((l): l is TldrLine => !!l && typeof l.label === "string" && typeof l.text === "string" && l.text.trim() !== "")
+            .slice(0, TLDR_MAX_LINES)
+            .map((l) => ({ label: l.label.slice(0, 40), text: l.text.slice(0, TLDR_MAX_TEXT) })),
+        }
+      : splitTldr(raw.notes);
     return {
       version: normalizeStableVersion(raw.version)!,
       ...(typeof raw.publishedAt === "string" && { publishedAt: raw.publishedAt }),
-      notes: capUtf8(raw.notes, RELEASE_NOTES_MAX_BYTES),
+      notes: capUtf8(split.notes, RELEASE_NOTES_MAX_BYTES),
       highlights: Array.isArray(raw.highlights)
         ? raw.highlights.filter(
             (h): h is ReleaseHighlight => !!h && typeof h.version === "string" && typeof h.text === "string",
           )
         : [],
+      tldr: split.tldr,
+      ...(typeof raw.stamp === "string" && { stamp: raw.stamp }),
     };
   } catch {
     return null;
@@ -785,6 +930,62 @@ export async function fetchReleaseByTag(version: string, fetchImpl: typeof fetch
   return { ok: true, release: result.release };
 }
 
+/** How many releases the Inbox's release list asks for (one request). */
+export const RELEASE_LIST_SIZE = 20;
+
+/**
+ * The newest releases (`…/releases?per_page=20`): the release API URL with
+ * its last segment (`latest`) removed, so PLANNOTATOR_UPDATE_API_URL points
+ * this request at the same fake or mirror as the others.
+ */
+export function releaseListApiUrl(env: NodeJS.ProcessEnv = process.env): string {
+  const url = new URL(releaseApiUrl(env));
+  url.pathname = url.pathname.replace(/\/+$/, "").replace(/\/[^/]*$/, "");
+  url.search = `?per_page=${RELEASE_LIST_SIZE}`;
+  url.hash = "";
+  return url.toString();
+}
+
+export type FetchReleaseListResult = { ok: true; releases: FetchedRelease[] } | Extract<FetchReleaseResult, { ok: false }>;
+
+/**
+ * One unauthenticated GET of the newest releases, with the same client rules
+ * as the release check (user agent, timeout, rate limit). Drafts,
+ * pre-releases and tags that are not X.Y.Z are left out; the tags come back
+ * canonical (`0.28.53`).
+ */
+export async function fetchReleaseList(url: string = releaseListApiUrl(), fetchImpl: typeof fetch = fetch): Promise<FetchReleaseListResult> {
+  try {
+    const res = await fetchImpl(url, {
+      headers: { accept: "application/vnd.github+json", "user-agent": "plannotator-update-check" },
+      signal: AbortSignal.timeout(RELEASE_CHECK_TIMEOUT_MS * 2),
+    });
+    if (res.status === 403 || res.status === 429) {
+      const wait = rateLimitWaitMs(res.headers);
+      return { ok: false, error: `HTTP ${res.status}`, rateLimited: true, ...(wait !== undefined && { retryAfterMs: wait }) };
+    }
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+    const body = (await res.json()) as unknown;
+    if (!Array.isArray(body)) return { ok: false, error: "the answer is not a list of releases" };
+    const releases: FetchedRelease[] = [];
+    for (const item of body.slice(0, 100)) {
+      if (!item || typeof item !== "object") continue;
+      const r = item as { tag_name?: unknown; draft?: unknown; prerelease?: unknown; published_at?: unknown; body?: unknown };
+      if (r.draft === true || r.prerelease === true) continue;
+      const tag = normalizeStableVersion(r.tag_name);
+      if (!tag) continue;
+      releases.push({
+        tag,
+        ...(typeof r.published_at === "string" && { publishedAt: r.published_at }),
+        ...(typeof r.body === "string" && { body: r.body }),
+      });
+    }
+    return { ok: true, releases };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export interface ReleaseCheckDeps {
   dataDir?: string;
   now?: () => number;
@@ -938,8 +1139,7 @@ export async function runReleaseCheck(deps: ReleaseCheckDeps): Promise<ReleaseCh
   }
   if (source === "api") {
     try {
-      const { notes, highlights } = extractReleaseNotes(release.body);
-      writeReleaseNotes({ version, ...(release.publishedAt && { publishedAt: release.publishedAt }), notes, highlights }, dataDir);
+      writeReleaseNotes(releaseNotesFrom(version, release), dataDir);
     } catch (err) {
       updateLog(`could not save the release notes: ${err instanceof Error ? err.message : String(err)}`, dataDir);
     }
@@ -1034,19 +1234,44 @@ export function scheduleReleaseCheck(deps: ReleaseCheckDeps, then?: (outcome: Re
 // ---------------------------------------------------------------------------
 
 /** How many versions `notesFetch` remembers. */
-const NOTES_FETCH_REMEMBERED = 10;
+/** Versions whose notes fetch is remembered: the Inbox may fetch any release its release list names (about 20). */
+const NOTES_FETCH_REMEMBERED = 30;
+
+/** The record names a release young enough for the quick retry (a clock far off either way does not). */
+function isYoungRelease(record: NotesFetchRecord, now: number): boolean {
+  const published = record.publishedAt;
+  return typeof published === "number" && Number.isFinite(published) && Math.abs(now - published) < RELEASE_NOTES_YOUNG_MS;
+}
+
+/**
+ * A release check answered after `at` (the network is up again since then).
+ * An answer dated after `now` (the clock moved back) does not count.
+ */
+function releaseCheckAnsweredAfter(state: UpdateState, at: number, now: number): boolean {
+  const answered = state.latestRelease?.fetchedAt;
+  return typeof answered === "number" && answered > at && answered <= now;
+}
 
 /**
  * Whether one version's notes may be asked for now: once, then after a
- * failure no sooner than 6 h, and after an answer that carried no "What's
- * New" part no sooner than 24 h (the release body is edited after publishing).
- * Never in a loop.
+ * failure no sooner than 6 h (15 minutes once the network is back, see
+ * `retryOnline`), after an answer that carried no "What's New" part no
+ * sooner than 15 minutes while the release is under 2 days old (the release
+ * body is edited after publishing), else 24 h. A claim nobody answered (its
+ * process quit) waits 15 minutes. Never sooner than 15 minutes, never in a loop.
  */
 export function isNotesFetchDue(state: UpdateState, version: string, now: number): boolean {
   const record = state.notesFetch?.[version];
   const at = record?.attemptedAt;
   if (!record || typeof at !== "number" || !Number.isFinite(at) || at > now) return true;
-  return now - at >= (record.failedAt ? RELEASE_ASSETS_FETCH_RETRY_MS : RELEASE_ASSETS_FETCH_INTERVAL_MS);
+  const wait = record.failedAt
+    ? record.retryOnline && releaseCheckAnsweredAfter(state, record.failedAt, now)
+      ? RELEASE_NOTES_PENDING_RETRY_MS
+      : RELEASE_ASSETS_FETCH_RETRY_MS
+    : record.inFlight || isYoungRelease(record, now)
+      ? RELEASE_NOTES_PENDING_RETRY_MS
+      : RELEASE_ASSETS_FETCH_INTERVAL_MS;
+  return now - at >= wait;
 }
 
 export interface ReleaseNotesFetchDeps {
@@ -1056,6 +1281,8 @@ export interface ReleaseNotesFetchDeps {
   /** The knob (resolveUpdateCheck): off, nothing is asked. */
   enabled: () => boolean;
   fetchRelease?: (version: string) => Promise<FetchReleaseResult>;
+  /** The person's Try again on What's new: ask now, whatever the per-version throttle says (`enabled` still applies). */
+  force?: boolean;
 }
 
 export type ReleaseNotesFetchOutcome =
@@ -1079,7 +1306,7 @@ export async function fetchReleaseNotesFor(deps: ReleaseNotesFetchDeps): Promise
   if (hasReleaseNotesContent(stored)) return { outcome: "present", notes: stored };
   if (!deps.enabled()) return { outcome: "disabled" };
   const now = (deps.now ?? Date.now)();
-  const record = (patch: { attemptedAt: number; failedAt?: number; error?: string }) =>
+  const record = (patch: NotesFetchRecord) =>
     patchUpdateState((s) => {
       const entries = Object.entries({ ...(s.notesFetch ?? {}), [version]: patch })
         .filter(([, r]) => r && typeof r.attemptedAt === "number")
@@ -1087,10 +1314,18 @@ export async function fetchReleaseNotesFor(deps: ReleaseNotesFetchDeps): Promise
         .slice(0, NOTES_FETCH_REMEMBERED);
       return { ...s, notesFetch: Object.fromEntries(entries) };
     }, dataDir);
+  let pendingBefore = false;
+  let previous: NotesFetchRecord | undefined;
+  let state: UpdateState;
   try {
-    if (!isNotesFetchDue(readUpdateState(dataDir), version, now)) return { outcome: "not-due" };
-    // Claim the attempt before the network call so concurrent processes ask once.
-    record({ attemptedAt: now });
+    state = readUpdateState(dataDir);
+    if (!deps.force && !isNotesFetchDue(state, version, now)) return { outcome: "not-due" };
+    // Claim the attempt before the network call so concurrent processes ask
+    // once. Marked in flight, so an attempt that never finished (the process
+    // quit) is tried again on the quick cadence, not in a day.
+    previous = state.notesFetch?.[version];
+    pendingBefore = !!previous && !previous.failedAt && isYoungRelease(previous, now);
+    record({ attemptedAt: now, inFlight: true, ...(pendingBefore && { publishedAt: previous!.publishedAt }) });
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     updateLog(`could not write update-state.json: ${error}`, dataDir);
@@ -1100,19 +1335,42 @@ export async function fetchReleaseNotesFor(deps: ReleaseNotesFetchDeps): Promise
   const tag = result.ok ? normalizeStableVersion(result.release.tag) : null;
   if (!result.ok || tag !== version) {
     const error = result.ok ? `the release answered for ${JSON.stringify(result.release.tag).slice(0, 80)}` : result.error;
-    updateLog(`could not read the release notes for ${version} (${error}); next try in 6h`, dataDir);
+    // Maybe the network (a laptop waking, a VPN): asked again 15 minutes after,
+    // once a release check answers. Not after a rate limit, and not when this
+    // source failed before with a release check answering since (it keeps
+    // failing while the network is up: 6 h).
+    const retryOnline = !(!result.ok && result.rateLimited) && !(previous?.failedAt && releaseCheckAnsweredAfter(state, previous.failedAt, now));
+    updateLog(`could not read the release notes for ${version} (${error}); next try in ${retryOnline ? "15m once online, else 6h" : "6h"}`, dataDir);
     try {
-      record({ attemptedAt: now, failedAt: now, error: error.slice(0, 200) });
+      record({ attemptedAt: now, failedAt: now, error: error.slice(0, 200), ...(retryOnline && { retryOnline }) });
     } catch {}
     return { outcome: "failed", error };
   }
   const release = result.release;
-  const { notes, highlights } = extractReleaseNotes(release.body);
-  const saved: ReleaseNotes = { version, ...(release.publishedAt && { publishedAt: release.publishedAt }), notes, highlights };
+  const saved = releaseNotesFrom(version, release);
+  const notes = saved.notes;
   try {
     writeReleaseNotes(saved, dataDir);
   } catch (err) {
     updateLog(`could not save the release notes: ${err instanceof Error ? err.message : String(err)}`, dataDir);
+  }
+  if (!notes) {
+    // GitHub's generated body, read before the written notes replaced it (or
+    // a release with none): a young release is asked again in 15 minutes.
+    const published = release.publishedAt ? Date.parse(release.publishedAt) : NaN;
+    const pending: NotesFetchRecord = { attemptedAt: now, ...(Number.isFinite(published) && { publishedAt: published }) };
+    try {
+      record(pending);
+    } catch {}
+    // One line per version, not one per retry.
+    if (isYoungRelease(pending, now) && !pendingBefore) {
+      updateLog(`the release notes for ${version} have no "What's New" part yet; next try in ${formatWait(RELEASE_NOTES_PENDING_RETRY_MS)}`, dataDir);
+    }
+  } else {
+    // Answered: no longer in flight (it matters only when the notes could not be saved).
+    try {
+      record({ attemptedAt: now });
+    } catch {}
   }
   // The release page names no publish date: take this answer's for the latest release.
   if (release.publishedAt) {
@@ -1150,6 +1408,7 @@ export const INSTALL_FLAG_SPELLINGS = {
   "skip-kiro": { posix: "--skip-kiro", powershell: "-SkipKiro" },
   "skip-vibe": { posix: "--skip-vibe", powershell: "-SkipVibe" },
   "skip-opencode": { posix: "--skip-opencode", powershell: "-SkipOpencode" },
+  "skip-qwen": { posix: "--skip-qwen", powershell: "-SkipQwen" },
   "skip-skills": { posix: "--skip-skills", powershell: "-SkipSkills" },
   "skip-claude-plugin": { posix: "--skip-claude-plugin", powershell: "-SkipClaudePlugin" },
 } as const;
@@ -1248,8 +1507,8 @@ export function installCommandFor(platform: NodeJS.Platform, flags: readonly Ins
  * What updating means for the host that launched this server:
  *  - `script`: the binary the install script manages; one click runs it.
  *  - `copy`: a binary the script does not manage; the page offers the command.
- *  - `pi`: the Pi extension (npm): `pi update --extensions`, then restart Pi.
- *  - `opencode`: the install script again (it clears OpenCode's plugin cache), then restart OpenCode.
+ *  - `pi`: the Pi extension (npm): `pi update --extensions`, then `/reload` in Pi.
+ *  - `opencode`: the install script again (it clears OpenCode's plugin cache), then `opencode2 reload` (OpenCode 1: restart it).
  */
 export type UpdateAction = "script" | "copy" | "pi" | "opencode";
 

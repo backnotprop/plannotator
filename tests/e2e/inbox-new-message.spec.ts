@@ -19,7 +19,7 @@
  * .local/proof/new-message/ with a contact sheet.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -27,7 +27,7 @@ import {
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
   INBOX_MESSAGE_INSTRUCTION,
-  inboxWakeClosingLine,
+  INBOX_WAKE_CLOSING_LINE,
   inboxWakeText,
   parseInboxBridgeCommands,
   type InboxReplyCommand,
@@ -173,7 +173,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   // HOME is the temp root, so the project reads as ~/src/ledger, as the record draws it.
   const root = inboxScratch('plannotator-inbox-new-message-e2e-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -238,14 +238,17 @@ test('one live session (5.1): a message sent through the route is drawn "to Pi",
   await expect(mine.locator('.ib-to')).toHaveText('to Pi');
   await expect(mine).toContainText(words);
   const command = await waitFor('the message command', () => writer.commands[0]);
-  expect(command).toMatchObject({ type: 'message', reply_to: null, thread_id: world.threadId, subject: SUBJECT, body: words });
+  // The writer started this thread, so it already has the subject (which goes stale): a New message to it is titled
+  // with the thread's short name, or `a message` when the thread has none (this one has none), never the subject.
+  expect(command).toMatchObject({ type: 'message', reply_to: null, thread_id: world.threadId, subject: null, body: words });
   const wake = inboxWakeText(command);
-  expect(wake.split('\n').slice(0, 2)).toEqual([`Plannotator Inbox: ${SUBJECT} (${command.id})`, INBOX_MESSAGE_INSTRUCTION]);
-  expect(wake.endsWith(`\n\n${words}\n\n${inboxWakeClosingLine(world.threadId)}`)).toBe(true);
+  expect(wake.split('\n').slice(0, 2)).toEqual([`Plannotator Inbox: a message (${command.id})`, INBOX_MESSAGE_INSTRUCTION]);
+  expect(wake).not.toContain(SUBJECT);
+  expect(wake.endsWith(`\n\n${words}\n\n${INBOX_WAKE_CLOSING_LINE}`)).toBe(true);
   const messages = await threadMessages();
   expect(messages.at(-1)).toMatchObject({ id: command.id, author: { kind: 'person' }, to: { host: 'pi', session: world.writer } });
   // The session's connection polls idle: it takes it within seconds.
-  await expect(pane.locator('[data-delivery="sending"]')).toHaveText('Sending to Pi…');
+  await expect(pane.locator('[data-delivery="sending"]').locator('.ib-dl-text')).toHaveText('Sending to Pi…');
 
   await writer.deliver(command.id);
   await expect(pane.locator('[data-delivery="delivered"]')).toHaveText(/^Delivered to Pi, (?:[A-Z][a-z]{2} \d{1,2}, )?\d{1,2}:\d{2} [AP]M$/);
@@ -280,7 +283,7 @@ test('two live sessions (5.2): the list puts the writer first; the picked sessio
   // Its turn ends, then the turn goes in.
   await second.setBusy(false);
   await second.deliver(command.id);
-  await expect(pane.locator('[data-delivery="delivered"]')).toHaveText(/^Delivered to Pi, (?:[A-Z][a-z]{2} \d{1,2}, )?\d{1,2}:\d{2} [AP]M$/);
+  await expect(pane.locator('article.ib-message[data-author="person"]').last().locator('[data-delivery="delivered"]')).toHaveText(/^Delivered to Pi, (?:[A-Z][a-z]{2} \d{1,2}, )?\d{1,2}:\d{2} [AP]M$/);
   await shot('5.2-delivered-to-the-picked-session');
 });
 

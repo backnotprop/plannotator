@@ -4,7 +4,7 @@
  * under a temp PLANNOTATOR_DATA_DIR and HOME, an agent sends through
  * `plannotator inbox mcp` (scripts/inbox-sim.ts) a message attaching
  * `site/SHEET.html` and one frame of the page, and Chromium opens the page.
- * Armed (Annotate, the default; no mode switch) a plain click on each link of
+ * With Annotate on (the page opens in Interact) a plain click on each link of
  * the page follows it, and a Cmd/Ctrl-click pins it for a comment: a sibling page that is
  * not attached opens read-only over the page with Back and Open in new tab,
  * and its own links follow; Back returns to the page; the attached frame
@@ -23,7 +23,7 @@
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
 
-import { chromium, devices, expect, test, webkit, type Browser, type Locator, type Page } from '@playwright/test';
+import { chromium, devices, expect, test, webkit, type Browser, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -106,7 +106,7 @@ async function world() {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-inbox-htmllinks-e2e-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -135,7 +135,7 @@ async function world() {
   return { root, url, agent, thread: sent.thread_id as string, ids };
 }
 
-/** The attached page opened from its tile (full screen), armed (Annotate, the default): a plain click on a link follows it. */
+/** The attached page opened from its tile (full screen), with Annotate on: a plain click on a link follows it. */
 async function openSheet(page: Page, url: string, thread: string, sheet: string) {
   // From its tile, as the person opens it: HTML opens full screen.
   await page.goto(`${url}#thread=${thread}`);
@@ -145,7 +145,11 @@ async function openSheet(page: Page, url: string, thread: string, sheet: string)
   await expect(pane).toHaveAttribute('data-full-view', '');
   const frame = page.frameLocator('.ib-htmlframe iframe');
   await expect(frame.locator('h1')).toHaveText('Guided narrative: contact sheet');
-  // No mode switch: the page stays in Annotate, where a plain click on a link follows it.
+  // The pen starts off (Interact) unless it was turned on in this thread: these tests are about Annotate, so it goes on.
+  await expect(page.locator('[data-full-view-pen]')).toBeVisible();
+  const interact = page.locator('[data-full-view-pen][aria-pressed="false"]');
+  if (await interact.isVisible()) await interact.click();
+  // In Annotate a plain click on a link still follows it.
   await expect(page.getByRole('button', { name: 'Annotate mode' })).toBeVisible();
   return { pane, frame };
 }
@@ -491,8 +495,10 @@ for (const phone of [
       // Press and hold: the comment composer opens on the link, and the release follows nothing.
       const before = page.url();
       await holdLink(page, link, phone.browserName);
-      const composer = page.locator('[data-comment-popover]');
+      // A phone's comment is the bottom card's (approval "inbox-html-attachments-phone"), on the link.
+      const composer = page.locator('[data-html-comment="compose"]');
       await expect(composer).toBeVisible();
+      await expect(composer.locator('[data-html-comment-target]')).toHaveText('A: Story page');
       await page.waitForTimeout(600);
       await expect(page.locator('[data-linked-page]')).toHaveCount(0);
       expect(page.url()).toBe(before);

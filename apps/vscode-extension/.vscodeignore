@@ -11,3 +11,8 @@ tsconfig.json
 bun.lock
 ../../**
 ../**
+# Not needed at run time: source maps and build configs.
+dist/**/*.map
+tsconfig*.json
+bunfig.toml
+vite.reader.config.ts

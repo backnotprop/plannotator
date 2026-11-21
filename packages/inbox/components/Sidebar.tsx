@@ -1,44 +1,152 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import type { InboxHealth, InboxListRow } from '@plannotator/core/inbox-types';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { inboxSidebarShown, type InboxSidebarItem } from '@plannotator/core/inbox-sidebar';
+import { useSidebarLayout } from '../sidebarLayout';
+import { drawnSidebarItems } from '../sidebarItems';
+import { SidebarMenu, useSidebarMenu } from './SidebarMenu';
+import type { InboxAgent, InboxHealth, InboxListRow, InboxRestartAgents } from '@plannotator/core/inbox-types';
+import { inboxRowSnoozed } from '@plannotator/core/inbox-snooze';
+import { restartAgentsDescription, restartAgentsLabel, restartAgentsOf } from '../restartAgents';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { ClaudeIcon, CodexIcon, OpenCodeIcon, PiIcon } from '@plannotator/ui/components/icons/AgentIcons';
 import type { ProjectFolder } from '../api';
 import { connectPrompt } from '../connectPrompt';
 import { formatCount } from '../format';
-import { Icon } from '../icons';
+import { Icon, type IconName } from '../icons';
+import { pinEnds, pinnedState } from '../pins';
+import { starPopping } from '../starPop';
+import type { MachinesModel } from '../machines';
+import { AgentsSection, GogglesMark } from '../agents/AgentsSection';
+import { TagsSection, type TagsSectionProps } from './TagsSection';
+import { TagIcon } from './InitiativePeek';
+import { useInboxAgents } from '../agentsList';
+import { useSidebarSections, type SidebarSection } from '../sidebarSections';
 import { useSidebar } from '../shell/sidebar';
 import { usePhone } from '../phone';
+import { shortProjectNames } from '../projectLabels';
 import { shownProjects, type ProjectAction } from '../projectMenu';
+import { projectSortControl, setProjectSort, sortProjects, useProjectSort, type ProjectSort } from '../projectSort';
+import { selfMachineId } from '../inboxUrl';
 import { ProjectRow } from './ProjectRow';
+import { newSessionTip } from '../compose/model';
 import { PinnedRow, type PinnedAction } from './PinnedRow';
+import { useStarredAbove } from '../starredPills';
 import { useInboxTheme } from '../theme';
 import { TaterMark } from './TaterMark';
 import { ProjectTip } from './ProjectRow';
 import { Tip } from './Tip';
 import { CheckFailingRow, UpdateButton } from './Updates';
+import { UsageRow } from './Usage';
 import type { UpdateCheckFailing } from '../api';
-import { openSearchAriaKeys, openSearchHint } from '../search/searchShortcut';
+import { inboxSearchShortcuts } from '../search/searchShortcut';
+import { ShortcutHint, useShortcutAria, withShortcut } from '../shortcuts/hint';
+import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
+import { Pebble } from '@plannotator/ui/components/shape/Pebble';
+import { ScheduledNav } from '../scheduled/ScheduledNav';
+import { PlansNav } from '../plans/PlansNav';
 
 export interface SidebarProps {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'shapes' | 'prs' | 'artifacts' | 'scheduled' | 'plans';
+  /** Plans: the row second under Inbox, only while Plans is on (config.json `inboxPlans`); no row, menu item or Customize entry while off. */
+  onPlans?: () => void;
+  /**
+   * Artifacts (approval "inbox-artifact-stars"): the row in the top group (before Reviews; Customize can hide it), drawn with `onArtifacts`, that opens
+   * the Artifacts wall on All. No count.
+   */
+  onArtifacts?: () => void;
   /**
    * The Board (approval "inbox-board", step 2): the row under Inbox, always
    * shown with `onBoard`. No count: the approval keeps the count in the
    * Board's header ("N in flight · N on you").
    */
   onBoard?: () => void;
+  /** Routines: the row under Board, only while Settings → Capabilities → Routines is on. */
+  onScheduled?: () => void;
+  /**
+   * Reviews (approvals "inbox-code-review-direction", item 4, and "inbox-reviews-page"): a row of its own (after Board when the Board is on; it needs none), shown only with
+   * `onPulls` (Settings → Capabilities → Code review on). `pullsCount`: the last read's "On you".
+   */
+  onPulls?: () => void;
+  pullsCount?: number;
+  /**
+   * Shape (approval "shape-inbox-placement"): the row directly under Board (under Inbox with the Board off),
+   * given only while Shape is on and there are 3 or more boards. `shapeChanged`: the boards changed since you looked.
+   */
+  onShape?: () => void;
+  shapeChanged?: number;
   projectId: string | null;
+  /** The machine the list shows (a machine's filter, its caption in Agents), or null for every machine. */
+  machineId?: string | null;
+  /** The agent the list shows (an agent's filter, its row in Agents, `#agent=<id>`) and its row's name, or null. */
+  agentFilter?: { id: string; name: string } | null;
+  /**
+   * Linked machines (machines.ts): in the Agents section above Projects, each machine's agents under its name, this
+   * machine first; a machine's name is a filter of the list as a project is.
+   */
+  machines?: MachinesModel;
+  /** Rows waiting on the person, per machine id (no longer drawn: the Agents section shows no counts). */
+  machineCounts?: ReadonlyMap<string, number>;
+  onMachine?: (machineId: string) => void;
+  /** The word on a machine opens its update dialog. Absent on a page that offers no updates. */
+  onMachineUpdate?: (machineId: string) => void;
+  /**
+   * The Agents section (approval "inbox-agents-section", agents/AgentsSection.tsx): shown while the list names agents
+   * (`agents`, agentsList.ts) or a machine is linked. `agentRows`: the window's rows, where an agent's threads are
+   * found; `onAgentFilter` shows one agent's threads (null: everything again); `onMessageAgent`: New message to a
+   * live agent with no thread here.
+   * `onAddAgent`: New message with a new session chosen (absent: no + button). `onAddMachine`: Settings → Machines
+   * (absent on an Inbox that cannot link).
+   */
+  agentRows?: readonly InboxListRow[];
+  /**
+   * The Tags section (approval "inbox-thread-tags", TagsSection.tsx), under Starred: drawn while `shown` (a tag holds
+   * a thread, or the person made one). Absent (an Inbox that keeps no tags, the tour): no section.
+   */
+  tags?: Pick<TagsSectionProps, 'tags' | 'waiting' | 'tagId' | 'onOpen' | 'onCreate' | 'onRename' | 'onDelete' | 'colours'> & { shown: boolean };
+  onAgentFilter?: (agentId: string | null) => void;
+  onMessageAgent?: (session: string, opener: HTMLElement) => void;
+  onAddAgent?: (opener: HTMLElement) => void;
+  onAddMachine?: () => void;
   /** Rows waiting on the person, all projects. */
   inboxCount: number;
   projects: readonly ProjectFolder[];
+  /**
+   * The window's name for each project (`windowProjectNames`, App.tsx), shared with the rows so a project reads
+   * the same in both, the pins' tooltip and name too. Absent, or a project not in it: the server's name.
+   */
+  projectNames?: ReadonlyMap<string, string>;
   /** Rows waiting on the person, per project id. */
   projectCounts: ReadonlyMap<string, number>;
+  /** Each project's latest activity (`projectActivity`): what "most recent" sorts Projects by. */
+  projectActivity?: ReadonlyMap<string, string>;
   /**
    * The project menu (design record "inbox-project-menu"): the projects where
    * Mark all as read has something to do, and the action. Absent: no menu.
    */
   projectsReadable?: ReadonlySet<string>;
   onProjectAction?: (projectId: string, action: ProjectAction) => void;
+  /**
+   * The project menu's Rename… and Reset name: a name, or null for the folder's name. Offered on this
+   * machine's projects only (names stay per machine). Resolves true once the list shows the new name.
+   */
+  onProjectRename?: (projectId: string, name: string | null) => Promise<boolean>;
+  /** The project menu's Set picture… (letter marks): an image as a data: URL, or null to take it away. This machine's projects only. */
+  onProjectPicture?: (projectId: string, file: File | null) => Promise<boolean>;
+  /** One step of combining: `from` into `into`. Resolves true once the list shows it. */
+  onProjectCombine?: (pair: { from: string; into: string; intoName: string }) => Promise<boolean>;
+  /** "+" on a project row (approval "launch-create-clone", F1-F7): New message with a new session there. Absent: no "+". */
+  onProjectNewSession?: (projectId: string, machine: string | null) => void;
+  /** Whether a project's "+" can start anything there (its machine's agents, its folder, launch on there; `asleep`, that machine is). Absent: every row's can. */
+  projectCanStart?: (project: ProjectFolder, machine: string | null, machineLaunch: boolean | null | undefined, asleep: boolean) => boolean;
+  /** Says a line in the window's live region (the rename field's refusals). */
+  announce?: (text: string) => void;
+  /**
+   * An agent row's Rename… and Reset name (agents/AgentsSection.tsx): a name, or null for its own (`own`). Resolves
+   * true once it is kept. Absent: agent rows have no menu.
+   */
+  onAgentRename?: (agent: InboxAgent, name: string | null, own: string) => Promise<boolean>;
+  /** An agent row's Stop and Delete … session… for an agent the Inbox launched (`machine`: a linked machine's id, else null). */
+  onAgentStop?: (agent: InboxAgent, machine: string | null) => void;
+  onAgentDelete?: (agent: InboxAgent, machine: string | null) => void;
   /** The update control's model (packages/server/inbox-updates.ts): the Update button above Settings. */
   update: InboxHealth['update'];
   restarting: boolean;
@@ -47,7 +155,6 @@ export interface SidebarProps {
   /**
    * Checking for updates has failed for hours (and no Update button shows):
    * the quiet "Can't check for updates" row, opening Settings → About.
-   * Null on a page opened over the tailnet.
    */
   checkFailing?: UpdateCheckFailing | null;
   onCheckFailing?: () => void;
@@ -58,15 +165,6 @@ export interface SidebarProps {
   onSearch?: (opener: HTMLElement) => void;
   /** Compose (a new message to a connected agent): the icon button beside Search. Absent: no button. */
   onCompose?: (opener: HTMLElement) => void;
-  /**
-   * Decision mode (experimental): how many decisions wait across threads. The
-   * "Decide N" row shows under Inbox whenever this is above 0 (with
-   * `onDecide`); the caller applies the minimum, passing 0 below two
-   * decisions (`decideEntryShown`, `DECIDE_ENTRY_MIN` in decisions/entry.tsx).
-   * Absent or 0: no row.
-   */
-  decideCount?: number;
-  onDecide?: () => void;
   /**
    * The threads pinned to the sidebar (approval "inbox-pinned-threads"), in
    * pin order: the Pinned section above Projects. None (or an older Inbox
@@ -91,15 +189,19 @@ export interface SidebarProps {
   onInbox: () => void;
   onProject: (projectId: string) => void;
   onSettings: () => void;
+  /** The keyboard button beside light and dark: the shortcut map (ShortcutMap.tsx). Absent, or on a phone: no button. */
+  onShortcuts?: () => void;
   onUpdate: () => void;
   onWhatsNew: (version: string) => void;
   /**
    * Claude Code sessions a restart would bring up to date (the list model's
    * `restart_claude_code`): "Reload Claude Code N" under "What's new in X",
    * opening Settings → Agents (owner approval "restart-warning"). It goes away
-   * by itself once they restart. Absent or 0: no row.
+   * by itself once they restart. Absent or 0: no row. `restartAgents` wins
+   * when given (every runtime's count; owner approval "reload-hosts").
    */
   restartClaudeCode?: number;
+  restartAgents?: InboxRestartAgents;
   onRestartSessions?: () => void;
   /**
    * `GET /api/inbox/settings` `mcp_command`, for the absolute `plannotator`
@@ -108,7 +210,25 @@ export interface SidebarProps {
   mcpCommand?: readonly string[] | null;
   /** The foot's Copy prompt pill (default true). The onboarding tour's sidebar leaves it out: it is for the person's own agents. */
   connectPrompt?: boolean;
+  /** Opens the Feedback dialog (components/FeedbackDialog.tsx): the row above Settings. Absent: no row. */
+  onFeedback?: () => void;
+  /** Opens or closes the Usage peek from its row (components/Usage.tsx), which shows only where `cswap` is. Absent: no row. */
+  onUsage?: (row: HTMLElement) => void;
+  usageOpen?: boolean;
+  /** `cswap` is on this computer: the row is there before the first read answers. */
+  usageInstalled?: boolean;
+  /** The foot stays hidden until it knows every row it will hold, so none arrives late and moves the others. */
+  footHeld?: boolean;
+  /**
+   * Pinned and Projects open and close as this browser last left them (the
+   * cookie in sidebarSections.ts; default true). The onboarding tour's
+   * sidebar passes false: both start open whatever the cookie says.
+   */
+  rememberSections?: boolean;
 }
+
+const NO_MACHINES: MachinesModel = { self: null, all: [], linked: [], names: new Map(), away: new Set() };
+const NO_ROWS: readonly InboxListRow[] = [];
 
 /**
  * Whether a scroll area has more below what it shows: the project list fades
@@ -139,18 +259,43 @@ function useMoreBelow<T extends HTMLElement>(deps: unknown) {
  * in the hover peek, and as the sheet on a phone width, which a pick closes.
  */
 export function Sidebar(props: SidebarProps) {
+  const restartAgents = props.restartAgents ?? restartAgentsOf(undefined, props.restartClaudeCode);
   const firstRun = props.projects.length === 0;
   const { setOpenMobile } = useSidebar();
+  const searchKeys = useShortcutAria({ scope: inboxSearchShortcuts, action: 'openSearch' });
+  const composeKeys = useShortcutAria({ scope: inboxAppShortcuts, action: 'compose' });
   const phone = usePhone();
+  // Another machine's project keeps what that machine gives it: only this machine's are renamed or combined.
+  const local = (project: ProjectFolder) => !project.machine || project.machine === selfMachineId();
   // A project with nothing in the list leaves the sidebar (automatic hiding); the one the list shows stays until the person leaves it.
   const held = props.page === 'inbox' ? props.projectId : null;
-  const shown = shownProjects(props.projects, held);
+  // Each project by the window's one name for it (windowProjectNames, App.tsx), as the rows name it.
+  const projectSort = useProjectSort();
+  // Only most recent reads the activity, so another order does not sort again when a row's time changes.
+  const activity = projectSort === 'recent' ? props.projectActivity : undefined;
+  const shown = useMemo(
+    () => sortProjects(shownProjects(props.projects, held).map((project) => ({ ...project, name: props.projectNames?.get(project.id) ?? project.name })), projectSort, activity),
+    [props.projects, props.projectNames, held, projectSort, activity],
+  );
   const pins = props.pins ?? [];
+  // Pinned and Projects close like folders; closed, a section still shows where the person is (the open pinned thread, the project the list shows).
+  const sections = useSidebarSections(props.rememberSections !== false);
+  // "Keep starred above the list" (starredPills.ts): on, the starred threads are the list's pills and no section here.
+  const [starredAbove] = useStarredAbove(props.rememberSections !== false);
+  const pinnedClosed = sections.closed('pinned');
+  const projectsClosed = sections.closed('projects');
+  const pinOn = (row: InboxListRow) => props.page === 'inbox' && props.openThreadId === row.thread_id;
+  // A closed Pinned counts the pins waiting on the person (a question, Stopped, Holds), so a Stopped thread never hides.
+  // A snoozed pin stays pinned but waits with the rest of its snooze, so it is no count here.
+  const pinsWaiting = pinnedClosed ? pins.filter((row) => !inboxRowSnoozed(row) && ['stop', 'hold', 'wait'].includes(pinnedState(row).kind)).length : 0;
   // One scroll area holds Pinned and Projects (no limit on pins: a long Pinned section scrolls with the projects).
-  const [projsRef, moreProjects] = useMoreBelow<HTMLDivElement>(`${shown.length}:${pins.length}`);
+  // The person's layout (approval "inbox-sidebar-customize"; core inbox-sidebar.ts): which items show, their order,
+  // top or bottom. The onboarding tour's sidebar always draws the default.
+  const layout = useSidebarLayout(props.rememberSections !== false);
+  const [projsRef, moreProjects] = useMoreBelow<HTMLDivElement>(`${shown.length}:${pins.length}:${pinnedClosed}:${projectsClosed}:${starredAbove}:${layout.hidden.join()}`);
   /**
    * After a pin's menu acted: Move up or down keeps focus on that row's ⋯ in its new place; Unpin moves it to
-   * the next pinned row's ⋯, else the first project, else Inbox (never the page).
+   * the next pinned row's ⋯ on screen, else the first project on screen, else the Pinned header, else Inbox (never the page).
    */
   const pinFocus = useRef<{ id: string; index: number; fallback: string[]; until: number } | null>(null);
   useLayoutEffect(() => {
@@ -175,89 +320,218 @@ export function Sidebar(props: SidebarProps) {
       if (own && (lost() || document.activeElement === own)) own.focus({ preventScroll: true });
       return;
     }
-    // Unpinned: the next pinned row's ⋯, else the first project, else Inbox.
+    // Unpinned: the next pinned row's ⋯ on screen, else the first project on screen, else the Pinned header, else Inbox.
     if (!lost() && !root.contains(document.activeElement)) return;
     const next =
       want.fallback.map((id) => root.querySelector<HTMLElement>(`[data-pin-more="${CSS.escape(id)}"]`)).find((el) => el !== null) ??
       root.querySelector<HTMLElement>('.ib-proj') ??
+      root.querySelector<HTMLElement>('[data-sidebar-section="pinned"]') ??
       inboxRef.current;
     next?.focus({ preventScroll: true });
   });
   const inboxRef = useRef<HTMLButtonElement>(null);
-  const inboxRefreshes = props.refreshes === true && props.page === 'inbox' && props.projectId === null;
+  const inboxRefreshes = props.refreshes === true && props.page === 'inbox' && props.projectId === null && !props.machineId && !props.agentFilter && !props.tags?.tagId;
   const spinOf = (scope: string | null) => (props.refreshSpin && props.refreshSpin.scope === scope ? props.refreshSpin.key : null);
   const refreshHintId = useId();
   const pinnedLabelId = useId();
+  const pinnedBodyId = useId();
+  const projectsLabelId = useId();
+  const projectsBodyId = useId();
+  const agentsLabelId = useId();
+  const tagsLabelId = useId();
+  const tagsBodyId = useId();
+  const tagsClosed = sections.closed('tags');
+  const agentsBodyId = useId();
+  const machineList = props.machines?.all ?? [];
+  const agentsClosed = sections.closed('agents');
+  // Agents shows while the list names agents (an Inbox from before them names none) or a machine is linked.
+  const agentsRead = useInboxAgents();
+  const agentsDrawn = agentsRead !== null || machineList.length > 0;
   /** The project a menu action ran on: once its row is gone (Archive all hid it), focus goes to Inbox, never the page. */
   const actedOn = useRef<string | null>(null);
+  /** A project combined from its rename field: its row goes, and focus lands on the ⋯ of the project it went into. */
+  const combinedInto = useRef<{ from: string; into: string } | null>(null);
   useLayoutEffect(() => {
+    const combined = combinedInto.current;
+    if (combined && !shown.some((p) => p.id === combined.from)) {
+      combinedInto.current = null;
+      asideRef.current?.querySelector<HTMLElement>(`[data-pmore="${combined.into}"]`)?.focus({ preventScroll: true });
+    }
     const id = actedOn.current;
     if (!id || shown.some((p) => p.id === id)) return;
     actedOn.current = null;
     const active = document.activeElement;
     if (!active || active === document.body || !active.isConnected) inboxRef.current?.focus({ preventScroll: true });
   });
+  /**
+   * The section that last held keyboard focus in this sidebar. A closed section's one row (the open pinned
+   * thread, the project the list shows) goes when it stops being current (Escape closed the thread, Back left
+   * the project): focus then moves to that section's header, never the page. Runs after Unpin's and Archive
+   * all's own fallbacks, which move focus first. Agents keeps no row while closed: focus that was in it goes to its
+   * header the same way.
+   */
+  const asideRef = useRef<HTMLElement>(null);
+  const focusedIn = useRef<SidebarSection | null>(null);
+  useEffect(() => {
+    const track = (event: FocusEvent) => {
+      const target = event.target instanceof Element && asideRef.current?.contains(event.target) ? event.target : null;
+      focusedIn.current = target?.closest('[data-pinned-section]') ? 'pinned' : target?.closest('[data-tags-section]') ? 'tags' : target?.closest('[data-agents-section]') ? 'agents' : target?.closest('.ib-projs') ? 'projects' : null;
+    };
+    document.addEventListener('focusin', track);
+    return () => document.removeEventListener('focusin', track);
+  }, []);
+  useLayoutEffect(() => {
+    const section = focusedIn.current;
+    if (!section || !sections.closed(section)) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    focusedIn.current = null;
+    asideRef.current?.querySelector<HTMLElement>(`[data-sidebar-section="${section}"]`)?.focus({ preventScroll: true });
+  });
   const pick = (go: () => void) => () => {
     setOpenMobile(false);
     go();
   };
-  return (
-    <aside className="ib-side" aria-label="Inbox navigation">
-      <div className="ib-brand">
-        <TaterMark />
-        <b>Plannotator</b>
-        <span>Inbox</span>
+  /**
+   * A phone's sheet (approval "inbox-phone-sidebar-sheet", Sheet 1): what narrows the list, in words, with Clear.
+   * A project by the name its row has; a machine by its own name; an agent by its row's name. Nothing while the list
+   * shows everything.
+   */
+  const showingOnly = ((): { kind: 'project' | 'machine' | 'agent' | 'tag'; name: string } | null => {
+    if (!phone || props.page !== 'inbox') return null;
+    if (props.projectId) {
+      const name = shown.find((project) => project.id === props.projectId)?.name ?? props.projectNames?.get(props.projectId) ?? props.projects.find((project) => project.id === props.projectId)?.name;
+      return name ? { kind: 'project', name } : null;
+    }
+    const machine = props.machineId ? machineList.find((m) => m.id === props.machineId) : undefined;
+    if (machine) return { kind: 'machine', name: machine.name };
+    if (props.agentFilter) return { kind: 'agent', name: props.agentFilter.name };
+    const tag = props.tags?.tagId ? props.tags.tags.find((t) => t.id === props.tags?.tagId) : undefined;
+    return tag ? { kind: 'tag', name: tag.name } : null;
+  })();
+  // A phone's sheet: a section heading that has stuck to the top of the scroll takes a hairline, so rows read as passing under it.
+  useLayoutEffect(() => {
+    const scroll = projsRef.current;
+    if (!phone || !scroll) return;
+    const read = () => {
+      const top = scroll.getBoundingClientRect().top;
+      for (const head of scroll.querySelectorAll<HTMLElement>('.ib-secrow')) {
+        const section = head.parentElement?.getBoundingClientRect();
+        const stuck = scroll.scrollTop > 0 && head.getBoundingClientRect().top - top <= 1 && (section ? section.bottom - top > head.offsetHeight + 2 : true);
+        head.toggleAttribute('data-stuck', stuck);
+      }
+    };
+    read();
+    scroll.addEventListener('scroll', read, { passive: true });
+    return () => scroll.removeEventListener('scroll', read);
+  });
+  /** On a phone each section is one block (its heading sticks while its own rows pass under it); elsewhere the rows stay as they were. */
+  const sheetSection = (name: SidebarSection, children: ReactNode): ReactNode =>
+    phone ? (
+      <div className="ib-sheet-sec" data-sheet-section={name}>
+        {children}
       </div>
-      {props.onSearch && (
-        <div className="ib-sp-entryrow">
-        <button
-          type="button"
-          className="ib-sp-entry"
-          data-open-search=""
-          aria-haspopup="dialog"
-          aria-keyshortcuts={openSearchAriaKeys()}
-          onClick={(event) => {
-            const opener = event.currentTarget;
-            // On a phone the sheet closes first; the search sheet takes the screen.
-            setOpenMobile(false);
-            props.onSearch?.(opener);
-          }}
-        >
-          <Icon name="search" />
-          Search
-          {/* The Inbox's one shortcut (search/searchShortcut.ts); the button's aria-keyshortcuts names it for a screen reader. */}
-          <kbd className="ib-kbd ib-sp-hint" aria-hidden="true" data-search-hint="">
-            {openSearchHint()}
-          </kbd>
-        </button>
-        {props.onCompose && (
-          <Tip content="New message">
-            <button
-              type="button"
-              className="ib-compose-btn"
-              data-open-compose=""
-              aria-label="New message"
-              aria-haspopup="dialog"
-              onClick={(event) => {
-                const opener = event.currentTarget;
-                setOpenMobile(false);
-                props.onCompose?.(opener);
-              }}
-            >
-              <Icon name="compose" />
-            </button>
-          </Tip>
-        )}
-        </div>
-      )}
+    ) : (
+      children
+    );
+  const drawn = drawnSidebarItems({
+    board: Boolean(props.onBoard),
+    plans: Boolean(props.onPlans),
+    scheduled: Boolean(props.onScheduled),
+    reviews: Boolean(props.onPulls),
+    shape: Boolean(props.onShape),
+    // The Usage row decides itself whether it shows (components/Usage.tsx); the menu offers it only where `cswap` is.
+    usage: Boolean(props.onUsage),
+    search: Boolean(props.onSearch),
+    compose: Boolean(props.onCompose),
+    feedback: Boolean(props.onFeedback),
+    drafts: Boolean(props.onDrafts),
+    artifacts: Boolean(props.onArtifacts),
+    shortcuts: Boolean(props.onShortcuts),
+    copyPrompt: props.connectPrompt !== false,
+    agents: agentsDrawn,
+    tags: props.tags?.shown === true,
+    phone,
+  });
+  const shows = (item: InboxSidebarItem) => drawn.has(item) && inboxSidebarShown(layout, item);
+  // Hidden in Customize sidebar (the owner, 2026-11-09): the whole section goes, heading and all. Agents keep running.
+  const agentsShown = shows('agents');
+  const tagsShown = shows('tags');
+  const starredShown = shows('starred');
+  const projectsShown = shows('projects');
+  const menu = useSidebarMenu(asideRef, props.rememberSections !== false);
+  const searchButton = (
+    <button
+      type="button"
+      className="ib-sp-entry"
+      data-open-search=""
+      aria-haspopup="dialog"
+      aria-keyshortcuts={searchKeys}
+      onClick={(event) => {
+        const opener = event.currentTarget;
+        // On a phone the sheet closes first; the search sheet takes the screen.
+        setOpenMobile(false);
+        props.onSearch?.(opener);
+      }}
+    >
+      <Icon name="search" />
+      Search
+      {/* ⌘K / Ctrl K (search/searchShortcut.ts); the button's aria-keyshortcuts names it, and `/`, for a screen reader. */}
+      <ShortcutHint scope={inboxSearchShortcuts} action="openSearch" className="ib-kbd ib-sp-hint" />
+    </button>
+  );
+  const compose = (event: MouseEvent<HTMLButtonElement>) => {
+    const opener = event.currentTarget;
+    setOpenMobile(false);
+    props.onCompose?.(opener);
+  };
+  const composeButton = (
+    <Tip content={withShortcut('New message', { scope: inboxAppShortcuts, action: 'compose' })}>
+      <button type="button" className="ib-compose-btn" data-open-compose="" aria-label="New message" aria-keyshortcuts={composeKeys} aria-haspopup="dialog" onClick={compose}>
+        <Icon name="compose" />
+      </button>
+    </Tip>
+  );
+  const keysShown = shows('shortcuts');
+  const themeShown = shows('theme');
+  const feedbackButton = (
+    <button type="button" className="ib-nav" aria-haspopup="dialog" data-feedback-nav="" onClick={pick(() => props.onFeedback?.())}>
+      <Icon name="comment" />
+      Feedback
+    </button>
+  );
+  // A phone's sheet (approval "inbox-phone-sidebar-sheet"): Settings, Feedback and light/dark share one foot row.
+  const footJoined = phone && shows('feedback') && shows('settings') && layout.bottom.includes('feedback') && layout.bottom.includes('settings');
+  /** One item's row. `list` is its stack as drawn: Search and New message share a row while side by side, as by default. */
+  const itemRow = (item: InboxSidebarItem, list: readonly InboxSidebarItem[], at: number): ReactNode => {
+    switch (item) {
+      case 'search':
+        return (
+          <div className="ib-sp-entryrow">
+            {searchButton}
+            {list[at + 1] === 'new-message' && composeButton}
+          </div>
+        );
+      case 'new-message':
+        if (list[at - 1] === 'search') return null;
+        // Apart from Search: a row of its own.
+        return (
+          <button type="button" className="ib-nav" data-open-compose="" aria-haspopup="dialog" aria-keyshortcuts={composeKeys} onClick={compose}>
+            <Icon name="compose" />
+            New message
+          </button>
+        );
+      case 'inbox':
+        return (
+          <>
       {/* On the list it shows, Inbox refreshes it: ↻ on hover with "Refresh", one turn on a click. */}
       <Tip content="Refresh" when={() => inboxRefreshes}>
         <button
           ref={inboxRef}
           type="button"
-          className={`ib-nav ib-nav-inbox${props.page === 'inbox' && props.projectId === null ? ' ib-on' : ''}`}
+          className={`ib-nav ib-nav-inbox${props.page === 'inbox' && props.projectId === null && !props.machineId && !props.agentFilter && !props.tags?.tagId ? ' ib-on' : ''}`}
           onClick={pick(props.onInbox)}
-          aria-current={props.page === 'inbox' && props.projectId === null ? 'page' : undefined}
+          aria-current={props.page === 'inbox' && props.projectId === null && !props.machineId && !props.agentFilter && !props.tags?.tagId ? 'page' : undefined}
           aria-describedby={inboxRefreshes ? refreshHintId : undefined}
           data-refreshes={inboxRefreshes ? '' : undefined}
           data-refreshing={spinOf(null) != null ? '' : undefined}
@@ -274,30 +548,85 @@ export function Sidebar(props: SidebarProps) {
       <span id={refreshHintId} hidden>
         Refresh the list
       </span>
-      {props.onBoard && (
+          </>
+        );
+      case 'board':
+        return (
         <button
           type="button"
           className={`ib-nav${props.page === 'board' ? ' ib-on' : ''}`}
-          onClick={pick(props.onBoard)}
+          onClick={pick(() => props.onBoard?.())}
           aria-current={props.page === 'board' ? 'page' : undefined}
           data-board-nav=""
         >
           <Icon name="board" />
           Board
         </button>
-      )}
-      {(props.decideCount ?? 0) > 0 && props.onDecide && (
-        <button type="button" className="ib-nav" onClick={pick(props.onDecide)} aria-haspopup="dialog" data-decide-nav="">
-          <Icon name="todo" />
-          Decide
-          <span className="ib-n">{formatCount(props.decideCount ?? 0)}</span>
+        );
+      case 'plans':
+        return <PlansNav on={props.page === 'plans' && !props.projectId} onClick={pick(() => props.onPlans?.())} pick={pick} phone={phone} />;
+      case 'scheduled':
+        return <ScheduledNav on={props.page === 'scheduled'} onClick={pick(() => props.onScheduled?.())} />;
+      case 'shape':
+        return (
+        <button
+          type="button"
+          className={`ib-nav${props.page === 'shapes' ? ' ib-on' : ''}`}
+          onClick={pick(() => props.onShape?.())}
+          aria-current={props.page === 'shapes' ? 'page' : undefined}
+          data-shape-nav=""
+        >
+          <span className="ib-pebble-ico" aria-hidden="true">
+            <Pebble alive={false} size={18} />
+          </span>
+          Shape
+          {(props.shapeChanged ?? 0) > 0 && (
+            <span className="ib-n" aria-label={`${props.shapeChanged} changed since you looked`}>
+              {formatCount(props.shapeChanged ?? 0)}
+            </span>
+          )}
         </button>
-      )}
-      {(props.draftsCount ?? 0) > 0 && props.onDrafts && (
+        );
+      case 'reviews':
+        return (
+        <button
+          type="button"
+          className={`ib-nav${props.page === 'reviews' || props.page === 'prs' ? ' ib-on' : ''}`}
+          onClick={pick(() => props.onPulls?.())}
+          aria-current={props.page === 'reviews' || props.page === 'prs' ? 'page' : undefined}
+          data-pulls-nav=""
+        >
+          <Icon name="pullRequest" />
+          Reviews
+          {(props.pullsCount ?? 0) > 0 && (
+            <span className="ib-n" aria-label={`${props.pullsCount} on you`}>
+              {formatCount(props.pullsCount ?? 0)}
+            </span>
+          )}
+        </button>
+        );
+      case 'artifacts':
+        // Artifacts (approval "inbox-artifact-stars"): the wall of every thread's artifacts, pinned ones first.
+        return (
+        <button
+          type="button"
+          className={`ib-nav${props.page === 'artifacts' ? ' ib-on' : ''}`}
+          onClick={pick(() => props.onArtifacts?.())}
+          aria-current={props.page === 'artifacts' ? 'page' : undefined}
+          data-artifacts-nav=""
+        >
+          <Icon name="artifacts" />
+          Artifacts
+        </button>
+        );
+      case 'drafts':
+        // Only while there are drafts not sent.
+        if ((props.draftsCount ?? 0) <= 0) return null;
+        return (
         <button
           type="button"
           className={`ib-nav${props.page === 'drafts' ? ' ib-on' : ''}`}
-          onClick={pick(props.onDrafts)}
+          onClick={pick(() => props.onDrafts?.())}
           aria-current={props.page === 'drafts' ? 'page' : undefined}
           data-drafts-nav=""
         >
@@ -305,21 +634,118 @@ export function Sidebar(props: SidebarProps) {
           Drafts
           <span className="ib-n">{formatCount(props.draftsCount ?? 0)}</span>
         </button>
+        );
+      case 'copy-prompt':
+        return <CopyConnectPrompt mcpCommand={props.mcpCommand ?? null} />;
+      case 'feedback':
+        // A phone's sheet: Feedback rides the Settings row while both are at the bottom (one foot row).
+        return footJoined ? null : feedbackButton;
+      case 'usage':
+        return <UsageRow installed={props.usageInstalled ?? false} open={props.usageOpen ?? false} onOpen={(row) => pick(() => props.onUsage?.(row))()} />;
+      case 'settings':
+        // Two controls side by side, never one inside the other: the row opens Settings, the icons open the shortcut map and flip light and dark.
+        return (
+          <div className="ib-setrow" data-keys={keysShown ? '' : undefined} data-theme={themeShown ? '' : undefined} data-sheet-foot={footJoined ? '' : undefined}>
+            <button
+              type="button"
+              className={`ib-nav${props.page === 'settings' ? ' ib-on' : ''}${keysShown && themeShown ? ' ib-has-keys' : ''}`}
+              onClick={pick(props.onSettings)}
+              aria-current={props.page === 'settings' ? 'page' : undefined}
+            >
+              <Icon name="settings" />
+              Settings
+            </button>
+            {footJoined && feedbackButton}
+            {keysShown && props.onShortcuts && <KeysButton onPress={props.onShortcuts} />}
+            {themeShown && <ThemeToggle />}
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+  /** A stack's rows, each in a slot that names its item (the right-click menu's aim). */
+  const stack = (list: readonly InboxSidebarItem[]) => {
+    const drawnList = list.filter(shows);
+    return drawnList.map((item, at) => {
+      const row = itemRow(item, drawnList, at);
+      return row === null ? null : (
+        <div key={item} className="ib-side-item" data-sidebar-item={item}>
+          {row}
+        </div>
+      );
+    });
+  };
+  const bottom = layout.bottom.filter(shows);
+  const brand = shows('logo') && (
+    <div className="ib-brand" data-sidebar-item="logo">
+      <TaterMark />
+      <b>Plannotator</b>
+      <span>Inbox</span>
+    </div>
+  );
+  /** A phone's sheet: Starred's heading in a row of its own, as Agents' and Projects' are, so all three stick alike. */
+  const sheetHeading = (heading: ReactNode): ReactNode => (phone ? <div className="ib-secrow">{heading}</div> : heading);
+  // The notices (Update, What's new, Can't check, Reload agents) are not items: they head the bottom area, under the
+  // Copy prompt pill when it leads it, as before.
+  const noticesAfter = bottom[0] === 'copy-prompt' ? 1 : 0;
+  return (
+    <aside ref={asideRef} className="ib-side" aria-label="Inbox navigation" onContextMenu={menu.onContextMenu} onTouchStart={menu.onTouchStart}>
+      {phone ? (
+        // A phone's sheet: the mark, and a close button (the only way out at a width the sheet fills).
+        <div className="ib-sheet-head">
+          {brand}
+          <button type="button" className="ib-sheet-close" aria-label="Close" data-sheet-close="" onClick={() => setOpenMobile(false)}>
+            <Icon name="x" />
+          </button>
+        </div>
+      ) : (
+        brand
       )}
+      {showingOnly && (
+        <div className="ib-sheet-now" data-sheet-showing={showingOnly.kind}>
+          <div className="ib-sheet-now-t">
+            <span className="ib-sheet-now-l">Showing only</span>
+            <span className="ib-sheet-now-n">
+              {showingOnly.kind === 'agent' ? <GogglesMark /> : showingOnly.kind === 'tag' ? <TagIcon className="ib-ic" /> : <Icon name={showingOnly.kind === 'project' ? 'folder' : 'laptop'} />}
+              <bdi dir="auto">{showingOnly.name}</bdi>
+            </span>
+          </div>
+          <button type="button" className="ib-sheet-now-c" aria-label="Clear: show everything" data-sheet-clear="" onClick={pick(props.onInbox)}>
+            Clear
+          </button>
+        </div>
+      )}
+      {!phone && stack(layout.top)}
       <div className="ib-sidescroll" ref={projsRef} data-more={moreProjects ? '' : undefined}>
-        {pins.length > 0 && (
+        {/* A phone's sheet has one scroll: the places scroll with the sections. */}
+        {phone && stack(layout.top)}
+        {starredShown && pins.length > 0 && !starredAbove && sheetSection('pinned',
           <>
-            <div className="ib-side-label" id={pinnedLabelId}>
-              Pinned
-            </div>
-            <section className="ib-pins" aria-labelledby={pinnedLabelId} data-pinned-section="">
-              {pins.map((row, index) => (
+            {sheetHeading(
+            <SectionHeader
+              section="pinned"
+              id={pinnedLabelId}
+              controls={pinnedBodyId}
+              label="Starred"
+              icon="star"
+              iconClass="ib-star-on"
+              pop={starPopping()}
+              open={!pinnedClosed}
+              count={pinsWaiting}
+              total={phone ? pins.length : undefined}
+              onToggle={() => sections.toggle('pinned')}
+            />,
+            )}
+            <section className="ib-pins" id={pinnedBodyId} aria-labelledby={pinnedLabelId} data-pinned-section="" data-closed={pinnedClosed ? '' : undefined}>
+              {pins.map((row, index) => (pinnedClosed && !pinOn(row) ? null : (
                 <PinnedRow
                   key={row.thread_id}
                   row={row}
-                  on={props.page === 'inbox' && props.openThreadId === row.thread_id}
-                  first={index === 0}
-                  last={index === pins.length - 1}
+                  project={props.projectNames?.get(row.project.id)}
+                  on={pinOn(row)}
+                  first={pinEnds(pins, index).first}
+                  last={pinEnds(pins, index).last}
                   phone={phone}
                   onOpen={pick(() => props.onOpenPin?.(row))}
                   onAction={(action) => {
@@ -332,23 +758,113 @@ export function Sidebar(props: SidebarProps) {
                     props.onPinAction?.(row, action);
                   }}
                 />
-              ))}
+              )))}
             </section>
-          </>
+          </>,
         )}
-        <div className="ib-side-label">Projects</div>
-        <div className="ib-projs">
+        {tagsShown && props.tags && sheetSection('tags',
+          <TagsSection
+            tags={props.tags.tags}
+            waiting={props.tags.waiting}
+            tagId={props.page === 'inbox' ? props.tags.tagId : null}
+            closed={tagsClosed}
+            onToggle={() => sections.toggle('tags')}
+            labelId={tagsLabelId}
+            bodyId={tagsBodyId}
+            header={
+              <SectionHeader
+                section="tags"
+                id={tagsLabelId}
+                controls={tagsBodyId}
+                label="Tags"
+                iconNode={<TagIcon className="ib-ic" />}
+                open={!tagsClosed}
+                count={0}
+                total={phone ? props.tags.tags.length : undefined}
+                onToggle={() => sections.toggle('tags')}
+              />
+            }
+            phone={phone}
+            pick={pick}
+            onOpen={props.tags.onOpen}
+            onCreate={props.tags.onCreate}
+            onRename={props.tags.onRename}
+            onDelete={props.tags.onDelete}
+            colours={props.tags.colours}
+          />,
+        )}
+        {agentsShown && (
+          <AgentsSection
+            machines={props.machines ?? NO_MACHINES}
+            rows={props.agentRows ?? NO_ROWS}
+            machineId={props.machineId ?? null}
+            agentId={props.agentFilter?.id ?? null}
+            page={props.page}
+            closed={agentsClosed}
+            onToggle={() => sections.toggle('agents')}
+            labelId={agentsLabelId}
+            bodyId={agentsBodyId}
+            header={(icon) => (
+              <SectionHeader
+                section="agents"
+                id={agentsLabelId}
+                controls={agentsBodyId}
+                label="Agents"
+                iconNode={icon}
+                open={!agentsClosed}
+                count={0}
+                onToggle={() => sections.toggle('agents')}
+              />
+            )}
+            onMachine={props.onMachine}
+            onMachineUpdate={props.onMachineUpdate}
+            onAgentFilter={(agentId) => props.onAgentFilter?.(agentId)}
+            onMessageAgent={(session, opener) => props.onMessageAgent?.(session, opener)}
+            onAddAgent={(opener) => (props.onAddAgent ?? props.onCompose)?.(opener)}
+            onAddMachine={props.onAddMachine}
+            pick={pick}
+            phone={phone}
+            // The sheet stays open on a phone: the field is in it.
+            onRename={props.onAgentRename}
+            onStop={props.onAgentStop}
+            // Delete asks in a dialog over the list: on a phone the sheet closes for it.
+            onDelete={props.onAgentDelete && ((agent, machine) => pick(() => props.onAgentDelete?.(agent, machine))())}
+            announce={props.announce}
+          />
+        )}
+        {projectsShown && sheetSection('projects',
+        <>
+        {/* Two controls side by side, never one inside the other: the header opens and closes, the icon changes the order. */}
+        <div className="ib-secrow">
+          <SectionHeader
+            section="projects"
+            id={projectsLabelId}
+            controls={projectsBodyId}
+            label="Projects"
+            icon={projectsClosed ? 'folder' : 'folderOpen'}
+            open={!projectsClosed}
+            count={0}
+            total={phone && shown.length > 0 ? shown.length : undefined}
+            onToggle={() => sections.toggle('projects')}
+          />
+          {!projectsClosed && shown.length > 1 && <ProjectSortToggle sort={projectSort} announce={props.announce} />}
+        </div>
+        <div className="ib-projs" id={projectsBodyId} role="group" aria-labelledby={projectsLabelId} data-closed={projectsClosed ? '' : undefined} data-recent={projectSort === 'recent' ? '' : undefined}>
+          {/* Closed: only the project the list shows, if any; never the empty notes. */}
           {firstRun ? (
-            <div className="ib-side-empty">Projects appear here when an agent writes from one.</div>
+            !projectsClosed && <div className="ib-side-empty">Projects appear here when an agent writes from one.</div>
           ) : shown.length === 0 ? (
-            <div className="ib-side-empty" data-projects-hidden="">
-              {/* Projects whose threads were deleted rather than archived are not in Settings → Archived. */}
-              {props.projects.some((project) => (project.archived ?? 0) > 0) ? 'Nothing open. Archived projects are in Settings → Archived.' : 'Nothing open.'}
-            </div>
+            !projectsClosed && (
+              <div className="ib-side-empty" data-projects-hidden="">
+                {/* Projects whose threads were deleted rather than archived are not in Settings → Archived. */}
+                {props.projects.some((project) => (project.archived ?? 0) > 0) ? 'Nothing open. Archived projects are in Settings → Archived.' : 'Nothing open.'}
+              </div>
+            )
           ) : (
             shown.map((project) => {
               const n = props.projectCounts.get(project.id) ?? 0;
-              const on = props.page === 'inbox' && props.projectId === project.id;
+              const on = (props.page === 'inbox' || props.page === 'plans') && props.projectId === project.id;
+              if (projectsClosed && !on) return null;
               if (!props.onProjectAction) {
                 return (
                   <ProjectTip key={project.id} name={project.name} root={project.root}>
@@ -382,15 +898,58 @@ export function Sidebar(props: SidebarProps) {
                     setOpenMobile(false);
                     props.onProjectAction?.(project.id, action);
                   }}
+                  // Another machine's project keeps the name that machine gives it. The sheet stays open on a phone: the field is in it.
+                  onRename={
+                    props.onProjectRename && (!project.machine || project.machine === selfMachineId())
+                      ? (name) => props.onProjectRename!(project.id, name)
+                      : undefined
+                  }
+                  // A picture is kept by the Inbox that has the project: this machine's projects only.
+                  onPicture={props.onProjectPicture && local(project) ? (file) => props.onProjectPicture!(project.id, file) : undefined}
+                  newSession={
+                    props.onProjectNewSession
+                      ? (() => {
+                          const machine = project.machine && project.machine !== props.machines?.self ? project.machine : null;
+                          const machineView = machine ? props.machines?.linked.find((m) => m.id === machine) : undefined;
+                          const asleep = machineView?.state === 'offline';
+                          if (props.projectCanStart && !props.projectCanStart(project, machine, machineView?.launch, asleep)) return undefined;
+                          const tip = newSessionTip(props.projectNames?.get(project.id) ?? project.name, machine ? (props.machines?.names.get(machine) ?? null) : null, asleep);
+                          return {
+                            tip,
+                            onPress: () => {
+                              setOpenMobile(false);
+                              props.onProjectNewSession!(project.id, machine);
+                            },
+                          };
+                        })()
+                      : undefined
+                  }
+                  announce={props.announce}
+                  // This machine's projects only: combining never crosses machines.
+                  others={local(project) ? props.projects.filter((p) => p.id !== project.id && local(p)).map((p) => ({ ...p, name: props.projectNames?.get(p.id) ?? p.name })) : []}
+                  onCombine={
+                    props.onProjectCombine && local(project)
+                      ? async (into) => {
+                          combinedInto.current = { from: project.id, into: into.id };
+                          setOpenMobile(false);
+                          // The name it will have: alone again, it loses a clash's parent.
+                          const intoName = shortProjectNames([into]).get(into.id) ?? into.name;
+                          const done = await props.onProjectCombine!({ from: project.id, into: into.id, intoName });
+                          if (!done) combinedInto.current = null;
+                          return done;
+                        }
+                      : undefined
+                  }
                 />
               );
             })
           )}
         </div>
+        </>,
+        )}
       </div>
-      <div className="ib-side-foot">
-        {/* Copy prompt first, then the Update button or "What's new in X", then the Settings row. */}
-        {props.connectPrompt !== false && <CopyConnectPrompt mcpCommand={props.mcpCommand ?? null} />}
+      <div className="ib-side-foot" data-held={props.footHeld ? '' : undefined}>
+        {stack(bottom.slice(0, noticesAfter))}
         <UpdateButton
           update={props.update}
           restarting={props.restarting}
@@ -401,40 +960,130 @@ export function Sidebar(props: SidebarProps) {
         {!props.update && props.checkFailing && props.onCheckFailing && (
           <CheckFailingRow failing={props.checkFailing} onOpen={pick(props.onCheckFailing)} />
         )}
-        {(props.restartClaudeCode ?? 0) > 0 && props.onRestartSessions && (
-          <RestartSessionsRow count={props.restartClaudeCode ?? 0} onOpen={pick(props.onRestartSessions)} />
-        )}
-        {/* Two controls side by side, never one inside the other: the row opens Settings, the icon flips light and dark. */}
-        <div className="ib-setrow">
-          <button
-            type="button"
-            className={`ib-nav${props.page === 'settings' ? ' ib-on' : ''}`}
-            onClick={pick(props.onSettings)}
-            aria-current={props.page === 'settings' ? 'page' : undefined}
-          >
-            <Icon name="settings" />
-            Settings
-          </button>
-          <ThemeToggle />
-        </div>
+        {restartAgents.total > 0 && props.onRestartSessions && <RestartSessionsRow agents={restartAgents} onOpen={pick(props.onRestartSessions)} />}
+        {stack(bottom.slice(noticesAfter))}
       </div>
+      <SidebarMenu menu={menu} layout={layout} drawn={props.usageInstalled ? drawn : new Set([...drawn].filter((item) => item !== 'usage'))} />
     </aside>
   );
 }
 
 /**
- * "Reload Claude Code N": the Claude Code sessions still on the plugin from
- * before an update. A real button named by its words and count; what it does
- * is in its description. Opens Settings → Agents, which lists them.
+ * A section's header (owner's pick, direction C "The section is the folder"):
+ * a quiet row with the section's icon (a pin; a folder, open while the
+ * section is), its name, and a chevron that turns down while open. A click,
+ * Enter or Space anywhere on it opens or closes the section; no shortcut.
+ * Closed, Pinned shows how many pins wait on the person (the project rows'
+ * count style); the chevron takes the count's place on hover, and on a phone
+ * both show. Not navigation: the phone sheet stays open.
  */
-function RestartSessionsRow({ count, onOpen }: { count: number; onOpen: () => void }) {
-  const why = `${count === 1 ? '1 Claude Code session runs' : `${count} Claude Code sessions run`} the plugin from before the update; /reload-plugins loads the new one. Opens Settings, Agents.`;
+function SectionHeader(props: {
+  section: SidebarSection;
+  id: string;
+  controls: string;
+  label: string;
+  /** The section's icon, or `iconNode` (Agents' goggles, a mark of its own). */
+  icon?: IconName;
+  iconNode?: ReactNode;
+  iconClass?: string;
+  /** The section's star takes the little pop: a thread was starred just now. */
+  pop?: boolean;
+  open: boolean;
+  count: number;
+  /** A phone's sheet: how many rows the section holds, beside its name, and the waiting count in words. Absent: neither. */
+  total?: number;
+  onToggle: () => void;
+}) {
   return (
-    <button type="button" className="ib-nav ib-quiet ib-rw-restart" data-restart-sidebar={count} onClick={onOpen}>
+    <button
+      type="button"
+      id={props.id}
+      className="ib-side-sec"
+      aria-expanded={props.open}
+      aria-controls={props.controls}
+      data-sidebar-section={props.section}
+      onClick={props.onToggle}
+    >
+      {props.iconNode ?? (props.icon && <Icon name={props.icon} className={[props.iconClass, props.pop ? 'ib-star-pop' : ''].filter(Boolean).join(' ') || undefined} />)}
+      <span className="ib-side-sec-l">{props.label}</span>
+      {props.total !== undefined && (
+        <span className="ib-side-sec-c" data-section-total="">
+          {formatCount(props.total)}
+        </span>
+      )}
+      <span className="ib-side-sec-tail">
+        {props.count > 0 && (
+          <span className="ib-n">
+            {formatCount(props.count)}
+            {props.total !== undefined ? (
+              <>
+                {' waiting'}
+                <span className="ib-sr"> on you</span>
+              </>
+            ) : (
+              <span className="ib-sr"> waiting on you</span>
+            )}
+          </span>
+        )}
+        <Icon name="chevR" className="ib-side-sec-chev" />
+      </span>
+    </button>
+  );
+}
+
+/**
+ * The order of Projects, one quiet icon beside the header's chevron: the icon
+ * is the order on screen, a press goes to the next. It shows on the header's
+ * hover and keyboard focus; where nothing hovers (a phone, a tablet) it always
+ * shows. Only with two projects or more, and only while the section is open.
+ * Not navigation: the phone sheet stays open. Going while it holds focus (the
+ * list fell to one project), it hands focus to the header, never the page.
+ */
+function ProjectSortToggle({ sort, announce }: { sort: ProjectSort; announce?: (text: string) => void }) {
+  const { icon, label, next, said } = projectSortControl(sort);
+  const button = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    const node = button.current;
+    return () => {
+      if (node && node === document.activeElement) node.closest('.ib-secrow')?.querySelector<HTMLElement>('[data-sidebar-section]')?.focus({ preventScroll: true });
+    };
+  }, []);
+  return (
+    <Tip content={label}>
+      <button
+        ref={button}
+        type="button"
+        className="ib-proj-sort"
+        aria-label={label}
+        data-projects-sort={sort}
+        onClick={() => {
+          setProjectSort(next);
+          announce?.(said);
+        }}
+      >
+        <Icon name={icon} />
+      </button>
+    </Tip>
+  );
+}
+
+/**
+ * "Reload Claude Code N" (owner approval "restart-warning"), generalized to
+ * every runtime (owner approval "reload-hosts"): the sessions still on the
+ * Plannotator from before an update. One runtime names itself ("Reload Pi",
+ * "Restart Oh My Pi"); more than one reads "Reload agents". Claude Code
+ * sessions whose plugin on disk is behind count too (`update_first`): the
+ * Settings → Agents it opens leads with the update command. A real button
+ * named by its words and count; what it does is in its description. Opens
+ * Settings → Agents, which lists them.
+ */
+function RestartSessionsRow({ agents, onOpen }: { agents: InboxRestartAgents; onOpen: () => void }) {
+  return (
+    <button type="button" className="ib-nav ib-quiet ib-rw-restart" data-restart-sidebar={agents.total} data-restart-update={agents.update_first || undefined} onClick={onOpen}>
       <Icon name="refresh" />
-      <span className="ib-rw-label">Reload Claude Code</span>
-      <span className="ib-n">{formatCount(count)}</span>
-      <span className="ib-sr">. {why}</span>
+      <span className="ib-rw-label">{restartAgentsLabel(agents)}</span>
+      <span className="ib-n">{formatCount(agents.total)}</span>
+      <span className="ib-sr">. {restartAgentsDescription(agents)}</span>
     </button>
   );
 }
@@ -457,8 +1106,8 @@ export const CONNECT_COPY_FAILED_ANNOUNCEMENT = "Couldn't copy the connect promp
  * 2 s (or "Couldn't copy"), the marks stay, focus stays on it, and a polite
  * live region says the same. Its name reads "Copy prompt to connect an
  * agent": the visible words first, then what they are for. Not navigation,
- * so the phone sheet stays open to show it. Shown everywhere, the tailnet
- * included.
+ * so the phone sheet stays open to show it. Not drawn on a phone (owner:
+ * it does not need to show there); the tailnet page on a desktop shows it.
  */
 function CopyConnectPrompt({ mcpCommand }: { mcpCommand: readonly string[] | null }) {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
@@ -517,6 +1166,18 @@ function CopyConnectPrompt({ mcpCommand }: { mcpCommand: readonly string[] | nul
  * goes back to matching the system). A click here never opens Settings and
  * never closes the phone sheet or the peek.
  */
+/** The shortcut map's button, left of light and dark (approval "inbox-keyboard-shortcuts"). */
+function KeysButton({ onPress }: { onPress: () => void }) {
+  const keys = useShortcutAria({ scope: inboxAppShortcuts, action: 'openMap' });
+  return (
+    <Tip content={withShortcut('Keyboard shortcuts', { scope: inboxAppShortcuts, action: 'openMap' })}>
+      <button type="button" className="ib-keys-tg" aria-label="Keyboard shortcuts" aria-haspopup="dialog" aria-keyshortcuts={keys} onClick={onPress} data-shortcut-map-button="">
+        <Icon name="keyboard" />
+      </button>
+    </Tip>
+  );
+}
+
 function ThemeToggle() {
   const { shown, flip } = useInboxTheme();
   const next = shown === 'dark' ? 'light' : 'dark';

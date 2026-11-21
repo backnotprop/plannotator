@@ -87,7 +87,7 @@ In the interactive terminal on Claude Code 2.1.287 or newer, the plugin runs the
 
 While a plan review is open Claude is not blocked, so if you leave plan mode yourself before you approve, it can start editing.
 
-Turn the mod off with `PLANNOTATOR_CLAUDE_MOD=0` or `{ "claudeCodeMod": false }` in `~/.plannotator/config.json` (read when Claude Code starts). Older Claude Code, `claude -p` and SDK runs, and Windows always use the classic hook below.
+Turn the mod off with `PLANNOTATOR_CLAUDE_MOD=0` or `{ "claudeCodeMod": false }` in `~/.plannotator/config.json` (read when Claude Code starts). Older Claude Code and `claude -p` and SDK runs always use the classic hook below.
 
 ### The classic hook
 
@@ -112,7 +112,7 @@ When Claude Code calls `ExitPlanMode`, this hook intercepts and waits for your d
 
 ## Remote / Devcontainer Usage
 
-When running Claude Code in a remote environment (SSH, devcontainer, WSL), set `PLANNOTATOR_REMOTE=1` (or `true`) and these environment variables:
+Over SSH, remote mode turns on by itself, so you only need to forward the port: `19432`, or your `PLANNOTATOR_PORT` if you set one. WSL2 does not need remote mode. Devcontainers and Docker are not detected. In a VS Code devcontainer the browser usually opens by itself, so you need the settings below only if it does not. In any other devcontainer or Docker, set:
 
 ```bash
 export PLANNOTATOR_REMOTE=1
@@ -126,11 +126,15 @@ This tells Plannotator to:
 
 **Port forwarding in VS Code devcontainers:** The port should be automatically forwarded. Check the "Ports" tab.
 
-**SSH port forwarding:** Add to your `~/.ssh/config`:
+**SSH port forwarding:** Add to your `~/.ssh/config` (use your `PLANNOTATOR_PORT` value if you set one):
 ```
 Host your-server
-    LocalForward 9999 localhost:9999
+    LocalForward 19432 localhost:19432
 ```
+
+**Docker:** Publish the port: `docker run -e PLANNOTATOR_REMOTE=1 -e PLANNOTATOR_PORT=9999 -p 9999:9999 your-image`.
+
+See the [remote access guide](https://docs.plannotator.ai/open-source/remote-access).
 
 ## Slash Commands
 

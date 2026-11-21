@@ -8,9 +8,9 @@ import { existsSync, statSync } from "node:fs";
 import type { Server } from "node:http";
 import os from "node:os";
 import { delimiter, join } from "node:path";
-import { loadConfig, resolveUrlHost, resolveUseGlimpse } from "../generated/config.ts";
+import { loadConfig, resolveLocalUrlHostname, resolveUseGlimpse } from "../generated/config.ts";
+import { resolveAdvertisedSessionUrl } from "../generated/advertised-url.ts";
 import { parsePortSelection } from "../generated/port-range.ts";
-import { isAutoUrlHost, resolveAutoHostCached } from "../generated/tailscale.ts";
 import { browserNoneReason, isNoOpBrowserSentinel, resolveBrowserIntent } from "../generated/browser-intent.ts";
 
 const DEFAULT_REMOTE_PORT = 19432;
@@ -99,6 +99,15 @@ export function isRemoteSession(): boolean {
 }
 
 /**
+ * Remote mode that only SSH turned on (`PLANNOTATOR_REMOTE` unset): mirrors
+ * packages/server/remote.ts. A loopback request is answered as in a local
+ * session (`isSshTunnelRequest` in this-machine.ts).
+ */
+export function isSshDetectedRemote(): boolean {
+	return getRemoteOverride() === null && Boolean(process.env.SSH_TTY || process.env.SSH_CONNECTION);
+}
+
+/**
  * Get the server ports to try, in order.
  * - PLANNOTATOR_PORT accepts a fixed port or inclusive range
  * - Remote sessions default to 19432 (for port forwarding)
@@ -154,43 +163,19 @@ export function getServerHostname(): string {
 	return isRemoteSession() ? "0.0.0.0" : LOOPBACK_HOST;
 }
 
-/** True when the advertised-URL host is overridden away from localhost. */
-export function isUrlHostOverridden(): boolean {
-	const host = resolveUrlHost(loadConfig());
-	if (host === undefined) return false;
-	if (isAutoUrlHost(host)) return isRemoteSession() && resolveAutoHostCached() !== undefined;
-	return true;
+/**
+ * The localhost subdomain sessions are advertised at (`urlHost:
+ * "plannotator.localhost"`, #2184), or undefined. Mirrors
+ * packages/server/remote.ts: read once at server start for the loopback Host
+ * check of Ask this session.
+ */
+export function getLocalUrlHostname(): string | undefined {
+	return resolveLocalUrlHostname(loadConfig());
 }
 
-let warnedLocalUrlHost = false;
-
-/**
- * Compose the URL advertised to the user for a bound port (issue #657).
- * Display-only: the PLANNOTATOR_URL_HOST / urlHost override changes what is
- * printed and opened, never which interface the server listens on
- * (getServerHostname). Remote sessions only: a local session binds loopback,
- * so honoring the override would advertise (and auto-open) a URL nothing is
- * listening on — the override is ignored with a once-per-process warning.
- * The "auto" sentinel resolves the host from Tailscale (resolveAutoHost).
- * Same-machine subprocesses must not use this — they get a loopback URL so a
- * tailnet-only hostname can't break local agent jobs.
- * Mirrors packages/server/remote.ts — keep the two behaviorally identical.
- */
+/** Compose the display-only URL advertised for a bound server port. */
 export function buildAdvertisedUrl(port: number): string {
-	const host = resolveUrlHost(loadConfig());
-	if (host === undefined) return `http://localhost:${port}`;
-	if (!isRemoteSession()) {
-		if (!warnedLocalUrlHost) {
-			warnedLocalUrlHost = true;
-			process.stderr.write(
-				`[plannotator] Warning: advertised URL host ${JSON.stringify(host)} ignored — this is a local session, so the server binds loopback and only localhost is reachable. Set PLANNOTATOR_REMOTE=1 to use the override.\n`,
-			);
-		}
-		return `http://localhost:${port}`;
-	}
-	const resolved = isAutoUrlHost(host) ? resolveAutoHostCached() : host;
-	if (resolved === undefined) return `http://localhost:${port}`;
-	return `http://${resolved}:${port}`;
+	return resolveAdvertisedSessionUrl(port, isRemoteSession());
 }
 
 const MAX_RETRIES = 5;
@@ -321,6 +306,7 @@ async function openGlimpse(url: string): Promise<boolean> {
 			resolve(opened);
 		};
 
+		// windows-hide-guard: starts the app window the person asked for, which windowsHide would start hidden.
 		const child = spawn(glimpseCli, args, {
 			detached: true,
 			stdio: ["pipe", "ignore", "ignore"],
@@ -408,6 +394,7 @@ export async function openBrowser(url: string): Promise<{
 			args = [url];
 		}
 
+		// windows-hide-guard: starts the app window the person asked for, which windowsHide would start hidden.
 		const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
 		// A failed launch exists only as an async "error" event; reporting
 		// opened: true unconditionally hides it (#1472).

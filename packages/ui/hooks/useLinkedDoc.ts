@@ -6,9 +6,9 @@
  * annotation caching per filepath, and highlight re-application.
  */
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { normalizeBrowserPath } from "@plannotator/core/browser-paths";
-import { isDiagramRenderKind } from "@plannotator/core/annotatable";
+import { isDocumentRenderKind } from "@plannotator/core/annotatable";
 import type { Annotation, DocumentRenderAs, ImageAttachment } from "../types";
 import type { ViewerHandle } from "../components/Viewer";
 import type { SidebarTab } from "./useSidebar";
@@ -226,6 +226,17 @@ export interface UseLinkedDocReturn {
     filepath: string,
     update: (annotations: Annotation[]) => Annotation[],
   ) => boolean;
+  /**
+   * Put recovered comments back on documents other than the active one, by
+   * path (a restored draft that carried several documents). A cached document
+   * gains the entries whose id (attachments: path) it does not hold yet; a
+   * document not opened in this session gets a cache entry, so its comments
+   * count, list and export at once, and show when it is opened. Returns the
+   * paths not taken: the active document's comments are host state.
+   */
+  restoreStoredDocuments: (
+    documents: ReadonlyArray<{ path: string; annotations: Annotation[]; globalAttachments: ImageAttachment[] }>,
+  ) => string[];
   /** Snapshot the root document plus linked-doc cache for cross-document session swaps */
   snapshotSession: () => LinkedDocSessionState;
   /** Restore a root document plus linked-doc cache, closing any active linked document */
@@ -303,6 +314,15 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const pendingNavigation = useRef<AbortController | null>(null);
+  const cancelPendingNavigation = useCallback(() => {
+    const pending = pendingNavigation.current;
+    if (!pending) return;
+    pendingNavigation.current = null;
+    pending.abort();
+    setIsLoading(false);
+  }, []);
+  useEffect(() => () => { pendingNavigation.current?.abort(); }, []);
   const [docAnnotationCount, setDocAnnotationCount] = useState(0);
   // Bumped whenever a stored (non-active) document's annotations change in
   // place. docCache is a ref, so without this the memos keyed on
@@ -395,6 +415,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
   }, [cancelScrollRestore]);
 
   const back = useCallback((backOptions?: { restoreScroll?: boolean }) => {
+    cancelPendingNavigation();
     if (!savedPlanState.current) return;
     // `back` may be handed straight to an onClick, so only an explicit false
     // turns the restore off.
@@ -462,6 +483,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     onAfterBack,
     restoreScrollAnchorSettled,
     cancelScrollRestore,
+    cancelPendingNavigation,
   ]);
 
   const activateDocument = useCallback((
@@ -555,9 +577,10 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     // App's renderAs === 'html' ? HtmlViewer : Viewer switch flips automatically.
     // A diagram source (.mmd/.dot) keeps the markdown state path — the raw
     // text is the document body — but names its engine so the App renders it
-    // as one diagram instead of parsing it as markdown.
+    // as one diagram instead of parsing it as markdown. AsciiDoc does the same
+    // for its own block parser.
     const docRenderAs: DocumentRenderAs =
-      data.renderAs === 'html' ? 'html' : isDiagramRenderKind(data.renderAs) ? data.renderAs : 'markdown';
+      data.renderAs === 'html' ? 'html' : isDocumentRenderKind(data.renderAs) ? data.renderAs : 'markdown';
     const hostMarkdown = docRenderAs === 'html' || !notifyDocumentLoaded ? undefined : onDocumentLoaded?.(data);
     const nextMarkdown = notifyDocumentLoaded
       ? hostMarkdown ?? cached?.markdown ?? data.markdown ?? ''
@@ -623,18 +646,23 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     restoreScrollAnchorSettled,
   ]);
 
+  // The current document can be edited while the response is in flight.
+  const activateCurrentDocument = useRef(activateDocument);
+  useLayoutEffect(() => { activateCurrentDocument.current = activateDocument; }, [activateDocument]);
+
   const openLoaded = useCallback((
     doc: LinkedDocLoadData & { filepath: string },
     targetTab?: SidebarTab,
     options?: { notifyDocumentLoaded?: boolean; revealSidebar?: boolean; restoreScroll?: boolean },
   ) => {
+    cancelPendingNavigation();
     activateDocument(doc, targetTab, {
       snapshotCurrent: true,
       notifyDocumentLoaded: options?.notifyDocumentLoaded,
       revealSidebar: options?.revealSidebar,
       restoreScroll: options?.restoreScroll,
     });
-  }, [activateDocument]);
+  }, [activateDocument, cancelPendingNavigation]);
 
   const open = useCallback(
     async (
@@ -644,16 +672,21 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
       options?: { revealSidebar?: boolean; restoreScroll?: boolean },
     ) => {
       onBeforeNavigate?.();
+      pendingNavigation.current?.abort();
+      const request = new AbortController();
+      pendingNavigation.current = request;
       setIsLoading(true);
       setError(null);
 
       try {
         const url = (buildUrl ?? defaultBuildUrl)(docPath);
-        const res = await fetch(url);
+        const res = await fetch(url, { signal: request.signal });
         const data = (await res.json()) as LinkedDocLoadData & {
           error?: string;
           matches?: string[];
         };
+
+        if (request.signal.aborted) return;
 
         if (!res.ok || data.error) {
           setError(data.error || "Failed to load document");
@@ -664,21 +697,21 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
           setError("Failed to load document");
           return;
         }
-        activateDocument({ ...data, filepath: data.filepath }, targetTab, {
+        activateCurrentDocument.current({ ...data, filepath: data.filepath }, targetTab, {
           snapshotCurrent: false,
           revealSidebar: options?.revealSidebar,
           restoreScroll: options?.restoreScroll,
         });
       } catch {
-        setError("Failed to connect to server");
+        if (!request.signal.aborted) setError("Failed to connect to server");
       } finally {
-        setIsLoading(false);
+        if (!request.signal.aborted && pendingNavigation.current === request) {
+          pendingNavigation.current = null;
+          setIsLoading(false);
+        }
       }
     },
-    [
-      onBeforeNavigate,
-      activateDocument,
-    ]
+    [onBeforeNavigate, defaultBuildUrl]
   );
 
   const dismissError = useCallback(() => setError(null), []);
@@ -720,6 +753,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
   }, [linkedDoc, annotations, globalAttachments, markdown, renderAs, rawHtml, shareHtml, selectedAnnotationId, getDocumentMarkdown]);
 
   const restoreSession = useCallback((state: LinkedDocSessionState) => {
+    cancelPendingNavigation();
     viewerRef.current?.clearAllHighlights();
     cancelScrollRestore();
 
@@ -757,6 +791,8 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     setRawHtml,
     setShareHtml,
     viewerRef,
+    cancelPendingNavigation,
+    cancelScrollRestore,
   ]);
 
   const updateStoredAnnotations = useCallback((
@@ -802,6 +838,50 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     setStoreRevision((r) => r + 1);
     return true;
   }, [linkedDoc, sourceFilePath]);
+
+  const restoreStoredDocuments = useCallback((
+    documents: ReadonlyArray<{ path: string; annotations: Annotation[]; globalAttachments: ImageAttachment[] }>,
+  ): string[] => {
+    const notTaken: string[] = [];
+    let changed = false;
+    for (const doc of documents) {
+      const wanted = normalizeBrowserPath(doc.path);
+      if (linkedDoc && wanted === normalizeBrowserPath(linkedDoc.filepath)) {
+        notTaken.push(doc.path);
+        continue;
+      }
+      let cacheKey: string | undefined;
+      for (const key of docCache.current.keys()) {
+        if (normalizeBrowserPath(key) === wanted) { cacheKey = key; break; }
+      }
+      const cached = cacheKey === undefined ? undefined : docCache.current.get(cacheKey);
+      const heldIds = new Set((cached?.annotations ?? []).map((a) => a.id));
+      const heldPaths = new Set((cached?.globalAttachments ?? []).map((g) => g.path));
+      const annotations = doc.annotations.filter((a) => !heldIds.has(a.id));
+      const globalAttachments = doc.globalAttachments.filter((g) => !heldPaths.has(g.path));
+      if (annotations.length === 0 && globalAttachments.length === 0) continue;
+      docCache.current.set(cacheKey ?? doc.path, {
+        ...(cached ?? {}),
+        annotations: [...(cached?.annotations ?? []), ...annotations],
+        globalAttachments: [...(cached?.globalAttachments ?? []), ...globalAttachments],
+      });
+      changed = true;
+    }
+    if (changed) {
+      // Same accounting as updateStoredAnnotations.
+      let total = 0;
+      for (const [fp, entry] of docCache.current.entries()) {
+        if (linkedDoc && fp === linkedDoc.filepath) continue;
+        total += entry.annotations.length + entry.globalAttachments.length;
+      }
+      if (linkedDoc && savedPlanState.current) {
+        total += savedPlanState.current.annotations.length + savedPlanState.current.globalAttachments.length;
+      }
+      setDocAnnotationCount(total);
+      setStoreRevision((r) => r + 1);
+    }
+    return notTaken;
+  }, [linkedDoc]);
 
   const getDocAnnotations = useCallback((): Map<string, CachedDocState> => {
     const result = new Map(docCache.current);
@@ -871,6 +951,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     getDocAnnotations,
     getFeedbackDocuments,
     updateStoredAnnotations,
+    restoreStoredDocuments,
     snapshotSession,
     restoreSession,
     docAnnotationCount,

@@ -5,18 +5,20 @@ import {
   type DiffFileTreeNode,
   type DiffFileTreeStatus,
 } from '../utils/diffFileTree';
+import { fileStatusLetter } from '../utils/fileStatusLetter';
 import { useDiffFileTreeExpansion, type DiffFileTreeDefaultExpanded } from '../hooks/useDiffFileTreeExpansion';
 
 export type { DiffFileTreeFile, DiffFileTreeNode, DiffFileTreeStatus } from '../utils/diffFileTree';
 export type { DiffFileTreeDefaultExpanded } from '../hooks/useDiffFileTreeExpansion';
 
 /*
- * The diff file tree's presentational parts. Plannotator's code review renders
- * its tree rows from the atoms below (folder row, file-row content, change
- * letter, +/- counts, indentation), adding its review-only decorations
- * (viewed/stage controls, annotation badge, context menu) around them; the
- * `DiffFileTree` component at the bottom is the read-only, embeddable tree a
- * host drops beside its own diff list.
+ * The diff file tree's presentational parts: the atoms below (folder row,
+ * file-row content, change letter, +/- counts, indentation) for a host's own
+ * rows, and the `DiffFileTree` component at the bottom, the read-only,
+ * embeddable tree a host drops beside its own diff list. Plannotator's code
+ * review shares `ChangeTypeLetter` and `diffFileTreeIndent` (its All files
+ * tree) but draws its own Changes rows since its aligned sidebar (see
+ * HANDOFF.md § "Diff file tree").
  */
 
 /** Left padding of a row at `depth` (px). */
@@ -30,23 +32,14 @@ export const ChangeTypeLetter: React.FC<{
   status: DiffFileTreeStatus;
   oldPath?: string;
   untracked?: boolean;
-}> = ({ status, oldPath, untracked }) => (
-  <span className="w-3 text-center text-[10px] flex-shrink-0">
-    {untracked ? (
-      <span className="font-semibold text-muted-foreground/70" title="Untracked file">U</span>
-    ) : status === 'added' ? (
-      <span className="font-semibold text-success" title="Added file">A</span>
-    ) : status === 'deleted' ? (
-      <span className="font-semibold text-destructive" title="Deleted file">D</span>
-    ) : status === 'renamed' ? (
-      <span className="font-semibold text-[#007aff]" title={oldPath ? `Renamed from ${oldPath}` : 'Renamed file'}>R</span>
-    ) : status === 'binary' ? (
-      <span className="font-semibold text-muted-foreground/70" title="Binary file">B</span>
-    ) : (
-      <span className="text-muted-foreground/40" title="Modified file">M</span>
-    )}
-  </span>
-);
+}> = ({ status, oldPath, untracked }) => {
+  const meta = fileStatusLetter(status, { oldPath, untracked });
+  return (
+    <span className="w-3.5 text-center text-[12px] leading-none flex-shrink-0" data-change-letter="">
+      <span className={meta.className} title={meta.title}>{meta.letter}</span>
+    </span>
+  );
+};
 
 /** Right-anchored +/- pair — one fixed-width block so the numbers always end
  * flush at the row edge, stay tight together, and add-only rows leave no

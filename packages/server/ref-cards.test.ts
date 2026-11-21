@@ -8,7 +8,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { forgeRefKey, forgeRefLabel, parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
+import { forgeRefKey, forgeRefLabel, parseForgeRefUrl, type ForgeRefCardData } from "@plannotator/core/forge-ref-card";
 import { forgeRefLinks } from "@plannotator/core/forge-refs";
 import {
   createRefCards,
@@ -16,10 +16,16 @@ import {
   parseGitlabRefAnswer,
   readSignedInHosts,
   refErrorOf,
+  AVATAR_CACHE_MAX,
+  AVATAR_CACHE_MAX_BYTES,
   REF_AUTH_HOSTS_MS,
+  REF_CACHE_MAX,
   REF_FAILURE_MS,
   REF_FRESH_MS,
+  REF_MAX_CONCURRENT,
+  REF_MAX_WAITING,
   REF_RATE_LIMIT_MS,
+  REF_REPO_ACCOUNTS_MAX,
   REF_STALE_MAX_MS,
   type RefCli,
   type RefCommandResult,
@@ -369,10 +375,10 @@ describe("fetching", () => {
     expect(self.args.find((s) => s.startsWith("query="))).toContain("issue(iid: $iid)");
   });
 
-  test("an unknown host is never fetched; the CLI missing reads quietly", async () => {
+  test("an unknown host is never fetched; the CLI missing says so, on a self-managed host too", async () => {
     const r = runner(() => err("", 127));
     const cards = createRefCards({ run: r.run });
-    expect(await cards.get("https://github.acme.dev/acme/widgets/pull/1")).toMatchObject({ ok: false, error: "unsupported" });
+    expect(await cards.get("https://github.acme.dev/acme/widgets/pull/1")).toMatchObject({ ok: false, error: "cli_missing", problem: { code: "tool.missing" } });
     expect(await cards.get("https://example.com/acme/widgets/pull/1")).toBeNull();
     expect(r.queries()).toHaveLength(0);
     expect(await cards.get(PR_URL)).toMatchObject({ ok: false, error: "cli_missing" });
@@ -479,6 +485,210 @@ describe("fetching", () => {
     expect(r.queries()[0].args).toContain("repo=2048");
     expect(r.queries()[1].args).toContain("owner=true");
     expect(r.queries()[1].args).toContain("repo=null");
+  });
+});
+
+describe("Bitbucket Cloud", () => {
+  const BB_URL = "https://bitbucket.org/acme/widgets/pull-requests/3";
+
+  function bitbucketCard(): ForgeRefCardData {
+    return {
+      platform: "bitbucket",
+      kind: "pull",
+      repo: "acme/widgets",
+      number: 3,
+      url: BB_URL,
+      title: "Ship it",
+      state: "open",
+      author: { login: "Ada", avatarUrl: "https://secure.gravatar.com/avatar/0" },
+      createdAt: "2026-10-01T00:00:00Z",
+      updatedAt: "2026-10-02T00:00:00Z",
+      closedAt: null,
+      labels: [],
+      assignees: [],
+      comments: 0,
+      body: "",
+      bodyCut: false,
+      lastComment: null,
+      linked: [],
+      pull: { base: "main", head: "feat", additions: 1, deletions: 0, files: 1, review: null, checks: null },
+    };
+  }
+
+  test("links parse: pull requests and issues numbered apart, a look-alike host is no forge", () => {
+    expect(parseForgeRefUrl(`${BB_URL}/diff`)).toMatchObject({ platform: "bitbucket", host: "bitbucket.org", owner: "acme", repo: "widgets", number: 3, kind: "pull" });
+    const issue = parseForgeRefUrl("https://bitbucket.org/acme/widgets/issues/3")!;
+    expect(issue).toMatchObject({ platform: "bitbucket", kind: "issue" });
+    expect(forgeRefKey(issue)).not.toBe(forgeRefKey(parseForgeRefUrl(BB_URL)!));
+    expect(forgeRefLabel(parseForgeRefUrl(BB_URL)!)).toBe("#3");
+    for (const bad of ["https://bitbucket.org-evil.example/a/b/pull-requests/1", "https://bitbucket.org.evil.example/a/b/pull-requests/1", "https://bitbucket.org/a/b/pull/1"]) {
+      expect(parseForgeRefUrl(bad)).toBeNull();
+    }
+  });
+
+  test("a pull request is read once through the reader, no CLI runs, and its avatar is inlined", async () => {
+    const r = runner(() => ok(githubPR()));
+    const reads: unknown[] = [];
+    const cards = createRefCards({
+      run: r.run,
+      avatar: async () => "data:image/png;base64,AA==",
+      bitbucket: async (ref) => {
+        reads.push(ref);
+        return bitbucketCard();
+      },
+    });
+    const [a, b] = await Promise.all([cards.get(BB_URL), cards.get(`${BB_URL}/commits`)]);
+    expect(a).toEqual(b);
+    if (!a?.ok) throw new Error("expected data");
+    expect(a.data.author?.avatarUrl).toBe("data:image/png;base64,AA==");
+    expect(reads).toEqual([{ workspace: "acme", repo: "widgets", number: 3 }]);
+    expect(r.calls).toHaveLength(0);
+  });
+
+  test("without a reader, and for an issue, the answer is unsupported and nothing runs", async () => {
+    const r = runner(() => ok(githubPR()));
+    let reads = 0;
+    const withReader = createRefCards({ run: r.run, avatar: async () => null, bitbucket: async () => (reads++, bitbucketCard()) });
+    expect(await withReader.get("https://bitbucket.org/acme/widgets/issues/3")).toMatchObject({ ok: false, error: "unsupported" });
+    expect(reads).toBe(0);
+    const without = createRefCards({ run: r.run, avatar: async () => null });
+    expect(await without.get(BB_URL)).toMatchObject({ ok: false, error: "unsupported" });
+    expect(r.calls).toHaveLength(0);
+  });
+
+  test("failures read quietly: no token or a rejected one is signed out, a hidden PR is not found, a 429 pauses the host", async () => {
+    let now = 1_000;
+    let status = 401;
+    let reads = 0;
+    const cards = createRefCards({
+      run: runner(() => ok(githubPR())).run,
+      now: () => now,
+      avatar: async () => null,
+      bitbucket: async () => {
+        reads++;
+        throw Object.assign(new Error("no"), { status });
+      },
+    });
+    expect(await cards.get(BB_URL)).toMatchObject({ error: "signed_out" });
+    status = 404;
+    now += REF_FAILURE_MS + 1;
+    expect(await cards.get(BB_URL)).toMatchObject({ error: "not_found" });
+    status = 429;
+    now += REF_FAILURE_MS + 1;
+    expect(await cards.get(BB_URL)).toMatchObject({ error: "rate_limited" });
+    const before = reads;
+    expect(await cards.get("https://bitbucket.org/acme/widgets/pull-requests/4")).toMatchObject({ error: "rate_limited" });
+    expect(reads).toBe(before);
+  });
+});
+
+describe("bounded memory", () => {
+  /** gh's answer for whatever `number=` asks, with an avatar URL of its own. */
+  const numbered = ({ args }: Call) => {
+    const n = Number(args.find((a) => a.startsWith("number="))?.slice("number=".length));
+    return ok(githubPR({ number: n, author: { login: `u${n}`, avatarUrl: `https://avatars.githubusercontent.com/u/${n}` } }));
+  };
+  const pr = (n: number, repo = "widgets") => `https://github.com/acme/${repo}/pull/${n}`;
+
+  test("the ref cache stops at REF_CACHE_MAX and drops the least recently used ref first", async () => {
+    const r = runner(numbered);
+    const cards = createRefCards({ run: r.run, avatar: async () => null });
+    for (let n = 1; n <= REF_CACHE_MAX + 50; n++) {
+      await cards.get(pr(n));
+      // Ref 1 is read again all along, so it stays.
+      if (n % 100 === 0) await cards.get(pr(1));
+    }
+    expect(cards.sizes().refs).toBe(REF_CACHE_MAX);
+    const asked = r.queries().length;
+    expect(asked).toBe(REF_CACHE_MAX + 50);
+    // Kept: the one read again, and the newest. Dropped: the oldest unread ones, asked again.
+    await cards.get(pr(1));
+    await cards.get(pr(REF_CACHE_MAX + 50));
+    expect(r.queries()).toHaveLength(asked);
+    await cards.get(pr(2));
+    expect(r.queries()).toHaveLength(asked + 1);
+    expect(cards.sizes().refs).toBe(REF_CACHE_MAX);
+  });
+
+  test("answers and failures no longer worth serving are dropped, with their holds", async () => {
+    let now = 1_000;
+    let up = true;
+    // No other account to fall back to: a refusal is a quiet not_found.
+    const r = runner(({ args }) => (args[0] === "auth" ? err("no") : up ? ok(githubPR()) : err("HTTP 404: Not Found")));
+    const cards = createRefCards({ run: r.run, now: () => now, avatar: async () => null });
+    for (let n = 1; n <= 20; n++) await cards.get(pr(n));
+    up = false;
+    for (let n = 21; n <= 40; n++) await cards.get(pr(n));
+    expect(cards.sizes()).toMatchObject({ refs: 40, retries: 0 });
+    // Past the fresh window, so past the failure window too: a stale answer's refresh fails and
+    // holds off the next one, and the 20 failures go with that fetch.
+    now += REF_FRESH_MS + 1;
+    await cards.get(pr(1));
+    await Bun.sleep(0);
+    expect(cards.sizes()).toMatchObject({ refs: 20, retries: 1 });
+    // Past the hold: it goes with the next fetch.
+    now += REF_FAILURE_MS + 1;
+    up = true;
+    await cards.get(pr(41));
+    expect(cards.sizes()).toMatchObject({ refs: 21, retries: 0 });
+    // Past the stale window: every old answer goes too.
+    now += REF_STALE_MAX_MS;
+    await cards.get(pr(42));
+    expect(cards.sizes()).toMatchObject({ refs: 1, retries: 0 });
+  });
+
+  test("remembered GitHub accounts stop at REF_REPO_ACCOUNTS_MAX, oldest dropped first", async () => {
+    const r = runner(({ args, env }) => {
+      if (args[0] === "auth" && args[1] === "status") {
+        return ok({ hosts: { "github.com": [{ login: "personal", active: true, state: "success" }, { login: "work", active: false, state: "success" }] } });
+      }
+      if (args[0] === "auth" && args[1] === "token") return ok("gho_work");
+      return env?.GH_TOKEN === "gho_work" ? ok(githubPR()) : err("HTTP 404: Not Found");
+    });
+    const cards = createRefCards({ run: r.run, avatar: async () => null });
+    for (let i = 0; i < REF_REPO_ACCOUNTS_MAX + 10; i++) expect((await cards.get(pr(1, `repo${i}`)))?.ok).toBe(true);
+    expect(cards.sizes().repoAccounts).toBe(REF_REPO_ACCOUNTS_MAX);
+    // The newest repo starts with its account; the oldest was forgotten and starts with the active one again.
+    await cards.get(pr(2, `repo${REF_REPO_ACCOUNTS_MAX + 9}`));
+    expect(r.queries().at(-1)?.env?.GH_TOKEN).toBe("gho_work");
+    const before = r.queries().length;
+    expect((await cards.get(pr(2, "repo0")))?.ok).toBe(true);
+    expect(r.queries()[before].env?.GH_TOKEN).toBeUndefined();
+  });
+
+  test("avatars stop at AVATAR_CACHE_MAX entries and AVATAR_CACHE_MAX_BYTES in all", async () => {
+    const small = runner(numbered);
+    const few = createRefCards({ run: small.run, avatar: async () => "data:image/png;base64,AA==" });
+    for (let n = 1; n <= AVATAR_CACHE_MAX + 20; n++) await few.get(pr(n));
+    expect(few.sizes().avatars).toBe(AVATAR_CACHE_MAX);
+
+    const big = runner(numbered);
+    const uri = `data:image/png;base64,${"A".repeat(1024 * 1024)}`;
+    const heavy = createRefCards({ run: big.run, avatar: async () => uri });
+    for (let n = 1; n <= 20; n++) expect(await heavy.get(pr(n))).toMatchObject({ ok: true, data: { author: { avatarUrl: uri } } });
+    const { avatars, avatarBytes } = heavy.sizes();
+    expect(avatarBytes).toBeLessThanOrEqual(AVATAR_CACHE_MAX_BYTES);
+    expect(avatarBytes).toBe(avatars * uri.length);
+    expect(avatars).toBe(Math.floor(AVATAR_CACHE_MAX_BYTES / uri.length));
+  });
+
+  test("at most REF_MAX_WAITING lookups wait for a CLI; one more answers unavailable at once and is not kept", async () => {
+    const gates: (() => void)[] = [];
+    let block = true;
+    const r = runner((call) => (block ? new Promise<RefCommandResult>((resolve) => gates.push(() => resolve(numbered(call)))) : numbered(call)));
+    const cards = createRefCards({ run: r.run, avatar: async () => null });
+    const queued = Array.from({ length: REF_MAX_CONCURRENT + REF_MAX_WAITING }, (_, i) => cards.get(pr(i + 1)));
+    await Bun.sleep(0);
+    expect(cards.sizes().waiting).toBe(REF_MAX_WAITING);
+    const extra = pr(REF_MAX_CONCURRENT + REF_MAX_WAITING + 1);
+    expect(await cards.get(extra)).toMatchObject({ ok: false, error: "unavailable" });
+    expect(cards.sizes().refs).toBe(0);
+    block = false;
+    while (gates.length) gates.shift()!();
+    for (const result of await Promise.all(queued)) expect(result?.ok).toBe(true);
+    expect(cards.sizes().waiting).toBe(0);
+    // Nothing was kept for the refused one: the next hover asks.
+    expect((await cards.get(extra))?.ok).toBe(true);
   });
 });
 

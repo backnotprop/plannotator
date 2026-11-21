@@ -7,14 +7,17 @@
  * Run: bun test scripts/install.test.ts
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
+  rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { createHash } from "node:crypto";
@@ -304,12 +307,12 @@ describe("install.sh", () => {
   test("Pi extension update keeps no settings.json package-skills filter", () => {
     // The extension resolves its skill overlap with ~/.agents/skills itself
     // (apps/pi-extension/bundled-skill.ts, #1642), so the installer never
-    // edits Pi's settings.json.
+    // edits Pi's settings.json (it only reads it to tell an update from a
+    // first install: see the fake-pi tests below).
     expect(script).toContain("update_pi_extension_if_present");
     expect(script).toContain("npm:@plannotator/pi-extension");
     expect(script).not.toContain("configure_pi_plannotator_package_filter");
     expect(script).not.toContain("plannotator_shared_agent_skills_available");
-    expect(script).not.toContain("PI_CODING_AGENT_DIR");
     expect(script).not.toContain("return { source: entry, skills: [] };");
 
     // Pi update still runs after the git-gated skills/commands install.
@@ -371,7 +374,6 @@ describe("install.sh", () => {
       'mv -f "$staged_file" "$INSTALL_DIR/plannotator"',
     );
     const minimalExit = script.indexOf('if [ "$minimal" -eq 1 ]; then');
-    const semInstall = script.indexOf("install_sem_sidecar\n");
     const agentTerminal = script.indexOf("install_agent_terminal_runtime\n");
     const callFlow = script.indexOf("install_call_flow_runtime\n");
     const codexBlock = script.indexOf(
@@ -384,7 +386,6 @@ describe("install.sh", () => {
     expect(binaryInstalled).toBeGreaterThan(0);
     expect(minimalExit).toBeGreaterThan(binaryInstalled);
     // Everything the reporter called "trash" runs strictly after the exit gate.
-    expect(semInstall).toBeGreaterThan(minimalExit);
     expect(agentTerminal).toBeGreaterThan(minimalExit);
     expect(callFlow).toBeGreaterThan(minimalExit);
     expect(codexBlock).toBeGreaterThan(minimalExit);
@@ -431,7 +432,7 @@ describe("install.sh", () => {
     expect(script).toContain("continue # explicit false is a veto, never a skip");
     // skills rides the same loop: not an agent, but the same three layers
     // and the same skipInstall key region.
-    expect(script).toContain("for _agent in codex gemini kiro vibe opencode skills claudePlugin; do");
+    expect(script).toContain("for _agent in codex gemini kiro vibe opencode qwen skills claudePlugin; do");
     // The old whole-file grep form is gone.
     expect(script).not.toContain('grep -q \'"codex"[[:space:]]*:[[:space:]]*true\' "$_config_dir/config.json"');
     // Precedence by textual layering (later assignment wins): config grep,
@@ -625,7 +626,7 @@ describe("install.ps1", () => {
     expect(script).toContain('"plannotator-review", "plannotator-annotate", "plannotator-last"');
     expect(script).toContain('foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-inbox"))');
     // Copy-SkillIfPresent pre-removes the destination to avoid nesting on upgrade.
-    expect(script).toContain("if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }");
+    expect(script).toContain("Remove-Item -Recurse -Force -LiteralPath $dest");
     // No Codex skills install.
     expect(script).not.toContain('Copy-SkillIfPresent "apps\\skills\\plannotator-review" $codexSkillsDir');
     // Missing git is a hard failure with an actionable message (parity with sh).
@@ -693,7 +694,6 @@ describe("install.ps1", () => {
     expect(script).toContain("npm:@plannotator/pi-extension");
     expect(script).not.toContain("Configure-PiPlannotatorPackageFilter");
     expect(script).not.toContain("Test-PlannotatorSharedAgentSkillsAvailable");
-    expect(script).not.toContain("PI_CODING_AGENT_DIR");
     expect(script).not.toContain("skills = @()");
 
     const skillsInstallIndex = script.indexOf("# Install skills and command stubs (requires git)");
@@ -719,14 +719,12 @@ describe("install.ps1", () => {
       'Move-Item -Force $tmpFile "$installDir\\plannotator.exe"',
     );
     const minimalExit = script.indexOf("if ($minimal) {");
-    const semInstall = script.indexOf("Install-SemSidecar\n");
     const callFlow = script.indexOf("Install-CallFlowRuntime\n");
     const pathAdvice = script.indexOf("function Show-PathAdvice");
 
     expect(binaryInstalled).toBeGreaterThan(0);
     expect(pathAdvice).toBeGreaterThan(binaryInstalled);
     expect(minimalExit).toBeGreaterThan(binaryInstalled);
-    expect(semInstall).toBeGreaterThan(minimalExit);
     expect(callFlow).toBeGreaterThan(minimalExit);
     // The gate exits rather than falling through.
     const gateBody = script.slice(minimalExit, minimalExit + 400);
@@ -965,7 +963,6 @@ describe("install.cmd", () => {
   test("Pi extension update keeps no settings.json package-skills filter", () => {
     expect(script).toContain("npm:@plannotator/pi-extension");
     // The settings.json package-skills filter machinery is fully removed.
-    expect(script).not.toContain("PI_CODING_AGENT_DIR");
     expect(script).not.toContain("PI_SETTINGS_PATH");
     expect(script).not.toContain("skills=@()");
     expect(script).not.toContain("PI_SHARED_SKILLS_AVAILABLE");
@@ -1011,13 +1008,11 @@ describe("install.cmd", () => {
       'move /y "!TEMP_FILE!" "!INSTALL_PATH!"',
     );
     const minimalExit = script.indexOf('if "!MINIMAL!"=="1" (');
-    const semInstall = script.indexOf("call :InstallSemSidecar");
     const callFlow = script.indexOf("call :InstallCallFlowRuntime");
     const printPathAdvice = script.indexOf(":PrintPathAdvice");
 
     expect(binaryInstalled).toBeGreaterThan(0);
     expect(minimalExit).toBeGreaterThan(binaryInstalled);
-    expect(semInstall).toBeGreaterThan(minimalExit);
     expect(callFlow).toBeGreaterThan(minimalExit);
     // The gate exits rather than falling through, and reuses :PrintPathAdvice.
     const gateBody = script.slice(minimalExit, minimalExit + 400);
@@ -1119,7 +1114,7 @@ describe("install.cmd", () => {
     // findstr - so a "codex": true under some OTHER key can never opt
     // anyone out and an explicit false inside skipInstall is honored.
     expect(script).toContain("$c.skipInstall.$k");
-    expect(script).toContain("@('codex','gemini','kiro','vibe','opencode','skills','claudePlugin')");
+    expect(script).toContain("@('codex','gemini','kiro','vibe','opencode','qwen','skills','claudePlugin')");
     expect(script).toContain("$v -is [bool] -and $v");
     expect(script).toContain("PLN_CONFIG_JSON");
     expect(script).toContain("skipInstall.codex");
@@ -1570,21 +1565,21 @@ describe("install shared behavior", () => {
 
     // install.sh: resolution before curl -o
     const shResolve = sh.indexOf("verify_attestation=0");
-    const shDownload = sh.indexOf('curl -fsSL -o "$tmp_file"');
+    const shDownload = sh.indexOf('download_release_binary "$binary_url" "$tmp_file"');
     expect(shResolve).toBeGreaterThan(-1);
     expect(shDownload).toBeGreaterThan(-1);
     expect(shResolve).toBeLessThan(shDownload);
 
-    // install.ps1: resolution before Invoke-WebRequest -OutFile $tmpFile
+    // install.ps1: resolution before the binary download
     const psResolve = ps.indexOf("$verifyAttestationResolved = $false");
-    const psDownload = ps.indexOf("Invoke-WebRequest -Uri $binaryUrl -OutFile $tmpFile");
+    const psDownload = ps.indexOf("Invoke-ResumableDownload -Uri $binaryUrl -OutFile $tmpFile");
     expect(psResolve).toBeGreaterThan(-1);
     expect(psDownload).toBeGreaterThan(-1);
     expect(psResolve).toBeLessThan(psDownload);
 
-    // install.cmd: resolution before curl -o "!TEMP_FILE!"
+    // install.cmd: resolution before the binary download
     const cmdResolve = cmdScript.indexOf('set "VERIFY_ATTESTATION=0"');
-    const cmdDownload = cmdScript.indexOf('curl -fsSL "!BINARY_URL!" -o "!TEMP_FILE!"');
+    const cmdDownload = cmdScript.indexOf("\ncall :DownloadBinary\n");
     expect(cmdResolve).toBeGreaterThan(-1);
     expect(cmdDownload).toBeGreaterThan(-1);
     expect(cmdResolve).toBeLessThan(cmdDownload);
@@ -1701,41 +1696,6 @@ describe("install shared behavior", () => {
     expect(cmdScript).toContain('set "MIN_ATTESTED_VERSION=v0.17.2"');
     expect(cmdScript).toContain("powershell -NoProfile -Command");
     expect(cmdScript).toContain("predates");
-  });
-
-  test("all installers install sem sidecar as a non-fatal optional dependency", () => {
-    const cmdScript = readScript("install.cmd");
-
-    expect(sh).toContain('SEM_REPO="Ataraxy-Labs/sem"');
-    expect(sh).toContain('SEM_VERSION="v0.8.0"');
-    expect(sh).toContain("install_sem_sidecar");
-    expect(sh).toContain("Skipping semantic diff sidecar install");
-    expect(sh).toContain('${_config_dir}/vendor/sem/${SEM_VERSION}');
-    expect(sh).toContain('if ! mkdir -p "$sem_dir"; then');
-    expect(sh).toContain('if ! cp "$extracted_sem" "$sem_bin"; then');
-    expect(sh).toContain('if ! chmod +x "$sem_bin"; then');
-
-    expect(ps).toContain('$semRepo = "Ataraxy-Labs/sem"');
-    expect(ps).toContain('$semVersion = "v0.8.0"');
-    expect(ps).toContain("function Install-SemSidecar");
-    expect(ps).toContain('if ($platform -eq "win32-x64")');
-    expect(ps).toContain("Skipping semantic diff sidecar install");
-
-    expect(cmdScript).toContain('set "SEM_REPO=Ataraxy-Labs/sem"');
-    expect(cmdScript).toContain('set "SEM_VERSION=v0.8.0"');
-    expect(cmdScript).toContain("call :InstallSemSidecar");
-    expect(cmdScript).toContain('if /i "!PLATFORM!"=="win32-x64" set "SEM_ASSET=sem-windows-x86_64.zip"');
-    expect(cmdScript).toContain("Skipping semantic diff sidecar install");
-    expect(cmdScript).toContain("Get-ChildItem -Path $env:SEM_EXTRACT -Filter sem.exe -Recurse -File");
-    expect(cmdScript).toContain('copy /y "!EXTRACTED_SEM!" "!SEM_PATH!"');
-
-    // The sidecar download is time-bounded so a slow/hung fetch can't wedge an
-    // install where plannotator itself already landed (all three installers).
-    expect(sh).toContain("--connect-timeout 10 --max-time 120");
-    expect(ps).toContain("-TimeoutSec 120");
-    expect(cmdScript).toContain("--connect-timeout 10 --max-time 120");
-    // And the opt-out is documented in the help text.
-    expect(sh).toContain("PLANNOTATOR_SKIP_SEM_INSTALL=1");
   });
 
   test("all installers install agent terminal runtime as a non-fatal optional dependency", () => {
@@ -1963,17 +1923,32 @@ describe("install shared behavior", () => {
     // install.sh: binary download and checksum download must NOT carry the
     // auth header array. Token vars cleared right after the api call so
     // they don't linger for the download phase.
-    expect(sh).not.toContain('curl -fsSL "${GH_AUTH_HEADER[@]}" -o "$tmp_file"');
-    expect(sh).not.toContain('curl -fsSL "${GH_AUTH_HEADER[@]}" "$checksum_url"');
+    // They go through download_release_binary / download_release_file, so
+    // neither body may carry it.
+    for (const fn of ["download_release_binary", "download_release_file"]) {
+      const shDownloader = sh.match(new RegExp(`^${fn}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`, "m"));
+      expect(shDownloader).not.toBeNull();
+      expect(shDownloader![0]).not.toContain("GH_AUTH_HEADER");
+    }
+    expect(sh).toContain('download_release_binary "$binary_url" "$tmp_file"');
+    expect(sh).toContain('download_release_file "$checksum_url" "$checksum_file"');
     expect(sh).toContain("unset _gh_token GH_AUTH_HEADER _api_url");
 
     // install.ps1: binary download must NOT carry $ghHeaders, which is nulled.
     expect(ps).not.toContain('Invoke-WebRequest -Uri $binaryUrl -OutFile $tmpFile -Headers $ghHeaders');
+    for (const fn of ["Invoke-ReleaseDownload", "Invoke-ResumableDownload"]) {
+      const psDownloader = ps.match(new RegExp(`^function ${fn} \\{\\n[\\s\\S]*?\\n\\}\\n`, "m"));
+      expect(psDownloader).not.toBeNull();
+      expect(psDownloader![0]).not.toContain("ghHeaders");
+    }
     expect(ps).toContain('$ghToken = $null; $ghHeaders = $null; $apiUrl = $null');
 
     // install.cmd: binary download must NOT carry !GH_AUTH_HEADER!. Token
     // vars cleared after the api call.
     expect(cmdScript).not.toContain('curl -fsSL !GH_AUTH_HEADER! "!BINARY_URL!"');
+    const cmdDownloader = cmdScript.slice(cmdScript.indexOf("\n:DownloadBinary\n"), cmdScript.indexOf("\n:DownloadBinaryEnd\n"));
+    expect(cmdDownloader).toContain("curl -fsSL");
+    expect(cmdDownloader).not.toContain("GH_AUTH_HEADER");
     expect(cmdScript).toContain('set "GH_TOKEN_VAL="');
     expect(cmdScript).toContain('set "GH_AUTH_HEADER="');
   });
@@ -2204,12 +2179,14 @@ describe("PlannotatorConfig schema", () => {
 // skipInstall config scoping.
 // ---------------------------------------------------------------------------
 
+const isRawBinaryCall = (c: string) => c.includes("/releases/download/") && !/\.(sha256|tar\.xz|gz)$/.test(c);
+
 const FAKE_BINARY = "fake plannotator binary\n";
 const FAKE_BINARY_SHA256 = createHash("sha256").update(FAKE_BINARY).digest("hex");
 const ATTESTATION_FIXTURE = join(scriptsDir, "fixtures", "attestations-response.json");
 
 type GhBehavior = "reject-bundle" | "fail-all" | "pass-all";
-type GitBehavior = "fail" | "sparse-unsupported" | "network-error" | "real-no-clone";
+type GitBehavior = "fail" | "sparse-unsupported" | "network-error" | "real-no-clone" | "repo-copy";
 
 // git shim that behaves like git 2.23 (macOS with stale Xcode CLT, #1238):
 // `clone --sparse` dies instantly on "unknown option" (exit 129, before any
@@ -2250,6 +2227,27 @@ fi
 exit 0
 `;
 
+// git shim whose clone copies this checkout's real apps/skills and
+// apps/qwen-code (so the installer copies the files that ship), and whose
+// sparse-checkout succeeds and records its paths in $HOME/git-sparse.log.
+// GIT_SHIM_NO_QWEN=1 leaves apps/qwen-code out, like a tag from before it.
+const GIT_REPO_COPY_SHIM = `#!/bin/bash
+if [ "$1" = "clone" ]; then
+  dest=""
+  for a in "$@"; do dest="$a"; done
+  dest="\${dest//\\\\//}"
+  mkdir -p "$dest/apps"
+  cp -R "${join(scriptsDir, "..", "apps", "skills")}" "$dest/apps/skills"
+  [ -n "$GIT_SHIM_NO_QWEN" ] || cp -R "${join(scriptsDir, "..", "apps", "qwen-code")}" "$dest/apps/qwen-code"
+  exit 0
+fi
+if [ "$1" = "sparse-checkout" ]; then
+  printf '%s\\n' "$*" >> "$HOME/git-sparse.log"
+  exit 0
+fi
+exit 0
+`;
+
 // git shim for a genuine (network) clone failure with a distinctive stderr
 // the installer must now surface instead of swallowing (#1238).
 const GIT_NETWORK_ERROR_SHIM = `#!/bin/bash
@@ -2273,6 +2271,8 @@ function gitShimBody(git: GitBehavior): string {
       // The host git for everything but a clone (which would reach the
       // network), so the installer can inspect a real fixture repository.
       return `#!/bin/bash\nif [ "$1" = "clone" ]; then exit 1; fi\nexec "${Bun.which("git")}" "$@"\n`;
+    case "repo-copy":
+      return GIT_REPO_COPY_SHIM;
   }
 }
 
@@ -2292,7 +2292,11 @@ function setupInstallSandbox(opts: {
 
   // Stub curl: serves the fake binary, its checksum, and the captured real
   // attestations response. Anything else fails, so a test can never reach
-  // the network.
+  // the network. Options are read in order like real curl: --version ends
+  // parsing, and with STUB_CURL_OLD (a curl older than 7.71) the option
+  // --retry-all-errors is unknown (exit 2). STUB_DOWNLOAD_FAIL=<code> fails
+  // the binary download with that code, except over --http1.1, which fails
+  // only with STUB_DOWNLOAD_FAIL_HTTP11=<code>.
   writeFileSync(
     join(stub, "curl"),
     `#!/bin/bash
@@ -2300,7 +2304,13 @@ if [ -n "$STUB_CURL_LOG" ]; then printf '%s\\n' "$*" >> "$STUB_CURL_LOG"; fi
 out=""
 url=""
 prev=""
+http11=""
 for a in "$@"; do
+  if [ "$a" = "--retry-all-errors" ] && [ -n "$STUB_CURL_OLD" ]; then
+    echo "curl: option --retry-all-errors: is unknown" >&2; exit 2
+  fi
+  if [ "$a" = "--version" ]; then echo "curl 8.7.1 (stub)"; exit 0; fi
+  if [ "$a" = "--http1.1" ]; then http11=1; fi
   if [ "$prev" = "-o" ]; then out="$a"; fi
   case "$a" in
     http*) url="$a" ;;
@@ -2308,11 +2318,21 @@ for a in "$@"; do
   prev="$a"
 done
 case "$url" in
+  */releases/download/*.tar.xz|*/releases/download/*.gz) echo "curl: (22) The requested URL returned error: 404" >&2; exit 22 ;;
+esac
+case "$url" in
+  *".sha256") ;;
+  */releases/download/*)
+    fail="$STUB_DOWNLOAD_FAIL"
+    if [ -n "$http11" ]; then fail="$STUB_DOWNLOAD_FAIL_HTTP11"; fi
+    if [ -n "$fail" ]; then printf 'partial' > "$out"; echo "curl: ($fail) stub failure" >&2; exit "$fail"; fi ;;
+esac
+case "$url" in
   https://github.com/*/releases/latest) printf '%s' "\${STUB_LATEST_URL:-https://github.com/backnotprop/plannotator/releases/tag/v99.9.9}" ;;
   */releases/latest)
     if [ -n "$STUB_API_DOWN" ]; then printf '{"message":"API rate limit exceeded"}\\n403'
     else printf '{"tag_name":"v99.9.9"}\\n200'; fi ;;
-  *".sha256") printf '%s  plannotator\\n' "$STUB_CHECKSUM" ;;
+  *".sha256") printf '%s  plannotator\\n' "$STUB_CHECKSUM" > "\${out:-/dev/stdout}" ;;
   */releases/download/*)
     if [ -n "$STUB_BINARY_SOURCE" ]; then cat "$STUB_BINARY_SOURCE" > "$out"
     else printf 'fake plannotator binary\\n' > "$out"; fi ;;
@@ -2376,8 +2396,10 @@ function runInstallSh(
         STUB_CHECKSUM: sandbox.binaryChecksum ?? FAKE_BINARY_SHA256,
         STUB_BINARY_SOURCE: sandbox.binarySource ?? "",
         STUB_ATT_JSON: ATTESTATION_FIXTURE,
-        PLANNOTATOR_SKIP_SEM_INSTALL: "1",
         PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL: "1",
+        // Tests never show a real notification: the alert tests turn it back
+        // on with a fake notifier first on PATH.
+        PLANNOTATOR_INSTALL_NOTIFY: "0",
         ...extraEnv,
       },
       stdout: "pipe",
@@ -2462,6 +2484,251 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
         expect(existsSync(join(result.home, "pwned"))).toBe(false);
       });
     }
+  },
+);
+
+// A dropped connection during the ~200 MB binary download (#2788: curl 92,
+// "HTTP/2 stream 1 was not closed cleanly") used to fail the whole install or
+// update, and nothing bounded a connection that only trickled.
+describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
+  "install.sh binary download retries a dropped connection (#2788)",
+  () => {
+    const args = ["--version", "v99.9.9", "--non-interactive", "--skip-skills"];
+    const binary = "#!/bin/sh\necho plannotator-fixture-new\n";
+    const OLD = "#!/bin/sh\necho plannotator-old\n";
+
+    function run(env: Record<string, string>, setupStub?: (stub: string) => void) {
+      const sandbox = setupInstallSandbox({ gh: "pass-all", binary });
+      setupStub?.(sandbox.stub);
+      const installed = join(sandbox.home, ".local", "bin", "plannotator");
+      mkdirSync(join(sandbox.home, ".local", "bin"), { recursive: true });
+      writeFileSync(installed, OLD, { mode: 0o755 });
+      const log = join(sandbox.home, "curl.log");
+      // No pause between attempts: the bounds are counts, not time.
+      const result = runInstallSh(sandbox, args, { STUB_CURL_LOG: log, PLANNOTATOR_DOWNLOAD_RETRY_DELAY: "0", ...env });
+      const calls = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [];
+      const downloads = calls.filter(isRawBinaryCall);
+      return { ...result, downloads, installed: readFileSync(installed, "utf8"), tmp: join(sandbox.home, "tmp") };
+    }
+
+    test("an HTTP/2 error (curl 92) moves the next attempt to HTTP/1.1, which continues the file, and the install completes", () => {
+      const r = run({ STUB_DOWNLOAD_FAIL: "92" });
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("trying again over HTTP/1.1");
+      expect(r.installed).toBe(binary);
+      expect(r.downloads).toHaveLength(2);
+      expect(r.downloads[0]).not.toContain("--http1.1");
+      expect(r.downloads[0]).not.toContain("-C -");
+      expect(r.downloads[1]).toContain("--http1.1");
+      // The stub left a partial file: the second attempt asks for the rest.
+      expect(r.downloads[1]).toContain("-C -");
+      // Each attempt is time-bounded and stops on a stall; curl's own --retry
+      // is not used for the binary, since it throws the partial file away.
+      for (const call of r.downloads) {
+        expect(call).not.toContain("--retry");
+        expect(call).toMatch(/--max-time \d+/);
+        expect(call).toContain("--speed-limit 1 --speed-time 60");
+      }
+    });
+
+    // The binary has 6 h in all, across its attempts, so a link at about
+    // 10 KB/s still finishes it; the .sha256 keeps 120 s and curl's retries.
+    test("the binary gets 6 h in all; the checksum keeps 120 s", () => {
+      const sandbox = setupInstallSandbox({ gh: "pass-all", binary });
+      const log = join(sandbox.home, "curl.log");
+      const result = runInstallSh(sandbox, args, { STUB_CURL_LOG: log, STUB_DOWNLOAD_FAIL: "92", PLANNOTATOR_DOWNLOAD_RETRY_DELAY: "0" });
+      expect(result.code).toBe(0);
+      const calls = readFileSync(log, "utf8").trim().split("\n");
+      const binaryCalls = calls.filter(isRawBinaryCall);
+      const checksumCalls = calls.filter((c) => c.includes("/releases/download/") && c.endsWith(".sha256"));
+      expect(binaryCalls).toHaveLength(2);
+      for (const call of binaryCalls) {
+        const left = Number(/--max-time (\d+)/.exec(call)?.[1]);
+        expect(left).toBeGreaterThan(21500);
+        expect(left).toBeLessThanOrEqual(21600);
+      }
+      expect(checksumCalls.length).toBeGreaterThan(0);
+      for (const call of checksumCalls) {
+        expect(call).toContain("--retry 3");
+        expect(call).toContain("--max-time 120 --retry-max-time 120");
+      }
+
+      const cmd = readScript("install.cmd");
+      expect(cmd).toContain("set /a DL_LEFT=21600-DL_SPENT");
+      expect(cmd).toContain('set "CURL_SUM_LIMITS=--connect-timeout 30 --max-time 120 --retry-max-time 120"');
+    });
+
+    test("a download that keeps failing stops after 4 attempts with no new bytes: old binary kept, no temp file left, no HTTP/1.1 for other errors", () => {
+      const r = run({ STUB_DOWNLOAD_FAIL: "56" });
+      expect(r.code).toBe(1);
+      expect(r.out).toContain("Could not download");
+      expect(r.out).toContain("curl exit 56");
+      // curl's error is printed once, when it gives up.
+      expect(r.out.split("stub failure").length - 1).toBe(1);
+      expect(r.installed).toBe(OLD);
+      // The stub leaves a 7-byte partial: the first attempt added bytes, the
+      // next four did not.
+      expect(r.downloads).toHaveLength(5);
+      for (const call of r.downloads) expect(call).not.toContain("--http1.1");
+      expect(readdirSync(r.tmp)).toEqual([]);
+    });
+
+    test("HTTP/1.1 failing too stops with curl's error, old binary kept", () => {
+      const r = run({ STUB_DOWNLOAD_FAIL: "92", STUB_DOWNLOAD_FAIL_HTTP11: "56" });
+      expect(r.code).toBe(1);
+      expect(r.out).toContain("curl exit 56");
+      expect(r.out.split("trying again over HTTP/1.1").length - 1).toBe(1);
+      expect(r.installed).toBe(OLD);
+      expect(r.downloads).toHaveLength(5);
+      expect(r.downloads.slice(1).every((c) => c.includes("--http1.1"))).toBe(true);
+    });
+
+    test("a .sha256 that is not 64 hex characters stops before the compare: old binary kept, no temp file left", () => {
+      for (const served of ["", "<html>login</html>", "a".repeat(63), `${"a".repeat(63)}g`, "a".repeat(65)]) {
+        const r = run({ STUB_CHECKSUM: served });
+        expect(r.code).toBe(1);
+        expect(r.out).toContain("is not a SHA-256 checksum");
+        expect(r.installed).toBe(OLD);
+        expect(readdirSync(r.tmp)).toEqual([]);
+      }
+    });
+
+    test("an empty .sha256 never matches a hash tool that printed nothing", () => {
+      // The gap the shape check closes: with no hash tool output, an empty
+      // expected value used to equal the empty actual one and install.
+      const r = run({ STUB_CHECKSUM: "" }, (stub) => {
+        for (const tool of ["shasum", "sha256sum"]) writeFileSync(join(stub, tool), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+      });
+      expect(r.code).toBe(1);
+      expect(r.installed).toBe(OLD);
+    });
+
+    test("an upper-case .sha256 is still accepted", () => {
+      const r = run({ STUB_CHECKSUM: createHash("sha256").update(binary).digest("hex").toUpperCase() });
+      expect(r.code).toBe(0);
+      expect(r.installed).toBe(binary);
+    });
+
+    test("a curl older than 7.71 (no --retry-all-errors) still installs, with plain --retry for the checksum", () => {
+      const sandbox = setupInstallSandbox({ gh: "pass-all", binary });
+      const log = join(sandbox.home, "curl.log");
+      const r = runInstallSh(sandbox, args, { STUB_CURL_LOG: log, STUB_CURL_OLD: "1" });
+      expect(r.code).toBe(0);
+      expect(readFileSync(join(sandbox.home, ".local", "bin", "plannotator"), "utf8")).toBe(binary);
+      const calls = readFileSync(log, "utf8").trim().split("\n");
+      const checksumCalls = calls.filter((c) => c.includes("/releases/download/") && c.endsWith(".sha256"));
+      expect(checksumCalls).toHaveLength(1);
+      expect(checksumCalls[0]).toContain("--retry 3");
+      expect(checksumCalls[0]).not.toContain("--retry-all-errors");
+    });
+  },
+);
+
+// Safe updates (step 1): Plannotator's own updater downloads this script and
+// the .sha256 of both binaries with its own connection, and hands them over in
+// PLANNOTATOR_EXPECTED_SHA256. The script must compare its download against
+// that value before anything is replaced, exit 113 on a mismatch (after
+// marking it in the updater's PLANNOTATOR_UPDATE_MISMATCH_FILE), and keep the
+// installed binary. Without the variables it behaves exactly as before.
+describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
+  "install.sh PLANNOTATOR_EXPECTED_SHA256 (safe updates)",
+  () => {
+    const args = ["--version", "v99.9.9", "--non-interactive", "--skip-skills"];
+    const binary = "#!/bin/sh\necho plannotator-fixture-new\n";
+    const os = process.platform === "darwin" ? "darwin" : "linux";
+    const machine = Bun.spawnSync(["uname", "-m"]).stdout.toString().trim();
+    const arch = machine === "x86_64" || machine === "amd64" ? "x64" : "arm64";
+    const mine = `plannotator-${os}-${arch}`;
+    const other = `plannotator-${os}-${arch === "x64" ? "arm64" : "x64"}`;
+    const OLD = "#!/bin/sh\necho plannotator-old\n";
+
+    function run(pin: string | undefined, opts: { servedChecksum?: string; marker?: string } = {}) {
+      const sandbox = setupInstallSandbox({ gh: "pass-all", binary });
+      const installed = join(sandbox.home, ".local", "bin", "plannotator");
+      mkdirSync(join(sandbox.home, ".local", "bin"), { recursive: true });
+      writeFileSync(installed, OLD, { mode: 0o755 });
+      const log = join(sandbox.home, "curl.log");
+      const env: Record<string, string> = { STUB_CURL_LOG: log };
+      if (pin !== undefined) env.PLANNOTATOR_EXPECTED_SHA256 = pin;
+      if (opts.servedChecksum) env.STUB_CHECKSUM = opts.servedChecksum;
+      if (opts.marker) env.PLANNOTATOR_UPDATE_MISMATCH_FILE = opts.marker;
+      const result = runInstallSh(sandbox, args, env);
+      const calls = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [];
+      return { ...result, calls, installed: readFileSync(installed, "utf8"), checksum: sandbox.binaryChecksum! };
+    }
+    const sha = (s: string) => createHash("sha256").update(s).digest("hex");
+    const fetchedSha256 = (calls: string[]) => calls.some((c) => c.endsWith(".sha256"));
+
+    test("a matching pin installs, says so, and does not fetch the .sha256 again", () => {
+      const r = run(`${other}=${"0".repeat(64)} ${mine}=${sha(binary)}`);
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("Checksum matches the one Plannotator fetched for v99.9.9.");
+      expect(fetchedSha256(r.calls)).toBe(false);
+      expect(r.installed).toBe(binary);
+    });
+
+    test("the pin is read for this machine's CPU type only, and in any letter case", () => {
+      // Upper case is the pin itself (no fallback to the .sha256): it says so.
+      const upper = run(`${mine}=${sha(binary).toUpperCase()} ${other}=${"f".repeat(64)}`);
+      expect(upper.code).toBe(0);
+      expect(upper.out).toContain("Checksum matches the one Plannotator fetched for v99.9.9.");
+      expect(fetchedSha256(upper.calls)).toBe(false);
+      // Only the other CPU type matches: this one is a mismatch.
+      const r = run(`${mine}=${"f".repeat(64)} ${other}=${sha(binary)}`);
+      expect(r.code).toBe(113);
+    });
+
+    test("only this machine's pin is enough (the other CPU type's may be missing)", () => {
+      const r = run(`${mine}=${sha(binary)}`);
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("Checksum matches the one Plannotator fetched for v99.9.9.");
+      expect(r.installed).toBe(binary);
+    });
+
+    test("tamper: a download that differs from the pin exits 113, marks it, and keeps the installed binary", () => {
+      // The network serves a .sha256 that matches the altered binary: only the pin catches it.
+      const markerDir = mkdtempSync(join(tmpdir(), "plannotator-mismatch-mark-"));
+      const marker = join(markerDir, "checksum-mismatch");
+      const r = run(`${mine}=${sha("the genuine binary")} ${other}=${sha("the genuine binary")}`, { servedChecksum: sha(binary), marker });
+      expect(r.code).toBe(113);
+      expect(existsSync(marker)).toBe(true);
+      rmSync(markerDir, { recursive: true, force: true });
+      expect(r.out).toContain("Stopped: the v99.9.9 download doesn't match the checksum Plannotator fetched for it.");
+      expect(r.out).toContain("Nothing was changed; the Plannotator you have still works.");
+      expect(r.out).not.toContain("curl -fsSL");
+      expect(r.installed).toBe(OLD);
+      expect(fetchedSha256(r.calls)).toBe(false);
+    });
+
+    test("the marker is only ever a file named checksum-mismatch at an absolute path", () => {
+      const markerDir = mkdtempSync(join(tmpdir(), "plannotator-mismatch-mark-"));
+      const elsewhere = join(markerDir, "some-other-file");
+      const r = run(`${mine}=${"f".repeat(64)}`, { marker: elsewhere });
+      expect(r.code).toBe(113);
+      expect(existsSync(elsewhere)).toBe(false);
+      rmSync(markerDir, { recursive: true, force: true });
+    });
+
+    test("a pin with no entry for this binary, or a malformed one, falls back to the .sha256 check", () => {
+      for (const pin of [`${other}=${sha(binary)}`, `${mine}=nothex`, `${mine}=${"a".repeat(63)}`, "garbage"]) {
+        const r = run(pin);
+        expect(r.code).toBe(0);
+        expect(r.out).toContain(`the update carried no checksum for ${mine}`);
+        expect(fetchedSha256(r.calls)).toBe(true);
+        expect(r.installed).toBe(binary);
+      }
+    });
+
+    test("without the variable nothing changes: the .sha256 is fetched and a mismatch is exit 1, as before", () => {
+      const ok = run(undefined);
+      expect(ok.code).toBe(0);
+      expect(fetchedSha256(ok.calls)).toBe(true);
+      expect(ok.out).not.toContain("Plannotator fetched");
+      const bad = run(undefined, { servedChecksum: "0".repeat(64) });
+      expect(bad.code).toBe(1);
+      expect(bad.out).toContain("Checksum verification failed!");
+      expect(bad.installed).toBe(OLD);
+    });
   },
 );
 
@@ -2552,10 +2819,12 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
         })),
         stdout: "pipe", stderr: "pipe",
       });
-      // An Agent SDK session (T3 runs Claude through it) reaches the binary.
-      const invoked = invoke("sdk-ts");
-      expect(invoked.exitCode).toBe(0);
-      expect(JSON.parse(invoked.stdout.toString())).toEqual({});
+      // An Agent SDK session (T3 runs Claude through it and names itself `t3-code`) reaches the binary.
+      for (const entrypoint of ["sdk-ts", "t3-code"]) {
+        const invoked = invoke(entrypoint);
+        expect(invoked.exitCode).toBe(0);
+        expect(JSON.parse(invoked.stdout.toString())).toEqual({});
+      }
       // Any other Claude session is answered by the shell: no output, no decision.
       for (const entrypoint of ["cli", undefined]) {
         const skipped = invoke(entrypoint);
@@ -2930,7 +3199,7 @@ describe("install-flags.json is written by every installer", () => {
   test("install.ps1 and install.cmd record the same neutral ids after both exits", () => {
     const ps = readScript("install.ps1");
     const cmd = readScript("install.cmd");
-    for (const id of ["minimal", "no-minimal", "verify-attestation", "skip-attestation", "with-call-flow", "skip-codex", "skip-gemini", "skip-kiro", "skip-vibe", "skip-opencode", "skip-skills", "skip-claude-plugin"]) {
+    for (const id of ["minimal", "no-minimal", "verify-attestation", "skip-attestation", "with-call-flow", "skip-codex", "skip-gemini", "skip-kiro", "skip-vibe", "skip-opencode", "skip-qwen", "skip-skills", "skip-claude-plugin"]) {
       expect(ps).toContain(`$ids += "${id}"`);
       expect(cmd).toContain(`call :AddInstallFlag ${id}`);
     }
@@ -3292,6 +3561,9 @@ describe.skipIf(!pwshBin || process.platform === "win32")(
       const { code, out } = runPs1ClosingSummary({ pi: true, kiro: true });
       expect(code).toBe(0);
       expect(out).toContain("  PI USERS");
+      // Install and update are different Pi commands (#902).
+      expect(out).toContain("  pi install npm:@plannotator/pi-extension\n");
+      expect(out).toContain("  pi update npm:@plannotator/pi-extension\n");
       expect(out).toContain("  KIRO CLI USERS");
       expect(out).toContain("Launch it: kiro-cli chat --agent plannotator");
     }, PWSH_SCANNER_TIMEOUT_MS);
@@ -3745,9 +4017,11 @@ function claudePluginRegistry(
 // the update runs after the repair). `plugin update` rewrites the registry to
 // FAKE_CLAUDE_NEW_VERSION when that is set, as the real command records the
 // new install. FAKE_CLAUDE_FAIL=<marketplace|plugin> fails that step;
-// FAKE_CLAUDE_HANG=1 never returns.
+// FAKE_CLAUDE_HANG=1 never returns. With FAKE_CLAUDE_ENV_LOG it also notes the
+// CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS each call saw.
 const FAKE_CLAUDE = `#!/bin/bash
 printf '%s\\n' "$*" >> "$FAKE_CLAUDE_LOG"
+if [ -n "$FAKE_CLAUDE_ENV_LOG" ]; then printf '%s\\n' "\${CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS-unset}" >> "$FAKE_CLAUDE_ENV_LOG"; fi
 if [ -n "$CLAUDECODE" ]; then echo "CLAUDECODE was set" >> "$FAKE_CLAUDE_LOG"; fi
 if [ "$FAKE_CLAUDE_HANG" = "1" ]; then exec sleep 30; fi
 step=""
@@ -3968,9 +4242,28 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
       expect(Date.now() - started).toBeLessThan(15_000);
       expect(s.calls()).toEqual([CLAUDE_PLUGIN_COMMANDS[0]]);
       expect(out).toContain(
-        "Claude Code plugin: could not update it (timed out after 1s). Run these, then restart Claude Code:",
+        `Claude Code plugin: could not update it (timed out after 1s). Run these, then restart Claude Code:\n${MANUAL_PLUGIN_COMMANDS}`,
       );
+      // The binary update itself went through.
+      expect(readFileSync(join(s.sandbox.home, ".local", "bin", "plannotator"), "utf8")).toBe(FAKE_BINARY);
     }, 30_000);
+
+    // Claude Code's own git clone of the marketplace stops after 120 s by
+    // default, which failed plugin updates on slow links.
+    test("both claude commands get 10 minutes for Claude Code's git clone; a value the person set is kept", () => {
+      for (const [preset, expected] of [[undefined, "600000"], ["900000", "900000"]] as const) {
+        const s = setupClaudePluginSandbox({});
+        const envLog = join(s.sandbox.home, "claude-env.log");
+        const { code } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+          ...s.env,
+          FAKE_CLAUDE_ENV_LOG: envLog,
+          ...(preset ? { CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS: preset } : {}),
+        });
+        expect(code).toBe(0);
+        expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+        expect(readFileSync(envLog, "utf8").trim().split("\n")).toEqual([expected, expected]);
+      }
+    });
 
     test("no claude on PATH: nothing runs, the banner keeps the manual commands", () => {
       const s = setupClaudePluginSandbox({ claude: false });
@@ -3983,6 +4276,26 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
         `Update the Claude Code plugin: run these in a terminal, then restart Claude Code:\n${MANUAL_PLUGIN_COMMANDS}`,
       );
     });
+
+    // An update the Inbox or a review window starts runs with that process's
+    // PATH, which often lacks ~/.local/bin (Claude Code's native installer's
+    // folder): the plugin must still be updated, from the folder Claude Code
+    // installed itself into, as the Inbox's launcher finds it.
+    for (const folder of [".local/bin", ".claude/local"]) {
+      test(`claude only in ~/${folder} (not on PATH): both update commands still run`, () => {
+        const s = setupClaudePluginSandbox({ claude: false });
+        mkdirSync(join(s.sandbox.home, folder), { recursive: true });
+        writeFileSync(join(s.sandbox.home, folder, "claude"), FAKE_CLAUDE, { mode: 0o755 });
+        const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+          ...s.env,
+          FAKE_CLAUDE_NEW_VERSION: "0.28.11",
+        });
+        expect(code).toBe(0);
+        expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+        expect(out).toContain("Claude Code plugin: updated to 0.28.11 (restart Claude Code to load it).");
+        expect(out).not.toContain(MANUAL_PLUGIN_COMMANDS);
+      });
+    }
 
     test("--skip-claude-plugin is remembered in install-flags.json", () => {
       const s = setupClaudePluginSandbox({});
@@ -4064,6 +4377,618 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
   },
 );
 
+// ---------------------------------------------------------------------------
+// The operating-system alert and the plugin-update page after a plugin update
+// that open Claude Code sessions cannot load by themselves. Every run puts a
+// FAKE osascript, notify-send, open and xdg-open first on PATH (they log their
+// arguments), so no test ever shows a real notification or opens a browser; a
+// "live session" is this test process's own pid in the sandbox's
+// ~/.claude/sessions.
+// ---------------------------------------------------------------------------
+
+const FAKE_NOTIFIER = `#!/bin/bash
+{ printf '%s' "$(basename "$0")"; printf '\\t%s' "$@"; printf '\\n'; } >> "$FAKE_NOTIFY_LOG"
+[ -z "$FAKE_NOTIFY_FAIL" ] || { echo "notifier failed" >&2; exit 1; }
+exit 0
+`;
+const ALERT_UPDATED = {
+  title: "Plannotator updated its Claude Code plugin",
+  body: "Type /reload-plugins in each open Claude Code session to load it.",
+};
+const ALERT_NOT_UPDATED = {
+  title: "Plannotator could not update its Claude Code plugin",
+  body: "See Settings > Agents in the Plannotator Inbox for the two commands to run.",
+};
+
+function deadPid(): number {
+  return Bun.spawnSync(["true"]).pid;
+}
+
+function setupAlertSandbox(opts: { from?: string; session?: "live" | "dead" | "none"; claude?: boolean } = {}) {
+  const s = setupClaudePluginSandbox({
+    registry: claudePluginRegistry([{ scope: "user", version: opts.from ?? "0.28.7" }]),
+    claude: opts.claude,
+  });
+  for (const name of ["osascript", "notify-send", "open", "xdg-open"]) {
+    writeFileSync(join(s.sandbox.stub, name), FAKE_NOTIFIER, { mode: 0o755 });
+  }
+  const session = opts.session ?? "live";
+  if (session !== "none") {
+    const dir = join(s.sandbox.home, ".claude", "sessions");
+    mkdirSync(dir, { recursive: true });
+    const pid = session === "live" ? process.pid : deadPid();
+    writeFileSync(join(dir, `${pid}.json`), JSON.stringify({ pid, kind: "interactive" }));
+  }
+  const log = join(s.sandbox.home, "notify.log");
+  const env: Record<string, string> = {
+    ...s.env,
+    PLANNOTATOR_INSTALL_NOTIFY: "",
+    FAKE_NOTIFY_LOG: log,
+    // A Linux desktop session (macOS uses osascript and needs neither).
+    DISPLAY: ":0",
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/nonexistent-bus",
+  };
+  const calls = () =>
+    existsSync(log) ? readFileSync(log, "utf-8").split("\n").filter(Boolean).map((line) => line.split("\t")) : [];
+  const alerts = () =>
+    calls()
+      .filter((parts) => parts[0] === "osascript" || parts[0] === "notify-send")
+      .map((parts) => ({ tool: parts[0], title: parts[parts.length - 2], body: parts[parts.length - 1] }));
+  // Every page opened, as "<opener> <url>" (the toast's powershell.exe is not one).
+  const pages = () =>
+    calls()
+      .filter((parts) => !["osascript", "notify-send", "powershell.exe"].includes(parts[0]!))
+      .map((parts) => `${parts[0]} ${parts.slice(1).join(" ")}`);
+  return { ...s, env, alerts, pages, calls, log };
+}
+
+const NOTIFIER = process.platform === "darwin" ? "osascript" : "notify-send";
+const OPENER = process.platform === "darwin" ? "open" : "xdg-open";
+const PAGE = "https://plannotator.ai/plugin-update";
+
+describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
+  "install.sh alerts once when open Claude Code sessions cannot load the updated plugin (fake notifier)",
+  () => {
+    test("updated from a plugin older than 0.28.52, with a session open: one alert with the reload words", () => {
+      const s = setupAlertSandbox({ from: "0.28.7" });
+      const { code } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, { ...s.env, FAKE_CLAUDE_NEW_VERSION: "0.28.61" });
+      expect(code).toBe(0);
+      expect(s.alerts()).toEqual([{ tool: NOTIFIER, ...ALERT_UPDATED }]);
+      expect(s.pages()).toEqual([`${OPENER} ${PAGE}?state=reload&from=0.28.7&to=0.28.61`]);
+    });
+
+    test("updated from 0.28.52 or newer (sessions reload themselves): no alert", () => {
+      const s = setupAlertSandbox({ from: "0.28.52" });
+      // The fake moves the commit (aaaaaaa to bbbbbbb), so this is an update.
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, { ...s.env, FAKE_CLAUDE_NEW_VERSION: "0.28.61" });
+      expect(code).toBe(0);
+      expect(out).toContain("Claude Code plugin: updated to 0.28.52");
+      expect(s.alerts()).toEqual([]);
+      expect(s.pages()).toEqual([]);
+    });
+
+    test("already current: no alert", () => {
+      const s = setupAlertSandbox({ from: "0.28.7" });
+      // Without FAKE_CLAUDE_NEW_VERSION the fake leaves the registry as it is.
+      writeFileSync(join(s.sandbox.stub, "claude"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "$FAKE_CLAUDE_LOG"\nexit 0\n`, { mode: 0o755 });
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(out).toContain("Claude Code plugin: already up to date (0.28.7).");
+      expect(s.alerts()).toEqual([]);
+      expect(s.pages()).toEqual([]);
+    });
+
+    test("fresh install (no plugin installed): no alert", () => {
+      const s = setupAlertSandbox({});
+      rmSync(s.registryPath);
+      const { code } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(s.alerts()).toEqual([]);
+      expect(s.pages()).toEqual([]);
+    });
+
+    const silent: Array<[string, Record<string, string>, Parameters<typeof setupAlertSandbox>[0]]> = [
+      ["PLANNOTATOR_INSTALL_NOTIFY=0", { PLANNOTATOR_INSTALL_NOTIFY: "0" }, {}],
+      ["PLANNOTATOR_INSTALL_NOTIFY=off", { PLANNOTATOR_INSTALL_NOTIFY: "off" }, {}],
+      ["CI", { CI: "true" }, {}],
+      ["an SSH session", { SSH_CONNECTION: "10.0.0.2 52000 10.0.0.1 22" }, {}],
+      ["the test sandbox", { PLANNOTATOR_TEST_SANDBOX: "1" }, {}],
+      ["no Claude Code session open (stale pid file)", {}, { session: "dead" }],
+      ["no Claude Code sessions folder", {}, { session: "none" }],
+    ];
+    for (const [name, env, opts] of silent) {
+      test(`${name}: no alert, the update itself still happens`, () => {
+        const s = setupAlertSandbox(opts);
+        const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+          ...s.env,
+          ...env,
+          FAKE_CLAUDE_NEW_VERSION: "0.28.61",
+        });
+        expect(code).toBe(0);
+        expect(out).toContain("Claude Code plugin: updated to 0.28.61");
+        expect(s.alerts()).toEqual([]);
+        expect(s.pages()).toEqual([]);
+      expect(s.pages()).toEqual([]);
+      });
+    }
+
+    test.skipIf(process.platform !== "linux")("Linux without a display: no alert", () => {
+      const s = setupAlertSandbox({});
+      const { DISPLAY: _d, ...env } = s.env;
+      const { code } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, { ...env, FAKE_CLAUDE_NEW_VERSION: "0.28.61" });
+      expect(code).toBe(0);
+      expect(s.alerts()).toEqual([]);
+      expect(s.pages()).toEqual([]);
+    });
+
+    test("the plugin could not be updated: one alert with the could-not-update words", () => {
+      const s = setupAlertSandbox({ from: "0.28.7" });
+      const { code } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, { ...s.env, FAKE_CLAUDE_FAIL: "marketplace" });
+      expect(code).toBe(0);
+      expect(s.alerts()).toEqual([{ tool: NOTIFIER, ...ALERT_NOT_UPDATED }]);
+      // The stub release is v99.9.9: the version the plugin should be at.
+      expect(s.pages()).toEqual([`${OPENER} ${PAGE}?state=manual&from=0.28.7&to=99.9.9`]);
+    });
+
+    test("no claude CLI found (manual): the could-not-update alert", () => {
+      const s = setupAlertSandbox({ from: "0.28.7", claude: false });
+      const { code } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(s.alerts()).toEqual([{ tool: NOTIFIER, ...ALERT_NOT_UPDATED }]);
+      expect(s.pages()).toEqual([`${OPENER} ${PAGE}?state=manual&from=0.28.7&to=99.9.9`]);
+    });
+
+    test("opted out of the plugin update (skipped): no alert", () => {
+      const s = setupAlertSandbox({ from: "0.28.7" });
+      const { code } = runInstallSh(s.sandbox, [...PLUGIN_INSTALL_ARGS, "--skip-claude-plugin"], s.env);
+      expect(code).toBe(0);
+      expect(s.alerts()).toEqual([]);
+      expect(s.pages()).toEqual([]);
+    });
+
+    test("PLANNOTATOR_BROWSER=none: the notification, no page", () => {
+      const s = setupAlertSandbox({});
+      const { code } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+        ...s.env,
+        // no-browser-guard: sentinel under test (the installer's "none" handling)
+        PLANNOTATOR_BROWSER: "none",
+        FAKE_CLAUDE_NEW_VERSION: "0.28.61",
+      });
+      expect(code).toBe(0);
+      expect(s.alerts()).toHaveLength(1);
+      expect(s.pages()).toEqual([]);
+    });
+
+    test("PLANNOTATOR_BROWSER naming a program: that program gets the page", () => {
+      const s = setupAlertSandbox({});
+      const browser = join(s.sandbox.home, "my-browser");
+      writeFileSync(browser, FAKE_NOTIFIER, { mode: 0o755 });
+      const { code } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+        ...s.env,
+        PLANNOTATOR_BROWSER: browser,
+        FAKE_CLAUDE_NEW_VERSION: "0.28.61",
+      });
+      expect(code).toBe(0);
+      expect(s.pages()).toEqual([`my-browser ${PAGE}?state=reload&from=0.28.7&to=0.28.61`]);
+    });
+
+    test("a failing notifier never fails the install", () => {
+      const s = setupAlertSandbox({ from: "0.28.7" });
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+        ...s.env,
+        FAKE_CLAUDE_NEW_VERSION: "0.28.61",
+        FAKE_NOTIFY_FAIL: "1",
+      });
+      expect(code).toBe(0);
+      expect(s.alerts()).toHaveLength(1);
+      expect(s.pages()).toHaveLength(1);
+      expect(out).not.toContain("notifier failed");
+      expect(JSON.parse(readFileSync(join(s.sandbox.home, ".plannotator", "install-flags.json"), "utf-8"))).toEqual({
+        v: 1,
+        flags: ["skip-skills"],
+      });
+    });
+  },
+);
+
+/** The toast script a Windows installer hands to powershell.exe -EncodedCommand. */
+function decodeToast(line: string): string {
+  const args = line.split("\t");
+  const encoded = args[args.indexOf("-EncodedCommand") + 1] ?? "";
+  return Buffer.from(encoded, "base64").toString("utf16le");
+}
+
+function extractCmdAlertCommand(): string {
+  const cmd = readScript("install.cmd");
+  const sub = cmd.slice(cmd.indexOf("\n:ClaudePluginReloadAlert\n"));
+  const m = /^powershell -NoProfile -ExecutionPolicy Bypass -Command "(.*)" >nul 2>&1$/m.exec(sub);
+  if (!m) throw new Error("could not locate the :ClaudePluginReloadAlert PowerShell in install.cmd");
+  return m[1];
+}
+
+describe("Windows installers' plugin alert (source scan)", () => {
+  test("install.cmd's alert PowerShell carries nothing cmd.exe would reinterpret, and the same words", () => {
+    const line = extractCmdAlertCommand();
+    expect(line).not.toMatch(/["%!&]/);
+    expect(line).toContain("'https://plannotator.ai/plugin-update?state='");
+    for (const words of [ALERT_UPDATED, ALERT_NOT_UPDATED]) {
+      expect(line).toContain(words.title);
+      expect(line).toContain(words.body);
+      expect(readScript("install.ps1")).toContain(words.title);
+      expect(readScript("install.ps1")).toContain(words.body);
+    }
+  });
+});
+
+describe.skipIf(!pwshBin || process.platform === "win32")(
+  "Windows installers' plugin alert (PowerShell, fake powershell.exe)",
+  () => {
+    function runAlert(
+      runner: "install.ps1" | "install.cmd",
+      opts: {
+        state: string;
+        from: string;
+        to?: string;
+        session?: "live" | "dead";
+        env?: Record<string, string>;
+        expectPage?: boolean;
+      },
+    ) {
+      const s = setupAlertSandbox({ from: opts.from, session: opts.session ?? "live" });
+      writeFileSync(join(s.sandbox.stub, "powershell.exe"), FAKE_NOTIFIER, { mode: 0o755 });
+      // Start-Process with a bare URL would reach the real default browser
+      // under pwsh on macOS or Linux: the page always goes to the fake.
+      const root = mkdtempSync(join(tmpdir(), "plannotator-ps-alert-test-"));
+      const driverPath = join(root, "driver.ps1");
+      const body =
+        runner === "install.ps1"
+          ? [
+              extractPs1Function("Get-ClaudePluginReloadAlert"),
+              extractPs1Function("Show-ClaudePluginReloadAlert"),
+              `Show-ClaudePluginReloadAlert (Get-ClaudePluginReloadAlert -State $env:PLN_NT_STATE -From $env:PLN_NT_FROM -To $env:PLN_NT_TO -Tag $env:PLN_NT_TAG)`,
+              `exit 0`,
+            ]
+          : [extractCmdAlertCommand()];
+      writeFileSync(driverPath, body.join("\n"));
+      const r = Bun.spawnSync([pwshBin!, "-NoProfile", "-File", driverPath], {
+        env: {
+          PATH: `${s.sandbox.stub}:/usr/bin:/bin`,
+          HOME: s.sandbox.home,
+          USERPROFILE: s.sandbox.home,
+          CLAUDE_CONFIG_DIR: join(s.sandbox.home, ".claude"),
+          TMPDIR: join(s.sandbox.home, "tmp"),
+          FAKE_NOTIFY_LOG: s.env.FAKE_NOTIFY_LOG!,
+          PLN_NT_STATE: opts.state,
+          PLN_NT_FROM: opts.from,
+          PLN_NT_TAG: "v0.28.61",
+          PLN_NT_TO: opts.to ?? "",
+          PLANNOTATOR_BROWSER: join(s.sandbox.stub, "xdg-open"),
+          ...opts.env,
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      // Start-Process returns before the fake has written: wait for it a little.
+      const deadline = Date.now() + 5000;
+      while (opts.expectPage && s.pages().length === 0 && Date.now() < deadline) Bun.sleepSync(50);
+      const lines = s.calls().filter((p) => p[0] === "powershell.exe").map((p) => p.join("\t"));
+      return { code: r.exitCode, lines, pages: s.pages() };
+    }
+
+    for (const runner of ["install.ps1", "install.cmd"] as const) {
+      test(`${runner}: updated from an old plugin with a session open: one toast with the reload words`, () => {
+        const r = runAlert(runner, { state: "updated", from: "0.28.7", to: "0.28.61", expectPage: true });
+        expect(r.code).toBe(0);
+        expect(r.lines).toHaveLength(1);
+        expect(r.pages).toEqual([`xdg-open ${PAGE}?state=reload&from=0.28.7&to=0.28.61`]);
+        const toast = decodeToast(r.lines[0]!);
+        expect(toast).toContain(ALERT_UPDATED.title);
+        expect(toast).toContain(ALERT_UPDATED.body);
+        expect(toast).toContain("ToastNotificationManager");
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
+      test(`${runner}: not updated: the could-not-update words`, () => {
+        const r = runAlert(runner, { state: "failed", from: "0.28.7", expectPage: true });
+        expect(r.lines).toHaveLength(1);
+        expect(r.pages).toEqual([`xdg-open ${PAGE}?state=manual&from=0.28.7&to=0.28.61`]);
+        expect(decodeToast(r.lines[0]!)).toContain(ALERT_NOT_UPDATED.title);
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
+      const none: Array<[string, Parameters<typeof runAlert>[1]]> = [
+        ["updated from 0.28.52", { state: "updated", from: "0.28.52" }],
+        ["current", { state: "current", from: "0.28.61" }],
+        ["skipped", { state: "skipped", from: "0.28.7" }],
+        ["fresh install", { state: "none", from: "" }],
+        ["no live session", { state: "updated", from: "0.28.7", session: "dead" }],
+        ["the opt-out", { state: "updated", from: "0.28.7", env: { PLANNOTATOR_INSTALL_NOTIFY: "0" } }],
+        ["CI", { state: "updated", from: "0.28.7", env: { CI: "true" } }],
+        ["SSH", { state: "updated", from: "0.28.7", env: { SSH_CONNECTION: "10.0.0.2 52000 10.0.0.1 22" } }],
+        ["the test sandbox", { state: "updated", from: "0.28.7", env: { PLANNOTATOR_TEST_SANDBOX: "1" } }],
+      ];
+      for (const [name, opts] of none) {
+        test(`${runner}: ${name}: no toast`, () => {
+          const r = runAlert(runner, opts);
+          expect(r.code).toBe(0);
+          expect(r.lines).toEqual([]);
+          expect(r.pages).toEqual([]);
+        }, PWSH_SCANNER_TIMEOUT_MS);
+      }
+
+      test(`${runner}: a failing powershell.exe never fails the run`, () => {
+        const r = runAlert(runner, { state: "updated", from: "0.28.7", env: { FAKE_NOTIFY_FAIL: "1" } });
+        expect(r.code).toBe(0);
+        expect(r.lines).toHaveLength(1);
+      }, PWSH_SCANNER_TIMEOUT_MS);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// OpenCode 2: a running service keeps the plugin it loaded, so the installer
+// asks it for the new one with `opencode2 plugin update <spec>` (measured on
+// OpenCode 2.0.22: nothing restarted or cancelled). Every run uses a FAKE
+// `opencode2` that logs its cwd and argv; nothing reaches the real CLI, a
+// real service, ~/.config/opencode, ~/.cache/opencode or the network. The
+// stub curl says the latest release is v99.9.9.
+// ---------------------------------------------------------------------------
+
+// State lives in files under $FAKE_OC2_DIR: `version` (what the service has
+// loaded), `misses` ("No plugins found" answers before the row shows, as in a
+// folder the service has not opened yet), `pending` / `pending_left` (a
+// version the service loads after that many more `plugin list` calls).
+// FAKE_OC2_STATUS: running | stopped | fail | hang. FAKE_OC2_SPEC: the SOURCE
+// column. FAKE_OC2_LIST=hang. FAKE_OC2_UPDATE: ok | noop (registry down:
+// "No plugin updates available", exit 0) | broken ("Updated", exit 0, old
+// plugin still active, a "- -" row) | fail (exit 1) | hang.
+const FAKE_OPENCODE2 = `#!/bin/bash
+st="$FAKE_OC2_DIR"
+printf '%s|%s\\n' "$PWD" "$*" >> "$st/calls.log"
+get() { cat "$st/$1" 2>/dev/null; }
+case "$1 $2" in
+  "service status")
+    case "\${FAKE_OC2_STATUS:-running}" in
+      running) echo "http://127.0.0.1:4096" ;;
+      stopped) echo "stopped" ;;
+      fail) echo "Error: no service" >&2; exit 2 ;;
+      hang) exec sleep 30 ;;
+    esac ;;
+  "plugin list")
+    [ "$FAKE_OC2_LIST" = "hang" ] && exec sleep 30
+    misses=$(get misses); misses=\${misses:-0}
+    if [ "$misses" -gt 0 ]; then echo $((misses - 1)) > "$st/misses"; echo "No plugins found"; exit 0; fi
+    pending=$(get pending)
+    if [ -n "$pending" ]; then
+      left=$(get pending_left); left=\${left:-0}
+      if [ "$left" -le 0 ]; then echo "$pending" > "$st/version"; rm -f "$st/pending"; else echo $((left - 1)) > "$st/pending_left"; fi
+    fi
+    echo "ID           VERSION   SOURCE"
+    echo "other-plugin 1.2.3     other-plugin@latest"
+    [ -n "$FAKE_OC2_NO_ROW" ] || echo "plannotator  $(get version)   \${FAKE_OC2_SPEC:-@plannotator/opencode@latest}"
+    [ -f "$st/broken" ] && echo "plannotator  -   -"
+    exit 0 ;;
+  "plugin update")
+    case "\${FAKE_OC2_UPDATE:-ok}" in
+      ok) echo "\${FAKE_OC2_NEW:-99.9.9}" > "$st/pending"; echo "\${FAKE_OC2_LOAD_AFTER:-0}" > "$st/pending_left"; echo 'Updated Server plugin "plannotator"' ;;
+      noop) echo "No plugin updates available" ;;
+      broken) : > "$st/broken"; echo 'Updated Server plugin "plannotator"' ;;
+      fail) echo "Error: Plugin is not configured: $3" >&2; exit 1 ;;
+      hang) exec sleep 30 ;;
+    esac ;;
+  *) echo "fake opencode2: unexpected $*" >&2; exit 64 ;;
+esac
+`;
+
+function setupOpenCode2Sandbox(opts: { version?: string; misses?: number; opencode2?: boolean } = {}) {
+  const sandbox = setupInstallSandbox({ gh: "pass-all" });
+  const state = join(sandbox.home, "fake-oc2");
+  mkdirSync(state, { recursive: true });
+  writeFileSync(join(state, "version"), `${opts.version ?? "0.29.0"}\n`);
+  if (opts.misses) writeFileSync(join(state, "misses"), `${opts.misses}\n`);
+  if (opts.opencode2 !== false) writeFileSync(join(sandbox.stub, "opencode2"), FAKE_OPENCODE2, { mode: 0o755 });
+  // The generation the service loaded, where OpenCode 2 caches it.
+  const generation = join(sandbox.home, ".cache", "opencode", "npm", "@plannotator", "opencode@latest", "1793048509721");
+  mkdirSync(generation, { recursive: true });
+  writeFileSync(join(generation, "package.json"), '{"name":"@plannotator/opencode","version":"0.29.0"}\n');
+  const calls = () =>
+    existsSync(join(state, "calls.log"))
+      ? readFileSync(join(state, "calls.log"), "utf-8").split("\n").filter(Boolean).map((line) => {
+          const [cwd, args] = line.split("|");
+          return { cwd, args };
+        })
+      : [];
+  return {
+    sandbox,
+    generation,
+    calls,
+    args: () => calls().map((c) => c.args),
+    loaded: () => readFileSync(join(state, "version"), "utf-8").trim(),
+    env: { FAKE_OC2_DIR: state, PLANNOTATOR_OPENCODE2_WAIT: "3" } as Record<string, string>,
+  };
+}
+
+const OC2_UPDATE_ARGS = ["--non-interactive", "--no-extras", "--skip-skills"];
+const ocLines = (out: string) => out.split("\n").filter((line) => line.startsWith("OpenCode 2:"));
+const MANUAL_OC2 = "To load 99.9.9, run: opencode2 models && opencode2 plugin update @plannotator/opencode@latest";
+
+describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
+  "install.sh updates a running OpenCode 2 service's plugin (fake opencode2, sandbox HOME)",
+  () => {
+    test("running, unpinned, older: plugin update with the configured spec, read back, one line; the cache stays", () => {
+      const s = setupOpenCode2Sandbox();
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(s.args()).toEqual(["service status", "plugin list", "plugin update @plannotator/opencode@latest", "plugin list"]);
+      // `plugin list` / `plugin update` answer for the folder they run in: always $HOME.
+      for (const call of s.calls()) expect(call.cwd).toBe(s.sandbox.home);
+      expect(ocLines(out)).toEqual(["OpenCode 2: the running service now uses Plannotator 99.9.9. Nothing was restarted."]);
+      expect(s.loaded()).toBe("99.9.9");
+      // With the entry gone the service would answer "No plugin updates available" next time.
+      expect(existsSync(s.generation)).toBe(true);
+    });
+
+    test("the bare spec is passed as it is configured", () => {
+      const s = setupOpenCode2Sandbox();
+      const { code } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, { ...s.env, FAKE_OC2_SPEC: "@plannotator/opencode" });
+      expect(code).toBe(0);
+      expect(s.args()).toContain("plugin update @plannotator/opencode");
+    });
+
+    test("the service loads the new plugin a moment after the update returns: it waits for it", () => {
+      const s = setupOpenCode2Sandbox();
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, { ...s.env, FAKE_OC2_LOAD_AFTER: "2" });
+      expect(code).toBe(0);
+      expect(ocLines(out)).toEqual(["OpenCode 2: the running service now uses Plannotator 99.9.9. Nothing was restarted."]);
+    });
+
+    test("a folder the service has not opened yet answers 'No plugins found' at first: it asks again", () => {
+      const s = setupOpenCode2Sandbox({ misses: 2 });
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(s.args().filter((a) => a === "plugin list").length).toBeGreaterThanOrEqual(3);
+      expect(ocLines(out)).toEqual(["OpenCode 2: the running service now uses Plannotator 99.9.9. Nothing was restarted."]);
+    });
+
+    test("already current: says so, no update", () => {
+      const s = setupOpenCode2Sandbox({ version: "99.9.9" });
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(s.args()).toEqual(["service status", "plugin list"]);
+      expect(ocLines(out)).toEqual(["OpenCode 2: the running service already uses Plannotator 99.9.9."]);
+      expect(existsSync(s.generation)).toBe(true);
+    });
+
+    test("a spec pinned to an exact version is left alone, and says so", () => {
+      const s = setupOpenCode2Sandbox();
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, { ...s.env, FAKE_OC2_SPEC: "@plannotator/opencode@0.29.0" });
+      expect(code).toBe(0);
+      expect(s.args()).toEqual(["service status", "plugin list"]);
+      expect(ocLines(out)).toEqual(["OpenCode 2: the Plannotator plugin is pinned to 0.29.0; left as it is."]);
+      expect(s.loaded()).toBe("0.29.0");
+    });
+
+    test("any other spec (a range, a path): nothing runs, nothing said, the cache is cleared as before", () => {
+      for (const spec of ["@plannotator/opencode@^0.29.0", "file:///work/plannotator"]) {
+        const s = setupOpenCode2Sandbox();
+        const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, { ...s.env, FAKE_OC2_SPEC: spec });
+        expect(code).toBe(0);
+        expect(s.args()).toEqual(["service status", "plugin list"]);
+        expect(ocLines(out)).toEqual([]);
+        expect(existsSync(s.generation)).toBe(false);
+      }
+    });
+
+    test("the service is not running: only `service status`, nothing said, the cache cleared as before (the next start loads the newest)", () => {
+      for (const status of ["stopped", "fail"]) {
+        const s = setupOpenCode2Sandbox();
+        const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, { ...s.env, FAKE_OC2_STATUS: status });
+        expect(code).toBe(0);
+        expect(s.args()).toEqual(["service status"]);
+        expect(ocLines(out)).toEqual([]);
+        expect(out).not.toContain("Updating the Plannotator plugin in the running OpenCode 2 service");
+        expect(existsSync(s.generation)).toBe(false);
+      }
+    });
+
+    test("the service has no Plannotator plugin: no update, nothing said", () => {
+      const s = setupOpenCode2Sandbox();
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, { ...s.env, FAKE_OC2_NO_ROW: "1", PLANNOTATOR_OPENCODE2_WAIT: "1" });
+      expect(code).toBe(0);
+      expect(s.args().every((a) => a === "service status" || a === "plugin list")).toBe(true);
+      expect(ocLines(out)).toEqual([]);
+      expect(existsSync(s.generation)).toBe(false);
+    });
+
+    test("registry down (exit 0, 'No plugin updates available'): read back, the old version named, the command to run; the cache stays", () => {
+      const s = setupOpenCode2Sandbox();
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, { ...s.env, FAKE_OC2_UPDATE: "noop", PLANNOTATOR_OPENCODE2_WAIT: "1" });
+      expect(code).toBe(0);
+      expect(ocLines(out)).toEqual([`OpenCode 2: the running service still uses Plannotator 0.29.0. ${MANUAL_OC2}`]);
+      expect(existsSync(s.generation)).toBe(true);
+    });
+
+    test("a broken new package ('Updated', exit 0, old plugin still active): never reported as updated", () => {
+      const s = setupOpenCode2Sandbox();
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, { ...s.env, FAKE_OC2_UPDATE: "broken", PLANNOTATOR_OPENCODE2_WAIT: "1" });
+      expect(code).toBe(0);
+      expect(out).not.toContain("now uses Plannotator");
+      expect(ocLines(out)).toEqual([`OpenCode 2: the running service still uses Plannotator 0.29.0. ${MANUAL_OC2}`]);
+    });
+
+    test("plugin update exits non-zero: its reason and the command, no wait", () => {
+      const s = setupOpenCode2Sandbox();
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, { ...s.env, FAKE_OC2_UPDATE: "fail" });
+      expect(code).toBe(0);
+      expect(s.args()).toEqual(["service status", "plugin list", "plugin update @plannotator/opencode@latest"]);
+      expect(ocLines(out)).toEqual([
+        `OpenCode 2: the running service still uses Plannotator 0.29.0 (opencode2 exited 1: Error: Plugin is not configured: @plannotator/opencode@latest). ${MANUAL_OC2}`,
+      ]);
+    });
+
+    test("plugin update hangs: stopped at the time limit, the install goes on and succeeds", () => {
+      const s = setupOpenCode2Sandbox();
+      const started = Date.now();
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, { ...s.env, FAKE_OC2_UPDATE: "hang", PLANNOTATOR_OPENCODE2_TIMEOUT: "1" });
+      expect(code).toBe(0);
+      expect(Date.now() - started).toBeLessThan(25_000);
+      expect(ocLines(out)).toEqual([`OpenCode 2: the running service still uses Plannotator 0.29.0 (timed out after 1s). ${MANUAL_OC2}`]);
+      // The install carried on past the step.
+      expect(out).toContain("OPENCODE USERS");
+    });
+
+    test("service status or plugin list hangs: stopped at the time limit, nothing said", () => {
+      for (const env of [{ FAKE_OC2_STATUS: "hang" }, { FAKE_OC2_LIST: "hang" }]) {
+        const s = setupOpenCode2Sandbox();
+        const started = Date.now();
+        const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, { ...s.env, ...env, PLANNOTATOR_OPENCODE2_TIMEOUT: "1" });
+        expect(code).toBe(0);
+        expect(Date.now() - started).toBeLessThan(25_000);
+        expect(s.args()).not.toContain("plugin update @plannotator/opencode@latest");
+        expect(ocLines(out)).toEqual([]);
+      }
+    });
+
+    test("a pinned install (--version) never touches the service; an auto-update run does", () => {
+      const pinned = setupOpenCode2Sandbox();
+      const r1 = runInstallSh(pinned.sandbox, [...OC2_UPDATE_ARGS, "--version", "v0.27.0"], pinned.env);
+      expect(r1.code).toBe(0);
+      expect(pinned.calls()).toEqual([]);
+      const auto = setupOpenCode2Sandbox();
+      const r2 = runInstallSh(auto.sandbox, [...OC2_UPDATE_ARGS, "--version", "v99.9.9"], { ...auto.env, PLANNOTATOR_UPDATE_VERSION: "v99.9.9" });
+      expect(r2.code).toBe(0);
+      expect(auto.args()).toContain("plugin update @plannotator/opencode@latest");
+    });
+
+    test("the OpenCode opt-out never runs opencode2", () => {
+      const s = setupOpenCode2Sandbox();
+      const { code } = runInstallSh(s.sandbox, [...OC2_UPDATE_ARGS, "--skip-opencode"], s.env);
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual([]);
+      expect(existsSync(s.generation)).toBe(true);
+    });
+
+    test("no opencode2 on PATH: the OpenCode 2 cache is cleared as before", () => {
+      const s = setupOpenCode2Sandbox({ opencode2: false });
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(ocLines(out)).toEqual([]);
+      expect(existsSync(s.generation)).toBe(false);
+    });
+
+    test("no temporary directory: nothing runs", () => {
+      const s = setupOpenCode2Sandbox();
+      writeFileSync(
+        join(s.sandbox.stub, "mktemp"),
+        `#!/bin/bash\ncase "$*" in *plannotator-opencode2*) exit 1 ;; esac\nexec /usr/bin/mktemp "$@"\n`,
+        { mode: 0o755 },
+      );
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual([]);
+      expect(ocLines(out)).toEqual([]);
+    });
+  },
+);
+
 describe("Claude Code plugin update: every installer (source scan)", () => {
   test("each installer takes the opt-out flag, env var and config key", () => {
     const sh = readScript("install.sh");
@@ -4071,7 +4996,7 @@ describe("Claude Code plugin update: every installer (source scan)", () => {
     const cmd = readScript("install.cmd");
     expect(sh).toContain("        --skip-claude-plugin)");
     expect(sh).toContain('case "${PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE:-}" in');
-    expect(sh).toContain("for _agent in codex gemini kiro vibe opencode skills claudePlugin; do");
+    expect(sh).toContain("for _agent in codex gemini kiro vibe opencode qwen skills claudePlugin; do");
     expect(ps).toContain("[switch]$SkipClaudePlugin");
     expect(ps).toContain("$env:PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE -match");
     expect(ps).toContain("$cfg.skipInstall.claudePlugin -is [bool]");
@@ -4267,6 +5192,14 @@ describe.skipIf(!pwshBin || process.platform === "win32")(
         );
       }, PWSH_SCANNER_TIMEOUT_MS);
 
+      test(`${runner}: both claude commands get 10 minutes for Claude Code's git clone`, () => {
+        const s = setupClaudePluginSandbox({});
+        const envLog = join(s.sandbox.home, "claude-env.log");
+        const r = runWindowsClaudePluginUpdate(runner, s, { env: { FAKE_CLAUDE_ENV_LOG: envLog } });
+        expectState(runner, r, "current");
+        expect(readFileSync(envLog, "utf8").trim().split("\n")).toEqual(["600000", "600000"]);
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
       test(`${runner}: a hanging claude is stopped at the time limit`, () => {
         const s = setupClaudePluginSandbox({});
         const started = Date.now();
@@ -4325,6 +5258,1201 @@ describe.skipIf(!pwshBin || process.platform === "win32")(
         expect(s.calls()).toEqual([]);
         expect(r.out).not.toContain("Updating the Claude Code plugin");
       }, PWSH_SCANNER_TIMEOUT_MS);
+
+      // An update the Inbox starts runs with its PATH, which can lack Claude
+      // Code's own install folders: the plugin is still updated from there.
+      for (const folder of [".local/bin", ".claude/local"]) {
+        test(`${runner}: claude only in the profile's ${folder} (not on PATH) - both commands still run`, () => {
+          const s = setupClaudePluginSandbox({ claude: false });
+          mkdirSync(join(s.sandbox.home, folder), { recursive: true });
+          writeFileSync(join(s.sandbox.home, folder, "claude"), FAKE_CLAUDE, { mode: 0o755 });
+          const r = runWindowsClaudePluginUpdate(runner, s, { env: { FAKE_CLAUDE_NEW_VERSION: "0.28.11" } });
+          expectState(runner, r, "updated");
+          expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+        }, PWSH_SCANNER_TIMEOUT_MS);
+      }
     }
   },
 );
+
+// ---------------------------------------------------------------------------
+// Pi extension update (#902). On an existing install, current Pi's
+// `pi install npm:@plannotator/pi-extension` runs a bare npm install that
+// keeps the saved version ("up to date") and exits 0, so the installers run
+// `pi update <source>` and read the version back before saying "updated".
+// The fake pi below behaves that way: its `install` leaves an existing
+// package as it is (unless FAKE_PI_INSTALL_MOVES=1, older Pi's global
+// `npm install -g`), and its `update` installs FAKE_PI_LATEST, the version the
+// registry offers. A fake npm answers only `npm root -g` (older Pi's global
+// install root). No real pi, npm or agent CLI is reachable, and HOME, the Pi
+// agent dir and PLANNOTATOR_DATA_DIR all live in a temp sandbox.
+// ---------------------------------------------------------------------------
+
+const PI_SOURCE = "npm:@plannotator/pi-extension";
+const FAKE_PI = [
+  "#!/bin/bash",
+  'printf \'%s\\n\' "$*" >> "$FAKE_PI_LOG"',
+  'pkg="$FAKE_PI_PKG"',
+  'write() { mkdir -p "$pkg"; printf \'{\\n  "name": "@plannotator/pi-extension",\\n  "version": "%s"\\n}\\n\' "$1" > "$pkg/package.json"; }',
+  'case "$1" in',
+  "  install)",
+  '    picks="$FAKE_PI_INSTALL_PICKS"; [ -n "$picks" ] || picks="$FAKE_PI_LATEST"',
+  '    if [ "$FAKE_PI_INSTALL_MOVES" = 1 ] || [ ! -f "$pkg/package.json" ]; then write "$picks"; echo "added 1 package"; else echo "up to date in 573ms"; fi',
+  '    if ! grep -q "npm:@plannotator/pi-extension" "$FAKE_PI_SETTINGS" 2>/dev/null; then mkdir -p "$(dirname "$FAKE_PI_SETTINGS")"; printf \'{"packages":["%s"]}\\n\' "$2" > "$FAKE_PI_SETTINGS"; fi',
+  '    echo "Installed $2"',
+  "    exit 0 ;;",
+  "  update)",
+  '    if [ "$FAKE_PI_UPDATE" = missing ]; then echo "Unknown command: update" >&2; exit 1; fi',
+  '    if [ "$FAKE_PI_UPDATE" = fail ]; then echo "npm error code ETIMEDOUT" >&2; exit 1; fi',
+  '    write "$FAKE_PI_LATEST"',
+  '    echo "Updated $2"',
+  "    exit 0 ;;",
+  "esac",
+  "exit 1",
+  "",
+].join("\n");
+const FAKE_NPM = [
+  "#!/bin/bash",
+  'if [ "$1" = "root" ] && [ "$2" = "-g" ]; then printf \'%s\\n\' "$FAKE_NPM_ROOT"; exit 0; fi',
+  'if [ "$1" = "view" ]; then',
+  '  printf \'%s\\n\' "$*" >> "$FAKE_NPM_LOG"',
+  '  if [ "$FAKE_NPM_VIEW" = e404 ]; then echo "npm error code E404" >&2; echo "npm error 404 No match found for version" >&2; exit 1; fi',
+  '  if [ "$FAKE_NPM_VIEW" = offline ]; then echo "npm error code ENOTFOUND" >&2; exit 1; fi',
+  '  v="$2"; printf \'%s\\n\' "${v##*@}"; exit 0',
+  "fi",
+  "exit 1",
+  "",
+].join("\n");
+
+/** The release every runner installs here: the stub curl's latest tag. */
+const PI_RELEASE = "99.9.9";
+const PI_OLDER = "99.9.8";
+const PI_INSTALL_ARGS = ["--non-interactive", "--no-extras", "--skip-skills", "--skip-claude-plugin"];
+
+interface PiScenario {
+  /** Pi's settings.json entry for the extension; null: not listed (first install). */
+  source: string | null;
+  /** package.json version on disk before the run; null: none; "garbled": unreadable. */
+  installed: string | null;
+  /** Where the package lives: Pi's managed npm dir, or older Pi's global npm root. */
+  where?: "managed" | "global";
+  latest: string;
+  update?: "ok" | "missing" | "fail";
+  installMoves?: boolean;
+  /** The version a bare-name `pi install` lands on (npm passing over a release whose engines Node misses). */
+  installPicks?: string;
+  /** `npm view <name>@<release> version`: found, E404 (not on the registry), or a network error. */
+  npmView?: "published" | "e404" | "offline";
+  /** PI_CODING_AGENT_DIR as the person set it ("~/..." is expanded as Pi does). */
+  agentDirEnv?: string;
+}
+
+function setupPiSandbox(sc: PiScenario) {
+  const sandbox = setupInstallSandbox({ gh: "pass-all" });
+  const agentDir = sc.agentDirEnv
+    ? join(sandbox.home, sc.agentDirEnv.replace(/^~\//, ""))
+    : join(sandbox.home, ".pi", "agent");
+  const settings = join(agentDir, "settings.json");
+  const npmRoot = join(sandbox.home, "global-npm", "lib", "node_modules");
+  const pkg =
+    sc.where === "global"
+      ? join(npmRoot, "@plannotator", "pi-extension")
+      : join(agentDir, "npm", "node_modules", "@plannotator", "pi-extension");
+  if (sc.source !== null) {
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(settings, JSON.stringify({ defaultProvider: "anthropic", packages: [sc.source] }, null, 2) + "\n");
+  }
+  if (sc.installed !== null) {
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(
+      join(pkg, "package.json"),
+      sc.installed === "garbled"
+        ? "{ not json"
+        : JSON.stringify({ name: "@plannotator/pi-extension", version: sc.installed }, null, 2),
+    );
+  }
+  writeFileSync(join(sandbox.stub, "pi"), FAKE_PI, { mode: 0o755 });
+  writeFileSync(join(sandbox.stub, "npm"), FAKE_NPM, { mode: 0o755 });
+  const log = join(sandbox.home, "pi-calls.log");
+  const env: Record<string, string> = {
+    FAKE_PI_LOG: log,
+    FAKE_PI_PKG: pkg,
+    FAKE_PI_SETTINGS: settings,
+    FAKE_PI_LATEST: sc.latest,
+    FAKE_PI_UPDATE: sc.update ?? "ok",
+    FAKE_PI_INSTALL_MOVES: sc.installMoves ? "1" : "0",
+    FAKE_PI_INSTALL_PICKS: sc.installPicks ?? "",
+    FAKE_NPM_ROOT: npmRoot,
+    FAKE_NPM_VIEW: sc.npmView ?? "published",
+    FAKE_NPM_LOG: join(sandbox.home, "npm-calls.log"),
+    PLANNOTATOR_DATA_DIR: join(sandbox.home, "plannotator-data"),
+    ...(sc.agentDirEnv ? { PI_CODING_AGENT_DIR: sc.agentDirEnv } : {}),
+  };
+  const calls = () => (existsSync(log) ? readFileSync(log, "utf-8").split("\n").filter(Boolean) : []);
+  const version = () => {
+    try {
+      return JSON.parse(readFileSync(join(pkg, "package.json"), "utf-8")).version as string;
+    } catch {
+      return null;
+    }
+  };
+  const settingsText = () => (existsSync(settings) ? readFileSync(settings, "utf-8") : null);
+  const npmLog = env.FAKE_NPM_LOG!;
+  const npmViews = () => (existsSync(npmLog) ? readFileSync(npmLog, "utf-8").split("\n").filter(Boolean) : []);
+  return { sandbox, env, calls, version, settingsText, pkg, npmViews };
+}
+
+type PiRunner = "install.sh" | "install.ps1" | "install.cmd";
+
+/** install.ps1's Pi region: from $piExtensionSource through Update-PiExtensionIfPresent. */
+function extractPs1PiRegion(): string {
+  const ps = readScript("install.ps1");
+  const start = ps.indexOf('$piExtensionSource = "npm:@plannotator/pi-extension"');
+  const fn = ps.indexOf("function Update-PiExtensionIfPresent {");
+  const end = ps.indexOf("\n}\n", fn);
+  if (start < 0 || fn < start || end < 0) throw new Error("could not locate the Pi region in install.ps1");
+  return ps.slice(start, end + 2);
+}
+
+/** The PowerShell install.cmd runs inside :UpdatePiExtension. */
+function extractCmdPiCommand(): string {
+  const cmd = readScript("install.cmd");
+  const sub = cmd.slice(cmd.indexOf("\n:UpdatePiExtension\n"));
+  const m = /^powershell -NoProfile -ExecutionPolicy Bypass -Command "(.*)"$/m.exec(sub);
+  if (!m) throw new Error("could not locate the :UpdatePiExtension PowerShell in install.cmd");
+  return m[1];
+}
+
+/**
+ * Run one installer's Pi step: the whole install.sh (its stub curl serves
+ * v99.9.9), install.ps1's Pi region with $latestTag = v99.9.9, or the exact
+ * PowerShell command install.cmd hands to `powershell -Command`.
+ */
+function runPiStep(runner: PiRunner, s: ReturnType<typeof setupPiSandbox>) {
+  if (runner === "install.sh") return runInstallSh(s.sandbox, PI_INSTALL_ARGS, s.env);
+  const root = mkdtempSync(join(tmpdir(), "plannotator-ps-pi-test-"));
+  const driverPath = join(root, "driver.ps1");
+  const body =
+    runner === "install.ps1"
+      ? [
+          `$ErrorActionPreference = "Stop"`,
+          `$latestTag = "v${PI_RELEASE}"`,
+          extractPs1PiRegion(),
+          "Update-PiExtensionIfPresent",
+          "exit 0",
+        ]
+      : [extractCmdPiCommand()];
+  writeFileSync(driverPath, body.join("\n"));
+  const r = Bun.spawnSync([pwshBin!, "-NoProfile", "-File", driverPath], {
+    env: {
+      PATH: `${s.sandbox.stub}:/usr/bin:/bin`,
+      HOME: s.sandbox.home,
+      USERPROFILE: s.sandbox.home,
+      TMPDIR: join(s.sandbox.home, "tmp"),
+      PLN_PI_TARGET: `v${PI_RELEASE}`,
+      ...s.env,
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return { code: r.exitCode, out: r.stdout.toString() + r.stderr.toString() };
+}
+
+const UPDATE_LATER = `To update it: pi update ${PI_SOURCE}`;
+
+function piStepTests(runner: PiRunner) {
+  const timeout = runner === "install.sh" ? undefined : PWSH_SCANNER_TIMEOUT_MS;
+
+  test(`${runner}: an existing install that pi install would leave stale is moved by pi update`, () => {
+    const s = setupPiSandbox({ source: PI_SOURCE, installed: PI_OLDER, latest: PI_RELEASE });
+    const r = runPiStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(s.calls()).toEqual([`update ${PI_SOURCE}`]);
+    expect(s.version()).toBe(PI_RELEASE);
+    expect(r.out).toContain(`Updating Pi extension...\nUpdated ${PI_SOURCE}\nPi extension updated to ${PI_RELEASE}.\n`);
+    expect(r.out).not.toContain("still");
+  }, timeout);
+
+  test(`${runner}: a Pi without a working pi update falls back to pi install and reads the global copy`, () => {
+    const s = setupPiSandbox({
+      source: PI_SOURCE,
+      installed: PI_OLDER,
+      where: "global",
+      latest: PI_RELEASE,
+      update: "missing",
+      installMoves: true,
+    });
+    const r = runPiStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(s.calls()).toEqual([`update ${PI_SOURCE}`, `install ${PI_SOURCE}`]);
+    expect(s.version()).toBe(PI_RELEASE);
+    expect(r.out).toContain(`Pi extension updated to ${PI_RELEASE}.`);
+  }, timeout);
+
+  test(`${runner}: a first install runs pi install, as before`, () => {
+    const s = setupPiSandbox({ source: null, installed: null, latest: PI_RELEASE });
+    const r = runPiStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(s.calls()).toEqual([`install ${PI_SOURCE}`]);
+    expect(s.version()).toBe(PI_RELEASE);
+    expect(r.out).toContain("Installing Pi extension...");
+    expect(r.out).toContain(`Pi extension installed (${PI_RELEASE}).`);
+    expect(r.out).not.toContain("Updating Pi extension");
+  }, timeout);
+
+  test(`${runner}: a first install that npm settles on an older version is moved by pi update`, () => {
+    const s = setupPiSandbox({ source: null, installed: null, latest: PI_RELEASE, installPicks: PI_OLDER });
+    const r = runPiStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(s.calls()).toEqual([`install ${PI_SOURCE}`, `update ${PI_SOURCE}`]);
+    expect(s.version()).toBe(PI_RELEASE);
+    expect(r.out).toContain(`Pi extension installed (${PI_RELEASE}).`);
+  }, timeout);
+
+  test(`${runner}: still behind because the registry lacks the release: says so, never "updated"`, () => {
+    const s = setupPiSandbox({ source: PI_SOURCE, installed: PI_OLDER, latest: PI_OLDER, npmView: "e404" });
+    const r = runPiStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(s.version()).toBe(PI_OLDER);
+    expect(r.out).toContain(
+      `Pi extension: still ${PI_OLDER} (${PI_RELEASE} is not on your npm registry yet). Run this later: pi update ${PI_SOURCE}\n`,
+    );
+    // A registry that never answers must not hold the install for minutes: one try, 10 s.
+    expect(s.npmViews()).toEqual([
+      `view @plannotator/pi-extension@${PI_RELEASE} version --fetch-timeout=10000 --fetch-retries=0`,
+    ]);
+    expect(r.out).not.toContain("Pi extension updated");
+    expect(r.out).not.toContain("already up to date");
+  }, timeout);
+
+  test(`${runner}: still behind for a reason it can't see: the release and the command`, () => {
+    const s = setupPiSandbox({ source: PI_SOURCE, installed: PI_OLDER, latest: PI_RELEASE, update: "fail", npmView: "offline" });
+    const r = runPiStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(s.calls()).toEqual([`update ${PI_SOURCE}`, `install ${PI_SOURCE}`]);
+    expect(s.version()).toBe(PI_OLDER);
+    expect(r.out).toContain(`Pi extension: still ${PI_OLDER} (this release is ${PI_RELEASE}). ${UPDATE_LATER}\n`);
+    expect(r.out).not.toContain("Pi extension updated");
+  }, timeout);
+
+  test(`${runner}: a version that can't be read is not called updated, and nothing is removed`, () => {
+    const s = setupPiSandbox({ source: PI_SOURCE, installed: "garbled", latest: PI_RELEASE, update: "fail" });
+    const r = runPiStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(s.calls()).toEqual([`update ${PI_SOURCE}`, `install ${PI_SOURCE}`]);
+    expect(existsSync(join(s.pkg, "package.json"))).toBe(true);
+    expect(r.out).toContain(`Pi extension: could not read its installed version. ${UPDATE_LATER}\n`);
+    expect(r.out).not.toContain("Pi extension updated");
+  }, timeout);
+
+  test(`${runner}: a version pinned in Pi's settings is left alone, with the command that moves it`, () => {
+    const s = setupPiSandbox({ source: `${PI_SOURCE}@${PI_OLDER}`, installed: PI_OLDER, latest: PI_RELEASE });
+    const before = s.settingsText();
+    const r = runPiStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(s.calls()).toEqual([]);
+    expect(s.settingsText()).toBe(before);
+    expect(s.version()).toBe(PI_OLDER);
+    expect(r.out).toContain(
+      `Pi extension: pinned to ${PI_OLDER} in Pi's settings, left as is. To move it: pi install ${PI_SOURCE}@${PI_RELEASE}\n`,
+    );
+  }, timeout);
+
+  test(`${runner}: already on the release: says so, with the version`, () => {
+    const s = setupPiSandbox({ source: PI_SOURCE, installed: PI_RELEASE, latest: PI_RELEASE });
+    const r = runPiStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(`Pi extension already up to date (${PI_RELEASE}).`);
+    expect(r.out).not.toContain("Pi extension updated");
+  }, timeout);
+
+  test(`${runner}: honors PI_CODING_AGENT_DIR with ~ expanded, as Pi does`, () => {
+    const s = setupPiSandbox({ source: PI_SOURCE, installed: PI_OLDER, latest: PI_RELEASE, agentDirEnv: "~/custom-pi" });
+    const r = runPiStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(s.calls()).toEqual([`update ${PI_SOURCE}`]);
+    expect(r.out).toContain(`Pi extension updated to ${PI_RELEASE}.`);
+  }, timeout);
+}
+
+describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
+  "install.sh updates the Pi extension to the release (fake pi, sandbox HOME, #902)",
+  () => {
+    piStepTests("install.sh");
+
+    test("the closing PI USERS section tells install and update apart", () => {
+      const s = setupPiSandbox({ source: PI_SOURCE, installed: PI_RELEASE, latest: PI_RELEASE });
+      const r = runInstallSh(s.sandbox, PI_INSTALL_ARGS, s.env);
+      expect(r.code).toBe(0);
+      const section = r.out.slice(r.out.indexOf("  PI USERS"));
+      expect(section).toContain(`  pi install ${PI_SOURCE}\n`);
+      expect(section).toContain(`  pi update ${PI_SOURCE}\n`);
+    });
+
+    test("no pi on PATH: no Pi step and no PI USERS section", () => {
+      const sandbox = setupInstallSandbox({ gh: "pass-all" });
+      const r = runInstallSh(sandbox, PI_INSTALL_ARGS, { PLANNOTATOR_DATA_DIR: join(sandbox.home, "plannotator-data") });
+      expect(r.code).toBe(0);
+      expect(r.out).not.toContain("Pi extension");
+      expect(r.out).not.toContain("PI USERS");
+    });
+  },
+);
+
+describe.skipIf(!pwshBin || process.platform === "win32")(
+  "Windows installers update the Pi extension to the release (PowerShell, fake pi, #902)",
+  () => {
+    piStepTests("install.ps1");
+    piStepTests("install.cmd");
+  },
+);
+
+describe("install.cmd's Pi step", () => {
+  test("runs as a subroutine called outside any parenthesized block", () => {
+    expect(readScript("install.cmd")).toContain("where pi >nul 2>&1\nif !ERRORLEVEL! equ 0 call :UpdatePiExtension\n");
+  });
+
+  test("its PowerShell carries nothing cmd.exe would reinterpret", () => {
+    expect(extractCmdPiCommand()).not.toMatch(/["%!^]/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Qwen Code: the skills go to $QWEN_HOME/skills (default ~/.qwen/skills) and
+// the plannotator extension is installed and updated with Qwen's own
+// `qwen extensions` commands, from <data dir>/qwen-code/extension. A fake
+// `qwen` on PATH (scripts/fixtures/fake-qwen.ts, started by a shell shim, or
+// by a qwen.cmd on Windows like npm's) acts like Qwen's commands on
+// $QWEN_HOME, extension store included, and logs every call. The git shim
+// hands install.sh this checkout's real apps/skills and apps/qwen-code, so
+// the files that ship are the ones installed.
+// ---------------------------------------------------------------------------
+const FAKE_QWEN_SCRIPT = join(scriptsDir, "fixtures", "fake-qwen.ts");
+
+function writeFakeQwen(dir: string): void {
+  if (process.platform === "win32") {
+    writeFileSync(join(dir, "qwen.cmd"), `@echo off\r\n"${process.execPath}" "${FAKE_QWEN_SCRIPT}" %*\r\n`);
+  } else {
+    writeFileSync(join(dir, "qwen"), `#!/bin/sh\nexec "${process.execPath}" "${FAKE_QWEN_SCRIPT}" "$@"\n`, { mode: 0o755 });
+  }
+}
+
+function removeFakeQwen(dir: string): void {
+  rmSync(join(dir, process.platform === "win32" ? "qwen.cmd" : "qwen"), { force: true });
+}
+
+const QWEN_SKILLS = ["plannotator-review", "plannotator-annotate", "plannotator-last"];
+const QWEN_ARGS = ["--version", "v99.9.9", "--non-interactive", "--no-extras"];
+
+// Helpers on a Qwen folder the fake qwen manages.
+function qwenFiles(qwenDir: string) {
+  const extension = join(qwenDir, "extensions", "plannotator");
+  const statePath = join(qwenDir, "extension-store", "state.json");
+  type Policy = { name: string; defaultActivation: string; workspaceOverrides: Record<string, string> };
+  const state = (): { extensions: Record<string, Policy> } => JSON.parse(readFileSync(statePath, "utf8"));
+  return {
+    extension,
+    record: () => JSON.parse(readFileSync(join(extension, ".qwen-extension-install.json"), "utf8")) as { source: string; type: string },
+    installedVersion: () => JSON.parse(readFileSync(join(extension, "qwen-extension.json"), "utf8")).version as string,
+    policies: () => Object.entries(state().extensions).filter(([, p]) => p.name === "plannotator"),
+    // An older version installed by the installer: what an update must replace.
+    makeOlder: () => {
+      const manifest = join(extension, "qwen-extension.json");
+      writeFileSync(manifest, JSON.stringify({ ...JSON.parse(readFileSync(manifest, "utf8")), version: "0.0.1" }));
+      writeFileSync(join(extension, "hooks", "hooks.json"), '{"hooks":{}}\n');
+    },
+    turnOff: (how: "default" | "project") => {
+      const s = state();
+      for (const policy of Object.values(s.extensions)) {
+        if (policy.name !== "plannotator") continue;
+        if (how === "default") policy.defaultActivation = "disabled";
+        else policy.workspaceOverrides["/work/some project"] = "disabled";
+      }
+      writeFileSync(statePath, JSON.stringify(s, null, 2));
+    },
+    seedLink: () => {
+      mkdirSync(extension, { recursive: true });
+      writeFileSync(join(extension, ".qwen-extension-install.json"), JSON.stringify({ source: "/dev/plannotator/apps/qwen-code/extension", type: "link" }));
+    },
+    seedForeign: () => {
+      mkdirSync(join(extension, "hooks"), { recursive: true });
+      writeFileSync(join(extension, "qwen-extension.json"), '{"name":"plannotator","version":"0.0.1"}\n');
+      writeFileSync(join(extension, "hooks", "hooks.json"), '{"hooks":{}}\n');
+      writeFileSync(join(extension, ".qwen-extension-install.json"), JSON.stringify({ source: "/elsewhere/plannotator", type: "local" }));
+    },
+  };
+}
+
+const qwenSource = (file: string) => readFileSync(join(scriptsDir, "..", "apps", "qwen-code", "extension", file), "utf8");
+
+describe.skipIf(process.platform === "win32")("Qwen Code integration (install.sh, fake qwen)", () => {
+  const roots: string[] = [];
+  afterAll(() => {
+    for (const root of roots) rmSync(root, { recursive: true, force: true });
+  });
+
+  function qwenSandbox(opts: { qwenDir?: boolean; marker?: string | null; qwenCli?: boolean; config?: string } = {}) {
+    const sandbox = setupInstallSandbox({ gh: "pass-all", git: "repo-copy" });
+    roots.push(join(sandbox.home, ".."));
+    const data = join(sandbox.home, "plannotator data");
+    // The run's data dir (PLANNOTATOR_DATA_DIR below) is where the installer reads config.json.
+    if (opts.config) {
+      mkdirSync(data, { recursive: true });
+      writeFileSync(join(data, "config.json"), opts.config);
+    }
+    const qwenDir = join(sandbox.home, ".qwen");
+    if (opts.qwenDir ?? true) {
+      mkdirSync(qwenDir, { recursive: true });
+      // A real Qwen Code folder has its settings.json.
+      const marker = opts.marker === undefined ? "settings.json" : opts.marker;
+      if (marker) writeFileSync(join(qwenDir, marker), "{}\n");
+    }
+    if (opts.qwenCli ?? true) writeFakeQwen(sandbox.stub);
+    const log = join(sandbox.home, "qwen-calls.log");
+    const run = (args: string[] = [], env: Record<string, string> = {}) =>
+      runInstallSh(sandbox, [...QWEN_ARGS, ...args], { FAKE_QWEN_LOG: log, FAKE_QWEN_HOME: sandbox.home, PLANNOTATOR_DATA_DIR: data, ...env });
+    const lines = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean) : []);
+    const calls = () => lines().map((line) => line.slice(line.indexOf("|") + 1));
+    const extensionCalls = () => calls().filter((call) => call.startsWith("extensions "));
+    const callDirs = () => lines().map((line) => line.slice(0, line.indexOf("|")));
+    return {
+      home: sandbox.home,
+      stub: sandbox.stub,
+      data,
+      stable: join(data, "qwen-code", "extension"),
+      qwenDir,
+      run,
+      calls,
+      extensionCalls,
+      callDirs,
+      ...qwenFiles(qwenDir),
+    };
+  }
+
+  test("installs the extension from the data folder with qwen, and the Qwen skills; the run succeeds", () => {
+    const q = qwenSandbox();
+    const r = q.run();
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("Installing the Qwen Code extension...\nQwen Code extension: installed (restart Qwen Code to load it).\n");
+    expect(q.calls()).toEqual(["--version", `extensions install ${q.stable} --consent`]);
+    // Run outside any project, so no project's .qwen settings take part.
+    for (const dir of q.callDirs()) expect(dir).toContain("plannotator-qwen.");
+    // Qwen records the source; it must be a path that stays.
+    expect(q.record().source).toBe(q.stable);
+    expect(readFileSync(join(q.stable, "hooks", "hooks.json"), "utf8")).toBe(qwenSource("hooks/hooks.json"));
+    expect(readFileSync(join(q.extension, "hooks", "hooks.json"), "utf8")).toBe(qwenSource("hooks/hooks.json"));
+    expect(readFileSync(join(q.extension, "qwen-extension.json"), "utf8")).toBe(qwenSource("qwen-extension.json"));
+    for (const skill of QWEN_SKILLS) {
+      expect(readFileSync(join(q.qwenDir, "skills", skill, "SKILL.md"), "utf8")).toBe(
+        readFileSync(join(scriptsDir, "..", "apps", "qwen-code", "skills", skill, "SKILL.md"), "utf8"),
+      );
+    }
+    expect(readFileSync(join(q.home, "git-sparse.log"), "utf8")).toContain(" apps/qwen-code");
+    expect(r.out).toContain("  QWEN CODE USERS");
+    expect(r.out).toContain("Qwen Code asks you to confirm the plan");
+    expect(r.out).toContain(`Skills are installed to ${q.qwenDir}/skills/:`);
+  });
+
+  test("a re-run with the same version runs no extension command and changes nothing in Qwen", () => {
+    const q = qwenSandbox();
+    expect(q.run().code).toBe(0);
+    const record = readFileSync(join(q.extension, ".qwen-extension-install.json"), "utf8");
+    const state = readFileSync(join(q.qwenDir, "extension-store", "state.json"), "utf8");
+    const r = q.run();
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("Qwen Code extension: already up to date.");
+    expect(q.extensionCalls()).toHaveLength(1);
+    expect(readFileSync(join(q.extension, ".qwen-extension-install.json"), "utf8")).toBe(record);
+    expect(readFileSync(join(q.qwenDir, "extension-store", "state.json"), "utf8")).toBe(state);
+  });
+
+  test("another version is updated with qwen extensions update, keeping the id; never uninstalled", () => {
+    const q = qwenSandbox();
+    expect(q.run().code).toBe(0);
+    const [[id]] = q.policies();
+    q.makeOlder();
+    const r = q.run();
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("Updating the Qwen Code extension...\nQwen Code extension: updated (restart Qwen Code to load it).\n");
+    expect(q.extensionCalls().slice(1)).toEqual(["extensions update plannotator"]);
+    expect(q.extensionCalls().some((call) => call.includes("uninstall"))).toBe(false);
+    expect(q.installedVersion()).toBe(JSON.parse(qwenSource("qwen-extension.json")).version);
+    expect(readFileSync(join(q.extension, "hooks", "hooks.json"), "utf8")).toBe(qwenSource("hooks/hooks.json"));
+    expect(q.policies().map(([key]) => key)).toEqual([id]);
+  });
+
+  for (const how of ["default", "project"] as const) {
+    test(`an extension turned off (${how === "default" ? "everywhere" : "in one project"}) stays off through an update, and the installer says so`, () => {
+      const q = qwenSandbox();
+      expect(q.run().code).toBe(0);
+      q.turnOff(how);
+      const before = q.policies();
+      q.makeOlder();
+      const r = q.run();
+      expect(r.code).toBe(0);
+      expect(q.installedVersion()).toBe(JSON.parse(qwenSource("qwen-extension.json")).version);
+      expect(q.policies()).toEqual(before);
+      expect(r.out).toContain("Qwen Code extension: updated (restart Qwen Code to load it).\nIt stays turned off where you turned it off in Qwen Code.\n");
+      expect(r.out).toContain("The plannotator extension is turned off in Qwen Code");
+      expect(r.out).not.toContain("the plan opens in your");
+    });
+  }
+
+  test("a turned-off rule in Qwen's older enablement file is read too; an enabled extension says nothing", () => {
+    const q = qwenSandbox();
+    expect(q.run().code).toBe(0);
+    q.makeOlder();
+    expect(q.run().out).not.toContain("It stays turned off");
+    q.makeOlder();
+    writeFileSync(join(q.qwenDir, "extensions", "extension-enablement.json"), JSON.stringify({ plannotator: { overrides: ["!/*"] } }));
+    expect(q.run().out).toContain("It stays turned off where you turned it off in Qwen Code.");
+  });
+
+  test("an update qwen did not make (it exits 0) is reported, and the installed one kept", () => {
+    const q = qwenSandbox();
+    expect(q.run().code).toBe(0);
+    q.makeOlder();
+    const r = q.run([], { FAKE_QWEN_UPDATE_FAIL: "1" });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("Qwen Code extension: could not update it (Update failed: disk full). The installed one was left as it was.");
+    expect(r.out).toContain("To try again by hand: qwen extensions update plannotator");
+    expect(r.out).toContain("The plan-review extension could not be installed");
+    expect(q.installedVersion()).toBe("0.0.1");
+    expect(r.out).toContain("YOU'RE ALL SET!");
+  });
+
+  test("a linked extension (qwen extensions link) is left alone, quietly", () => {
+    const q = qwenSandbox();
+    q.seedLink();
+    const r = q.run();
+    expect(r.code).toBe(0);
+    expect(q.extensionCalls()).toEqual([]);
+    expect(r.out).toContain("Qwen Code extension: linked from a local folder (qwen extensions link), left as it is.");
+    expect(r.out).not.toContain("could not");
+    expect(r.out).not.toContain("the plan opens in your");
+    expect(q.record().type).toBe("link");
+  });
+
+  test("an extension installed from another source is left alone, and says from where", () => {
+    const q = qwenSandbox();
+    q.seedForeign();
+    const r = q.run();
+    expect(r.code).toBe(0);
+    expect(q.extensionCalls()).toEqual([]);
+    expect(r.out).toContain("Qwen Code extension: installed from /elsewhere/plannotator, not by this installer, so it was left as it is.");
+    expect(readFileSync(join(q.extension, "hooks", "hooks.json"), "utf8")).toBe('{"hooks":{}}\n');
+  });
+
+  test("a failed first install is reported with the command to run, and never fails the install", () => {
+    const q = qwenSandbox();
+    const r = q.run([], { FAKE_QWEN_INSTALL_FAIL: "1" });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("Qwen Code extension: could not install it (qwen exited 1: Install failed: disk full).");
+    expect(r.out).toContain(`To try again by hand: qwen extensions install "${q.stable}"`);
+    expect(r.out).toContain("The plan-review extension could not be installed");
+    expect(existsSync(q.extension)).toBe(false);
+    // The skills still install.
+    expect(existsSync(join(q.qwenDir, "skills", "plannotator-review", "SKILL.md"))).toBe(true);
+  });
+
+  test("a qwen that hangs is stopped at the time limit and the install goes on", () => {
+    const q = qwenSandbox();
+    const started = Date.now();
+    const r = q.run([], { FAKE_QWEN_HANG: "1", PLANNOTATOR_QWEN_EXTENSION_TIMEOUT: "1" });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("Qwen Code extension: could not install it (timed out after 1s).");
+    expect(Date.now() - started).toBeLessThan(40_000);
+  }, 45_000);
+
+  for (const version of ["0.12.9", "0.6.0"]) {
+    test(`Qwen Code ${version} (before extension hooks): nothing installed, and it says to update`, () => {
+      const q = qwenSandbox();
+      const r = q.run([], { FAKE_QWEN_VERSION: version });
+      expect(r.code).toBe(0);
+      expect(q.calls()).toEqual(["--version"]);
+      expect(r.out).toContain(`Qwen Code ${version} is older than 0.13.0, so nothing was installed for it. Update Qwen Code to use plan review.`);
+      expect(existsSync(join(q.qwenDir, "skills"))).toBe(false);
+      expect(existsSync(q.extension)).toBe(false);
+      expect(r.out).not.toContain("Skills are installed to");
+      expect(r.out).not.toContain("the plan opens in your");
+    });
+  }
+
+  test("a release from before the Qwen Code integration: no extension, and no claim that skills were installed", () => {
+    const q = qwenSandbox();
+    const r = q.run([], { GIT_SHIM_NO_QWEN: "1" });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("This release has no Qwen Code extension.");
+    expect(existsSync(join(q.qwenDir, "skills"))).toBe(false);
+    expect(r.out).not.toContain("Skills are installed to");
+  });
+
+  for (const version of ["0.13.0", "0.26.2-nightly.20261020", "not a version"]) {
+    test(`Qwen Code reporting "${version}" gets the extension`, () => {
+      const q = qwenSandbox();
+      expect(q.run([], { FAKE_QWEN_VERSION: version }).out).toContain("Qwen Code extension: installed");
+    });
+  }
+
+  for (const [label, args, env, config, sourceName] of [
+    ["--skip-qwen", ["--skip-qwen"], {}, undefined, "--skip-qwen"],
+    ["PLANNOTATOR_SKIP_QWEN_INSTALL", [], { PLANNOTATOR_SKIP_QWEN_INSTALL: "1" }, undefined, "PLANNOTATOR_SKIP_QWEN_INSTALL"],
+    ["skipInstall.qwen", [], {}, '{ "skipInstall": { "qwen": true } }\n', "config skipInstall.qwen"],
+  ] as const) {
+    test(`${label}: no qwen command, nothing written under ~/.qwen, an installed extension left alone`, () => {
+      const q = qwenSandbox({ config });
+      q.seedForeign();
+      const r = q.run([...args], env);
+      expect(r.code).toBe(0);
+      expect(r.out).toContain(`Qwen Code: detected, skipped (${sourceName}).`);
+      expect(r.out).toContain("The installed Qwen Code extension was left untouched.");
+      expect(q.calls()).toEqual([]);
+      expect(existsSync(join(q.qwenDir, "skills"))).toBe(false);
+      expect(existsSync(q.stable)).toBe(false);
+      expect(readFileSync(join(q.extension, "hooks", "hooks.json"), "utf8")).toBe('{"hooks":{}}\n');
+    });
+  }
+
+  test("--skip-qwen is remembered for auto-update", () => {
+    const q = qwenSandbox();
+    expect(q.run(["--skip-qwen"]).code).toBe(0);
+    const flags = JSON.parse(readFileSync(join(q.data, "install-flags.json"), "utf8"));
+    expect(flags.flags).toContain("skip-qwen");
+  });
+
+  test("no Qwen folder: nothing Qwen-related runs or prints, even with qwen on PATH", () => {
+    const q = qwenSandbox({ qwenDir: false });
+    const r = q.run();
+    expect(r.code).toBe(0);
+    expect(q.calls()).toEqual([]);
+    expect(existsSync(q.qwenDir)).toBe(false);
+    expect(r.out).not.toContain("Qwen Code");
+    expect(r.out).not.toContain("QWEN CODE USERS");
+  });
+
+  test("a ~/.qwen the skills CLI made (skills/ only, no qwen command) is not Qwen Code: nothing written or printed", () => {
+    const q = qwenSandbox({ marker: null, qwenCli: false });
+    mkdirSync(join(q.home, ".agents", "skills", "other-skill"), { recursive: true });
+    mkdirSync(join(q.qwenDir, "skills"), { recursive: true });
+    symlinkSync(join(q.home, ".agents", "skills", "other-skill"), join(q.qwenDir, "skills", "other-skill"));
+    const r = q.run();
+    expect(r.code).toBe(0);
+    expect(readdirSync(join(q.qwenDir, "skills"))).toEqual(["other-skill"]);
+    expect(readdirSync(q.qwenDir)).toEqual(["skills"]);
+    expect(r.out).not.toContain("Qwen Code");
+    expect(r.out).not.toContain("QWEN CODE USERS");
+  });
+
+  test("a ~/.qwen with only skills/ counts once the qwen command is on PATH", () => {
+    const q = qwenSandbox({ marker: null });
+    mkdirSync(join(q.qwenDir, "skills"), { recursive: true });
+    expect(q.run().out).toContain("Qwen Code extension: installed");
+  });
+
+  for (const marker of ["settings.json", "installation_id", "projects", "extensions"]) {
+    test(`Qwen Code's ${marker} counts as Qwen Code without the qwen command: skills installed, the extension reported`, () => {
+      const q = qwenSandbox({ marker: null, qwenCli: false });
+      if (marker.includes(".") || marker === "installation_id") writeFileSync(join(q.qwenDir, marker), "x\n");
+      else mkdirSync(join(q.qwenDir, marker), { recursive: true });
+      const r = q.run();
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("Qwen Code extension: not installed (the qwen command is not on PATH).");
+      expect(existsSync(join(q.qwenDir, "skills", "plannotator-last", "SKILL.md"))).toBe(true);
+      expect(existsSync(join(q.extension, "qwen-extension.json"))).toBe(false);
+    });
+  }
+
+  test("a Qwen skill the skills CLI linked is replaced, and what it pointed to is kept", () => {
+    const q = qwenSandbox();
+    const shared = join(q.home, "elsewhere", "plannotator-review");
+    mkdirSync(shared, { recursive: true });
+    writeFileSync(join(shared, "SKILL.md"), "shared copy\n");
+    mkdirSync(join(q.qwenDir, "skills"), { recursive: true });
+    symlinkSync(shared, join(q.qwenDir, "skills", "plannotator-review"));
+    expect(q.run().code).toBe(0);
+    expect(readFileSync(join(shared, "SKILL.md"), "utf8")).toBe("shared copy\n");
+    expect(readFileSync(join(q.qwenDir, "skills", "plannotator-review", "SKILL.md"), "utf8")).toContain("is_background: true");
+  });
+
+  test("QWEN_HOME with a leading ~ is the Qwen folder itself", () => {
+    const q = qwenSandbox({ qwenDir: false });
+    mkdirSync(join(q.home, "qwen-home"), { recursive: true });
+    const r = q.run([], { QWEN_HOME: "~/qwen-home" });
+    expect(r.code).toBe(0);
+    expect(existsSync(join(q.home, "qwen-home", "skills", "plannotator-review", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(q.home, "qwen-home", "extensions", "plannotator", "qwen-extension.json"))).toBe(true);
+    expect(existsSync(q.qwenDir)).toBe(false);
+  });
+
+  test("--skip-skills: no extension and no Qwen skills, said plainly", () => {
+    const q = qwenSandbox();
+    const r = q.run(["--skip-skills"]);
+    expect(r.code).toBe(0);
+    expect(q.calls()).toEqual([]);
+    expect(existsSync(join(q.qwenDir, "skills"))).toBe(false);
+    expect(r.out).toContain("so neither was\ninstalled or changed");
+  });
+
+  test("--model-invocable unlocks the Qwen copy of a chosen skill too", () => {
+    const q = qwenSandbox();
+    const r = q.run(["--model-invocable", "plannotator-review"]);
+    expect(r.code).toBe(0);
+    expect(readFileSync(join(q.qwenDir, "skills", "plannotator-review", "SKILL.md"), "utf8")).not.toContain(
+      "disable-model-invocation: true",
+    );
+    expect(readFileSync(join(q.qwenDir, "skills", "plannotator-last", "SKILL.md"), "utf8")).toContain(
+      "disable-model-invocation: true",
+    );
+  });
+});
+
+// The Windows installers' Qwen Code steps, driven with the same fake qwen:
+// install.ps1's regions (its functions and state), and install.cmd's
+// PowerShell program, both under PowerShell (pwsh on Linux and macOS; pwsh
+// and Windows PowerShell 5.1 on Windows). On Windows install.cmd's
+// subroutines also run under cmd.exe itself, and the fake is a qwen.cmd, as
+// npm installs it. Every folder name has a space in it.
+function extractRegion(text: string, start: string, end: string, what: string): string {
+  const from = text.indexOf(start);
+  const to = text.indexOf(end, from);
+  if (from < 0 || to <= from) throw new Error(`could not locate ${what}`);
+  return text.slice(from, to);
+}
+
+const ps1Text = () => readScript("install.ps1").replace(/\r\n/g, "\n");
+const cmdText = () => readScript("install.cmd").replace(/\r\n/g, "\n");
+
+function extractPs1QwenRegions(): string {
+  const ps = ps1Text();
+  return [
+    extractRegion(ps, "# --- Qwen Code commands (only when Qwen Code is detected) ---", "# Captured tail of git's stderr", "the Qwen Code commands in install.ps1"),
+    extractRegion(ps, "# --- Qwen Code extension (only when Qwen Code is detected) ---", "\nif (-not $checkoutFailed) {\n    try { Install-QwenExtensionIfPresent", "the Qwen Code extension in install.ps1"),
+  ].join("\n");
+}
+
+function extractCmdQwenBlock(): string {
+  return extractRegion(cmdText(), "REM BEGIN Qwen Code subroutines", "REM END Qwen Code subroutines", "the Qwen Code subroutines in install.cmd");
+}
+
+// install.cmd's PowerShell program, put together as install.cmd does.
+function cmdQwenProgramLines(): string[] {
+  const lines = extractCmdQwenBlock().split("\n");
+  return lines.filter((line) => line.startsWith('set "PLN_QX_P')).map((line) => {
+    const m = /^set "PLN_QX_P(\d{3})=(.*)"$/.exec(line);
+    if (!m) throw new Error(`unexpected line: ${line}`);
+    return m[2];
+  });
+}
+
+describe("install.cmd's Qwen Code steps", () => {
+  test("its PowerShell lines carry nothing cmd.exe would reinterpret, and are numbered in order", () => {
+    const lines = extractCmdQwenBlock().split("\n").filter((line) => line.startsWith('set "PLN_QX_P'));
+    expect(lines.length).toBeGreaterThan(10);
+    lines.forEach((line, i) => expect(line.startsWith(`set "PLN_QX_P${String(i + 1).padStart(3, "0")}=`)).toBe(true));
+    for (const line of cmdQwenProgramLines()) expect(line).not.toMatch(/["%!^]/);
+  });
+
+  test("its commands stay well under cmd.exe's 8191-character line limit", () => {
+    for (const line of extractCmdQwenBlock().split("\n")) expect(line.length).toBeLessThan(2000);
+  });
+
+  test("runs as subroutines called outside any parenthesized block", () => {
+    const cmd = cmdText();
+    expect(cmd).toContain('\nif "!CHECKOUT_FAILED!"=="0" if "!QWEN_AVAILABLE!"=="1" call :InstallQwenExtension\n');
+    expect(cmd).toContain("\ncall :QwenVersionCheck\nset \"CHECKOUT_FAILED=0\"\n");
+  });
+});
+
+// Qwen state, as each runner reports it.
+type QwenRunResult = { out: string; state: string; off: boolean; tooOld: boolean };
+type QwenRunner = { name: string; run: (s: QwenPsSandbox, env?: Record<string, string>, skipSource?: string) => QwenRunResult };
+type QwenPsSandbox = ReturnType<typeof setupQwenPs>;
+
+const PS_SHELLS = (process.platform === "win32" ? ["pwsh", "powershell"] : ["pwsh"]).map((name) => Bun.which(name)).filter(
+  (path): path is string => !!path,
+);
+
+function setupQwenPs(roots: string[]) {
+  const root = mkdtempSync(join(tmpdir(), "plannotator-ps-qwen-test-"));
+  roots.push(root);
+  const stub = join(root, "stub bin");
+  const qwenDir = join(root, "qwen home");
+  const skillsTmp = join(root, "skills tmp");
+  const src = join(skillsTmp, "qwen-extension");
+  const data = join(root, "plannotator data");
+  for (const dir of [stub, qwenDir, join(root, "tmp")]) mkdirSync(dir, { recursive: true });
+  writeFakeQwen(stub);
+  cpSync(join(scriptsDir, "..", "apps", "qwen-code", "extension"), src, { recursive: true });
+  const log = join(root, "qwen-calls.log");
+  const calls = () =>
+    existsSync(log)
+      ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((line) => line.slice(line.indexOf("|") + 1).trim())
+      : [];
+  return {
+    root,
+    stub,
+    qwenDir,
+    skillsTmp,
+    src,
+    data,
+    stable: join(data, "qwen-code", "extension"),
+    log,
+    calls,
+    extensionCalls: () => calls().filter((call) => call.startsWith("extensions ")),
+    ...qwenFiles(qwenDir),
+  };
+}
+
+function qwenPsEnv(s: QwenPsSandbox, env: Record<string, string>): Record<string, string> {
+  const base: Record<string, string> =
+    process.platform === "win32"
+      ? {
+          // Only the system folders, so no real qwen on this machine's PATH is found.
+          PATH: [
+            s.stub,
+            ...PS_SHELLS.map((shell) => join(shell, "..")),
+            join(process.env.SystemRoot ?? "C:\\Windows", "System32"),
+            process.env.SystemRoot ?? "C:\\Windows",
+            join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0"),
+          ].join(";"),
+          SystemRoot: process.env.SystemRoot ?? "C:\\Windows",
+          ComSpec: process.env.ComSpec ?? "C:\\Windows\\System32\\cmd.exe",
+          PATHEXT: process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD",
+          USERPROFILE: s.root,
+          TEMP: join(s.root, "tmp"),
+          TMP: join(s.root, "tmp"),
+        }
+      : { PATH: `${s.stub}:/usr/bin:/bin`, HOME: s.root, TMPDIR: join(s.root, "tmp") };
+  return { ...base, QWEN_HOME: s.qwenDir, FAKE_QWEN_HOME: s.root, FAKE_QWEN_LOG: s.log, ...env };
+}
+
+function spawnPs(shell: string, s: QwenPsSandbox, body: string, env: Record<string, string>) {
+  const driver = join(s.root, `driver-${Math.random().toString(36).slice(2)}.ps1`);
+  writeFileSync(driver, body);
+  const r = Bun.spawnSync([shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", driver], {
+    env: qwenPsEnv(s, env),
+    cwd: s.root,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return { code: r.exitCode, out: r.stdout.toString() + r.stderr.toString() };
+}
+
+const psQuote = (value: string) => `'${value.replace(/'/g, "''")}'`;
+
+function ps1Runner(shell: string): QwenRunner {
+  return {
+    name: `install.ps1 (${shell.split(/[\\/]/).pop()})`,
+    run: (s, env = {}, skipSource) => {
+      const body = [
+        `$ErrorActionPreference = "Stop"`,
+        `$qwenAvailable = $true`,
+        `$skipQwenResolved = $${skipSource ? "true" : "false"}`,
+        `$skipQwenSource = ${psQuote(skipSource ?? "")}`,
+        `$skipSkillsResolved = $false`,
+        `$qwenDir = ${psQuote(s.qwenDir)}`,
+        `$configDir = ${psQuote(s.data)}`,
+        extractPs1QwenRegions(),
+        `Install-QwenExtensionIfPresent ${psQuote(s.src)}`,
+        `Write-Host ("RESULT=" + $qwenExtensionState + ";" + $qwenExtensionOff + ";" + $qwenTooOld)`,
+        `exit 0`,
+      ].join("\n");
+      const r = spawnPs(shell, s, body, env);
+      const m = /RESULT=([^;]*);(\w+);(\w+)/.exec(r.out);
+      if (!m) throw new Error(`no result: ${r.out}`);
+      return { out: r.out, state: m[1], off: m[2] === "True", tooOld: m[3] === "True" };
+    },
+  };
+}
+
+// install.cmd's exit codes, as its :InstallQwenExtension reads them.
+const CMD_STATES: Record<number, [string, boolean]> = {
+  30: ["no-cli", false],
+  31: ["current", false],
+  32: ["installed", false],
+  33: ["updated", false],
+  34: ["failed", false],
+  35: ["not-in-tag", false],
+  37: ["linked", false],
+  38: ["foreign", false],
+  41: ["current", true],
+  43: ["updated", true],
+};
+
+function cmdPsRunner(shell: string): QwenRunner {
+  return {
+    name: `install.cmd's PowerShell (${shell.split(/[\\/]/).pop()})`,
+    run: (s, env = {}, skipSource) => {
+      if (skipSource) throw new Error("install.cmd handles the opt-out in cmd.exe");
+      const program = `${cmdQwenProgramLines().join("\n")}\nexit $rc\n`;
+      const common = { PLN_QX_HOME: s.qwenDir, ...env };
+      const version = spawnPs(shell, s, program, { ...common, PLN_QX_MODE: "version" });
+      if (version.code === 36) return { out: version.out, state: "too-old", off: false, tooOld: true };
+      expect(version.code).toBe(0);
+      const r = spawnPs(shell, s, program, { ...common, PLN_QX_MODE: "extension", PLN_QX_SRC: s.src, PLN_QX_DATA: s.data });
+      const [state, off] = CMD_STATES[r.code] ?? [`exit ${r.code}`, false];
+      return { out: version.out + r.out, state, off, tooOld: false };
+    },
+  };
+}
+
+// install.cmd's own subroutines under cmd.exe (Windows only).
+const cmdExeRunner: QwenRunner = {
+  name: "install.cmd (cmd.exe)",
+  run: (s, env = {}, skipSource) => {
+    const driver = join(s.root, `driver-${Math.random().toString(36).slice(2)}.cmd`);
+    const lines = [
+      "@echo off",
+      "setlocal EnableDelayedExpansion",
+      'set "QWEN_AVAILABLE=1"',
+      `set "SKIP_QWEN=${skipSource ? 1 : 0}"`,
+      `set "SKIP_QWEN_SOURCE=${skipSource ?? ""}"`,
+      'set "SKIP_SKILLS=0"',
+      'set "QWEN_DIR=%DRV_QWEN_DIR%"',
+      'set "SKILLS_TMP=%DRV_SKILLS_TMP%"',
+      'set "_CONFIG_DIR=%DRV_DATA%"',
+      'set "QWEN_EXTENSION_STATE="',
+      "call :QwenVersionCheck",
+      "call :InstallQwenExtension",
+      "echo RESULT=!QWEN_EXTENSION_STATE!;!QWEN_TOO_OLD!",
+      "exit /b 0",
+      extractCmdQwenBlock(),
+    ];
+    writeFileSync(driver, lines.join("\r\n") + "\r\n");
+    const r = Bun.spawnSync([process.env.ComSpec ?? "cmd.exe", "/d", "/c", driver], {
+      env: qwenPsEnv(s, { DRV_QWEN_DIR: s.qwenDir, DRV_SKILLS_TMP: s.skillsTmp, DRV_DATA: s.data, ...env }),
+      cwd: s.root,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const out = r.stdout.toString() + r.stderr.toString();
+    const m = /RESULT=([^;\r\n]*);(\d)/.exec(out);
+    if (!m) throw new Error(`no result: ${out}`);
+    // cmd.exe keeps only ok / ok-off for a working extension.
+    const state = { ok: "ok", "ok-off": "ok", "too-old": "too-old" }[m[1]] ?? m[1];
+    return { out, state, off: m[1] === "ok-off", tooOld: m[2] === "1" };
+  },
+};
+
+// install.cmd's program runs under pwsh directly; on Windows the cmd.exe
+// runner covers it under Windows PowerShell 5.1 (what install.cmd starts),
+// so it is not run under 5.1 a second time.
+const QWEN_PS_RUNNERS: QwenRunner[] = [
+  ...PS_SHELLS.map(ps1Runner),
+  ...PS_SHELLS.filter((shell) => !/powershell(\.exe)?$/i.test(shell)).map(cmdPsRunner),
+  ...(process.platform === "win32" ? [cmdExeRunner] : []),
+];
+
+// Windows PowerShell 5.1 on a CI runner takes many seconds per start.
+const QWEN_PS_TIMEOUT_MS = process.platform === "win32" ? 300_000 : 120_000;
+
+describe.skipIf(QWEN_PS_RUNNERS.length === 0)("Windows installers' Qwen Code steps (PowerShell, fake qwen)", () => {
+  const roots: string[] = [];
+  afterAll(() => {
+    for (const root of roots) rmSync(root, { recursive: true, force: true });
+  });
+  const shipped = () => JSON.parse(qwenSource("qwen-extension.json")).version as string;
+
+  for (const runner of QWEN_PS_RUNNERS) {
+    // cmd.exe reports a working extension as "ok".
+    const expectState = (r: QwenRunResult, state: string) =>
+      expect(r.state).toBe(runner === cmdExeRunner && ["installed", "updated", "current"].includes(state) ? "ok" : state);
+
+    test(`${runner.name}: installs from the data folder, then a re-run runs no extension command`, () => {
+      const s = setupQwenPs(roots);
+      const first = runner.run(s);
+      expectState(first, "installed");
+      expect(first.out).toContain("Qwen Code extension: installed (restart Qwen Code to load it).");
+      expect(s.extensionCalls()).toEqual([`extensions install ${s.stable} --consent`]);
+      expect(s.record().source).toBe(s.stable);
+      expect(readFileSync(join(s.extension, "hooks", "hooks.json"), "utf8")).toBe(qwenSource("hooks/hooks.json"));
+      const second = runner.run(s);
+      expectState(second, "current");
+      expect(second.out).toContain("Qwen Code extension: already up to date.");
+      expect(s.extensionCalls()).toHaveLength(1);
+    }, QWEN_PS_TIMEOUT_MS);
+
+    test(`${runner.name}: another version is updated in place, and one turned off stays off`, () => {
+      const s = setupQwenPs(roots);
+      runner.run(s);
+      s.turnOff("default");
+      const before = s.policies();
+      s.makeOlder();
+      const r = runner.run(s);
+      expectState(r, "updated");
+      expect(r.off).toBe(true);
+      expect(r.out).toContain("It stays turned off where you turned it off in Qwen Code.");
+      expect(s.extensionCalls().slice(1)).toEqual(["extensions update plannotator"]);
+      expect(s.installedVersion()).toBe(shipped());
+      expect(s.policies()).toEqual(before);
+    }, QWEN_PS_TIMEOUT_MS);
+
+    test(`${runner.name}: an update qwen did not make is reported, the installed one kept`, () => {
+      const s = setupQwenPs(roots);
+      runner.run(s);
+      s.makeOlder();
+      const r = runner.run(s, { FAKE_QWEN_UPDATE_FAIL: "1" });
+      expectState(r, "failed");
+      expect(r.out).toContain("Qwen Code extension: could not update it (Update failed: disk full). The installed one was left as it was.");
+      expect(s.installedVersion()).toBe("0.0.1");
+    }, QWEN_PS_TIMEOUT_MS);
+
+    test(`${runner.name}: a linked or a foreign extension is left alone`, () => {
+      const linked = setupQwenPs(roots);
+      linked.seedLink();
+      const l = runner.run(linked);
+      expectState(l, "linked");
+      expect(linked.extensionCalls()).toEqual([]);
+      const foreign = setupQwenPs(roots);
+      foreign.seedForeign();
+      const f = runner.run(foreign);
+      expectState(f, "foreign");
+      expect(f.out).toContain("installed from /elsewhere/plannotator, not by this installer");
+      expect(foreign.extensionCalls()).toEqual([]);
+    }, QWEN_PS_TIMEOUT_MS);
+
+    test(`${runner.name}: a Qwen Code before 0.13.0 gets nothing`, () => {
+      const s = setupQwenPs(roots);
+      const r = runner.run(s, { FAKE_QWEN_VERSION: "0.12.0" });
+      expect(r.tooOld).toBe(true);
+      expect(r.out).toContain("Qwen Code 0.12.0 is older than 0.13.0, so nothing was installed for it. Update Qwen Code to use plan review.");
+      expect(s.calls()).toEqual(["--version"]);
+      expect(existsSync(s.extension)).toBe(false);
+    }, QWEN_PS_TIMEOUT_MS);
+
+    test(`${runner.name}: no qwen on PATH is reported, nothing runs`, () => {
+      const s = setupQwenPs(roots);
+      removeFakeQwen(s.stub);
+      const r = runner.run(s);
+      expectState(r, "no-cli");
+      expect(r.out).toContain("Qwen Code extension: not installed (the qwen command is not on PATH).");
+      expect(existsSync(s.extension)).toBe(false);
+    }, QWEN_PS_TIMEOUT_MS);
+
+    test(`${runner.name}: a qwen that hangs is stopped at the time limit`, () => {
+      const s = setupQwenPs(roots);
+      const r = runner.run(s, { FAKE_QWEN_HANG: "1", PLANNOTATOR_QWEN_EXTENSION_TIMEOUT: "2" });
+      expectState(r, "failed");
+      expect(r.out).toContain("could not install it (timed out after 2s)");
+    }, QWEN_PS_TIMEOUT_MS);
+
+    if (process.platform === "win32") {
+      test(`${runner.name}: qwen.cmd is not run with a path cmd.exe would change`, () => {
+        const odd = setupQwenPs(roots);
+        const data = join(odd.root, "data 100%");
+        const run = runner.run({ ...odd, data, stable: join(data, "qwen-code", "extension") });
+        expectState(run, "failed");
+        expect(run.out).toContain("a path has a character cmd.exe would change");
+        expect(existsSync(odd.extension)).toBe(false);
+      }, QWEN_PS_TIMEOUT_MS);
+    }
+  }
+
+  for (const shell of PS_SHELLS) {
+    test(`install.ps1 (${shell.split(/[\\/]/).pop()}): an opt-out runs nothing and says so`, () => {
+      const s = setupQwenPs(roots);
+      const r = ps1Runner(shell).run(s, {}, "-SkipQwen");
+      expect(r.out).toContain("Qwen Code: detected, skipped (-SkipQwen).");
+      expect(s.calls()).toEqual([]);
+    }, QWEN_PS_TIMEOUT_MS);
+
+    test(`install.ps1 (${shell.split(/[\\/]/).pop()}): the older enablement file's "!" rule counts as turned off`, () => {
+      const s = setupQwenPs(roots);
+      const runner = ps1Runner(shell);
+      runner.run(s);
+      s.makeOlder();
+      expect(runner.run(s).off).toBe(false);
+      s.makeOlder();
+      writeFileSync(join(s.qwenDir, "extensions", "extension-enablement.json"), JSON.stringify({ plannotator: { overrides: ["!/*"] } }));
+      expect(runner.run(s).off).toBe(true);
+    }, QWEN_PS_TIMEOUT_MS);
+
+    test(`install.ps1 (${shell.split(/[\\/]/).pop()}): Copy-SkillIfPresent replaces a linked skill and keeps what it pointed to`, () => {
+      const s = setupQwenPs(roots);
+      const shared = join(s.root, "agents skills", "plannotator-review");
+      mkdirSync(shared, { recursive: true });
+      writeFileSync(join(shared, "SKILL.md"), "shared copy\n");
+      const skills = join(s.qwenDir, "skills");
+      mkdirSync(skills, { recursive: true });
+      symlinkSync(shared, join(skills, "plannotator-review"), process.platform === "win32" ? "junction" : "dir");
+      const source = join(scriptsDir, "..", "apps", "qwen-code", "skills", "plannotator-review");
+      const fn = extractRegion(ps1Text(), "function Copy-SkillIfPresent {", "\n# Captured tail of git's stderr", "Copy-SkillIfPresent");
+      const body = `$ErrorActionPreference = "Stop"\n${fn.slice(0, fn.indexOf("\n}\n") + 3)}\nCopy-SkillIfPresent ${psQuote(source)} ${psQuote(skills)}\nexit 0\n`;
+      const r = spawnPs(shell, s, body, {});
+      expect(r.code).toBe(0);
+      expect(readFileSync(join(shared, "SKILL.md"), "utf8")).toBe("shared copy\n");
+      expect(readFileSync(join(skills, "plannotator-review", "SKILL.md"), "utf8")).toContain("is_background: true");
+    }, QWEN_PS_TIMEOUT_MS);
+  }
+});
+
+// F7 (#2338): install.ps1 under PowerShell. A run stopped between the swap's
+// two moves left no plannotator.exe until the person reinstalled by hand. The
+// next run now puts the binary it moved aside back before anything else, and
+// the swap stages the new binary next to the target first, so its two moves
+// are renames on one volume, back to back.
+describe.skipIf(PS_SHELLS.length === 0)("install.ps1 always leaves a plannotator.exe (F7)", () => {
+  const roots: string[] = [];
+  afterAll(() => {
+    for (const root of roots) rmSync(root, { recursive: true, force: true });
+  });
+
+  function scratch(): string {
+    const root = mkdtempSync(join(tmpdir(), "plannotator-ps1-swap-test-"));
+    roots.push(root);
+    return root;
+  }
+
+  function runPs1Region(shell: string, region: string, vars: Record<string, string>) {
+    const root = scratch();
+    const driver = join(root, "driver.ps1");
+    const lines = [`$ErrorActionPreference = "Stop"`, ...Object.entries(vars).map(([k, v]) => `$${k} = ${psQuote(v)}`), region, "exit 0", ""];
+    writeFileSync(driver, lines.join("\n"));
+    const env: Record<string, string> =
+      process.platform === "win32"
+        ? { SystemRoot: process.env.SystemRoot ?? "C:\\Windows", PATH: process.env.PATH ?? "", TEMP: root, TMP: root }
+        : { PATH: "/usr/bin:/bin", HOME: root, TMPDIR: root };
+    const r = Bun.spawnSync([shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", driver], { env, cwd: root, stdout: "pipe", stderr: "pipe" });
+    return { code: r.exitCode, out: r.stdout.toString() + r.stderr.toString() };
+  }
+
+  function installDirWith(files: Record<string, string>): string {
+    const dir = join(scratch(), "plannotator dir");
+    mkdirSync(dir);
+    for (const [name, body] of Object.entries(files)) writeFileSync(join(dir, name), body);
+    return dir;
+  }
+
+  const recovery = () =>
+    extractRegion(ps1Text(), '$targetExe = "$installDir\\plannotator.exe"\n\n# A run stopped', "# First plannotator release", "the plannotator.exe recovery in install.ps1");
+  const swap = () =>
+    extractRegion(ps1Text(), "# Stage the new binary next to the target first", '\nWrite-Host ""\nWrite-Host "plannotator $latestTag installed', "the binary swap in install.ps1");
+
+  for (const shell of PS_SHELLS) {
+    const name = shell.split(/[\\/]/).pop();
+
+    test(`install.ps1 (${name}): a run stopped between the two moves gets its binary back first thing`, () => {
+      const olderAside = `plannotator.exe.old-${"a".repeat(32)}`;
+      const dir = installDirWith({ "plannotator.exe.old": "newest aside", [olderAside]: "older aside" });
+      const older = (Date.now() - 60 * 60_000) / 1000;
+      utimesSync(join(dir, olderAside), older, older);
+      const r = runPs1Region(shell, recovery(), { installDir: dir });
+      expect(r.code, r.out).toBe(0);
+      expect(readFileSync(join(dir, "plannotator.exe"), "utf8")).toBe("newest aside");
+      // A plannotator.exe that is there is never touched.
+      const kept = installDirWith({ "plannotator.exe": "current", "plannotator.exe.old": "aside" });
+      expect(runPs1Region(shell, recovery(), { installDir: kept }).code).toBe(0);
+      expect(readFileSync(join(kept, "plannotator.exe"), "utf8")).toBe("current");
+    }, QWEN_PS_TIMEOUT_MS);
+
+    test(`install.ps1 (${name}): the swap puts the new binary in place and leaves no staged or aside copy`, () => {
+      const dir = installDirWith({ "plannotator.exe": "old binary" });
+      const tmpFile = join(installDirWith({ "download.tmp": "new binary" }), "download.tmp");
+      const r = runPs1Region(shell, swap(), { installDir: dir, tmpFile });
+      expect(r.code, r.out).toBe(0);
+      expect(readFileSync(join(dir, "plannotator.exe"), "utf8")).toBe("new binary");
+      expect(readdirSync(dir)).toEqual(["plannotator.exe"]);
+      expect(existsSync(tmpFile)).toBe(false);
+    }, QWEN_PS_TIMEOUT_MS);
+  }
+});

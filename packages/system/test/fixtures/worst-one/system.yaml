@@ -1,0 +1,13 @@
+format: 1
+# One part (break-ui fixture, dev only). A brand-new system: one part, no
+# lines, no notes, no record yet. Its inside has one sheet with nothing
+# drawn on it, and one plan that adds one part. Every count here is 0 or 1.
+system: Jo
+root: C-001
+scopes: { root: Jo, inside: "Jo, inside" }
+parts:
+  jo:
+    name: Jo
+    kind: product
+    child: inside
+flows: {}

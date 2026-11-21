@@ -8,7 +8,7 @@ export function t3Endpoint(value: string): URL {
     throw new Error("T3 requires HTTPS, or HTTP on loopback for a local environment.");
   }
   if (url.username || url.password || url.search || url.hash || url.pathname !== "/mcp") {
-    throw new Error("Use the MCP URL from T3 Settings → Connections, ending in /mcp without credentials or query parameters.");
+    throw new Error("Use the MCP URL from T3 (Settings → Environments, the environment's menu, Copy MCP URL), ending in /mcp without credentials or query parameters.");
   }
   return url;
 }
@@ -119,7 +119,7 @@ export class T3Client implements T3Rpc {
 
 export class T3Thread {
   constructor(readonly rpc: T3Rpc, readonly id: string) {
-    if (!id.trim() || id.length > 256 || /[\s\u0000-\u001f]/.test(id)) throw new Error("An explicit T3 thread ID is required.");
+    if (!id.trim() || id.length > 4096 || /[\s\u0000-\u001f]/.test(id)) throw new Error("An explicit T3 thread ID is required.");
   }
 
   async read(args: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T3ThreadRead> {

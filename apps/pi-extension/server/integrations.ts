@@ -1,5 +1,5 @@
 /**
- * Note-taking app integrations (Obsidian, Bear, Octarine).
+ * Note-taking app integrations (Obsidian, Bear, Octarine, Notion).
  * Node.js equivalents of packages/server/integrations.ts.
  * Config types, save functions, tag extraction, filename generation
  */
@@ -12,6 +12,7 @@ import {
 	type ObsidianConfig,
 	type BearConfig,
 	type OctarineConfig,
+	type NotionConfig,
 	type IntegrationResult,
 	extractTitle,
 	generateFrontmatter,
@@ -26,7 +27,8 @@ import {
 import { sanitizeTag } from "../generated/project.ts";
 import { resolveUserPath } from "../generated/resolve-file.ts";
 
-export type { ObsidianConfig, BearConfig, OctarineConfig, IntegrationResult };
+export type { ObsidianConfig, BearConfig, OctarineConfig, NotionConfig, IntegrationResult };
+export { isNotionAvailable, saveToNotion, NOTION_API_VERSION } from "../generated/notion.ts";
 export {
 	extractTitle,
 	generateFrontmatter,
@@ -43,6 +45,7 @@ function detectProjectNameSync(): string | null {
 	try {
 		const toplevel = execSync("git rev-parse --show-toplevel", {
 			env: process.env,
+			windowsHide: true,
 			encoding: "utf-8",
 			stdio: ["pipe", "pipe", "pipe"],
 		}).trim();
@@ -166,6 +169,7 @@ export async function saveToBear(
 		const hashtags = buildHashtags(customTags, tags ?? []);
 		const content = buildBearContent(body, hashtags, tagPosition);
 		const url = `bear://x-callback-url/create?title=${encodeURIComponent(title)}&text=${encodeURIComponent(content)}&open_note=no`;
+		// windows-hide-guard: macOS only (open).
 		spawn("open", [url], { stdio: "ignore" });
 		return { success: true };
 	} catch (err) {
@@ -191,6 +195,7 @@ export async function saveToOctarine(
 		const frontmatter = generateOctarineFrontmatter(tags);
 		const content = `${frontmatter}\n\n${plan}`;
 		const url = `octarine://create?path=${encodeURIComponent(path)}&content=${encodeURIComponent(content)}&workspace=${encodeURIComponent(workspace)}&fresh=true&openAfter=false`;
+		// windows-hide-guard: macOS only (open).
 		spawn("open", [url], { stdio: "ignore" });
 		return { success: true, path };
 	} catch (err) {

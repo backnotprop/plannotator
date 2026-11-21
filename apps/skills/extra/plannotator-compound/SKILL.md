@@ -21,10 +21,29 @@ Research integrity is paramount — every file must be read, no skipping.
 
 Before starting the analysis, determine which data source is available.
 
-1. **Plannotator mode (first-class)** — Determine the Plannotator data directory:
-   use `$PLANNOTATOR_DATA_DIR` if set, otherwise `~/.plannotator`. Check the
-   `plans/` subdirectory there. If it exists and contains `*-denied.md` files,
-   use this mode. The entire workflow below is written for Plannotator data.
+1. **Plannotator mode (first-class)** — Find the Plannotator data directory,
+   called `<data-dir>` from here on. Run:
+
+   ```
+   plannotator data-dir
+   ```
+
+   It prints the folder's absolute path and creates nothing; use what it
+   prints. If it prints nothing or fails (an older Plannotator), use `$PLANNOTATOR_DATA_DIR` if
+   set, else whichever of `$XDG_DATA_HOME/plannotator` and the home folder's
+   `.plannotator` holds `history/` or `sessions/` (the home one if both do),
+   and ask the user if neither does.
+
+   Never write into any other folder than `<data-dir>`. In particular, do not
+   create a `.plannotator` folder in the home folder unless `<data-dir>` is
+   that folder: on an install that keeps its data under `$XDG_DATA_HOME`, a
+   new one can make Plannotator lose sight of the person's plans and history.
+   Leave any other Plannotator folder you find alone, and do not suggest
+   deleting it: it may hold older data.
+
+   Check the `plans/` subdirectory of `<data-dir>`. If it exists and contains
+   `*-denied.md` files, use this mode. The entire workflow below is written for
+   Plannotator data.
 
 2. **Claude Code fallback mode** — If the Plannotator archive is absent or
    contains no denied plans, check `~/.claude/projects/`. If present, read
@@ -55,8 +74,10 @@ In either mode, proceed to Previous Report Detection below.
 After locating the plans directory, check for existing reports:
 
 ```
-ls ${PLANNOTATOR_DATA_DIR:-~/.plannotator}/plans/compound-planning-report*.html
+ls <data-dir>/plans/compound-planning-report*.html
 ```
+
+(`<data-dir>` is the folder from Source Selection; put its real path in the command.)
 
 Reports follow a versioned naming scheme:
 - First report: `compound-planning-report.html`
@@ -361,7 +382,7 @@ vs total denials). Report this percentage — it will be different for every use
 ## Phase 4: Generate the HTML Dashboard
 
 Build a single, self-contained HTML file as the final deliverable. Save it to
-the user's plans directory with a versioned filename:
+`<data-dir>/plans/` (the folder from Source Selection) with a versioned filename:
 
 - First ever report: `compound-planning-report.html`
 - Second report: `compound-planning-report-v2.html`
@@ -519,10 +540,13 @@ every future planning session automatically.
 The hook file lives at:
 
 ```
-${PLANNOTATOR_DATA_DIR:-~/.plannotator}/hooks/compound/enterplanmode-improve-hook.txt
+<data-dir>/hooks/compound/enterplanmode-improve-hook.txt
 ```
 
-Create the `hooks/compound/` directory inside the data directory if it doesn't exist.
+`<data-dir>` is the folder from Source Selection (`plannotator data-dir`
+prints it). If you have not found it yet, find it now the same way; never
+guess it. Create the `hooks/compound/` directory inside `<data-dir>` if it
+doesn't exist.
 
 The file contents should be the corrective prompt instructions from Phase 3 —
 the same numbered list that appears in section 7 of the HTML report. Write them

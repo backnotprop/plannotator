@@ -12,14 +12,27 @@ import {
   type AIEndpoints,
   type PiSDKConfig,
   type PullSessionBridgeConfig,
+  type QwenSDKConfig,
   type SessionBridge,
   type SessionBridgeHost,
 } from "@plannotator/ai";
 import { resolveWindowsCommandShim } from "@plannotator/ai/providers/command-path";
 import { isLoopbackHostHeader } from "@plannotator/shared/loopback-host";
 import { cameThroughTailscale } from "@plannotator/shared/tailnet-audience";
-import { isRemoteSession } from "./remote";
+import { getLocalUrlHostname, isRemoteSession, isSshDetectedRemote } from "./remote";
 import type { SessionTailnetGate } from "./session-tailnet";
+import { isSshTunnelRequest } from "./this-machine";
+
+/**
+ * A remote session only SSH turned on: its own tunnel (a loopback peer, see
+ * this-machine.ts) asks the agent session as a local tab does; every other
+ * address is a "peer" and gets Ask AI through the agent SDKs only, which is
+ * what remote mode gives.
+ */
+const sshTunnelGate: SessionTailnetGate = {
+  audience: (req) => (isSshTunnelRequest(req) ? "local" : "peer"),
+  askAllowed: (req, localAllowed) => isSshTunnelRequest(req) && localAllowed(req),
+};
 
 export interface AIRuntime {
   endpoints: AIEndpoints;
@@ -44,6 +57,13 @@ interface CreateAIRuntimeOptions {
    * (DNS-rebinding guard). Undefined (not bound yet) refuses bridge requests.
    */
   getServerPort?: () => number | undefined;
+  /**
+   * The localhost subdomain this session is advertised at (#2184): a page
+   * there asks with that Host, so the bridge accepts it beside the loopback
+   * names. Defaults to the configured one (getLocalUrlHostname), read here
+   * once; null accepts none.
+   */
+  localHostname?: string | null;
   /**
    * "Ask this session" for a host that launched this server as a SEPARATE
    * process (the OpenCode plugin, the Claude Code mod): the host long-polls
@@ -221,12 +241,33 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
     } catch {
       // OpenCode not available.
     }
+
+    try {
+      await import("@plannotator/ai/providers/qwen-sdk");
+      const rawQwenPath = Bun.which("qwen", { PATH: childPath() });
+      if (rawQwenPath) {
+        const provider = await createProvider({
+          type: "qwen-sdk",
+          cwd,
+          qwenExecutablePath: resolveWindowsCommandShim(rawQwenPath),
+        } as QwenSDKConfig);
+        const providerId = registry.register(provider);
+        // Discovery reads Qwen Code's settings.json (no process), and a
+        // session runs on qwen's own default model when none is picked.
+        deferModelDiscovery(providerId, provider, { blockSession: false });
+      }
+    } catch {
+      // Qwen Code not available.
+    }
   };
 
   // Off in remote mode, in-process or pulled: anyone who can reach the session
   // URL could otherwise type into the agent session (same reasoning as the
-  // agent terminal).
-  const remote = isRemoteSession();
+  // agent terminal). A remote session only SSH turned on keeps the bridge, and
+  // answers it only for its own tunnel (`sshTunnelGate` below), so the rest of
+  // the network gets exactly what remote mode gives.
+  const sshOnly = isSshDetectedRemote();
+  const remote = isRemoteSession() && !sshOnly;
   const inProcessBridge = remote ? undefined : options.sessionBridge;
   const envPull = options.pullSessionBridge === undefined ? takeEnvPullSessionBridgeConfig() : undefined;
   const pullConfig = remote || inProcessBridge ? undefined : (options.pullSessionBridge ?? envPull);
@@ -248,12 +289,13 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
   // even in a session that was never published: a `--bg` serve mapping a
   // crashed `--tailscale` session left behind can point at a later local
   // session on the same port.
+  const localHostname = options.localHostname !== undefined ? options.localHostname : getLocalUrlHostname();
   const localBridgeRequest = (req: Request) =>
-    isLoopbackHostHeader(req.headers.get("host"), options.getServerPort?.()) && !cameThroughTailscale(req.headers);
+    isLoopbackHostHeader(req.headers.get("host"), options.getServerPort?.(), localHostname) && !cameThroughTailscale(req.headers);
   // A tailnet-published session with a bridge: who may ask the agent session
   // is decided per request. Without one (or without a bridge) the guard is
   // exactly the local one.
-  const tailnet = bridgeProvider ? options.tailnet : undefined;
+  const tailnet = bridgeProvider ? (options.tailnet ?? (sshOnly ? sshTunnelGate : undefined)) : undefined;
   const servedPullBridge = pullBridge
     ? {
         // The host's own channel: this machine only, whatever Host is claimed.

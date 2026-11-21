@@ -1,0 +1,50 @@
+# One question from Claude Code, answered in the Inbox page, waking the
+# session. The MCP route, the bridge and the page's routes are three doors
+# of one Inbox server.
+sheet: F-201
+scope: inbox
+kind: flow
+title: The Inbox
+question: One question from an agent to your answer and back, hop by hop.
+time: in order
+lanes: [iclaude, iregistry, iserver, istore, iwindow]
+places:
+  - { label: Claude Code, means: the mod, tone: sand, lanes: [iclaude] }
+  - { label: The Inbox, means: "Bun, loopback, files under inbox/", tone: stone, lanes: [iregistry, iserver, istore] }
+  - { label: Your browser, tone: mist, lanes: [iwindow] }
+hops:
+  - { id: find, from: iclaude, to: iregistry, says: read inbox.json, at: "1", payload: { name: inbox.json, lines: ['{ v, pid, port, url,', '  token, serverSession }'] } }
+  - { id: health, on: iclaude, do: "GET /api/inbox/health; start plannotator inbox --background if it does not answer", at: "2" }
+  - id: call
+    from: iclaude
+    to: iserver
+    says: POST /mcp tools/call
+    flow: i_claude
+    at: "3"
+    payload: { name: send_message, lines: ['{ body, subject, project_path,', '  agent_session, agent_host:', '  "claude-code" }'] }
+  - { id: append, from: iserver, to: istore, says: append, flow: i_store, at: "4", payload: { name: messages.jsonl, lines: ['{ v, seq, at, kind: "message",', '  id: "msg_...", record: {...} }'] } }
+  - { id: result, from: iserver, to: iclaude, reply: true, says: "sent: thread id and url", flow: i_claude, at: "5" }
+  - { id: event, from: iserver, to: iwindow, says: "SSE event: record", flow: i_page, at: "6", payload: { name: events, lines: ['GET /api/inbox/events', 'id: <seq>', 'event: record'] } }
+  - { id: answer, on: iwindow, do: You answer the question, at: "7" }
+  - id: reply
+    from: iwindow
+    to: iserver
+    says: POST .../messages/<id>/reply
+    flow: i_page
+    at: "8"
+    payload: { name: reply, lines: ['{ idempotency_key,', '  words, questions }'] }
+  - { id: store, from: iserver, to: istore, says: append the reply, flow: i_store, at: "9" }
+  - id: poll
+    from: iclaude
+    to: iserver
+    says: POST /api/inbox/bridge/poll
+    flow: i_claude
+    at: "10"
+    payload: { name: Bearer <registry token>, lines: ['{ session, host: "claude-code",', '  waitMs: 20000, busy }'] }
+  - { id: cmd, from: iserver, to: iclaude, reply: true, says: "commands: [reply]", flow: i_claude, at: "11" }
+  - { id: wake, on: iclaude, do: "host.submit(wake text) when idle; append into the turn for Send now", at: "12" }
+  - { id: ack, from: iclaude, to: iserver, says: "bridge/event: delivered", flow: i_claude, at: "13" }
+notes:
+  a: { on: call, text: "The mod adds project_path, agent_session and agent_host itself; the model only writes the message." }
+  b: { on: poll, text: "The poll is held up to 25 s and answered the moment a person's message lands in the store." }
+  c: { on: ack, text: "Delivered is one more line in messages.jsonl; the window then shows Delivered to Claude Code." }

@@ -14,6 +14,7 @@ import { cn } from '../../lib/utils';
 import { diagramHitSource } from '../../utils/diagram-render';
 import { isMac, isModKeyHeld } from '../../utils/platform';
 import { Button } from '../ui/button';
+import { DOUBLE_TAP_MS, DOUBLE_TAP_SLOP_PX } from '../imageZoom';
 import { isDiagramControlEvent } from './diagramControls';
 import { svgContentSize } from './svgContentSize';
 import {
@@ -28,7 +29,9 @@ import {
 
 /**
  * The canvas: the rendered svg inside a transformed wrapper, edge to edge in
- * its host. Wheel and pinch zoom about the pointer, drag pans, `+` `-` `0`
+ * its host. Wheel and pinch zoom about the pointer (inline, with
+ * `wheelZoom="modifier"`, only Ctrl/Cmd+wheel and a pinch do: a plain wheel
+ * scrolls the page), drag pans, `+` `-` `0`
  * (fit) and the arrow keys on the keyboard, a small control in the corner.
  * Click-to-select, drag-to-pan: a press that does not travel the drag
  * threshold (4 px for a mouse or pen, 10 px for a finger) is a click and
@@ -44,6 +47,14 @@ import {
  * `widenEdgeHitAreas`), so where an edge meets a node both are under the
  * pointer, and the caller's `pickTarget` takes the node first, then an edge,
  * then a cluster.
+ *
+ * Fingers: two pinch-zoom about their midpoint and pan with it, and the one
+ * left behind when the other lifts pans on (never a tap). A tap on a part
+ * clicks at once, inside the touch, so iOS raises the keyboard for the
+ * composer. A double tap on empty space zooms in about the finger from Fit
+ * and back to Fit from anywhere else, so a tap there waits out the
+ * double-tap window before it clicks; a pinch, a pan or a press anywhere else
+ * cancels the wait. A mouse's click lands at once.
  *
  * In the document flow the canvas lets a finger scroll the page vertically
  * (`touch-action: pan-y`); a full-size host that owns the screen passes
@@ -86,6 +97,19 @@ export interface DiagramCanvasHandle {
  * reach whatever holds the canvas (a popout's close). */
 export type DiagramEscapeOutcome = 'consumed' | 'pass';
 
+/** What a wheel over the canvas does. `always`: every wheel zooms (a viewer
+ * that owns the screen: a popout, a diagram file). `modifier`: a plain wheel
+ * is the page's and scrolls past the diagram; Ctrl or Cmd with the wheel, and
+ * a trackpad pinch (which browsers send as a wheel with `ctrlKey`), zoom. */
+export type DiagramWheelZoom = 'always' | 'modifier';
+
+const CANVAS_LABEL_PREFIX = 'Diagram canvas. Drag or arrow keys to pan, ';
+const CANVAS_LABEL_SUFFIX = ' 0 to fit, click a part to comment.';
+const CANVAS_LABEL: Record<DiagramWheelZoom, string> = {
+  always: `${CANVAS_LABEL_PREFIX}wheel or plus and minus to zoom,${CANVAS_LABEL_SUFFIX}`,
+  modifier: `${CANVAS_LABEL_PREFIX}plus and minus or pinch to zoom,${CANVAS_LABEL_SUFFIX}`,
+};
+
 export function DiagramCanvas({
   svgNode,
   targetSelector,
@@ -99,6 +123,7 @@ export function DiagramCanvas({
   children,
   autoFocus,
   className,
+  wheelZoom = 'always',
 }: {
   /** The last good render's sanitized svg root, or null before the first. */
   svgNode: SVGSVGElement | null;
@@ -126,11 +151,14 @@ export function DiagramCanvas({
   /** `touch-none` for a host that owns the whole screen (a popout); the
    * default lets a finger scroll the page past an inline diagram. */
   className?: string;
+  /** Default `always` (today's canvas). An inline diagram in a document
+   * passes `modifier` so the reader's wheel scrolls the page past it. */
+  wheelZoom?: DiagramWheelZoom;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [content, setContent] = useState<ContentSize | null>(null);
-  const { viewport, fit, zoomBy, panBy, panIntoView } = useDiagramViewport(hostRef, content);
+  const { viewport, fit, zoomBy, toggleZoom, panBy, panIntoView } = useDiagramViewport(hostRef, content);
 
   // Mount the sanitized node once per render and size the wrapper to the
   // diagram's own box so the transform scales real pixels.
@@ -160,7 +188,9 @@ export function DiagramCanvas({
   }, [autoFocus]);
 
   // Wheel zoom needs a non-passive listener (React's onWheel is passive,
-  // so preventDefault there cannot stop the page from scrolling).
+  // so preventDefault there cannot stop the page from scrolling). The
+  // listener holds the page's scroll only for a wheel it zooms with: under
+  // `modifier` a plain wheel returns untouched and the page scrolls.
   useEffect(() => {
     const host = hostRef.current;
     if (host === null) return;
@@ -168,12 +198,13 @@ export function DiagramCanvas({
       // A sub-pixel delta (a trackpad coming to rest, a horizontal swipe)
       // is neither a zoom nor a reason to hold the page's scroll.
       if (Math.abs(event.deltaY) < 0.1) return;
+      if (wheelZoom === 'modifier' && !event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
       zoomBy(Math.exp(-event.deltaY * WHEEL_ZOOM_SENSITIVITY), event.clientX, event.clientY);
     };
     host.addEventListener('wheel', onWheel, { passive: false });
     return () => host.removeEventListener('wheel', onWheel);
-  }, [zoomBy]);
+  }, [wheelZoom, zoomBy]);
 
   const targetUnder = useCallback(
     (event: ReactPointerEvent): Element | null => {
@@ -240,12 +271,71 @@ export function DiagramCanvas({
   } | null>(null);
   const [panning, setPanning] = useState(false);
 
+  // The fingers on the canvas, and the pinch two of them make: their
+  // distance and midpoint at the last move.
+  const fingersRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchRef = useRef<{ dist: number; midX: number; midY: number } | null>(null);
+  const pinchOf = useCallback(() => {
+    const [a, b] = [...fingersRef.current.values()];
+    if (a === undefined || b === undefined) return null;
+    return { dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), midX: (a.x + b.x) / 2, midY: (a.y + b.y) / 2 };
+  }, []);
+
+  // A finger's tap on empty space waits out the double-tap window before it
+  // clicks (a tap on a part clicks at once, inside the touch, so iOS raises
+  // the keyboard for the composer it opens): where and when it landed, and
+  // its click while it waits.
+  const pendingTapRef = useRef<{ t: number; x: number; y: number; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const onClickElementRef = useRef(onClickElement);
+  onClickElementRef.current = onClickElement;
+  const cancelTap = useCallback(() => {
+    const pending = pendingTapRef.current;
+    if (pending === null) return;
+    pendingTapRef.current = null;
+    clearTimeout(pending.timer);
+  }, []);
+  useEffect(() => cancelTap, [cancelTap]);
+  // Anything else pressed first takes the waiting tap's place: a badge, the
+  // zoom strip, the expand button, anything outside the canvas.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (host === null) return;
+    const doc = host.ownerDocument;
+    const onDown = (event: PointerEvent) => {
+      if (pendingTapRef.current === null) return;
+      const target = event.target;
+      // A badge is a button, so a control.
+      const onCanvas = target instanceof Node && host.contains(target);
+      if (!onCanvas || isDiagramControlEvent(event)) cancelTap();
+    };
+    doc.addEventListener('pointerdown', onDown, true);
+    return () => doc.removeEventListener('pointerdown', onDown, true);
+  }, [cancelTap]);
+
   const onPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     // Pressing a control is not the start of a pan either.
     if (isDiagramControlEvent(event)) {
       pressRef.current = null;
       return;
+    }
+    if (event.pointerType === 'touch') {
+      // The first finger down starts afresh (a lift the canvas never saw
+      // leaves no finger behind).
+      if (event.isPrimary) {
+        fingersRef.current.clear();
+        pinchRef.current = null;
+      }
+      fingersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      // A second finger makes it a pinch: neither finger is a tap on a part
+      // or a one-finger pan any more, so the press ends here.
+      if (fingersRef.current.size >= 2) {
+        pinchRef.current = pinchOf();
+        if (pressRef.current?.panning) setPanning(false);
+        pressRef.current = null;
+        cancelTap();
+        return;
+      }
     }
     pressRef.current = {
       id: event.pointerId,
@@ -257,10 +347,23 @@ export function DiagramCanvas({
       threshold: event.pointerType === 'touch' ? TOUCH_DRAG_THRESHOLD_PX : DRAG_THRESHOLD_PX,
       panning: false,
     };
-  }, []);
+  }, [cancelTap, pinchOf]);
 
   const onPointerMove = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (fingersRef.current.has(event.pointerId)) {
+        fingersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        const prev = pinchRef.current;
+        const next = prev === null ? null : pinchOf();
+        if (prev !== null && next !== null) {
+          // The part under the fingers' old midpoint follows it to the new
+          // one, then the diagram scales about it with their spread.
+          panBy(next.midX - prev.midX, next.midY - prev.midY);
+          zoomBy(next.dist / prev.dist, next.midX, next.midY);
+          pinchRef.current = next;
+          return;
+        }
+      }
       const press = pressRef.current;
       if (press === null || press.id !== event.pointerId) {
         // Nothing highlights on a plain mouse-over; the ring under the
@@ -274,6 +377,7 @@ export function DiagramCanvas({
         press.panning = true;
         setPanning(true);
         onHoverElement(null);
+        cancelTap();
         if (typeof event.currentTarget.setPointerCapture === 'function') {
           event.currentTarget.setPointerCapture(event.pointerId);
         }
@@ -282,11 +386,22 @@ export function DiagramCanvas({
       press.lastX = event.clientX;
       press.lastY = event.clientY;
     },
-    [onHoverElement, panBy, targetUnder],
+    [cancelTap, onHoverElement, panBy, pinchOf, targetUnder, zoomBy],
   );
 
   const endPress = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>, click: boolean) => {
+      if (fingersRef.current.delete(event.pointerId) && pinchRef.current !== null) {
+        // A finger of a pinch lifted. Two still down pinch on from where
+        // they are; one left behind pans on, and is never a tap.
+        pinchRef.current = pinchOf();
+        const rest = fingersRef.current.size === 1 ? [...fingersRef.current][0] : undefined;
+        pressRef.current =
+          rest === undefined
+            ? null
+            : { id: rest[0], x: rest[1].x, y: rest[1].y, lastX: rest[1].x, lastY: rest[1].y, threshold: 0, panning: true };
+        return;
+      }
       const press = pressRef.current;
       if (press === null || press.id !== event.pointerId) return;
       pressRef.current = null;
@@ -305,9 +420,37 @@ export function DiagramCanvas({
         }
         return;
       }
-      if (click) onClickElement(targetUnder(event), event.shiftKey);
+      if (!click) return;
+      const element = targetUnder(event);
+      if (event.pointerType !== 'touch') {
+        onClickElement(element, event.shiftKey);
+        return;
+      }
+      // A finger. The second tap of a double tap begun on empty space zooms,
+      // and the first one's click never lands.
+      const now = Date.now();
+      const pending = pendingTapRef.current;
+      cancelTap();
+      if (pending !== null && now - pending.t <= DOUBLE_TAP_MS && Math.hypot(event.clientX - pending.x, event.clientY - pending.y) <= DOUBLE_TAP_SLOP_PX) {
+        toggleZoom(event.clientX, event.clientY);
+        return;
+      }
+      // A part clicks at once, inside the touch (iOS shows the keyboard only
+      // for a focus made there); a double tap on it opens its composer.
+      if (element !== null) {
+        onClickElement(element, event.shiftKey);
+        return;
+      }
+      // Empty space waits for a second tap.
+      const shiftKey = event.shiftKey;
+      const timer = setTimeout(() => {
+        if (pendingTapRef.current?.timer !== timer) return;
+        pendingTapRef.current = null;
+        onClickElementRef.current(null, shiftKey);
+      }, DOUBLE_TAP_MS);
+      pendingTapRef.current = { t: now, x: event.clientX, y: event.clientY, timer };
     },
-    [onClickElement, targetUnder],
+    [cancelTap, onClickElement, pinchOf, targetUnder, toggleZoom],
   );
 
   const onKeyDown = useCallback(
@@ -360,7 +503,7 @@ export function DiagramCanvas({
       ref={hostRef}
       data-diagram-canvas=""
       tabIndex={0}
-      aria-label="Diagram canvas. Drag or arrow keys to pan, wheel or plus and minus to zoom, 0 to fit, click a part to comment."
+      aria-label={CANVAS_LABEL[wheelZoom]}
       className={cn(
         'relative h-full w-full touch-pan-y select-none overflow-hidden outline-none',
         panning ? 'cursor-grabbing' : 'cursor-grab',

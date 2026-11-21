@@ -21,7 +21,7 @@
  * PLANNOTATOR_UNDELIVERED_SHOTS, else .local/proof/undelivered/.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -164,7 +164,8 @@ async function replyInWindow(page: Page, words: string): Promise<void> {
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
   await pane.getByRole('textbox', { name: 'Reply to Claude Code' }).fill(words);
   await page.keyboard.press('ControlOrMeta+Enter');
-  await expect(pane.locator('article.ib-message[data-author="person"]').last()).toContainText(words);
+  // The reply landed (not the words drawn while the Send is on its way, `data-sending`): the server has it.
+  await expect(pane.locator('article.ib-message[data-author="person"]:not([data-sending])').last()).toContainText(words);
 }
 
 async function shot(page: Page, name: string, clip?: () => Promise<{ x: number; y: number; width: number; height: number }>): Promise<void> {
@@ -206,6 +207,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const env = {
     PATH: process.env.PATH ?? '',
     HOME: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',
@@ -293,7 +295,9 @@ test('waiting on a busy agent: "Undelivered N min" on the row (blue / grey), Sen
   await page.goto(`${world.url}`);
   const heroRow = page.locator(`.ib-lbody [data-thread-id="${hero.thread}"]`).first();
   const stuckRow = page.locator(`.ib-lbody [data-thread-id="${stuck.thread}"]`).first();
+  // A wide row (1440) draws the full words (the owner, 2026-10-29), read as they are.
   await expect(heroRow.locator('[data-undelivered]')).toHaveText('Undelivered 3 min');
+  await expect(heroRow.locator('.ib-c .ib-sr')).toHaveCount(0);
   await expect(heroRow.locator('[data-undelivered]')).not.toHaveAttribute('data-stuck', /.*/);
   await expect(stuckRow.locator('[data-undelivered]')).toHaveText('Undelivered 3 min');
   await expect(stuckRow.locator('[data-undelivered]')).toHaveAttribute('data-stuck', '');
@@ -309,7 +313,10 @@ test('waiting on a busy agent: "Undelivered N min" on the row (blue / grey), Sen
   await heroRow.hover();
   const action = page.locator(`[data-row="${hero.thread}"] > [data-row-send-now]`);
   await expect(action).toBeVisible();
-  await expect(heroRow.locator('.ib-c')).toBeHidden();
+  // "Undelivered 3 min" sits left of the marks (approval "inbox-row-byline", the one-line row), clear of the
+  // action, so it stays on screen beside Send now.
+  await expect(heroRow.locator('.ib-c')).toBeVisible();
+  expect((await heroRow.locator('.ib-c').boundingBox())!.x + (await heroRow.locator('.ib-c').boundingBox())!.width).toBeLessThanOrEqual((await action.boundingBox())!.x);
   await shot(page, 'list-hover', sentGroup);
   await stuckRow.hover();
   await expect(page.locator(`[data-row="${stuck.thread}"] > [data-row-send-now]`)).toHaveCount(0);
@@ -356,7 +363,7 @@ test('on a phone: the row badge, the band and a 44 px Send now', async ({ browse
     await windowAhead(page, 3.5 * MIN);
     await page.goto(world.url);
     const row = page.locator(`.ib-mrow[data-thread-id="${hero.thread}"]`);
-    await expect(row.locator('[data-undelivered]')).toHaveText('Undelivered 3 min');
+    await expect(row.locator('[data-undelivered]')).toHaveText('Undelivered 3m');
     // A phone row keeps one tap target: no Send now on it.
     await expect(page.locator('[data-row-send-now]')).toHaveCount(0);
     await shot(page, 'phone-list');
@@ -398,7 +405,7 @@ test('it goes into the running turn by itself after the wait, counted again from
   await page.clock.setFixedTime(new Date());
   await page.goto(`${world.url}#thread=${hero.thread}`);
   const pane = page.locator('section.ib-pane');
-  await expect(pane.locator('[data-delivery]')).toHaveText('Sending to Claude Code now…');
+  await expect(pane.locator('[data-delivery]').locator('.ib-dl-text')).toHaveText('Sending to Claude Code now…');
   // The connection put it into the running turn.
   await hero.connection.deliver(hero.reply);
   expect((await message(hero.thread, hero.reply)).delivery).toMatchObject({ into_turn: true });

@@ -1,0 +1,5 @@
+revision: W-20
+scope: core
+title: Small plan 20
+change:
+  gateway: "Small change number 20."

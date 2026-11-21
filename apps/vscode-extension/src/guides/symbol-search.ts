@@ -6,7 +6,7 @@
  */
 
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { realFileInside } from "./safe-path";
 
 /** Imports and re-exports name a symbol without defining it. */
 const IMPORT_LINE = /^\s*(import\b|export\s*(\*|\{|type\s*\{)|from\s+["'])/;
@@ -26,15 +26,21 @@ function definitionPatterns(name: string): RegExp[] {
   ];
 }
 
-/** Definitions of `name` in the given files (repo-relative, read under `root`). */
+/**
+ * Definitions of `name` in the given files (repo-relative, read under `root`).
+ * A file is read only when it is a regular file inside `root` once symlinks
+ * are followed; any other path is skipped unread.
+ */
 export async function searchDefinitions(root: string, paths: readonly string[], name: string): Promise<SymbolHit[]> {
   const short = name.includes(".") ? name.split(".").pop()! : name;
   const patterns = definitionPatterns(short);
   const hits: SymbolHit[] = [];
   for (const path of paths) {
+    const real = realFileInside(root, path);
+    if (!real) continue;
     let text: string;
     try {
-      text = await readFile(join(root, path), "utf8");
+      text = await readFile(real, "utf8");
     } catch {
       continue;
     }

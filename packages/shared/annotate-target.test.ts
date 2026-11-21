@@ -379,7 +379,7 @@ describe("resolveAnnotateBundleFiles", () => {
       files: [
         { path: paths[0], renderAs: "html" },
         { path: paths[1], renderAs: "markdown" },
-        { path: paths[2], renderAs: "markdown" },
+        { path: paths[2], renderAs: "code" },
       ],
     });
     const converted = resolveAnnotateBundleFiles(paths, { convertHtml: true });

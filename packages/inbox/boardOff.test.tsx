@@ -5,7 +5,7 @@
  * computer instead. What regresses: a Board row (or the Board) shown while it
  * is off, or an off page with no way on.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  * The server half (tools/list, `board_off`, cards kept) is
  * packages/server/inbox-board-switch.test.ts; the whole window on the
  * compiled binary is tests/e2e/inbox-board.spec.ts.
@@ -73,23 +73,20 @@ test.skipIf(!hasDom)('off: no Board row in the sidebar; on: the row, with no cou
 
 test.skipIf(!hasDom)('a #board link while off: the page says so and Turn it on turns it on', () => {
   let turned = 0;
-  const host = mount(<BoardOff via="local" onTurnOn={() => turned++} error={null} />);
+  const host = mount(<BoardOff onTurnOn={() => turned++} error={null} />);
   expect(host.querySelector('[data-board-view="off"] h2')?.textContent).toBe('The Board is off');
   // Nothing of the Board is drawn: no lanes, no cards, no New card.
   expect(host.querySelector('.ib-lane, [data-card-id], [data-board-new]')).toBeNull();
   const on = host.querySelector<HTMLButtonElement>('[data-board-turn-on]')!;
   act(() => on.click());
   expect(turned).toBe(1);
+  // It points to where the same switch lives now: Settings → Capabilities.
+  expect(host.querySelector<HTMLAnchorElement>('[data-board-settings-link] a')?.getAttribute('href')).toBe('#settings/capabilities');
   // A component tooltip rule: no native title.
   expect(host.querySelector('[title]')).toBeNull();
 });
 
-test.skipIf(!hasDom)('a refused switch is said; a page from the tailnet gets a note, not the button', () => {
-  let host = mount(<BoardOff via="local" onTurnOn={() => {}} error="The Board was not turned on. Try again." />);
+test.skipIf(!hasDom)('a refused switch is said', () => {
+  const host = mount(<BoardOff onTurnOn={() => {}} error="The Board was not turned on. Try again." />);
   expect(host.querySelector('[role="alert"]')?.textContent).toBe('The Board was not turned on. Try again.');
-  act(() => root?.unmount());
-  document.body.innerHTML = '';
-  host = mount(<BoardOff via="tailnet" onTurnOn={() => {}} error={null} />);
-  expect(host.querySelector('[data-board-turn-on]')).toBeNull();
-  expect(host.querySelector('.ib-boff-note')?.textContent).toContain('this computer');
 });

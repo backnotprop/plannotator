@@ -1,7 +1,7 @@
 {
-  // The Worker: strict, no DOM, Workers types only. `tsc --noEmit -p
-  // apps/telemetry` (the root typecheck). The proof under test/ runs under bun
-  // and is checked by its own run.
+  // The Worker: strict, no DOM, Workers types only (`tsc --noEmit -p
+  // apps/telemetry`, part of the root typecheck). The tests under test/ run
+  // in the root `bun test`.
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",

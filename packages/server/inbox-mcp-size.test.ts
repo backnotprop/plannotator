@@ -3,8 +3,8 @@
  * asks, the person answers, 30 rounds: 59 messages), through the real doors:
  * a running Inbox, the MCP SDK client, and the text the agent connections
  * hand the model (`inboxToolResultText`). The failures these guard: a host
- * that indents the structured JSON again, wait_for_reply or read_thread's
- * list carrying the window's full records again, and a message id passed as
+ * that indents the structured JSON again, read_thread's list carrying the
+ * window's full records again, and a message id passed as
  * `thread` starting a new thread named after it. The thread window, the
  * text-complete mark and search are in inbox-mcp-window.test.ts.
  */
@@ -220,22 +220,3 @@ test("read_thread's list stays small: under 400 bytes a thread as the hosts rend
   expect(bytes(inboxToolResultText(listed).text)).toBeLessThan(17 * 400);
 });
 
-test("wait_for_reply carries the reply once: each question as key, state and answer, not the full records", async () => {
-  const { client, seeded } = await world();
-  const waiting = call(client, "wait_for_reply", { thread_id: seeded.threadId, agent_session: "ses_long", timeout_seconds: 10 });
-  await Bun.sleep(100);
-  const replyId = await seeded.answerLast();
-  const got = await waiting;
-  expect(got.structuredContent.status).toBe("replied");
-  expect(got.structuredContent.reply.message_id).toBe(replyId);
-  const questions = got.structuredContent.questions as Record<string, any>[];
-  expect(questions).toHaveLength(2);
-  for (const q of questions) {
-    expect(Object.keys(q).sort()).toEqual(["answer", "key", "message_id", "sent_reply_id", "state"]);
-    expect(q).toMatchObject({ state: "sent", sent_reply_id: replyId, answer: { key: q.key, selected: expect.any(Array) } });
-  }
-  // The text the model reads: the reply, then a small JSON tail, whatever the thread's length.
-  const rendered = inboxToolResultText(got).text;
-  const body = got.structuredContent.reply.body as string;
-  expect(bytes(rendered)).toBeLessThan(bytes(body) * 2 + 1200);
-});

@@ -27,7 +27,10 @@ const context = (overrides: Partial<InboxHtmlLinkContext> = {}): InboxHtmlLinkCo
 describe('resolveInboxHtmlLink', () => {
   test('a link to an attachment of the thread opens it, fragment kept', () => {
     expect(resolveInboxHtmlLink('frames/A-1440-light.png', context())).toEqual({ kind: 'attachment', id: 'att_frame', name: 'A-1440-light.png', hash: '' });
-    expect(resolveInboxHtmlLink('./SHEET.html?x=1#top', context())).toEqual({ kind: 'attachment', id: 'att_sheet', name: 'SHEET.html', hash: 'top' });
+    // An attached page's query rides along: the page opens with it, as a tab would.
+    expect(resolveInboxHtmlLink('./SHEET.html?x=1#top', context())).toEqual({ kind: 'attachment', id: 'att_sheet', name: 'SHEET.html', hash: 'top', search: '?x=1' });
+    // Another kind of file has no query to read.
+    expect(resolveInboxHtmlLink('frames/A-1440-light.png?x=1', context())).toEqual({ kind: 'attachment', id: 'att_frame', name: 'A-1440-light.png', hash: '' });
     expect(resolveInboxHtmlLink('NOTES.md', context())).toMatchObject({ kind: 'attachment', id: 'att_notes' });
   });
 
@@ -80,8 +83,45 @@ describe('resolveInboxHtmlLink', () => {
     expect(resolveInboxHtmlLink('#section', context())).toEqual({ kind: 'ignored' });
   });
 
+  // A prototype's own switcher (`<a href="?variant=2">`) is a link to the page itself: it loads again with the
+  // query, as in a tab. It used to resolve to nothing (the query dropped, nothing left), so the click did nothing.
+  test('a bare query is the page itself, with its query and fragment', () => {
+    expect(resolveInboxHtmlLink('?variant=2&n=3', context())).toEqual({ kind: 'self', search: '?variant=2&n=3', hash: '' });
+    expect(resolveInboxHtmlLink(' ?x=1#top ', context())).toEqual({ kind: 'self', search: '?x=1', hash: '#top' });
+    // A GET form with no fields.
+    expect(resolveInboxHtmlLink('?', context())).toEqual({ kind: 'self', search: '?', hash: '' });
+  });
+
+  test('the page by its own name: a query or a fresh load is the page itself; a fragment alone still scrolls', () => {
+    const self = context({ selfPath: `${FOLDER}/SHEET.html` });
+    expect(resolveInboxHtmlLink('SHEET.html?variant=2', self)).toEqual({ kind: 'self', search: '?variant=2', hash: '' });
+    expect(resolveInboxHtmlLink('./SHEET.html', self)).toEqual({ kind: 'self', search: '', hash: '' });
+    expect(resolveInboxHtmlLink('SHEET.html#top', self)).toEqual({ kind: 'attachment', id: 'att_sheet', name: 'SHEET.html', hash: 'top' });
+    // Another page with a query is that page, as before.
+    expect(resolveInboxHtmlLink('B-cards.html?variant=2', self)).toMatchObject({ kind: 'page', relative: 'B-cards.html' });
+    // With no page named, a link to a file by name is never `self`.
+    expect(resolveInboxHtmlLink('SHEET.html?variant=2', context()).kind).toBe('attachment');
+  });
+
+  test('a Markdown file has no query to read: a bare query there is not the page itself', () => {
+    expect(resolveInboxHtmlLink('?x=1', context({ markdown: true, assetRoute: null })).kind).not.toBe('self');
+  });
+
   test('folderOf', () => {
     expect(folderOf('/a/b/c.html')).toBe('/a/b');
     expect(folderOf('C:\\a\\c.html')).toBe('c:/a');
   });
+});
+
+
+test('Markdown links resolve from the current document and retain fragments without widening HTML links', () => {
+  const ctx = context({ markdown: true, assetRoute: null });
+  expect(resolveInboxHtmlLink('peer%20notes.md?view=1#target', ctx)).toMatchObject({ kind: 'page', relative: 'peer notes.md', hash: 'target' });
+  expect(resolveInboxHtmlLink('../peer.md', { ...ctx, baseDir: `${FOLDER}/sub` })).toMatchObject({ kind: 'page', relative: 'peer.md' });
+  for (const href of ['../escape.md', '.hidden/secret.md', 'not-attached.html']) expect(resolveInboxHtmlLink(href, ctx).kind).toBe('refused');
+  expect(resolveInboxHtmlLink('peer.md', context()).kind).toBe('refused');
+  // A Markdown file has no asset route, so an image beside it does not open, and the note promises none.
+  const image = resolveInboxHtmlLink('shot.png', ctx);
+  expect(image.kind).toBe('refused');
+  expect(image.kind === 'refused' && image.note).not.toContain('image');
 });

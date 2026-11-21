@@ -1,9 +1,9 @@
 /**
- * "You are here" in the native diff editor (SPEC 3.4): a CodeLens at the top
- * of each guide file ("● Chapter 2 of 5 · title | Mark reviewed | Next file
- * ›"), a chapter-colored gutter mark and highlight of the agent's focus
- * lines, a status-bar item, and a line in the hover for symbols changed in a
- * chapter.
+ * The guide outside the Guide tab: a status-bar item ("Guide · Chapter 2 of
+ * 5 · 1/5 reviewed", which shows the chapter in the Guide tab), and, in a
+ * native editor or diff showing a guide file (opened from the Guide tab's
+ * "Open in editor" or "Diff"), a chapter-colored gutter mark, the agent's
+ * focus lines and a line in the hover for symbols changed in a chapter.
  */
 
 import * as vscode from "vscode";
@@ -20,7 +20,6 @@ export interface ReaderUiHost {
 
 export class ReaderUi implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
-  private readonly lensChanged = new vscode.EventEmitter<void>();
   private readonly status: vscode.StatusBarItem;
   private readonly gutter: vscode.TextEditorDecorationType[];
   private readonly focus: vscode.TextEditorDecorationType;
@@ -31,13 +30,8 @@ export class ReaderUi implements vscode.Disposable {
   constructor(private readonly host: ReaderUiHost) {
     const selector: vscode.DocumentSelector = [{ scheme: "file" }, { scheme: GUIDE_SCHEME }];
     this.disposables.push(
-      vscode.languages.registerCodeLensProvider(selector, {
-        onDidChangeCodeLenses: this.lensChanged.event,
-        provideCodeLenses: (doc) => this.lenses(doc),
-      }),
       vscode.languages.registerHoverProvider(selector, { provideHover: (doc, pos, token) => this.hover(doc, pos, token) }),
       vscode.window.onDidChangeVisibleTextEditors(() => this.decorate()),
-      this.lensChanged,
     );
     this.status = vscode.window.createStatusBarItem("plannotator.guides.status", vscode.StatusBarAlignment.Left, 50);
     this.status.name = "Plannotator Guide";
@@ -59,50 +53,8 @@ export class ReaderUi implements vscode.Disposable {
 
   /** Redraw everything after the guide, the ticks or the current file changed. */
   refresh(): void {
-    this.lensChanged.fire();
     this.decorate();
     this.updateStatus();
-  }
-
-  private pathOf(doc: vscode.TextDocument): { path: string; model: ReaderModel } | null {
-    const cur = this.host.current();
-    if (!cur) return null;
-    const path = headPathOf(cur.sides, doc.uri);
-    if (!path || cur.model.chapterOf(path) < 0) return null;
-    return { path, model: cur.model };
-  }
-
-  private lenses(doc: vscode.TextDocument): vscode.CodeLens[] {
-    const hit = this.pathOf(doc);
-    if (!hit) return [];
-    const { model, path } = hit;
-    const chapter = model.chapterOf(path);
-    const range = new vscode.Range(0, 0, 0, 0);
-    const reviewed = model.fileTicks.has(path);
-    const next = model.nextFile(path);
-    return [
-      new vscode.CodeLens(range, {
-        title: `● Chapter ${chapter + 1} of ${model.chapters.length} · ${model.chapters[chapter].title}`,
-        command: "plannotator.guides.openChapter",
-        arguments: [chapter + 1, { openFile: false }],
-        tooltip: "Show the chapter overview",
-      }),
-      new vscode.CodeLens(range, {
-        title: reviewed ? "✓ Reviewed" : "Mark reviewed",
-        command: "plannotator.guides.toggleFileReviewed",
-        arguments: [path],
-        tooltip: reviewed ? "Untick this file" : "Tick this file; the chapter ticks itself when all its files are ticked",
-      }),
-      new vscode.CodeLens(range, {
-        title: "Ask…",
-        command: "plannotator.guides.askAboutFile",
-        arguments: [path],
-        tooltip: "Ask the agent about the selected lines, or the whole file; the answer opens beside the diff",
-      }),
-      new vscode.CodeLens(range, next
-        ? { title: "Next file ›", command: "plannotator.guides.nextFile", arguments: [path], tooltip: `${next.path} (chapter ${next.chapter + 1})` }
-        : { title: "Last file", command: "" }),
-    ];
   }
 
   private decorate(): void {
@@ -148,9 +100,9 @@ export class ReaderUi implements vscode.Disposable {
     }
     const m = cur.model;
     const chapter = m.currentChapter;
-    this.status.text = `$(book) Guide: Chapter ${chapter + 1}/${m.chapters.length} · ${m.filesReviewedCount()}/${m.orderedFiles().length} files reviewed`;
-    this.status.tooltip = `${m.title}\n${m.chapters[chapter]?.title ?? ""}${currentFile ? `\n${currentFile}` : ""}`;
-    this.status.command = { command: "plannotator.guides.openChapter", title: "Show chapter", arguments: [chapter + 1, { openFile: false }] };
+    this.status.text = `$(book) Guide · Chapter ${chapter + 1} of ${m.chapters.length} · ${m.reviewed.filter(Boolean).length}/${m.chapters.length} reviewed`;
+    this.status.tooltip = `${m.title}\n${m.chapters[chapter]?.title ?? ""}${currentFile ? `\n${currentFile}` : ""}\nShow it in the Guide tab`;
+    this.status.command = { command: "plannotator.guides.openChapter", title: "Show chapter", arguments: [chapter + 1] };
     this.status.show();
   }
 

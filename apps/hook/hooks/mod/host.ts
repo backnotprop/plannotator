@@ -37,6 +37,30 @@ export interface TimerHandle {
   cancel: () => void
 }
 
+/**
+ * `$.prompt.submit` did not take the prompt: the engine RESOLVES `{ drop:
+ * <reason> }` instead of rejecting, whatever the reason, while it holds
+ * plugins' input until someone types: after the person stops the session
+ * (Esc, a remote interrupt: "the session was stopped and nobody has sent
+ * input since"), and seen after an idle compaction. No turn starts and
+ * nothing entered the conversation, so the caller may try again later.
+ */
+export class PromptDropped extends Error {
+  constructor(readonly reason: string) {
+    super(reason)
+    this.name = 'PromptDropped'
+  }
+}
+
+/** `$.prompt.submit`'s answer read: any `drop` rejects with `PromptDropped`; anything else is a prompt that went in. */
+export async function submitOrThrow(submit: () => Promise<unknown>): Promise<void> {
+  const result = (await submit()) as { drop?: unknown } | null | undefined
+  // Any `drop` the engine set (not undefined, null or false) is a refusal; only a string reason is kept as words.
+  if (result && typeof result === 'object' && 'drop' in result && result.drop !== undefined && result.drop !== null && result.drop !== false) {
+    throw new PromptDropped(typeof result.drop === 'string' ? result.drop : '')
+  }
+}
+
 export interface Host {
   now(): Promise<number>
   /**
@@ -60,7 +84,12 @@ export interface Host {
   fileSize(path: string): Promise<number | null>
   storeGet(key: string): Promise<unknown>
   storeSet(key: string, value: unknown): Promise<void>
-  /** `$.prompt.submit`: runs once the session is idle, read under the plugin's name. */
+  /**
+   * `$.prompt.submit`: runs once the session is idle, read under the plugin's
+   * name. Resolves once the turn was taken. Rejects with `PromptDropped` when
+   * the engine refused the prompt (no turn started: try again after the
+   * person's next input), and with any other error when it failed.
+   */
   submit(text: string): Promise<void>
   /**
    * `$.session.append` of a user-role row (the model reads it; the person
@@ -86,10 +115,28 @@ export interface Host {
    * when a read failed); optional for test hosts, which then send nothing.
    */
   loadedPlugin?(): Promise<LoadedPluginInfo | null>
+  /**
+   * The prompt box's text now (`$.prompt.read()`; `''` where no box is drawn).
+   * Optional: without it Plannotator never reloads itself (auto-reload.ts).
+   */
+  readPrompt?(): Promise<string>
+  /**
+   * `$.command.run({ command: 'reload-plugins', args: 'plannotator' })`: queued
+   * by the engine and run once the session is idle; rejects when the engine
+   * refused it before it ran. Called only from a timer, never from a hook a
+   * turn waits on. Optional: without it Plannotator never reloads itself.
+   */
+  runReload?(): Promise<unknown>
   /** Claude Code's own version (`$.session.version()`'s `base`); null when unknown. Optional. */
   engineVersion?(): Promise<string | null>
   /** `$.session.append` of a notice the transcript shows and the model never reads. */
   appendNotice?(text: string): Promise<void>
+  /**
+   * `$.env.set` of PLANNOTATOR_SESSION_PROJECT (INBOX_SESSION_PROJECT_ENV in
+   * inbox.ts), which every process the session starts from then on inherits.
+   * Optional: a test host without it exports nothing.
+   */
+  setSessionProject?(value: string): Promise<void>
   suggest(text: string): Promise<void>
   status(text: string | undefined): void
   log(text: string): void

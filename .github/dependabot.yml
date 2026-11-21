@@ -17,8 +17,6 @@ updates:
     ignore:
       - dependency-name: "@types/vscode"          # pinned to engines.vscode ^1.85.0
       - dependency-name: "@earendil-works/pi-coding-agent"  # security floor >=0.79.1, pinned by startup.test.ts
-      - dependency-name: "katex"
-        versions: [">=0.19.0"]                     # mermaid 12.2 pins ^0.18; one KaTeX in the builds needs ui on the same line
     groups:
       bun-minor-and-patch:
         patterns:

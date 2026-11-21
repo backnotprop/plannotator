@@ -94,7 +94,7 @@ describe("exportReviewFeedback", () => {
       }],
     })]);
 
-    expect(result).toContain('## General');
+    expect(result).toContain('## Global comments');
     expect(result).toContain('`checkout()` → `if (authorized)` — `inferred step`');
   });
 
@@ -472,11 +472,11 @@ describe("exportReviewFeedback", () => {
     expect(result).not.toContain("Review scope: full-stack");
   });
 
-  it("general comments render under a General section, not a file/line group", () => {
+  it("general comments render under a Global comments section, not a file/line group", () => {
     const result = exportReviewFeedback([
       ann({ id: "g", scope: "general", filePath: "", lineStart: 0, lineEnd: 0, text: "the overall approach is off" }),
     ]);
-    expect(result).toContain("## General");
+    expect(result).toContain("## Global comments");
     expect(result).toContain("the overall approach is off");
     // No bogus line heading for a review-level comment.
     expect(result).not.toContain("Line 0");
@@ -488,8 +488,10 @@ describe("exportReviewFeedback", () => {
       ann({ id: "g", scope: "general", filePath: "", lineStart: 0, lineEnd: 0, text: "review-wide note" }),
     ]);
     expect(result).toContain("line issue");
-    expect(result).toContain("## General");
+    expect(result).toContain("## Global comments");
     expect(result).toContain("review-wide note");
+    // Global comments come before the per-file sections.
+    expect(result.indexOf("## Global comments")).toBeLessThan(result.indexOf("line issue"));
   });
 
   it("labels the header with short sha + subject for a commit diff", () => {

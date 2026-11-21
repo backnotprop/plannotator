@@ -1,8 +1,11 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Canvas } from './Canvas';
+import { ZoomableCanvas } from './ZoomableCanvas';
+import type { AnnotatorBox } from './zoom';
 import { Toolbar } from './Toolbar';
 import { renderStroke } from './utils';
 import type { Point } from './types';
+import { newUuid } from '../../utils/uuid';
 import { useImageAnnotatorShortcuts } from '../../shortcuts';
 import {
   DEFAULT_STROKE_HISTORY_STATE,
@@ -20,6 +23,24 @@ interface ImageAnnotatorProps {
   onClose: () => void;
   /** Pre-populated image name (derived from filename) */
   initialName?: string;
+  /**
+   * Optional: Escape cancels (closes without accepting) and a click outside
+   * closes only an empty drawing; Enter and the ✓ accept. Absent: Escape,
+   * Enter and a click outside all accept, exactly as before.
+   */
+  escapeCancels?: boolean;
+  /** Optional: the line under the image in place of "Press Esc or Enter or click outside to accept". */
+  hint?: React.ReactNode;
+  sourceBlob?: Blob;
+  /**
+   * Optional (a touch screen): the picture fills the screen between the tools
+   * and the hint, pinches to zoom and pans with two fingers while one finger
+   * draws, each stroke as wide on screen as the size chosen. Absent: the
+   * picture drawn at its preview size, exactly as before.
+   */
+  zoomable?: boolean;
+  /** Optional, with `zoomable`: open on this part of the picture (its own pixels), as the viewer showed it. */
+  initialBox?: AnnotatorBox | null;
 }
 
 export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
@@ -28,6 +49,11 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
   onAccept,
   onClose,
   initialName = '',
+  escapeCancels = false,
+  hint,
+  sourceBlob,
+  zoomable = false,
+  initialBox,
 }) => {
   const [state, setState] = useState<StrokeHistoryState>(DEFAULT_STROKE_HISTORY_STATE);
   const [saving, setSaving] = useState(false);
@@ -43,8 +69,9 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
     }
   }, [isOpen, initialName]);
 
-  const handleStrokeStart = useCallback((point: Point) => {
-    const id = crypto.randomUUID();
+  // `zoom`: how far the zoomable picture is zoomed in, so a stroke is as wide on screen as the size chosen.
+  const handleStrokeStart = useCallback((point: Point, zoom = 1) => {
+    const id = newUuid();
     setState(s => ({
       ...s,
       currentStroke: {
@@ -52,9 +79,13 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
         tool: s.tool,
         points: [point],
         color: s.color,
-        size: s.strokeSize,
+        size: zoom > 0 ? s.strokeSize / zoom : s.strokeSize,
       },
     }));
+  }, []);
+
+  const handleStrokeCancel = useCallback(() => {
+    setState(s => (s.currentStroke ? { ...s, currentStroke: null } : s));
   }, []);
 
   const handleStrokeMove = useCallback((point: Point) => {
@@ -111,8 +142,7 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
 
       // If no drawings, just pass through original image
       if (!hasDrawings) {
-        const response = await fetch(imageSrc);
-        const blob = await response.blob();
+        const blob = sourceBlob ?? (await (await fetch(imageSrc)).blob());
         await onAccept(blob, false, finalName);
         onClose();
         return;
@@ -170,15 +200,21 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
       },
       save: {
         when: (event) => isOpen && !saving && !keyboardTargetIsInput(event),
-        handle: () => { void handleAccept(); },
+        handle: (event) => {
+          if (escapeCancels && event.key === 'Escape') onClose();
+          else void handleAccept();
+        },
       },
     },
   });
 
+  const outsideTap = () => {
+    // With escapeCancels, a click outside never takes a drawing away: it closes an empty one only.
+    if (!escapeCancels) handleAccept();
+    else if (state.strokes.length === 0) onClose();
+  };
   const handleBackdropClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) {
-      handleAccept();
-    }
+    if (e.target === e.currentTarget) outsideTap();
   };
 
   if (!isOpen) return null;
@@ -192,7 +228,8 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
       {/* Canvas with image and toolbar */}
       <div
         data-pn-image-annotator-stage
-        className="relative flex max-w-full flex-col items-center gap-3"
+        data-pn-image-annotator-zoomable={zoomable ? '' : undefined}
+        className={zoomable ? 'relative flex h-full w-full touch-none flex-col items-center gap-3 px-3 py-3' : 'relative flex max-w-full flex-col items-center gap-3'}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Toolbar - above image */}
@@ -209,19 +246,35 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
           onRedo={handleRedo}
           onClear={handleClear}
           onSave={handleAccept}
+          saveKey={escapeCancels ? 'Enter' : 'Escape'}
         />
 
-        <Canvas
-          imageSrc={imageSrc}
-          strokes={state.strokes}
-          currentStroke={state.currentStroke}
-          tool={state.tool}
-          color={state.color}
-          onStrokeStart={handleStrokeStart}
-          onStrokeMove={handleStrokeMove}
-          onStrokeEnd={handleStrokeEnd}
-          onImageLoad={handleImageLoad}
-        />
+        {zoomable ? (
+          <ZoomableCanvas
+            imageSrc={imageSrc}
+            strokes={state.strokes}
+            currentStroke={state.currentStroke}
+            onStrokeStart={handleStrokeStart}
+            onStrokeMove={handleStrokeMove}
+            onStrokeEnd={handleStrokeEnd}
+            onStrokeCancel={handleStrokeCancel}
+            onImageLoad={handleImageLoad}
+            initialBox={initialBox}
+            onBackgroundTap={outsideTap}
+          />
+        ) : (
+          <Canvas
+            imageSrc={imageSrc}
+            strokes={state.strokes}
+            currentStroke={state.currentStroke}
+            tool={state.tool}
+            color={state.color}
+            onStrokeStart={handleStrokeStart}
+            onStrokeMove={handleStrokeMove}
+            onStrokeEnd={handleStrokeEnd}
+            onImageLoad={handleImageLoad}
+          />
+        )}
 
         {/* Image name input */}
         {initialName && (
@@ -250,8 +303,12 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
         )}
 
         {/* Accept hint */}
-        <div className="text-xs text-muted-foreground">
-          Press <kbd className="px-1.5 py-0.5 bg-muted rounded text-foreground">Esc</kbd> or <kbd className="px-1.5 py-0.5 bg-muted rounded text-foreground">Enter</kbd> or click outside to accept
+        <div className="text-xs text-muted-foreground" data-pn-image-annotator-hint>
+          {hint ?? (
+            <>
+              Press <kbd className="px-1.5 py-0.5 bg-muted rounded text-foreground">Esc</kbd> or <kbd className="px-1.5 py-0.5 bg-muted rounded text-foreground">Enter</kbd> or click outside to accept
+            </>
+          )}
         </div>
       </div>
 

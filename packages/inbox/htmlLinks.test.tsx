@@ -2,8 +2,8 @@
  * Links inside an attached HTML page: the whole window (InboxApp) over a REAL
  * Inbox server in a temp data dir (its own process,
  * tests/helpers/inbox-dom-server.ts in its `html-links` mode). The page's
- * bridge is played by a `link-click` message from the page's own frame, as
- * the bridge posts it in Interact. What is proved: a sibling page that is not
+ * bridge is played by a `link-click` on the port the viewer hands the frame,
+ * as the bridge posts it in Interact. What is proved: a sibling page that is not
  * attached opens read-only over the page with Back, the note and Open in new
  * tab, and Back returns; a link to another attachment of the thread opens it
  * in the pane as a new history entry; an image in the folder that is not
@@ -13,7 +13,7 @@
  * join the one comment (the bridge's selection and multi-target messages played
  * from the frame).
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -23,12 +23,12 @@ import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { NO_BROWSER } from '../../tests/helpers/no-browser';
+import { followLinkInFrame } from '../ui/test-setup/bridgeLinkPort';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
 
 const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-server.ts');
-const LINK_CLICK = 'plannotator-bridge-link-click';
 
 type World = { project: string; htmlLinks: { thread: string; ids: Record<string, string> } };
 
@@ -44,9 +44,12 @@ let savedEventSource: unknown;
 let savedOpen: typeof window.open;
 let opened: string[] = [];
 
-function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
+function loopback(path: string, method = 'GET', body?: string | Uint8Array, encoding?: string | null): Promise<{ status: number; text: string }> {
   return new Promise((done, fail) => {
-    const req = request({ host: '127.0.0.1', port, path, method, headers: { 'Content-Type': 'application/json', Host: `127.0.0.1:${port}` } }, (res) => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json', Host: `127.0.0.1:${port}` };
+    // The window sends a page gzipped (api.ts `post`, `gzip: true`): its bytes and their encoding go through as they are.
+    if (encoding) headers['Content-Encoding'] = encoding;
+    const req = request({ host: '127.0.0.1', port, path, method, headers }, (res) => {
       const chunks: Buffer[] = [];
       res.on('data', (c: Buffer) => chunks.push(c));
       res.on('end', () => done({ status: res.statusCode ?? 0, text: Buffer.concat(chunks).toString('utf8') }));
@@ -101,7 +104,9 @@ beforeEach(() => {
   world = worlds.shift()!;
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const answer = await loopback(String(input), init?.method ?? 'GET', init?.body ? String(init.body) : undefined);
+    const raw = init?.body;
+    const body = raw === undefined || raw === null ? undefined : typeof raw === 'string' ? raw : new Uint8Array(await new Response(raw).arrayBuffer());
+    const answer = await loopback(String(input), init?.method ?? 'GET', body, new Headers(init?.headers).get('content-encoding'));
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
@@ -154,11 +159,9 @@ async function renderSheet() {
   return host;
 }
 
-/** The page's bridge relaying a link click (in Interact), from the frame it lives in. */
+/** The page's bridge relaying a link click (in Interact), on the port the viewer handed it. */
 async function clickLink(frame: HTMLIFrameElement, href: string) {
-  await act(async () => {
-    window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data: { type: LINK_CLICK, href } }));
-  });
+  await followLinkInFrame(frame, href);
 }
 
 const sheetFrame = (el: ParentNode) => el.querySelector<HTMLIFrameElement>('.ib-view .ib-htmlframe iframe')!;
@@ -204,19 +207,26 @@ test.skipIf(!hasDom)("Back from a linked page after a view switch goes back to t
   const params = () => new URLSearchParams(window.location.hash.slice(1));
   expect(params().get('view')).toBe('side');
   const entries = window.history.length;
-  // Full screen, pressed on the linked page: the entry on screen is replaced; the page's entry still names side by side.
+  // Full screen, pressed on the linked page: a new entry over the linked page beside the thread (fullScreenOrigin.ts).
   await act(async () => el.querySelector<HTMLButtonElement>('.ib-vhead [data-full-screen-toggle]')!.click());
   await until(() => el.querySelector('.ib-view')?.hasAttribute('data-full-view') === true, 'full screen');
   expect(params().get('view')).toBe('full');
-  expect(window.history.length).toBe(entries);
-  // Back: the browser's Back to the page's entry (no new entry), then that entry takes the view now on screen.
+  expect(window.history.length).toBe(entries + 1);
+  // Back: the browser's Back past the switch and the linked page to the page's entry, then full screen again with the switch.
   await act(async () => el.querySelector<HTMLButtonElement>('[data-linked-back]')!.click());
   await until(() => el.querySelector('[data-linked-page]') === null, 'back on the attached page');
   await until(() => params().get('view') === 'full', 'the page in full screen');
   expect(params().get('linked')).toBeNull();
-  // No new entry (happy-dom drops the entry left by a Back; a browser keeps it for Forward).
+  // No entry left over: back two, one new (happy-dom drops the entries left by a Back; a browser keeps them for Forward).
   expect(window.history.length).toBeLessThanOrEqual(entries);
   expect(el.querySelector('.ib-view')!.hasAttribute('data-full-view')).toBe(true);
+  // × still knows full screen came from beside the thread: the page goes back beside it.
+  const exit = el.querySelector<HTMLButtonElement>('[data-full-view-close]')!;
+  expect(exit.getAttribute('aria-label')).toBe('Exit full screen');
+  await act(async () => exit.click());
+  await until(() => el.querySelector('.ib-view') !== null && !el.querySelector('.ib-view')!.hasAttribute('data-full-view'), 'the page beside the thread');
+  expect(params().get('linked')).toBeNull();
+  expect(params().get('view')).toBe('side');
 });
 
 test.skipIf(!hasDom)('Back takes focus once it is drawn, even when the next frame comes before React draws it', async () => {

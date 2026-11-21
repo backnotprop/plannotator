@@ -13,7 +13,7 @@
  * their own, looser rule; for a body the store wrote they give the same text.
  */
 import { isInboxActionReport, isInboxNote, type InboxMessageWire } from '@plannotator/core/inbox-types';
-import { splitInboxReplyBody, type InboxReplyBodyParts } from '@plannotator/core/inbox-questions';
+import { inboxQuestionPlace, inboxQuestionsInPlaceOrder, splitInboxReplyBody, type InboxReplyBodyParts } from '@plannotator/core/inbox-questions';
 import { cleanInline } from './folding';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { pickWords } from './components/ReplacedQuestion';
@@ -44,9 +44,16 @@ function answerWords(answer: QuestionAnswer): string {
 /** The answers a reply carried, one group per asking message, in thread order. */
 export interface SentAnswerGroup {
   messageId: string;
-  /** The asking message as a group heading names it ("Claude Code's message, 2:58 PM"). */
+  /** The asking message as a group heading names it ("Claude Code's message, 2:58 PM"; "plan.md in Claude Code's message, 2:58 PM" for a file's questions). */
   name: string;
+  /** The attached file the group's questions were asked in (issue #2828), or absent for the message's body. */
+  file?: { id: string; name: string } | null;
   answers: SentAnswer[];
+}
+
+/** A group heading for the questions inside an attached file: "plan.md in Claude Code's message, 2:58 PM". */
+export function fileGroupName(fileName: string, messageName: string): string {
+  return `${fileName} in ${messageName}`;
 }
 
 /**
@@ -60,10 +67,21 @@ export function sentAnswersOf(reply: InboxMessageWire, messages: readonly InboxM
   const groups: SentAnswerGroup[] = [];
   for (const message of messages) {
     if (message.author.kind !== 'agent') continue;
-    const answers = (message.questions ?? [])
-      .filter((q) => q.sent_reply_id === reply.id && q.answer !== null)
-      .sort((a, b) => a.position - b.position)
-      .map((q) => ({
+    // The body's questions, then each attached file's (issue #2828), each file a group of its own: it numbers its own cards.
+    const sent = inboxQuestionsInPlaceOrder((message.questions ?? []).filter((q) => q.sent_reply_id === reply.id && q.answer !== null));
+    let place: string | null | undefined;
+    for (const q of sent) {
+      const here = inboxQuestionPlace(q);
+      if (here !== place) {
+        place = here;
+        groups.push({
+          messageId: message.id,
+          name: q.attachment ? fileGroupName(q.attachment.name, nameOf(message)) : nameOf(message),
+          ...(q.attachment ? { file: { id: q.attachment.id, name: q.attachment.name } } : {}),
+          answers: [],
+        });
+      }
+      groups.at(-1)!.answers.push({
         id: `${message.id}/${q.key}`,
         messageId: message.id,
         key: q.key,
@@ -71,8 +89,8 @@ export function sentAnswersOf(reply: InboxMessageWire, messages: readonly InboxM
         prompt: cleanInline(q.prompt).replace(/\s+/g, ' ').trim(),
         answer: answerWords(q.answer!),
         skipped: q.answer!.skipped === true,
-      }));
-    if (answers.length > 0) groups.push({ messageId: message.id, name: nameOf(message), answers });
+      });
+    }
   }
   return groups;
 }

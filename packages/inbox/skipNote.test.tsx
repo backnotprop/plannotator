@@ -8,7 +8,7 @@
  * a note alone with Skip them. The window
  * over a REAL Inbox (tests/helpers/inbox-dom-server.ts).
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -175,7 +175,7 @@ function note(card: HTMLElement, words: string) {
 }
 
 function typeNote(card: HTMLElement, words: string, from = 0) {
-  const text = card.querySelector('textarea') as HTMLTextAreaElement;
+  const text = card.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
   // Typed one character at a time, as a person types: each keystroke saves.
   for (let i = from + 1; i <= words.length; i++) {

@@ -15,6 +15,32 @@ export function splitCallFlowFilePath(filePath: string): { directory: string; na
   };
 }
 
+export interface CallFlowSignatureParts {
+  /** Receiver and `new ` prefix, shown muted: `ScheduleCheck.` in `ScheduleCheck.authorize(…)`. */
+  readonly receiver: string;
+  /** The called name, which the row leads with and never truncates. */
+  readonly name: string;
+  /** Arguments and any chained tail, shown most muted and truncated first. */
+  readonly rest: string;
+}
+
+/**
+ * Split a CallDiff call label so the called name leads the row:
+ * `ScheduleCheck.authorize(session, name)` -> `ScheduleCheck.` / `authorize` / `(session, name)`.
+ * The three parts always concatenate back to the label. A chained call keeps
+ * its tail in `rest`; a label with no call keeps its text in `name`.
+ */
+export function splitCallFlowSignature(label: string): CallFlowSignatureParts {
+  const open = label.indexOf('(');
+  const head = open === -1 ? label : label.slice(0, open);
+  const rest = open === -1 ? '' : label.slice(open);
+  const prefix = head.startsWith('new ') ? 'new ' : '';
+  const callee = head.slice(prefix.length);
+  const dot = callee.lastIndexOf('.');
+  if (dot <= 0 || dot === callee.length - 1) return { receiver: prefix, name: callee, rest };
+  return { receiver: prefix + callee.slice(0, dot + 1), name: callee.slice(dot + 1), rest };
+}
+
 export type CallFlowRawLineKind = 'added' | 'removed' | 'context';
 
 export interface CallFlowRawLine {

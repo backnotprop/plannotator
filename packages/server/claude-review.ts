@@ -269,12 +269,12 @@ export function claudeJobIsolationArgs(opts?: ClaudeJobCommandOptions): string[]
 }
 
 /**
- * The Bash commands every Claude agent job (code review, Code Tour, Guided
+ * The Bash commands every Claude agent job (code review, Guided
  * Review and guide repair) may run without a prompt: exactly the read-only
  * commands the job prompts instruct (`packages/core/review-prompt.ts`, the
- * PR-mode messages in `agent-review-message.ts`, and the review/tour/guide
+ * PR-mode messages in `agent-review-message.ts`, and the review/guide
  * system prompts), plus a few read-only lookups those prompts imply (history,
- * blame, file listings). One list for all three builders so they cannot drift.
+ * blame, file listings). One list for every builder so they cannot drift.
  *
  * Deliberately absent: `git -C` (it prefixes ANY git subcommand; workspace
  * reviews inline the combined diff instead), `git grep` / `git ls-remote`
@@ -328,6 +328,9 @@ export const CLAUDE_JOB_DISALLOWED_TOOLS: readonly string[] = [
   "Bash(git grep *)", "Bash(git ls-remote *)", "Bash(gh api *)", "Bash(glab api *)",
   // jj: config injection (global flags, accepted anywhere) and external tools.
   "Bash(jj --config*)", "Bash(jj * --config*)", "Bash(jj * --tool*)",
+  // Plannotator's Inbox MCP server, by name, as Ask AI does (claude-agent-sdk.ts).
+  // `--strict-mcp-config` already loads no MCP server; this holds whatever the transport.
+  "mcp__plannotator-inbox",
 ];
 
 /** `--tools` / `--allowedTools` / `--disallowedTools` for a Claude agent job. */

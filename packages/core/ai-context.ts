@@ -68,8 +68,10 @@ export interface AnnotateContext {
   sourceInfo?: string;
   /** True when the document was converted from HTML or a remote reader result. */
   sourceConverted?: boolean;
-  /** Render mode for the annotated content. */
-  renderAs?: "markdown" | "html";
+  /** Render mode for the annotated content (`DocumentRenderAs`): `code` is a
+   *  config or data file shown as its own text, `content` being that raw file.
+   *  Spelled out, not imported: Pi vendors this file on its own. */
+  renderAs?: "markdown" | "html" | "asciidoc" | "mermaid" | "graphviz" | "code";
   /** Summary of annotations the user has made. */
   annotations?: string;
   /** A review of several files: where the open file sits (1-based `index` of `total`). */

@@ -1,0 +1,26 @@
+# What this repo is built on. Tiles are stack entries in system.yaml.
+sheet: T-001
+scope: root
+kind: landscape
+title: Plannotator
+question: What it is built on, by discipline.
+columns:
+  - label: Runs on
+    means: where the code executes
+    tone: mist
+    row: [t-bun, t-workers, t-do]
+    says: The binary and the Inbox are Bun on your computer; the small hosted services are Cloudflare Workers.
+  - label: Written in
+    tone: sand
+    row: [t-ts, t-react]
+    says: Every page is React.
+  - label: Keeps
+    means: where data lives
+    tone: sage
+    row: [t-jsonl, t-r2, t-d1]
+    says: The local tools keep plain files. The hosted services keep guides, pastes and the ping's daily totals.
+  - label: Talks
+    means: between parts
+    tone: stone
+    row: [t-mcp, t-sse]
+    says: Agents reach the Inbox over MCP; the Inbox page sees changes over one event stream.

@@ -1,0 +1,387 @@
+/**
+ * One read for a run of saved answers, not one per save. A card saves on every
+ * change, and each save used to read the list, the thread, the drafts and the
+ * files (twice for the list and the files): the owner's debug log, 2026-11-02,
+ * shows that burst behind each of 81 saves on a phone. Each save's answer
+ * already brought its questions, so those reads wait for the last save, and
+ * then read only what shows the pick besides the pane: the list once and the
+ * drafts, never the thread or its files (its records are echoes, ownSaves.ts;
+ * the owner's debug log, 2026-11-09: a full re-read behind each key typed). A
+ * list read that brings nothing new draws nothing (listSame.ts). The
+ * window over a REAL Inbox (tests/helpers/inbox-dom-server.ts); the saves are
+ * slowed and their records handed to the stream by hand, as the record frame
+ * comes while the save's answer is still on its way.
+ *
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
+ */
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
+import { act, Profiler } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { request } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+
+const hasDom = typeof document !== 'undefined';
+const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
+
+const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-server.ts');
+/** Past the window's 80 ms pause after a record, so nothing but the hold can spare a read. */
+const SAVE_MS = 130;
+
+type World = { project: string; waiting: string };
+let child: ReturnType<typeof Bun.spawn> | null = null;
+let port = 0;
+let worlds: World[] = [];
+let world: World = { project: '', waiting: '' };
+let dir: string | null = null;
+let root: Root | null = null;
+let host: HTMLElement | null = null;
+let savedFetch: typeof fetch;
+let savedEventSource: unknown;
+/** The stream the window holds: a test hands it frames. */
+let frames: Map<string, (event: MessageEvent<string>) => void>;
+let seq = 1_000_000;
+let saves = 0;
+let reads: string[] = [];
+/** The agents reads since the window opened, never cleared by a test: the load reads them twice (App.tsx `refreshAgents`). */
+let agentsReads = 0;
+let slow = false;
+/** The next saves never answer, as on a connection that went away without a word. */
+let hang = false;
+/** The next saves land only on `land()`, and their record never comes. */
+let gated = false;
+let land: () => void = () => {};
+/** The window's commits (React's Profiler): a read that brings nothing new must add none. */
+let commits = 0;
+/** The question the last save answered with: what the Inbox's record of that save carries. */
+let lastPicked: object | null = null;
+
+function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
+  return new Promise((done, fail) => {
+    const req = request({ host: '127.0.0.1', port, path, method, headers: { 'Content-Type': 'application/json', Host: `127.0.0.1:${port}` } }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (c: Buffer) => chunks.push(c));
+      res.on('end', () => done({ status: res.statusCode ?? 0, text: Buffer.concat(chunks).toString('utf8') }));
+    });
+    req.on('error', fail);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+const frame = (name: string, data: object) => frames.get(name)?.(new MessageEvent(name, { data: JSON.stringify(data) }));
+
+const TESTS = 10;
+
+beforeAll(async () => {
+  if (!hasDom) return;
+  dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-pick-reads-dom-')));
+  mkdirSync(join(dir, 'bin'));
+  writeFileSync(join(dir, 'bin', 'tailscale'), '#!/bin/sh\nexit 1\n');
+  chmodSync(join(dir, 'bin', 'tailscale'), 0o755);
+  child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), String(TESTS)], {
+    env: { ...process.env, DOM_TESTS: '0', PLANNOTATOR_DATA_DIR: join(dir, 'data'), HOME: dir, PATH: `${join(dir, 'bin')}:${process.env.PATH}` },
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'inherit',
+  });
+  const reader = (child.stdout as ReadableStream<Uint8Array>).getReader();
+  let buffer = '';
+  let first: string | null = null;
+  void (async () => {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      buffer += new TextDecoder().decode(value);
+      const at = buffer.indexOf('\n');
+      if (at >= 0 && first === null) first = buffer.slice(0, at).trim();
+    }
+  })();
+  for (let i = 0; i < 400 && first === null; i++) await new Promise((r) => setTimeout(r, 25));
+  if (first === null) throw new Error('the Inbox did not start');
+  const started = JSON.parse(first) as { port: number; worlds: World[] };
+  port = started.port;
+  worlds = started.worlds;
+});
+
+afterAll(async () => {
+  if (!hasDom) return;
+  child?.kill();
+  await child?.exited;
+  child = null;
+  if (dir) rmSync(dir, { recursive: true, force: true });
+  dir = null;
+});
+
+beforeEach(() => {
+  if (!hasDom) return;
+  world = worlds.shift()!;
+  saves = 0;
+  reads = [];
+  agentsReads = 0;
+  slow = false;
+  hang = false;
+  gated = false;
+  land = () => {};
+  commits = 0;
+  lastPicked = null;
+  frames = new Map();
+  savedFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    const method = init?.method ?? 'GET';
+    const answer = await loopback(path, method, init?.body ? String(init.body) : undefined);
+    if (method === 'POST' && path.endsWith('/picks') && answer.status === 200) {
+      saves += 1;
+      lastPicked = (JSON.parse(answer.text) as { questions: object[] }).questions[0] ?? null;
+      if (hang) await new Promise(() => {});
+      if (gated) await new Promise<void>((r) => (land = r));
+      if (slow) {
+        const { questions } = JSON.parse(answer.text) as { questions: { key: string }[] };
+        // The record frame beats the save's own answer.
+        seq += 1;
+        // As the Inbox sends it: the question with its thread.
+        frame('record', { seq, kind: 'question', id: 'qst_any', thread_id: world.waiting, question: questions[0] });
+        await new Promise((r) => setTimeout(r, SAVE_MS));
+      }
+    }
+    if (method === 'GET') reads.push(path.split('?')[0]!);
+    if (method === 'GET' && path.split('?')[0] === '/api/inbox/agents') agentsReads += 1;
+    return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
+  }) as typeof fetch;
+  savedEventSource = (globalThis as Record<string, unknown>).EventSource;
+  (globalThis as Record<string, unknown>).EventSource = class {
+    addEventListener(name: string, listener: (event: MessageEvent<string>) => void) {
+      frames.set(name, listener);
+    }
+    close() {}
+  };
+  window.location.hash = '';
+});
+
+afterEach(() => {
+  if (!hasDom) return;
+  act(() => root?.unmount());
+  host?.remove();
+  root = null;
+  host = null;
+  globalThis.fetch = savedFetch;
+  (globalThis as Record<string, unknown>).EventSource = savedEventSource;
+});
+
+async function wait(ms: number) {
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, ms));
+  });
+}
+
+async function until(check: () => boolean, what: string) {
+  for (let i = 0; i < 200; i++) {
+    if (check()) return;
+    await wait(20);
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+async function open() {
+  window.location.hash = `#thread=${world.waiting}`;
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    root.render(
+      <Profiler id="inbox" onRender={() => (commits += 1)}>
+        <InboxApp />
+      </Profiler>,
+    );
+  });
+  const field = () => host!.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Other answer"]');
+  await until(() => field() !== null, 'the question card');
+  await until(() => frames.has('record'), 'the stream');
+  await wait(200);
+  reads = [];
+  return field()!;
+}
+
+function type(field: HTMLTextAreaElement, words: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+  act(() => {
+    setter.call(field, words);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+const threadRoute = () => `/api/inbox/threads/${world.waiting}`;
+const count = (route: string) => reads.filter((path) => path === route).length;
+
+async function closePane() {
+  await act(async () => {
+    window.location.hash = '';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  await until(() => host!.querySelector('textarea[aria-label^="Other answer"]') === null, 'the pane closed');
+}
+
+test.skipIf(!hasDom)('a run of saves reads nothing until the last one lands, then the list and the drafts once, never the thread or its files', async () => {
+  const field = await open();
+  slow = true;
+  // The first letter answers the question (open → picked): it saves at once, and its run reads what shows the pick.
+  type(field, 'w');
+  await until(() => saves === 1, 'the first save');
+  await until(() => count('/api/inbox/drafts') > 0, 'the read after the first save');
+  await wait(SAVE_MS + 120);
+  // One save's echo is not a whole re-read: the list once, the drafts once (the pick is unsent work), and nothing of
+  // the thread, whose pane drew the save's answer already.
+  expect(count('/api/inbox/threads')).toBe(1);
+  expect(count('/api/inbox/drafts')).toBe(1);
+  expect(count(threadRoute())).toBe(0);
+  expect(count(`${threadRoute()}/attachments`)).toBe(0);
+});
+
+test.skipIf(!hasDom)('words typed in an answer already picked save once after the pause and read nothing: no row or draft label moved', async () => {
+  const field = await open();
+  type(field, 'w');
+  await until(() => saves === 1 && count('/api/inbox/drafts') > 0, 'the first save and its reads');
+  await wait(SAVE_MS + 120);
+  reads = [];
+  slow = true;
+  let words = 'w';
+  for (let i = 0; i < 24; i += 1) {
+    words += 'w';
+    type(field, words);
+    await wait(25);
+  }
+  // No save while the person types (typedAnswers.ts), then one with the last words.
+  expect(saves).toBe(1);
+  await until(() => saves === 2, 'the save after the pause');
+  await until(() => (lastPicked as { answer?: { other?: string } } | null)?.answer?.other === words, 'the last words saved');
+  await wait(SAVE_MS + 300);
+  expect(field.value).toBe(words);
+  // The question stayed picked: nothing the list, the decisions or the drafts show moved, so nothing is read.
+  expect(reads.filter((path) => (path.startsWith('/api/inbox/threads') && !path.endsWith('/ask')) || path === '/api/inbox/drafts' || path === '/api/inbox/decisions')).toEqual([]);
+});
+
+test.skipIf(!hasDom)("a save's record that comes after its answer reads nothing more, and a list read with nothing new draws nothing", async () => {
+  const field = await open();
+  // The page's load is done first: it reads the agents again 2.5 s after it opened and draws what that settles, which
+  // a slow run counted below as the list read's.
+  await until(() => agentsReads >= 2, "the load's second agents read");
+  for (let quiet = -1, i = 0; quiet !== commits && i < 50; i++) {
+    quiet = commits;
+    await wait(200);
+  }
+  type(field, 'a');
+  // The save landed with no record yet: what its record will owe is read at once (the list, the drafts).
+  await until(() => saves === 1 && count('/api/inbox/threads') === 1 && count('/api/inbox/drafts') === 1, 'the reads after the save');
+  await wait(200);
+  reads = [];
+  // The record of that save, after its answer (the stream was slower than the save): an echo, already read for.
+  expect(lastPicked).not.toBeNull();
+  seq += 1;
+  frame('record', { seq, kind: 'question', id: 'qst_own', thread_id: world.waiting, question: lastPicked });
+  await wait(250);
+  expect(reads.filter((path) => (path.startsWith('/api/inbox/threads') && !path.endsWith('/ask')) || path === '/api/inbox/drafts' || path === '/api/inbox/decisions')).toEqual([]);
+  // Nothing changed since the last list read: it draws nothing.
+  const drawn = commits;
+  frame('pins', {});
+  await until(() => count('/api/inbox/threads') === 1, 'the list read for the pins');
+  await wait(80);
+  expect(commits).toBe(drawn);
+}, 20_000);
+
+test.skipIf(!hasDom)('a record that is not a question line is read at once, whatever is saving', async () => {
+  const field = await open();
+  hang = true;
+  type(field, 'a');
+  await until(() => saves === 1, 'the save');
+  // An agent wrote meanwhile: the thread is read now, with the save still out.
+  seq += 1;
+  frame('record', { seq, kind: 'message', first: false, message: { id: 'msg_x', thread_id: world.waiting, author: { kind: 'agent' }, body: '' } });
+  await until(() => count(threadRoute()) === 1, 'the read of that record');
+});
+
+const ownQuestion = async () => {
+  const { thread } = JSON.parse((await loopback(threadRoute())).text) as { thread: { messages: { questions?: object[] }[] } };
+  return thread.messages[0]!.questions![0]!;
+};
+/** Another question's line: another window's pick, or anything else that only moves a question. */
+const otherQuestion = async () => ({ ...(await ownQuestion()), message_id: 'msg_01OTHERTHREAD00000000000000', key: 'q-other' });
+
+test.skipIf(!hasDom)("another question's record is read at once while this one saves", async () => {
+  const field = await open();
+  const question = await otherQuestion();
+  hang = true;
+  type(field, 'a');
+  await until(() => saves === 1, 'the save');
+  seq += 1;
+  frame('record', { seq, kind: 'question', id: 'qst_other', question });
+  await until(() => count(threadRoute()) === 1, 'the read of that record');
+});
+
+test.skipIf(!hasDom)("a save that never answers holds back only its own question's records, and nothing once the pane closes", async () => {
+  const field = await open();
+  const question = await otherQuestion();
+  hang = true;
+  type(field, 'a');
+  await until(() => saves === 1, 'the save');
+  await wait(100);
+  expect(count(threadRoute())).toBe(0);
+
+  seq += 1;
+  frame('record', { seq, kind: 'question', id: 'qst_other', question });
+  await until(() => count(threadRoute()) === 1 && count('/api/inbox/drafts') === 1, 'the read of that record');
+
+  // The pane closes on the save that never answered: records read as they come.
+  await closePane();
+  reads = [];
+  seq += 1;
+  frame('record', { seq, kind: 'question', id: 'qst_own', question: await ownQuestion() });
+  await until(() => count('/api/inbox/threads') > 0 && count('/api/inbox/drafts') === 1, 'the read of its own record');
+});
+
+test.skipIf(!hasDom)('closing a thread with nothing saving reads no list: the rows wait out the settle', async () => {
+  await open();
+  reads = [];
+  await closePane();
+  await wait(120);
+  expect(count('/api/inbox/threads')).toBe(0);
+});
+
+test.skipIf(!hasDom)('a save that lands after the pane closed reads the list then, not at the close', async () => {
+  const field = await open();
+  gated = true;
+  type(field, 'a');
+  await until(() => saves === 1, 'the save');
+  reads = [];
+  await closePane();
+  await wait(120);
+  expect(count('/api/inbox/threads')).toBe(0);
+  land();
+  await until(() => count('/api/inbox/threads') > 0, 'the list read as the save landed');
+});
+
+test.skipIf(!hasDom)('a record held for a save is read as the pane closes, the save still out', async () => {
+  const field = await open();
+  const question = await ownQuestion();
+  // A save that never lands: only the close can read for this record.
+  hang = true;
+  type(field, 'a');
+  await until(() => saves === 1, 'the save');
+  seq += 1;
+  frame('record', { seq, kind: 'question', id: 'qst_own', question });
+  await wait(120);
+  expect(count('/api/inbox/drafts')).toBe(0);
+  await closePane();
+  await until(() => count('/api/inbox/drafts') === 1, 'the read the record owed');
+});
+
+test.skipIf(!hasDom)('no stream at all: the list still follows a saved answer', async () => {
+  const field = await open();
+  type(field, 'a');
+  await until(() => saves === 1 && count('/api/inbox/threads') === 1, 'the list read after the save');
+  // The stream silent, nothing else was read, and the answer is saved.
+  expect(count(threadRoute())).toBe(0);
+  const saved = JSON.parse((await loopback(threadRoute())).text) as { thread: { messages: { questions?: { answer: { other?: string } | null }[] }[] } };
+  expect(saved.thread.messages[0]!.questions?.[0]?.answer?.other).toBe('a');
+});

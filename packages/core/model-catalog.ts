@@ -1,6 +1,6 @@
 /**
  * Model catalogs — the per-provider model lists every picker (Ask AI and the
- * review / Guided Review / Code Tour launchers) reads.
+ * review / Guided Review launchers) reads.
  *
  * The real lists come from the tool the user runs: Claude from the Agent SDK's
  * `supportedModels()` against the installed `claude`, Codex from the
@@ -9,6 +9,8 @@
  * below are used only when discovery fails or is unavailable. Browser-safe and
  * dependency-free: imported by the AI providers and by the UI.
  */
+
+import { catalogFromRows, CLAUDE_FALLBACK_ROWS, CODEX_FALLBACK_ROWS, MODEL_FALLBACKS_CHECKED } from "./model-fallbacks";
 
 export interface CatalogModel {
   id: string;
@@ -39,47 +41,11 @@ export function effortList(ids: readonly string[]): Array<{ id: string; label: s
   return ids.map((id) => ({ id, label: EFFORT_LABELS[id] ?? id }));
 }
 
-const CLAUDE_EFFORTS = effortList(['low', 'medium', 'high', 'xhigh', 'max']);
-const claude = (id: string, label: string, extra: Partial<CatalogModel> = {}): CatalogModel => ({
-  id,
-  label,
-  reasoningEfforts: CLAUDE_EFFORTS,
-  defaultReasoningEffort: 'high',
-  ...extra,
-});
+export const CLAUDE_FALLBACK_MODELS: CatalogModel[] = catalogFromRows(CLAUDE_FALLBACK_ROWS);
 
-export const CLAUDE_FALLBACK_MODELS: CatalogModel[] = [
-  claude('opus', 'Opus (latest)'),
-  claude('sonnet', 'Sonnet (latest)', { default: true }),
-  claude('fable', 'Fable (latest)'),
-  { id: 'haiku', label: 'Haiku (latest)' },
-  claude('claude-fable-5-1', 'Fable 5.1'),
-  claude('claude-opus-5-5', 'Opus 5.5'),
-  claude('claude-sonnet-5', 'Sonnet 5'),
-  { id: 'claude-haiku-4-5', label: 'Haiku 4.5' },
-];
+export const CODEX_FALLBACK_MODELS: CatalogModel[] = catalogFromRows(CODEX_FALLBACK_ROWS);
 
-const codex = (id: string, label: string, efforts: readonly string[], defaultReasoningEffort: string, extra: Partial<CatalogModel> = {}): CatalogModel => ({
-  id,
-  label,
-  reasoningEfforts: effortList(efforts),
-  defaultReasoningEffort,
-  fastMode: true,
-  ...extra,
-});
-const CODEX_TO_ULTRA = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
-const CODEX_TO_MAX = ['low', 'medium', 'high', 'xhigh', 'max'];
-// What codex 0.155.1's `model/list` reports (GPT-6 is listed only to codex
-// >= 0.155); every model offers the fast (`priority`) tier.
-export const CODEX_FALLBACK_MODELS: CatalogModel[] = [
-  codex('gpt-6-sol', 'GPT-6-Sol', CODEX_TO_ULTRA, 'medium', { default: true }),
-  codex('gpt-6-astra', 'GPT-6-Astra', CODEX_TO_ULTRA, 'medium'),
-  codex('gpt-6-luna', 'GPT-6-Luna', CODEX_TO_MAX, 'medium'),
-  codex('gpt-5.6-sol', 'GPT-5.6-Sol', CODEX_TO_ULTRA, 'low'),
-  codex('gpt-5.6-terra', 'GPT-5.6-Terra', CODEX_TO_ULTRA, 'medium'),
-  codex('gpt-5.6-luna', 'GPT-5.6-Luna', CODEX_TO_MAX, 'medium'),
-  codex('gpt-5.5', 'GPT-5.5', ['low', 'medium', 'high', 'xhigh'], 'medium'),
-];
+export { MODEL_FALLBACKS_CHECKED };
 
 /** Where a provider's model list came from: the installed tool, or the static fallback. */
 export type ModelsSource = 'fallback' | 'discovered';
@@ -177,6 +143,45 @@ export function piCatalogFromRpc(rows: readonly PiRpcModel[], toolVersion: strin
       ...(levels.length ? { reasoningEfforts: effortList(levels) } : {}),
     };
   });
+}
+
+/** The subset of one Qwen Code `modelProviders.<authType>[]` entry the catalog reads. */
+export interface QwenSettingsModel {
+  id?: unknown;
+  name?: unknown;
+}
+
+/**
+ * Build the Qwen Code catalog from its `settings.json` (already parsed), so no
+ * `qwen` process runs. `qwen -m <id>` resolves the id against the models
+ * configured for the selected auth type (`security.auth.selectedType`, else
+ * `openai`), so only `modelProviders[<that type>]` is listed: a model of
+ * another type would not run. `model.name` is the model qwen uses without
+ * `-m`; it is the default, and it is listed first when the provider list
+ * does not name it (a built-in model). No reasoning efforts: qwen takes no
+ * per-run effort flag.
+ */
+export function qwenCatalogFromSettings(settings: unknown): CatalogModel[] {
+  if (!settings || typeof settings !== 'object') return [];
+  const root = settings as {
+    model?: { name?: unknown };
+    modelProviders?: Record<string, unknown>;
+    security?: { auth?: { selectedType?: unknown } };
+  };
+  const selected = root.security?.auth?.selectedType;
+  const authType = typeof selected === 'string' && selected.trim() ? selected.trim() : 'openai';
+  const entries = root.modelProviders && typeof root.modelProviders === 'object' ? root.modelProviders[authType] : undefined;
+  const rows: CatalogModel[] = [];
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    if (!entry || typeof entry !== 'object') continue;
+    const { id, name } = entry as QwenSettingsModel;
+    if (typeof id !== 'string' || !id.trim() || rows.some((r) => r.id === id.trim())) continue;
+    rows.push({ id: id.trim(), label: (typeof name === 'string' && name.trim()) || id.trim() });
+  }
+  const active = typeof root.model?.name === 'string' ? root.model.name.trim() : '';
+  if (active && !rows.some((r) => r.id === active)) rows.unshift({ id: active, label: active });
+  const defaultId = active || rows[0]?.id;
+  return rows.map((r) => (r.id === defaultId ? { ...r, default: true } : r));
 }
 
 /**
@@ -369,4 +374,17 @@ export function effortSelectOptions(models: readonly CatalogModel[], modelId: st
 /** Label for a model id: the catalog's, else an alias's, else the id itself. */
 export function modelLabel(models: readonly CatalogModel[], id: string): string {
   return models.find((m) => m.id === id)?.label ?? aliasLabel(id) ?? id;
+}
+
+export function modelFallbackNotice(
+  saved: string,
+  offered: ReadonlyArray<{ id: string; label: string; resolvedId?: string }>,
+  used: string,
+  engineName: string,
+): string | null {
+  if (!saved || offered.length === 0 || offered.some((m) => m.id === saved) || saved === used) return null;
+  const usedRow = offered.find((m) => m.id === used);
+  if (usedRow?.resolvedId === saved) return null;
+  const label = usedRow?.label ?? (used || "its default");
+  return `${saved} isn't offered by ${engineName} any more. Using ${label}.`;
 }

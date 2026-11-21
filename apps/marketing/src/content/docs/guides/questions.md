@@ -20,9 +20,9 @@ Where should losing conflict versions be kept?
 
 Last-write-wins silently drops the loser unless we keep it somewhere.
 
+- [ ] Nowhere — accept silent loss for v1
 - [ ] Local only, purged after 30 days — cheap, no server change
 - [ ] Server-side per user — survives reinstall, needs a retention policy
-- [ ] Nowhere — accept silent loss for v1
 
 Recommended: Local only, purged after 30 days
 :::

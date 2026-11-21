@@ -11,7 +11,9 @@ import {
   type JjEvoLogEntry,
   type JjLineBaseResolution,
   type JjRevisionInfo,
+  type RepoFileListing,
   JJ_TRUNK_REVSET,
+  compareRepoPaths,
   jjCommitRevset,
   jjLineBaseRevset,
   parseJjCommitDiffType,
@@ -117,7 +119,7 @@ export async function getJjContext(
       { id: "jj-last", label: "Last change" },
       { id: "jj-line", label: "Line of work" },
       ...(evologs.length >= 2 ? [{ id: "jj-evolog", label: "Evolution diff" }] : []),
-      { id: "jj-all", label: "All files" },
+      { id: "jj-all", label: "Every file" },
     ],
     worktrees: [],
     availableBranches: targets,
@@ -521,6 +523,41 @@ async function resolveJjSideRevs(
   }
 }
 
+/**
+ * The repository at a jj review's new side (All files). `jj file list` reads
+ * the revision's tree, so it is never "live": the working copy is snapshotted
+ * by the next jj command, and the review's Refresh picks that up.
+ */
+export async function listJjFilesForDiff(
+  runtime: ReviewJjRuntime,
+  diffType: DiffType,
+  defaultBranch: string,
+  cwd?: string,
+): Promise<RepoFileListing | null> {
+  const revs = await resolveJjSideRevs(runtime, diffType, defaultBranch, "", undefined, cwd);
+  if (!revs?.new) return null;
+  const rev = revs.new.rev;
+  const options = { cwd: revs.cwd, timeoutMs: 5 * 60_000 };
+  // NUL-separated through a template where the jj supports it; one path a line otherwise.
+  let listed = await runtime.runJj(["file", "list", "-r", rev, "-T", 'path ++ "\\0"'], options);
+  let paths: string[];
+  if (listed.exitCode === 0) {
+    paths = listed.stdout.split("\0").filter(Boolean);
+  } else {
+    listed = await runtime.runJj(["file", "list", "-r", rev], options);
+    if (listed.exitCode !== 0) return null;
+    paths = listed.stdout.split("\n").filter(Boolean);
+  }
+  paths.sort(compareRepoPaths);
+  const label = await runtime.runJj(["log", "-r", rev, "--no-graph", "-T", "change_id.short()"], options);
+  return {
+    paths,
+    revision: { kind: "commit", label: label.exitCode === 0 && label.stdout.trim() ? label.stdout.trim() : rev },
+    live: false,
+    root: revs.cwd,
+  };
+}
+
 export async function getJjFileContentsForDiff(
   runtime: ReviewJjRuntime,
   diffType: DiffType,
@@ -609,7 +646,7 @@ export function getJjDiffArgs(
         label: `Evolution diff from ${compareTarget.slice(0, 8)}`,
       };
     case "jj-all":
-      return { args: ["diff", "--git", ...whitespaceArgs, "--from", "root()", "--to", "@"], label: "All files" };
+      return { args: ["diff", "--git", ...whitespaceArgs, "--from", "root()", "--to", "@"], label: "Every file" };
     default:
       return null;
   }

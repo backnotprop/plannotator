@@ -5,7 +5,10 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createPullSessionBridge, type PullSessionBridge } from '../../../../packages/ai/session-bridge-pull.ts'
-import { createBridge, OTHER_PLUGIN_INTERRUPT_TEXT, TAKEN_OVER_INTERRUPT_TEXT, takenOverFallback } from './bridge'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { createBridge, OTHER_PLUGIN_INTERRUPT_TEXT, SESSION_COULD_NOT_ANSWER_TEXT, SESSION_GONE_INTERRUPT_TEXT, TAKEN_OVER_INTERRUPT_TEXT, takenOverFallback } from './bridge'
+import { submitOrThrow } from './host'
 import { fakeHost, type FakeHost } from './testing/fake-host'
 import { TAKEN_OVER_BY_PERSON_TEXT, TurnTracker } from './turns'
 
@@ -99,6 +102,49 @@ describe('Ask this session over the pull bridge', () => {
     await running
   })
 
+  // Review of #2780: Claude Code resolves `{ drop }` for a prompt it refuses (after a Stop, until someone types).
+  // Read as taken, the question waited for a turn that never came; it ends `failed`, with words even for an empty reason.
+  for (const [reason, shown] of [
+    ['the session was stopped and nobody has sent input since', 'the session was stopped and nobody has sent input since'],
+    ['  ', SESSION_COULD_NOT_ANSWER_TEXT],
+  ] as const) {
+    test(`a question whose prompt Claude Code drops ends failed, not waiting (${JSON.stringify(reason)})`, async () => {
+      live = true
+      server = createPullSessionBridge({ token: TOKEN, host: 'claude-code', modes: { turn: true, transient: false } })
+      const host = fakeHost()
+      wire(host, server)
+      host.submit = (text) =>
+        submitOrThrow(async () => {
+          host.submits.push(text)
+          return { drop: reason }
+        })
+      const turns = new TurnTracker()
+      const client = createBridge({ host, baseUrl: 'http://127.0.0.1:4321', token: TOKEN, turns, isLive: () => live })
+      const running = client.run()
+
+      await until(() => server!.bridge.status() === 'ready')
+      const { seen, sink } = collector()
+      server.bridge.ask({ askId: 'ask-1', text: '[Plannotator Ask AI] Why step 2?', mode: 'turn' }, sink, new AbortController().signal)
+
+      await until(() => seen.error !== null)
+      expect(host.submits).toHaveLength(1)
+      expect(seen.error).toBe('failed')
+      expect(seen.message).toBe(shown)
+      expect(seen.done).toBeNull()
+      // Nothing waits in the engine for it: no later turn is taken as its answer.
+      expect(turns.queuedPrompts()).toEqual([])
+
+      live = false
+      server.dispose()
+      await running
+    })
+  }
+
+  test("the empty-reason words are the server's own fallback for a failed question", () => {
+    const source = readFileSync(join(import.meta.dir, '../../../../packages/ai/session-bridge.ts'), 'utf8')
+    expect(source).toContain(`message || ${JSON.stringify(SESSION_COULD_NOT_ANSWER_TEXT)}`)
+  })
+
   test('Claude mid-turn reads as busy, and an interrupt aborts the running turn', async () => {
     live = true
     server = createPullSessionBridge({ token: TOKEN, host: 'claude-code', modes: { turn: true, transient: false } })
@@ -114,6 +160,37 @@ describe('Ask this session over the pull bridge', () => {
     expect(host.aborted).toEqual(['user-turn'])
 
     live = false
+    server.dispose()
+    await running
+  })
+
+  // The failure this guards: a poll stays open up to 15 s past `/clear` or a
+  // lease move, and an interrupt arriving on it aborted the turn of whatever
+  // conversation the process had gone on with, and reported ok.
+  test('an interrupt on a held poll after the session ended aborts nothing and reports ok: false', async () => {
+    live = true
+    server = createPullSessionBridge({ token: TOKEN, host: 'claude-code', modes: { turn: true, transient: false } })
+    const host = fakeHost()
+    wire(host, server)
+    const events: unknown[] = []
+    const answer = host.onFetch!
+    host.onFetch = (url, body) => {
+      if (url.endsWith('/event')) events.push(body)
+      return answer(url, body)
+    }
+    const turns = new TurnTracker()
+    turns.onTurnStart('new-conversation-turn', 'a turn of the next conversation')
+    const client = createBridge({ host, baseUrl: 'http://127.0.0.1:4321', token: TOKEN, turns, isLive: () => live })
+    const running = client.run()
+    await until(() => server!.bridge.status() === 'busy')
+
+    live = false
+    const refused = await Promise.resolve(server.bridge.interrupt!()).then(() => 'reported ok', (error: Error) => error.message)
+
+    expect(host.aborted).toEqual([])
+    expect(refused).toBe(SESSION_GONE_INTERRUPT_TEXT)
+    expect(events).toContainEqual({ type: 'interrupted', interruptId: 'interrupt-1', ok: false, message: SESSION_GONE_INTERRUPT_TEXT })
+
     server.dispose()
     await running
   })
@@ -313,7 +390,7 @@ describe('how a bridge loop ends', () => {
     expect(await client(host).run()).toMatchObject({ reason: 'refused', status: 404 })
   })
 
-  test('superseded: the next poll waits 10-15 s instead of taking the server back at once', async () => {
+  test('superseded: the next poll waits 10-14 s instead of taking the server back at once', async () => {
     const host = fakeHost()
     const pollTimes: number[] = []
     host.onFetch = (url) => {
@@ -328,8 +405,26 @@ describe('how a bridge loop ends', () => {
     for (const [index, time] of pollTimes.slice(1).entries()) {
       const gap = time - (pollTimes[index] as number)
       expect(gap).toBeGreaterThanOrEqual(10_000)
-      expect(gap).toBeLessThanOrEqual(15_000)
+      expect(gap).toBeLessThanOrEqual(14_000)
     }
+  })
+
+  test('a question an open poll brings after the client stopped being live is refused as gone, and never submitted', async () => {
+    const host = fakeHost()
+    const events: unknown[] = []
+    let live = true
+    host.onFetch = (url, body) => {
+      if (url !== POLL) {
+        events.push(body)
+        return { status: 200, ok: true, text: '{}' }
+      }
+      live = false
+      return { status: 200, ok: true, text: JSON.stringify({ commands: [{ type: 'ask', askId: 'late', text: 'Why?', mode: 'turn' }] }) }
+    }
+    await client(host, () => live).run()
+
+    expect(host.submits).toEqual([])
+    expect(events).toEqual([{ type: 'error', askId: 'late', code: 'gone' }])
   })
 
   test('a review that is no longer live ends it as ended', async () => {

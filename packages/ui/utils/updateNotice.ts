@@ -116,13 +116,13 @@ export function describeUpdateToast(advert: UpdateAdvert): { title: string; desc
     case 'pi':
       return {
         title: `Plannotator for Pi ${advert.version} is available`,
-        description: `Run ${advert.command}, then restart Pi.`,
+        description: `Run ${advert.command}, then type /reload in Pi.`,
         primary: 'copy',
       };
     case 'opencode':
       return {
         title: `Plannotator ${advert.version} is available`,
-        description: "Run the install script again, then restart OpenCode. It also clears OpenCode's cached plugin.",
+        description: "Run the install script again, then run opencode2 reload (OpenCode 1: restart it). It also clears OpenCode's cached plugin.",
         primary: 'copy',
       };
   }

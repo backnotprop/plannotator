@@ -145,6 +145,52 @@ describe('DecisionControl', () => {
     }
   });
 
+  // Guards the keyboard path to a note: a bumped openNoteRequest opens the
+  // first composer straight away, and the initial value opens nothing.
+  test.skipIf(!hasDom)('openNoteRequest opens the note composer', async () => {
+    const handlers = makeHandlers();
+    await mountControl(REVIEW_FEEDBACK, handlers, { openNoteRequest: 0 });
+    expect(popover()).toBeNull();
+
+    await act(async () => {
+      root!.render(
+        <DecisionControl
+          spec={buildDecisionSpec(REVIEW_FEEDBACK)}
+          handlers={handlers}
+          busy={false}
+          isLoading={false}
+          openNoteRequest={1}
+        />,
+      );
+    });
+    expect(popover()?.dataset.decisionPopover).toBe('composer');
+
+    await typeNote('ship it');
+    await pressKey(noteInput(), { key: 'Enter', ctrlKey: true });
+    expect(handlers['note-with-feedback']).toHaveBeenCalledWith('ship it');
+  });
+
+  // Guards a host that remounts the control (a layout switch) after one
+  // request: the count it mounts with is old and opens nothing.
+  test.skipIf(!hasDom)('a control mounted with a bumped openNoteRequest opens nothing until the next bump', async () => {
+    const handlers = makeHandlers();
+    await mountControl(REVIEW_FEEDBACK, handlers, { openNoteRequest: 1 });
+    expect(popover() === null).toBe(true);
+
+    await act(async () => {
+      root!.render(
+        <DecisionControl
+          spec={buildDecisionSpec(REVIEW_FEEDBACK)}
+          handlers={handlers}
+          busy={false}
+          isLoading={false}
+          openNoteRequest={2}
+        />,
+      );
+    });
+    expect(popover()?.dataset.decisionPopover).toBe('composer');
+  });
+
   // Guards both throwing away a half-typed note and hijacking the host app's
   // own Escape ladder.
   test.skipIf(!hasDom)('Escape ladder: composer keeps the draft, menu consumes, closed propagates', async () => {
@@ -402,6 +448,54 @@ describe('DecisionControl', () => {
     expect(confirmButton()).toBeUndefined();
     expect(popover()?.dataset.decisionPopover).toBe('menu');
     expect(handlers['discard-and-finish']).not.toHaveBeenCalled();
+  });
+
+  // Guards a note lost to a failed send (Inbox code review): a host holding
+  // the notes gets each keystroke, a fresh mount shows what it holds, and the
+  // control never clears a note on submit; the host does, once it went.
+  test.skipIf(!hasDom)('host-held notes survive a submit and a remount until the host clears them', async () => {
+    let held: Record<string, string> = { 'note-with-feedback': 'kept from before' };
+    const handlers = makeHandlers();
+    function Host() {
+      const [drafts, setDrafts] = React.useState(held);
+      return (
+        <DecisionControl
+          spec={buildDecisionSpec(REVIEW_FEEDBACK)}
+          handlers={handlers}
+          busy={false}
+          isLoading={false}
+          drafts={drafts}
+          onDraftsChange={(next) => {
+            held = next;
+            setDrafts(next);
+          }}
+        />
+      );
+    }
+    const mountHost = async () => {
+      host = document.createElement('div');
+      document.body.appendChild(host);
+      root = createRoot(host);
+      await act(async () => root!.render(<Host />));
+    };
+    await mountHost();
+    await openMenu();
+    await clickItem('Send with a note…');
+    expect(noteInput().value).toBe('kept from before');
+    await typeNote('needs a test');
+    expect(held).toEqual({ 'note-with-feedback': 'needs a test' });
+    await pressKey(noteInput(), { key: 'Enter', metaKey: true });
+    expect(handlers['note-with-feedback']).toHaveBeenCalledWith('needs a test');
+    expect(held).toEqual({ 'note-with-feedback': 'needs a test' });
+
+    await act(async () => root!.unmount());
+    root = null;
+    host?.remove();
+    host = null;
+    await mountHost();
+    await openMenu();
+    await clickItem('Send with a note…');
+    expect(noteInput().value).toBe('needs a test');
   });
 
 });

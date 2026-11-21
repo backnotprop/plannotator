@@ -47,6 +47,9 @@ export interface AIErrorMessage {
   code?: string;
 }
 
+/** An error's `code` when the provider itself says the prompt was past the model's context window (Codex's `contextWindowExceeded`). */
+export const AI_ERROR_CONTEXT_WINDOW_EXCEEDED = "context_window_exceeded";
+
 export interface AIResultMessage {
   type: "result";
   sessionId: string;
@@ -208,6 +211,13 @@ export interface CreateSessionOptions {
    * Controls how much thinking the model does before responding.
    */
   reasoningEffort?: string;
+  /**
+   * A single judgment, not a conversation (the Inbox's PR risk agent): this
+   * text is the whole system prompt, and the provider gives the agent no tools
+   * and keeps no session wherever its agent allows that. The context's prompt
+   * is not used.
+   */
+  oneShot?: { systemPrompt: string };
 }
 
 /**
@@ -362,6 +372,16 @@ export interface PiSDKConfig extends AIProviderConfig {
    * doesn't work the same way (e.g., bun build --compile).
    */
   piExecutablePath?: string;
+}
+
+export interface QwenSDKConfig extends AIProviderConfig {
+  type: "qwen-sdk";
+  /**
+   * Explicit path to the qwen CLI binary.
+   * Required when running inside a compiled binary where PATH resolution
+   * doesn't work the same way (e.g., bun build --compile).
+   */
+  qwenExecutablePath?: string;
 }
 
 export interface OpenCodeConfig extends AIProviderConfig {

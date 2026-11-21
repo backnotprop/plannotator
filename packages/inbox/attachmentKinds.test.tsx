@@ -74,14 +74,39 @@ test.skipIf(!hasDom)('an image shows inline in the message and as a tile with it
   const inline = host!.querySelector<HTMLButtonElement>(`[data-gallery-image="${shot.id}"]`)!;
   expect(inline).not.toBeNull();
   // (happy-dom fails every image load, so the frame's src is read off the frame.)
-  expect(inline.querySelector('.ib-gal-frame')!.getAttribute('data-src')).toBe(route);
+  // A frame is a few hundred pixels wide: the 1280-wide picture loads as a copy 800 wide.
+  expect(inline.querySelector('.ib-gal-frame')!.getAttribute('data-src')).toBe(`${route}?w=800`);
   expect(inline.getAttribute('aria-label')).toBe('View checkout.png, PNG image, 2 comments');
   expect(inline.textContent).toContain('1280 × 800');
   const tile = host!.querySelector<HTMLButtonElement>(`button[data-attachment-id="${shot.id}"]`)!;
-  expect(tile.querySelector('.ib-thumb img')!.getAttribute('src')).toBe(route);
+  // The 30-pixel icon loads a copy 128 wide, not the 1280-wide picture (images.ts `drawnImageUrl`).
+  expect(tile.querySelector('.ib-thumb img')!.getAttribute('src')).toBe(`${route}?w=128`);
   await act(async () => inline.click());
   await act(async () => tile.click());
   expect(opened).toEqual([shot.id, shot.id]);
+});
+
+// A tab with dozens of big screenshots died of decoding them at full size: where the window draws a picture small,
+// it asks for a smaller copy; a picture that is already small, or of unknown size, loads as it is.
+test.skipIf(!hasDom)('the gallery and the tile icons load a big picture as a smaller copy, lazily and decoded async', async () => {
+  const big = file('att_01K7EEEEEEEEEEEEEEEEEEEEEE', 'wide.png', 'image', { media_type: 'image/png', width: 3840, height: 2242 });
+  const small = file('att_01K7FFFFFFFFFFFFFFFFFFFFFF', 'small.png', 'image', { media_type: 'image/png', width: 640, height: 400 });
+  const unknown = file('att_01K7GGGGGGGGGGGGGGGGGGGGGG', 'unknown.png', 'image', { media_type: 'image/png' });
+  await render(<AttachmentTiles attachments={[big, small, unknown]} annotationCounts={new Map()} onOpen={() => {}} />);
+  // (happy-dom fails every image load, so the gallery's src is read off its frame.)
+  const gallery = (a: InboxAttachmentState) => host!.querySelector(`[data-gallery-image="${a.id}"] .ib-gal-frame`)!.getAttribute('data-src');
+  const icon = (a: InboxAttachmentState) => host!.querySelector(`button[data-attachment-id="${a.id}"] .ib-thumb img`)!;
+  const route = (a: InboxAttachmentState) => `/api/inbox/attachments/${a.id}/image`;
+  expect(gallery(big)).toBe(`${route(big)}?w=800`);
+  expect(icon(big).getAttribute('src')).toBe(`${route(big)}?w=128`);
+  expect(gallery(small)).toBe(route(small));
+  expect(icon(small).getAttribute('src')).toBe(`${route(small)}?w=128`);
+  expect(gallery(unknown)).toBe(route(unknown));
+  expect(icon(unknown).getAttribute('src')).toBe(route(unknown));
+  for (const img of host!.querySelectorAll('.ib-thumb img')) {
+    expect(img.getAttribute('loading')).toBe('lazy');
+    expect(img.getAttribute('decoding')).toBe('async');
+  }
 });
 
 test.skipIf(!hasDom)('a PDF, a plain file and an unknown kind are Download links, never opened in the window', async () => {

@@ -7,7 +7,7 @@
  * stays readable as the control's description (a hidden element named by
  * aria-describedby, since the tooltip itself tags nothing).
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, expect, test } from 'bun:test';
 import React, { act } from 'react';

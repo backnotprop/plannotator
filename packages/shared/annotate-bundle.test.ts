@@ -34,6 +34,16 @@ describe("parseAnnotateBundle", () => {
 		expect(parseAnnotateBundle([files[0], { path: "/r/c.pdf", renderAs: "pdf" }])).toBeNull();
 		expect(parseAnnotateBundle("nope")).toBeNull();
 	});
+
+	test("a config file in the review keeps the bundle: its render mode is code", () => {
+		// The failure: the CLI names a .toml `code`, and a validator that does
+		// not know the mode drops the whole review's bundle UI.
+		const files = [
+			{ path: "/r/plan.md", renderAs: "markdown" },
+			{ path: "/r/pyproject.toml", renderAs: "code" },
+		];
+		expect(parseAnnotateBundle(files)).toEqual(files as never);
+	});
 });
 
 describe("annotateBundleDocumentCounts", () => {

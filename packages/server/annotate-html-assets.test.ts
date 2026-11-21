@@ -486,7 +486,8 @@ describe("annotate catch-all: framed requests", () => {
 
   test("a plain request for a missing path still gets the app, as before #1561", async () => {
     await withServer(async (url) => {
-      for (const path of ["/prototype-slash.html", "/assets/frame", "/"]) {
+      // (Not under /assets/: that prefix is the packed chunks route, where a miss is 404.)
+      for (const path of ["/prototype-slash.html", "/docs/frame", "/"]) {
         const response = await fetch(`${url}${path}`);
         expect(response.status).toBe(200);
         expect(await response.text()).toContain("PLANNOTATOR_APP_SHELL");

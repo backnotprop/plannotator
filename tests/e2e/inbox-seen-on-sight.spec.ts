@@ -26,7 +26,7 @@
  * PNGs land in .local/proof/seen-on-sight/ (PLANNOTATOR_E2E_PROOF_DIR).
  */
 
-import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -64,7 +64,7 @@ test.beforeAll(async () => {
   rmSync(proofDir, { recursive: true, force: true });
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-seen-on-sight-e2e-');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
@@ -172,8 +172,8 @@ test('desktop, at the end of the thread: the arrival scrolls into view, the row 
     expect(await rowsOf(page)).toEqual(order);
     expect(await sectionOf(page, id)).toBe(section);
     expect((await storeRow(id)).unseen).toBe(1);
-    // The Show line counts only the other thread, and names only its project.
-    await expect(page.locator('[data-inbox-notice]')).toContainText('1 new in docs-other');
+    // The Show line counts only the other thread, and names only it.
+    await expect(page.locator('[data-inbox-notice]')).toContainText(/^New from .+: “Docs deploy”/);
     expect(await noticeText(page)).not.toContain('billing-end');
     await shot(page, '01-desktop-arrived-bold');
     // Its first lines are on screen (the view followed it to the end).
@@ -415,8 +415,10 @@ test('phone (WebKit, iPhone 15): an arrival under the annotations sheet is not s
     // At the end of the thread, then the sheet over it.
     const body = page.locator('section.ib-pane .ib-pbody');
     await body.evaluate((b) => (b.scrollTop = b.scrollHeight));
-    await page.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ }).tap();
-    await page.locator('section.ib-pane [data-annotations-chip]').tap();
+    await page.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).tap();
+    // A phone's foot line ("1 question open · 1 comment") opens its sheet; Review opens the comments (approval "inbox-reply-foot-phone").
+    await page.locator('section.ib-pane [data-foot-summary]').tap();
+    await page.getByRole('dialog', { name: 'Goes with this reply' }).getByRole('button', { name: 'Review comments' }).tap();
     const sheet = page.locator('.ib-annpop');
     await expect(sheet).toBeVisible();
     // Back at the end of the thread, the sheet over it. The window learns it is at the end from the scroll

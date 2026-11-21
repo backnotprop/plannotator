@@ -9,8 +9,8 @@
  */
 
 import { parsePortSelection } from "@plannotator/shared/port-range";
-import { loadConfig, resolveUrlHost } from "@plannotator/shared/config";
-import { isAutoUrlHost, resolveAutoHostCached } from "@plannotator/shared/tailscale";
+import { loadConfig, resolveLocalUrlHostname } from "@plannotator/shared/config";
+import { resolveAdvertisedSessionUrl } from "@plannotator/shared/advertised-url";
 
 const DEFAULT_REMOTE_PORT = 19432;
 const LOOPBACK_HOST = "127.0.0.1";
@@ -87,6 +87,18 @@ export function isRemoteSession(): boolean {
   }
 
   return false;
+}
+
+/**
+ * Remote mode that only SSH turned on (`PLANNOTATOR_REMOTE` unset, `SSH_TTY`
+ * or `SSH_CONNECTION` set). The server binds and advertises exactly as in any
+ * remote mode, but a request that comes over loopback (the person's own SSH
+ * tunnel, or a browser on that machine) is answered as in a local session:
+ * `isSshTunnelRequest` in this-machine.ts. `PLANNOTATOR_REMOTE=1` keeps
+ * remote mode whole (a proxy on this machine also arrives over loopback).
+ */
+export function isSshDetectedRemote(): boolean {
+  return getRemoteOverride() === null && Boolean(process.env.SSH_TTY || process.env.SSH_CONNECTION);
 }
 
 /**
@@ -185,47 +197,25 @@ export async function startBunServerOnAvailablePort<TServer>(
 }
 
 /**
- * Bind local sessions to loopback, but keep remote sessions reachable via the
- * container or host network interface for SSH/devcontainer/Docker forwarding.
+ * Bind local sessions to loopback. Remote sessions bind every interface so other
+ * devices and published Docker ports can reach them; `ssh -L` and editor port
+ * forwards reach loopback.
  */
 export function getServerHostname(): string {
   return isRemoteSession() ? "0.0.0.0" : LOOPBACK_HOST;
 }
 
-/** True when the advertised-URL host is overridden away from localhost. */
-export function isUrlHostOverridden(): boolean {
-  const host = resolveUrlHost(loadConfig());
-  if (host === undefined) return false;
-  if (isAutoUrlHost(host)) return isRemoteSession() && resolveAutoHostCached() !== undefined;
-  return true;
+/**
+ * The localhost subdomain sessions are advertised at (`urlHost:
+ * "plannotator.localhost"`, #2184), or undefined. Servers read it once at
+ * start and hand it to the loopback Host checks of the routes a page calls
+ * (Ask this session, `/api/update`), so a page at that name is "this computer".
+ */
+export function getLocalUrlHostname(): string | undefined {
+  return resolveLocalUrlHostname(loadConfig());
 }
 
-let warnedLocalUrlHost = false;
-
-/**
- * Compose the URL advertised to the user for a bound port (issue #657).
- * Display-only: the PLANNOTATOR_URL_HOST / urlHost override changes what is
- * printed and opened, never which interface the server listens on
- * (getServerHostname). Remote sessions only: a local session binds loopback,
- * so honoring the override would advertise (and auto-open) a URL nothing is
- * listening on — the override is ignored with a once-per-process warning.
- * The "auto" sentinel resolves the host from Tailscale (resolveAutoHost).
- * Same-machine subprocesses must not use this — they get a loopback URL so a
- * tailnet-only hostname can't break local agent jobs.
- */
+/** Compose the display-only URL advertised for a bound server port. */
 export function buildAdvertisedUrl(port: number): string {
-  const host = resolveUrlHost(loadConfig());
-  if (host === undefined) return `http://localhost:${port}`;
-  if (!isRemoteSession()) {
-    if (!warnedLocalUrlHost) {
-      warnedLocalUrlHost = true;
-      process.stderr.write(
-        `[plannotator] Warning: advertised URL host ${JSON.stringify(host)} ignored — this is a local session, so the server binds loopback and only localhost is reachable. Set PLANNOTATOR_REMOTE=1 to use the override.\n`,
-      );
-    }
-    return `http://localhost:${port}`;
-  }
-  const resolved = isAutoUrlHost(host) ? resolveAutoHostCached() : host;
-  if (resolved === undefined) return `http://localhost:${port}`;
-  return `http://${resolved}:${port}`;
+  return resolveAdvertisedSessionUrl(port, isRemoteSession());
 }

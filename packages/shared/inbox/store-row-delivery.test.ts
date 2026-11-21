@@ -172,8 +172,8 @@ describe("the row's delivery in a thread with two sessions (the session that ask
     store.sendReply(m2.id, { words: "Yes, clean them up.", idempotency_key: "k1" });
     // M1's question stays open, but with no pick the Send skips nothing: the session that asked is M2's.
     expect(store.questionsOf(m1.id)[0]!.state).toBe("open");
-    // Named as the thread's line names it: the thread's first agent (the root's), whoever it goes to.
-    expect(row(m1.id).delivery).toMatchObject({ kind: "reply", state: "queued", reason: "working", send_now: true, host: "pi" });
+    // Named for the session it goes to (M2's), not the thread's first agent (handoff "multi-agent-thread-model", A).
+    expect(row(m1.id).delivery).toMatchObject({ kind: "reply", state: "queued", reason: "working", send_now: true, host: "claude-code" });
     expect(row(m1.id).delivery!.asking).toBeUndefined();
   });
 
@@ -183,5 +183,69 @@ describe("the row's delivery in a thread with two sessions (the session that ask
     store.savePicks(m1.id, [{ key: q.key, revision: q.revision, answer: pickFor(q, "eu-west") }]);
     store.sendReply(m2.id, { words: "And keep the logs bucket.", idempotency_key: "k1" });
     expect(row(m1.id).delivery).toMatchObject({ state: "saved", reason: "ended", asking: { host: "pi", name: null } });
+  });
+});
+
+describe("the row's Session ended", () => {
+  test("waiting on the person from a session that ended: marked outside Quiet; open questions keep their count", () => {
+    const { store, project, ended, row } = world();
+    const asked = store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: question("Which target?", ["ARM", "x86"]), wakes: true }).message;
+    expect(row(asked.id).session_ended).toBeUndefined();
+    ended.add("ses_a");
+    expect(row(asked.id).session_ended).toBe(true);
+    expect(row(asked.id).questions.open).toBe(1);
+  });
+
+  test("never for a thread in Quiet or archived", () => {
+    const { store, project, ended, row } = world();
+    const asked = store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: question("Which target?", ["ARM", "x86"]), wakes: true }).message;
+    ended.add("ses_a");
+    store.resolveThread(asked.id, true);
+    expect(row(asked.id).session_ended).toBeUndefined();
+
+    const told = store.sendMessage({ project_id: project.id, author: agent("ses_b"), body: "Done.", wakes: true }).message;
+    ended.add("ses_b");
+    store.markSeen(told.id);
+    expect(row(told.id).section).toBe("quiet");
+    expect(row(told.id).session_ended).toBeUndefined();
+  });
+
+  test("a host with no signal shows nothing: no `wakes`, however long since it was heard from", () => {
+    const { store, project, ended, row } = world();
+    const asked = store.sendMessage({ project_id: project.id, author: agent("ses_mcp", "cursor"), body: question("Which target?", ["ARM", "x86"]) }).message;
+    ended.add("ses_mcp");
+    expect(row(asked.id).session_ended).toBeUndefined();
+  });
+
+  test("a saved reply keeps it; moved to another session, the thread is not owed to the ended one", () => {
+    const { store, project, ended, row } = world();
+    const asked = store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "Which target?", wakes: true }).message;
+    const reply = store.sendReply(asked.id, { words: "ARM.", idempotency_key: "k1" }).reply!;
+    ended.add("ses_a");
+    expect(row(asked.id).delivery).toMatchObject({ state: "saved", reason: "ended" });
+    expect(row(asked.id).session_ended).toBe(true);
+    store.readdressMessage(reply.id, { host: "pi", session: "ses_b" }, { askerEnded: true, tookOver: true });
+    expect(row(asked.id).session_ended).toBeUndefined();
+    expect(store.threadOwner(asked.id)).toEqual({ host: "pi", session: "ses_b" });
+    // An agent writing after it owns the thread again by the usual rule.
+    store.sendMessage({ project_id: project.id, author: agent("ses_c"), body: "Picked it up.", reply_to: reply.id, wakes: true });
+    expect(store.threadOwner(asked.id)).toEqual({ host: "claude-code", session: "ses_c" });
+  });
+});
+
+describe("the row's delivery while the reply waits on T3 (approval \"inbox-t3-reply-waiting-line\")", () => {
+  test("it waits on T3, never Sending or plain Queued, though the session's last poll still reads as idle; then delivered as usual", () => {
+    const { store, project, connections, row } = world();
+    const session = "mcp:9843db4f-69c2-4891-9a2b-de6f0afaed58";
+    const asked = store.sendMessage({ project_id: project.id, author: agent(session, "t3"), body: "Ship the worker today?", wakes: true }).message;
+    const reply = store.sendReply(asked.id, { words: "Yes, ship it.", idempotency_key: "k1" }).reply!;
+    // T3 quit: its Claude's last poll is still inside the live window, idle.
+    connections.set(session, { busy: false, send_now: false });
+    expect(row(asked.id).delivery).toMatchObject({ state: "sending", reason: "idle" });
+    store.recordT3Wait(reply.id, "closed");
+    expect(row(asked.id).delivery).toMatchObject({ state: "queued", t3_wait: "closed" });
+    store.recordDelivery(reply.id, { host: "t3", session });
+    expect(row(asked.id).delivery).toMatchObject({ state: "delivered" });
+    expect(row(asked.id).delivery).not.toHaveProperty("t3_wait");
   });
 });

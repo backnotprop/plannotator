@@ -73,7 +73,7 @@ test("a sibling page comes back with its <base href>, its asset URL, and its ima
   expect((await linked(server, sheet, "sub/deep.htm")).status).toBe(200);
 });
 
-test("refusals: outside the folder, hidden, not HTML, missing, too large, another site, not an HTML attachment", async () => {
+test("refusals: outside the folder, hidden, not HTML, missing, too large, another site, unsupported document type", async () => {
   const { server, sheet, notes } = await world();
   const code = async (res: Response) => [res.status, ((await res.json()) as { code: string }).code];
   expect(await code(await linked(server, sheet, "../outside.html"))).toEqual([403, "linked_page_outside"]);
@@ -85,7 +85,7 @@ test("refusals: outside the folder, hidden, not HTML, missing, too large, anothe
   expect(await code(await linked(server, sheet, "gone.html"))).toEqual([404, "linked_page_missing"]);
   expect(await code(await linked(server, sheet, "huge.html"))).toEqual([413, "linked_page_too_large"]);
   expect(await code(await linked(server, sheet, ""))).toEqual([422, "validation_error"]);
-  expect(await code(await linked(server, notes, "B-cards.html"))).toEqual([415, "attachment_not_html"]);
+  expect(await code(await linked(server, notes, "B-cards.html"))).toEqual([415, "linked_page_not_html"]);
   expect(await code(await linked(server, sheet, "B-cards.html", { "Sec-Fetch-Site": "cross-site" }))).toEqual([403, "cross_origin"]);
   const post = await fetch(`http://127.0.0.1:${server.port}/api/inbox/attachments/${sheet}/linked-page?path=B-cards.html`, { method: "POST" });
   expect(post.status).toBe(405);
@@ -132,3 +132,36 @@ test("a parent folder swapped for a symlink between the realpath and the open ne
     await swapper.exited;
   }
 }, 30000);
+
+
+test("Markdown siblings open as text under the same folder and origin guards", async () => {
+  const { server, project, notes } = await world();
+  writeFileSync(join(project, "peer.md"), "# Linked document\n\n[Next](sub/deep.mdx)");
+  writeFileSync(join(project, "sub", "deep.mdx"), "# Deep document");
+  writeFileSync(join(project, ".private", "secret.md"), "# Hidden");
+  writeFileSync(join(project, "huge.md"), "x".repeat(2 * 1024 * 1024 + 1));
+  writeFileSync(join(project, "image.png"), "not Markdown");
+  symlinkSync(join(project, "..", "outside.html"), join(project, "escape.md"));
+  const answer = await linked(server, notes, "peer.md");
+  expect(answer.status).toBe(200);
+  expect(await answer.json()).toMatchObject({ path: join(project, "peer.md"), name: "peer.md", html: null, text: "# Linked document\n\n[Next](sub/deep.mdx)", url: null });
+  expect((await linked(server, notes, "sub/deep.mdx")).status).toBe(200);
+  for (const path of ["../outside.md", "escape.md", ".private/secret.md"]) expect((await linked(server, notes, path)).status).toBe(403);
+  expect((await linked(server, notes, "huge.md")).status).toBe(413);
+  expect((await linked(server, notes, "missing.md")).status).toBe(404);
+  expect((await linked(server, notes, "image.png")).status).toBe(415);
+  expect((await linked(server, notes, "peer.md", { "Sec-Fetch-Site": "same-site" })).status).toBe(403);
+});
+
+test("a link named like a document but leading to another kind of file is refused by where it leads", async () => {
+  const { server, project, sheet, notes } = await world();
+  writeFileSync(join(project, "data.json"), '{"token":"x"}');
+  symlinkSync(join(project, "data.json"), join(project, "alias.md"));
+  symlinkSync(join(project, "data.json"), join(project, "alias.html"));
+  const code = async (res: Response) => [res.status, ((await res.json()) as { code: string }).code];
+  expect(await code(await linked(server, notes, "alias.md"))).toEqual([415, "linked_page_not_html"]);
+  expect(await code(await linked(server, sheet, "alias.html"))).toEqual([415, "linked_page_not_html"]);
+  // The image route reads a linked document the same way.
+  const image = await fetch(`http://127.0.0.1:${server.port}/api/inbox/attachments/${notes}/markdown-image?document=alias.md&path=a.png`);
+  expect(image.status).toBe(415);
+});

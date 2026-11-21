@@ -1,13 +1,13 @@
 /**
  * First run, "One next step" (components/EmptyState.tsx; the approved design
  * inbox-connect-next-step, variant C), on each of the mock's computers:
- * Typical, Plugin missing, Nothing found, Tool locked off, and a page that
- * cannot read this computer's agents (opened over the tailnet). Turn on goes
+ * Typical, Plugin missing, Nothing found, Tool locked off, and a read of the
+ * agents that failed. Turn on goes
  * through POST /api/inbox/agents (a recording fetch) and the card moves to the
  * next step; Not now puts a step off; installing is a command to copy; MCP is
  * folded behind "Use MCP instead"; Message opens compose to the live session.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -50,7 +50,7 @@ interface Mounted {
   model: () => InboxAgentsModel | null;
 }
 
-function mount(start: InboxAgentsModel | null, options: { unavailable?: 'tailnet' | 'failed' | null; sessions?: ComposeSessionsModel | null; onRetry?: () => void } = {}): Mounted {
+function mount(start: InboxAgentsModel | null, options: { unavailable?: 'failed' | null; sessions?: ComposeSessionsModel | null; onRetry?: () => void } = {}): Mounted {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
@@ -139,6 +139,15 @@ test.skipIf(!hasDom)('Turn on saves through POST /api/inbox/agents, says when it
   expect(text(hero.querySelector('.ib-cn-eb'))).toBe('Next step · last one');
   expect([...listOf(m.el, 'Already connected')].map(text)).toContain('Pi next session');
   expect(text(m.el.querySelector('[aria-live="polite"]'))).toBe("Pi's Inbox tool is on. Start a new Pi session, or run /reload in one that is running.");
+});
+
+test.skipIf(!hasDom)("Turn on for Cline says its tool is on and when it applies, and lists it as next session", async () => {
+  const m = mount(agentsModel({ cline: toolOff() }));
+  globalThis.fetch = (async (_input: RequestInfo | URL, _init?: RequestInit) =>
+    new Response(JSON.stringify({ ...agentsModel({ cline: ready() }), error: null }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as typeof fetch;
+  await click(button(card(m.el), 'Turn on')!);
+  expect(text(m.el.querySelector('[aria-live="polite"]'))).toBe("Cline's Inbox tool is on. It applies to Cline sessions started from now on.");
+  expect([...listOf(m.el, 'Already connected')].map(text)).toContain('Cline next session');
 });
 
 test.skipIf(!hasDom)('a refused Turn on says why on the card and offers Try again', async () => {
@@ -237,12 +246,6 @@ test.skipIf(!hasDom)('all set: nothing left, a quiet card, and Message is the pr
   expect(button(m.el, 'Message Claude Code')!.classList.contains('ib-pri')).toBe(true);
 });
 
-test.skipIf(!hasDom)('the agents cannot be read here (a page over the tailnet): the first step with the commands, and where to connect in one click', () => {
-  const m = mount(null, { unavailable: 'tailnet' });
-  expect(text(card(m.el).querySelector('h3'))).toBe('Connect your first agent');
-  expect(text(card(m.el))).toContain('Open the Inbox on the computer to connect agents with one click.');
-});
-
 test.skipIf(!hasDom)('while the agents load, nothing but the heading shows', () => {
   const m = mount(null);
   expect(m.el.querySelector('.ib-cn')).toBeNull();
@@ -250,11 +253,10 @@ test.skipIf(!hasDom)('while the agents load, nothing but the heading shows', () 
   expect(text(m.el.querySelector('h2'))).toBe('No agent has written yet');
 });
 
-test.skipIf(!hasDom)('a read of the agents that failed on this computer says so, with Try again; never the tailnet line', async () => {
+test.skipIf(!hasDom)('a read of the agents that failed on this computer says so, with Try again', async () => {
   let retried = 0;
   const m = mount(null, { unavailable: 'failed', onRetry: () => retried++ });
   expect(text(card(m.el).querySelector('h3'))).toBe('Connect your first agent');
-  expect(text(card(m.el))).not.toContain('Open the Inbox on the computer');
   expect(text(card(m.el).querySelector('[data-agents-failed]'))).toBe('The Inbox could not read the agents on this computer. Try again');
   await click(button(card(m.el), 'Try again')!);
   expect(retried).toBe(1);

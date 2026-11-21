@@ -6,7 +6,7 @@
  * read exactly as before.
  */
 import { describe, expect, test } from 'bun:test';
-import { dateTime, dayWords, formatCount, plural, questionCount, shortTime, whenTime } from './format';
+import { dateTime, dayWords, formatCount, plural, questionCount, shortAgentName, shortTime, whenTime } from './format';
 
 // Local times, so the day boundaries are the person's own.
 const now = new Date(2026, 9, 12, 21, 30);
@@ -54,5 +54,25 @@ describe('counts', () => {
     expect(plural(0, 'thread')).toBe('0 threads');
     expect(questionCount(1500)).toBe('1,500 questions');
     expect(questionCount(1)).toBe('');
+  });
+});
+
+describe('shortAgentName: an agent name a toast shows (design record "inbox-toasts-break-fixes")', () => {
+  test('a name up to 40 characters is shown whole, its spacing tidied', () => {
+    expect(shortAgentName('Claude Code')).toBe('Claude Code');
+    expect(shortAgentName('A'.repeat(40))).toBe('A'.repeat(40));
+    expect(shortAgentName('  Claude   Code  ')).toBe('Claude Code');
+  });
+
+  test('a longer one is cut to 40 with "…", at a space when one is near the end', () => {
+    expect(shortAgentName('Claude Code (worktree agent-a0316994da8440ab5)')).toBe('Claude Code (worktree agent-a0316994da8…');
+    expect(shortAgentName('A'.repeat(41))).toBe(`${'A'.repeat(39)}…`);
+    expect(shortAgentName('The quick brown fox jumps over the lazy dog again')).toBe('The quick brown fox jumps over the…');
+  });
+
+  test('an emoji or an accent is never split', () => {
+    const coder = '👩‍💻';
+    expect(shortAgentName(coder.repeat(45))).toBe(`${coder.repeat(39)}…`);
+    expect(shortAgentName(`${'e'.repeat(38)}é̃xtra`)).toBe(`${'e'.repeat(38)}é̃…`);
   });
 });

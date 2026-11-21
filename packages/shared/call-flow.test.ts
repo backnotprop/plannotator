@@ -44,11 +44,11 @@ const runtime: CallFlowRuntime = {
   grammarCacheDir: "/runtime/grammar-cache",
   installedLanguageIds: ["javascript-typescript"],
   managed: true,
-  version: "0.4.1",
+  version: CALLDIFF_VERSION,
 };
 
 const parsedResult: ParsedCallDiffWorkerResult = {
-  version: "0.4.1",
+  version: CALLDIFF_VERSION,
   from: "before",
   to: "after",
   raw: "",
@@ -408,7 +408,7 @@ describe("CallFlowService", () => {
       resolveRuntime: async () => ({
         ok: false,
         reason: "node-unavailable",
-        message: "Call flow requires Node.js 22 or newer, which was not found on PATH.",
+        message: "Call flow needs Node.js 22.18 or newer, which was not found on PATH.",
       }),
     });
     const rawPatch = [
@@ -594,7 +594,7 @@ describe("CallFlowService", () => {
     const runtimeDir = join(repo, "fake-runtime");
     const packageRoot = join(runtimeDir, "node_modules", "calldiff");
     mkdirSync(join(packageRoot, "dist"), { recursive: true });
-    writeFileSync(join(packageRoot, "package.json"), JSON.stringify({ type: "module", version: "0.4.1" }));
+    writeFileSync(join(packageRoot, "package.json"), JSON.stringify({ type: "module", version: CALLDIFF_VERSION }));
     writeFileSync(join(packageRoot, "dist", "run.js"), [
       'import { execFileSync } from "node:child_process";',
       'export function runDiff() { execFileSync("npm", ["--version"]); return {}; }',
@@ -611,7 +611,7 @@ describe("CallFlowService", () => {
       grammarCacheDir: join(runtimeDir, "grammar-cache"),
       installedLanguageIds: ["javascript-typescript"],
       managed: true,
-      version: "0.4.1",
+      version: CALLDIFF_VERSION,
     };
     const service = new CallFlowService({ resolveRuntime: async () => ({ ok: true, runtime: fakeRuntime }) });
     const result = await service.analyze({ ...input(), rawPatch });
@@ -628,7 +628,7 @@ describe("CallFlowService", () => {
     const runtimeDir = join(repo, "missing-runtime");
     const packageRoot = join(runtimeDir, "node_modules", "calldiff");
     mkdirSync(join(packageRoot, "dist"), { recursive: true });
-    writeFileSync(join(packageRoot, "package.json"), JSON.stringify({ type: "module", version: "0.4.1" }));
+    writeFileSync(join(packageRoot, "package.json"), JSON.stringify({ type: "module", version: CALLDIFF_VERSION }));
     writeFileSync(join(packageRoot, "dist", "run.js"), "export function runDiff() { throw new Error('must not run'); }\n");
     const fakeRuntime: CallFlowRuntime = {
       nodePath: process.execPath,
@@ -637,7 +637,7 @@ describe("CallFlowService", () => {
       grammarCacheDir: join(runtimeDir, "grammar-cache"),
       installedLanguageIds: ["javascript-typescript", "python"],
       managed: true,
-      version: "0.4.1",
+      version: CALLDIFF_VERSION,
     };
     const service = new CallFlowService({ resolveRuntime: async () => ({ ok: true, runtime: fakeRuntime }) });
     const result = await service.analyze({ ...input(), rawPatch });

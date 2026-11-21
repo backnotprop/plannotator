@@ -1,0 +1,34 @@
+/* Tokyo Night Moon — folke/tokyonight.nvim "moon" (dark only) */
+.theme-tokyo-night-moon,
+.theme-tokyo-night-moon.light {
+  --background: #222436;
+  --foreground: #c8d3f5;
+  --card: #1e2030;
+  --card-foreground: #c8d3f5;
+  --popover: #1e2030;
+  --popover-foreground: #c8d3f5;
+  --primary: #82aaff;
+  --primary-foreground: #1e2030;
+  --secondary: #444a73;
+  --secondary-foreground: #c8d3f5;
+  --muted: #2f334d;
+  --muted-foreground: #828bb8;
+  --accent: #86e1fc;
+  --accent-foreground: #1e2030;
+  --destructive: #ff757f;
+  --destructive-foreground: #1e2030;
+  --border: #444a73;
+  --input: #2f334d;
+  --ring: #82aaff;
+  --success: #c3e88d;
+  --success-foreground: #1e2030;
+  --warning: #ffc777;
+  --warning-foreground: #1e2030;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #191b29;
+  --focus-highlight: #86e1fc;
+}

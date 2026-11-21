@@ -18,57 +18,18 @@
  * PNGs (light and dark) land in PLANNOTATOR_PHONE_STEPPING_SHOTS (default .local/proof/phone-stepping).
  */
 
-import { chromium, devices, expect, test, webkit, type Browser, type Page } from '@playwright/test';
+import { chromium, devices, expect, test, webkit, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { deflateSync } from 'node:zlib';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { finger, png } from './phone-touch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const shots = resolve(process.env.PLANNOTATOR_PHONE_STEPPING_SHOTS ?? join(repo, '.local/proof/phone-stepping'));
-
-/** A small PNG drawn here (a two-tone gradient with bands), `width` × `height`. */
-function png(width: number, height: number, hue: [number, number, number]): Buffer {
-  const table = Array.from({ length: 256 }, (_, n) => {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    return c >>> 0;
-  });
-  const crc = (bytes: Buffer) => {
-    let c = 0xffffffff;
-    for (const b of bytes) c = table[(c ^ b) & 0xff]! ^ (c >>> 8);
-    return (c ^ 0xffffffff) >>> 0;
-  };
-  const chunk = (type: string, data: Buffer) => {
-    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
-    const out = Buffer.alloc(8 + data.length + 4);
-    out.writeUInt32BE(data.length, 0);
-    body.copy(out, 4);
-    out.writeUInt32BE(crc(body), 8 + data.length);
-    return out;
-  };
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(width, 0);
-  ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8;
-  ihdr[9] = 2;
-  const rows = Buffer.alloc((width * 3 + 1) * height);
-  for (let y = 0; y < height; y++) {
-    const band = Math.floor(y / 120) % 2 === 0 ? 1 : 0.86;
-    for (let x = 0; x < width; x++) {
-      const at = y * (width * 3 + 1) + 1 + x * 3;
-      const t = (x + y) / (width + height);
-      rows[at] = Math.round(hue[0] * (0.45 + 0.55 * t) * band);
-      rows[at + 1] = Math.round(hue[1] * (0.45 + 0.55 * t) * band);
-      rows[at + 2] = Math.round(hue[2] * (0.45 + 0.55 * t) * band);
-    }
-  }
-  return Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
-}
 
 const NOTES = [
   '# Checkout copy',
@@ -102,7 +63,7 @@ async function world() {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-inbox-phone-stepping-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -124,7 +85,7 @@ async function world() {
     body: 'The new checkout, its copy, the pay page, the retry policy and the receipt.',
   });
   const ids = Object.fromEntries((sent.attachments as { id: string; name: string }[]).map((a) => [a.name, a.id])) as Record<string, string>;
-  return { root, url, agent, project, thread: sent.thread_id as string, ids };
+  return { root, url, agent, project, thread: sent.thread_id as string, first: sent.message_id as string, ids };
 }
 
 const pane = (page: Page) => page.locator('[data-attachment-pane]');
@@ -138,82 +99,13 @@ async function shot(page: Page, name: string, scheme: 'light' | 'dark') {
   await page.screenshot({ path: join(shots, `${name}-${scheme}.png`) });
 }
 
-interface Finger {
-  /** Put one finger down at (x, y) and move it by (dx, dy) in `moves` moves. */
-  down(x: number, y: number, dx: number, dy: number, moves?: number): Promise<void>;
-  /** Lift it. */
-  up(): Promise<void>;
-}
-
-/** One finger, real (Chromium, the DevTools protocol) or as iOS sends its events to the page (WebKit). */
-async function finger(page: Page, browserName: 'chromium' | 'webkit'): Promise<Finger> {
-  if (browserName === 'chromium') {
-    const cdp = await page.context().newCDPSession(page);
-    let at = { x: 0, y: 0 };
-    return {
-      async down(x, y, dx, dy, moves = 10) {
-        at = { x, y };
-        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
-        for (let i = 1; i <= moves; i++) {
-          at = { x: x + (dx * i) / moves, y: y + (dy * i) / moves };
-          await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [at] });
-          await page.waitForTimeout(16);
-        }
-      },
-      async up() {
-        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-      },
-    };
-  }
-  return {
-    async down(x, y, dx, dy, moves = 10) {
-      await page.evaluate(
-        async ({ x, y, dx, dy, moves }) => {
-          // The element under the finger, inside shadow roots too (iOS targets the innermost one; Pierre's code is in shadow roots).
-          let target = document.elementFromPoint(x, y)!;
-          while (target.shadowRoot) {
-            const inner = target.shadowRoot.elementFromPoint(x, y);
-            if (!inner || inner === target) break;
-            target = inner;
-          }
-          const w = window as unknown as { __finger: { target: Element; x: number; y: number } };
-          const fire = (type: string, px: number, py: number) => {
-            const point = { identifier: 1, clientX: px, clientY: py, pageX: px, pageY: py, target };
-            const event = new Event(type, { bubbles: true, cancelable: true, composed: true });
-            Object.defineProperty(event, 'touches', { value: type === 'touchend' ? [] : [point] });
-            Object.defineProperty(event, 'changedTouches', { value: [point] });
-            target.dispatchEvent(event);
-          };
-          fire('touchstart', x, y);
-          for (let i = 1; i <= moves; i++) {
-            fire('touchmove', x + (dx * i) / moves, y + (dy * i) / moves);
-            await new Promise((done) => setTimeout(done, 16));
-          }
-          w.__finger = { target, x: x + dx, y: y + dy };
-        },
-        { x, y, dx, dy, moves },
-      );
-    },
-    async up() {
-      await page.evaluate(() => {
-        const { target, x, y } = (window as unknown as { __finger: { target: Element; x: number; y: number } }).__finger;
-        const point = { identifier: 1, clientX: x, clientY: y, pageX: x, pageY: y, target };
-        const event = new Event('touchend', { bubbles: true, cancelable: true, composed: true });
-        Object.defineProperty(event, 'touches', { value: [] });
-        Object.defineProperty(event, 'changedTouches', { value: [point] });
-        target.dispatchEvent(event);
-      });
-    },
-  };
-}
-
 for (const phone of [
   { name: 'iPhone 15 (WebKit)', device: devices['iPhone 15'], browserName: 'webkit' as const, schemes: ['light', 'dark'] as const },
   { name: 'Pixel 7 (Chromium)', device: devices['Pixel 7'], browserName: 'chromium' as const, schemes: ['light'] as const },
 ])
   for (const scheme of phone.schemes)
   test(`on a phone, ${phone.name}, ${scheme}: the pill opens every file in one tap, and a swipe steps where it can`, async () => {
-    const { root, url, agent, project, thread, ids } = await world();
+    const { root, url, agent, project, thread, first, ids } = await world();
     const { defaultBrowserType: _ignored, ...device } = phone.device;
     // (WebKit launches without the config's Chromium flags, which Linux WebKit exits on.)
     const browser: Browser = phone.browserName === 'webkit' ? await webkit.launch({ args: [] }) : await chromium.launch();
@@ -357,11 +249,13 @@ for (const phone of [
       await page.locator('[data-peek-backdrop]').click({ position: { x: 20, y: 20 } });
       await expect(sheet).toBeHidden();
 
-      // The toolbar still tucks into its handle, and the handle brings it back.
+      // The toolbar still gathers into the corner control, and one tap on it brings the tools back (approval
+      // "inbox-fullscreen-gather").
       await bar(page).locator('[data-full-view-hide]').tap();
       await expect(page.locator('[data-full-view-dock]')).toHaveAttribute('data-bar', 'tucked');
       await page.locator('[data-full-view-handle]').tap();
-      await expect(page.locator('[data-full-view-dock]')).not.toHaveAttribute('data-bar', 'tucked');
+      await expect(page.locator('[data-full-view-dock]')).toHaveAttribute('data-bar', 'pinned');
+      await expect(bar(page)).toBeVisible();
 
       expect(errors).toEqual([]);
       await context.close();
@@ -370,6 +264,7 @@ for (const phone of [
       // the comment count and the pill: the page again in a second message after eight notes ("14/14"), 12 comments on it.
       const more = await agent.send({
         project_path: project,
+        reply_to: first,
         subject: 'Checkout: notes',
         attachments: [...Array.from({ length: 8 }, (_, i) => `checkout/note-${i + 1}.txt`), 'checkout/pay.html'],
         body: 'Eight notes and the pay page again.',

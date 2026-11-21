@@ -5,7 +5,7 @@ import type { CodeAnnotation } from '@plannotator/ui/types';
 /**
  * The review-level note produced by the Send control's "Send with additional
  * feedback" action is a scope:'general' CodeAnnotation. These guard the export
- * shape it depends on — the whole feature rides the existing ## General
+ * shape it depends on — the whole feature rides the existing ## Global comments
  * section, with no new export code.
  */
 
@@ -35,9 +35,9 @@ const lineComment = (): CodeAnnotation => ({
 describe('exportReviewFeedback - review-level note', () => {
   // Guards giving the note a filePath or scope:'line', which would export it as
   // a comment on a file that is not in the diff (and create a group for "").
-  it('renders under ## General and creates no file group', () => {
+  it('renders under ## Global comments and creates no file group', () => {
     const output = exportReviewFeedback([note('rebase before merging')]);
-    const generalIndex = output.indexOf('## General');
+    const generalIndex = output.indexOf('## Global comments');
     expect(generalIndex).toBeGreaterThan(-1);
     expect(output.indexOf('rebase before merging')).toBeGreaterThan(generalIndex);
     // No group header for the empty sentinel path.
@@ -51,7 +51,7 @@ describe('exportReviewFeedback - review-level note', () => {
     const output = exportReviewFeedback([lineComment(), note('and split the migration')]);
     expect(output).toContain('## src/index.ts');
     expect(output).toContain('this branch is unreachable');
-    expect(output).toContain('## General');
+    expect(output).toContain('## Global comments');
     expect(output).toContain('and split the migration');
   });
 

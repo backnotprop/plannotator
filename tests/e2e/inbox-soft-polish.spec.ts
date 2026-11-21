@@ -3,10 +3,10 @@
  * against the compiled binary:
  *
  *  - Mark read's `E` is a keycap inside its borderless button, centred on it;
- *  - a tile's hidden Open holds no room, so a name is never cut more than in
- *    today's look; when Open shows (hover, keyboard focus) it is back in the
- *    row and the name is cut before it, keeping its end, left to right and
- *    right to left; a screen without hover keeps its room;
+ *  - a tile's Open holds no room, at rest or shown (hover, keyboard focus), so
+ *    a name is never cut more than in today's look and never differently when
+ *    Open shows, left to right and right to left; a screen without hover keeps
+ *    its room (inbox-attachment-hover.spec.ts proves nothing moves);
  *  - layout corners one step smaller (panes 10, row pills 8, tiles 10), buttons
  *    unchanged;
  *  - the text size (`--inbox-text-size`, the Text size setting, 14 by default):
@@ -21,7 +21,7 @@
  * .local/proof/soft-polish/.
  */
 
-import { devices, expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { devices, expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -80,7 +80,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-soft-polish-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -91,7 +91,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   writeFileSync(join(project, 'docs', 'retry-plan.md'), '# Retry plan\n\nRetry once with the same key.\n');
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const first = await claude.send({ project_path: project, subject: 'Refund worker: retry a 409?', thread: 'refunds', body: ASK, attachments: [`docs/${LONG}`, `docs/${RTL}`, 'docs/retry-plan.md'] });
-  // Each in a thread of its own (one session's plain sends would share its default thread).
+  // Each in a thread of its own, under its own name.
   for (const subject of ['Nightly build is green', 'Ledger ownership', 'Rotate the processor key?', 'Idempotency cache and paging']) {
     await new Promise((r) => setTimeout(r, 15));
     await claude.send({ project_path: project, subject, thread: subject.toLowerCase().replace(/\W+/g, '-').replace(/-$/, ''), body: `${subject}. Details in the runbook.` });
@@ -139,7 +139,7 @@ test("rows have no line between them at today's pitch; the hover pill still mark
 test('beside an open thread the two-line rows have no line either', async () => {
   const { page } = world;
   await page.goto(`${world.url}#thread=${world.thread}`);
-  await expect(page.locator('[data-mark-read]')).toBeVisible();
+  await expect(page.locator('section.ib-pane [data-thread-more]')).toBeVisible();
   const rows = page.locator('.ib-nrow');
   await expect(rows.first()).toBeVisible();
   for (const line of await rows.evaluateAll((els) => els.map((e) => getComputedStyle(e).borderBottomColor))) expect(line).toBe('rgba(0, 0, 0, 0)');
@@ -156,44 +156,29 @@ test('beside an open thread the two-line rows have no line either', async () => 
   await shot(page, '2-thread');
 });
 
-test("Mark read's E is a keycap inside its button, centred on it; today's look keeps its outlined key", async () => {
+// The header's controls are icon buttons (approval "inbox-thread-header"); Mark read and its E live in the ⋯ menu.
+test("the header's icon buttons fill on hover in both looks", async () => {
   const { page } = world;
   await page.goto(`${world.url}#thread=${world.thread}`);
-  const button = page.locator('[data-mark-read]');
+  const button = page.locator('section.ib-pane [data-thread-more]');
   await expect(button).toBeEnabled();
-  const kbd = button.locator('.ib-kbd');
-  const geometry = async () =>
-    button.evaluate((b) => {
-      const k = b.querySelector('.ib-kbd')!;
-      const br = b.getBoundingClientRect();
-      const kr = k.getBoundingClientRect();
-      const cs = getComputedStyle(k);
-      return { inside: kr.left >= br.left && kr.right <= br.right && kr.top >= br.top && kr.bottom <= br.bottom, dy: Math.abs(kr.top + kr.height / 2 - (br.top + br.height / 2)), end: br.right - kr.right, bg: cs.backgroundColor, line: cs.borderTopColor, w: kr.width };
-    });
-  const soft = await geometry();
-  expect(soft.inside).toBe(true);
-  expect(soft.dy).toBeLessThanOrEqual(1);
-  expect(soft.bg).not.toBe('rgba(0, 0, 0, 0)');
-  expect(soft.w).toBeGreaterThanOrEqual(18);
-  // The space after the cap is about the space around its letter: the key ends the control.
-  expect(soft.end).toBeLessThan(8);
   await button.hover();
   await expect.poll(() => button.evaluate((b) => getComputedStyle(b).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
-  await page.locator('.ib-phead').screenshot({ path: join(proofDir, '3-mark-read-hover.png') });
+  await page.locator('.ib-phead').screenshot({ path: join(proofDir, '3-header-hover.png') });
   await page.mouse.move(700, 880);
+  // Soft's `hbtns` switch now reaches the header only through the icon buttons' hover (`--ib-hb-hover-s`): the labelled
+  // `.ib-hbtn` buttons are gone.
   const back = await todays(page, 'hbtns');
-  const today = await geometry();
+  await button.hover();
+  await expect.poll(() => button.evaluate((b) => getComputedStyle(b).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
+  await page.mouse.move(700, 880);
   await back();
-  expect(today.line).not.toBe('rgba(0, 0, 0, 0)');
-  // Today: the button's 11 px end padding and its 1 px border.
-  expect(today.end).toBeCloseTo(12, 0);
-  await expect(kbd).toHaveText('E');
 });
 
-test("a tile's hidden Open holds no room at rest; when it shows (hover, keyboard focus) the name is cut before it and keeps its end, left to right and right to left", async () => {
+test("a tile's Open holds no room, at rest or shown (hover, keyboard focus): it lies over the tile's end and the name is cut the same either way, left to right and right to left", async () => {
   const { page } = world;
   await page.goto(`${world.url}#thread=${world.thread}`);
-  await expect(page.locator('[data-mark-read]')).toBeVisible();
+  await expect(page.locator('section.ib-pane [data-thread-more]')).toBeVisible();
   for (const name of [LONG, RTL]) {
     const tile = page.locator(`.ib-atts .ib-att-t:has(.ib-fname[data-name="${name}"])`).last();
     await expect(tile).toBeVisible();
@@ -211,10 +196,9 @@ test("a tile's hidden Open holds no room at rest; when it shows (hover, keyboard
           shown: head.clientWidth,
           position: getComputedStyle(openEl).position,
           opacity: Number(getComputedStyle(openEl).opacity),
-          // The name's end (the extension) and its start are both inside the text box, and Open covers none of it.
+          // The name's end (the extension) and its start are both inside the text box.
           tailInside: tail.left >= text.left - 0.5 && tail.right <= text.right + 0.5,
           nameInside: name.left >= text.left - 0.5 && name.right <= text.right + 0.5,
-          clearOfOpen: name.right <= open.left + 0.5 || name.left >= open.right - 0.5,
           openInside: open.right <= t.getBoundingClientRect().right,
         };
       });
@@ -230,10 +214,10 @@ test("a tile's hidden Open holds no room at rest; when it shows (hover, keyboard
     await tile.hover();
     await expect.poll(async () => (await measure()).opacity).toBe(1);
     const hovered = await measure();
-    expect(hovered.position, name).toBe('static');
-    expect(hovered, `${name} hovered`).toMatchObject({ tailInside: true, nameInside: true, clearOfOpen: true, openInside: true });
-    // Never cut more than today's look while Open shows.
-    expect(hovered.shown, name).toBeGreaterThanOrEqual(today.shown - 0.5);
+    // Out of the row still: the name is cut exactly as at rest (inbox-attachment-hover.spec.ts proves every box).
+    expect(hovered.position, name).toBe('absolute');
+    expect(hovered, `${name} hovered`).toMatchObject({ tailInside: true, nameInside: true, openInside: true });
+    expect(hovered.shown, name).toBe(rest.shown);
     await page.locator('.ib-atts').last().screenshot({ path: join(proofDir, `4-tiles-hover-${name === LONG ? 'ltr' : 'rtl'}.png`) });
     // From the keyboard: focus-visible shows Open the same way.
     await page.mouse.move(700, 880);
@@ -243,7 +227,7 @@ test("a tile's hidden Open holds no room at rest; when it shows (hover, keyboard
     await page.keyboard.press('Tab');
     await expect(tile).toBeFocused();
     await expect.poll(async () => (await measure()).opacity).toBe(1);
-    expect(await measure(), `${name} focused`).toMatchObject({ position: 'static', tailInside: true, nameInside: true, clearOfOpen: true });
+    expect(await measure(), `${name} focused`).toMatchObject({ position: 'absolute', tailInside: true, nameInside: true, shown: rest.shown });
   }
   await page.mouse.move(700, 880);
   await page.locator('.ib-atts').last().screenshot({ path: join(proofDir, '4-tiles-rest.png') });
@@ -252,7 +236,7 @@ test("a tile's hidden Open holds no room at rest; when it shows (hover, keyboard
 test('layout corners are one step smaller; buttons keep theirs', async () => {
   const { page } = world;
   await page.goto(`${world.url}#thread=${world.thread}`);
-  await expect(page.locator('[data-mark-read]')).toBeVisible();
+  await expect(page.locator('section.ib-pane [data-thread-more]')).toBeVisible();
   const r = (selector: string, pseudo?: string) => page.locator(selector).first().evaluate((e, p) => getComputedStyle(e, p ?? null).borderTopLeftRadius, pseudo);
   expect(await r('.ib-main > .ib-pane')).toBe('10px');
   expect(await r('.ib-main > .ib-listcol')).toBe('10px');
@@ -261,7 +245,7 @@ test('layout corners are one step smaller; buttons keep theirs', async () => {
   expect(await r('.ib-att-t')).toBe('10px');
   expect(await r('.pn-inbox fieldset.question-block')).toBe('12px');
   // Buttons are not layout: the header's and the foot's keep their corners.
-  expect(await r('[data-mark-read]')).toBe('10px');
+  expect(await r('section.ib-pane [data-thread-more]')).toBe('10px');
   expect(await r('.ib-pfoot .ib-btn')).toBe('999px');
 });
 

@@ -34,9 +34,10 @@ export type ByteRangeDecision =
  * The most one `206` carries. Bun 1.3.14 pulls a streamed body as fast as
  * the file reads, whatever the client's socket takes (every stream form it
  * offers does: measured, a client at 400 KB/s on `bytes=0-` of a 200 MB film
- * had all 200 MB read into memory in 0.1 s). So an open-ended range, or one
- * longer than this, is answered with its first 8 MiB and the matching
- * `Content-Range`; RFC 9110 lets a server send less than was asked for, and a
+ * had all 200 MB read into memory in 0.1 s). Bun 1.4.4 waits for the client
+ * (the same client: 4 MiB read in 3 s); the cap still bounds one answer on
+ * any runtime. So an open-ended range, or one longer than this, is answered
+ * with its first 8 MiB and the matching `Content-Range`; RFC 9110 lets a server send less than was asked for, and a
  * player asks again from where the answer ended (Chromium, AVPlayer and
  * ExoPlayer do). A full `200` (a download with no Range) is not capped.
  */
@@ -82,26 +83,32 @@ function decideRequestedRange(range: string | null, size: number, options: { ifR
 /**
  * A streamed body not pulled for this long has lost its reader: its file
  * handle is closed and the stream ends with an error (a player that only
- * paused asks again with a Range).
+ * paused asks again with a Range). Five minutes, not less: Bun 1.4 pulls only
+ * as fast as the client reads, so a player paused with a full buffer, or a
+ * slow download, leaves a live answer unpulled; at 30 s Bun 1.4.4 cut such an
+ * answer short (measured: a 200 KB/s client lost its 8 MiB answer at 14 s
+ * with a 2 s watchdog). Bun 1.4.4 cancels a gone client itself, so this is a
+ * backstop for a runtime that does not.
  */
-export const STREAM_IDLE_CLOSE_MS = 30_000;
+export const STREAM_IDLE_CLOSE_MS = 5 * 60_000;
 
 /**
  * Bytes `start..end` (inclusive; to the end of the file when `end` is
  * omitted) of a file handle, read in 1 MiB chunks. The handle is closed at
  * the end, on an error, when the reader cancels, and by an idle watchdog.
  *
- * Two Bun facts shape this (measured on Bun 1.3.14 against the Inbox, with
- * `lsof`):
+ * Two Bun 1.3.14 facts shape this (measured against the Inbox, with `lsof`;
+ * Bun 1.4.4 fixed both, and the guards stay for any runtime that has them):
  * - A client that aborts mid-answer does get `cancel` called, but Bun pulls
  *   ahead, so a read is in flight then, and `FileHandle.close()` called while
  *   a read is in flight never closes the descriptor: it stays open for good.
- *   So a close asked for during a read is done when that read returns.
+ *   So a close asked for during a read is done when that read returns. (On
+ *   1.4.4 a close during a read closes it, and `cancel` rarely meets a read.)
  * - A client that is gone before the answer starts (it closed the socket
  *   while the handler was still opening the file) gets a stream Bun neither
  *   reads to the end nor cancels. Only a watchdog can close that handle: a
  *   body not pulled for `STREAM_IDLE_CLOSE_MS` closes itself. The same covers
- *   any runtime that never calls `cancel`.
+ *   any runtime that never calls `cancel`. (Bun 1.4.4 cancels these.)
  * No Bun mechanism does this for us: `server.timeout(req, s)` and
  * `idleTimeout` end a socket, never the stream's own resources, and the
  * Inbox's handler is async (opening and checking the file), so the answer
@@ -188,9 +195,9 @@ export function handleRangeStream(handle: FileHandle, start: number, end = Numbe
 /**
  * An answer up to this long is read whole and sent with its `Content-Length`
  * (a player's probe, `bytes=0-1`, and most of its seeks). Bun sends a longer,
- * streamed body chunked and drops the header (checked on Bun 1.3.14: a
- * ReadableStream that does not finish at once loses an explicit
- * Content-Length), so the size of a long answer is in its `Content-Range`
+ * streamed body chunked and drops the header (checked on Bun 1.3.14 and
+ * 1.4.4: a ReadableStream body over a few hundred bytes loses an explicit
+ * Content-Length, even one that is complete at once), so the size of a long answer is in its `Content-Range`
  * (206), and in the attachment's record (200).
  */
 export const BYTE_RANGE_WHOLE_MAX = 1024 * 1024;

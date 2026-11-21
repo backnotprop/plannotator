@@ -22,7 +22,8 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, writeFileSync } from "node:fs";
-import { request } from "node:http";
+import { createServer, request } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { createTestEnvironment } from "../../tests/helpers/environment";
 
@@ -108,6 +109,7 @@ export function defineStateRouteScenarios(runtime: string, start: StartStateRout
       "PLANNOTATOR_ALLOWED_HOSTS",
       "SSH_TTY",
       "SSH_CONNECTION",
+      "NOTION_TOKEN",
     ],
     "plannotator-state-route-guards-",
   );
@@ -129,7 +131,7 @@ export function defineStateRouteScenarios(runtime: string, start: StartStateRout
    * The server then starts with PATH holding only an empty folder, so it
    * detects no agent CLI and no provider is available to launch.
    */
-  async function setUp(kind: StateRouteScenarioKind, options: { agentJobs?: boolean } = {}): Promise<void> {
+  async function setUp(kind: StateRouteScenarioKind, options: { agentJobs?: boolean; env?: Record<string, string> } = {}): Promise<void> {
     const originalPath = process.env.PATH ?? "";
     environment.reset();
     const dir = environment.makeTempDir();
@@ -140,6 +142,7 @@ export function defineStateRouteScenarios(runtime: string, start: StartStateRout
     process.env.PLANNOTATOR_INBOX_CONNECT = "0";
     process.env.PLANNOTATOR_FEEDBACK_HISTORY = "0";
     process.env.PLANNOTATOR_REMOTE = "0";
+    Object.assign(process.env, options.env);
 
     emptyPath = environment.makeTempDir();
     vault = environment.makeTempDir();
@@ -382,5 +385,66 @@ export function defineStateRouteScenarios(runtime: string, start: StartStateRout
       const legacy = await call("DELETE", "/api/agents/jobs", sameOrigin());
       expect(legacy.status).toBe(200);
     });
+  });
+  // Save to Notion acts with the server's NOTION_TOKEN, so only a session on
+  // this computer offers it. Notion itself is never called: fetch is stubbed.
+  describe(`${runtime}: Notion is offered only to a local session with NOTION_TOKEN`, () => {
+    async function freePort(): Promise<string> {
+      const probe = createServer();
+      await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+      const port = (probe.address() as AddressInfo).port;
+      await new Promise<void>((resolve) => probe.close(() => resolve()));
+      return String(port);
+    }
+
+    async function offered(): Promise<unknown> {
+      return (await send(server!.url, "GET", "/api/plan", { host })).body?.notion;
+    }
+
+    /** Save through the route with Notion stubbed; returns the result and how often Notion was called. */
+    async function saveToNotionRoute(): Promise<{ result: unknown; calls: number }> {
+      const realFetch = globalThis.fetch;
+      let calls = 0;
+      // Only Notion's API is stubbed and counted; the server's own requests pass through.
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const target = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        if (!target.startsWith("https://api.notion.com/")) return realFetch(input, init);
+        calls++;
+        return Response.json({ url: "https://www.notion.so/saved" });
+      }) as unknown as typeof fetch;
+      try {
+        const answer = await call("POST", "/api/save-notes", sameOrigin(), {
+          notion: { plan: "# Plan\n\nBody", parentPageId: "0123456789abcdef0123456789abcdef" },
+          serverSession,
+        });
+        expect(answer.status).toBe(200);
+        return { result: (answer.body?.results as Record<string, unknown> | undefined)?.notion, calls };
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+    }
+
+    for (const kind of ["plan", "annotate"] as const) {
+      test(`${kind}: offered and saved locally with a token`, async () => {
+        await setUp(kind, { env: { NOTION_TOKEN: "secret-token" } });
+        expect(await offered()).toBe(true);
+        const { result, calls } = await saveToNotionRoute();
+        expect(result).toEqual({ success: true, url: "https://www.notion.so/saved" });
+        expect(calls).toBe(1);
+      });
+
+      test(`${kind}: never offered or saved in remote mode`, async () => {
+        await setUp(kind, { env: { NOTION_TOKEN: "secret-token", PLANNOTATOR_REMOTE: "1", PLANNOTATOR_PORT: await freePort() } });
+        expect(await offered()).toBeUndefined();
+        const { result, calls } = await saveToNotionRoute();
+        expect(result).toBeUndefined();
+        expect(calls).toBe(0);
+      });
+
+      test(`${kind}: never offered without NOTION_TOKEN`, async () => {
+        await setUp(kind);
+        expect(await offered()).toBeUndefined();
+      });
+    }
   });
 }

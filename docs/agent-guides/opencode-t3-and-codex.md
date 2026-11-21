@@ -119,7 +119,108 @@ order, `list` named it `2 files: notes.md, mock.html`, its feedback arrived
 headed `— Feedback · 2 comments.` under `Files: notes.md, mock.html`, and
 `close all` closed a second bundle.
 
-### T3 Code: Ask this session through an optional Claude hook (opt-in, unreleased)
+### OpenCode 2: sessions the Inbox starts
+
+In a server the Inbox started (`PLANNOTATOR_INBOX_LAUNCHED=1`), the plugin's wake watches each root session as it is created (`session.created`), not only once it ran, so the Inbox's first message reaches a session that has had no turn; with `PLANNOTATOR_INBOX_LAUNCHED_SESSION` it watches that session from the start (a restart). The rest is "OpenCode" in `inbox-launch.md`. Test: `inbox-v2-wake.test.ts` "OpenCode 2 started by the Inbox".
+
+### OpenCode 2: a prompt waiting in the terminal (Inbox)
+
+The plugin's Inbox link says `blocked: { kind }` on its polls and in a `state`
+event while a session waits on the person in OpenCode (`noteOpenCodePrompt`,
+`openCodeBlocked` in `apps/opencode-plugin/inbox.ts`): `permission.asked`
+holds a `permission` until `permission.replied` for that request;
+`question.asked` holds a `question` until `question.replied` or
+`question.rejected` for that request (`requestID`; the names in the installed
+SDK's v2 types, 1.19.3); `form.created` holds one until any later `form.*`
+event for that form. A permission wins over a question. Everything clears when
+the turn ends (`session.execution.succeeded` / `failed` / `interrupted`),
+whenever the plugin finds the session not running by any other way (a lost end
+event found by the idle cross-check, the event stream gone, the session
+deleted: `endOpenCodePrompts`), and nothing is said for a session it does not
+think is running. The Inbox's 45 s expiry does not bound a stale word: it
+guards only against a plugin that stops polling, so the plugin itself must stop
+saying it. Only the kind leaves the plugin, never the action, patterns or the
+question's words. Which question events a real OpenCode 2 raises is not yet
+proved on one. The Inbox side: "Status marks for every agent" in
+[inbox-notifications-and-agents.md](inbox-notifications-and-agents.md). Tests:
+`apps/opencode-plugin/inbox-blocked.test.ts`.
+
+### OpenCode 2: the installer updates a running service's plugin
+
+The OpenCode 2 service keeps the plugin it loaded. When it is running with an
+unpinned `@plannotator/opencode` spec, `install.sh` runs `opencode2 plugin
+update <spec>` (`update_opencode2_service_plugin`), which loads the new plugin
+without cancelling a turn, a pending permission, a question form or an open
+Plannotator review (measured on OpenCode 2.0.22, 5 of 5; `opencode2 reload`
+cancels the permission and the form, so nothing automatic uses it). The step
+only asks the service, bounds every call, reads the result back from `plugin
+list`, never fails the install, and keeps the OpenCode 2 cache while the
+service has the plugin. There is no "reload when every session is idle"
+action in the Inbox: idleness cannot be held between the check and the
+reload, and `plugin update` needs no idle gate. Details and knobs:
+`PLANNOTATOR_OPENCODE2_TIMEOUT` in [environment.md](environment.md).
+`install.ps1` / `install.cmd` have no OpenCode 2 step yet.
+
+### OpenCode: in-process servers in `plannotator sessions` (#1567)
+
+The plugin's own servers (submit_plan's plan review, `/plannotator-review`,
+`/plannotator-annotate`, `/plannotator-last`) run inside OpenCode's process, so
+the plugin lists them itself (`apps/opencode-plugin/session-registry.ts`):
+`registerInProcessSession` in `packages/server/sessions.ts` writes
+`sessions/opencode/<pid>-<port>.json` with `host: "opencode"`, and the
+`plannotator sessions` table marks the row `(in OpenCode)` (`--json`: `host`).
+They do not run the binary, so they must never hold back its update: the
+entries live in a subfolder that `listSessions` / `listLiveSessions` never
+read, as no released binary does (every reader lists only the top folder's
+`*.json`), and `otherOpenSessions` and the Inbox update dialog also skip any
+entry with `host`. Removal: the decision or a throw (`decideListed`, before
+`stop()`), submit_plan's abort and timeout (`finally`), and process exit. No
+SIGINT/SIGTERM listener is added (it would change OpenCode's own signal
+handling); instead each registration deletes entries whose pid is dead, and
+`listInProcessSessions` drops and deletes an entry whose pid is dead, whose
+loopback port no longer accepts a connection, or that cannot be read. Commands
+list the project they detected (or `unknown`); only the plan review detects it.
+
+### OpenCode: which reply `last` opens (#3312)
+
+`/plannotator-last` and the tool's `last`, on OpenCode 1 (embedded runtime and
+CLI bridge) and OpenCode 2, read the session through one function,
+`pickRecentAssistantMessages` (`apps/opencode-plugin/recent-messages.ts`). It
+opens the newest reply to a prompt the person wrote, not a reply to an
+injected prompt (an OpenCode 2 `synthetic` row, or an OpenCode 1 user message
+whose parts are all synthetic) that OpenCode or a plugin added; such a reply
+opens only when there is no other. A reply belongs to its turn's prompt.
+OpenCode 1's `parentID` counts only when it names a prompt the person wrote,
+since OpenCode 1 parents the rest of a turn on the injected rows it adds inside
+it (the "Continue…" row after an auto-compaction, a subtask command's
+"Summarize the task tool output…" row). Otherwise the newest prompt row starts
+the turn, and an assistant step ends it unless it called a tool the host runs
+(not a provider-hosted one, as OpenCode's own `needsContinuation` decides) or
+stopped at the output limit (`finish: "length"`); a failed step always ends
+it. An injected row stored after a step or a compaction of a running turn, or
+OpenCode 2's Plan-mode reminder right after the prompt (entry, or exit after
+a revert across a Plan→Build switch; `isOpenCode2PlanReminder`,
+`isOpenCode2PlanExitReminder`), stays in that turn: Plannotator's session-URL
+notice, OpenCode's continuation rows. Any other injected row right after a
+prompt starts its own turn (that prompt got no reply). Known limit: another
+plugin that stores a row from a context hook, before the first step as the
+Plan plugin does, demotes the person's answer. Compaction rows do not
+change the turn, and a compaction summary (`summary: true`) is listed but
+opens only when nothing else can. One injected row counts as the person's: an
+OpenCode 2 background subagent result (`<subagent sessionID="…">`, from
+`SubagentCompletion.deliver`) whose child session is named by a `subagent`
+tool call in one of the person's turns, so the reply to that result opens. A
+result for a subagent that a wake's turn started, or that no turn here names,
+stays injected. A subagent command (`subtask` in the command config) starts
+its child with no tool call in the parent, so its result stays injected. Not
+handled: the retry row after an incomplete stream follows a failed step, so its reply counts as injected. The
+picker lists the reply that opens first (★), then the rest newest first,
+capped at 25; the one that opens is kept even when 25 newer replies to
+injected prompts exist. `toBridgeMessages` carries a V2 step's `error` and
+`finish`, and a row's `text` as a text part. Pi and Claude Code still open the
+newest reply with text. Tests: `apps/opencode-plugin/recent-messages.test.ts`.
+
+### T3 Code: Ask this session through an optional Claude hook (opt-in)
 
 `packages/t3-code` (user notes in its README). T3 Code runs Claude through the
 Agent SDK, which loads `~/.claude/settings.json` hooks, so a Claude Bash hook
@@ -128,6 +229,30 @@ conversation to that conversation: Ask this session becomes a T3 turn, and the
 decision arrives as a T3 message. It uses T3's existing MCP API as a client
 (no T3 change, no provider-side MCP server, no skill change). Nothing of it
 runs for anyone who did not opt in.
+
+The same grant (`plannotator t3 login`) also lets the Plannotator Inbox put a
+reply into a T3 Claude thread as a turn, with a `plannotator inbox mcp --t3`
+entry: see "T3 Code" in `inbox-notifications-and-agents.md`. That is why
+`plannotator t3` is listed (`plannotator --help` points at it, the skill
+documents it); its help leads with that setup.
+
+On the machine that runs T3 no grant is needed: the Inbox sends a reply into
+a T3 thread, Claude or Codex, with T3's own `t3 thread send`, and a Codex
+thread T3 runs is never `codex queue`d ("A thread T3 Code runs" and "T3 Code"
+in `inbox-notifications-and-agents.md`). The grant is for a T3 on another
+machine. Not on Windows yet: there the local route is off, and a reply goes
+in under a grant or waits for the agent's next read.
+
+Where Claude Code runs hooks modules, the Claude Code mod runs in a T3
+thread's Claude by itself (T3 0.1.7 and later; "A T3 Code thread" in
+`claude-code-mod.md`): it gives the thread `plannotator_inbox` filed as the
+thread, puts the Inbox's reply in as a turn while T3 keeps that Claude (only
+the process that shows T3's own `t3-code` tools polls; no grant needed), and answers
+`plannotator review` / `annotate` / `last` itself. The hook then stands aside
+(`claudeModServesThread` in `prepareT3Hook`: the mod's tag `t3:<thread>` in
+`PLANNOTATOR_SESSION_TAG`), so no command is acted on twice; it stays for a
+Claude Code without hooks modules or with the mod off. The grant remains the
+Inbox's way into a thread once T3 released its Claude.
 
 - **Opt in / out:** `install.sh --with-t3` writes one `PreToolUse` `Bash` hook
   into `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json` (`t3-hook install`,
@@ -138,13 +263,14 @@ runs for anyone who did not opt in.
   `--minimal`; a failing step warns and never aborts the install. Without a
   flag the installer touches nothing T3. `plannotator t3 login --url <T3 MCP
   URL>` authorizes once (OAuth, PKCE); `plannotator t3 logout --url …` stops
-  that endpoint's workers and deletes the saved grant. `t3` and `t3-hook` are
-  in `HIDDEN_SUBCOMMANDS`.
+  that endpoint's workers and deletes the saved grant. `t3-hook` is in
+  `HIDDEN_SUBCOMMANDS`; `t3` is not.
 - **The gate (per Bash call cost):** the hook runs on every Bash call of every
   Claude session that loads the settings file. The command is
-  `case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) PLANNOTATOR_DATA_DIR=… '<binary>' t3-hook;; esac`
+  `case "$CLAUDE_CODE_ENTRYPOINT" in sdk*|t3-code) PLANNOTATOR_DATA_DIR=… '<binary>' t3-hook;; esac`
   (`t3HookCommand`, `packages/shared/t3-hook-command.ts`): only an Agent SDK
-  session (`sdk-ts`, …) starts the binary; an interactive `claude` (`cli`)
+  session (T3 names itself `t3-code`; other SDK apps report `sdk-ts`, …)
+  starts the binary; an interactive `claude` (`cli`)
   is answered by the shell with no output (~3 ms instead of ~290 ms of CLI
   startup). The binary repeats the check as the first statement of
   `apps/hook/server/index.ts` and in `prepareT3Hook`. Inside an SDK session

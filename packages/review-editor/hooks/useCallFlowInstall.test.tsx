@@ -126,7 +126,7 @@ describe('useCallFlowInstall', () => {
         if (posts === 1) {
           return jsonResponse({
             state: 'error',
-            error: 'Call flow requires Node.js 22 or newer, which was not found on PATH.',
+            error: 'Call flow needs Node.js 22.18 or newer, which was not found on PATH.',
             reason: 'node-unavailable',
           });
         }
@@ -139,7 +139,7 @@ describe('useCallFlowInstall', () => {
     await render(async () => { installedCalls++; });
     await clickInstall();
     await waitForState('error');
-    expect(host?.querySelector('[data-error]')?.textContent).toContain('Node.js 22 or newer');
+    expect(host?.querySelector('[data-error]')?.textContent).toContain('Node.js 22.18 or newer');
     expect(installedCalls).toBe(0);
 
     await clickInstall();

@@ -18,7 +18,7 @@
  * PLANNOTATOR_SEND_NOW_SHOTS when it names a folder.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -131,6 +131,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const env = {
     PATH: process.env.PATH ?? '',
     HOME: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',
@@ -217,7 +218,7 @@ test('Claude Code at work: the reply reads "Undelivered · … is working" with 
   const tick = row.locator('.ib-tick');
   await expect(tick).toHaveAttribute('data-tick', 'queued');
   await expect(tick).toHaveAttribute('aria-label', 'Queued for Claude Code,');
-  await expect(row.locator('.ib-st')).toHaveText('Migration shipped');
+  await expect(row.locator('.ib-title')).toHaveText('Migration shipped');
   await expect(tick).not.toHaveAttribute('title', /./);
   // Waiting on a busy agent (approval "inbox-busy-agent-reply"): "Undelivered" in place of the count, and on hover
   // the row's own Send now takes the count's and the time's place (so the tick's tooltip is not offered then).
@@ -232,7 +233,7 @@ test('Claude Code at work: the reply reads "Undelivered · … is working" with 
 
   await button.click();
   await expect(line).toHaveAttribute('data-delivery', 'sending');
-  await expect(line).toHaveText('Sending to Claude Code now…');
+  await expect(line.locator('.ib-dl-text')).toHaveText('Sending to Claude Code now…');
   await expect(button).toHaveCount(0);
   await expect.poll(() => connection.commands[0]?.now, { timeout: 15_000 }).toBe(true);
   await expect(tick).toHaveAttribute('data-tick', 'sending');
@@ -261,7 +262,7 @@ test('idle: "Sending to Claude Code…", no Send now', async () => {
   await replyInWindow(page, 'Great. Post the numbers in the PR.');
   const line = pane.locator('[data-delivery]');
   await expect(line).toHaveAttribute('data-delivery', 'sending');
-  await expect(line).toHaveText('Sending to Claude Code…');
+  await expect(line.locator('.ib-dl-text')).toHaveText('Sending to Claude Code…');
   await expect(pane.locator('[data-send-now]')).toHaveCount(0);
   await shot(page, '4-sending-idle');
 });
@@ -276,14 +277,14 @@ test('an MCP-only agent: "Saved for … It sees it when it next reads this threa
   await expect(pane.getByRole('heading', { name: 'Docs pass done' })).toBeVisible();
   await replyInWindow(page, 'Thanks.');
   const line = pane.locator('[data-delivery]');
-  await expect(line).toHaveText('Saved for Claude Code. It sees it when it next reads this thread.');
+  await expect(line.locator('.ib-dl-text')).toHaveText('Saved for Claude Code. It sees it when it next reads this thread.');
   await expect(pane.locator('[data-send-now]')).toHaveCount(0);
   // The list holds still while the thread is open: when its first read came after the look, the row sits in
   // Quiet (folded), where the reply shows in place.
   if ((await page.locator('[data-section-id="quiet"] .ib-band').count()) > 0) await openQuiet(page);
   const row = page.locator(`.ib-lbody [data-thread-id="${sent.thread_id}"]`).first();
   await expect(row.locator('.ib-tick')).toHaveAttribute('data-tick', 'saved');
-  await expect(row.locator('.ib-st')).toHaveText('Docs pass done');
+  await expect(row.locator('.ib-title')).toHaveText('Docs pass done');
   await shot(page, '5-saved-mcp-only');
   expect(world.errors).toEqual([]);
 });
@@ -415,7 +416,7 @@ test('the ticks on wide rows, beside a thread and on a phone, light and dark; th
   await openQuiet(page);
   await expectStates(page);
   // Sent rows keep their own subject.
-  await expect(page.locator(`.ib-lbody [data-thread-id="${saved.thread_id}"] .ib-st`).first()).toHaveText('App Store screenshots: light or dark?');
+  await expect(page.locator(`.ib-lbody [data-thread-id="${saved.thread_id}"] .ib-title`).first()).toHaveText('App Store screenshots: light or dark?');
   // The dots breathe, and stand still under reduced motion.
   const dot = tickOf(page, sending.thread_id).locator('.ib-dots i').first();
   expect(await dot.evaluate((el) => getComputedStyle(el).animationName)).toBe('ib-dots');

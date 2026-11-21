@@ -76,7 +76,7 @@ Plan saving is enabled by default. You can change the save directory or disable 
 
 If the UI doesn't open automatically, check:
 
-- **Remote/SSH session?** Set `PLANNOTATOR_REMOTE=1` and `PLANNOTATOR_PORT` to a port you'll forward. See the [remote guide](/docs/guides/remote-and-devcontainers/).
+- **Remote/SSH session?** Over SSH, remote mode turns on by itself, so open the printed URL through a forwarded port. If `SSH_TTY` and `SSH_CONNECTION` are not set in that shell (for example, in a tmux session started outside SSH), set `PLANNOTATOR_REMOTE=1`. Outside SSH (a devcontainer or Docker), set `PLANNOTATOR_REMOTE=1` and `PLANNOTATOR_PORT` to a port you'll forward. See the [remote guide](/docs/guides/remote-and-devcontainers/).
 - **Wrong browser?** Set `PLANNOTATOR_BROWSER` to the app name or path, or use `--browser` for a one-off override.
 - **`Not opening a browser (PLANNOTATOR_BROWSER=none)`?** That is on purpose: `PLANNOTATOR_BROWSER` (or `--browser`) is set to `none`, `false`, `0`, `off`, `no`, `true`, `1` or `:`. Open the printed URL, or unset the variable. (`BROWSER=true` does not do this; only `PLANNOTATOR_BROWSER` does.)
 - **URL still works** — even if the browser didn't open, the server is running. Check `plannotator sessions` for the URL and open it manually.
@@ -97,7 +97,7 @@ On Claude Code 2.1.287 or newer, the [Plannotator mod](/docs/guides/claude-code/
 1. Update the plugin: `claude plugin marketplace update plannotator`, then `claude plugin update plannotator@plannotator`, then restart Claude Code. Refreshing the marketplace alone does not update the plugin.
 2. Update the `plannotator` binary by running the install script again. With an older binary, plan review falls back to the classic flow.
 3. Check that `PLANNOTATOR_CLAUDE_MOD` is not set to `0` and `~/.plannotator/config.json` has no `"claudeCodeMod": false`.
-4. The mod does not run in `claude -p` or SDK runs, or on Windows. Those always use the classic flow.
+4. The mod does not run in `claude -p` or SDK runs. Those always use the classic flow.
 5. To report a problem, start Claude Code with `PLANNOTATOR_MOD_DEBUG=1` and attach `~/.plannotator/claude-code-mod/debug.log`.
 
 ## Codex plan review doesn't open

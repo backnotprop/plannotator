@@ -65,10 +65,8 @@ export function resolveReviewDecisionAction(id: DecisionActionId): ReviewDecisio
 }
 
 /**
- * The mode the ReviewSubmissionDialog opens in: the review event it posts
- * (#1611: `request_changes` is a real GitHub REQUEST_CHANGES review; GitLab
- * posts it as a comment) and whether the dialog offers the Comment / Request
- * changes choice.
+ * The mode the ReviewSubmissionDialog opens in: the review event it posts and
+ * whether it offers the Comment / Request changes choice.
  */
 export interface PlatformDialogMode {
   action: PRReviewAction;
@@ -207,7 +205,7 @@ export function compactPrimaryIdForReviewDecision(
  * The one shape for a human review-level comment: `scope: 'general'` with the
  * ''/0/0 sentinels that keep it out of every file group. Shared by BOTH human
  * producers — the header composer's submit note (`commitReviewNote`) and the
- * sidebar's durable "+ General comment" — so the transport shape the
+ * sidebar's durable "+ Global comment" — so the transport shape the
  * review-note payload tests pin cannot fork between them.
  *
  * Deliberately carries no PR context (`prUrl`/`diffScope`): an unstamped

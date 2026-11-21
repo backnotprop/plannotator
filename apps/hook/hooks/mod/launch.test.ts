@@ -60,7 +60,7 @@ describe('stopArgv (TERM for a CLI without host close)', () => {
   test('a system whose ps cannot verify the pid: nothing is signalled', async () => {
     const child = spawn('sleep 30; : plannotator review')
     const emptyPath = tempDir()
-    const proc = Bun.spawn(stopArgv(String(child.pid), []), { stdout: 'ignore', stderr: 'ignore', env: { PATH: emptyPath } })
+    const proc = Bun.spawn(stopArgv(String(child.pid), []), { stdout: 'ignore', stderr: 'ignore', env: { PATH: emptyPath, HOME: process.env.HOME! } })
     expect(await proc.exited).toBe(STOP_EXIT.cannotVerify)
     expect(alive(child.pid)).toBe(true)
   })

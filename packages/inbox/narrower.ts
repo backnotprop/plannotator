@@ -4,21 +4,23 @@ import { useLayoutEffect, useRef, useState } from 'react';
  * Whether an element is narrower than `min`, read before paint and on every
  * resize: a screen picks its narrow layout from its own width, not the
  * window's (the list beside a thread). Unmeasured (no layout, no
- * ResizeObserver) reads as `unmeasured`.
+ * ResizeObserver) reads as `unmeasured`. `drawn` is false while the element
+ * is not in the DOM yet (a screen still loading draws something else): it is
+ * measured once it turns true.
  *
  * Crossing `min` swaps every row element for the other shape, which would
  * drop keyboard focus: the row that held it (`[data-thread-id]`) is noted
  * just before the swap and focused again (without scrolling) once the new
  * rows are in the DOM.
  */
-export function useNarrowerThan<T extends HTMLElement = HTMLElement>(min: number, unmeasured: boolean) {
+export function useNarrowerThan<T extends HTMLElement = HTMLElement>(min: number, unmeasured: boolean, drawn = true) {
   const ref = useRef<T>(null);
   const [narrower, setNarrower] = useState(unmeasured);
   const current = useRef(unmeasured);
   const focused = useRef<{ attr: string; id: string } | null>(null);
   useLayoutEffect(() => {
     const el = ref.current;
-    if (!el) return;
+    if (!el || !drawn) return;
     const read = (width: number) => {
       const next = width > 0 ? width < min : unmeasured;
       if (next === current.current) return;
@@ -43,7 +45,7 @@ export function useNarrowerThan<T extends HTMLElement = HTMLElement>(min: number
     const observer = new ResizeObserver((entries) => read(entries[0]?.borderBoxSize?.[0]?.inlineSize ?? el.getBoundingClientRect().width));
     observer.observe(el);
     return () => observer.disconnect();
-  }, [min, unmeasured]);
+  }, [min, unmeasured, drawn]);
   useLayoutEffect(() => {
     const target = focused.current;
     focused.current = null;

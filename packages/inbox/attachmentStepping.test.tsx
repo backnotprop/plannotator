@@ -1,19 +1,21 @@
 /**
  * Stepping through a thread's attachments without leaving the viewer (design
  * record "inbox-attachment-stepping", v2, not in this repo): the order across
- * messages, the stops at the ends, when `]` `[` `→` `←` stand down, the
- * question row before a typed comment is lost, the header's name rule, the
- * live region, and the image comment box starting empty on every file. The
+ * messages, the stops at the ends, when `]` `[` `→` `←` stand down, a typed
+ * comment never stopping a step (its words wait for its file), the header's
+ * name rule, the live region, and the image comment box starting empty on
+ * every other file. The
  * real browser proof (the HTML bridge, Back, the list) is
  * tests/e2e/inbox-attachment-stepping.spec.ts.
  *
- * DOM-gated: the rendering tests run under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: the rendering tests run under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAttachmentState, InboxMessageWire } from '@plannotator/core/inbox-types';
 import { attachmentSequence, stepAnnouncement, type AttachmentStep } from './stepping';
+import { clearFileDrafts } from './fileCommentDrafts';
 
 const hasDom = typeof document !== 'undefined';
 const { AttachmentPane } = (hasDom ? await import('./components/AttachmentPane') : {}) as typeof import('./components/AttachmentPane');
@@ -29,6 +31,8 @@ afterEach(() => {
   host = null;
   globalThis.fetch = realFetch;
   if (hasDom) window.getSelection()?.removeAllRanges();
+  // A file closed with words keeps them in this window's memory: each test starts clean.
+  clearFileDrafts();
 });
 
 const M1 = 'msg_01K7M1MMMMMMMMMMMMMMMMMMMM';
@@ -411,7 +415,7 @@ test('images in a message come before its attached files, in text order; each sa
   expect(stepAnnouncement(withReply, 0)).toMatch(/^1 of 1, mine\.png, PNG image, in your .*message$/);
 });
 
-test.skipIf(!hasDom)('a typed image comment asks first: keep writing, discard, or save it and go on', async () => {
+test.skipIf(!hasDom)('a typed image comment never stops a step or a close: its words wait for that image and are back when it opens again', async () => {
   const saved: object[] = [];
   globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body ?? '{}'));
@@ -432,51 +436,42 @@ test.skipIf(!hasDom)('a typed image comment asks first: keep writing, discard, o
     });
   };
   await type('The Pay button sits under the fold.');
+  // Next goes on the first press: no question, nothing saved.
   await act(async () => host!.querySelector<HTMLButtonElement>('[data-step-next]')!.click());
-  const guard = () => host!.querySelector<HTMLElement>('[data-step-guard]');
-  expect(guard()).not.toBeNull();
-  expect(guard()!.textContent).toContain('Your comment on desktop.png is not saved yet.');
-  expect(guard()!.querySelector('[data-guard-discard]')!.textContent).toBe('Discard and go to refund-policy.pdf');
-  expect(document.activeElement).toBe(guard()!.querySelector('[data-guard-save]'));
-  expect(harness.steps).toEqual([]);
-  // The row owns the keys while it is open.
-  await key(pane(), { key: ']' });
-  expect(harness.steps).toEqual([]);
-  // Esc is Keep writing: the text is focused, the cursor at its end.
-  await key(guard()!.querySelector('[data-guard-save]')!, { key: 'Escape' });
-  expect(guard()).toBeNull();
-  expect(document.activeElement).toBe(box());
-  expect(box().selectionStart).toBe(box().value.length);
-
-  // Discard: the file changes and the next image's box starts empty.
-  await act(async () => host!.querySelector<HTMLButtonElement>('[data-step-next]')!.click());
-  await act(async () => guard()!.querySelector<HTMLButtonElement>('[data-guard-discard]')!.click());
+  expect(host!.querySelector('[data-step-guard]')).toBeNull();
   expect(openId()).toBe(spec.id);
   expect(saved).toEqual([]);
+  // The next image's box starts empty: the words are that image's.
   await key(pane(), { key: ']' });
   expect(openId()).toBe(shotB.id);
   expect(box().value).toBe('');
-
-  // Save it and go on: the comment is saved on the file it was typed on, then the step.
-  await type('Move it above the fold.');
-  await key(pane(), { key: ']' });
-  expect(guard()).not.toBeNull();
-  await act(async () => guard()!.querySelector<HTMLButtonElement>('[data-guard-save]')!.click());
-  await settle();
-  expect(openId()).toBe(zip.id);
-  expect(saved).toHaveLength(1);
-  expect((saved[0] as { attachment_id: string }).attachment_id).toBe(shotB.id);
-  expect((saved[0] as { annotation: { text: string } }).annotation.text).toBe('Move it above the fold.');
-
-  // Close asks too.
+  // Back on desktop.png: its words are in its box again.
   await key(pane(), { key: '[' });
-  expect(openId()).toBe(shotB.id);
+  await key(pane(), { key: '[' });
+  expect(openId()).toBe(shotA.id);
+  expect(box().value).toBe('The Pay button sits under the fold.');
+
+  // Discard is on the comment itself: words cleared, nothing waits.
+  await type('');
+  await key(pane(), { key: ']' });
+  await key(pane(), { key: '[' });
+  expect(openId()).toBe(shotA.id);
+  expect(box().value).toBe('');
+
+  // Saved from its own box, it is a comment, not a draft.
+  await type('Move it above the fold.');
+  await act(async () => host!.querySelector<HTMLButtonElement>('[data-image-comment-save]')!.click());
+  await settle();
+  expect(saved).toHaveLength(1);
+  expect((saved[0] as { annotation: { text: string } }).annotation.text).toBe('Move it above the fold.');
+  expect(box().value).toBe('');
+
+  // Close with words closes on the first press.
   await type('One more thought.');
-  await act(async () => host!.querySelector<HTMLButtonElement>('[aria-label="Close checkout-mobile.png"]')!.click());
-  expect(harness.closed).toBe(0);
-  expect(guard()!.querySelector('[data-guard-discard]')!.textContent).toBe('Discard and close the file');
-  await act(async () => guard()!.querySelector<HTMLButtonElement>('[data-guard-discard]')!.click());
+  await act(async () => host!.querySelector<HTMLButtonElement>('[aria-label="Close desktop.png"]')!.click());
+  expect(host!.querySelector('[data-step-guard]')).toBeNull();
   expect(harness.closed).toBe(1);
+  expect(saved).toHaveLength(1);
 });
 
 test.skipIf(!hasDom)('the header drops the file name when the thread has more than one file; one file keeps it and has no stepper', async () => {

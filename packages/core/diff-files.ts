@@ -76,6 +76,33 @@ function deriveStatus(lines: string[], oldPath: string, newPath: string): DiffFi
   return oldPath !== newPath ? "renamed" : "modified";
 }
 
+/**
+ * A patch's added and removed lines, counted only inside its hunks: before a
+ * file's first `@@` the `---`/`+++` lines are its headers, and inside a hunk
+ * a line such as `----` (a removed `---` rule) or `--- x` (a removed SQL
+ * comment) is content, as git's numstat counts it. A combined diff
+ * (`diff --cc`, hunks headed `@@@`) is counted by its first column.
+ */
+export function countPatchChanges(patch: string): { additions: number; deletions: number } {
+  return countPatchLines(patch.split("\n"));
+}
+
+function countPatchLines(lines: readonly string[]): { additions: number; deletions: number } {
+  let additions = 0;
+  let deletions = 0;
+  let inHunk = false;
+  for (const line of lines) {
+    // A new file's headers follow its `diff` line; no hunk line starts with `diff`.
+    if (line.startsWith("diff ")) inHunk = false;
+    // `@@ ` heads a hunk, `@@@ ` a combined diff's; no hunk line starts with `@`.
+    else if (line.startsWith("@@")) inHunk = true;
+    else if (!inHunk) continue;
+    else if (line.startsWith("+")) additions += 1;
+    else if (line.startsWith("-")) deletions += 1;
+  }
+  return { additions, deletions };
+}
+
 export function parseDiffToFiles(rawPatch: string): DiffFile[] {
   const files: DiffFile[] = [];
 
@@ -91,13 +118,7 @@ export function parseDiffToFiles(rawPatch: string): DiffFile[] {
     const newPath = fromFileLines.newPath ?? fromFileLines.oldPath ?? fromMetadata.newPath ?? fromHeader.newPath;
     if (!oldPath || !newPath) continue;
 
-    let additions = 0;
-    let deletions = 0;
-
-    for (const line of lines) {
-      if (line.startsWith("+") && !line.startsWith("+++")) additions += 1;
-      if (line.startsWith("-") && !line.startsWith("---")) deletions += 1;
-    }
+    const { additions, deletions } = countPatchLines(lines);
 
     files.push({
       path: newPath,
@@ -110,6 +131,118 @@ export function parseDiffToFiles(rawPatch: string): DiffFile[] {
   }
 
   return files;
+}
+
+/** The two blobs a file's patch runs between (its `index` line). */
+export interface PatchBlobIds {
+  oldId: string;
+  newId: string;
+}
+
+/** A file's `index` blob ids; null when there is no such line (GitLab's rebuilt patches) or a side does not exist (all zeros). */
+export function patchBlobIds(patch: string): PatchBlobIds | null {
+  const ids = /^index ([0-9a-f]{7,64})\.\.([0-9a-f]{7,64})/m.exec(patch);
+  if (!ids || /^0+$/.test(ids[1]!) || /^0+$/.test(ids[2]!)) return null;
+  return { oldId: ids[1]!, newId: ids[2]! };
+}
+
+/** One line of a hunk, numbered on each side it exists on. `text` drops the ` `/`+`/`-` prefix. */
+export type DiffHunkLine =
+  | { kind: "context"; oldLine: number; newLine: number; text: string }
+  | { kind: "add"; newLine: number; text: string }
+  | { kind: "del"; oldLine: number; text: string };
+
+/**
+ * One `@@` hunk. Each side is the half-open line range `[start, end)` it
+ * covers; an empty side (`-3,0`) has `start === end`, placed after the line
+ * its header names. Lines past the hunk move by `newEnd - oldEnd`.
+ */
+export interface DiffHunk {
+  oldStart: number;
+  oldEnd: number;
+  newStart: number;
+  newEnd: number;
+  lines: DiffHunkLine[];
+}
+
+const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+
+/**
+ * The hunks of one file's patch (a `DiffFile.patch`), in order, with every
+ * line numbered. The file header before the first hunk is skipped, and so is
+ * `\ No newline at end of file`. Returns null for anything else it cannot
+ * account for: a hunk whose lines do not add up to its header, hunks that
+ * overlap, an `@@` row it cannot read (combined `@@@` diffs included), or a
+ * line of content outside a hunk. A truncated or hand-edited patch is never
+ * read as a shorter valid one.
+ */
+export function diffHunkLines(patch: string): DiffHunk[] | null {
+  const rows = patch.split("\n");
+  const hunks: DiffHunk[] = [];
+  for (let i = 0; i < rows.length; ) {
+    const header = HUNK_HEADER.exec(rows[i]);
+    if (!header) {
+      if (!isFileHeaderRow(rows[i], hunks.length > 0)) return null;
+      i += 1;
+      continue;
+    }
+    const read = readHunk(header, rows, i + 1);
+    const previous = hunks.at(-1);
+    if (!read || (previous && (read.hunk.oldStart < previous.oldEnd || read.hunk.newStart < previous.newEnd))) return null;
+    hunks.push(read.hunk);
+    i = read.next;
+  }
+  return hunks;
+}
+
+/**
+ * True for a row that may stand outside a hunk. Before the first hunk that is
+ * the file header (`---`/`+++` included, but no other content row and no
+ * `@@` row); after it, only the blank row that ends the patch.
+ */
+function isFileHeaderRow(row: string, pastFirstHunk: boolean): boolean {
+  if (pastFirstHunk) return row === "";
+  if (row.startsWith("--- ") || row.startsWith("+++ ")) return true;
+  return !/^(?:@@|[ +-])/.test(row);
+}
+
+/** First line number a hunk side covers: an empty side's header names the line before it. */
+function sideStart(start: number, count: number): number {
+  return count === 0 ? start + 1 : start;
+}
+
+/** Reads the hunk whose header was just matched; `next` is the row after it. Null when the rows do not fit the header. */
+function readHunk(header: RegExpExecArray, rows: readonly string[], from: number): { hunk: DiffHunk; next: number } | null {
+  let oldLeft = Number(header[2] ?? "1");
+  let newLeft = Number(header[4] ?? "1");
+  let oldLine = sideStart(Number(header[1]), oldLeft);
+  let newLine = sideStart(Number(header[3]), newLeft);
+  const hunk: DiffHunk = { oldStart: oldLine, oldEnd: oldLine + oldLeft, newStart: newLine, newEnd: newLine + newLeft, lines: [] };
+  let i = from;
+  for (; oldLeft > 0 || newLeft > 0; i += 1) {
+    const row = rows[i];
+    if (row === undefined) return null;
+    const text = row.slice(1);
+    if (row.startsWith("\\")) continue;
+    // Git's diff.suppressBlankEmpty omits the space on an empty context
+    // row. The final split sentinel is not a row in the patch.
+    const contextRow = row.startsWith(" ") || (row === "" && i < rows.length - 1);
+    if (contextRow && oldLeft > 0 && newLeft > 0) {
+      hunk.lines.push({ kind: "context", oldLine: oldLine++, newLine: newLine++, text });
+      oldLeft -= 1;
+      newLeft -= 1;
+    } else if (row.startsWith("-") && oldLeft > 0) {
+      hunk.lines.push({ kind: "del", oldLine: oldLine++, text });
+      oldLeft -= 1;
+    } else if (row.startsWith("+") && newLeft > 0) {
+      hunk.lines.push({ kind: "add", newLine: newLine++, text });
+      newLeft -= 1;
+    } else {
+      return null;
+    }
+  }
+  while (rows[i]?.startsWith("\\")) i += 1;
+  return { hunk, next: i };
 }
 
 /** Return true only when the complete source range is represented by one diff hunk. */

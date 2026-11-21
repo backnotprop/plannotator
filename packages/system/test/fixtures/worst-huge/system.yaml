@@ -1,0 +1,187 @@
+format: 1
+# 60 parts and 120 lines on one sheet (break-ui fixture, dev only).
+system: Northwind Freight, everything on one sheet
+root: L-001
+scopes: { root: Everything }
+parts:
+  shipperweb: { name: "Shipper web", kind: client, role: "Shipper web for every region." }
+  driverios: { name: "Driver iOS", kind: client, role: "Driver iOS for every region." }
+  driverandroid: { name: "Driver Android", kind: client, role: "Driver Android for every region." }
+  kiosk: { name: "Kiosk", kind: client, role: "Kiosk for every region." }
+  partnerapi: { name: "Partner API", kind: client, role: "Partner API for every region." }
+  edi: { name: "EDI", kind: client, role: "EDI for every region." }
+  sftp: { name: "SFTP", kind: client, role: "SFTP for every region." }
+  emailintake: { name: "Email intake", kind: client, role: "Email intake for every region." }
+  sms: { name: "SMS", kind: client, role: "SMS for every region." }
+  voice: { name: "Voice", kind: client, role: "Voice for every region." }
+  slackbot: { name: "Slack bot", kind: client, role: "Slack bot for every region." }
+  opsconsole: { name: "Ops console", kind: client, role: "Ops console for every region." }
+  publicgateway: { name: "Public gateway", kind: worker, role: "Public gateway for every region." }
+  partnergateway: { name: "Partner gateway", kind: worker, role: "Partner gateway for every region." }
+  auth: { name: "Auth", kind: worker, role: "Auth for every region." }
+  webhooks: { name: "Webhooks", kind: worker, role: "Webhooks for every region." }
+  ratelimiter: { name: "Rate limiter", kind: worker, role: "Rate limiter for every region." }
+  waf: { name: "WAF", kind: worker, role: "WAF for every region." }
+  graphql: { name: "GraphQL", kind: worker, role: "GraphQL for every region." }
+  grpcedge: { name: "gRPC edge", kind: worker, role: "gRPC edge for every region." }
+  uploads: { name: "Uploads", kind: worker, role: "Uploads for every region." }
+  adminapi: { name: "Admin API", kind: worker, role: "Admin API for every region." }
+  statuspage: { name: "Status page", kind: worker, role: "Status page for every region." }
+  featureflags: { name: "Feature flags", kind: worker, role: "Feature flags for every region." }
+  dispatch: { name: "Dispatch", kind: service, role: "Dispatch for every region." }
+  routing: { name: "Routing", kind: service, role: "Routing for every region." }
+  pricing: { name: "Pricing", kind: service, role: "Pricing for every region." }
+  quotes: { name: "Quotes", kind: service, role: "Quotes for every region." }
+  billing: { name: "Billing", kind: service, role: "Billing for every region." }
+  recon: { name: "Recon", kind: service, role: "Recon for every region." }
+  ledger: { name: "Ledger", kind: service, role: "Ledger for every region." }
+  notify: { name: "Notify", kind: service, role: "Notify for every region." }
+  tracking: { name: "Tracking", kind: service, role: "Tracking for every region." }
+  eta: { name: "ETA", kind: service, role: "ETA for every region." }
+  fraud: { name: "Fraud", kind: service, role: "Fraud for every region." }
+  claims: { name: "Claims", kind: service, role: "Claims for every region." }
+  scheduler: { name: "Scheduler", kind: worker, role: "Scheduler for every region." }
+  kafka: { name: "Kafka", kind: worker, role: "Kafka for every region." }
+  outboxrelay: { name: "Outbox relay", kind: worker, role: "Outbox relay for every region." }
+  searchindexer: { name: "Search indexer", kind: worker, role: "Search indexer for every region." }
+  exports: { name: "Exports", kind: worker, role: "Exports for every region." }
+  imports: { name: "Imports", kind: worker, role: "Imports for every region." }
+  geocoder: { name: "Geocoder", kind: worker, role: "Geocoder for every region." }
+  photoresizer: { name: "Photo resizer", kind: worker, role: "Photo resizer for every region." }
+  invoicepdf: { name: "Invoice PDF", kind: worker, role: "Invoice PDF for every region." }
+  payouts: { name: "Payouts", kind: worker, role: "Payouts for every region." }
+  auditlog: { name: "Audit log", kind: worker, role: "Audit log for every region." }
+  retention: { name: "Retention", kind: worker, role: "Retention for every region." }
+  postgres: { name: "Postgres", kind: store, role: "Postgres for every region." }
+  readreplica: { name: "Read replica", kind: store, role: "Read replica for every region." }
+  redis: { name: "Redis", kind: store, role: "Redis for every region." }
+  s3: { name: "S3", kind: store, role: "S3 for every region." }
+  snowflake: { name: "Snowflake", kind: store, role: "Snowflake for every region." }
+  elasticsearch: { name: "Elasticsearch", kind: store, role: "Elasticsearch for every region." }
+  clickhouse: { name: "ClickHouse", kind: store, role: "ClickHouse for every region." }
+  dynamodb: { name: "DynamoDB", kind: store, role: "DynamoDB for every region." }
+  vault: { name: "Vault", kind: store, role: "Vault for every region." }
+  kms: { name: "KMS", kind: store, role: "KMS for every region." }
+  backups: { name: "Backups", kind: store, role: "Backups for every region." }
+  tilescache: { name: "Tiles cache", kind: store, role: "Tiles cache for every region." }
+flows:
+  f1: { from: uploads, to: ledger, says: "writes ledger" }
+  f2: { from: imports, to: dynamodb, says: "calls dynamodb" }
+  f3: { from: adminapi, to: geocoder, says: "streams to geocoder" }
+  f4: { from: sms, to: uploads, says: "books uploads" }
+  f5: { from: fraud, to: payouts, says: "checks payouts" }
+  f6: { from: featureflags, to: geocoder, says: "loads geocoder" }
+  f7: { from: dispatch, to: invoicepdf, says: "signs invoicepdf" }
+  f8: { from: retention, to: postgres, says: "reads postgres" }
+  f9: { from: dispatch, to: auditlog, says: "writes auditlog" }
+  f10: { from: voice, to: webhooks, says: "calls webhooks" }
+  f11: { from: recon, to: exports, says: "streams to exports" }
+  f12: { from: partnerapi, to: publicgateway, says: "books publicgateway" }
+  f13: { from: driverandroid, to: billing, says: "checks billing" }
+  f14: { from: invoicepdf, to: dynamodb, says: "loads dynamodb" }
+  f15: { from: scheduler, to: dynamodb, says: "signs dynamodb" }
+  f16: { from: scheduler, to: s3, says: "reads s3" }
+  f17: { from: webhooks, to: notify, says: "writes notify" }
+  f18: { from: eta, to: postgres, says: "calls postgres" }
+  f19: { from: ratelimiter, to: ledger, says: "streams to ledger" }
+  f20: { from: slackbot, to: graphql, says: "books graphql" }
+  f21: { from: ledger, to: scheduler, says: "checks scheduler" }
+  f22: { from: voice, to: ratelimiter, says: "loads ratelimiter" }
+  f23: { from: routing, to: invoicepdf, says: "signs invoicepdf" }
+  f24: { from: partnerapi, to: waf, says: "reads waf" }
+  f25: { from: notify, to: outboxrelay, says: "writes outboxrelay" }
+  f26: { from: opsconsole, to: waf, says: "calls waf" }
+  f27: { from: payouts, to: elasticsearch, says: "streams to elasticsearch" }
+  f28: { from: retention, to: snowflake, says: "books snowflake" }
+  f29: { from: opsconsole, to: uploads, says: "checks uploads" }
+  f30: { from: publicgateway, to: tracking, says: "loads tracking" }
+  f31: { from: geocoder, to: readreplica, says: "signs readreplica" }
+  f32: { from: sms, to: statuspage, says: "reads statuspage" }
+  f33: { from: notify, to: imports, says: "writes imports" }
+  f34: { from: ledger, to: outboxrelay, says: "calls outboxrelay" }
+  f35: { from: voice, to: waf, says: "streams to waf" }
+  f36: { from: ratelimiter, to: dispatch, says: "books dispatch" }
+  f37: { from: slackbot, to: uploads, says: "checks uploads" }
+  f38: { from: quotes, to: s3, says: "loads s3" }
+  f39: { from: statuspage, to: notify, says: "signs notify" }
+  f40: { from: partnergateway, to: dispatch, says: "reads dispatch" }
+  f41: { from: kiosk, to: partnergateway, says: "writes partnergateway" }
+  f42: { from: ledger, to: redis, says: "calls redis" }
+  f43: { from: partnergateway, to: searchindexer, says: "streams to searchindexer" }
+  f44: { from: imports, to: tilescache, says: "books tilescache" }
+  f45: { from: emailintake, to: pricing, says: "checks pricing" }
+  f46: { from: statuspage, to: pricing, says: "loads pricing" }
+  f47: { from: driverandroid, to: partnergateway, says: "signs partnergateway" }
+  f48: { from: grpcedge, to: claims, says: "reads claims" }
+  f49: { from: sftp, to: partnergateway, says: "writes partnergateway" }
+  f50: { from: sftp, to: statuspage, says: "calls statuspage" }
+  f51: { from: kiosk, to: fraud, says: "streams to fraud" }
+  f52: { from: uploads, to: dispatch, says: "books dispatch" }
+  f53: { from: eta, to: kafka, says: "checks kafka" }
+  f54: { from: webhooks, to: eta, says: "loads eta" }
+  f55: { from: scheduler, to: tilescache, says: "signs tilescache" }
+  f56: { from: slackbot, to: webhooks, says: "reads webhooks" }
+  f57: { from: webhooks, to: fraud, says: "writes fraud" }
+  f58: { from: edi, to: uploads, says: "calls uploads" }
+  f59: { from: statuspage, to: searchindexer, says: "streams to searchindexer" }
+  f60: { from: driverandroid, to: grpcedge, says: "books grpcedge" }
+  f61: { from: uploads, to: routing, says: "checks routing" }
+  f62: { from: quotes, to: vault, says: "loads vault" }
+  f63: { from: fraud, to: outboxrelay, says: "signs outboxrelay" }
+  f64: { from: geocoder, to: snowflake, says: "reads snowflake" }
+  f65: { from: fraud, to: geocoder, says: "writes geocoder" }
+  f66: { from: photoresizer, to: redis, says: "calls redis" }
+  f67: { from: partnerapi, to: statuspage, says: "streams to statuspage" }
+  f68: { from: payouts, to: dynamodb, says: "books dynamodb" }
+  f69: { from: photoresizer, to: kms, says: "checks kms" }
+  f70: { from: invoicepdf, to: vault, says: "loads vault" }
+  f71: { from: partnerapi, to: grpcedge, says: "signs grpcedge" }
+  f72: { from: claims, to: kafka, says: "reads kafka" }
+  f73: { from: billing, to: imports, says: "writes imports" }
+  f74: { from: invoicepdf, to: tilescache, says: "calls tilescache" }
+  f75: { from: quotes, to: retention, says: "streams to retention" }
+  f76: { from: eta, to: redis, says: "books redis" }
+  f77: { from: searchindexer, to: backups, says: "checks backups" }
+  f78: { from: auditlog, to: redis, says: "loads redis" }
+  f79: { from: routing, to: elasticsearch, says: "signs elasticsearch" }
+  f80: { from: exports, to: redis, says: "reads redis" }
+  f81: { from: emailintake, to: statuspage, says: "writes statuspage" }
+  f82: { from: photoresizer, to: tilescache, says: "calls tilescache" }
+  f83: { from: kiosk, to: billing, says: "streams to billing" }
+  f84: { from: graphql, to: claims, says: "books claims" }
+  f85: { from: auditlog, to: tilescache, says: "checks tilescache" }
+  f86: { from: photoresizer, to: postgres, says: "loads postgres" }
+  f87: { from: adminapi, to: billing, says: "signs billing" }
+  f88: { from: ratelimiter, to: eta, says: "reads eta" }
+  f89: { from: outboxrelay, to: vault, says: "writes vault" }
+  f90: { from: edi, to: statuspage, says: "calls statuspage" }
+  f91: { from: dispatch, to: photoresizer, says: "streams to photoresizer" }
+  f92: { from: sms, to: claims, says: "books claims" }
+  f93: { from: driverios, to: uploads, says: "checks uploads" }
+  f94: { from: slackbot, to: auth, says: "loads auth" }
+  f95: { from: partnerapi, to: billing, says: "signs billing" }
+  f96: { from: auditlog, to: clickhouse, says: "reads clickhouse" }
+  f97: { from: photoresizer, to: snowflake, says: "writes snowflake" }
+  f98: { from: retention, to: tilescache, says: "calls tilescache" }
+  f99: { from: graphql, to: ledger, says: "streams to ledger" }
+  f100: { from: emailintake, to: featureflags, says: "books featureflags" }
+  f101: { from: outboxrelay, to: snowflake, says: "checks snowflake" }
+  f102: { from: quotes, to: searchindexer, says: "loads searchindexer" }
+  f103: { from: slackbot, to: featureflags, says: "signs featureflags" }
+  f104: { from: geocoder, to: clickhouse, says: "reads clickhouse" }
+  f105: { from: exports, to: snowflake, says: "writes snowflake" }
+  f106: { from: shipperweb, to: grpcedge, says: "calls grpcedge" }
+  f107: { from: eta, to: scheduler, says: "streams to scheduler" }
+  f108: { from: driverandroid, to: pricing, says: "books pricing" }
+  f109: { from: waf, to: quotes, says: "checks quotes" }
+  f110: { from: grpcedge, to: pricing, says: "loads pricing" }
+  f111: { from: ledger, to: payouts, says: "signs payouts" }
+  f112: { from: emailintake, to: ratelimiter, says: "reads ratelimiter" }
+  f113: { from: auth, to: ledger, says: "writes ledger" }
+  f114: { from: dispatch, to: imports, says: "calls imports" }
+  f115: { from: opsconsole, to: quotes, says: "streams to quotes" }
+  f116: { from: opsconsole, to: statuspage, says: "books statuspage" }
+  f117: { from: fraud, to: auditlog, says: "checks auditlog" }
+  f118: { from: edi, to: featureflags, says: "loads featureflags" }
+  f119: { from: quotes, to: exports, says: "signs exports" }
+  f120: { from: eta, to: elasticsearch, says: "reads elasticsearch" }

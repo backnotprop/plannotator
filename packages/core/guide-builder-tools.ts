@@ -53,6 +53,21 @@ const LINKS =
 
 const edit = { readOnlyHint: false, destructiveHint: false, idempotentHint: false } as const;
 
+/** A chapter's one diagram (AGENT TEXT: awaits the owner's OK of these words). */
+const CHAPTER_DIAGRAM = {
+  type: "object",
+  description:
+    "Optional. One diagram at the top of the chapter, only when a picture explains this chapter better than words. " +
+    "Mermaid preferred (flowchart, sequence, state, ER…); it links with `click` lines: `click node \"symbol:name\"`. " +
+    "Every link must resolve and the diagram must render; the answer names what does not.",
+  properties: {
+    kind: { type: "string", enum: ["mermaid", "html"], description: "`mermaid`. (`html` is a sanitized custom picture, capped at 64 KB.)" },
+    source: { type: "string", description: "The diagram's source." },
+  },
+  required: ["kind", "source"],
+  additionalProperties: false,
+} as const;
+
 export const GUIDE_BUILDER_TOOLS: readonly GuideBuilderToolDefinition[] = [
   {
     name: "guide_set_header",
@@ -71,23 +86,12 @@ export const GUIDE_BUILDER_TOOLS: readonly GuideBuilderToolDefinition[] = [
   {
     name: "guide_set_overview",
     title: "Set the overview",
-    description:
-      `Set the overview shown above the chapters: a few sentences on how the change fits together, and optionally one diagram. Replaces any earlier overview. ${LINKS} ` +
-      "A Mermaid diagram (flowchart, sequence, state, ER…) links with `click` lines: `click node \"symbol:name\"`. Every link must resolve and the diagram must render; the answer names what does not.",
+    // The overview no longer offers a diagram (diagrams go in chapters); the builder still reads one an older draft has.
+    description: `Set the overview shown above the chapters: a few sentences on how the change fits together. Replaces any earlier overview. ${LINKS}`,
     inputSchema: {
       type: "object",
       properties: {
         text: { type: "string", description: "Markdown, a few sentences, with code links." },
-        diagram: {
-          type: "object",
-          description: "Optional. One diagram.",
-          properties: {
-            kind: { type: "string", enum: ["mermaid", "html"], description: "`mermaid`. (`html` is a sanitized custom picture, capped at 64 KB.)" },
-            source: { type: "string", description: "The diagram's source." },
-          },
-          required: ["kind", "source"],
-          additionalProperties: false,
-        },
       },
       required: ["text"],
       additionalProperties: false,
@@ -97,12 +101,13 @@ export const GUIDE_BUILDER_TOOLS: readonly GuideBuilderToolDefinition[] = [
   {
     name: "guide_add_chapter",
     title: "Add a chapter",
-    description: `Add a chapter: a concept-level title and an overview (markdown, 2-6 sentences: what changed, why, what it implies). Answers the new chapter's id (\`c3\`). At most 10 chapters. ${LINKS}`,
+    description: `Add a chapter: a concept-level title, an overview (markdown, 2-6 sentences: what changed, why, what it implies), and optionally one diagram. Answers the new chapter's id (\`c3\`). At most 10 chapters. ${LINKS}`,
     inputSchema: {
       type: "object",
       properties: {
         title: { type: "string", description: "Concept-level, never a file name." },
         overview: { type: "string", description: "Markdown, 2-6 sentences." },
+        diagram: CHAPTER_DIAGRAM,
         position: { type: "integer", minimum: 1, description: "1-based place in reading order. Default: last." },
       },
       required: ["title", "overview"],
@@ -113,13 +118,14 @@ export const GUIDE_BUILDER_TOOLS: readonly GuideBuilderToolDefinition[] = [
   {
     name: "guide_update_chapter",
     title: "Update a chapter",
-    description: "Change a chapter's title, overview, or both.",
+    description: "Change a chapter's title, overview or diagram. `diagram: null` removes the diagram.",
     inputSchema: {
       type: "object",
       properties: {
         chapter: CHAPTER,
         title: { type: "string" },
         overview: { type: "string" },
+        diagram: { ...CHAPTER_DIAGRAM, type: ["object", "null"] },
       },
       required: ["chapter"],
       additionalProperties: false,
@@ -230,8 +236,9 @@ export const GUIDE_BUILDER_TOOLS: readonly GuideBuilderToolDefinition[] = [
 /** The paragraph on the guide's shape and the builder tools (spec 4.3). */
 export const GUIDE_BUILDER_PROMPT_PARAGRAPH =
   "Build the guide with the `guide_*` tools, in any order. A guide has a title, an intent, an optional overview " +
-  "(a few sentences and one Mermaid diagram, with links like `symbol:name` or `code:path#L12`), and a few chapters " +
-  "in reading order. Each chapter has an overview and the files it covers, each with a one-line summary. Every " +
+  "(a few sentences, with links like `symbol:name` or `code:path#L12`), and a few chapters in reading order. Each " +
+  "chapter has an overview and the files it covers, each with a one-line summary, and may have one Mermaid diagram " +
+  "when a picture explains it better than words. Every " +
   "changed file goes in exactly one chapter, or is marked unplaced. Call `guide_read` to see the draft and what is " +
   "left; call `guide_finish` when done.";
 

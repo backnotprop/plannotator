@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import type { EditorMode, InputMethod } from '../types';
-import { TaterSpritePullup } from './TaterSpritePullup';
+import { TaterPullupSlot } from './TaterSpriteSlots';
 
 /** Props for the shared annotation input and action mode toolstrip. */
 export interface AnnotationToolstripProps {
@@ -42,6 +42,12 @@ export interface AnnotationToolstripProps {
    * Markup and Comment).
    */
   hideRedline?: boolean;
+  /**
+   * Omit the action group (Markup, Comment, Redline, Label) and show only the
+   * Select / Pinpoint pair. For a host whose composer decides the action (a
+   * Shape board: Change it or Ask).
+   */
+  hideActionModes?: boolean;
 }
 
 /** Render the shared input-method and annotation-mode controls. */
@@ -57,6 +63,7 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
   hideInputMethodSwitch = false,
   hideQuickLabel = false,
   hideRedline = false,
+  hideActionModes = false,
 }) => {
   const [showHelp, setShowHelp] = useState(false);
   const [helpTab, setHelpTab] = useState<'selection' | 'plannotator'>('selection');
@@ -114,6 +121,7 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
         )}
 
         {/* Action mode group */}
+        {!hideActionModes && (
         <div className="inline-flex items-center gap-0.5 bg-muted/50 rounded-lg p-0.5 border border-border/30">
           <ToolstripButton
             active={mode === 'selection'}
@@ -176,6 +184,7 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
             />
           )}
         </div>
+        )}
 
         {/* Help */}
         {!compact && showHelpLink && (
@@ -198,7 +207,7 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
             className="bg-card border border-border rounded-xl w-full max-w-2xl shadow-2xl relative"
             onClick={e => e.stopPropagation()}
           >
-            {taterMode && <TaterSpritePullup />}
+            {taterMode && <TaterPullupSlot />}
             <div className="flex items-center justify-between p-4 border-b border-border">
               <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-0.5">
                 <button

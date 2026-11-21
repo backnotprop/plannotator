@@ -25,6 +25,7 @@
  */
 
 import type { InboxAttachmentState, InboxGuideRef, InboxMessageWire } from '@plannotator/core/inbox-types';
+import { isInboxAnnotatableKind } from '@plannotator/core/inbox-types';
 import { agentName, whenTime } from './format';
 
 /** Who sent the message an artifact came in, and when, in the window's words. */
@@ -69,7 +70,19 @@ export function artifactKey(artifact: Artifact): string {
   return artifact.type === 'file' ? artifact.attachment.id : `guide:${artifact.messageId}`;
 }
 
-function originOf(message: InboxMessageWire): ArtifactOrigin {
+/** Who sent a message and when, as a tile says it (also the Artifacts wall's, from its rows). */
+export function originOf(message: Pick<InboxMessageWire, 'id' | 'author' | 'created_at'>): ArtifactOrigin {
+  const day = new Date().toDateString();
+  const kept = origins.get(message);
+  if (kept?.day === day) return kept.origin;
+  const origin = originNow(message);
+  origins.set(message, { day, origin });
+  return origin;
+}
+
+const origins = new WeakMap<object, { day: string; origin: ArtifactOrigin }>();
+
+function originNow(message: Pick<InboxMessageWire, 'id' | 'author' | 'created_at'>): ArtifactOrigin {
   const fromPerson = message.author.kind === 'person';
   return {
     messageId: message.id,
@@ -98,12 +111,12 @@ export function threadArtifacts(
   const out: Artifact[] = [];
   const placed = new Set<string>();
   for (const message of messages) {
-    const origin = originOf(message);
+    const origin = () => originOf(message);
     const files: FileArtifact[] = [];
     for (const image of inlineImages) {
       if (image.message_id !== message.id || placed.has(image.id)) continue;
       placed.add(image.id);
-      files.push({ type: 'file', ...origin, attachment: image, inline: true, alsoIds: [] });
+      files.push({ type: 'file', ...origin(), attachment: image, inline: true, alsoIds: [] });
     }
     for (const attachment of attachments) {
       if (attachment.message_id !== message.id || placed.has(attachment.id)) continue;
@@ -114,10 +127,10 @@ export function threadArtifacts(
         twin.alsoIds = [...twin.alsoIds, attachment.id];
         continue;
       }
-      files.push({ type: 'file', ...origin, attachment, inline: false, alsoIds: [] });
+      files.push({ type: 'file', ...origin(), attachment, inline: false, alsoIds: [] });
     }
     out.push(...files);
-    if (message.guide) out.push({ type: 'guide', ...origin, guide: message.guide });
+    if (message.guide) out.push({ type: 'guide', ...origin(), guide: message.guide });
   }
   for (const [list, inline] of [
     [inlineImages, true],
@@ -156,7 +169,22 @@ export function artifactOfFile(artifacts: readonly Artifact[], attachmentId: str
   return null;
 }
 
-/** How many messages the artifacts came from ("11 from 5 messages"). */
-export function artifactMessageCount(artifacts: readonly Artifact[]): number {
-  return new Set(artifacts.map((a) => a.messageId)).size;
+/** The pin key of an open file: its artifact's (the shown image's id for an attached twin), else its own id. */
+export function openArtifactKey(artifacts: readonly Artifact[], attachmentId: string): string {
+  const artifact = artifactOfFile(artifacts, attachmentId);
+  return artifact ? artifactKey(artifact) : attachmentId;
+}
+
+/**
+ * What `O` opens (approval "inbox-keyboard-shortcuts"): the newest message's
+ * first file that opens in the viewer (its tile says Open, not Download), the
+ * grid's order. Guided reviews open their own reader and a plain file or a PDF
+ * is a download, so neither is taken. Null: nothing to open.
+ */
+export function newestViewableFile(artifacts: readonly Artifact[]): FileArtifact | null {
+  for (const artifact of artifactsNewestFirst(artifacts)) {
+    if (artifact.type !== 'file') continue;
+    if (isInboxAnnotatableKind(artifact.attachment.kind)) return artifact;
+  }
+  return null;
 }
