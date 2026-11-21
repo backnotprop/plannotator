@@ -46,6 +46,7 @@ import { hasMermaidMath } from './mermaid-math-slot';
 import { applyMermaidTheme, mermaidThemeKey, type MermaidThemeMode } from './mermaidTheme';
 import { loadPeleRuntime, PELE_IN_BUILD, PELE_OUTPUT_LIMIT, PELE_SOURCE_LIMIT, peleFonts, peleSvgId, renderPeleSource } from './pele';
 import { finishPeleLabels, needsPeleLabels, pageMathTypesetter, peleLabelMeasurer, preparePeleLabels, restorePeleLabelMessage, type PreparedPeleLabels } from './pele-labels';
+import { peleAuthorThemeVariables } from './peleAuthorTheme';
 import { applyPeleThemeVariables, peleShadowCss, readPeleThemeVariables } from './peleTheme';
 
 export type { DiagramKind } from '@plannotator/core/diagram-anchor';
@@ -840,7 +841,9 @@ async function renderPele(renderId: string, source: string, theme: DiagramTheme,
     }
     svgNode.id = peleSvgId(renderId);
     scrubFetchingStyles(svgNode);
-    applyPeleThemeVariables(svgNode, readPeleThemeVariables(theme.mode));
+    // The person's palette, or the author's own colours when the source gives them (`peleAuthorTheme.ts`).
+    const personColors = readPeleThemeVariables(theme.mode);
+    applyPeleThemeVariables(svgNode, peleAuthorThemeVariables(source, personColors) ?? personColors);
     // The Diagram Shadow setting: one rule scoped under this svg (built here, after the sanitizer, from numbers only).
     const shadow = peleShadowCss(svgNode, theme.mode, theme.shadowAmount);
     if (shadow !== null) {

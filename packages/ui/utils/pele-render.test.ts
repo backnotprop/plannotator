@@ -113,4 +113,13 @@ describe.if(hasDom)('Pele render integration', () => {
     expect(sheets[0]).toContain('filter: drop-shadow(');
     expect(off.svgNode.querySelector('style')).toBeNull();
   });
+
+  test("a source that gives its own theme is drawn in the author's colours; one that gives none is not", async () => {
+    const own = await renderDiagram('mermaid', 'author', "%%{init: {'theme': 'forest', 'themeVariables': {'lineColor': '#123456'}}}%%\nflowchart LR\n  A --> B", theme);
+    const plain = await renderDiagram('mermaid', 'plain', 'flowchart LR\n  A --> B', theme);
+    if (own.ok === false || plain.ok === false) throw new Error('render failed');
+    expect(own.svgNode.style.getPropertyValue('--pele-surface')).toBe('#cde498');
+    expect(own.svgNode.style.getPropertyValue('--pele-line')).toBe('#123456');
+    expect(plain.svgNode.style.getPropertyValue('--pele-surface')).toBe('');
+  });
 });
