@@ -1,16 +1,3 @@
-/**
- * Copy source on a diagram: one press copies the fence's text, from the drawn
- * diagram's hover buttons and from the source view, without switching views
- * first.
- *
- * What regresses if these fail:
- * - the drawn diagram has no Copy source button, so copying needs Show
- *   source, a select, and a copy;
- * - the source view loses it;
- * - the button copies something other than the fence's text.
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

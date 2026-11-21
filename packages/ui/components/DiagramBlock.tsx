@@ -65,7 +65,6 @@ function inlineHeight(state: DiagramRenderState | null): string {
 
 const ICON_BUTTON = 'p-1.5 rounded-md bg-muted/85 hover:bg-muted text-muted-foreground hover:text-foreground';
 
-/** Copies the fence's text in one press, from either view, with a brief check mark. */
 const CopySourceButton: React.FC<{ source: string }> = ({ source }) => {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
@@ -83,7 +82,7 @@ const CopySourceButton: React.FC<{ source: string }> = ({ source }) => {
       aria-label="Copy source"
     >
       {copied ? (
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <svg className="w-4 h-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
         </svg>
       ) : (
