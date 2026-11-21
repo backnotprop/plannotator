@@ -32,6 +32,7 @@ export default defineConfig({
       // highlights with Shiki. See build/pierre-highlights-stub.ts.
       '@pierre/highlights/themes/loader': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
       '@pierre/highlights': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
+      '@pierre/patches': path.resolve(__dirname, '../../build/pierre-patches-stub.ts'),
       // Read-only hosts never render the annotation composer, comment popover
       // or reviewer identity — stub them at build time so their dependency
       // tails (markdown/sanitizer, base-ui dialogs, the username wordlist)

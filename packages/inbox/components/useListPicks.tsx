@@ -21,6 +21,8 @@ export interface ListPicksInput {
   sections: readonly InboxListSection[];
   /** A group's rows are drawn (open, or in List every group's but a folded Snoozed band). */
   isOpen: (group: InboxListGroupId) => boolean;
+  /** The rows a view draws besides the open groups' (the Agents view: an open agent's shown rows); Select all picks these too. */
+  drawn?: readonly string[] | null;
   body: RefObject<HTMLElement | null>;
   bulk?: BulkWrites;
   phone: boolean;
@@ -43,6 +45,10 @@ export interface MenuPicks {
   act: PickActions;
   /** Stop the Combine a row waits in (its menu's Stop combining). */
   stopCombine?: (threadId: string) => void;
+  /** A row dropped on another (listDrops.tsx): today's Combine dialog with exactly these threads picked. Absent: no Combine here. */
+  combineWith?: (threadIds: readonly string[]) => void;
+  /** A dragged thread was dropped anywhere (threadDrag.ts `dropped`): picking ends, unless the drop opened Combine on them. */
+  dropped?: () => void;
 }
 
 export function useListPicks(input: ListPicksInput) {
@@ -75,7 +81,7 @@ export function useListPicks(input: ListPicksInput) {
   }, [input.scope, leave]);
   /** The rows as drawn that can be picked, for a Shift press's range (an Archived group's are not). */
   const order = () => [...(body.current?.querySelectorAll('[data-thread-id]') ?? [])].map((el) => el.getAttribute('data-thread-id')!).filter((id) => listed.has(id));
-  const drawnIds = sections.filter((section) => isOpen(section.id)).flatMap((section) => section.threads.map((row) => row.thread_id));
+  const drawnIds = [...(input.drawn ?? []), ...sections.filter((section) => isOpen(section.id)).flatMap((section) => section.threads.map((row) => row.thread_id))];
   const rows = sections.flatMap((section) => section.threads).filter((row, i, all) => picks.picked.has(row.thread_id) && all.findIndex((r) => r.thread_id === row.thread_id) === i);
   const rules: PickRules = {
     drawn: (row) => sectionOf(row.thread_id),
@@ -85,6 +91,9 @@ export function useListPicks(input: ListPicksInput) {
   };
   const [tidyAt, setTidyAt] = useState<HTMLElement | null>(null);
   const [combining, setCombining] = useState(false);
+  // A drop opened the dialog (listDrops.tsx): its Cancel leaves picking too, as every drop ends the picks
+  // (drag-system.html clears them after any drop); until it closes, the drop's own end leaves them for the dialog.
+  const dropOpened = useRef(false);
   const combines = bulk?.combines;
   const act: PickActions | null = bulk
     ? {
@@ -144,11 +153,34 @@ export function useListPicks(input: ListPicksInput) {
       <>
         <PickBar act={act} all={boxState(drawnIds, picks.picked)} onAll={() => picks.all(drawnIds)} onDone={leave} phone={phone} />
         <PickTidy rows={rows} machines={machines} anchor={tidyAt} phone={phone} onClose={() => setTidyAt(null)} />
-        {combining && combines && <CombineDialog rows={rows} machines={machines} onClose={() => setCombining(false)} onStarted={(record, machine) => (combines.begin(record, machine, rows), leave())} />}
+        {combining && combines && (
+          <CombineDialog
+            rows={rows}
+            machines={machines}
+            onClose={() => {
+              setCombining(false);
+              if (dropOpened.current) leave();
+              dropOpened.current = false;
+            }}
+            onStarted={(record, machine) => (combines.begin(record, machine, rows), leave())}
+          />
+        )}
       </>
     ) : null;
   const sheet = picks.on && act && phone ? <PickSheet act={act} /> : null;
   const stopCombine = combines ? (id: string) => combines.waiting.has(id) && void combines.stop(combines.waiting.get(id)!) : undefined;
-  const menu: MenuPicks | undefined = act ? { has: (id) => picks.on && picks.picked.has(id), takes: (id) => listed.has(id), start: picks.start, act, stopCombine } : undefined;
+  const combineWith = combines
+    ? (ids: readonly string[]) => {
+        dropOpened.current = true;
+        picks.leave();
+        picks.start();
+        picks.all(ids.filter((id) => listed.has(id)));
+        setCombining(true);
+      }
+    : undefined;
+  const dropped = () => {
+    if (!dropOpened.current && picksRef.current.on) leave();
+  };
+  const menu: MenuPicks | undefined = act ? { has: (id) => picks.on && picks.picked.has(id), takes: (id) => listed.has(id), start: picks.start, act, stopCombine, combineWith, dropped } : undefined;
   return { on: picks.on && !!act, has: (id: string) => picks.picked.has(id), start: act ? () => picks.start() : undefined, onClickCapture, onRowBox, groupBox, bar, sheet, menu };
 }

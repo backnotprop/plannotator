@@ -31,8 +31,11 @@ export interface MessageBodyProps {
   openInFiles?: boolean;
   /** The project's git `origin` (the thread payload's `project.repo`): bare `#123` refs link into it. */
   repo?: InboxProjectRepo | null;
-  /** A link in the body to one of this message's attachments was followed. */
-  onOpenAttachment: (attachment: InboxAttachment) => void;
+  /**
+   * A link in the body to one of this message's attachments was followed. `start`: an HTML page's query and
+   * fragment from the link (`mock.html?variant=2` → `?variant=2`), which the page opens with.
+   */
+  onOpenAttachment: (attachment: InboxAttachment, start?: string) => void;
   /**
    * A file this agent message names (approval "inbox-file-refs-open-viewer": a link that is not attached, a code span
    * that is a path, a bare path, a picture that did not load) opens beside the thread. Absent: as before.
@@ -62,6 +65,11 @@ export interface MessageBodyProps {
    * `recordFor` names the record a block draws (null: the block stays text
    * and ends the run); `render` draws a run's records, in body order.
    */
+  /**
+   * `:::run` and `:::secret` blocks (parts/RunBlocks): the host's card for one block, by its opening line; undefined
+   * leaves the block as text (a callout, its command with Copy).
+   */
+  renderRunBlock?: (block: { startLine: number; directiveKind?: string }) => React.ReactNode | undefined;
   renderActions?: {
     recordFor: (block: { startLine: number; content: string }) => InboxQuestion | null;
     render: (records: InboxQuestion[]) => React.ReactNode;

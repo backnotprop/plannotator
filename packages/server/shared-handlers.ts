@@ -13,8 +13,10 @@ import { browserNoneReason, resolveBrowserIntent } from "@plannotator/shared/bro
 import { isLocalOnlyAdvertisedUrl } from "@plannotator/shared/advertised-url";
 import { writeUrlQr } from "./qr";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
-import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "./draft";
+import { saveDraft, loadDraft, deleteDraft, getDraftGeneration, missingDraftHeaders } from "./draft";
 import { faviconBody, faviconIcoBody } from "@plannotator/shared/favicon";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { customThemesAnswer, pageWithCustomThemes } from "@plannotator/shared/theme-files";
 import { getServerConfig } from "./config";
 import { saveToObsidian, saveToBear, saveToOctarine, saveToNotion } from "./integrations";
 import type { ObsidianConfig, BearConfig, OctarineConfig, NotionConfig, IntegrationResult } from "./integrations";
@@ -153,14 +155,12 @@ export async function handleDraftSave(req: Request, contentKey: string): Promise
 /** Load annotation draft. Used by all 3 servers. */
 export function handleDraftLoad(contentKey: string): Response {
   const draft = loadDraft(contentKey);
-  if (!draft) {
-    const draftGeneration = getDraftGeneration(contentKey);
-    return Response.json(
-      { found: false, ...(draftGeneration !== null ? { draftGeneration } : {}) },
-      { status: 404 },
-    );
-  }
+  if (!draft) return missingDraftResponse(getDraftGeneration(contentKey));
   return Response.json(draft);
+}
+
+export function missingDraftResponse(draftGeneration: number | null): Response {
+  return new Response(null, { status: 204, headers: missingDraftHeaders(draftGeneration) });
 }
 
 /** Delete annotation draft. Used by all 3 servers. */
@@ -234,6 +234,28 @@ export function handleFavicon(pathname = "/favicon.png"): Response {
   return new Response(body, {
     headers: { "Content-Type": contentType, "Cache-Control": "no-cache" },
   });
+}
+
+/**
+ * `/plannotator-themes.js`: the person's own themes for the page's first frame
+ * (packages/shared/theme-files.ts). Every page links it in its head; it is
+ * read from the data dir on every load, so a theme added since shows on reload.
+ * With `?syntax=<id>`, that theme's code colours as JSON, which the page asks
+ * for when code first renders in it. Pi's servers answer the same
+ * (apps/pi-extension/server/handlers.ts).
+ */
+/**
+ * The page with the person's themes written in, or no themes tag when they have
+ * none (`pageWithCustomThemes`): the `page` option every server's
+ * `openPackedApp` takes, so a page load asks for no themes script.
+ */
+export function customThemesPage(html: string, dataDir: string = getPlannotatorDataDir()): string {
+  return pageWithCustomThemes(html, dataDir);
+}
+
+export function handleCustomThemesScript(search: URLSearchParams = new URLSearchParams(), dataDir: string = getPlannotatorDataDir()): Response {
+  const answer = customThemesAnswer(dataDir, search);
+  return new Response(answer.body, { status: answer.status, headers: answer.headers });
 }
 
 interface ServerReadyOptions {

@@ -79,8 +79,8 @@ export function checkPullRefs(values: unknown, field: string): InboxThreadPullRe
 }
 
 /** `checkPullRefs` in a thread's project, where a short `group/project!45` is on the project's own GitLab host. */
-export async function checkProjectPullRefs(context: Pick<InboxPullsMcpContext, "projectHost">, values: unknown, field: string, projectId: string): Promise<InboxThreadPullRef[]> {
-  return checkedRefs(await parseProjectPullRefs(values, field, projectId, context.projectHost), field);
+export async function checkProjectPullRefs(context: Pick<InboxPullsMcpContext, "projectHost">, values: unknown, field: string, projectId: string, onThread?: (key: string) => boolean): Promise<InboxThreadPullRef[]> {
+  return checkedRefs(await parseProjectPullRefs(values, field, projectId, context.projectHost, onThread), field);
 }
 
 function checkedRefs(parsed: ReturnType<typeof parseInboxThreadPullRefs>, field: string): InboxThreadPullRef[] {
@@ -198,7 +198,7 @@ export function registerInboxThreadPullsTool(server: McpServer, context: InboxPu
         // Every ref is read before anything is written: one bad ref changes nothing.
         const add = input.add ? await checkProjectPullRefs(context, input.add, "add", named.project_id) : [];
         const all = input.remove?.length === 1 && input.remove[0]!.trim().toLowerCase() === "all";
-        const remove = all ? "all" : input.remove ? await checkProjectPullRefs(context, input.remove, "remove", named.project_id) : [];
+        const remove = all ? "all" : input.remove ? await checkProjectPullRefs(context, input.remove, "remove", named.project_id, (key) => store.threadPulls(root).some((pull) => pull.pull === key)) : [];
         const reader = input.agent_session?.trim() || null;
         let changed = "";
         let change: InboxThreadPullsChange | null = null;

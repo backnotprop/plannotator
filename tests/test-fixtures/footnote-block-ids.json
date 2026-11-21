@@ -1,0 +1,503 @@
+{
+  "generatedFrom": "parseMarkdownToBlocks at f89f51a7b848a03d9a27eb19f6da24576feb6173 (origin/main this branch merged)",
+  "docs": [
+    {
+      "name": "definition interrupts a paragraph",
+      "markdown": "# Title\n\nA claim.[^1] More text\nstill the paragraph.\n[^1]: The note interrupts.\n\n- [ ] Task A\n- [x] Task B\n\nEnd.",
+      "base": [
+        {
+          "id": "block-0",
+          "type": "heading",
+          "content": "Title",
+          "startLine": 1
+        },
+        {
+          "id": "block-1",
+          "type": "paragraph",
+          "content": "A claim.[^1] More text\nstill the paragraph.\n[^1]: The note interrupts.",
+          "startLine": 3
+        },
+        {
+          "id": "block-2",
+          "type": "list-item",
+          "content": "Task A",
+          "startLine": 7
+        },
+        {
+          "id": "block-3",
+          "type": "list-item",
+          "content": "Task B",
+          "startLine": 8
+        },
+        {
+          "id": "block-4",
+          "type": "paragraph",
+          "content": "End.",
+          "startLine": 10
+        }
+      ]
+    },
+    {
+      "name": "a run of definitions under a line",
+      "markdown": "Sources:\n[^1]: RFC 9110\n[^2]: RFC 9111\n\n- [ ] Task A\n- [x] Task B\n\nCites [^1] and [^2].",
+      "base": [
+        {
+          "id": "block-0",
+          "type": "paragraph",
+          "content": "Sources:\n[^1]: RFC 9110\n[^2]: RFC 9111",
+          "startLine": 1
+        },
+        {
+          "id": "block-1",
+          "type": "list-item",
+          "content": "Task A",
+          "startLine": 5
+        },
+        {
+          "id": "block-2",
+          "type": "list-item",
+          "content": "Task B",
+          "startLine": 6
+        },
+        {
+          "id": "block-3",
+          "type": "paragraph",
+          "content": "Cites [^1] and [^2].",
+          "startLine": 8
+        }
+      ]
+    },
+    {
+      "name": "indented continuation paragraphs and a list",
+      "markdown": "Claim.[^long]\n\n[^long]: First paragraph.\n\n    Second paragraph, indented.\n\n    - a list in the note\n    - another\n\n## Next\n\n- [ ] Task\n\nText.",
+      "base": [
+        {
+          "id": "block-0",
+          "type": "paragraph",
+          "content": "Claim.[^long]",
+          "startLine": 1
+        },
+        {
+          "id": "block-1",
+          "type": "paragraph",
+          "content": "[^long]: First paragraph.",
+          "startLine": 3
+        },
+        {
+          "id": "block-2",
+          "type": "paragraph",
+          "content": "    Second paragraph, indented.",
+          "startLine": 5
+        },
+        {
+          "id": "block-3",
+          "type": "list-item",
+          "content": "a list in the note",
+          "startLine": 7
+        },
+        {
+          "id": "block-4",
+          "type": "list-item",
+          "content": "another",
+          "startLine": 8
+        },
+        {
+          "id": "block-5",
+          "type": "heading",
+          "content": "Next",
+          "startLine": 10
+        },
+        {
+          "id": "block-6",
+          "type": "list-item",
+          "content": "Task",
+          "startLine": 12
+        },
+        {
+          "id": "block-7",
+          "type": "paragraph",
+          "content": "Text.",
+          "startLine": 14
+        }
+      ]
+    },
+    {
+      "name": "definition at the start",
+      "markdown": "[^a]: Note at the very start.\n\nBody cites it.[^a]\n\n- [ ] Task",
+      "base": [
+        {
+          "id": "block-0",
+          "type": "paragraph",
+          "content": "[^a]: Note at the very start.",
+          "startLine": 1
+        },
+        {
+          "id": "block-1",
+          "type": "paragraph",
+          "content": "Body cites it.[^a]",
+          "startLine": 3
+        },
+        {
+          "id": "block-2",
+          "type": "list-item",
+          "content": "Task",
+          "startLine": 5
+        }
+      ]
+    },
+    {
+      "name": "definitions at the end",
+      "markdown": "# Plan\n\nStep one.[^1]\n\n- [ ] Task\n\n[^1]: At the end.\n[^2]: Nobody cites this one.",
+      "base": [
+        {
+          "id": "block-0",
+          "type": "heading",
+          "content": "Plan",
+          "startLine": 1
+        },
+        {
+          "id": "block-1",
+          "type": "paragraph",
+          "content": "Step one.[^1]",
+          "startLine": 3
+        },
+        {
+          "id": "block-2",
+          "type": "list-item",
+          "content": "Task",
+          "startLine": 5
+        },
+        {
+          "id": "block-3",
+          "type": "paragraph",
+          "content": "[^1]: At the end.\n[^2]: Nobody cites this one.",
+          "startLine": 7
+        }
+      ]
+    },
+    {
+      "name": "definitions under each section, a sentence written twice",
+      "markdown": "## Database\nWe add an index on users.email.[^1]\n\n[^1]: Postgres 16 builds it concurrently.\n\n## API\nThen run the tests.\n\n## Rollout\nThen run the tests.\n\n- [x] Ticked below the notes",
+      "base": [
+        {
+          "id": "block-0",
+          "type": "heading",
+          "content": "Database",
+          "startLine": 1
+        },
+        {
+          "id": "block-1",
+          "type": "paragraph",
+          "content": "We add an index on users.email.[^1]",
+          "startLine": 2
+        },
+        {
+          "id": "block-2",
+          "type": "paragraph",
+          "content": "[^1]: Postgres 16 builds it concurrently.",
+          "startLine": 4
+        },
+        {
+          "id": "block-3",
+          "type": "heading",
+          "content": "API",
+          "startLine": 6
+        },
+        {
+          "id": "block-4",
+          "type": "paragraph",
+          "content": "Then run the tests.",
+          "startLine": 7
+        },
+        {
+          "id": "block-5",
+          "type": "heading",
+          "content": "Rollout",
+          "startLine": 9
+        },
+        {
+          "id": "block-6",
+          "type": "paragraph",
+          "content": "Then run the tests.",
+          "startLine": 10
+        },
+        {
+          "id": "block-7",
+          "type": "list-item",
+          "content": "Ticked below the notes",
+          "startLine": 12
+        }
+      ]
+    },
+    {
+      "name": "a lazy line, then a heading",
+      "markdown": "## A\nText[^x]\n[^x]: note\nlazy line\n## B\nMore.\n\n- [ ] Task",
+      "base": [
+        {
+          "id": "block-0",
+          "type": "heading",
+          "content": "A",
+          "startLine": 1
+        },
+        {
+          "id": "block-1",
+          "type": "paragraph",
+          "content": "Text[^x]\n[^x]: note\nlazy line",
+          "startLine": 2
+        },
+        {
+          "id": "block-2",
+          "type": "heading",
+          "content": "B",
+          "startLine": 5
+        },
+        {
+          "id": "block-3",
+          "type": "paragraph",
+          "content": "More.",
+          "startLine": 6
+        },
+        {
+          "id": "block-4",
+          "type": "list-item",
+          "content": "Task",
+          "startLine": 8
+        }
+      ]
+    },
+    {
+      "name": "a fence and a question after a note",
+      "markdown": "Claim[^q]\n\n[^q]: note\n\n    ```\n    :::question\n    ```\n\n    :::question\n    Hidden?\n    - A\n    :::\n\n:::question\nWhich?\n- A\n- B\n:::\n\n- [ ] Task",
+      "base": [
+        {
+          "id": "block-0",
+          "type": "paragraph",
+          "content": "Claim[^q]",
+          "startLine": 1
+        },
+        {
+          "id": "block-1",
+          "type": "paragraph",
+          "content": "[^q]: note",
+          "startLine": 3
+        },
+        {
+          "id": "block-2",
+          "type": "code",
+          "content": "    :::question",
+          "startLine": 5
+        },
+        {
+          "id": "block-3",
+          "type": "directive",
+          "content": "    Hidden?\n    - A",
+          "startLine": 9
+        },
+        {
+          "id": "block-4",
+          "type": "directive",
+          "content": "Which?\n- A\n- B",
+          "startLine": 14
+        },
+        {
+          "id": "block-5",
+          "type": "list-item",
+          "content": "Task",
+          "startLine": 20
+        }
+      ]
+    },
+    {
+      "name": "regex prose that nobody cites",
+      "markdown": "[^0-9]: anything but digits\n\n- [ ] Task\n\nText.",
+      "base": [
+        {
+          "id": "block-0",
+          "type": "paragraph",
+          "content": "[^0-9]: anything but digits",
+          "startLine": 1
+        },
+        {
+          "id": "block-1",
+          "type": "list-item",
+          "content": "Task",
+          "startLine": 3
+        },
+        {
+          "id": "block-2",
+          "type": "paragraph",
+          "content": "Text.",
+          "startLine": 5
+        }
+      ]
+    },
+    {
+      "name": "a reference only in code",
+      "markdown": "Code `[^1]` only.\n\n[^1]: Not cited outside code.\n\n- [ ] Task",
+      "base": [
+        {
+          "id": "block-0",
+          "type": "paragraph",
+          "content": "Code `[^1]` only.",
+          "startLine": 1
+        },
+        {
+          "id": "block-1",
+          "type": "paragraph",
+          "content": "[^1]: Not cited outside code.",
+          "startLine": 3
+        },
+        {
+          "id": "block-2",
+          "type": "list-item",
+          "content": "Task",
+          "startLine": 5
+        }
+      ]
+    },
+    {
+      "name": "quote and table right after a note",
+      "markdown": "Cite[^n].\n\n[^n]: The note.\n> a quote\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n- [ ] Task",
+      "base": [
+        {
+          "id": "block-0",
+          "type": "paragraph",
+          "content": "Cite[^n].",
+          "startLine": 1
+        },
+        {
+          "id": "block-1",
+          "type": "paragraph",
+          "content": "[^n]: The note.",
+          "startLine": 3
+        },
+        {
+          "id": "block-2",
+          "type": "blockquote",
+          "content": "a quote",
+          "startLine": 4
+        },
+        {
+          "id": "block-3",
+          "type": "table",
+          "content": "| a | b |\n|---|---|\n| 1 | 2 |",
+          "startLine": 6
+        },
+        {
+          "id": "block-4",
+          "type": "list-item",
+          "content": "Task",
+          "startLine": 10
+        }
+      ]
+    },
+    {
+      "name": "display math closing mid-line, then text",
+      "markdown": "Cite[^1].\n\n$$x^2$$ and more text\n\n- [ ] Task\n\n[^1]: Note.",
+      "base": [
+        {
+          "id": "block-0",
+          "type": "paragraph",
+          "content": "Cite[^1].",
+          "startLine": 1
+        },
+        {
+          "id": "block-1",
+          "type": "math",
+          "content": "x^2",
+          "startLine": 3
+        },
+        {
+          "id": "block-2",
+          "type": "paragraph",
+          "content": "and more text",
+          "startLine": 3
+        },
+        {
+          "id": "block-3",
+          "type": "list-item",
+          "content": "Task",
+          "startLine": 5
+        },
+        {
+          "id": "block-4",
+          "type": "paragraph",
+          "content": "[^1]: Note.",
+          "startLine": 7
+        }
+      ]
+    },
+    {
+      "name": "an uncited definition line right after a note",
+      "markdown": "Cite[^1].\n\n[^1]: Cited note.\n[^2]: Nobody cites this.\n\n- [x] Task",
+      "base": [
+        {
+          "id": "block-0",
+          "type": "paragraph",
+          "content": "Cite[^1].",
+          "startLine": 1
+        },
+        {
+          "id": "block-1",
+          "type": "paragraph",
+          "content": "[^1]: Cited note.\n[^2]: Nobody cites this.",
+          "startLine": 3
+        },
+        {
+          "id": "block-2",
+          "type": "list-item",
+          "content": "Task",
+          "startLine": 6
+        }
+      ]
+    },
+    {
+      "name": "an uncited definition line under a cited one, under a line",
+      "markdown": "Sources:\n[^1]: RFC 9110\n[^2]: RFC 9111\n\n- [x] Task\n\nCites [^1].",
+      "base": [
+        {
+          "id": "block-0",
+          "type": "paragraph",
+          "content": "Sources:\n[^1]: RFC 9110\n[^2]: RFC 9111",
+          "startLine": 1
+        },
+        {
+          "id": "block-1",
+          "type": "list-item",
+          "content": "Task",
+          "startLine": 5
+        },
+        {
+          "id": "block-2",
+          "type": "paragraph",
+          "content": "Cites [^1].",
+          "startLine": 7
+        }
+      ]
+    },
+    {
+      "name": "unclosed $$ inside a note",
+      "markdown": "Cite[^m].\n\n[^m]: costs\n$$100k for infra\n\n- [ ] Task",
+      "base": [
+        {
+          "id": "block-0",
+          "type": "paragraph",
+          "content": "Cite[^m].",
+          "startLine": 1
+        },
+        {
+          "id": "block-1",
+          "type": "paragraph",
+          "content": "[^m]: costs\n$$100k for infra",
+          "startLine": 3
+        },
+        {
+          "id": "block-2",
+          "type": "list-item",
+          "content": "Task",
+          "startLine": 6
+        }
+      ]
+    }
+  ]
+}

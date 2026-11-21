@@ -13,6 +13,9 @@ import { Icon } from '../icons';
 import { CopyCommand } from './RestartNote';
 import { Tip } from './Tip';
 
+/** The sign-in command's Copy: its name and what it says once copied (here and in Settings → Agents' T3 Code group). */
+export const T3_SIGN_IN_COPY = { label: 'Copy the T3 sign-in command', announcement: 'T3 sign-in command copied.' } as const;
+
 export function T3WaitLine({ reason, children }: { reason: InboxT3WaitReason; children?: ReactNode }) {
   const line = inboxT3WaitLine(reason);
   return (
@@ -33,7 +36,7 @@ export function T3WaitLine({ reason, children }: { reason: InboxT3WaitReason; ch
           )}
         </span>
       </span>
-      {line.command && <CopyCommand text={line.command} label="Copy the T3 sign-in command" announcement="T3 sign-in command copied." />}
+      {line.command && <CopyCommand text={line.command} label={T3_SIGN_IN_COPY.label} announcement={T3_SIGN_IN_COPY.announcement} />}
       {children}
     </div>
   );

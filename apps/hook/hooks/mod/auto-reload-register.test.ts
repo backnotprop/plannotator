@@ -42,6 +42,8 @@ function engineOver(sessionId: string, installed: string, env: Record<string, st
   const files = new Map<string, string>([
     ['/bin/sh', ''],
     [inboxRegistryPathOf(DATA), REGISTRY],
+    // The person turned the Inbox on here (inbox-turned-on.ts).
+    [`${DATA}/inbox/turned-on`, '{"on":true,"by":"command"}'],
     [`${ROOT}/.claude-plugin/plugin.json`, JSON.stringify({ name: 'plannotator', version: '0.28.50' })],
   ])
   const store = new Map<string, unknown>()

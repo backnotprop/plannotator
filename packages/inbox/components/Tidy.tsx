@@ -18,6 +18,7 @@ import { THREAD_PANEL_LABEL } from '../threadPanel';
 import { LIST_VIEW_LABEL, LIST_VIEW_OPTIONS, type ListView } from '../listView';
 import { STARRED_ABOVE_LABEL } from '../starredPills';
 import { SHOW_TAG_COLOURS_LABEL } from '../tagColours';
+import { AGENT_STATUS_LABEL, setAgentStatus, useAgentStatusOn } from '../agents/agentStatus';
 
 /**
  * Tidy (owner-approved design, 2026-10-28, simplified the same day: "quiet,
@@ -169,7 +170,7 @@ export function useTidy(scope: string | null, surface: TidySurface, version: unk
  * check boxes anyways. They don't look right as icons"). The box sits where Tidy's and Refresh's icons sit, so every
  * label starts at one edge. A tick leaves the menu open, so the next can be tried, unless `closeOnClick`.
  */
-function MenuCheckbox({
+export function MenuCheckbox({
   label,
   checked,
   onChange,
@@ -192,7 +193,16 @@ function MenuCheckbox({
 }
 
 /**
- * The list's view (listView.ts): Grouped or List, one choice of two (`menuitemradio`, its state announced), drawn as
+ * "Show agent status" (agents/agentStatus.ts, owner 2026-11-18): the same switch as Settings → General → Appearance's
+ * row, so the two always agree. Off by default.
+ */
+export function AgentStatusMenuItem() {
+  const on = useAgentStatusOn();
+  return <MenuCheckbox label={AGENT_STATUS_LABEL} checked={on} onChange={(next) => void setAgentStatus(next)} data-agent-status-option="" />;
+}
+
+/**
+ * The list's view (listView.ts): Grouped, List or Agents, one choice (`menuitemradio`, its state announced), drawn as
  * the checkboxes are with a round box, under its label (the radio group is the labelled group). A pick changes the
  * list at once and leaves the menu open, as a tick does.
  */
@@ -229,6 +239,7 @@ export function TidyMenu({
   view,
   starredAbove,
   onSelect,
+  markAllRead,
   showArchived,
   tagColours,
 }: {
@@ -253,6 +264,11 @@ export function TidyMenu({
   starredAbove?: { on: boolean; onChange: (on: boolean) => void };
   /** "Select threads", after Tidy: the list starts picking rows (rowPicks.ts). Absent (the Board, the tour): no item. */
   onSelect?: () => void;
+  /**
+   * "Mark all as read", after Select threads (markAllRead.ts): every row the list shows that takes Mark read, as the
+   * project menu's item. Greyed while none does. Absent (the Board, the tour): no item.
+   */
+  markAllRead?: { disabled: boolean; onClick: () => void };
   /** "Show archived" (approval "inbox-archived-group"), after it: the Archived group under the list. Absent: no item. */
   showArchived?: { on: boolean; onChange: (on: boolean) => void };
   /**
@@ -325,6 +341,12 @@ export function TidyMenu({
                   Select threads
                 </Menu.Item>
               )}
+              {markAllRead && (
+                <Menu.Item className="ib-pmi" label="Mark all as read" disabled={markAllRead.disabled} data-list-mark-all-read="" onClick={markAllRead.onClick}>
+                  <Icon name="checkCircle" size={15} />
+                  Mark all as read
+                </Menu.Item>
+              )}
               <Menu.Item className="ib-pmi" label="Refresh" data-tidy-refresh="" onClick={onRefresh} aria-keyshortcuts={refreshKeys}>
                 <Icon name="refresh" size={15} />
                 Refresh
@@ -336,6 +358,13 @@ export function TidyMenu({
                   <MenuViewChoice view={view.value} onChange={view.onChange} />
                   {starredAbove && <MenuCheckbox label={STARRED_ABOVE_LABEL} checked={starredAbove.on} onChange={starredAbove.onChange} data-starred-above-option="" />}
                   {showArchived && <MenuCheckbox label="Show archived" checked={showArchived.on} onChange={showArchived.onChange} data-show-archived-option="" />}
+                </>
+              )}
+              {/* About the sidebar's agents, not the list's rows: its own item after the View group (owner, 2026-11-18). */}
+              {view && (
+                <>
+                  <Menu.Separator className="ib-pm-sep" />
+                  <AgentStatusMenuItem />
                 </>
               )}
               {look && onLook && (

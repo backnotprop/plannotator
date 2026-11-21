@@ -175,12 +175,15 @@ describe("Cancel: a write still waiting that never left (a launch held for a mac
 });
 
 describe("remote launch: which forwarded writes start, stop or trust an agent", () => {
-  test("a new message that starts an agent, and a launch's Stop, Try again, Trust folder and Delete; nothing else", () => {
+  test("a new message or a reply that starts an agent, and a launch's Stop, Try again, Trust folder and Delete; nothing else", () => {
     expect(startsAgentThere("messages", { to: { launch: { agent: "claude-code", project_id: "prj_1" } } })).toBe(true);
     expect(startsAgentThere("messages", { to: { launch: { agent: "claude-code", scratch: true } } })).toBe(true);
     for (const action of ["stop", "retry", "trust", "delete"]) expect(startsAgentThere(`launch/lch_1/${action}`, {})).toBe(true);
     expect(startsAgentThere("messages", { to: { host: "claude-code", session: "ses_1" } })).toBe(false);
-    expect(startsAgentThere("messages/m1/reply", { to: { launch: {} } })).toBe(false);
+    // A reply sent to a new session in place of one that ended starts an agent there; a reply to a session does not.
+    expect(startsAgentThere("messages/m1/reply", { to: { launch: { agent: "claude-code", project_id: "prj_1" } } })).toBe(true);
+    expect(startsAgentThere("messages/m1/reply", { to: { host: "claude-code", session: "ses_1" } })).toBe(false);
+    expect(startsAgentThere("messages/m1/reply/extra", { to: { launch: {} } })).toBe(false);
     expect(startsAgentThere("launch/lch_1/open", {})).toBe(false);
     expect(startsAgentThere("launch/settings", {})).toBe(false);
   });
@@ -462,9 +465,9 @@ describe("rule 8: every door write is classified, and only small JSON is held", 
     expect(doorWriteKind("cards/marks")).toBeNull();
     expect(doorWriteKind("cards")).toBeNull();
     // A linked machine's PR: closed, reopened or merged by that machine's gh / glab, never held. A thread's PRs are held.
-    for (const verb of ["close", "reopen", "merge"]) expect(doorWriteKind(`pulls/${verb}`)).toBe("forge");
+    // A review thread started there keeps its PRs there, never held either.
+    for (const verb of ["close", "reopen", "merge", "owner"]) expect(doorWriteKind(`pulls/${verb}`)).toBe("forge");
     expect(doorWriteKind("pulls/review")).toBeNull();
-    expect(doorWriteKind("pulls/owner")).toBeNull();
     expect(doorWriteKind("pulls/risk")).toBeNull();
     expect(doorWriteKind("threads/msg_1/pulls")).toBe("set");
     // A Combine, and a Tidy with the person's words, go now from the window or not at all: one held for days would

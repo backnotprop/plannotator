@@ -1,5 +1,7 @@
 import { Fragment, useId } from 'react';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
+import { inboxActionCountWords } from '@plannotator/core/inbox-actions';
+import type { InboxActionOutcome } from '@plannotator/core/inbox-types';
 import { plural } from '../format';
 import { Icon } from '../icons';
 import { pickWords, type JumpTarget } from './ReplacedQuestion';
@@ -185,7 +187,7 @@ export interface ActionRow {
   number: number;
   prompt: string;
   /** The person's mark. */
-  outcome: 'done' | 'cant';
+  outcome: InboxActionOutcome;
   note: string | null;
   /** The agent saw it done itself; the person's note is what goes. */
   seen?: boolean;
@@ -194,21 +196,17 @@ export interface ActionRow {
 export function actionRowWords(a: Pick<ActionRow, 'outcome' | 'note' | 'seen'>): string {
   if (a.seen) return a.note ? `Seen done · ${a.outcome === 'cant' ? 'Your reason' : 'Note'}: ${a.note}` : 'Seen done';
   if (a.outcome === 'cant') return `Can't do it${a.note ? `: ${a.note}` : ''}`;
-  return a.note ? `Done · Note: ${a.note}` : 'Done';
+  const word = a.outcome === 'skip' ? 'Skipped' : 'Done';
+  return a.note ? `${word} · Note: ${a.note}` : word;
 }
 
 export function ReplyActions({ actions, sent = false, onJump }: { actions: readonly ActionRow[]; sent?: boolean; onJump?: (target: JumpTarget) => void }) {
   const headingId = useId();
   if (actions.length === 0) return null;
   // Counted by the person's own mark: a Can't do it the agent then saw done is one they couldn't do.
-  const done = actions.filter((a) => a.outcome === 'done').length;
-  const cant = actions.length - done;
+  const count = (outcome: InboxActionOutcome) => actions.filter((a) => a.outcome === outcome).length;
   const heading = sent
-    ? done > 0 && cant > 0
-      ? `You did ${plural(done, 'action item')}, couldn't do ${cant}`
-      : done > 0
-        ? `You did ${plural(done, 'action item')}`
-        : `You couldn't do ${plural(cant, 'action item')}`
+    ? `You ${inboxActionCountWords({ done: count('done'), cant: count('cant'), skip: count('skip') })}`
     : actions.length === 1
       ? 'Your action item goes with this reply'
       : `Your ${plural(actions.length, 'action item')} go with this reply`;

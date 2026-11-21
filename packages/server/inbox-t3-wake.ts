@@ -59,7 +59,7 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { INBOX_T3_HOST, isT3ThreadId, type InboxMessage, type InboxT3WaitReason } from "@plannotator/core/inbox-types";
+import { INBOX_T3_HOST, isT3ThreadId, type InboxMessage, type InboxT3Status, type InboxT3WaitReason } from "@plannotator/core/inbox-types";
 import { inboxClaimDirs } from "@plannotator/shared/inbox/claims";
 import type { InboxReplyCommand } from "@plannotator/shared/inbox/connection";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -130,6 +130,8 @@ export interface InboxT3Wake {
   wakes(host: unknown, session: unknown): Promise<boolean>;
   /** `alive` (a T3 thread the Inbox wakes), `dead` (T3 no longer has it), null (not a T3 thread, or one no saved grant reaches). */
   status(session: string): "alive" | "dead" | null;
+  /** The saved sign-ins for Settings: none, one that can send, only Read only ones, or ones T3 refused (401). */
+  signIn(): Promise<InboxT3Status["sign_in"]>;
   /** T3 said it no longer has the thread, promised or not, and the thread has not called the Inbox since. */
   gone(session: string): boolean;
   /** The thread called an Inbox tool: it is there. */
@@ -813,6 +815,20 @@ export function createInboxT3Wake(options: {
       const home = homes.get(session);
       if (home && (!home.credentials.token() || !sendsInto(session, home))) return null;
       return dead.has(session) ? "dead" : "alive";
+    },
+    signIn: async () => {
+      const found = await grants();
+      if (found.length === 0) return "none";
+      const mark = markOf(found);
+      if ([...misses.values()].some((miss) => miss.lapsed && miss.grants === mark)) return "ran_out";
+      const readOnly = found.every((credentials) => {
+        try {
+          return t3CeilingOfScope((credentials.read()?.tokens as { scope?: unknown } | undefined)?.scope) === "read-only";
+        } catch {
+          return false;
+        }
+      });
+      return readOnly ? "read_only" : "ok";
     },
     gone: (session) => dead.has(session),
     noteToolCall: (session) => {

@@ -11,7 +11,8 @@
 
 .shp-root {
   --shp-paper: color-mix(in oklab, var(--background) 92%, var(--muted));
-  --pw: clamp(360px, 31vw, 440px);
+  /* The board's own size and its References panel's width (--shp-w, --shp-h, --pw) are set on this root by ShapeSurface's
+     usePhone, before the first paint: a board in a pane lays out by the pane. */
   position: relative;
   height: 100%;
   min-height: 0;
@@ -46,17 +47,17 @@
 .shp-head { padding: 22px 28px 0 40px; }
 /* The title first; Global comment (and Bring it up to date) on its first line, at the right. */
 .shp-title-row { display: flex; align-items: flex-start; gap: 10px; }
-.shp-head-side { flex: none; display: flex; align-items: center; gap: 8px; min-height: 30px; margin-top: calc((clamp(28px, 2.5vw, 38px) * 1.1 - 30px) / 2); }
+.shp-head-side { flex: none; display: flex; align-items: center; gap: 8px; min-height: 30px; margin-top: calc((clamp(28px, calc(var(--shp-w, 100vw) * .025), 38px) * 1.1 - 30px) / 2); }
 .shp-head-side:empty { display: none; }
 /* A host's control before the title (the Inbox: its sidebar toggle), centred on the title's first line. */
-.shp-head-start { flex: none; display: flex; align-items: center; min-height: 32px; margin-top: calc((clamp(28px, 2.5vw, 38px) * 1.1 - 32px) / 2); }
+.shp-head-start { flex: none; display: flex; align-items: center; min-height: 32px; margin-top: calc((clamp(28px, calc(var(--shp-w, 100vw) * .025), 38px) * 1.1 - 32px) / 2); }
 /* The agent is drawing the next version: the reshaping Pebble (fill only under reduced motion: Pebble.tsx) and its words. */
 .shp-drawing { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--muted-foreground); white-space: nowrap; }
 .shp-drawing .shp-pebble path { stroke: var(--primary); }
 .shp-finished { font-size: 12px; font-weight: 500; color: var(--muted-foreground); white-space: nowrap; }
 .shp-close { font-size: 20px; }
 .shp-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
-.shp-head h1 { flex: 1; min-width: 0; font-size: clamp(28px, 2.5vw, 38px); line-height: 1.1; letter-spacing: -0.025em; font-weight: 700; margin: 0 0 6px; text-wrap: balance; }
+.shp-head h1 { flex: 1; min-width: 0; font-size: clamp(28px, calc(var(--shp-w, 100vw) * .025), 38px); line-height: 1.1; letter-spacing: -0.025em; font-weight: 700; margin: 0 0 6px; text-wrap: balance; }
 .shp-claim { margin: 0; font-size: 16.5px; line-height: 1.5; color: color-mix(in oklab, var(--foreground) 78%, transparent); max-width: 64ch; text-wrap: pretty; }
 .shp-claim a, .shp-file-src a { color: var(--primary); text-decoration: none; font-weight: 500; }
 .shp-claim code { font: 500 .88em var(--font-mono); padding: 1px 4px; border-radius: 4px; background: color-mix(in oklab, var(--muted) 80%, transparent); }
@@ -123,11 +124,8 @@
 .shp-tbtn:hover { color: var(--foreground); }
 .shp-tbtn:disabled { opacity: .5; cursor: default; }
 .shp-tbtn.on { background: var(--background); color: var(--foreground); box-shadow: 0 1px 2px rgb(0 0 0 / .08); }
-.shp-tbtn.chat.ready { color: var(--primary); background: color-mix(in oklab, var(--primary) 11%, transparent); }
 .shp-tdot { position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 2px var(--popover); }
 .shp-tcount { font: 600 10.5px/1 var(--font-mono); color: var(--muted-foreground); padding: 2px 5px; border-radius: 6px; background: color-mix(in oklab, var(--muted) 80%, transparent); }
-.shp-ready-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--primary); animation: shp-ready 1.6s ease-out 2; }
-@keyframes shp-ready { 0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 50%, transparent); } 100% { box-shadow: 0 0 0 7px transparent; } }
 .shp-tstrip { padding-left: 6px; border-left: 1px solid var(--border); display: inline-flex; align-items: center; gap: 6px; }
 .shp-tstrip > div { flex-wrap: nowrap !important; }
 .shp-tstrip button { flex-shrink: 0; }
@@ -179,18 +177,24 @@
   transform: translateX(calc(100% + 24px)); opacity: 0; visibility: hidden; transition: transform .32s cubic-bezier(.2,.8,.2,1), opacity .2s ease, visibility 0s .32s; }
 .shp-sidep.open { transform: none; opacity: 1; visibility: visible; transition: transform .32s cubic-bezier(.2,.8,.2,1), opacity .16s ease, visibility 0s; }
 .shp-sidep-head { display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 10px; border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent); }
-.shp-tabs { display: inline-flex; gap: 2px; padding: 2px; border-radius: 10px; background: color-mix(in oklab, var(--muted) 55%, transparent); flex: 1; }
-.shp-tabs button { flex: 1; appearance: none; border: 0; background: transparent; height: 28px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font: 500 12.5px/1 var(--font-sans); color: var(--muted-foreground); cursor: pointer; }
-.shp-tabs button.on { background: var(--background); color: var(--foreground); box-shadow: 0 1px 2px rgb(0 0 0 / .08); }
+.shp-sidep-title { flex: 1; display: inline-flex; align-items: center; gap: 6px; margin: 0; padding-left: 4px; font: 600 13px/1 var(--font-sans); color: var(--foreground); }
 .shp-sidep-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .shp-sidep-body > * { flex: 1; min-height: 0; }
-.shp-thread-in { display: flex; flex-direction: column; overflow: auto; }
 .shp-sidep.sheet { top: auto; left: 0; right: 0; bottom: 0; width: auto; height: 84%; border-radius: 18px 18px 0 0; transform: translateY(100%); }
 .shp-sidep.sheet.open { transform: none; }
 .shp-grab { width: 38px; height: 4px; border-radius: 4px; background: color-mix(in oklab, var(--foreground) 22%, transparent); margin: 8px auto 0; flex: none; }
 .shp-scrim { position: absolute; inset: 0; background: rgb(0 0 0 / .28); z-index: 29; animation: shp-fade-only .2s ease both; }
-.shp-root.panel-open:not(.phone) .shp-dock, .shp-root.panel-open:not(.phone) .shp-pill { left: calc((100% - var(--pw) - 12px) / 2); }
-.shp-dock, .shp-pill { transition: left .32s cubic-bezier(.2,.8,.2,1); }
+/* Beside the board, References takes its room: the whole surface (title, drawing, dock, pill, Show more, the example
+   card, and the boxes bounded by it) ends left of the panel, and the drawing fits what is left (ShapeDrawn `aside`).
+   Nothing of the board is under the panel. */
+.shp-root.panel-open:not(.panel-sheet) .shp-surface { margin-right: calc(var(--pw) + 12px); }
+/* In step with the panel's own slide (`.shp-sidep`): the dock and the status, centred in the surface, slide with it, and
+   the drawing refits as it goes (ShapeDrawn reads the surface's margin as its `aside`, so its layout never flips). */
+.shp-surface { transition: margin-right .32s cubic-bezier(.2,.8,.2,1); }
+/* As a sheet (a phone, a narrow pane: ShapeSurface `usePanelSheet`) the dock stays over it, whole and in reach; the
+   sheet's list ends above the dock. */
+.shp-root.panel-open.panel-sheet .shp-dock { z-index: 32; }
+.shp-sidep.sheet .shp-sidep-body { padding-bottom: 72px; }
 
 /* ── reference bubbles and the References list ── */
 .shp-rb { appearance: none; border: 0; display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; margin: 0 0 0 5px; border-radius: 999px; vertical-align: 2px;
@@ -216,7 +220,6 @@
 
 /* A message a reference points at, in the host's Thread. */
 [data-shape-message] { border-radius: 10px; transition: background-color .6s; }
-[data-shape-message].shp-flash { background: color-mix(in oklab, var(--primary) 14%, transparent); transition: background-color .15s; }
 
 /* ── phone: 390 px, the panel is a bottom sheet ── */
 .shp-root.phone .shp-head { padding: 14px 16px 0 10px; }
@@ -237,9 +240,9 @@
 
 @media (prefers-reduced-motion: reduce) {
   .shp-rb.flash { animation: none; background: var(--primary); color: var(--primary-foreground); }
-  .shp-ready-dot, .shp-pill, .shp-fresh-text, .shp-scrim { animation: none; }
+  .shp-pill, .shp-fresh-text, .shp-scrim { animation: none; }
   .shp-sidep, .shp-sidep.open { transition: opacity .16s; }
-  .shp-dock, .shp-pill, .shp-pin-hover { transition: none; }
+  .shp-dock, .shp-pill, .shp-pin-hover, .shp-surface { transition: none; }
 }
 
 /* ── the grid: Shape's landing (approved "shape-landing-grid") ── */
@@ -299,7 +302,6 @@
 /* "Show more": the board's corner, only when there is more to draw. */
 .shp-more { position: absolute; right: 28px; bottom: 22px; z-index: 5; appearance: none; border: 0; height: 30px; padding: 0 12px; border-radius: 999px; background: color-mix(in oklab, var(--popover) 94%, transparent); color: var(--foreground); box-shadow: 0 0 0 1px color-mix(in oklab, var(--border) 85%, transparent); font: 500 12.5px/1 var(--font-sans); cursor: pointer; }
 .shp-more:hover { background: var(--muted); }
-.shp-root.panel-open:not(.phone) .shp-more { right: calc(var(--pw) + 28px); }
 .shp-root.phone .shp-more { right: 12px; bottom: 66px; }
 
 /* ── Follow an example (approval "trace-it-board", r5; the path on its rail from r7) ── The card sits where the
@@ -316,11 +318,10 @@
   animation: shp-ex-card-in .24s var(--ex-ease) both; }
 .shp-ex-card.expanded { width: min(1180px, calc(100% - 32px)); }
 @keyframes shp-ex-card-in { from { opacity: 0; transform: translateY(8px); } }
-.shp-root.panel-open:not(.phone) .shp-ex-card { left: calc((100% - var(--pw) - 12px) / 2); max-width: calc(100% - var(--pw) - 44px); }
 .shp-ex-card.leaving { pointer-events: none; }
 /* The board's status stays in view while an example is followed: it rides above the card, on the card's curve. */
 /* It keeps sliding with the dock when a panel opens. */
-.shp-pill { translate: 0 calc(-1 * var(--ex-lift, 0px)); transition: left .32s cubic-bezier(.2,.8,.2,1), translate .26s cubic-bezier(.22, 1, .36, 1); }
+.shp-pill { translate: 0 calc(-1 * var(--ex-lift, 0px)); transition: translate .26s cubic-bezier(.22, 1, .36, 1); }
 .shp-root.follow-sheet .shp-pill { z-index: 26; }
 .shp-ex-skin { position: absolute; inset: 0 0 var(--ex-cut, 0px); z-index: -1; border-radius: 14px; transform-origin: 0 0; background: var(--popover); pointer-events: none;
   box-shadow: 0 0 0 1px var(--ex-edge), 0 12px 32px -14px rgb(0 0 0 / .3), 0 2px 6px -2px rgb(0 0 0 / .06); }
@@ -334,7 +335,7 @@
 .shp-ex-card.expanded .shp-ex-navs > :not(.cur) { display: none; }
 .shp-ex-texts { grid-area: text; min-width: 0; }
 .shp-ex-side { grid-area: side; display: flex; align-items: center; gap: 4px; min-width: 0; }
-.shp-ex-tabs { margin-right: 4px; max-width: min(460px, 42vw); overflow-x: auto; scrollbar-width: none; }
+.shp-ex-tabs { margin-right: 4px; max-width: min(460px, calc(var(--shp-w, 100vw) * .42)); overflow-x: auto; scrollbar-width: none; }
 .shp-ex-tabs .shp-tbtn { height: 28px; padding: 0 10px; flex: 0 1 auto; min-width: 0; }
 .shp-ex-tabs .tn { display: block; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -370,7 +371,7 @@
 .shp-ex-note { margin-top: 8px !important; font: 400 12px/16px var(--font-sans); color: var(--muted-foreground); text-wrap: pretty; }
 
 /* Open: what goes in, what happens, what comes out. Every step in one cell; the one on now shows. */
-.shp-ex-ios { position: relative; display: grid; grid-template-rows: minmax(0, 1fr); margin-top: 8px; max-height: min(340px, 40dvh); }
+.shp-ex-ios { position: relative; display: grid; grid-template-rows: minmax(0, 1fr); margin-top: 8px; max-height: min(340px, calc(var(--shp-h, 100dvh) * .4)); }
 .shp-ex-card.phone .shp-ex-ios { max-height: none; }
 .shp-ex-ios > .shp-ex-io { grid-area: 1 / 1; visibility: hidden; align-self: start; min-width: 0; max-height: 100%; min-height: calc(100% - var(--ex-cut, 0px)); }
 /* A phone's sheet sizes to the step on now: the board scrolls there, so nothing else moves. */
@@ -466,7 +467,7 @@ span.shp-ex-src { display: block; overflow: hidden; text-overflow: ellipsis; tex
 .shp-ex-rail { display: flex; flex-direction: column; align-self: start; box-sizing: border-box; min-width: 0; min-height: calc(100% - var(--ex-cut, 0px)); padding: 8px; }
 .shp-ex-rail .shp-ex-tabs { margin: 0 0 8px; max-width: 100%; align-self: flex-start; overflow: visible; flex-wrap: wrap; height: auto; }
 .shp-ex-rail .shp-ex-tabs .tn { max-width: 25ch; }
-.shp-ex-stops { display: flex; flex-direction: column; row-gap: 2px; flex: none; max-height: min(256px, 28dvh); overflow-y: auto; scrollbar-width: thin; }
+.shp-ex-stops { display: flex; flex-direction: column; row-gap: 2px; flex: none; max-height: min(256px, calc(var(--shp-h, 100dvh) * .28)); overflow-y: auto; scrollbar-width: thin; }
 .shp-ex-stop { appearance: none; position: relative; border: 0; background: none; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 4px 8px; border-radius: 6px; text-align: left; color: var(--muted-foreground); font: 400 13px/20px var(--font-sans); cursor: pointer; transition: background-color .15s ease, color .15s ease; }
 .shp-ex-stop .st { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shp-ex-stop.on { background: var(--ex-band); color: var(--foreground); font-weight: 500; }
@@ -492,7 +493,7 @@ span.shp-ex-src { display: block; overflow: hidden; text-overflow: ellipsis; tex
 .shp-ex-card.narrow .shp-ex-io.panes { display: flex; flex-direction: column; row-gap: 12px; }
 .shp-ex-card.narrow .shp-ex-vars, .shp-ex-card.narrow .shp-ex-scroll { overflow: visible; }
 /* One column reads what decided it first, then what went in; beside a board, the step scrolls as one. */
-.shp-ex-card.narrow:not(.phone) .shp-ex-ios { max-height: min(260px, 32dvh); }
+.shp-ex-card.narrow:not(.phone) .shp-ex-ios { max-height: min(260px, calc(var(--shp-h, 100dvh) * .32)); }
 .shp-ex-card.narrow:not(.phone) .shp-ex-io.panes { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; margin-inline: -8px; padding-inline: 8px; }
 .shp-ex-card.narrow .shp-ex-col { flex: none; }
 .shp-ex-card.narrow .shp-ex-io.panes .shp-ex-col.fn { order: 1; }
@@ -504,7 +505,7 @@ span.shp-ex-src { display: block; overflow: hidden; text-overflow: ellipsis; tex
 .shp-ex-card.narrow .shp-ex-io.panes .shp-ex-ret { margin-top: 6px; }
 .shp-ex-card.phone { position: absolute; left: 0; right: 0; bottom: 0; translate: none; width: 100%; animation-name: shp-ex-sheet-in; }
 .shp-ex-card.phone .shp-ex-skin { border-radius: 18px 18px 0 0; }
-.shp-ex-card.phone .shp-ex-in { max-height: var(--ex-room, 72dvh); overflow-y: auto; overscroll-behavior: contain; border-radius: 18px 18px 0 0; padding: 0 16px max(12px, env(safe-area-inset-bottom)); }
+.shp-ex-card.phone .shp-ex-in { max-height: var(--ex-room, calc(var(--shp-h, 100dvh) * .72)); overflow-y: auto; overscroll-behavior: contain; border-radius: 18px 18px 0 0; padding: 0 16px max(12px, env(safe-area-inset-bottom)); }
 @keyframes shp-ex-sheet-in { from { transform: translateY(24px); opacity: 0; } }
 .shp-ex-grab { display: flex; justify-content: center; width: 100%; height: 20px; padding: 8px 0 0; border: 0; background: none; cursor: pointer; }
 .shp-ex-grab span { width: 36px; height: 4px; border-radius: 2px; background: color-mix(in oklab, var(--muted-foreground) 45%, transparent); }
@@ -641,3 +642,20 @@ button.shp-stk-pr { cursor: pointer; transition: background-color .15s ease, col
 .shp-stk-file-path { margin: 12px 16px; font: var(--ib-fs-13, 13px)/1.4 var(--font-mono, ui-monospace, monospace); color: var(--muted-foreground); }
 @media (pointer: coarse) { .shp-stk-chip { height: 36px; } .shp-stk-frow { min-height: 44px; } }
 @media (prefers-reduced-motion: reduce) { .shp-stk-card, .shp-stk-card.sheet { animation: shp-ex-fade .15s linear both; } .shp-stk-chip, .shp-stk-chip:active { transform: none; transition: background-color .15s, color .15s; } }
+
+/* A part's questions and changes, with the answers, in its comment box (talk.tsx): above the words, scrolling on its own. */
+.shp-talk { max-height: min(42vh, 320px); overflow: auto; padding: 8px 12px 4px; display: flex; flex-direction: column; gap: 10px; font: 400 13px/1.45 var(--font-sans); color: var(--foreground); }
+.shp-talk-who { margin: 0; font-size: 11.5px; color: var(--muted-foreground); }
+.shp-talk-entry { display: flex; flex-direction: column; gap: 3px; }
+.shp-talk-where { margin: 0; font-size: 11.5px; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shp-talk-q { margin: 0; font-weight: 500; overflow-wrap: anywhere; }
+.shp-talk-a { overflow-wrap: anywhere; }
+.shp-talk-a .ai-markdown > :first-child { margin-top: 0; }
+.shp-talk-a .ai-markdown > :last-child { margin-bottom: 0; }
+.shp-talk-status, .shp-talk-wait { margin: 0; font-size: 12px; color: var(--muted-foreground); display: inline-flex; align-items: center; gap: 6px; }
+.shp-talk-error { margin: 0; font-size: 12px; color: var(--destructive); }
+/* A finished board's box to read what was asked (talk.tsx `ShapeTalkBox`): the comment box's look, with no words to type. */
+.shp-talkbox { position: fixed; z-index: 100; display: flex; flex-direction: column; background: var(--popover); color: var(--popover-foreground, var(--foreground)); border-radius: 12px; box-shadow: 0 22px 60px -20px rgb(0 0 0 / .38), 0 0 0 1px var(--border); overflow: hidden; outline: none; }
+.shp-talkbox-head { display: flex; align-items: center; gap: 6px; padding: 6px 6px 6px 12px; border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent); font: 400 12px/1.3 var(--font-sans); color: var(--muted-foreground); }
+.shp-talkbox-head > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shp-talkbox .shp-talk { max-height: none; flex: 1; min-height: 0; padding-bottom: 12px; }

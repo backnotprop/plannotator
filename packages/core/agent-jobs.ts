@@ -66,11 +66,11 @@ export interface AgentJobInfo {
   id: string;
   /** Source identifier for external annotations — "agent-{id prefix}". */
   source: string;
-  /** Provider that spawned this job — "claude", "codex", "tour", "shell", etc. */
+  /** Provider that spawned this job — "claude", "codex", "guide", "shell", etc. */
   provider: string;
-  /** Underlying engine used (e.g., "claude" or "codex"). Set when provider is "tour". */
+  /** Underlying engine used (e.g., "claude" or "codex"). Set when provider is "guide". */
   engine?: string;
-  /** Model used (e.g., "sonnet", "opus"). Set when provider is "tour" with Claude engine. */
+  /** Model used (e.g., "sonnet", "opus"). Set when provider is "guide" with Claude engine. */
   model?: string;
   /** Claude --effort level (e.g., "low", "medium", "high", "xhigh", "max"). */
   effort?: string;
@@ -117,6 +117,7 @@ export interface AgentJobInfo {
   reviewProfileId?: string;
   /** Resolved review profile label — rides on findings so the UI can show a profile tag. */
   reviewProfileLabel?: string;
+  launchLabel?: string;
   /**
    * Launch-time review-target snapshot for guide jobs (#1112). Guide jobs run
    * for minutes while the session supports mid-generation PR/diff switching,
@@ -200,8 +201,15 @@ export function jobSource(id: string): string {
 /** Calm, provider-neutral failure reason. Never leak schema/CLI internals. */
 export const REVIEW_OUTPUT_FAILED = "Review finished but produced no usable findings.";
 
-/** Flip a job to failed with a calm one-liner (Code Tour precedent). */
+/** Flip a job to failed with a calm one-liner. */
 export function markJobReviewFailed(job: AgentJobInfo, error: string): void {
   job.status = "failed";
   job.error = error;
 }
+
+export function launchLabelOf(sent: unknown, stored: string): string | undefined {
+  if (typeof sent !== "string") return undefined;
+  const label = sent.trim().slice(0, 200);
+  return label && label !== stored ? label : undefined;
+}
+

@@ -336,6 +336,20 @@ test('a phone: the ⋮ and the popover as a bottom sheet, on the list and the Bo
     await page.locator('[data-tidy-item]').click();
     await expect(page.locator('[data-tidy-popover]')).toBeVisible();
     await shot(page, 'board-popover-390');
+    await page.keyboard.press('Escape');
+
+    // Every bottom sheet shares the rule, the thread's ⋮ too: taller than a 320×568 screen, it starts below the top
+    // edge and scrolls inside to its last item.
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto(`${world.url}#thread=${world.t.hover.thread}`);
+    await page.locator('section.ib-pane [data-thread-more]').click();
+    const threadSheet = page.locator('[data-thread-menu]');
+    const threadItems = threadSheet.getByRole('menuitem');
+    await expect(threadItems.first()).toBeInViewport({ ratio: 1 });
+    expect(await threadSheet.evaluate((el) => el.getBoundingClientRect().top)).toBeGreaterThanOrEqual(0);
+    await threadSheet.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+    await expect(threadItems.last()).toBeInViewport({ ratio: 1 });
+    await shot(page, 'thread-menu-320');
   } finally {
     await context.close();
   }

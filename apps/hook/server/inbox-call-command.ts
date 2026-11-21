@@ -35,7 +35,9 @@
  *
  * stdout: the result as one JSON value, and nothing else, so anything on it is
  * a success (empty on failure: `jq` then finds nothing, where a JSON error
- * would read as a result with null fields). A failure goes to stderr as
+ * would read as a result with null fields). With `CallCommandDeps.text` (what
+ * `plannotator routine` asks for without --json) it is the result's words
+ * instead. A failure goes to stderr as
  * `<code>: <message>`. Exit 0 ok, 1 refused or unreachable, 2 bad usage.
  */
 
@@ -52,7 +54,7 @@ import { questionOpenersWithTextText, type QuestionOpenerWithText } from "@plann
 import { hasHelpFlag, INBOX_CALL_ACTIONS, INBOX_CALL_USAGE, INBOX_PAIRED_CALL_USAGE } from "./cli";
 import { pairedAttachments } from "./inbox-call-pieces";
 import { writeWholeToStdout } from "./write-whole-stdout";
-import { fillInboxToolArguments, type InboxHostSession, INBOX_DSH_ROOT_FOR_ENV, INBOX_DSH_ROOT_SESSION_ENV, INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
+import { AUTHOR_TOOLS, fillInboxToolArguments, type InboxHostSession, INBOX_DSH_ROOT_FOR_ENV, INBOX_DSH_ROOT_SESSION_ENV, INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
 
 /** One request never waits longer: a wedged Inbox must not hang a script. */
 const REQUEST_TIMEOUT_MS = 90_000;
@@ -80,6 +82,21 @@ const SESSIONLESS_HOSTS: readonly { variable: string; name: string; host?: strin
   { variable: "CURSOR_AGENT", name: "Cursor" },
   { variable: "DSH_SHELL", name: "DeepSeek Harness", host: "dsh" },
 ];
+
+/**
+ * The agent a shell that names no session belongs to, by its marker (`SESSIONLESS_HOSTS`: GEMINI_CLI, COPILOT_CLI,
+ * CURSOR_AGENT, OPENCODE, CLAUDECODE, OMPCODE, QWEN_CODE, DSH_SHELL): its name, and its host when it has one. A
+ * message it sends then reads as that agent's, never as a script's (`inboxSessionlessSend`). With two markers the
+ * shell was started inside another agent: Claude Code's `CLAUDECODE` is taken as the outer one, then the table's
+ * order decides, so the post still carries a name. Null for a shell with no marker (cron, launchd, a plain terminal).
+ */
+export function inboxShellAgentOf(env: Record<string, string | undefined>): { name: string; host?: string } | null {
+  const markers = SESSIONLESS_HOSTS.filter(({ variable }) => env[variable]);
+  const inner = markers.find(({ variable }) => variable !== "CLAUDECODE") ?? markers[0];
+  if (!inner) return null;
+  const { name, host } = inner;
+  return host ? { name, host } : { name };
+}
 
 export type InboxCaller = Pick<InboxHostSession, "session"> & Partial<InboxHostSession>;
 
@@ -115,6 +132,10 @@ export function inboxCallerOf(flag: string | null, env: Record<string, string | 
   if (flag !== null) {
     const caller = callerOfFlag(flag);
     if (!caller) return { ok: false, usage: true, code: "invalid_session", message: `--session takes <host>:<id> or <id>, as your Tidy's wake gives it, not ${JSON.stringify(flag)}.` };
+    // A bare id this shell names is that session, host and name too: without them a reply to it reads as from
+    // "An agent", and the window cannot tell it from a script nothing wakes.
+    const own = caller.host === undefined ? named.filter((other) => other.session === caller.session) : [];
+    if (own.length === 1) return { ok: true, caller: own[0]! };
     // A host that names no session, in this shell's line, may be who holds the flag; otherwise the shell knows better.
     if (named.length === 0 || sessionless.length > 0 || named.some((other) => other.host === caller.host && other.session === caller.session)) return { ok: true, caller };
     const shell = named.map(refOf).join(", ");
@@ -157,7 +178,7 @@ export function parseCallCommand(argv: readonly string[], actions: readonly stri
   // `steps` is left out of the list, as in the usage: it is served only while the person has thread steps on (and the
   // switch is the Inbox's, not known here), so an agent with them off reads no word of it.
   if (!actions.includes(action)) {
-    return { ok: false, code: "unknown_action", error: `${action} is not an Inbox action. Actions: ${actions.filter((name) => name !== "steps").join(", ")}.` };
+    return { ok: false, code: "unknown_action", error: `${action} is not an Inbox action. Actions: ${actions.filter((name) => name !== "steps" && name !== "routine").join(", ")}.` };
   }
   if (more.length > 0) return { ok: false, code: "usage", error: "inbox call takes one JSON argument (quote it), or - to read it from stdin." };
   return { ok: true, action, json: json === "-" ? null : (json ?? null), stdin: json === "-", session };
@@ -193,6 +214,8 @@ export interface CallCommandDeps {
   err?: (text: string) => void;
   /** Tests: how long one request may take. */
   timeoutMs?: number;
+  /** Print the tool's lines of text instead of its structured result (`plannotator routine` without --json). */
+  text?: boolean;
 }
 
 /** Run `plannotator inbox call …`; resolves to the exit code. */
@@ -224,6 +247,13 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
 
   // With no project_path, the session's own project (its host's PLANNOTATOR_SESSION_PROJECT), wherever the shell has cd'd to.
   const call = fillInboxToolArguments({ method: "tools/call", params: { name: parsed.action, arguments: input.args } }, deps.cwd, null, caller.caller, null, inboxSessionProjectFromEnv(deps.env));
+  // An agent's own shell that names no session (Gemini CLI, Copilot CLI, Cursor…): its message carries that agent's name.
+  const shellAgent = caller.caller === null && AUTHOR_TOOLS.has(parsed.action) ? inboxShellAgentOf(deps.env) : null;
+  if (shellAgent) {
+    const filled = call.params!.arguments as Record<string, unknown>;
+    filled.agent_name = shellAgent.name;
+    if (shellAgent.host) filled.agent_host = shellAgent.host;
+  }
   // Where the script runs is where its relative attachments and images are, wherever its project is.
   const params = inboxToolCallParams({ name: parsed.action, arguments: call.params!.arguments as Record<string, unknown> }, { wakes: false, workingFolder: deps.cwd });
   // Only on a read of one thread or message: a list has nothing to settle, and the peek would empty it.
@@ -252,7 +282,7 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
   }
   if (!answer) return refused("inbox_no_answer", "Plannotator Inbox gave no answer.");
   if (answer.error) return refused("inbox_error", answer.error.message ?? "The Inbox refused the call.");
-  return printResult(answer.result as CallResult | undefined, out, err);
+  return printResult(answer.result as CallResult | undefined, out, err, deps.text === true);
 }
 
 type CallResult = { content?: { text?: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean };
@@ -359,7 +389,7 @@ function loopbackDoor(value: string | undefined): string | null {
   }
 }
 
-async function printResult(result: CallResult | undefined, out: (text: string) => void | Promise<void>, err: (text: string) => void): Promise<number> {
+async function printResult(result: CallResult | undefined, out: (text: string) => void | Promise<void>, err: (text: string) => void, text = false): Promise<number> {
   const words = (result?.content ?? []).map((part) => part.text ?? "").join("\n");
   if (result?.isError) {
     // The Inbox's refusals are `<code>: <message>`; the MCP layer's (a field the schema does not take) are plain words.
@@ -395,6 +425,6 @@ async function printResult(result: CallResult | undefined, out: (text: string) =
   // A quiet hint (send_message's `hint`): the result text's last line, on stderr too.
   const hint = result?.structuredContent?.hint;
   if (typeof hint === "string" && hint) err(`${hint}\n`);
-  await out(`${JSON.stringify(result?.structuredContent ?? { text: words })}\n`);
+  await out(text ? `${words}\n` : `${JSON.stringify(result?.structuredContent ?? { text: words })}\n`);
   return 0;
 }

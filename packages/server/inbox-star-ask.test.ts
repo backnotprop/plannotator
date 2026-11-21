@@ -9,11 +9,12 @@
  * running gh; Not now stamping the line's three-day wait; a star on an ask the Inbox did not show.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { configStarAskStore, createStarAsk, type GhResult, type GhRunner } from "@plannotator/shared/star-ask";
 import { claimInboxStar, inboxStarAction } from "./inbox-star-ask";
+import { savedConfig } from "../../tests/helpers/saved-config";
 
 const original = process.env.PLANNOTATOR_DATA_DIR;
 let dir = "";
@@ -28,7 +29,7 @@ afterEach(() => {
   else process.env.PLANNOTATOR_DATA_DIR = original;
 });
 
-const config = () => JSON.parse(readFileSync(join(dir, "config.json"), "utf8"));
+const config = () => savedConfig(dir);
 const seed = (value: unknown) => writeFileSync(join(dir, "config.json"), JSON.stringify(value));
 const status = (code: number): GhResult => ({ code: code < 300 ? 0 : 1, stdout: `HTTP/2.0 ${code} X\r\n\r\n`, stderr: "" });
 

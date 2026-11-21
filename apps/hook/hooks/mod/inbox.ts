@@ -63,7 +63,9 @@ import {
   INBOX_ASK_POLL_FIELD,
   INBOX_AUTO_RELOAD_POLL_FIELD,
   INBOX_CONTINUES_POLL_FIELD,
+  INBOX_PLACE_POLL_FIELD,
   INBOX_TITLE_POLL_FIELD,
+  INBOX_FIRST_STARTED_POLL_FIELD,
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
   inboxAskBridgeBase,
@@ -74,6 +76,8 @@ import {
   inboxToolResultText,
   inboxToolsWithoutBro,
   INBOX_HELD_POLL_FIELD,
+  inboxBlockedField,
+  type InboxBlockedKind,
   INBOX_SEND_NOW_POLL_FIELD,
   INBOX_STEER_POLLS_POLL_FIELD,
   INBOX_TAGS_POLL_FIELD,
@@ -90,6 +94,7 @@ import {
   parseInboxReloadOffer,
   parseInboxRegistry,
   parseInboxToolList,
+  type InboxPlace,
   type InboxRegistryView,
   type InboxReloadOffer,
   type InboxReplyCommand,
@@ -767,6 +772,69 @@ export class TranscriptContinuedIn {
   }
 }
 
+/**
+ * `$.store` key: the last titles read from each session's transcript (`TranscriptTitle`), so a module reload, a
+ * transcript not found yet or a first read whose region holds no title line never clears a known name. Only a title
+ * line the transcript holds replaces one. Kept to the newest INBOX_SESSION_NAMES_MAX.
+ */
+export const STORE_INBOX_SESSION_TITLES = 'inboxSessionTitles'
+
+/** What a session's transcript last said: its title (`custom-title`; `''` when it said none) and Claude Code's own (`ai-title`). */
+export interface KnownTranscriptTitles {
+  title: string | null
+  generated: string | null
+}
+
+export type InboxSessionTitles = Record<string, KnownTranscriptTitles & { at: number }>
+
+const titleOrNull = (value: unknown) => (typeof value === 'string' ? value : null)
+
+/** The stored record: session id → its known titles and when they were kept, anything else dropped. */
+export function readSessionTitles(value: unknown): InboxSessionTitles {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const out: InboxSessionTitles = {}
+  for (const [id, entry] of Object.entries(value as Record<string, unknown>)) {
+    const { title, generated, at } = (entry ?? {}) as Record<string, unknown>
+    if (id && typeof at === 'number' && Number.isFinite(at) && (titleOrNull(title) !== null || titleOrNull(generated) !== null)) out[id] = { title: titleOrNull(title), generated: titleOrNull(generated), at }
+  }
+  return out
+}
+
+/** The record with `sessionId`'s titles as `known` (both null: dropped), the newest INBOX_SESSION_NAMES_MAX kept. */
+export function withSessionTitles(record: InboxSessionTitles, sessionId: string, known: KnownTranscriptTitles, now: number): InboxSessionTitles {
+  const was = record[sessionId]
+  if ((was?.title ?? null) === known.title && (was?.generated ?? null) === known.generated) return record
+  const { [sessionId]: _old, ...rest } = record
+  const entries = Object.entries(known.title === null && known.generated === null ? rest : { ...rest, [sessionId]: { ...known, at: now } }).sort((a, b) => b[1].at - a[1].at)
+  return Object.fromEntries(entries.slice(0, INBOX_SESSION_NAMES_MAX))
+}
+
+/**
+ * `$.store` key: each session's first start (epoch ms), so the link a module reload makes still tells the Inbox when
+ * the session started (`InboxLinkOptions.firstStart`). Kept to the newest INBOX_SESSION_NAMES_MAX.
+ */
+export const STORE_INBOX_SESSION_STARTS = 'inboxSessionStarts'
+
+/** The stored record: session id → its first start, anything else dropped. */
+export function readSessionStarts(value: unknown): Record<string, number> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter((e): e is [string, number] => !!e[0] && typeof e[1] === 'number' && Number.isFinite(e[1]) && e[1] > 0))
+}
+
+/** The record with `sessionId` started at `startedAt` unless it started earlier, the newest INBOX_SESSION_NAMES_MAX kept. */
+export function withSessionStart(record: Record<string, number>, sessionId: string, startedAt: number): Record<string, number> {
+  const was = record[sessionId]
+  if (was !== undefined && was <= startedAt) return record
+  const entries = Object.entries({ ...record, [sessionId]: startedAt }).sort((a, b) => b[1] - a[1])
+  return Object.fromEntries(entries.slice(0, INBOX_SESSION_NAMES_MAX))
+}
+
+/** Where a `TranscriptTitle` keeps what it read across module reloads (`STORE_INBOX_SESSION_TITLES`); a failure is nothing kept. */
+export interface TranscriptTitleMemory {
+  load(): Promise<KnownTranscriptTitles | null>
+  save(known: KnownTranscriptTitles): Promise<void>
+}
+
 export class TranscriptTitle {
   private path: string | null = null
   private lookedAt = Number.NEGATIVE_INFINITY
@@ -785,11 +853,15 @@ export class TranscriptTitle {
   private title: string | null = null
   private generated: string | null = null
 
+  /** What `memory` held, read once before the first read. */
+  private recalled: Promise<void> | null = null
+
   constructor(
     private readonly host: Pick<Host, 'fileSize' | 'run' | 'now'>,
     private readonly sessionId: string,
     /** Where the transcript may be (`claudeTranscriptPaths`), asked only while it is not found. */
     private readonly candidates: () => Promise<readonly string[]>,
+    private readonly memory?: TranscriptTitleMemory,
   ) {}
 
   generatedTitle(): string | null {
@@ -798,6 +870,22 @@ export class TranscriptTitle {
 
   /** The latest title (`''`: the transcript says none), or null when the transcript says nothing or cannot be read. */
   async read(): Promise<string | null> {
+    await (this.recalled ??= this.recall())
+    const before = { title: this.title, generated: this.generated }
+    const title = await this.readNow()
+    if (this.memory && (this.title !== before.title || this.generated !== before.generated)) await this.memory.save({ title: this.title, generated: this.generated }).catch(() => undefined)
+    return title
+  }
+
+  /** The titles a reader before this one kept (a module reload): known until the transcript says otherwise. */
+  private async recall(): Promise<void> {
+    const known = await this.memory?.load().catch(() => null)
+    if (!known) return
+    this.title ??= known.title
+    this.generated ??= known.generated
+  }
+
+  private async readNow(): Promise<string | null> {
     const path = await this.locate()
     if (!path) return this.title
     const size = await this.host.fileSize(path).catch(() => null)
@@ -1010,6 +1098,11 @@ export interface InboxLinkOptions {
   /** A turn is running (or a question of Ask this session is in flight). */
   isBusy: () => boolean
   /**
+   * What the session waits on in its terminal now (terminal-prompts.ts): a permission prompt or a question, the kind
+   * only. Asked every tick; a change goes to the Inbox as a `state` event, and every poll repeats it. Absent: never said.
+   */
+  blocked?: (now: number) => InboxBlockedKind | null
+  /**
    * The main-loop turn running now when a Send now reply may go into it, else
    * null: never the turn of this session's own "Ask this session" question
    * (its answer streams to Plannotator), and null while that question is
@@ -1043,11 +1136,23 @@ export interface InboxLinkOptions {
   /** Set by the host, never by the model. */
   title?: () => string | Promise<string>
   /**
+   * The session's first start, given this link's (`STORE_INBOX_SESSION_STARTS`): earlier when an earlier link of the
+   * same session kept one (a module reload makes a new link). Sent as INBOX_FIRST_STARTED_POLL_FIELD, so the Agents
+   * list keeps the session's place. A rejection: this link's start.
+   */
+  firstStart?: (startedAt: number) => Promise<number>
+  /**
    * The session ids this conversation continues (`TranscriptForkedFrom`), read
    * for every poll and sent as INBOX_CONTINUES_POLL_FIELD when there is one.
    * Set by the host, never by the model. Absent, empty or a rejection: nothing sent.
    */
   continues?: () => Promise<readonly string[]>
+  /**
+   * Where the session lives (`inboxPlaceFromEnv`: a Rex pane's ids), read for every poll and sent as
+   * INBOX_PLACE_POLL_FIELD when there is one. Set by the host, never by the model. Absent, null or a rejection:
+   * nothing sent.
+   */
+  place?: () => Promise<InboxPlace | null>
   /** Names this process in the lease and the claims. */
   instanceId: string
   /** Who the session is in the Inbox (a T3 Code thread); absent: the Claude Code session `sessionId`. */
@@ -1145,6 +1250,8 @@ export class InboxLink {
   private heldForInput = false
   /** When this link started (the session, near enough), and the turn state last told the Inbox (step 8). */
   private startedAt = 0
+  /** The session's first start (`InboxLinkOptions.firstStart`), asked once; 0 until known. */
+  private firstStartedAt = 0
   /** The last title that was known; what a poll repeats when it is not. */
   private lastLabel = ''
   private busy: boolean | null = null
@@ -1162,6 +1269,10 @@ export class InboxLink {
   private lastSendNow: boolean | null = null
   /** What the Inbox was last told about `heldForInput` (`held` on the poll and the state events): its "Stopped" line. */
   private lastHeld = false
+  /** What the Inbox was last told the session waits on in its terminal (`blocked` on the poll and the state events). */
+  private lastBlocked: InboxBlockedKind | null = null
+  /** When `lastBlocked` last changed (this host's clock; INBOX_BLOCKED_AT_FIELD): null until the first tick that read it. */
+  private blockedAt: number | null = null
   /** Send now could not go into the running turn (the engine refused the row): these wait for idle, as before. */
   private noSteer = new Set<string>()
   /** The engine refused a row once (an engine without `$.session.append`): stop offering Send now. */
@@ -1472,16 +1583,21 @@ export class InboxLink {
     // Whether a Send now reply could go in right now: never while this session's own Ask question holds it.
     const sendNow = await this.sendNowNow()
     const held = this.heldForInput
-    if (busy !== this.busy || sendNow !== this.lastSendNow || held !== this.lastHeld) {
+    const blocked = this.options.blocked?.(now) ?? null
+    if (this.blockedAt === null) this.blockedAt = now
+    else if (blocked !== this.lastBlocked) this.blockedAt = Math.max(now, this.blockedAt + 1)
+    if (busy !== this.busy || sendNow !== this.lastSendNow || held !== this.lastHeld || blocked !== this.lastBlocked) {
       const known = this.busy !== null
       if (busy !== this.busy && !busy) this.idleSince = now
       this.busy = busy
       this.lastSendNow = sendNow
       this.lastHeld = held
-      // A turn started or ended: the Inbox's live sessions say so (step 8), whether Send now can go in, and
-      // whether Claude Code holds this session's replies until the person types (the window's "Stopped").
+      this.lastBlocked = blocked
+      // A turn started or ended: the Inbox's live sessions say so (step 8), whether Send now can go in,
+      // whether Claude Code holds this session's replies until the person types (the window's "Stopped"), and
+      // what it waits on in its terminal (the Agents list's mark; the kind only).
       if (known && this.leader)
-        void this.bridge(INBOX_BRIDGE_EVENT_PATH, { type: 'state', busy, idle_since: this.idleSince, [INBOX_SEND_NOW_POLL_FIELD]: sendNow, [INBOX_HELD_POLL_FIELD]: held })
+        void this.bridge(INBOX_BRIDGE_EVENT_PATH, { type: 'state', busy, idle_since: this.idleSince, [INBOX_SEND_NOW_POLL_FIELD]: sendNow, [INBOX_HELD_POLL_FIELD]: held, ...inboxBlockedField(blocked, this.blockedAt) })
     }
     if (now - this.leaseCheckedAt >= LEASE_EVERY_MS) {
       await this.holdLease(now)
@@ -1640,20 +1756,30 @@ export class InboxLink {
     const label = await this.labelNow()
     const title = this.options.title ? await Promise.resolve().then(this.options.title).catch(() => '') : null
     const continues = this.options.continues ? await this.options.continues().catch(() => [] as readonly string[]) : []
+    const place = this.options.place ? await this.options.place().catch(() => null) : null
+    if (this.startedAt && !this.firstStartedAt && this.options.firstStart) {
+      const started = this.startedAt
+      this.firstStartedAt = await this.options.firstStart(started).catch(() => started)
+    }
     const response = await this.bridge(INBOX_BRIDGE_POLL_PATH, {
       waitMs,
       // The session this conversation was branched from: the Inbox hands this one what waits for it once it is gone.
       ...(continues.length > 0 ? { [INBOX_CONTINUES_POLL_FIELD]: [...continues] } : {}),
+      // Where it lives (a Rex pane's ids): a hint the Inbox checks against Rex before it shows anything.
+      ...(place ? { [INBOX_PLACE_POLL_FIELD]: place } : {}),
       ...(project ? { project_path: project } : {}),
       // The session's title (additive): the To picker's name for it; empty clears it.
       ...(label === null ? {} : { label }),
       ...(title === null ? {} : { [INBOX_TITLE_POLL_FIELD]: title }),
       ...(this.startedAt ? { started_at: this.startedAt } : {}),
+      ...(this.firstStartedAt ? { [INBOX_FIRST_STARTED_POLL_FIELD]: this.firstStartedAt } : {}),
       ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
       // Send now: this engine can put a reply into a running turn (`$.session.append`).
       ...((await this.sendNowNow()) ? { [INBOX_SEND_NOW_POLL_FIELD]: true } : {}),
       // Claude Code refused a reply and holds them all until the person types there: the window says "Stopped".
       ...(this.heldForInput ? { [INBOX_HELD_POLL_FIELD]: true } : {}),
+      // A prompt up in its terminal (the kind only): said again on every poll while it lasts.
+      ...inboxBlockedField(this.lastBlocked, this.blockedAt ?? undefined),
       [INBOX_STEER_POLLS_POLL_FIELD]: true,
       // Tags (approval "inbox-tag-agents"): this connection words a reply it was tagged in truthfully.
       [INBOX_TAGS_POLL_FIELD]: true,

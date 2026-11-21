@@ -58,6 +58,7 @@ function world(
     bitbucket?: BitbucketRefReader;
     cards?: boolean;
     projectHost?: (projectId: string) => Promise<string | null>;
+    projectHostOf?: (projectId: string) => string | null;
   } = {},
 ) {
   const dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-route-"));
@@ -68,7 +69,7 @@ function world(
   const thread = store.sendMessage({ project_id: project.id, author: AGENT, body: "Opened the retry PR.", subject: "Invoice retries" }).message.id;
   const gh = options.gh ?? fakeGh({});
   const refCards = options.bitbucket || options.cards ? createRefCards({ run: gh.run as never, now: () => now, avatar: async () => null, bitbucket: options.bitbucket }) : undefined;
-  const states = createThreadPullStates({ store, run: gh.run as never, ...(refCards ? { refCards } : {}), now: () => now, fixture: options.fixture ?? null, onLiveChange: options.onLiveChange });
+  const states = createThreadPullStates({ store, run: gh.run as never, ...(refCards ? { refCards } : {}), now: () => now, fixture: options.fixture ?? null, onLiveChange: options.onLiveChange, projectHostOf: options.projectHostOf });
   const route = createThreadPullsRoute({
     store,
     states,
@@ -80,7 +81,7 @@ function world(
     now: () => now,
   });
   const path = (id: string) => `/api/inbox/threads/${id}/pulls`;
-  const get = (id: string) => route.route(new Request(`http://x${path(id)}`), path(id));
+  const get = (id: string, query = "") => route.route(new Request(`http://x${path(id)}${query}`), path(id));
   const post = (id: string, body: Record<string, unknown>) =>
     route.route(new Request(`http://x${path(id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), path(id));
   const agentAdd = (id: string, ...values: string[]) => {
@@ -88,7 +89,7 @@ function world(
     if ("error" in parsed) throw new Error(parsed.error);
     return store.changeThreadPulls({ thread_id: id, add: parsed.refs, by: { kind: "agent", session: "ses_a", host: "claude-code", name: "Claude Code" } });
   };
-  return { store, project, thread, get, post, agentAdd, gh, advance: (ms: number) => (now += ms) };
+  return { store, project, thread, get, post, agentAdd, gh, states, advance: (ms: number) => (now += ms) };
 }
 
 describe("the window's route", () => {
@@ -128,6 +129,28 @@ describe("the window's route", () => {
     // Its short form takes it off again.
     await w.post(w.thread, { remove: ["acme/api!3"] });
     expect(w.store.threadPulls(w.thread).map((p) => p.pull)).toEqual(["github.com/o/r#1", "gitlab.acme.dev/acme/api#2:pull"]);
+  });
+
+  test("an MR stored on gitlab.com in a self-managed project is never rewritten; its short text takes it off, and added again it lands on the project's host", async () => {
+    const w = world({ projectHost: async () => "gitlab-master.example.com" });
+    // How an older Inbox stored `acme/api!3` in a project whose host it did not know as a GitLab.
+    w.agentAdd(w.thread, "acme/api!3");
+    const before = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+    expect(before.pulls.map((p) => [p.pull, p.url, p.host, p.ref])).toEqual([["gitlab.com/acme/api#3:pull", "https://gitlab.com/acme/api/-/merge_requests/3", "gitlab.com", "acme/api!3"]]);
+    // The window removes a row by its `ref`.
+    await w.post(w.thread, { remove: [before.pulls[0]!.ref] });
+    expect(w.store.threadPulls(w.thread)).toEqual([]);
+    await w.post(w.thread, { add: ["acme/api!3"] });
+    expect(w.store.threadPulls(w.thread).map((p) => p.url)).toEqual(["https://gitlab-master.example.com/acme/api/-/merge_requests/3"]);
+    // With both on the thread, each comes off by the text it shows: the gitlab.com row by `acme/api!3`, the project's by its URL.
+    w.agentAdd(w.thread, "acme/api!3");
+    const pair = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+    expect(pair.pulls.map((p) => p.ref).sort()).toEqual(["acme/api!3", "https://gitlab-master.example.com/acme/api/-/merge_requests/3"]);
+    await w.post(w.thread, { remove: ["acme/api!3"] });
+    expect(w.store.threadPulls(w.thread).map((p) => p.pull)).toEqual(["gitlab-master.example.com/acme/api#3:pull"]);
+    w.agentAdd(w.thread, "acme/api!3");
+    await w.post(w.thread, { remove: ["https://gitlab-master.example.com/acme/api/-/merge_requests/3"] });
+    expect(w.store.threadPulls(w.thread).map((p) => p.pull)).toEqual(["gitlab.com/acme/api#3:pull"]);
   });
 
   test("remove [\"all\"] takes every PR off, and the answer lists them as removed", async () => {
@@ -309,6 +332,146 @@ describe("a forge that never answers", () => {
     await w.get(w.thread);
     await settle();
     expect(heard).toHaveLength(1);
+  });
+});
+
+describe("why a PR could not be read (the card's tool state)", () => {
+  test("signed-out gh: the read answers at once, the windows hear of it, the next read carries the problem (the tool's own words stay here), and Try again reads the held failure again", async () => {
+    // The preload's fake GH_TOKEN would turn this into "the token in GH_TOKEN was refused": this is the plain case.
+    const token = process.env.GH_TOKEN;
+    delete process.env.GH_TOKEN;
+    try {
+      let signedIn = false;
+      const answered = fakeGh({ 3: { state: "OPEN" } });
+      const calls: string[][] = [];
+      // gh's own words, as gh 2.103 says them with no login (verified against the real gh in an empty GH_CONFIG_DIR).
+      const run = async (cli: string, args: string[]) => {
+        calls.push(args);
+        if (args[0] === "auth") return { stdout: "", stderr: "You are not logged into any GitHub hosts. To log in, run: gh auth login", exitCode: 1 };
+        if (!signedIn) return { stdout: "", stderr: "To get started with GitHub CLI, please run:  gh auth login\nAlternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token.", exitCode: 4 };
+        return answered.run(cli, args);
+      };
+      const heard: string[][] = [];
+      const w = world({ gh: { run, calls }, onLiveChange: (ids) => heard.push([...ids]) });
+      w.agentAdd(w.thread, "o/r#3");
+      const first = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+      expect(first.pulls[0]!.problem).toBeUndefined();
+      await settle();
+      expect(heard).toEqual([[w.thread]]);
+      const body = await (await w.get(w.thread))!.text();
+      const problem = (JSON.parse(body) as InboxThreadPullsAnswer).pulls[0]!.problem!;
+      expect(problem.code).toBe("tool.signed_out");
+      // The exact command the person copies (pinned on purpose: it is what they run).
+      expect(problem.action).toEqual({ kind: "copy_command", value: "gh auth login --hostname github.com" });
+      // What gh printed is kept on the server only.
+      expect(body).not.toContain("populate the GH_TOKEN");
+      expect(w.states.diag("github.com/o/r#3")?.last_line).toContain("populate the GH_TOKEN");
+      // Signed in since: a hover inside the failure hold runs nothing; Try again reads at once and the problem clears.
+      signedIn = true;
+      const ghCalls = () => calls.filter((c) => c[0] === "api").length;
+      const before = ghCalls();
+      await w.get(w.thread);
+      await settle();
+      expect(ghCalls()).toBe(before);
+      const retried = (await (await w.get(w.thread, "?retry=1"))!.json()) as InboxThreadPullsAnswer;
+      expect(retried.pulls.map((p) => [p.state, p.problem])).toEqual([["open", undefined]]);
+    } finally {
+      if (token === undefined) delete process.env.GH_TOKEN;
+      else process.env.GH_TOKEN = token;
+    }
+  });
+
+  /** Run `work` with no GH_ENTERPRISE_TOKEN / GITLAB_TOKEN (the preload's fake token would name the variable instead). */
+  const noTokens = async (work: () => Promise<void>) => {
+    const saved = { GH_ENTERPRISE_TOKEN: process.env.GH_ENTERPRISE_TOKEN, GITHUB_ENTERPRISE_TOKEN: process.env.GITHUB_ENTERPRISE_TOKEN, GITLAB_TOKEN: process.env.GITLAB_TOKEN };
+    for (const k of Object.keys(saved)) delete process.env[k];
+    try {
+      await work();
+    } finally {
+      for (const [k, v] of Object.entries(saved)) if (v !== undefined) process.env[k] = v;
+    }
+  };
+  const problemsOf = async (w: ReturnType<typeof world>, query = "") => {
+    await w.get(w.thread, query);
+    await settle();
+    return ((await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer).pulls.map((p) => [p.host, p.problem?.code, p.problem?.action ?? null, p.problem?.retry ?? null]);
+  };
+
+  test("a GitHub Enterprise host in gh's configuration, signed out: the command names it, and Try again recovers right after the sign-in", async () => {
+    await noTokens(async () => {
+      let signedIn = false;
+      const answered = fakeGh({ 5: { state: "OPEN" } });
+      const calls: string[][] = [];
+      const run = async (cli: string, args: string[]) => {
+        calls.push([cli, ...args]);
+        if (args.join(" ") === "auth status --json hosts") return { stdout: JSON.stringify({ hosts: { "github.acme.dev": [{ state: signedIn ? "success" : "error", login: "dana" }] } }), stderr: "", exitCode: signedIn ? 0 : 1 };
+        if (args[0] === "auth") return signedIn ? { stdout: "", stderr: "", exitCode: 0 } : { stdout: "", stderr: "You are not logged into any accounts on github.acme.dev", exitCode: 1 };
+        return answered.run(cli, args);
+      };
+      const w = world({ gh: { run, calls } });
+      w.agentAdd(w.thread, "https://github.acme.dev/acme/api/pull/5");
+      expect(await problemsOf(w)).toEqual([["github.acme.dev", "tool.signed_out", { kind: "copy_command", value: "gh auth login --hostname github.acme.dev" }, true]]);
+      // The person runs the command, then presses Try again (the card's button: `?retry=1`).
+      signedIn = true;
+      await w.get(w.thread);
+      await settle();
+      expect(((await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer).pulls[0]!.problem?.code).toBe("tool.signed_out");
+      const retried = (await (await w.get(w.thread, "?retry=1"))!.json()) as InboxThreadPullsAnswer;
+      expect(retried.pulls.map((p) => [p.state, p.problem])).toEqual([["open", undefined]]);
+    });
+  });
+
+  test("a host gh only knows from its configuration and cannot check now: failed, never signed out", async () => {
+    await noTokens(async () => {
+      const run = async (_cli: string, args: string[]) => {
+        if (args.join(" ") === "auth status --json hosts") return { stdout: JSON.stringify({ hosts: { "github.acme.dev": [{ state: "error", login: "dana" }] } }), stderr: "", exitCode: 1 };
+        if (args[0] === "auth") return { stdout: "", stderr: "X Failed to log in to github.acme.dev account dana (keyring)", exitCode: 1 };
+        return { stdout: "", stderr: "unexpected", exitCode: 1 };
+      };
+      const w = world({ gh: { run, calls: [] } });
+      w.agentAdd(w.thread, "https://github.acme.dev/acme/api/pull/5");
+      expect(await problemsOf(w)).toEqual([["github.acme.dev", "tool.failed", { kind: "retry" }, null]]);
+    });
+  });
+
+  test("gh or glab not installed: a self-managed host says missing, with the install link and Try again", async () => {
+    const run = async () => ({ stdout: "", stderr: "", exitCode: 127 });
+    const w = world({ gh: { run, calls: [] }, cards: true });
+    w.agentAdd(w.thread, "https://github.acme.dev/acme/api/pull/5", "https://gitlab.acme.dev/acme/api/-/merge_requests/9");
+    expect(await problemsOf(w)).toEqual([
+      ["github.acme.dev", "tool.missing", { kind: "open_url", value: "https://cli.github.com", label: "Install gh" }, true],
+      ["gitlab.acme.dev", "tool.missing", { kind: "open_url", value: "https://gitlab.com/gitlab-org/cli#installation", label: "Install glab" }, true],
+    ]);
+  });
+
+  test("a sign-in command names only a host the person uses: the project's own GitLab yes; look-alikes an agent linked get no command and are never asked", async () => {
+    await noTokens(async () => {
+      const calls: string[][] = [];
+      // Signed in nowhere but the public forges; nothing in either CLI's configuration for these hosts.
+      const run = async (cli: string, args: string[]) => {
+        calls.push([cli, ...args]);
+        if (cli === "gh" && args.join(" ") === "auth status --json hosts") return { stdout: JSON.stringify({ hosts: { "github.com": [{ state: "success", login: "dana" }] } }), stderr: "", exitCode: 0 };
+        if (args[0] === "auth") return { stdout: "", stderr: "gitlab.com\n  ✓ Logged in to gitlab.com as dana\n", exitCode: 0 };
+        return { stdout: "", stderr: "unexpected", exitCode: 1 };
+      };
+      const w = world({ gh: { run, calls }, cards: true, projectHostOf: () => "gitlab.acme.dev" });
+      w.agentAdd(
+        w.thread,
+        "https://gitlab.acme.dev/acme/api/-/merge_requests/9",
+        "https://github.corn/acme/api/pull/1",
+        "https://gitlab-acme.com/acme/api/-/merge_requests/2",
+      );
+      // A host that only starts like a public forge is no forge link at all: it never reaches a card.
+      expect(() => w.agentAdd(w.thread, "https://gitlab.com.evil.example/acme/api/-/merge_requests/3")).toThrow();
+      const unsupported = ["tool.unsupported", null, true];
+      expect(await problemsOf(w)).toEqual([
+        ["gitlab.acme.dev", "tool.signed_out", { kind: "copy_command", value: "glab auth login --hostname gitlab.acme.dev" }, true],
+        ["github.corn", ...unsupported],
+        ["gitlab-acme.com", ...unsupported],
+      ]);
+      // No tool was ever run naming a look-alike, the status check included.
+      expect(calls.filter((call) => call.some((arg) => /github\.corn|gitlab-acme|evil\.example/.test(arg)))).toEqual([]);
+    });
   });
 });
 

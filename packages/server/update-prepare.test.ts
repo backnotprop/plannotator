@@ -289,6 +289,12 @@ function serve(release: Release) {
  * a `curl` that serves the binary install.sh downloads (and logs every call,
  * so a test can prove the wrapper itself never used curl), plus a `git` that
  * fails so the skills checkout never reaches the network.
+ *
+ * The stub answers like the mirror the wrapper names in
+ * PLANNOTATOR_RELEASE_DOWNLOAD_URL (`…/dl`), which install.sh downloads the
+ * binary from: the plain binary only, no `.tar.xz` / `.gz` copies (a mirror
+ * may not carry them). Any other URL, github.com included, fails, so an
+ * install.sh that ignored the mirror fails these tests.
  */
 function sandbox(binaryServed: string) {
   const home = join(root, "home");
@@ -311,7 +317,8 @@ for a in "$@"; do
 done
 case "$url" in
   *.sha256) printf '%s  plannotator\\n' "$(shasum -a 256 "${binarySource}" 2>/dev/null | cut -d' ' -f1 || sha256sum "${binarySource}" | cut -d' ' -f1)" > "\${out:-/dev/stdout}" ;;
-  */releases/download/*) cat "${binarySource}" > "$out" ;;
+  */dl/v*/plannotator-*.tar.xz|*/dl/v*/plannotator-*.gz) exit 22 ;;
+  */dl/v*/plannotator-*) cat "${binarySource}" > "$out" ;;
   *) exit 22 ;;
 esac
 `,
@@ -338,7 +345,6 @@ function wrapperEnv(box: Box, port: number, extra: Record<string, string> = {}) 
       PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9",
       PLANNOTATOR_DATA_DIR: box.data,
       PLANNOTATOR_UPDATE_CHECK: "0",
-      PLANNOTATOR_SKIP_SEM_INSTALL: "1",
       PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL: "1",
       PLANNOTATOR_UPDATE_VERSION: "v1.2.3",
       PLANNOTATOR_UPDATE_RESULT: paths.result,
@@ -449,7 +455,11 @@ describe.skipIf(process.platform === "win32")("POSIX update wrapper (safe update
       expect(r.lockHeld).toBe(false);
       expect(staged(box.tmp)).toEqual([]);
       // install.sh did not fetch the .sha256 again over its own connection.
-      expect(readFileSync(box.curlLog, "utf-8")).not.toContain(".sha256");
+      const curlCalls = readFileSync(box.curlLog, "utf-8");
+      expect(curlCalls).not.toContain(".sha256");
+      // The binary came from the mirror the update was pointed at, never github.com (#3298).
+      expect(curlCalls).toContain(`http://127.0.0.1:${server.port}/dl/v1.2.3/${NATIVE}`);
+      expect(curlCalls).not.toContain("github.com");
     } finally {
       server.stop(true);
     }

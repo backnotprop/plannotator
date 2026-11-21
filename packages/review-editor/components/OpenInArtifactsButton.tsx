@@ -12,7 +12,7 @@ export function OpenInArtifactsButton({ url }: { url: string }): React.JSX.Eleme
     <button
       type="button"
       onClick={() => state.openPRArtifact(artifact.id)}
-      className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-md px-2 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <Maximize2 className="h-3 w-3" aria-hidden="true" />
       Open in Artifacts

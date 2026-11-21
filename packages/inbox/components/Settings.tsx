@@ -10,7 +10,9 @@ import { HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark, Icon, type IconName } from '../icons';
 import { ConnectPicker } from './ConnectPicker';
 import { AccountsRefresh, AccountsSection } from './Accounts';
+import { LinearKeySettings } from './LinearKeySettings';
 import { AgentsSettings, agentsNeedRestart } from './AgentsSettings';
+import { AgentStatusRow } from '../agents/AgentStatusSwitch';
 import { PromptsSection, promptsSummary } from './PromptsSettings';
 import type { InboxPromptsSettings } from '@plannotator/core/inbox-types';
 import type { InboxAgentsModel, InboxNotifyReach } from '@plannotator/core/inbox-types';
@@ -28,16 +30,20 @@ import { PaletteRow } from './Palettes';
 import { DEFAULT_COLOR_THEME } from '@plannotator/ui/utils/themeRegistry';
 import { chooseTextSize, useInboxTextSize } from '../textSize';
 import { chooseFavicon, useInboxFavicon } from '../faviconChoice';
+import { useSplitViewSwitch } from '../data/actions/settings';
+import { splitViewSetting } from '../panes/beside';
 import { FAVICON_STYLE_CHOICES, faviconDataUrl } from '@plannotator/core/favicon';
 import { SETTINGS_SECTION_LABEL, SETTINGS_SECTIONS, settingsHash, type SettingsSection } from '../settingsRoute';
 import { VoiceSettings } from './VoiceSettings';
-import { useVoiceSettings } from '../voice';
+import { useVoiceSettings, voiceWhere } from '../voice';
 import { RowsSection, rowsSummary, type RowsSectionProps } from './RowsSettings';
 import { useListLook } from '../listLook';
 import { DecisionData } from './DecisionData';
 import type { SystemProjectRow } from '@plannotator/core/inbox-system';
 import { openSystemSetup } from '../system/opener';
 import { systemStateWords } from '../system/projects';
+import { ScheduledSettingsRow } from '../scheduled/SettingsRow';
+import { usePhone } from '../phone';
 
 const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'claude-code', name: 'Claude Code' },
@@ -101,11 +107,13 @@ export interface SettingsPageProps {
   onToggleChapterDiagrams?: (next: boolean) => void;
   /** Settings → Capabilities → Checklist (thread steps, approval "inbox-thread-steps"). Absent (or an Inbox without it): no row. */
   onToggleSteps?: (next: boolean) => void;
+  /** Settings → Capabilities → Routines (after Checklist). Absent (or an Inbox without it, Windows among them): no row. */
+  onToggleScheduled?: (next: boolean) => void;
   /** Settings → Capabilities → Bro mode (approval "bro-mode"). Absent (or an Inbox without it): no row. */
   onToggleBro?: (next: boolean) => void;
   /** Settings → Capabilities → Experimental → "Float reply drafts" (approval "inbox-reply-floaters", off by default). Absent (or an Inbox without it): no row. */
   onToggleFloatDrafts?: (next: boolean) => void;
-  /** Settings → General → When an agent asks you → the Mark read warning (the owner's ask, 2026-11-10). Absent (or an Inbox without it): no row. */
+  /** Settings → General → When an agent sends you something → the Mark read warning (the owner's ask, 2026-11-10). Absent (or an Inbox without it): no row. */
   onToggleMarkReadWarning?: (next: boolean) => void;
   /** Over your tailnet: the switch, and whether a change is in flight. */
   onToggleTailscale: (next: boolean, replaceExposed?: boolean) => void;
@@ -137,7 +145,7 @@ export interface SettingsPageProps {
    * action, Check now (components/Updates.tsx GeneralUpdateRow). Absent: none.
    */
   updateRow?: ReactNode;
-  /** The question sound's row, under the notifications switch (sound.ts). */
+  /** The sound's row, under the notifications switch (sound.ts). */
   sound?: InboxSound;
   /** Settings → Archived: the archived threads (components/Archived.tsx). */
   archived?: ReactNode;
@@ -217,6 +225,31 @@ const THEME_CHOICES = [
 ] as const;
 
 /**
+ * Thread panes (config.json `inboxSplitView`, off by default; docs/agent-guides/inbox-window.md "Free layout"): several
+ * threads side by side beside the list. Saved here, every window turns them on or off at once (useSplitViewSwitch).
+ */
+function SplitViewRow({ saved }: { saved: boolean }) {
+  const { on, failed, toggle } = useSplitViewSwitch(saved);
+  return (
+    <div className="ib-prow" data-settings-split-view={on ? 'on' : 'off'}>
+      <span className="ib-txt">
+        <span className="ib-l" id="ib-split-view-label">
+          Threads side by side
+        </span>
+        <span className="ib-desc" aria-live="polite">
+          {failed
+            ? 'Not saved. Try again.'
+            : 'Open several threads at once: right-click a thread and choose Open to the side, or drag it next to the open one.'}
+        </span>
+      </span>
+      <span className="ib-ctl">
+        <Switch on={on} labelledBy="ib-split-view-label" onClick={toggle} />
+      </span>
+    </div>
+  );
+}
+
+/**
  * General (design of record `.product/approved/inbox-settings-tabs/`):
  * Appearance (light, dark, or match this computer; the text size; and the
  * palette for each half, Plannotator's one theme preference, so plan review
@@ -251,6 +284,9 @@ function GeneralSection({
   const textSize = useInboxTextSize();
   // Null from an Inbox that predates the setting: no row.
   const favicon = useInboxFavicon();
+  // Null from a settings model without it: no row. Never on a phone, which always shows one thread.
+  const splitView = splitViewSetting(settings);
+  const phone = usePhone();
   const notificationsOn = settings.notifications.enabled && permission === 'granted';
   const status = notifyStatusKind(settings.notifications.enabled, permission);
   const browser = browserName();
@@ -353,6 +389,9 @@ function GeneralSection({
               </button>
             </span>
           </div>
+          {splitView && !phone && <SplitViewRow saved={splitView.on} />}
+          {/* Agent status (agents/agentStatus.ts, owner 2026-11-18): every agent's mark; the ⋮ menu has the same switch. */}
+          <AgentStatusRow />
           <PaletteRow />
           {favicon && (
             <div className="ib-prow" data-settings-favicon={favicon}>
@@ -385,7 +424,7 @@ function GeneralSection({
       </section>
       <KeyboardSettings />
       <section className="ib-sgroup" data-settings-notifications="" aria-labelledby="ib-g-attention">
-        <h2 id="ib-g-attention">When an agent asks you</h2>
+        <h2 id="ib-g-attention">When an agent sends you something</h2>
         <div className="ib-card">
           <div className="ib-prow">
             <span className="ib-txt">
@@ -502,6 +541,8 @@ function CapabilitiesSection({
   onToggleBoard,
   steps,
   onToggleSteps,
+  scheduled,
+  onToggleScheduled,
   codeReview,
   onToggleCodeReview,
   shape,
@@ -524,6 +565,9 @@ function CapabilitiesSection({
   /** The checklist (thread steps, approval "inbox-thread-steps"), null on an Inbox without it. */
   steps: { on: boolean } | null;
   onToggleSteps?: (next: boolean) => void;
+  /** Routines, null where the Inbox has no switch for them. */
+  scheduled: { on: boolean; login?: 'added' | 'unavailable' } | null;
+  onToggleScheduled?: (next: boolean) => void;
   /** Code review in the Inbox (approval "inbox-code-review-direction"), null on an Inbox without it. */
   codeReview: { on: boolean } | null;
   onToggleCodeReview?: (next: boolean) => void;
@@ -550,6 +594,7 @@ function CapabilitiesSection({
 }) {
   const boardRow = board && onToggleBoard;
   const stepsRow = steps && onToggleSteps;
+  const scheduledRow = scheduled && onToggleScheduled;
   const codeReviewRow = codeReview && onToggleCodeReview;
   const shapeRow = shape && onToggleShape;
   // System's row (see SYSTEM_SETTINGS_ROW_VISIBLE): while hidden, it shows only once System is on, and then stays for
@@ -566,7 +611,7 @@ function CapabilitiesSection({
   const decisionRow = experimental && onToggleExperimental;
   return (
     <>
-      {(boardRow || stepsRow || codeReviewRow || shapeRow) && (
+      {(boardRow || stepsRow || scheduledRow || codeReviewRow || shapeRow) && (
         <section className="ib-sgroup" data-settings-capabilities="" aria-label="Capabilities">
           <div className="ib-card">
             {boardRow && (
@@ -599,6 +644,7 @@ function CapabilitiesSection({
                 </span>
               </div>
             )}
+            {scheduledRow && <ScheduledSettingsRow value={scheduled} onToggle={onToggleScheduled} />}
             {codeReviewRow && (
               <div className="ib-prow" data-settings-code-review="">
                 <span className="ib-txt">
@@ -1045,6 +1091,7 @@ export function SettingsPage(props: SettingsPageProps) {
   const experimental = settings?.experimental && props.onToggleExperimental ? settings.experimental : null;
   const board = settings?.board && props.onToggleBoard ? settings.board : null;
   const steps = settings?.steps && props.onToggleSteps ? settings.steps : null;
+  const scheduled = settings?.scheduled_threads && props.onToggleScheduled ? settings.scheduled_threads : null;
   const codeReview = settings?.code_review && props.onToggleCodeReview ? settings.code_review : null;
   const shape = settings?.shape && props.onToggleShape ? settings.shape : null;
   const system = settings?.system && props.onToggleSystem ? settings.system : null;
@@ -1057,7 +1104,7 @@ export function SettingsPage(props: SettingsPageProps) {
   const voice = useVoiceSettings();
   const [look] = useListLook();
   const sections = SETTINGS_SECTIONS.filter(
-    (id) => (id !== 'capabilities' || board !== null || steps !== null || codeReview !== null || shape !== null || bro !== null || floatDrafts !== null || experimental !== null) && (id !== 'cloud-agents' || cloud.shown === true) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
+    (id) => (id !== 'capabilities' || board !== null || steps !== null || scheduled !== null || codeReview !== null || shape !== null || bro !== null || floatDrafts !== null || experimental !== null) && (id !== 'cloud-agents' || cloud.shown === true) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
   );
   /** The phone's list of sections, in its groups: settings (Capabilities last of them), then your data and Plannotator. */
   const phoneGroups: { label: string; ids: SettingsSection[] }[] = [
@@ -1165,7 +1212,12 @@ export function SettingsPage(props: SettingsPageProps) {
         body = <CloudAgentsSection />;
         break;
       case 'accounts':
-        body = <AccountsSection machine={machines.find((machine) => machine.self)?.name} />;
+        body = (
+          <>
+            <AccountsSection machine={machines.find((machine) => machine.self)?.name} />
+            {settings.linear_key && <LinearKeySettings initial={settings.linear_key} where={voiceWhere(settings.voice ?? null)} />}
+          </>
+        );
         break;
       case 'prompts':
         body = settings.prompts ? (
@@ -1250,12 +1302,14 @@ export function SettingsPage(props: SettingsPageProps) {
         break;
       case 'capabilities':
         body =
-          (board && props.onToggleBoard) || steps || codeReview || shape || bro || experimental ? (
+          (board && props.onToggleBoard) || steps || scheduled || codeReview || shape || bro || experimental ? (
             <CapabilitiesSection
               board={board}
               onToggleBoard={props.onToggleBoard}
               steps={steps}
               onToggleSteps={props.onToggleSteps}
+              scheduled={scheduled}
+              onToggleScheduled={props.onToggleScheduled}
               codeReview={codeReview}
               onToggleCodeReview={props.onToggleCodeReview}
               shape={shape}
@@ -1296,7 +1350,7 @@ export function SettingsPage(props: SettingsPageProps) {
         in {tildePath(store?.dir ?? settings.store_dir ?? settings.store?.dir ?? '', settings.home)}: messages, attached files as they were sent, and annotations.
       </p>
     ) : section === 'devices' && settings && !phonesOn ? (
-      <p className="ib-lede">Browsers on your other devices.</p>
+      <p className="ib-lede">Open this Inbox from your phone, tablet or another computer.</p>
     ) : section && LEDE[section] ? (
       <p className="ib-lede">{LEDE[section]}</p>
     ) : null;

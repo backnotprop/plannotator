@@ -1,5 +1,5 @@
 /**
- * Phones in the Inbox window's Settings → Devices (mobile plan steps P1 and
+ * Phones in the Inbox window's Settings → Remote devices (mobile plan steps P1 and
  * P2; adr/implementation/inbox-mobile.md sections 1 to 3; Pair a phone as a
  * guided flow, design of record `.product/approved/inbox-settings-tabs/`),
  * proved in a real browser against the compiled binary under a temp

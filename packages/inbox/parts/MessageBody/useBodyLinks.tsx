@@ -9,6 +9,7 @@ import { paintSkillReferences } from '../../skillHighlight';
 import { paintTagReferences, type TagMarkPlace } from '../../tagHighlight';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 import type { RefObject } from 'react';
+import { prototypeStart } from '../../prototypes';
 import type { MessageBodyProps } from './types';
 import type { OpenFileRefRef } from './useFileRefs';
 
@@ -120,7 +121,7 @@ export function useBodyLinks({
         kind: 'open',
         title: openAttachmentTitle(attachmentDisplayPath(attachment, projectRoot)),
         href: attachmentDeepLink(message.thread_id, attachment.id),
-        open: () => openRef.current(attachment),
+        open: () => openRef.current(attachment, attachment.kind === 'html' ? prototypeStart(href) || undefined : undefined),
       };
     },
     [message.attachments, message.base_path, message.thread_id, message.id, projectRoot, replyFileList, openInFiles, refsOn],

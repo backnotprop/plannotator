@@ -75,7 +75,7 @@ function mount(element: React.ReactElement): HTMLElement {
 }
 
 const noop = () => {};
-function panel(): HTMLElement {
+function panel(more: Partial<CardPanelProps> = {}): HTMLElement {
   const props: CardPanelProps = {
     card,
     history: [],
@@ -99,6 +99,7 @@ function panel(): HTMLElement {
     onLink: async () => null,
     onOpenThread: noop,
     onCreateThread: noop,
+    ...more,
   } as CardPanelProps;
   return mount(createElement(CardPanel, props));
 }
@@ -155,6 +156,30 @@ describe('opened card links: YouTrack and any web link (user feedback #10)', () 
     }
     // Never a remote address: the window's CSP would block it.
     for (const each of host.querySelectorAll('img')) expect(each.getAttribute('src')).toStartWith('/api/inbox/');
+  });
+});
+
+describe('opened card links: Remove', () => {
+  test.if(hasDom)('each link has a Remove that sends its URL; focus goes to the field that adds a link', async () => {
+    const removed: string[] = [];
+    const host = panel({ onUnlink: async (url) => (removed.push(url), null) });
+    const remove = host.querySelector<HTMLButtonElement>(`[data-card-unlink="${MINE.url}"]`)!;
+    expect(remove.getAttribute('aria-label')).toBe('Remove the link notion.so/acme/Roadmap-2026');
+    expect(host.querySelector(`[data-card-unlink="${YOUTRACK.url}"]`)!.getAttribute('aria-label')).toBe('Remove the link PROJ-123');
+    await act(async () => remove.click());
+    expect(removed).toEqual([MINE.url]);
+    expect(document.activeElement).toBe(host.querySelector('[data-card-link-field]'));
+    expect(host.querySelector('.ib-crdp-refs + [role="alert"]')).toBeNull();
+  });
+
+  test.if(hasDom)('a refused remove says why under the links', async () => {
+    const host = panel({ onUnlink: async () => 'No card crd_1.' });
+    await act(async () => host.querySelector<HTMLButtonElement>(`[data-card-unlink="${MINE.url}"]`)!.click());
+    expect(host.querySelector('.ib-crdp-refs + [role="alert"]')!.textContent).toBe('No card crd_1.');
+  });
+
+  test.if(hasDom)('a window that cannot remove draws no Remove', () => {
+    expect(panel().querySelector('[data-card-unlink]')).toBeNull();
   });
 });
 

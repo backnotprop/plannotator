@@ -822,7 +822,7 @@ test.skipIf(!hasDom)('an old reading or an expired login is no warning: the row 
   expect(peek()!.querySelector('.ib-usage-lines')?.hasAttribute('data-muted')).toBe(true);
   act(() => root?.unmount());
   host?.remove();
-
+  await call('/api/inbox/accounts'); // The peek's click started a read; the next window's would join it (see beforeEach).
   answer({ stdout: listOf({ alias: 'gone', active: true, usageStatus: 'relogin_required', usage: { fiveHour: limit(95) } }) });
   const expired = await openInbox();
   await openPeek(expired);
@@ -850,9 +850,9 @@ test.skipIf(!hasDom)('what the peek says with nothing to draw: an API key, no re
   const reopen = async (stdout: string, exit = 0) => {
     act(() => root?.unmount());
     host?.remove();
+    await call('/api/inbox/accounts'); // The peek's click started a read; the next window's would join it (see beforeEach).
     answer({ stdout, exit });
-    const el = await openInbox();
-    await openPeek(el);
+    await openPeek(await openInbox());
   };
   answer({ stdout: listOf({ alias: 'build key', active: true, usageStatus: 'api_key' }) });
   await openPeek(await openInbox());

@@ -6,7 +6,7 @@
  * a closed group that reads or holds rows; more or fewer than 20 rows, "Show 20 more" not adding 20, the group going
  * past 100 without pointing to Search; a row drawn with its last message's time instead of when it was archived;
  * Unarchive that leaves the row on screen until the answer, has no Undo, or loses a row whose write was held (an
- * asleep machine); the group ignoring the selected project, the list's filters or the linked machines; a swipe on a
+ * asleep machine); the group ignoring the selected project, the list's filters (its Tag picks too) or the linked machines; a swipe on a
  * phone that takes a rightward or a short one; and the live list's rows drawn again when the group opens or reads.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -20,6 +20,8 @@ import type { TidyController } from './components/Tidy';
 import type { ArchivedModel } from './api';
 import type { BulkWrites } from './bulkWrites';
 import * as format from './format';
+import { filterListSections, NO_LIST_FILTER } from './listFilter';
+import { withLiveTagPicks } from './listFilterTags';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
@@ -421,6 +423,26 @@ test.skipIf(!hasDom)("the group follows the selected project, and the list's fil
   expect(groupIds().every((id) => Number(id!.slice(4)) % 3 === 0)).toBe(true);
 });
 
+test.skipIf(!hasDom)("the list's Tag filter applies to the group: an untagged archived row drops out when a tag is picked", async () => {
+  // Thread tags step 2: App's filter for the group (App.tsx `archivedFilter`), the list's picks read against the live tags.
+  const release = { id: 'ini_release', name: 'Release', created_at: '', created_by: { kind: 'person' }, updated_at: '', deleted_at: null } as const;
+  store = Array.from({ length: 30 }, (_, i) => archivedRow(i, i % 2 ? { tags: ['ini_release'] } : {}));
+  const picks = withLiveTagPicks({ ...NO_LIST_FILTER, tags: ['ini_release'] }, [release]);
+  const byTag = (rows: readonly InboxListRow[]) => filterListSections([{ id: 'archived', label: 'Archived', threads: [...rows] } as InboxListSection], picks, Date.now(), undefined, (r) => r.tags ?? [])[0]?.threads ?? rows;
+  render({ filter: byTag });
+  await switchOn();
+  await openGroup();
+  await settle();
+  expect(groupIds().length).toBeGreaterThan(0);
+  expect(groupIds().every((id) => Number(id!.slice(4)) % 2 === 1)).toBe(true);
+  // No tag picked: every archived row, tagged or not.
+  act(() => band().click());
+  render({ filter: (rows) => filterListSections([{ id: 'archived', label: 'Archived', threads: [...rows] } as InboxListSection], NO_LIST_FILTER, Date.now(), undefined, (r) => r.tags ?? [])[0]?.threads ?? rows });
+  await openGroup();
+  await settle();
+  expect(groupIds().some((id) => Number(id!.slice(4)) % 2 === 0)).toBe(true);
+});
+
 test.skipIf(!hasDom)('on a phone a swipe to the left unarchives; rightward and short ones do nothing, and open nothing', async () => {
   spies.push(spyOn(inboxApi, 'resolve').mockImplementation(async (id) => void events.push(`resolve:${id}`) as never));
   render({ phone: true });
@@ -490,4 +512,24 @@ test.skipIf(!hasDom)('picking: an archived row is never picked, and opening the 
   expect(count()).toBe('2 selected');
   expect(events.filter((e) => e === `open:${id}`)).toHaveLength(2);
   expect(archivedEl.getAttribute('aria-pressed')).not.toBe('true');
+});
+
+test.skipIf(!hasDom)("in the Agents view an archived row is the group's own row: Unarchive, not Mark unread", async () => {
+  const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
+  const { LIST_VIEW_COOKIE, resetListViewForTests } = await import('./listView');
+  const kept = new Map<string, string>([[LIST_VIEW_COOKIE, 'agents']]);
+  setStorageBackend({ getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => void kept.set(k, v), removeItem: (k) => void kept.delete(k) });
+  resetListViewForTests();
+  try {
+    render();
+    await switchOn();
+    await openGroup();
+    const wrap = group()!.querySelector<HTMLElement>('[data-row="arc_0"]')!;
+    expect(wrap.querySelector('[data-row-unarchive]')?.getAttribute('aria-label')).toBe('Unarchive: Thread arc_0');
+    expect(wrap.querySelector('.ib-lrow')).toBeNull();
+    expect(wrap.textContent).not.toContain('Mark unread');
+  } finally {
+    resetStorageBackend();
+    resetListViewForTests();
+  }
 });

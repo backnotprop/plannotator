@@ -16,6 +16,7 @@ import { inboxAgentTool, INBOX_BRO_LINE, parseInboxToolList } from "@plannotator
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createAgentEnvironmentFor } from "./inbox-agents";
 import { SEND_BODY_DESCRIPTION } from "./inbox-mcp";
+import { savedConfig } from "../../tests/helpers/saved-config";
 
 const DAY = 24 * 3_600_000;
 
@@ -54,6 +55,9 @@ interface WorldOptions {
 
 /** An Inbox with Snooze and the rest of the line behind the person, so only Bro mode can be next. */
 async function world(options: WorldOptions = {}) {
+  // The view choice (reveals.ts `view_choice`: five threads, no tenure, `ahead`) shown 3 days ago, merged into any
+  // `inboxReveals` a case brings: with these worlds' threads it would otherwise be next where Bro mode is not.
+  const { inboxReveals, ...config } = options.config ?? {};
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-bro-")));
   roots.push(root);
   const dataDir = join(root, "data");
@@ -81,7 +85,8 @@ async function world(options: WorldOptions = {}) {
       inboxTool: { openclaw: true },
       // Priority (after Snooze in the line): settled by a thread once added to Priority.
       inboxPriorityIntro: { usedAt: new Date(Date.now() - 3 * DAY).toISOString() },
-      ...options.config,
+      inboxReveals: { view_choice: { shownAt: new Date(Date.now() - 3 * DAY).toISOString() }, ...(inboxReveals as Record<string, unknown> | undefined) },
+      ...config,
     }),
   );
   // What the person read: heavy use counts the dates of the agent messages they looked at.
@@ -109,7 +114,7 @@ async function world(options: WorldOptions = {}) {
   const settings = async () => (await (await fetch(`${base}/api/inbox/settings?store=0`)).json()) as Json;
   const next = async () => (await settings()).reveal.next as string | null;
   const claim = async (key?: string) => (await (await post("/api/inbox/reveal", { id: "bro", ...(key ? { key } : {}) })).json()) as Json;
-  const saved = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as Json;
+  const saved = () => savedConfig(dataDir) as Json;
   let rpcId = 0;
   const rpc = async (method: string, params: Record<string, unknown>) => {
     const response = await fetch(`${base}/mcp`, {

@@ -41,6 +41,7 @@ import { inboxStatus, readInboxRegistry, stopInbox } from "@plannotator/shared/i
 import { takeDownInboxTailnet } from "./inbox-devices";
 import { hasTailnetDoorRecord, readTailnetDoorRecord } from "./inbox-tailnet-door";
 import { takeDownInboxTailscale } from "./inbox-tailscale";
+import { inboxLoginItem } from "./inbox-scheduled-login";
 import { agentHomeAllowed, forgetInboxAgents, planInboxAgentRemoval, type AgentEnvironment } from "./inbox-agents";
 import { qwenTrustRemoval, type QwenRevokeResult } from "./inbox-qwen-trust";
 import { hermesPluginInstalled } from "./inbox-hermes";
@@ -150,6 +151,7 @@ const PURGE_OWNED_TOP_LEVEL = [
   "semantic-diff",
   "migrations",
   "config.json",
+  "state.json",
   "install-prefs",
   "review-skills.json",
   "vscode-ipc.json",
@@ -461,7 +463,8 @@ export async function runPlannotatorUninstall(
       } else {
         const tailnet = takeDownInboxTailnet(state.dataDir);
         if (tailnet === "removed") state.removed.push(`Took down the Plannotator Inbox's tailnet address (tailscale serve --https=${door.https_port})`);
-        if (tailnet === "failed") state.warnings.push(`Could not check or remove the Inbox's tailnet address; run: tailscale serve --https=${door.https_port} off`);
+        // Tailscale not running ("later"): an uninstall cannot wait for it, so it says as for a failure.
+        if (tailnet === "failed" || tailnet === "later") state.warnings.push(`Could not check or remove the Inbox's tailnet address; run: tailscale serve --https=${door.https_port} off`);
       }
     }
     // "Over your tailnet": the window's mapping a crashed Inbox left behind (a clean stop, including the stop above, takes its own down).
@@ -488,6 +491,16 @@ export async function runPlannotatorUninstall(
     for (const worker of await stopT3Workers(state.dataDir)) {
       if (worker.state === "stopped") state.removed.push(`Stopped the T3 Code companion for thread ${worker.entry.thread} (pid ${worker.entry.pid})`);
       if (worker.state === "still_running") state.warnings.push(`The T3 Code companion for thread ${worker.entry.thread} (pid ${worker.entry.pid}) did not stop; quit it before deleting ${join(state.dataDir, "t3-code")}.`);
+    }
+  }
+
+  // Routines' start at login (inbox-scheduled-login.ts): with the binary gone it would fail at every login.
+  const login = inboxLoginItem({ platform: environment.platform, home: environment.homeDir, argv: [], dataDir: state.dataDir, run: async ([command, ...args]) => ({ code: (await environment.runCommand(command!, args)).exitCode }) });
+  if (login.path && existsSync(login.path)) {
+    if (request.dryRun) state.planned.push(`Remove the Inbox's start at login (${login.path})`);
+    else {
+      await login.remove();
+      state.removed.push(`Removed the Inbox's start at login (${login.path})`);
     }
   }
 

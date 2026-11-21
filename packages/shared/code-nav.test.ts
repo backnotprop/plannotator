@@ -852,6 +852,26 @@ const HOVER_REQUEST = {
 };
 
 describe("resolveCodeNavHover", () => {
+  for (const originFirst of [false, true]) {
+    test(`keeps the hovered file when repository matches exceed the parse cap (origin first: ${originFirst})`, async () => {
+      resetRgCache();
+      const origin = rgMatch("./src/pay.js", 2, "function charge(amount) {", 9);
+      const others = Array.from({ length: 600 }, (_, i) =>
+        rgMatch(`./other/f${i}.js`, 1, "function charge(amount) {", 9),
+      );
+      const stdout = (originFirst ? [origin, ...others] : [...others, origin]).join("\n");
+      const runtime = stubRuntime(stdout);
+
+      const hover = await resolveCodeNavHover(runtime, HOVER_REQUEST, "/repo", []);
+      expect(hover.definition?.filePath).toBe("src/pay.js");
+      expect(hover.definition?.line).toBe(2);
+      expect(hover.capped).toBe(true);
+      const resolved = await resolveCodeNav(runtime, HOVER_REQUEST, "/repo", []);
+      expect(resolved.definitions[0]?.filePath).toBe("src/pay.js");
+      expect(resolved.definitions.length + resolved.references.length).toBe(50);
+    });
+  }
+
   test("enriches the top definition from the file the runtime reads", async () => {
     resetRgCache();
     const source = [

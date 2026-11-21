@@ -8,8 +8,9 @@
  * list's ⋮ menu → View → Simple list (listView.ts); `settings-<section>` opens that Settings section;
  * `settings-experimental` opens Capabilities on its Experimental group. A link opens real release notes or docs.
  *
- * Experimental features held until 0.29 (packages/server/inbox.ts `heldSwitch`: Code review, Shape, System) are
- * not here: their switches are hidden, so nothing may offer them.
+ * Code review, Shape and System are not here. Shape and System are held (packages/server/inbox.ts `heldSwitch`,
+ * `SYSTEM_SETTINGS_ROW_VISIBLE`): their switches are hidden, so nothing may offer them. Code review's switch shows to
+ * everyone since the owner's call of 2026-11-17, but it has no answer here yet.
  *
  * Matching is whole words and whole phrases, no stems: "moves" never finds "remove". An entry matches on one of its
  * `phrases`, or when every `near` group has a word that is not negated ("doesn't move" is praise) and they sit
@@ -118,10 +119,10 @@ export const KNOWN_ANSWERS: readonly KnownAnswer[] = [
   {
     id: 'phone',
     answer: 'Use the Inbox on your phone, over your tailnet',
-    action: { kind: 'settings-devices', label: 'Open Settings → Devices' },
+    action: { kind: 'settings-devices', label: 'Open Settings → Remote devices' },
     faq: {
       question: 'Can I use the Inbox on my phone?',
-      answer: 'Yes, over your tailnet: open the address from Settings → Devices on your phone.',
+      answer: 'Yes, over your tailnet: open the address from Settings → Remote devices on your phone.',
     },
     feature: 'Over your tailnet',
     match: {
