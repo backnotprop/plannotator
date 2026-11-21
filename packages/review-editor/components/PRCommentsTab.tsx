@@ -723,6 +723,15 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
   );
 }
 
+/** The words of a comment's link to its forge, from the link: GitHub's is the one with nothing else to say. */
+export function commentLinkLabel(url: string): string {
+  if (url.includes('gitlab')) return 'View on GitLab';
+  if (url.includes('bitbucket.org')) return 'View on Bitbucket';
+  // Forgejo and Gitea write a pull request as /pulls/N (GitHub's is /pull/N).
+  if (/\/pulls\/\d+/.test(url)) return 'View on Forgejo';
+  return 'View on GitHub';
+}
+
 function PRCommentLinkActions({ url, body, commentId, author, onAnnotate }: {
   url?: string;
   body: string;
@@ -757,7 +766,7 @@ function PRCommentLinkActions({ url, body, commentId, author, onAnnotate }: {
           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
           </svg>
-          {url.includes('gitlab') ? 'View on GitLab' : url.includes('bitbucket.org') ? 'View on Bitbucket' : 'View on GitHub'}
+          {commentLinkLabel(url)}
         </a>
       )}
       <CopyButton text={body} variant="inline" label="Copy" />
