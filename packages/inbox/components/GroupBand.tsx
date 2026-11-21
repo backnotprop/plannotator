@@ -1,4 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react';
+import type { InboxListGroupId, InboxListRow } from '@plannotator/core/inbox-types';
 import { Icon } from '../icons';
 import { Tip } from './Tip';
 
@@ -83,3 +84,30 @@ export function GroupBand({
 
 /** The tip never opens by a hover of its anchor: only while `tip` is set. */
 const NEVER = () => false;
+
+/**
+ * A closed group with an agent stopped or held up inside (Stopped on you, Holding up work, the Snoozed band): the
+ * triangle, so a blocker never hides behind the fold.
+ */
+export function FoldedBlocker({ rows, group }: { rows: readonly InboxListRow[]; group: InboxListGroupId }) {
+  const stopped = rows.some((row) => row.section === 'stopped');
+  if (!stopped && !rows.some((row) => row.section === 'holding')) return null;
+  const snoozed = group === 'snoozed';
+  const words = snoozed
+    ? stopped
+      ? 'A snoozed thread is stopped on you'
+      : 'A snoozed thread is holding up work'
+    : stopped
+      ? 'A closed thread is stopped on you'
+      : 'A closed thread is holding up work';
+  return (
+    <span className="ib-zband-tri" data-stopped={stopped ? '' : undefined} data-snooze-blocker={snoozed ? '' : undefined} data-folded-blocker="" role="img" aria-label={words}>
+      <Icon name="warn" size={14} />
+    </span>
+  );
+}
+
+/** Something new came into a closed group since it was closed: an unread row whose latest agent message came after. */
+export function newSince(rows: readonly InboxListRow[], since: number): boolean {
+  return rows.some((row) => row.unread && Date.parse(row.last_agent_at ?? row.last_at) > since);
+}

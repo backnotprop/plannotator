@@ -9,6 +9,8 @@
 import { inboxRowArchived, type InboxListGroupId, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
 import { waitsBehindShow } from './held';
 import { offersRowMarkRead } from './markRead';
+import type { BulkWrites } from './bulkWrites';
+import type { BandMenu } from './components/RowMenu';
 
 /** A band menu's items, in their order: the project menu's words ("Mark all as read", "Archive all"). */
 export type BandMenuAction = 'read' | 'archive';
@@ -51,6 +53,30 @@ export function bandMenuActions(section: InboxListSection): BandMenuAction[] {
   if (bandMarkAllRows(section).length > 0) out.push('read');
   if (bandArchiveAllRows(section).length > 0) out.push('archive');
   return out;
+}
+
+/**
+ * A group band's menu (RowMenu.tsx `bands`): Mark all as read and Archive all on that band's threads, each written as
+ * its thread is now (bulkWrites.ts). `onOpened`: a band's menu really opened (not a press that only took its look).
+ */
+export function bandMenuOf(sections: readonly InboxListSection[], bulk: Pick<BulkWrites, 'markAllRead' | 'archiveAll'>, onOpened: () => void): BandMenu {
+  const bandSection = (id: string) => sections.find((section) => section.id === id);
+  return {
+    actionsOf: (id) => {
+      const section = bandSection(id);
+      return section ? bandMenuActions(section) : [];
+    },
+    labelOf: (id) => bandSection(id)?.label ?? '',
+    stateOf: (id) => bandSection(id)?.threads.map((row) => row.thread_id).join(' ') ?? '',
+    onAction: (id, action) => {
+      const section = bandSection(id);
+      if (!section) return;
+      const rows = action === 'read' ? bandMarkAllRows(section) : bandArchiveAllRows(section);
+      if (action === 'archive') void bulk.archiveAll(rows);
+      else if (rows.length > 0) void bulk.markAllRead(rows);
+    },
+    onOpened,
+  };
 }
 
 /**

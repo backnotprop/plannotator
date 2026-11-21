@@ -1848,15 +1848,6 @@ export const inboxApi = {
       ...(agents && agents.length > 0 ? { agents } : {}),
     }),
   /**
-   * A band's menu opened (bandTip.ts): the Group tip is stamped and never shows, whatever the tenure or a dialog's gap.
-   * Best effort: a lost answer only means the tip may still show once.
-   */
-  retireBandTip: () =>
-    post<{ show: boolean }>(inboxUrl('/reveal'), { id: 'band_tip', used: true }).then(
-      () => undefined,
-      () => undefined,
-    ),
-  /**
    * An offer of the line closed with Not now (or Escape, or a click outside) without taking it: the next one waits three
    * days. Offers only (an update-day dialog's Not now keeps the usual one). Best effort: a lost answer only shortens that wait.
    */

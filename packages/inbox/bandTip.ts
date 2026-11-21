@@ -19,8 +19,9 @@
  *  - A band's menu really opening (never a press that only took the pressed look) before the tip ever showed retires
  *    it for good: `used` stamps it whatever the tenure or a dialog's gap (the person has found the menu).
  */
-import { useEffect, useRef, useState } from 'react';
-import type { SettingsModel } from './api';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { post, type SettingsModel } from './api';
+import { inboxUrl } from './inboxUrl';
 import { claimRevealOnce } from './reveal';
 import { newUuid } from './uuid';
 
@@ -52,7 +53,7 @@ export interface BandTipHost {
   busy: () => boolean;
   /** Spends the claim: true when the tip may show (`claimRevealOnce('band_tip')`). */
   claim: () => Promise<boolean>;
-  /** A band's menu opened: the tip is stamped and never shows (`inboxApi.retireBandTip`), due or not. */
+  /** A band's menu opened: the tip is stamped and never shows (`retireBandTip`), due or not. */
   used: () => unknown;
 }
 
@@ -63,6 +64,47 @@ export function bandTipClaimer(): () => Promise<boolean> {
     key ??= newUuid();
     return (await claimRevealOnce('band_tip', key)).show;
   };
+}
+
+/**
+ * A band's menu opened: the Group tip is stamped and never shows, whatever the tenure or a dialog's gap. Best effort: a
+ * lost answer only means the tip may still show once.
+ */
+export function retireBandTip(): Promise<void> {
+  return post<{ show: boolean }>(inboxUrl('/reveal'), { id: 'band_tip', used: true }).then(
+    () => undefined,
+    () => undefined,
+  );
+}
+
+/** App's host for the list: one claimer per page; `busy` is read as App last drew it (the list asks from its timers). */
+export function useBandTipHost(due: boolean, busy: () => boolean): BandTipHost {
+  const claim = useMemo(() => bandTipClaimer(), []);
+  const latestBusy = useRef(busy);
+  latestBusy.current = busy;
+  return { due, busy: () => latestBusy.current(), claim, used: retireBandTip };
+}
+
+/**
+ * Whether a group's band is in view now: inside the window and inside the list's scrolling box (a phone's Group tip
+ * waits for one).
+ */
+export function bandOnScreen(body: HTMLElement | null, sectionId: string): boolean {
+  const band = body?.querySelector<HTMLElement>(`.ib-group[data-section-id="${CSS.escape(sectionId)}"] > button.ib-band`);
+  if (!band) return false;
+  const rect = band.getBoundingClientRect();
+  if (rect.height === 0) return false;
+  let top = 0;
+  let bottom = window.innerHeight;
+  for (let el = band.parentElement; el; el = el.parentElement) {
+    const overflow = getComputedStyle(el).overflowY;
+    if (overflow !== 'auto' && overflow !== 'scroll') continue;
+    const box = el.getBoundingClientRect();
+    top = Math.max(top, box.top);
+    bottom = Math.min(bottom, box.bottom);
+    break;
+  }
+  return rect.top >= top && rect.bottom <= bottom;
 }
 
 /**

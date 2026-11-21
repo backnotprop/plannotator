@@ -23,7 +23,7 @@ import { rowLabel, scheduledLook, scheduledOf, ScheduledTile, useScheduled } fro
 import { HeldNoticeLine, HeldNoticeSaid, HoldViewOnBar, noticeLines, type ListNotice } from './HeldNoticeLine';
 import { listBarShows } from '../listNewState';
 import { useShowHold } from '../holdView';
-import { ThreadRowMenu, bandMenuId, useRowDragA11y, type BandMenu } from './RowMenu';
+import { ThreadRowMenu, bandMenuId, useRowDragA11y } from './RowMenu';
 import type { RowMenuAction } from '../rowMenu';
 import { WIDE_ROW_WAIT_WORDS, WaitWords, rowHasBadge } from './RowBadge';
 import { rowStatus } from './RowStatus';
@@ -53,9 +53,9 @@ import { sameListRow, type ListRowProps } from './listRowProps';
 import { useListPicks } from './useListPicks';
 import { PickBox, PickMark } from './PickBar';
 import type { BulkWrites } from '../bulkWrites';
-import { GroupBand } from './GroupBand';
-import { useBandTip, type BandTipHost } from '../bandTip';
-import { bandArchiveAllRows, bandMarkAllRows, bandMenuActions, listMarkAllRows } from '../markAllRead';
+import { FoldedBlocker, GroupBand, newSince } from './GroupBand';
+import { bandOnScreen, useBandTip, type BandTipHost } from '../bandTip';
+import { bandMenuOf, listMarkAllRows } from '../markAllRead';
 import { AgentsList } from '../agentsView/AgentsList';
 import { LineRow } from '../agentsView/LineRow';
 import { rowAgent, slotSession, cardOf, SnoozedUntil, RowTime, BadgeWords, subjectOf, sentWordsOf, titleOf, RowTitle, countWords, liveCount, CountWords, EndedMark, LineCount, openCountsKey, OpenCounts, ClipText, RowWithAction } from './rowParts';
@@ -714,33 +714,6 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
   );
 }
 
-/**
- * A closed group with an agent stopped or held up inside (Stopped on you, Holding up work, the Snoozed band): the
- * triangle, so a blocker never hides behind the fold.
- */
-function FoldedBlocker({ rows, group }: { rows: readonly InboxListRow[]; group: InboxListGroupId }) {
-  const stopped = rows.some((row) => row.section === 'stopped');
-  if (!stopped && !rows.some((row) => row.section === 'holding')) return null;
-  const snoozed = group === 'snoozed';
-  const words = snoozed
-    ? stopped
-      ? 'A snoozed thread is stopped on you'
-      : 'A snoozed thread is holding up work'
-    : stopped
-      ? 'A closed thread is stopped on you'
-      : 'A closed thread is holding up work';
-  return (
-    <span className="ib-zband-tri" data-stopped={stopped ? '' : undefined} data-snooze-blocker={snoozed ? '' : undefined} data-folded-blocker="" role="img" aria-label={words}>
-      <Icon name="warn" size={14} />
-    </span>
-  );
-}
-
-/** Something new came into a closed group since it was closed: an unread row whose latest agent message came after. */
-function newSince(rows: readonly InboxListRow[], since: number): boolean {
-  return rows.some((row) => row.unread && Date.parse(row.last_agent_at ?? row.last_at) > since);
-}
-
 const NO_UNSEEN: readonly UnseenRow[] = [];
 
 export function InboxList(props: InboxListProps) {
@@ -976,30 +949,8 @@ export function InboxList(props: InboxListProps) {
   });
   // Shift+F10 opens a row's menu (the context-menu key too), named on each row for assistive technology.
   const rowKeys = onRowAction ? shortcutAria({ scope: inboxListShortcuts, action: 'rowMenu' }) : undefined;
-  /**
-   * A group band's menu (RowMenu.tsx `bands`, markAllRead.ts): Mark all as read and Archive all on that band's threads,
-   * each written as its thread is now (bulkWrites.ts). Not while picking: the band's box is the picks' then.
-   */
-  const bandSection = (id: string) => props.sections.find((section) => section.id === id);
-  const bands: BandMenu | undefined =
-    props.bulk && !pick.on
-      ? {
-          actionsOf: (id) => {
-            const section = bandSection(id);
-            return section ? bandMenuActions(section) : [];
-          },
-          labelOf: (id) => bandSection(id)?.label ?? '',
-          stateOf: (id) => bandSection(id)?.threads.map((row) => row.thread_id).join(' ') ?? '',
-          onAction: (id, action) => {
-            const section = bandSection(id);
-            if (!section) return;
-            if (action === 'read') void markAllRead?.(bandMarkAllRows(section));
-            else void props.bulk!.archiveAll(bandArchiveAllRows(section));
-          },
-          // A band's menu really opened (not a press that only took its look): the Group tip goes, for good.
-          onOpened: () => bandTip.menuOpened(),
-        }
-      : undefined;
+  // A group band's menu (markAllRead.ts `bandMenuOf`). Not while picking: the band's box is the picks' then.
+  const bands = props.bulk && !pick.on ? bandMenuOf(props.sections, props.bulk, () => bandTip.menuOpened()) : undefined;
   // The bands drawn that have a menu now, for the Group tip: none while picking, none while a thread covers the list.
   const menuBands =
     bands && props.covered !== true ? (asList || asAgents ? (listBand ? [listBand] : []) : visible).filter((section) => bands.actionsOf(section.id).length > 0).map((section) => section.id) : [];
@@ -1332,26 +1283,4 @@ export const ListRow = memo(
 function guideLabelHidden(trigger: Element): boolean {
   const label = trigger.querySelector<HTMLElement>('.ib-att-l');
   return !label || label.offsetWidth === 0 || getComputedStyle(label).display === 'none';
-}
-
-/**
- * Whether a group's band is in view now: inside the window and inside the list's scrolling box (a phone's Group tip
- * waits for one).
- */
-function bandOnScreen(body: HTMLElement | null, sectionId: string): boolean {
-  const band = body?.querySelector<HTMLElement>(`.ib-group[data-section-id="${CSS.escape(sectionId)}"] > button.ib-band`);
-  if (!band) return false;
-  const rect = band.getBoundingClientRect();
-  if (rect.height === 0) return false;
-  let top = 0;
-  let bottom = window.innerHeight;
-  for (let el = band.parentElement; el; el = el.parentElement) {
-    const overflow = getComputedStyle(el).overflowY;
-    if (overflow !== 'auto' && overflow !== 'scroll') continue;
-    const box = el.getBoundingClientRect();
-    top = Math.max(top, box.top);
-    bottom = Math.min(bottom, box.bottom);
-    break;
-  }
-  return rect.top >= top && rect.bottom <= bottom;
 }
