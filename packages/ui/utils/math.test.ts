@@ -26,6 +26,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import katex from 'katex';
 import {
   getMathRenderer,
@@ -274,5 +276,47 @@ describe('renderMathToHtml', () => {
     }
     expect(seen[0]).toMatchObject({ displayMode: true });
     expect(seen[1]).toMatchObject({ displayMode: false });
+  });
+});
+
+describe('KaTeX text-mode font contract', () => {
+  // KaTeX's text-mode commands emit these classes; theme.css maps them to the
+  // document fonts (--font-sans / --font-mono) so a coloured value in a table
+  // cell keeps the table's font instead of switching to KaTeX's own families.
+  // The class mapping is the contract this guards: a KaTeX upgrade that renames
+  // the classes (0.18 renamed 21 of them) or a theme.css change that drops the
+  // rules would leave the override silently no longer applying.
+  const TEXT_MODE_CLASSES: Array<{ tex: string; className: string }> = [
+    { tex: String.raw`\text{x}`, className: 'text' },
+    { tex: String.raw`\textrm{x}`, className: 'textrm' },
+    { tex: String.raw`\textsf{x}`, className: 'textsf' },
+    // \textnormal maps to KaTeX's .textrm in 0.19; pin that so a rename to a
+    // new .textnormal class (which theme.css would not yet cover) is caught.
+    { tex: String.raw`\textnormal{x}`, className: 'textrm' },
+    { tex: String.raw`\texttt{x}`, className: 'texttt' },
+  ];
+
+  const hasClass = (html: string, cls: string): boolean =>
+    new RegExp(`class="[^"]*\\b${cls}\\b[^"]*"`).test(html);
+
+  test('renderMathToHtml still emits the text-mode classes theme.css targets', () => {
+    for (const { tex, className } of TEXT_MODE_CLASSES) {
+      const html = renderMathToHtml(tex, false, katex);
+      expect(html).not.toBeNull();
+      expect(hasClass(html as string, className)).toBe(true);
+    }
+  });
+
+  test('theme.css maps the text-mode classes to the document fonts', () => {
+    const css = readFileSync(join(import.meta.dir, '..', 'theme.css'), 'utf8').replace(
+      /\/\*[\s\S]*?\*\//g,
+      '',
+    );
+    for (const cls of ['text', 'textrm', 'textsf']) {
+      expect(css).toMatch(
+        new RegExp(`\\.katex\\s+\\.${cls}[^{]*\\{[^}]*font-family:\\s*var\\(--font-sans\\)`),
+      );
+    }
+    expect(css).toMatch(/\.katex\s+\.texttt[^{]*\{[^}]*font-family:\s*var\(--font-mono\)/);
   });
 });
