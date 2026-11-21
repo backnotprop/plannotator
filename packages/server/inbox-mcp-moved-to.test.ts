@@ -49,6 +49,21 @@ test("the orchestrator archives a sub-agent's thread pointing at its brief; a re
   expect(w.store.thread(String(old.thread_id))!.messages.length).toBe(1);
 });
 
+test("read_thread of the old thread by the orchestrator or a third session (window and full) leaves the sub-agent's note waiting for its wake", async () => {
+  const w = world();
+  const old = (await w.call("send_message", "ses_sub", { subject: "Retry policy", body: ASK("Retry failed charges?") })).structuredContent!;
+  const brief = (await w.call("send_message", "ses_orch", { subject: "Morning brief", body: ASK("Retry failed charges?") })).structuredContent!;
+  await w.call("resolve_message", "ses_orch", { message_id: old.thread_id, moved_to: brief.thread_id });
+  for (const session of ["ses_orch", "ses_third"]) {
+    await w.call("read_thread", session, { thread_id: old.thread_id });
+    await w.call("read_thread", session, { thread_id: old.thread_id, format: "full" });
+  }
+  const waiting = w.store.pendingReplies("ses_sub");
+  expect(waiting.map((m) => m.moved_note?.thread_id)).toEqual([String(brief.thread_id)]);
+  expect(w.store.pendingReplies("ses_orch")).toEqual([]);
+  expect(w.store.pendingReplies("ses_third")).toEqual([]);
+});
+
 test("a thread the caller never wrote in is refused, naming the field, and nothing is archived", async () => {
   const w = world();
   const old = (await w.call("send_message", "ses_sub", { subject: "Retry policy", body: ASK("Retry failed charges?") })).structuredContent!;

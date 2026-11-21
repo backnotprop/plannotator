@@ -3979,7 +3979,9 @@ export class InboxStore {
    * same on every read, so a reader new to the thread is another agent.
    */
   private owedToAnother(message: InboxMessage, reader: string | null, isNewcomer = () => this.newcomerTo(message.thread_id, reader)): boolean {
-    if (message.to || hasTags(message) || message.delivery || isUnlistedNote(message) || message.taken_back_at) return false;
+    // A 👍's note is any agent's to see. A moved note is not: it is owed to its own session like any reply, and only
+    // its wake settles it (`pendingFor`).
+    if (message.to || hasTags(message) || message.delivery || isAckNote(message) || message.taken_back_at) return false;
     if (message.tidy && !message.tidy.wake) return false;
     const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
     if (asked?.author.kind !== "agent") return false;
@@ -6870,7 +6872,9 @@ export class InboxStore {
     // A New message, or a reply the person sent to another session, is
     // settled only by its delivery to the session it names, never by another
     // agent's read; so is a reply that tags agents. One sent again (`sendAgain`) waits whatever was read.
-    if (!message.to && !hasTags(message) && message.sent_again_to !== session && (this.messages.get(message.thread_id)?.agent_checked_seq ?? 0) >= seq) return false;
+    // So is the note telling a session its questions moved: no read shows it (it is never listed), so only its wake
+    // to that session settles it.
+    if (!message.to && !hasTags(message) && !isMovedNote(message) && message.sent_again_to !== session && (this.messages.get(message.thread_id)?.agent_checked_seq ?? 0) >= seq) return false;
     return true;
   }
 
@@ -6987,7 +6991,8 @@ export class InboxStore {
 
   recordOwnRead(threadId: string, session: string, shown?: ReadonlySet<string>): void {
     for (const message of this.threadMessages(threadId)) {
-      if (message.author.kind !== "person" || message.tidy || (shown && !shown.has(message.id))) continue;
+      // A moved note is never shown by a read (it is not listed), so a read never settles it: its wake does.
+      if (message.author.kind !== "person" || message.tidy || isMovedNote(message) || (shown && !shown.has(message.id))) continue;
       const owner = this.isOwner(message, session);
       const tag = owner ? null : tagOf(message, session);
       if (!owner && !tag) continue;

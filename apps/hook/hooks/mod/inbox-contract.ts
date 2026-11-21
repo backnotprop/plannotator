@@ -1353,6 +1353,16 @@ export interface InboxReplyCommand {
    */
   ack_reaction?: { emoji: string; label?: string }
   /**
+   * On the Inbox's note telling a session that another agent archived the
+   * thread it asked in and moved its questions to another thread
+   * (`InboxMessage.moved_note`): the wake is INBOX_MOVED_WAKE_INSTRUCTION and
+   * the note, with no reply instruction (an answer in the archived thread
+   * would bring it back to the person). The command stays a `reply`, so an
+   * older connection still delivers it, as a reply. Absent on every other
+   * command.
+   */
+  moved?: true
+  /**
    * On a reply handed to a session the person tagged with `@` that does not
    * own the thread (approval "inbox-tag-agents"): the owning session's agent,
    * named from its host (`Claude Code`). The wake takes
@@ -1757,6 +1767,12 @@ export function parseInboxBridgeCommands(text: string): InboxReplyCommand[] {
   }
 }
 
+/**
+ * The second line of the wake carrying the Inbox's note that a session's questions moved to another thread
+ * (`moved`): a notice, not the person's words, so nothing to answer (DRAFT words, waiting for the owner).
+ */
+export const INBOX_MOVED_WAKE_INSTRUCTION = 'This is a notice from Plannotator Inbox, not a reply from the person. Nothing here needs an answer.'
+
 /** The fixed second line of every wake: who is speaking, and how to answer. */
 export const INBOX_WAKE_INSTRUCTION =
   "This is a user reply from Plannotator Inbox. Their reply follows as they wrote it: it is their answer to you. When they need to hear back, answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above."
@@ -2047,7 +2063,9 @@ export function inboxWakeCommand<T extends { body: string; thread_id?: unknown; 
  * their data (`inboxWakeDetailsLine`, `inboxWakeReplyingLine`), then the words
  * verbatim, then INBOX_WAKE_CLOSING_LINE. Never the thread re-sent. A 👍 Looks
  * good (`ack_of`) is the first line and `inboxAckLine`, closed by
- * `[thread <id>]` alone.
+ * `[thread <id>]` alone. The note that a session's questions moved (`moved`)
+ * is the first line, INBOX_MOVED_WAKE_INSTRUCTION and the note, closed by
+ * `[thread <id>]` alone: no reply instruction.
  */
 export function inboxWakeText(
   command: Pick<InboxReplyCommand, 'id' | 'subject' | 'body'> & {
@@ -2060,6 +2078,7 @@ export function inboxWakeText(
     launched?: unknown
     ack_of?: string
     ack_reaction?: unknown
+    moved?: unknown
     tagged?: { owner?: unknown } | null
     also_tagged?: unknown
     added?: unknown
@@ -2085,6 +2104,12 @@ export function inboxWakeText(
     const ackSubject = (command.subject ?? '').replace(/\s+/g, ' ').trim() || 'a message'
     const thread = wakeThreadId(command.thread_id)
     return `Plannotator Inbox: ${ackSubject} (${command.id})\n${inboxAckLine(command.ack_of, command.ack_reaction)}${thread ? `\n\n[thread ${thread}]` : ''}`
+  }
+  // The note that this session's questions moved: a notice, never a reply to answer in the archived thread.
+  if (command.moved === true) {
+    const movedSubject = (command.subject ?? '').replace(/\s+/g, ' ').trim() || 'a message'
+    const thread = wakeThreadId(command.thread_id)
+    return `Plannotator Inbox: ${movedSubject} (${command.id})\n${INBOX_MOVED_WAKE_INSTRUCTION}\n\n${command.body}${thread ? `\n\n[thread ${thread}]` : ''}`
   }
   // The session's steps in this thread (approval "inbox-thread-steps"), its own paragraph before the closing line;
   // with none there yet and the person's answers in this reply, the line that says when to start one.

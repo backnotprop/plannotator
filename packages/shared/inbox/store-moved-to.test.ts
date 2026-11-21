@@ -344,6 +344,46 @@ describe("the Inbox tells the agents whose questions moved, quietly", () => {
     expect(store.pendingReplies(SUB.session!)).toEqual([]);
   });
 
+  /** What read_thread does for `reader`: the window's read (`shown`, the messages it listed) or format "full" (none). */
+  const readAs = (store: InboxStore, threadId: string, reader: string, format: "window" | "full") => {
+    const shown = format === "window" ? new Set(store.thread(threadId)!.messages.map((m) => m.id)) : undefined;
+    store.markAgentChecked(threadId, Number.POSITIVE_INFINITY, undefined, reader);
+    store.settleReadPast(threadId, reader, shown);
+    store.markAcksSeen(threadId, shown);
+    store.recordOwnRead(threadId, reader, shown);
+  };
+
+  for (const format of ["window", "full"] as const) {
+    test(`another session's read of the old thread (${format}) does not swallow the note: only its wake to the sub-agent settles it`, () => {
+      const { store } = open();
+      const { project, old, brief } = world(store);
+      store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
+      // The orchestrator reads the thread it archived, and so does a third session that never wrote there.
+      readAs(store, old.id, ORCH.session!, format);
+      readAs(store, old.id, "ses_third", format);
+      expect(store.pendingReplies(SUB.session!)).toHaveLength(1);
+      // Also when the orchestrator wrote in the old thread before (not new to it).
+      const { old: old2, brief: brief2 } = world(store);
+      store.sendMessage({ project_id: project.id, author: ORCH, body: "Taking these to the brief.", reply_to: old2.id });
+      store.resolveThread(old2.id, true, "agent", { to: brief2.id, session: ORCH.session });
+      readAs(store, old2.id, ORCH.session!, format);
+      const [first, second, ...more] = store.pendingReplies(SUB.session!);
+      expect(more).toEqual([]);
+      expect([first!.thread_id, second!.thread_id]).toEqual([old.id, old2.id]);
+      // The sub-agent's own read does not settle it either: no read shows it.
+      readAs(store, old.id, SUB.session!, format);
+      expect(store.pendingReplies(SUB.session!)).toHaveLength(2);
+      // Delivered to the sub-agent: settled, and never pending again, whoever reads after.
+      store.recordDelivery(first!.id, { host: "claude-code", session: SUB.session! });
+      store.recordDelivery(second!.id, { host: "claude-code", session: SUB.session! });
+      readAs(store, old.id, ORCH.session!, format);
+      expect(store.pendingReplies(SUB.session!)).toEqual([]);
+      // The caller and the third session never get it.
+      expect(store.pendingReplies(ORCH.session!)).toEqual([]);
+      expect(store.pendingReplies("ses_third")).toEqual([]);
+    });
+  }
+
   test("a plain archive by another session (no moved_to) tells nobody, as before", () => {
     const { store } = open();
     const { old } = world(store);
