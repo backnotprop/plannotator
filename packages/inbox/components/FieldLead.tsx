@@ -37,6 +37,11 @@ const px = (value: string) => {
   return Number.isFinite(n) ? n : 0;
 };
 
+/** Sets a style property only when it changes, so placing again after every render writes nothing new. */
+function put(el: HTMLElement, name: string, value: string): void {
+  if (el.style.getPropertyValue(name) !== value) el.style.setProperty(name, value);
+}
+
 /** The field's box (the lead's parent) and its textarea, from the DOM: on the first commit neither parent's ref is set yet. */
 function partsOf(lead: HTMLElement | null): { wrap: HTMLElement; field: HTMLTextAreaElement } | null {
   const wrap = lead?.parentElement;
@@ -61,38 +66,44 @@ export function FieldLead({ value, children }: { value: string; children: ReactN
     // On the first line's box, centred in it; with the field's own scroll (a field capped in height), up with the words.
     const above = px(style.borderTopWidth) + px(style.paddingTop) + (line - height) / 2;
     const top = fieldBox.top - wrapBox.top + above - field.scrollTop;
-    lead.style.top = `${Math.round(top)}px`;
+    put(lead, 'top', `${Math.round(top)}px`);
     // How far a tap area may reach past the lead without leaving the first line: up into the field's top padding (a
     // quote line, when shown, sits above it), never down into the second line (phoneComposer.css reads both).
-    lead.style.setProperty('--ib-lead-up', `${Math.max(0, above)}px`);
-    lead.style.setProperty('--ib-lead-down', `${Math.max(0, (height - line) / 2) + 0.5}px`);
+    put(lead, '--ib-lead-up', `${Math.max(0, above)}px`);
+    put(lead, '--ib-lead-down', `${Math.max(0, (height - line) / 2) + 0.5}px`);
     if (rtl) {
       const scrollbar = Math.max(0, field.offsetWidth - field.clientWidth - px(style.borderLeftWidth) - px(style.borderRightWidth));
-      lead.style.left = 'auto';
-      lead.style.right = `${Math.round(wrapBox.right - fieldBox.right + px(style.borderRightWidth) + scrollbar + px(style.paddingRight))}px`;
+      put(lead, 'left', 'auto');
+      put(lead, 'right', `${Math.round(wrapBox.right - fieldBox.right + px(style.borderRightWidth) + scrollbar + px(style.paddingRight))}px`);
     } else {
-      lead.style.right = 'auto';
-      lead.style.left = `${Math.round(fieldBox.left - wrapBox.left + px(style.borderLeftWidth) + px(style.paddingLeft))}px`;
+      put(lead, 'right', 'auto');
+      put(lead, 'left', `${Math.round(fieldBox.left - wrapBox.left + px(style.borderLeftWidth) + px(style.paddingLeft))}px`);
     }
-    wrap.style.setProperty('--ib-lead', `${Math.ceil(lead.getBoundingClientRect().width) + LEAD_GAP}px`);
+    put(wrap, '--ib-lead', `${Math.ceil(lead.getBoundingClientRect().width) + LEAD_GAP}px`);
   }, [rtl]);
 
+  // After every render: a quote line over the words changes the field's top padding and nothing else (its height can
+  // stay at its least), so no size watch would see it. `put` writes only what changed.
   useLayoutEffect(() => {
     place();
-  }, [place]);
+  });
 
-  // The lead's width (another recipient, a name that gives way), the field's size and padding (a quote over the words,
-  // the text size, a phone turned) and the field's own scroll move it.
+  // Between renders: the lead's width (another recipient, a name that gives way), the field's size (its border box as
+  // it grows; its content box when the padding changes under a fixed height: the text size, a phone turned) and the
+  // field's own scroll move it.
   useEffect(() => {
     const lead = leadRef.current;
     const field = partsOf(lead)?.field;
     if (!lead || !field) return;
     const watch = typeof ResizeObserver === 'function' ? new ResizeObserver(() => place()) : null;
+    const inner = typeof ResizeObserver === 'function' ? new ResizeObserver(() => place()) : null;
     watch?.observe(lead);
     watch?.observe(field, { box: 'border-box' });
+    inner?.observe(field, { box: 'content-box' });
     field.addEventListener('scroll', place);
     return () => {
       watch?.disconnect();
+      inner?.disconnect();
       field.removeEventListener('scroll', place);
     };
   }, [place]);

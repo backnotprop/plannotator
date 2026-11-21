@@ -177,10 +177,14 @@ export function saysWords(name: string, words: string): boolean {
   return false;
 }
 
-/** The field the chip leads is 480 px wide or less (inbox.css then shows the short name), as last measured. */
+/**
+ * The chip shows the short name (inbox.css, `data-narrow`): in the phone layout (`phone`, the window's own choice of
+ * the phone's parts, at any width: a phone turned, a 700 px window), or in a field 480 px wide or less as last
+ * measured. The one source for what it shows and what its name says.
+ */
 const NARROW_FIELD = 480;
-function useNarrowField(chipRef: RefObject<HTMLButtonElement | null>, atFirst: boolean): boolean {
-  const [narrow, setNarrow] = useState(atFirst);
+function useNarrowField(chipRef: RefObject<HTMLButtonElement | null>, phone: boolean): boolean {
+  const [narrow, setNarrow] = useState(false);
   useLayoutEffect(() => {
     const field = chipRef.current?.closest<HTMLElement>('.ib-cfield');
     if (!field) return;
@@ -194,7 +198,7 @@ function useNarrowField(chipRef: RefObject<HTMLButtonElement | null>, atFirst: b
     watch.observe(field);
     return () => watch.disconnect();
   }, [chipRef]);
-  return narrow;
+  return phone || narrow;
 }
 
 /**
@@ -213,7 +217,7 @@ export function RecipientChip({
   noun = 'reply',
   buttonRef,
   attrs,
-  narrowAtFirst = false,
+  phone = false,
 }: {
   rows: readonly RecipientRow[];
   chosen: readonly RecipientRow[];
@@ -225,12 +229,12 @@ export function RecipientChip({
   buttonRef?: RefObject<HTMLButtonElement | null>;
   /** `aria-*` and `data-*` attributes of the host (the list it controls, a sheet's popup kind). */
   attrs?: Record<string, string | undefined>;
-  /** Short names until the field is measured (a phone); a field that has no width yet keeps this. */
-  narrowAtFirst?: boolean;
+  /** The phone layout (PhoneReplyRecipient): the short name at any width. */
+  phone?: boolean;
 }) {
   const { one, names, ended, tile, words, partial } = recipientFace(rows, chosen, labels, folderOf);
   const ownRef = useRef<HTMLButtonElement | null>(null);
-  const narrow = useNarrowField(ownRef, narrowAtFirst);
+  const narrow = useNarrowField(ownRef, phone);
   // The name starts with the words the chip shows (a narrow field's short name, a fallback name), then who that is,
   // when those words are not already in it: "To Pi · Copy pass on the order summary".
   const shown = one ? (narrow ? one.short : words) : null;

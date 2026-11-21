@@ -529,6 +529,32 @@ for (const engine of ENGINES) {
   });
 }
 
+test.describe('Chromium at 700 x 900 (the phone layout in a wide window)', () => {
+  test('the reply chip shows the short name there, and its accessible name says the words it shows', async ({ page }) => {
+    await page.setViewportSize({ width: 700, height: 900 });
+    await page.goto(`${world.url}#thread=${world.twoThread}`);
+    await pane(page).locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
+    const chip = pane(page).locator('.ib-rbox [data-field-lead] [data-recipient]');
+    await expect(chip).toBeVisible();
+    const agree = async () => {
+      const seen = await chip.evaluate((el) => {
+        const shown = [...el.querySelectorAll<HTMLElement>('.ib-rto-full, .ib-rto-short')].filter((n) => getComputedStyle(n).display !== 'none');
+        return { field: el.closest('.ib-cfield')!.clientWidth, words: shown.map((n) => n.textContent ?? ''), label: el.getAttribute('aria-label') ?? '' };
+      });
+      expect(seen.field, 'the field is not wider than 480 px here').toBeGreaterThan(480);
+      expect(seen.words, 'the chip does not show one name').toHaveLength(1);
+      expect(seen.label.startsWith(`To ${seen.words[0]}`), `"${seen.label}" does not start with the words the chip shows, "${seen.words[0]}"`).toBe(true);
+    };
+    await agree();
+    // The Claude Code session has a long title: the chip shows "Claude Code", and its name starts with it.
+    await chip.click();
+    await replySheet(page).locator(`[data-recipient-row="${TWO_A}"] .ib-sheet-t`).click();
+    await expect(chip).toHaveAttribute('data-recipient-chosen', TWO_A);
+    await agree();
+    await expect(chip, 'the chip\'s name leaves out the session\'s title').toHaveAttribute('aria-label', new RegExp(LABEL_TWO.slice(0, 30)));
+  });
+});
+
 test.describe('Chromium at 1440 x 900 (the desktop)', () => {
   test('none of the phone applies: the recipient chip with its full name, Send with its word, the To line', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -570,6 +596,27 @@ test.describe('Chromium at 1440 x 900 (the desktop)', () => {
     await box.locator('[data-field-lead] [data-recipient]').click();
     await expect(page.locator('.ib-rpick[data-recipient-list]'), 'the chip does not open the list').toBeVisible();
     await page.keyboard.press('Escape');
+    // A quote line over the words changes only the field's top padding: the chip follows the first line both ways.
+    const fit = () =>
+      box.evaluate((el) => {
+        const chip = el.querySelector('[data-field-lead] [data-recipient]')!.getBoundingClientRect();
+        const text = el.querySelector('textarea')!;
+        const t = text.getBoundingClientRect();
+        const cs = getComputedStyle(text);
+        const lineTop = t.top + parseFloat(cs.borderTopWidth) + parseFloat(cs.paddingTop) - text.scrollTop;
+        const line = parseFloat(cs.lineHeight);
+        return { quote: el.querySelector('[data-reply-quote]') !== null, off: (chip.top + chip.bottom) / 2 - (lineTop + line / 2), below: chip.bottom - (lineTop + line) };
+      });
+    await pane(page).getByText('First, from Claude Code.').first().click();
+    await pane(page).locator('article button[aria-label="Reply"]').first().click();
+    await expect(box.locator('[data-reply-quote]'), 'the Reply arrow showed no quote line').toBeVisible();
+    for (const step of ['with the quote', 'with the quote removed']) {
+      const f = await fit();
+      expect(Math.abs(f.off), `the chip is off the first line ${step}`).toBeLessThanOrEqual(1);
+      expect(f.below, `the chip reaches into the second line ${step}`).toBeLessThanOrEqual(1);
+      if (f.quote) await box.locator('[data-reply-quote-remove]').click();
+      await expect(box.locator('[data-reply-quote]')).toHaveCount(0);
+    }
     await replyField(page).fill('');
     await expect(pane(page).locator('.ib-rbox [data-agent-mark], .ib-rbox [data-agent-pill], .ib-sheet'), 'a phone part is drawn on the desktop').toHaveCount(0);
     expect((await box.locator('[data-reply-send] .ib-rsend-w').boundingBox())!.width, 'Send lost its word on the desktop').toBeGreaterThanOrEqual(20);

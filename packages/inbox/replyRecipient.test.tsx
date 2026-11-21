@@ -241,6 +241,7 @@ test.skipIf(!hasDom)('several agents, a computer: the chip is at the start of th
   const chip = pill(el)!;
   const field = el.querySelector('.ib-cfield') as HTMLElement;
   expect(chip.hasAttribute('data-recipient-chip')).toBe(true);
+  expect(chip.hasAttribute('data-narrow')).toBe(false);
   expect(chip.closest('[data-field-lead]')?.parentElement).toBe(field);
   expect(chip.closest('[data-reply-row]')).toBeNull();
   // The pill in the row is gone: the chip replaces it.
@@ -787,6 +788,8 @@ test.skipIf(!hasDom)('a phone, several agents: who gets the reply is the chip at
   expect(control.compareDocumentPosition(text) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   // It names the last writer, with the name (the phone shows it too now).
   expect(control.hasAttribute('data-recipient-chip')).toBe(true);
+  // The phone layout shows the short name at any width, and the name follows what shows (one source, `data-narrow`).
+  expect(control.hasAttribute('data-narrow')).toBe(true);
   expect(control.getAttribute('data-recipient-chosen')).toBe('ses_pi');
   expect(control.querySelector('.ib-rto-full')?.textContent).toBe('Pi');
   expect(control.querySelector('.ib-rto-short')?.textContent).toBe('Pi');

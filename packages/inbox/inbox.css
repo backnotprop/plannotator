@@ -9670,9 +9670,10 @@ dialog.ib-pqi .ib-listcol.ib-pqi-list { position: relative; inset: auto; visibil
      foot's 10 px top padding plus the line's 4 px above it, and 14 px between the line and the box under it. */
   .ib-draft-above { display: flex; justify-content: flex-end; padding-top: 4px; margin-bottom: 14px; }
   .ib-draft-above:empty { display: none; }
-  /* The pill on the line over the box's row: the folder alone. */
-  .ib-rto-full { display: none; }
-  .ib-rto-short { display: block; }
+  /* The pill on the line over the box's row (a PR's new thread): the folder alone. The reply's chip decides by its
+     own `data-narrow`, so what it shows and what its name says agree. */
+  .ib-rto .ib-rto-full { display: none; }
+  .ib-rto .ib-rto-short { display: block; }
   .pn-inbox .ib-rpick-name { height: 44px; gap: 8px; }
   .pn-inbox .ib-rpick-tick { width: 44px; height: 44px; }
   .ib-rpick-tick > span { width: 20px; height: 20px; }
