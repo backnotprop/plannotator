@@ -1,3 +1,4 @@
+import type { InboxSearchRow } from '@plannotator/core/inbox-search';
 import type { SearchModel } from '../api';
 import { machineOf, selfMachineId } from '../inboxUrl';
 import type { SearchFilters, SearchOption } from './model';
@@ -28,15 +29,15 @@ export function optionKey(option: SearchOption): string {
 export function keepingRow(model: SearchModel, option: SearchOption | undefined, before: SearchModel): SearchModel {
   if (option?.kind !== 'row') return model;
   const { group, row } = option;
-  const same = (one: { id: string; type: string }) => one.id === row.id && one.type === row.type;
-  const kept = <T extends { id: string; type: string }>(rows: readonly T[], was: readonly T[] | null | undefined): T[] => {
+  const same = (one: InboxSearchRow) => one.id === row.id && one.type === row.type;
+  const kept = <T extends InboxSearchRow>(rows: readonly T[], was: readonly T[] | null | undefined, mine: T): T[] => {
     if (rows.some(same)) return [...rows];
     const at = Math.max(0, (was ?? []).findIndex(same));
-    return [...rows.slice(0, at), row as T, ...rows.slice(at)];
+    return [...rows.slice(0, at), mine, ...rows.slice(at)];
   };
-  if (group === 'recent') return model.recent && row.type === 'thread' ? { ...model, recent: kept(model.recent, before.recent) } : model;
+  if (group === 'recent') return model.recent && row.type === 'thread' ? { ...model, recent: kept(model.recent, before.recent, row) } : model;
   if (!model.groups) return model;
-  return { ...model, groups: { ...model.groups, [group]: kept(model.groups[group] ?? [], before.groups?.[group]) } };
+  return { ...model, groups: { ...model.groups, [group]: kept(model.groups[group] ?? [], before.groups?.[group], row) } };
 }
 
 export function unansweredWords(names: readonly string[]): string {
