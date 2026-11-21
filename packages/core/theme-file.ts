@@ -118,7 +118,7 @@ export const THEME_FONT_STYLES = ['italic', 'bold', 'underline', 'strikethrough'
 export const CUSTOM_THEME_LIMIT = 32;
 
 /**
- * The 56 built-in palettes (`packages/ui/utils/themeRegistry.ts`'s ids; its test
+ * The 57 built-in palettes (`packages/ui/utils/themeRegistry.ts`'s ids; its test
  * keeps the two lists equal). A custom theme can never take one of these ids.
  */
 export const BUILT_IN_THEME_IDS: readonly string[] = [
