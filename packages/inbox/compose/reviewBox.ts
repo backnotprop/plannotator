@@ -121,9 +121,10 @@ export function reviewLinkStack(pull: InboxPull): InboxPullStack {
 
 /** The line under the Link field: how it was read, or why it wasn't. */
 export function reviewLinkWords(link: InboxReviewLinkAnswer): string {
-  if (link.ok) return `Read with ${link.cli}, signed in to ${link.pull.host}`;
+  if (link.ok) return link.cli === 'forgejo' ? `Read with your token for ${link.pull.host}` : `Read with ${link.cli}, signed in to ${link.pull.host}`;
   if (link.reason === 'unreadable') return `${link.cli} couldn't read it. Check the link, and that ${link.cli} is signed in to ${link.host}.`;
   if (link.reason === 'bitbucket') return "Bitbucket links aren't supported yet.";
+  if (link.reason === 'forgejo') return "Couldn't read that Forgejo or Gitea link. Add its host and a token in Settings → Accounts → Forgejo and Gitea, then try again.";
   if (link.reason === 'failed') return "Couldn't check that link. Try again.";
   return link.reason === 'host' ? "Plannotator can't read that host yet." : "That isn't a pull request link.";
 }

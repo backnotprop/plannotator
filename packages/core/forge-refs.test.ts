@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { classifyForgeHost, findCrossRepoRef, forgeRefLinks, gitlabHostsSnapshot, learnGitlabHosts, matchCrossRepoRef, normalizeForgeHost } from "./forge-refs";
+import { afterEach } from "bun:test";
+import { classifyForgeHost, CODEBERG_HOST, findCrossRepoRef, forgeRefLinks, forgejoHostsSnapshot, gitlabHostsSnapshot, learnForgejoHosts, learnGitlabHosts, matchCrossRepoRef, normalizeForgeHost, subscribeForgejoHosts } from "./forge-refs";
 
 describe("forgeRefLinks", () => {
   const cases: Array<{
@@ -166,5 +167,61 @@ describe("a self-managed GitLab at any address", () => {
     } finally {
       learnGitlabHosts(before);
     }
+  });
+});
+
+describe("Forgejo hosts", () => {
+  // The known hosts are one global of this process: put it back for every other test.
+  afterEach(() => learnForgejoHosts([]));
+
+  test("codeberg.org is a Forgejo with nothing configured; any other host is one only once named", () => {
+    expect(classifyForgeHost(CODEBERG_HOST)).toBe("forgejo");
+    expect(classifyForgeHost("git.acme.com")).toBeNull();
+    learnForgejoHosts(["Git.Acme.com", "git.acme.io:8443"]);
+    expect(classifyForgeHost("git.acme.com")).toBe("forgejo");
+    expect(classifyForgeHost("git.acme.io:8443")).toBe("forgejo");
+    // The port is part of the name: another port is another server.
+    expect(classifyForgeHost("git.acme.io")).toBeNull();
+    expect(classifyForgeHost("source.acme.io")).toBeNull();
+  });
+
+  test("learning replaces the list, and codeberg.org never leaves it", () => {
+    learnForgejoHosts(["git.acme.com"]);
+    learnForgejoHosts(["git.other.com"]);
+    expect(classifyForgeHost("git.acme.com")).toBeNull();
+    expect([...forgejoHostsSnapshot()].sort()).toEqual([CODEBERG_HOST, "git.other.com"]);
+    learnForgejoHosts([]);
+    expect([...forgejoHostsSnapshot()]).toEqual([CODEBERG_HOST]);
+  });
+
+  test("a host the person named as a Forgejo wins over a guess from its name", () => {
+    expect(classifyForgeHost("gitlab-mirror.example.com")).toBe("gitlab");
+    learnForgejoHosts(["gitlab-mirror.example.com"]);
+    expect(classifyForgeHost("gitlab-mirror.example.com")).toBe("forgejo");
+    // The public forges cannot be taken over by naming a look-alike.
+    expect(classifyForgeHost("github.com")).toBe("github");
+  });
+
+  test("listeners hear a change, and not a list that is the same", () => {
+    let heard = 0;
+    const stop = subscribeForgejoHosts(() => heard++);
+    learnForgejoHosts(["git.acme.com"]);
+    learnForgejoHosts(["GIT.acme.com"]);
+    expect(heard).toBe(1);
+    learnForgejoHosts([]);
+    expect(heard).toBe(2);
+    stop();
+    learnForgejoHosts(["git.acme.com"]);
+    expect(heard).toBe(2);
+  });
+
+  test("#12 links to a Forgejo's issues on codeberg.org and on a named host, and stays plain on an unnamed one", () => {
+    expect(forgeRefLinks({ display: "acme/api", host: "codeberg.org" })?.issue(12)).toBe("https://codeberg.org/acme/api/issues/12");
+    expect(forgeRefLinks({ display: "acme/api", host: "git.acme.com" })).toBeNull();
+    learnForgejoHosts(["git.acme.com"]);
+    const links = forgeRefLinks({ display: "acme/api", host: "git.acme.com" });
+    expect(links?.issue(12)).toBe("https://git.acme.com/acme/api/issues/12");
+    expect(links?.user("ada")).toBe("https://git.acme.com/ada");
+    expect(matchCrossRepoRef("acme/web#4", "", { host: "git.acme.com" })?.href).toBe("https://git.acme.com/acme/web/issues/4");
   });
 });

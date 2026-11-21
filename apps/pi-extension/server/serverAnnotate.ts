@@ -25,7 +25,7 @@ import { isDocServeAllowed, isPathAllowed } from "../generated/doc-resolve.ts";
 import { countUnsentDraftComments, hostSessionClosedEvent } from "../generated/host-control.ts";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control.ts";
-import { createPiRefCards, handleRefCards, type RefRunner } from "./ref-cards.ts";
+import { createPiRefCards, handleRefCards, type ForgejoRefReader, type RefRunner } from "./ref-cards.ts";
 import { createRequestHostGuard } from "./request-host-guard.ts";
 import { isSameOriginRequest, refuseCrossOriginWrite } from "./request-origin-guard.ts";
 import { getPlanVersion, getVersionCount, listVersions } from "../generated/storage.ts";
@@ -312,6 +312,8 @@ function createHtmlAssetRegistry(
 export async function startAnnotateServer(options: {
 	/** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
 	refRunner?: RefRunner;
+	/** Tests: Forgejo / Gitea cards, with `refRunner` (a real session reads them with the person's token, on hosts they named). */
+	forgejoRefReader?: ForgejoRefReader;
 	/** "Ask this session": the in-process bridge to the Pi session that opened this annotation. */
 	sessionBridge?: SessionBridge;
 	/** Turns on `/api/host/status` and `/api/host/close` for a caller in another process (never in remote mode). */
@@ -423,7 +425,7 @@ export async function startAnnotateServer(options: {
 	// Save to Notion uses the server's NOTION_TOKEN, so it is offered only on this computer.
 	const notionAvailable = isNotionAvailable(isRemoteSession());
 	// Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for.
-	const refCards = createPiRefCards(options.refRunner);
+	const refCards = createPiRefCards(options.refRunner, options.forgejoRefReader);
 	const sendAlreadyDecided = (res: import("node:http").ServerResponse): void => {
 		json(res, { error: "This review session has already been decided.", code: "already_decided" }, 409);
 	};

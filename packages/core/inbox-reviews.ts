@@ -21,8 +21,9 @@
  * teammate or the forge is Waiting on others.
  */
 
+import { classifyForgeHost } from "./forge-refs";
 import { sameCommit, type InboxBranchReportRow } from "./inbox-branch-reports";
-import { inboxPullIsOpen, inboxPullLongLived, inboxPullRefOfUrl, type InboxPull, type InboxPullHidden, type InboxRepoHidden, type InboxPullHost, type InboxPullLink, type InboxPullReason, type InboxPullStack } from "./inbox-pulls";
+import { inboxPullIsOpen, inboxPullLongLived, inboxPullRefOfUrl, inboxPullUrlOf, type InboxPull, type InboxPullHidden, type InboxRepoHidden, type InboxPullHost, type InboxPullLink, type InboxPullReason, type InboxPullStack } from "./inbox-pulls";
 import type { InboxReviewVerdict } from "./inbox-review";
 
 /** Where a review's changes came from: the guide snapshot's `source` and `review` (base), as the message records them. */
@@ -38,7 +39,7 @@ export interface InboxReviewSource {
   git_ref?: string;
   head_sha?: string;
   /** The PR the guide is of, when it says. */
-  pr?: { url: string; number?: number; platform?: "github" | "gitlab" };
+  pr?: { url: string; number?: number; platform?: "github" | "gitlab" | "forgejo" };
 }
 
 /** A source field is kept as one line of at most this many characters (the agent wrote it). */
@@ -79,7 +80,7 @@ export function inboxReviewSourceOf(snapshot: {
     out.pr = {
       url,
       ...(typeof pr!.number === "number" && Number.isInteger(pr!.number) && pr!.number > 0 ? { number: pr!.number } : {}),
-      ...(pr!.platform === "github" || pr!.platform === "gitlab" ? { platform: pr!.platform } : {}),
+      ...(pr!.platform === "github" || pr!.platform === "gitlab" || pr!.platform === "forgejo" ? { platform: pr!.platform } : {}),
     };
   }
   return out;
@@ -281,14 +282,20 @@ export function inboxReviewStartOf(value: unknown, where: Pick<InboxReviewStart,
  * What the person pasted as a pull request link: a web address, or `owner/repo#123` on github.com. `unsupported`: a
  * forge's link the Inbox can't read yet; null: not a link to a pull request at all.
  */
-export function inboxReviewLinkOf(text: string): { url: string; ref: NonNullable<ReturnType<typeof inboxPullRefOfUrl>> } | { unsupported: "bitbucket" | "host" } | null {
+export function inboxReviewLinkOf(text: string): { url: string; ref: NonNullable<ReturnType<typeof inboxPullRefOfUrl>> } | { unsupported: "bitbucket" | "forgejo" | "host" } | null {
   const typed = text.trim();
   const short = /^([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)#(\d+)$/.exec(typed);
   const url = short ? `https://github.com/${short[1]}/pull/${short[2]}` : typed;
+  // A Forgejo / Gitea names its pull request by `/pulls/N` (GitHub's own page is `/pull/N`): never read as a GitHub's,
+  // which rewrote it to a `/pull/N` page that is not there and blamed gh for not reading it. A host the person named
+  // is read (with their token); any other is not.
+  const forgejoShaped = /^https:\/\/([A-Za-z0-9.-]+)\/[^/?#]+\/[^/?#]+\/pulls\/\d+(?:[/?#]|$)/.exec(url);
+  const shapedAs = forgejoShaped ? classifyForgeHost(forgejoShaped[1]!.toLowerCase()) : null;
+  if (forgejoShaped && shapedAs !== "github" && shapedAs !== "forgejo") return { unsupported: "forgejo" };
   const ref = inboxPullRefOfUrl(url);
   // A host or owner that reads as a flag never goes near a CLI.
   if (ref?.host.startsWith("-") || ref?.repo.split("/").some((part) => part.startsWith("-"))) return null;
-  if (ref) return { url: `https://${ref.host}/${ref.repo}/${ref.platform === "gitlab" ? "-/merge_requests" : "pull"}/${ref.number}`, ref };
+  if (ref) return { url: inboxPullUrlOf(ref), ref };
   let address: URL;
   try {
     address = new URL(typed);
@@ -304,14 +311,15 @@ export function inboxReviewLinkOf(text: string): { url: string; ref: NonNullable
 export type InboxReviewLinkAnswer =
   | {
       ok: true;
-      cli: "gh" | "glab";
+      /** What read it: the person's `gh` or `glab`, or, for a Forgejo, the token they saved for that host. */
+      cli: "gh" | "glab" | "forgejo";
       pull: InboxPull;
       /** The Inbox projects its repository is. None: it is reviewed from a new scratch folder, or wherever To says. */
       projects: string[];
       /** It already has a review thread (one not on the list too): Start opens that. */
       thread_id: string | null;
     }
-  | { ok: false; reason: "not_a_link" | "bitbucket" | "host" }
+  | { ok: false; reason: "not_a_link" | "bitbucket" | "forgejo" | "host" }
   /** The Inbox itself didn't answer: nothing is known about the link. */
   | { ok: false; reason: "failed" }
   | { ok: false; reason: "unreadable"; cli: "gh" | "glab"; host: string };

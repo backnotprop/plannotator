@@ -33,7 +33,7 @@ import { forgePullRefShort, parseForgeRefUrl, type ForgeRefCardResult } from '@p
 import { FORGE_SPECS } from '@plannotator/core/forge-refs';
 import { REF_CARD_CLOSE_MS, REF_CARD_DELAY_MS, RefCardView } from '@plannotator/ui/components/RefHoverCard';
 import { forgetRefCard, loadRefCard } from '@plannotator/ui/utils/refCard';
-import { cardProblem } from '@plannotator/core/problem-words';
+import { cardProblem, forgejoProblem } from '@plannotator/core/problem-words';
 import { PullProblems, pullProblems } from './PullProblems';
 import { inboxApi } from '../api';
 import { INBOX_UNREACHABLE } from '../toastError';
@@ -350,7 +350,9 @@ function OnePull({ pull, sheet, onClose, onRetry, retrying, touch = sheet, revie
       </>
     );
   }
-  const problem = pull.problem ?? (target ? cardProblem(result, target) : null);
+  // An older server sends no problem for a Forgejo: its card's own error, in Forgejo's words (never a CLI's).
+  const forgejoFailed = target?.platform === 'forgejo' && result && !result.ok ? forgejoProblem(result.error, { url: pull.url }) : null;
+  const problem = pull.problem ?? forgejoFailed ?? (target ? cardProblem(result, target) : null);
   return (
     <>
       <PullsList answer={{ pulls: [pull], groups: [{ kind: 'related', pulls: [pull.pull] }], removed: [] }} review={review} />
@@ -367,11 +369,13 @@ function shortOf(pull: InboxThreadPullWire): string {
 }
 
 /**
- * Decisions post on GitHub and GitLab PRs only: the server refuses a Bitbucket one (`forge_unsupported`), so no Post
- * decisions button or menu row is offered for it.
+ * Decisions post on GitHub, GitLab and Forgejo PRs only: the server refuses a Bitbucket one (`forge_unsupported`), so
+ * no Post decisions button or menu row is offered for it. Nor for a Forgejo on a host the person has not named
+ * (`forgejo.unsupported`, the reason its read answers with): the server posts only to a host they named, so the click
+ * would only come back refused.
  */
-export function canPostDecisionsOn(pull: Pick<InboxThreadPullWire, 'platform'>): boolean {
-  return pull.platform !== 'bitbucket';
+export function canPostDecisionsOn(pull: Pick<InboxThreadPullWire, 'platform' | 'problem'>): boolean {
+  return pull.platform !== 'bitbucket' && !(pull.platform === 'forgejo' && pull.problem?.code === 'forgejo.unsupported');
 }
 
 /**
@@ -628,7 +632,7 @@ export function PullsCard({
               setText(e.target.value);
               setError(null);
             }}
-            placeholder="Add a PR: owner/repo#123 or its link"
+            placeholder="Add a PR: owner/repo#123 or its link. Forgejo: the full link"
             aria-label="Add a pull request to this thread"
             aria-invalid={error ? true : undefined}
             spellCheck={false}

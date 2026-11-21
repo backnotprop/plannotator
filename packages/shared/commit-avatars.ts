@@ -40,8 +40,8 @@ export interface CommandRunner {
   runCommand(cmd: string, args: string[]): Promise<CommandResult>;
 }
 
-/** The forges whose CLI answers an avatar lookup: Bitbucket has no CLI. */
-export type AvatarPlatform = Exclude<ForgePlatform, "bitbucket">;
+/** The forges whose CLI answers an avatar lookup: Bitbucket and Forgejo have no CLI. */
+export type AvatarPlatform = Exclude<ForgePlatform, "bitbucket" | "forgejo">;
 
 export interface AvatarRemote {
   platform: AvatarPlatform;

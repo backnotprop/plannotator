@@ -27,9 +27,9 @@ export interface InboxCardRefResolver {
   resolve(ref: InboxCardRef): Promise<InboxCardRefResult | null>;
 }
 
-/** GitHub, GitLab and Bitbucket Cloud: #2187's lookup, by the reference's URL. */
+/** GitHub, GitLab, Bitbucket Cloud and Forgejo: #2187's lookup, by the reference's URL. */
 export function forgeCardRefResolver(refCards: RefCards): InboxCardRefResolver {
-  return { sources: ["github", "gitlab", "bitbucket"], resolve: (ref) => refCards.get(ref.url) };
+  return { sources: ["github", "gitlab", "bitbucket", "forgejo"], resolve: (ref) => refCards.get(ref.url) };
 }
 
 /**

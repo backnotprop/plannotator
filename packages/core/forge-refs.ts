@@ -6,7 +6,7 @@
  * server-side commit-avatar lookup classifies remotes with the same rule.
  */
 
-export type ForgePlatform = "github" | "gitlab" | "bitbucket";
+export type ForgePlatform = "github" | "gitlab" | "bitbucket" | "forgejo";
 
 /** How each forge names and addresses its pull requests and issues. */
 export interface ForgeSpec {
@@ -25,6 +25,8 @@ export const FORGE_SPECS: Readonly<Record<ForgePlatform, ForgeSpec>> = {
   github: { name: "GitHub", pullName: "Pull request", pullMark: "#", pullPath: "pull", numbersByKind: false },
   gitlab: { name: "GitLab", pullName: "Merge request", pullMark: "!", pullPath: "-/merge_requests", numbersByKind: true },
   bitbucket: { name: "Bitbucket", pullName: "Pull request", pullMark: "#", pullPath: "pull-requests", numbersByKind: true },
+  // Forgejo and Gitea number issues and pull requests together, as GitHub does: /issues/N names a PR too.
+  forgejo: { name: "Forgejo", pullName: "Pull request", pullMark: "#", pullPath: "pulls", numbersByKind: false },
 };
 
 /**
@@ -56,10 +58,13 @@ export function normalizeForgeHost(host: string | null | undefined): string | nu
  * `gitlab-master.example.com`), and so is a host learned as one
  * (`learnGitlabHosts`); bitbucket.org is Bitbucket Cloud (Bitbucket Data
  * Center has another API and is not one). A structured match, not a bare
- * substring: `mygitlabproxy.example.com` does not qualify. Opaque
- * self-hosted names return null.
+ * substring: `mygitlabproxy.example.com` does not qualify. A Forgejo has no
+ * name to go by: only a host the person named (`learnForgejoHosts`) or
+ * codeberg.org is one. Other opaque self-hosted names return null.
  */
 export function classifyForgeHost(host: string): ForgePlatform | null {
+  // A host the person named as a Forgejo is theirs to name: it wins over a guess from the name.
+  if (knownForgejoHosts.has(host)) return "forgejo";
   if (host === "github.com" || host.startsWith("github.")) return "github";
   if (host === "bitbucket.org") return "bitbucket";
   if (host.split(".").slice(0, -1).some(gitlabLabel) || knownGitlabHosts.has(host)) return "gitlab";
@@ -87,6 +92,32 @@ export function gitlabHostsSnapshot(): ReadonlySet<string> {
   return knownGitlabHosts;
 }
 
+/** The public Forgejo instance everyone has: always a Forgejo, with nothing to configure. */
+export const CODEBERG_HOST = "codeberg.org";
+
+let knownForgejoHosts: ReadonlySet<string> = new Set([CODEBERG_HOST]);
+const knownForgejoListeners = new Set<() => void>();
+
+/**
+ * Replace the Forgejo hosts this process knows: the hosts the person named (config, a token's origin) plus
+ * codeberg.org, which is always one. A host is `name` or `name:port`, lower case.
+ */
+export function learnForgejoHosts(hosts: Iterable<string>): void {
+  const next = new Set([CODEBERG_HOST, ...[...hosts].map((host) => host.toLowerCase())]);
+  if (next.size === knownForgejoHosts.size && [...next].every((host) => knownForgejoHosts.has(host))) return;
+  knownForgejoHosts = next;
+  for (const listener of knownForgejoListeners) listener();
+}
+
+export function subscribeForgejoHosts(listener: () => void): () => void {
+  knownForgejoListeners.add(listener);
+  return () => knownForgejoListeners.delete(listener);
+}
+
+export function forgejoHostsSnapshot(): ReadonlySet<string> {
+  return knownForgejoHosts;
+}
+
 export interface ForgeRefLinks {
   issue(num: string | number): string;
   user(handle: string): string;
@@ -102,6 +133,7 @@ export interface ForgeRefLinks {
  *   apps that pass no host, and SSH aliases like `git@work-gh:o/r`).
  * - GitHub-like host → `https://<host>/<path>/issues/N`.
  * - GitLab-like host → `https://<host>/<path>/-/issues/N`.
+ * - A Forgejo the person named, or codeberg.org → `https://<host>/<path>/issues/N`.
  * - Bitbucket, or any other host → null: a wrong-forge link is worse than no
  *   link, and a Bitbucket repository's `#N` may name a pull request or an
  *   issue (numbered apart, the issue tracker often off).
@@ -111,7 +143,7 @@ export function forgeRefLinks(repo: { display?: string; host?: string }): ForgeR
   if (!path || !path.includes("/")) return null;
   const host = normalizeForgeHost(repo.host) ?? "github.com";
   const platform = classifyForgeHost(host);
-  if (platform !== "github" && platform !== "gitlab") return null;
+  if (platform !== "github" && platform !== "gitlab" && platform !== "forgejo") return null;
   const base = `https://${host}`;
   const issues = platform === "gitlab" ? `${base}/${path}/-/issues` : `${base}/${path}/issues`;
   return {

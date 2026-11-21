@@ -12,7 +12,7 @@ import { getAllowedRootPaths, isDocServeAllowed } from "../generated/doc-resolve
 import { countUnsentDraftComments, hostSessionClosedEvent, type HostCloseOutcome } from "../generated/host-control.ts";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control.ts";
-import { createPiRefCards, handleRefCards, type RefRunner } from "./ref-cards.ts";
+import { createPiRefCards, handleRefCards, type ForgejoRefReader, type RefRunner } from "./ref-cards.ts";
 import { createRequestHostGuard } from "./request-host-guard.ts";
 import { isSameOriginRequest, refuseCrossOriginWrite } from "./request-origin-guard.ts";
 import {
@@ -142,6 +142,8 @@ export interface PlanServerResult {
 export async function startPlanReviewServer(options: {
 	/** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
 	refRunner?: RefRunner;
+	/** Tests: Forgejo / Gitea cards, with `refRunner` (a real session reads them with the person's token, on hosts they named). */
+	forgejoRefReader?: ForgejoRefReader;
 	/** Turns on `/api/host/status` for a caller in another process (never in remote mode or archive mode). */
 	hostControlToken?: string;
 	plan: string;
@@ -282,7 +284,7 @@ export async function startPlanReviewServer(options: {
 	// Save to Notion uses the server's NOTION_TOKEN, so it is offered only on this computer.
 	const notionAvailable = isNotionAvailable(isRemoteSession());
 	// Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for.
-	const refCards = createPiRefCards(options.refRunner);
+	const refCards = createPiRefCards(options.refRunner, options.forgejoRefReader);
 	const decisionPromise = new Promise<PlanReviewDecision>((r) => {
 		resolveDecision = r;
 	});

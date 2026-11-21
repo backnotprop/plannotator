@@ -36,7 +36,7 @@ import { parseUpdateAdvert, parseUpdateCheckFailing, type UpdateAdvert, type Upd
 import { claimAutoUpdateNotice, describeAutoUpdateNotice, parseAutoUpdateNotice, type AutoUpdateNotice } from '@plannotator/ui/utils/autoUpdateNotice';
 import { storage } from '@plannotator/ui/utils/storage';
 import { RefHoverCards } from '@plannotator/ui/components/RefHoverCard';
-import { refCardRouteTransport, setRefCardTransport } from '@plannotator/ui/utils/refCard';
+import { refCardRouteTransport, setRefCardForgejo, setRefCardTransport } from '@plannotator/ui/utils/refCard';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { useStarAskDoneScreen } from '@plannotator/ui/components/StarAskDoneScreen';
 import {
@@ -2939,6 +2939,8 @@ const ReviewApp: React.FC = () => {
         // computer's gh / glab (GET /api/ref, ref-cards.ts). Only once a server answered; never in
         // the demo. A card shows only when the forge answered (`onlyWithData` below).
         setRefCardTransport(refCardRouteTransport('/api/ref'));
+        // A Forgejo / Gitea link too: the server reads it with the person's token, on a host they named.
+        setRefCardForgejo(true);
         if (data.repoInfo) setRepoInfo(data.repoInfo);
         if (typeof data.title === 'string' && data.title) setSessionTitle(data.title);
         updatePRSession({
@@ -3402,7 +3404,7 @@ const ReviewApp: React.FC = () => {
       });
     }
   }, [deleteExternalAnnotation, externalAnnotations, reviewHistory]);
-  const livePR = useMemo(() => (prMetadata ? { forge: prMetadata.platform === 'gitlab' ? 'GitLab' : prMetadata.platform === 'bitbucket' ? 'Bitbucket' : 'GitHub', platform: prMetadata.platform, threads: prContext?.reviewThreads ?? null, load: () => void fetchPRContext() } : null), [prMetadata, prContext, fetchPRContext]);
+  const livePR = useMemo(() => (prMetadata ? { forge: getPlatformLabel(prMetadata), platform: prMetadata.platform, threads: prContext?.reviewThreads ?? null, load: () => void fetchPRContext() } : null), [prMetadata, prContext, fetchPRContext]);
   const revealLiveLines = useCallback((filePath: string, start: number, end: number, side: 'old' | 'new') => {
     handleScrollToAILines(filePath, start, end, side);
     window.setTimeout(() => setPendingSelection((current) => (current && current.start === start && current.end === end ? null : current)), 900);

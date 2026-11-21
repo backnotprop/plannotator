@@ -42,12 +42,22 @@ export type InboxDecisionPostResult = { status: 200; body: InboxDecisionPostAnsw
 
 const refused = (status: number, code: string, error: string): InboxDecisionPostResult => ({ status, body: { error, code } });
 
-const FORGE = { github: { name: "GitHub", cli: "gh" }, gitlab: { name: "GitLab", cli: "glab" } } as const;
+const FORGE = { github: { name: "GitHub", cli: "gh" }, gitlab: { name: "GitLab", cli: "glab" }, forgejo: { name: "Forgejo", cli: null } } as const;
 
 /** A forge's refusal as one plain sentence that says what to do. */
 export function decisionPostFailure(platform: DecisionPostPlatform, ref: string, message: string, what: "comment" | "description"): string {
   const { name, cli } = FORGE[platform];
   const lead = `Couldn't post on ${ref}`;
+  // A Forgejo is posted with its token, never a CLI: no sign-in command, no install line.
+  if (platform === "forgejo") {
+    if (/HTTP 401|needs an access token|rejected the token|not logged in/i.test(message)) return `${lead}: Plannotator has no working token for this Forgejo. Add one (forgejoTokens), then try again.`;
+    if (/locked/i.test(message)) return `${lead}: its conversation is locked. Ask a maintainer to unlock it, then try again.`;
+    if (/HTTP 404|not found/i.test(message)) return `${lead}: this Forgejo account can't see it. Use a token for an account that can, then try again.`;
+    if (/HTTP 403|permission|scopes/i.test(message)) return `${lead}: this Forgejo token isn't allowed to ${what === "comment" ? "comment there" : "edit its description"}. It needs the write:repository and write:issue scopes, and access to the repository.`;
+    if (/rate.?limit|HTTP 429/i.test(message)) return `${lead}: ${name} is limiting requests. Try again in a few minutes.`;
+    const text = message.replace(/\s+/g, " ").trim();
+    return `${lead}: ${text.length > 200 ? `${text.slice(0, 199)}…` : text}`;
+  }
   if (/not authenticated|auth login|not logged in|bad credentials|HTTP 401|401 Unauthorized/i.test(message)) return `${lead}: ${cli} isn't signed in. Run \`${cli} auth login\`, then try again.`;
   if (/executable file not found|ENOENT|command not found|not installed/i.test(message)) return `${lead}: ${cli} isn't installed on this computer. Install it and sign in, then try again.`;
   if (/locked/i.test(message)) return `${lead}: its conversation is locked. Ask a maintainer to unlock it, then try again.`;
@@ -70,6 +80,8 @@ function prRefOf(key: string, url: string): PRRef | null {
       return { platform: "gitlab", host: ref.host, projectPath: `${ref.owner}/${ref.repo}`, iid: ref.number };
     case "bitbucket":
       return { platform: "bitbucket", host: ref.host, workspace: ref.owner, repo: ref.repo, number: ref.number };
+    case "forgejo":
+      return { platform: "forgejo", host: ref.host, owner: ref.owner, repo: ref.repo, number: ref.number };
   }
 }
 
@@ -89,11 +101,13 @@ export async function postThreadDecisions(
   const doc = decisionExportForPost(built.doc);
   if (doc.decisions.length + doc.others.length === 0) return refused(409, "no_decisions", "This thread has no questions to post.");
   const ref = prRefOf(linked.pull, linked.url);
-  if (!ref || ref.platform === "bitbucket" || !canPostMarkedText(ref)) return refused(422, "forge_unsupported", "Posting decisions works on GitHub and GitLab only.");
+  if (!ref || ref.platform === "bitbucket" || !canPostMarkedText(ref)) return refused(422, "forge_unsupported", "Posting decisions works on GitHub, GitLab and Forgejo only.");
   const platform: DecisionPostPlatform = ref.platform;
   const refText = inboxThreadPullText(linked);
   const host = { platform, host: ref.host };
-  if (!forgeHostTrusted(host, new Set()) && !forgeHostTrusted(host, (await deps.signedIn?.(FORGE[platform].cli).catch(() => null)) ?? new Set())) {
+  // A Forgejo is trusted by the person's own list (a host they named, a token's origin, codeberg.org), never by a CLI.
+  const cli = FORGE[platform].cli;
+  if (!forgeHostTrusted(host, new Set()) && !(cli && forgeHostTrusted(host, (await deps.signedIn?.(cli).catch(() => null)) ?? new Set()))) {
     return refused(502, "post_failed", decisionPostFailure(platform, refText, "not logged in", "comment"));
   }
   const destination = decisionPostDestinationOf(deps.destination);

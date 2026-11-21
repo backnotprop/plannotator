@@ -10,16 +10,38 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { createRefCards, handleRefCardRoute, REF_CARD_ROUTE, type RefCards, type RefRunner } from "../generated/ref-cards.ts";
+import { createRefCards, handleRefCardRoute, REF_CARD_ROUTE, type ForgejoRefReader, type RefCards, type RefRunner } from "../generated/ref-cards.ts";
+import { loadConfig, resolveForgejoHosts } from "../generated/config.ts";
+import { learnForgejoHosts } from "../generated/forge-refs.ts";
+import { fetchFjCard } from "../generated/pr-provider.ts";
 import { nodeRefCliRunner } from "../generated/ref-cards-node.ts";
 import { isRemoteSession } from "./network.ts";
+import { prCommandRuntime } from "./pr.ts";
 import { isSshTunnelRequest } from "./this-machine.ts";
 
-export type { RefRunner } from "../generated/ref-cards.ts";
+export type { ForgejoRefReader, RefRunner } from "../generated/ref-cards.ts";
 
-/** One cache per server; `run` is for tests (default: the real gh / glab through Node). */
-export function createPiRefCards(run?: RefRunner): RefCards {
-	return createRefCards({ run: run ?? nodeRefCliRunner });
+/**
+ * One cache per server; `run` is for tests (default: the real gh / glab through Node). With no `run` (a real session) a
+ * Forgejo / Gitea link is read too, with the person's token for its host and only on a host they named; a test that
+ * hands its own runner gets no Forgejo reader unless it passes `forgejo`, so no test reaches a real instance.
+ */
+export function createPiRefCards(run?: RefRunner, forgejo?: ForgejoRefReader): RefCards {
+	return createRefCards({ run: run ?? nodeRefCliRunner, forgejo: run ? forgejo : (ref, signal) => fetchFjCard(prCommandRuntime, ref, signal) });
+}
+
+/** The Forgejo hosts the person named, read from config at most every few seconds, so one named later shows on the next hover. */
+const FORGEJO_HOSTS_REFRESH_MS = 5_000;
+let forgejoHostsAt = -Infinity;
+function refreshForgejoHosts(): void {
+	const now = Date.now();
+	if (now - forgejoHostsAt < FORGEJO_HOSTS_REFRESH_MS) return;
+	forgejoHostsAt = now;
+	try {
+		learnForgejoHosts(resolveForgejoHosts(loadConfig({ quiet: true })));
+	} catch {
+		// An unreadable config leaves what was learned.
+	}
 }
 
 /** Answers `/api/ref` and returns true, or returns false for any other path. */
@@ -31,6 +53,7 @@ export async function handleRefCards(
 	serverSession: string,
 ): Promise<boolean> {
 	if (url.pathname !== REF_CARD_ROUTE) return false;
+	refreshForgejoHosts();
 	const header = (name: string): string | null => {
 		const value = req.headers[name];
 		return typeof value === "string" ? value : null;

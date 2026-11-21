@@ -13,10 +13,13 @@ import {
   REF_TIMEOUT_MS,
   refRunnerKill,
   type BitbucketRefReader,
+  type ForgejoRefReader,
   type RefCards,
   type RefRunner,
 } from "@plannotator/shared/ref-cards";
-import { fetchBbPRCard } from "@plannotator/shared/pr-provider";
+import { fetchBbPRCard, fetchFjCard } from "@plannotator/shared/pr-provider";
+import { learnForgejoHosts } from "@plannotator/core/forge-refs";
+import { loadConfig, resolveForgejoHosts } from "@plannotator/shared/config";
 import { prCommandRuntime } from "./pr";
 
 import { childEnv } from "@plannotator/shared/child-env";
@@ -106,9 +109,38 @@ export const refCliRunner: RefRunner = createBunRefCliRunner();
 /** Bitbucket Cloud pull requests through the review app's provider and credentials (the Inbox passes it). */
 export const bitbucketRefReader: BitbucketRefReader = (ref, signal) => fetchBbPRCard(prCommandRuntime, { platform: "bitbucket", host: "bitbucket.org", ...ref }, signal);
 
-/** `createRefCards` with the Bun runner by default (tests pass their own). */
+/**
+ * Forgejo / Gitea issues and pull requests through the review app's provider and credentials. Only the hosts the
+ * person named (and codeberg.org) are ever read (`forgeHostTrusted`), and the token goes only to the origin it was
+ * configured for.
+ */
+export const forgejoRefReader: ForgejoRefReader = (ref, signal) => fetchFjCard(prCommandRuntime, ref, signal);
+
+/**
+ * The Forgejo hosts the person named (config `forgejoHosts`, a token's origin, PLANNOTATOR_FORGEJO_URL), learned for
+ * this process so a link to one reads as Forgejo and may be fetched. The Inbox calls it when it starts and on each card
+ * request (read again at most every few seconds, so a change to the config shows up on the next one).
+ */
+const FORGEJO_HOSTS_REFRESH_MS = 5_000;
+let forgejoHostsAt = -Infinity;
+export function refreshForgejoHosts(now: number = Date.now()): void {
+  if (now - forgejoHostsAt < FORGEJO_HOSTS_REFRESH_MS) return;
+  forgejoHostsAt = now;
+  try {
+    learnForgejoHosts(resolveForgejoHosts(loadConfig({ quiet: true })));
+  } catch {
+    // An unreadable config leaves what was learned.
+  }
+}
+
+/**
+ * `createRefCards` with the Bun runner by default (tests pass their own). With no runner given (a real session), a
+ * Forgejo / Gitea link is read too, with the person's token for its host and only on a host they named
+ * (`forgeHostTrusted`); a test that hands its own runner gets no Forgejo reader unless it passes one, so no test
+ * reaches a real instance.
+ */
 export function createRefCards(options: Partial<Parameters<typeof createSharedRefCards>[0]> = {}): ReturnType<typeof createSharedRefCards> {
-  return createSharedRefCards({ ...options, run: options.run ?? refCliRunner });
+  return createSharedRefCards({ ...(options.run ? {} : { forgejo: forgejoRefReader }), ...options, run: options.run ?? refCliRunner });
 }
 
 /**
@@ -123,6 +155,8 @@ export async function refCardRouteResponse(
   options: { enabled: boolean | ((req: Request) => boolean); serverSession?: string },
 ): Promise<Response | null> {
   if (url.pathname !== REF_CARD_ROUTE) return null;
+  // A Forgejo the person named in config is only known to this process once it has read the config.
+  refreshForgejoHosts();
   const answer = await handleRefCardRoute(
     {
       method: req.method,

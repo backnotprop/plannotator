@@ -12,7 +12,8 @@
  *  - a `<picture>`'s dark-mode `srcset` keeps a direct URL to a private image.
  */
 import { describe, expect, test } from 'bun:test';
-import { prImageSrc, prImageSrcset, proxiesGitHubImages, resolvePRImage } from './prImage';
+import type { PRMetadata } from '@plannotator/shared/pr-types';
+import { forgejoImageHandling, prImageSrc, prImageSrcset, proxiesGitHubImages, resolvePRImage } from './prImage';
 
 const proxied = (url: string) => `/api/pr-artifact-content?${new URLSearchParams({ url })}`;
 
@@ -70,5 +71,42 @@ describe('proxiesGitHubImages', () => {
     expect(proxiesGitHubImages({ platform: 'github', url: 'https://github.example.com/acme/widgets/pull/1' })).toBe(false);
     expect(proxiesGitHubImages({ platform: 'gitlab', url: 'https://gitlab.com/acme/widgets/-/merge_requests/7' })).toBe(false);
     expect(proxiesGitHubImages(null)).toBe(false);
+  });
+});
+
+/**
+ * A Forgejo PR's own uploads in comment text. What regresses if this fails: the
+ * Overview shows `![shot.png](/attachments/…)` as plain text again, or an image
+ * from some other place is sent to the proxy.
+ */
+describe('forgejoImageHandling', () => {
+  const pr = {
+    platform: 'forgejo', host: 'forgejo.example.com', owner: 'acme', repo: 'widgets', number: 5, title: 't', author: 'a',
+    baseBranch: 'main', headBranch: 'b', baseSha: 'x', headSha: 'y', url: 'https://forgejo.example.com/acme/widgets/pulls/5',
+  } as PRMetadata;
+  const uuid = '0b1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4d';
+  const handling = forgejoImageHandling(pr)!;
+
+  test('makes the editor\'s relative upload links absolute on the PR\'s origin, in both shapes', () => {
+    expect(handling.prepare(`Screenshot: ![dot.png](/attachments/${uuid})`)).toBe(`Screenshot: ![dot.png](https://forgejo.example.com/attachments/${uuid})`);
+    expect(handling.prepare(`![a](/acme/widgets/attachments/${uuid})`)).toBe(`![a](https://forgejo.example.com/acme/widgets/attachments/${uuid})`);
+  });
+
+  test('leaves any other image as written', () => {
+    for (const text of ['![x](/somewhere/else.png)', '![x](/other/repo/attachments/' + uuid + ')', '![x](https://example.com/attachments/' + uuid + ')', '![x](/attachments/not-a-uuid)']) {
+      expect(handling.prepare(text)).toBe(text);
+    }
+  });
+
+  test('loads the PR\'s own upload through the proxy, and nothing else', () => {
+    const own = `https://forgejo.example.com/attachments/${uuid}`;
+    expect(handling.src(own)).toBe(proxied(own));
+    expect(handling.src(`https://evil.example/attachments/${uuid}`)).toBe(`https://evil.example/attachments/${uuid}`);
+    expect(handling.src('https://forgejo.example.com/acme/widgets/raw/branch/main/a.png')).toBe('https://forgejo.example.com/acme/widgets/raw/branch/main/a.png');
+  });
+
+  test('is off for a PR that is not Forgejo', () => {
+    expect(forgejoImageHandling({ ...pr, platform: 'github' } as unknown as PRMetadata)).toBeNull();
+    expect(forgejoImageHandling(null)).toBeNull();
   });
 });

@@ -259,6 +259,8 @@ const NOT_OWNERS: Record<ForgePlatform, ReadonlySet<string>> = {
   github: new Set(['about', 'apps', 'codespaces', 'collections', 'contact', 'customer-stories', 'enterprise', 'explore', 'features', 'issues', 'join', 'login', 'marketplace', 'new', 'notifications', 'orgs', 'pricing', 'pulls', 'readme', 'search', 'security', 'settings', 'sponsors', 'stars', 'topics', 'trending', 'users', 'watching']),
   gitlab: new Set(['admin', 'dashboard', 'explore', 'groups', 'help', 'projects', 'search', 'users']),
   bitbucket: new Set(['account', 'blog', 'dashboard', 'product', 'repo', 'site', 'snippets', 'socialauth', 'support', 'workspace']),
+  // Forgejo's reserved first path parts (its own routes), so `/explore/repos` is no owner.
+  forgejo: new Set(['-', 'admin', 'api', 'assets', 'attachments', 'avatars', 'captcha', 'commits', 'devtest', 'explore', 'issues', 'login', 'milestones', 'new', 'notifications', 'org', 'pulls', 'raw', 'repo', 'search', 'user']),
 };
 
 /** Readable, and never a way to turn text around (a bidi override written into a url). */
@@ -318,6 +320,12 @@ function repoRow({ platform, host, path, section, rest }: Repository, url: URL):
     const cut = path.lastIndexOf('/');
     const key = forgeRefKey({ platform, host, owner: path.slice(0, cut), repo: path.slice(cut + 1), number, kind: refKind });
     return { kind: refKind, mark: forgeRefLabel({ platform, kind: refKind, number }), name: null, path: null, key };
+  }
+  // Forgejo's file page: /src/<branch|tag|commit>/<ref>/<path>.
+  if (platform === 'forgejo' && section === 'src' && rest.length > 2 && ['branch', 'tag', 'commit'].includes(rest[0]!)) {
+    const file = rest.slice(2).map(readable);
+    const line = /^#L(\d+)/.exec(url.hash)?.[1];
+    return { kind: 'file', mark: null, name: `${file.at(-1)}${line ? `:${line}` : ''}`, path: file.join('/'), key: null };
   }
   if (section === 'blob' && rest.length > 1) {
     const file = rest.slice(1).map(readable);
