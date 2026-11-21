@@ -20,9 +20,11 @@
  */
 
 import { createHash } from "node:crypto";
-import { basename } from "node:path";
-import { isInboxId } from "@plannotator/core/inbox-types";
-import { INBOX_MESSAGE_IMAGE_CSP, inboxMessageImageRefsInOrder, readInboxMessageImageAsync, type InboxMessageImageResult } from "@plannotator/shared/inbox/message-images";
+import { realpathSync } from "node:fs";
+import { basename, join } from "node:path";
+import { isInboxId, type InboxInlineImage } from "@plannotator/core/inbox-types";
+import { inboxBlobPath, inboxBlobsDir } from "@plannotator/shared/inbox/attachments";
+import { INBOX_MESSAGE_IMAGE_CSP, inboxMessageImageRefsInOrder, readInboxMessageImageAsync, readInboxPictureAsync, type InboxMessageImageResult } from "@plannotator/shared/inbox/message-images";
 import { captureInboxInlineImages, yieldToLoop } from "@plannotator/shared/inbox/inline-images";
 import { openInboxMessageMedia } from "@plannotator/shared/inbox/message-media";
 import { inboxInlineMediaKind } from "@plannotator/core/inbox-inline-media";
@@ -61,6 +63,12 @@ export async function inboxMessageImageRoute(req: Request, url: URL, store: Inbo
   const project = store.project(message.project_id);
   if (!project) return refuse(404, "project_not_found", "The message's project is gone.");
 
+  // A picture sent as bytes (a cloud agent's, inbox-cloud-pictures.ts) is in no folder on disk: it is shown from the
+  // Inbox's own copy, captured at send, before any file of that name. Every other picture is read live, as below.
+  const src = url.searchParams.get("path");
+  const fromBytes = src ? message.inline_images?.find((image) => image.ref === src && inboxPictureFromUpload(store.dir, image)) : undefined;
+  if (fromBytes) return inboxImageResponse(req, await capturedPicture(store.dir, fromBytes), inboxImageWidth(url));
+
   const input = {
     body: message.body,
     root: project.root,
@@ -82,6 +90,26 @@ export async function inboxMessageImageRoute(req: Request, url: URL, store: Inbo
     }, { head: req.method === "HEAD" });
   }
   return inboxImageResponse(req, await readInboxMessageImageAsync(input), inboxImageWidth(url));
+}
+
+/**
+ * Whether a message's picture was captured at send from bytes sent with it (an upload): its recorded realpath is the
+ * Inbox's own blob of those bytes, not a file of the agent's.
+ */
+export function inboxPictureFromUpload(inboxDirPath: string, image: InboxInlineImage): boolean {
+  if (image.captured !== undefined || typeof image.path !== "string") return false;
+  if (image.path === inboxBlobPath(inboxDirPath, image.sent_sha256)) return true;
+  try {
+    return image.path === join(realpathSync(inboxBlobsDir(inboxDirPath)), image.sent_sha256);
+  } catch {
+    return false;
+  }
+}
+
+/** A picture the capture at send took from bytes sent with the message, read from its blob. */
+async function capturedPicture(inboxDirPath: string, image: InboxInlineImage): Promise<InboxMessageImageResult> {
+  const read = await readInboxPictureAsync(inboxBlobPath(inboxDirPath, image.sent_sha256), () => false);
+  return read.ok ? { ...read, named: image.name } : read;
 }
 
 /** `filename` (an ASCII fallback) and `filename*` (the real name, percent-encoded) for Content-Disposition. */
