@@ -32,6 +32,36 @@ import type { Mermaid, MermaidConfig } from 'mermaid';
 export const MERMAID_LABEL_WRAP_WIDTH = 140;
 
 /**
+ * Elements a label's own HTML may not keep, and attributes no element in it
+ * may keep: what loads something (a picture, media, a frame, a stylesheet) or
+ * navigates the tab (a form, an image map, a button). Mermaid writes every
+ * label into the live page to measure it before `diagram-render` sanitizes the
+ * drawn svg, so a picture there is fetched at that moment; this list is what
+ * Mermaid's own label pass removes, so nothing in it ever reaches the page.
+ * `style` is Mermaid's own default. Text inside a removed element is kept
+ * (`<button>Go</button>` leaves "Go").
+ */
+export const MERMAID_LABEL_FORBIDDEN_TAGS = [
+  'style',
+  'img', 'image', 'picture', 'source', 'track', 'audio', 'video',
+  'iframe', 'frame', 'frameset', 'object', 'embed', 'portal', 'fencedframe',
+  'link', 'meta', 'base',
+  'form', 'button', 'input', 'select', 'option', 'optgroup', 'datalist', 'textarea',
+  'map', 'area',
+  'mglyph',
+];
+
+/** See MERMAID_LABEL_FORBIDDEN_TAGS. A label's `<a>` loses its target here too (the canvas owns every click). */
+export const MERMAID_LABEL_FORBIDDEN_ATTRS = [
+  'src', 'srcset', 'imagesrcset', 'href', 'xlink:href', 'background', 'poster', 'ping',
+  'action', 'formaction', 'data', 'cite', 'longdesc', 'usemap', 'manifest', 'codebase',
+  'archive', 'profile', 'lowsrc', 'dynsrc', 'icon', 'srcdoc', 'classid', 'attributionsrc',
+];
+
+/** Mermaid's own secure keys (its default `secure`), which a diagram's directive or front matter cannot change. */
+const MERMAID_DEFAULT_SECURE_KEYS = ['secure', 'securityLevel', 'startOnLoad', 'maxTextSize', 'suppressErrorRendering', 'maxEdges'];
+
+/**
  * Hoisted verbatim from the former module-scope `mermaid.initialize(...)` in
  * MermaidBlock. Nothing in it reads a CSS token or the resolved mode.
  * `securityLevel: 'strict'` is a deliberate security pin (see MermaidBlock.test.ts).
@@ -39,6 +69,14 @@ export const MERMAID_LABEL_WRAP_WIDTH = 140;
 export const MERMAID_CONFIG: MermaidConfig = {
   startOnLoad: false,
   securityLevel: 'strict',
+  /**
+   * The DOMPurify config Mermaid sanitizes each label with, in place of its
+   * default `{ FORBID_TAGS: ['style'] }` (see MERMAID_LABEL_FORBIDDEN_TAGS).
+   * Listed in `secure`, so a `%%{init}%%` directive or front matter cannot
+   * replace it.
+   */
+  dompurifyConfig: { FORBID_TAGS: MERMAID_LABEL_FORBIDDEN_TAGS, FORBID_ATTR: MERMAID_LABEL_FORBIDDEN_ATTRS },
+  secure: [...MERMAID_DEFAULT_SECURE_KEYS, 'dompurifyConfig'],
   /**
    * Mermaid's own failure output is a "Syntax error in text" graphic drawn
    * into a temporary node on `document.body`, left there when it throws. The
