@@ -119,9 +119,9 @@ describe('whether the reply\'s agent can open a mentioned thread', () => {
 
   // Linked machines whose agents read each other's threads (mark `agent-read`), and one too old to.
   const THIRD = `ibx_${'01JD5THRD'.padEnd(26, '0')}`;
-  const linked = (marks: string[], both_ways = true) => [
-    { id: SELF, self: true, name: 'Studio', marks: ['agent-read'], both_ways: true },
-    { id: OTHER, name: 'Mini', marks, both_ways },
+  const linked = (marks: string[], both_ways = true, other: { list_cursor?: number | null; state?: string } = {}) => [
+    { id: SELF, self: true, name: 'Studio', marks: ['agent-read'], both_ways: true, list_cursor: null, state: 'online' },
+    { id: OTHER, name: 'Mini', marks, both_ways, list_cursor: 7, state: 'online', ...other },
   ];
 
   test('a linked machine\'s thread is readable both ways once that machine reads across', () => {
@@ -141,6 +141,27 @@ describe('whether the reply\'s agent can open a mentioned thread', () => {
     const sent = replyWordsWithMentions(HERE, mentioned('See', { ...FLAKY, machine: OTHER }));
     expect(sent).toContain(W.needsUpdate('Mini'));
     expect(sent).not.toContain(W.read(FLAKY.id));
+  });
+
+  test('a thread here, read by an agent on an older linked machine: its own machine must update, not this one', () => {
+    setSelfMachine(SELF, linked(['star']));
+    // The reply goes to Mini's agent; the mentioned thread is on Studio, this window's machine.
+    rememberMachine([HERE], OTHER);
+    const sent = replyWordsWithMentions(HERE, mentioned('See', { ...FLAKY, machine: SELF }));
+    expect(sent).toContain(W.readerNeedsUpdate('Studio', 'Mini'));
+    expect(sent).not.toContain(W.needsUpdate('Mini'));
+    expect(sent).not.toContain(W.read(FLAKY.id));
+  });
+
+  test('a linked machine whose list is not read yet is not called old: the agent is told to read it', () => {
+    // Asleep since this Inbox restarted: no list, so no marks, and not known to be old.
+    setSelfMachine(SELF, linked([], true, { list_cursor: null, state: 'offline' }));
+    const there = replyWordsWithMentions(HERE, mentioned('See', { ...FLAKY, machine: OTHER }));
+    expect(there).toContain(W.read(FLAKY.id));
+    expect(there).not.toContain(W.needsUpdate('Mini'));
+    // A machine its line already found too old is named even before its list.
+    setSelfMachine(SELF, linked([], true, { list_cursor: null, state: 'needs_update' }));
+    expect(mentionReadable(HERE, asMention(OTHER))).toBe(false);
   });
 
   test('no way there: a link only one way, or a third machine, stays unreadable', () => {

@@ -367,15 +367,15 @@ const ALLOWLIST: readonly DoorRoute[] = [
 /**
  * The door's own routes, beside the allowlist: `pair` (no token, answered before the token is read), `revoke`, and a
  * linked machine's own (never on the allowlist, so no phone reaches them): its link-back and unlink (inbox-machines.ts
- * answers them), this computer's update, read and started for a linked machine's window, and this computer's
- * accounts. `serve` answers the machine's through `machineOwn`, typed by this list, so a route here without an answer,
+ * answers them), this computer's update, read and started for a linked machine's window, this computer's accounts,
+ * and its agents' reads of this computer's threads and their files (`agent-read`, `agent-file`). `serve` answers the machine's through `machineOwn`, typed by this list, so a route here without an answer,
  * or an answer not here, does not compile. `needs`: answered only while this Inbox has it, and only then listed.
  */
 const DOOR_OWN_ROUTES = [
   { method: "POST", route: "pair", grant: "phone" },
   { method: "POST", route: "revoke", grant: "phone" },
   { method: "GET", route: "accounts", grant: "machine" },
-  // A linked machine's agent reads this Inbox's threads and saves their files there (inbox-far-read.ts, mark `agent-read`).
+  // A linked machine's agent reads this Inbox's threads and fetches the files they list (inbox-far-read.ts, mark `agent-read`).
   { method: "GET", route: "agent-read", grant: "machine", needs: "machines" },
   { method: "GET", route: "agent-file", grant: "machine", needs: "machines" },
   { method: "POST", route: "link-back", grant: "machine", needs: "machines" },

@@ -7,7 +7,11 @@
  *     person's reply in it, the first line naming the computer it is on.
  *  2. A file of MacBook's thread: read_thread lists it with the command that saves it; Studio's agent runs that
  *     command and gets the same bytes on Studio, in a temp folder.
+ *  2b. The command saves the file itself: in the folder it was given (relative to its working folder), or in its own
+ *     temp folder, never the Inbox's.
  *  3. Nothing of MacBook's thread is written to Studio's data folder by the reads.
+ *  3b. A read from Studio leaves MacBook's delivery state unchanged: the person's reply still waits for MacBook's
+ *     agent, and that agent's own read takes it.
  *  4. A reply into MacBook's thread from Studio's agent says it is not available from this computer yet.
  *  5. MacBook stopped: Studio's agent is told at once that it cannot be reached, with its name.
  *
@@ -73,13 +77,15 @@ function machine(name: string): Machine {
   };
 }
 
-const cli = (m: Machine, ...args: string[]) => {
-  const run = spawnSync(binary, ['inbox', ...args], { env: m.env, cwd: m.root, encoding: 'utf8', timeout: 60_000 });
+/** The CLI on `m`: its environment (with `shell` over it, an agent shell's own), in `cwd` (default its root). */
+const cliIn = (m: Machine, shell: { env?: Record<string, string>; cwd?: string }, ...args: string[]) => {
+  const run = spawnSync(binary, ['inbox', ...args], { env: { ...m.env, ...shell.env }, cwd: shell.cwd ?? m.root, encoding: 'utf8', timeout: 60_000 });
   return { status: run.status ?? -1, out: run.stdout ?? '', err: run.stderr ?? '' };
 };
+const cli = (m: Machine, ...args: string[]) => cliIn(m, {}, ...args);
 /** One agent action from this computer's shell: its result, or its refusal's words. */
-const call = (m: Machine, action: string, args: Record<string, unknown>) => {
-  const run = cli(m, 'call', action, JSON.stringify(args));
+const call = (m: Machine, action: string, args: Record<string, unknown>, shell: { env?: Record<string, string>; cwd?: string } = {}) => {
+  const run = cliIn(m, shell, 'call', action, JSON.stringify(args));
   return { ...run, json: run.status === 0 ? (JSON.parse(run.out) as Record<string, any>) : null };
 };
 const base = (m: Machine) => `http://127.0.0.1:${(JSON.parse(readFileSync(join(m.dataDir, 'inbox', 'inbox.json'), 'utf8')) as { port: number }).port}`;
@@ -100,7 +106,7 @@ function link(from: Machine, to: Machine): void {
 }
 
 /** A thread an agent on `m` started, with a file when given, and the person's reply in it (from `m`'s own window route). */
-async function threadOn(m: Machine, subject: string, file?: { name: string; text: string }): Promise<{ id: string; reply: string }> {
+async function threadOn(m: Machine, subject: string, file?: { name: string; text: string }): Promise<{ id: string; reply: string; agent: SimAgent }> {
   const agent = await SimAgent.connect({ binary, env: m.env, name: 'Claude Code', host: 'claude-code', cwd: m.root });
   agents.push(agent);
   const project = scratchProject(join(m.root, 'code'), 'billing-svc');
@@ -111,7 +117,7 @@ async function threadOn(m: Machine, subject: string, file?: { name: string; text
   const health = await read<{ serverSession: string }>(m, '/api/inbox/health');
   const answer = await fetch(`${base(m)}/api/inbox/messages/${id}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ words: reply, idempotency_key: `r-${id}`, serverSession: health.serverSession }) });
   expect(answer.status).toBe(200);
-  return { id, reply };
+  return { id, reply, agent };
 }
 
 /** Every file under a folder whose bytes name `needle`. */
@@ -145,6 +151,7 @@ test.afterAll(async () => {
 });
 
 let onMac = { id: '', reply: '' };
+let fileArgs: Record<string, unknown> = {};
 
 test('1. each computer\'s agent reads the other\'s thread by its id', async () => {
   onMac = await threadOn(macbook, 'Refund webhook');
@@ -167,14 +174,52 @@ test('2. a file of the far thread is listed with its command, and that command s
   const file = (got.json!.thread.messages as { files?: { name: string; fetch: string }[] }[]).flatMap((m) => m.files ?? []).find((f) => f.name === 'limits.md')!;
   expect(file.fetch.startsWith("plannotator inbox call fetch_file '")).toBe(true);
   const args = JSON.parse(file.fetch.slice(file.fetch.indexOf("'") + 1, -1)) as Record<string, unknown>;
+  fileArgs = args;
   const saved = call(studio, 'fetch_file', args);
   expect(saved.status, saved.err).toBe(0);
   expect(String(saved.json!.path).startsWith(join(studio.root, 'tmp'))).toBe(true);
   expect(readFileSync(saved.json!.path, 'utf8')).toBe('# Limits\n100 a minute\n');
 });
 
+test('2b. the fetched file is saved by the CLI, in the folder the CLI was given', () => {
+  // The agent's shell has its own temp folder and working folder; the Inbox's is studio.root/tmp.
+  const shellTmp = join(studio.root, 'agent-tmp');
+  const work = join(studio.root, 'agent-work');
+  mkdirSync(shellTmp, { recursive: true });
+  mkdirSync(work, { recursive: true });
+  const shell = { env: { TMPDIR: shellTmp }, cwd: work };
+  const inFolder = call(studio, 'fetch_file', { ...fileArgs, folder: 'fetched' }, shell);
+  expect(inFolder.status, inFolder.err).toBe(0);
+  expect(inFolder.json!.path).toBe(join(work, 'fetched', 'limits.md'));
+  expect(readFileSync(inFolder.json!.path, 'utf8')).toBe('# Limits\n100 a minute\n');
+  // No folder: a new one in the command's own temp folder, not the Inbox's.
+  const inTemp = call(studio, 'fetch_file', fileArgs, shell);
+  expect(inTemp.status, inTemp.err).toBe(0);
+  expect(String(inTemp.json!.path).startsWith(join(shellTmp, 'plannotator-file-'))).toBe(true);
+  expect(readFileSync(inTemp.json!.path, 'utf8')).toBe('# Limits\n100 a minute\n');
+});
+
 test('3. nothing of the far thread is written to the reading computer\'s data folder', () => {
   expect(filesNaming(studio.dataDir, onMac.reply)).toEqual([]);
+});
+
+test('3b. a read from A leaves B\'s delivery state unchanged', async () => {
+  const waiting = await threadOn(macbook, 'Retry budget');
+  const row = async () => {
+    const list = await read<{ sections: { threads: { thread_id: string; sent: unknown; unread: boolean }[] }[] }>(macbook, '/api/inbox/threads');
+    const found = list.sections.flatMap((s) => s.threads).find((t) => t.thread_id === waiting.id)!;
+    return { sent: found.sent, unread: found.unread };
+  };
+  const before = await row();
+  expect(before.sent).toMatchObject({ checked_at: null });
+  for (const ask of [{ thread_id: waiting.id }, { thread_id: waiting.id, format: 'full' }]) {
+    const got = call(studio, 'read_thread', ask);
+    expect(got.status, got.err).toBe(0);
+  }
+  expect(await row()).toEqual(before);
+  // MacBook's own agent still gets the person's reply.
+  const reply = await waiting.agent.nextReply(waiting.id, 20);
+  expect(reply.body).toContain(waiting.reply);
 });
 
 test('4. a reply into the far thread says plainly it is not available from this computer yet', () => {

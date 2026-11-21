@@ -24,7 +24,6 @@
  *    (`link-back`, `unlink`).
  */
 
-import { isAbsolute } from "node:path";
 import { INBOX_LINKED_MARKS, inboxPullUrlOfKey, inboxRowArchived, isInboxId, type InboxAgentsGroup, type InboxCardWire, type InboxInitiative, type InboxListRow, type InboxMachineAccountsRead, type InboxTagColours } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -1237,12 +1236,12 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const body = await context.readBody(req);
     if (path === "/api/inbox/control/machines/offer") return json(offer({ tailscale: body.tailscale === true }), 201);
     if (path === "/api/inbox/control/machines/link") return json(await link(body), 201);
-    // `plannotator inbox call fetch_file` of a linked machine's message: saved on this computer, its path answered.
+    // `plannotator inbox call fetch_file` of a linked machine's message: its bytes streamed on to the command, which
+    // saves them in its own process. Nothing is written here, and a body's other fields (a folder) are not read.
     if (path === "/api/inbox/control/machines/fetch-file") {
       const id = typeof body.message_id === "string" ? body.message_id.trim() : "";
       if (id && context.holds("messages", id)) throw new InboxError("file_is_local", FAR_READ_REFUSALS.fileLocal(id));
-      const folder = typeof body.folder === "string" && isAbsolute(body.folder) ? body.folder : null;
-      return json({ saved: await agentRead.fetchFile({ message_id: id, file: typeof body.file === "string" ? body.file.trim() : "" }, folder) });
+      return await agentRead.fetchFile({ message_id: id, file: typeof body.file === "string" ? body.file.trim() : "" }, req.signal);
     }
     if (path === "/api/inbox/control/machines/unlink") {
       const target = typeof body.machine === "string" ? body.machine.trim() : "";

@@ -44,13 +44,16 @@ export const INBOX_THREAD_MENTION_WORDS = {
   unreadable: '   It is on another machine: you cannot open it, you have its title only.',
   /** In place of `read`, when the thread is on a linked machine whose Plannotator is too old to share it with agents. */
   needsUpdate: (machine: string) => `   It is on ${machine}, whose Plannotator is too old to share it with you: you have its title only. Updating Plannotator on ${machine} makes it readable.`,
+  /** In place of `read`, when the thread is on this window's machine and the reader's own machine is too old to read it there. */
+  readerNeedsUpdate: (thread: string, reader: string) => `   It is on ${thread}. Plannotator on ${reader}, where you are, is too old to read threads on ${thread}: you have its title only. Updating Plannotator on ${reader} makes it readable.`,
 } as const;
 
 /**
  * Whether the agent a reply goes to can read a mentioned thread: `true` (its Inbox holds it, or reads it from a linked
- * machine), `false` (no link reaches it), or the linked machine that must update first.
+ * machine), `false` (no link reaches it), or which machine must update first: the thread's (`update: "thread"`) or the
+ * reader's own (`update: "reader"`), with both machines' names.
  */
-export type InboxThreadMentionReach = boolean | { needsUpdate: string };
+export type InboxThreadMentionReach = boolean | { update: 'thread' | 'reader'; thread: string; reader: string };
 
 /** The longest title a mention carries (more is cut, with "…"). */
 export const INBOX_THREAD_MENTION_TITLE_MAX = 120;
@@ -215,6 +218,13 @@ export function inboxReplyMentionTitles(body: string, mentions: readonly InboxRe
   return out + body.slice(at);
 }
 
+/** The line for a mention a machine must update before the agent reads it: the thread's machine, or the reader's own. */
+function needsUpdateLine(reach: Exclude<InboxThreadMentionReach, boolean>): string {
+  const thread = oneLine(reach.thread) || 'another machine';
+  const reader = oneLine(reach.reader) || 'your machine';
+  return reach.update === 'thread' ? INBOX_THREAD_MENTION_WORDS.needsUpdate(thread) : INBOX_THREAD_MENTION_WORDS.readerNeedsUpdate(thread, reader);
+}
+
 /**
  * The words the agent reads: each mention's label replaced, at its spot, by its reference, then a blank line and the
  * list, each thread once in the order first mentioned. `readable`: whether the agent's own Inbox can read the thread,
@@ -240,7 +250,7 @@ export function inboxThreadMentionWords(words: string, mentions: readonly InboxR
     const details = W.details(mention);
     if (details) lines.push(W.detailsLine(details));
     const reach = readable(mention);
-    lines.push(reach === true ? W.read(mention.thread_id) : reach === false ? W.unreadable : W.needsUpdate(oneLine(reach.needsUpdate) || 'another machine'));
+    lines.push(reach === true ? W.read(mention.thread_id) : reach === false ? W.unreadable : needsUpdateLine(reach));
   }
   return `${out.trimEnd()}\n\n${lines.join('\n')}`;
 }

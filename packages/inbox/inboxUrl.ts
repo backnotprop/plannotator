@@ -36,14 +36,30 @@ export interface LinkedMachineFacts {
   marks: readonly string[];
   /** It holds a link to this Inbox too (`both_ways`), so its Inbox can call this one's door. */
   both_ways: boolean;
+  /** Its list was read (`list_cursor` not null): until then its marks are not known (an empty list says nothing). */
+  listed: boolean;
+  /** Its line's state (`needs_update`: too old to link at all). */
+  state: string;
 }
 const linkedFacts = new Map<string, LinkedMachineFacts>();
+/** This machine's own name, as the merged list names it. */
+let selfName: string | null = null;
+
+type MachineFactsWire = { id: string; self?: boolean; name: string; marks?: readonly string[]; both_ways?: boolean; list_cursor?: number | null; state?: string };
 
 /** The merged list's machines: each linked one's facts, for what an agent there can read (threadMentions.ts). */
-export function setLinkedMachines(machines: readonly { id: string; self?: boolean; name: string; marks?: readonly string[]; both_ways?: boolean }[] | null | undefined): void {
+export function setLinkedMachines(machines: readonly MachineFactsWire[] | null | undefined): void {
   if (!machines) return;
   linkedFacts.clear();
-  for (const m of machines) if (!m.self && MACHINE_ID.test(m.id)) linkedFacts.set(m.id, { name: m.name, marks: m.marks ?? [], both_ways: m.both_ways === true });
+  for (const m of machines) {
+    if (m.self) selfName = m.name;
+    else if (MACHINE_ID.test(m.id)) linkedFacts.set(m.id, { name: m.name, marks: m.marks ?? [], both_ways: m.both_ways === true, listed: m.list_cursor !== null && m.list_cursor !== undefined, state: m.state ?? '' });
+  }
+}
+
+/** This machine's name as the merged list last said it, or null. */
+export function selfMachineName(): string | null {
+  return selfName;
 }
 
 /** A linked machine's facts as the merged list last said them, or null (not linked, or not heard of yet). */
@@ -108,6 +124,7 @@ export function localRoute(url: string): string {
 /** Tests only: forget every machine. */
 export function resetMachineRoutes(): void {
   selfMachine = null;
+  selfName = null;
   linkedFacts.clear();
   owners.clear();
   local.clear();

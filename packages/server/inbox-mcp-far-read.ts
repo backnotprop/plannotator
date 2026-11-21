@@ -5,7 +5,7 @@
  */
 
 import type { InboxStore } from "@plannotator/shared/inbox/store";
-import { FAR_READ_WORDS, farThreadReadText, machineNameWords, type FarReadAnswer, type FarReadAsk } from "./inbox-far-read";
+import { FAR_READ_WORDS, farAnswerCleaned, farThreadReadText, machineNameWords, type FarReadAnswer, type FarReadAsk } from "./inbox-far-read";
 import { ok, okComplete, type ToolResult } from "./inbox-mcp-result";
 
 export interface InboxFarReadMcpContext {
@@ -37,15 +37,18 @@ export async function farThreadRead(context: InboxFarReadMcpContext, input: FarR
   if (!context.readOnMachine || context.cloudAgent || !farCandidate(context.store, input)) return null;
   const far = await context.readOnMachine(input);
   if (!far) return null;
-  const { answer, machine } = far;
+  const { machine } = far;
+  // What this computer prints of the far read: no far command, escape or control character (inbox-far-read.ts).
+  const answer = farAnswerCleaned(far.answer);
   const url = `${context.baseUrl()}#thread=${answer.thread_id}`;
   const where = { id: machine, name: far.name };
   if ("full" in answer) {
     const thread = answer.full as { messages: { author?: { kind?: string } }[]; subject?: string | null; resolved_at?: string | null };
     const replies = thread.messages.filter((m) => m.author?.kind === "person").length;
     const n = thread.messages.length;
+    const subject = typeof thread.subject === "string" ? thread.subject.replace(/\s+/g, " ").trim() : "";
     return ok(
-      `${FAR_READ_WORDS.on(machineNameWords(far.name))} Thread ${answer.thread_id}${thread.subject ? ` (${thread.subject})` : ""}: ${n} message${n === 1 ? "" : "s"}, ${replies} from the person${thread.resolved_at ? ", resolved" : ""}.`,
+      `${FAR_READ_WORDS.on(machineNameWords(far.name))} Thread ${answer.thread_id}${subject ? ` (${subject})` : ""}: ${n} message${n === 1 ? "" : "s"}, ${replies} from the person${thread.resolved_at ? ", resolved" : ""}.`,
       { thread, url, machine: where },
     );
   }

@@ -1,7 +1,9 @@
 /**
- * An agent on this computer reads a linked machine's thread, and saves one of its files here (inbox-far-read.ts says
- * why and what the other machine answers). In process, from read_thread and `plannotator inbox call fetch_file`:
- * never through the forward's window-only routes, and never written to disk but the file an agent asked to save.
+ * An agent on this computer reads a linked machine's thread, and fetches one of its files (inbox-far-read.ts says why
+ * and what the other machine answers). In process, from read_thread and `plannotator inbox call fetch_file`: never
+ * through the forward's window-only routes. This Inbox writes nothing of either to disk: a fetched file's bytes stream
+ * on to the command, which saves them in its own process (apps/hook/server/inbox-call-far-fetch.ts), so the agent's
+ * own sandbox decides where it may write.
  *
  * Which machine: the one whose list names the thread; for an id no list names (an archived thread, a message id),
  * every online machine that takes `agent-read` is asked at once, and the one that holds it answers. Each ask is
@@ -9,13 +11,22 @@
  * answer (no `agent-read` mark, or its door does not know the route) is named, with what to do.
  */
 
-import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, unlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { isDotenvFileName } from "@plannotator/core/annotatable";
-import { INBOX_UPLOAD_MAX_BYTES, isInboxId } from "@plannotator/core/inbox-types";
-import { newSavedFile, savedFileName } from "@plannotator/shared/inbox/saved-file";
+import { isInboxId } from "@plannotator/core/inbox-types";
+import { inboxStopNoticeReply } from "@plannotator/shared/inbox/connection";
+import {
+  FETCHED_FILE_MACHINE_HEADER,
+  FETCHED_FILE_MAX_BYTES,
+  FETCHED_FILE_NAME_HEADER,
+  FETCHED_FILE_SHA_HEADER,
+  FETCHED_FILE_SIZE_HEADER,
+  FETCHED_FILE_WORDS,
+  fetchedNameHeader,
+  fetchedNameOf,
+  fetchedShaOf,
+  fetchedSizeOf,
+  fetchedTypeOf,
+  savedNameIsDotenv,
+} from "@plannotator/shared/inbox/saved-file";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { AGENT_FILE_NAME_HEADER, AGENT_FILE_ROUTE, AGENT_FILE_SHA_HEADER, AGENT_READ_ROUTE, farReadQuery, machineNameWords, type FarReadAnswer, type FarReadAsk } from "./inbox-far-read";
 import { readCapped, type PeerLink } from "./inbox-peer-link";
@@ -26,7 +37,6 @@ export const FAR_READ_WAIT_MS = 5_000;
 const FAR_READ_MAX_BYTES = 16 * 1024 * 1024;
 /** A file's bytes that stop arriving for this long end the fetch. */
 const FAR_FILE_STALL_MS = 30_000;
-const MB = 1024 * 1024;
 
 /** The mark a machine's list carries when its agents' reads of its threads are answered (`INBOX_LINKED_MARKS`). */
 export const AGENT_READ_MARK = "agent-read";
@@ -40,6 +50,7 @@ export const FAR_READ_REFUSALS = {
   notHere: (id: string) => `No thread ${id} on this computer or the computers linked to it.`,
   fileNotHere: (id: string) => `No message ${id} on this computer or the computers linked to it.`,
   fileLocal: (id: string) => `${id} is on this computer: read_thread lists its files with their paths here.`,
+  fileUnreadable: (name: string) => `${name} sent a file this Inbox cannot use. Nothing was saved; fetch it again.`,
   conflict: "Two linked machines both claim this thread, so it opens on neither.",
 } as const;
 
@@ -55,25 +66,45 @@ export interface MachineAgentReadDeps {
   /** A linked machine's name, as this Inbox calls it. */
   nameOf: (id: string) => string;
   waitMs?: number;
+  /** Tests: how long a file's bytes may stop arriving. */
+  stallMs?: number;
 }
 
-/** A file saved here for an agent: where, and what it is. */
-export interface FarSavedFile {
-  path: string;
-  name: string;
-  size: number;
-  sha256: string;
-  content_type: string;
-  machine: string;
-}
-
-async function refusalOf(response: Response): Promise<{ code: string; error: string }> {
-  const text = await readCapped(response, 64 * 1024).catch(() => null);
+/** A body as text, at most `maxBytes` and read for at most `waitMs`, else null: its stream is let go either way. */
+async function readBounded(response: Response, maxBytes: number, waitMs: number): Promise<string | null> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const deadline = Date.now() + waitMs;
+  const chunks: Uint8Array[] = [];
+  let size = 0;
   try {
-    const body = JSON.parse(text ?? "") as { code?: unknown; error?: unknown };
-    return { code: typeof body.code === "string" ? body.code : "machine_refused", error: typeof body.error === "string" ? body.error : `The other computer answered ${response.status}.` };
+    for (;;) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const late = new Promise<"late">((resolve) => (timer = setTimeout(() => resolve("late"), Math.max(0, deadline - Date.now()))));
+      const next = await Promise.race([reader.read(), late]).finally(() => clearTimeout(timer));
+      if (next === "late") break;
+      if (next.done) return Buffer.concat(chunks).toString("utf8");
+      size += next.value.byteLength;
+      if (size > maxBytes) break;
+      chunks.push(next.value);
+    }
   } catch {
-    return { code: "machine_refused", error: `The other computer answered ${response.status}.` };
+    // The line dropped: no words.
+  }
+  void reader.cancel().catch(() => {});
+  return null;
+}
+
+/** A refusal's code and words, read for at most `waitMs`: a far side that sends its headers and then stalls never holds the agent. */
+async function refusalOf(response: Response, waitMs: number): Promise<{ code: string; error: string }> {
+  const plain = { code: "machine_refused", error: `The other computer answered ${response.status}.` };
+  const text = await readBounded(response, 64 * 1024, waitMs);
+  if (text === null) return plain;
+  try {
+    const body = JSON.parse(text) as { code?: unknown; error?: unknown };
+    return { code: typeof body.code === "string" ? body.code : plain.code, error: typeof body.error === "string" ? body.error : plain.error };
+  } catch {
+    return plain;
   }
 }
 
@@ -94,8 +125,12 @@ function maybeWords(outcomes: readonly Outcome[]): string {
     .join(" ");
 }
 
+/** An id read_thread may name a far message by: a message id, or a stop notice's (`<reply>-stop`, resolved there). */
+const farMessageId = (id: string): boolean => isInboxId("msg", inboxStopNoticeReply(id) ?? id);
+
 export function createMachineAgentRead(deps: MachineAgentReadDeps) {
   const waitMs = deps.waitMs ?? FAR_READ_WAIT_MS;
+  const stallMs = deps.stallMs ?? FAR_FILE_STALL_MS;
   const linked = () => [...deps.peers()].filter((peer) => peer.state !== "revoked");
   const nameOf = (peer: PeerLink) => machineNameWords(deps.nameOf(peer.id));
 
@@ -107,15 +142,21 @@ export function createMachineAgentRead(deps: MachineAgentReadDeps) {
       const signal = AbortSignal.timeout(waitMs);
       const response = await peer.request(AGENT_READ_ROUTE, farReadQuery(ask), { method: "GET", headers: {}, signal, timeoutMs: waitMs });
       if (response.status === 404) {
-        const { code, error } = await refusalOf(response);
+        const { code, error } = await refusalOf(response, waitMs);
         if (routeUnknown(code)) return { kind: "older", name };
-        return code === "thread_not_found" || code === "message_not_found" ? { kind: "missing" } : { kind: "refused", code, error };
+        // That machine has no such thread (or, asked by a message id alone, no such message): another may. A message
+        // missing from a thread it holds is its own refusal, as a local read says it.
+        if (code === "thread_not_found" || (code === "message_not_found" && !ask.thread_id)) return { kind: "missing" };
+        return { kind: "refused", code, error };
       }
-      if (response.status >= 500) return { kind: "away", name };
-      if (!response.ok) return { kind: "refused", ...(await refusalOf(response)) };
+      if (response.status >= 500) {
+        void response.body?.cancel().catch(() => {});
+        return { kind: "away", name };
+      }
+      if (!response.ok) return { kind: "refused", ...(await refusalOf(response, waitMs)) };
       const text = await readCapped(response, FAR_READ_MAX_BYTES);
       const answer = text === null ? null : (JSON.parse(text) as FarReadAnswer);
-      const whole = answer && typeof answer.thread_id === "string" && ("full" in answer ? !!answer.full && Array.isArray(answer.full.messages) : !!answer.result?.thread && Array.isArray(answer.order) && Array.isArray(answer.lines));
+      const whole = answer && isInboxId("msg", answer.thread_id) && ("full" in answer ? !!answer.full && Array.isArray(answer.full.messages) : !!answer.result?.thread && Array.isArray(answer.result.thread.messages) && Array.isArray(answer.order) && Array.isArray(answer.lines));
       return whole ? { kind: "found", peer, answer: answer! } : { kind: "refused", code: "machine_answer_unreadable", error: `${name} sent a read this Inbox cannot use.` };
     } catch {
       return { kind: "away", name };
@@ -128,7 +169,7 @@ export function createMachineAgentRead(deps: MachineAgentReadDeps) {
    */
   const readThread = async (ask: FarReadAsk): Promise<{ machine: string; name: string; answer: FarReadAnswer } | null> => {
     const id = ask.thread_id ?? ask.message_id;
-    if (!id || !isInboxId("msg", id)) return null;
+    if (!id || !(ask.thread_id ? isInboxId("msg", id) : farMessageId(id))) return null;
     const peers = linked();
     if (peers.length === 0) return null;
     const listed = ask.thread_id ? peers.filter((peer) => peer.list?.rows.some((row) => row.thread_id === ask.thread_id)) : [];
@@ -151,11 +192,11 @@ export function createMachineAgentRead(deps: MachineAgentReadDeps) {
   };
 
   /**
-   * `plannotator inbox call fetch_file` of a message on a linked machine: its bytes saved in `folder` (or a new temp
-   * folder), checked against the size and SHA-256 that machine named. At most 100 MB; a dotenv name is refused here
-   * too, whatever that machine sent. A failure leaves no file behind.
+   * `plannotator inbox call fetch_file` of a message on a linked machine: that machine's answer, streamed on as it
+   * arrives (`relayFile`), never written here. `signal`: the command's request, so a command that gave up stops the
+   * far fetch too.
    */
-  const fetchFile = async (args: { message_id: string; file: string }, folder: string | null): Promise<FarSavedFile> => {
+  const fetchFile = async (args: { message_id: string; file: string }, signal?: AbortSignal): Promise<Response> => {
     if (!isInboxId("msg", args.message_id)) throw new InboxError("validation_error", "message_id: the id of the message the file is on, as read_thread shows it.");
     if (!args.file) throw new InboxError("validation_error", "file: one of the message's files, as read_thread lists it.");
     const peers = linked();
@@ -165,87 +206,97 @@ export function createMachineAgentRead(deps: MachineAgentReadDeps) {
     const answers = await Promise.all(
       askable.map(async (peer) => {
         try {
-          return { peer, response: await peer.request(AGENT_FILE_ROUTE, query, { method: "GET", headers: {}, timeoutMs: waitMs }) };
+          return { peer, response: await peer.request(AGENT_FILE_ROUTE, query, { method: "GET", headers: {}, timeoutMs: waitMs, ...(signal ? { signal } : {}) }) };
         } catch {
           return { peer, response: null };
         }
       }),
     );
     const hit = answers.find((a) => a.response?.ok);
-    if (hit) for (const a of answers) if (a !== hit) void a.response?.body?.cancel().catch(() => {});
+    // Every answer but the one used is let go: a refusal's body is read below only when no machine has the file.
+    for (const a of answers) if (a !== hit && (hit || !a.response || a.response.status >= 500)) void a.response?.body?.cancel().catch(() => {});
+    if (signal?.aborted) {
+      void hit?.response?.body?.cancel().catch(() => {});
+      throw new InboxError("fetch_cancelled", "The fetch was given up.");
+    }
     if (!hit) {
       const notAsked: Outcome[] = [];
-      for (const a of answers) {
-        if (!a.response || a.response.status >= 500) {
-          void a.response?.body?.cancel().catch(() => {});
-          notAsked.push({ kind: "away", name: nameOf(a.peer) });
-          continue;
-        }
-        const { code, error } = await refusalOf(a.response);
-        if (routeUnknown(code)) notAsked.push({ kind: "older", name: nameOf(a.peer) });
-        else if (code !== "message_not_found") throw new InboxError(code, error);
+      const refusals = await Promise.all(answers.map(async (a) => (!a.response || a.response.status >= 500 ? null : await refusalOf(a.response, waitMs))));
+      for (const [i, a] of answers.entries()) {
+        const refusal = refusals[i];
+        if (!refusal) notAsked.push({ kind: "away", name: nameOf(a.peer) });
+        else if (routeUnknown(refusal.code)) notAsked.push({ kind: "older", name: nameOf(a.peer) });
+        else if (refusal.code !== "message_not_found") throw new InboxError(refusal.code, refusal.error);
       }
       const notAnswered: Outcome[] = [...stops.filter((s): s is Outcome => s !== null), ...notAsked];
       throw new InboxError("message_not_found", `${FAR_READ_REFUSALS.fileNotHere(args.message_id)}${notAnswered.length > 0 ? ` ${maybeWords(notAnswered)}` : ""}`);
     }
-    return saveAnswer(hit.response!, hit.peer.id, folder);
+    return relayFile(hit.response!, hit.peer.id, nameOf(hit.peer), stallMs);
   };
 
   return { readThread, fetchFile };
 }
 
-/** A far file's answer saved as a new file: checked as it streams (cap, stall), then against the named SHA-256 and size. */
-export async function saveAnswer(response: Response, machine: string, folder: string | null): Promise<FarSavedFile> {
-  let name = "file";
-  try {
-    name = decodeURIComponent(response.headers.get(AGENT_FILE_NAME_HEADER) ?? "") || "file";
-  } catch {
-    name = "file";
-  }
-  const sha256 = (response.headers.get(AGENT_FILE_SHA_HEADER) ?? "").toLowerCase();
-  const declared = Number(response.headers.get("content-length") ?? NaN);
-  const contentType = response.headers.get("content-type") ?? "application/octet-stream";
+/**
+ * A far file's answer passed on to the command that saves it: refused before a byte goes when its name is a dotenv
+ * one, its length is past 100 MB or not said, or its SHA-256 is not one; then streamed as it arrives (no buffering),
+ * cut off past its length or 100 MB, or after `stallMs` with no bytes. Its name, SHA-256, length and type go in
+ * headers this Inbox builds (inbox-call-far-fetch.ts reads them), never a far header as it came.
+ */
+export function relayFile(response: Response, machine: string, machineName: string, stallMs = FAR_FILE_STALL_MS): Response {
+  const name = fetchedNameOf(response.headers.get(AGENT_FILE_NAME_HEADER));
+  const sha256 = fetchedShaOf(response.headers.get(AGENT_FILE_SHA_HEADER));
+  const declared = fetchedSizeOf(response.headers.get(FETCHED_FILE_SIZE_HEADER) ?? response.headers.get("content-length"));
   const cancel = () => void response.body?.cancel().catch(() => {});
-  if (isDotenvFileName(name)) {
+  if (savedNameIsDotenv(name)) {
     cancel();
-    throw new InboxError("attachment_refused", `${name}: the Inbox does not hand out a .env file.`);
+    throw new InboxError("attachment_refused", FETCHED_FILE_WORDS.dotenv(name));
   }
-  if (Number.isFinite(declared) && declared > INBOX_UPLOAD_MAX_BYTES) {
+  if (declared !== null && declared > FETCHED_FILE_MAX_BYTES) {
     cancel();
-    throw new InboxError("file_too_large", `${name} is ${Math.ceil(declared / MB)} MB; an agent fetches a file of at most ${INBOX_UPLOAD_MAX_BYTES / MB} MB.`);
+    throw new InboxError("file_too_large", FETCHED_FILE_WORDS.tooLarge(name, declared));
   }
-  const dir = folder ?? (await mkdtemp(join(tmpdir(), "plannotator-file-")));
-  await mkdir(dir, { recursive: true });
-  const target = await newSavedFile(dir, savedFileName(name));
-  const fail = async (error: InboxError): Promise<never> => {
+  if (declared === null || sha256 === null || !response.body) {
     cancel();
-    await target.handle.close().catch(() => {});
-    await unlink(target.path).catch(() => {});
-    throw error;
-  };
-  const hash = createHash("sha256");
+    throw new InboxError("machine_answer_unreadable", FAR_READ_REFUSALS.fileUnreadable(machineName));
+  }
+  const reader = response.body.getReader();
   let size = 0;
-  const reader = response.body?.getReader();
-  try {
-    for (;;) {
-      if (!reader) break;
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const stalled = new Promise<"stalled">((resolve) => (timer = setTimeout(() => resolve("stalled"), FAR_FILE_STALL_MS)));
-      const next = await Promise.race([reader.read(), stalled]).finally(() => clearTimeout(timer));
-      if (next === "stalled") return await fail(new InboxError("machine_offline", `The other computer stopped sending ${name}. Nothing was saved; fetch it again.`));
-      if (next.done) break;
-      size += next.value.byteLength;
-      if (size > INBOX_UPLOAD_MAX_BYTES) return await fail(new InboxError("file_too_large", `${name} is over ${INBOX_UPLOAD_MAX_BYTES / MB} MB; an agent fetches a file of at most ${INBOX_UPLOAD_MAX_BYTES / MB} MB.`));
-      hash.update(next.value);
-      await target.handle.write(next.value);
-    }
-  } catch {
-    return await fail(new InboxError("machine_offline", `The other computer stopped sending ${name}. Nothing was saved; fetch it again.`));
-  }
-  const got = hash.digest("hex");
-  if ((Number.isFinite(declared) && size !== declared) || (sha256 && got !== sha256)) {
-    return await fail(new InboxError("fetch_mismatch", `${name} arrived as ${size} bytes with SHA-256 ${got}, not as the other computer named it. Nothing was saved; fetch it again.`));
-  }
-  await target.handle.close();
-  return { path: target.path, name, size, sha256: got, content_type: contentType, machine };
+      const stalled = new Promise<"stalled">((resolve) => (timer = setTimeout(() => resolve("stalled"), stallMs)));
+      try {
+        const next = await Promise.race([reader.read(), stalled]);
+        if (next === "stalled") throw new InboxError("machine_offline", FETCHED_FILE_WORDS.stopped(name));
+        if (next.done) {
+          if (size !== declared) throw new InboxError("machine_offline", FETCHED_FILE_WORDS.stopped(name));
+          controller.close();
+          return;
+        }
+        size += next.value.byteLength;
+        if (size > declared || size > FETCHED_FILE_MAX_BYTES) throw new InboxError("file_too_large", FETCHED_FILE_WORDS.over(name));
+        controller.enqueue(next.value);
+      } catch (error) {
+        void reader.cancel().catch(() => {});
+        controller.error(error);
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    cancel() {
+      void reader.cancel().catch(() => {});
+    },
+  });
+  return new Response(body, {
+    headers: {
+      "Content-Type": fetchedTypeOf(response.headers.get("content-type")),
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+      [FETCHED_FILE_NAME_HEADER]: fetchedNameHeader(name),
+      [FETCHED_FILE_SHA_HEADER]: sha256,
+      [FETCHED_FILE_SIZE_HEADER]: String(declared),
+      [FETCHED_FILE_MACHINE_HEADER]: machine,
+    },
+  });
 }

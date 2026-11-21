@@ -19,10 +19,13 @@
  * own window's link in place of B's. Asking B, and saving a fetched file, is inbox-machine-agent-read.ts.
  */
 
+import { inboxStopNoticeReply } from "@plannotator/shared/inbox/connection";
+import { FETCHED_FILE_NAME_HEADER, FETCHED_FILE_SHA_HEADER, FETCHED_FILE_SIZE_HEADER, fetchedNameHeader } from "@plannotator/shared/inbox/saved-file";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxViewingLine } from "@plannotator/shared/inbox/uploads";
-import { inboxAgentFilesOf, openInboxAgentFile } from "./inbox-agent-files";
+import { isInboxAttachmentId, isInboxId } from "@plannotator/core/inbox-types";
+import { inboxAgentFetchCommand, inboxAgentFilesOf, openInboxAgentFile, type AgentFile } from "./inbox-agent-files";
 import { windowedThread, windowedThreadText, type ThreadWindowResult } from "./inbox-mcp-read";
 import { threadPullsText, type InboxPullsMcpContext } from "./inbox-mcp-pulls";
 import { threadStepsText } from "./inbox-mcp-steps";
@@ -32,8 +35,8 @@ export const AGENT_READ_ROUTE = "agent-read";
 export const AGENT_FILE_ROUTE = "agent-file";
 
 /** The headers a fetched file's name and SHA-256 ride in (its type and length in the usual ones). */
-export const AGENT_FILE_NAME_HEADER = "X-Plannotator-File-Name";
-export const AGENT_FILE_SHA_HEADER = "X-Plannotator-File-Sha256";
+export const AGENT_FILE_NAME_HEADER = FETCHED_FILE_NAME_HEADER;
+export const AGENT_FILE_SHA_HEADER = FETCHED_FILE_SHA_HEADER;
 
 /** read_thread's options, as the reader's Inbox passes them on. */
 export interface FarReadAsk {
@@ -51,22 +54,40 @@ export type FarReadAnswer =
   | { thread_id: string; result: ThreadWindowResult; order: string[]; lines: string[]; steps?: unknown[]; pulls?: unknown[] }
   | { thread_id: string; full: Record<string, unknown> & { messages: unknown[] } };
 
-/** The ask as a door query: only what read_thread takes. */
+/**
+ * The ask as a door query: only what read_thread takes. A bound keeps its type: a number goes as `#<number>`, a string
+ * as it is, so the owner reads `before: 1.5` and `before: "1.5"` exactly as a local read_thread would.
+ */
 export function farReadQuery(ask: FarReadAsk): string {
   const query = new URLSearchParams();
   for (const key of ["thread_id", "message_id", "before", "after", "format"] as const) {
     const value = ask[key];
-    if (value !== undefined && value !== "") query.set(key, String(value));
+    if (typeof value === "number") query.set(key, `#${value}`);
+    else if (value !== undefined && value !== "") query.set(key, value);
   }
   if (ask.limit !== undefined) query.set("limit", String(ask.limit));
   if (ask.expand?.length) query.set("expand", ask.expand.join(","));
   return `?${query}`;
 }
 
-/** A bound as read_thread takes it: a message id, or a cursor. */
-const boundOf = (value: string | null): string | number | undefined => (value === null || value === "" ? undefined : /^\d{1,15}$/.test(value) ? Number(value) : value);
+/** A bound as the reader's read_thread took it: `#<number>` a cursor (a number there), anything else a string. */
+function boundOf(value: string | null, name: string): string | number | undefined {
+  if (value === null || value === "") return undefined;
+  if (!value.startsWith("#")) return value;
+  const n = Number(value.slice(1));
+  if (value.length === 1 || !Number.isFinite(n) || n < 0) throw new InboxError("validation_error", `${name}: a message id of this thread, or a cursor.`);
+  return n;
+}
 
-function askOf(url: URL): FarReadAsk {
+/** A message id as read_thread resolves it: a stop notice's id (`<reply>-stop`) is its reply's (`ownMessageId` in inbox-mcp.ts). */
+function ownId<T extends string | number | undefined>(store: InboxStore, id: T): T {
+  if (typeof id !== "string") return id;
+  const reply = inboxStopNoticeReply(id);
+  return (reply && store.message(reply) ? reply : id) as T;
+}
+
+/** The ask from the door's query, its ids resolved as the local read resolves them (inbox-mcp.ts's read_thread). */
+function askOf(store: InboxStore, url: URL): FarReadAsk {
   const q = url.searchParams;
   const limit = q.get("limit");
   const n = limit === null ? undefined : Number(limit);
@@ -74,11 +95,11 @@ function askOf(url: URL): FarReadAsk {
   const expand = q.get("expand");
   return {
     thread_id: q.get("thread_id") || undefined,
-    message_id: q.get("message_id") || undefined,
+    message_id: ownId(store, q.get("message_id") || undefined),
     ...(n !== undefined ? { limit: n } : {}),
-    ...(expand ? { expand: expand.split(",").filter(Boolean) } : {}),
-    before: boundOf(q.get("before")),
-    after: boundOf(q.get("after")),
+    ...(expand ? { expand: expand.split(",").filter(Boolean).map((id) => ownId(store, id)) } : {}),
+    before: ownId(store, boundOf(q.get("before"), "before")),
+    after: ownId(store, boundOf(q.get("after"), "after")),
     ...(q.get("format") === "full" ? { format: "full" as const } : {}),
   };
 }
@@ -116,7 +137,7 @@ const refusal = (error: unknown): Response => {
 export function agentReadDoorAnswer(host: AgentReadHost, url: URL): Response {
   try {
     const { store } = host;
-    const ask = askOf(url);
+    const ask = askOf(store, url);
     const threadId = threadOfAsk(store, ask);
     if (ask.format === "full") {
       const records = store.agentThread(threadId, null);
@@ -180,8 +201,10 @@ export async function agentFileDoorAnswer(store: InboxStore, url: URL): Promise<
         "Content-Length": String(opened.size),
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
-        [AGENT_FILE_NAME_HEADER]: encodeURIComponent(opened.name),
+        [AGENT_FILE_NAME_HEADER]: fetchedNameHeader(opened.name),
         [AGENT_FILE_SHA_HEADER]: opened.sha256,
+        // Its length again, where no proxy on the way rewrites it.
+        [FETCHED_FILE_SIZE_HEADER]: String(opened.size),
       },
     });
   } catch (error) {
@@ -199,6 +222,55 @@ export const FAR_READ_WORDS = {
 
 /** A machine's name on one line, for the words. */
 export const machineNameWords = (name: string): string => name.replace(/[\p{Cc}\p{Zl}\p{Zp}\p{Cf}]+/gu, " ").replace(/\s+/g, " ").trim().slice(0, 80) || "another computer";
+
+/** Terminal escapes (CSI, OSC and the short ones, 7- and 8-bit): a far string never carries one into what this computer prints. */
+const ESCAPES = /\x1b\[[0-?]*[ -/]*[@-~]|\x9b[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b[@-_]?/g;
+/** Control characters but a line break and a tab. */
+const CONTROLS = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g;
+/** On one line: no control character, line break or line separator at all. */
+const oneLine = (text: string): string => text.replace(ESCAPES, "").replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ").trim();
+
+/** The thread's own words (a message's body, its first words), printed as a local read prints them. */
+const CONTENT_KEYS = new Set(["body", "words"]);
+
+/** Every far string but the thread's own words with no terminal escape and no control character but a line break or tab. */
+function cleanStrings(value: unknown, key = ""): unknown {
+  if (typeof value === "string") return CONTENT_KEYS.has(key) ? value : value.replace(ESCAPES, "").replace(CONTROLS, "");
+  if (Array.isArray(value)) return value.map((item) => cleanStrings(item));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, cleanStrings(v, k)]));
+  return value;
+}
+
+/** A file id read_thread lists: an attachment's `att_` id, or a person's drawing by its name. */
+const isFileId = (file: unknown): file is string => isInboxAttachmentId(file) || (typeof file === "string" && /^[0-9a-f]{64}\.(png|jpg|webp)$/.test(file));
+
+/**
+ * A far message's files as this computer lists them: only ids that read as one, each command rebuilt here from the
+ * message id and the file id (never the far one), and its name, kind and path (the owner's, inert text: the file is
+ * reached by the command) each on one line.
+ */
+function farFiles(messageId: unknown, files: unknown): AgentFile[] {
+  if (!Array.isArray(files) || !isInboxId("msg", messageId)) return [];
+  return files.flatMap((f: Partial<AgentFile>) =>
+    f && isFileId(f.file)
+      ? [{ file: f.file, name: oneLine(String(f.name ?? "")) || "file", kind: oneLine(String(f.kind ?? "")) || "file", size: typeof f.size === "number" && Number.isFinite(f.size) && f.size >= 0 ? f.size : 0, path: oneLine(String(f.path ?? "")), fetch: inboxAgentFetchCommand(messageId, f.file) }]
+      : [],
+  );
+}
+
+/**
+ * B's answer as this computer prints it: what a local read would print of the same thread. Its words as they are
+ * (a local read prints a body as it was sent), every other string with no terminal escape or control character, and
+ * each file's command made here.
+ */
+export function farAnswerCleaned<T extends FarReadAnswer>(answer: T): T {
+  const clean = cleanStrings(answer) as T;
+  const messages = "full" in clean ? (clean.full.messages as Record<string, unknown>[]) : (clean.result?.thread?.messages as unknown as Record<string, unknown>[] | undefined);
+  for (const message of messages ?? []) {
+    if (message && typeof message === "object" && "files" in message) message.files = farFiles(message.id, message.files);
+  }
+  return clean;
+}
 
 /** A far windowed read as the local read's text: the line that says where, then exactly what a local read prints. */
 export function farThreadReadText(answer: Extract<FarReadAnswer, { result: unknown }>, machine: string, url: string): { text: string; result: ThreadWindowResult } {
