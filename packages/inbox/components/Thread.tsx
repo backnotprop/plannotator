@@ -25,6 +25,7 @@ import { annotationOf, attachmentFeedback, attachmentImageUrl, isFileComment, OW
 import { withPictures } from '../commentPictureFiles';
 import { CommentPictures } from '../commentPictures';
 import { closedByArchive, fileQuestionRecords, type FileQuestions } from '../fileQuestions';
+import { ArchivedFoot } from '../parts/ArchivedFoot';
 import { ThreadMeta } from '../parts/ThreadMeta';
 import { replyViewingOf } from '../replyViewing';
 import { AttachmentTiles, changedCount } from './AttachmentTiles';
@@ -5503,28 +5504,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           </div>
         )}
         {resolved ? (
-          <div className="ib-acts">
-            {/* An agent moved this thread's questions to another thread and archived it (resolve_message's moved_to). */}
-            {root.moved_to ? (
-              <span className="ib-st" data-moved-to={root.moved_to.thread_id}>
-                Archived. Its questions moved to{' '}
-                {/* Its name now while it is open (served `open`), else the subject it had when they moved, unlinked. */}
-                {root.moved_to.open ? (
-                  <a className="ib-lnk" href={`#thread=${encodeURIComponent(root.moved_to.thread_id)}`}>
-                    {root.moved_to.name || root.moved_to.subject || 'another thread'}
-                  </a>
-                ) : (
-                  root.moved_to.subject || 'another thread'
-                )}
-                .
-              </span>
-            ) : (
-              <span className="ib-st">Archived. The next message from {asker} starts a new thread.</span>
-            )}
-            <button type="button" className="ib-btn" onClick={() => void resolve(false)}>
-              Unarchive
-            </button>
-          </div>
+          <ArchivedFoot movedTo={root.moved_to} asker={asker} onUnarchive={() => void resolve(false)} />
         ) : guard && staleQuestions.length > 0 ? (
           <StaleGuard
             ref={guardRef}
