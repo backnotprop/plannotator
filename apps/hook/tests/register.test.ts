@@ -13,6 +13,8 @@ const SESSION = { surface: 'terminal', isInteractive: true, cwd: '/work' } as co
 /** What the engine names a plugin's registered tool (the mock answers with this). */
 const TOOL_PREFIX = 'mcp__plugin_plannotator_tools__'
 const TOOL = `${TOOL_PREFIX}plannotator`
+/** The Inbox's gate (packages/shared/inbox/turned-on.ts): the person's own `plannotator inbox` writes it. */
+const TURNED_ON = '/home/me/.plannotator/inbox/turned-on'
 
 /** The world beneath the mod: a session, a file map, and a CLI that comes up at once. */
 function world(
@@ -38,9 +40,12 @@ function world(
     /** Holds every `$.tool.register` until it settles; `onRegister` runs as each one arrives. */
     toolRegistered?: Promise<void>
     onRegister?: (name: string) => void
+    /** The person never ran `plannotator inbox` here: no `inbox/turned-on` mark (by default there is one). */
+    noMark?: boolean
   } = {},
 ) {
   const files = options.files ?? new Map<string, string>()
+  if (!options.noMark && !files.has(TURNED_ON)) files.set(TURNED_ON, '{"on":true,"by":"command"}')
   const runs: string[][] = []
   const submits: string[] = []
   const logs: string[] = []
@@ -636,8 +641,31 @@ describe('register', () => {
     // Every action a real Inbox offers, in the contract's order (INBOX_TOOL_ACTIONS).
     expect(registered?.inputSchema.properties.action.enum).toEqual(['send_message', 'read_thread', 'search', 'resolve_message', 'snooze_thread', 'thread_pulls', 'submit_guide', 'get_guide_brief'])
     expect(calls).toEqual([])
-    expect([...w.files.keys()].filter((path) => path.includes('/inbox'))).toEqual([])
+    expect([...w.files.keys()].filter((path) => path.includes('/inbox') && path !== TURNED_ON)).toEqual([])
     expect(w.runs.filter((argv) => argv.includes('inbox'))).toEqual([])
+  })
+
+  // The Inbox is off until the person runs it (inbox-turned-on.ts): no tool, no reminder, nothing asked or started.
+  test('the person never ran plannotator inbox here: no plannotator_inbox, no reminder, nothing run', async ($: any, on: any) => {
+    const calls: { url: string; body: any }[] = []
+    const w = world(on, { fetch: inbox(TOOLS, calls), noMark: true })
+    await $.session.start(SESSION)
+    await $.prompt.submit({ text: 'Refactor the handler.' })
+
+    expect(w.tools.map((t) => t.name)).toEqual(['plannotator'])
+    expect(w.contexts).toEqual([null])
+    expect(calls).toEqual([])
+    expect(w.runs.filter((argv) => argv.includes('inbox'))).toEqual([])
+    expect(w.files.has(TURNED_ON)).toBe(false)
+  })
+
+  // An Inbox that ran before the mark, or that an older plannotator started (it writes no mark): on, written once.
+  test('an Inbox ran here with no mark (inbox.json from before, or an older plannotator): plannotator_inbox, and the mark written on', async ($: any, on: any) => {
+    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []), noMark: true })
+    await $.session.start(SESSION)
+
+    expect(w.tools.map((t) => t.name)).toEqual(['plannotator_inbox', 'plannotator'])
+    expect(JSON.parse(w.files.get(TURNED_ON)!)).toMatchObject({ on: true, by: 'update-existing' })
   })
 
   test('the first plannotator_inbox call with no Inbox yet starts one with plannotator inbox --background', async ($: any, on: any) => {
@@ -1551,5 +1579,32 @@ describe("Claude Code's guard from 2.1.326 (early run)", () => {
     await $.tool.describe({ tool: 'mcp__org_tools__lookup', description: 'Looks a record up.', provider: { plugin: 'matcher-probe', tier: 'user' } })
 
     expect(w.logs.filter((line) => line.startsWith('passed by: ')).sort()).toEqual(['passed by: matcher-probe tool.describe', 'passed by: plannotator tool.describe'])
+  })
+})
+
+// What waits on the person where the session runs (hooks/mod/terminal-prompts.ts), for the Inbox's Agents list. The
+// mod reads it only from hooks it has anyway (tool.call, the Bash-matched tool.check, the matched tool.* run hook),
+// never with a wildcard or a hook on another tool's permission (an engine refuses two matcherless `tool.*` hooks, and
+// a hook there changes how other tools' prompts behave). The failures this guards on each engine of test.yml's
+// matrix: a question's answer, a Bash call's result or a Bash verdict reaching the caller changed (the mod only
+// watches).
+describe('watching for prompts where the session runs', () => {
+  test("an AskUserQuestion answer, a Bash result and a Bash ask verdict reach the caller unchanged", async ($: any, on: any) => {
+    world(on)
+    const called: string[] = []
+    // An ask for one command only (the call below is another): a Bash prompt as the session would raise it.
+    on('tool.check', ($: any, e: any, next: any) => (e.input?.command === 'rm -rf build' ? { decision: 'ask', reason: 'beneath' } : next(e)))
+    on('tool.call', ($: any, e: any) => {
+      called.push(e.tool)
+      return e.tool === 'AskUserQuestion' ? { result: { answers: { 'Which database?': 'Postgres' } } } : { result: `ran ${e.command}` }
+    })
+    await $.session.start(SESSION)
+    const asked = await $.tool.call({ tool: 'AskUserQuestion', questions: [{ question: 'Which database?' }] })
+    expect(asked.result).toEqual({ answers: { 'Which database?': 'Postgres' } })
+    const ran = await $.tool.call({ tool: 'Bash', command: 'npm run build' })
+    expect(ran.result).toBe('ran npm run build')
+    expect(called).toEqual(['AskUserQuestion', 'Bash'])
+    const verdict = await $.tool.check({ tool: 'Bash', input: { command: 'rm -rf build' } })
+    expect([verdict.decision, verdict.reason]).toEqual(['ask', 'beneath'])
   })
 })

@@ -833,3 +833,20 @@ test.if(hasDom)('a phone filtered to a project with no cards says so, with Show 
   expect($('[data-board-view="phone"] .ib-bstack')).toBeNull();
   expect($('[data-board-show-all]')).not.toBeNull();
 });
+
+test.if(hasDom)('a project carrying a tag (project tags): the Tag pick keeps its cards, and its count counts them once', async () => {
+  scriptFetch();
+  // api carries Memory (its ⋯ → Add tag); none of its cards is in Memory itself.
+  const tagged = PROJECTS.map((p) => (p.id === API ? { ...p, tags: [MEMORY] } : p)) as BoardPageProps['projects'];
+  draw({ projects: tagged, initiative: MEMORY });
+  await settle();
+  expect(shownCards()).toEqual(['api_build', 'api_review']);
+  await press($('[data-board-filter-button]')!);
+  // api_build is in Shape itself and in Memory by its project: once in each. No tag stays the cards with none of their own.
+  expect(rows('data-board-initiative-option')).toEqual([
+    { name: 'All tags', count: null, checked: 'false' },
+    { name: 'Shape', count: '3', checked: 'false' },
+    { name: 'Memory', count: '2', checked: 'true' },
+    { name: 'No tag', count: '2', checked: 'false' },
+  ]);
+});

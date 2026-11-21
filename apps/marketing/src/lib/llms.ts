@@ -9,6 +9,7 @@
 import {
   COLUMNS,
   INSTALL,
+  TURN_ON,
   INSTALL_WIN,
   LISTED_AGENTS,
   TEST,
@@ -20,12 +21,14 @@ import {
 } from './inbox-agents';
 import { QUESTION_AUTHORING_GUIDE } from '../../../../packages/core/question-block';
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE } from '../../../../packages/core/inbox-actions';
+import { INBOX_RUN_EXAMPLE, INBOX_RUN_GUIDE, INBOX_SECRET_EXAMPLE } from '../../../../packages/core/inbox-run-guide';
 import {
   INBOX_ANSWERS_WAKE_LINE,
   INBOX_ASK_RECOGNISE_RULE,
   INBOX_FILLED_ARGUMENTS,
   INBOX_FOLLOW_THROUGH_RULE,
   INBOX_PICTURES_RULE,
+  INBOX_CHANGE_RULE,
   INBOX_REREAD_RULE,
   INBOX_SHOWING_RULE,
   INBOX_SUBAGENT_RULE,
@@ -200,7 +203,7 @@ export function buildLlmsInbox(): string {
     '### Reach it',
     '',
     `- With the ${code(INBOX_TOOL_NAME)} tool: set \`action\` to the Inbox tool you want (\`send_message\`, \`read_thread\`, \`search\`, \`resolve_message\` and the others \`plannotator inbox --help\` lists) and pass that tool's fields beside it. The tool fills ${INBOX_FILLED_ARGUMENTS.map(code).join(', ')} for you. It may need loading through tool search first.`,
-    '- Without it: the stdio MCP server `plannotator inbox mcp`, with the same tools. Every call starts a stopped Inbox in the background, so never run `plannotator inbox` just to send. Bare `plannotator inbox` is for the person: it opens the window.',
+    '- Without it: the stdio MCP server `plannotator inbox mcp`, with the same tools. While the Inbox is on, every call starts it in the background when it is stopped, so never run `plannotator inbox` just to send. Bare `plannotator inbox` is for the person: it opens the window and turns the Inbox on. Until they have, a call answers that the Inbox is off: ask them in the chat instead.',
     '',
     '### Send one message',
     '',
@@ -209,6 +212,7 @@ export function buildLlmsInbox(): string {
     '- `attachments`: files to show beside the message, absolute or relative to the project: a plan, an HTML prototype, a video, code. The person annotates them and the annotations come back in the reply. Folders and `.env` files are refused.',
     `- ${INBOX_SHOWING_RULE}`,
     `- Pictures: ${INBOX_PICTURES_RULE}`,
+    `- Before and after: ${INBOX_CHANGE_RULE}`,
     `- ${INBOX_REREAD_RULE}`,
     '- `supersedes`: earlier questions of the thread that no longer apply. `done`: your own action items you saw done.',
     '- Thread steps exist only when the person turned them on in the Inbox\'s Settings → Capabilities. Then your tool lists a `steps` action, and `plannotator inbox --help` explains it.',
@@ -228,6 +232,16 @@ export function buildLlmsInbox(): string {
     '',
     '```markdown',
     INBOX_ACTION_EXAMPLE.trimEnd(),
+    '```',
+    '',
+    '### Commands the person runs, and secrets',
+    '',
+    INBOX_RUN_GUIDE.trimEnd(),
+    '',
+    '```markdown',
+    INBOX_RUN_EXAMPLE.trimEnd(),
+    '',
+    INBOX_SECRET_EXAMPLE.trimEnd(),
     '```',
     '',
     '### What comes back, and when',
@@ -255,11 +269,11 @@ export function buildLlmsInbox(): string {
     '',
     '1. Check: `plannotator --version`. If it is not found, try `~/.local/bin/plannotator --version`.',
     `2. Install it, with the person's yes. In a terminal on macOS, Linux or WSL: ${code(INSTALL)}. Windows PowerShell: ${code(INSTALL_WIN)}. Without prompts, for an agent: ${code('curl -fsSL https://plannotator.ai/install.sh | bash -s -- --non-interactive')} (PowerShell: ${code('& ([scriptblock]::Create((irm https://plannotator.ai/install.ps1))) -NonInteractive')}). The same command updates an older release.`,
-    "3. Open the Inbox: `plannotator inbox`. It opens the window in the browser and connects the agents it finds on this computer that are not connected yet; its stderr names them. That is part of the setup the person asked for: tell them before you run it. If they want only you connected, run `PLANNOTATOR_INBOX_CONNECT=0 plannotator inbox` and connect yourself in step 4. It never adds back a connection the person removed or turned off. On SSH or a headless machine no browser opens: `plannotator inbox --background` prints the URL to give the person.",
+    `3. Open the Inbox: ${code(TURN_ON)}. It opens the window in the browser, prints its URL, then connects the agents it finds on this computer that are not connected yet; its stderr names them. That is part of the setup the person asked for: tell them before you run it. If they want only you connected, run ${code(`PLANNOTATOR_INBOX_CONNECT=0 ${TURN_ON}`)} and connect yourself in step 4. It never adds back a connection the person removed or turned off. On SSH or a headless machine no browser opens: give the person the URL it prints.`,
     `4. Connect yourself: find your agent under Agents below and follow its steps. If step 3 connected you, or your config already has a \`plannotator-inbox\` server that runs the \`plannotator\` binary, skip this. A connection takes effect in the next session, never in the one already running; until then you can send through \`plannotator inbox mcp\` directly (step 4 of [the setup script](${url('/inbox/prompt.md')}) shows how).`,
     `5. Test it: send the person one message with a question, end your turn, and read their answer when it comes back. The person can also ask you this: "${TEST}"`,
     '',
-    `Agents with a Plannotator plugin (${list(plugins.map((a) => a.name))}) get the ${code(INBOX_TOOL_NAME)} tool. It is on by default in Claude Code and off at first in the others, because they send every tool with each request. The person's \`plannotator inbox\` turns it on when it finds the plugin. It can also be turned on with the switch in the Inbox's Settings → Agents, or by merging \`{ "inboxTool": { "<host>": true } }\` into \`config.json\` in the data folder, keeping its other keys. Tell the person before you turn it on.`,
+    `Agents with a Plannotator plugin (${list(plugins.map((a) => a.name))}) get the ${code(INBOX_TOOL_NAME)} tool. Once the Inbox is on, it is on by default in Claude Code and off at first in the others, because they send every tool with each request. Step 3 turns it on when it finds the plugin, the first time, and so does the person's own \`plannotator inbox\` later. It can also be turned on with the switch in the Inbox's Settings → Agents, or by merging \`{ "inboxTool": { "<host>": true } }\` into \`config.json\` in the data folder, keeping its other keys. Tell the person before you turn it on.`,
     '',
     '## Agents',
     '',
@@ -380,13 +394,13 @@ const ascii = (text: string) =>
     .replace(/…/g, '...')
     .replace(/[–—]/g, '-');
 
-/** The words of a step before `plannotator inbox`: its code, which is the install line. */
+/** The words of a step before `plannotator inbox --open`: its code, which is the install line. */
 function beforeStep(step: Step): string {
   if (!step.code) return sentence(step.do);
   return `${step.file ? `In ${code(step.file)}: ` : ''}${step.code.split('\n').map(code).join(' then ')}.`;
 }
 
-/** The words of a step after `plannotator inbox`, less a sentence about what that command did, and its code unless they quote it. */
+/** The words of a step after `plannotator inbox --open`, less a sentence about what `plannotator inbox` did, and its code unless they quote it. */
 function afterStep(step: Step): string {
   const words = step.do
     .split(/(?<=\.) (?=[A-Z`])/)
@@ -396,12 +410,12 @@ function afterStep(step: Step): string {
   return shown.length ? `${sentence(words)} ${shown.map(code).join(' then ')}.` : sentence(words);
 }
 
-/** The by-hand MCP step: `plannotator inbox` has no way to connect the agent. */
+/** The by-hand MCP step: `plannotator inbox --open` has no way to connect the agent. */
 const isByHandMcp = (step: Step) => step.prompt === 'after' && step.code === 'plannotator inbox mcp';
 
 const agentLink = (agent: Agent) => `[${agent.name}](${url(llmsAgentPath(agent.slug))})`;
 
-/** What each agent does around `plannotator inbox` in the install prompt, from the steps marked `prompt`. */
+/** What each agent does around `plannotator inbox --open` in the install prompt, from the steps marked `prompt`. */
 export function buildInboxPromptAgents(): string {
   const marked = (agent: Agent) => agent.setup.filter((step) => step.prompt);
   const lines: string[] = [];
@@ -429,7 +443,10 @@ export function buildInboxPromptAgents(): string {
   return ascii(lines.join('\n'));
 }
 
-/** The install prompt: inbox-prompt.md (passed in, a ?raw import) with the per-agent list in its slot. */
+/** The line in inbox-prompt.md's text that stands for the setup command (INBOX_SETUP_COMMAND). */
+export const INBOX_PROMPT_TURN_ON_SLOT = '{{TURN_ON}}';
+
+/** The install prompt: inbox-prompt.md (passed in, a ?raw import) with the per-agent list in its slot and the setup command in its own. */
 export function buildInboxPrompt(source: string): string {
-  return source.replace(INBOX_PROMPT_AGENTS_SLOT, buildInboxPromptAgents());
+  return source.replace(INBOX_PROMPT_AGENTS_SLOT, buildInboxPromptAgents()).replaceAll(INBOX_PROMPT_TURN_ON_SLOT, TURN_ON);
 }

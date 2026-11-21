@@ -26,6 +26,9 @@ export function buildHeadingSlugMap(
   const counts = new Map<string, number>();
   for (const block of blocks) {
     if (block.type !== 'heading') continue;
+    // From the heading as written, `[^1]` included (`Title[^1]` is
+    // `#title-1`, as before footnotes were drawn): hand-written links keep
+    // working. Only the displayed text leaves a reference out.
     const base = slugifyHeading(block.content);
     if (!base) continue;
     const n = counts.get(base) ?? 0;

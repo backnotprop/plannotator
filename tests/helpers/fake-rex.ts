@@ -15,6 +15,12 @@
  * action `refused` (403) with the real app's words (as a real one answered, 2026-11-18). What a
  * real app answers with Remote Control on was never seen: here, the documented success (`performed_by`).
  *
+ * A headless Rex (Linux, FreeBSD: a server with no app on its machine) is `app: false` with `apps`: the Rex apps
+ * attached to it from other computers, each as Rex's manual says `client.list` gives one (`info.platform`, a
+ * `principal` of kind `tailscale`, or `peer` over the unix socket for one that came in by ssh), with its own Remote
+ * Control setting. An app that listed its actions without the one asked answers `not_supported`, as the manual says
+ * of `client.perform`. What a real app attached from another computer answers was never seen.
+ *
  * Program status (OSC 7501, Rex's `build/program-status`): each block holds the records its programs reported, read
  * with `block.method` `program_status` as a real server answered it (`{ records: [{ id?, state, kind?, app,
  * effective_app, title?, msg?, updated_at, owner }] }`, the root record with no `id`).
@@ -43,6 +49,25 @@ export interface FakeRexCall {
   payload: Record<string, unknown>;
 }
 
+/** A Rex app attached from another computer (a headless server's only kind). */
+export interface FakeRexFarApp {
+  /** Its client id's last digits (a full id is made from it). */
+  id: string;
+  platform?: "macos" | "ios" | "linux" | "windows";
+  /** How it came in: over the tailnet (default), or by ssh (the server sees a local peer on its unix socket). */
+  transport?: "tailscale" | "ssh";
+  /** Its Remote Control setting. Default true. */
+  remote?: boolean;
+  /** The actions it listed (`client.perform` answers `not_supported` for any other). Default: none listed, so it is asked anyway. */
+  actions?: string[];
+  /** Its connection dropped without closing (`connection_state: lost`). */
+  lost?: boolean;
+  /** By ssh: the account it came in as (default the app connection's uid). Another uid is another person's app. */
+  uid?: number;
+  /** The name the app gives itself (`info.label`). Default `far-<id>`. */
+  label?: string;
+}
+
 export interface FakeRexOptions {
   /** The socket's folder; a new temp folder by default (its path has a space, as Rex's own under Application Support). */
   dir?: string;
@@ -56,6 +81,8 @@ export interface FakeRexOptions {
   appUid?: number;
   /** The app's process id in its connection's `principal` (Rex 0.1 says it); none by default. */
   appPid?: number;
+  /** Rex apps attached from other computers, beside (or, with `app: false`, instead of) this computer's own. */
+  apps?: FakeRexFarApp[];
   /** The server's API revision: 18 (default, Rex 0.1) or 7 (the older server: no `session.attach_all`, no attach for a block's methods). */
   revision?: 7 | 18;
 }
@@ -68,6 +95,10 @@ export interface FakeRex {
   methods(): string[];
   /** Change the app: attached or not, its Remote Control on or off. */
   setApp(app: boolean): void;
+  /** The apps attached from other computers now (replaces them all). */
+  setFarApps(apps: FakeRexFarApp[]): void;
+  /** A far app's full client id. */
+  farAppId(id: string): string;
   setRemote(on: boolean): void;
   /** Answer every request (or only `method`'s) this much later (a slow Rex); Infinity never answers. */
   setDelay(ms: number, method?: string): void;
@@ -87,6 +118,7 @@ export interface FakeRex {
 }
 
 const APP_CLIENT = "client:01a1eb00-0000-7000-8000-00000000a99a";
+const farClient = (id: string) => `client:01a1eb00-0000-7000-8000-${id.padStart(12, "0")}`;
 const uuid = () => crypto.randomUUID();
 
 type Socket = Bun.ServerWebSocket<{ attached: Set<string>; all: boolean }>;
@@ -96,6 +128,7 @@ export function startFakeRex(options: FakeRexOptions = {}): FakeRex {
   mkdirSync(dir, { recursive: true });
   const socketPath = join(dir, "server.sock");
   let app = options.app ?? true;
+  let farApps = options.apps ?? [];
   let remote = options.remote ?? false;
   let delay = 0;
   const delays = new Map<string, number>();
@@ -155,7 +188,18 @@ export function startFakeRex(options: FakeRexOptions = {}): FakeRex {
       case "client.list":
         return {
           payload: {
-            clients: app
+            clients: [
+              ...farApps.map((far) => ({
+                client_id: farClient(far.id),
+                info: { kind: "app", platform: far.platform ?? "macos", name: "Rex.app", version: "0.1.0", label: far.label ?? `far-${far.id}` },
+                principal:
+                  far.transport === "ssh"
+                    ? { kind: "peer", transport: "unix", display: `uid ${far.uid ?? appUid}`, uid: far.uid ?? appUid, gid: 20, pid: 4000 }
+                    : { kind: "tailscale", transport: "tailscale", display: "someone@example.com", user_id: "u1", login_name: "someone@example.com", node: `far-${far.id}` },
+                connected_at: "2026-11-18T08:00:00Z",
+                connection_state: far.lost ? "lost" : "connected",
+              })),
+              ...(app
               ? [
                   {
                     client_id: APP_CLIENT,
@@ -168,16 +212,19 @@ export function startFakeRex(options: FakeRexOptions = {}): FakeRex {
                     connection_state: "connected",
                   },
                 ]
-              : [],
+              : []),
+            ],
           },
         };
       case "client.perform": {
-        if (!app || payload.client_id !== APP_CLIENT) return fail("not_found", "no such client", 404);
-        if (!remote) return fail("refused", FAKE_REX_REFUSAL, 403);
+        const far = farApps.find((one) => farClient(one.id) === payload.client_id && !one.lost);
+        if (!far && (!app || payload.client_id !== APP_CLIENT)) return fail("not_found", "no such client", 404);
+        if (far?.actions && !far.actions.includes(String(payload.action))) return fail("not_supported", `the client does not offer ${String(payload.action)}`, 501);
+        if (far ? far.remote === false : !remote) return fail("refused", FAKE_REX_REFUSAL, 403);
         if (performAnswer) return performAnswer;
         const args = (payload.args as Record<string, unknown> | undefined) ?? {};
         if (payload.action === "session.select" && !sessionOf(args.session_id)) return fail("session_not_found", "no such session", 404);
-        return { payload: { performed_by: APP_CLIENT } };
+        return { payload: { performed_by: payload.client_id } };
       }
       case "session.attach": {
         const s = sessionOf(payload.session_id);
@@ -296,6 +343,10 @@ export function startFakeRex(options: FakeRexOptions = {}): FakeRex {
     setApp: (on) => {
       app = on;
     },
+    setFarApps: (next) => {
+      farApps = next;
+    },
+    farAppId: farClient,
     setRemote: (on) => {
       remote = on;
     },

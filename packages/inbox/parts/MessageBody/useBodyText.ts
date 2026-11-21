@@ -6,7 +6,7 @@ import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
 import { withoutInboxReplyQuoteLead } from '@plannotator/core/inbox-reply-quote';
 import { linkInboxThreadMentions } from '@plannotator/core/inbox-thread-mention';
 import { linkReplyFeedback } from '../../replyFileLinks';
-import { splitReplyFeedback } from '../../replyFeedback';
+import { splitReplyFeedback, withoutElementDetails } from '../../replyFeedback';
 import { sentReplyParts } from '../../sentReply';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 import { splitPullThreadDetails } from '../../pulls/threadDetails';
@@ -38,16 +38,20 @@ export function useBodyText({ message, sentActions, sentAnswers, replyFiles, pro
   const replyPeople = ownReply ? replyFiles?.personMessageIds : undefined;
   // `#Shape` naming a live initiative links to the Board filtered to it (approval "board-hashtags"; display only).
   const { initiatives: tagInitiatives, href: tagHref } = useLiveInitiatives();
+  // A pin on an HTML page: its outline and selector lines are the agent's; the person's own reply is drawn without them
+  // (replyFeedback.ts `withoutElementDetails`; display only).
   const linkFiles = useCallback(
-    (text: string) =>
-      linkHashtags(
+    (text: string) => {
+      const shownText = ownReply ? withoutElementDetails(text) : text;
+      return linkHashtags(
         replyFileList && replyPeople
-          ? linkReplyFeedback(text, { files: replyFileList, projectRoot, personMessageIds: replyPeople, replyAt: message.created_at })
-          : text,
+          ? linkReplyFeedback(shownText, { files: replyFileList, projectRoot, personMessageIds: replyPeople, replyAt: message.created_at })
+          : shownText,
         tagInitiatives,
         tagHref,
-      ),
-    [replyFileList, replyPeople, projectRoot, message.created_at, tagInitiatives, tagHref],
+      );
+    },
+    [ownReply, replyFileList, replyPeople, projectRoot, message.created_at, tagInitiatives, tagHref],
   );
   // The feedback the Send wrote after the person's words ("# Feedback on the attached files"…): a block of
   // its own, its headings at text size (replyFeedback.ts; display only). The person's own message only.

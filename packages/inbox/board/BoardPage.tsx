@@ -165,7 +165,7 @@ export function BoardPage(props: BoardPageProps) {
   const cardsShowProject = project === null && (offered.length > 1 || allCards.some((c) => farMachine(c) !== null));
   const across = props.tagsAcross ?? null;
   const initiatives = useMemo(() => boardTags(across, liveInitiatives(model?.initiatives)), [across, model?.initiatives]);
-  const cards = cardsInInitiative(projectCards, initiative, initiatives);
+  const cards = cardsInInitiative(projectCards, initiative, initiatives, props.projects);
   const initiativeName = initiativeLabel(initiatives, initiative);
   const counts = boardCounts(cards);
   const drops = unseenDrops(cards);
@@ -200,7 +200,7 @@ export function BoardPage(props: BoardPageProps) {
   const onLanes = (card: InboxCardWire) => INBOX_CARD_LIVE_COLUMNS.includes(card.column) || inDoneLane(card, now);
   const liveCount = cards.filter(onLanes).length;
   // The filter's counts: the cards on the lanes of the picked project, per initiative (and in none).
-  const filterCounts = initiativeCounts(projectCards.filter(onLanes), initiatives);
+  const filterCounts = initiativeCounts(projectCards.filter(onLanes), initiatives, props.projects);
   /** Put a card in an initiative (or none): the card menu's Initiative and the opened card's. */
   const setInitiative = async (card: InboxCardWire, next: string | null) => {
     setFailed(null);

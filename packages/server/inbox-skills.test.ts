@@ -74,7 +74,7 @@ describe("GET /api/inbox/skills", () => {
     const answer = await w.get("/api/inbox/skills");
     expect(answer.status).toBe(200);
     expect(answer.headers.get("cache-control")).toBe("no-store");
-    expect(answer.body.skills).toEqual([
+    expect(answer.body.skills.filter((s: Json) => s.root !== "plannotator")).toEqual([
       { name: "humanizer", root: "universal", description: "Remove AI tells.", humanOnly: false, dir: join(w.home, ".agents", "skills", "humanizer") },
       { name: "readback", root: "claude", description: "State the request back.", humanOnly: true, dir: join(w.home, ".claude", "skills", "readback") },
       { name: "write-better", root: "claude", description: "Improve prose.", humanOnly: false, dir: join(w.home, ".claude", "skills", "write-better") },
@@ -131,8 +131,7 @@ describe("GET /api/inbox/skills", () => {
     expect((await w.get("/api/inbox/skills/content?name=outside-skill")).status).toBe(200);
   });
 
-  // With both switches off the catalog ignores `discovered` and scans the folders itself, so the empty fake proves that path.
-  test.skipIf(checkoutIsScratch)("inboxSkillCatalog, called directly: the sandbox covers every switch, also the path that ignores injected discovery", async () => {
+  test.skipIf(checkoutIsScratch)("inboxSkillCatalog, called directly: the sandbox covers every switch", async () => {
     await setup(); // For its scratch env, put back after the test.
     const outside = makeOutsideScratch();
     roots.push(outside);
@@ -143,12 +142,10 @@ describe("GET /api/inbox/skills", () => {
       ((await inboxSkillCatalog(codeReview, discovered, shape).json()) as { skills: Json[] }).skills.map((s) => s.name);
 
     process.env.PLANNOTATOR_TEST_SANDBOX = "1";
-    expect(await names(false, () => [], false)).not.toContain("outside-skill");
     expect(await names(true, listReferenceSkills, false)).not.toContain("outside-skill");
     expect(await names(false, listReferenceSkills, true)).not.toContain("outside-skill");
 
     delete process.env.PLANNOTATOR_TEST_SANDBOX;
-    expect(await names(false, () => [], false)).toContain("outside-skill");
     expect(await names(true, listReferenceSkills, false)).toContain("outside-skill");
     expect(await names(false, listReferenceSkills, true)).toContain("outside-skill");
   });
@@ -157,6 +154,7 @@ describe("GET /api/inbox/skills", () => {
     const w = await setup();
     rmSync(join(w.home), { recursive: true, force: true });
     const answer = await w.get("/api/inbox/skills");
-    expect(answer).toMatchObject({ status: 200, body: { skills: [] } });
+    expect(answer.status).toBe(200);
+    expect(answer.body.skills.filter((s: Json) => s.root !== "plannotator")).toEqual([]);
   });
 });

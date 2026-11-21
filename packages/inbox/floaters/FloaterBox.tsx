@@ -44,7 +44,7 @@ const ENDED_READ_MS = 5_000;
 
 /** Picks, comments and action items waiting in the thread: only the thread's Send carries them. */
 export function carriedCount(row: InboxReplyDraftRow): number {
-  return (row.unsent?.picks ?? 0) + (row.unsent?.comments ?? 0) + (row.unsent?.done ?? 0) + (row.unsent?.cant ?? 0);
+  return (row.unsent?.picks ?? 0) + (row.unsent?.comments ?? 0) + (row.unsent?.done ?? 0) + (row.unsent?.cant ?? 0) + (row.unsent?.skipped ?? 0);
 }
 
 /**

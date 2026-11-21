@@ -5,13 +5,14 @@
  * taken away) carries the page's `serverSession`.
  */
 import type { PlanApprovalCleared, PlanApprovalMoved, PlanArtifact, PlanComment, PlanDecision, PlanDocument, PlanEvent, PlanFaceText, PlanLook, PlanRecord, PlanSummary, PlanVersion, SpacesView } from '@plannotator/core/plans';
+import type { SpaceShareMode, SpaceShareStatus } from '@plannotator/core/space-share';
 import { pageServerSession } from '../api';
 import { readJson } from '../apiError';
 
 declare module '../api' {
   interface SettingsModel {
     /** Plans (config.json `inboxPlans`, turned on by `plannotator plans`): present only while on. */
-    plans?: { on: boolean };
+    plans?: { on: boolean; /** Share this space is on too (config.json `inboxSpaceShare`). */ share?: boolean };
   }
 }
 
@@ -120,6 +121,16 @@ export const plansApi = {
   saveVersion: (id: string, base: number, change: { text: string } | { restore: number }, doc: string | null = null) => post<PlanVersionSaved>(one(id, '/versions'), { ...(doc ? { doc } : {}), base, ...change }),
   /** Approve the version on screen; refused (409, `moved_on`) when a newer one came. */
   approve: (id: string, version: number, doc: string | null = null) => post<{ decision: PlanDecision }>(one(id, '/approve'), doc ? { doc, version } : { version }),
+  /** Share this space (packages/shared/spaces/share-job.ts): where the plan's share stands. */
+  share: (id: string) => get<SpaceShareStatus>(one(id, '/share')),
+  /** Share, update or try again; `fresh`: as a new space. The upload runs on in the Inbox. */
+  shareStart: (id: string, input: { mode?: SpaceShareMode; fresh?: boolean } = {}) => post<SpaceShareStatus>(one(id, '/share'), input),
+  shareStop: (id: string) => post<SpaceShareStatus>(one(id, '/share/stop'), {}),
+  /** Keep this space: the browser opens for the sign-in. */
+  shareKeep: (id: string) => post<SpaceShareStatus>(one(id, '/share/keep'), {}),
+  shareKeepCancel: (id: string) => post<SpaceShareStatus>(one(id, '/share/keep/cancel'), {}),
+  /** Stop sharing: delete the copy in Spaces. */
+  shareDelete: (id: string) => post<SpaceShareStatus>(one(id, '/share/delete'), {}),
   /** Pin a plan (at `index`, else last), move it, or unpin it: the order after. */
   pin: (id: string, pinned: boolean, index: number | null = null) => post<{ pins: string[] }>(`${BASE}/pins`, index === null ? { id, pinned } : { id, pinned, index }),
   /** Keep the Spaces home's view for the person (config.json). */

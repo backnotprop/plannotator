@@ -53,14 +53,27 @@ export function inboxScratch(prefix: string): string {
  * (tests/e2e/agent-cli-stubs.ts), whose teardown fails the run, and the login shell is read too. So an e2e world
  * starts with launch off (`inboxLaunch.enabled: false`, merged into config.json); a spec about launch turns it on
  * in its own config, with its fakes on a PATH of its own. A spec that writes config.json whole keeps this key.
+ * The world is one the person turned the Inbox on in (`inbox/turned-on`, packages/shared/inbox/turned-on.ts), so a
+ * spec's `--background` start works as it does after their first `plannotator inbox`.
  */
 export function launchOff(dataDir: string): void {
   refuseRealDataDir(dataDir, 'tests/e2e/inbox-scratch.ts launchOff');
   mkdirSync(dataDir, { recursive: true });
   const file = join(dataDir, 'config.json');
   const config = existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>) : {};
-  writeFileSync(file, JSON.stringify({ ...config, ...E2E_LAUNCH_OFF }));
+  // The world's own reveals stay; the Group tip is seen in every one.
+  writeFileSync(file, JSON.stringify({ ...config, ...E2E_LAUNCH_OFF, inboxReveals: { ...E2E_GROUP_TIP_SEEN, ...((config.inboxReveals as Record<string, unknown> | undefined) ?? {}) } }));
+  mkdirSync(join(dataDir, 'inbox'), { recursive: true });
+  writeFileSync(join(dataDir, 'inbox', 'turned-on'), '{"on":true,"by":"command"}\n');
 }
+
+/**
+ * The Group tip (a band's one-time tooltip, packages/inbox/bandTip.ts) as already shown: a world a day or more past its
+ * first use would otherwise show it on the first hover of a band, or after the list holds still on a phone, and claim
+ * it. Every world's `inboxReveals` starts with it (`E2E_LAUNCH_OFF`, `launchOff`); a spec that writes `inboxReveals`
+ * whole spreads it in.
+ */
+export const E2E_GROUP_TIP_SEEN = { band_tip: { shownAt: '2026-10-01T10:00:00.000Z' } } as const;
 
 /**
  * The config.json keys every e2e world starts with (`launchOff`): spread it into a config a spec writes whole. Besides
@@ -69,7 +82,12 @@ export function launchOff(dataDir: string): void {
  * dialog takes the key out. The warning before a Mark read that sets questions aside is off too (as for someone who
  * ticked "Don't show this again"), so a spec about Mark read itself is not stopped by it.
  */
-export const E2E_LAUNCH_OFF = { inboxLaunch: { enabled: false }, inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' }, inboxMarkReadWarning: false } as const;
+export const E2E_LAUNCH_OFF = {
+  inboxLaunch: { enabled: false },
+  inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
+  inboxMarkReadWarning: false,
+  inboxReveals: E2E_GROUP_TIP_SEEN,
+} as const;
 
 /**
  * What every Plannotator process a spec starts under `root` needs: a scratch
