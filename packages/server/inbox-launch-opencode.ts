@@ -248,7 +248,8 @@ function readProjectConfig(path: string, root: string): { model: string | null |
   let text: string;
   let fd: number | null = null;
   try {
-    fd = openSync(at, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+    // Non-blocking: a named pipe at this path would otherwise hold the open, and the whole server with it.
+    fd = openSync(at, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0));
     const stat = fstatSync(fd);
     if (!stat.isFile() || stat.size > OPENCODE_PROJECT_CONFIG_CAP) return false;
     const buffer = Buffer.alloc(OPENCODE_PROJECT_CONFIG_CAP + 1);
