@@ -78,8 +78,9 @@ function holdReads() {
 /** The window (1440 x 900) and its panes' boxes, as a browser lays them out (happy-dom lays out nothing). */
 const WINDOW = { left: 0, top: 0, right: 1440, bottom: 900 };
 let boxes: Array<[string, { left: number; top: number; right: number; bottom: number }]> = [];
-const realRect = HTMLElement.prototype.getBoundingClientRect;
-const realQueryAll = document?.querySelectorAll;
+// Read only with a DOM: without one (the non-DOM unit shards) these names do not exist and the file must load to skip.
+const realRect = (hasDom ? HTMLElement.prototype.getBoundingClientRect : undefined) as HTMLElement['getBoundingClientRect'];
+const realQueryAll = (hasDom ? document.querySelectorAll : undefined) as Document['querySelectorAll'];
 let paneQueries = 0;
 let shell: HTMLElement | null = null;
 
