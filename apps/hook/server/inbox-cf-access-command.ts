@@ -28,6 +28,7 @@ export const CF_ACCESS_USAGE = [
   "           --hostname names the Inbox. --session-hostname names review, annotate and last",
   "           sessions. Both names must be distinct and one level under the selected zone.",
   "           On first setup, the sessions name defaults to <inbox-label>-s.<zone>.",
+  "           To change it later, run teardown first.",
   "teardown   turns it off, then deletes the DNS record, the Access application and the tunnel.",
   "           --local-only turns it off here without the token and lists what is left.",
   "status     what is set up, and whether the tunnel is connected.",
