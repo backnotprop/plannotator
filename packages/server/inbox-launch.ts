@@ -2400,7 +2400,7 @@ ${result.text}`);
         scratch: { root },
         clone: { into: defaultCloneInto() },
         ...(notReady.length > 0 ? { not_ready: notReady } : {}),
-        drives: mounted.map((d) => ({ path: d.path, name: d.name, ...(d.network ? { network: true as const } : {}) })),
+        drives: mounted.map((d) => ({ path: d.path, name: d.name, ...(d.network ? { network: true as const } : {}), ...(d.shortcut === false ? { shortcut: false as const } : {}) })),
         ...(options.platform === "darwin" ? { finder: true as const } : {}),
       };
     },
