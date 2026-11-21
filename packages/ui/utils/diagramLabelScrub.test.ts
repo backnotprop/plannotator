@@ -40,7 +40,7 @@ describe("Mermaid's own label pass", () => {
     for (const tag of ['style', 'form', 'button', 'input', 'select', 'option', 'optgroup', 'datalist', 'textarea', 'map', 'area', 'base']) {
       expect([tag, tags.includes(tag)]).toEqual([tag, true]);
     }
-    for (const attr of ['action', 'formaction', 'ping', 'target', 'usemap']) expect([attr, attrs.includes(attr)]).toEqual([attr, true]);
+    for (const attr of ['action', 'formaction', 'ping', 'target', 'usemap', 'for', 'accesskey']) expect([attr, attrs.includes(attr)]).toEqual([attr, true]);
     // A picture or media in a label draws as it did on main (the page's own policy decides what loads).
     for (const tag of ['img', 'picture', 'source', 'video', 'audio', 'image']) expect([tag, tags.includes(tag)]).toEqual([tag, false]);
     for (const attr of ['src', 'srcset', 'href', 'background', 'poster']) expect([attr, attrs.includes(attr)]).toEqual([attr, false]);
@@ -113,6 +113,7 @@ describe.if(hasDom)('what a label may hold once mounted', () => {
   test('drops what navigates or submits and keeps its words', () => {
     const svg = label(
       '<img src="https://example.org/a.png" usemap="#m"/><map name="m"><area shape="default" href="https://example.org/x"/></map>' +
+      '<label for="app-button" accesskey="k">press</label>' +
         '<form action="https://example.org/f" target="_top"><button formaction="https://example.org/g">Go</button><input type="submit" value="Send"/>' +
         '<select><option>One</option></select><textarea>Note</textarea></form><base href="https://example.org/"/>' +
         '<a href="https://example.org/a" ping="https://example.org/p" target="_blank">link</a>',
@@ -123,11 +124,11 @@ describe.if(hasDom)('what a label may hold once mounted', () => {
       expect([tag, tags.includes(tag)]).toEqual([tag, false]);
     }
     const navigating = Array.from(svg.querySelectorAll('*')).flatMap((e) =>
-      e.getAttributeNames().filter((n) => ['action', 'formaction', 'ping', 'target', 'usemap'].includes(n)).map((n) => `${e.localName}@${n}`),
+      e.getAttributeNames().filter((n) => ['action', 'formaction', 'ping', 'target', 'usemap', 'for', 'accesskey'].includes(n)).map((n) => `${e.localName}@${n}`),
     );
     expect(navigating).toEqual([]);
     expect(svg.querySelector('a')!.hasAttribute('href')).toBe(false);
-    expect(svg.querySelector('p')?.textContent).toBe('GoOneNotelink');
+    expect(svg.querySelector('p')?.textContent).toBe('pressGoOneNotelink');
   });
 
   test('keeps what only loads, as main did', () => {

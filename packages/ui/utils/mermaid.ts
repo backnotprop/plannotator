@@ -48,7 +48,8 @@ export const MERMAID_LABEL_FORBIDDEN_TAGS = [
 ];
 
 /** See MERMAID_LABEL_FORBIDDEN_TAGS: the attributes that navigate or submit. */
-export const MERMAID_LABEL_FORBIDDEN_ATTRS = ['action', 'formaction', 'ping', 'target', 'usemap'];
+// `for` and `accesskey`: a label's click (or a key) would otherwise press a control of the app that has that id.
+export const MERMAID_LABEL_FORBIDDEN_ATTRS = ['action', 'formaction', 'ping', 'target', 'usemap', 'for', 'accesskey'];
 
 /** Mermaid's own secure keys (its default `secure`), which a diagram's directive or front matter cannot change. */
 const MERMAID_DEFAULT_SECURE_KEYS = ['secure', 'securityLevel', 'startOnLoad', 'maxTextSize', 'suppressErrorRendering', 'maxEdges'];
