@@ -1555,7 +1555,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         });
         // The session saw these subjects (the check INBOX_REPLY_TO_CHECK asks for), unless a connection read them for it.
         if (!peek) for (const row of local) noteSessionRead(store, session, row.thread_id, clock());
-        const rows = farList ? mergedThreadRows(local, (row) => owed.has(row.thread_id), farList.rows.map(({ project: where, ...row }) => (found?.every ? { ...row, project: where } : row)), limit) : local;
+        const rows = farList ? mergedThreadRows(local, (row) => owed.has(row.thread_id), farList.rows.map(({ project: where, ...row }) => (found?.every || where.toLowerCase() !== (project?.name ?? "").toLowerCase() ? { ...row, project: where } : row)), limit) : local;
         const head = `${total} thread${total === 1 ? "" : "s"}${project ? ` in ${project.name}` : ""}${total > limit ? `, showing ${limit}` : ""}.`;
         const farLines = farList?.lines.length ? `\n${farList.lines.join("\n")}` : "";
         // A folder that holds projects (a plain folder over a repo) lists nothing itself: name the projects below it, so the agent can ask for them.

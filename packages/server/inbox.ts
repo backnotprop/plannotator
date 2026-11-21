@@ -1867,6 +1867,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A thread only a linked machine holds goes through the window's own forward (inbox-machines.ts).
     snoozeOnMachine: async (threadId, until) => (machines ? machines.snoozeThread(threadId, until) : null),
     readOnMachine: async (ask) => (machines ? machines.readThread(ask) : null),
+    filePieceOnMachine: async (args, offset) => (machines ? machines.filePiece(args, offset) : null),
     farThreadMachine: (threadId) => machines?.farThreadMachine(threadId) ?? null,
     // search and read_thread's list ask the linked machines too, naming a project by its git remote (inbox-mcp-far-find.ts).
     findOnMachines: () => machines?.agentFind ?? null,

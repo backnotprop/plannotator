@@ -8,14 +8,14 @@ import { inboxBlobPath } from "@plannotator/shared/inbox/attachments";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxUploadAttachments, readInboxUpload, receiveInboxUpload, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
-import { inboxAgentFetchAction } from "./inbox-agent-files";
+import { inboxAgentFetchAction, inboxAgentFetchFields } from "./inbox-agent-files";
 import { INBOX_AGENT_FETCH_FILE } from "@plannotator/shared/inbox/agent-pairing";
 import { bytesOfBase64, createInboxAgentPieces, inboxAgentPieceAction } from "./inbox-agent-pieces";
 import { inboxAgentRouteAction } from "./inbox-agent-routes";
 import { hasCloudWake, type InboxCloudAgent, type InboxCloudAgents } from "./inbox-cloud-agents";
 import type { InboxSendUpload } from "./inbox-cloud-pictures";
 import { createInboxMcpServer, type InboxMcpContext } from "./inbox-mcp";
-import { fail, okComplete, type ToolResult } from "./inbox-mcp-result";
+import { fail, ok, okComplete, type ToolResult } from "./inbox-mcp-result";
 
 export const INBOX_AGENT_DOOR_PATH = "/api/inbox/agent/call";
 export const INBOX_AGENT_ATTACHMENTS_MAX_BYTES = 16 * 1024 * 1024;
@@ -56,11 +56,25 @@ class DoorRefusal extends Error {
   }
 }
 
-/** DRAFT words (the owner's to approve): a cloud agent's fetch_file of a message this computer does not hold. */
-export const CLOUD_FAR_FILE_REFUSAL = (id: string): string =>
-  `No message ${id} on this computer. A file of a thread on a linked computer cannot be fetched by a cloud agent yet.`;
-
 const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * fetch_file of a message this store does not hold, while a machine is linked: that machine's piece, in the same
+ * answer as one of this computer's (inbox-agent-files.ts `inboxAgentFetchAction`). Null: not a far message.
+ */
+async function farFetchAction(store: InboxStore, mcp: InboxMcpContext, args: Record<string, unknown>): Promise<ToolResult | null> {
+  const messageId = typeof args.message_id === "string" ? args.message_id.trim() : "";
+  if (!messageId || store.message(messageId) || !mcp.filePieceOnMachine) return null;
+  const extra = Object.keys(args).find((field) => !inboxAgentFetchFields.includes(field));
+  if (extra) throw new DoorRefusal("validation_error", `${extra}: not taken. ${INBOX_AGENT_FETCH_FILE} takes: ${inboxAgentFetchFields.join(", ")}.`);
+  const offset = args.offset ?? 0;
+  if (typeof offset !== "number" || !Number.isInteger(offset) || offset < 0) throw new DoorRefusal("validation_error", "offset: where the piece starts, in bytes from 0 (the next_offset of the piece before).");
+  const file = typeof args.file === "string" ? args.file.trim() : "";
+  const piece = await mcp.filePieceOnMachine({ message_id: messageId, file }, offset);
+  if (!piece) return null;
+  const end = piece.next_offset ?? piece.size;
+  return ok(`${piece.name}: bytes ${offset} to ${end} of ${piece.size}${piece.next_offset === null ? ", the end" : `; next offset ${piece.next_offset}`}.`, { message_id: messageId, file, ...piece });
+}
 
 export function createInboxAgentDoor(context: InboxAgentDoorContext) {
   const { store, agents } = context;
@@ -285,10 +299,9 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
     }
     const pieceResult = inboxAgentPieceAction(pieces, agent.session, tool, args);
     if (pieceResult) return pieceResult;
-    // A file of a linked machine's thread: read_thread shows it, but its bytes do not come through the pairing yet.
-    if (tool === INBOX_AGENT_FETCH_FILE && typeof args.message_id === "string" && !store.message(args.message_id.trim()) && context.mcp.findOnMachines?.()?.any()) {
-      throw new DoorRefusal("file_on_linked_machine", CLOUD_FAR_FILE_REFUSAL(args.message_id.trim()));
-    }
+    // A file of a linked machine's thread: its pieces come from there, as this computer's own do (inbox-machine-agent-piece.ts).
+    const far = tool === INBOX_AGENT_FETCH_FILE ? await farFetchAction(store, context.mcp, args) : null;
+    if (far) return far;
     const fetched = await inboxAgentFetchAction(store, agent.session, tool, args);
     if (fetched) return fetched;
     const routed = await inboxAgentRouteAction(context.route, { host: inboxCloudHostOf(agent.preset), session: agent.session }, tool, args);

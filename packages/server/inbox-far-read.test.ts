@@ -200,19 +200,17 @@ describe("read_thread of a thread on a linked machine", () => {
     expect(mini.store.pendingReplies("ses_builder").map((m) => m.id)).toEqual(waiting);
   });
 
-  test("a paired cloud agent reads a far thread too, with no file command it cannot run", async () => {
+  test("a paired cloud agent reads a far thread too, its files listed with the same command", async () => {
     const studio = machine("Studio");
     const mini = machine("Mini");
     const id = await thread(mini, ["notes.md"]);
     const link = linkTo(mini, { rows: [id] });
     readerTools(studio, [link], { [link.id]: "Mini" });
+    const local = (await studio.tools().read_thread!.handler({ thread_id: id }, {})).content[0]!.text;
     studio.context.cloudAgent = { homeRoot: studio.root };
     const read = await studio.tools().read_thread!.handler({ thread_id: id }, {});
-    const text = read.content[0]!.text;
-    expect(text.startsWith(`${FAR_READ_WORDS.on("Mini")}${FAR_READ_WORDS.cloudFiles("Mini")}\n`)).toBe(true);
-    expect(text).toContain("The lower one, 100 a minute.");
-    expect(text).toContain(`(to your machine: ${FAR_READ_WORDS.cloudFetch})`);
-    expect(text).not.toContain("inbox call fetch_file");
+    expect(read.content[0]!.text).toBe(local);
+    expect(read.content[0]!.text).toContain("plannotator inbox call fetch_file '");
   });
 
   test("takes exactly what a local read takes: a stop notice's id, a fractional cursor, a message the thread lacks", async () => {

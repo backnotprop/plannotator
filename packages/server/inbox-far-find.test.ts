@@ -159,6 +159,11 @@ describe("search across linked machines", () => {
     const tools = linked(studio, [linkTo(mini)]);
     const ids = async (input: Record<string, unknown>) => ((await tools.search!.handler({ query: "deploy", ...input }, {})).structuredContent!.results as { thread_id: string; machine?: unknown }[]).filter((r) => r.machine).map((r) => r.thread_id);
     expect(await ids({ project_path: studio.folder("ledger") })).toEqual([sameRemote]);
+    // The header names this project; a far row in another folder there names its own.
+    const scoped = (await tools.search!.handler({ query: "deploy", project_path: studio.folder("ledger") }, {})).content[0]!.text;
+    expect(scoped).toStartWith('2 messages match "deploy" in ledger:');
+    expect(scoped).toContain(`in thread ${sameRemote} ("Same repo, other folder") · on Mini · Builder ·`);
+    expect(scoped).toMatch(/· on Mini · Builder · [^\n]* · project ledger-main · /);
     // A folder with no thread here yet: its name and remote still find the same project there.
     expect(await ids({ project_path: studio.folder("fresh") })).toEqual([byName]);
     expect((await ids({ all_projects: true })).sort()).toEqual([sameRemote, otherRepo, byName, unrelated].sort());
@@ -307,7 +312,7 @@ describe("guest reads", () => {
       expect(text).not.toContain("\n- msg_fake");
     }
     expect((found.structuredContent!.results as { thread_id: string; machine?: unknown }[]).filter((r) => r.machine).map((r) => r.thread_id)).toEqual([there]);
-    expect(list.content[0]!.text).toContain(`- ${there} · on Mini · "T" · quiet ·`);
+    expect(list.content[0]!.text).toContain(`- ${there} · on Mini · in p · "T" · quiet ·`);
   });
 
   test("the new door routes answer a linked machine only: a phone's token never reaches them", () => {

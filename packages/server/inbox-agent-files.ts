@@ -45,6 +45,8 @@ import { ok, type ToolResult } from "./inbox-mcp-result";
 export const INBOX_AGENT_FETCH_PIECE_BYTES = 1024 * 1024;
 
 const FIELDS = ["message_id", "file", "offset"] as const;
+/** What fetch_file takes, for a far message's pieces too (inbox-agent-door.ts). */
+export const inboxAgentFetchFields: readonly string[] = FIELDS;
 const MB = 1024 * 1024;
 const OPEN_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
 const DRAWING_NAME = /^[0-9a-f]{64}\.(?:png|jpg|webp)/;

@@ -30,6 +30,8 @@ import {
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { AGENT_FILE_NAME_HEADER, AGENT_FILE_ROUTE, AGENT_FILE_SHA_HEADER, AGENT_READ_ROUTE, farReadQuery, machineNameWords, type FarReadAnswer, type FarReadAsk } from "./inbox-far-read";
 import { readCapped, type PeerLink } from "./inbox-peer-link";
+import { AGENT_FILE_PIECE_MAX_BYTES } from "./inbox-far-read";
+import { farPieceOf, FAR_PIECE_WAIT_MS, type FarFilePiece } from "./inbox-machine-agent-piece";
 
 /** How long one machine may take to answer a read (and a file's first bytes). */
 export const FAR_READ_WAIT_MS = 5_000;
@@ -197,12 +199,29 @@ export function createMachineAgentRead(deps: MachineAgentReadDeps) {
    * far fetch too.
    */
   const fetchFile = async (args: { message_id: string; file: string }, signal?: AbortSignal): Promise<Response> => {
+    const hit = await askFile(args, {}, signal);
+    return relayFile(hit.response, hit.peer.id, nameOf(hit.peer), stallMs);
+  };
+
+  /**
+   * A paired cloud agent's fetch_file of a file a linked machine holds: one piece (1 MiB at most) at `offset`, read
+   * there by range and held here in memory for this answer only. Null when no machine is linked.
+   */
+  const filePiece = async (args: { message_id: string; file: string }, offset: number): Promise<FarFilePiece | null> => {
+    if (linked().length === 0) return null;
+    const hit = await askFile(args, { offset: String(offset), length: String(AGENT_FILE_PIECE_MAX_BYTES) }, AbortSignal.timeout(Math.max(waitMs, FAR_PIECE_WAIT_MS)));
+    const name = nameOf(hit.peer);
+    return farPieceOf(hit.response, offset, { older: FAR_READ_REFUSALS.older(name), unreadable: FAR_READ_REFUSALS.fileUnreadable(name) });
+  };
+
+  /** The machine that holds the file, and its answer; or why none can give it. */
+  const askFile = async (args: { message_id: string; file: string }, more: Record<string, string>, signal?: AbortSignal): Promise<{ peer: PeerLink; response: Response }> => {
     if (!isInboxId("msg", args.message_id)) throw new InboxError("validation_error", "message_id: the id of the message the file is on, as read_thread shows it.");
     if (!args.file) throw new InboxError("validation_error", "file: one of the message's files, as read_thread lists it.");
     const peers = linked();
     const stops = peers.map((peer) => blocked(peer, nameOf(peer)));
     const askable = peers.filter((_, i) => stops[i] === null);
-    const query = `?${new URLSearchParams({ message_id: args.message_id, file: args.file })}`;
+    const query = `?${new URLSearchParams({ message_id: args.message_id, file: args.file, ...more })}`;
     const answers = await Promise.all(
       askable.map(async (peer) => {
         try {
@@ -231,10 +250,10 @@ export function createMachineAgentRead(deps: MachineAgentReadDeps) {
       const notAnswered: Outcome[] = [...stops.filter((s): s is Outcome => s !== null), ...notAsked];
       throw new InboxError("message_not_found", `${FAR_READ_REFUSALS.fileNotHere(args.message_id)}${notAnswered.length > 0 ? ` ${maybeWords(notAnswered)}` : ""}`);
     }
-    return relayFile(hit.response!, hit.peer.id, nameOf(hit.peer), stallMs);
+    return { peer: hit.peer, response: hit.response! };
   };
 
-  return { readThread, fetchFile };
+  return { readThread, fetchFile, filePiece };
 }
 
 /**

@@ -1366,6 +1366,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     farCard,
     snoozeThread,
     readThread: agentRead.readThread,
+    /** A piece of a linked machine's file, for a paired cloud agent's fetch_file (inbox-machine-agent-piece.ts). */
+    filePiece: agentRead.filePiece,
     /** An agent's search and thread list on every linked machine (inbox-machine-agent-find.ts). */
     agentFind,
     /** The name of the linked machine whose list names `threadId` (send_message's reply_to there is refused in words). */

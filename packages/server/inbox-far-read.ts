@@ -164,13 +164,13 @@ export function agentReadDoorAnswer(host: AgentReadHost, url: URL): Response {
 }
 
 /** A file handle's bytes as a stream, closed at the end or when the reader goes. */
-function handleStream(opened: { handle: { read: (b: Buffer, o: number, l: number, p: number) => Promise<{ bytesRead: number }>; close: () => Promise<void> }; size: number }): ReadableStream<Uint8Array> {
-  let at = 0;
+function handleStream(opened: { handle: { read: (b: Buffer, o: number, l: number, p: number) => Promise<{ bytesRead: number }>; close: () => Promise<void> }; size: number }, from = 0, end = opened.size): ReadableStream<Uint8Array> {
+  let at = from;
   const close = () => void opened.handle.close().catch(() => {});
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
-        const length = Math.min(1024 * 1024, opened.size - at);
+        const length = Math.min(1024 * 1024, end - at);
         if (length <= 0) {
           close();
           controller.close();
@@ -190,15 +190,44 @@ function handleStream(opened: { handle: { read: (b: Buffer, o: number, l: number
   });
 }
 
-/** `GET agent-file` on B: one file read_thread lists, its bytes, with its name and SHA-256. */
+/** The most `length` a piece read (`offset=`) takes: the agent door's piece. */
+export const AGENT_FILE_PIECE_MAX_BYTES = 1024 * 1024;
+/** The header that says where a piece read starts: a door that does not send it reads the whole file (an older one). */
+export const AGENT_FILE_OFFSET_HEADER = "X-Plannotator-File-Offset";
+
+/** A piece read's `offset` and `length` from the query, or null for the whole file. Throws for one that does not read. */
+function pieceAsk(url: URL, size: number, name: string): { offset: number; length: number } | null {
+  const offset = url.searchParams.get("offset");
+  if (offset === null) return null;
+  const at = Number(offset);
+  if (!Number.isInteger(at) || at < 0) throw new InboxError("validation_error", "offset: where the piece starts, in bytes from 0.");
+  if (at > size) throw new InboxError("validation_error", `offset: ${name} has ${size} bytes.`);
+  const asked = Number(url.searchParams.get("length") ?? AGENT_FILE_PIECE_MAX_BYTES);
+  if (!Number.isInteger(asked) || asked < 1) throw new InboxError("validation_error", "length: a whole number of bytes, at least 1.");
+  return { offset: at, length: Math.min(asked, AGENT_FILE_PIECE_MAX_BYTES, size - at) };
+}
+
+/**
+ * `GET agent-file` on B: one file read_thread lists, its bytes, with its name and SHA-256 (the whole file's). With
+ * `offset` (and `length`, at most 1 MiB): only that piece, said in `X-Plannotator-File-Offset`, so the person's
+ * computer serves a cloud agent's pieces without reading the whole file each time.
+ */
 export async function agentFileDoorAnswer(store: InboxStore, url: URL): Promise<Response> {
   try {
     const args = { message_id: url.searchParams.get("message_id") ?? "", file: url.searchParams.get("file") ?? "" };
     const opened = await openInboxAgentFile(store, null, args, "an agent on another computer");
-    return new Response(handleStream(opened), {
+    let piece: { offset: number; length: number } | null;
+    try {
+      piece = pieceAsk(url, opened.size, opened.name);
+    } catch (error) {
+      await opened.handle.close().catch(() => {});
+      throw error;
+    }
+    return new Response(piece ? handleStream(opened, piece.offset, piece.offset + piece.length) : handleStream(opened), {
       headers: {
         "Content-Type": opened.contentType,
-        "Content-Length": String(opened.size),
+        "Content-Length": String(piece ? piece.length : opened.size),
+        ...(piece ? { [AGENT_FILE_OFFSET_HEADER]: String(piece.offset) } : {}),
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
         [AGENT_FILE_NAME_HEADER]: fetchedNameHeader(opened.name),
@@ -218,10 +247,6 @@ export const FAR_READ_WORDS = {
   on: (machine: string) => `This thread is on ${machine}.`,
   /** When a message shows files: their paths are that computer's, and how to get a copy here. */
   files: (machine: string) => ` Its files are on ${machine}; the command after each saves a copy on this computer and prints its path.`,
-  /** The same, for a paired cloud agent: its fetch_file reaches this computer's files only. */
-  cloudFiles: (machine: string) => ` Its files are on ${machine}, which a cloud agent cannot fetch from yet.`,
-  /** In place of each file's command, for a paired cloud agent. */
-  cloudFetch: "not available to a cloud agent yet",
 } as const;
 
 /** A machine's name on one line, for the words. */
@@ -277,12 +302,10 @@ export function farAnswerCleaned<T extends FarReadAnswer>(answer: T): T {
 }
 
 /** A far windowed read as the local read's text: the line that says where, then exactly what a local read prints. */
-export function farThreadReadText(answer: Extract<FarReadAnswer, { result: unknown }>, machine: string, url: string, cloud = false): { text: string; result: ThreadWindowResult } {
+export function farThreadReadText(answer: Extract<FarReadAnswer, { result: unknown }>, machine: string, url: string): { text: string; result: ThreadWindowResult } {
   const result = { ...answer.result, url };
   const name = machineNameWords(machine);
   const files = result.thread.messages.some((m) => (m.files?.length ?? 0) > 0);
-  // A paired cloud agent's fetch_file reaches this computer's files only: no command it cannot run.
-  if (cloud) for (const m of result.thread.messages) if (m.files) m.files = m.files.map((f) => ({ ...f, fetch: FAR_READ_WORDS.cloudFetch }));
-  const head = `${FAR_READ_WORDS.on(name)}${files ? (cloud ? FAR_READ_WORDS.cloudFiles(name) : FAR_READ_WORDS.files(name)) : ""}`;
+  const head = `${FAR_READ_WORDS.on(name)}${files ? FAR_READ_WORDS.files(name) : ""}`;
   return { text: `${head}\n${windowedThreadText(result, answer.order, "", answer.lines)}`, result };
 }

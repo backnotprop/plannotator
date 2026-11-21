@@ -128,7 +128,8 @@ export function registerInboxSearchTool(server: McpServer, context: InboxMcpCont
         const away = await far;
         if (away) {
           total += away.total;
-          for (const { score, project, ...row } of away.rows) ranked.push({ row: projectIds === null ? { ...row, project } : row, score });
+          // A far row names its project whenever it is not this one's name (the same repository in another folder there).
+          for (const { score, project, ...row } of away.rows) ranked.push({ row: projectIds === null || project.toLowerCase() !== scope.toLowerCase() ? { ...row, project } : row, score });
         }
         ranked.sort((a, b) => b.score - a.score);
         const results = ranked.slice(0, limit).map(({ row }) => row);

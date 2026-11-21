@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, unlink, type FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { INBOX_AGENT_FETCH_FILE } from "@plannotator/shared/inbox/agent-pairing";
-import { newSavedFile as newFile, savedFileName } from "@plannotator/shared/inbox/saved-file";
+import { FETCHED_FILE_WORDS, newSavedFile as newFile, savedFileName, savedNameIsDotenv } from "@plannotator/shared/inbox/saved-file";
 
 type Refusal = { ok: false; code: string; message: string };
 /** One call through the pairing: the result's structured content, or why not. */
@@ -65,6 +65,8 @@ export async function fetchPairedFile(args: Record<string, unknown>, cwd: string
         return await fail({ ok: false, code: "fetch_broken", message: "The Inbox's answer was not the next piece of this file. Nothing was saved; fetch it again." });
       }
       if (!first) {
+        // Never saved under a dotenv name, whatever the Inbox named it (as the command saves a linked machine's file).
+        if (savedNameIsDotenv(piece.name)) return await fail({ ok: false, code: "attachment_refused", message: FETCHED_FILE_WORDS.dotenv(piece.name) });
         first = piece;
         const dir = typeof folder === "string" ? resolve(cwd, folder) : await mkdtemp(join(tmpdir(), "plannotator-file-"));
         await mkdir(dir, { recursive: true });
