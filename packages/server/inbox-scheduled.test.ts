@@ -39,7 +39,7 @@ async function until(check: () => boolean) {
   expect(check()).toBe(true);
 }
 
-function world(start = "2026-11-16T13:59:00.000Z") {
+function world(start = "2026-11-16T13:59:00.000Z", startIn: "rex" | null = null) {
   const root = mkdtempSync(join(tmpdir(), "plannotator-scheduled-"));
   restore.push(() => rmSync(root, { recursive: true, force: true }));
   const dataDir = join(root, "data");
@@ -48,7 +48,9 @@ function world(start = "2026-11-16T13:59:00.000Z") {
   for (const dir of [dataDir, home, folder]) mkdirSync(dir, { recursive: true });
   setEnv("PLANNOTATOR_DATA_DIR", dataDir);
   setEnv("PLANNOTATOR_TEST_SANDBOX", "1");
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true } }));
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true, ...(startIn ? { startIn } : {}) } }));
+  // Rex's tabs asked for (a stand-in for inbox-rex.ts: here, always there).
+  const rexOpens: string[] = [];
   const clock = { now: Date.parse(start) };
   const open = () => InboxStore.open(dataDir, { now: () => new Date(clock.now) });
   let store = open();
@@ -75,6 +77,7 @@ function world(start = "2026-11-16T13:59:00.000Z") {
       onChange: () => {},
       selfCommand: ["plannotator"],
       hosts: () => [fake.host, other],
+      rex: { open: async (request) => (rexOpens.push(request.command), { opened: true, session: "session:x", window: "window:y", block: "block:z", line: "Rex · project / Fake Agent" }), appAttachedNow: async () => true, paneGone: async () => null, closePane: async () => "refused" as const },
       now: () => clock.now,
     });
     restore.push(() => made.stop());
@@ -127,6 +130,7 @@ function world(start = "2026-11-16T13:59:00.000Z") {
     clock,
     project,
     fake,
+    rexOpens,
     switches,
     during,
     make,
@@ -258,6 +262,36 @@ describe("a run is a launch of its own in the one thread", () => {
     expect(w.store.launchedRoots().map((m) => m.id).sort()).toEqual([run1!.id, plain.id].sort());
     expect(w.store.scheduledRunLaunches().map((m) => m.id)).toEqual([run2!.id]);
     expect(w.store.thread(plain.thread_id)!.messages.filter((m) => m.launch).map((m) => m.id)).toEqual([plain.id]);
+  });
+});
+
+describe("Rex chosen in Settings → Agents", () => {
+  test("a routine's run never starts in Rex: in the background, as ever, and its Stop and Delete stop it", async () => {
+    const w = world(undefined, "rex");
+    const { record } = await w.make();
+    const { message } = await w.scheduled.runNow(record.id, { kind: "person" });
+    await until(() => !!w.store.message(message.id)!.launch!.session_ref);
+    expect(w.rexOpens).toEqual([]);
+    expect(w.fake.calls.filter((call) => call.startsWith("start "))).toHaveLength(1);
+    expect(w.store.message(message.id)!.launch!.rex).toBeUndefined();
+    w.fake.poll(w.store.message(message.id)!.to!.session, true, w.clock.now);
+    await w.scheduled.stopRun(record.id);
+    expect(w.fake.calls.some((call) => call.startsWith("stop "))).toBe(true);
+  });
+
+  test("a run that runs in Rex (from before routines started only in the background): Stop and Delete go through, Rex's tab left as it is", async () => {
+    const w = world();
+    const { record } = await w.make();
+    const { message } = await w.scheduled.runNow(record.id, { kind: "person" });
+    await until(() => !!w.store.message(message.id)!.launch!.session_ref);
+    const started = w.store.message(message.id)!;
+    w.store.settleLaunch(message.id, { to: started.to!, session_ref: started.launch!.session_ref!, rex: { line: "Rex · project / Fake Agent" } });
+    w.fake.poll(started.to!.session, true, w.clock.now);
+    expect(w.scheduled.rowOf(record).state).toBe("running");
+    await w.scheduled.stopRun(record.id);
+    await w.scheduled.remove(record.id, { kind: "person" });
+    expect(w.store.scheduledThread(record.id)).toBeNull();
+    expect(w.fake.calls.filter((call) => call.startsWith("stop "))).toEqual([]);
   });
 });
 

@@ -1211,8 +1211,8 @@ breaks, and why it isn't already handled.
 
 ## Do NOT report
   - Formatting, naming, or style preferences (unless a repo guideline requires).
-  - "Consider adding tests" — unless the change adds non-trivial logic with no
-    test coverage at all.
+  - Missing tests, unless the change adds non-trivial logic with no test
+    coverage at all.
   - Hypothetical problems needing exotic conditions with no real code path.
   - Speculative refactors or "this could be cleaner" outside the change's scope.
 

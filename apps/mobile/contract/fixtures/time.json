@@ -1,0 +1,18 @@
+{
+  "about": "Invented moments. scripts/mobile/vectors.ts formats each with the window's own functions (packages/core/inbox-format.ts) in each time zone named here, and writes vectors/time.json. UTC, a fixed +05:30 (Asia/Kolkata) and America/Los_Angeles (-08:00 in November, -07:00 in summer), so an app that formats in UTC instead of the zone it is given fails.",
+  "time_zones": [
+    "UTC",
+    "Asia/Kolkata",
+    "America/Los_Angeles"
+  ],
+  "now": "2026-11-18T15:30:00.000Z",
+  "moments": [
+    "2026-11-18T15:29:00.000Z",
+    "2026-11-18T00:05:00.000Z",
+    "2026-11-17T23:55:00.000Z",
+    "2026-11-17T08:00:00.000Z",
+    "2026-10-03T10:42:00.000Z",
+    "2025-09-02T20:22:00.000Z",
+    "not a time"
+  ]
+}

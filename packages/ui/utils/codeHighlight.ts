@@ -24,6 +24,7 @@
  * There is no auto-detection anywhere in this module.
  */
 
+import { connectCustomSyntaxThemes, type CustomSyntaxPierre } from './customSyntaxThemes';
 import { themedLinesToHtml, tokenStyle, type ThemedTokenish } from './codeHighlightHtml';
 
 type PierreModule = typeof import('@pierre/diffs');
@@ -208,6 +209,8 @@ export function ensureHighlight(lang: string, theme: string): Promise<boolean> {
   const load = loadPierre()
     .then(async (mod) => {
       if (!mod) return false;
+      // A custom theme's code colours are themes Pierre resolves by name (customSyntaxThemes.ts).
+      connectCustomSyntaxThemes(mod as unknown as CustomSyntaxPierre);
       await mod.getSharedHighlighter({
         themes: [theme],
         langs: [lang],
