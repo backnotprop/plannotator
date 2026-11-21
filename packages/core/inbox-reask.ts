@@ -6,7 +6,7 @@
  * sessions by the same rule. Moved here unchanged from the window.
  */
 
-import type { InboxMessageWire, InboxQuestion } from './inbox-types';
+import { inboxActionInDraft, type InboxMessageWire, type InboxQuestion } from './inbox-types';
 import { isInboxPermissionSession } from './inbox-permission';
 import { agentName } from './inbox-format';
 
@@ -71,7 +71,7 @@ export const reaskSessionKey = (m: InboxMessageWire): string =>
 export interface WaitingSession {
   /** Open questions with no pick, and open action items. */
   open: number;
-  /** Questions picked and not sent. */
+  /** Questions picked and not sent, and action items whose Done or Can't do it waits in the draft (`inboxActionInDraft`). */
   picked: number;
   /** A launched session's permission prompt: never asked again. */
   permission: boolean;
@@ -87,12 +87,13 @@ export function waitingSessions(messages: readonly InboxMessageWire[], live: (me
   const out = new Map<string, WaitingSession>();
   for (const m of messages) {
     if (m.author.kind !== 'agent' || !live(m)) continue;
-    const waiting = itemsOf(m).filter(isWaiting);
+    // An action item the person marked, waiting unsent in their draft, waits on their Send: an archive would drop it.
+    const waiting = itemsOf(m).filter((q) => isWaiting(q) || inboxActionInDraft(q));
     if (waiting.length === 0) continue;
     const key = reaskSessionKey(m);
     const seen = out.get(key) ?? { open: 0, picked: 0, permission: isInboxPermissionSession(m.author.session) };
     seen.open += waiting.filter((q) => q.state === 'open').length;
-    seen.picked += waiting.filter((q) => q.state === 'picked').length;
+    seen.picked += waiting.filter((q) => q.state !== 'open').length;
     out.set(key, seen);
   }
   return out;

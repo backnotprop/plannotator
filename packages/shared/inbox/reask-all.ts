@@ -19,11 +19,12 @@
  *   (left out of it) or after (as any pick after a Re-ask).
  * - The tidy line (`INBOX_REASK_TIDY_LINE`: archive the thread when nothing is left) goes only to an agent that is
  *   the only one anything in the thread waits on: archiving closes every question in the thread, so with another
- *   session's question or pick open, a session not reached, or a pick of its own unsent, the note is the plain one.
+ *   session's question or pick open, a session not reached, or any unsent work of the person's in the thread (a pick,
+ *   an action item marked in the draft, reply words, comments), the note is the plain one.
  */
 
 import { reaskSessionKey, reaskTargets, waitingSessions } from "@plannotator/core/inbox-reask";
-import type { InboxMessageWire } from "@plannotator/core/inbox-types";
+import { inboxHasUnsent, type InboxMessageWire } from "@plannotator/core/inbox-types";
 import { InboxError } from "./schema";
 import type { InboxReaskInput, InboxStore } from "./store";
 
@@ -107,7 +108,10 @@ export function reaskThreadAll(store: InboxStore, threadId: string, key: string,
   for (const t of asking) if (!reached.includes(t)) out.unreached.push({ host: t.host, session: t.session });
   // The tidy line only for the one agent everything left in the thread waits on, with no pick of its own unsent.
   const only = reached.length === 1 && out.unreached.length === 0 ? reached[0]! : null;
-  const alone = only !== null && waiting.size === 1 && waiting.get(reaskSessionKey(only.message))?.picked === 0;
+  // The person's own unsent work in the thread (reply words, picks, comments, a marked action item; the server keeps
+  // them, `listRow().unsent`) would be closed or dropped by an archive too: then no tidy line either.
+  const alone =
+    only !== null && waiting.size === 1 && waiting.get(reaskSessionKey(only.message))?.picked === 0 && !inboxHasUnsent(store.listRow(threadId)?.unsent);
   let firstError: unknown = null;
   for (const target of reached) {
     const who = { host: target.host, session: target.session };

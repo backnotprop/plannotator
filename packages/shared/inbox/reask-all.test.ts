@@ -178,6 +178,30 @@ describe("Re-ask all's tidy line: only for the one agent everything left waits o
     expect(notes(store, root.id).find((m) => m.reply_to === root.id)!.body).not.toContain(INBOX_REASK_TIDY_LINE);
   });
 
+  test("an action item the person marked Done, waiting unsent in the draft: no tidy line, the thread's own note byte for byte", () => {
+    const world = () => {
+      const { store, project } = alone();
+      const asked = store.sendMessage({ project_id: project.id, author: A, wakes: true, body: `One call and one step.\n\n${block("Ship on Friday?")}\n\n:::action\nRotate the API key\n:::` }).message;
+      const action = store.questionsOf(asked.id).find((q) => q.kind === "action")!;
+      store.markAction(asked.id, action.key, { outcome: "done", staged: true });
+      return { store, asked };
+    };
+    const { store, asked } = world();
+    reaskThreadAll(store, asked.id, "press1", always);
+    const [note] = notes(store, asked.id);
+    expect(note!.body).not.toContain(INBOX_REASK_TIDY_LINE);
+    const plain = world();
+    const own = plain.store.sendReask(plain.asked.id, { idempotency_key: "own" }).reply;
+    expect(note!.body.replaceAll(note!.id, "<note>").replaceAll(asked.id, "<asked>")).toBe(own.body.replaceAll(own.id, "<note>").replaceAll(plain.asked.id, "<asked>"));
+  });
+
+  test("the person's reply words saved unsent in the thread: no tidy line", () => {
+    const { store, root } = alone();
+    store.saveReplyDraft(root.id, { body: "Half a thought", base: null });
+    reaskThreadAll(store, root.id, "press1", always);
+    expect(notes(store, root.id)[0]!.body).not.toContain(INBOX_REASK_TIDY_LINE);
+  });
+
   test("a pick of its own not sent: no tidy line (an archive would close what the person picked)", () => {
     const { store, root } = alone();
     pick(store, root.id, 0);
