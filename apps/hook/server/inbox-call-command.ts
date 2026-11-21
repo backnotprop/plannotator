@@ -343,7 +343,9 @@ function pairedLink(deps: PairedDeps): PairedLink | { ok: false; code: string; m
   const call: PairedCall = async (tool, body) => {
     const outcome = await transport(tool, body, PIECE_WAIT_MS);
     if (outcome.kind === "refused") return { ok: false, code: outcome.code, message: outcome.message };
-    // Only a write is queued (a command's change, isInboxAgentWrite): applied once when the computer answers.
+    // Only a write is queued (isInboxAgentWrite): a piece of a file, whose message was never sent, or a command's
+    // change, applied once when the computer answers.
+    if (outcome.kind === "queued" && tool !== INBOX_AGENT_ROUTE) return { ok: false, code: "no_answer", message: "The person's computer did not take the file in time. Nothing was sent. Try again later." };
     if (outcome.kind === "queued") return { ok: false, code: "queued", message: `${outcome.reason === "offline" ? "The person's computer is asleep or offline" : "The person's computer did not answer in time"}. This change waits at the relay and is applied once when it is back. Do not run it again.` };
     const got = resultOf(outcome);
     if ("code" in got) return { ok: false, ...got };
