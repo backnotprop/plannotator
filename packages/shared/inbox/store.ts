@@ -2046,23 +2046,33 @@ export class InboxStore {
    * can carry status that goes stale, and a plain reply repeated it every
    * time, so a plain reply takes the thread's short name, or null with none
    * (the connection then says `a reply`).
-   * A thread the person started and named (`named_by.kind` "person": typed
-   * in compose, or a name the Inbox filled in for them) takes that name on
+   * A thread the person started whose name they see as its title, not an
+   * agent's (`named_by.kind` "person": typed in compose, or a name the Inbox
+   * filled in for them; or "auto": compose's suggestion left as it was, or
+   * the name a review or PR thread started with), takes that name on
    * everything it delivers, its first message and every first sight
    * included, as a mail's subject goes with it: its subject is only the
-   * body's first words. Everything else keeps the thread's subject
+   * body's first words. A suggestion still lets the agent name the thread
+   * (`threadNamers`); once it has, the agent's name is the plain replies'
+   * title and the rest keep the subject. A routine's thread keeps the
+   * routine's subject. Everything else keeps the thread's subject
    * (`plainReplyFor` says why).
    */
   agentTitle(message: InboxMessage, session: string | null): string | null {
     if (this.plainReplyFor(message, session)) return this.threadShortName(message.thread_id);
-    if (this.namedByPerson(message.thread_id)) return this.threadShortName(message.thread_id) ?? this.threadSubject(message.thread_id);
+    if (this.titledByName(message.thread_id)) return this.threadShortName(message.thread_id) ?? this.threadSubject(message.thread_id);
     return this.threadSubject(message.thread_id);
   }
 
-  /** A thread the person started and named themselves (not compose's suggestion, not an agent). */
-  private namedByPerson(threadId: string): boolean {
+  /**
+   * A thread the person started whose name is theirs or compose's suggestion (not an agent's), and not a routine's
+   * (its lines carry the routine's own subject): `agentTitle` titles it by that name.
+   */
+  private titledByName(threadId: string): boolean {
     const root = this.messages.get(threadId);
-    return !!root?.started_by_person && root.named_by?.kind === "person" && !!root.thread_name?.trim();
+    if (!root?.started_by_person || !root.thread_name?.trim()) return false;
+    const kind = root.named_by?.kind;
+    return kind === "person" || (kind === "auto" && !root.scheduled_run);
   }
 
   /**
