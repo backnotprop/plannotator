@@ -13,10 +13,12 @@ export interface PowerUpStatus {
   unavailable: Exclude<PowerUpFileState['state'], 'asking' | 'ok'> | null;
 }
 
+export type PowerUpProvider = 'jev' | 'clef' | 'custom';
+
 export interface PowerUpConfig {
   active: boolean;
   rejected: readonly string[];
-  provider: 'jev' | 'clef' | null;
+  provider: PowerUpProvider | null;
   retry: number;
 }
 
@@ -38,4 +40,4 @@ export function writePowerUpRejected(ids: readonly string[]): readonly string[] 
   return kept;
 }
 
-export const PROVIDER_NAME: Record<'jev' | 'clef', string> = { jev: 'Jev', clef: 'Clef' };
+export const PROVIDER_NAME: Record<PowerUpProvider, string> = { jev: 'Jev', clef: 'Clef', custom: 'Custom' };

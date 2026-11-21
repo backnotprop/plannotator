@@ -11,16 +11,20 @@ afterEach(() => {
   dir = "";
 });
 
-function stub(status: number, body: unknown, seen?: Array<{ url: string; auth: string | null }>): typeof fetch {
+type SeenCall = { url: string; auth: string | null; body: Record<string, unknown> | null };
+
+function stub(status: number, body: unknown, seen?: SeenCall[]): typeof fetch {
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
-    seen?.push({ url: String(input), auth: new Headers(init?.headers).get("authorization") });
+    const parsed = typeof init?.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : null;
+    seen?.push({ url: String(input), auth: new Headers(init?.headers).get("authorization"), body: parsed });
     return new Response(JSON.stringify(body), { status });
   }) as unknown as typeof fetch;
 }
 
 const okCheck = stub(200, { result: { answers: { q: { noul: 0.97 } } } });
 const candidate = { kind: "extract", helper: "subtotal", caller: "checkout", file: "src/checkout.ts", code: { helper: "function subtotal() {}", caller: "a", callerNew: "b" } };
-const route = (pathname: string, method: string, body: unknown, f: typeof fetch) => answerSemDiffOpinionRequest(pathname, method, async () => body, dir, f);
+const route = (pathname: string, method: string, body: unknown, f: typeof fetch, env: Record<string, string | undefined> = {}) =>
+  answerSemDiffOpinionRequest(pathname, method, async () => body, dir, f, env);
 
 describe("Power Up key and opinion routes", () => {
   test("a key is checked before it is kept, kept 0600 outside config.json, and never answered back", async () => {
@@ -61,5 +65,170 @@ describe("Power Up key and opinion routes", () => {
     expect((await route("/api/sem-diff/opinion", "POST", { candidates: [{ ...other, helper: "third" }] }, stub(402, {}))).body).toMatchObject({ state: "noCredit" });
     expect((await route("/api/sem-diff/opinion", "POST", { candidates: "x" }, okCheck)).body).toMatchObject({ state: "failed" });
     expect((await route("/api/sem-diff/opinion", "GET", null, okCheck)).status).toBe(405);
+  });
+
+  test("env-configured systemone endpoint, model, auth scheme, and API key work without a saved key", async () => {
+    dir = mkdtempSync(join(tmpdir(), "pn-opinion-"));
+    const env = {
+      PLANNOTATOR_OPINION_URL: "https://inference.baseten.co/v1/systemone",
+      PLANNOTATOR_OPINION_MODEL: "decision-models/baseten-mammoth-27b-latest",
+      PLANNOTATOR_OPINION_API_KEY: KEY,
+      PLANNOTATOR_OPINION_AUTH: "api-key",
+    };
+    const settings = await route("/api/sem-diff/opinion/settings", "GET", null, okCheck, env);
+    expect(settings.body).toEqual({
+      configured: true,
+      provider: "jev",
+      source: "env",
+      endpoint: "inference.baseten.co",
+      model: "decision-models/baseten-mammoth-27b-latest",
+    });
+    expect(JSON.stringify(settings)).not.toContain(KEY);
+
+    const seen: SeenCall[] = [];
+    const reply = await route(
+      "/api/sem-diff/opinion",
+      "POST",
+      { candidates: [candidate] },
+      stub(200, { answers: { q: { probabilities: { moved: 0.91, new: 0.09 } } } }, seen),
+      env,
+    );
+    expect(reply.body).toMatchObject({ ok: true, answers: [{ accept: true, band: "very-likely", answer: "moved", model: "decision-models/baseten-mammoth-27b-latest" }] });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.url).toBe("https://inference.baseten.co/v1/systemone");
+    expect(seen[0]!.auth).toBe(`Api-Key ${KEY}`);
+    expect(seen[0]!.body?.model).toBe("decision-models/baseten-mammoth-27b-latest");
+    expect(existsSync(semDiffOpinionPath(dir))).toBe(false);
+    expect(JSON.stringify(reply)).not.toContain(KEY);
+  });
+
+  test("saved key verifies against custom endpoint, invalid env config fails closed, and Clef is unaffected", async () => {
+    dir = mkdtempSync(join(tmpdir(), "pn-opinion-"));
+    const customEnv = {
+      PLANNOTATOR_OPINION_URL: "https://models.example.com/v1/systemone",
+      PLANNOTATOR_OPINION_MODEL: "custom-decision-v1",
+    };
+    const seen: SeenCall[] = [];
+    const saved = await route("/api/sem-diff/opinion/settings", "POST", { provider: "jev", apiKey: KEY }, stub(200, { answers: { q: { noul: 0.95 } } }, seen), customEnv);
+    expect(saved.body).toMatchObject({ ok: true, provider: "jev" });
+    expect(seen[0]!.url).toBe("https://models.example.com/v1/systemone");
+    expect(seen[0]!.auth).toBe(`Bearer ${KEY}`);
+    expect(seen[0]!.body?.model).toBe("custom-decision-v1");
+
+    const badUrlCalls: SeenCall[] = [];
+    const badUrl = await route(
+      "/api/sem-diff/opinion",
+      "POST",
+      { candidates: [candidate] },
+      stub(200, {}, badUrlCalls),
+      { PLANNOTATOR_OPINION_URL: "ftp://bad.example.com" },
+    );
+    expect(badUrl.body).toMatchObject({ ok: false, state: "failed" });
+    expect(badUrlCalls).toHaveLength(0);
+
+    const badAuthCalls: SeenCall[] = [];
+    const badAuth = await route(
+      "/api/sem-diff/opinion/settings",
+      "POST",
+      { provider: "jev", apiKey: KEY },
+      stub(200, {}, badAuthCalls),
+      { PLANNOTATOR_OPINION_AUTH: "basic" },
+    );
+    expect(badAuth.body).toMatchObject({ ok: false, failure: "noAnswer" });
+    expect(badAuthCalls).toHaveLength(0);
+
+    const clefSeen: SeenCall[] = [];
+    const clefSaved = await route(
+      "/api/sem-diff/opinion/settings",
+      "POST",
+      { provider: "clef", accountId: "acct", apiToken: KEY },
+      stub(200, { result: { answers: { q: { noul: 0.96 } } } }, clefSeen),
+      { ...customEnv, PLANNOTATOR_OPINION_AUTH: "api-key" },
+    );
+    expect(clefSaved.body).toMatchObject({ ok: true, provider: "clef" });
+    expect(new URL(clefSeen[0]!.url).host).toBe("api.cloudflare.com");
+    expect(clefSeen[0]!.auth).toBe(`Bearer ${KEY}`);
+  });
+
+  test("custom provider saves URL, model, auth, and key, rejects invalid URLs, and honors env overrides", async () => {
+    dir = mkdtempSync(join(tmpdir(), "pn-opinion-"));
+    const badCalls: SeenCall[] = [];
+    const bad = await route(
+      "/api/sem-diff/opinion/settings",
+      "POST",
+      { provider: "custom", url: "ftp://bad.example.com/v1", auth: "api-key", apiKey: KEY },
+      stub(200, {}, badCalls),
+    );
+    expect(bad.body).toMatchObject({ ok: false, failure: "invalidUrl" });
+    expect(badCalls).toHaveLength(0);
+    expect(existsSync(semDiffOpinionPath(dir))).toBe(false);
+
+    const credCalls: SeenCall[] = [];
+    const withCreds = await route(
+      "/api/sem-diff/opinion/settings",
+      "POST",
+      { provider: "custom", url: "https://user:pass@inference.baseten.co/v1/systemone", apiKey: KEY },
+      stub(200, {}, credCalls),
+    );
+    expect(withCreds.body).toMatchObject({ ok: false, failure: "invalidUrl" });
+    expect(credCalls).toHaveLength(0);
+
+    const saveSeen: SeenCall[] = [];
+    const saved = await route(
+      "/api/sem-diff/opinion/settings",
+      "POST",
+      {
+        provider: "custom",
+        url: "https://inference.baseten.co/v1/systemone",
+        model: "decision-models/baseten-mammoth-27b-latest",
+        auth: "api-key",
+        apiKey: KEY,
+      },
+      stub(200, { answers: { q: { noul: 0.96 } } }, saveSeen),
+    );
+    expect(saved.body).toMatchObject({ ok: true, provider: "custom" });
+    expect(saveSeen[0]!.url).toBe("https://inference.baseten.co/v1/systemone");
+    expect(saveSeen[0]!.auth).toBe(`Api-Key ${KEY}`);
+    expect(saveSeen[0]!.body?.model).toBe("decision-models/baseten-mammoth-27b-latest");
+
+    const settings = await route("/api/sem-diff/opinion/settings", "GET", null, okCheck);
+    expect(settings.body).toEqual({
+      configured: true,
+      provider: "custom",
+      url: "https://inference.baseten.co/v1/systemone",
+      endpoint: "inference.baseten.co",
+      model: "decision-models/baseten-mammoth-27b-latest",
+      auth: "api-key",
+    });
+    expect(JSON.stringify(settings)).not.toContain(KEY);
+
+    const askSeen: SeenCall[] = [];
+    const reply = await route(
+      "/api/sem-diff/opinion",
+      "POST",
+      { candidates: [candidate] },
+      stub(200, { answers: { q: { probabilities: { moved: 0.92, new: 0.08 } } } }, askSeen),
+    );
+    expect(reply.body).toMatchObject({ ok: true, answers: [{ accept: true, answer: "moved" }] });
+    expect(askSeen[0]!.url).toBe("https://inference.baseten.co/v1/systemone");
+    expect(askSeen[0]!.auth).toBe(`Api-Key ${KEY}`);
+    expect(askSeen[0]!.body?.model).toBe("decision-models/baseten-mammoth-27b-latest");
+
+    const overrideSeen: SeenCall[] = [];
+    const envOverride = {
+      PLANNOTATOR_OPINION_URL: "https://override.example.com/v1/systemone",
+      PLANNOTATOR_OPINION_MODEL: "override-model",
+      PLANNOTATOR_OPINION_AUTH: "bearer",
+    };
+    await route(
+      "/api/sem-diff/opinion",
+      "POST",
+      { candidates: [{ ...candidate, helper: "overrideHelper" }] },
+      stub(200, { answers: { q: { probabilities: { moved: 0.9, new: 0.1 } } } }, overrideSeen),
+      envOverride,
+    );
+    expect(overrideSeen[0]!.url).toBe("https://override.example.com/v1/systemone");
+    expect(overrideSeen[0]!.auth).toBe(`Bearer ${KEY}`);
+    expect(overrideSeen[0]!.body?.model).toBe("override-model");
   });
 });

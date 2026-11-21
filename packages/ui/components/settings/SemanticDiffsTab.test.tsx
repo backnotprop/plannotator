@@ -95,4 +95,117 @@ describe('Settings › Semantic diffs › Power Up', () => {
     expect(document.getElementById(token.getAttribute('aria-describedby')!)?.textContent).toBe('No credit left on this Clef account');
     expect(host!.querySelector('form')!.className).toContain('w-[340px]');
   });
+
+  test.skipIf(!hasDom)('env-configured systemone endpoint enables Power Up and hides key input and Remove', async () => {
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          configured: true,
+          provider: 'jev',
+          source: 'env',
+          endpoint: 'inference.baseten.co',
+          model: 'decision-models/baseten-mammoth-27b-latest',
+        }),
+      )) as unknown as typeof fetch;
+    await mount();
+    const powerUp = [...host!.querySelectorAll<HTMLButtonElement>('[role="switch"]')].find((b) => b.textContent?.includes('Power Up'))!;
+    expect(powerUp.disabled).toBe(false);
+    expect(host!.textContent).toContain('inference.baseten.co · decision-models/baseten-mammoth-27b-latest');
+    expect(host!.textContent).toContain('PLANNOTATOR_OPINION_API_KEY');
+    expect(host!.textContent).toContain('code is sent to inference.baseten.co');
+    expect(host!.querySelector('input')).toBeNull();
+    expect(host!.querySelector('[data-power-up-key-remove]')).toBeNull();
+  });
+
+  test.skipIf(!hasDom)('custom endpoint without env key shows endpoint host in key form and error text', async () => {
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        return new Response(JSON.stringify({ ok: false, failure: 'refused', reason: 'The key was refused.' }));
+      }
+      return new Response(
+        JSON.stringify({
+          configured: false,
+          provider: null,
+          endpoint: 'inference.baseten.co',
+          model: 'decision-models/baseten-mammoth-27b-latest',
+        }),
+      );
+    }) as unknown as typeof fetch;
+    await mount();
+    expect(host!.textContent).toContain('inference.baseten.co · decision-models/baseten-mammoth-27b-latest');
+    expect(host!.textContent).toContain('Paste the key for inference.baseten.co');
+    expect(host!.textContent).toContain('code is sent to inference.baseten.co');
+    await type('API key', 'wrong');
+    await act(async () => host!.querySelector<HTMLButtonElement>('button[type="submit"]')!.click());
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(host!.textContent).toContain('inference.baseten.co refused this key');
+  });
+
+  test.skipIf(!hasDom)('Custom provider saves URL, model, auth header, and key, hydrates saved metadata, and flags invalid URLs', async () => {
+    const posts: unknown[] = [];
+    let savedSettings: Record<string, unknown> = { configured: false, provider: null };
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as Record<string, string>;
+        posts.push(body);
+        if (!body.url.startsWith('https://')) {
+          return new Response(JSON.stringify({ ok: false, failure: 'invalidUrl', reason: 'Enter an http or https endpoint URL.' }));
+        }
+        savedSettings = {
+          configured: true,
+          provider: 'custom',
+          url: body.url,
+          endpoint: new URL(body.url).host,
+          model: body.model,
+          auth: body.auth,
+        };
+        return new Response(JSON.stringify({ ok: true, provider: 'custom', ms: 145 }));
+      }
+      return new Response(JSON.stringify(savedSettings));
+    }) as typeof fetch;
+
+    await mount();
+    const customRadio = [...host!.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent === 'Custom')!;
+    await act(async () => customRadio.click());
+    await type('Custom endpoint URL', 'ftp://bad.example.com');
+    await type('Custom API key', KEY);
+    await act(async () => host!.querySelector<HTMLButtonElement>('button[type="submit"]')!.click());
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(host!.textContent).toContain('Enter an http or https endpoint URL');
+    expect(host!.querySelector('input[aria-label="Custom endpoint URL"]')!.getAttribute('aria-invalid')).toBe('true');
+
+    await type('Custom endpoint URL', 'https://inference.baseten.co/v1/systemone');
+    await type('Custom model', 'decision-models/baseten-mammoth-27b-latest');
+    const apiKeyRadio = [...host!.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent === 'Api-Key')!;
+    await act(async () => apiKeyRadio.click());
+    await type('Custom API key', KEY);
+    await act(async () => host!.querySelector<HTMLButtonElement>('button[type="submit"]')!.click());
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+
+    expect(posts[1]).toEqual({
+      provider: 'custom',
+      url: 'https://inference.baseten.co/v1/systemone',
+      model: 'decision-models/baseten-mammoth-27b-latest',
+      auth: 'api-key',
+      apiKey: KEY,
+    });
+    expect(host!.textContent).toContain('Key works · 145 ms');
+    expect(host!.querySelector('[data-power-up-key-save]')!.textContent).toBe('Saved');
+    expect(host!.querySelector('[data-power-up-key-remove]')).not.toBeNull();
+    expect(host!.innerHTML).not.toContain(KEY);
+    expect(host!.textContent).toContain('inference.baseten.co · decision-models/baseten-mammoth-27b-latest');
+    expect(host!.textContent).toContain('code is sent to inference.baseten.co');
+
+    // Remount to confirm saved non-secret metadata hydrates while key stays hidden.
+    await act(async () => root?.unmount());
+    root = null;
+    host?.remove();
+    host = null;
+    await mount();
+    expect(host!.querySelector<HTMLInputElement>('input[aria-label="Custom endpoint URL"]')!.value).toBe('https://inference.baseten.co/v1/systemone');
+    expect(host!.querySelector<HTMLInputElement>('input[aria-label="Custom model"]')!.value).toBe('decision-models/baseten-mammoth-27b-latest');
+    expect(host!.querySelector<HTMLInputElement>('input[aria-label="Custom API key"]')!.value).toBe('');
+    expect(host!.querySelector('[data-power-up-key-save]')!.textContent).toBe('Saved');
+    expect(host!.innerHTML).not.toContain(KEY);
+  });
 });

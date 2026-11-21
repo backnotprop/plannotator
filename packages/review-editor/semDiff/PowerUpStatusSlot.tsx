@@ -1,35 +1,59 @@
 import React, { useState } from 'react';
 import { PowerUpGuy } from '@plannotator/ui/components/agentFace/PowerUpGuy';
-import { PROVIDER_NAME, type PowerUpStatus } from './powerUp';
+import { PROVIDER_NAME, type PowerUpProvider, type PowerUpStatus } from './powerUp';
+
+type SlotState = 'unavailable' | 'asking' | 'powered' | 'nothing';
+
+const UNAVAILABLE_TEXT: Record<string, string> = {
+  refusedKey: 'Power Up: key refused',
+  noCredit: 'Power Up: no credit left',
+};
+
+function providerLabel(provider: PowerUpProvider | null, endpoint?: string): string {
+  if (provider && provider !== 'clef' && endpoint) return endpoint;
+  return provider ? PROVIDER_NAME[provider] : 'the model';
+}
+
+function statusKind(status: PowerUpStatus): SlotState {
+  if (status.unavailable) return 'unavailable';
+  if (status.asking > 0) return 'asking';
+  if (status.links > 0) return 'powered';
+  return 'nothing';
+}
+
+function statusText(state: SlotState, status: PowerUpStatus, model: string): string {
+  if (status.unavailable) {
+    return UNAVAILABLE_TEXT[status.unavailable] ?? 'Power Up unavailable';
+  }
+  if (state === 'asking') return `Asking ${model} · ${status.asking}`;
+  if (state === 'powered') {
+    const noun = status.links === 1 ? 'link' : 'links';
+    return `Powered up · ${status.links} ${noun}`;
+  }
+  return 'Nothing to add';
+}
+
+function statusTitle(state: SlotState, links: number, model: string): string {
+  if (state === 'unavailable') return "You're seeing the engine's diff. Nothing is guessed.";
+  if (state === 'powered') {
+    const noun = links === 1 ? 'change' : 'changes';
+    return `${model} linked ${links} ${noun} the engine alone wasn't sure of.`;
+  }
+  if (state === 'nothing') return `${model} found nothing the engine missed.`;
+  return `Asking ${model} about the calls the engine was too strict to make.`;
+}
 
 export const PowerUpStatusSlot: React.FC<{
   status: PowerUpStatus;
-  provider: 'jev' | 'clef' | null;
+  provider: PowerUpProvider | null;
+  endpoint?: string;
   onRetry: () => void;
   onSettings: () => void;
-}> = ({ status, provider, onRetry, onSettings }) => {
-  const model = provider ? PROVIDER_NAME[provider] : 'the model';
-  const state = status.unavailable ? 'unavailable' : status.asking > 0 ? 'asking' : status.links > 0 ? 'powered' : 'nothing';
-  const text =
-    state === 'unavailable'
-      ? status.unavailable === 'refusedKey'
-        ? 'Power Up: key refused'
-        : status.unavailable === 'noCredit'
-          ? 'Power Up: no credit left'
-          : 'Power Up unavailable'
-      : state === 'asking'
-        ? `Asking ${model} · ${status.asking}`
-        : state === 'powered'
-          ? `Powered up · ${status.links} ${status.links === 1 ? 'link' : 'links'}`
-          : 'Nothing to add';
-  const title =
-    state === 'unavailable'
-      ? "You're seeing the engine's diff. Nothing is guessed."
-      : state === 'powered'
-        ? `${model} linked ${status.links} ${status.links === 1 ? 'change' : 'changes'} the engine alone wasn't sure of.`
-        : state === 'nothing'
-          ? `${model} found nothing the engine missed.`
-          : `Asking ${model} about the calls the engine was too strict to make.`;
+}> = ({ status, provider, endpoint, onRetry, onSettings }) => {
+  const model = providerLabel(provider, endpoint);
+  const state = statusKind(status);
+  const text = statusText(state, status, model);
+  const title = statusTitle(state, status.links, model);
   const [card, setCard] = useState(false);
   const [poke, setPoke] = useState(0);
   const wake = () => {
