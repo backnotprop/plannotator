@@ -224,7 +224,6 @@ export interface FolderDrive {
   path: string;
   name: string;
   network?: true;
-  /** A mounted drive kept for project status, without an automatic shortcut. */
   shortcut?: false;
 }
 

@@ -14,7 +14,6 @@ export interface InboxDrive {
   name: string;
   /** A network drive (SMB, NFS, AFP, WebDAV, sshfs): it may be slow to answer. */
   network?: true;
-  /** Keep mount metadata without offering an automatic folder shortcut. */
   shortcut?: false;
 }
 
@@ -26,7 +25,6 @@ const MOUNT_TIMEOUT_MS = 2000;
 const LINUX_NETWORK = new Set(["nfs", "nfs4", "cifs", "smb3", "smbfs", "fuse.sshfs", "sshfs", "9p", "davfs", "fuse.rclone", "ceph", "glusterfs", "fuse.glusterfs"]);
 
 const nameOf = (path: string) => path.split("/").filter(Boolean).pop() ?? path;
-/** WSL's drive roots and system mounts, rather than user-mounted folders. */
 const WSL_AUTOMATIC_MOUNT = /^\/mnt\/(?:[a-z]\/?$|(?:wsl|wslg|host)(?:\/|$))/i;
 /** A folder name nobody picks: hidden, or one of macOS's own (`com.apple.TimeMachine.localsnapshots`). */
 const quietName = (path: string) => path.split("/").some((segment) => segment.startsWith(".") || segment.startsWith("com.apple."));
