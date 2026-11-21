@@ -125,6 +125,10 @@ test("a fork checkout links refs to the remote `gh repo set-default` picked, not
   expect(await readInboxProjectRepo(fork)).toEqual({ display: "me/project", host: "github.com" });
   Bun.spawnSync(["git", "config", "remote.upstream.gh-resolved", "base"], { cwd: fork });
   expect(await readInboxProjectRepo(fork)).toEqual({ display: "org/project", host: "github.com" });
+  // A pick git cannot name (its URL gone) falls back to origin rather than linking nothing.
+  const stale = gitProject(root, "stale", "git@github.com:me/project.git");
+  Bun.spawnSync(["git", "config", "remote.gone.gh-resolved", "base"], { cwd: stale });
+  expect(await readInboxProjectRepo(stale)).toEqual({ display: "me/project", host: "github.com" });
 });
 
 test("a repo not resolved yet is not known: the payload carries no repo_known until its read lands", async () => {

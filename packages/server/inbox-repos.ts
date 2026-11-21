@@ -21,7 +21,7 @@ import { runtime } from "./git";
 
 /** How long a resolved remote counts as fresh before a read refreshes it in the background (kept in core: the window reads it too). */
 export { INBOX_REPO_TTL_MS };
-/** One `git remote get-url origin` never runs longer than this. */
+/** Each git a read runs (the gh pick, then `git remote get-url`) never runs longer than this. */
 export const INBOX_REPO_GIT_TIMEOUT_MS = 3_000;
 /** At most this many `git remote get-url` run at once. */
 export const INBOX_REPO_MAX_CONCURRENT = 4;
@@ -37,13 +37,16 @@ export async function readInboxProjectRepo(root: string, timeoutMs = INBOX_REPO_
     const key = resolved.exitCode === 0
       ? resolved.stdout.split("\n").map((line) => line.trim().split(/\s+/)).find(([, value]) => value === "base")?.[0]
       : undefined;
-    const remote = key ? key.slice("remote.".length, -".gh-resolved".length) : "origin";
-    const result = await runtime.runGit(["remote", "get-url", remote], { cwd: root, timeoutMs, interaction: "forbid" });
-    if (result.exitCode !== 0) return null;
-    const url = result.stdout.trim();
-    const display = parseRemoteUrl(url);
-    if (!display) return null;
-    return { display, host: parseRemoteHost(url) };
+    const picked = key ? key.slice("remote.".length, -".gh-resolved".length) : null;
+    // gh's pick first; a pick git cannot name or parse (a key left after its URL went) falls back to origin.
+    for (const remote of picked && picked !== "origin" ? [picked, "origin"] : ["origin"]) {
+      const result = await runtime.runGit(["remote", "get-url", remote], { cwd: root, timeoutMs, interaction: "forbid" });
+      if (result.exitCode !== 0) continue;
+      const url = result.stdout.trim();
+      const display = parseRemoteUrl(url);
+      if (display) return { display, host: parseRemoteHost(url) };
+    }
+    return null;
   } catch {
     return null;
   }
