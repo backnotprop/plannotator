@@ -1,8 +1,4 @@
-import { storage } from './storage';
-
-const STORAGE_KEY_TOC = 'plannotator-toc-enabled';
-const STORAGE_KEY_STICKY_ACTIONS = 'plannotator-sticky-actions-enabled';
-const STORAGE_KEY_PLAN_WIDTH = 'plannotator-plan-width';
+import { configStore } from '../config';
 
 export type PlanWidth = 'compact' | 'default' | 'wide';
 
@@ -18,17 +14,26 @@ export interface UIPreferences {
   planWidth: PlanWidth;
 }
 
+/**
+ * Settings → Display's Auto-open Sidebar, Sticky Actions and Plan Width. The
+ * values live in the config registry (`tocEnabled`, `stickyActionsEnabled`,
+ * `planWidth`), so they sync to config.json's `displayOptions` like the other
+ * Display settings; the cookie keys are unchanged.
+ */
 export function getUIPreferences(): UIPreferences {
-  const width = storage.getItem(STORAGE_KEY_PLAN_WIDTH);
   return {
-    tocEnabled: storage.getItem(STORAGE_KEY_TOC) !== 'false',
-    stickyActionsEnabled: storage.getItem(STORAGE_KEY_STICKY_ACTIONS) !== 'false',
-    planWidth: (width === 'compact' || width === 'default' || width === 'wide') ? width : 'compact',
+    tocEnabled: configStore.get('tocEnabled'),
+    stickyActionsEnabled: configStore.get('stickyActionsEnabled'),
+    planWidth: configStore.get('planWidth'),
   };
 }
 
+/** Saves only the keys that changed, so an untouched default is never written to config.json. */
 export function saveUIPreferences(prefs: UIPreferences): void {
-  storage.setItem(STORAGE_KEY_TOC, String(prefs.tocEnabled));
-  storage.setItem(STORAGE_KEY_STICKY_ACTIONS, String(prefs.stickyActionsEnabled));
-  storage.setItem(STORAGE_KEY_PLAN_WIDTH, prefs.planWidth);
+  const current = getUIPreferences();
+  if (prefs.tocEnabled !== current.tocEnabled) configStore.set('tocEnabled', prefs.tocEnabled);
+  if (prefs.stickyActionsEnabled !== current.stickyActionsEnabled) {
+    configStore.set('stickyActionsEnabled', prefs.stickyActionsEnabled);
+  }
+  if (prefs.planWidth !== current.planWidth) configStore.set('planWidth', prefs.planWidth);
 }
