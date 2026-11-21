@@ -380,3 +380,42 @@ describe("createGuideSession launch review memo (portable export)", () => {
     expect(session.getLaunchReview("job-24")).toEqual(review(24));
   });
 });
+
+describe("createGuideSession with Copilot CLI (#3798)", () => {
+  it("passes the Guided Review prompt (with embedded patch) via stdinPrompt instead of argv", async () => {
+    const session = createGuideSession();
+    const largePatch = "diff --git a/big.ts b/big.ts\n" + "+const line = 1;\n".repeat(2_500);
+    expect(largePatch.length).toBeGreaterThan(32_767);
+    const built = await session.buildCommand({
+      cwd: "/tmp",
+      patch: largePatch,
+      diffType: "uncommitted" as DiffType,
+      options: { prDiffScope: "full-stack" },
+      prMetadata: { platform: "github", url: "https://github.com/org/repo/pull/42" } as never,
+      config: { engine: "copilot", model: "claude-sonnet-5" },
+    });
+    expect(built.engine).toBe("copilot");
+    expect(built.stdinPrompt).toBe(built.prompt);
+    expect(built.prompt).toContain(largePatch);
+    expect(built.command).not.toContain("-p");
+    expect(built.command.join(" ").length).toBeLessThan(2_000);
+  });
+
+  it("passes the Guide Repair prompt via stdinPrompt instead of argv", async () => {
+    const session = createGuideSession();
+    const brokenPayload = '{"sections": [' + '{"title": "x"},'.repeat(3_000);
+    const built = await session.buildCommand({
+      cwd: "/tmp",
+      patch: "",
+      diffType: "uncommitted" as DiffType,
+      config: { engine: "copilot", model: "claude-sonnet-5" },
+      repair: { payload: brokenPayload },
+    });
+    expect(built.engine).toBe("copilot");
+    expect(built.label).toBe("Guide Repair");
+    expect(built.stdinPrompt).toBe(built.prompt);
+    expect(built.prompt).toContain(brokenPayload);
+    expect(built.command).not.toContain("-p");
+    expect(built.command.join(" ").length).toBeLessThan(2_000);
+  });
+});

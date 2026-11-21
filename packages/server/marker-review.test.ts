@@ -190,8 +190,8 @@ describe("Pi on Windows: the job's prompt moves to stdin for a .cmd shim", () =>
 });
 
 describe("buildMarkerCommand: copilot", () => {
-  test("json output, non-interactive denial posture, read-only shell allowlist, prompt via -p", () => {
-    const { command } = buildMarkerCommand(MARKER_ENGINES.copilot, "review this", "claude-sonnet-5", "/repo");
+  test("json output, non-interactive denial posture, read-only shell allowlist, prompt via stdin", () => {
+    const { command, stdinPrompt } = buildMarkerCommand(MARKER_ENGINES.copilot, "review this", "claude-sonnet-5", "/repo");
     expect(command[0]).toBe("copilot");
     expect(command[command.indexOf("-C") + 1]).toBe("/repo");
     expect(command[command.indexOf("--output-format") + 1]).toBe("json");
@@ -213,9 +213,11 @@ describe("buildMarkerCommand: copilot", () => {
     expect(command).not.toContain("--allow-all-tools");
     expect(command).not.toContain("--yolo");
     expect(command[command.indexOf("--model") + 1]).toBe("claude-sonnet-5");
-    // Prompt is the VALUE of -p, last in argv.
-    expect(command[command.length - 2]).toBe("-p");
-    expect(command[command.length - 1]).toBe("review this");
+    // #3798: prompt is piped on stdin (no -p flag), so it never crosses cmd.exe
+    // or hits the Windows ~32k argv limit.
+    expect(command).not.toContain("-p");
+    expect(command).not.toContain("review this");
+    expect(stdinPrompt).toBe("review this");
   });
 
   test("omits --model for auto/empty/undefined; -C when no cwd", () => {
@@ -223,6 +225,43 @@ describe("buildMarkerCommand: copilot", () => {
     expect(buildMarkerCommand(MARKER_ENGINES.copilot, "p", "", "/repo").command).not.toContain("--model");
     expect(buildMarkerCommand(MARKER_ENGINES.copilot, "p", undefined, "/repo").command).not.toContain("--model");
     expect(buildMarkerCommand(MARKER_ENGINES.copilot, "p").command).not.toContain("-C");
+  });
+
+  // #3798: Copilot CLI on Windows with an npm copilot.cmd shim refused every
+  // job (line breaks / quotes in the prompt failed cmd.exe safety checks), and
+  // large reviews on copilot.exe exceeded the ~32k CreateProcess argv limit.
+  test("Windows copilot.cmd shim runs through cmd.exe with hostile prompt on stdin (#3798)", () => {
+    const copilotCmd = String.raw`C:\Users\me\AppData\Roaming\npm\copilot.cmd`;
+    const prompt = 'Review this diff.\n\n+const s = "100% & | <done> !bang! ^caret";';
+    const { command, stdinPrompt } = buildMarkerCommand(MARKER_ENGINES.copilot, prompt, "claude-sonnet-5", String.raw`C:\repo`);
+    const launch = planAgentJobSpawn(command, {
+      which: (name) => (name === "copilot" ? copilotCmd : null),
+      stdinPrompt,
+      platform: "win32",
+      exists: () => false,
+      comspec: "cmd.exe",
+    });
+    expect(launch.unsafeScript).toBeUndefined();
+    expect(launch.stdinPrompt).toBe(prompt);
+    expect(launch.verbatim).toBe(true);
+    expect(launch.command.slice(0, 4)).toEqual(["cmd.exe", "/d", "/s", "/c"]);
+    const quoted = [copilotCmd, ...command.slice(1)].map((arg) => `"${arg}"`).join(" ");
+    expect(launch.command[4]).toBe(`"${quoted}"`);
+  });
+
+  test("large review prompt (>32k chars) stays off argv for copilot.exe and POSIX (#3798)", () => {
+    const largePrompt = "Review this large diff.\n" + "+line of code\n".repeat(4_000);
+    expect(largePrompt.length).toBeGreaterThan(32_767);
+    const { command, stdinPrompt } = buildMarkerCommand(MARKER_ENGINES.copilot, largePrompt, "claude-sonnet-5", String.raw`C:\repo`);
+    expect(command.join(" ").length).toBeLessThan(2_000);
+    expect(stdinPrompt).toBe(largePrompt);
+    const winExeLaunch = planAgentJobSpawn(command, {
+      which: () => String.raw`C:\tools\copilot.exe`,
+      stdinPrompt,
+      platform: "win32",
+      exists: () => false,
+    });
+    expect(winExeLaunch).toEqual({ command, stdinPrompt: largePrompt, verbatim: false });
   });
 });
 

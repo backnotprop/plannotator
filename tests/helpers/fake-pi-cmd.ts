@@ -20,12 +20,13 @@ export interface FakePiCmd {
   pidFile: string;
 }
 
-export function writeFakePiCmd(root: string): FakePiCmd {
+export function writeFakeCmdShim(root: string, name: string): FakePiCmd {
   const bin = join(root, "bin");
   mkdirSync(bin, { recursive: true });
-  const record = join(root, "pi-record.json");
-  const pidFile = join(root, "pi-stub.pid");
-  writeFileSync(join(bin, "pi-stub.js"), [
+  const record = join(root, `${name}-record.json`);
+  const pidFile = join(root, `${name}-stub.pid`);
+  const stubScript = `${name}-stub.js`;
+  writeFileSync(join(bin, stubScript), [
     'const fs = require("node:fs");',
     'let stdin = "";',
     'process.stdin.setEncoding("utf8");',
@@ -39,9 +40,13 @@ export function writeFakePiCmd(root: string): FakePiCmd {
   ].join("\n"));
   // The shape of an npm shim: the runtime, the script beside the shim, then
   // the arguments as cmd.exe passed them.
-  writeFileSync(join(bin, "pi.cmd"), `@echo off\r\n"${process.execPath}" "%~dp0pi-stub.js" %*\r\n`);
-  writeFileSync(join(bin, "pi"), '#!/bin/sh\necho "the Windows stub runs as pi.cmd" >&2\nexit 1\n');
+  writeFileSync(join(bin, `${name}.cmd`), `@echo off\r\n"${process.execPath}" "%~dp0${stubScript}" %*\r\n`);
+  writeFileSync(join(bin, name), `#!/bin/sh\necho "the Windows stub runs as ${name}.cmd" >&2\nexit 1\n`);
   return { bin, record, pidFile };
+}
+
+export function writeFakePiCmd(root: string): FakePiCmd {
+  return writeFakeCmdShim(root, "pi");
 }
 
 /** A PATH that reaches the stub and the Windows tools (cmd, where, taskkill), and no real agent CLI. */
