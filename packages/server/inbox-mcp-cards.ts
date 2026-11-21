@@ -133,17 +133,24 @@ export interface CardCallInput {
   agent_host?: string;
 }
 
+/**
+ * How a refusal tells the caller to reach another project: a folder for an agent here, the project's id (the `project`
+ * field the agent door takes) for a cloud agent, which names no folder (inbox-agent-door.ts).
+ */
+function passProject(context: InboxMcpContext, project: InboxProject | null, fallbackId: string): string {
+  if (context.cloudAgent) return `pass project ${project?.id ?? fallbackId}`;
+  return `pass project_path ${project?.root ?? "<its folder>"}`;
+}
+
 /** The card `id`, in the caller's project scope, or a refusal naming where it is. */
-function cardInScope(store: InboxStore, id: string | undefined, projectIds: ReadonlySet<string>) {
+function cardInScope(context: InboxMcpContext, id: string | undefined, projectIds: ReadonlySet<string> | null) {
+  const { store } = context;
   if (!id?.trim()) throw new InboxError("validation_error", "card_id: the card to change (list shows yours).", { field: "card_id" });
   const card = store.card(id.trim());
   if (!card) throw new InboxError("card_not_found", `No card ${id.trim()}.`);
-  if (!projectIds.has(card.project_id)) {
+  if (projectIds && !projectIds.has(card.project_id)) {
     const project = store.project(card.project_id);
-    throw new InboxError(
-      "card_other_project",
-      `Card ${card.id} is in project ${project?.name ?? card.project_id}, not this one: pass project_path ${project?.root ?? "<its folder>"} to change it.`,
-    );
+    throw new InboxError("card_other_project", `Card ${card.id} is in project ${project?.name ?? card.project_id}, not this one: ${passProject(context, project, card.project_id)} to change it.`);
   }
   return card;
 }
@@ -167,9 +174,9 @@ const OP_COMMON = new Set<keyof CardCallInput>(["op", "project_path", "agent_ses
  * worktree it lies in. A card call never writes a project; a folder the Inbox
  * has never seen has no Board yet.
  */
-async function cardScope(context: InboxMcpContext, path: string): Promise<{ project: InboxProject | null; projectIds: Set<string>; unresolved: boolean }> {
-  const found = context.findProjects ? await context.findProjects(path) : { projects: [], unresolved: false };
-  return { project: found.projects[0] ?? null, projectIds: new Set(found.projects.flatMap((p) => context.store.projectGroup(p.id))), unresolved: found.unresolved };
+async function cardScope(context: InboxMcpContext, path: string): Promise<{ project: InboxProject | null; projectIds: Set<string>; unresolved: boolean; every: boolean }> {
+  const found: { projects: InboxProject[]; unresolved: boolean; every?: boolean } = context.findProjects ? await context.findProjects(path) : { projects: [], unresolved: false };
+  return { project: found.projects[0] ?? null, projectIds: new Set(found.projects.flatMap((p) => context.store.projectGroup(p.id))), unresolved: found.unresolved, every: found.every === true };
 }
 
 /** Run one card call; throws InboxError on a refusal. */
@@ -178,6 +185,11 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
   for (const [field, value] of Object.entries(input) as [keyof CardCallInput, unknown][]) {
     // `false` is a default (include_resolved: false), not a field the agent meant to set: tolerated, as the plannotator tool contract does.
     if (value === undefined || value === false || OP_COMMON.has(field)) continue;
+    // The agent door fills `relay.<commandId>` on every tool whose fields list
+    // `idempotency_key`, for a call that came through the relay and sent none
+    // (inbox-agent-door.ts). Only `create` reads a key, so the other ops leave
+    // the relay's own unread instead of refusing the whole call.
+    if (field === "idempotency_key" && typeof value === "string" && value.startsWith("relay.")) continue;
     if (!INBOX_CARD_OP_FIELDS[input.op].includes(field)) {
       throw new InboxError("validation_error", `${field}: op ${input.op} does not take it (it takes ${INBOX_CARD_OP_FIELDS[input.op].join(", ")}).`, { field });
     }
@@ -185,7 +197,7 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
   // The Board turned off after this session listed the tool: refused, nothing written (checked before anything else is read).
   if (context.boardOn && !context.boardOn()) throw new InboxError("board_off", INBOX_BOARD_OFF_TEXT.replace(/^board_off: /, ""));
   if (!input.project_path) throw new InboxError("validation_error", "project_path: required (the connection fills it).", { field: "project_path" });
-  const { project, projectIds, unresolved } = await cardScope(context, input.project_path);
+  const { project, projectIds, unresolved, every } = await cardScope(context, input.project_path);
   if (unresolved) {
     throw new InboxError("project_unresolved", "git did not answer in time, so this folder's project is not known yet. Nothing was changed; try the same call again.");
   }
@@ -204,7 +216,9 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
   if (!project && input.op !== "list") {
     throw new InboxError(
       "card_no_project",
-      "This folder's project has no Board yet: the Inbox has never had a message from it. Send one with send_message first, or pass the project_path of a project the Inbox knows.",
+      context.cloudAgent
+        ? "This project has no Board yet: the Inbox has never had a message in it. Send one with send_message first, or pass project with a project the Inbox knows (whoami lists them)."
+        : "This folder's project has no Board yet: the Inbox has never had a message from it. Send one with send_message first, or pass the project_path of a project the Inbox knows.",
     );
   }
   const session = input.agent_session?.trim() || null;
@@ -228,24 +242,12 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
   };
 
   if (input.op === "list") {
+    // Every project (a cloud agent's list with no project, inbox-agent-door.ts): its cards wherever they are, each naming its project.
+    if (every) return listCards(context, input, null, session, initiativeName);
     if (!project) {
       return { text: "No cards: the Inbox has never had a message from this folder's project.", structured: { project: null, cards: [], total: 0 } };
     }
-    const askedBy = input.asked_by ?? (session ? "me" : "anyone");
-    if (askedBy === "me" && !session) throw new InboxError("validation_error", "asked_by: \"me\" needs agent_session.", { field: "asked_by" });
-    const columns = new Set<InboxCardColumn>(input.include_resolved ? INBOX_CARD_COLUMNS : INBOX_CARD_LIVE_COLUMNS);
-    const cards = store.listCards({ projectIds, columns, agentSession: askedBy === "me" ? session : null }).map((card) => store.cardWire(card));
-    const whose = askedBy === "me" ? "Your" : "All";
-    const head = `${whose} ${cards.length} card${cards.length === 1 ? "" : "s"} in ${project.name}${input.include_resolved ? "" : " (done and dropped left out)"}.`;
-    const parked = cards.some((card) => card.column === "backlog" && card.moved_by?.kind === "person")
-      ? "\nA card the person put in Backlog is not asked for yet: leave its work alone until they send it to you."
-      : "";
-    const summary = cardInitiativesSummary(store);
-    const lines = cards.map((card) => cardLineText(card, initiativeName, context.sessionName)).join("\n");
-    return {
-      text: `${cards.length > 0 ? `${head}\n${lines}${parked}` : head}${summary.line ? `\n${summary.line}` : ""}`,
-      structured: { project: { id: project.id, name: project.name, root: project.root }, cards, total: cards.length, initiatives: summary.initiatives },
-    };
+    return listCards(context, input, { project, projectIds }, session, initiativeName);
   }
 
   if (input.op === "create") {
@@ -255,10 +257,7 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
       if (!message) throw new InboxError("thread_not_found", `No thread or message ${input.thread_id.trim()}.`);
       if (!projectIds.has(message.project_id)) {
         const other = store.project(message.project_id);
-        throw new InboxError(
-          "card_other_project",
-          `Thread ${message.thread_id} is in project ${other?.name ?? message.project_id}, not this one: pass project_path ${other?.root ?? "<its folder>"} to make its card there.`,
-        );
+        throw new InboxError("card_other_project", `Thread ${message.thread_id} is in project ${other?.name ?? message.project_id}, not this one: ${passProject(context, other, message.project_id)} to make its card there.`);
       }
       projectId = message.project_id;
     }
@@ -278,7 +277,7 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
     return answer(replayed ? "Already made (the same idempotency_key)" : "Made a card on the person's Board; keep it current with move or say as the work moves", store.cardWire(card), { replayed }, card.title, tag_decided === true);
   }
 
-  const card = cardInScope(store, input.card_id, projectIds);
+  const card = cardInScope(context, input.card_id, every ? null : projectIds);
   if (input.op === "move" && !input.column) throw new InboxError("validation_error", "column: where the card goes (move).", { field: "column" });
   if (input.op === "say" && !input.say && !input.you && !input.title && input.initiative === undefined) {
     throw new InboxError("validation_error", "say: your last word (or `you`, what the person owes; `title`; or `initiative`).", { field: "say" });
@@ -302,6 +301,36 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
   // With no `initiative` in the call, only a linked thread's tag can have moved it.
   const tagDecided = input.initiative === undefined && wire.initiative !== store.cardWire(card).initiative;
   return answer(verb, wire, {}, input.title ? next.title : null, tagDecided);
+}
+
+/** `list`: one project's cards (`scope`), or every project's (null), each line then naming its project. */
+function listCards(
+  context: InboxMcpContext,
+  input: CardCallInput,
+  scope: { project: InboxProject; projectIds: ReadonlySet<string> } | null,
+  session: string | null,
+  initiativeName: (id: string) => string | null,
+): { text: string; structured: Record<string, unknown> } {
+  const { store } = context;
+  const askedBy = input.asked_by ?? (session ? "me" : "anyone");
+  if (askedBy === "me" && !session) throw new InboxError("validation_error", "asked_by: \"me\" needs agent_session.", { field: "asked_by" });
+  const columns = new Set<InboxCardColumn>(input.include_resolved ? INBOX_CARD_COLUMNS : INBOX_CARD_LIVE_COLUMNS);
+  const cards = store.listCards({ projectIds: scope?.projectIds ?? null, columns, agentSession: askedBy === "me" ? session : null }).map((card) => store.cardWire(card));
+  const whose = askedBy === "me" ? "Your" : "All";
+  const head = `${whose} ${cards.length} card${cards.length === 1 ? "" : "s"}${scope ? ` in ${scope.project.name}` : ""}${input.include_resolved ? "" : " (done and dropped left out)"}.`;
+  const parked = cards.some((card) => card.column === "backlog" && card.moved_by?.kind === "person")
+    ? "\nA card the person put in Backlog is not asked for yet: leave its work alone until they send it to you."
+    : "";
+  const summary = cardInitiativesSummary(store);
+  const projectOf = (card: InboxCardWire) => {
+    const project = store.project(card.project_id);
+    return project ? ` · project ${JSON.stringify(project.name)}` : "";
+  };
+  const lines = cards.map((card) => `${cardLineText(card, initiativeName, context.sessionName)}${scope ? "" : projectOf(card)}`).join("\n");
+  return {
+    text: `${cards.length > 0 ? `${head}\n${lines}${parked}` : head}${summary.line ? `\n${summary.line}` : ""}`,
+    structured: { project: scope ? { id: scope.project.id, name: scope.project.name, root: scope.project.root } : null, cards, total: cards.length, initiatives: summary.initiatives },
+  };
 }
 
 export function registerInboxCardTool(server: McpServer, context: InboxMcpContext): void {
