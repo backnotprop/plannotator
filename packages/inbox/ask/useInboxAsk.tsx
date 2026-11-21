@@ -87,7 +87,10 @@ export interface AskCorner {
   host: string | null;
   subject: string | null;
   minimized: boolean;
-  /** The minimized chat's circle is in the window's corner (sideCircle): a floating draft's window keeps clear of it. */
+  /**
+   * The minimized chat's circle is on screen in the window's corner (sideCircle, and SideChatCorner found a pane to
+   * cut): a floating draft's window keeps clear of it.
+   */
   circle: boolean;
   store: ChatWindowStore;
   open: () => void;
@@ -120,6 +123,8 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
   const [read, setRead] = useState<{ threadId: string; model: InboxAskModel } | null>(null);
   const [picked, setPicked] = useState<InboxAskChat | null>(null);
   const [focusRequest, setFocusRequest] = useState(0);
+  /** SideChatCorner draws the circle (not hidden for want of a pane to cut, or for something else's corner). */
+  const [drawn, setDrawn] = useState(false);
   const [seed, setSeed] = useState<{ threadId: string; words: string; token: number; source?: string; taken?: () => void } | null>(null);
   /** The thread whose box takes focus once it can: only after a press here, never when the list moves to a thread. */
   const wantsFocus = useRef<string | null>(null);
@@ -236,7 +241,9 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
       store.setMinimized(true);
     },
   };
-  corner.circle = sideCircle(corner, phone);
+  // Mounted while it may show; on screen only where SideChatCorner draws it.
+  const showCircle = sideCircle(corner, phone);
+  corner.circle = showCircle && drawn;
 
   const canAsk = model?.can_ask === true;
   const side = useCallback((selected: string, source?: string) => askWith(sideQuote(selected), source), [askWith]);
@@ -247,7 +254,6 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
 
   // The minimized chat's circle (the owner, 2026-11-20): this thread has a chat, on a computer (no Ask on phones).
   const flight = useRef<SideFlight | null>(null);
-  const showCircle = corner.circle;
 
   const region = useOpenInCodeRegion({ thread: askFor ?? '' }, codeReview && !!askFor);
 
@@ -278,7 +284,8 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
           onLeave={() => {
             openChats.current.delete(askFor);
             // Still in the page: the minimize's own handler runs before the re-render that removes the window.
-            flight.current = takeSideFlight();
+            // No copy of the window when no circle comes to fly into (a phone, no chat yet).
+            flight.current = takeSideFlight(sideCircle({ ...corner, minimized: true }, phone));
           }}
           onConversation={adopt}
           onReload={reload}
@@ -287,7 +294,7 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
         {region.window}
         {showCircle && (
           <ChatFrameLauncher store={store}>
-            <SideChatCorner host={corner.host} unseen={corner.unseen} answering={corner.answering} onOpen={corner.open} flight={flight} opener={opener} />
+            <SideChatCorner host={corner.host} unseen={corner.unseen} answering={corner.answering} onOpen={corner.open} flight={flight} opener={opener} onShown={setDrawn} />
           </ChatFrameLauncher>
         )}
       </div>

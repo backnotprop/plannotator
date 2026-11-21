@@ -21,17 +21,43 @@ export interface SideFlight {
   at: number;
 }
 
-/** The window's node, taken before React removes it (the minimize's own handler runs before the re-render). */
-export function takeSideFlight(): SideFlight {
+/**
+ * The window's node, taken before React removes it (the minimize's own handler runs before the re-render). No copy
+ * when nothing will fly: under reduced motion, or when no circle comes to fly into (`circle` false).
+ */
+export function takeSideFlight(circle = true): SideFlight {
   const at = performance.now();
-  const el = document.querySelector<HTMLElement>('[data-ask-window]');
+  const still = !circle || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+  const el = still ? null : document.querySelector<HTMLElement>('[data-ask-window]');
   const rect = el?.getBoundingClientRect();
   if (!el || !rect || rect.width <= 0 || rect.height <= 0) return { node: null, rect: null, radius: '0px', at };
   return { node: el.cloneNode(true) as HTMLElement, rect, radius: getComputedStyle(el).borderTopLeftRadius, at };
 }
 
-/** The panes a thread view lays out; the one whose corner is the window's gets the cut. */
-const PANES = ['.ib-pane', '.ib-view', '.ib-listcol', '.ib-panehost > .ib-panedock > .ib-pane', '.ib-panehost > .ib-panedock > .ib-view'].map((pane) => `.ib-main > ${pane}`).join(', ');
+/**
+ * The panes a thread view lays out; the one whose corner is the window's gets the cut. With Split view on
+ * (`inboxSplitView`) every pane sits in the free layout's place for it (panes/ThreadPanes.tsx, panes.css).
+ */
+const PANES = [
+  ...['.ib-pane', '.ib-view', '.ib-listcol', '.ib-panehost > .ib-panedock > .ib-pane', '.ib-panehost > .ib-panedock > .ib-view'].map((pane) => `.ib-main > ${pane}`),
+  '.ib-main > .ib-layout .pierre-layout-content > .ib-panehost > .ib-panedock > .ib-pane',
+  '.ib-main > .ib-layout .pierre-layout-content > .ib-panehost > .ib-panedock > .ib-view',
+].join(', ');
+
+/**
+ * Something else's in the corner pane's bottom-right corner, which the cut would clip and the circle cover: a Shape
+ * board open in the thread (its side panel and its More run to the pane's corner), a narrow file view's annotations
+ * panel (open down its right edge to its foot), or the floating drafts' pile resting in the window's corner (a
+ * thread with no reply foot on screen). The circle and the cut keep off; they come back when it goes.
+ */
+function cornerOwned(pane: HTMLElement): boolean {
+  if (pane.querySelector('.ib-shape-inthread:not([hidden])')) return true;
+  if (pane.matches(FOLDED_PANEL) || pane.querySelector(FOLDED_PANEL)) return true;
+  return document.querySelector('[data-rf-corner][data-rf-spot="corner"]') !== null;
+}
+const FOLDED_PANEL = '.ib-view.ib-fold.ib-panel-open';
+/** Classes on a pane that hand its corner to something else, or the whole window to a layer. */
+const OWNER_CLASSES = ['ib-fold', 'ib-panel-open', 'ib-wlayer'];
 /**
  * A whole-window layer (`ib-wlayer`: a file's full view, a guided review, a PR review, a Shape board, the tour's
  * viewer) over the corner: that corner is the layer's, and the circle is not shown over it.
@@ -80,13 +106,25 @@ const MOVES_NOTHING = 'pre, .ib-rmirror, .ib-rtext, [data-side-corner], [data-si
 export function cornerMoves(record: MutationRecord): boolean {
   const target = record.target.nodeType === 1 ? (record.target as Element) : record.target.parentElement;
   if (!target) return false;
+  if (record.type === 'attributes') return ownerChanged(record, target);
   if (target.closest(MOVES_NOTHING)) return false;
-  // Inside a pane (not the pane's own container): nothing that moves it.
-  const inPane = target.closest(PANES);
-  if (inPane) return false;
   const nodes = [...record.addedNodes, ...record.removedNodes];
   if (nodes.length === 0) return false;
+  // Inside a pane (not the pane's own container): nothing that moves it, only a board opening or closing in it.
+  if (target.closest(PANES)) return nodes.some((node) => node.nodeType === 1 && (node as Element).matches('.ib-shape-inthread'));
   return nodes.some((node) => node.nodeType === 1 && !(node as Element).matches(MOVES_NOTHING));
+}
+
+/**
+ * An attribute change that gives the corner to something else or takes it back (cornerOwned): the drafts' pile moving
+ * to or from the window's corner, a board in a thread shown or hidden, a pane folding, opening its panel or going full.
+ */
+function ownerChanged(record: MutationRecord, target: Element): boolean {
+  if (record.attributeName === 'data-rf-spot') return true;
+  if (record.attributeName === 'hidden') return target.matches('.ib-shape-inthread');
+  if (record.attributeName !== 'class' || !target.matches(PANES)) return false;
+  const was = new Set((record.oldValue ?? '').split(/\s+/));
+  return OWNER_CLASSES.some((name) => was.has(name) !== target.classList.contains(name));
 }
 
 const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -102,6 +140,8 @@ export interface SideChatCornerProps {
   flight: MutableRefObject<SideFlight | null>;
   /** What had focus when the chat was last opened: focus goes back there on a minimize with no circle to take it. */
   opener: MutableRefObject<HTMLElement | null>;
+  /** Whether the circle is on screen (not hidden for want of a pane to cut): false again when it unmounts. */
+  onShown?: (shown: boolean) => void;
 }
 
 interface Cut {
@@ -120,7 +160,7 @@ export function sideChatName(unseen: boolean, answering: boolean): string {
   return `Side chat${unseen ? ', new answer' : ''}${answering ? ', answering' : ''}`;
 }
 
-export function SideChatCorner({ host, unseen, answering, onOpen, flight, opener }: SideChatCornerProps) {
+export function SideChatCorner({ host, unseen, answering, onOpen, flight, opener, onShown }: SideChatCornerProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const dotRef = useRef<HTMLSpanElement | null>(null);
@@ -174,8 +214,9 @@ export function SideChatCorner({ host, unseen, answering, onOpen, flight, opener
       const cs = getComputedStyle(pane);
       const gx = Math.max(0, corner.right - r.right);
       const gy = Math.max(0, corner.bottom - r.bottom);
-      // A whole-window layer over the corner, or a placeholder pane with no thread in it (Reviews with code review off).
-      const notOurs = cornerLayer(corner) || pane.matches('.ib-pempty');
+      // A whole-window layer over the corner, a placeholder pane with no thread in it (Reviews with code review off), or
+      // something else's in the pane's corner.
+      const notOurs = cornerLayer(corner) || pane.matches('.ib-pempty') || cornerOwned(pane);
       const radius = parseFloat(cs.borderTopRightRadius) || 0;
       const geo = { sx: SIDE_CORNER_R - gx, sy: SIDE_CORNER_R - gy, R: SIDE_CORNER_R, f: SIDE_CORNER.f };
       const shadows = parseBoxShadows(cs.getPropertyValue('--ib-pane-shadow'));
@@ -210,7 +251,8 @@ export function SideChatCorner({ host, unseen, answering, onOpen, flight, opener
       else soon();
     });
     // The window's root, which outlives the layouts inside it (a narrow window swaps the shell on its first frames).
-    watch.observe(rootRef.current?.closest('.pn-inbox') ?? document.body, { childList: true, subtree: true });
+    // Attributes: only those that hand the corner to something else or back (ownerChanged).
+    watch.observe(rootRef.current?.closest('.pn-inbox') ?? document.body, { childList: true, subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['class', 'hidden', 'data-rf-spot'] });
     // A theme or palette change: the pane's shadow is another list.
     const theme = new MutationObserver(soon);
     theme.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
@@ -222,6 +264,11 @@ export function SideChatCorner({ host, unseen, answering, onOpen, flight, opener
       theme.disconnect();
     };
   }, []);
+
+  useLayoutEffect(() => {
+    onShown?.(!covered);
+  }, [covered, onShown]);
+  useLayoutEffect(() => () => onShown?.(false), [onShown]);
 
   // The pane's own corner: masked to the cut, its outer shadows off (the edge layer draws them along the cut).
   const pane = cut?.geo && !covered ? cut.pane : null;
@@ -249,6 +296,7 @@ export function SideChatCorner({ host, unseen, answering, onOpen, flight, opener
     flight.current = null;
     const host = flyRef.current;
     const dot = dotRef.current;
+    const layer = rootRef.current?.parentElement;
     if (!from || performance.now() - from.at > 500) return;
     if (!shown.current) {
       let second = 0;
@@ -266,7 +314,7 @@ export function SideChatCorner({ host, unseen, answering, onOpen, flight, opener
         cancelAnimationFrame(second);
       };
     }
-    if (!host || !dot || !from.node || !from.rect) return;
+    if (!host || !dot || !layer || !from.node || !from.rect) return;
     if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || typeof from.node.animate !== 'function') return;
     const ghost = from.node;
     const fromRect = from.rect;
@@ -288,7 +336,11 @@ export function SideChatCorner({ host, unseen, answering, onOpen, flight, opener
       pointerEvents: 'none',
     });
     host.appendChild(ghost);
-    const to = dot.getBoundingClientRect();
+    // The circle's box from the corner's geometry (its centre SIDE_CORNER_R in from both edges of the window), never
+    // from the dot: this commit mounted the circle hidden, and the measure's verdict shows it only on the next one.
+    const corner = layer.getBoundingClientRect();
+    const d = SIDE_CORNER.d;
+    const to = { left: corner.right - SIDE_CORNER_R - d / 2, top: corner.bottom - SIDE_CORNER_R - d / 2, width: d, height: d };
     const sx = to.width / fromRect.width;
     const sy = to.height / fromRect.height;
     const flyBox = ghost.animate(

@@ -12,7 +12,10 @@
  *   over a placeholder pane, and focus left on the page when a minimize has no circle to land on;
  * - the circle and the cut blinking off on a switch between two threads with chats while the new read is on its way;
  * - a measure (a walk of the page) for every change inside a message's body, which code highlighting makes many
- *   times a second on a long thread.
+ *   times a second on a long thread, in one pane or in Split view's panes; no circle or cut in Split view, or the cut
+ *   on a pane that is not at the window's corner;
+ * - the circle and the cut over something else's corner: a Shape board in the thread, a folded file's open panel,
+ *   the floating drafts' pile resting in the window's corner.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -342,4 +345,95 @@ test.skipIf(!hasDom)("a guided review over the window hides the circle and the c
   main.replaceChildren(empty);
   await until(() => !circleShown(), 'no circle over the placeholder');
   expect(document.querySelector('[data-side-scoop]')).toBeNull();
+});
+
+/** Split view (`inboxSplitView`): every pane in the free layout's place for it, as panes/ThreadPanes.tsx draws it. */
+function splitShell(): { left: HTMLElement; right: HTMLElement } {
+  const main = shell!.querySelector('.ib-main')!;
+  const place = (pane: HTMLElement) => {
+    const outer = document.createElement('div');
+    outer.className = 'pierre-layout-pane';
+    outer.innerHTML = '<div class="pierre-layout-pane-inner"><div class="pierre-layout-content"><div class="ib-panehost"><div class="ib-panedock"></div></div></div></div>';
+    outer.querySelector('.ib-panedock')!.appendChild(pane);
+    return outer;
+  };
+  const left = paneEl();
+  left.dataset.p = 'left';
+  const right = paneEl();
+  right.dataset.p = 'right';
+  const layout = document.createElement('div');
+  layout.className = 'ib-layout pierre-layout';
+  layout.append(place(left), place(right));
+  main.replaceChildren(layout);
+  boxes = [
+    ['.ib-ask-layer', WINDOW],
+    ['section.ib-pane[data-p="left"]', { left: 628, top: 8, right: 1028, bottom: 892 }],
+    ['section.ib-pane[data-p="right"]', { left: 1036, top: 8, right: 1432, bottom: 892 }],
+  ];
+  return { left, right };
+}
+
+test.skipIf(!hasDom)("split view: the pane at the window's corner is cut, and a burst inside any pane's body measures nothing", async () => {
+  const { left, right } = splitShell();
+  await show(THREAD);
+  await until(() => circleShown(), 'the circle in split view');
+  expect(document.querySelector('[data-side-scoop]')).toBe(right);
+  expect(left.hasAttribute('data-side-scoop')).toBe(false);
+  await wait(60);
+  paneQueries = 0;
+  for (const pane of [left, right]) {
+    const body = pane.querySelector('.msg')!;
+    for (let i = 0; i < 40; i += 1) {
+      const span = document.createElement('span');
+      span.textContent = `token ${i}`;
+      body.appendChild(span);
+      if (i % 3 === 0) body.firstChild?.remove();
+    }
+  }
+  await wait(80);
+  expect(paneQueries).toBe(0);
+  // The two panes swapped in the layout: measured, and the cut follows the pane now at the corner.
+  const layout = shell!.querySelector('.ib-layout')!;
+  layout.appendChild(layout.firstElementChild!);
+  boxes[1] = ['section.ib-pane[data-p="left"]', { left: 1036, top: 8, right: 1432, bottom: 892 }];
+  boxes[2] = ['section.ib-pane[data-p="right"]', { left: 628, top: 8, right: 1028, bottom: 892 }];
+  await until(() => left.hasAttribute('data-side-scoop'), 'the cut on the pane now at the corner');
+  expect(right.hasAttribute('data-side-scoop')).toBe(false);
+});
+
+test.skipIf(!hasDom)("something else's in the pane's corner (a board in the thread, a folded file's panel, the drafts' pile there): no circle or cut until it goes", async () => {
+  await show(THREAD);
+  await until(() => circleShown(), 'the circle');
+  const pane = shell!.querySelector<HTMLElement>('section.ib-pane')!;
+  // A Shape board opened in the thread: its side panel runs to the pane's corner.
+  const board = document.createElement('section');
+  board.className = 'ib-shape-layer pn-shape ib-shape-inthread';
+  pane.appendChild(board);
+  await until(() => !circleShown(), 'no circle over the board');
+  expect(cutPane()).toBeNull();
+  board.hidden = true;
+  board.setAttribute('hidden', '');
+  await until(() => circleShown(), 'the circle back with the board hidden');
+  board.remove();
+  await wait(40);
+  expect(circleShown()).toBe(true);
+  // The floating drafts' pile resting in the window's corner (no reply foot on screen), then level with Send again.
+  const pile = document.createElement('div');
+  pile.setAttribute('data-rf-corner', '');
+  pile.setAttribute('data-rf-spot', 'corner');
+  shell!.appendChild(pile);
+  await until(() => !circleShown(), 'no circle over the pile');
+  pile.setAttribute('data-rf-spot', 'foot');
+  await until(() => circleShown(), 'the circle back with the pile at the foot');
+  // A file beside the thread at the corner, folded with its annotations panel open down its right edge.
+  const main = shell!.querySelector('.ib-main')!;
+  const file = paneEl('ib-view ib-fold');
+  main.appendChild(file);
+  boxes = [['.ib-ask-layer', WINDOW], ['.ib-main > section.ib-pane', { left: 628, top: 8, right: 1028, bottom: 892 }], ['.ib-main > section.ib-view', { left: 1036, top: 8, right: 1432, bottom: 892 }]];
+  file.className = 'ib-view';
+  await until(() => document.querySelector('[data-side-scoop]') === file, 'the file cut');
+  file.className = 'ib-view ib-fold ib-panel-open';
+  await until(() => !circleShown(), 'no circle over the open panel');
+  file.className = 'ib-view ib-fold';
+  await until(() => circleShown(), 'the circle back with the panel shut');
 });

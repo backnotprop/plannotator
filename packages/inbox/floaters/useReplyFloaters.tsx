@@ -384,6 +384,8 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
   // Where the button sits: level with Send at the foot's right end; beside Ask's window while that is open.
   const askGeom = !phone && askOpen && !ask.store.fullscreen ? ask.store.geometry() : null;
   const place: CSSProperties = askGeom ? { right: askGeom.right + askGeom.w + 12, bottom: askGeom.bottom } : { right: room.right, bottom: room.bottom };
+  // In the window's very corner (no reply foot on screen): the minimized chat's circle keeps off it (SideChatCorner).
+  const spot: StackProps['spot'] = askGeom ? 'ask' : room.foot ? 'foot' : 'corner';
   const showCorner = items.length > 0 && !room.hidden && !(phone && (room.boxOpen || askOpen || openRow !== null)) && !(!phone && openRow !== null) && !(askOpen && ask.store.fullscreen);
   const onAll = () => {
     setMenu(false);
@@ -401,7 +403,7 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
         data-rf-over-circle={!phone && openRow && ask.circle ? '' : undefined}
       >
         {showCorner &&
-          (phone ? <PhoneCorner style={place} items={items} menu={menu} setMenu={setMenu} onAll={onAll} /> : <Stack style={place} items={items} menu={menu} setMenu={setMenu} onAll={onAll} />)}
+          (phone ? <PhoneCorner style={place} spot={spot} items={items} menu={menu} setMenu={setMenu} onAll={onAll} /> : <Stack style={place} spot={spot} items={items} menu={menu} setMenu={setMenu} onAll={onAll} />)}
         {openRow && (
           <FloaterBox
             key={openRow.thread_id}
@@ -424,6 +426,8 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
 
 interface StackProps {
   style: CSSProperties;
+  /** Where it rests: beside Ask's window, level with Send, or in the window's corner. */
+  spot: 'ask' | 'foot' | 'corner';
   items: readonly CornerItem[];
   menu: boolean;
   setMenu: (open: boolean) => void;
@@ -431,7 +435,7 @@ interface StackProps {
 }
 
 /** The corner's pile: a round button that spreads into named rows when you reach for it. */
-function Stack({ style, items, menu, setMenu, onAll }: StackProps) {
+function Stack({ style, spot, items, menu, setMenu, onAll }: StackProps) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrap = useRef<HTMLDivElement | null>(null);
   const spread = (on: boolean, wait: number) => {
@@ -464,6 +468,7 @@ function Stack({ style, items, menu, setMenu, onAll }: StackProps) {
       role="group"
       aria-label={groupName}
       data-rf-corner=""
+      data-rf-spot={spot}
       data-spread={menu ? '' : undefined}
       onPointerEnter={(event) => event.pointerType === 'mouse' && spread(true, 70)}
       onPointerLeave={(event) => event.pointerType === 'mouse' && spread(false, 260)}
@@ -535,7 +540,7 @@ function Stack({ style, items, menu, setMenu, onAll }: StackProps) {
 }
 
 /** A phone: no hover. The round button sits in the foot's row; a press opens one sheet with the list. */
-function PhoneCorner({ style, items, menu, setMenu, onAll }: StackProps) {
+function PhoneCorner({ style, spot, items, menu, setMenu, onAll }: StackProps) {
   const front = items[0]!;
   const drafts = items.filter((item) => item.kind === 'draft');
   const withAsk = items.some((item) => item.kind === 'ask');
@@ -552,6 +557,7 @@ function PhoneCorner({ style, items, menu, setMenu, onAll }: StackProps) {
         aria-label={withAsk ? (drafts.length > 0 ? `Ask AI and ${drafts.length === 1 ? '1 draft reply' : `${drafts.length} draft replies`}` : front.label) : items.length === 1 ? front.label : `Draft replies, ${items.length}`}
         data-rf-launcher=""
         data-rf-corner=""
+        data-rf-spot={spot}
         onClick={press}
       >
         {front.mark}
