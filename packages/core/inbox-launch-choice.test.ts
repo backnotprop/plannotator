@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { codexThreadChoice, launchChoiceArgs, launchChoiceLine, launchEffortsFor, openCodeSessionModel, parseClaudeChoices, parseCodexModels, parseLaunchChoice, parseOpenCodeAgents, parseOpenCodeModels, parsePiChoices } from "./inbox-launch-choice";
+import { codexThreadChoice, launchChoiceArgs, launchChoiceLine, launchChoicesReadable, launchEffortsFor, openCodeSessionModel, parseClaudeChoices, parseCodexModels, parseLaunchChoice, parseOpenCodeAgents, parseOpenCodeDefaultModel, parseOpenCodeModels, parsePiChoices } from "./inbox-launch-choice";
 
 // Claude Code 2.1.322's and Pi 1.5's help, as their CLIs print it (wrapped).
 const CLAUDE_HELP = `  --effort <level>                      Effort level for the current session
@@ -125,5 +125,23 @@ describe("model and effort at launch", () => {
     expect(launchChoiceLine({ primary_agent: "plan" })).toBe("plan");
     // Never on argv: only OpenCode reads it, on its new session.
     expect(launchChoiceArgs("claude-code", { primary_agent: "plan" })).toEqual([]);
+  });
+});
+
+describe("OpenCode's default model", () => {
+  test("GET /api/model/default reads as provider/model; anything else, or a name that could reach argv as a flag, is unknown", () => {
+    expect(parseOpenCodeDefaultModel({ data: { providerID: "opencode", id: "big-pickle" } })).toBe("opencode/big-pickle");
+    expect(parseOpenCodeDefaultModel({ data: { providerID: "vercel", id: "anthropic/claude-sonnet-4.5" } })).toBe("vercel/anthropic/claude-sonnet-4.5");
+    for (const answer of [null, {}, { data: null }, { data: { providerID: "opencode" } }, { data: { providerID: "", id: "x" } }, { data: { providerID: "-x", id: "y" } }, { data: { providerID: 1, id: "y" } }]) {
+      expect(parseOpenCodeDefaultModel(answer)).toBeNull();
+    }
+  });
+
+  test("lists being read, or that could not be read, are never checked against: a Send then checks the token only", () => {
+    const lists = { models: ["opencode/big-pickle"], efforts: [], effort_word: "Variant" };
+    expect(launchChoicesReadable(lists)).toBe(lists);
+    expect(launchChoicesReadable({ ...lists, models: [], unread: "timeout" as const })).toBeNull();
+    expect(launchChoicesReadable({ ...lists, models: [], reading: true as const })).toBeNull();
+    expect(launchChoicesReadable(null)).toBeNull();
   });
 });
