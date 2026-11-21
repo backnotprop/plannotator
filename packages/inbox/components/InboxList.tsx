@@ -1263,7 +1263,7 @@ export function InboxList(props: InboxListProps) {
                 <GroupBand
                   open={open}
                   menu={menuRow === bandMenuId(section.id)}
-                  menuPopup={!!bands && bands.actionsOf(section.id).length > 0}
+                  keys={bands && bands.actionsOf(section.id).length > 0 ? rowKeys : undefined}
                   tip={bandTip.shown?.band === section.id ? bandTip.shown.words : null}
                   tipEnd={props.phone === true}
                   onPointed={() => bandTip.pointed(section.id)}

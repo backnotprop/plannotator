@@ -165,15 +165,15 @@ test.skipIf(!hasDom)('a right-click on a band: Mark all as read and Archive all 
   expect(band('waiting').getAttribute('aria-expanded')).toBe('true');
 });
 
-test.skipIf(!hasDom)('a band with nothing to take (Snoozed) has no menu: the browser keeps its own; only a band with a menu says it has one (aria-haspopup), and none names a key', async () => {
+test.skipIf(!hasDom)('a band with nothing to take (Snoozed) has no menu: the browser keeps its own; it names no menu key; no band says it opens a menu (Enter toggles it)', async () => {
   if (!hasDom) return;
   draw();
   const event = await rightClick(band('snoozed'));
   expect(event.defaultPrevented).toBe(false);
   expect(bandMenu()).toBeNull();
-  expect(band('snoozed').hasAttribute('aria-haspopup')).toBe(false);
-  expect(band('new').getAttribute('aria-haspopup')).toBe('menu');
-  expect([band('new'), band('waiting'), band('snoozed')].some((el) => el.hasAttribute('aria-keyshortcuts'))).toBe(false);
+  expect(band('snoozed').hasAttribute('aria-keyshortcuts')).toBe(false);
+  expect(band('new').getAttribute('aria-keyshortcuts')).toBe('Shift+F10');
+  expect([band('new'), band('waiting'), band('snoozed')].some((el) => el.hasAttribute('aria-haspopup'))).toBe(false);
 });
 
 test.skipIf(!hasDom)('Shift+F10 on the focused band opens its menu; Escape puts focus back on the band', async () => {

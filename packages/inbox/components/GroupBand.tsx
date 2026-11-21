@@ -7,10 +7,10 @@ import { Tip } from './Tip';
  * while the pointer is on the header, as the sidebar's sections do (owner, 2026-11-08: no wait), or while keyboard
  * focus is on it. A touch never shows it, as before. `data-chev` shows it; inbox.css fades it in and out. Its own
  * state, so only this header redraws. `menu`: its right-click menu is open (RowMenu.tsx `bands`), the hover's fill;
- * `menuPopup`: the band has a menu now (`aria-haspopup`, how assistive tech learns of it). `tip`: the Group tip's
- * words (bandTip.ts), shown while set; `onPointed` and `onLeft`: the pointer came onto the band (a mouse, never a
- * touch) and left it, for the tip. The tip keeps its last words while it fades out, so no empty bubble is drawn. The tip sits on the band itself
- * and covers no row: it hangs on an empty anchor of no size (`.ib-band-tipat`), just after the name and count on a
+ * `keys`: that menu's keys, while the band has one (no `aria-haspopup`: Enter toggles the band, it opens no menu).
+ * `tip`: the Group tip's words (bandTip.ts), shown while set; `onPointed` and `onLeft`: the pointer came onto the band
+ * (a mouse, never a touch) and left it, for the tip. The tip keeps its last words while it fades out, so no empty
+ * bubble is drawn. The tip sits on the band itself and covers no row: it hangs on an empty anchor of no size (`.ib-band-tipat`), just after the name and count on a
  * desktop (`tipEnd` false: it reads to their right), at the band's right end on a phone (`tipEnd`: it reads to the
  * anchor's left, inside the band). The anchor is always inside its Tip (empty, it never opens), so showing the tip
  * never draws the band again, and it neither changes the band's height nor moves its name or chevron. The pointer goes
@@ -20,7 +20,7 @@ export function GroupBand({
   open,
   onToggle,
   menu = false,
-  menuPopup = false,
+  keys,
   tip = null,
   tipEnd = false,
   onPointed,
@@ -30,7 +30,7 @@ export function GroupBand({
   open: boolean;
   onToggle: (band: HTMLButtonElement) => void;
   menu?: boolean;
-  menuPopup?: boolean;
+  keys?: string;
   tip?: string | null;
   tipEnd?: boolean;
   onPointed?: () => void;
@@ -49,7 +49,7 @@ export function GroupBand({
       aria-expanded={open}
       data-chev={hovered || focusShown ? '' : undefined}
       data-menu={menu ? '' : undefined}
-      aria-haspopup={menuPopup ? 'menu' : undefined}
+      aria-keyshortcuts={keys}
       onClick={(event) => onToggle(event.currentTarget)}
       onPointerEnter={(event) => {
         if (event.pointerType === 'touch') return;
