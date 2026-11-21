@@ -1039,7 +1039,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
   const filtered = filtersSet(filters);
   const indexing = answered?.model.indexing === true;
   const unanswered = answered && !indexing && !error ? (answered.model.unanswered ?? []) : [];
-  const unansweredEmpty = unanswered.length > 0 && options.length === 0 && Boolean(answered?.filters.project);
+  const unansweredEmpty = unanswered.length > 0 && !options.some((option) => option.kind === 'row') && Boolean(answered?.filters.project);
   let index = -1;
   const body = (() => {
     if (error) {
@@ -1098,6 +1098,16 @@ export default function SearchPalette(props: SearchPaletteProps) {
             </span>
           )}
         </div>
+      );
+    }
+    if (unansweredEmpty) {
+      return (
+        <>
+          {renderGroups()}
+          <div className="ib-sp-empty" data-search-none="" data-search-unanswered="">
+            <span>{unansweredWords(unanswered)}</span>
+          </div>
+        </>
       );
     }
     return renderGroups();
