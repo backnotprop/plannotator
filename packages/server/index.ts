@@ -53,7 +53,7 @@ import {
   type ArchivedPlan,
 } from "./storage";
 import { getRepoInfo } from "./repo";
-import { createRefCards, refCardRouteResponse, type RefRunner } from "./ref-cards";
+import { createRefCardsWithLinear, refCardRouteResponse, type RefRunner } from "./ref-cards";
 import { detectProjectName } from "./project";
 import { agentSwitchConfigToSave, agentToolSaveFailed, cookieHostConfigWrite, loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveFeedbackHistory } from "./config";
 import { getAutoUpdateAdvert, getUpdateAdvert, handleUpdateRoute } from "./auto-update";
@@ -288,7 +288,7 @@ export async function startPlannotatorServer(
   const notionAvailable = isNotionAvailable(isRemote);
   // Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for,
   // and never in remote mode, where anyone who reaches the URL could drive the user's gh / glab.
-  const refCards = createRefCards(options.refRunner ? { run: options.refRunner } : {});
+  const refCards = createRefCardsWithLinear(options.refRunner);
   const wslFlag = await isWSL();
   const gitUser = detectGitUser();
 
