@@ -2195,7 +2195,9 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                         {PLAN_WIDTH_OPTIONS.map((opt) => (
                           <button
                             key={opt.id}
+                            type="button"
                             onClick={() => handleUIPrefsChange({ planWidth: opt.id })}
+                            aria-pressed={uiPrefs.planWidth === opt.id}
                             className={`flex-1 px-3 py-1.5 text-xs rounded-md transition-colors ${
                               uiPrefs.planWidth === opt.id
                                 ? 'bg-background text-foreground shadow-sm font-medium'
@@ -2213,7 +2215,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                         // Exaggerated proportions so the width difference is visually obvious in the small preview
                         const sidebarPct = 14;
                         const panelPct = 14;
-                        const cardPctMap: Record<PlanWidth, number> = { compact: 48, default: 70, wide: 94 };
+                        const cardPctMap: Record<PlanWidth, number> = { compact: 48, default: 70, wide: 94, unlimited: 100 };
                         const cardPct = cardPctMap[active.id];
                         return (
                           <div className="space-y-2">
@@ -2279,7 +2281,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                               </div>
                             </div>
                             <div className="text-[10px] text-muted-foreground/70 leading-snug">
-                              {active.px}px — {active.hint}
+                              {active.px === null ? 'No maximum' : `${active.px}px`} — {active.hint}
                             </div>
                           </div>
                         );
