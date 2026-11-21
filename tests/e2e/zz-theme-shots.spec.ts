@@ -293,6 +293,19 @@ async function selectText(page: Page, needle: string): Promise<void> {
   await expect(page.locator('.annotation-toolbar')).toBeVisible();
 }
 
+async function toolbarPress(page: Page, cls: string): Promise<void> {
+  const r = await page.evaluate((c) => {
+    const bar = document.querySelector('.annotation-toolbar');
+    if (!bar) return 'no toolbar';
+    const all = [...bar.querySelectorAll('button')];
+    const b = all.find((e) => e.classList.contains(c));
+    if (!b) return 'none: ' + all.map((e) => e.className + '|' + (e.getAttribute('aria-label') ?? '')).join(' ; ');
+    b.click();
+    return 'ok';
+  }, cls);
+  if (r !== 'ok') throw new Error(r);
+}
+
 async function toTop(page: Page): Promise<void> {
   await page.evaluate(() => {
     window.scrollTo(0, 0);
@@ -307,7 +320,7 @@ async function annotate(page: Page, v: Variant): Promise<void> {
       'comment',
       async () => {
         await selectText(page, 'a cold cache costs two seconds');
-        await page.locator('.annotation-toolbar button[aria-label="Comment"]').click();
+        await toolbarPress(page, 'text-annotation-comment');
         await page.locator('[data-comment-popover] textarea').last().fill('Is that measured in production or on a laptop?');
         await page.locator('[data-comment-popover]').getByRole('button', { name: /^(Comment|Add)$/ }).last().click();
       },
@@ -316,14 +329,14 @@ async function annotate(page: Page, v: Variant): Promise<void> {
       'delete',
       async () => {
         await selectText(page, 'then a week of watching');
-        await page.locator('.annotation-toolbar button[aria-label="Delete"]').click();
+        await toolbarPress(page, 'text-destructive');
       },
     ],
     [
       'looks-good',
       async () => {
         await selectText(page, 'Move reads first, then writes.');
-        await page.locator('.annotation-toolbar button[aria-label="Looks good"]').click();
+        await toolbarPress(page, 'hover:bg-green-500/10');
       },
     ],
     [
@@ -360,12 +373,19 @@ async function planShots(browser: Browser, v: Variant): Promise<void> {
       await annotate(page, v);
       await toTop(page);
       await snap(page, v, 'plan-review');
-      await page.getByText('Budget', { exact: true }).first().scrollIntoViewIfNeeded().catch(() => {});
+      await page.evaluate(() => {
+        const h = [...document.querySelectorAll('h2')].find((e) => e.textContent?.trim() === 'Steps' && e.getClientRects().length > 0);
+        h?.scrollIntoView({ block: 'start' });
+      });
       await snap(page, v, 'plan-review-lower');
     }
     if (v.shots.includes('plandiff') || v.shots.includes('warn')) {
       try {
-        await page.locator('button[title="Show what changed from previous version"]:visible').first().click();
+        await page.evaluate(() => {
+          const b = [...document.querySelectorAll<HTMLButtonElement>('button[title="Show what changed from previous version"]')].find((e) => e.getClientRects().length > 0);
+          if (!b) throw new Error('no diff badge');
+          b.click();
+        });
         await expect(page.locator('.plan-diff-added, .plan-diff-removed, .plan-diff-modified').first()).toBeVisible();
         const counts = await page.evaluate(() => ['added', 'removed', 'modified'].map((k) => `${k}=${document.querySelectorAll(`.plan-diff-${k}`).length}`).join(' '));
         log(`${v.name} plan diff blocks: ${counts}`);
@@ -396,8 +416,10 @@ async function planShots(browser: Browser, v: Variant): Promise<void> {
         const half = v.mode === 'dark' ? 'Dark' : 'Light';
         await page.getByRole('button', { name: `${half} theme`, exact: true }).first().click().catch(() => {});
         const name = v.theme === 'nightfox' ? 'Nightfox' : 'Tritanopia';
-        const tile = page.getByRole('button', { name: new RegExp(name) }).first();
-        await tile.scrollIntoViewIfNeeded();
+        await page.evaluate((n) => {
+          const tile = [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === n && b.querySelector('div'));
+          tile?.scrollIntoView({ block: 'center' });
+        }, name);
         await page.waitForTimeout(400);
         await snap(page, v, 'theme-picker');
       } catch (err) {
@@ -551,6 +573,11 @@ async function reviewShots(browser: Browser, v: Variant): Promise<void> {
       await page.keyboard.press('Escape').catch(() => {});
     }
     log(`${v.name} diff colours: ${await measureDiff(page)}`);
+    await page.evaluate(() => {
+      let el: HTMLElement | null = document.querySelector('diffs-container');
+      while (el && !(el.scrollHeight > el.clientHeight + 20 && /auto|scroll/.test(getComputedStyle(el).overflowY))) el = el.parentElement;
+      (el ?? document.scrollingElement as HTMLElement | null)?.scrollBy(0, 200);
+    });
     await snap(page, v, 'code-review');
   } catch (err) {
     await dump(page, v, 'review', err);
