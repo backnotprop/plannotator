@@ -393,8 +393,8 @@ function GeneralSection({
           {splitView && !phone && <SplitViewRow saved={splitView.on} />}
           {/* Agent status (agents/agentStatus.ts, owner 2026-11-18): every agent's mark; the ⋮ menu has the same switch. */}
           <AgentStatusRow />
-          {/* Comment dots (data/contentsDots.ts): the contents rail's comments as dots; the rail itself stays. */}
-          <ContentsDotsRow />
+          {/* Comment dots (data/contentsDots.ts, owner 2026-11-21): the contents rail's comments as dots; the rail itself stays. A phone has no rail. */}
+          {!phone && <ContentsDotsRow />}
           <PaletteRow />
           {favicon && (
             <div className="ib-prow" data-settings-favicon={favicon}>
