@@ -62,7 +62,7 @@ export function NotificationAsk({
   onSettings?: () => void;
   /** The address notifications were allowed at (`moved`). */
   movedFrom?: string | null;
-  /** The question sound is on (sound.ts): a fresh install learns it here, not from a dialog. */
+  /** The sound is on (sound.ts): a fresh install learns it here, not from a dialog. */
   soundOn?: boolean;
   /** Drawn on the first-run screen, before any agent wrote: the words speak of the first question. */
   firstRun?: boolean;

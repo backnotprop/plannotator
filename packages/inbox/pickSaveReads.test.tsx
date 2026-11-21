@@ -44,6 +44,8 @@ let frames: Map<string, (event: MessageEvent<string>) => void>;
 let seq = 1_000_000;
 let saves = 0;
 let reads: string[] = [];
+/** The agents reads since the window opened, never cleared by a test: the load reads them twice (App.tsx `refreshAgents`). */
+let agentsReads = 0;
 let slow = false;
 /** The next saves never answer, as on a connection that went away without a word. */
 let hang = false;
@@ -70,7 +72,7 @@ function loopback(path: string, method = 'GET', body?: string): Promise<{ status
 
 const frame = (name: string, data: object) => frames.get(name)?.(new MessageEvent(name, { data: JSON.stringify(data) }));
 
-const TESTS = 9;
+const TESTS = 10;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -117,6 +119,7 @@ beforeEach(() => {
   world = worlds.shift()!;
   saves = 0;
   reads = [];
+  agentsReads = 0;
   slow = false;
   hang = false;
   gated = false;
@@ -144,6 +147,7 @@ beforeEach(() => {
       }
     }
     if (method === 'GET') reads.push(path.split('?')[0]!);
+    if (method === 'GET' && path.split('?')[0] === '/api/inbox/agents') agentsReads += 1;
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
@@ -192,7 +196,7 @@ async function open() {
       </Profiler>,
     );
   });
-  const field = () => host!.querySelector<HTMLInputElement>('input[aria-label^="Other answer"]');
+  const field = () => host!.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Other answer"]');
   await until(() => field() !== null, 'the question card');
   await until(() => frames.has('record'), 'the stream');
   await wait(200);
@@ -200,8 +204,8 @@ async function open() {
   return field()!;
 }
 
-function type(field: HTMLInputElement, words: string) {
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+function type(field: HTMLTextAreaElement, words: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
   act(() => {
     setter.call(field, words);
     field.dispatchEvent(new Event('input', { bubbles: true }));
@@ -216,34 +220,57 @@ async function closePane() {
     window.location.hash = '';
     window.dispatchEvent(new HashChangeEvent('hashchange'));
   });
-  await until(() => host!.querySelector('input[aria-label^="Other answer"]') === null, 'the pane closed');
+  await until(() => host!.querySelector('textarea[aria-label^="Other answer"]') === null, 'the pane closed');
 }
 
 test.skipIf(!hasDom)('a run of saves reads nothing until the last one lands, then the list and the drafts once, never the thread or its files', async () => {
   const field = await open();
   slow = true;
-  let words = '';
-  for (let i = 0; i < 24; i += 1) {
-    words += 'w';
-    type(field, words);
-    await wait(25);
-  }
-  expect(saves).toBeGreaterThanOrEqual(3);
-  // Saves went through, and the window read nothing for them.
-  expect(reads.filter((path) => (path.startsWith('/api/inbox/threads') && !path.endsWith('/ask')) || path === '/api/inbox/drafts' || path === '/api/inbox/decisions')).toEqual([]);
-
-  await until(() => field.value === words && count('/api/inbox/drafts') > 0, 'the read after the last save');
+  // The first letter answers the question (open → picked): it saves at once, and its run reads what shows the pick.
+  type(field, 'w');
+  await until(() => saves === 1, 'the first save');
+  await until(() => count('/api/inbox/drafts') > 0, 'the read after the first save');
   await wait(SAVE_MS + 120);
   // One save's echo is not a whole re-read: the list once, the drafts once (the pick is unsent work), and nothing of
-  // the thread, whose pane drew each save's answer already.
+  // the thread, whose pane drew the save's answer already.
   expect(count('/api/inbox/threads')).toBe(1);
   expect(count('/api/inbox/drafts')).toBe(1);
   expect(count(threadRoute())).toBe(0);
   expect(count(`${threadRoute()}/attachments`)).toBe(0);
 });
 
+test.skipIf(!hasDom)('words typed in an answer already picked save once after the pause and read nothing: no row or draft label moved', async () => {
+  const field = await open();
+  type(field, 'w');
+  await until(() => saves === 1 && count('/api/inbox/drafts') > 0, 'the first save and its reads');
+  await wait(SAVE_MS + 120);
+  reads = [];
+  slow = true;
+  let words = 'w';
+  for (let i = 0; i < 24; i += 1) {
+    words += 'w';
+    type(field, words);
+    await wait(25);
+  }
+  // No save while the person types (typedAnswers.ts), then one with the last words.
+  expect(saves).toBe(1);
+  await until(() => saves === 2, 'the save after the pause');
+  await until(() => (lastPicked as { answer?: { other?: string } } | null)?.answer?.other === words, 'the last words saved');
+  await wait(SAVE_MS + 300);
+  expect(field.value).toBe(words);
+  // The question stayed picked: nothing the list, the decisions or the drafts show moved, so nothing is read.
+  expect(reads.filter((path) => (path.startsWith('/api/inbox/threads') && !path.endsWith('/ask')) || path === '/api/inbox/drafts' || path === '/api/inbox/decisions')).toEqual([]);
+});
+
 test.skipIf(!hasDom)("a save's record that comes after its answer reads nothing more, and a list read with nothing new draws nothing", async () => {
   const field = await open();
+  // The page's load is done first: it reads the agents again 2.5 s after it opened and draws what that settles, which
+  // a slow run counted below as the list read's.
+  await until(() => agentsReads >= 2, "the load's second agents read");
+  for (let quiet = -1, i = 0; quiet !== commits && i < 50; i++) {
+    quiet = commits;
+    await wait(200);
+  }
   type(field, 'a');
   // The save landed with no record yet: what its record will owe is read at once (the list, the drafts).
   await until(() => saves === 1 && count('/api/inbox/threads') === 1 && count('/api/inbox/drafts') === 1, 'the reads after the save');
@@ -261,7 +288,7 @@ test.skipIf(!hasDom)("a save's record that comes after its answer reads nothing 
   await until(() => count('/api/inbox/threads') === 1, 'the list read for the pins');
   await wait(80);
   expect(commits).toBe(drawn);
-});
+}, 20_000);
 
 test.skipIf(!hasDom)('a record that is not a question line is read at once, whatever is saving', async () => {
   const field = await open();

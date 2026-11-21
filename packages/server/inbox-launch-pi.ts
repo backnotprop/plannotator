@@ -49,16 +49,19 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { childEnv } from "@plannotator/shared/child-env";
 import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
-import { readPiSessionClaims, type PiSessionClaim } from "@plannotator/shared/inbox/pi-session-claim";
+import { piSessionClaimFileOf, readPiSessionClaims, type PiSessionClaim } from "@plannotator/shared/inbox/pi-session-claim";
 import { agentVersionRun, createAgentEnvironmentFor } from "./inbox-agents";
+import { inboxCommandBeforeName, inboxProcessStartedAt } from "./inbox-rex-resume";
+import { launchChoiceArgs, parsePiChoices } from "@plannotator/core/inbox-launch-choice";
+import { LAUNCH_CHOICES_RUN_MS, launchChoiceCache } from "./inbox-launch-choice";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
-import { launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
-import { launchNoteText, writeLaunchNote, type LaunchAvailability, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchLive, type LaunchPermissionContext } from "./inbox-launch-host";
+import { launchShellSwitches, launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
+import { launchNoteText, launchTurnErrorNote, writeLaunchNote, type LaunchAvailability, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchLive, type LaunchPermissionContext } from "./inbox-launch-host";
 
 export const PI = "pi" as const;
 export const PI_NAME = "Pi";
@@ -83,8 +86,6 @@ const HANDOFF_MS = 60_000;
 const TERMINAL_OPEN_MS = 30_000;
 /** The longest dialog title the thread note quotes. */
 const NOTE_TITLE_MAX = 80;
-/** The longest error text a turn's error note quotes. */
-const NOTE_ERROR_MAX = 300;
 /**
  * A Pi before 0.80.4 sends no `agent_settled`: how long after a run's last `agent_end` its error is held for
  * one (or for a compaction or retry that may still follow) before the note goes anyway.
@@ -128,13 +129,16 @@ export function piExtensionListed(settingsText: string | null): boolean {
 }
 
 /** The argv of one Pi process for a session: RPC mode, its exact session id (made when missing), its name (Pi takes the next argument as it is). */
-export function piArgv(pi: string, session: string, name: string): string[] {
-  return [pi, "--mode", "rpc", "--session-id", session, "--name", name.trim() || "Inbox"];
+export function piArgv(pi: string, session: string, name: string, choice: readonly string[] = []): string[] {
+  return [pi, "--mode", "rpc", "--session-id", session, "--name", name.trim() || "Inbox", ...choice];
 }
 
-/** The process's env: the login env through the launch filter, the Inbox tool on, and this Inbox's data dir when not the default. */
+/**
+ * The process's env: the login env through the launch filter, the person's own Plannotator switches
+ * (`LAUNCH_SHELL_SWITCHES`), the Inbox tool on, and this Inbox's data dir when not the default.
+ */
 export function piSpawnEnv(login: Readonly<LaunchEnv>, dataDir: string | null): LaunchEnv {
-  return { ...launchSpawnEnv(login), PLANNOTATOR_INBOX_TOOL: "1", ...(dataDir ? { PLANNOTATOR_DATA_DIR: dataDir } : {}) };
+  return { ...launchSpawnEnv(login), ...launchShellSwitches(login), PLANNOTATOR_INBOX_TOOL: "1", ...(dataDir ? { PLANNOTATOR_DATA_DIR: dataDir } : {}) };
 }
 
 /**
@@ -189,7 +193,7 @@ export function piSessionProcesses(listing: string, session: string, exclude: It
     return false;
   };
   // Quoted (a terminal's `sh -c`) or not (Pi's own argv), and never a longer id that starts the same.
-  const names = (command: string) => new RegExp(`--session-id\\s+'?${session}(?![0-9a-f-])`, "i").test(command);
+  const names = (command: string) => new RegExp(`--session-id\\s+'?${session}(?![0-9a-f-])`, "i").test(inboxCommandBeforeName(command));
   const found = new Map<number, boolean>();
   for (const [pid, command] of rows) {
     if (!under(pid) && names(command)) found.set(pid, /--mode\s+rpc\b/.test(command));
@@ -230,10 +234,7 @@ export function piTurnError(messages: unknown): string | undefined {
 }
 
 /** The thread note for a turn that ended in an error: Pi's own words, one line. */
-export function piTurnErrorNote(error: string): string {
-  const shown = launchNoteText(error, NOTE_ERROR_MAX);
-  return shown ? `Pi's turn ended with an error: ${shown}` : "Pi's turn ended with an error.";
-}
+export const piTurnErrorNote = (error: string): string => launchTurnErrorNote("Pi", error);
 
 /** Pi's default sessions folder for `cwd` under `agentDir` (its `getDefaultSessionDirPath`). */
 export function piSessionDirOf(agentDir: string, cwd: string): string {
@@ -307,7 +308,7 @@ interface PiSessionRecord {
  */
 function processListing(ps: string): string | null {
   try {
-    const run = Bun.spawnSync([ps, "-A", "-ww", "-o", "pid=,ppid=,command="], { env: childEnv(), stdout: "pipe", stderr: "ignore" });
+    const run = Bun.spawnSync([ps, "-A", "-ww", "-o", "pid=,ppid=,command="], { env: childEnv(), stdout: "pipe", stderr: "ignore", windowsHide: true });
     return run.exitCode === 0 ? run.stdout.toString() : null;
   } catch {
     return null;
@@ -408,7 +409,10 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     if (looked) return;
     looked = true;
     const text = list() ?? "";
-    for (const match of text.matchAll(/--session-id\s+'?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi)) elsewhere.add(match[1]!.toLowerCase());
+    // Each process's own session only: never an id inside a thread's name (`--name`, after it on the line).
+    for (const line of text.split("\n")) {
+      for (const match of inboxCommandBeforeName(line).matchAll(/--session-id\s+'?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi)) elsewhere.add(match[1]!.toLowerCase());
+    }
     for (const claim of readPiSessionClaims(ctx.dataDir)) elsewhere.add(claim.session.toLowerCase());
   };
   /** Whether a process of no hand-off of this Inbox's still runs `session` (checked again at most every `LISTING_MS`). */
@@ -476,10 +480,10 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     });
 
   /** One note from the session in the launch's thread (a dialog answered Cancel, a session file that is gone). */
-  const note = (launchId: string, session: string, body: string, key: string) => {
+  const note = (launchId: string, session: string, body: string, key: string, turnError = false) => {
     const root = threads?.rootOf(launchId);
     if (!threads || !root) return;
-    writeLaunchNote(threads, root, { author: { host: PI, session, name: PI_NAME }, body, key }, ctx.log);
+    writeLaunchNote(threads, root, { author: { host: PI, session, name: PI_NAME }, body, key, turnError }, ctx.log);
   };
 
   /** A dialog no one here can show: Cancel at once, and one note in the launch's thread saying so. */
@@ -540,7 +544,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     // Never into a launch folder a Delete removed meanwhile.
     if (existsSync(ctx.launchDir(p.launchId))) ctx.startLog(p.launchId, `pi ${p.session}: the turn ended with an error: ${held.text.slice(0, 2000)}`);
     ctx.log(`Inbox launch ${p.launchId}: a Pi turn ended with an error: ${held.text.slice(0, 200)}`);
-    note(p.launchId, p.session, piTurnErrorNote(held.text), `pi-error-${p.launchId}-${Date.now()}-${++errorNotes}`);
+    note(p.launchId, p.session, piTurnErrorNote(held.text), `pi-error-${p.launchId}-${Date.now()}-${++errorNotes}`, true);
   };
 
   type SpawnResult = { ok: true } | { ok: false; cancelled: boolean; missing: boolean; text: string; output: string };
@@ -551,10 +555,10 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     if (!path) return { ok: false, cancelled: false, missing: true, text: "pi is not on the login PATH.", output: "pi not found" };
     // The last moment a Stop, Delete or Open in Terminal can keep the process from being made at all.
     if (cancelled()) return { ok: false, cancelled: true, missing: false, text: "", output: "" };
-    const argv = piArgv(path, session, name);
+    const argv = piArgv(path, session, name, launchChoiceArgs(PI, { model: launch.model, effort: launch.effort }));
     let proc: ReturnType<typeof Bun.spawn>;
     try {
-      proc = Bun.spawn(argv, { cwd: launch.folder, env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+      proc = Bun.spawn(argv, { cwd: launch.folder, env, stdin: "pipe", stdout: "pipe", stderr: "pipe", windowsHide: true });
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
       return { ok: false, cancelled: false, missing: false, text: piCause(text), output: text };
@@ -664,7 +668,9 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
 
   const nameOf = (launch: InboxLaunchRecord) => {
     const root = threads?.rootOf(launch.id);
-    return root?.thread_name ?? root?.subject ?? "Inbox";
+    // A reply's launch takes its thread's name.
+    const head = root ? (threads!.store.message(root.thread_id) ?? root) : null;
+    return head?.thread_name ?? head?.subject ?? "Inbox";
   };
 
   type ResumeResult = LaunchHostResult & { failure: { code: "untrusted" | "failed"; text: string } | null };
@@ -697,6 +703,24 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
   /** The highest bridge poll count seen per session: a session held elsewhere reads one above it (Stop waits for a higher one). */
   const pollsSeen = new Map<string, number>();
 
+  let choiceKey: string | null = null;
+  const choiceLists = launchChoiceCache(async () => {
+    const e = await ctx.environment();
+    const path = e.which("pi");
+    if (!path) return null;
+    // Help with no `--thinking` (an older Pi) means no menu.
+    const help = await e.run([path, "--help"], { timeoutMs: LAUNCH_CHOICES_RUN_MS });
+    if (help.exitCode !== 0 || help.timedOut || !/--thinking <level>/.test(help.stdout)) return null;
+    const models = await e.run([path, "--list-models"], { timeoutMs: LAUNCH_CHOICES_RUN_MS });
+    return parsePiChoices(help.stdout, models.exitCode === 0 && !models.timedOut ? models.stdout : null);
+  });
+
+  /** The Pis that run `session` now by `listing` (argv or claim), not one this Inbox runs in the background. */
+  const piRexPids = (session: string, listing: string): number[] => {
+    const own = [...procs.values()].filter((p) => !p.exited).map((p) => p.proc.pid);
+    return piSessionProcesses(listing, session, own, readPiSessionClaims(ctx.dataDir)).flatMap((found) => (found.pid !== process.pid ? [found.pid] : []));
+  };
+
   return {
     agent: PI,
     name: PI_NAME,
@@ -713,8 +737,11 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
       if (!piExtensionListed(settingsText())) return { ok: false, missing: false, reason: "Plannotator's Pi extension is not installed (pi install npm:@plannotator/pi-extension)" };
       const version = parsePiVersion((await agentVersionRun(e, path, { timeoutMs: 10_000 })).stdout);
       if (!version || !versionAtLeast(version, PI_LAUNCH_MIN_VERSION)) return { ok: false, missing: false, reason: `Pi ${version ?? "?"} is older than ${PI_LAUNCH_MIN_VERSION}` };
+      choiceKey = `${path}@${version}`;
       return { ok: true, version };
     },
+
+    choices: () => choiceLists(choiceKey),
 
     /** Pi has no permission modes: nothing to fix on the record. */
     startOf: () => ({ full: false, ownMode: false, bypass: false }),
@@ -729,6 +756,56 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
         return { ok: false as const, code: result.missing ? ("missing" as const) : ("failed" as const), text: result.text };
       }
       return { ok: true as const, session, ref: session };
+    },
+
+    /**
+     * Start in Rex: interactive Pi in the folder on the session id the Inbox picks now (or the same one again), with
+     * the Inbox tool on and this Inbox's data dir, as Open in Terminal runs it. The extension connects it at its
+     * start, as that id, and takes the root as its first turn: the message is never on the command line.
+     */
+    /** Start in Rex: a Pi lists as `pi` alone, so the claim its extension wrote (this Inbox's data dir) says which session it runs. */
+    runsSession(session: string, listing: string) {
+      return piRexPids(session, listing).length > 0;
+    },
+
+    /**
+     * The Pis Stop signals: one whose argv names the session, or one by its claim only while that claim is from this
+     * process's own life (written after it started). A pid another Pi reused, under a claim a Pi that died left, never.
+     */
+    async sessionPids(session: string, listing: string) {
+      const own = [...procs.values()].filter((p) => !p.exited).map((p) => p.proc.pid);
+      const byArgv = new Set(piSessionProcesses(listing, session, own, []).map((found) => found.pid));
+      const claims = readPiSessionClaims(ctx.dataDir);
+      const out: number[] = [];
+      for (const pid of piRexPids(session, listing)) {
+        if (byArgv.has(pid)) {
+          out.push(pid);
+          continue;
+        }
+        const claim = claims.find((c) => c.pid === pid && c.session.toLowerCase() === session.toLowerCase());
+        let written: number | null = null;
+        try {
+          written = claim ? statSync(piSessionClaimFileOf(ctx.dataDir, claim.session, claim.pid)).mtimeMs : null;
+        } catch {
+          written = null;
+        }
+        const started = written === null ? null : await inboxProcessStartedAt(pid);
+        if (written !== null && started !== null && started <= written + 1000) out.push(pid);
+      }
+      return out;
+    },
+
+    async rexCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean; fresh?: boolean }) {
+      const session = input.resume && launch.session ? launch.session : randomUUID();
+      const dataDir = dataDirArg();
+      const choice = launchChoiceArgs(PI, { model: launch.model, effort: launch.effort });
+      const env = ["PLANNOTATOR_INBOX_TOOL=1", ...(dataDir ? [`PLANNOTATOR_DATA_DIR=${dataDir}`] : [])];
+      // Named for its thread, as a background start is (`piArgv`): without it Pi names the session itself, and the list's
+      // row reads that name. A session started again keeps the name it has (the person may have renamed it), as Claude's.
+      // One that never took a turn (`fresh`) is named as a first start is.
+      const named = input.resume && !input.fresh ? [] : ["--name", input.name.trim() || "Inbox"];
+      const command = `cd ${shellQuote(launch.folder)} && exec env ${[...env, "pi", "--session-id", session, ...named, ...choice].map(shellQuote).join(" ")}`;
+      return { ok: true as const, session, ref: session, command };
     },
 
     /** What this Inbox's processes say: running (busy or idle), stopped once one ended, absent when none ran here. */

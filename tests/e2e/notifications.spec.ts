@@ -225,6 +225,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     env: {
       PATH: process.env.PATH ?? '',
       HOME: home,
+      PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
       PLANNOTATOR_DATA_DIR: dataDir,
       PLANNOTATOR_BROWSER: NO_BROWSER,
       NO_BROWSER,
@@ -364,10 +365,13 @@ test('Settings shows the status, a test and the reach; after a port change "move
   expect((await calls()).at(-1)).toMatchObject({ title: 'Plannotator Inbox: test notification', tag: 'plannotator-inbox-test' });
   await expect(block.locator('[data-notify-test]')).toContainText("Didn't see it?");
   const main = block.getByRole('switch', { name: 'Desktop notifications' });
-  // On by default, and allowed by the browser: the one notifications switch reads on (the other is the question sound's).
+  // On by default, and allowed by the browser: the one notifications switch reads on.
   await expect(main).toHaveAttribute('aria-checked', 'true');
   await expect(block.getByRole('switch', { name: 'Desktop notifications' })).toHaveCount(1);
-  await expect(block.getByRole('switch')).toHaveCount(2);
+  // The card's other switches are named: the sound's and the Mark read warning's; no second notifications switch.
+  await expect(block.getByRole('switch', { name: 'Play a sound' })).toHaveCount(1);
+  await expect(block.getByRole('switch', { name: 'Warn before Mark read sets questions aside' })).toHaveCount(1);
+  await expect(block.getByRole('switch')).toHaveCount(3);
   await main.click();
   await expect(main).toHaveAttribute('aria-checked', 'false');
   await expect.poll(() => config().inboxNotifications?.enabled).toBe(false);

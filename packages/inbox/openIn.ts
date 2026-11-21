@@ -7,12 +7,16 @@
  * it, the file manager; then Copy path. The current choice is checked.
  * A referenced file (Shape, a review's diff headers) has the same list, by its
  * kind on disk, with no Browser: only an attachment has a page to open.
+ * A file of a thread on another linked machine (`onAnotherMachine`) lists
+ * only what works from here, a page's or an image's new tab and Copy path:
+ * every surface asks `openInMenu` and `newTabUrl`, so each follows.
  */
 
 import { INBOX_OPEN_IN_DEFAULT_APP, inboxOpenInPolicy, readInboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import type { OpenInPlatform } from '@plannotator/core/open-in-apps';
 import type { DetectedOpenInApp } from '@plannotator/ui/hooks/useOpenInApps';
 import { attachmentImageUrl, attachmentPageUrl } from './attachments';
+import { machineOf, selfMachineId } from './inboxUrl';
 
 export type OpenInItem =
   /** A new tab of the page (a link in the window; nothing launches). */
@@ -31,9 +35,22 @@ export interface OpenInMenu {
 }
 
 /**
+ * Whether the file's thread lives on another linked machine (docs/agent-guides/inbox-machines.md: Open in stays on
+ * this computer). Its bytes are on that machine's disk, so this computer's editors, Default app and file manager have
+ * nothing to open. What works from here: Copy path (that machine's path, for a shell there), a page or an image in
+ * a new tab (through the forward; inbox-machine-page.ts makes the page's), Download and the viewer in the thread.
+ */
+export function onAnotherMachine(attachment: Pick<InboxAttachmentState, 'id'>): boolean {
+  const machine = machineOf(attachment.id);
+  return machine !== null && machine !== selfMachineId();
+}
+
+/**
  * The menu for one attachment. `version` is the one the window shows: a new
  * tab shows that version; the apps always open the file as it is now
- * (owner's recommendation 1: no temp copy of the sent bytes).
+ * (owner's recommendation 1: no temp copy of the sent bytes). For a file on
+ * another machine, only what works from here: a page's or an image's new tab
+ * (through the forward), and Copy path, which every list ends with.
  */
 export function openInMenu(
   attachment: InboxAttachmentState,
@@ -42,6 +59,11 @@ export function openInMenu(
   remembered: string | null,
   version: 'current' | 'sent',
 ): OpenInMenu {
+  if (onAnotherMachine(attachment)) {
+    const tab = newTabUrl(attachment, version);
+    const items: OpenInItem[] = tab ? [{ kind: 'browser', id: 'browser', label: 'Browser', href: tab }] : [];
+    return { items, primary: items[0] ?? null, missing: false };
+  }
   return openInMenuFor(attachment, detected, platform, remembered, attachmentPageUrl(attachment, version), attachment.unavailable !== null);
 }
 
@@ -84,6 +106,7 @@ export function remembersOpenInItem(item: OpenInItem): boolean {
 /**
  * Over the tailnet and on a phone the only "Open in" is a new tab: the page
  * route for HTML, the image route for an image, nothing for anything else.
+ * The same for a file on another machine, through the forward.
  */
 export function newTabUrl(attachment: InboxAttachmentState, version: 'current' | 'sent'): string | null {
   const kind = readInboxAttachmentKind(attachment.kind);

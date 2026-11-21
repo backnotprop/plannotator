@@ -20,6 +20,7 @@ const stateLabels: Record<PRItem['state'], string> = {
 
 interface PRSelectorProps {
   mrNumberLabel: string;
+  numberPrefix: string;
   prTitle: string;
   currentNumber: number;
   onSelect: (url: string) => void;
@@ -28,7 +29,7 @@ interface PRSelectorProps {
 
 const HIDE_MERGED_PR_KEY = 'plannotator-pr-list-hide-merged';
 
-export function PRSelector({ mrNumberLabel, prTitle, currentNumber, onSelect, disabled }: PRSelectorProps) {
+export function PRSelector({ mrNumberLabel, numberPrefix, prTitle, currentNumber, onSelect, disabled }: PRSelectorProps) {
   const [prs, setPrs] = useState<PRItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [fetched, setFetched] = useState(false);
@@ -93,7 +94,7 @@ export function PRSelector({ mrNumberLabel, prTitle, currentNumber, onSelect, di
       onOpenChange={handleOpen}
       headerContent={mergedCount > 0 ? (
         <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/50">
-          <span className="text-[10px] text-muted-foreground/60">
+          <span className="text-xs text-muted-foreground/60">
             {hideMerged ? `${openCount} open · ${mergedCount} hidden` : `${openCount} open, ${prs.length} total`}
           </span>
           <button
@@ -135,9 +136,9 @@ export function PRSelector({ mrNumberLabel, prTitle, currentNumber, onSelect, di
         <div className="flex flex-col gap-0.5">
           <div className="flex items-center justify-between gap-2">
             <span className={`font-mono ${isSelected ? 'text-foreground font-medium' : 'text-foreground/80'}`}>
-              #{item.number}
+              {numberPrefix}{item.number}
             </span>
-            <span className={`text-[10px] ${stateColors[item.state]}`}>
+            <span className={`text-xs ${stateColors[item.state]}`}>
               {stateLabels[item.state]}
             </span>
           </div>

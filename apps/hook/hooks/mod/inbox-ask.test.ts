@@ -63,7 +63,7 @@ async function world() {
   const { thread_id: threadId, message_id: messageId } = sent.structuredContent as { thread_id: string; message_id: string }
   const store = new Map<string, unknown>()
   const open = async () => {
-    const session = await ClaudeSession.start({ env: { PATH: process.env.PATH ?? '', PLANNOTATOR_DATA_DIR: dataDir }, cwd: project, store, sessionId: SESSION, dataDir })
+    const session = await ClaudeSession.start({ env: { PATH: process.env.PATH ?? '', PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir }, cwd: project, store, sessionId: SESSION, dataDir })
     session.holdPluginTurns = true
     sessions.push(session)
     return session

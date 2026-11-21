@@ -420,12 +420,12 @@ describe("parseInboxCardPr", () => {
 });
 
 describe("cards: the Board page's fields (step 2)", () => {
-  test("notes: the person's, line breaks kept, capped; cleared with an empty value", () => {
+  test("notes: the person's, line breaks kept, any length; cleared with an empty value", () => {
     const { store, project } = world();
     const { card } = store.createCard({ project_id: project.id, by: PERSON, title: "Roadmap page", notes: "  One page.\n\nWhat is next.  " });
     expect(card.notes).toBe("One page.\n\nWhat is next.");
     expect(store.updateCard(card.id, { by: PERSON, notes: "" }).notes).toBeNull();
-    expect(refusal(() => store.updateCard(card.id, { by: PERSON, notes: "x".repeat(4001) }))).toBe("validation_error");
+    expect(store.updateCard(card.id, { by: PERSON, notes: "x".repeat(4001) }).notes).toBe("x".repeat(4001));
   });
 
   test("links: an issue and a PR as refs, the PRs still written as prs for an older Inbox; a stored prs-only card reads its refs", () => {
@@ -446,6 +446,22 @@ describe("cards: the Board page's fields (step 2)", () => {
     writeFileSync(file, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
     // Linked as `prs` then, so each is the card's own PR (`via: "pr"`).
     expect(InboxStore.open(dir).card(card.id)!.refs).toEqual([{ kind: "pr", source: "github", ref: "acme/widgets#12", url: "https://github.com/acme/widgets/pull/12", via: "pr" }]);
+  });
+
+  test("the person removes a link: its PR leaves prs too, the history says so, a retry writes nothing, and it reads back", () => {
+    const { dir, store, project } = world();
+    const { card } = store.createCard({ project_id: project.id, by: AGENT, title: "Forge", prs: ["acme/widgets#12"], refs: ["acme/widgets#11"] });
+    const pr = "https://github.com/acme/widgets/pull/12";
+    const after = store.unlinkCardRef(card.id, ` ${pr} `);
+    expect(after.refs.map((ref) => ref.ref)).toEqual(["acme/widgets#11"]);
+    expect(after.prs).toEqual([]);
+    expect(store.cardHistory(card.id)[0]).toMatchObject({ kind: "unlinked_ref", by: PERSON, ref: "acme/widgets#12", ref_kind: "pr" });
+    const lines = store.cardHistory(card.id).length;
+    expect(store.unlinkCardRef(card.id, pr)).toBe(store.card(card.id)!);
+    expect(store.cardHistory(card.id)).toHaveLength(lines);
+    expect(refusal(() => store.unlinkCardRef(card.id, ""))).toBe("validation_error");
+    expect(refusal(() => store.unlinkCardRef("crd_nope", pr))).toBe("card_not_found");
+    expect(InboxStore.open(dir).card(card.id)!.refs.map((ref) => ref.ref)).toEqual(["acme/widgets#11"]);
   });
 
   test("history: every write the card saw, newest first, with who wrote it", () => {

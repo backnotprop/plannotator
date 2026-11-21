@@ -80,7 +80,7 @@ interface ReviewSubmissionDialogProps {
    */
   onActionChange?: (action: 'comment' | 'request_changes') => void;
   /**
-   * Why Request changes cannot be chosen (GitLab has no such review; GitHub
+   * Why Request changes cannot be chosen (the platform has no such review, or
    * refuses it on your own PR). Set ⇒ the option renders disabled with this
    * reason under it.
    */

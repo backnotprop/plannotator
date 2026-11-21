@@ -207,6 +207,13 @@ test.skipIf(!hasDom)('"Showing only" names the project in full, Clear goes back 
   draw({ machineId: MINI, machines });
   expect(one('[data-sheet-showing]')!.getAttribute('data-sheet-showing')).toBe('machine');
   expect(one('[data-sheet-showing] bdi')?.textContent).toBe('Studio Mac mini');
+  // So does an agent (its row's name), and its Clear is the same Clear.
+  draw({ agentFilter: { id: 'ses_a', name: 'Invoice retries' }, onInbox: () => void cleared++ });
+  expect(one('[data-sheet-showing]')!.getAttribute('data-sheet-showing')).toBe('agent');
+  expect(one('[data-sheet-showing] bdi')?.textContent).toBe('Invoice retries');
+  expect(one('[data-inbox-nav]')!.getAttribute('aria-current')).toBeNull();
+  click(one('[data-sheet-clear]')!);
+  expect(cleared).toBe(2);
   draw({ page: 'settings', projectId: 'prj_b' });
   expect(one('[data-sheet-showing]')).toBeNull();
 });

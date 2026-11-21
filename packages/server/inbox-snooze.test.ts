@@ -8,12 +8,13 @@
  * snoozed thread, a project batch ending one, and a past time accepted.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { InboxListRow, InboxListSection } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
+import { savedConfig } from "../../tests/helpers/saved-config";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -141,7 +142,7 @@ describe("snooze_thread, the agent's call", () => {
     try {
       const { client, send } = await setup();
       const a = await send(ASK, "ses_a");
-      const mark = () => (existsSync(join(configDir, "config.json")) ? JSON.parse(readFileSync(join(configDir, "config.json"), "utf8")).inboxSnoozeIntro?.snoozedAt : undefined);
+      const mark = () => savedConfig(configDir).inboxSnoozeIntro?.snoozedAt;
       await call(client, { thread_id: a.thread_id, until: null });
       await call(client, { thread_id: a.thread_id, until: later(-60_000) });
       expect(mark()).toBeUndefined();
@@ -243,6 +244,24 @@ describe("snooze", () => {
     // Read, the clock goes.
     await post(server, `/api/inbox/threads/${a.thread_id}/seen`, {});
     expect(server.store.snoozes()).toEqual([]);
+  });
+
+  test("a thread in the person's Priority keeps it while snoozed and when it comes back", async () => {
+    const { server, send } = await setup();
+    const a = await send(ASK, "ses_a");
+    expect((await post(server, `/api/inbox/threads/${a.thread_id}/priority`, { priority: true })).status).toBe(200);
+    const first = server.store.priorities().threads[0]!.at;
+    await snooze(server, a.thread_id, later(800));
+    // Snoozed: in the band (the window draws it there, not in Priority), its priority kept.
+    const snoozed = (await list(server)).snoozed!.find((r) => r.thread_id === a.thread_id)!;
+    expect(snoozed.priority).toEqual({ person: true, at: first, ask: null });
+    let back = await list(server);
+    for (let i = 0; i < 40 && back.snoozed!.length > 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      back = await list(server);
+    }
+    expect(back.snoozed).toEqual([]);
+    expect(back.sections.flatMap((s) => s.threads).find((r) => r.thread_id === a.thread_id)!.priority).toEqual({ person: true, at: first, ask: null });
   });
 
   test("a time gone by is refused; Unsnooze ends it", async () => {

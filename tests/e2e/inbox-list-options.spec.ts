@@ -33,7 +33,7 @@
  * PNGs land in PLANNOTATOR_E2E_PROOF_DIR/list-options, or .local/proof/list-options/.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -62,7 +62,7 @@ test.beforeAll(async () => {
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-list-options-e2e-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   url = started.stdout.trim();
@@ -299,7 +299,23 @@ test('by keyboard: Enter opens ⋮, the arrows reach an option, Space and Enter 
     await page.keyboard.press('Enter');
     await expect(page.locator('[data-tidy-menu-popup]')).toBeVisible();
     const highlighted = () => page.locator('[data-tidy-menu-popup] [data-highlighted]').getAttribute('data-list-look');
-    for (let i = 0; i < 8 && (await highlighted()) !== 'compact'; i++) await page.keyboard.press('ArrowDown');
+    // The arrows walk every item, however many come before the one sought (no count of presses to keep in step).
+    const items = await page.locator('[data-tidy-menu-popup] [role^="menuitem"]').count();
+    const arrowTo = async (target: string) => {
+      const reached = page.locator(`[data-tidy-menu-popup] [data-highlighted]${target}`);
+      for (let i = 0; i <= items && (await reached.count()) === 0; i++) await page.keyboard.press('ArrowDown');
+      await expect(reached).toHaveCount(1);
+    };
+    // "Show agent status", its own item after the view: reached by the arrows, Space turns it on, Enter off again.
+    const agentStatus = page.locator('[data-tidy-menu-popup] [data-agent-status-option]');
+    await arrowTo('[data-agent-status-option]');
+    await expect(agentStatus).toHaveAttribute('aria-checked', 'false');
+    await page.keyboard.press(' ');
+    await expect(agentStatus).toHaveAttribute('aria-checked', 'true');
+    await page.keyboard.press('Enter');
+    await expect(agentStatus).toHaveAttribute('aria-checked', 'false');
+    await expect(page.locator('[data-tidy-menu-popup]')).toBeVisible();
+    await arrowTo('[data-list-look="compact"]');
     expect(await highlighted()).toBe('compact');
     await page.keyboard.press(' ');
     await expect(option(page, 'compact')).toHaveAttribute('aria-checked', 'true');
@@ -324,6 +340,8 @@ test('by keyboard: Enter opens ⋮, the arrows reach an option, Space and Enter 
     await expect(trigger).toBeFocused();
   } finally {
     await context.close();
+    // The agent status switch is this Inbox's setting: off again for the next test, whatever this one reached.
+    await post('/api/inbox/settings', { agent_status: { on: false } });
   }
 });
 

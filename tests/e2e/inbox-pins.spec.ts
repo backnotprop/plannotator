@@ -21,7 +21,7 @@
  * `bun run test:e2e:inbox`.
  */
 
-import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -121,7 +121,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   rmSync(shots, { recursive: true, force: true });
   mkdirSync(shots, { recursive: true });
   const root = inboxScratch('plannotator-inbox-pins-e2e-');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const src = join(root, 'src');
@@ -184,7 +184,7 @@ test('Star thread leads the row menu; the thread appears under Pinned, above Pro
 
   await rowButton(page, threads.board).click({ button: 'right' });
   const menu = page.locator('[data-row-menu]');
-  await expect(menu.getByRole('menuitem').first()).toHaveText('Star thread');
+  await expect(menu.getByRole('menuitem', { name: 'Star thread' })).toBeVisible();
   await page.locator('[data-row-action="pin"]').click();
   await expect(pinned(page, threads.board)).toBeVisible();
   await expect(page.locator('.ib-side-sec-l')).toHaveText(['Starred', 'Agents', 'Projects']);
@@ -233,13 +233,12 @@ test("a click opens the thread and keeps the filter; the header ⋯ menu pins an
   await pinned(page, threads.board).click();
   await expect(page).toHaveURL(/#project=prj_.*thread=|thread=.*project=/);
   await expect(pinned(page, threads.board)).toHaveAttribute('aria-current', 'true');
-  // No pin button in the header; the ⋯ menu leads with the pin (off a phone Snooze is the header's clock, approval
-  // "inbox-thread-header"), and says it is pinned.
+  // No pin button in the header; the ⋯ menu has the pin in its own group after the read action and Snooze, and says
+  // it is pinned.
   await expect(page.locator('[data-pin-toggle]')).toHaveCount(0);
   const item = await openThreadMenu(page);
   await expect(item).toHaveText('Unstar thread');
-  await expect(page.locator('[data-thread-menu] [role="menuitem"]').nth(0)).toHaveText('Unstar thread');
-  await expect(page.locator('.ib-phead [data-thread-snooze]')).toBeVisible();
+  await expect(page.locator('[data-thread-menu] [data-thread-snooze-item]')).toBeVisible();
   await shot(page, 'desktop-thread-menu-light.png');
   await page.keyboard.press('Escape');
   await shot(page, 'desktop-thread-light.png');

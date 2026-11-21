@@ -1,0 +1,208 @@
+{
+  "about": "Invented moments for snoozing. scripts/mobile/vectors-snooze.ts runs the window's own snooze rules (packages/core/inbox-snooze.ts) once per time zone named here, in its own process with TZ set, and scripts/mobile/vectors.ts writes vectors/snooze.json. The nows cross each zone's clock changes: America/Los_Angeles falls back on 2026-11-01 and springs forward on 2026-03-08 (2:00 AM), Europe/London falls back on 2026-10-25, Pacific/Auckland springs forward on 2026-09-27 (2:00 AM) and America/Santiago springs forward at midnight on 2026-09-06, so a day there has no 12:00 AM.",
+  "time_zones": [
+    "UTC",
+    "Asia/Kolkata",
+    "America/Los_Angeles",
+    "Europe/London",
+    "Pacific/Auckland",
+    "America/Santiago"
+  ],
+  "nows": [
+    "2026-11-18T15:30:00.000Z",
+    "2026-11-19T01:10:00.000Z",
+    "2026-11-18T18:00:00.000Z",
+    "2026-11-20T23:45:00.000Z",
+    "2026-11-22T12:00:00.000Z",
+    "2026-11-23T09:00:00.000Z",
+    "2026-10-31T20:00:00.000Z",
+    "2026-11-01T07:30:00.000Z",
+    "2026-03-07T18:00:00.000Z",
+    "2026-03-08T09:15:00.000Z",
+    "2026-10-24T10:00:00.000Z",
+    "2026-09-26T00:00:00.000Z",
+    "2026-09-05T15:00:00.000Z",
+    "2026-12-31T22:30:00.000Z"
+  ],
+  "pick_days": [
+    "2026-11-18",
+    "2026-11-01",
+    "2026-03-08",
+    "2026-10-25",
+    "2026-09-27",
+    "2026-09-06"
+  ],
+  "pick_days_count": 4,
+  "when": [
+    "2026-11-18T17:00:00.000Z",
+    "2026-11-19T16:00:00.000Z",
+    "2026-11-24T08:00:00.000Z",
+    "2026-11-26T08:00:00.000Z",
+    "2027-01-04T16:00:00.000Z",
+    "2026-11-17T09:00:00.000Z",
+    "not a time"
+  ],
+  "keep_time": [
+    "00:00",
+    "08:00",
+    "15:00",
+    "15:10",
+    "23:59"
+  ],
+  "refusals": [
+    "2026-11-18T15:30:00.000Z",
+    "2026-11-18T15:30:00.001Z",
+    "2027-11-19T15:30:00.000Z",
+    "2027-11-20T15:30:00.000Z",
+    "tomorrow",
+    42
+  ],
+  "rows_now": "2026-11-18T15:30:00.000Z",
+  "rows": [
+    {
+      "thread_id": "msg_S00000000000000000000001",
+      "note": "snoozed until tomorrow: stays in the band",
+      "section": "waiting",
+      "unread": false,
+      "last_at": "2026-11-18T09:00:00.000Z",
+      "resolved_at": null,
+      "snoozed": {
+        "until": "2026-11-19T16:00:00.000Z",
+        "at": "2026-11-18T09:05:00.000Z"
+      }
+    },
+    {
+      "thread_id": "msg_S00000000000000000000002",
+      "note": "snoozed until an hour from now: first in the band",
+      "section": "sent",
+      "unread": false,
+      "last_at": "2026-11-18T08:00:00.000Z",
+      "resolved_at": null,
+      "snoozed": {
+        "until": "2026-11-18T16:30:00.000Z",
+        "at": "2026-11-18T08:10:00.000Z"
+      }
+    },
+    {
+      "thread_id": "msg_S00000000000000000000003",
+      "note": "a Quiet thread whose snooze ended: back as New, bold, at its return time",
+      "section": "quiet",
+      "unread": false,
+      "last_at": "2026-11-17T10:00:00.000Z",
+      "resolved_at": null,
+      "snoozed": {
+        "until": "2026-11-18T14:00:00.000Z",
+        "at": "2026-11-17T10:30:00.000Z"
+      }
+    },
+    {
+      "thread_id": "msg_S00000000000000000000004",
+      "note": "a Waiting thread whose snooze ended, with a newer message: back in Waiting at its own time",
+      "section": "waiting",
+      "unread": true,
+      "last_at": "2026-11-18T15:00:00.000Z",
+      "resolved_at": null,
+      "snoozed": {
+        "until": "2026-11-18T12:00:00.000Z",
+        "at": "2026-11-18T07:00:00.000Z"
+      }
+    },
+    {
+      "thread_id": "msg_S00000000000000000000005",
+      "note": "archived while snoozed and past its time: stays archived, no return",
+      "section": "quiet",
+      "unread": false,
+      "last_at": "2026-11-16T10:00:00.000Z",
+      "resolved_at": "2026-11-17T10:00:00.000Z",
+      "snoozed": {
+        "until": "2026-11-18T11:00:00.000Z",
+        "at": "2026-11-16T11:00:00.000Z"
+      }
+    },
+    {
+      "thread_id": "msg_S00000000000000000000006",
+      "note": "two snoozes ending at the same moment: the thread id breaks the tie",
+      "section": "new",
+      "unread": true,
+      "last_at": "2026-11-18T07:00:00.000Z",
+      "resolved_at": null,
+      "snoozed": {
+        "until": "2026-11-19T16:00:00.000Z",
+        "at": "2026-11-18T09:06:00.000Z"
+      }
+    },
+    {
+      "thread_id": "msg_S00000000000000000000007",
+      "note": "not snoozed",
+      "section": "new",
+      "unread": true,
+      "last_at": "2026-11-18T13:00:00.000Z",
+      "resolved_at": null,
+      "snoozed": null
+    },
+    {
+      "thread_id": "msg_S00000000000000000000008",
+      "note": "snoozed until exactly now: over (a snooze runs while its time is ahead)",
+      "section": "quiet",
+      "unread": false,
+      "last_at": "2026-11-18T06:00:00.000Z",
+      "resolved_at": null,
+      "snoozed": {
+        "until": "2026-11-18T15:30:00.000Z",
+        "at": "2026-11-18T06:30:00.000Z"
+      }
+    }
+  ],
+  "sections": [
+    {
+      "id": "waiting",
+      "label": "Waiting on you",
+      "threads": [
+        "msg_S00000000000000000000009"
+      ]
+    },
+    {
+      "id": "new",
+      "label": "New since you looked",
+      "threads": [
+        "msg_S00000000000000000000011"
+      ]
+    },
+    {
+      "id": "quiet",
+      "label": "Quiet",
+      "threads": [
+        "msg_S00000000000000000000010"
+      ]
+    }
+  ],
+  "section_rows": [
+    {
+      "thread_id": "msg_S00000000000000000000009",
+      "note": "waiting, newer than the snooze that ended",
+      "section": "waiting",
+      "unread": true,
+      "last_at": "2026-11-18T15:10:00.000Z",
+      "resolved_at": null,
+      "snoozed": null
+    },
+    {
+      "thread_id": "msg_S00000000000000000000010",
+      "note": "quiet, older",
+      "section": "quiet",
+      "unread": false,
+      "last_at": "2026-11-15T10:00:00.000Z",
+      "resolved_at": null,
+      "snoozed": null
+    },
+    {
+      "thread_id": "msg_S00000000000000000000011",
+      "note": "new, already in its section: a woken row sorts in beside it",
+      "section": "new",
+      "unread": true,
+      "last_at": "2026-11-18T14:30:00.000Z",
+      "resolved_at": null,
+      "snoozed": null
+    }
+  ]
+}

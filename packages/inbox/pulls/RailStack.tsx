@@ -9,6 +9,7 @@ import { Tip } from '../components/Tip';
 import { Icon } from '../icons';
 import { chainTo } from './model';
 import { isOpen } from './topology';
+import type { PullViewScope } from './viewScope';
 
 /** Layers this many or more fold what is far from you. */
 const FOLD_FROM = 8;
@@ -31,12 +32,12 @@ const foldWords = (n: number, side: string, hidden: readonly InboxPull[]) => {
 export function RailStack({ layers, here, scope, wholeTip, wholeCounts, onLayer }: {
   layers: InboxPull[];
   here: InboxPull;
-  scope: 'layer' | 'stack';
+  scope: PullViewScope;
   /** What the whole stack compares: its row's tip. */
   wholeTip: string;
   /** The whole stack's own numbers, once its diff is on screen; layers' sums count a line changed twice twice. */
   wholeCounts?: { add: number; del: number };
-  onLayer: (key: string, scope: 'layer' | 'stack') => void;
+  onLayer: (key: string, scope: PullViewScope) => void;
 }) {
   const [showEarlier, setShowEarlier] = useState(false);
   const [showLater, setShowLater] = useState(false);

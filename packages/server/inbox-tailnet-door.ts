@@ -15,9 +15,17 @@
  *  - `published`: the mapping may exist. Written true BEFORE `tailscale
  *    serve` runs, so a crash between the two never leaves a mapping the Inbox
  *    does not own; false once a take-down removed it (or found it gone).
- * Only a mapping on that port with exactly that target, while `published`,
- * is the Inbox's. Anything else is never adopted, re-pointed or removed,
- * even a mapping whose target is the port the door listener happens to bind.
+ *  - `made` (additive): every target this Inbox pointed the mapping at, the
+ *    newest last (at most `DOOR_TARGETS_KEPT`). Kept through take-downs, so a
+ *    mapping a crash or a stop left behind is still known as the Inbox's own
+ *    after a take-down read an empty `serve status` (Tailscale stopped) and
+ *    wrote `published: false`.
+ * A mapping on that port with exactly that target, while `published`, is the
+ * Inbox's. So is one whose target is in `made` (or is `target`) and where
+ * nothing listens now (`loopbackTargetDead`, read before the choice): a dead
+ * mapping it made itself.
+ * Anything else is never adopted, re-pointed or removed, even a mapping whose
+ * target is the port the door listener happens to bind.
  *
  * Before this record (v0.28.40 and earlier), the Inbox kept only inbox.json's
  * `tailnet: { https_port, door_port }`, written after a successful publish.
@@ -28,6 +36,7 @@
  */
 
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { connect } from "node:net";
 import { join } from "node:path";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { serveStatusProxy } from "@plannotator/shared/tailscale";
@@ -45,6 +54,67 @@ export interface TailnetDoorRecord {
   target: string;
   /** The mapping may exist (written before `tailscale serve`; false once taken down). */
   published: boolean;
+  /** Every target this Inbox pointed the mapping at, newest last; absent in a record an older build wrote. */
+  made?: string[];
+}
+
+/** How many targets a record keeps in `made`. */
+export const DOOR_TARGETS_KEPT = 8;
+
+/** `made` with `targets` added at the end, each once, the newest `DOOR_TARGETS_KEPT`. */
+export function withMadeTargets(made: readonly string[] | undefined, ...targets: (string | null | undefined)[]): string[] {
+  const out = (made ?? []).filter((t) => !targets.includes(t));
+  for (const t of targets) if (t && LOOPBACK_TARGET.test(t) && !out.includes(t)) out.push(t);
+  return out.slice(-DOOR_TARGETS_KEPT);
+}
+
+/** How long a connect to a loopback port may take before "something may be there". */
+export const LOOPBACK_PROBE_MS = 1_000;
+
+/**
+ * One connect: "refused" only for ECONNREFUSED (and `alsoRefused`); a connection, a timeout or any other error is
+ * "maybe".
+ */
+function connectOnce(host: string, port: number, timeoutMs: number, alsoRefused: readonly string[] = []): Promise<"refused" | "maybe"> {
+  return new Promise((resolve) => {
+    let done = false;
+    const socket = connect({ host, port });
+    const finish = (answer: "refused" | "maybe") => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(answer);
+    };
+    const timer = setTimeout(() => finish("maybe"), timeoutMs);
+    socket.once("connect", () => finish("maybe"));
+    socket.once("error", (error: NodeJS.ErrnoException) => finish(error.code === "ECONNREFUSED" || alsoRefused.includes(error.code ?? "") ? "refused" : "maybe"));
+  });
+}
+
+/**
+ * Nothing listens on this loopback port now: a connect to 127.0.0.1 and to ::1 are both refused. A mapping this Inbox
+ * made to such a port is dead (its process crashed, or stopped without taking it down; serve answers 502), so it is
+ * still the Inbox's to re-point. A connection, a timeout or any other error means something may be there, and it is
+ * never treated as dead. The port is never bound to find out (a bind can succeed beside a listener on 0.0.0.0 on macOS).
+ */
+export async function loopbackPortRefused(port: number, timeoutMs = LOOPBACK_PROBE_MS): Promise<boolean> {
+  if (!Number.isSafeInteger(port) || port <= 0 || port > 65535) return false;
+  if ((await connectOnce("127.0.0.1", port, timeoutMs)) !== "refused") return false;
+  // A computer with no IPv6 loopback has no ::1 to listen on: those errors say so, and only those.
+  return (await connectOnce("::1", port, timeoutMs, ["EADDRNOTAVAIL", "EAFNOSUPPORT", "ENETUNREACH"])) === "refused";
+}
+
+/** The port of a `http://127.0.0.1:<port>` target, or null. */
+export function loopbackTargetPort(target: string): number | null {
+  const port = /^http:\/\/127\.0\.0\.1:(\d+)$/.exec(target)?.[1];
+  return port === undefined ? null : Number(port);
+}
+
+/** A `http://127.0.0.1:<port>` target where nothing listens now (`loopbackPortRefused`). */
+export async function loopbackTargetDead(target: string, timeoutMs = LOOPBACK_PROBE_MS): Promise<boolean> {
+  const port = loopbackTargetPort(target);
+  return port !== null && (await loopbackPortRefused(port, timeoutMs));
 }
 
 const recordPath = (dataDir: string) => join(inboxDir(dataDir), INBOX_TAILNET_DOOR_FILE);
@@ -55,7 +125,8 @@ export function readTailnetDoorRecord(dataDir: string): TailnetDoorRecord | null
   try {
     const parsed = JSON.parse(readFileSync(recordPath(dataDir), "utf8")) as Record<string, unknown>;
     if (parsed.v !== 1 || !Number.isSafeInteger(parsed.https_port) || typeof parsed.target !== "string" || !LOOPBACK_TARGET.test(parsed.target)) return null;
-    return { https_port: parsed.https_port as number, target: parsed.target, published: parsed.published === true };
+    const made = Array.isArray(parsed.made) ? parsed.made.filter((t): t is string => typeof t === "string" && LOOPBACK_TARGET.test(t)).slice(-DOOR_TARGETS_KEPT) : [];
+    return { https_port: parsed.https_port as number, target: parsed.target, published: parsed.published === true, ...(made.length > 0 ? { made } : {}) };
   } catch {
     return null;
   }
@@ -115,13 +186,31 @@ export type TailnetDoorPort =
   | { state: "taken" }
   | { state: "malformed" };
 
-/** The port the door takes, read from `tailscale serve status --json`: the record's port, else (first publish) the first free one. */
-export function chooseTailnetDoorPort(serveStatus: string, record: TailnetDoorRecord | null): TailnetDoorPort {
+/**
+ * The mapping on the record's port when it is one this Inbox made (the record's `target`, or one of `made`) and is not
+ * simply its live, published mapping: a leftover to probe (`loopbackTargetDead`) before the choice. Null otherwise.
+ */
+export function ownLeftoverTarget(serveStatus: string, record: TailnetDoorRecord | null): string | null {
+  if (!record) return null;
+  const mapped = serveStatusProxy(serveStatus, record.https_port);
+  if (mapped.state !== "mapped" || !LOOPBACK_TARGET.test(mapped.proxy)) return null;
+  if (record.published && mapped.proxy === record.target) return null;
+  return mapped.proxy === record.target || (record.made ?? []).includes(mapped.proxy) ? mapped.proxy : null;
+}
+
+/**
+ * The port the door takes, read from `tailscale serve status --json`: the record's port, else (first publish) the first
+ * free one. `dead`: targets found dead just before (`loopbackTargetDead`); a mapping the record says this Inbox made
+ * that points at one of them is its own leftover and is re-pointed. Default: none is.
+ */
+export function chooseTailnetDoorPort(serveStatus: string, record: TailnetDoorRecord | null, dead: (target: string) => boolean = () => false): TailnetDoorPort {
   if (record) {
     const mapped = serveStatusProxy(serveStatus, record.https_port);
     if (mapped.state === "malformed") return { state: "malformed" };
     if (mapped.state === "free") return { state: "usable", port: record.https_port, own: null };
     if (record.published && mapped.proxy === record.target) return { state: "usable", port: record.https_port, own: record.target };
+    const madeHere = mapped.proxy === record.target || (record.made ?? []).includes(mapped.proxy);
+    if (madeHere && LOOPBACK_TARGET.test(mapped.proxy) && dead(mapped.proxy)) return { state: "usable", port: record.https_port, own: mapped.proxy };
     return { state: "held", port: record.https_port };
   }
   for (const port of INBOX_TAILNET_HTTPS_PORTS) {

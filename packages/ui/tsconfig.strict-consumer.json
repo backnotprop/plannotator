@@ -81,6 +81,9 @@
     "components/inbox-thread/GuideCard.tsx",
     "components/inbox-thread/SkillsLine.tsx",
     "components/inbox-thread/ReaskNote.tsx",
-    "components/inbox-thread/reask.ts"
+    "components/inbox-thread/reask.ts",
+    "components/frame/index.ts",
+    "test-consumer/frame-example.tsx",
+    "test-consumer/frame-card-example.tsx"
   ]
 }

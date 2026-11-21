@@ -1,0 +1,6 @@
+{
+ "v": 1,
+ "sets": [
+  { "id": "pokemon", "name": "Pokémon", "count": 1025, "manifest": "https://plannotator.ai/assets/icon-sets/v1/pokemon.json" }
+ ]
+}

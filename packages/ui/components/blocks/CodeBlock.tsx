@@ -3,6 +3,7 @@ import type { Block } from '../../types';
 import { copyTextToClipboard } from '../../utils/clipboard';
 import { applyHighlight, codeBlockClassName, codeBlockKeepsLayout } from '../../utils/codeHighlight';
 import { useFenceTheme } from '../../hooks/useFenceTheme';
+import { sourceLineAttrs } from '../../utils/sourceLineAttrs';
 
 interface CodeBlockProps {
   block: Block;
@@ -54,6 +55,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ block, onHover, onLeave })
       data-content-start-line={typeof block.contentStartLine === 'number' ? block.contentStartLine : undefined}
       onMouseEnter={onHover ? handleMouseEnter : undefined}
       onMouseLeave={onLeave}
+      {...sourceLineAttrs(block)}
     >
       <button
         onClick={handleCopy}

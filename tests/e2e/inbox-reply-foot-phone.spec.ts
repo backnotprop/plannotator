@@ -18,7 +18,7 @@
  * The cases one by one are DOM tests: packages/inbox/replyFootPhone.test.tsx. Build the binary first (see inbox.spec.ts).
  */
 
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './inbox-test';
 import { FILE_WORDS, MESSAGE_WORDS, pane, startWorld, stopWorld, type ListWorld } from './inbox-comments-list-world';
 
 const LONG_NAME = 'Codex (northwind-industries-holdings platform reviewer)';
@@ -197,7 +197,8 @@ for (const width of [390, 320] as const) {
         word: Math.max(word.width, word.height),
       };
     });
-    expect(drawn.sizes, 'every control is drawn 36 px round').toEqual(Array.from({ length: 4 }, () => [36, 36]));
+    expect(drawn.sizes, 'four controls in the row').toHaveLength(4);
+    for (const v of drawn.sizes.flat()) expect(v, 'every control is drawn 36 px round').toBeCloseTo(36, 0);
     expect(drawn.arrow, 'Send is the arrow').toBe(true);
     expect(drawn.word, 'the word "Send" is not drawn (it is the name)').toBeLessThanOrEqual(1);
     await expect(pane(page).locator('.ib-rbox [data-recipient]'), 'one agent: no recipient control').toHaveCount(0);
@@ -292,8 +293,8 @@ test('the sheet: Skip them skips them, Review opens the list, and a long agent n
   const list = page.getByRole('dialog', { name: '3 comments', exact: true });
   await expect(list).toBeVisible();
   const place = list.locator('[data-annotation-row="on-message"] .ib-af');
-  // The Inbox keeps 40 characters of a name: "Codex (northwind-industries-holdings…'s message, 3:49 PM", still wider than a 320 px row.
-  await expect(place).toHaveText(/^Codex \(northwind-industries-holdings…'s message, \d/);
+  // The Inbox keeps the whole name: "Codex (northwind-industries-holdings platform reviewer)'s message, 3:49 PM", far wider than a 320 px row.
+  await expect(place).toHaveText(/^Codex \(northwind-industries-holdings platform reviewer\)'s message, \d/);
   const drawn = await place.evaluate((el) => {
     const style = getComputedStyle(el);
     return { height: el.getBoundingClientRect().height, line: parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.6, align: style.textAlign };

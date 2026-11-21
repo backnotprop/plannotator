@@ -45,6 +45,11 @@ export interface FakeClaudeConfig {
   answer?: string;
   /** The whole answer, in words, in place of the line tests read (screenshots). */
   body?: string;
+  /**
+   * The turn ends as one the API refused: no answer, and the session's transcript gets an `isApiErrorMessage` entry
+   * with this `error` kind and text (Claude Code 2.1.322's shape). Null or absent: it answers.
+   */
+  apiError?: { error: string; text: string } | null;
   /** A session's first poll waits this long (ms): the Inbox shows "Starting" meanwhile. */
   startDelayMs?: number;
   /** `--bg` answers (and the session exists) only after this long (ms). */
@@ -143,6 +148,8 @@ export interface FakeClaude {
   setLoginExports(vars: Record<string, string> | null): void;
   /** The ids of the commands sessions took, in order. */
   delivered(): string[];
+  /** The same commands with their session and `launched` (approval "inbox-launched-agent-note"), in order. */
+  wakes(): { sessionId: string; id: string; launched: { agent: string; project: boolean } | null }[];
   /** Each permission prompt a session played, in order. */
   permissions(): FakePermissionResult[];
   /** Each permission hook run, as it exited: its raw stdout and exit code. */
@@ -182,6 +189,8 @@ export function installFakeClaude(input: { bin: string; state: string; config?: 
     existsSync(file)
       ? readFileSync(file, "utf8")
           .split("\n")
+          // A line is whole only once its newline is written: the last piece is "" or a line still being appended.
+          .slice(0, -1)
           .filter(Boolean)
           .map((line) => JSON.parse(line) as T)
       : [];
@@ -230,6 +239,7 @@ export function installFakeClaude(input: { bin: string; state: string; config?: 
     },
     permissions: () => lines<FakePermissionResult>(join(state, "permissions.jsonl")),
     hooks: () => lines<ReturnType<FakeClaude["hooks"]>[number]>(join(state, "hooks.jsonl")),
+    wakes: () => lines<ReturnType<FakeClaude["wakes"]>[number]>(join(state, "wakes.jsonl")),
     delivered() {
       const file = join(state, "delivered.log");
       return existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean) : [];

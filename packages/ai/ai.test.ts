@@ -539,15 +539,18 @@ describe("Context builders", () => {
     expect(preamble).toContain("Lines 10-15");
   });
 
-  test("truncates very long plans", () => {
-    const longPlan = "x".repeat(100_000);
-    const ctx: AIContext = {
-      mode: "plan-review",
-      plan: { plan: longPlan },
-    };
-    const prompt = buildSystemPrompt(ctx);
-    expect(prompt).toContain("[truncated for context window]");
-    expect(prompt.length).toBeLessThan(longPlan.length);
+  test("a long plan, its previous version, a long document and a long diff go to the model whole, up to 300,000 characters", () => {
+    const long = `${"x".repeat(150_000)}END`;
+    const plan = buildSystemPrompt({ mode: "plan-review", plan: { plan: long, previousPlan: long } });
+    expect(plan.split(long).length - 1).toBe(2);
+    expect(plan).not.toContain("truncated");
+    expect(buildSystemPrompt({ mode: "annotate", annotate: { content: long, filePath: "/x.md" } })).toContain(long);
+    expect(buildForkPreamble({ mode: "code-review", review: { patch: long }, parent: { sessionId: "s", cwd: "/r" } })).toContain(long);
+    // Past the bound a giant document still gets an answer: cut, and the model is told.
+    const huge = "y".repeat(400_000);
+    const cut = buildSystemPrompt({ mode: "annotate", annotate: { content: huge, filePath: "/x.md" } });
+    expect(cut).toContain("[truncated for context window: 300,000 of 400,000 characters shown]");
+    expect(cut.length).toBeLessThan(huge.length);
   });
 
   test("every mode instructs the agent to answer directly (no unprompted review)", () => {

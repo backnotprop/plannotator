@@ -17,7 +17,7 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-thread-panel.spec.ts`.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -441,7 +441,7 @@ test('search opens its thread in the panel, and closing it returns to the empty 
   const hit = palette.locator('[role="option"]', { hasText: 'Refund events' }).first();
   await expect(hit).toBeVisible();
   await hit.click();
-  await expect(subject(page)).toContainText('Trust the webhook');
+  await expect(subject(page)).toHaveAccessibleName(/Trust the webhook/);
   expect(await width(page)).toBe(380);
   await page.keyboard.press('Escape');
   await expect(empty(page)).toBeVisible();
@@ -587,7 +587,7 @@ test('a thread on a linked machine opens in the panel and closes to the empty pa
   await expect(page.locator('.ib-lbody [data-thread-id]:visible').filter({ hasText: 'There' }).first()).toBeVisible({ timeout: 30_000 });
   await expect(empty(page)).toBeVisible();
   await page.locator('.ib-lbody [data-thread-id]:visible').filter({ hasText: 'There' }).first().click();
-  await expect(subject(page)).toHaveText('On the MacBook');
+  await expect(subject(page)).toHaveAccessibleName(/On the MacBook$/);
   expect(await width(page)).toBe(380);
   await page.getByRole('button', { name: 'Close the thread' }).click();
   await expect(empty(page)).toBeVisible();

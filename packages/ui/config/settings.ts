@@ -123,6 +123,12 @@ function writeAgentSwitchCookies(choice: AgentSwitchChoice | null): void {
   else if (choice.switchTo === 'custom') storage.removeItem(AGENT_SWITCH_CUSTOM_COOKIE);
 }
 
+export type DiffMinimapMode = 'auto' | 'always' | 'off';
+const DIFF_MINIMAP_MODES = ['auto', 'always', 'off'] as const;
+function isDiffMinimapMode(v: unknown): v is DiffMinimapMode {
+  return typeof v === 'string' && (DIFF_MINIMAP_MODES as readonly string[]).includes(v);
+}
+
 const DIFF_LINE_BG_INTENSITY_VALUES = ['subtle', 'normal', 'strong'] as const;
 function isDiffLineBgIntensity(v: unknown): v is DiffLineBgIntensity {
   return typeof v === 'string' && (DIFF_LINE_BG_INTENSITY_VALUES as readonly string[]).includes(v);
@@ -275,6 +281,22 @@ export const SETTINGS = {
     fromCookie: () =>
       normalizeFontFamilyName(storage.getItem('plannotator-document-font-family') ?? '') || undefined,
     toCookie: (value: string) => storage.setItem('plannotator-document-font-family', value),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
+  /**
+   * Show each rendered block's source lines in plan review and annotate
+   * (#1650). Default OFF: today's document with no gutter. Cookie-only, like
+   * Text size and Document font. `42` for one line, `42–45` for a span.
+   */
+  documentSourceLineNumbers: {
+    defaultValue: false as boolean,
+    fromCookie: () => {
+      const value = storage.getItem('plannotator-document-source-line-numbers');
+      return value === 'true' ? true : value === 'false' ? false : undefined;
+    },
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-document-source-line-numbers', String(value)),
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 
@@ -619,6 +641,51 @@ export const SETTINGS = {
     toServer: (v: string) => ({ diffOptions: { fontFamily: v } }),
   },
 
+  diffSemantic: {
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-semantic');
+      return v === 'true' ? true : v === 'false' ? false : undefined;
+    },
+    toCookie: (v: boolean) => storage.setItem('plannotator-diff-semantic', String(v)),
+    serverKey: 'diffOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = (sc.diffOptions as Record<string, unknown> | undefined)?.semantic;
+      return typeof v === 'boolean' ? v : undefined;
+    },
+    toServer: (v: boolean) => ({ diffOptions: { semantic: v } }),
+  },
+
+  diffPowerUp: {
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-power-up');
+      return v === 'true' ? true : v === 'false' ? false : undefined;
+    },
+    toCookie: (v: boolean) => storage.setItem('plannotator-diff-power-up', String(v)),
+    serverKey: 'diffOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = (sc.diffOptions as Record<string, unknown> | undefined)?.powerUp;
+      return typeof v === 'boolean' ? v : undefined;
+    },
+    toServer: (v: boolean) => ({ diffOptions: { powerUp: v } }),
+  },
+
+  diffPowerUpMotion: {
+    defaultValue: 'still' as 'stream' | 'still',
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-power-up-motion');
+      return v === 'stream' || v === 'still' ? v : undefined;
+    },
+    toCookie: (v: 'stream' | 'still') => storage.setItem('plannotator-diff-power-up-motion', v),
+    serverKey: 'diffOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = (sc.diffOptions as Record<string, unknown> | undefined)?.powerUpMotion;
+      return v === 'stream' || v === 'still' ? v : undefined;
+    },
+    toServer: (v: 'stream' | 'still') => ({ diffOptions: { powerUpMotion: v } }),
+  },
+
   diffHideWhitespace: {
     defaultValue: false as boolean,
     fromCookie: () => {
@@ -689,6 +756,17 @@ export const SETTINGS = {
       return isDiffLineBgIntensity(v) ? v : undefined;
     },
     toServer: (v: DiffLineBgIntensity) => ({ diffOptions: { lineBgIntensity: v } }),
+  },
+  diffMinimap: {
+    defaultValue: 'auto' as DiffMinimapMode,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-minimap');
+      return isDiffMinimapMode(v) ? v : undefined;
+    },
+    toCookie: (v: DiffMinimapMode) => storage.setItem('plannotator-diff-minimap', v),
+    serverKey: undefined,
+    fromServer: undefined,
+    toServer: undefined,
   },
   /** Experimental: author suggestions by editing code in place in the review
    *  all-files view. Cookie-only (no server sync) while the feature is

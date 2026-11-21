@@ -37,22 +37,23 @@ export function platformRules(pull: PlatformPostPull): PlatformRules {
   const caps = getPRPlatformCapabilities({ platform: pull.platform });
   // The person's own PR: the forge refuses their approval (and on GitHub their request for changes).
   const selfAuthored = pull.mine && caps.selfReviewBlocked;
+  const noun = caps.changeLabel === 'MR' ? 'merge request' : 'pull request';
   return {
     label: caps.label,
     mrLabel: caps.changeLabel,
     selfAuthored,
     requestChangesSupported: caps.requestChanges,
+    selfRequestChangesBlocked: caps.selfRequestChangesBlocked,
     requestChangesUnavailableReason: !caps.requestChanges
       ? `${caps.label} has no request-changes review; this posts as a comment.`
-      : selfAuthored
-        ? `You can't request changes on your own pull request on ${caps.label}.`
+      : selfAuthored && caps.selfRequestChangesBlocked
+        ? `You can't request changes on your own ${noun} on ${caps.label}.`
         : undefined,
   };
 }
 
-/** The posted confirmation's words (GitLab has no request-changes review: it went as a comment). */
 export function postedWords(posted: { label: string; action: string }): string {
   if (posted.action === 'approve') return `Approved on ${posted.label}`;
-  if (posted.action === 'request_changes' && posted.label !== 'GitLab') return `Changes requested on ${posted.label}`;
+  if (posted.action === 'request_changes') return `Changes requested on ${posted.label}`;
   return `Review posted on ${posted.label}`;
 }

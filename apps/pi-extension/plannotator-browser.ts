@@ -57,13 +57,17 @@ import {
 	hasPlanBrowserHtml,
 	hasReviewBrowserHtml,
 	reviewDiagramEngineDirectory,
+	reviewSemDiffDirectory,
 } from "./plannotator-browser-runtime.ts";
 import { diagramEngineSourcesFromDir, type DiagramEngineSources } from "./generated/diagram-engine-assets.ts";
+import { semDiffSourcesFromDir, type SemDiffSources } from "./generated/sem-diff-assets.ts";
 
 /** The diagram engine files, read once per extension process (the first review that needs them). */
 let reviewDiagramEngineSources: Promise<DiagramEngineSources | null> | undefined;
 const readReviewDiagramEngine = () =>
 	(reviewDiagramEngineSources ??= diagramEngineSourcesFromDir(reviewDiagramEngineDirectory)());
+let reviewSemDiffSources: Promise<SemDiffSources | null> | undefined;
+const readReviewSemDiff = () => (reviewSemDiffSources ??= semDiffSourcesFromDir(reviewSemDiffDirectory)());
 export { getLastAssistantMessageText } from "./assistant-message.ts";
 export {
 	getStartupErrorMessage,
@@ -462,6 +466,11 @@ export async function openCodeReview(
 	return session.waitForDecision();
 }
 
+export function piLiveReviewAgent(ctx: unknown): { host: "pi"; session: string } | null {
+	const session = (ctx as { sessionManager?: { getSessionId?: () => string | undefined } } | null)?.sessionManager?.getSessionId?.();
+	return typeof session === "string" && session ? { host: "pi", session } : null;
+}
+
 export async function startCodeReviewBrowserSession(
 	ctx: ExtensionContext,
 	options: CodeReviewOptions = {},
@@ -586,7 +595,7 @@ async function createCodeReviewBrowserSession(
 				// A fork URL fetch must never stop to prompt for credentials.
 				const fetchHead = async (args: string[], cwd: string) => {
 					if (!headFetch.remote) return checkoutRuntime.runGit(args, { cwd });
-					const r = spawnSync("git", args, { cwd, encoding: "utf-8", env: { ...process.env, ...ghAccountEnv, GIT_TERMINAL_PROMPT: "0" } });
+					const r = spawnSync("git", args, { cwd, encoding: "utf-8", env: { ...process.env, ...ghAccountEnv, GIT_TERMINAL_PROMPT: "0" }, windowsHide: true });
 					return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", exitCode: r.status ?? 1 };
 				};
 
@@ -634,7 +643,7 @@ async function createCodeReviewBrowserSession(
 					exitHandler = () => {
 						try {
 							for (const entry of worktreePool?.entries() ?? []) {
-								spawnSync("git", ["worktree", "remove", "--force", entry.path], { cwd: wtRepoDir, env: process.env });
+								spawnSync("git", ["worktree", "remove", "--force", entry.path], { cwd: wtRepoDir, env: process.env, windowsHide: true });
 							}
 						} catch {}
 						if (sessionDir) try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
@@ -656,7 +665,7 @@ async function createCodeReviewBrowserSession(
 					const [cloneCmd, ...cloneArgs] = cloneCommand.argv;
 
 					setCodeReviewProgress(ctx, `Cloning ${prRepo}...`);
-					const cloneResult = spawnSync(cloneCmd, cloneArgs, { encoding: "utf-8", env: cloneEnv ?? process.env });
+					const cloneResult = spawnSync(cloneCmd, cloneArgs, { encoding: "utf-8", env: cloneEnv ?? process.env, windowsHide: true });
 					if ((cloneResult.status ?? 1) !== 0) {
 						throw new Error(`${cloneCmd === "git" ? "git clone" : `${cloneCmd} repo clone`} failed: ${(cloneResult.stderr ?? "").trim()}`);
 					}
@@ -822,6 +831,7 @@ async function createCodeReviewBrowserSession(
 
 	const server = await startServerWithSelfPreemption(() => startReviewServer({
 		sessionBridge: options.sessionBridge,
+		liveReviewAgent: piLiveReviewAgent(ctx),
 		rawPatch,
 		gitRef,
 		error: diffError,
@@ -843,6 +853,7 @@ async function createCodeReviewBrowserSession(
 		worktreePool,
 		htmlContent: reviewHtmlContent,
 		diagramEngine: readReviewDiagramEngine,
+		semDiff: readReviewSemDiff,
 		sharingEnabled: resolveSharingEnabled(loadConfig()),
 		// Pi's review consumer (index.ts) sends approve-time feedback after the
 		// approved prompt, so the advert is unconditional — same shape as the

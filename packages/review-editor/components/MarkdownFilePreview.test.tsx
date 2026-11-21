@@ -5,7 +5,9 @@
  * section it was in). The same comment shows in the other view by its text,
  * and says so when its text is not there. Mermaid and Graphviz fences draw
  * through the diagram engine the server advertises (loaded on demand), and
- * render as code without it or when it fails to load.
+ * render as code without it or when it fails to load. Ctrl+C with the
+ * composer open copies the selected words (`utils/highlightCopy`, through the
+ * shared highlighter).
  *
  * DOM-gated (DOM_TESTS=1) and registered in .github/workflows/test.yml's
  * "Run UI seam-contract + DOM tests" step.
@@ -176,6 +178,29 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
     expect(added[0].anchor.diffContext).toBe('modified');
     await settle();
     expect(marksText(el)).toBe('new installer');
+  });
+
+  test('Ctrl+C with the composer open copies the selected words; text typed and selected in it copies natively', async () => {
+    const el = await mount();
+    await selectText(el, 'new installer');
+    const area = document.body.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea')!;
+    expect(area).not.toBeNull();
+    area.focus();
+    const copyAt = (target: EventTarget) => {
+      const data = new Map<string, string>();
+      const event = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent;
+      Object.defineProperty(event, 'clipboardData', { value: { setData: (k: string, v: string) => data.set(k, v), getData: (k: string) => data.get(k) ?? '' } });
+      target.dispatchEvent(event);
+      return { prevented: event.defaultPrevented, plain: data.get('text/plain') };
+    };
+    expect(copyAt(area)).toEqual({ prevented: true, plain: 'new installer' });
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(area, 'Link the page.');
+      area.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    area.setSelectionRange(0, 4);
+    expect(copyAt(area)).toEqual({ prevented: false, plain: undefined });
   });
 
   test('a comment made in one view is found in the other by its text', async () => {

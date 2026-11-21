@@ -1,13 +1,15 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback, useId } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, useId, useContext } from 'react';
 import { createPortal } from 'react-dom';
 import type { ImageAttachment } from '../types';
 import { AttachmentsButton } from './AttachmentsButton';
+import { CommentCardToolsContext } from './CommentCardTools';
+import { useHostCommentDraft } from '../hooks/useHostCommentDraft';
 import { useDraggable } from '../hooks/useDraggable';
 import { SparklesIcon } from './SparklesIcon';
 import { Icon } from './inbox-thread/icons';
 import { commentCardAimX, getCommentCardEnabled, getCommentCardLayout } from '../utils/commentCardPolicy';
 import { hasUnsavedCommentContent } from '../utils/commentContent';
-import { isCommentSubmitKey } from '../utils/commentSubmitKey';
+import { isCommentSubmitKey, isImeCompositionKey } from '../utils/commentSubmitKey';
 import { useConfigValue } from '../config/useConfig';
 import { useSkillReferenceAutocomplete } from '../hooks/useSkillReferenceAutocomplete';
 import { HumanOnlySkillNotice, SkillReferenceMenu } from './SkillReferenceMenu';
@@ -17,6 +19,7 @@ import { MentionAutocompleteMenu, mentionActiveOptionId } from './MentionAutocom
 import type { MentionSource } from '../utils/mentions';
 import {
   hasPrimaryCoarsePointer,
+  layoutViewportHeight,
   shouldUseExpandedComposer,
   useVisibleViewportBounds,
   type VisibleViewportBounds,
@@ -154,10 +157,24 @@ interface CommentPopoverProps {
   /** Opt-in: why the last submit failed (Shape: a Change it that did not reach the server), shown under the
    *  header with `role="alert"` while the person's words stay in the box. Absent → nothing, as always. */
   errorText?: string;
+  /** Opt-in: drawn under the header, above the words (Shape: what was asked or changed on this part, and the
+   *  answers). Absent → nothing, as always. */
+  before?: React.ReactNode;
   /** Opt-in: `side` opens the popover beside the anchor (right, else left),
    *  falling back to below/above when neither side has room (an image region
    *  in the image viewer). Absent → below/above, as always. */
   placement?: 'below' | 'side';
+  /** Opt-in, for the comment card with `placement: 'side'`: the card ends above this element's foot (as much
+   *  of it as shows), so what the host draws under it is never covered (a live html block's caption and its
+   *  pen, under the block's frame). The card goes beside the anchor (right, else left), from the anchor's top
+   *  down when that fits above the foot and from the foot up when the anchor is low; with no room on either
+   *  side, over the anchor, else under it, else on it, always above the foot. A phone docks the card as
+   *  always. Absent → as always. */
+  keepAbove?: HTMLElement | null;
+  /** Opt-in: the box the popover stays inside (Shape: the board, in a thread's pane), placed and clamped by its
+   *  edges rather than only the window's; with no room above or below it there, a sheet at the box's foot rather
+   *  than the window's dialog. Absent → the window, as always. */
+  within?: HTMLElement | null;
   /** Opt-in: the stacking level, for a composer over a surface that is
    *  itself above the page (the image viewer is z-200). Absent → 100. */
   zIndex?: number;
@@ -178,8 +195,8 @@ const draftStore = new Map<string, { text: string; images: ImageAttachment[] }>(
  * popover clears the draft on submit), so the next open of that composer
  * shows them. A draft typed since is newer and is kept.
  */
-export function restoreCommentDraft(draftKey: string, text: string): void {
-  if (!draftStore.has(draftKey) && text.trim() !== '') draftStore.set(draftKey, { text, images: [] });
+export function restoreCommentDraft(draftKey: string, text: string, images: ImageAttachment[] = []): void {
+  if (!draftStore.has(draftKey) && (text.trim() !== '' || images.length > 0)) draftStore.set(draftKey, { text, images });
 }
 
 /** Whether words (or images) wait as the `draftKey` draft: a closed composer that kept them. */
@@ -206,6 +223,23 @@ interface CommentPopoverPosition {
   width: number;
   maxHeight: number;
   requiresExpanded: boolean;
+}
+
+/** `bounds` cut to `el`'s box, `inset` in from its edges (the window's bounds when `el` is absent or not laid out). */
+export function boundsWithin(bounds: VisibleViewportBounds, el: HTMLElement | null | undefined, inset = 8): VisibleViewportBounds {
+  const r = el?.getBoundingClientRect();
+  if (!r || r.width <= 0 || r.height <= 0) return bounds;
+  const top = Math.max(bounds.top, r.top + inset);
+  const left = Math.max(bounds.left, r.left + inset);
+  const right = Math.max(left, Math.min(bounds.right, r.right - inset));
+  const bottom = Math.max(top, Math.min(bounds.bottom, r.bottom - inset));
+  return { top, left, right, bottom, width: right - left, height: bottom - top };
+}
+
+/** A popover with no room by its anchor inside `bounds`: a sheet at their foot, as wide as a popover may be. */
+export function sheetWithin(bounds: VisibleViewportBounds): CommentPopoverPosition {
+  const width = Math.min(MAX_POPOVER_WIDTH, bounds.width);
+  return { top: bounds.bottom, left: bounds.left + (bounds.width - width) / 2, flipAbove: true, width, maxHeight: Math.max(0, bounds.height * 0.75), requiresExpanded: false };
 }
 
 export function computeCommentPopoverPosition(
@@ -255,6 +289,21 @@ export interface CommentCardGeometry { docked: boolean; above: boolean; style: R
 export const COMMENT_CARD_WIDTH = 352;
 /** The least room the card takes by the words; with less on both sides it docks. */
 const CARD_NEED = 132;
+/** With `keepAbove`: the room a card beside its anchor needs under the anchor's top to open downward. */
+const CARD_SIDE_ROOM = 200;
+/** With `keepAbove`: the space left between the card and the foot. */
+const CARD_FLOOR_GAP = 6;
+
+/** How much of `el` shows, at its foot: its own bottom edge, or that of an ancestor that clips it sooner. */
+export function visibleFootOf(el: HTMLElement): number {
+  let foot = el.getBoundingClientRect().bottom;
+  for (let up = el.parentElement; up && up !== document.body; up = up.parentElement) {
+    const style = getComputedStyle(up);
+    if (style.overflowY === 'visible' && style.overflowX === 'visible') continue;
+    foot = Math.min(foot, up.getBoundingClientRect().bottom);
+  }
+  return foot;
+}
 
 /**
  * The comment card's place. It never sits on the words it is about: a card beside them (under, else over; with
@@ -269,10 +318,13 @@ export function computeCommentCardGeometry(
     phone: boolean;
     expanded: boolean;
     pane: Pick<DOMRect, 'left' | 'right' | 'bottom' | 'width'> | null;
+    /** The layout viewport's height (`layoutViewportHeight`), which a docked card's `bottom` is measured from. */
     viewportHeight: number;
     footTop?: number | null;
     aimX?: number | null;
     placement?: 'below' | 'side';
+    /** `keepAbove`'s foot: with `placement: 'side'`, the card ends above this line. */
+    floor?: number | null;
   },
 ): CommentCardGeometry {
   // The pane's foot is never covered: the card ends above it. A short window keeps the room instead.
@@ -281,7 +333,7 @@ export function computeCommentCardGeometry(
   }
   const dock = (): CommentCardGeometry => {
     if (opts.phone) {
-      return { docked: true, above: false, style: { left: bounds.left + 8, width: bounds.width - 16, bottom: opts.viewportHeight - bounds.bottom + 8, maxHeight: Math.max(160, bounds.height * 0.6) } };
+      return { docked: true, above: false, style: { left: bounds.left + 8, width: bounds.width - 16, bottom: opts.viewportHeight - bounds.bottom + 8, maxHeight: Math.min(bounds.height, Math.max(160, bounds.height * 0.6)) } };
     }
     const pane = opts.pane ?? { left: bounds.left, right: bounds.right, bottom: bounds.bottom, width: bounds.width };
     const width = Math.min(pane.width - 24, opts.expanded ? 760 : 680);
@@ -290,6 +342,29 @@ export function computeCommentCardGeometry(
   };
   if (!anchor || opts.phone || opts.expanded) return dock();
   const width = Math.min(COMMENT_CARD_WIDTH, bounds.width);
+  if (opts.placement === 'side' && opts.floor != null) {
+    // Above the foot (`keepAbove`), inside the pane. The card's height is its words', so a card that opens
+    // upward is held by its bottom edge.
+    const foot = Math.min(bounds.bottom, opts.floor - CARD_FLOOR_GAP);
+    if (foot - bounds.top < CARD_NEED) return dock();
+    const minLeft = Math.max(bounds.left, opts.pane ? opts.pane.left + 8 : bounds.left);
+    const maxRight = Math.min(bounds.right, opts.pane ? opts.pane.right - 8 : bounds.right);
+    const up = (left: number, bottomEdge: number): CommentCardGeometry => ({ docked: false, above: true, style: { left, width, bottom: opts.viewportHeight - bottomEdge, maxHeight: bottomEdge - bounds.top } });
+    const right = anchor.right + GAP * 1.75;
+    const left = anchor.left - GAP * 1.75 - width;
+    const sideLeft = right + width <= maxRight ? right : left >= minLeft ? left : null;
+    if (sideLeft !== null) {
+      const top = Math.max(bounds.top, anchor.top);
+      if (foot - top >= CARD_SIDE_ROOM) return { docked: false, above: false, style: { left: sideLeft, width, top, maxHeight: foot - top } };
+      return up(sideLeft, foot);
+    }
+    const middle = Math.max(minLeft, Math.min(anchor.left + anchor.width / 2 - width / 2, maxRight - width));
+    const overTop = anchor.top - GAP;
+    if (overTop - bounds.top >= CARD_NEED) return up(middle, overTop);
+    const under = anchor.bottom + GAP;
+    if (foot - under >= CARD_NEED) return { docked: false, above: false, style: { left: middle, width, top: under, maxHeight: foot - under } };
+    return up(middle, foot);
+  }
   if (opts.placement === 'side') {
     const right = anchor.right + GAP * 1.75;
     const left = anchor.left - GAP * 1.75 - width;
@@ -368,7 +443,10 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   yieldState,
   headerText,
   errorText,
+  before,
   placement = 'below',
+  keepAbove,
+  within,
   zIndex,
   autoFocus = true,
 }) => {
@@ -380,6 +458,8 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   });
   // The comment card (opt-in, `configurePlannotatorUI({ commentCard })`): read once, so a box never changes look open.
   const [card] = useState(() => allowCard && getCommentCardEnabled());
+  const CardTools = useContext(CommentCardToolsContext);
+  const [toolsBusy, setToolsBusy] = useState(false);
   const [mode, setMode] = useState<'popover' | 'dialog'>(() =>
     prefersExpandedComposer && !card ? 'dialog' : 'popover'
   );
@@ -394,6 +474,11 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   const initialDraft = draftKey ? draftStore.get(draftKey) : undefined;
   const [text, setText] = useState(initialDraft?.text ?? initialText);
   const [images, setImages] = useState<ImageAttachment[]>(allowImages ? initialDraft?.images ?? [] : []);
+  const [picturesPending, setPicturesPending] = useState(false);
+  const hostDraft = useHostCommentDraft(isGlobal ? draftKey : undefined, text, allowImages ? images : [], (draft) => {
+    setText(draft.text);
+    if (allowImages) setImages(draft.images);
+  });
   const [position, setPosition] = useState<CommentPopoverPosition | null>(null);
   // Direction of an open popover that has scrolled out of view, or null when on-screen.
   const [offscreen, setOffscreen] = useState<'above' | 'below' | null>(null);
@@ -439,7 +524,8 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
         : [];
       const footTop = feet.length ? Math.min(...feet.map((r) => r.top)) - 4 : null;
       setCardGeo(computeCommentCardGeometry(rect, visibleBounds, {
-        phone: cardPhone, expanded: cardExpanded, pane, viewportHeight: window.innerHeight, footTop, aimX: cardAim.current, placement,
+        phone: cardPhone, expanded: cardExpanded, pane, viewportHeight: layoutViewportHeight(window), footTop, aimX: cardAim.current, placement,
+        floor: keepAbove ? visibleFootOf(keepAbove) : null,
       }));
     };
     update();
@@ -449,7 +535,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       window.removeEventListener('scroll', update, true);
       window.removeEventListener('resize', update);
     };
-  }, [card, anchorEl, anchorRect, visibleBounds, cardPhone, cardExpanded, placement]);
+  }, [card, anchorEl, anchorRect, visibleBounds, cardPhone, cardExpanded, placement, keepAbove]);
   // Docked at the foot: the words the comment is about are scrolled up above the card, never left under it.
   const cardDocked = cardGeo?.docked ?? false;
   useEffect(() => {
@@ -499,7 +585,12 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     const update = () => {
       const rect = anchorEl?.getBoundingClientRect() ?? anchorRect;
       if (!rect) return;
-      const nextPosition = computeCommentPopoverPosition(rect, visibleBounds, placement);
+      const bounds = within ? boundsWithin(visibleBounds, within) : visibleBounds;
+      const nextPosition = computeCommentPopoverPosition(rect, bounds, placement);
+      if (nextPosition.requiresExpanded && within) {
+        setPosition(sheetWithin(bounds));
+        return;
+      }
       if (nextPosition.requiresExpanded) {
         setDialogIsForced(true);
         setMode('dialog');
@@ -513,7 +604,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     return () => {
       window.removeEventListener('scroll', update, true);
     };
-  }, [anchorEl, anchorRect, mode, visibleBounds, wasDragged, placement, card]);
+  }, [anchorEl, anchorRect, mode, visibleBounds, wasDragged, placement, card, within]);
 
   // Surface a "jump back" arrow when an open popover scrolls out of view.
   // Re-measures whenever the popover repositions (position updates every scroll
@@ -732,21 +823,26 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   );
 
   const runExtraAction = (action: NonNullable<CommentPopoverProps['extraActions']>[number]) => {
-    if (action.spends && draftKey) draftStore.delete(draftKey);
+    if (action.spends && draftKey) {
+      draftStore.delete(draftKey);
+      hostDraft.clear();
+    }
     action.onSelect(text.trim());
   };
 
   const handleSubmit = useCallback(() => {
     const canSubmitEmpty = allowEmptySubmit && initialText.trim().length > 0;
+    if (picturesPending || toolsBusy) return;
     if (hasUnsavedContent || canSubmitEmpty) {
       if (draftKey) draftStore.delete(draftKey);
+      hostDraft.clear();
       const submitImages = allowImages && images.length > 0 ? images : undefined;
       // Without a mentionSource this is the two-argument call it always was.
       if (mentionSource) onSubmit(text, submitImages, mentionAc.mentionIds);
       else onSubmit(text, submitImages);
       restoreOpeningFocus();
     }
-  }, [text, images, onSubmit, draftKey, allowImages, allowEmptySubmit, initialText, hasUnsavedContent, restoreOpeningFocus, mentionSource, mentionAc.mentionIds]);
+  }, [text, images, onSubmit, draftKey, allowImages, allowEmptySubmit, initialText, hasUnsavedContent, restoreOpeningFocus, mentionSource, mentionAc.mentionIds, picturesPending, toolsBusy, hostDraft]);
 
   const handleAskAI = useCallback(async () => {
     const question = text.trim();
@@ -770,17 +866,19 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       return;
     }
     if (draftKey) draftStore.delete(draftKey);
+    hostDraft.clear();
     onDraftChange?.('', allowImages ? [] : undefined);
     onClose();
-  }, [allowImages, askAIContext, contextText, draftKey, isGlobal, onAskAI, onClose, onDraftChange, text]);
+  }, [allowImages, askAIContext, contextText, draftKey, hostDraft, isGlobal, onAskAI, onClose, onDraftChange, text]);
 
   const handleExtra = useCallback(() => {
     if (!extraAction) return;
     extraAction.onAction(text.trim());
     if (draftKey) draftStore.delete(draftKey);
+    hostDraft.clear();
     onDraftChange?.('', allowImages ? [] : undefined);
     onClose();
-  }, [allowImages, draftKey, extraAction, onClose, onDraftChange, text]);
+  }, [allowImages, draftKey, extraAction, hostDraft, onClose, onDraftChange, text]);
 
   // After the primary action in the DOM, so Tab reaches it second; `order` keeps it at the footer's end on screen,
   // and Tab goes the way the eye reads the two: the primary, then this.
@@ -824,6 +922,12 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
 
   const enterSavesComment = useConfigValue('enterSavesComment');
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Escape during composition belongs to the IME. Leave its default alone
+    // and keep it from reaching the comment dialog or the app's close shortcut.
+    if (e.key === 'Escape' && isImeCompositionKey(e)) {
+      e.stopPropagation();
+      return;
+    }
     if (skillAc.onKeyDown(e)) return;
     if (mentionAc.onKeyDown(e)) return;
     if (e.key === 'Escape') {
@@ -864,9 +968,19 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     </p>
   ) : null;
 
+  const draftConflictRow = hostDraft.conflict !== undefined ? (
+    <p role="status" data-comment-draft-conflict="" className="pn-cbox-conflict px-3 pt-2 text-xs text-muted-foreground">
+      <span>This comment changed in another window.</span>
+      <button type="button" className="font-medium text-foreground underline" onClick={hostDraft.takeTheirs}>Use that one</button>
+      <button type="button" className="font-medium text-foreground underline" onClick={hostDraft.keepMine}>Keep mine</button>
+    </p>
+  ) : null;
+
   const canSubmit =
-    hasUnsavedContent ||
-    (allowEmptySubmit && initialText.trim().length > 0);
+    !picturesPending &&
+    !toolsBusy &&
+    (hasUnsavedContent ||
+    (allowEmptySubmit && initialText.trim().length > 0));
   const canAskAI = !!onAskAI && !askAIDisabled && text.trim().length > 0;
   const showsSkillMenu = skillAc.menu !== null;
 
@@ -916,6 +1030,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       : {};
     const discard = () => {
       if (draftKey) draftStore.delete(draftKey);
+      hostDraft.clear();
       setText('');
       setImages([]);
       onDraftChange?.('', allowImages ? [] : undefined);
@@ -992,6 +1107,8 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
             {isGlobal ? 'Global comment' : on ?? 'Comment'}
           </div>
           {errorRow}
+          {before}
+          {draftConflictRow}
           {chipsRow}
           <div className="pn-cbox-field">
             <ComposerTokenTextarea
@@ -1013,6 +1130,19 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
             {mentionSource?.renderNotice?.(mentionChipPeople)}
             <MentionAutocompleteMenu id={mentionListboxId} menu={mentionAc.menu} onSelect={mentionAc.select} />
           </div>
+          {images.some((image) => image.kind === 'file') && (
+            <ul className="pn-cbox-files" aria-label="Attached files">
+              {images.filter((image) => image.kind === 'file').map((file) => (
+                <li key={file.path} className="pn-cbox-file" title={file.name}>
+                  <Icon name="doc" size={13} />
+                  <span className="pn-cbox-file-name">{file.name}</span>
+                  <button type="button" aria-label={`Remove ${file.name}`} onClick={() => setImages((prev) => prev.filter((i) => i.path !== file.path))}>
+                    <Icon name="x" size={12} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
           {/* Screen order is Tab order: the tools, the bin, then Comment at the right end. */}
           <div className="pn-cbox-row">
             {quickLookGoodButton}
@@ -1021,9 +1151,11 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
                 images={images}
                 onAdd={(img) => setImages((prev) => [...prev, img])}
                 onRemove={(path) => setImages((prev) => prev.filter((i) => i.path !== path))}
+                onPendingChange={setPicturesPending}
                 variant="inline"
               />
             )}
+            {CardTools && <CardTools textareaRef={textareaRef} phone={cardPhone} onBusyChange={setToolsBusy} />}
             {onAskAI && (
               <button type="button" className="pn-cbox-tool pn-cbox-word" onClick={handleAskAI} disabled={!canAskAI} title={canAskAI ? 'Ask AI this question' : 'Type a question to ask AI'}>
                 <SparklesIcon className="w-3.5 h-3.5" />
@@ -1141,6 +1273,8 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           </div>
 
           {errorRow}
+          {before}
+          {draftConflictRow}
           {chipsRow}
 
           {/* Textarea */}
@@ -1219,6 +1353,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
                   images={images}
                   onAdd={(img) => setImages((prev) => [...prev, img])}
                   onRemove={(path) => setImages((prev) => prev.filter((i) => i.path !== path))}
+                  onPendingChange={setPicturesPending}
                   variant="inline"
                 />
               )}
@@ -1311,6 +1446,8 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       </div>
 
       {errorRow}
+      {before}
+          {draftConflictRow}
       {chipsRow}
 
       {/* Textarea */}
@@ -1388,6 +1525,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
               images={images}
               onAdd={(img) => setImages((prev) => [...prev, img])}
               onRemove={(path) => setImages((prev) => prev.filter((i) => i.path !== path))}
+              onPendingChange={setPicturesPending}
               variant="inline"
             />
           )}

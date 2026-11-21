@@ -15,6 +15,7 @@
  */
 
 import type { InboxMessageWire } from '@plannotator/core/inbox-types';
+import { inboxQuestionWaitsOnPerson } from '@plannotator/core/inbox-questions';
 import type { AttachmentStep } from './stepping';
 
 /** One choice of the set, as the caption names it. */
@@ -139,6 +140,25 @@ export function optionSetOf(messages: readonly InboxMessageWire[], steps: readon
   });
   if (setSteps.length < 2) return null;
   return { id: optionSetId(message.id, question.key), messageId: message.id, questionKey: question.key, choices, steps: setSteps };
+}
+
+/**
+ * The `set=` for a picture opened some other way than its choice's zoom (a
+ * tile, the Artifacts view): the question still waiting on the person whose
+ * choice shows this file, on that choice. Null when none does. A file is one
+ * message's own, so the copy a replaced or answered question showed opens
+ * without a set even when an open question shows the same picture.
+ */
+export function openChoiceSetOf(messages: readonly InboxMessageWire[], steps: readonly AttachmentStep[], attachmentId: string): string | null {
+  for (const message of messages) {
+    for (const question of message.questions ?? []) {
+      if (!inboxQuestionWaitsOnPerson(question)) continue;
+      const set = optionSetOf(messages, steps, optionSetId(message.id, question.key));
+      const shown = set ? optionOf(set, attachmentId) : null;
+      if (set && shown) return optionSetAddress(set, shown.choice.choice);
+    }
+  }
+  return null;
 }
 
 /**

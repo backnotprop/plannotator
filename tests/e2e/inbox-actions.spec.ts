@@ -33,7 +33,7 @@
  * checks that nothing of the person's landed before the Send.
  */
 
-import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -150,7 +150,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-actions-e2e-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -201,7 +201,9 @@ test('the list: no new section; the action item sits in Stopped on you and its r
   const { page, threads } = world;
   await page.goto(world.url);
   const stopped = page.locator('section[aria-label="Stopped on you"], .ib-group').filter({ hasText: 'Stopped on you' }).first();
-  await expect(stopped).toContainText('Approve the production deploy on Vercel');
+  // The row's grey line is the message's first words (approval "inbox-row-latest-preview"); the action item is in its pill.
+  await expect(row(page, threads.vercel)).toContainText('Release 4.2 is built and every check passed.');
+  await expect(stopped.locator(`[data-thread-id="${threads.vercel}"]`)).toHaveCount(1);
   // The open action items' pill and the open questions' count (approval "inbox-row-action-icon"), named in words: a
   // blocked row's marks say its state first (approval "inbox-question-mark", #2929).
   for (const [id, actions, questions] of [[threads.vercel, 1, 0], [threads.npm, 1, 1], [threads.staging, 3, 0]] as const) {

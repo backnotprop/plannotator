@@ -10,7 +10,7 @@
  * toolbar (above the bar beside the thread; one row per message, the open
  * file ringed) and owns the keys while open; an inline
  * image takes a comment and a markup and rides the Send under its path and
- * message; an image the agent overwrites says "Changed since Claude sent it"
+ * message; an image the agent overwrites says "Claude sent an earlier version at …"
  * and opens the version it sent; a typed comment asks before a step; on an
  * iPhone (WebKit) the toolbar's ⋯ opens the peek as a bottom sheet; and plan
  * review's annotate surface gets the light version (full screen, ← →, the
@@ -21,7 +21,7 @@
  * PNGs, light and dark, land in PLANNOTATOR_E2E_SHOTS_DIR (default .local/proof/image-viewer).
  */
 
-import { expect, test, webkit, devices, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, webkit, devices, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -322,11 +322,11 @@ test('an image the agent overwrites says it changed since it was sent, and opens
   await expect(line).toContainText('Changed since sent');
   await expect(line).not.toHaveAttribute('title', /./);
   await line.locator('.ib-fvver-t').hover();
-  await expect(page.locator('[data-side].bg-popover')).toHaveText(/^Changed since Claude sent it/);
+  await expect(page.locator('[data-side].bg-popover')).toHaveText(/^Viewing the current file \(edited [^)]*\)\. Claude sent an earlier version at /);
   await page.mouse.move(700, 600);
   await expect(page.locator('[data-side].bg-popover')).toHaveCount(0);
   await shot(page, '05-inline-image-changed');
-  await line.getByRole('button', { name: 'Open the version it sent' }).click();
+  await line.getByRole('button', { name: 'View sent version' }).click();
   await expect(pane()).toHaveAttribute('data-version', 'sent');
 });
 
@@ -423,7 +423,7 @@ test('plan review and annotate get the light version: full screen, ← → acros
     ['# Checkout plan', '', '## Options', '', '![A: one page](checkout-a-single-page.png)', '', '![B: three steps](checkout-b-steps.png)', '', '![C: a drawer](checkout-c-drawer.png)', '', '## Mobile', '', '![Phone](checkout-mobile.png)', ''].join('\n'),
   );
   const readyFile = join(root, 'ready.jsonl');
-  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
   let child: ChildProcess | undefined;
   let url = '';
   try {
@@ -499,7 +499,7 @@ test('Actual size shows an image at its real size: a tall one scrolls, a small o
   const doc = join(root, 'PLAN.md');
   writeFileSync(doc, ['# Sizes', '', '![Tall](tall.png)', '', '![Small](small.png)', ''].join('\n'));
   const readyFile = join(root, 'ready.jsonl');
-  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
   let child: ChildProcess | undefined;
   let url = '';
   try {
@@ -600,7 +600,7 @@ test('the lightbox zooms: Ctrl + wheel about the pointer, drag pans, a double cl
   const doc = join(root, 'PLAN.md');
   writeFileSync(doc, ['# Zoom', '', '![Wide](wide.png)', '', '![Other](other.png)', ''].join('\n'));
   const readyFile = join(root, 'ready.jsonl');
-  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
   let child: ChildProcess | undefined;
   let url = '';
   try {
@@ -707,7 +707,7 @@ test('on an iPhone (WebKit) a tap beside the image closes the single overlay, an
   // A link high on the page, where the tap beside the image lands once the overlay is open.
   writeFileSync(doc, ['# Ghost tap', '', '[Go somewhere else](https://example.com/ghost) and [another link](https://example.com/ghost-2)', '', '![Small](small.png)', ''].join('\n'));
   const readyFile = join(root, 'ready.jsonl');
-  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
   let child: ChildProcess | undefined;
   let url = '';
   const { defaultBrowserType: _ignored, ...device } = devices['iPhone 15'];
@@ -1086,7 +1086,7 @@ test('#2127: in annotate, a plain wheel zooms in, a pause, then the wheel scroll
   const doc = join(root, 'NOTES.md');
   writeFileSync(doc, ['# Notes', '', '![Big](big.png)', ''].join('\n'));
   const readyFile = join(root, 'ready.jsonl');
-  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
   let child: ChildProcess | undefined;
   let url = '';
   try {

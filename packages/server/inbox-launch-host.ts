@@ -18,6 +18,7 @@
 import { join } from "node:path";
 import type { InboxLaunchAgent, InboxLaunchError, InboxLaunchNotReady, InboxLaunchRecord, InboxMessage } from "@plannotator/core/inbox-types";
 import type { InboxRunHostState } from "@plannotator/core/inbox-run-line";
+import type { InboxLaunchChoices } from "@plannotator/core/inbox-launch-choice";
 import type { resolveInboxLaunch } from "@plannotator/shared/config";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -43,8 +44,7 @@ export interface LaunchHostResult {
  * launch of this Inbox owns), it could not (`failed`: tried again later, as a failed `codex queue` is), or it may
  * have gone (`uncertain`: sent and never answered; kept claimed and never sent again, as a `codex queue` that ran
  * out of time is). `hold` (the engine's answer, never a host's): not now, and not the wake's own way either; the
- * item waits in the Inbox (a deleted launch's session, a reply the person's Stop held, a guest's reply to a
- * session that is not running).
+ * item waits in the Inbox (a deleted launch's session, a reply the person's Stop held).
  */
 export type LaunchDelivery = "delivered" | "queue" | "hold" | { failed: string } | { uncertain: string };
 
@@ -54,20 +54,58 @@ export type LaunchDelivery = "delivered" | "queue" | "hold" | { failed: string }
  */
 export const launchUploadsDir = (dataDir: string) => join(inboxDir(dataDir), INBOX_UPLOADS_DIR);
 
+/** A word that is a link: cut inside it, it would be a link to somewhere else. */
+const LINK_WORD = /^(?:[a-z][a-z0-9+.-]*:\/\/|www\.)/i;
+
 /**
  * Text from an agent as a thread note quotes it: one line, controls and invisible characters dropped, Markdown's
  * marks escaped, `max` characters at most. What a note quotes comes from the agent or its provider, never the person.
+ * `words`: a cut falls between words when the last one starts in the second half of the room (else through it), and
+ * never inside a link, which goes whole.
  */
-export function launchNoteText(text: unknown, max: number): string {
+export function launchNoteText(text: unknown, max: number, options: { words?: boolean } = {}): string {
   const flat = String(typeof text === "string" ? text : "")
     // Controls, bidi and other invisible format characters go; the zero-width joiner stays (it holds an emoji together).
     .replace(/(?:(?!‍)[\p{Cc}\p{Cf}\p{Zl}\p{Zp}])+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
-  const short = [...flat].length > max ? `${[...flat].slice(0, max - 1).join("").trimEnd()}…` : flat;
+  const chars = [...flat];
+  let short = flat;
+  if (chars.length > max) {
+    let end = max - 1;
+    if (options.words && chars[end] !== " ") {
+      const space = chars.lastIndexOf(" ", end - 1);
+      const next = chars.indexOf(" ", end);
+      const word = chars.slice(space + 1, next === -1 ? chars.length : next).join("");
+      if (LINK_WORD.test(word) || space >= end / 2) end = Math.max(space, 0);
+    }
+    short = `${chars.slice(0, end).join("").trimEnd()}…`;
+  }
   // Only marks the Inbox's inline Markdown both formats and unescapes (InlineMarkdown's
   // backslash rule): an escaped `:` or `<` would show its backslash; React keeps `<` text.
   return short.replace(/[\\`*_[\]~#>|$!&{}]/g, (mark) => `\\${mark}`);
+}
+
+/** The most of an agent's own error a failed turn's note quotes. */
+export const LAUNCH_TURN_ERROR_MAX = 300;
+
+/**
+ * The note a launched session's failed turn leaves in its thread (Codex, Pi, Claude Code): "<name>'s turn ended with
+ * an error: <the agent's own words>", one line, LAUNCH_TURN_ERROR_MAX characters at most, cut between words.
+ */
+export function launchTurnErrorNote(name: string, error: string): string {
+  const shown = launchNoteText(error, LAUNCH_TURN_ERROR_MAX, { words: true });
+  return shown ? `${name}'s turn ended with an error: ${shown}` : `${name}'s turn ended with an error.`;
+}
+
+/**
+ * A launched session's last turn ended in an error the session itself wrote down (Claude Code's transcript): `key`
+ * names that entry (one note per entry, however often it is read), `text` is the agent's own words, `at` when (ms).
+ */
+export interface LaunchTurnError {
+  key: string;
+  text: string;
+  at: number;
 }
 
 /**
@@ -77,12 +115,22 @@ export function launchNoteText(text: unknown, max: number): string {
 export function writeLaunchNote(
   context: Pick<LaunchPermissionContext, "store" | "onChange">,
   root: InboxMessage,
-  note: { author: { host: string; session: string; name: string }; body: string; key: string },
+  note: { author: { host: string; session: string; name: string }; body: string; key: string; turnError?: boolean },
   log: (line: string) => void,
 ): void {
   try {
     const latest = context.store.threadMessageIds(root.thread_id).at(-1) ?? root.id;
-    context.store.sendMessage({ project_id: root.project_id, author: { kind: "agent", ...note.author }, body: note.body, reply_to: latest, idempotency_key: note.key });
+    context.store.sendMessage({
+      project_id: root.project_id,
+      author: { kind: "agent", ...note.author },
+      body: note.body,
+      reply_to: latest,
+      idempotency_key: note.key,
+      // The Inbox's own note: the sound never rings for it, except a failed turn's (`InboxMessage.launch_note`).
+      launch_note: true,
+      // A failed turn's note: the window notifies for it (`InboxMessage.turn_error`).
+      ...(note.turnError ? { turn_error: true } : {}),
+    });
     context.onChange();
   } catch (error) {
     log(`Inbox launch ${root.launch?.id ?? root.id}: a note was not written: ${error instanceof Error ? error.message : String(error)}`);
@@ -203,12 +251,30 @@ export interface LaunchHost {
   readonly name: string;
   /** What of Plannotator's connects a session, in the line's words: "plugin" (the default), Pi's "extension". */
   readonly connector?: string;
-  /** The login-shell names it keeps from each read (the rest of the env is never held). */
+  /** The login-shell names it keeps from each read (the rest of the env is held only by a host with `loginRead`). */
   readonly shellNames: readonly string[];
   /** Login-shell names it learns only whether they are set: kept as "1", never their values (a sign-in token). */
   readonly shellFlags?: readonly string[];
-  /** Whether To may offer it. The engine caches it 30 s. */
-  available(): Promise<LaunchAvailability>;
+  /**
+   * Each login read's whole env, as read (a stand-in from a shell that did not answer included: the host tells them
+   * apart with `LOGIN_ENV_FALLBACKS`). OpenCode holds it in memory for its model-list reads, so they see what the
+   * session sees (a key exported in the shell rc) without running the shell again. Never written, never logged.
+   */
+  loginRead?(login: Readonly<LaunchEnv>): void;
+  /**
+   * Whether To may offer it. The engine caches it 30 s. `folders`: whether it can start in at least one of these
+   * (already checked) folders, by their own settings where the host reads any (Claude Code's project plugin
+   * scopes); not cached. None: the machine's own setup.
+   */
+  available(folders?: readonly string[]): Promise<LaunchAvailability>;
+  /**
+   * Its model lists; OpenCode's may instead say why they could not be read (`unread`, lists empty). `defaultIn`: the
+   * folder picked in To (null: the home folder), for a host that names its default model for it (OpenCode: never by
+   * running anything there); absent, none.
+   */
+  choices?(options?: { defaultIn?: string | null }): Promise<Omit<InboxLaunchChoices, "last"> | null>;
+  /** What compose gets while `choices` takes longer than the offer's wait (OpenCode: `reading`). None: no lists. */
+  readonly choicesWhileReading?: Omit<InboxLaunchChoices, "last">;
   /** How a launch made now in `folder` starts; fixed on the record at Send. */
   startOf(folder: string): { full: boolean; ownMode: boolean; bypass: boolean };
   /** It starts in `folder` (and every scratch folder in it) without a trust prompt. */
@@ -222,6 +288,31 @@ export interface LaunchHost {
    * session (`settleLaunch`) and its own channel delivers it. It writes its own start.log entries.
    */
   start(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv }): Promise<{ ok: true; session: string; ref: string } | ({ ok: false } & LaunchStartFailure)>;
+  /**
+   * Start in Rex (Settings → Agents' "Start new agents in"): the agent's ordinary interactive command, for a Rex tab
+   * to run through the person's login shell. Only a host whose interactive session connects to the Inbox by itself
+   * at its start, as the session id given here (so the root, addressed to it, is its first turn through its own
+   * channel, as for `start`): never the person's message on the command line. `resume`: the same session again (a
+   * reply to one that ended). `fresh` with it: that session never took a turn (it never connected: stopped at a
+   * prompt in its tab), so there is nothing to resume: it starts on its own id as a first start does, named (Claude
+   * Code's `--session-id`, not `--resume`). It writes what the session needs (Claude Code's settings file), or makes the session
+   * first when only the agent's server can (OpenCode: a short server of its own, ended before the tab opens); the
+   * agent itself runs only in the tab. No member: this agent always starts in the background (Codex: a Codex in a tab
+   * never tells the Inbox between turns whether it runs, so its line could not say).
+   */
+  rexCommand?(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean; fresh?: boolean }): Promise<{ ok: true; session: string; ref: string; command: string } | ({ ok: false } & LaunchStartFailure)>;
+  /**
+   * Start in Rex: whether a process on this computer runs `session`, by `listing` (`ps -A -o pid=,ppid=,command=`),
+   * for an agent whose running process does not keep its argv (Pi sets `process.title`). No member: its argv names
+   * the session (inbox-rex-resume.ts reads it).
+   */
+  runsSession?(session: string, listing: string): boolean;
+  /**
+   * The processes in `listing` that run `session` (the same check as `runsSession`, as pids), for Stop of an agent in
+   * a Rex pane the Inbox did not open: only ones it is sure are that agent now (a signal goes to each). No member: its
+   * argv names the session (inbox-rex-resume.ts finds them).
+   */
+  sessionPids?(session: string, listing: string): number[] | Promise<number[]>;
   /** Every session it knows, read once (the engine caches it 10 s, and only while a line could change); null when it could not be read. */
   sessions(): Promise<LaunchSessions | null>;
   /** The session connected to the Inbox now; null when not. `polls` must rise whenever it shows new life (Stop waits for a higher count). */
@@ -259,6 +350,12 @@ export interface LaunchHost {
    * no turn after it.
    */
   deliver?(launch: InboxLaunchRecord, text: string, signal: AbortSignal): Promise<LaunchDelivery>;
+  /**
+   * Only a host whose session writes its failed turns down where the Inbox can read them (Claude Code's transcript)
+   * and says nothing to the Inbox itself: the error the session's last turn ended in, or null (it ended well, a new
+   * turn began, nothing could be read). The engine asks only for a session this Inbox launched, while it is idle.
+   */
+  turnError?(launch: InboxLaunchRecord, session: string): LaunchTurnError | null;
   /** The Inbox stops: let go of what this host holds (a connection, the processes it owns). No `close`: it holds nothing. */
   close?(): void;
 }

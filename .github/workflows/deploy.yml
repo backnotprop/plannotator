@@ -50,6 +50,8 @@ jobs:
       paste: ${{ steps.changes.outputs.paste }}
       waitlist: ${{ steps.changes.outputs.waitlist }}
     steps:
+      # A Test preview (a manual run given as_if_changed, named "Test preview: ...")
+      # runs only part of Test, so it does not count.
       - name: Manual run needs a passed Test run on this commit
         if: github.event_name == 'workflow_dispatch'
         env:
@@ -58,7 +60,7 @@ jobs:
           COMMIT_SHA: ${{ github.sha }}
         run: |
           conclusion="$(gh api "repos/${REPOSITORY}/actions/workflows/test.yml/runs?head_sha=${COMMIT_SHA}&per_page=100" \
-            --jq '[.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch")] | sort_by(.created_at) | last | .conclusion // "missing"')"
+            --jq '[.workflow_runs[] | select(.event == "push" or (.event == "workflow_dispatch" and ((.display_title // "") | startswith("Test preview:") | not)))] | sort_by(.created_at) | last | .conclusion // "missing"')"
           if [[ "$conclusion" != "success" ]]; then
             echo "The latest Test run on ${COMMIT_SHA} is ${conclusion}, not success. Run Test on this commit first." >&2
             exit 1
@@ -176,17 +178,29 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
+      # The site's videos are not in the repository: they are uploaded by hand
+      # to assets/ in this bucket. The excludes keep --delete from removing
+      # them (an excluded key is neither uploaded nor deleted). assets/hosted/
+      # holds other files uploaded by hand, such as pictures an in-app dialog
+      # loads. See "Videos" in docs/agent-guides/project-and-development.md.
       - name: Deploy to S3
-        run: aws s3 sync apps/marketing/dist/ s3://plannotator-marketing/ --delete
+        run: >-
+          aws s3 sync apps/marketing/dist/ s3://plannotator-marketing/ --delete
+          --exclude "assets/*.mp4" --exclude "assets/*.webm"
+          --exclude "assets/hosted/*"
 
-      # The sync guesses text/markdown with no charset for .md; re-upload the
-      # Inbox install prompt (/inbox/prompt.md) with an explicit charset.
-      - name: Set the Inbox prompt's content type
+      # The sync names .md text/markdown and .txt text/plain with no charset, so
+      # an agent reads the agent pages' curly quotes and arrows as Latin-1.
+      # Every .md and .txt the build emits goes up again with UTF-8 named
+      # (apps/marketing/llms.test.ts checks the patterns cover them).
+      - name: Set the agent pages' content type
         run: |
-          if [ -f apps/marketing/dist/inbox/prompt.md ]; then
-            aws s3 cp apps/marketing/dist/inbox/prompt.md s3://plannotator-marketing/inbox/prompt.md \
-              --content-type "text/markdown; charset=utf-8"
-          fi
+          aws s3 cp apps/marketing/dist/ s3://plannotator-marketing/ --recursive \
+            --exclude "*" --include "*.md" \
+            --content-type "text/markdown; charset=utf-8"
+          aws s3 cp apps/marketing/dist/ s3://plannotator-marketing/ --recursive \
+            --exclude "*" --include "*.txt" \
+            --content-type "text/plain; charset=utf-8"
 
       - name: Invalidate CloudFront
         run: |

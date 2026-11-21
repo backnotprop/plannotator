@@ -39,6 +39,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxSearchAnswer, InboxSearchRow, InboxSearchThreadRow } from '@plannotator/core/inbox-search';
 import { tooltipOf } from './testing/tooltip';
+import type { SearchPaletteProps } from './search/SearchPalette';
 
 const hasDom = typeof document !== 'undefined';
 const { default: SearchPalette } = (hasDom ? await import('./search/SearchPalette') : {}) as typeof import('./search/SearchPalette');
@@ -121,7 +122,7 @@ afterEach(() => {
   globalThis.fetch = savedFetch;
 });
 
-async function render(props: { currentProject?: string | null; phone?: boolean; projects?: { id: string; name: string; root: string }[]; projectLabels?: ReadonlyMap<string, string> } = {}): Promise<void> {
+async function render(props: { currentProject?: string | null; phone?: boolean; tintOf?: SearchPaletteProps['tintOf']; projects?: { id: string; name: string; root: string }[]; projectLabels?: ReadonlyMap<string, string> } = {}): Promise<void> {
   await act(async () => {
     root!.render(
       <SearchPalette
@@ -132,10 +133,23 @@ async function render(props: { currentProject?: string | null; phone?: boolean; 
         projectLabels={props.projectLabels}
         onClose={(reason) => closed.push(reason)}
         onOpenResult={(hash, land) => opened.push({ hash, land })}
+        tintOf={props.tintOf}
       />,
     );
   });
 }
+
+test.skipIf(!hasDom)('a thread result in a coloured tag is tinted and names the tag, as its list row; a message result is not', async () => {
+  respond = async (call) => (call.url.searchParams.get('q') ? results(call.url.searchParams.get('q')!) : answer({}));
+  await render({ tintOf: (id) => (id === 'msg_t1' || id === 'msg_t2' ? { colour: 'green', name: 'Release', also: ['Windows'] } : null) });
+  await type('rate lim');
+  await waitFor(() => options().length === 10);
+  const thread = host!.querySelector<HTMLElement>('[data-result="thread"]')!;
+  expect(thread.getAttribute('data-tint')).toBe('green');
+  expect(thread.querySelector('[data-row-tag]')!.textContent).toBe('Release +1');
+  expect(thread.querySelector<HTMLElement>('[data-row-tag]')!.title).toBe('Highlighted: Release, Green. Also in Windows');
+  expect(host!.querySelector('[data-result="message"]')!.hasAttribute('data-tint')).toBe(false);
+});
 
 const input = () => host!.querySelector<HTMLInputElement>('[role="combobox"]')!;
 const options = () => [...host!.querySelectorAll<HTMLElement>('[role="option"]')];

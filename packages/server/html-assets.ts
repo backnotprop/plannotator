@@ -3,6 +3,7 @@ import {
   HTML_ASSET_ERROR_CSP,
   HTML_ASSET_DOCUMENT_CSP,
   HTML_ASSET_ROUTE_PREFIX,
+  prependNoNetworkMarker,
   buildHtmlAssetErrorDocument,
   encodeHtmlAssetPath,
   htmlAssetBaseHref,
@@ -207,9 +208,12 @@ export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) 
 
   function rewriteHtml(html: string, htmlFilePath: string): string {
     if (/^https?:\/\//i.test(htmlFilePath)) return html;
+    // Outside the session's roots the viewer's srcdoc frame gets no network
+    // either (HTML_NO_NETWORK_MARKER), as the asset route's document does.
+    const outside = isOutside(htmlFilePath);
     try {
       const { root, basePath, docDir } = htmlAssetContext(htmlFilePath, folderPath);
-      const token = register(root, docDir, isOutside(htmlFilePath));
+      const token = register(root, docDir, outside);
       return rewriteHtmlAssetReferences(
         html,
         (assetPath) => `${HTML_ASSET_ROUTE_PREFIX}/${token}/${encodeHtmlAssetPath(assetPath)}`,
@@ -221,10 +225,11 @@ export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) 
           baseHref: htmlAssetBaseHref(token) + (basePath ? `${encodeHtmlAssetPath(basePath)}/` : ""),
           assetBasePath: basePath,
           outsideAssetUrlFor: outsideMapper(root),
+          noNetwork: outside,
         },
       );
     } catch {
-      return html;
+      return outside ? prependNoNetworkMarker(html) : html;
     }
   }
 

@@ -7,8 +7,7 @@
  * session cleared it, or vanishes from a finished thread the moment the session
  * ends; a label written into a message record, where every reader (an agent's
  * read_thread, a linked machine, an export) would carry it; a window never told
- * a label changed; and, above all, a tailnet guest who now sees what it never
- * saw, or an owner over the tailnet who is shut out.
+ * a label changed; or an agent that reads a name in place of the session's id.
  *
  * A real Inbox under a temp data dir; connections are plain HTTP with the
  * registry's token, agents the MCP client, the tailnet a scripted `tailscale`.
@@ -26,7 +25,6 @@ type Json = Record<string, any>;
 
 const MAGIC = "macbook-pro.tail0000.ts.net";
 const OWNER = "ramos@example.com";
-const GUEST = "guest@example.com";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -72,8 +70,8 @@ function fakeTailscale(): TailscaleRunner {
   };
 }
 
-/** A real Inbox on the tailnet (a guest allowed), one project, and the MCP client agents write through. */
-async function setup() {
+/** A real Inbox on the tailnet, one project, and the MCP client agents write through. */
+async function setup(sessionsNow?: () => number) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-label-surfaces-")));
   roots.push(root);
   const project = join(root, "ai-collab");
@@ -82,8 +80,8 @@ async function setup() {
   mkdirSync(dataDir, { recursive: true });
   setEnv("PLANNOTATOR_DATA_DIR", dataDir);
   for (const name of ["PLANNOTATOR_INBOX_TAILSCALE", "PLANNOTATOR_URL_HOST"]) setEnv(name, undefined);
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, inboxTailscaleAllow: [GUEST], updateCheck: false }));
-  const server = await startInboxServer({ dataDir, binaryPath: null, tailscale: fakeTailscale() });
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, updateCheck: false }));
+  const server = await startInboxServer({ dataDir, binaryPath: null, tailscale: fakeTailscale(), ...(sessionsNow ? { sessionsNow } : {}) });
   servers.push(server);
   const client = new Client({ name: "inbox-label-surfaces-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -91,9 +89,9 @@ async function setup() {
   return { server, client, project };
 }
 
-type Caller = "local" | "owner" | "guest";
+type Caller = "local" | "owner";
 
-/** A read as this computer's window, the owner's phone over the tailnet, or a guest's. */
+/** A read as this computer's window, or the owner's phone over the tailnet. */
 async function read(server: InboxServer, caller: Caller, path: string): Promise<Json> {
   if (caller === "local") {
     const origin = `http://127.0.0.1:${server.port}`;
@@ -109,7 +107,7 @@ async function read(server: InboxServer, caller: Caller, path: string): Promise<
       Origin: `https://${MAGIC}:${server.port}`,
       "Sec-Fetch-Site": "same-origin",
       "X-Forwarded-Proto": "https",
-      "Tailscale-User-Login": caller === "owner" ? OWNER : GUEST,
+      "Tailscale-User-Login": OWNER,
     },
   });
   expect(response.status).toBe(200);
@@ -117,11 +115,11 @@ async function read(server: InboxServer, caller: Caller, path: string): Promise<
 }
 
 /** One poll from a Claude Code session's connection; `label` absent is an older connection. */
-async function poll(server: InboxServer, session: string, project: string, label?: string) {
+async function poll(server: InboxServer, session: string, project: string, label?: string, extra: Json = {}) {
   const response = await fetch(`http://127.0.0.1:${server.port}${INBOX_BRIDGE_POLL_PATH}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${server.token}` },
-    body: JSON.stringify({ session, host: "claude-code", waitMs: 0, project_path: project, started_at: Date.now(), busy: false, tags: true, ...(label === undefined ? {} : { label }) }),
+    body: JSON.stringify({ session, host: "claude-code", waitMs: 0, project_path: project, started_at: Date.now(), busy: false, tags: true, ...(label === undefined ? {} : { label }), ...extra }),
   });
   expect(response.status).toBe(200);
 }
@@ -137,8 +135,8 @@ async function sends(client: Client, project: string, session: string, body: str
 }
 
 /** Three named Claude Code sessions and an unnamed one, the first three writing in one thread. */
-async function threeNamed() {
-  const s = await setup();
+async function threeNamed(sessionsNow?: () => number) {
+  const s = await setup(sessionsNow);
   await poll(s.server, "ses-login", s.project, "Fix login redirect");
   await poll(s.server, "ses-docs", s.project, "Docs pass");
   await poll(s.server, "ses-billing", s.project, "Billing cleanup");
@@ -177,12 +175,6 @@ describe("the routes carry each session's own label", () => {
     const next = await read(server, "local", `${path}${encodeURIComponent(first.list_version as string)}`);
     expect(next.delta.rows).toEqual([]);
     expect(next.session_labels).toMatchObject({ "ses-login": "Login, take two" });
-    // And over the wire a tailnet guest's list never has them, a change of rows or not.
-    const guestFirst = await read(server, "guest", path);
-    expect("session_labels" in guestFirst).toBe(false);
-    const guestNext = await read(server, "guest", `${path}${encodeURIComponent(guestFirst.list_version as string)}`);
-    expect(guestNext.delta).toBeDefined();
-    expect("session_labels" in guestNext).toBe(false);
   });
 
   test("a rename follows on the next poll, an empty label or an older connection clears it, and the label is the cleaned one", async () => {
@@ -198,8 +190,8 @@ describe("the routes carry each session's own label", () => {
     expect(liveLabels(await read(server, "local", `/api/inbox/threads/${threadId}/taggable`))["ses-docs"]).toBeUndefined();
   });
 
-  test("the label is never written into a message, and no agent's read carries it", async () => {
-    const { server, client, threadId, rootId } = await threeNamed();
+  test("the label is never written into a message; an agent reads it only beside the id of a session it is told of", async () => {
+    const { server, client, project, threadId, rootId } = await threeNamed();
     const thread = (await read(server, "local", `/api/inbox/threads/${threadId}`)).thread as Json;
     expect(JSON.stringify(thread)).not.toContain("Fix login redirect");
     expect(server.store.message(rootId)!.author).toEqual({ kind: "agent", host: "claude-code", session: "ses-login", name: "Claude Code" });
@@ -207,6 +199,25 @@ describe("the routes carry each session's own label", () => {
       const result = await client.callTool({ name: "read_thread", arguments: { ...args, agent_session: "ses-docs" } });
       expect(JSON.stringify(result)).not.toMatch(/Fix login redirect|Docs pass|Billing cleanup/);
     }
+    await poll(server, "ses-plain", project, "", { title: "Cookie audit" });
+    const origin = `http://127.0.0.1:${server.port}`;
+    const tagged = await fetch(`${origin}/api/inbox/messages/${rootId}/reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: origin },
+      body: JSON.stringify({ serverSession: server.serverSession, idempotency_key: "tag-1", words: "Docs and cookies, check this.", tags: [{ host: "claude-code", session: "ses-docs" }, { host: "claude-code", session: "ses-plain" }] }),
+    });
+    expect(tagged.status).toBe(200);
+    const result = (await client.callTool({ name: "read_thread", arguments: { thread_id: threadId, agent_session: "ses-billing" } })) as Json;
+    const text = (result.content as Json[]).map((c) => c.text).join("\n");
+    expect(text).toContain('tagged "Docs pass" (Claude Code ses-docs), "Cookie audit" (Claude Code ses-plain)');
+    const reply = (result.structuredContent.thread.messages as Json[]).findLast((m) => m.tagged);
+    expect(reply.tagged).toEqual([
+      { agent: "Claude Code", session: "ses-docs", name: "Docs pass", you: false },
+      { agent: "Claude Code", session: "ses-plain", name: "Cookie audit", you: false },
+    ]);
+    // The tagged session itself reads `you`, never its own name.
+    const own = (await client.callTool({ name: "read_thread", arguments: { thread_id: threadId, agent_session: "ses-docs" } })) as Json;
+    expect((own.structuredContent.thread.messages as Json[]).findLast((m) => m.tagged).tagged[0]).toEqual({ agent: "Claude Code", session: "ses-docs", you: true });
   });
 
   test("a session that ended keeps its label in the list while the Inbox runs, so a finished thread keeps its names", async () => {
@@ -224,36 +235,32 @@ describe("the routes carry each session's own label", () => {
 });
 
 describe("who sees them", () => {
-  test("the owner over the tailnet reads what this computer reads; a guest reads every route as before", async () => {
-    const { server, threadId } = await threeNamed();
+  test("the owner over the tailnet reads what this computer reads", async () => {
+    const { server, project, threadId } = await threeNamed();
+    await poll(server, "ses-plain", project, "", { title: "Cookie audit" });
     const routes = ["/api/inbox/threads", `/api/inbox/threads/${threadId}/taggable`, `/api/inbox/threads/${threadId}/sessions`];
     for (const path of routes) {
       const local = await read(server, "local", path);
       const owner = await read(server, "owner", path);
-      const guest = await read(server, "guest", path);
       expect(JSON.stringify(owner)).toContain("Fix login redirect");
       expect(owner.session_labels).toEqual(local.session_labels);
-      expect(JSON.stringify(guest)).not.toMatch(/Fix login redirect|Docs pass|Billing cleanup/);
-      expect(guest.session_labels).toBeUndefined();
-      // The rest of the guest's answer is the owner's, labels aside.
-      const strip = (model: Json) => JSON.parse(JSON.stringify(model, (key, value) => (key === "label" || key === "session_labels" ? undefined : value)));
-      expect(Object.keys(strip(guest)).sort()).toEqual(Object.keys(strip(owner)).sort());
+      expect(owner.session_titles).toEqual(local.session_titles);
     }
   });
 });
 
 describe("the windows are told", () => {
-  test("a poll that changes a label says `labels` on the deliveries frame, to the owner's window only", async () => {
+  test("a poll that changes a label says `labels` on the deliveries frame, here and on the owner's phone", async () => {
     const { server, project } = await threeNamed();
-    const frames = async (caller: "local" | "guest") => {
+    const frames = async (caller: "local" | "owner") => {
       const controller = new AbortController();
       const origin = `http://127.0.0.1:${server.port}`;
       const listener = server.tailscale.listenerPort()!;
       const response =
         caller === "local"
           ? await fetch(`${origin}/api/inbox/events?window=window-local-1&permission=default&origin=${encodeURIComponent(origin)}`, { headers: { Origin: origin }, signal: controller.signal })
-          : await fetch(`http://127.0.0.1:${listener}/api/inbox/events?window=window-guest-1&permission=default&origin=${encodeURIComponent(`https://${MAGIC}:${server.port}`)}`, {
-              headers: { Host: `${MAGIC}:${server.port}`, Origin: `https://${MAGIC}:${server.port}`, "Sec-Fetch-Site": "same-origin", "X-Forwarded-Proto": "https", "Tailscale-User-Login": GUEST },
+          : await fetch(`http://127.0.0.1:${listener}/api/inbox/events?window=window-owner-1&permission=default&origin=${encodeURIComponent(`https://${MAGIC}:${server.port}`)}`, {
+              headers: { Host: `${MAGIC}:${server.port}`, Origin: `https://${MAGIC}:${server.port}`, "Sec-Fetch-Site": "same-origin", "X-Forwarded-Proto": "https", "Tailscale-User-Login": OWNER },
               signal: controller.signal,
             });
       const reader = response.body!.getReader();
@@ -270,20 +277,17 @@ describe("the windows are told", () => {
       return { until, text: () => text, close: () => controller.abort() };
     };
     const local = await frames("local");
-    const guest = await frames("guest");
+    const phone = await frames("owner");
     expect(await local.until(/event: hello/, 3_000)).toBe(true);
-    expect(await guest.until(/event: hello/, 3_000)).toBe(true);
+    expect(await phone.until(/event: hello/, 3_000)).toBe(true);
     // The first compare after a window opens may say the sessions moved, to every window: let it pass.
     await local.until(/event: deliveries/, 2_500);
-    await guest.until(/event: deliveries/, 500);
-    const guestBefore = guest.text().length;
+    await phone.until(/event: deliveries/, 500);
     await poll(server, "ses-login", project, "Renamed now");
     expect(await local.until(/event: deliveries\ndata: \{"labels":true\}/, 5_000)).toBe(true);
-    // Only a label changed: the guest's window gets no frame at all, not even an empty one.
-    await guest.until(/event: deliveries[\s\S]*event: deliveries/, 2_500);
-    expect(guest.text().slice(guestBefore)).not.toContain("event: deliveries");
+    expect(await phone.until(/event: deliveries\ndata: \{"labels":true\}/, 5_000)).toBe(true);
     local.close();
-    guest.close();
+    phone.close();
   }, 20_000);
 });
 

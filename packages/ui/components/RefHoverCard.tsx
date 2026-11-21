@@ -39,7 +39,11 @@ import {
   type ForgeRefChecks,
   type ForgeRefPerson,
 } from '@plannotator/core/forge-ref-card';
+import { FORGE_SPECS } from '@plannotator/core/forge-refs';
+import { cardProblem, refUnsupportedLine } from '@plannotator/core/problem-words';
 import { loadRefCard, refCardTarget } from '../utils/refCard';
+import { ProblemNotice } from './ProblemNotice';
+import { providedRefCardLabel, providedRefCardView } from '../utils/refCardProviders';
 import { RenderedMarkdown } from './RenderedMarkdown';
 import { tooltipContainerOf } from './HostTitle';
 
@@ -73,20 +77,21 @@ function timeAgo(iso: string, now = Date.now()): string {
 }
 
 const fmt = (n: number) => n.toLocaleString();
-const forgeName = (p: ForgeRef['platform']) => (p === 'gitlab' ? 'GitLab' : 'GitHub');
+const forgeName = (p: ForgeRef['platform']) => FORGE_SPECS[p].name;
 
 /** "Issue", "Pull request", "Merge request". */
 export function refKindName(ref: Pick<ForgeRef, 'platform' | 'kind'>): string {
-  return ref.kind === 'issue' ? 'Issue' : ref.platform === 'gitlab' ? 'Merge request' : 'Pull request';
+  return ref.kind === 'issue' ? 'Issue' : FORGE_SPECS[ref.platform].pullName;
 }
 
-const FAILURE_TEXT: Record<ForgeRefCardError, (forge: string, cli: string) => string> = {
-  unsupported: (_forge, cli) => `Details show for hosts your ${cli} is signed in to. This one isn't, so nothing was fetched.`,
-  cli_missing: (forge, cli) => `Install the ${forge} CLI (${cli}) on this computer to see details here.`,
-  signed_out: (_forge, cli) => `Sign in with ${cli} auth login to see details here.`,
-  not_found: (forge) => `None of your signed-in ${forge} accounts can see this one, or it doesn't exist.`,
-  rate_limited: (forge) => `${forge} asked for a short break. Details come back in a minute.`,
-  unavailable: () => "Details couldn't load right now.",
+/** Bitbucket has no CLI: Plannotator reads it with an API token, so its failures keep their own lines (`unavailable` also: no answer at all). */
+const BITBUCKET_FAILURE_TEXT: Record<ForgeRefCardError, string> = {
+  unsupported: 'Details show for Bitbucket Cloud pull requests in the Inbox.',
+  cli_missing: "Details couldn't load right now.",
+  signed_out: "Plannotator couldn't sign in to Bitbucket. Check its API token setup to see details here.",
+  not_found: "Your Bitbucket API token can't see this one, or it doesn't exist.",
+  rate_limited: 'Bitbucket asked for a short break. Details come back in a minute.',
+  unavailable: "Details couldn't load right now.",
 };
 
 type Tone = 'open' | 'merged' | 'closed' | 'neutral';
@@ -364,6 +369,9 @@ export interface RefCardViewProps {
 }
 
 export function RefCardView({ target, href, result, pinned, onClose, sheet, tight }: RefCardViewProps) {
+  // A provider's own card (utils/refCardProviders.ts).
+  const Provided = providedRefCardView(target);
+  if (Provided) return <Provided target={target} href={href} result={result} pinned={pinned} onClose={onClose} sheet={sheet} tight={tight} />;
   const repoName = `${target.owner}/${target.repo}`;
   const forge = forgeName(target.platform);
   const btn = sheet ? 'min-h-11 px-3' : 'h-7 px-2.5';
@@ -406,17 +414,26 @@ export function RefCardView({ target, href, result, pinned, onClose, sheet, tigh
 
   if (!result || !result.ok) {
     const error = result && 'error' in result ? result.error : 'unavailable';
+    // The tool's state in the one table's words (problem-words.ts): the same lines the Inbox's PR card and Pull
+    // requests page say. No answer at all (the route failed) claims nothing about the tool: a neutral line.
+    const problem = result ? cardProblem(result, target) : null;
     return (
       <div>
-        <div className="px-3.5 pb-3 pt-3">
+        <div className="px-3.5 pt-3">
           <div className="text-[11.5px] text-muted-foreground">{repoName}</div>
           <div className="mt-1 text-[13.5px] font-semibold text-foreground">
             {refKindName(target)} {forgeRefLabel(target)}
           </div>
-          <p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground" data-ref-card-error={error}>
-            {FAILURE_TEXT[error](forge, target.platform === 'gitlab' ? 'glab' : 'gh')}
-          </p>
         </div>
+        {problem ? (
+          <div className="-mt-1" data-ref-card-error={error}>
+            <ProblemNotice problem={problem} touch={sheet} linked={href} />
+          </div>
+        ) : (
+          <p className="px-3.5 pb-3 pt-1.5 text-[12px] leading-relaxed text-muted-foreground" data-ref-card-error={error}>
+            {!result || target.platform === 'bitbucket' ? BITBUCKET_FAILURE_TEXT[error] : refUnsupportedLine(target.platform === 'gitlab' ? 'glab' : 'gh')}
+          </p>
+        )}
         {footer()}
       </div>
     );
@@ -838,9 +855,10 @@ export function useRefHoverCards(
   if (!card || typeof document === 'undefined') return null;
   const container = tooltipContainerOf(card.anchor) ?? document.body;
   const sheet = card.via === 'tap';
+  const provided = providedRefCardLabel(card.target);
   const label = card.result?.ok
-    ? `${refKindName(card.result.data)} ${forgeRefLabel(card.result.data)}: ${card.result.data.title}`
-    : `${refKindName(card.target)} ${forgeRefLabel(card.target)}`;
+    ? `${provided ?? `${refKindName(card.result.data)} ${forgeRefLabel(card.result.data)}`}: ${card.result.data.title}`
+    : (provided ?? `${refKindName(card.target)} ${forgeRefLabel(card.target)}`);
   const surface = 'border border-border bg-popover text-popover-foreground shadow-2xl';
   const body = (
     <div
@@ -911,3 +929,6 @@ export function RefHoverCards({
 }): React.ReactElement {
   return <>{useRefHoverCards(rootRef, { delayMs, onlyWithData })}</>;
 }
+
+// The card's parts, for a provider's own card (utils/refCardProviders.ts).
+export { Avatar as RefCardAvatar, SafeMarkdown as RefCardMarkdown, StateIcon as RefCardStateIcon, timeAgo as refCardTimeAgo };

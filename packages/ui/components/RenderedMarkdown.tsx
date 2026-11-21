@@ -1,10 +1,12 @@
 import React, { useMemo } from 'react';
+import type { Block } from '../types';
 import { parseMarkdownToBlocks, groupBlocks, computeListIndices } from '../utils/parser';
 import { BlockRenderer } from './BlockRenderer';
 import { LocalLinkContext, type LocalLinkResolver } from './LocalLinkContext';
 import { ImageResolverContext, PreserveResolvedVideosContext, ResolvedResponsiveImagesContext, type ImageResolver } from './ImageResolverContext';
 import { SoftLineBreaksContext } from './InlineMarkdown';
 import { buildHeadingSlugMap } from '../utils/slugify';
+import { FootnoteList, FootnoteProvider, useFootnotes } from './footnotes/Footnotes';
 
 /**
  * Full markdown renderer for surfaces outside the plan editor (e.g. the PR
@@ -38,6 +40,8 @@ export interface RenderedMarkdownProps {
   preserveVideos?: boolean;
   /** With `resolveImage`: keep raw HTML's `<picture><source>` and `srcset`, each candidate resolved (see ResolvedResponsiveImagesContext). */
   responsiveImages?: boolean;
+  /** Optional host rendering for paragraphs; the fallback keeps the standard renderer. */
+  renderParagraph?: (block: Block, fallback: React.ReactNode) => React.ReactNode;
   /**
    * Optional: give headings slug ids (Viewer's slugger, GitHub dedup), so a
    * host can scroll to `#section` links. Absent/false, headings carry no id.
@@ -63,16 +67,22 @@ export const RenderedMarkdown: React.FC<RenderedMarkdownProps> = ({
   resolveImage,
   preserveVideos = false,
   responsiveImages = false,
+  renderParagraph,
   headingAnchors = false,
   softLineBreaks = false,
 }) => {
   const blocks = useMemo(() => parseMarkdownToBlocks(markdown), [markdown]);
-  const groups = useMemo(() => groupBlocks(blocks), [blocks]);
+  const footnotes = useFootnotes(blocks);
+  const groups = useMemo(() => groupBlocks(footnotes ? footnotes.bodyBlocks : blocks), [blocks, footnotes]);
   const headingSlugMap = useMemo(
     () => (headingAnchors ? buildHeadingSlugMap(blocks) : null),
     [blocks, headingAnchors],
   );
   const cb = { onImageClick, onOpenLinkedDoc, onOpenCodeFile, githubRepo, repoHost };
+  const renderBlock = (block: Block) => {
+    const fallback = <BlockRenderer block={block} headingAnchorId={headingSlugMap?.get(block.id)} {...cb} />;
+    return block.type === 'paragraph' && renderParagraph ? renderParagraph(block, fallback) : fallback;
+  };
 
   let body = (
     <div className={className}>
@@ -89,11 +99,13 @@ export const RenderedMarkdown: React.FC<RenderedMarkdownProps> = ({
             );
           })()
         ) : (
-          <BlockRenderer key={group.block.id} block={group.block} headingAnchorId={headingSlugMap?.get(group.block.id)} {...cb} />
+          <React.Fragment key={group.block.id}>{renderBlock(group.block)}</React.Fragment>
         ),
       )}
+      {footnotes && <FootnoteList index={footnotes} {...cb} />}
     </div>
   );
+  body = <FootnoteProvider index={footnotes}>{body}</FootnoteProvider>;
   // Provide only what the caller passed, so an enclosing provider still
   // applies when a prop is absent.
   if (softLineBreaks) {

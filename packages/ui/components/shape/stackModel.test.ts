@@ -54,6 +54,11 @@ test("a file row counts what the agent wrote, else the lines it shows", () => {
   expect(stackFileCounts({ path: 'a' }, null)).toBeNull();
 });
 
+test("a file row counts a removed `---` rule, not the file's own headers", () => {
+  const rule = ['diff --git a/notes.md b/notes.md', '--- a/notes.md', '+++ b/notes.md', '@@ -1,2 +1 @@', ' # Notes', '----', ''].join('\n');
+  expect(stackFileCounts({ path: 'notes.md' }, stackFilePatch(rule, 'notes.md'))).toEqual({ additions: 0, deletions: 1 });
+});
+
 test('the card is about one PR in one part, and its "Also changed here by" names only the others that changed it', () => {
   const stack: ShapeStack = {
     pulls: [

@@ -10,11 +10,11 @@
  * is and Escape change nothing; "Customize rows" opens Settings → Rows. App retires it either way (the Inbox's claim).
  *
  * The dialog follows the person's mode, the picture too (the owner, q-fd707b9e). `PreviewList` and `lightScope` stay
- * here for the other dialogs that draw the person's rows in a light picture (ListViewIntro, VoiceIntro).
+ * here for the other dialogs that draw rows in a light picture (ListViewIntro's fixed demo, VoiceIntro).
  */
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { flushSync } from 'react-dom';
-import type { InboxListGroupId, InboxListRow, InboxSectionId } from '@plannotator/core/inbox-types';
+import type { InboxListGroupId, InboxListRow } from '@plannotator/core/inbox-types';
 import { listLookClasses, type ListLook } from '../listLook';
 import { LIST_INTRO_SWAP_MS, ROWS_INTRO_END_MS, ROWS_INTRO_STEPS_MS, rowsIntroScene } from '../listIntro';
 import { RowMarksScope } from '../letterMarks';
@@ -37,7 +37,8 @@ export function lightScope(lightTheme: string): string {
 
 /** The list's groups as drawn (Quiet folded: its band only). `count`: the group's threads (`rows` may be fewer). */
 export interface ListIntroGroup {
-  id: InboxSectionId;
+  /** A group of the person's list as drawn (the Snoozed band is never shown here). */
+  id: Exclude<InboxListGroupId, 'snoozed'>;
   label: string;
   count: number;
   rows: readonly InboxListRow[];

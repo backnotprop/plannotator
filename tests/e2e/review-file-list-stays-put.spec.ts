@@ -65,6 +65,7 @@ function reviewEnv(root: string, readyFile: string): NodeJS.ProcessEnv {
     PATH: ownPath(root),
     HOME: root,
     PLANNOTATOR_TEST_SANDBOX: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: join(root, 'data'),
     PLANNOTATOR_READY_FILE: readyFile,
     PLANNOTATOR_BROWSER: NO_BROWSER,
@@ -139,7 +140,7 @@ async function stopReview(child: ChildProcess | undefined, root: string) {
   rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 
-async function withReview(browser: Browser, run: (page: Page) => Promise<void>) {
+async function withReview(browser: Browser, run: (page: Page) => Promise<void>, prepare?: (page: Page) => Promise<void>) {
   test.skip(!existsSync(binary), `compile the binary first: ${binary}`);
   const root = mkdtempSync(join(tmpdir(), 'plannotator-review-stays-put-'));
   const repo = buildRepo(root);
@@ -153,6 +154,7 @@ async function withReview(browser: Browser, run: (page: Page) => Promise<void>) 
     const context = await browser.newContext({ viewport: { width: 1274, height: 1185 } });
     await context.addCookies(Object.entries(FIRST_RUN).map(([name, value]) => ({ name, value, url })));
     const page = await context.newPage();
+    await prepare?.(page);
     await page.goto(url);
     await expect(page.locator('[data-review-sticky-tools]')).toBeVisible();
     await run(page);
@@ -182,14 +184,27 @@ const mainHeaders = (page: Page) =>
     return out.sort((a, b) => a.top - b.top);
   }, [...MODIFIED, ...ADDED]);
 
+const headerUnder = (page: Page, x: number, y: number) =>
+  page.evaluate(
+    ([px, py]) => document.elementFromPoint(px!, py!)?.closest('diffs-container')?.querySelector('span[title]')?.getAttribute('title') ?? null,
+    [x, y],
+  );
+
+async function openAllChanges(page: Page): Promise<void> {
+  const row = page.locator('[data-review-sidebar] [title="Every change of this review in one view"]');
+  if (await row.count()) await row.click();
+  await expect(page.locator('[data-review-sidebar] [title="Every change of this review in one view"]')).toHaveCount(0);
+}
+
 test('All changes: opening a folded file leaves every header where it was', async ({ browser }) => {
   await withReview(browser, async (page) => {
-    await page.locator('[data-review-sidebar] [title="Every change of this review in one view"]').click();
-    // Fold every file (the dock button reads "Expand all files" once they all are).
-    const foldToggle = page.getByRole('button', { name: /^(Collapse|Expand) all files$/ });
+    await openAllChanges(page);
+    await page.locator('[data-diff-display-options]').click();
+    const foldToggle = page.locator('[data-collapse-all-files]');
     await expect(foldToggle).toBeVisible();
-    if ((await foldToggle.getAttribute('aria-label')) === 'Collapse all files') await foldToggle.click();
-    await expect(page.getByRole('button', { name: 'Expand all files' })).toBeVisible();
+    if ((await foldToggle.textContent())?.includes('Collapse all files')) await foldToggle.click();
+    await expect(foldToggle).toHaveText('Expand all files');
+    await page.keyboard.press('Escape');
     await expect.poll(async () => (await mainHeaders(page)).length).toBe(15);
     await expect.poll(async () => (await mainHeaders(page)).filter((h) => h.height > 40).length).toBe(0);
 
@@ -198,6 +213,7 @@ test('All changes: opening a folded file leaves every header where it was', asyn
     const x = target.nameX;
     const y = target.nameY;
     await page.mouse.move(x, y);
+    await expect.poll(() => headerUnder(page, x, y)).toBe(target.path);
     await page.mouse.click(x, y);
     const opened = async () => (await mainHeaders(page)).find((h) => h.path === target.path)!.height;
     // Open: its code drawn, then two frames for Pierre's sticky window to settle.
@@ -211,18 +227,39 @@ test('All changes: opening a folded file leaves every header where it was', asyn
       expect(Math.abs(now.top - was.top), `${was.path} moved`).toBeLessThan(0.5);
     }
     // The pointer is still on the header it clicked.
-    const underPath = await page.evaluate(
-      ([px, py]) => document.elementFromPoint(px!, py!)?.closest('diffs-container')?.querySelector('span[title]')?.getAttribute('title') ?? null,
-      [x, y],
-    );
-    expect(underPath).toBe(target.path);
+    expect(await headerUnder(page, x, y)).toBe(target.path);
   });
+});
+
+test('All changes: Collapse all files clicked while the code is still loading folds every file once it shows', async ({ browser }) => {
+  await withReview(
+    browser,
+    async (page) => {
+      await openAllChanges(page);
+      await page.locator('[data-diff-display-options]').click();
+      await page.locator('[data-collapse-all-files]').click();
+      await expect(page.locator('[data-collapse-all-files]')).toHaveText('Expand all files');
+      await page.keyboard.press('Escape');
+      await expect.poll(async () => (await mainHeaders(page)).length).toBe(15);
+      await expect.poll(async () => (await mainHeaders(page)).filter((h) => h.height > 40).length).toBe(0);
+    },
+    (page) =>
+      page.addInitScript(() => {
+        const Base = window.Worker;
+        const until = performance.now() + 3_000;
+        window.Worker = class extends Base {
+          override postMessage(message: unknown, options?: StructuredSerializeOptions | Transferable[]) {
+            setTimeout(() => super.postMessage(message, options as StructuredSerializeOptions), Math.max(0, until - performance.now()));
+          }
+        } as typeof Worker;
+      }),
+  );
 });
 
 test('Hide viewed: the file you leave keeps its row while the pointer is in the list', async ({ browser }) => {
   await withReview(browser, async (page) => {
     await page.getByRole('button', { name: 'Hide viewed files' }).click();
-    const row = (path: string) => page.locator(`[data-review-sidebar] .file-tree-item[title="${path}"]`);
+    const row = (path: string) => page.locator(`[data-review-sidebar] [data-item-type="file"][title="${path}"]`);
     const first = row('src/services/operation.hpp');
     const next = row('src/services/service.hpp');
     await first.click();
@@ -234,16 +271,77 @@ test('Hide viewed: the file you leave keeps its row while the pointer is in the 
     const y = box.y + box.height / 2;
     await page.mouse.move(x, y);
     await page.mouse.click(x, y);
-    await expect(page.locator('[data-panel-viewed-controls]')).toHaveText(/^1 of 15 viewed$/);
+    await expect(page.locator('[data-panel-viewed-controls]')).toHaveText(/^1\/15$/);
 
     // The row you left is still there, and nothing moved under the pointer.
     await expect(first).toHaveCount(1);
     expect((await next.boundingBox())!.y).toBe(box.y);
-    const underTitle = await page.evaluate(([px, py]) => document.elementFromPoint(px!, py!)?.closest('.file-tree-item')?.getAttribute('title') ?? null, [x, y]);
+    const underTitle = await page.evaluate(([px, py]) => {
+      const outer = document.elementFromPoint(px!, py!);
+      const inner = outer?.shadowRoot?.elementFromPoint(px!, py!) ?? outer;
+      return inner?.closest('[data-type="item"]')?.getAttribute('title') ?? null;
+    }, [x, y]);
     expect(underTitle).toBe('src/services/service.hpp');
 
     // Leaving the list hides it.
     await page.mouse.move(800, 600);
     await expect(first).toHaveCount(0);
+  });
+});
+
+test('All changes: Collapse all files at the top right, left of Split/Unified, folds every file and keeps the file you read in view', async ({ browser }) => {
+  await withReview(browser, async (page) => {
+    await openAllChanges(page);
+    await expect.poll(async () => (await mainHeaders(page)).filter((h) => h.height > 200).length).toBeGreaterThan(0);
+    const listTop = (await mainHeaders(page))[0]!.top;
+    const x = (await mainHeaders(page))[0]!.nameX;
+    await page.mouse.move(x, listTop + 300);
+    await page.mouse.wheel(0, 1_200);
+    await expect.poll(() => headerUnder(page, x, listTop + 40)).not.toBe(MODIFIED[0]);
+    await page.waitForTimeout(300);
+    const reading = (await headerUnder(page, x, listTop + 40))!;
+    expect(reading).toBeTruthy();
+    const top = async () => (await mainHeaders(page)).find((h) => h.path === reading)?.top ?? Number.NaN;
+
+    await expect(page.locator('[data-review-sticky-tools]').getByRole('button', { name: /all files/ })).toHaveCount(0);
+    const tools = page.locator('header [data-review-diff-controls]');
+    await expect(tools.locator('[data-header-collapse-all-files] + [data-diff-layout-toggle]')).toHaveCount(1);
+    await tools.getByRole('button', { name: 'Collapse all files' }).click();
+    await expect(tools.getByRole('button', { name: 'Expand all files' })).toBeVisible();
+    await expect.poll(async () => (await mainHeaders(page)).length).toBe(15);
+    await expect.poll(async () => (await mainHeaders(page)).filter((h) => h.height > 40).length).toBe(0);
+    const folded = await top();
+    expect(folded).toBeGreaterThanOrEqual(listTop - 1);
+    expect(folded).toBeLessThan(page.viewportSize()!.height - 40);
+
+    await tools.getByRole('button', { name: 'Expand all files' }).click();
+    await expect(tools.getByRole('button', { name: 'Collapse all files' })).toBeVisible();
+    await expect.poll(async () => (await mainHeaders(page)).find((h) => h.path === reading)?.height ?? 0).toBeGreaterThan(200);
+    await expect.poll(async () => Math.abs((await top()) - listTop)).toBeLessThan(3);
+  });
+});
+
+test('File header: hover shows Open in on the left of its actions, and nothing in the header moves', async ({ browser }) => {
+  await withReview(browser, async (page) => {
+    await openAllChanges(page);
+    const header = page.locator('[data-file-header]').first();
+    await expect(header).toBeVisible();
+    const viewed = header.locator('[data-file-header-viewed]');
+    const comment = header.getByRole('button', { name: 'Comment on this file' });
+    const openIn = header.locator('[data-open-in-quiet]');
+    await page.mouse.move(5, 5);
+    await expect.poll(() => openIn.evaluate((el) => getComputedStyle(el).opacity)).toBe('0');
+    const boxes = async () => ({ header: (await header.boundingBox())!, viewed: (await viewed.boundingBox())!, comment: (await comment.boundingBox())!, openIn: (await openIn.boundingBox())! });
+    const rest = await boxes();
+    expect(rest.header.x + rest.header.width - (rest.comment.x + rest.comment.width)).toBeLessThan(16);
+    expect(rest.openIn.x + rest.openIn.width).toBeLessThanOrEqual(rest.viewed.x);
+
+    await header.hover({ position: { x: 40, y: rest.header.height / 2 } });
+    await expect.poll(() => openIn.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+    const hovered = await boxes();
+    for (const key of ['viewed', 'comment', 'openIn'] as const) {
+      expect(hovered[key].x, `${key} moved`).toBe(rest[key].x);
+      expect(hovered[key].y, `${key} moved`).toBe(rest[key].y);
+    }
   });
 });

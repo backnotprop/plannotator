@@ -33,8 +33,8 @@ export interface SystemSwitchDeps {
 /**
  * Settings → Capabilities → System (config.json `inboxSystem`). System shows, and its routes answer, only while it
  * AND Code review are on (`on`); the window hears the switch only while Code review is on (`wire`), since the row shows
- * only then. The settings POST's part: `check` before anything is saved (a tailnet guest is refused, like every
- * capability switch; a malformed value throws), `answer` after the other fields saved.
+ * only then. The settings POST's part: `check` before anything is saved (a malformed value
+ * throws), `answer` after the other fields saved.
  */
 export function systemSwitch(deps: SystemSwitchDeps) {
   const switchOn = () => deps.fixed ?? deps.saved();
@@ -50,12 +50,8 @@ export function systemSwitch(deps: SystemSwitchDeps) {
     switchOn,
     on,
     wire,
-    check(body: { system?: unknown }, owner: boolean): "local_only" | null {
-      if (body.system === undefined) return null;
-      // The drawings, and from B9 the jobs that keep them current: the owner's to change.
-      if (!owner) return "local_only";
-      parse(body.system);
-      return null;
+    check(body: { system?: unknown }): void {
+      if (body.system !== undefined) parse(body.system);
     },
     /** The answer's `system`: the saved switch, to the save that set it even while Code review is off; else `wire`. */
     answer(body: { system?: unknown }): { system?: { on: boolean } } {
@@ -206,8 +202,6 @@ export async function systemPullTouches(
 export interface SystemRouteDeps extends SystemReadDeps {
   store: { listProjects(): InboxProject[]; project(id: string): InboxProject | null; canonicalProjectId(id: string): string };
   serverSession: string;
-  /** The request comes from the person on this computer, or the machine's owner over the tailnet. */
-  ownerOrLocal: (req: Request) => boolean;
   /** System and Code review both on. */
   systemOn: () => boolean;
   /** The PRs the pulls list holds now (its own cached read). */
@@ -222,13 +216,12 @@ export interface SystemRouteDeps extends SystemReadDeps {
 export const SYSTEM_READ_PATHS = ["/api/inbox/system/projects", "/api/inbox/system/drawing", "/api/inbox/system/pulls"] as const;
 
 /**
- * `GET /api/inbox/system/projects`, `/drawing?project=<id>` and `/pulls?project=<id>`. Guards in order: method, owner,
+ * `GET /api/inbox/system/projects`, `/drawing?project=<id>` and `/pulls?project=<id>`. Guards in order: method,
  * same origin, System on. An `InboxError` is thrown for the caller's error answer.
  */
 export async function systemReadRoute(req: Request, path: string, deps: SystemRouteDeps): Promise<Response> {
   const { json } = deps;
   if (req.method !== "GET") return json({ error: "Use GET." }, 405);
-  if (!deps.ownerOrLocal(req)) return json({ error: "This answers only on this computer, not over the tailnet.", code: "local_only" }, 403);
   if (!isSameOriginOrNoOrigin(req.headers.get("origin"), req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
     return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
   }

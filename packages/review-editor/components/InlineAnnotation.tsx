@@ -1,4 +1,5 @@
 import React from 'react';
+import { ClampedCommentBody } from './ClampedCommentBody';
 import { SEVERITY_STYLES, DiffAnnotationMetadata } from '@plannotator/ui/types';
 import { SuggestionBlock } from './SuggestionBlock';
 import { CommentMeta } from './CommentMeta';
@@ -8,7 +9,8 @@ import { isAgentGeneratedFinding } from '../utils/explainFinding';
 
 interface InlineAnnotationProps {
   metadata: DiffAnnotationMetadata;
-  language?: string;
+  /** The annotated file; a suggestion is coloured as the diff colours it. */
+  filePath?: string;
   isSelected?: boolean;
   onSelect: (id: string) => void;
   onEdit: (id: string) => void;
@@ -21,7 +23,7 @@ interface InlineAnnotationProps {
 /** Renders a single annotation comment inside the diff view */
 export const InlineAnnotation: React.FC<InlineAnnotationProps> = ({
   metadata,
-  language,
+  filePath,
   isSelected = false,
   onSelect,
   onEdit,
@@ -52,16 +54,16 @@ export const InlineAnnotation: React.FC<InlineAnnotationProps> = ({
         createdAt={metadata.createdAt}
       />
       {metadata.text && (
-        <div className="review-comment-body">{renderInlineMarkdown(metadata.text)}</div>
+        <ClampedCommentBody className="review-comment-body">{renderInlineMarkdown(metadata.text)}</ClampedCommentBody>
       )}
       {metadata.reasoning && (
-        <div className="review-comment-reasoning text-[11px] text-muted-foreground/60 leading-relaxed mt-1.5">
+        <div className="review-comment-reasoning text-xs text-muted-foreground/60 leading-relaxed mt-1.5">
           {metadata.reasoning}
         </div>
       )}
       {metadata.suggestedCode && (
         <div className="mt-2">
-          <SuggestionBlock code={metadata.suggestedCode} originalCode={metadata.originalCode} language={language} />
+          <SuggestionBlock code={metadata.suggestedCode} originalCode={metadata.originalCode} filePath={filePath} />
         </div>
       )}
       <CommentActions

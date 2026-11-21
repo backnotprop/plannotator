@@ -39,7 +39,7 @@ export const inboxThreadShortcuts = defineShortcutScope({
       displayOrder: 5.1,
     },
     snooze: {
-      // InboxList.tsx (a row the keyboard is on: its menu at the times) and Thread.tsx (the header clock's menu).
+      // InboxList.tsx (a row the keyboard is on: its menu at the times) and Thread.tsx (the header ⋯ menu at the times).
       description: 'Snooze…',
       bindings: ['H'],
       section: 'List',
@@ -58,7 +58,7 @@ export const inboxThreadShortcuts = defineShortcutScope({
     send: {
       // The reply box's and compose's own keydown (Thread.tsx, ComposeDialog.tsx) match this binding, and so does
       // Thread.tsx's handler for the closed foot's Send (from any focus in the thread), the full-screen composer's card,
-      // and the Reviews stack view's Reply box (pulls/PullsPage.tsx).
+      // the Reviews stack view's Reply box (pulls/PullsPage.tsx), and a PR's new thread (pulls/PullThreadStart.tsx).
       description: 'Send',
       bindings: ['Mod+Enter'],
       section: 'Thread',

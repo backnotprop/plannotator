@@ -17,7 +17,7 @@
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
 
-import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -80,7 +80,7 @@ async function tickStarredAbove(page: Page) {
 test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-inbox-starred-pills-e2e-');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const src = join(root, 'src');
@@ -212,6 +212,8 @@ test("the right-click menu: Move right and Move left change the stars' one order
   await menu.locator('[data-pill-action="left"]').click();
   const again = [threads.postings, threads.apns, threads.nightly, threads.diff];
   await expect.poll(() => serverPins(page)).toEqual(again);
+  // Unstar's Undo goes back to the place the window holds: wait for the window to hold the move too.
+  await expect.poll(() => pillOrder(page)).toEqual(again);
 
   // The keyboard: Shift+F10 on a focused pill, Unstar first.
   await pill(page, threads.nightly).focus();

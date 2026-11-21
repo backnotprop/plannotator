@@ -20,6 +20,7 @@ import {
 	type AgentCapabilities,
 	isTerminalStatus,
 	jobSource,
+	launchLabelOf,
 	serializeAgentSSEEvent,
 	AGENT_HEARTBEAT_COMMENT,
 	AGENT_HEARTBEAT_INTERVAL_MS,
@@ -59,7 +60,6 @@ const CAPABILITIES = `${BASE}/capabilities`;
 const SERVER_BUILT_PROVIDERS: ReadonlySet<string> = new Set([
 	"claude",
 	"codex",
-	"tour",
 	"guide",
 	"cursor",
 	"opencode",
@@ -77,7 +77,7 @@ export function whichPath(cmd: string): string | null {
 		const bin = process.platform === "win32" ? "where" : "which";
 		// Pass the live env explicitly: under Bun, execFileSync without `env` looks
 		// the binary up on the STARTUP PATH, not the current process.env.PATH.
-		const out = execFileSync(bin, [cmd], { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], env: process.env });
+		const out = execFileSync(bin, [cmd], { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], env: process.env, windowsHide: true });
 		return out.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? null;
 	} catch {
 		return null;
@@ -228,7 +228,6 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 	const capabilities: AgentCapability[] = [
 		{ id: "claude", name: "Claude Code", available: whichCmd("claude") },
 		{ id: "codex", name: "Codex CLI", available: whichCmd("codex") },
-		{ id: "tour", name: "Code Tour", available: whichCmd("claude") || whichCmd("codex") },
 		{
 			id: "guide",
 			name: "Guided Review",
@@ -296,7 +295,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 		command: string[],
 		label: string,
 		outputPath?: string,
-		spawnOptions?: { captureStdout?: boolean; stdinPrompt?: string; cwd?: string; prompt?: string; engine?: string; model?: string; effort?: string; reasoningEffort?: string; fastMode?: boolean; thinking?: string; prUrl?: string; diffScope?: string; diffContext?: AgentJobInfo["diffContext"]; reviewProfileId?: string; reviewProfileLabel?: string; changedFilesSnapshot?: string[]; guideContext?: AgentJobInfo["guideContext"]; launchReview?: GuideLaunchReview },
+		spawnOptions?: { captureStdout?: boolean; stdinPrompt?: string; cwd?: string; prompt?: string; engine?: string; model?: string; effort?: string; reasoningEffort?: string; fastMode?: boolean; thinking?: string; prUrl?: string; diffScope?: string; diffContext?: AgentJobInfo["diffContext"]; reviewProfileId?: string; reviewProfileLabel?: string; launchLabel?: string; changedFilesSnapshot?: string[]; guideContext?: AgentJobInfo["guideContext"]; launchReview?: GuideLaunchReview },
 	): AgentJobInfo {
 		const source = jobSource(id);
 
@@ -321,6 +320,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 			...(spawnOptions?.guideContext && { guideContext: spawnOptions.guideContext }),
 			...(spawnOptions?.reviewProfileId && { reviewProfileId: spawnOptions.reviewProfileId }),
 			...(spawnOptions?.reviewProfileLabel && { reviewProfileLabel: spawnOptions.reviewProfileLabel }),
+			...(spawnOptions?.launchLabel && { launchLabel: spawnOptions.launchLabel }),
 		};
 
 		let proc: ChildProcess | null = null;
@@ -343,6 +343,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 			proc = spawn(launch.command[0]!, launch.command.slice(1), {
 				cwd: spawnCwd,
 				windowsVerbatimArguments: launch.verbatim,
+				windowsHide: true,
 				stdio: [
 					hasStdinPrompt ? "pipe" : "ignore",
 					captureStdout ? "pipe" : "ignore",
@@ -397,7 +398,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 				// events — handled in onJobComplete).
 				const emitLogLine = (line: string) => {
 					if (!line.trim()) return;
-					// Tour jobs with the Claude engine also stream Claude JSONL.
+					// Guide jobs with the Claude engine also stream Claude JSONL.
 					if (provider === "claude" || spawnOptions?.engine === "claude") {
 						const formatted = formatClaudeLogEvent(line);
 						if (formatted !== null) broadcast({ type: "job:log", jobId: id, delta: formatted + '\n' });
@@ -510,14 +511,14 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 						// otherwise still see/use. Cursor, OpenCode, and Pi are fail-closed —
 						// an unexpected throw during prompt-enforced ingestion must fail the
 						// job, not pass it. (Their handlers normally fail by mutation and
-						// never throw; this guards future refactors.) Tour and guide widen
-						// that fail-closed rule too: both are single-shot, all-or-nothing
-						// outputs with nothing meaningful partially ingested, so an
+						// never throw; this guards future refactors.) Guide widens
+						// that fail-closed rule too: it is a single-shot, all-or-nothing
+						// output with nothing meaningful partially ingested, so an
 						// unexpected throw means the whole result is unusable.
 						if (MARKER_ENGINES[provider as MarkerEngineId]) {
 							entry.info.status = "failed";
 							entry.info.error = err instanceof Error ? err.message : `${provider} result ingestion failed`;
-						} else if (provider === "tour" || provider === "guide") {
+						} else if (provider === "guide") {
 							entry.info.status = "failed";
 							entry.info.error = `Result ingestion failed: ${err instanceof Error ? err.message : String(err)}`;
 						}
@@ -847,6 +848,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 						diffContext: jobDiffContext,
 						reviewProfileId: jobReviewProfileId,
 						reviewProfileLabel: jobReviewProfileLabel,
+						launchLabel: launchLabelOf(body.label, label),
 						changedFilesSnapshot: jobChangedFilesSnapshot,
 						guideContext: jobGuideContext,
 						launchReview: jobLaunchReview,

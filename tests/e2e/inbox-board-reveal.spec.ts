@@ -25,12 +25,13 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-board-reveal.spec.ts`. PNGs land in
  * PLANNOTATOR_E2E_PROOF_DIR/board-reveal, or .local/proof/board-reveal/.
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { savedConfig } from '../helpers/saved-config';
 
 const repo = resolve(__dirname, '../..');
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'board-reveal');
@@ -73,7 +74,7 @@ async function world(): Promise<World> {
   const dataDir = join(root, 'data');
   const src = join(root, 'src');
   for (const dir of [dataDir, src, join(root, 'claude'), join(root, 'codex'), join(root, 'xdg-config'), join(root, 'xdg-data')]) mkdirSync(dir, { recursive: true });
-  const seeded = spawnSync('bun', [join(repo, 'tests/e2e/inbox-board-reveal-seed.ts'), dataDir, src, '4'], { cwd: repo, encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir } });
+  const seeded = spawnSync('bun', [join(repo, 'tests/e2e/inbox-board-reveal-seed.ts'), dataDir, src, '4'], { cwd: repo, encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir } });
   expect(seeded.status, seeded.stderr).toBe(0);
   const ids = JSON.parse(seeded.stdout.trim()) as Record<string, string>;
   const past = '2026-10-01T10:00:00.000Z';
@@ -93,12 +94,18 @@ async function world(): Promise<World> {
       // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
       inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
       inboxSnoozeIntro: { shownAt: snoozeShown },
-      inboxReveals: { lastShownAt: snoozeShown },
+      // "Which view do you prefer?" (five threads, no tenure, armed ahead of the Board): settled too.
+      inboxReveals: { ...E2E_GROUP_TIP_SEEN, lastShownAt: snoozeShown, view_choice: { shownAt: past } },
+      // Personal agents (after Snooze in the line): settled by OpenClaw's Inbox tool turned on.
+      inboxTool: { openclaw: true },
+      // Priority (after Snooze in the line): settled by a thread once added to Priority.
+      inboxPriorityIntro: { usedAt: snoozeShown },
     }),
   );
   const env = {
     PATH: process.env.PATH ?? '',
     HOME: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     // A release version: never the live daily ping (packages/shared/daily-ping.ts).
     NO_ANON_PING: '1',
@@ -121,7 +128,7 @@ async function world(): Promise<World> {
   return { url, dataDir, ids };
 }
 
-const config = (w: World) => JSON.parse(readFileSync(join(w.dataDir, 'config.json'), 'utf8')) as Record<string, any>;
+const config = (w: World) => savedConfig(w.dataDir);
 
 /**
  * This spec proves the leave moment ("back on the list"), so the page is never idle (idleClock.ts: 20 s without input

@@ -21,7 +21,12 @@
  *
  * The rules are pure; `fitPhoneHead` tries them against the page's own layout
  * (before paint: the caller runs in a layout effect), as footFit.ts does for the foot.
+ *
+ * A PR's pane on a phone (pulls/PullLaunchpad.tsx, PullsPage's stack page) leads its bar with the same way back
+ * (`‹ Reviews`) and gives way by the same rules (`usePhoneHeadFit`): its subject is the PR's number and repository
+ * (`[data-fit-subject]`, which names its own least room: the number and a readable piece of the repository).
  */
+import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
 
 /** One way the header gives way. */
 export type PhoneHeadStep = 'tight' | 'count' | 'back';
@@ -46,22 +51,33 @@ export interface PhoneHeadMeasure {
   overflow: number;
   label: { shown: number; whole: number } | null;
   subject?: number | null;
+  /** The subject's own least room (`data-fit-subject="160"`); else `SUBJECT_FLOOR`. */
+  subjectFloor?: number;
 }
 
 /** Fits: nothing past the edge, the label shown whole or at least its floor, and the subject with room to be read. */
-export function phoneHeadFits({ overflow, label, subject = null }: PhoneHeadMeasure): boolean {
+export function phoneHeadFits({ overflow, label, subject = null, subjectFloor }: PhoneHeadMeasure): boolean {
   if (overflow > 0.5) return false;
-  if (subject !== null && !subjectHasRoom(subject)) return false;
+  if (subject !== null && !subjectHasRoom(subject, subjectFloor)) return false;
   if (label === null) return true;
   return label.shown >= Math.min(label.whole, BACK_LABEL_FLOOR) - 0.5;
 }
 
 /** Whether the subject has room to be read. */
-export function subjectHasRoom(width: number): boolean {
-  return width >= SUBJECT_FLOOR - 0.5;
+export function subjectHasRoom(width: number, floor: number = SUBJECT_FLOOR): boolean {
+  return width >= floor - 0.5;
+}
+
+/** A subject's own least room (`data-fit-subject="160"`), else `SUBJECT_FLOOR`. */
+function floorOf(subject: HTMLElement | null): number {
+  const own = Number(subject?.getAttribute('data-fit-subject'));
+  return own > 0 ? own : SUBJECT_FLOOR;
 }
 
 // ── DOM ──
+
+/** The header's subject: a thread's (`.ib-phsubj`), or another bar's that gives way the same (`[data-fit-subject]`). */
+const SUBJECT = '.ib-phsubj, [data-fit-subject]';
 
 function measure(head: HTMLElement): PhoneHeadMeasure {
   const box = head.getBoundingClientRect();
@@ -73,11 +89,12 @@ function measure(head: HTMLElement): PhoneHeadMeasure {
   }
   const label = head.querySelector<HTMLElement>('.ib-pback-l');
   const drawn = label !== null && label.getBoundingClientRect().width > 1;
-  const subject = head.querySelector<HTMLElement>('.ib-phsubj');
+  const subject = head.querySelector<HTMLElement>(SUBJECT);
   return {
     overflow: right - end,
     label: drawn ? { shown: label.clientWidth, whole: label.scrollWidth } : null,
     subject: subject ? subject.getBoundingClientRect().width : null,
+    subjectFloor: floorOf(subject),
   };
 }
 
@@ -103,8 +120,8 @@ export function fitPhoneHead(head: HTMLElement): readonly PhoneHeadStep[] | null
   // No way leaves the subject room: it is not drawn, and the controls keep the most they can ("Inbox" whole).
   const fit = tryEach(true) ?? tryEach(false) ?? PHONE_HEAD_FITS[PHONE_HEAD_FITS.length - 1]!;
   draw(head, fit);
-  const subject = head.querySelector<HTMLElement>('.ib-phsubj');
-  head.toggleAttribute('data-subject-off', subject !== null && !subjectHasRoom(subject.getBoundingClientRect().width));
+  const subject = head.querySelector<HTMLElement>(SUBJECT);
+  head.toggleAttribute('data-subject-off', subject !== null && !subjectHasRoom(subject.getBoundingClientRect().width, floorOf(subject)));
   return fit;
 }
 
@@ -112,4 +129,33 @@ export function fitPhoneHead(head: HTMLElement): readonly PhoneHeadStep[] | null
 export function clearPhoneHead(head: HTMLElement): void {
   head.removeAttribute('data-fit');
   head.removeAttribute('data-subject-off');
+}
+
+/**
+ * A bar fitted as a phone's thread header is (components/Thread.tsx): on a phone it gives way by `fitPhoneHead`
+ * whenever its width or `sig` (what it draws) changes, and once the real font has loaded; off a phone it is drawn
+ * as it is. For bars outside a thread (a PR's pane), which draw the same `‹` way back.
+ */
+export function usePhoneHeadFit(ref: RefObject<HTMLElement | null>, phone: boolean, sig: string): void {
+  const fittedFor = useRef('');
+  const fit = useRef<(force?: boolean) => void>(() => {});
+  fit.current = (force = false) => {
+    const head = ref.current;
+    if (!head) return;
+    const key = `${head.getBoundingClientRect().width}|${phone}|${sig}`;
+    if (!force && key === fittedFor.current) return;
+    fittedFor.current = key;
+    if (phone) fitPhoneHead(head);
+    else clearPhoneHead(head);
+  };
+  useLayoutEffect(() => fit.current());
+  useEffect(() => {
+    const head = ref.current;
+    if (!head || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => fit.current());
+    observer.observe(head);
+    // Words measured in a fallback font fit differently once the real one loads.
+    void document.fonts?.ready.then(() => fit.current(true));
+    return () => observer.disconnect();
+  }, [ref]);
 }

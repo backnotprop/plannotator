@@ -8,7 +8,11 @@
  *  - the note on a decision lost when its send fails, or a retry of the same
  *    verdict going with a new idempotency key (two replies for one verdict);
  *  - a verdict whose answer comes after the person left the review pulling
- *    them back to its thread.
+ *    them back to its thread;
+ *  - the next round covering the whole change again: a verdict asking for
+ *    changes, to the live session that wrote the review, carries
+ *    /review-recheck's instructions; one to another session, or waiting for
+ *    the next agent, carries none (that session never saw the review).
  *
  * The diff reader is stubbed: this file is about the header's decision.
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -22,12 +26,13 @@ import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
 import type { ShapeHost } from '@plannotator/ui/components/shape';
 import type { InboxShapes } from './shape/useInboxShapes';
+import { inboxApi } from './api';
 
 const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 
 const hasDom = typeof document !== 'undefined';
 if (hasDom) {
-  mock.module('#guide-reader', () => ({ default: () => null }));
+  mock.module('#guide-reader', () => ({ default: () => null, PullChangesTree: () => null }));
   // The real review-app dialog and submit (tsconfig `paths` points the window's typecheck at its .d.ts).
   // By a path in a variable: the window's strict typecheck must not follow it into review-editor.
   const seam: string = './guide/PlatformPost.tsx';
@@ -74,6 +79,8 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let posted: Record<string, unknown>[] = [];
 let others: (typeof OTHER)[] = [];
+/** Whether the session that wrote the review polls now (`/sessions`' asker). */
+let askerLive = false;
 let replyAnswer: () => Response = () => Response.json({ reply: {}, questions: [], replayed: false });
 let backs = 0;
 /** Post to GitHub/GitLab: what went to `POST /api/inbox/pulls/review`, and the list the review reads its PR from. */
@@ -108,6 +115,7 @@ beforeEach(() => {
   pullDiffAnswer = null;
   window.localStorage.clear();
   others = [OTHER];
+  askerLive = false;
   backs = 0;
   replyAnswer = () => Response.json({ reply: {}, questions: [], replayed: false });
   clearReviewNotes(REVIEW);
@@ -136,7 +144,7 @@ beforeEach(() => {
     if (path.includes('/guide')) return Response.json({ message_id: REVIEW, guide: message.guide, snapshot });
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations });
     if (path.includes('/sessions')) {
-      return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions: others, asker: { session: 'ses_review', live: false } });
+      return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions: others, asker: { session: 'ses_review', live: askerLive } });
     }
     return Response.json({});
   }) as typeof fetch;
@@ -463,6 +471,58 @@ test.skipIf(!hasDom)('a verdict answered after the review closed leaves the pers
   expect(backs).toBe(0);
 });
 
+const globalComment = (text: string) => ({
+  id: 'ann-guide-global', project_id: PROJECT.id, thread_id: REVIEW, message_id: REVIEW, attachment_id: '', path: '', version: 'a',
+  guide: { title: 'Token refresh', file: '', side: 'new', line_start: 0, line_end: 0, scope: 'general' },
+  annotation: { id: 'ann-guide-global', type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, side: 'new', text, createdAt: 1 },
+  created_at: '2026-10-11T10:45:00.000Z', updated_at: '2026-10-11T10:45:00.000Z', removed_at: null, sent_reply_id: null,
+});
+const RECHECK = '`review-recheck`';
+
+test.skipIf(!hasDom)('asking for changes from the live session that wrote the review asks it for only what changed since, after the comments; an approval asks nothing', async () => {
+  askerLive = true;
+  annotations = [globalComment('Split the guard and the retry.')];
+  await render();
+  expect(document.querySelector('[data-asker-ended]')).toBeNull();
+  await click('[data-review-decision] [data-decision-primary]');
+  expect(posted).toHaveLength(1);
+  expect(posted[0]).toMatchObject({ review_verdict: 'changes_requested' });
+  expect(posted[0]!.to).toBeUndefined();
+  const feedback = String(posted[0]!.feedback);
+  expect(feedback).toContain(RECHECK);
+  expect(feedback.indexOf('Split the guard and the retry.')).toBeLessThan(feedback.indexOf(RECHECK));
+
+  act(() => root?.unmount());
+  host?.remove();
+  annotations = [];
+  posted = [];
+  await render();
+  await click('[data-review-decision] [data-decision-primary]');
+  expect(posted[0]).toMatchObject({ review_verdict: 'approved' });
+  expect(JSON.stringify(posted[0])).not.toContain(RECHECK);
+});
+
+test.skipIf(!hasDom)('changes asked of another session (the reviewer ended), or left for the next agent, carry no recheck: that session gets the whole change', async () => {
+  annotations = [globalComment('Split the guard and the retry.')];
+  await render();
+  await click('[data-review-decision] [data-decision-primary]');
+  await click('[data-route-send]');
+  expect(posted).toHaveLength(1);
+  expect(posted[0]).toMatchObject({ review_verdict: 'changes_requested', to: { session: 'ses_other' } });
+  expect(String(posted[0]!.feedback)).toContain('Split the guard and the retry.');
+  expect(String(posted[0]!.feedback)).not.toContain(RECHECK);
+
+  act(() => root?.unmount());
+  host?.remove();
+  others = [];
+  posted = [];
+  await render();
+  await click('[data-review-decision] [data-decision-primary]');
+  expect(posted).toHaveLength(1);
+  expect(posted[0]!.to).toBeUndefined();
+  expect(String(posted[0]!.feedback)).not.toContain(RECHECK);
+});
+
 // A global comment (on the whole review) is a comment like a line comment: it flips Approve to Send feedback and
 // rides the verdict, under "Global comments" ahead of the files.
 test.skipIf(!hasDom)('a global comment flips the decision to Send feedback and rides the verdict under Global comments', async () => {
@@ -482,6 +542,36 @@ test.skipIf(!hasDom)('a global comment flips the decision to Send feedback and r
   expect(posted).toHaveLength(1);
   expect(posted[0]!.annotation_ids).toEqual(['ann-guide-global']);
   expect(String(posted[0]!.feedback)).toContain(`## Global comments\n\n${text}`);
+});
+
+// A comment whose save has not answered yet when the verdict is pressed (a slow link): the verdict waits for it and
+// carries it, never going with the comments confirmed at the press alone.
+test.skipIf(!hasDom)('a verdict pressed while a comment is still saving waits for it and carries every comment', async () => {
+  others = [];
+  const record = (id: string, text: string) => ({
+    id, project_id: PROJECT.id, thread_id: REVIEW, message_id: REVIEW, attachment_id: '', path: '', version: 'a',
+    guide: { title: 'Token refresh', file: '', side: 'new', line_start: 0, line_end: 0, scope: 'general' },
+    annotation: { id, type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, side: 'new', text, createdAt: 1 },
+    created_at: '2026-10-11T10:45:00.000Z', updated_at: '2026-10-11T10:45:00.000Z', removed_at: null, sent_reply_id: null,
+  });
+  annotations = [record('ann-first', 'Split the guard and the retry.')];
+  let answer: () => void = () => {};
+  globalThis.fetch = ((inner) => (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (!String(input).endsWith('/guide/annotations') || init?.method !== 'POST') return inner(input, init);
+    await new Promise<void>((resolve) => (answer = resolve));
+    return Response.json({ annotation: record('ann-second', 'Name the retry budget.') });
+  }) as typeof fetch)(globalThis.fetch);
+  await render();
+  // The reader's save, as its composer makes it: on its way when the verdict is pressed.
+  const saving = inboxApi.saveGuideAnnotation(REVIEW, record('ann-second', 'Name the retry budget.').annotation);
+  await click('[data-review-decision] [data-decision-primary]');
+  await settle();
+  expect(posted).toHaveLength(0);
+  answer();
+  await saving;
+  await settle();
+  expect(posted).toHaveLength(1);
+  expect(posted[0]!.annotation_ids).toEqual(['ann-first', 'ann-second']);
 });
 
 // The PR page's Details in the full review (approval "inbox-review-details-panel"), and the PR title as its way in.

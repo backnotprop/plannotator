@@ -3,7 +3,7 @@ import { inboxSidebarShown, type InboxSidebarItem } from '@plannotator/core/inbo
 import { useSidebarLayout } from '../sidebarLayout';
 import { drawnSidebarItems } from '../sidebarItems';
 import { SidebarMenu, useSidebarMenu } from './SidebarMenu';
-import type { InboxHealth, InboxListRow, InboxRestartAgents } from '@plannotator/core/inbox-types';
+import type { InboxAgent, InboxHealth, InboxListRow, InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { inboxRowSnoozed } from '@plannotator/core/inbox-snooze';
 import { restartAgentsDescription, restartAgentsLabel, restartAgentsOf } from '../restartAgents';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
@@ -12,10 +12,12 @@ import type { ProjectFolder } from '../api';
 import { connectPrompt } from '../connectPrompt';
 import { formatCount } from '../format';
 import { Icon, type IconName } from '../icons';
-import { pinnedState } from '../pins';
+import { pinEnds, pinnedState } from '../pins';
 import { starPopping } from '../starPop';
 import type { MachinesModel } from '../machines';
-import { AgentsSection } from '../agents/AgentsSection';
+import { AgentsSection, GogglesMark } from '../agents/AgentsSection';
+import { TagsSection, type TagsSectionProps } from './TagsSection';
+import { TagIcon } from './InitiativePeek';
 import { useInboxAgents } from '../agentsList';
 import { useSidebarSections, type SidebarSection } from '../sidebarSections';
 import { useSidebar } from '../shell/sidebar';
@@ -39,9 +41,13 @@ import { inboxSearchShortcuts } from '../search/searchShortcut';
 import { ShortcutHint, useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
+import { ScheduledNav } from '../scheduled/ScheduledNav';
+import { PlansNav } from '../plans/PlansNav';
 
 export interface SidebarProps {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'shapes' | 'prs' | 'artifacts';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'shapes' | 'prs' | 'artifacts' | 'scheduled' | 'plans';
+  /** Plans: the row second under Inbox, only while Plans is on (config.json `inboxPlans`); no row, menu item or Customize entry while off. */
+  onPlans?: () => void;
   /**
    * Artifacts (approval "inbox-artifact-stars"): the row in the top group (before Reviews; Customize can hide it), drawn with `onArtifacts`, that opens
    * the Artifacts wall on All. No count.
@@ -53,6 +59,8 @@ export interface SidebarProps {
    * Board's header ("N in flight · N on you").
    */
   onBoard?: () => void;
+  /** Routines: the row under Board, only while Settings → Capabilities → Routines is on. */
+  onScheduled?: () => void;
   /**
    * Reviews (approvals "inbox-code-review-direction", item 4, and "inbox-reviews-page"): a row of its own (after Board when the Board is on; it needs none), shown only with
    * `onPulls` (Settings → Capabilities → Code review on). `pullsCount`: the last read's "On you".
@@ -68,6 +76,8 @@ export interface SidebarProps {
   projectId: string | null;
   /** The machine the list shows (a machine's filter, its caption in Agents), or null for every machine. */
   machineId?: string | null;
+  /** The agent the list shows (an agent's filter, its row in Agents, `#agent=<id>`) and its row's name, or null. */
+  agentFilter?: { id: string; name: string } | null;
   /**
    * Linked machines (machines.ts): in the Agents section above Projects, each machine's agents under its name, this
    * machine first; a machine's name is a filter of the list as a project is.
@@ -80,13 +90,19 @@ export interface SidebarProps {
   onMachineUpdate?: (machineId: string) => void;
   /**
    * The Agents section (approval "inbox-agents-section", agents/AgentsSection.tsx): shown while the list names agents
-   * (`agents`, agentsList.ts) or a machine is linked. `agentRows`: the window's rows, where an agent's thread is
-   * found; `onOpenAgentThread` opens it; `onMessageAgent`: New message to a live agent with no thread here.
+   * (`agents`, agentsList.ts) or a machine is linked. `agentRows`: the window's rows, where an agent's threads are
+   * found; `onAgentFilter` shows one agent's threads (null: everything again); `onMessageAgent`: New message to a
+   * live agent with no thread here.
    * `onAddAgent`: New message with a new session chosen (absent: no + button). `onAddMachine`: Settings → Machines
    * (absent on an Inbox that cannot link).
    */
   agentRows?: readonly InboxListRow[];
-  onOpenAgentThread?: (threadId: string) => void;
+  /**
+   * The Tags section (approval "inbox-thread-tags", TagsSection.tsx), under Starred: drawn while `shown` (a tag holds
+   * a thread, or the person made one). Absent (an Inbox that keeps no tags, the tour): no section.
+   */
+  tags?: Pick<TagsSectionProps, 'tags' | 'waiting' | 'tagId' | 'onOpen' | 'onCreate' | 'onRename' | 'onDelete' | 'colours'> & { shown: boolean };
+  onAgentFilter?: (agentId: string | null) => void;
   onMessageAgent?: (session: string, opener: HTMLElement) => void;
   onAddAgent?: (opener: HTMLElement) => void;
   onAddMachine?: () => void;
@@ -119,10 +135,18 @@ export interface SidebarProps {
   onProjectCombine?: (pair: { from: string; into: string; intoName: string }) => Promise<boolean>;
   /** "+" on a project row (approval "launch-create-clone", F1-F7): New message with a new session there. Absent: no "+". */
   onProjectNewSession?: (projectId: string, machine: string | null) => void;
-  /** Whether a project's "+" can start anything there (its machine's agents, its folder, launch on there). Absent: every row's can. */
-  projectCanStart?: (project: ProjectFolder, machine: string | null, machineLaunch: boolean | null | undefined) => boolean;
+  /** Whether a project's "+" can start anything there (its machine's agents, its folder, launch on there; `asleep`, that machine is). Absent: every row's can. */
+  projectCanStart?: (project: ProjectFolder, machine: string | null, machineLaunch: boolean | null | undefined, asleep: boolean) => boolean;
   /** Says a line in the window's live region (the rename field's refusals). */
   announce?: (text: string) => void;
+  /**
+   * An agent row's Rename… and Reset name (agents/AgentsSection.tsx): a name, or null for its own (`own`). Resolves
+   * true once it is kept. Absent: agent rows have no menu.
+   */
+  onAgentRename?: (agent: InboxAgent, name: string | null, own: string) => Promise<boolean>;
+  /** An agent row's Stop and Delete … session… for an agent the Inbox launched (`machine`: a linked machine's id, else null). */
+  onAgentStop?: (agent: InboxAgent, machine: string | null) => void;
+  onAgentDelete?: (agent: InboxAgent, machine: string | null) => void;
   /** The update control's model (packages/server/inbox-updates.ts): the Update button above Settings. */
   update: InboxHealth['update'];
   restarting: boolean;
@@ -131,7 +155,6 @@ export interface SidebarProps {
   /**
    * Checking for updates has failed for hours (and no Update button shows):
    * the quiet "Can't check for updates" row, opening Settings → About.
-   * Null on a tailnet guest's page.
    */
   checkFailing?: UpdateCheckFailing | null;
   onCheckFailing?: () => void;
@@ -266,7 +289,10 @@ export function Sidebar(props: SidebarProps) {
   // A snoozed pin stays pinned but waits with the rest of its snooze, so it is no count here.
   const pinsWaiting = pinnedClosed ? pins.filter((row) => !inboxRowSnoozed(row) && ['stop', 'hold', 'wait'].includes(pinnedState(row).kind)).length : 0;
   // One scroll area holds Pinned and Projects (no limit on pins: a long Pinned section scrolls with the projects).
-  const [projsRef, moreProjects] = useMoreBelow<HTMLDivElement>(`${shown.length}:${pins.length}:${pinnedClosed}:${projectsClosed}:${starredAbove}`);
+  // The person's layout (approval "inbox-sidebar-customize"; core inbox-sidebar.ts): which items show, their order,
+  // top or bottom. The onboarding tour's sidebar always draws the default.
+  const layout = useSidebarLayout(props.rememberSections !== false);
+  const [projsRef, moreProjects] = useMoreBelow<HTMLDivElement>(`${shown.length}:${pins.length}:${pinnedClosed}:${projectsClosed}:${starredAbove}:${layout.hidden.join()}`);
   /**
    * After a pin's menu acted: Move up or down keeps focus on that row's ⋯ in its new place; Unpin moves it to
    * the next pinned row's ⋯ on screen, else the first project on screen, else the Pinned header, else Inbox (never the page).
@@ -304,7 +330,7 @@ export function Sidebar(props: SidebarProps) {
     next?.focus({ preventScroll: true });
   });
   const inboxRef = useRef<HTMLButtonElement>(null);
-  const inboxRefreshes = props.refreshes === true && props.page === 'inbox' && props.projectId === null && !props.machineId;
+  const inboxRefreshes = props.refreshes === true && props.page === 'inbox' && props.projectId === null && !props.machineId && !props.agentFilter && !props.tags?.tagId;
   const spinOf = (scope: string | null) => (props.refreshSpin && props.refreshSpin.scope === scope ? props.refreshSpin.key : null);
   const refreshHintId = useId();
   const pinnedLabelId = useId();
@@ -312,6 +338,9 @@ export function Sidebar(props: SidebarProps) {
   const projectsLabelId = useId();
   const projectsBodyId = useId();
   const agentsLabelId = useId();
+  const tagsLabelId = useId();
+  const tagsBodyId = useId();
+  const tagsClosed = sections.closed('tags');
   const agentsBodyId = useId();
   const machineList = props.machines?.all ?? [];
   const agentsClosed = sections.closed('agents');
@@ -346,7 +375,7 @@ export function Sidebar(props: SidebarProps) {
   useEffect(() => {
     const track = (event: FocusEvent) => {
       const target = event.target instanceof Element && asideRef.current?.contains(event.target) ? event.target : null;
-      focusedIn.current = target?.closest('[data-pinned-section]') ? 'pinned' : target?.closest('[data-agents-section]') ? 'agents' : target?.closest('.ib-projs') ? 'projects' : null;
+      focusedIn.current = target?.closest('[data-pinned-section]') ? 'pinned' : target?.closest('[data-tags-section]') ? 'tags' : target?.closest('[data-agents-section]') ? 'agents' : target?.closest('.ib-projs') ? 'projects' : null;
     };
     document.addEventListener('focusin', track);
     return () => document.removeEventListener('focusin', track);
@@ -365,16 +394,20 @@ export function Sidebar(props: SidebarProps) {
   };
   /**
    * A phone's sheet (approval "inbox-phone-sidebar-sheet", Sheet 1): what narrows the list, in words, with Clear.
-   * A project by the name its row has; a machine by its own name. Nothing while the list shows everything.
+   * A project by the name its row has; a machine by its own name; an agent by its row's name. Nothing while the list
+   * shows everything.
    */
-  const showingOnly = ((): { kind: 'project' | 'machine'; name: string } | null => {
+  const showingOnly = ((): { kind: 'project' | 'machine' | 'agent' | 'tag'; name: string } | null => {
     if (!phone || props.page !== 'inbox') return null;
     if (props.projectId) {
       const name = shown.find((project) => project.id === props.projectId)?.name ?? props.projectNames?.get(props.projectId) ?? props.projects.find((project) => project.id === props.projectId)?.name;
       return name ? { kind: 'project', name } : null;
     }
     const machine = props.machineId ? machineList.find((m) => m.id === props.machineId) : undefined;
-    return machine ? { kind: 'machine', name: machine.name } : null;
+    if (machine) return { kind: 'machine', name: machine.name };
+    if (props.agentFilter) return { kind: 'agent', name: props.agentFilter.name };
+    const tag = props.tags?.tagId ? props.tags.tags.find((t) => t.id === props.tags?.tagId) : undefined;
+    return tag ? { kind: 'tag', name: tag.name } : null;
   })();
   // A phone's sheet: a section heading that has stuck to the top of the scroll takes a hairline, so rows read as passing under it.
   useLayoutEffect(() => {
@@ -401,11 +434,10 @@ export function Sidebar(props: SidebarProps) {
     ) : (
       children
     );
-  // The person's layout (approval "inbox-sidebar-customize"; core inbox-sidebar.ts): which items show, their order,
-  // top or bottom. The onboarding tour's sidebar always draws the default.
-  const layout = useSidebarLayout(props.rememberSections !== false);
   const drawn = drawnSidebarItems({
     board: Boolean(props.onBoard),
+    plans: Boolean(props.onPlans),
+    scheduled: Boolean(props.onScheduled),
     reviews: Boolean(props.onPulls),
     shape: Boolean(props.onShape),
     // The Usage row decides itself whether it shows (components/Usage.tsx); the menu offers it only where `cswap` is.
@@ -418,11 +450,15 @@ export function Sidebar(props: SidebarProps) {
     shortcuts: Boolean(props.onShortcuts),
     copyPrompt: props.connectPrompt !== false,
     agents: agentsDrawn,
+    tags: props.tags?.shown === true,
     phone,
   });
   const shows = (item: InboxSidebarItem) => drawn.has(item) && inboxSidebarShown(layout, item);
   // Hidden in Customize sidebar (the owner, 2026-11-09): the whole section goes, heading and all. Agents keep running.
   const agentsShown = shows('agents');
+  const tagsShown = shows('tags');
+  const starredShown = shows('starred');
+  const projectsShown = shows('projects');
   const menu = useSidebarMenu(asideRef, props.rememberSections !== false);
   const searchButton = (
     <button
@@ -493,9 +529,9 @@ export function Sidebar(props: SidebarProps) {
         <button
           ref={inboxRef}
           type="button"
-          className={`ib-nav ib-nav-inbox${props.page === 'inbox' && props.projectId === null && !props.machineId ? ' ib-on' : ''}`}
+          className={`ib-nav ib-nav-inbox${props.page === 'inbox' && props.projectId === null && !props.machineId && !props.agentFilter && !props.tags?.tagId ? ' ib-on' : ''}`}
           onClick={pick(props.onInbox)}
-          aria-current={props.page === 'inbox' && props.projectId === null && !props.machineId ? 'page' : undefined}
+          aria-current={props.page === 'inbox' && props.projectId === null && !props.machineId && !props.agentFilter && !props.tags?.tagId ? 'page' : undefined}
           aria-describedby={inboxRefreshes ? refreshHintId : undefined}
           data-refreshes={inboxRefreshes ? '' : undefined}
           data-refreshing={spinOf(null) != null ? '' : undefined}
@@ -527,6 +563,10 @@ export function Sidebar(props: SidebarProps) {
           Board
         </button>
         );
+      case 'plans':
+        return <PlansNav on={props.page === 'plans' && !props.projectId} onClick={pick(() => props.onPlans?.())} pick={pick} phone={phone} />;
+      case 'scheduled':
+        return <ScheduledNav on={props.page === 'scheduled'} onClick={pick(() => props.onScheduled?.())} />;
       case 'shape':
         return (
         <button
@@ -667,7 +707,7 @@ export function Sidebar(props: SidebarProps) {
           <div className="ib-sheet-now-t">
             <span className="ib-sheet-now-l">Showing only</span>
             <span className="ib-sheet-now-n">
-              <Icon name={showingOnly.kind === 'project' ? 'folder' : 'laptop'} />
+              {showingOnly.kind === 'agent' ? <GogglesMark /> : showingOnly.kind === 'tag' ? <TagIcon className="ib-ic" /> : <Icon name={showingOnly.kind === 'project' ? 'folder' : 'laptop'} />}
               <bdi dir="auto">{showingOnly.name}</bdi>
             </span>
           </div>
@@ -680,7 +720,7 @@ export function Sidebar(props: SidebarProps) {
       <div className="ib-sidescroll" ref={projsRef} data-more={moreProjects ? '' : undefined}>
         {/* A phone's sheet has one scroll: the places scroll with the sections. */}
         {phone && stack(layout.top)}
-        {pins.length > 0 && !starredAbove && sheetSection('pinned',
+        {starredShown && pins.length > 0 && !starredAbove && sheetSection('pinned',
           <>
             {sheetHeading(
             <SectionHeader
@@ -704,8 +744,8 @@ export function Sidebar(props: SidebarProps) {
                   row={row}
                   project={props.projectNames?.get(row.project.id)}
                   on={pinOn(row)}
-                  first={index === 0}
-                  last={index === pins.length - 1}
+                  first={pinEnds(pins, index).first}
+                  last={pinEnds(pins, index).last}
                   phone={phone}
                   onOpen={pick(() => props.onOpenPin?.(row))}
                   onAction={(action) => {
@@ -722,12 +762,43 @@ export function Sidebar(props: SidebarProps) {
             </section>
           </>,
         )}
+        {tagsShown && props.tags && sheetSection('tags',
+          <TagsSection
+            tags={props.tags.tags}
+            waiting={props.tags.waiting}
+            tagId={props.page === 'inbox' ? props.tags.tagId : null}
+            closed={tagsClosed}
+            onToggle={() => sections.toggle('tags')}
+            labelId={tagsLabelId}
+            bodyId={tagsBodyId}
+            header={
+              <SectionHeader
+                section="tags"
+                id={tagsLabelId}
+                controls={tagsBodyId}
+                label="Tags"
+                iconNode={<TagIcon className="ib-ic" />}
+                open={!tagsClosed}
+                count={0}
+                total={phone ? props.tags.tags.length : undefined}
+                onToggle={() => sections.toggle('tags')}
+              />
+            }
+            phone={phone}
+            pick={pick}
+            onOpen={props.tags.onOpen}
+            onCreate={props.tags.onCreate}
+            onRename={props.tags.onRename}
+            onDelete={props.tags.onDelete}
+            colours={props.tags.colours}
+          />,
+        )}
         {agentsShown && (
           <AgentsSection
             machines={props.machines ?? NO_MACHINES}
             rows={props.agentRows ?? NO_ROWS}
             machineId={props.machineId ?? null}
-            openThreadId={props.openThreadId ?? null}
+            agentId={props.agentFilter?.id ?? null}
             page={props.page}
             closed={agentsClosed}
             onToggle={() => sections.toggle('agents')}
@@ -747,14 +818,21 @@ export function Sidebar(props: SidebarProps) {
             )}
             onMachine={props.onMachine}
             onMachineUpdate={props.onMachineUpdate}
-            onOpenThread={(threadId) => props.onOpenAgentThread?.(threadId)}
+            onAgentFilter={(agentId) => props.onAgentFilter?.(agentId)}
             onMessageAgent={(session, opener) => props.onMessageAgent?.(session, opener)}
             onAddAgent={(opener) => (props.onAddAgent ?? props.onCompose)?.(opener)}
             onAddMachine={props.onAddMachine}
             pick={pick}
+            phone={phone}
+            // The sheet stays open on a phone: the field is in it.
+            onRename={props.onAgentRename}
+            onStop={props.onAgentStop}
+            // Delete asks in a dialog over the list: on a phone the sheet closes for it.
+            onDelete={props.onAgentDelete && ((agent, machine) => pick(() => props.onAgentDelete?.(agent, machine))())}
+            announce={props.announce}
           />
         )}
-        {sheetSection('projects',
+        {projectsShown && sheetSection('projects',
         <>
         {/* Two controls side by side, never one inside the other: the header opens and closes, the icon changes the order. */}
         <div className="ib-secrow">
@@ -785,7 +863,7 @@ export function Sidebar(props: SidebarProps) {
           ) : (
             shown.map((project) => {
               const n = props.projectCounts.get(project.id) ?? 0;
-              const on = props.page === 'inbox' && props.projectId === project.id;
+              const on = (props.page === 'inbox' || props.page === 'plans') && props.projectId === project.id;
               if (projectsClosed && !on) return null;
               if (!props.onProjectAction) {
                 return (
@@ -833,8 +911,9 @@ export function Sidebar(props: SidebarProps) {
                       ? (() => {
                           const machine = project.machine && project.machine !== props.machines?.self ? project.machine : null;
                           const machineView = machine ? props.machines?.linked.find((m) => m.id === machine) : undefined;
-                          if (props.projectCanStart && !props.projectCanStart(project, machine, machineView?.launch)) return undefined;
-                          const tip = newSessionTip(props.projectNames?.get(project.id) ?? project.name, machine ? (props.machines?.names.get(machine) ?? null) : null, machineView?.state === 'offline');
+                          const asleep = machineView?.state === 'offline';
+                          if (props.projectCanStart && !props.projectCanStart(project, machine, machineView?.launch, asleep)) return undefined;
+                          const tip = newSessionTip(props.projectNames?.get(project.id) ?? project.name, machine ? (props.machines?.names.get(machine) ?? null) : null, asleep);
                           return {
                             tip,
                             onPress: () => {

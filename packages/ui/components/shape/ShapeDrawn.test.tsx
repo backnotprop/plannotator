@@ -311,6 +311,27 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
     }
   });
 
+  // References beside the board takes its room from the view: the drawing shrinks into what is left, as it is.
+  test('a side panel\'s room (aside) only scales the drawing: no tall layout, no pan', async () => {
+    // This DOM measures 0 wide, which alone is narrow; with the panel's room added back it is not.
+    const real = window.getComputedStyle;
+    window.getComputedStyle = ((el: Element) => { const cs = real.call(window, el); return new Proxy(cs, { get: (t, k) => (String(k).startsWith('padding') ? '0px' : Reflect.get(t, k)) }); }) as typeof window.getComputedStyle;
+    try {
+      const canvas = { html: '<p data-mark="wide">wide</p>', width: 1000, height: 500, tall: { html: '<p data-mark="tall">tall</p>' } };
+      const narrow = await draw({ html: '<p>x</p>', drawn: canvas, pan: true });
+      expect(narrow.board.querySelector('[data-mark="tall"]')).not.toBeNull();
+      act(() => root!.unmount());
+      root = null;
+      container!.remove();
+      const beside = await draw({ html: '<p>x</p>', drawn: canvas, pan: true, aside: () => 1000 });
+      expect(beside.board.querySelector('[data-mark="wide"]')).not.toBeNull();
+      expect(container!.querySelector('.shp-drawn')!.classList.contains('pan')).toBe(false);
+      expect(beside.board.style.transform).toBe('scale(0.2)');
+    } finally {
+      window.getComputedStyle = real;
+    }
+  });
+
   // A real board cut off at 390 px showed its left zone and no sign there was more to the right.
   test('a panning drawing shows which way there is more: that side fades, and a track follows the scroll', async () => {
     const real = window.getComputedStyle;

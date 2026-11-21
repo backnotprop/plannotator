@@ -87,13 +87,13 @@ export interface ShapeHost {
   copy?(text: string): Promise<void> | void;
   /**
    * Once the session ended, nothing answers an Ask here: the question waits for the agent (the Inbox, which has
-   * no Ask AI fallback). Absent: a host whose Ask AI answers then, and the panel says so.
+   * no Ask AI fallback). Absent: a host whose Ask AI answers then, and a comment box's questions say so.
    */
   askWaitsWhenEnded?: boolean;
   /**
    * This host cannot tell whether the agent's session is live (the standalone Shape page: its server knows no
-   * sessions, so every board reads `gone`). The Ask panel then shows no session line at all, rather than claim the
-   * session ended. Absent: the line shows the session's state, as always.
+   * sessions, so every board reads `gone`). A comment box's questions then show no session line at all, rather than
+   * claim the session ended. Absent: the line shows the session's state, as always.
    */
   sessionless?: boolean;
 }
@@ -136,7 +136,8 @@ export interface ShapeCodeHoverCardProps {
   onSelectLocation?: (location: { filePath: string; line: number }) => void;
 }
 
-export type ShapePanelTab = 'ask' | 'thread' | 'refs';
+/** The board's one side panel (the owner, 2026-11-16: "it's just the reference panel"). */
+export type ShapePanelTab = 'refs';
 
 /** A place in a review's guided review: a file and line, a guide step (from 1), every file, or (empty) its start. */
 export interface ShapeReviewAt {
@@ -209,8 +210,9 @@ export interface ShapeSurfaceProps {
    * link (the Code view, `review`, the viewer).
    */
   onCode?: (target: ShapeCodeTarget, el: HTMLElement, version?: ShapeVersion | null) => boolean;
-  /** The Thread tab's body (an Inbox shape). Absent: no Thread tab. Mark each message `data-shape-message="<id>"`. */
-  renderThread?: (options: { flash: string | null }) => ReactNode;
+  /** A reference to a message of the board's thread was opened: the host shows it (the Inbox: the thread, at that
+   *  message). Absent: a message reference opens nothing. */
+  onMessage?: (messageId: string) => void;
   /**
    * Plannotator's board: annotation starts off behind an Annotate button, a number pops out a bubble with its
    * picture and line (a file's lines through `host.readFile`, and a PR or link with a picture opens the picture),

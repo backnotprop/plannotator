@@ -232,8 +232,6 @@ if "!MINIMAL_FLAG!"=="1" set "MINIMAL=1"
 if "!MINIMAL_FLAG!"=="0" set "MINIMAL=0"
 
 set "REPO=backnotprop/plannotator"
-set "SEM_REPO=Ataraxy-Labs/sem"
-set "SEM_VERSION=v0.8.0"
 set "INSTALL_DIR=%USERPROFILE%\.local\bin"
 
 REM First plannotator release that carries SLSA build-provenance attestations.
@@ -788,36 +786,17 @@ REM path can't redirect where curl writes the downloaded executable.
 REM The SHA256 check would pass regardless (content is authentic), but
 REM the install destination would be corrupted.
 REM
-REM The download retries a dropped connection (#2788). --retry-all-errors
-REM (curl 7.71+) also retries what plain --retry treats as final, such as an
-REM HTTP/2 stream error (curl 92); the curl.exe of an older Windows rejects
-REM it, so it gets --retry alone. The probe puts the option before --version,
-REM which ends curl's option parsing. Each attempt must connect within 30 s,
-REM gives up after a minute below 1 byte/s and after six hours (the binary
-REM is about 200 MB, so a link at about 0.08 Mbit/s still finishes; a retry
-REM starts again from zero, so it never helps a slow link), no retry starts
-REM after an hour, and when curl still ends in an HTTP/2 error, one more run
-REM goes over HTTP/1.1.
+REM The binary continues where a dropped or stalled connection stopped (see
+REM :DownloadBinary). The checksum download retries a dropped connection
+REM (#2788). --retry-all-errors (curl 7.71+) also retries what plain --retry
+REM treats as final, such as an HTTP/2 stream error (curl 92); the curl.exe of
+REM an older Windows rejects it, so it gets --retry alone. The probe puts the
+REM option before --version, which ends curl's option parsing.
 set "CURL_RETRY=--retry 3 --retry-delay 2"
 curl --retry-all-errors --version >nul 2>&1
 if !ERRORLEVEL! equ 0 set "CURL_RETRY=!CURL_RETRY! --retry-all-errors"
-set "CURL_LIMITS=--connect-timeout 30 --max-time 21600 --retry-max-time 3600 --speed-limit 1 --speed-time 60"
-set "TEMP_FILE=%TEMP%\plannotator-%RANDOM%.exe"
-curl -fsSL !CURL_RETRY! !CURL_LIMITS! "!BINARY_URL!" -o "!TEMP_FILE!"
-set "DL_STATUS=!ERRORLEVEL!"
-if "!DL_STATUS!"=="92" (
-    echo The download hit an HTTP/2 error; trying again over HTTP/1.1... >&2
-    curl -fsSL --http1.1 !CURL_RETRY! !CURL_LIMITS! "!BINARY_URL!" -o "!TEMP_FILE!"
-    set "DL_STATUS=!ERRORLEVEL!"
-)
-if !DL_STATUS! neq 0 (
-    echo Failed to download binary >&2
-    if exist "!TEMP_FILE!" del "!TEMP_FILE!"
-    exit /b 1
-)
-
 REM Download checksum to a randomized temp path for the same reason as
-REM the binary download above (concurrent collision + symlink pre-placement).
+REM the binary download below (concurrent collision + symlink pre-placement).
 set "CHECKSUM_FILE=%TEMP%\plannotator-checksum-%RANDOM%.txt"
 set "CURL_SUM_LIMITS=--connect-timeout 30 --max-time 120 --retry-max-time 120"
 curl -fsSL !CURL_RETRY! !CURL_SUM_LIMITS! "!CHECKSUM_URL!" -o "!CHECKSUM_FILE!"
@@ -834,7 +813,6 @@ if !DL_STATUS! neq 0 (
     REM at CHECKSUM_FILE. Clean it up to match the discipline used
     REM for TEMP_FILE elsewhere in this script.
     if exist "!CHECKSUM_FILE!" del "!CHECKSUM_FILE!"
-    del "!TEMP_FILE!"
     exit /b 1
 )
 
@@ -859,9 +837,26 @@ if "!CHECKSUM_SHAPE:~64,1!"=="" set "CHECKSUM_OK="
 if not "!CHECKSUM_SHAPE:~65!"=="" set "CHECKSUM_OK="
 if not defined CHECKSUM_OK (
     echo The checksum file for !BINARY_NAME! !TAG! is not a SHA-256 checksum. Nothing was changed; try again later. >&2
-    del "!TEMP_FILE!"
     exit /b 1
 )
+
+set "TEMP_FILE=%TEMP%\plannotator-%RANDOM%.exe"
+set "TAKEN="
+set "PACKED_SUFFIXES=.gz"
+if /i "!PLANNOTATOR_SKIP_COMPRESSED_DOWNLOAD!"=="1" set "PACKED_SUFFIXES="
+if /i "!PLANNOTATOR_SKIP_COMPRESSED_DOWNLOAD!"=="true" set "PACKED_SUFFIXES="
+if /i "!PLANNOTATOR_SKIP_COMPRESSED_DOWNLOAD!"=="yes" set "PACKED_SUFFIXES="
+for %%S in (!PACKED_SUFFIXES!) do if not defined TAKEN call :DownloadPacked %%S
+if defined TAKEN goto :DownloadTaken
+call :DownloadBinary
+if !DL_STATUS! neq 0 (
+    echo Failed to download binary >&2
+    if exist "!TEMP_FILE!" del "!TEMP_FILE!"
+    exit /b 1
+)
+set "TAKEN=!BINARY_NAME!"
+:DownloadTaken
+echo Downloaded !TAKEN!.
 
 REM Verify checksum using certutil
 set "ACTUAL_CHECKSUM="
@@ -1054,7 +1049,6 @@ if "!MINIMAL!"=="1" (
     exit /b 0
 )
 
-call :InstallSemSidecar
 call :InstallAgentTerminalRuntime
 call :InstallCallFlowRuntime
 
@@ -1091,6 +1085,7 @@ REM what gets copied. It never installs the plugin, never prompts, and never
 REM fails the install. Opt out with --skip-claude-plugin,
 REM PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE=1 or skipInstall.claudePlugin.
 set "CLAUDE_PLUGIN_STATE=none"
+set "CLAUDE_PLUGIN_FROM="
 call :UpdateClaudePlugin
 
 REM Codex hooks on Windows are still experimental upstream. Do not mutate
@@ -1977,6 +1972,10 @@ if exist "!PLUGIN_HOOKS!" if exist "!CLAUDE_SETTINGS!" (
 REM The full install completed: remember its command-line flags for auto-update.
 call :WriteInstallFlags
 
+REM One Windows notification when open Claude Code sessions cannot load the
+REM plugin by themselves (see :ClaudePluginReloadAlert). Never fails the install.
+call :ClaudePluginReloadAlert
+
 echo.
 exit /b 0
 
@@ -2033,6 +2032,143 @@ set "PLN_HOOKS_RE="
 goto :eof
 
 REM ======================================================================
+REM :ClaudePluginReloadAlert - one Windows notification when Claude Code
+REM sessions that are open right now cannot load the plugin by themselves,
+REM and the plugin-update page on plannotator.ai in the default browser
+REM (PLANNOTATOR_BROWSER honored; a none value opens none). Same rule and
+REM URL as notify_claude_plugin_reload in install.sh and
+REM Get-ClaudePluginReloadAlert in install.ps1 (keep the three in step):
+REM updated from a plugin older than 0.28.52 (the first release whose mod
+REM reloads itself, #2356), or not updated (manual / failed / no-marketplace)
+REM while older than this release. Never on a fresh install, a skipped or
+REM current plugin, with no live Claude Code session (sessions\<pid>.json), in
+REM CI, over SSH, in a non-interactive session or under
+REM PLANNOTATOR_TEST_SANDBOX; opt out of both with
+REM PLANNOTATOR_INSTALL_NOTIFY=0. The toast is shown by Windows PowerShell
+REM (powershell.exe -EncodedCommand), time-bounded. Inputs travel in PLN_NT_*;
+REM the command carries no double quote, percent sign or exclamation mark.
+REM ======================================================================
+:ClaudePluginReloadAlert
+set "PLN_NT_STATE=!CLAUDE_PLUGIN_STATE!"
+set "PLN_NT_FROM=!CLAUDE_PLUGIN_FROM!"
+set "PLN_NT_TAG=!TAG!"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'SilentlyContinue'; if ($env:PLANNOTATOR_INSTALL_NOTIFY -match '^(0|false|no|off|disabled)$') { exit 0 }; if ($env:PLANNOTATOR_TEST_SANDBOX -or $env:CI -or $env:SSH_CONNECTION -or $env:SSH_CLIENT -or $env:SSH_TTY) { exit 0 }; if (-not [Environment]::UserInteractive) { exit 0 }; function P($v) { if ([string]$v -match '^v?([0-9]+)[.]([0-9]+)[.]([0-9]+)$') { return $Matches[1] + '.' + $Matches[2] + '.' + $Matches[3] }; return '' }; $h = P $env:PLN_NT_FROM; if (-not $h) { exit 0 }; $w = P $env:PLN_NT_TAG; $s = $env:PLN_NT_STATE; if ($s -eq 'updated') { if ([version]$h -ge [version]'0.28.52') { exit 0 }; $k = 'reload'; $t = 'Plannotator updated its Claude Code plugin'; $b = 'Type /reload-plugins in each open Claude Code session to load it.' } elseif ($s -in @('manual', 'failed', 'no-marketplace')) { if (-not $w -or [version]$h -ge [version]$w) { exit 0 }; $k = 'manual'; $t = 'Plannotator could not update its Claude Code plugin'; $b = 'See Settings > Agents in the Plannotator Inbox for the two commands to run.' } else { exit 0 }; $d = if ($env:CLAUDE_CONFIG_DIR) { Join-Path $env:CLAUDE_CONFIG_DIR 'sessions' } else { Join-Path $env:USERPROFILE '.claude\sessions' }; $o = $false; foreach ($f in @(Get-ChildItem -LiteralPath $d -Filter '*.json' -File)) { if ($f.BaseName -match '^[0-9]+$' -and (Get-Process -Id ([int]$f.BaseName))) { $o = $true; break } }; if (-not $o) { exit 0 }; $u = 'https://plannotator.ai/plugin-update?state=' + $k + [char]38 + 'from=' + $h; if ($w) { $u = $u + [char]38 + 'to=' + $w }; $ps = Get-Command powershell.exe -CommandType Application | Select-Object -First 1; if ($ps) { $q = '$m = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]; $x = $m::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); $n = $x.GetElementsByTagName(''text''); $null = $n.Item(0).AppendChild($x.CreateTextNode(''' + $t + ''')); $null = $n.Item(1).AppendChild($x.CreateTextNode(''' + $b + ''')); $m::CreateToastNotifier(''{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe'').Show([Windows.UI.Notifications.ToastNotification]::new($x))'; $si = New-Object System.Diagnostics.ProcessStartInfo; $si.FileName = $ps.Source; $si.Arguments = '-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ' + [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($q)); $si.UseShellExecute = $false; $si.CreateNoWindow = $true; try { $p = [System.Diagnostics.Process]::Start($si); if (-not $p.WaitForExit(10000)) { $p.Kill() } } catch { } }; $br = [string]$env:PLANNOTATOR_BROWSER; if ($br.Trim().ToLowerInvariant() -in @('none', 'false', '0', 'off', 'no', 'true', '1', ':')) { exit 0 }; try { if ($br) { Start-Process -FilePath $br -ArgumentList $u -ErrorAction Stop } else { Start-Process -FilePath $u -ErrorAction Stop } } catch { }; exit 0" >nul 2>&1
+set "PLN_NT_STATE="
+set "PLN_NT_FROM="
+set "PLN_NT_TAG="
+goto :eof
+
+:DownloadPacked
+set "PK_SUFFIX=%~1"
+curl -fsSIL --connect-timeout 30 --max-time 60 "!BINARY_URL!!PK_SUFFIX!" >nul 2>&1
+if errorlevel 1 goto :eof
+set "PK_RAW_URL=!BINARY_URL!"
+set "PK_RAW_FILE=!TEMP_FILE!"
+set "BINARY_URL=!BINARY_URL!!PK_SUFFIX!"
+set "TEMP_FILE=%TEMP%\plannotator-packed-%RANDOM%!PK_SUFFIX!"
+call :DownloadBinary 2>nul
+set "PK_FILE=!TEMP_FILE!"
+set "BINARY_URL=!PK_RAW_URL!"
+set "TEMP_FILE=!PK_RAW_FILE!"
+set "PK_STATUS=1"
+set "PLN_PK_IN=!PK_FILE!"
+set "PLN_PK_OUT=!TEMP_FILE!"
+set "PLN_PK_SHA=!EXPECTED_CHECKSUM!"
+if !DL_STATUS! equ 0 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Stop'; try { $i = [System.IO.File]::OpenRead($env:PLN_PK_IN); try { $g = New-Object System.IO.Compression.GZipStream -ArgumentList $i, ([System.IO.Compression.CompressionMode]::Decompress); $o = [System.IO.File]::Create($env:PLN_PK_OUT); try { $g.CopyTo($o) } finally { $o.Dispose(); $g.Dispose() } } finally { $i.Dispose() }; $s = [System.IO.File]::OpenRead($env:PLN_PK_OUT); try { $h = [BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash($s)).Replace('-', '') } finally { $s.Dispose() }; if ($h -ne $env:PLN_PK_SHA) { exit 1 } } catch { exit 1 }; exit 0" >nul 2>&1 && set "PK_STATUS=0"
+if exist "!PK_FILE!" del "!PK_FILE!" >nul 2>&1
+if "!PK_STATUS!"=="0" (
+    set "TAKEN=!BINARY_NAME!!PK_SUFFIX!"
+) else (
+    if exist "!TEMP_FILE!" del "!TEMP_FILE!" >nul 2>&1
+)
+goto :eof
+
+REM ======================================================================
+REM :DownloadBinary - download BINARY_URL to TEMP_FILE, continuing where a
+REM dropped or stalled connection stopped instead of starting the ~200 MB
+REM binary again from zero. Same rules as download_release_binary in
+REM install.sh and Invoke-ResumableDownload in install.ps1 (keep the three in
+REM step). Each attempt is one curl run against the github.com URL (it
+REM redirects to a signed URL that expires, so that one is never reused);
+REM after the first, curl -C - asks only for the rest of the file. curl's own
+REM --retry is not used here: it throws away the bytes of the attempt it
+REM retries. Bounds: at most 30 attempts, at most 4 in a row that add no
+REM bytes, 2 s apart, and no more than 6 hours in all (curl reports the time
+REM of each attempt). Each attempt must connect within 30 s, and a stall
+REM (below 1 byte/s for 60 s) ends it so the next one continues. A server that
+REM ignores the Range (curl exit 33) gets the whole file again, and later
+REM attempts start from zero; after an HTTP/2 error (curl 92) the attempts go
+REM over HTTP/1.1. curl's error is shown only when it gives up. Sets DL_STATUS
+REM to 0, or to curl's last exit code; the SHA-256 check after it still covers
+REM the whole file. The pause is ping, not timeout, which fails when stdin is
+REM redirected. PLANNOTATOR_DOWNLOAD_STALL_SECONDS and
+REM PLANNOTATOR_DOWNLOAD_RETRY_DELAY are internal knobs for the tests.
+REM ======================================================================
+:DownloadBinary
+REM A file left at this random name by an earlier, stopped run is not ours to continue.
+if exist "!TEMP_FILE!" del "!TEMP_FILE!" >nul 2>&1
+set "DL_STALL=60"
+set "DL_N=0"
+if defined PLANNOTATOR_DOWNLOAD_STALL_SECONDS set /a "DL_N=PLANNOTATOR_DOWNLOAD_STALL_SECONDS" >nul 2>&1
+if !DL_N! gtr 0 set "DL_STALL=!DL_N!"
+set "DL_DELAY=2"
+set "DL_N=-1"
+if defined PLANNOTATOR_DOWNLOAD_RETRY_DELAY set /a "DL_N=PLANNOTATOR_DOWNLOAD_RETRY_DELAY" >nul 2>&1
+if !DL_N! geq 0 set "DL_DELAY=!DL_N!"
+set "DL_TIMES=%TEMP%\plannotator-time-%RANDOM%.txt"
+set "DL_ERR=%TEMP%\plannotator-curl-%RANDOM%.txt"
+set "DL_TRIES=0"
+set "DL_IDLE=0"
+set "DL_SPENT=0"
+set "DL_RANGE=1"
+set "DL_HTTP="
+:DownloadBinaryAttempt
+set /a DL_TRIES+=1
+set "DL_HAVE=0"
+if exist "!TEMP_FILE!" for %%A in ("!TEMP_FILE!") do set "DL_HAVE=%%~zA"
+set "DL_RESUME="
+if !DL_HAVE! gtr 0 if "!DL_RANGE!"=="1" set "DL_RESUME=-C -"
+if !DL_HAVE! gtr 0 if not "!DL_RANGE!"=="1" (
+    type nul > "!TEMP_FILE!"
+    set "DL_HAVE=0"
+)
+set /a DL_LEFT=21600-DL_SPENT
+if !DL_LEFT! lss 1 set "DL_LEFT=1"
+curl -fsSL !DL_HTTP! !DL_RESUME! --connect-timeout 30 --max-time !DL_LEFT! --speed-limit 1 --speed-time !DL_STALL! -w "%%{time_total}" "!BINARY_URL!" -o "!TEMP_FILE!" >"!DL_TIMES!" 2>"!DL_ERR!"
+set "DL_STATUS=!ERRORLEVEL!"
+if "!DL_STATUS!"=="0" goto :DownloadBinaryEnd
+if "!DL_STATUS!"=="33" set "DL_RANGE=0"
+if "!DL_STATUS!"=="92" if not defined DL_HTTP (
+    echo The download hit an HTTP/2 error; trying again over HTTP/1.1... >&2
+    set "DL_HTTP=--http1.1"
+)
+set "DL_NOW=0"
+if exist "!TEMP_FILE!" for %%A in ("!TEMP_FILE!") do set "DL_NOW=%%~zA"
+if !DL_NOW! gtr !DL_HAVE! (set "DL_IDLE=0") else (set /a DL_IDLE+=1)
+REM Seconds this attempt took: the whole part of curl's time_total.
+set "DL_TIME=0"
+if exist "!DL_TIMES!" set /p DL_TIME=<"!DL_TIMES!"
+for /f "tokens=1 delims=.," %%T in ("!DL_TIME!") do set "DL_TIME=%%T"
+set /a "DL_SPENT=DL_SPENT+DL_TIME+DL_DELAY+1" >nul 2>&1
+set "DL_GIVE_UP="
+if !DL_TRIES! geq 30 set "DL_GIVE_UP=1"
+if !DL_IDLE! geq 4 set "DL_GIVE_UP=1"
+if !DL_SPENT! geq 21600 set "DL_GIVE_UP=1"
+if defined DL_GIVE_UP (
+    if exist "!DL_ERR!" type "!DL_ERR!" >&2
+    goto :DownloadBinaryEnd
+)
+if !DL_DELAY! gtr 0 (
+    set /a "DL_N=DL_DELAY+1"
+    ping -n !DL_N! 127.0.0.1 >nul 2>&1
+)
+goto :DownloadBinaryAttempt
+:DownloadBinaryEnd
+if exist "!DL_TIMES!" del "!DL_TIMES!" >nul 2>&1
+if exist "!DL_ERR!" del "!DL_ERR!" >nul 2>&1
+goto :eof
+
+REM ======================================================================
 REM :UpdateClaudePlugin - update an installed Claude Code plugin (see the call
 REM site). Same steps as update_claude_plugin_if_installed in install.sh and
 REM Update-ClaudePluginIfInstalled in install.ps1 (keep the three in step):
@@ -2044,8 +2180,10 @@ REM Inbox starts may not have on PATH), or when opted out, run nothing; otherwis
 REM `claude plugin marketplace update plannotator` then `claude plugin update
 REM plannotator@plannotator --scope user`, each started directly with its stdin pipe
 REM closed at once (a claude that exits first is not an error) and a time
-REM limit (PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT seconds, default 120, an internal
-REM knob for the tests), and report updated / already up to date from the
+REM limit (PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT seconds, default 660, an internal
+REM knob for the tests; CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS gives Claude Code's
+REM own git clone 10 minutes instead of 120 s, unless the person set it), and
+REM report updated / already up to date from the
 REM record, or the manual commands on failure. The PowerShell reports its state
 REM as its exit code (0 none, 20 no CLI, 21 skipped, 22 updated, 23 current,
 REM 24 failed, 25 marketplace missing). A --version pin (TAG is not the release
@@ -2068,10 +2206,18 @@ if not exist "!PLN_CP_REGISTRY!" (
 )
 set "PLN_CP_SKIP="
 if "!SKIP_CLAUDE_PLUGIN!"=="1" set "PLN_CP_SKIP=!SKIP_CLAUDE_PLUGIN_SOURCE!"
+set "PLN_CP_FROM_FILE=!TEMP!\plannotator-claude-plugin-from-!RANDOM!!RANDOM!.txt"
+if exist "!PLN_CP_FROM_FILE!" del /f /q "!PLN_CP_FROM_FILE!" >nul 2>&1
 set "PLN_CP_PINNED="
 if /i not "!VERSION!"=="latest" if not "!TAG!"=="!PLANNOTATOR_UPDATE_VERSION!" set "PLN_CP_PINNED=!TAG!"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Continue'; $id = 'plannotator@plannotator'; $reg = $env:PLN_CP_REGISTRY; function Rec { if (-not (Test-Path -LiteralPath $reg -PathType Leaf)) { return $null }; try { $j = Get-Content -LiteralPath $reg -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop } catch { return $null }; if ($null -eq $j -or $null -eq $j.plugins) { return $null }; $e = $j.plugins.$id; if ($null -eq $e) { return $null }; return @($e) | Where-Object { $null -ne $_ -and ((-not $_.scope) -or ($_.scope -eq 'user')) } | Select-Object -First 1 }; function Fp($r) { if ($null -eq $r) { return '||' }; return [string]$r.version + '|' + [string]$r.gitCommitSha + '|' + [string]$r.installPath }; function Run($a) { $si = New-Object System.Diagnostics.ProcessStartInfo; $si.FileName = $cl; $si.Arguments = ($a -join ' '); $si.UseShellExecute = $false; $si.RedirectStandardInput = $true; $si.RedirectStandardOutput = $true; $si.RedirectStandardError = $true; $si.CreateNoWindow = $true; try { $p = [System.Diagnostics.Process]::Start($si) } catch { return 'could not run claude: ' + $_.Exception.Message }; try { $p.StandardInput.Close() } catch { }; $to = $p.StandardOutput.ReadToEndAsync(); $te = $p.StandardError.ReadToEndAsync(); if (-not $p.WaitForExit($secs * 1000)) { try { $p.Kill($true) } catch { try { $null = & taskkill /T /F /PID $p.Id 2>$null } catch { }; try { $p.Kill() } catch { } }; return 'timed out after ' + $secs + 's' }; $p.WaitForExit(); if ($p.ExitCode -eq 0) { return '' }; $tx = @(); foreach ($t in @($te, $to)) { $v = ''; try { if ($t.Wait(5000)) { $v = [string]$t.Result } } catch { }; $tx += $v }; foreach ($m in @($tx | ForEach-Object { $_ -split '\r?\n' })) { if ($m -match 'marketplace' -and $m -match 'not found|not exist|no such|unknown') { $script:mm = $true } }; $l = $null; foreach ($v in $tx) { $l = @($v -split '\r?\n') | ForEach-Object { ($_ -replace '[^\x20-\x7E]', '').Trim() } | Where-Object { $_ } | Select-Object -Last 1; if ($l) { break } }; if ($l -and $l.Length -gt 200) { $l = $l.Substring(0, 200) }; if ($l) { return 'claude exited ' + $p.ExitCode + ': ' + $l }; return 'claude exited ' + $p.ExitCode }; function Manual { Write-Output '  claude plugin marketplace update plannotator'; Write-Output ('  claude plugin update ' + $id + ' --scope user') }; function Readd { Write-Output '  claude plugin marketplace add backnotprop/plannotator'; Write-Output ('  claude plugin update ' + $id + ' --scope user') }; $r = Rec; if ($null -eq $r) { exit 0 }; $c = Get-Command claude -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1; foreach ($d in @(@('.local', 'bin'), @('.claude', 'local'))) { if (-not $c -and $env:USERPROFILE) { $c = Get-Command ([System.IO.Path]::Combine($env:USERPROFILE, $d[0], $d[1], 'claude')) -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 } }; if (-not $c) { exit 20 }; $cl = $c.Source; if ($env:PLN_CP_SKIP) { Write-Output ('Claude Code plugin: not updated (' + $env:PLN_CP_SKIP + ').'); exit 21 }; if ($env:PLN_CP_PINNED) { Write-Output ('Claude Code plugin: not updated: pinned to ' + $env:PLN_CP_PINNED + '; updating would install the newest plugin.'); exit 21 }; $secs = 120; if ($env:PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT -match '^[1-9][0-9]*$') { $secs = [int]$env:PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT }; $b = Fp $r; Remove-Item Env:CLAUDECODE -ErrorAction SilentlyContinue; Write-Output 'Updating the Claude Code plugin...'; $script:mm = $false; $x = Run @('plugin', 'marketplace', 'update', 'plannotator'); if (-not $x) { $x = Run @('plugin', 'update', $id, '--scope', 'user') }; if ($x -and $script:mm) { Write-Output 'Claude Code plugin: could not update it (the plannotator marketplace is not registered). Re-add it, then restart Claude Code:'; Readd; exit 25 }; if ($x) { Write-Output ('Claude Code plugin: could not update it (' + $x + '). Run these, then restart Claude Code:'); Manual; exit 24 }; $r = Rec; $a = Fp $r; $v = ''; if ($r -and $r.version) { $v = [string]$r.version }; if ($a -eq '||' -or $b -ne $a) { if ($v) { $v = ' to ' + $v }; Write-Output ('Claude Code plugin: updated' + $v + ' (restart Claude Code to load it).'); exit 22 }; if ($v) { $v = ' (' + $v + ')' }; Write-Output ('Claude Code plugin: already up to date' + $v + '.'); exit 23"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Continue'; $id = 'plannotator@plannotator'; $reg = $env:PLN_CP_REGISTRY; function Rec { if (-not (Test-Path -LiteralPath $reg -PathType Leaf)) { return $null }; try { $j = Get-Content -LiteralPath $reg -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop } catch { return $null }; if ($null -eq $j -or $null -eq $j.plugins) { return $null }; $e = $j.plugins.$id; if ($null -eq $e) { return $null }; return @($e) | Where-Object { $null -ne $_ -and ((-not $_.scope) -or ($_.scope -eq 'user')) } | Select-Object -First 1 }; function Fp($r) { if ($null -eq $r) { return '||' }; return [string]$r.version + '|' + [string]$r.gitCommitSha + '|' + [string]$r.installPath }; function Run($a) { $si = New-Object System.Diagnostics.ProcessStartInfo; $si.FileName = $cl; $si.Arguments = ($a -join ' '); $si.UseShellExecute = $false; $si.RedirectStandardInput = $true; $si.RedirectStandardOutput = $true; $si.RedirectStandardError = $true; $si.CreateNoWindow = $true; try { $p = [System.Diagnostics.Process]::Start($si) } catch { return 'could not run claude: ' + $_.Exception.Message }; try { $p.StandardInput.Close() } catch { }; $to = $p.StandardOutput.ReadToEndAsync(); $te = $p.StandardError.ReadToEndAsync(); if (-not $p.WaitForExit($secs * 1000)) { try { $p.Kill($true) } catch { try { $null = & taskkill /T /F /PID $p.Id 2>$null } catch { }; try { $p.Kill() } catch { } }; return 'timed out after ' + $secs + 's' }; $p.WaitForExit(); if ($p.ExitCode -eq 0) { return '' }; $tx = @(); foreach ($t in @($te, $to)) { $v = ''; try { if ($t.Wait(5000)) { $v = [string]$t.Result } } catch { }; $tx += $v }; foreach ($m in @($tx | ForEach-Object { $_ -split '\r?\n' })) { if ($m -match 'marketplace' -and $m -match 'not found|not exist|no such|unknown') { $script:mm = $true } }; $l = $null; foreach ($v in $tx) { $l = @($v -split '\r?\n') | ForEach-Object { ($_ -replace '[^\x20-\x7E]', '').Trim() } | Where-Object { $_ } | Select-Object -Last 1; if ($l) { break } }; if ($l -and $l.Length -gt 200) { $l = $l.Substring(0, 200) }; if ($l) { return 'claude exited ' + $p.ExitCode + ': ' + $l }; return 'claude exited ' + $p.ExitCode }; function Manual { Write-Output '  claude plugin marketplace update plannotator'; Write-Output ('  claude plugin update ' + $id + ' --scope user') }; function Readd { Write-Output '  claude plugin marketplace add backnotprop/plannotator'; Write-Output ('  claude plugin update ' + $id + ' --scope user') }; $r = Rec; if ($null -eq $r) { exit 0 }; if ($env:PLN_CP_FROM_FILE) { try { Set-Content -LiteralPath $env:PLN_CP_FROM_FILE -Value ([string]$r.version) -NoNewline } catch { } }; $c = Get-Command claude -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1; foreach ($d in @(@('.local', 'bin'), @('.claude', 'local'))) { if (-not $c -and $env:USERPROFILE) { $c = Get-Command ([System.IO.Path]::Combine($env:USERPROFILE, $d[0], $d[1], 'claude')) -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 } }; if (-not $c) { exit 20 }; $cl = $c.Source; if ($env:PLN_CP_SKIP) { Write-Output ('Claude Code plugin: not updated (' + $env:PLN_CP_SKIP + ').'); exit 21 }; if ($env:PLN_CP_PINNED) { Write-Output ('Claude Code plugin: not updated: pinned to ' + $env:PLN_CP_PINNED + '; updating would install the newest plugin.'); exit 21 }; $secs = 660; if ($env:PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT -match '^[1-9][0-9]*$') { $secs = [int]$env:PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT }; if (-not $env:CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS) { $env:CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS = '600000' }; $b = Fp $r; Remove-Item Env:CLAUDECODE -ErrorAction SilentlyContinue; Write-Output 'Updating the Claude Code plugin...'; $script:mm = $false; $x = Run @('plugin', 'marketplace', 'update', 'plannotator'); if (-not $x) { $x = Run @('plugin', 'update', $id, '--scope', 'user') }; if ($x -and $script:mm) { Write-Output 'Claude Code plugin: could not update it (the plannotator marketplace is not registered). Re-add it, then restart Claude Code:'; Readd; exit 25 }; if ($x) { Write-Output ('Claude Code plugin: could not update it (' + $x + '). Run these, then restart Claude Code:'); Manual; exit 24 }; $r = Rec; $a = Fp $r; $v = ''; if ($r -and $r.version) { $v = [string]$r.version }; if ($a -eq '||' -or $b -ne $a) { if ($v) { $v = ' to ' + $v }; Write-Output ('Claude Code plugin: updated' + $v + ' (restart Claude Code to load it).'); exit 22 }; if ($v) { $v = ' (' + $v + ')' }; Write-Output ('Claude Code plugin: already up to date' + $v + '.'); exit 23"
 set "PLN_CP_RC=!ERRORLEVEL!"
+set "CLAUDE_PLUGIN_FROM="
+if exist "!PLN_CP_FROM_FILE!" (
+    set /p CLAUDE_PLUGIN_FROM=<"!PLN_CP_FROM_FILE!"
+    del /f /q "!PLN_CP_FROM_FILE!" >nul 2>&1
+)
+set "PLN_CP_FROM_FILE="
 if "!PLN_CP_RC!"=="20" set "CLAUDE_PLUGIN_STATE=manual"
 if "!PLN_CP_RC!"=="21" set "CLAUDE_PLUGIN_STATE=skipped"
 if "!PLN_CP_RC!"=="22" set "CLAUDE_PLUGIN_STATE=updated"
@@ -2366,102 +2512,6 @@ if not "!INSTALL_CALL_FLOW!"=="1" (
 if !ERRORLEVEL! neq 0 (
     echo Call-flow runtime install failed; it remains available as an in-app opt-in install
 )
-goto :eof
-
-REM ======================================================================
-REM Optional semantic diff sidecar install. Non-fatal: Plannotator remains
-REM installed if sem download, checksum, or extraction fails.
-REM ======================================================================
-:InstallSemSidecar
-if /i "!PLANNOTATOR_SKIP_SEM_INSTALL!"=="1" (
-    echo Skipping semantic diff sidecar install ^(PLANNOTATOR_SKIP_SEM_INSTALL is set^)
-    goto :eof
-)
-if /i "!PLANNOTATOR_SKIP_SEM_INSTALL!"=="true" (
-    echo Skipping semantic diff sidecar install ^(PLANNOTATOR_SKIP_SEM_INSTALL is set^)
-    goto :eof
-)
-if /i "!PLANNOTATOR_SKIP_SEM_INSTALL!"=="yes" (
-    echo Skipping semantic diff sidecar install ^(PLANNOTATOR_SKIP_SEM_INSTALL is set^)
-    goto :eof
-)
-
-set "SEM_ASSET="
-if /i "!PLATFORM!"=="win32-x64" set "SEM_ASSET=sem-windows-x86_64.zip"
-if not defined SEM_ASSET (
-    echo Skipping semantic diff sidecar install ^(sem does not publish !PLATFORM!^)
-    goto :eof
-)
-
-set "SEM_DIR=!_CONFIG_DIR!\vendor\sem\!SEM_VERSION!"
-set "SEM_PATH=!SEM_DIR!\sem.exe"
-if exist "!SEM_PATH!" (
-    "!SEM_PATH!" --version 2>nul | findstr /r /c:"^sem " >nul 2>&1
-    if !ERRORLEVEL! equ 0 (
-        echo Semantic diff sidecar already installed at !SEM_PATH!
-        goto :eof
-    )
-)
-
-set "SEM_BASE_URL=https://github.com/!SEM_REPO!/releases/download/!SEM_VERSION!"
-set "SEM_ARCHIVE=%TEMP%\plannotator-sem-%RANDOM%.zip"
-set "SEM_EXTRACT=%TEMP%\plannotator-sem-%RANDOM%"
-mkdir "!SEM_EXTRACT!" >nul 2>&1
-
-REM Bounded so a slow/hung download of this optional sidecar can't wedge an
-REM install where plannotator already landed. Opt out with PLANNOTATOR_SKIP_SEM_INSTALL=1.
-curl -fsSL --connect-timeout 10 --max-time 120 "!SEM_BASE_URL!/!SEM_ASSET!" -o "!SEM_ARCHIVE!"
-if !ERRORLEVEL! neq 0 (
-    echo Skipping semantic diff sidecar install ^(download failed^)
-    goto :sem_cleanup
-)
-
-REM Pinned for SEM_VERSION, not read from the release's checksums.txt (same
-REM connection as the archive). Keep in step with install.sh / install.ps1.
-set "EXPECTED_SEM_CHECKSUM="
-if /i "!SEM_ASSET!"=="sem-windows-x86_64.zip" set "EXPECTED_SEM_CHECKSUM=2a4b57f8368f0c88ded52f9ecbe0a85771008e37aa09215fc9ce750adab03d06"
-if not defined EXPECTED_SEM_CHECKSUM (
-    echo Skipping semantic diff sidecar install ^(checksum missing for !SEM_ASSET!^)
-    goto :sem_cleanup
-)
-
-set "ACTUAL_SEM_CHECKSUM="
-for /f "skip=1 tokens=*" %%i in ('certutil -hashfile "!SEM_ARCHIVE!" SHA256') do (
-    if not defined ACTUAL_SEM_CHECKSUM (
-        set "ACTUAL_SEM_CHECKSUM=%%i"
-        set "ACTUAL_SEM_CHECKSUM=!ACTUAL_SEM_CHECKSUM: =!"
-    )
-)
-if /i "!ACTUAL_SEM_CHECKSUM!" neq "!EXPECTED_SEM_CHECKSUM!" (
-    echo Skipping semantic diff sidecar install ^(checksum mismatch^)
-    goto :sem_cleanup
-)
-
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Force -Path $env:SEM_ARCHIVE -DestinationPath $env:SEM_EXTRACT"
-if !ERRORLEVEL! neq 0 (
-    echo Skipping semantic diff sidecar install ^(extract failed^)
-    goto :sem_cleanup
-)
-set "EXTRACTED_SEM="
-for /f "usebackq delims=" %%i in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -Path $env:SEM_EXTRACT -Filter sem.exe -Recurse -File | Select-Object -First 1 -ExpandProperty FullName"`) do (
-    set "EXTRACTED_SEM=%%i"
-)
-if not defined EXTRACTED_SEM (
-    echo Skipping semantic diff sidecar install ^(binary missing from archive^)
-    goto :sem_cleanup
-)
-
-if not exist "!SEM_DIR!" mkdir "!SEM_DIR!"
-copy /y "!EXTRACTED_SEM!" "!SEM_PATH!" >nul
-if !ERRORLEVEL! equ 0 (
-    echo Semantic diff sidecar installed to !SEM_PATH!
-) else (
-    echo Skipping semantic diff sidecar install ^(copy failed^)
-)
-
-:sem_cleanup
-if exist "!SEM_ARCHIVE!" del "!SEM_ARCHIVE!"
-if exist "!SEM_EXTRACT!" rmdir /s /q "!SEM_EXTRACT!"
 goto :eof
 
 REM ======================================================================

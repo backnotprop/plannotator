@@ -24,6 +24,7 @@
  * There is no auto-detection anywhere in this module.
  */
 
+import { connectCustomSyntaxThemes, type CustomSyntaxPierre } from './customSyntaxThemes';
 import { themedLinesToHtml, tokenStyle, type ThemedTokenish } from './codeHighlightHtml';
 
 type PierreModule = typeof import('@pierre/diffs');
@@ -70,7 +71,26 @@ const ready = new Set<string>();
 const rejected = new Map<string, unknown>();
 const inflight = new Map<string, Promise<boolean>>();
 
-const pairKey = (lang: string, theme: string) => `${lang} ${theme}`;
+/**
+ * Fence labels Shiki does not know, each to the grammar of the language it
+ * names. Shiki knows none of these keys, so a fence that is coloured with its
+ * own label keeps that grammar; any other unknown label stays plain.
+ */
+const FENCE_LANGUAGE_ALIASES: ReadonlyMap<string, string> = new Map([
+  ['patch', 'diff'],
+  ['env', 'dotenv'],
+  ['postgresql', 'sql'],
+  ['mysql', 'sql'],
+  ['gradle', 'groovy'],
+  ['hpp', 'cpp'],
+]);
+
+/** The grammar `lang` is highlighted with: its alias when it has one, else itself. */
+export function fenceGrammar(lang: string): string {
+  return FENCE_LANGUAGE_ALIASES.get(lang) ?? lang;
+}
+
+const pairKey = (lang: string, theme: string) => `${fenceGrammar(lang)} ${theme}`;
 
 function loadPierre(): Promise<PierreModule | undefined> {
   pierreLoad ??= import('@pierre/diffs').then(
@@ -113,6 +133,7 @@ const TOKENIZE_PASSES = 3;
 /** Shiki's tokens for `code`, or null when the pair is not attached (or the tokenizer threw). */
 function themedLines(code: string, lang: string, theme: string): ThemedTokenish[][] | null {
   const mod = pierre;
+  lang = fenceGrammar(lang);
   if (!mod || !ready.has(pairKey(lang, theme))) return null;
   const highlighter = mod.getHighlighterIfLoaded();
   if (!highlighter) {
@@ -178,6 +199,7 @@ export function highlightToRuns(code: string, lang: string, theme: string): High
  * tagged with something made up: that block simply stays plain.
  */
 export function ensureHighlight(lang: string, theme: string): Promise<boolean> {
+  lang = fenceGrammar(lang);
   const key = pairKey(lang, theme);
   if (ready.has(key)) return Promise.resolve(true);
   if (rejected.has(key)) return Promise.resolve(false);
@@ -187,6 +209,8 @@ export function ensureHighlight(lang: string, theme: string): Promise<boolean> {
   const load = loadPierre()
     .then(async (mod) => {
       if (!mod) return false;
+      // A custom theme's code colours are themes Pierre resolves by name (customSyntaxThemes.ts).
+      connectCustomSyntaxThemes(mod as unknown as CustomSyntaxPierre);
       await mod.getSharedHighlighter({
         themes: [theme],
         langs: [lang],
@@ -525,23 +549,24 @@ export function applyHighlight(
     notifyHighlightSwap(el);
     return;
   }
+  const grammar = fenceGrammar(lang);
 
   if (canDefer()) {
     // What it waited to show is not what it shows now (a new theme waits for its own attach first).
     if (pending.has(el)) forgetPending(el);
     el.textContent = code;
     notifyHighlightSwap(el);
-    const job = { code, lang, theme, seq };
-    if (pierre && ready.has(pairKey(lang, theme))) waitForView(el, job);
+    const job = { code, lang: grammar, theme, seq };
+    if (pierre && ready.has(pairKey(grammar, theme))) waitForView(el, job);
     else
-      void ensureHighlight(lang, theme).then((ok) => {
+      void ensureHighlight(grammar, theme).then((ok) => {
         if (ok && renderSeq.get(el) === seq && el.isConnected) waitForView(el, job);
       });
     return;
   }
   if (pending.has(el)) forgetPending(el);
 
-  const immediate = highlightToHtml(code, lang, theme);
+  const immediate = highlightToHtml(code, grammar, theme);
   if (immediate !== null) {
     el.innerHTML = immediate;
     notifyHighlightSwap(el);
@@ -550,9 +575,9 @@ export function applyHighlight(
 
   el.textContent = code;
   notifyHighlightSwap(el);
-  void ensureHighlight(lang, theme).then((ok) => {
+  void ensureHighlight(grammar, theme).then((ok) => {
     if (!ok || renderSeq.get(el) !== seq || !el.isConnected) return;
-    const html = highlightToHtml(code, lang, theme);
+    const html = highlightToHtml(code, grammar, theme);
     if (html === null) return;
     el.innerHTML = html;
     notifyHighlightSwap(el);
