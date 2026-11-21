@@ -108,8 +108,10 @@ interface DiagramRenderer {
 
 /** Elements that never belong in a rendered diagram. DOMPurify's profiles
  * already drop every one of them; the sweep below is the belt that does not
- * depend on which profile a later config edit turns on. */
-const FORBIDDEN_ELEMENTS = 'script, iframe, object, embed, link, meta, mglyph';
+ * depend on which profile a later config edit turns on. The MathML ones:
+ * `mglyph` loads an image, `maction` is a link or status action, and
+ * `annotation-xml` can hold html; a KaTeX label needs none of them. */
+const FORBIDDEN_ELEMENTS = 'script, iframe, object, embed, link, meta, mglyph, maction, annotation-xml';
 
 /**
  * The belt over the engine's output (see the header). DOMPurify parses the
@@ -134,7 +136,7 @@ export function sanitizeDiagramSvg(svg: string): SVGSVGElement | null {
 
 /**
  * Step one of the sanitizer: DOMPurify parses the markup under the svg,
- * svg-filter and html profiles and hands back a detached fragment; the svg
+ * svg-filter, html and MathML profiles and hands back a detached fragment; the svg
  * root is adopted into the page's document so the node the canvas mounts
  * belongs to it. Null when the markup carries no svg root, when there is no
  * document, or when the fragment cannot be adopted.

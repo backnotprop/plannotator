@@ -297,6 +297,26 @@ describe.if(hasDom)('scrubDiagramSvg (the belt over the engine output)', () => {
     expect(svg.getElementsByTagNameNS(MATHML, 'mglyph').length).toBe(0);
     expect(svg.contains(mn)).toBe(true);
   });
+
+  test('drops maction and annotation-xml without the parse\'s help, and keeps the formula', () => {
+    // What regresses: a config edit that lets either through the parse also
+    // gets it past the belt (maction is a link or status action, annotation-xml
+    // can hold html).
+    const { MATHML, svg, math, mrow } = mathLabel();
+    const action = document.createElementNS(MATHML, 'maction');
+    action.setAttribute('actiontype', 'statusline');
+    action.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', 'https://example.com/x');
+    action.append(document.createElementNS(MATHML, 'mi'));
+    const annotation = document.createElementNS(MATHML, 'annotation-xml');
+    annotation.setAttribute('encoding', 'text/html');
+    annotation.append(document.createElement('div'));
+    math.append(action, annotation);
+    scrubDiagramSvg(svg);
+    expect(svg.getElementsByTagNameNS(MATHML, 'maction').length).toBe(0);
+    expect(svg.getElementsByTagNameNS(MATHML, 'annotation-xml').length).toBe(0);
+    expect(svg.contains(mrow)).toBe(true);
+    expect(math.textContent).toBe('f=0.30');
+  });
 });
 
 describe.if(hasDom)('edge labels, duplicate labels, and the hit layer', () => {
