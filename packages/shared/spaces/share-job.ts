@@ -189,6 +189,8 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
       needs_keep: needsKeep && !running,
       own,
       limit_own: phase === "over_limit" && overOwn,
+      // A share from here keeps the record's mode (`share`): never shown as a choice once a record is there.
+      started: !!record,
       mode: record?.mode ?? "all",
       versions: Math.max(0, ...source.local.documents.map((d) => d.versions.length)),
       changes: phase === "shared" ? plan.changes : 0,

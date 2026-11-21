@@ -321,7 +321,8 @@ export interface SharePanelProps {
 export function SharePanel({ status, view, onView, mode, onMode, actions }: SharePanelProps) {
   const [deleteFailed, setDeleteFailed] = useState(false);
   const link = linkOf(status);
-  const shownMode = status.phase === 'none' ? mode : status.mode;
+  // The switch's side only before any share was started: after that a share goes on with the record's mode.
+  const shownMode = status.phase === 'none' && !status.started ? mode : status.mode;
 
   if (view === 'stop') {
     return (
@@ -422,10 +423,10 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
               ) : undefined
             }
           />
-          {status.versions > 1 && <VersionSwitch mode={mode} onMode={onMode} />}
+          {status.versions > 1 && !status.started && <VersionSwitch mode={mode} onMode={onMode} />}
           {access()}
           <Foot left={detailsLink}>
-            <Btn kind="pri" onClick={() => actions.share({ mode })} name="share">
+            <Btn kind="pri" onClick={() => actions.share({ mode: shownMode })} name="share">
               {SHARE_WORDS.share}
             </Btn>
           </Foot>
@@ -546,7 +547,8 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
       );
     case 'over_limit':
       // The person's own space: no sign-in can help. Try again sends once more (room may have been made in the
-      // space) and comes back here when it is still over; nothing tries by itself.
+      // space) and comes back here when it is still over; nothing tries by itself. Open in Spaces is the thing to
+      // do meanwhile: make room there.
       if (status.limit_own) {
         return (
           <>
@@ -555,6 +557,7 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
             </Msg>
             {link && <LinkRow link={link} primary={false} />}
             <Foot>
+              {link && <LinkBtn href={link} name="open-space">{SHARE_WORDS.openInSpaces}</LinkBtn>}
               <Btn kind="pri" onClick={() => actions.share({})} name="try-again">
                 {SHARE_WORDS.tryAgain}
               </Btn>

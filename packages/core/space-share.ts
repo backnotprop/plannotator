@@ -659,6 +659,11 @@ export interface SpaceShareStatus {
   own?: boolean;
   /** Over the limit of a space that is the person's own (or was started signed in): no sign-in can help. */
   limit_own?: boolean;
+  /**
+   * A share of this plan was started (its space may be there already): a share from here goes on with `mode`, so the
+   * first-share state shows no switch and its Details follow `mode`.
+   */
+  started?: boolean;
   details: Record<SpaceShareMode, SpaceShareDetails>;
 }
 

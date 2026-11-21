@@ -248,14 +248,16 @@ describe("over the limit", () => {
     saveSpacesCredential(s.dataDir, HOST, { token: s.spaces.issueToken("Maya Chen"), name: "Maya Chen" });
     s.world.store.addArtifact(id, { asset_path: "a.bin", content_type: "application/octet-stream", created_at: new Date().toISOString(), bytes: new Uint8Array([1, 2, 3]) });
     s.spaces.failNext(/assets\//, 413, "quota_exceeded");
-    s.jobs.share(id, {});
+    expect(s.jobs.status(id)).toMatchObject({ phase: "none", started: false });
+    s.jobs.share(id, { mode: "newest" });
     await s.settle();
     expect(s.jobs.status(id)).toMatchObject({ phase: "over_limit", limit_own: true });
     s.world.store.addArtifact(id, { asset_path: "a.bin", content_type: "application/octet-stream", created_at: new Date().toISOString(), bytes: new Uint8Array([1]) });
-    expect(s.jobs.status(id)).toMatchObject({ phase: "none", limit_own: false, progress: null, access: "private" });
-    s.jobs.share(id, {});
+    // The space is there: the first-share state goes on with the record's mode, which a share from here keeps.
+    expect(s.jobs.status(id)).toMatchObject({ phase: "none", limit_own: false, progress: null, access: "private", started: true, mode: "newest" });
+    s.jobs.share(id, { mode: "all" });
     await s.settle();
-    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", kept: true });
+    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", kept: true, mode: "newest" });
     expect(s.spaces.spaces.size).toBe(1);
   });
 
