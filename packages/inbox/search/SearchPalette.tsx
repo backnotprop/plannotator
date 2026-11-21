@@ -23,7 +23,7 @@
 
 import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { INBOX_SEARCH_GROUPS, middleCutInboxName, type InboxSearchGroupId, type InboxSearchRow, type InboxSearchSort } from '@plannotator/core/inbox-search';
-import { inboxApi, saveRecentSearch, searchInbox, type SearchModel } from '../api';
+import { inboxApi, saveRecentSearch, searchInbox, type MachineView, type SearchModel } from '../api';
 
 import { HostMark, Icon } from '../icons';
 import { rowTintTitle, tintAttrs, type RowTint } from '../tagColours';
@@ -85,6 +85,7 @@ export interface SearchPaletteProps {
   /** The projects for the Project chip, with their names as the person reads them. */
   projects: readonly { id: string; name: string; root: string; display_name?: unknown }[];
   projectLabels?: ReadonlyMap<string, string>;
+  linkedMachines?: readonly MachineView[];
   /** `opened`: a result opened here (focus goes to it); `dismissed`: focus goes back to what opened the palette. */
   onClose: (reason: 'dismissed' | 'opened') => void;
   /** Open a result in this tab: the window writes the hash (a new history entry) and lands on the message. */
@@ -458,7 +459,7 @@ function keepInputFocus(event: ReactMouseEvent): void {
 }
 
 export default function SearchPalette(props: SearchPaletteProps) {
-  const { open, phone, currentProject, projects, projectLabels, onClose, onOpenResult, actions, onAction, shapes } = props;
+  const { open, phone, currentProject, projects, projectLabels, linkedMachines, onClose, onOpenResult, actions, onAction, shapes } = props;
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   /** An IME composition is under way in the input (its Escape is not the palette's). */
@@ -497,6 +498,8 @@ export default function SearchPalette(props: SearchPaletteProps) {
   const names = useMemo(() => projectLabels ?? projectNames(projects), [projectLabels, projects]);
   const projectName = useCallback((id: string) => names.get(id) ?? id, [names]);
   const projectNameRef = useRef(projectName);
+  const linkedRef = useRef(linkedMachines);
+  linkedRef.current = linkedMachines;
   projectNameRef.current = projectName;
 
   // ── the dialog ──
@@ -606,7 +609,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
           const said = nextType ? typeCountWords(model, query, nextType) : countWords(model, query, filtersSet(nextFilters));
           // Found inside a filter: the count says so, as the line under the list does ("2 results in 2 groups. Searched only plannotator").
           const only = said && query.trim() && filtersSet(nextFilters) && !said.startsWith('No ') ? scopeWords(nextFilters, projectNameRef.current, nextType, tagWords(nextFilters.tags, tagListRef.current)).join(', ') : '';
-          setLive(model.unanswered?.length && passes === 'merged' ? unansweredWords(model.unanswered) : only ? `${said}. Searched only ${only}` : said);
+          setLive(model.unanswered?.length && passes === 'merged' ? unansweredWords(model.unanswered, linkedRef.current) : only ? `${said}. Searched only ${only}` : said);
         })
         .catch((cause) => {
           if (seq !== requestSeq.current || (cause instanceof DOMException && cause.name === 'AbortError')) return;
@@ -1083,7 +1086,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
         <div className="ib-sp-empty" data-search-none="" data-search-unanswered={unansweredEmpty ? '' : undefined}>
           <span>
             {unansweredEmpty ? (
-              unansweredWords(unanswered)
+              unansweredWords(unanswered, linkedMachines)
             ) : answered.q ? (
               <>
                 No matches for &ldquo;<bdi>{answered.q}</bdi>&rdquo;
@@ -1105,7 +1108,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
         <>
           {renderGroups()}
           <div className="ib-sp-empty" data-search-none="" data-search-unanswered="">
-            <span>{unansweredWords(unanswered)}</span>
+            <span>{unansweredWords(unanswered, linkedMachines)}</span>
           </div>
         </>
       );
@@ -1337,7 +1340,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
       )}
       {unanswered.length > 0 && !unansweredEmpty && (
         <div className="ib-sp-scope" data-search-unanswered="" onMouseDown={keepInputFocus}>
-          {unansweredWords(unanswered)}
+          {unansweredWords(unanswered, linkedMachines)}
         </div>
       )}
       {!phone && <KeyFooter />}

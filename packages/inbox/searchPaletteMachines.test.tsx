@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxSearchAnswer, InboxSearchThreadRow } from '@plannotator/core/inbox-search';
 import { rememberMachine, resetMachineRoutes, setSelfMachine } from './inboxUrl';
+import type { MachineView } from './api';
 
 const hasDom = typeof document !== 'undefined';
 const { default: SearchPalette } = (hasDom ? await import('./search/SearchPalette') : {}) as typeof import('./search/SearchPalette');
@@ -11,6 +12,11 @@ type Answer = InboxSearchAnswer & { serverSession: string; recent_searches?: str
 
 const SELF = `ibx_01K${'0'.repeat(22)}S`;
 const MAC = `ibx_01K${'0'.repeat(22)}M`;
+const MINI = `ibx_01K${'0'.repeat(22)}N`;
+const linked = [
+  { id: MAC, name: 'MacBook', self: false, state: 'offline', since: '2026-11-20T09:00:00Z' },
+  { id: MINI, name: 'Mini', self: false, state: 'online', since: '2026-11-20T09:00:00Z' },
+] as unknown as MachineView[];
 const here = { id: 'prj_01M4V7JERHR0Y3XQERK1MR604A', name: 'api' };
 const far = { id: 'prj_01M4V7JERHR0Y3XQERK1MR604C', name: 'web' };
 
@@ -62,6 +68,7 @@ async function render(): Promise<void> {
         currentProject={null}
         projects={[{ ...here, root: '/src/api' }, { ...far, root: '/src/web' }]}
         projectLabels={new Map([[here.id, 'api'], [far.id, 'web · MacBook']])}
+        linkedMachines={linked}
         onClose={() => {}}
         onOpenResult={(hash) => opened.push(hash)}
       />,
@@ -123,22 +130,22 @@ test.skipIf(!hasDom)('the highlighted row stays highlighted when the other machi
   expect(opened[0]).toContain('thr_here2');
 });
 
-test.skipIf(!hasDom)('a machine that did not answer is named: under the results, and in place of No results for its project', async () => {
+test.skipIf(!hasDom)('machines that did not answer are named, asleep in the list’s words: under the results, and in place of No results for its project', async () => {
   rememberMachine([far.id], MAC);
   respond = async (url) => {
-    if (url.searchParams.get('project') === far.id) return merged(url) ? answer({ totals: { threads: 0, messages: 0, files: 0, projects: 0 }, groups: { threads: [] }, recent: null, unanswered: ['MacBook'] }) : Promise.reject(new Error('asked this machine for another machine’s project'));
+    if (url.searchParams.get('project') === far.id) return merged(url) ? answer({ totals: { threads: 0, messages: 0, files: 0, projects: 0 }, groups: { threads: [] }, recent: null, unanswered: [{ id: MAC, name: 'MacBook' }] }) : Promise.reject(new Error('asked this machine for another machine’s project'));
     if (!url.searchParams.get('q')) return answer({});
-    return found([threadRow('thr_here1')], merged(url) ? { unanswered: ['MacBook'] } : {});
+    return found([threadRow('thr_here1')], merged(url) ? { unanswered: [{ id: MAC, name: 'MacBook' }, { id: MINI, name: 'Mini' }] } : {});
   };
   await render();
   await type('deploy');
   await waitFor(() => host!.querySelector('[data-search-unanswered]') !== null);
-  expect(host!.querySelector('[data-search-unanswered]')!.textContent).toBe('MacBook didn’t answer');
+  expect(host!.querySelector('[data-search-unanswered]')!.textContent).toBe('MacBook is asleep · Mini didn’t answer');
   expect(ids()).toEqual(['thr_here1']);
   await type('');
   await act(async () => host!.querySelector<HTMLElement>('[data-chip="project"]')!.click());
   await act(async () => [...host!.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) => item.textContent === 'web · MacBook')!.click());
   await waitFor(() => host!.querySelector('[data-search-none]') !== null);
-  expect(host!.querySelector('[data-search-none] > span')!.textContent).toBe('MacBook didn’t answer');
+  expect(host!.querySelector('[data-search-none] > span')!.textContent).toBe('MacBook is asleep');
   expect(host!.textContent).not.toContain('No threads match');
 });

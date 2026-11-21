@@ -101,7 +101,7 @@ export async function searchAcrossMachines(input: SearchAcrossInput): Promise<An
         totals: totals as Answer["totals"],
         groups,
         recent: null,
-        ...(share ? {} : { unanswered: [nameOf(owner)] }),
+        ...(share ? {} : { unanswered: [{ id: owner, name: nameOf(owner) }] }),
       };
     }
   }
@@ -123,7 +123,7 @@ export async function searchAcrossMachines(input: SearchAcrossInput): Promise<An
     ),
   ]);
   const answered = theirs.filter((one): one is { machine: InboxSearchMachine; shares: InboxSearchAnswer[] } => one.shares !== null);
-  const missing = theirs.filter((one) => one.shares === null).map((one) => one.machine.name);
+  const missing = theirs.filter((one) => one.shares === null).map(({ machine }) => ({ id: machine.id, name: machine.name }));
   const unanswered = missing.length > 0 ? { unanswered: missing } : {};
 
   if (answer.recent) {

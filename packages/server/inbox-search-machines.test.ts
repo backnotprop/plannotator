@@ -137,7 +137,7 @@ test("a machine that never answers costs one wait, Show all pages in the first v
   const page = await ask("q=zebracorn&group=threads&limit=50");
   const next = await ask("q=zebracorn&group=threads&offset=50&limit=50");
   for (const { answer, took } of [first, page, next]) {
-    expect(answer.unanswered).toEqual(["Mini", "Laptop"]);
+    expect(answer.unanswered).toEqual([{ id: C, name: "Mini" }, { id: D, name: "Laptop" }]);
     expect(took).toBeLessThan(550);
   }
   expect(page.answer.totals.threads).toBe(70);
@@ -149,7 +149,7 @@ test("a machine that never answers costs one wait, Show all pages in the first v
   expect(new Set(all.slice(0, 10).map((row) => row.project.machine ?? "here"))).toEqual(new Set([B, "here"]));
 
   const away = await ask(`q=&project=${id("prj", "D")}`);
-  expect(away.answer.unanswered).toEqual(["Laptop"]);
+  expect(away.answer.unanswered).toEqual([{ id: D, name: "Laptop" }]);
   expect(away.answer.totals.threads).toBe(0);
   a.routes.dispose();
   b.routes.dispose();

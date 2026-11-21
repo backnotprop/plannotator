@@ -1,6 +1,7 @@
 import type { InboxSearchRow } from '@plannotator/core/inbox-search';
-import type { SearchModel } from '../api';
 import { machineOf, selfMachineId } from '../inboxUrl';
+import { awayLine } from '../machines';
+import type { MachineView, SearchModel } from '../api';
 import type { SearchFilters, SearchOption } from './model';
 
 export type SearchPasses = 'local' | 'merged' | 'both';
@@ -40,7 +41,9 @@ export function keepingRow(model: SearchModel, option: SearchOption | undefined,
   return { ...model, groups: { ...model.groups, [group]: kept(model.groups[group] ?? [], before.groups?.[group], row) } };
 }
 
-export function unansweredWords(names: readonly string[]): string {
-  const list = names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
-  return `${list} didn’t answer`;
+export function unansweredWords(missing: readonly { id: string; name: string }[], linked: readonly MachineView[] = []): string {
+  const away = missing.map((one) => linked.find((machine) => machine.id === one.id)).map((machine) => (machine ? awayLine(machine, null) : null));
+  const silent = missing.filter((_, at) => !away[at]).map((one) => one.name);
+  const list = silent.length < 2 ? silent.join('') : `${silent.slice(0, -1).join(', ')} and ${silent.at(-1)}`;
+  return [...away.filter((words): words is string => Boolean(words)), ...(list ? [`${list} didn’t answer`] : [])].join(' · ');
 }
