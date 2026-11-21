@@ -14,6 +14,10 @@
  *    their `att_` id or their name when only one has it), or a drawing the
  *    person made on an image, named in their own message's words by its place
  *    in the Inbox's markups folder (`<sha256>.png`);
+ *  - on a cloud agent's own message, a picture its body shows only when it was
+ *    captured at send from a file it attached (the Inbox's blob of the upload,
+ *    `inboxCloudSendPictures`): never one read from this computer's disk, even
+ *    if the capture code ever recorded one;
  *  - the bytes are the Inbox's own copy: the sent blob (`inbox/blobs/<sha256>`,
  *    opened as the browser's `?version=sent` download opens it, no symlink
  *    followed) or the drawing (`inbox/markups/<name>`, the same); the file's
@@ -22,13 +26,14 @@
  *    are refused.
  */
 
-import { constants, lstatSync } from "node:fs";
+import { constants, lstatSync, realpathSync } from "node:fs";
 import { open, type FileHandle } from "node:fs/promises";
 import { join, sep } from "node:path";
 import { isDotenvFileName } from "@plannotator/core/annotatable";
-import { INBOX_UPLOAD_MAX_BYTES, isInboxTextKind, type InboxAttachment, type InboxMessageWire } from "@plannotator/core/inbox-types";
+import { isInboxCloudAuthor } from "@plannotator/core/inbox-cloud";
+import { INBOX_UPLOAD_MAX_BYTES, isInboxTextKind, type InboxAttachment, type InboxInlineImage, type InboxMessageWire } from "@plannotator/core/inbox-types";
 import { INBOX_AGENT_FETCH_FILE } from "@plannotator/shared/inbox/agent-pairing";
-import { openInboxAttachmentVersion } from "@plannotator/shared/inbox/attachments";
+import { inboxBlobPath, inboxBlobsDir, openInboxAttachmentVersion } from "@plannotator/shared/inbox/attachments";
 import { inboxMarkupsDir, isInboxMarkupName } from "@plannotator/shared/inbox/markups";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -73,8 +78,29 @@ export function inboxDrawingsNamed(inboxDirPath: string, message: Pick<InboxMess
   return names;
 }
 
+/**
+ * Whether a picture on a cloud agent's message was captured at send from a file it attached: read from the Inbox's own
+ * blob of the upload (its recorded realpath is that blob), not taken later on open.
+ */
+export function inboxCloudPictureFromUpload(inboxDirPath: string, image: InboxInlineImage): boolean {
+  if (image.captured !== undefined || typeof image.path !== "string") return false;
+  let blobs: string;
+  try {
+    blobs = realpathSync(inboxBlobsDir(inboxDirPath));
+  } catch {
+    return false;
+  }
+  try {
+    return image.path === join(blobs, image.sent_sha256) || image.path === inboxBlobPath(inboxDirPath, image.sent_sha256);
+  } catch {
+    return false;
+  }
+}
+
 function sourcesOf(inboxDirPath: string, message: InboxMessageWire): (Omit<AgentFile, "fetch"> & { source: Source })[] {
-  const records = [...(message.attachments ?? []), ...(message.inline_images ?? [])].map((record) => ({ file: record.id, name: record.name, kind: record.kind, size: record.size, source: { record } }));
+  // A cloud agent's message never hands out a picture read from this computer: only what it attached.
+  const shown = isInboxCloudAuthor(message.author) ? (message.inline_images ?? []).filter((image) => inboxCloudPictureFromUpload(inboxDirPath, image)) : (message.inline_images ?? []);
+  const records = [...(message.attachments ?? []), ...shown].map((record) => ({ file: record.id, name: record.name, kind: record.kind, size: record.size, source: { record } }));
   const drawings = inboxDrawingsNamed(inboxDirPath, message).flatMap((name) => {
     try {
       const stat = lstatSync(join(inboxMarkupsDir(inboxDirPath), name));
@@ -84,6 +110,21 @@ function sourcesOf(inboxDirPath: string, message: InboxMessageWire): (Omit<Agent
     }
   });
   return [...records, ...drawings];
+}
+
+/**
+ * A result as a cloud agent gets it: each drawing's place in the Inbox's data folder (in the person's own words, where
+ * the window's feedback names it) is cut to its file name, which is what read_thread lists it by. Nothing else changes.
+ */
+export function inboxAgentWithoutDrawingPaths<T>(inboxDirPath: string, value: T): T {
+  const prefix = `${inboxMarkupsDir(inboxDirPath)}${sep}`;
+  const cut = (inner: unknown): unknown => {
+    if (typeof inner === "string") return inner.includes(prefix) ? inner.split(prefix).join("") : inner;
+    if (Array.isArray(inner)) return inner.map(cut);
+    if (!inner || typeof inner !== "object") return inner;
+    return Object.fromEntries(Object.entries(inner).map(([key, item]) => [key, cut(item)]));
+  };
+  return cut(value) as T;
 }
 
 /** The command that saves one file of a message on the agent's machine. */

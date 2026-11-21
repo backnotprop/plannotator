@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, open, unlink, type FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, extname, join, resolve } from "node:path";
+import { extname, join, resolve } from "node:path";
 import { INBOX_AGENT_FETCH_FILE } from "@plannotator/shared/inbox/agent-pairing";
 
 type Refusal = { ok: false; code: string; message: string };
@@ -33,10 +33,27 @@ function pieceOf(value: Record<string, unknown> | undefined): Piece | null {
   return { ...piece, content_type: typeof piece.content_type === "string" ? piece.content_type : "application/octet-stream" } as Piece;
 }
 
-/** The file's name as a plain name in the folder: never a path out of it. */
+/** The longest name saved, in bytes: under every file system's 255, with room for `-2`. */
+const SAVED_NAME_MAX_BYTES = 200;
+
+/** Cut to at most `max` UTF-8 bytes, never inside a character. */
+function cutBytes(text: string, max: number): string {
+  let out = "";
+  for (const char of text) {
+    if (Buffer.byteLength(out + char) > max) break;
+    out += char;
+  }
+  return out;
+}
+
+/** The file's name as a plain name in the folder: never a path out of it, never a control character, never too long. */
 export function savedFileName(name: string): string {
-  const plain = basename(name.replace(/[\\/\0]/g, "_")).trim();
-  return plain === "" || plain === "." || plain === ".." ? "file" : plain;
+  const plain = name.replace(/[\\/\x00-\x1f\x7f]/g, "_").trim();
+  if (plain === "" || /^\.+$/.test(plain)) return "file";
+  if (Buffer.byteLength(plain) <= SAVED_NAME_MAX_BYTES) return plain;
+  const ext = extname(plain);
+  const keep = Buffer.byteLength(ext) <= 20 ? ext : "";
+  return `${cutBytes(plain.slice(0, plain.length - keep.length), SAVED_NAME_MAX_BYTES - Buffer.byteLength(keep))}${keep}`;
 }
 
 /** A new file in `dir` named `name`, or `name-2`, `name-3`… when that one is taken: an earlier fetch is never overwritten. */

@@ -804,7 +804,7 @@ export function windowedThreadText(result: ThreadWindowResult, order: readonly s
   );
   const facts = [
     thread.thread_name ? `Name: ${thread.thread_name}` : null,
-    `Project: ${thread.project.name} (${thread.project.root})`,
+    `Project: ${thread.project.name}${thread.project.root ? ` (${thread.project.root})` : ""}`,
     `From: ${thread.participants.map((p) => `${p.you ? `${p.name} (you)` : p.name} ${p.messages}`).join(", ")}`,
     thread.resolved_at ? `Resolved ${shortTime(thread.resolved_at)}` : null,
     result.url,

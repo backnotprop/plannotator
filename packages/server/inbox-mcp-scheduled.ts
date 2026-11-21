@@ -10,7 +10,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import type { InboxScheduledRow } from "@plannotator/core/inbox-scheduled-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
-import { INBOX_SCHEDULED_OFF_TEXT, type InboxScheduled, type InboxScheduledBy } from "./inbox-scheduled";
+import { CLOUD_PROMPT_CHANGE_NEEDS_APPROVAL, INBOX_SCHEDULED_OFF_TEXT, type InboxScheduled, type InboxScheduledBy } from "./inbox-scheduled";
 import type { InboxRoutineGrants } from "./inbox-routine-grants";
 import { guarded, okComplete, PROJECT_PATH_DESCRIPTION } from "./inbox-mcp-result";
 
@@ -19,7 +19,13 @@ export const SCHEDULED_THREAD_OPS = ["create", "list", "get", "update", "on", "o
 export const SCHEDULED_THREAD_DESCRIPTION =
   "Routines in the Plannotator Inbox: a saved prompt an agent on this computer runs on a schedule, every run replying in the routine's own Inbox thread. Make one only when the person asks for work to run on its own, on a schedule. op: create, list, get, update, on, off, run, delete; update changes only the fields you pass. One you create arrives off, unless the person asked you for it with /create-routine in the thread you pass as thread_id: then it is on, and the result says so. Off, the person turns it on the first time, in the Inbox; after that you may update, turn it on or off, run and delete it. Changing its folder or its agent turns it off again until the person turns it back on. A schedule's runs are at least 15 minutes apart. Each change posts one line for the person: in thread_id, the thread you work in, if you pass it, else in the routine's own thread; runs reply only in their own thread.";
 
+/** Said to a paired cloud agent while `CLOUD_PROMPT_CHANGE_NEEDS_APPROVAL` is on (inbox-scheduled.ts `cloudRoutineChange`). */
+export const SCHEDULED_THREAD_CLOUD_NOTE =
+  " You are a cloud agent: changing a routine's prompt, schedule, model or effort turns it off too, until the person turns it back on, and the line for each update goes in the routine's own thread, not thread_id.";
+
 export interface InboxScheduledMcpContext {
+  /** Set for a paired cloud agent's call (inbox-agent-door.ts): the tool's description says what its changes do. */
+  cloudAgent?: { homeRoot: string };
   /** Whether the person has routines on, read on every request. Absent: off. */
   scheduledOn?: () => boolean;
   scheduled?: () => InboxScheduled | null;
@@ -50,7 +56,7 @@ export function registerInboxScheduledTool(server: McpServer, context: InboxSche
     "routine",
     {
       title: "Make or change a routine",
-      description: SCHEDULED_THREAD_DESCRIPTION,
+      description: context.cloudAgent && CLOUD_PROMPT_CHANGE_NEEDS_APPROVAL ? `${SCHEDULED_THREAD_DESCRIPTION}${SCHEDULED_THREAD_CLOUD_NOTE}` : SCHEDULED_THREAD_DESCRIPTION,
       inputSchema: z
         .object({
           op: z.enum(SCHEDULED_THREAD_OPS),

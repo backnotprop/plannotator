@@ -458,11 +458,26 @@ export interface TailscaleSelfIdentity {
  * non-empty) is owned by its tags, not a person, so its login is null even
  * though Tailscale lists a "tagged-devices" pseudo-user for it. Undefined
  * when the output is not a status document.
+ *
+ * Tailscale user ids are 64-bit integers and can exceed
+ * `Number.MAX_SAFE_INTEGER`. `JSON.parse`'s default number conversion rounds
+ * them and misses their string key in `User`, so the reviver keeps canonical
+ * integer `UserID` tokens as their exact source text.
  */
 export function parseTailscaleSelfIdentity(stdout: string): TailscaleSelfIdentity | undefined {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(stdout);
+    parsed = JSON.parse(stdout, (key, value, context?: { source?: string }) => {
+      if (
+        key === "UserID" &&
+        typeof value === "number" &&
+        typeof context?.source === "string" &&
+        /^(?:0|-?[1-9]\d*)$/.test(context.source)
+      ) {
+        return context.source;
+      }
+      return value;
+    });
   } catch {
     return undefined;
   }
@@ -473,10 +488,18 @@ export function parseTailscaleSelfIdentity(stdout: string): TailscaleSelfIdentit
   if (Array.isArray(tags) && tags.length > 0) return { login: null, tagged: true };
   const userId = (self as { UserID?: unknown }).UserID;
   const users = (parsed as { User?: unknown }).User;
-  if ((typeof userId !== "number" && typeof userId !== "string") || !users || typeof users !== "object") {
+  if (
+    (typeof userId === "number" ? !Number.isSafeInteger(userId) : typeof userId !== "string") ||
+    !users ||
+    typeof users !== "object" ||
+    Array.isArray(users)
+  ) {
     return { login: null, tagged: false };
   }
-  const profile = (users as Record<string, unknown>)[String(userId)];
+  const key = String(userId);
+  const profile = Object.prototype.hasOwnProperty.call(users, key)
+    ? (users as Record<string, unknown>)[key]
+    : undefined;
   const login = (profile as { LoginName?: unknown } | null | undefined)?.LoginName;
   return { login: typeof login === "string" && login.trim() !== "" ? login.trim() : null, tagged: false };
 }

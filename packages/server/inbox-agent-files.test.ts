@@ -6,9 +6,9 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fetchPairedFile } from "../../apps/hook/server/inbox-call-fetch";
 import { INBOX_AGENT_FETCH_FILE } from "@plannotator/shared/inbox/agent-pairing";
 import { callInboxThroughRelay } from "@plannotator/shared/inbox/agent-relay-client";
@@ -16,7 +16,7 @@ import { inboxBlobPath, recordInboxAttachments } from "@plannotator/shared/inbox
 import { writeInboxMarkup } from "@plannotator/shared/inbox/markups";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxUploadAttachments, receiveInboxUpload } from "@plannotator/shared/inbox/uploads";
-import { INBOX_AGENT_FETCH_PIECE_BYTES } from "./inbox-agent-files";
+import { INBOX_AGENT_FETCH_PIECE_BYTES, inboxAgentFetchAction } from "./inbox-agent-files";
 import { createInboxAgentDoor } from "./inbox-agent-door";
 import type { InboxCloudAgent, InboxCloudAgents } from "./inbox-cloud-agents";
 import { createInboxMcpServer, type InboxMcpContext } from "./inbox-mcp";
@@ -126,6 +126,21 @@ describe("a paired cloud agent fetches the files of a thread", () => {
       expect(text).toContain(file.fetch);
     }
     for (const attachment of [...w.root0.attachments!, ...w.store.message(w.reply.id)!.attachments!]) expect(text).not.toContain(attachment.path);
+    // Nothing of the person's computer in the text or the structured result: the drawing is named by its file name.
+    expect(JSON.stringify(read)).not.toContain(w.root);
+    expect(text).toContain(`- [demo-markup] \`${w.drawing.name}\``);
+  });
+
+  test("format full, a send's result and a fetch's result carry no place on the person's computer either", async () => {
+    const w = await world();
+    const full = await w.call("read_thread", { thread_id: w.threadId, format: "full" });
+    expect(full.isError).toBeUndefined();
+    expect(full.structuredContent!.thread.messages.length).toBe(2);
+    const sent = await w.call("send_message", { reply_to: w.reply.id, body: "Thanks: fetched both." });
+    expect(sent.isError).toBeUndefined();
+    const piece = await w.call(INBOX_AGENT_FETCH_FILE, { message_id: w.reply.id, file: w.drawing.name });
+    expect(piece.isError).toBeUndefined();
+    for (const result of [full, sent, piece]) expect(JSON.stringify(result)).not.toContain(w.root);
   });
 
   test("each file comes whole, across pieces, with the Inbox's hash; by its id or its name; an earlier copy is kept", async () => {
@@ -221,4 +236,81 @@ test("while the person's computer is asleep a fetch is a read: refused at once, 
   const outcome = await callInboxThroughRelay(pairing, INBOX_AGENT_FETCH_FILE, { message_id: "msg_1", file: "att_1", offset: 0 }, { fetch: stub });
   expect(outcome).toMatchObject({ kind: "refused", code: "computer_asleep" });
   expect(posted).toEqual([]);
+});
+
+describe("pictures a body shows, by who wrote the message", () => {
+  test("a cloud agent's own picture, captured at send from the file it attached, is listed and fetched whole", async () => {
+    const w = await world();
+    const sent = await w.call("send_message", { reply_to: w.reply.id, body: "Fixed: ![after](after.png)", attachments: [{ name: "after.png", data: PNG.toString("base64") }] });
+    expect(sent.isError).toBeUndefined();
+    const id = String(sent.structuredContent!.message_id);
+    const image = w.store.message(id)!.inline_images![0]!;
+    const read = await w.call("read_thread", { thread_id: w.threadId, message_id: id });
+    const mine = (read.structuredContent!.thread.messages as { id: string; files?: { file: string }[] }[]).find((m) => m.id === id)!;
+    expect(mine.files!.map((f) => f.file)).toEqual([image.id]);
+    const got = await w.fetchFile({ message_id: id, file: "after.png" });
+    expect(got.ok && sha(readFileSync(got.saved.path))).toBe(sha(PNG));
+  });
+
+  test("on a cloud agent's message a picture taken from this computer's disk is never handed out; on a local agent's it is, as the window shows it", async () => {
+    const w = await world();
+    // What a capture from the disk records: the project file's realpath, its bytes copied to a blob. Never made for a
+    // cloud agent's message now; the fetch refuses one even if a record ever held it.
+    const onDisk = join(w.root, "ledger", "desk.png");
+    writeFileSync(onDisk, PNG);
+    const blob = inboxBlobPath(w.store.dir, sha(PNG));
+    writeFileSync(blob, PNG);
+    const picture = (id: string, extra: Record<string, unknown> = {}) => ({ id, path: onDisk, named_path: null, name: `${id}.png`, kind: "image", sent_sha256: sha(PNG), size: PNG.length, sent_at: "2026-11-21T00:00:00.000Z", sent_mtime: "2026-11-21T00:00:00.000Z", media_type: "image/png", ref: `${id}.png`, ...extra });
+    const fromUpload = picture("att_UPLOAD", { path: realpathSync(blob) });
+    const disk = picture("att_DISK");
+    const onOpen = picture("att_OPEN", { path: realpathSync(blob), captured: "on_open", captured_at: "2026-11-21T00:00:01.000Z" });
+    const storeWith = (author: Record<string, unknown>) => {
+      const message = { id: "msg_PIC", thread_id: "msg_PIC", reply_to: null, author, body: "Look.", inline_images: [fromUpload, disk, onOpen] };
+      return { dir: w.store.dir, message: () => message, agentThread: () => ({ messages: [message] }) } as unknown as InboxStore;
+    };
+    const fetchFrom = (store: InboxStore, file: string) => inboxAgentFetchAction(store, "cloud.0123456789ab", INBOX_AGENT_FETCH_FILE, { message_id: "msg_PIC", file }).then(
+      (result) => result!.structuredContent!.sha256 as string,
+      (error: { code: string }) => error.code,
+    );
+    const cloud = storeWith({ kind: "agent", host: "cloud", session: "cloud.0123456789ab", name: "Nightly fixer" });
+    expect(await fetchFrom(cloud, "att_UPLOAD")).toBe(sha(PNG));
+    expect(await fetchFrom(cloud, "att_DISK")).toBe("file_not_found");
+    expect(await fetchFrom(cloud, "att_OPEN")).toBe("file_not_found");
+    const local = storeWith({ kind: "agent", host: "claude-code", session: "ses_local", name: "Builder" });
+    for (const file of ["att_UPLOAD", "att_DISK", "att_OPEN"]) expect(await fetchFrom(local, file)).toBe(sha(PNG));
+  });
+
+  test("a file in the dotenv family is never handed out, whatever the record says", async () => {
+    const w = await world();
+    const bytes = Buffer.from("TOKEN=1\n");
+    writeFileSync(inboxBlobPath(w.store.dir, sha(bytes)), bytes);
+    const record = { id: "att_ENV", path: join(w.root, ".env"), named_path: null, name: ".env", kind: "text", sent_sha256: sha(bytes), size: bytes.length, sent_at: "2026-11-21T00:00:00.000Z", sent_mtime: "2026-11-21T00:00:00.000Z" };
+    const message = { id: "msg_ENV", thread_id: "msg_ENV", reply_to: null, author: { kind: "agent", host: "claude-code", session: "ses_local" }, body: "Env.", attachments: [record] };
+    const store = { dir: w.store.dir, message: () => message, agentThread: () => ({ messages: [message] }) } as unknown as InboxStore;
+    const refused = await inboxAgentFetchAction(store, "cloud.0123456789ab", INBOX_AGENT_FETCH_FILE, { message_id: "msg_ENV", file: "att_ENV" }).catch((error: { code: string; message: string }) => error);
+    expect(refused).toMatchObject({ code: "attachment_refused" });
+    expect(JSON.stringify(refused)).not.toContain("TOKEN");
+  });
+});
+
+describe("inbox call fetch_file saves under a safe name, inside the folder it was given", () => {
+  const hostile = ["../../x", "/etc/passwd", "a\u0000b.txt", ".", "..", "...", "\\server\\share\\x.txt", `${"long-".repeat(80)}.png`, "line\nbreak.txt"];
+  test.each(hostile)("%j", async (name) => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-fetch-name-")));
+    roots.push(root);
+    const bytes = Buffer.from("payload");
+    const result = await fetchPairedFile({ message_id: "msg_1", file: "att_1", folder: "saved" }, root, async () => ({
+      ok: true,
+      structured: { name, size: bytes.length, sha256: sha(bytes), content_type: "text/plain", offset: 0, next_offset: null, data: bytes.toString("base64") },
+    }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const folder = join(root, "saved");
+    expect(dirname(result.saved.path)).toBe(folder);
+    expect(readdirSync(folder)).toEqual([basename(result.saved.path)]);
+    expect(Buffer.byteLength(basename(result.saved.path))).toBeLessThanOrEqual(200);
+    expect(basename(result.saved.path)).not.toMatch(/[\x00-\x1f\\/]|^\.+$/);
+    expect(readFileSync(result.saved.path, "utf8")).toBe("payload");
+    expect(readdirSync(root)).toEqual(["saved"]);
+  });
 });

@@ -16,7 +16,7 @@ const tooLarge = (item: string, size: number): Refusal => ({
   message: `${item} is ${size} bytes; a file is at most ${INBOX_UPLOAD_MAX_BYTES / MB} MB. Nothing was sent.`,
 });
 
-async function sendInPieces(path: string, item: string, send: PairedSend): Promise<{ ok: true; upload: string } | Refusal> {
+async function sendInPieces(path: string, item: string, send: PairedSend, name = basename(path)): Promise<{ ok: true; upload: string } | Refusal> {
   const uploadId = randomBytes(18).toString("base64url");
   const hash = createHash("sha256");
   const handle = await open(path, "r");
@@ -36,28 +36,37 @@ async function sendInPieces(path: string, item: string, send: PairedSend): Promi
   } finally {
     await handle.close();
   }
-  const done = await send(INBOX_AGENT_UPLOAD_FINISH, { upload_id: uploadId, name: basename(path), size, sha256: hash.digest("hex") });
+  const done = await send(INBOX_AGENT_UPLOAD_FINISH, { upload_id: uploadId, name, size, sha256: hash.digest("hex") });
   return done.ok ? { ok: true, upload: uploadId } : done;
 }
 
-export async function pairedAttachments(items: readonly unknown[], cwd: string, send: PairedSend): Promise<{ ok: true; items: unknown[] } | Refusal> {
+/**
+ * The send's attachments as the door takes them: each path read from this machine (a big file in pieces), every other
+ * item as it is. `named`: more files to send under a given name (the body's pictures, planAgentBodyPictures).
+ */
+export async function pairedAttachments(items: readonly unknown[], cwd: string, send: PairedSend, named: readonly { path: string; name: string }[] = []): Promise<{ ok: true; items: unknown[] } | Refusal> {
   const sent: unknown[] = [];
   let inline = 0;
+  type File = { path: string; name: string; label: string };
+  const all: (File | { item: unknown })[] = [
+    ...items.map((item) => (typeof item === "string" ? { path: resolve(cwd, item), name: basename(resolve(cwd, item)), label: item } : { item })),
+    ...named.map((file) => ({ ...file, label: file.path })),
+  ];
   try {
-    for (const item of items) {
-      if (typeof item !== "string") {
-        sent.push(item);
+    for (const file of all) {
+      if ("item" in file) {
+        sent.push(file.item);
         continue;
       }
-      const path = resolve(cwd, item);
+      const { path, name, label } = file;
       const size = (await stat(path)).size;
-      if (size > INBOX_UPLOAD_MAX_BYTES) return tooLarge(item, size);
+      if (size > INBOX_UPLOAD_MAX_BYTES) return tooLarge(label, size);
       if (inline + size <= INBOX_CALL_PIECE_BYTES) {
         inline += size;
-        sent.push({ name: basename(path), data: (await readFile(path)).toString("base64") });
+        sent.push({ name, data: (await readFile(path)).toString("base64") });
         continue;
       }
-      const upload = await sendInPieces(path, item, send);
+      const upload = await sendInPieces(path, label, send, name);
       if (!upload.ok) return upload;
       sent.push({ upload: upload.upload });
     }

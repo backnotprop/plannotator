@@ -41,7 +41,9 @@
  * `<code>: <message>`. Exit 0 ok, 1 refused or unreachable, 2 bad usage.
  */
 
+import { statSync } from "node:fs";
 import { resolve } from "node:path";
+import { planAgentBodyPictures } from "@plannotator/shared/inbox/agent-pictures";
 import { decodeInboxAgentPairing, INBOX_AGENT_CALL_ACTIONS, INBOX_AGENT_FETCH_FILE } from "@plannotator/shared/inbox/agent-pairing";
 import { callInboxThroughRelay, inboxAgentSignalUrl, type InboxAgentRelayOutcome } from "@plannotator/shared/inbox/agent-relay-client";
 import { INBOX_HOST_NAMES, INBOX_QWEN_SESSION_ENV, INBOX_T3_HOST, INBOX_T3_THREAD_ENV, inboxTidyMcpLine, parseInboxSessionRef, type InboxTidyMark } from "@plannotator/core/inbox-types";
@@ -179,7 +181,9 @@ export function parseCallCommand(argv: readonly string[], actions: readonly stri
   // `steps` is left out of the list, as in the usage: it is served only while the person has thread steps on (and the
   // switch is the Inbox's, not known here), so an agent with them off reads no word of it.
   if (!actions.includes(action)) {
-    return { ok: false, code: "unknown_action", error: `${action} is not an Inbox action. Actions: ${actions.filter((name) => name !== "steps" && name !== "routine").join(", ")}.` };
+    // A paired agent's list (INBOX_AGENT_CALL_ACTIONS) names them all, as its usage does.
+    const named = actions === INBOX_CALL_ACTIONS ? actions.filter((name) => name !== "steps" && name !== "routine") : actions;
+    return { ok: false, code: "unknown_action", error: `${action} is not an Inbox action. Actions: ${named.join(", ")}.` };
   }
   if (more.length > 0) return { ok: false, code: "usage", error: "inbox call takes one JSON argument (quote it), or - to read it from stdin." };
   return { ok: true, action, json: json === "-" ? null : (json ?? null), stdin: json === "-", session };
@@ -217,6 +221,17 @@ export interface CallCommandDeps {
   timeoutMs?: number;
   /** Print the tool's lines of text instead of its structured result (`plannotator routine` without --json). */
   text?: boolean;
+  /** Tests: a paired call's one request (the relay or the door), so it runs with no relay and no Inbox. */
+  pairedTransport?: (tool: string, body: Record<string, unknown>, waitMs?: number) => Promise<InboxAgentRelayOutcome>;
+}
+
+/**
+ * What a command with no agent-door action says to a paired cloud agent (`PLANNOTATOR_PAIRING`) instead of looking for
+ * an Inbox on its own machine: it changes the person's Inbox on their computer through a route only that computer
+ * reaches, so it is not available over a pairing. Never "Inbox is off", which is about a machine the agent is not on.
+ */
+export function inboxPairedCommandUnavailable(command: string): string {
+  return `not_over_pairing: ${command} works only on the person's computer, and you reach their Inbox through a pairing, so nothing was done. Ask the person to do it in the Inbox, or to ask an agent on their computer.`;
 }
 
 /** Run `plannotator inbox call …`; resolves to the exit code. */
@@ -314,6 +329,7 @@ async function runPairedCall(
   }
   const relayed = !door && pairing.relay ? { ...pairing, relay: pairing.relay } : null;
   const transport = async (tool: string, body: Record<string, unknown>, waitMs?: number): Promise<InboxAgentRelayOutcome> => {
+    if (deps.pairedTransport) return deps.pairedTransport(tool, body, waitMs);
     if (relayed) return callInboxThroughRelay(relayed, tool, body, waitMs ? { readWaitMs: waitMs } : {});
     try {
       const response = await fetch(`${door}/api/inbox/agent/call`, {
@@ -359,8 +375,22 @@ async function runPairedCall(
     await out(`${JSON.stringify(fetched.saved)}\n`);
     return 0;
   }
+  // The pictures the body shows from this machine's disk, as a local agent writes them: sent with the message, each
+  // named by its file's name, which is what the door shows it by (packages/shared/inbox/agent-pictures.ts).
+  const pictures =
+    typeof args.body === "string"
+      ? planAgentBodyPictures(args.body, Array.isArray(args.attachments) ? args.attachments : [], deps.cwd, (path) => {
+          try {
+            return statSync(path).isFile();
+          } catch {
+            return false;
+          }
+        })
+      : null;
+  if (pictures) args.body = pictures.body;
+  if (pictures && pictures.files.length > 0) args.attachments = [...(Array.isArray(args.attachments) ? args.attachments : [])];
   if (Array.isArray(args.attachments)) {
-    const sent = await pairedAttachments(args.attachments, deps.cwd, pieceCall);
+    const sent = await pairedAttachments(args.attachments, deps.cwd, pieceCall, pictures?.files ?? []);
     if (!sent.ok) return refused(sent.code, sent.message);
     args.attachments = sent.items;
   }
@@ -383,7 +413,7 @@ async function runPairedCall(
   if (relayed && parsed.action === "whoami" && !got.result.isError) {
     got.result.structuredContent = { ...got.result.structuredContent, signal_url: await inboxAgentSignalUrl(relayed) };
   }
-  return printResult(got.result, out, err);
+  return printResult(got.result, out, err, deps.text === true);
 }
 
 /** `http://127.0.0.1:<port>` (or localhost, [::1]) with nothing after the port, else null. */

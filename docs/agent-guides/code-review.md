@@ -18,6 +18,9 @@ Send Feedback → feedback sent to agent session
 Approve → approved prompt sent to agent session (with the note/annotations when approving with notes)
 ```
 
+Local Perforce reviews open the default changelist when it has files. Otherwise
+they open the first numbered changelist with files in the provider's list.
+
 ### Color-free VCS output (#1661)
 
 Every git command the review servers parse goes through `prepareGitCommand`

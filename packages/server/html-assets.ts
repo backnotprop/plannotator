@@ -117,6 +117,8 @@ export interface HtmlAssetRegistryOptions {
   pictures?: {
     allows: (absolutePath: string) => boolean;
     serve: (absolutePath: string, req: Request) => Promise<Response>;
+    /** Whether a page in folder `root` may show pictures from outside it (the Inbox: never a cloud agent's). Absent: every page may. */
+    fromPage?: (root: string) => boolean;
   };
 }
 
@@ -140,7 +142,7 @@ export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) 
   /** The asset-route URL of a picture outside the root (`/api/html-assets/<token>/<name>`), or null. */
   function outsideMapper(root: string): HtmlOutsideAssetUrlMapper | undefined {
     const pictures = options.pictures;
-    if (!pictures) return undefined;
+    if (!pictures || (pictures.fromPage && !pictures.fromPage(root))) return undefined;
     return (path) => {
       const absolute = resolvePath(root, path);
       if (!pictures.allows(absolute)) return null;

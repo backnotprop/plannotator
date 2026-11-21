@@ -44,6 +44,7 @@ import { inboxViewingLine } from "@plannotator/shared/inbox/uploads";
 import type { InboxAttachment, InboxListRow, InboxLiveSiteRef, InboxMessageWire } from "@plannotator/core/inbox-types";
 import { inboxAgentFilesOf } from "./inbox-agent-files";
 import { registerInboxGuideTools } from "./inbox-guides";
+import { inboxCloudSendPictures, inboxImagePathRefusedText, type InboxCloudSendFile } from "./inbox-cloud-pictures";
 import { lastContactOf, noteSessionRead, staleThreadOf, staleThreadText } from "./inbox-session-reads";
 import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, clip, shortTime, sizeText, windowedThread, windowedThreadText } from "./inbox-mcp-read";
 import { registerInboxSearchTool } from "./inbox-mcp-search";
@@ -305,6 +306,13 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMc
    * project for a path.
    */
   findProjects?: (path: string) => Promise<{ projects: InboxProject[]; unresolved: boolean; every?: boolean }>;
+  /**
+   * A cloud agent's call (inbox-agent-door.ts, always set for one, empty when it attached nothing): the files it
+   * attached in this send, the only place a picture in what it writes comes from (inbox-cloud-pictures.ts). Set,
+   * nothing the body names is read from this computer, and a picture that names no attached file, or one that cannot
+   * be shown, refuses the send. Absent (an agent on this computer): pictures are read from where the agent sent from.
+   */
+  inlineImageFiles?: readonly InboxCloudSendFile[];
   /**
    * Whether the Inbox itself knows the sender's session is woken by the
    * person's reply, whatever its own connection said: a Claude Code, Pi or
@@ -884,11 +892,15 @@ export async function sendAgentMessage(
   // Where relative paths start: the folder the agent works in, when its connection says (a cd away from its project).
   const working = !!input.working_folder && isAbsolute(input.working_folder);
   const here = working ? input.working_folder : input.project_path;
+  // A cloud agent: the pictures of the body actually sent (this body, a guide's intent included), each a file it attached
+  // in this send, matched before anything is written; a picture's file shows in the body, not again below it.
+  const cloud = context.inlineImageFiles ? inboxCloudSendPictures(input.body, context.inlineImageFiles, input.attachments) : null;
+  const attachmentInput = cloud ? cloud.attachments : input.attachments;
   let attachments: InboxAttachment[] | undefined;
-  if (input.attachments && input.attachments.length > 0) {
+  if (attachmentInput && attachmentInput.length > 0) {
     if (!context.recordAttachments) throw new InboxError("validation_error", "attachments: not taken by this Inbox.");
     const base = here && isAbsolute(here) ? here : project.root;
-    attachments = await context.recordAttachments(input.attachments, project, base);
+    attachments = await context.recordAttachments(attachmentInput, project, base);
   }
   // The question blocks inside attached Markdown files (issue #2828): answerable in the window like the body's.
   const attachmentQuestions = attachments && attachments.length > 0 ? await readInboxAttachmentQuestions(store.dir, attachments) : [];
@@ -915,8 +927,18 @@ export async function sendAgentMessage(
         anywhere: true,
         sentAt: new Date().toISOString(),
         stage: true,
+        // Every one, past the usual 64 too: a cloud agent's picture not captured now is never shown.
+        ...(cloud ? { files: cloud.pictures, max: Number.POSITIVE_INFINITY } : {}),
       })
     : null;
+  // A cloud agent's picture is never read later from this computer (the background capture skips its messages):
+  // one that did not take refuses the send, before anything is written.
+  const notTaken = cloud ? captured?.failures[0] : undefined;
+  if (notTaken) {
+    await captured?.discard();
+    if (notTaken.code === "image_not_attached") throw new InboxError("image_path_refused", inboxImagePathRefusedText(notTaken.ref), { field: "body" });
+    throw new InboxError("image_not_shown", `body: ${notTaken.ref}: the attached file is not a picture the Inbox can show (${notTaken.code}). Nothing was sent.`, { field: "body" });
+  }
   let result: ReturnType<InboxStore["sendMessage"]>;
   try {
     result = store.sendMessage({
@@ -962,13 +984,14 @@ export async function sendAgentMessage(
   const superseded = store.supersededBy(message.id);
   const markedDone = result.done ?? [];
   const notShown = imagesNotShown(input.body, captured?.failures ?? []);
-  const notPlayed = await mediaNotShown(input.body, { root: project.root, base: basePath });
+  // A cloud agent's sounds and videos are never opened on this computer (the image route refuses them for its messages).
+  const notPlayed = cloud ? [] : await mediaNotShown(input.body, { root: project.root, base: basePath });
   // Pictures sent only as attachments (tiles at the bottom, away from the words about them):
   // the result advises the next message; the send and what the person sees are unchanged.
   // The message is already stored: advice that fails is left out, never an error for a sent message.
   let attachedOnly: string[] = [];
   try {
-    attachedOnly = attachedImagesNotInBody(input.body, input.attachments, here && isAbsolute(here) ? here : project.root, basePath ?? project.root);
+    attachedOnly = cloud ? [] : attachedImagesNotInBody(input.body, input.attachments, here && isAbsolute(here) ? here : project.root, basePath ?? project.root);
   } catch {
     attachedOnly = [];
   }
@@ -1468,7 +1491,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           // The thread's PRs (approval "inbox-pr-binding"), after its open questions: with who added each, and what was removed lately.
           const pulls = threadPullsText(context, threadId, reader);
           const prs = pulls.length > 0 ? { pulls: store.threadPulls(threadId).map(({ pull: _key, id: _id, ...rest }) => rest) } : {};
-          return okComplete(windowedThreadText(result, order, naming?.line ?? "", [...pulls, ...steps]), { ...result, ...(naming?.structured ?? {}), ...lists, ...prs });
+          // A cloud agent is told no folder on this computer (the agent door strips the structured ones too).
+          const told = context.cloudAgent ? { ...result, thread: { ...result.thread, project: { ...result.thread.project, root: "" } } } : result;
+          return okComplete(windowedThreadText(told, order, naming?.line ?? "", [...pulls, ...steps]), { ...result, ...(naming?.structured ?? {}), ...lists, ...prs });
         }
         if (input.expand || input.before !== undefined || input.after !== undefined) {
           throw new InboxError("validation_error", "expand, before and after read one thread: pass thread_id (or message_id).");
