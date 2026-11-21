@@ -514,6 +514,12 @@ describe("a pull request link", () => {
     for (const text of ["", "retries", "https://github.com/northwind/payments", "file:///etc/pull/1", "o/r#x"]) expect(inboxReviewLinkOf(text)).toBeNull();
   });
 
+  test("a Send's link start on a Forgejo keeps the PR by its own key and address", () => {
+    const where = { host: "pi", project_id: "p", at: "2026-11-05T10:00:00.000Z" };
+    const start = inboxReviewStartOf({ kind: "link", url: "https://codeberg.org/acme/w/pulls/7", title: "Add a widget", mine: false, ask: "guide" }, where);
+    expect(start).toMatchObject({ kind: "link", pull: { key: "codeberg.org/acme/w#7", number: 7, title: "Add a widget" } });
+  });
+
   test("a Send's link start keeps the PR named by its own address, whatever else it says", () => {
     const where = { host: "pi", project_id: "p", at: "2026-11-05T10:00:00.000Z" };
     const start = inboxReviewStartOf({ kind: "link", url: "https://github.com/northwind/payments/pull/231", title: "Idempotent refunds", mine: true, ask: "custom", key: "github.com/other/repo#1", number: 1 }, where);
