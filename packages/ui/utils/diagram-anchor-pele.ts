@@ -42,15 +42,47 @@ function cleanText(value: string | null | undefined): string {
   return (value ?? '').replace(/\s+/gu, ' ').trim();
 }
 
-function labelOf(el: Element): string {
-  return cleanText(el.textContent);
+/** Where the label step (`pele-labels.ts`, `PELE_TEX_ATTR`) keeps a formula's TeX: the line or gap it was drawn in. */
+const TEX_ATTR = 'data-pele-tex';
+
+/**
+ * The words an element draws, as the source has them: a formula as
+ * `$$tex$$` (its MathML box is skipped), a line (a positioned `tspan`)
+ * joined to the one before by `lineJoin`, the styled runs inside a line
+ * joined to it as they are drawn, and the outline copy Pele draws under a
+ * cluster title read once (not at all).
+ */
+export function peleLabelText(el: Element | null | undefined, lineJoin: string): string {
+  if (el === null || el === undefined) return '';
+  let out = '';
+  const walk = (node: Node): void => {
+    if (node.nodeType === 3) {
+      out += node.nodeValue ?? '';
+      return;
+    }
+    if (node.nodeType !== 1) return;
+    const element = node as Element;
+    if (element.localName.toLowerCase() === 'foreignobject' && element.hasAttribute(TEX_ATTR)) return;
+    if (element.localName === 'text' && element.getAttribute('fill') === 'none' && element.hasAttribute('stroke')) return;
+    if (element.localName === 'tspan' && element.hasAttribute('y') && out !== '') out += lineJoin;
+    const tex = element.getAttribute(TEX_ATTR);
+    if (tex !== null) {
+      out += ` $$${tex}$$ `;
+      return;
+    }
+    for (const child of Array.from(element.childNodes)) walk(child);
+  };
+  walk(el);
+  return cleanText(out.replace(/\u200b/gu, ''));
 }
 
-/** A text's words: its lines (`tspan`s) joined by a space, never run together. */
+function labelOf(el: Element): string {
+  return peleLabelText(el, '');
+}
+
+/** A text's words: its lines joined by a space, never run together. */
 function textOf(el: Element | null | undefined): string {
-  if (el === null || el === undefined) return '';
-  const lines = Array.from(el.querySelectorAll('tspan'));
-  return lines.length === 0 ? cleanText(el.textContent) : cleanText(lines.map((line) => line.textContent ?? '').join(' '));
+  return peleLabelText(el, ' ');
 }
 
 /** A part's name: its own `.pele-label` text. */

@@ -9,7 +9,7 @@
  * - `PELE_CAPABILITIES` no longer says what a click on a part does under each
  *   engine (the data a quiet fallback reads);
  * - `'pele-where-safe'` draws with Pele a fence that would lose its part
- *   comments or its math labels, or does not fall back to Mermaid when Pele
+ *   comments, keeps a math fence off Pele, or does not fall back to Mermaid when Pele
  *   cannot draw the fence;
  * - a click on a part of a flowchart, sequence, state, class, ER or
  *   requirement diagram makes a different anchor (kind, id, ends, label,
@@ -253,11 +253,12 @@ describe.if(hasDom)("diagram engine: 'pele-where-safe'", () => {
     }
   });
 
-  test('a fence with a math label stays on Mermaid', async () => {
+  test('a fence with a math label is drawn by Pele, its formula typeset', async () => {
     __setDiagramEngineModeForTests('pele-where-safe');
     await mount(<MermaidBlock block={fence('flowchart LR\n  A["$$x^2$$"] --> B')} annotations={[]} onAddAnnotation={noop} />);
     await waitFor(() => drawn());
-    expect(engineOf(drawn())).toBe('mermaid');
+    expect(engineOf(drawn())).toBe('pele');
+    expect(drawn().querySelector('foreignObject.pele-math[data-pele-tex="x^2"]')).not.toBeNull();
   });
 
   const failing = (how: 'unsupported' | 'throws'): (() => Promise<PeleRuntime>) => () =>

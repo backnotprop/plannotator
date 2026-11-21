@@ -20,8 +20,6 @@
  * features that are not per type are listed in `DIAGRAM_FEATURES`. Both are
  * checked against real renders in `DiagramBlock.engine.test.tsx`.
  */
-import { hasMermaidMath } from './mermaid-math-slot';
-
 export type DiagramEngine = 'mermaid' | 'pele';
 export type DiagramEngineMode = 'mermaid' | 'pele-where-safe' | 'pele';
 
@@ -154,10 +152,10 @@ export const PELE_CAPABILITIES: Readonly<Record<MermaidDiagramType, Readonly<Rec
 
 /** Features that are not per type: whether Pele keeps each one. */
 export const DIAGRAM_FEATURES = {
-  /** `$$...$$` labels typeset with KaTeX. Pele prints the raw text. */
-  mathLabels: { mermaid: true, pele: false },
-  /** HTML in labels beyond bold, italic and line breaks. */
-  htmlLabels: { mermaid: true, pele: false },
+  /** `$$...$$` labels typeset with KaTeX (MathML). Pele: through the label step (`pele-labels.ts`). */
+  mathLabels: { mermaid: true, pele: true },
+  /** Styled label text: colour, underline, strike, code, bold, italic, line breaks (`pele-labels.ts`). Pictures and icons in a label draw under neither. */
+  htmlLabels: { mermaid: true, pele: true },
   /** An author's `%%{init}%%` theme settings. Pele ignores them. */
   initThemeDirectives: { mermaid: true, pele: false },
   /** The Diagram Shadow setting. Pele draws no node shadow. */
@@ -169,7 +167,7 @@ export const DIAGRAM_FEATURES = {
 } as const;
 
 /** Why `diagramEngineFor` kept a fence on Mermaid in `'pele-where-safe'`. */
-export type MermaidReason = 'switch' | 'math-labels' | 'part-comments';
+export type MermaidReason = 'switch' | 'part-comments';
 
 export interface EngineChoice {
   readonly engine: DiagramEngine;
@@ -185,7 +183,6 @@ export interface EngineChoice {
 export function diagramEngineFor(source: string, context: { readonly mode: DiagramEngineMode }): EngineChoice {
   if (context.mode === 'mermaid') return { engine: 'mermaid', reason: 'switch' };
   if (context.mode === 'pele') return { engine: 'pele' };
-  if (hasMermaidMath(source)) return { engine: 'mermaid', reason: 'math-labels' };
   const capability = PELE_CAPABILITIES[mermaidDiagramTypeOf(source)];
   if (capability.mermaid.partComments && !capability.pele.partComments) return { engine: 'mermaid', reason: 'part-comments' };
   return { engine: 'pele' };

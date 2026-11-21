@@ -115,8 +115,15 @@ export function peleFonts(): PeleFonts {
 }
 
 /** Render one source: links and images off, the app's fonts, measured on a canvas when there is one. */
-export function renderPeleSource(runtime: PeleRuntime, source: string, renderId: string, fonts: PeleFonts = peleFonts()): Promise<RenderResult> {
-  const measurer = canvasMeasurer(fonts);
+export function renderPeleSource(
+  runtime: PeleRuntime,
+  source: string,
+  renderId: string,
+  fonts: PeleFonts = peleFonts(),
+  wrapMeasurer?: (base: TextMeasurer | undefined) => TextMeasurer | undefined,
+): Promise<RenderResult> {
+  const base = canvasMeasurer(fonts);
+  const measurer = wrapMeasurer === undefined ? base : wrapMeasurer(base);
   return runtime.render(source, {
     idPrefix: peleSvgId(renderId),
     fontFamily: fonts.sans,
@@ -132,7 +139,7 @@ export function renderPeleSource(runtime: PeleRuntime, source: string, renderId:
   });
 }
 
-function canvasMeasurer(fonts: PeleFonts): TextMeasurer | undefined {
+export function canvasMeasurer(fonts: PeleFonts): TextMeasurer | undefined {
   if (typeof document === 'undefined') return undefined;
   let context: CanvasRenderingContext2D | null = null;
   try {

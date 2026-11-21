@@ -33,6 +33,7 @@
  * into a navigation. The canvas owns every click.
  */
 import DOMPurify from 'dompurify';
+import type { TextMeasurer } from 'pele';
 import type { DiagramKind } from '@plannotator/core/diagram-anchor';
 import { MERMAID_FINDER, type DiagramFinder } from './diagram-anchor';
 import { GRAPHVIZ_FINDER } from './diagram-anchor-graphviz';
@@ -43,7 +44,8 @@ import { loadMathRenderer } from './math';
 import { getMermaidRetryDelayMs, loadMermaidRuntime } from './mermaid';
 import { hasMermaidMath } from './mermaid-math-slot';
 import { applyMermaidTheme, mermaidThemeKey, type MermaidThemeMode } from './mermaidTheme';
-import { loadPeleRuntime, PELE_IN_BUILD, PELE_OUTPUT_LIMIT, PELE_SOURCE_LIMIT, peleSvgId, renderPeleSource } from './pele';
+import { loadPeleRuntime, PELE_IN_BUILD, PELE_OUTPUT_LIMIT, PELE_SOURCE_LIMIT, peleFonts, peleSvgId, renderPeleSource } from './pele';
+import { finishPeleLabels, needsPeleLabels, pageMathTypesetter, peleLabelMeasurer, preparePeleLabels, restorePeleLabelMessage, type PreparedPeleLabels } from './pele-labels';
 import { applyPeleThemeVariables, readPeleThemeVariables } from './peleTheme';
 
 export type { DiagramKind } from '@plannotator/core/diagram-anchor';
@@ -816,12 +818,22 @@ async function renderPele(renderId: string, source: string, theme: DiagramTheme,
   if (!supported) {
     return { ok: false, message: 'Pele does not draw this diagram type.', line: null, runtimeUnavailable: false, unsupported: true };
   }
+  // Math and styled text in labels (`pele-labels.ts`): the source Pele draws, then its svg finished.
+  const fonts = peleFonts();
+  let labels: PreparedPeleLabels | null = null;
+  if (needsPeleLabels(source)) {
+    const typesetter = hasMermaidMath(source) ? await pageMathTypesetter(fonts.sans) : null;
+    labels = preparePeleLabels(source, typesetter);
+  }
   try {
-    const result = await renderPeleSource(runtime, source, renderId);
+    const prepared = labels;
+    let measurer: TextMeasurer | undefined;
+    const result = await renderPeleSource(runtime, prepared?.text ?? source, renderId, fonts, prepared === null ? undefined : (base) => (measurer = peleLabelMeasurer(base, prepared)));
     if (result.svg.length > PELE_OUTPUT_LIMIT) {
       return { ok: false, message: `Rendered diagram exceeds the ${PELE_OUTPUT_LIMIT.toLocaleString()} character limit.`, line: null, runtimeUnavailable: false };
     }
-    const svgNode = sanitizeFor(result.svg, options);
+    const markup = prepared === null ? result.svg : finishPeleLabels(result.svg, prepared, measurer ?? peleLabelMeasurer(undefined, prepared));
+    const svgNode = sanitizeFor(markup, options);
     if (svgNode === REFUSED) return REFUSED_RESULT;
     if (svgNode === null) {
       return { ok: false, message: 'The diagram could not be rendered.', line: null, runtimeUnavailable: false };
@@ -832,7 +844,7 @@ async function renderPele(renderId: string, source: string, theme: DiagramTheme,
     widenEdgeHitAreas(svgNode);
     return { ok: true, svgNode, findTarget: PELE_FINDER.findTarget };
   } catch (error) {
-    return { ok: false, message: errorMessage(error, 'Failed to render diagram'), line: peleErrorLine(error), runtimeUnavailable: false };
+    return { ok: false, message: restorePeleLabelMessage(errorMessage(error, 'Failed to render diagram'), labels), line: peleErrorLine(error), runtimeUnavailable: false };
   }
 }
 

@@ -69,11 +69,12 @@ describe('Pele runtime', () => {
     expect(lines).toBeGreaterThan(wide.match(/<tspan/gu)?.length ?? 0);
   });
 
-  test('records what Pele does not keep: math labels print as raw text, and an init directive\'s colours are ignored', async () => {
+  test("records what Pele does not keep: an init directive's colours are ignored", async () => {
     const runtime = await loadPeleRuntime();
+    // Math labels are typeset by the label step around this call (`pele-labels.test.ts`); Pele alone prints the TeX.
     const { svg: math } = await renderPeleSource(runtime, 'flowchart LR\n  A["$$x^2$$"] --> B', 'math', fonts);
     expect(math).toContain('$$x^2$$');
-    expect(DIAGRAM_FEATURES.mathLabels.pele).toBe(false);
+    expect(DIAGRAM_FEATURES.mathLabels.pele).toBe(true);
     const { svg: init } = await renderPeleSource(
       runtime,
       "%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#ff00aa'}}}%%\nflowchart LR\n  A --> B",
