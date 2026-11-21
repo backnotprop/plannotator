@@ -479,6 +479,14 @@ export function buildMermaidThemeVariables(
   const scaleHex = scale.map(toHex);
   const scalePeer = scale.map((c) => toHex(mixOklab(c, scaleInk, 0.25)));
   const scaleLabel = scale.map((c) => toHex(text(scaleInk, c)));
+  // A done gantt bar: a grey (the muted-foreground hue, its own low chroma)
+  // at the categorical lightness, fitted for the ink Mermaid writes the
+  // label in (`taskTextDarkColor`, `.doneText0`). `muted` read at 1.0-1.8:1.
+  const doneTaskBkg = fitFillForInk(
+    withOklchLightness(p.mutedForeground, CATEGORICAL_LIGHTNESS[polarity]),
+    parseCssColor(scaleLabel[0]) as RgbColor,
+    polarity,
+  );
 
   const h = toHex;
   // The shadow nodes, clusters and actors are painted with. Derived from the
@@ -602,7 +610,7 @@ export function buildMermaidThemeVariables(
     activeTaskBorderColor: h(primaryLine),
     activeTaskBkgColor: scaleHex[1] ?? scaleHex[0],
     gridColor: h(nodeBorder),
-    doneTaskBkgColor: h(p.muted),
+    doneTaskBkgColor: h(doneTaskBkg),
     doneTaskBorderColor: h(nodeBorder),
     critBorderColor: h(destructiveLine),
     critBkgColor: h(fitFillForInk(withOklchLightness(p.destructive, CATEGORICAL_LIGHTNESS[polarity]), scaleInk, polarity)),

@@ -36,11 +36,15 @@ import DOMPurify from 'dompurify';
 import type { DiagramKind } from '@plannotator/core/diagram-anchor';
 import { MERMAID_FINDER, type DiagramFinder } from './diagram-anchor';
 import { GRAPHVIZ_FINDER } from './diagram-anchor-graphviz';
+import { PELE_COMPAT_FINDER, PELE_FINDER } from './diagram-anchor-pele';
+import { diagramEngineFor, diagramEngineMode } from './diagram-engine';
 import { getGraphvizRetryDelayMs, loadGraphvizRuntime, type GraphvizRuntime } from './graphviz';
 import { loadMathRenderer } from './math';
 import { getMermaidRetryDelayMs, loadMermaidRuntime } from './mermaid';
 import { hasMermaidMath } from './mermaid-math-slot';
 import { applyMermaidTheme, mermaidThemeKey, type MermaidThemeMode } from './mermaidTheme';
+import { loadPeleRuntime, PELE_OUTPUT_LIMIT, PELE_SOURCE_LIMIT, peleSvgId, renderPeleSource } from './pele';
+import { applyPeleThemeVariables, readPeleThemeVariables } from './peleTheme';
 
 export type { DiagramKind } from '@plannotator/core/diagram-anchor';
 
@@ -80,6 +84,8 @@ export type DiagramRenderError = {
   /** The host's check (`DiagramRenderOptions.accept`) refused the drawn svg before it reached the page: the block
    * shows the source instead. */
   readonly refused?: boolean;
+  /** Pele has no renderer for the source's diagram type (only when the engine switch sends a fence to Pele). */
+  readonly unsupported?: boolean;
 };
 
 /**
@@ -273,6 +279,8 @@ const EDGE_SELECTOR = [
   'path.messageLine0',
   'path.messageLine1',
   'g.edge > path',
+  // Pele (`diagram-engine.ts`): its edge groups; a marker path is the arrowhead.
+  'g.pele-edge > path:not(.pele-marker)',
 ].join(', ');
 
 /** The geometry a hit path keeps from its edge; everything else (id, class,
@@ -771,15 +779,96 @@ const graphvizRenderer: DiagramRenderer = {
   },
 };
 
-const RENDERERS: Record<DiagramKind, DiagramRenderer> = {
-  mermaid: mermaidRenderer,
-  graphviz: graphvizRenderer,
+/**
+ * The Pele entry (`./pele`, lazy): the same sanitizer and hit layer as
+ * Mermaid, then Pele's colour variables from the page's palette
+ * (`peleTheme.ts`) on the svg root. Pele draws no `<a>` and no `<image>`
+ * (links and images are off), and its own sheet is inline `style`
+ * attributes, so the scoped-`<style>` pass has nothing to keep.
+ */
+async function renderPele(renderId: string, source: string, theme: DiagramTheme, options?: DiagramRenderOptions): Promise<DiagramRenderResult> {
+  let runtime: Awaited<ReturnType<typeof loadPeleRuntime>>;
+  try {
+    runtime = await loadWithRetry(loadPeleRuntime, getMermaidRetryDelayMs());
+  } catch (error) {
+    return { ok: false, message: errorMessage(error, 'The Pele engine could not be loaded.'), line: null, runtimeUnavailable: true };
+  }
+  if (source.length > PELE_SOURCE_LIMIT) {
+    return { ok: false, message: `Diagram source exceeds the ${PELE_SOURCE_LIMIT.toLocaleString()} character limit.`, line: null, runtimeUnavailable: false };
+  }
+  let supported = false;
+  try {
+    supported = await runtime.supports(source);
+  } catch {
+    supported = false;
+  }
+  if (!supported) {
+    return { ok: false, message: 'Pele does not draw this diagram type.', line: null, runtimeUnavailable: false, unsupported: true };
+  }
+  try {
+    const result = await renderPeleSource(runtime, source, renderId);
+    if (result.svg.length > PELE_OUTPUT_LIMIT) {
+      return { ok: false, message: `Rendered diagram exceeds the ${PELE_OUTPUT_LIMIT.toLocaleString()} character limit.`, line: null, runtimeUnavailable: false };
+    }
+    const svgNode = sanitizeFor(result.svg, options);
+    if (svgNode === REFUSED) return REFUSED_RESULT;
+    if (svgNode === null) {
+      return { ok: false, message: 'The diagram could not be rendered.', line: null, runtimeUnavailable: false };
+    }
+    svgNode.id = peleSvgId(renderId);
+    scrubFetchingStyles(svgNode);
+    applyPeleThemeVariables(svgNode, readPeleThemeVariables(theme.mode));
+    widenEdgeHitAreas(svgNode);
+    return { ok: true, svgNode, findTarget: PELE_FINDER.findTarget };
+  } catch (error) {
+    return { ok: false, message: errorMessage(error, 'Failed to render diagram'), line: peleErrorLine(error), runtimeUnavailable: false };
+  }
+}
+
+/** Pele writes its styling, an author's `style` and `classDef` included, as
+ * inline `style` attributes: one that fetches (`url(https://…)`) goes. */
+function scrubFetchingStyles(root: SVGSVGElement): void {
+  for (const el of [root, ...Array.from(root.querySelectorAll('[style]'))]) {
+    const style = el.getAttribute('style');
+    if (style !== null && cssFetches(style)) el.removeAttribute('style');
+  }
+}
+
+/** Pele's errors carry a one-based `line` (0 when it has none). */
+function peleErrorLine(error: unknown): number | null {
+  const line = typeof error === 'object' && error !== null ? (error as { line?: unknown }).line : undefined;
+  return typeof line === 'number' && Number.isFinite(line) && line > 0 ? line : null;
+}
+
+/**
+ * Mermaid-syntax fences when the engine switch is not `'mermaid'`
+ * (`diagram-engine.ts`). The finder reads whichever grammar the displayed
+ * svg has, so a fence that fell back to Mermaid keeps Mermaid's part
+ * comments. In `'pele-where-safe'` a Pele failure that is not a host's
+ * refusal is drawn by Mermaid instead.
+ */
+const engineSwitchRenderer: DiagramRenderer = {
+  finder: PELE_COMPAT_FINDER,
+  async render(renderId, source, theme, options) {
+    const mode = diagramEngineMode();
+    if (diagramEngineFor(source, { mode }).engine === 'mermaid') return mermaidRenderer.render(renderId, source, theme, options);
+    const result = await renderPele(renderId, source, theme, options);
+    if (result.ok === true || result.refused === true || mode !== 'pele-where-safe') return result;
+    return mermaidRenderer.render(renderId, source, theme, options);
+  },
 };
+
+/** The renderer for a kind. With the switch on `'mermaid'` (the shipped
+ * value) a Mermaid fence gets exactly the Mermaid entry above. */
+function rendererFor(kind: DiagramKind): DiagramRenderer {
+  if (kind === 'graphviz') return graphvizRenderer;
+  return diagramEngineMode() === 'mermaid' ? mermaidRenderer : engineSwitchRenderer;
+}
 
 /** The finder for a kind, synchronously: the viewer wires the pointer and
  * the anchors to it before the first render lands. */
 export function diagramFinder(kind: DiagramKind): DiagramFinder {
-  return RENDERERS[kind].finder;
+  return rendererFor(kind).finder;
 }
 
 /**
@@ -794,5 +883,5 @@ export function renderDiagram(
   theme: DiagramTheme,
   options?: DiagramRenderOptions,
 ): Promise<DiagramRenderResult> {
-  return RENDERERS[kind].render(renderId, source, theme, options);
+  return rendererFor(kind).render(renderId, source, theme, options);
 }

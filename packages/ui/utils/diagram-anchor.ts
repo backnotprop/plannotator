@@ -53,6 +53,15 @@ export interface DiagramFinder {
  * gitGraph, pie) are `other`: a comment there is diagram-level. */
 export function diagramFamilyOf(svg: Element): DiagramFamily {
   const role = svg.getAttribute('aria-roledescription') ?? '';
+  // Pele keeps Mermaid's accessible role, but its root class is the reliable
+  // discriminator: its SVG ids and group structure are not Mermaid's.
+  if (svg.classList.contains('pele')) {
+    const peleRole = Array.from(svg.classList).find((name) => name.startsWith('pele-'))?.slice(5);
+    if (peleRole === 'flowchart') return 'flowchart';
+    if (peleRole === 'class') return 'class';
+    if (peleRole === 'state') return 'state';
+    return 'other';
+  }
   if (role.startsWith('flowchart')) return 'flowchart';
   if (role === 'stateDiagram') return 'state';
   if (role === 'classDiagram') return 'class';
