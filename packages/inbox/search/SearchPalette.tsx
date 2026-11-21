@@ -541,7 +541,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
   /** Enter pressed while a newer query was on its way: open its first row once it lands. */
   const openWhenSettled = useRef(false);
   const merged = useRef<{ key: string; model: SearchModel } | null>(null);
-  const carry = useRef<{ key: string; top: number | null } | null>(null);
+  const carry = useRef<{ key: string; top: number | null; height: number } | null>(null);
   const pointed = useRef(false);
   const pressing = useRef(false);
   const heldMerge = useRef<(() => void) | null>(null);
@@ -581,7 +581,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
               const at = hlRef.current;
               const option = at === null ? undefined : optionsRef.current[at];
               const shown = at === null ? null : document.getElementById(optionId(at));
-              carry.current = option ? { key: optionKey(option), top: shown ? shown.getBoundingClientRect().top : null } : null;
+              carry.current = option ? { key: optionKey(option), top: shown ? shown.getBoundingClientRect().top : null, height: listRef.current?.clientHeight ?? 0 } : null;
               setAnswered((current) => (current && current.key === key ? { ...current, model: keepingRow(model, option) } : current));
             };
             if (pressing.current) heldMerge.current = apply;
@@ -683,6 +683,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
   useLayoutEffect(() => {
     pointed.current = false;
     carry.current = null;
+    if (listRef.current) listRef.current.style.maxHeight = '';
     setHl(options.length > 0 ? 0 : null);
     // Only a new answer resets it; expanding a group keeps the row.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -695,7 +696,10 @@ export default function SearchPalette(props: SearchPaletteProps) {
     if (at < 0) return;
     const row = document.getElementById(optionId(at));
     const list = listRef.current;
-    if (pointed.current && held.top !== null && row && list) list.scrollTop += row.getBoundingClientRect().top - held.top;
+    if (pointed.current && held.top !== null && row && list) {
+      list.style.maxHeight = `${held.height}px`;
+      list.scrollTop += row.getBoundingClientRect().top - held.top;
+    }
     setHl(at);
     // optionId is stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1303,6 +1307,9 @@ export default function SearchPalette(props: SearchPaletteProps) {
           onScroll={measure}
           onPointerDown={() => {
             pressing.current = true;
+          }}
+          onPointerLeave={(event) => {
+            event.currentTarget.style.maxHeight = '';
           }}
         >
           {body}
