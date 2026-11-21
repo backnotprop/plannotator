@@ -725,8 +725,8 @@ describe("a paired cloud agent's change to a routine the person turned on", () =
 });
 
 describe("a routine's name in a change line", () => {
-  // Each a name that would draw as something else were it written into the line as it is (the window's drawing of
-  // these lines: packages/inbox/scheduled/changeLineNames.test.tsx).
+  // A plain name (Maya's triage, written as it is, as on main), then each a name that would draw as something else were
+  // it written into the line as it is (the window's drawing of these lines: packages/inbox/scheduled/changeLineNames.test.tsx).
   const NAMES = ["Maya's triage", "Deps: weekly", "@maya's sweep", "snake_case_name", "2 * 3 * 4", "Scan <img src=scan.png>", "Scan ![x](scan.png)", "Fix #123 now", "See https://e.co", "a `tick` and ``two``", "`edge`"];
 
   test("reads exactly as typed in the list row's preview, a folded line and read_thread, and no picture is read for it", async () => {
@@ -758,6 +758,17 @@ describe("a routine's name in a change line", () => {
         for (const id of [made, renamed, deleted]) expect(w.store.message(id!)!.inline_images ?? []).toEqual([]);
       }
     }
+  });
+
+  test("a plain name's lines are main's, byte for byte", async () => {
+    const w = world();
+    const by = { kind: "agent" as const, host: FAKE, session: "s-maya", name: "Fake Agent", thread_id: null };
+    const { record, told: made } = await w.scheduled.create({ name: "Maya's triage", prompt: "Triage.", schedule: null, folder: { project_id: w.project.id }, agent: FAKE }, by);
+    expect(w.store.message(made!)!.body).toBe(`Made the routine [Maya's triage](#routine=${record.id}). It is off until you turn it on.`);
+    const { told: renamed } = await w.scheduled.update(record.id, { name: "Morning triage" }, by);
+    expect(w.store.message(renamed!)!.body).toBe(`Changed the routine [Morning triage](#routine=${record.id}).\n\nIts name was Maya's triage.`);
+    const { told: deleted } = await w.scheduled.remove(record.id, by);
+    expect(w.store.message(deleted!)!.body).toBe("Deleted the routine Morning triage. Its thread and past runs stay.");
   });
 
   test("a folder's path reads as typed, and the Inbox's own words for a folder stay plain words", async () => {

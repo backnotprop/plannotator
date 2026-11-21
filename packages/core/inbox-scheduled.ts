@@ -247,14 +247,15 @@ export function inboxScheduledDecide(input: {
  * The characters a plain name may hold: letters (with their marks), numbers, emoji, a space, and punctuation no inline
  * renderer of a thread reads as markup where these lines put a name (always mid-line, after a space: inside a link's
  * words, or before `.`, ` (` or `).`). The window's InlineMarkdown, core `cleanInline` and the phone's inline Markdown
- * draw them as typed. Left out, so such a name is code: `'` and `"` (the window's smart quotes draw `’`), `_ * ~`
- * (emphasis), `[ ] ! < > & \ $ # @ : / | =` and backticks (links, pictures, tags, references, escapes, math, refs,
- * mentions, emoji codes, URLs, paths), and any other space, control or direction mark.
+ * draw them as typed (`'` the window draws as `’`, its smart quotes: only how it looks; the line keeps `'`). Left
+ * out, so such a name is code: `"`, `_ * ~` (emphasis), `[ ] ! < > & \ $ # @ : / | =` and backticks (links,
+ * pictures, tags, references, escapes, math, refs, mentions, emoji codes, URLs, paths), and any other space, control or
+ * direction mark.
  */
-const PLAIN_NAME = /^[\p{L}\p{M}\p{N}\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}‍️ .,’\-–—()+?]*$/u;
+const PLAIN_NAME = /^[\p{L}\p{M}\p{N}\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}\u200D\uFE0F .,'’\-–—()+?]*$/u;
 
 /** A path may also hold `/`, `_` and a leading `~/`, and no `.`: see `isPlainLineText`. */
-const PLAIN_PATH = /^(?:~\/)?[\p{L}\p{M}\p{N}\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}‍️ ,’\-–—()+?/_]*$/u;
+const PLAIN_PATH = /^(?:~\/)?[\p{L}\p{M}\p{N}\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}\u200D\uFE0F ,'’\-–—()+?/_]*$/u;
 
 /**
  * Whether text reads as typed, and draws as nothing but its words, written into a change line as it is. Besides the

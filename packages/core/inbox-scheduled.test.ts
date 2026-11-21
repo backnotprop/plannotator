@@ -147,6 +147,8 @@ describe("a routine's name or folder in a change line", () => {
     expect(made("Not theirs")).toBe("Made the routine [Not theirs](#routine=sch_1). It is off until you turn it on.");
     expect(made("Dependency check", true)).toBe("Made the routine [Dependency check](#routine=sch_1). It is on, as you asked with /create-routine.");
     expect(`Its name was ${routineLineText("Morning triage")}.`).toBe("Its name was Morning triage.");
+    expect(made("Maya's triage")).toBe("Made the routine [Maya's triage](#routine=sch_1). It is off until you turn it on.");
+    expect(`Deleted the routine ${routineLineText("Maya's triage")}. Its thread and past runs stay.`).toBe("Deleted the routine Maya's triage. Its thread and past runs stay.");
     expect(`It now works in ${routineLineText("~/acme-web", "path")} (was ${routineLineText("~/acme-api", "path")}).`).toBe("It now works in ~/acme-web (was ~/acme-api).");
     for (const name of [
       ".,’-–—()+?", // only the allowed punctuation
@@ -161,12 +163,11 @@ describe("a routine's name or folder in a change line", () => {
       "हिन्दी रिपोर्ट",
       "فرز يومي",
     ]) expect(routineLineText(name)).toBe(name);
-    for (const folder of ["~/code/my-app_v2", "/srv/apps/acme web", "~/projects/snake__case", "~/linear/ENG-42"]) expect(routineLineText(folder, "path")).toBe(folder);
+    for (const folder of ["~/code/my-app_v2", "/srv/apps/acme web", "~/projects/snake__case", "~/linear/ENG-42", "~/maya's app"]) expect(routineLineText(folder, "path")).toBe(folder);
   });
 
   test("a name or folder any renderer could read as markup, or not as typed, is code", () => {
     for (const name of [
-      "Maya's triage", // smart quotes would draw ’
       'Say "hi"',
       "www.example.com",
       "Check WWW.example.com",
@@ -181,6 +182,8 @@ describe("a routine's name or folder in a change line", () => {
       "a..b",
       "a--b",
       "ENG-42 follow-up", // the window links a Linear issue
+      "Maya's ENG-42",
+      "@maya's sweep",
       "snake_case",
       "~tilde~",
       "a/b",

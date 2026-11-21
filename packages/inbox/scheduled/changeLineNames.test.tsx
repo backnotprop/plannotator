@@ -9,7 +9,7 @@ import { routineLineText } from '@plannotator/core/inbox-scheduled';
 import { InlineMarkdown } from '@plannotator/ui/components/InlineMarkdown';
 import { findBarePaths } from '../fileRefs';
 
-const NAMES = ["Maya's triage", 'Deps: weekly', "@maya's sweep", 'snake_case_name', '2 * 3 * 4', 'Scan <img src=scan.png>', 'Scan ![x](/p.png)', 'Fix #123 now', 'See https://e.co', 'a `tick` and ``two``', '`edge`'];
+const NAMES = ['Deps: weekly', "@maya's sweep", 'snake_case_name', '2 * 3 * 4', 'Scan <img src=scan.png>', 'Scan ![x](/p.png)', 'Fix #123 now', 'See https://e.co', 'a `tick` and ``two``', '`edge`'];
 
 /** The lines a change writes with a name in them, as inbox-scheduled.ts writes them. */
 const linesOf = (name: string) => [
@@ -37,8 +37,8 @@ describe("a routine's name in a change line, in the window", () => {
   });
 
   test('a plain name or folder, written as it is (as on main), draws as its words only: no code, emphasis, strikethrough, link or picture', () => {
-    const PLAIN = ['Morning triage', 'Dependency check', '.,’-–—()+?', 'Weekly sync v2.1', 'follow-up (daily)', 'What changed?', '🚀 Deploy check', 'Café crème', '毎朝のトリアージ', 'हिन्दी रिपोर्ट'];
-    const FOLDERS = ['~/acme-web', '~/code/my-app_v2', '~/projects/snake__case', '/srv/apps/acme web', '~/linear/ENG-42'];
+    const PLAIN = ["Maya's triage", 'Morning triage', 'Dependency check', '.,’-–—()+?', 'Weekly sync v2.1', 'follow-up (daily)', 'What changed?', '🚀 Deploy check', 'Café crème', '毎朝のトリアージ', 'हिन्दी रिपोर्ट'];
+    const FOLDERS = ["~/maya's app", '~/acme-web', '~/code/my-app_v2', '~/projects/snake__case', '/srv/apps/acme web', '~/linear/ENG-42'];
     const lines = [
       ...PLAIN.flatMap((name) => linesOf(name).map((line) => ({ line, words: name }))),
       ...FOLDERS.map((folder) => ({ line: `It now works in ${routineLineText(folder, 'path')} (was ${routineLineText('~/acme-api', 'path')}).`, words: folder })),
@@ -50,7 +50,9 @@ describe("a routine's name in a change line, in the window", () => {
       const html = renderToStaticMarkup(<InlineMarkdown text={line} githubRepo="acme/api" />);
       const tags = html.match(/<(img|a|code|em|strong|del|script|iframe)\b[^>]*>/g) ?? [];
       expect([line, tags.filter((tag) => !tag.includes('href="#routine=sch_1"'))]).toEqual([line, []]);
-      expect([line, textOf(html).includes(words)]).toEqual([line, true]);
+      // The window's smart quotes draw ' as ‘ or ’, as on main: only how it looks (the line itself keeps ').
+      const quotes = (text: string) => text.replace(/[‘’]/g, "'");
+      expect([line, quotes(textOf(html)).includes(quotes(words))]).toEqual([line, true]);
     }
   });
 });
