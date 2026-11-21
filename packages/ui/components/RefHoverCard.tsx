@@ -94,6 +94,26 @@ const BITBUCKET_FAILURE_TEXT: Record<ForgeRefCardError, string> = {
   unavailable: "Details couldn't load right now.",
 };
 
+/** Forgejo / Gitea has no CLI either: Plannotator reads it with the access token for that host, so its failures say so. */
+const FORGEJO_FAILURE_TEXT: Record<ForgeRefCardError, string> = {
+  unsupported: 'Details show for codeberg.org and for the Forgejo hosts you name (forgejoHosts).',
+  cli_missing: "Details couldn't load right now.",
+  signed_out: "Plannotator couldn't sign in to this Forgejo. Add an access token for its host (forgejoTokens) to see details here.",
+  not_found: "This Forgejo account can't see this one, or it doesn't exist.",
+  rate_limited: 'This Forgejo asked for a short break. Details come back in a minute.',
+  unavailable: "Details couldn't load right now.",
+};
+
+/**
+ * The line a failed card shows when no tool problem is named. Forgejo and Bitbucket are read with a token, never a CLI,
+ * so neither is told "gh isn't installed"; GitHub and GitLab keep the CLI's line. `answered` is false when the card got
+ * no answer at all.
+ */
+export function refFailureLine(platform: ForgeRef['platform'], error: ForgeRefCardError, answered: boolean): string {
+  if (platform === 'forgejo') return FORGEJO_FAILURE_TEXT[error];
+  return !answered || platform === 'bitbucket' ? BITBUCKET_FAILURE_TEXT[error] : refUnsupportedLine(platform === 'gitlab' ? 'glab' : 'gh');
+}
+
 type Tone = 'open' | 'merged' | 'closed' | 'neutral';
 
 function stateOf(data: ForgeRefCardData): { label: string; tone: Tone } {
@@ -431,7 +451,7 @@ export function RefCardView({ target, href, result, pinned, onClose, sheet, tigh
           </div>
         ) : (
           <p className="px-3.5 pb-3 pt-1.5 text-[12px] leading-relaxed text-muted-foreground" data-ref-card-error={error}>
-            {!result || target.platform === 'bitbucket' ? BITBUCKET_FAILURE_TEXT[error] : refUnsupportedLine(target.platform === 'gitlab' ? 'glab' : 'gh')}
+            {refFailureLine(target.platform, error, !!result)}
           </p>
         )}
         {footer()}

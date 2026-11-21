@@ -122,6 +122,34 @@ export function toolProblem(state: ToolState, ctx: ToolProblemContext, at: Date 
   return { code: `tool.${state}`, kind: "tool", ...TOOL_WORDS[state](ctx), at: at.toISOString() };
 }
 
+/**
+ * A Forgejo / Gitea is read with the access token for its host, never a CLI, so its failures say that: no `gh`, no
+ * sign-in command. The words match the hover card's lines (`FORGEJO_FAILURE_TEXT`, RefHoverCard.tsx). No claim names the
+ * host, since a link an agent wrote can name any host.
+ */
+const FORGEJO_WORDS: Record<ForgeRefCardError, { title: string; detail: string }> = {
+  unsupported: { title: "Details show for the Forgejo hosts you name", detail: "Name this one in forgejoHosts, and give it a token in forgejoTokens." },
+  signed_out: { title: "Plannotator has no working token for this Forgejo", detail: "Add an access token for its host (forgejoTokens), then try again." },
+  not_found: { title: "This Forgejo account can't see this pull request", detail: "It may be private, or the number may be wrong." },
+  rate_limited: { title: "This Forgejo asked for a short break", detail: "Details come back by themselves in a minute." },
+  cli_missing: { title: "Forgejo didn't answer", detail: "Try again in a moment." },
+  unavailable: { title: "Forgejo didn't answer", detail: "Try again in a moment." },
+};
+
+/** A failed Forgejo / Gitea read as a problem. `url` is the pull request's page: offered only when it is https. */
+export function forgejoProblem(error: ForgeRefCardError, ctx: { url?: string } = {}, at: Date = new Date()): Problem {
+  const words = FORGEJO_WORDS[error];
+  const open = error === "not_found" && ctx.url && /^https:\/\//.test(ctx.url) ? { kind: "open_url" as const, value: ctx.url, label: "Open on Forgejo" } : null;
+  return {
+    code: `forgejo.${error === "cli_missing" ? "unavailable" : error}`,
+    kind: "tool",
+    ...words,
+    ...(open ? { action: open } : {}),
+    ...(error === "signed_out" || error === "unavailable" || error === "cli_missing" ? { retry: true as const } : {}),
+    at: at.toISOString(),
+  };
+}
+
 /** A host this computer's CLI does not read: no claim about the host, no command. */
 const UNSUPPORTED_WORDS = (cli: ToolCli) => ({ title: `Details show for hosts your ${cli} is signed in to`, detail: "This one isn't, so nothing was fetched." });
 
@@ -164,8 +192,9 @@ export function cardProblem(result: ForgeRefCardResult | null | undefined, ref: 
   const failed = result as Extract<ForgeRefCardResult, { ok: false }>;
   const sent = problemOf(failed.problem);
   if (sent) return sent;
-  // Bitbucket has no CLI: its failures keep the hover card's own lines.
-  if (ref.platform === "bitbucket") return null;
+  // Bitbucket and Forgejo have no CLI: their failures keep the hover card's own lines (a thread's PR card gets a
+  // Forgejo problem from the server, or `forgejoProblem`), never "gh isn't installed".
+  if (ref.platform === "bitbucket" || ref.platform === "forgejo") return null;
   const state = toolStateOfCardError(failed.error);
   if (!state) return null;
   return toolProblem(state, { cli: ref.platform === "gitlab" ? "glab" : "gh", host: ref.host, kind: ref.kind }, new Date(result.fetchedAt || Date.now()));

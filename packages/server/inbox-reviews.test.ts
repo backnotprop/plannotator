@@ -28,6 +28,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import type { ForgeRefCardData } from "@plannotator/core/forge-ref-card";
 import { inboxReviewStartOf } from "@plannotator/core/inbox-types";
 import type { InboxMessage, InboxPullHost, InboxReviewLanding, InboxReviewLinkAnswer, InboxReviewRow, InboxReviewsAnswer, InboxReviewThread } from "@plannotator/core/inbox-types";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
@@ -109,7 +110,7 @@ function forge(answer: unknown = GH_ANSWER) {
   return { run, calls, prState, commits };
 }
 
-async function world(options: { repoDelayMs?: number; answer?: unknown; launchHost?: ReturnType<typeof fakeLaunchHost>["host"] } = {}) {
+async function world(options: { repoDelayMs?: number; answer?: unknown; launchHost?: ReturnType<typeof fakeLaunchHost>["host"]; forgejoRefReader?: NonNullable<Parameters<typeof startInboxServer>[0]["forgejoRefReader"]> } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-reviews-")));
   roots.push(root);
   const project = join(root, "billing-svc");
@@ -127,6 +128,7 @@ async function world(options: { repoDelayMs?: number; answer?: unknown; launchHo
     dataDir,
     phones: false,
     refRunner: f.run,
+    ...(options.forgejoRefReader ? { forgejoRefReader: options.forgejoRefReader } : {}),
     ...(options.launchHost ? { binaryPath: null, launchHosts: () => [options.launchHost!] } : {}),
     // A posted review stops here: nothing reaches a forge.
     prRuntime: {
@@ -456,8 +458,37 @@ describe("a pull request link", () => {
     const before = w.forge.calls.length;
     expect((await read(w, "https://bitbucket.org/acme/mobile/pull-requests/88")).body).toMatchObject({ ok: false, reason: "bitbucket" });
     expect((await read(w, "retries")).body).toMatchObject({ ok: false, reason: "not_a_link" });
+    // A Forgejo link is no GitHub PR: no gh call asking github about its /pull/N page, and the answer names Forgejo.
+    expect((await read(w, "https://codeberg.org/acme/w/pulls/7")).body).toMatchObject({ ok: false, reason: "forgejo" });
     expect(w.forge.calls.length).toBe(before);
     expect((await read(w, "https://gitlab.example.com/g/app/-/merge_requests/9")).body).toMatchObject({ ok: false, reason: "unreadable", cli: "glab", host: "gitlab.example.com" });
+  });
+
+  test("a Forgejo link is read with the person's token, never gh or glab, and a host nothing reads says so", async () => {
+    const asked: string[] = [];
+    const w = await world({
+      forgejoRefReader: async (ref) => {
+        asked.push(`${ref.host}/${ref.owner}/${ref.repo}#${ref.number}`);
+        if (ref.number !== 7) throw Object.assign(new Error("not found"), { status: 404 });
+        return {
+          platform: "forgejo", kind: "pull", repo: `${ref.owner}/${ref.repo}`, number: 7, url: `https://${ref.host}/${ref.owner}/${ref.repo}/pulls/7`, title: "Add a widget", state: "open",
+          author: { login: "sam", avatarUrl: null }, createdAt: "", updatedAt: "2026-11-01T00:00:00Z", closedAt: null, labels: [], assignees: [], comments: 0, body: "", bodyCut: false, lastComment: null, linked: [],
+          pull: { base: "main", head: "widget", additions: 12, deletions: 3, files: 2, review: null, checks: null },
+        } as unknown as ForgeRefCardData;
+      },
+    });
+    await w.setCodeReview(true);
+    const before = w.forge.calls.length;
+    const { body } = await read(w, "https://codeberg.org/acme/w/pulls/7");
+    expect(body).toMatchObject({ ok: true, cli: "forgejo", pull: { platform: "forgejo", key: "codeberg.org/acme/w#7", url: "https://codeberg.org/acme/w/pulls/7", number: 7, title: "Add a widget", author: "sam", mine: false, base: "main", head: "widget", state: "open", additions: 12, files: 2 }, thread_id: null });
+    expect(asked).toEqual(["codeberg.org/acme/w#7"]);
+    // Not gh, not glab: a Forgejo has neither.
+    expect(w.forge.calls.length).toBe(before);
+    // The reader could not read it (no token, no such PR): the answer is Forgejo's own, with no CLI named.
+    expect((await read(w, "https://codeberg.org/acme/w/pulls/8")).body).toMatchObject({ ok: false, reason: "forgejo" });
+    // A host nobody named is not even asked.
+    expect((await read(w, "https://git.example.test/acme/w/pulls/7")).body).toMatchObject({ ok: false, reason: "forgejo" });
+    expect(asked).toEqual(["codeberg.org/acme/w#7", "codeberg.org/acme/w#8"]);
   });
 
   test("a PR of one of the person's projects says so, one on the list needs no call, and one in review names its thread", async () => {

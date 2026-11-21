@@ -450,6 +450,7 @@ function prSourceOf(url: string): string {
   try {
     const host = new URL(url).hostname;
     if (host === "bitbucket.org") return "bitbucket";
+    if (/\/pulls\/\d+$/.test(url)) return "forgejo";
     return /\/-\/merge_requests\//.test(url) ? "gitlab" : "github";
   } catch {
     return "github";

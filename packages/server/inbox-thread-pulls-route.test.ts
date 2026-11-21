@@ -18,7 +18,8 @@ import { parseInboxThreadPullRefs, type InboxAuthor, type InboxThreadPullsAnswer
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createThreadPullStates, createThreadPullsRoute, THREAD_PULLS_ADD_WAIT_MS, threadPullsChangedForWake, type ThreadPullFixture } from "./inbox-thread-pulls";
-import { createRefCards, type BitbucketRefReader } from "./ref-cards";
+import { createRefCards, type BitbucketRefReader, type ForgejoRefReader } from "./ref-cards";
+import { learnForgejoHosts } from "@plannotator/core/forge-refs";
 
 /** Let the reads behind an answer land (the stand-in forges answer at once). */
 const settle = async () => {
@@ -56,6 +57,7 @@ function world(
     gh?: { run: unknown; calls: string[][] };
     onLiveChange?: (threadIds: readonly string[]) => void;
     bitbucket?: BitbucketRefReader;
+    forgejo?: ForgejoRefReader;
     cards?: boolean;
     projectHost?: (projectId: string) => Promise<string | null>;
     projectHostOf?: (projectId: string) => string | null;
@@ -68,7 +70,7 @@ function world(
   const project = store.ensureProject({ name: "billing", root: "/work/billing" });
   const thread = store.sendMessage({ project_id: project.id, author: AGENT, body: "Opened the retry PR.", subject: "Invoice retries" }).message.id;
   const gh = options.gh ?? fakeGh({});
-  const refCards = options.bitbucket || options.cards ? createRefCards({ run: gh.run as never, now: () => now, avatar: async () => null, bitbucket: options.bitbucket }) : undefined;
+  const refCards = options.bitbucket || options.forgejo || options.cards ? createRefCards({ run: gh.run as never, now: () => now, avatar: async () => null, bitbucket: options.bitbucket, forgejo: options.forgejo }) : undefined;
   const states = createThreadPullStates({ store, run: gh.run as never, ...(refCards ? { refCards } : {}), now: () => now, fixture: options.fixture ?? null, onLiveChange: options.onLiveChange, projectHostOf: options.projectHostOf });
   const route = createThreadPullsRoute({
     store,
@@ -236,6 +238,61 @@ describe("the state reader", () => {
     expect(reads).toEqual([{ workspace: "acme", repo: "billing", number: 7 }]);
     expect(answer.pulls.map((p) => [p.platform, p.label, p.state, p.title, p.checks, p.review])).toEqual([["bitbucket", "#7", "open", "Retry invoices", "failing", "approved"]]);
     expect(w.store.threadPulls(w.thread)[0]).toMatchObject({ state: "open", base: "main", head: "retries" });
+  });
+
+  describe("a Forgejo PR", () => {
+    const URL_ = "https://git.example.test/acme/widgets/pulls/7";
+    const forgejoCard = (checks: "success" | "failure" | "pending") => ({
+      platform: "forgejo" as const, kind: "pull" as const, repo: "acme/widgets", number: 7, url: URL_,
+      title: "Add mul", state: "open" as const, author: null, createdAt: "", updatedAt: "", closedAt: null, labels: [], assignees: [],
+      comments: 0, body: "", bodyCut: false, lastComment: null, linked: [],
+      pull: { base: "main", head: "feat", additions: 0, deletions: 0, files: 0, review: null, checks: { state: checks, passed: 1, failed: 1, pending: 0, total: 2 } },
+    });
+    const named = () => learnForgejoHosts(["git.example.test"]);
+    afterEach(() => learnForgejoHosts([]));
+
+    test("on a host the person named, its state and checks come through the token reader; no CLI runs", async () => {
+      named();
+      const gh = fakeGh({});
+      const reads: unknown[] = [];
+      const w = world({ gh, forgejo: async (ref) => (reads.push(ref), forgejoCard("failure")) });
+      w.agentAdd(w.thread, URL_);
+      await w.get(w.thread);
+      await settle();
+      const answer = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+      expect(gh.calls).toEqual([]);
+      expect(reads).toEqual([{ host: "git.example.test", owner: "acme", repo: "widgets", number: 7 }]);
+      expect(answer.pulls.map((p) => [p.platform, p.label, p.state, p.title, p.checks, p.problem])).toEqual([["forgejo", "#7", "open", "Add mul", "failing", undefined]]);
+    });
+
+    test.each([
+      ["a refused token", () => Object.assign(new Error("Forgejo rejected the token (401)"), { status: 401 }), "forgejo.signed_out"],
+      ["a pull it cannot see", () => Object.assign(new Error("Forgejo says not found (404)"), { status: 404 }), "forgejo.not_found"],
+      ["a rate limit", () => Object.assign(new Error("Forgejo says slow down (429)"), { status: 429 }), "forgejo.rate_limited"],
+    ])("%s reaches the card as a Forgejo problem, never as gh's", async (_name, fail, code) => {
+      named();
+      const w = world({ gh: fakeGh({}), forgejo: async () => { throw fail(); } });
+      w.agentAdd(w.thread, URL_);
+      await w.get(w.thread);
+      await settle();
+      const answer = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+      const problem = answer.pulls[0]!.problem!;
+      expect(problem.code).toBe(code);
+      expect(`${problem.title} ${problem.detail}`).not.toMatch(/\b(gh|glab)\b/);
+      expect(answer.pulls[0]!.state).toBe("unknown");
+    });
+
+    test("a host the person has not named says how to name it, and no request is made", async () => {
+      const reads: unknown[] = [];
+      const w = world({ gh: fakeGh({}), forgejo: async (ref) => (reads.push(ref), forgejoCard("success")) });
+      w.agentAdd(w.thread, URL_);
+      await w.get(w.thread);
+      await settle();
+      const answer = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+      expect(reads).toEqual([]);
+      expect(answer.pulls[0]!.problem?.code).toBe("forgejo.unsupported");
+      expect(answer.pulls[0]!.problem?.detail).toContain("forgejoHosts");
+    });
   });
 
   test("a self-managed GitLab's MR reads its state through the glab signed in there; a host glab is not signed in to is never asked", async () => {

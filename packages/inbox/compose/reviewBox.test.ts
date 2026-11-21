@@ -185,6 +185,25 @@ describe('a pull request link', () => {
     }
   });
 
+  test("a Forgejo link's line says where to add the host and token, never a CLI or GitHub", () => {
+    const line = reviewLinkWords({ ok: false, reason: 'forgejo' });
+    expect(line).toContain('Settings');
+    expect(line).not.toMatch(/\b(gh|glab)\b|GitHub|GitLab|host yet/);
+  });
+
+  test("a Forgejo link that was read says the token read it, not a signed-in CLI", () => {
+    const line = reviewLinkWords({ ...read(8, { host: 'codeberg.org', platform: 'forgejo' }), cli: 'forgejo' });
+    expect(line).toBe('Read with your token for codeberg.org');
+  });
+
+  test("a Forgejo link's hand-off names it a pull request, by its own address", () => {
+    const stack = reviewLinkStack(pull(7, { host: 'codeberg.org', platform: 'forgejo', repo: 'acme/w', url: 'https://codeberg.org/acme/w/pulls/7' }));
+    const message = pullHandoffMessage(stack);
+    expect(message).toContain('https://codeberg.org/acme/w/pulls/7');
+    expect(message).toContain('pull request');
+    expect(message).not.toContain('merge request');
+  });
+
   test('its line names the tool and the host it was read from', () => {
     const line = reviewLinkWords({ ...read(8, { host: 'gitlab.example.com' }), cli: 'glab' });
     expect(line).toContain('glab');

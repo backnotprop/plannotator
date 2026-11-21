@@ -3,6 +3,7 @@ import type { PRMetadata } from '@plannotator/shared/pr-types';
 import { parseSrcset, serializeSrcset } from '@plannotator/ui/utils/srcset';
 import { isGitHubAttachmentUrl } from '@plannotator/core/pr-attachment-url';
 import { artifactContentProxyUrl } from '../dock/panels/artifactDocument';
+import { isKnownForgejoAssetUrl } from './prArtifacts';
 
 /**
  * Whether GitHub attachment images in this PR's text load through the server
@@ -31,10 +32,45 @@ export function prImageSrc(src: string): string {
  * Candidates are split as the browser splits them, so a `data:` URL's comma
  * stays inside its URL.
  */
-export function prImageSrcset(srcset: string): string {
+export function prImageSrcset(srcset: string, resolve: (src: string) => string = prImageSrc): string {
   return serializeSrcset(
-    parseSrcset(srcset).map(({ url, descriptors }) => ({ url: prImageSrc(url), descriptors })),
+    parseSrcset(srcset).map(({ url, descriptors }) => ({ url: resolve(url), descriptors })),
   );
+}
+
+type ForgejoPR = Extract<PRMetadata, { platform: 'forgejo' }>;
+
+/**
+ * A Forgejo PR's own uploads in comment text. The editor writes them as
+ * relative links (`![a.png](/attachments/<uuid>)`), which the comment renderer
+ * would show as plain text and which need the reviewer's token to load. The
+ * links are made absolute on the PR's own origin, and then load through the
+ * same proxy as GitHub's. A link to any other place is left as it was.
+ */
+export function forgejoImageHandling(pr: PRMetadata | null | undefined): {
+  prepare: (markdown: string) => string;
+  src: (src: string) => string;
+} | null {
+  if (!pr || pr.platform !== 'forgejo') return null;
+  const origin = new URL(pr.url).origin;
+  const known = (raw: string): URL | null => {
+    try {
+      const url = new URL(raw, origin);
+      return isKnownForgejoAssetUrl(url, pr) ? url : null;
+    } catch {
+      return null;
+    }
+  };
+  return {
+    prepare: (markdown) => markdown.replace(/!\[([^\]]*)\]\((\/[^)\s]+)\)/g, (whole, alt: string, path: string) => {
+      const url = known(path);
+      return url ? `![${alt}](${url.href})` : whole;
+    }),
+    src: (src) => {
+      const url = known(src);
+      return url ? artifactContentProxyUrl(url.href) : src;
+    },
+  };
 }
 
 export const resolvePRImage: ImageResolver = (src) => {

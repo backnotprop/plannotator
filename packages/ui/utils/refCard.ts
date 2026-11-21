@@ -26,6 +26,8 @@ export type RefCardTransport = (href: string, ref: ForgeRef, signal: AbortSignal
 let transport: RefCardTransport | null = null;
 /** Bitbucket Cloud links get a card too: only a host whose server reads them (the Inbox) turns it on. */
 let bitbucketCards = false;
+/** Forgejo / Gitea links get a card too: only a host whose server reads them (the Inbox) turns it on. */
+let forgejoCards = false;
 
 export function setRefCardTransport(next: RefCardTransport | null): void {
   transport = next;
@@ -34,6 +36,11 @@ export function setRefCardTransport(next: RefCardTransport | null): void {
 
 export function setRefCardBitbucket(on: boolean): void {
   bitbucketCards = on;
+  cache.clear();
+}
+
+export function setRefCardForgejo(on: boolean): void {
+  forgejoCards = on;
   cache.clear();
 }
 
@@ -72,7 +79,10 @@ export function refCardTarget(href: string | null | undefined): ForgeRef | null 
   if (!transport || !href) return null;
   const ref = parseForgeRefUrl(href);
   // Bitbucket issues get no card anywhere: the server reads only its pull requests.
-  if (ref) return ref.platform !== 'bitbucket' || (bitbucketCards && ref.kind === 'pull') ? ref : null;
+  if (ref?.platform === 'bitbucket') return bitbucketCards && ref.kind === 'pull' ? ref : null;
+  // A Forgejo link names its host by its path alone: the server decides whether it is one it may read.
+  if (ref?.platform === 'forgejo') return forgejoCards ? ref : null;
+  if (ref) return ref;
   return providedRefCardTarget(href);
 }
 

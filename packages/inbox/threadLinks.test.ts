@@ -4,7 +4,8 @@
  * code span, an image); a repository's links split or merged across hosts; a
  * look-alike host taken for a forge; the same item listed twice.
  */
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { learnForgejoHosts } from '@plannotator/core/forge-refs';
 import { linksOfBody, threadLinks } from './threadLinks';
 
 const repo = { display: 'acme/web', host: 'github.com' };
@@ -177,6 +178,54 @@ describe('the list', () => {
       ['bitbucket.org', 'bitbucket'],
       ['bitbucket.org.evil.example', null],
     ]);
+  });
+
+  describe('Forgejo / Gitea', () => {
+    // The known hosts are one global of this process: put it back for every other test.
+    afterEach(() => learnForgejoHosts([]));
+
+    test('on codeberg.org: a pull request and its files are one row named #N, a file link and a commit are their own rows', () => {
+      const { repos, others } = one(
+        [
+          '[Retry invoices](https://codeberg.org/acme/billing/pulls/7)',
+          'https://codeberg.org/acme/billing/pulls/7/files',
+          'https://codeberg.org/acme/billing/issues/3',
+          'https://codeberg.org/acme/billing/src/branch/main/src/math.ts#L12',
+          'https://codeberg.org/acme/billing/commit/3f2a1bc9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3',
+          'https://codeberg.org/explore/repos',
+        ].join(' '),
+      );
+      expect(repos.map((r) => [r.host, r.path, r.platform])).toEqual([['codeberg.org', 'acme/billing', 'forgejo']]);
+      expect(repos[0]!.links.map((l) => [l.kind, l.lead, l.text])).toEqual([
+        ['pull', '#7', 'Retry invoices'],
+        ['issue', null, '#3'],
+        ['file', null, 'math.ts:12'],
+        ['commit', null, '3f2a1bc'],
+      ]);
+      // A forge's own page is no repository.
+      expect(others.map((l) => [l.tail, l.platform])).toEqual([['codeberg.org', 'forgejo']]);
+    });
+
+    test('a file link reads its whole path and a branch name that has a slash does not make a page', () => {
+      const { repos } = one('https://codeberg.org/acme/billing/src/branch/main/docs/guide.md https://codeberg.org/acme/billing/src/tag/v1/README.md');
+      expect(repos[0]!.links.map((l) => [l.kind, l.text])).toEqual([['file', 'guide.md'], ['file', 'README.md']]);
+    });
+
+    test('on a host the person has not named, a pull request link is still a Forgejo repository by its path, and an issue link is a plain site', () => {
+      const before = one('https://git.acme.com/acme/billing/pulls/7 https://git.acme.com/acme/billing/issues/3');
+      expect(before.repos.map((r) => [r.host, r.platform, r.links.map((l) => l.kind)])).toEqual([['git.acme.com', 'forgejo', ['pull']]]);
+      expect(before.others.map((l) => [l.tail, l.platform])).toEqual([['git.acme.com', null]]);
+      learnForgejoHosts(['git.acme.com']);
+      // A message read before is the cache's: a new one carries the same links.
+      const after = threadLinks([{ id: 'after', body: 'https://git.acme.com/acme/billing/pulls/7 https://git.acme.com/acme/billing/issues/3' }], null);
+      expect(after.repos[0]!.links.map((l) => l.kind)).toEqual(['pull', 'issue']);
+    });
+
+    test("a look-alike host is not codeberg.org's", () => {
+      const { repos, others } = one('https://codeberg.org.evil.example/acme/billing/issues/8 https://codeberg.org-evil.example/acme/billing/src/branch/main/a.ts');
+      expect(repos).toEqual([]);
+      expect(others.every((l) => l.platform === null)).toBe(true);
+    });
   });
 
   test("a site's name is its real host, whatever the words say", () => {

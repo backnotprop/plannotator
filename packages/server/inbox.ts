@@ -220,10 +220,11 @@ import { createInboxScheduled, INBOX_SCHEDULED_ERROR_STATUS, INBOX_SCHEDULED_OFF
 import { createRoutineGrants, sendRecipients } from "./inbox-routine-grants";
 import { scheduledRoute, scheduledSwitch } from "./inbox-scheduled-routes";
 import { execLoginCommand, inboxLoginItem, type InboxLoginItem } from "./inbox-scheduled-login";
-import { bitbucketRefReader, createRefCards, readSignedInHosts, refCliRunner, type BitbucketRefReader, type RefRunner } from "./ref-cards";
+import { bitbucketRefReader, createRefCards, forgejoRefReader, readSignedInHosts, refCliRunner, refreshForgejoHosts, type BitbucketRefReader, type ForgejoRefReader, type RefRunner } from "./ref-cards";
 import { closePull, reopenAllowed, reopenPull, PULL_REOPEN_WINDOW_MS } from "@plannotator/shared/inbox-pull-close";
 import { createLinearCards, linearRefsRoute, withLinearCards } from "./inbox-linear-cards";
 import { createLinearKey } from "./inbox-linear-key";
+import { createForgejoHosts } from "./inbox-forgejo-hosts";
 import { mergePull } from "@plannotator/shared/inbox-pull-merge";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleCustomThemesScript, handleFavicon } from "./shared-handlers";
@@ -342,6 +343,7 @@ import { themeChooserLook, themeChooserOpen } from "@plannotator/shared/inbox/th
 import { createCardMarks } from "./inbox-card-marks";
 import { validateFilePath } from "@plannotator/shared/review-core";
 import { createInboxPullLookups, refCardsKindReader } from "./inbox-pull-lookups";
+import { forgejoLinkPull } from "./inbox-forgejo-link";
 import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, threadAgent, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
 import { pullDiffScopeOf } from "./inbox-pull-diff-scope";
 import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitForgeReview, type PRRef, type PRReviewFileComment, type PRRuntime } from "@plannotator/shared/pr-provider";
@@ -659,6 +661,8 @@ export interface InboxServerOptions {
   gitlabHosts?: GitlabHosts;
   /** Tests: Bitbucket Cloud PRs' cards and states (default: the real API, unless `refRunner` is given). */
   bitbucketRefReader?: BitbucketRefReader;
+  /** Tests: Forgejo / Gitea issues' and PRs' cards (default: the real API, unless `refRunner` is given). */
+  forgejoRefReader?: ForgejoRefReader;
   /** Tests: a thread's PRs read their states from this instead of gh / glab (inbox-thread-pulls.ts). */
   threadPullFixture?: () => ThreadPullFixture | null;
   /**
@@ -1410,6 +1414,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const name = normalizeForgeHost(host);
     return !!name && classifyForgeHost(name) === "gitlab";
   };
+  /** A project's remote on a Forgejo / Gitea (codeberg.org, or a host named in config): the window learns it the same way. */
+  const forgejoRemote = (host: string | null): boolean => {
+    const name = normalizeForgeHost(host);
+    return !!name && classifyForgeHost(name) === "forgejo";
+  };
   /** A project's remote host. It decides where a short `group/project!45` points, so it waits for a first read (at most INBOX_REPO_GIT_TIMEOUT_MS). */
   const projectRepoHost = async (projectId: string): Promise<string | null> => {
     const project = store.project(projectId);
@@ -1421,14 +1430,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Until the startup read of every project's origin has begun, an empty cache says nothing yet about Tidy's suggestions.
   let repoReadsBegun = false;
 
+  refreshForgejoHosts();
   // Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for (or the attach line looks a number up after a send, `pullLookups` below).
   // github.com, gitlab.com and the hosts this computer's own gh / glab is signed in to; nothing else.
   // Bitbucket Cloud PRs through the review app's credentials; a test that runs its own CLIs passes its own reader.
   // Linear issue links answer from Linear (inbox-linear-cards.ts); a test's own runner gets no real Linear.
   const linearKey = createLinearKey({ dataDir, serverSession, json, readBody: (req) => readBody(req), changed: () => linearCards?.forget() });
+  const forgejoHosts = createForgejoHosts({ serverSession, json, readBody: (req) => readBody(req) });
   const linearCards = options.refRunner ? null : createLinearCards({ apiKey: () => linearKey.apiKey() });
   const refCards = withLinearCards(
-    createRefCards(options.refRunner ? { run: options.refRunner, bitbucket: options.bitbucketRefReader } : { bitbucket: options.bitbucketRefReader ?? bitbucketRefReader }),
+    createRefCards(options.refRunner ? { run: options.refRunner, bitbucket: options.bitbucketRefReader, forgejo: options.forgejoRefReader } : { bitbucket: options.bitbucketRefReader ?? bitbucketRefReader, forgejo: options.forgejoRefReader ?? forgejoRefReader }),
     linearCards,
   );
   // The Board's links, one resolver per source (inbox-card-refs.ts): GitHub and GitLab through the hover cards' lookup.
@@ -1939,7 +1950,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const repo = repos.peek(project.root);
       // Its tags, additive and only when there are any.
       const tags = tagsOf?.(project.id) ?? [];
-      return { ...project, ...(tags.length > 0 ? { tags } : {}), ...(combined.length > 0 ? { combined } : {}), ...(picture !== undefined ? { picture } : {}), ...(repo ? { repo_host: repo.host, ...(gitlabRemote(repo.host) ? { repo_forge: "gitlab" as const } : {}) } : {}), threads: mine.length, unread, listed: mine.length - archived, archived };
+      return { ...project, ...(tags.length > 0 ? { tags } : {}), ...(combined.length > 0 ? { combined } : {}), ...(picture !== undefined ? { picture } : {}), ...(repo ? { repo_host: repo.host, ...(gitlabRemote(repo.host) ? { repo_forge: "gitlab" as const } : forgejoRemote(repo.host) ? { repo_forge: "forgejo" as const } : {}) } : {}), threads: mine.length, unread, listed: mine.length - archived, archived };
     });
   };
 
@@ -4045,6 +4056,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     voice: voice.settings(via),
     /** Settings → Accounts → Linear: never the key, only its source and, for a saved one, its last 4. */
     linear_key: linearKey.state(),
+    /** Settings → Accounts → Forgejo and Gitea: hosts and where each token comes from, never a token. */
+    forgejo_hosts: forgejoHosts.state(),
     /** Settings → About: update notices and automatic updates. */
     updates: updatesState(),
     /** Settings → General: "Open Plannotator at plannotator.localhost" (#2184). */
@@ -6179,6 +6192,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         const href = url.searchParams.get("url") ?? "";
         if (href.length > 2048) throw new InboxError("validation_error", "url: at most 2048 characters.", { field: "url" });
+        // A Forgejo the person named in config is only known to this process once it has read the config.
+        refreshForgejoHosts();
         const result = await refCards.get(href);
         if (!result) throw new InboxError("validation_error", "url: an https link to an issue, pull request or merge request.", { field: "url" });
         return json({ serverSession, ...result });
@@ -6466,10 +6481,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!link) return json({ serverSession, ok: false, reason: "not_a_link" });
         if ("unsupported" in link) return json({ serverSession, ok: false, reason: link.unsupported });
         const { ref } = link;
-        const cli = ref.platform === "gitlab" ? ("glab" as const) : ("gh" as const);
-        const pull = pulls.find(ref.key) ?? (await readUnlistedPull(ref));
-        if (pull) linkReads.set(ref.key, pull);
-        if (!pull) return json({ serverSession, ok: false, reason: "unreadable", cli, host: ref.host });
+        let cli: "gh" | "glab" | "forgejo";
+        let pull: InboxPull | null;
+        if (ref.platform === "forgejo") {
+          // Read with the person's token for that host, through the hover card's reader (never gh or glab).
+          cli = "forgejo";
+          const card = await refCards.get(link.url).catch(() => null);
+          pull = card?.ok ? forgejoLinkPull(card.data, ref.key, ref.host) : null;
+          if (!pull) return json({ serverSession, ok: false, reason: "forgejo" });
+        } else {
+          cli = ref.platform === "gitlab" ? "glab" : "gh";
+          pull = pulls.find(ref.key) ?? (await readUnlistedPull(ref));
+          if (!pull) return json({ serverSession, ok: false, reason: "unreadable", cli, host: ref.host });
+        }
+        linkReads.set(ref.key, pull);
         const { projectsByRepo } = await pullProjects();
         const owner = pullOwners.get(ref.key);
         const row = owner ? store.listRow(owner.thread_id) : null;
@@ -6705,7 +6730,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const pull = pulls.find(key);
         if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
         if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
-        const result = await mergePull(options.refRunner ?? refCliRunner, pull, seen);
+        if (pull.platform === "forgejo") return json({ error: "A Forgejo pull request can't be merged from the Inbox yet.", code: "pull_unsupported" }, 409);
+        const result = await mergePull(options.refRunner ?? refCliRunner, pull as Parameters<typeof mergePull>[1], seen);
         if (!result.ok) return json({ error: result.message, code: result.code }, result.code === "pull_merge_failed" ? 502 : 409);
         // The next list shows it merged at once, even from the read cache or a forge search that still says open.
         pulls.markMerged(key);
@@ -6735,7 +6761,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const pull = reopen ? (pulls.find(key) ?? closedHere?.pull) : pulls.find(key);
         if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
         if (!reopen && !inboxPullIsOpen(pull)) return json({ error: pull.state === "merged" ? "It is already merged." : "It is already closed.", code: pull.state === "merged" ? "pull_merged" : "pull_closed" }, 409);
-        const result = reopen ? await reopenPull(options.refRunner ?? refCliRunner, pull) : await closePull(options.refRunner ?? refCliRunner, pull);
+        if (pull.platform === "forgejo") return json({ error: "A Forgejo pull request can't be closed or reopened from the Inbox yet.", code: "pull_unsupported" }, 409);
+        const result = reopen ? await reopenPull(options.refRunner ?? refCliRunner, pull as Parameters<typeof reopenPull>[1]) : await closePull(options.refRunner ?? refCliRunner, pull as Parameters<typeof closePull>[1]);
         if (!result.ok) return json({ error: result.message, code: result.code }, result.code === "pull_close_failed" ? 502 : 409);
         if (reopen) {
           closedByInbox.delete(key);
@@ -7147,6 +7174,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
         const answer = await voice.route(req, url, via);
+        if (answer) return answer;
+      }
+      if (path === "/api/inbox/forgejo/hosts") {
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        const answer = await forgejoHosts.route(req, path, via);
         if (answer) return answer;
       }
       if (path === "/api/inbox/linear/key") {

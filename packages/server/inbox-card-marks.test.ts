@@ -150,6 +150,25 @@ describe("the marks reader", () => {
     expect(forge.calls).toEqual([]);
   });
 
+  test("Forgejo pull requests and issues through the hover cards' lookup, with no CLI run", async () => {
+    const asked: string[] = [];
+    const refCards: RefCards = {
+      async get(href) {
+        asked.push(href);
+        return { ok: true, fetchedAt: 0, data: { state: href.includes("/pulls/") ? "merged" : "closed", title: "Forgejo item" } as never };
+      },
+    };
+    const forge = scriptedGh({});
+    const marks = createCardMarks({ run: forge.run, refCards });
+    const pull: InboxCardRef = { kind: "pr", source: "forgejo", ref: "codeberg.org/acme/widgets#5", url: "https://codeberg.org/acme/widgets/pulls/5" };
+    const issue: InboxCardRef = { kind: "issue", source: "forgejo", ref: "codeberg.org/acme/widgets#6", url: "https://codeberg.org/acme/widgets/issues/6" };
+    const out = await marks.marks([pull, issue]);
+    expect(out.get(pull.url)).toMatchObject({ state: "merged", title: "Forgejo item" });
+    expect(out.get(issue.url)!.state).toBe("closed");
+    expect(asked).toEqual([pull.url, issue.url]);
+    expect(forge.calls).toEqual([]);
+  });
+
   test("the query asks only whole numbers, and only state and title", () => {
     expect(() => githubMarksQuery([1.5])).toThrow();
     expect(() => githubMarksQuery([0])).toThrow();
@@ -218,7 +237,19 @@ async function world(board: boolean) {
       comments: 0, body: "", bodyCut: false, lastComment: null, linked: [],
     } satisfies ForgeRefCardData;
   };
-  const server = await startInboxServer({ dataDir, binaryPath: null, refRunner: forge.run, bitbucketRefReader, phones: false, board });
+  // A stand-in for a Forgejo (codeberg.org, built in): pull 5 is merged, 6 open, 7 closed. Every host it is asked for is kept.
+  const forgejoAsked: string[] = [];
+  const forgejoRefReader = async (ref: { host: string; owner: string; repo: string; number: number }) => {
+    forgejoAsked.push(`${ref.host}/${ref.owner}/${ref.repo}#${ref.number}`);
+    const state = ({ 5: "merged", 6: "open", 7: "closed" } as Record<number, string>)[ref.number];
+    if (!state) throw Object.assign(new Error("not found"), { status: 404 });
+    return {
+      platform: "forgejo", kind: "pull", repo: `${ref.owner}/${ref.repo}`, number: ref.number, url: `https://${ref.host}/${ref.owner}/${ref.repo}/pulls/${ref.number}`,
+      title: `Forgejo ${state}`, state, author: null, createdAt: "", updatedAt: "", closedAt: null, labels: [], assignees: [],
+      comments: 0, body: "", bodyCut: false, lastComment: null, linked: [],
+    } as unknown as ForgeRefCardData;
+  };
+  const server = await startInboxServer({ dataDir, binaryPath: null, refRunner: forge.run, bitbucketRefReader, forgejoRefReader, phones: false, board });
   servers.push(server);
   const base = `http://127.0.0.1:${server.port}`;
   const project = server.store.ensureProject({ name: "web", root: join(root, "web") });
@@ -226,7 +257,7 @@ async function world(board: boolean) {
   const make = (title: string, prs: string[] = [], refs: string[] = []) => server.store.createCard({ project_id: project.id, by: agent, title, prs, refs }).card;
   const post = (body: Record<string, unknown>, headers: Record<string, string> = {}) =>
     fetch(`${base}/api/inbox/cards/marks`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
-  return { server, forge, make, post };
+  return { server, forge, make, post, forgejoAsked };
 }
 
 describe("POST /api/inbox/cards/marks", () => {
@@ -284,6 +315,26 @@ describe("POST /api/inbox/cards/marks", () => {
     store.updateCard(review.id, { by: { kind: "person" }, column: "in_progress" });
     expect((await w.post({ cards: ids, refresh: true })).status).toBe(200);
     expect(column(review.id)).toBe("in_progress");
+  });
+
+  // The same rule for a Forgejo / Gitea PR (the card's state comes from its own reader, never a CLI). What regresses: a
+  // merged Forgejo PR that never moves its card, or one that moves it for an open or closed PR, or a host the person has
+  // not named being asked at all.
+  test("auto-ship for a Forgejo PR: merged moves the card to Done; open, closed, unknown, and a host not named never do, and that host is never asked", async () => {
+    const w = await world(true);
+    const { store } = w.server;
+    const merged = w.make("Merged on Forgejo", ["https://codeberg.org/acme/widgets/pulls/5"]);
+    const open = w.make("Open on Forgejo", ["https://codeberg.org/acme/widgets/pulls/6"]);
+    const closed = w.make("Closed on Forgejo", ["https://codeberg.org/acme/widgets/pulls/7"]);
+    const unknown = w.make("Unknown on Forgejo", ["https://codeberg.org/acme/widgets/pulls/99"]);
+    const mixed = w.make("One merged, one open", ["https://codeberg.org/acme/widgets/pulls/5", "https://codeberg.org/acme/widgets/pulls/6"]);
+    const unnamed = w.make("Merged, host not named", ["https://git.unnamed.test/acme/widgets/pulls/5"]);
+    const all = [merged, open, closed, unknown, mixed, unnamed];
+    expect((await w.post({ cards: all.map((card) => card.id) })).status).toBe(200);
+    expect(all.map((card) => store.card(card.id)!.column)).toEqual(["done", "todo", "todo", "todo", "todo", "todo"]);
+    expect(store.card(merged.id)).toMatchObject({ auto_shipped: { prs: ["https://codeberg.org/acme/widgets/pulls/5"] } });
+    expect(w.forgejoAsked.some((asked) => asked.startsWith("git.unnamed.test"))).toBe(false);
+    expect(w.forge.calls).toEqual([]);
   });
 
   test("refused while the Board is off, to another site, to a stale tab, and for bad ids; nothing runs", async () => {

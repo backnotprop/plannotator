@@ -11,13 +11,14 @@
  * the description (or no room in it) not falling back to a comment; the setting not kept in config.json; the route
  * answering another site.
  */
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { learnForgejoHosts } from "@plannotator/core/forge-refs";
 import { parseInboxThreadPullRef } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import type { CommandResult } from "@plannotator/shared/pr-types";
+import type { CommandResult, PRRuntime } from "@plannotator/shared/pr-types";
 import { createFakePRRuntime, type FakePRCommand } from "../../tests/helpers/fake-pr-runtime";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { postThreadDecisions } from "./inbox-decision-post";
@@ -442,4 +443,218 @@ test("a self-managed GitLab's MR is posted to only when glab is signed in there;
   await postThreadDecisions(world.store, world.thread, { pull: known }, { runtime: forge.runtime, version: "test", destination: "comment", signedIn });
   expect(forge.calls.length).toBeGreaterThan(0);
   expect(forge.calls.every((call) => call.args.includes("git.acme.com"))).toBe(true);
+});
+
+// --- Forgejo / Gitea: posted with its token over its REST API, never a CLI ---
+
+const FJ_HOST = "git.example.test";
+const FJ_PR = `https://${FJ_HOST}/acme/notes/pulls/12`;
+const FJ_ORIGIN = `https://${FJ_HOST}`;
+
+interface FjCall {
+  method: string;
+  path: string;
+  authorization: string | null;
+  body: Record<string, any> | undefined;
+}
+
+/**
+ * One Forgejo as its API answers it: comments and the description of acme/notes#12, the token's account, and the same
+ * hooks as `fakeForge`. A runtime with `fetch` only: any CLI it is asked to run throws.
+ */
+function fakeForgejo(me = "rivka") {
+  let next = 100;
+  const calls: FjCall[] = [];
+  const comments: { id: number; body: string; login: string }[] = [];
+  const state: { description: string; refuseDescription?: boolean; refuseAll?: number; onDescriptionRead?: (count: number) => void } = { description: "Does the thing." };
+  let reads = 0;
+  const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
+  const message = (code: number, text: string) => json({ message: text }, code);
+  const runtime: PRRuntime = {
+    async runCommand() {
+      throw new Error("a Forgejo post must never run a CLI");
+    },
+    forgejoToken: (origin) => (origin === FJ_ORIGIN ? "fj-token" : null),
+    fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const call: FjCall = {
+        method: init?.method ?? "GET",
+        path: url.pathname.replace("/api/v1", ""),
+        authorization: new Headers(init?.headers).get("authorization"),
+        body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+      };
+      calls.push(call);
+      if (url.origin !== FJ_ORIGIN) return message(404, "elsewhere");
+      if (state.refuseAll) return message(state.refuseAll, state.refuseAll === 401 ? "token is invalid" : "refused");
+      if (call.path === "/user") return json({ login: me });
+      const base = "/repos/acme/notes";
+      if (call.path === `${base}/issues/12/comments`) {
+        if (call.method === "GET") return json(comments.map((c) => ({ id: c.id, body: c.body, user: { login: c.login }, html_url: `${FJ_PR}#issuecomment-${c.id}` })));
+        const note = { id: next++, body: call.body!.body as string, login: me };
+        comments.push(note);
+        return json({ id: note.id, body: note.body, html_url: `${FJ_PR}#issuecomment-${note.id}` });
+      }
+      const edit = call.path.match(/^\/repos\/acme\/notes\/issues\/comments\/(\d+)$/);
+      if (edit && call.method === "PATCH") {
+        const note = comments.find((c) => c.id === Number(edit[1]));
+        if (!note) return message(404, "comment does not exist");
+        if (note.login !== me) return message(403, "not the owner of the comment");
+        note.body = call.body!.body as string;
+        return json({ id: note.id });
+      }
+      if (call.path === `${base}/pulls/12`) {
+        if (call.method === "PATCH") {
+          if (state.refuseDescription) return message(403, "user should have permission to edit this pull request");
+          state.description = call.body!.body as string;
+          return json({ number: 12 });
+        }
+        const answer = json({ number: 12, body: state.description, html_url: FJ_PR });
+        state.onDescriptionRead?.(++reads);
+        return answer;
+      }
+      return message(404, "not routed");
+    }) as typeof fetch,
+  };
+  return { runtime, calls, comments, state, writes: () => calls.filter((c) => c.method !== "GET") };
+}
+
+describe("Forgejo / Gitea decisions", () => {
+  const named = () => learnForgejoHosts([FJ_HOST]);
+  afterEach(() => learnForgejoHosts([]));
+  const post = (world: ReturnType<typeof seed>, forge: ReturnType<typeof fakeForgejo>, destination: unknown) =>
+    postThreadDecisions(world.store, world.thread, { pull: FJ_PR }, { runtime: forge.runtime, version: "test", destination });
+
+  test("a comment is created once with the marker, then edited in place; the banner is its words as a link", async () => {
+    named();
+    const world = seed([FJ_PR]);
+    const forge = fakeForgejo();
+    const first = await post(world, forge, "comment");
+    expect(first).toMatchObject({ status: 200, body: { ok: true, action: "created", destination: "comment", ref: FJ_PR } });
+    expect(forge.comments).toHaveLength(1);
+    expect(forge.comments[0]!.body).toStartWith("<!-- plannotator");
+    expect(forge.comments[0]!.body).not.toContain("<picture>");
+    expect(forge.comments[0]!.body).toContain("**Decisions**, from Plannotator");
+    const second = await post(world, forge, "comment");
+    expect(second).toMatchObject({ status: 200, body: { action: "updated", destination: "comment" } });
+    expect(forge.comments).toHaveLength(1);
+    expect(forge.writes().map((c) => c.method)).toEqual(["POST", "PATCH"]);
+    // The token goes out as `Authorization: token`, on every request, and only to the host named.
+    expect(forge.calls.every((c) => c.authorization === "token fj-token")).toBe(true);
+  });
+
+  test("someone else's comment with the marker is never edited; a comment deleted meanwhile is posted again", async () => {
+    named();
+    const world = seed([FJ_PR]);
+    const forge = fakeForgejo();
+    await post(world, forge, "comment");
+    forge.comments[0]!.login = "linus";
+    const again = await post(world, forge, "comment");
+    expect(again).toMatchObject({ status: 200, body: { action: "created" } });
+    expect(forge.comments.map((c) => c.login)).toEqual(["linus", "rivka"]);
+    expect(forge.writes().every((c) => c.method === "POST")).toBe(true);
+    // Deleted between the list and the edit: the PATCH is a 404, and the comment is posted again.
+    const mine = forge.comments[1]!;
+    const gone = fakeForgejo();
+    await post(world, gone, "comment");
+    const patched = gone.runtime.fetch!;
+    gone.runtime.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? "GET") === "PATCH") gone.comments.length = 0;
+      return patched(input, init);
+    }) as typeof fetch;
+    expect(mine.login).toBe("rivka");
+    expect(await post(world, gone, "comment")).toMatchObject({ status: 200, body: { action: "created" } });
+    expect(gone.comments).toHaveLength(1);
+  });
+
+  test("an edit that fails for any reason but the comment being gone is the person's to see: no second comment is posted", async () => {
+    named();
+    const world = seed([FJ_PR]);
+    const forge = fakeForgejo();
+    await post(world, forge, "comment");
+    const answer = forge.runtime.fetch!;
+    forge.runtime.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+      (init?.method ?? "GET") === "PATCH" ? new Response(JSON.stringify({ message: "boom" }), { status: 500 }) : answer(input, init)) as typeof fetch;
+    const result = await post(world, forge, "comment");
+    expect(result.status).toBe(502);
+    expect((result.body as { error: string }).error).toContain("boom");
+    expect(forge.comments).toHaveLength(1);
+  });
+
+  test("the description keeps every byte outside its markers; a re-post replaces only the section", async () => {
+    named();
+    const world = seed([FJ_PR]);
+    const forge = fakeForgejo();
+    forge.state.description = "Does the thing.\n\n![shot](/attachments/x)\n";
+    const first = await post(world, forge, "description");
+    expect(first).toMatchObject({ status: 200, body: { action: "created", destination: "description" } });
+    expect(forge.state.description.startsWith("Does the thing.\n\n![shot](/attachments/x)\n")).toBe(true);
+    expect(forge.comments).toHaveLength(0);
+    const kept = forge.state.description.slice(0, forge.state.description.indexOf("<!-- plannotator-decisions:start"));
+    const second = await post(world, forge, "description");
+    expect(second).toMatchObject({ status: 200, body: { action: "updated", destination: "description" } });
+    expect(forge.state.description.slice(0, kept.length)).toBe(kept);
+    expect(forge.state.description.match(/plannotator-decisions:start/g)).toHaveLength(1);
+  });
+
+  test("an edit landing between the description's read and write is not clobbered", async () => {
+    named();
+    const world = seed([FJ_PR]);
+    const forge = fakeForgejo();
+    forge.state.onDescriptionRead = (count) => {
+      if (count === 1) forge.state.description += "\nSomeone's edit.";
+    };
+    const result = await post(world, forge, "description");
+    expect(result).toMatchObject({ status: 409, body: { code: "description_changed" } });
+    expect(forge.state.description).toBe("Does the thing.\nSomeone's edit.");
+    expect(forge.writes()).toHaveLength(0);
+  });
+
+  test("a description the person may not edit, or with no room, takes a comment instead, and the answer says why", async () => {
+    named();
+    const world = seed([FJ_PR]);
+    const refused = fakeForgejo();
+    refused.state.refuseDescription = true;
+    expect(await post(world, refused, "description")).toMatchObject({ status: 200, body: { destination: "comment", fallback: "no_permission" } });
+    expect(refused.comments).toHaveLength(1);
+    const full = fakeForgejo();
+    full.state.description = "x".repeat(65_500);
+    expect(await post(world, full, "description")).toMatchObject({ status: 200, body: { destination: "comment", fallback: "too_long" } });
+    expect(full.state.description).toHaveLength(65_500);
+    expect(full.comments).toHaveLength(1);
+  });
+
+  test("both: the full comment, and a short section in the description that links to it", async () => {
+    named();
+    const world = seed([FJ_PR]);
+    const forge = fakeForgejo();
+    const result = await post(world, forge, "both");
+    expect(result).toMatchObject({ status: 200, body: { destination: "both" } });
+    expect(forge.comments).toHaveLength(1);
+    expect(forge.state.description).toContain(`${FJ_PR}#issuecomment-${forge.comments[0]!.id}`);
+  });
+
+  test.each([
+    [401, /no working token for this Forgejo.*forgejoTokens/],
+    [404, /this Forgejo account can't see it/],
+    [403, /token isn't allowed to comment there.*write:repository/],
+  ])("a %i says what to do about the token, and names no CLI", async (code, words) => {
+    named();
+    const world = seed([FJ_PR]);
+    const forge = fakeForgejo();
+    forge.state.refuseAll = code;
+    const result = await post(world, forge, "comment");
+    expect(result.status).toBe(502);
+    const error = (result.body as { error: string }).error;
+    expect(error).toMatch(words);
+    expect(error).not.toMatch(/\b(gh|glab|auth login)\b/);
+  });
+
+  test("a host the person has not named is refused with nothing sent, and its token is never used", async () => {
+    const world = seed([FJ_PR]);
+    const forge = fakeForgejo();
+    const result = await post(world, forge, "comment");
+    expect(result).toMatchObject({ status: 502, body: { code: "post_failed" } });
+    expect((result.body as { error: string }).error).toContain("forgejoTokens");
+    expect(forge.calls).toHaveLength(0);
+  });
 });
