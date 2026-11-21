@@ -1,10 +1,10 @@
 /**
- * Who gets the reply, in a thread with more than one agent (approval "inbox-reply-recipient"; placed by
+ * Who gets the reply on a computer, in a thread with more than one agent (approval "inbox-reply-recipient"; placed by
  * "inbox-reply-target-chip", option B "A chip at the start of your words", 2026-11-20, which superseded option E's
- * pill under the box, right, and a phone's mark-only control): a filled chip at the start of the words' first line,
- * "to [tile] Claude Code (plannotator) ⌄", the words flowing after it (`chip`; drawn by the field, FieldLead.tsx). A
- * phone draws the same chip (`RecipientChip`) with its bottom sheet, PhoneReplyRecipient.tsx. Without `chip` it is the
- * pill in the box's own row, which a PR's new thread keeps (`PullThreadStart`).
+ * pill under the box, right): a filled chip at the start of the words' first line, "to [tile] Claude Code
+ * (plannotator) ⌄", the words flowing after it (`chip`; drawn by the field, FieldLead.tsx). Without `chip` it is the
+ * pill in the box's own row, which a PR's new thread keeps (`PullThreadStart`). A phone keeps its control in the box's
+ * row with its bottom sheet (PhoneReplyRecipient.tsx; the owner, 2026-11-20).
  *
  * Tap it for the thread's agents (live first, ended last), the chosen ones
  * ticked. Tap a name: only that agent. Tap a circle: that agent too ("2
@@ -179,12 +179,11 @@ export function saysWords(name: string, words: string): boolean {
 }
 
 /**
- * The chip shows the short name (inbox.css, `data-narrow`): in the phone layout (`phone`, the window's own choice of
- * the phone's parts, at any width: a phone turned, a 700 px window), or in a field 480 px wide or less as last
- * measured. The one source for what it shows and what its name says.
+ * The chip shows the short name (inbox.css, `data-narrow`) in a field 480 px wide or less as last measured (a narrow
+ * pane). The one source for what it shows and what its name says.
  */
 const NARROW_FIELD = 480;
-function useNarrowField(chipRef: RefObject<HTMLButtonElement | null>, phone: boolean): boolean {
+function useNarrowField(chipRef: RefObject<HTMLButtonElement | null>): boolean {
   const [narrow, setNarrow] = useState(false);
   useLayoutEffect(() => {
     const field = chipRef.current?.closest<HTMLElement>('.ib-cfield');
@@ -199,7 +198,7 @@ function useNarrowField(chipRef: RefObject<HTMLButtonElement | null>, phone: boo
     watch.observe(field);
     return () => watch.disconnect();
   }, [chipRef]);
-  return phone || narrow;
+  return narrow;
 }
 
 /** The least of a name the chip shows beside "to" before it drops the word (about six letters). */
@@ -220,9 +219,9 @@ export interface ChipWidths {
 /**
  * Whether the chip drops its "to" (`data-tight`), from its state now (`tight`). It drops it when "to", the mark, the
  * whole name and the chevron do not fit in its widest (FieldLead.tsx `leadMaxWidth`, 40% of the first line) and
- * either the whole name fits without the word (a short agent name at 320 px: "to Codex" is 108 px of a 236 px line)
- * or under `NAME_LEAST` of the name would show beside it (a long name at 320 px). Otherwise the word stays and the
- * name gives way with "…", as on a computer. A chip that dropped it shows it again only when everything fits with
+ * either the whole name fits without the word or under `NAME_LEAST` of the name would show beside it (a long name in a
+ * split view's 400 px pane: a 274 px first line, so a 109 px chip). Otherwise the word stays and the
+ * name gives way with "…". A chip that dropped it shows it again only when everything fits with
  * `TO_BACK_ROOM` to spare, or dropping it no longer helps: a name within a pixel of the edge never flips it back and forth.
  */
 export function chipDropsTo(w: ChipWidths, tight: boolean): boolean {
@@ -307,7 +306,7 @@ function useTightChip(chipRef: RefObject<HTMLButtonElement | null>): boolean {
  * then, as when it shows a fallback name, the short name or "2 agents", the hover says who in full. Its accessible
  * name is the pill's, led by the words it shows when those differ ("To Pi · Copy pass on the order summary").
  */
-export function RecipientChip({
+function RecipientChip({
   rows,
   chosen,
   open,
@@ -317,7 +316,6 @@ export function RecipientChip({
   noun = 'reply',
   buttonRef,
   attrs,
-  phone = false,
 }: {
   rows: readonly RecipientRow[];
   chosen: readonly RecipientRow[];
@@ -327,14 +325,12 @@ export function RecipientChip({
   folderOf?: (session: string) => string;
   noun?: 'reply' | 'message';
   buttonRef?: RefObject<HTMLButtonElement | null>;
-  /** `aria-*` and `data-*` attributes of the host (the list it controls, a sheet's popup kind). */
+  /** `aria-*` and `data-*` attributes of the host (the list it controls). */
   attrs?: Record<string, string | undefined>;
-  /** The phone layout (PhoneReplyRecipient): the short name at any width. */
-  phone?: boolean;
 }) {
   const { one, names, ended, tile, words, partial } = recipientFace(rows, chosen, labels, folderOf);
   const ownRef = useRef<HTMLButtonElement | null>(null);
-  const narrow = useNarrowField(ownRef, phone);
+  const narrow = useNarrowField(ownRef);
   const tight = useTightChip(ownRef);
   // The name starts with the words the chip shows (a narrow field's short name, a fallback name), then who that is,
   // when those words are not already in it: "To Pi · Copy pass on the order summary".
@@ -357,7 +353,7 @@ export function RecipientChip({
         data-tight={tight ? '' : undefined}
         aria-label={`To ${spoken}${ended ? ', ended' : ''}. Change who gets this ${noun}`}
         aria-expanded={open}
-        // The press must not take focus from the words (a phone's sheet gives it back to them).
+        // The press must not take focus from the words.
         onMouseDown={(event) => event.preventDefault()}
         onClick={onClick}
         {...attrs}

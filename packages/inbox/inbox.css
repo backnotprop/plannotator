@@ -9625,11 +9625,12 @@ dialog.ib-pqi .ib-listcol.ib-pqi-list { position: relative; inset: auto; visibil
 .ib-rto-slot > * { grid-area: 1 / 1; }
 .pn-inbox .ib-rto-ghost { visibility: hidden; pointer-events: none; }
 /* The chip at the start of the words (approval "inbox-reply-target-chip", option B, 2026-11-20): who gets the reply in a
-   thread with several agents, on a computer and a phone alike (the pill above stays for a PR's new thread). A filled
+   thread with several agents, on a computer (the pill above stays for a PR's new thread; a phone keeps its control in
+   the box's row, phoneComposer.css). A filled
    token laid over the first line's indent: FieldLead.tsx places it and sets `--ib-lead`, which indents the field and
    its painted mirror alike, so the words, the caret and the placeholder start after it and later lines wrap under it.
    Capped at 40% of the first line (`--ib-lead-max`, FieldLead.tsx, from the textarea's content box) so the first line
-   always keeps room for the caret; a longer name gives way with "…". On the narrowest fields the chip drops "to" when
+   always keeps room for the caret; a longer name gives way with "…". In the narrowest panes (a split view's 400 px) it drops "to" when
    that lets the whole name fit, or when beside it too little of the name would show (`data-tight`, RecipientChip):
    the mark and the chevron still say what it is, and its accessible name still starts "To". */
 .ib-cfield:has(> .ib-flead) :is(.ib-rtext, .ib-rmirror) { text-indent: var(--ib-lead, 0px); }
@@ -9674,10 +9675,9 @@ dialog.ib-pqi .ib-listcol.ib-pqi-list { position: relative; inset: auto; visibil
      foot's 10 px top padding plus the line's 4 px above it, and 14 px between the line and the box under it. */
   .ib-draft-above { display: flex; justify-content: flex-end; padding-top: 4px; margin-bottom: 14px; }
   .ib-draft-above:empty { display: none; }
-  /* The pill on the line over the box's row (a PR's new thread): the folder alone. The reply's chip decides by its
-     own `data-narrow`, so what it shows and what its name says agree. */
-  .ib-rto .ib-rto-full { display: none; }
-  .ib-rto .ib-rto-short { display: block; }
+  /* The pill on the line over the box's row: the folder alone. */
+  .ib-rto-full { display: none; }
+  .ib-rto-short { display: block; }
   .pn-inbox .ib-rpick-name { height: 44px; gap: 8px; }
   .pn-inbox .ib-rpick-tick { width: 44px; height: 44px; }
   .ib-rpick-tick > span { width: 20px; height: 20px; }

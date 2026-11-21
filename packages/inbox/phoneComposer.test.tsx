@@ -1,8 +1,8 @@
 /**
- * The phone composer and its picker sheet (approval "inbox-phone-composer-picker"): on a phone who gets the reply in
- * a thread with several agents is the chip at the start of the words, with the name, as on a computer (approval
- * "inbox-reply-target-chip", 2026-11-20; a one-agent thread has no control, as on a computer), New message's To is a
- * pill in the foot's row, and both open a bottom sheet. The failures this catches: a reply that goes to another agent than the control names, a sheet that
+ * The phone composer and its picker sheet (approval "inbox-phone-composer-picker"): on a phone the reply box's row
+ * holds who gets the reply in a thread with several agents (the mark and a name, or the first mark and a count with
+ * several recipients; a one-agent thread has no control, as on a computer), New message's To is a pill in the foot's
+ * row, and both open a bottom sheet. The failures this catches: a reply that goes to another agent than the control names, a sheet that
  * leaves focus nowhere (so the keyboard never comes back), the phone parts leaking onto a computer, and the typing
  * area's cap or the phone query drifting from phone.ts.
  *
@@ -149,7 +149,7 @@ async function openReply(thread: InboxThread, phone: boolean) {
 }
 
 const q = <T extends Element = HTMLElement>(selector: string) => document.querySelector<T>(selector);
-const control = () => q<HTMLButtonElement>('.ib-pfoot [data-recipient]');
+const control = () => q<HTMLButtonElement>('[data-reply-row] [data-recipient]');
 const sheet = () => q('[data-sheet][data-shown]');
 const click = async (el: Element | null) => {
   if (!el) throw new Error('nothing to click');
@@ -172,35 +172,34 @@ test.skipIf(!hasDom)('a phone, one agent: no agent control in the row (the paper
   expect(q('[data-reply-send] svg')).not.toBeNull();
 });
 
-test.skipIf(!hasDom)('a phone, several agents: the chip with the name at the start of the words, not in the row (the paperclip, Skills, then Send); its name is the computer\'s', async () => {
-  const text = await openReply(TWO_AGENTS(), true);
+test.skipIf(!hasDom)('a phone, several agents of different kinds: the mark and a chevron alone, in the row after Skills; its name still says who, with the session\'s title', async () => {
+  await openReply(TWO_AGENTS(), true);
   const row = q('[data-reply-row][data-phone]')!;
-  expect(row.querySelector('[data-recipient]')).toBeNull();
-  expect([...row.querySelectorAll('[data-reply-attach], [data-reply-skills], [data-reply-send]')].length).toBe(3);
-  const chip = control()!;
-  expect(chip.closest('[data-field-lead]')).not.toBeNull();
-  expect(chip.compareDocumentPosition(text) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(q('[data-agent-mark], [data-agent-pill]')).toBeNull();
-  expect(chip.getAttribute('data-recipient-chosen')).toBe('ses_pi');
-  expect(chip.querySelector('.ib-rto-short')!.textContent).toBe('Pi');
-  expect(chip.getAttribute('aria-label')).toBe('To Pi. Change who gets this reply');
-  expect(chip.getAttribute('aria-haspopup')).toBe('dialog');
+  expect([...row.querySelectorAll('[data-reply-skills], [data-recipient], [data-reply-send]')].map((el) => (el.hasAttribute('data-recipient') ? 'recipient' : el.hasAttribute('data-reply-send') ? 'send' : 'skills'))).toEqual(['skills', 'recipient', 'send']);
+  const pill = control()!;
+  expect(pill.hasAttribute('data-agent-pill')).toBe(true);
+  expect(pill.getAttribute('data-recipient-chosen')).toBe('ses_pi');
+  // The mark says who: no name beside it.
+  expect(pill.querySelector('.ib-apill-n')).toBeNull();
+  expect(pill.textContent).toBe('');
+  expect(pill.getAttribute('aria-label')).toBe('Reply goes to Pi. Change');
   act(() => setSessionLabels({ ses_pi: 'Copy pass on the order summary' }));
   await settle();
-  // The chip shows the short name ("Pi"): its name starts with those words, then the session's title.
-  expect(control()!.querySelector('.ib-rto-short')!.textContent).toBe('Pi');
-  expect(control()!.getAttribute('aria-label')).toBe('To Pi · Copy pass on the order summary. Change who gets this reply');
+  expect(control()!.querySelector('.ib-apill-n')).toBeNull();
+  expect(control()!.getAttribute('aria-label')).toBe('Reply goes to Pi · Copy pass on the order summary. Change');
 });
 
-test.skipIf(!hasDom)('a phone, two agents of one kind: the chip and the sheet tell them apart by the session\'s title', async () => {
+test.skipIf(!hasDom)('a phone, two agents of one kind: still the mark and a chevron alone; the accessible name and the sheet tell them apart', async () => {
   const SECOND = { kind: 'agent' as const, host: 'claude-code', session: 'ses_pi', name: null };
   await openReply(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, SECOND, 45)), true);
   act(() => setSessionLabels({ ses_pi: 'Invoice PDF fonts' }));
   await settle();
-  const chip = control()!;
-  expect(chip.querySelector('.ib-rto-short')!.textContent).toBe('Claude Code 2');
-  expect(chip.getAttribute('aria-label')).toBe('To Claude Code 2 · Invoice PDF fonts. Change who gets this reply');
-  await click(chip);
+  const pill = control()!;
+  expect(pill.hasAttribute('data-agent-pill')).toBe(true);
+  expect(pill.querySelector('.ib-apill-n')).toBeNull();
+  expect(pill.textContent).toBe('');
+  expect(pill.getAttribute('aria-label')).toBe('Reply goes to Claude Code · Invoice PDF fonts. Change');
+  await click(pill);
   await until(() => sheet() !== null, 'the sheet');
   expect(q('[data-recipient-row="ses_pi"] .ib-sheet-t')!.textContent).toBe('Invoice PDF fonts');
   expect(q('[data-recipient-row="ses_pi"]')!.getAttribute('aria-selected')).toBe('true');
@@ -220,7 +219,7 @@ test.skipIf(!hasDom)('a phone: a tap on another agent sends to it alone, closes 
   expect(sheet()).toBeNull();
   expect(document.activeElement).toBe(text);
   expect(control()!.getAttribute('data-recipient-chosen')).toBe('ses_claude');
-  expect(control()!.getAttribute('aria-label')).toBe('To Claude Code. Change who gets this reply');
+  expect(control()!.getAttribute('aria-label')).toBe('Reply goes to Claude Code. Change');
   await sheetGone();
   await click(q('[data-reply-send]'));
   await settle();
@@ -229,7 +228,7 @@ test.skipIf(!hasDom)('a phone: a tap on another agent sends to it alone, closes 
   expect(replies()[0]!.body.to).toBeUndefined();
 });
 
-test.skipIf(!hasDom)('a phone, several recipients: the circle adds one and the sheet stays; the chip says how many; Escape closes and focus returns', async () => {
+test.skipIf(!hasDom)('a phone, several recipients: the circle adds one and the sheet stays; the control is the first mark with how many; Escape closes and focus returns', async () => {
   const text = await openReply(TWO_AGENTS(), true);
   await click(control());
   await until(() => sheet() !== null, 'the sheet');
@@ -237,10 +236,10 @@ test.skipIf(!hasDom)('a phone, several recipients: the circle adds one and the s
   // A tick does not complete the choice: the sheet is still up.
   expect(sheet()).not.toBeNull();
   expect(q('[data-recipient-tick="ses_claude"]')!.getAttribute('aria-checked')).toBe('true');
-  const chip = control()!;
-  expect(chip.querySelector('.ib-rto-short')!.textContent).toBe('2 agents');
-  expect(chip.getAttribute('data-recipient-chosen')).toBe('ses_pi ses_claude');
-  expect(chip.getAttribute('aria-label')).toBe('To Pi and Claude Code. Change who gets this reply');
+  const mark = control()!;
+  expect(mark.hasAttribute('data-agent-mark')).toBe(true);
+  expect(mark.querySelector('[data-agent-count]')!.textContent).toBe('2');
+  expect(mark.getAttribute('aria-label')).toBe('Reply goes to Pi and Claude Code. Change');
   act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
   await settle();
   expect(sheet()).toBeNull();

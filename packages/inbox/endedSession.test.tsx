@@ -799,10 +799,9 @@ test.skipIf(!hasDom)('ended, on a phone: Send to another session and Archive com
   await settle();
   const sheet = pillList(el) as HTMLElement;
   expect(sheet.getAttribute('role')).toBe('dialog');
-  // The chip at the start of the words (approval "inbox-reply-target-chip").
-  expect(pill(el)?.closest('[data-field-lead]') != null).toBe(true);
+  expect(pill(el)?.closest('[data-reply-row]') != null).toBe(true);
   expect(pill(el)?.getAttribute('aria-expanded')).toBe('true');
-  expect(pill(el)?.getAttribute('aria-label')).toBe('To Claude Code, ended. Change who gets this reply');
+  expect(pill(el)?.getAttribute('aria-label')).toBe('Reply goes to Claude Code, ended. Change');
   expect([...sheet.querySelectorAll('[data-recipient-row]')].map((r) => [r.getAttribute('data-recipient-row'), r.querySelector('.ib-sheet-t')?.textContent, r.querySelector('.ib-sheet-d')?.textContent ?? null])).toEqual([
     ['ses_other', 'Claude Code 2', 'ledger'],
     ['ses_asker', 'Claude Code', 'ended'],
@@ -812,7 +811,7 @@ test.skipIf(!hasDom)('ended, on a phone: Send to another session and Archive com
   await settle();
   expect(pill(el)?.getAttribute('aria-expanded')).toBe('false');
   expect(pill(el)?.getAttribute('data-recipient-chosen')).toBe('ses_other');
-  expect(pill(el)?.getAttribute('aria-label')).toBe('To Claude Code 2. Change who gets this reply');
+  expect(pill(el)?.getAttribute('aria-label')).toBe('Reply goes to Claude Code 2. Change');
 });
 
 test.skipIf(!hasDom)('ended, nothing live: only Archive, since nothing could take the reply', async () => {

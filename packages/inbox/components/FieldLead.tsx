@@ -41,8 +41,8 @@ const px = (value: string) => {
 };
 
 /**
- * The widest the lead may be, in px: 40% of the first line (the textarea's content box, between its paddings: a phone's
- * box keeps 48 px at the right for its expand button, so 40% of the field's own box was nearer half the line), at most
+ * The widest the lead may be, in px: 40% of the first line (the textarea's content box, between its paddings: the box
+ * keeps 48 px at the right for its expand button, so 40% of the field's own box was more than 40% of the line), at most
  * 240 px. Null while the field is not laid out.
  */
 export function leadMaxWidth(field: HTMLTextAreaElement): number | null {
@@ -81,10 +81,6 @@ export function FieldLead({ value, children }: { value: string; children: ReactN
     const above = px(style.borderTopWidth) + px(style.paddingTop) + (line - height) / 2;
     const top = fieldBox.top - wrapBox.top + above - field.scrollTop;
     put(lead, 'top', `${Math.round(top)}px`);
-    // How far a tap area may reach past the lead without leaving the first line: up into the field's top padding (a
-    // quote line, when shown, sits above it), never down into the second line (phoneComposer.css reads both).
-    put(lead, '--ib-lead-up', `${Math.max(0, above)}px`);
-    put(lead, '--ib-lead-down', `${Math.max(0, (height - line) / 2) + 0.5}px`);
     if (rtl) {
       const scrollbar = Math.max(0, field.offsetWidth - field.clientWidth - px(style.borderLeftWidth) - px(style.borderRightWidth));
       put(lead, 'left', 'auto');
@@ -106,7 +102,7 @@ export function FieldLead({ value, children }: { value: string; children: ReactN
   });
 
   // Between renders: the lead's width (another recipient, a name that gives way), the field's size (its border box as
-  // it grows; its content box when the padding changes under a fixed height: the text size, a phone turned) and the
+  // it grows; its content box when the padding changes under a fixed height: the text size) and the
   // field's own scroll move it.
   useEffect(() => {
     const lead = leadRef.current;

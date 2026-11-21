@@ -6,8 +6,8 @@
  * one that becomes part of the words (Backspace, the field's name, the tab order), or a one-agent thread that grows
  * new UI.
  *
- * A phone (approval "inbox-phone-composer-picker"): under the same rule (a one-agent thread has none), the same chip
- * with the name, and its list is a bottom sheet; the last cases here.
+ * A phone (approval "inbox-phone-composer-picker"; kept by the owner, 2026-11-20): under the same rule (a one-agent
+ * thread has none), the control is in the box's row after Skills, and its list is a bottom sheet; the last cases here.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -776,26 +776,25 @@ const sheetRow = (el: HTMLElement, session: string) => el.querySelector(`[data-r
 /** The sheet is open: after a close it stays in the DOM for its way out, so the control says it. */
 const sheetOpen = (el: HTMLElement) => pill(el)?.getAttribute('aria-expanded') === 'true';
 
-test.skipIf(!hasDom)('a phone, several agents: who gets the reply is the chip at the start of the words, with its name; its sheet is a dialog that takes focus, a circle adds a second agent (an ended one\'s is off), a row picks that agent alone, closes the sheet and gives the reply its focus back', async () => {
+test.skipIf(!hasDom)('a phone, several agents: who gets the reply is a pill in the row after Skills; its sheet is a dialog that takes focus, a circle adds a second agent (an ended one\'s is off), a row picks that agent alone, closes the sheet and gives the reply its focus back', async () => {
   const el = await render(threadOf(agentMessage(M1, GONE, 39), agentMessage(M2, CLAUDE, 41), agentMessage(M3, PI, 45)), true);
   const text = await write(el, 'Use the old totals.');
   act(() => text.focus());
   const control = pill(el)!;
-  // In the field, before the words; not in the row, and not the mark-only control the row had.
-  expect(control.closest('[data-field-lead]') !== null).toBe(true);
-  expect(control.closest('[data-reply-row]')).toBeNull();
-  expect(el.querySelector('[data-reply-row] [data-recipient]')).toBeNull();
-  expect(el.querySelector('[data-agent-mark], [data-agent-pill]')).toBeNull();
-  expect(control.compareDocumentPosition(text) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  // It names the last writer, with the name (the phone shows it too now).
-  expect(control.hasAttribute('data-recipient-chip')).toBe(true);
-  // The phone layout shows the short name at any width, and the name follows what shows (one source, `data-narrow`).
-  expect(control.hasAttribute('data-narrow')).toBe(true);
+  // In the row, after Skills; never on the line over the row, and none of a computer's pill.
+  expect(control.closest('[data-reply-row]') !== null).toBe(true);
+  expect(el.querySelector('[data-reply-line] [data-recipient]')).toBeNull();
+  expect(el.querySelector('.ib-rto')).toBeNull();
+  expect(el.querySelector('[data-reply-skills]')!.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(el.querySelector('[data-voice-mic], [data-reply-send]')!.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  // It names the last writer.
+  expect(control.hasAttribute('data-agent-pill')).toBe(true);
   expect(control.getAttribute('data-recipient-chosen')).toBe('ses_pi');
-  expect(control.querySelector('.ib-rto-full')?.textContent).toBe('Pi');
-  expect(control.querySelector('.ib-rto-short')?.textContent).toBe('Pi');
-  expect(control.getAttribute('aria-label')).toBe('To Pi. Change who gets this reply');
+  expect(control.getAttribute('aria-label')).toBe('Reply goes to Pi. Change');
   expect(control.getAttribute('aria-haspopup')).toBe('dialog');
+  // No other agent here wears Pi's mark: the mark and the chevron say it, with no name (the label has it).
+  expect(control.querySelector('.ib-apill-n')).toBeNull();
+  expect(control.querySelector('.ib-apill-m') !== null && control.querySelector('.ib-apill-c') !== null).toBe(true);
   await openList(el);
   const sheet = el.querySelector('[data-recipient-list]') as HTMLElement;
   expect(sheet.getAttribute('role')).toBe('dialog');
@@ -817,8 +816,8 @@ test.skipIf(!hasDom)('a phone, several agents: who gets the reply is the chip at
   expect(sheetOpen(el)).toBe(true);
   expect(tick(el, 'ses_claude').getAttribute('aria-checked')).toBe('true');
   expect(pill(el)!.getAttribute('data-recipient-chosen')).toBe('ses_pi ses_claude');
-  expect(pill(el)!.querySelector('.ib-rto-short')?.textContent).toBe('2 agents');
-  expect(pill(el)!.getAttribute('aria-label')).toBe('To Pi and Claude Code. Change who gets this reply');
+  expect(pill(el)!.querySelector('[data-agent-count]')?.textContent).toBe('2');
+  expect(pill(el)!.getAttribute('aria-label')).toBe('Reply goes to Pi and Claude Code. Change');
   // A row: that agent only. The sheet closes and the reply has focus again.
   await act(async () => sheetRow(el, 'ses_claude').click());
   await settle();
@@ -836,18 +835,19 @@ test.skipIf(!hasDom)('a phone, several agents: who gets the reply is the chip at
   expect(replies()[0]!.body.tags).toBeUndefined();
 });
 
-test.skipIf(!hasDom)('a phone, two agents of one kind (two Claude Code sessions): the chip names each by its folder, as a narrow box names it, and its accessible name says which', async () => {
+test.skipIf(!hasDom)('a phone, two agents with the same mark (two Claude Code sessions): still the mark alone, and its accessible name says which gets the reply', async () => {
   const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M4, FARCLAUDE, 45, { from_project: { name: FAR.name, root: FAR.root } })), true);
   await write(el, 'Which folder?');
+  expect(pill(el)!.hasAttribute('data-agent-pill')).toBe(true);
   expect(pill(el)!.getAttribute('data-recipient-chosen')).toBe('ses_far');
-  expect(pill(el)!.getAttribute('aria-label')).toBe('To Claude Code (plannotator). Change who gets this reply');
-  expect(pill(el)!.querySelector('.ib-rto-short')?.textContent).toBe('plannotator');
+  expect(pill(el)!.getAttribute('aria-label')).toBe('Reply goes to Claude Code (plannotator). Change');
+  expect(pill(el)!.querySelector('.ib-apill-n')).toBeNull();
   await openList(el);
   await act(async () => sheetRow(el, 'ses_claude').click());
   await settle();
   expect(pill(el)!.getAttribute('data-recipient-chosen')).toBe('ses_claude');
-  expect(pill(el)!.querySelector('.ib-rto-short')?.textContent).toBe('superfans');
-  expect(pill(el)!.getAttribute('aria-label')).toBe('To Claude Code (superfans). Change who gets this reply');
+  expect(pill(el)!.querySelector('.ib-apill-n')).toBeNull();
+  expect(pill(el)!.getAttribute('aria-label')).toBe('Reply goes to Claude Code (superfans). Change');
 });
 
 test.skipIf(!hasDom)('a phone, a tagged agent that ended and never wrote here: its row can\'t be picked alone, and the reply stays with the agent that wrote', async () => {
@@ -869,7 +869,7 @@ test.skipIf(!hasDom)('a phone, one agent: nothing new, as on a computer: no cont
   const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, CLAUDE, 45)), true);
   const text = await write(el, 'Ship it.');
   expect(pill(el)).toBeNull();
-  expect(el.querySelector('[data-agent-mark], [data-agent-pill], [data-field-lead]')).toBeNull();
+  expect(el.querySelector('[data-agent-mark], [data-agent-pill]')).toBeNull();
   expect(el.querySelector('[data-recipient-list], [data-sheet]')).toBeNull();
   // The row is the paperclip, Skills and Send.
   expect(el.querySelector('[data-reply-row][data-phone] [data-reply-skills]')).not.toBeNull();
@@ -881,7 +881,7 @@ test.skipIf(!hasDom)('a phone, one agent: nothing new, as on a computer: no cont
   expect(replies().map((r) => r.path)).toEqual([`/api/inbox/messages/${M2}/reply`]);
 });
 
-test.skipIf(!hasDom)('three Pi sessions in one folder, one renamed in the sidebar: the chip and its row show that name alone, the others read "Pi" and "Pi 2", on a computer and a phone', async () => {
+test.skipIf(!hasDom)('three Pi sessions in one folder, one renamed in the sidebar: the chip and its row show that name alone, the others read "Pi" and "Pi 2"; a phone\'s sheet names them alike', async () => {
   const PI2 = { kind: 'agent' as const, host: 'pi', session: 'ses_pi2', name: null };
   const PI3 = { kind: 'agent' as const, host: 'pi', session: 'ses_pi3', name: null };
   taggable = [tagged('ses_pi', 'pi'), tagged('ses_pi2', 'pi'), tagged('ses_pi3', 'pi')];
@@ -901,10 +901,8 @@ test.skipIf(!hasDom)('three Pi sessions in one folder, one renamed in the sideba
     host?.remove();
     const phone = await render(thread, true);
     await write(phone, 'Use the old totals.');
-    const control = pill(phone)!;
-    expect(control.hasAttribute('data-narrow')).toBe(true);
-    expect(control.querySelector('.ib-rto-short')?.textContent).toBe('Billing review');
-    expect(control.getAttribute('aria-label')).toBe('To Billing review. Change who gets this reply');
+    await openList(phone);
+    expect(sheetRows(phone).map((r) => r[1])).toEqual(['Pi', 'Pi 2', 'Billing review']);
   } finally {
     // The names are global: clear them inside act, while the pane is still mounted.
     act(() => setAgentNames(new Map()));
@@ -930,7 +928,7 @@ test.skipIf(!hasDom)('two sessions renamed alike: the chip and the rows add the 
 
 test('chipDropsTo: at every width near the edge, from either state and with the word\'s measure a pixel off either way, the chip settles in two steps and never flips back and forth', () => {
   const max = 94;
-  // "to Codex" at 320 px: padding, the mark, the chevron and their gaps; the word and its gap.
+  // A chip near its widest: padding, the mark, the chevron and their gaps; the word and its gap.
   const fixed = 49;
   const to = 17.4;
   for (let tenth = -20; tenth <= 20; tenth += 1) {
@@ -951,11 +949,11 @@ test('chipDropsTo: at every width near the edge, from either state and with the 
 });
 
 test('chipDropsTo: the word goes for a short name that then fits whole, or for a long one with under 48 px beside it; it stays for a long name with room, and comes back when everything fits with 2 px to spare', () => {
-  // 320 px: "to Codex" needs 108 of 94; without the word 90.6 fits.
+  // "to Codex" needs 108 of 94; without the word 90.6 fits.
   expect(chipDropsTo({ fixed: 49, to: 17.4, name: 41.6, max: 94 }, false)).toBe(true);
-  // 320 px, a long name: beside the word 27.6 px of it would show.
+  // A long name in a narrow pane: beside the word 27.6 px of it would show.
   expect(chipDropsTo({ fixed: 49, to: 17.4, name: 400, max: 94 }, false)).toBe(true);
-  // 390 px, a long name: 55.6 px of it shows beside the word, so the word stays and the name is cut.
+  // A long name with more room: 55.6 px of it shows beside the word, so the word stays and the name is cut.
   expect(chipDropsTo({ fixed: 49, to: 17.4, name: 400, max: 122 }, false)).toBe(false);
   expect(chipDropsTo({ fixed: 49, to: 17.4, name: 400, max: 122 }, true)).toBe(false);
   // Dropped, then the field grows: back only with 2 px to spare.
