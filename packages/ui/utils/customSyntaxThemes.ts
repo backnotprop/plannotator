@@ -22,6 +22,7 @@
  */
 
 import { syntaxTextMateTheme, type ThemeFileHalf } from '@plannotator/core/theme-file';
+import { connectFenceSyntaxThemes } from './fenceSyntaxThemes';
 import { getCustomThemes, type ThemeInfo } from './themeRegistry';
 
 /** Pierre's two calls this needs (`@pierre/diffs`). */
@@ -63,6 +64,8 @@ const registered = new Set<string>();
 /** Register every custom half with code colours with Pierre (once per name; call again after setCustomThemes). */
 export function connectCustomSyntaxThemes(pierre: CustomSyntaxPierre): void {
   if (typeof pierre?.registerCustomTheme !== 'function') return;
+  // The fences' default code colours (fenceSyntaxThemes.ts) resolve by name the same way.
+  connectFenceSyntaxThemes(pierre);
   for (const theme of getCustomThemes()) {
     for (const half of theme.syntax ?? []) {
       const name = customSyntaxThemeName(theme.id, half);

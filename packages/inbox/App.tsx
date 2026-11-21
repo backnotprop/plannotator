@@ -77,7 +77,7 @@ import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads'
 import { machinesModel, rowSnoozes, snoozeBlockedBy, threadAwayLine } from './machines';
 import { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineUpdateDialog } from './components/MachineUpdate';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
-import { flatRows, readListView, useListView, type ListSort } from './listView';
+import { readListView, useListView, type ListSort } from './listView';
 import { useShowLight } from './showLight';
 import { useHeldRead } from './app/useHeldRead';
 import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
@@ -158,9 +158,10 @@ import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro, VOICE_INTRO_MIN_WORDS, VOICE_INTRO_MOMENT_MS } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
 import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
-import { useLineLatch, claimRevealOnce, listTallerThanScreen, listViewRevealClear, listViewRevealLeaveCounts, listViewRevealMayClaim, idleClockArmed, noteRevealThread, openThreadAsks, revealArmed, broRevealIdleCounts, broRevealLeaveCounts, grillMeTipIdleCounts, grillMeTipLeaveCounts, REVEAL_TIMES, starRevealLeaveCounts, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
+import { useLineLatch, viewChoiceRevealClear, viewChoiceRevealLeaveCounts, viewChoiceRevealMayClaim, viewChoiceWanted, idleClockArmed, noteRevealThread, openThreadAsks, revealArmed, broRevealIdleCounts, broRevealLeaveCounts, grillMeTipIdleCounts, grillMeTipLeaveCounts, REVEAL_TIMES, starRevealLeaveCounts, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
 import { useIdleClock } from './idleClock';
 import { launchTipDue } from './compose/launchTip';
+import { useLaunchTipClaim } from './data/actions/launchTip';
 import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
 import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
@@ -169,6 +170,7 @@ import { adoptSavedSidebar, hearSidebarEvent, sidebarLayoutReadMark, useSidebarC
 import { adoptShowArchived } from './showArchived';
 import { useArchivedGroup } from './data/actions/archivedGroup';
 import { sidebarTipDue, useSidebarTip } from './sidebarTip';
+import { bandTipDue, useBandTipHost } from './bandTip';
 import { SidebarTipCard } from './components/SidebarTipCard';
 import { SidebarCustomizer } from './components/SidebarCustomizer';
 import { drawnSidebarItems } from './sidebarItems';
@@ -2238,20 +2240,9 @@ function Inbox() {
     focusAfterOpen();
   };
   // ── Compose: a new message to a connected agent (compose/ComposeDialog.tsx) ──
-  // The Launch tip (compose/launchTip.ts): this page spends its claim once, with its own key (a retry after a lost
-  // answer is shown it again); the Inbox keeps it seen for every window and the phone. A plain New message that never
+  // The Launch tip (compose/launchTip.ts, its claim data/actions/launchTip.ts). A plain New message that never
   // reached the tip (To opened first) leaves it for the next one.
-  const launchTipSpent = useRef(false);
-  const launchTipKey = useRef(`lt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
-  const launchTip = useMemo(
-    () => ({
-      claim: async () => {
-        launchTipSpent.current = true;
-        return (await claimRevealOnce('launch_tip', launchTipKey.current)).show;
-      },
-    }),
-    [],
-  );
+  const { spent: launchTipSpent, tip: launchTip } = useLaunchTipClaim();
   const openCompose = (request: ComposeRequest, opener?: HTMLElement | null) => {
     composeOpener.current = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     setCompose(request);
@@ -3818,10 +3809,10 @@ function Inbox() {
   });
   // The list options' moment (approval "inbox-one-time-dialogs"): back on the list, no thread open, or the page idle.
   const listOptionsClear = listIntroClear && (!route.thread || pageIdle);
-  // Grouping before Rows (the owner's order, 2026-11-10): the Inbox arms List view beside the Rows dialog (`reveal.ahead`,
-  // it never holds the line); while List view's own need holds on this page (Smart groups, the list taller than the
-  // screen), Rows waits for it. When it does not hold, Rows goes as before.
-  const groupingFirst = lineLatch?.listIntroDue === true && lineLatch.ahead.includes('list_view') && readListView() === 'grouped' && listTallerThanScreen(listBody(rootRef.current));
+  // The view choice before Rows (the owner's order, 2026-11-10): the Inbox arms it beside the Rows dialog (`reveal.ahead`,
+  // it never holds the line); while it is for this page's view (any but Agents, `viewChoiceWanted`), Rows waits for it.
+  // When it is not, Rows goes as before.
+  const groupingFirst = lineLatch?.listIntroDue === true && lineLatch.ahead.includes('view_choice') && viewChoiceWanted(readListView());
   const listIntroLoad: ListIntroLoad = {
     due: listIntroAtLoad !== null && lineLatch?.listIntroDue === true && !groupingFirst,
     listLoaded: listIntroAtLoad !== null,
@@ -4014,37 +4005,24 @@ function Inbox() {
     mayClaim: (pageAge) => personalAgentsBanner !== null && lineLatch !== null && !firstRun && pageAge >= REVEAL_TIMES.pageAgeMs,
     holds: () => true,
   });
-  // The List view's choice, registered with the line (approval "inbox-one-time-dialogs", the change; reveal.ts
-  // `useLineReveal`): armed while it is `reveal.next`, or in `reveal.ahead` (it goes at its own moment, ahead of the
-  // other offers), back on the list with no thread open or the page idle (any layout), once the list is taller than the
-  // screen, on Smart groups.
+  // "Which view do you prefer?", registered with the line (reveals.ts `view_choice`; reveal.ts `useLineReveal`): armed
+  // while it is `reveal.next`, or in `reveal.ahead` (it goes at its own moment, ahead of the other offers), back on the
+  // list with no thread open or the page idle (any layout), on any view but Agents (`viewChoiceWanted`).
   const [listView, setListView] = useListView();
   const listViewThread = route.page === 'inbox' ? (route.thread ?? null) : null;
   const listViewReveal = useLineReveal({
-    id: 'list_view',
-    due: lineLatch?.next === 'list_view' || (lineLatch?.ahead.includes('list_view') ?? false),
+    id: 'view_choice',
+    due: lineLatch?.next === 'view_choice' || (lineLatch?.ahead.includes('view_choice') ?? false),
     ...revealAt,
     thread: listViewThread,
-    clear: listViewRevealClear(listIntroClear, listViewThread, pageIdle),
-    leaveCounts: (_visit, _now, _row, next) => listViewRevealLeaveCounts(next),
+    clear: viewChoiceRevealClear(listIntroClear, listViewThread, pageIdle),
+    leaveCounts: (_visit, _now, _row, next) => viewChoiceRevealLeaveCounts(next),
     idle: pageIdle,
-    mayClaim: (pageAge) =>
-      listViewRevealMayClaim(
-        {
-          listLoaded: lineLatch !== null,
-          firstRun,
-          grouped: listView === 'grouped',
-          taller: listTallerThanScreen(listBody(rootRef.current)),
-        },
-        pageAge,
-      ),
-    holds: () => listView === 'grouped',
+    mayClaim: (pageAge) => viewChoiceRevealMayClaim({ listLoaded: lineLatch !== null, firstRun, view: listView }, pageAge),
+    holds: () => viewChoiceWanted(listView),
   });
   const listViewIntroOpen = listViewReveal.stage === 'open';
   const listViewChoiceOpen = listViewIntroOpen && shown !== null;
-  // The choice's two pictures: the person's own list as the groups draw it, and as the Simple list draws it.
-  const listViewChoiceGroups: ListIntroGroup[] = listViewChoiceOpen && shown ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 8) }] : [])) : [];
-  const listViewChoiceFlat = listViewChoiceOpen && shown ? flatRows(filterList(shown), null, { epoch: 0, keep: null }).rows.slice(0, 10) : [];
   const { reveal: priorityReveal, dialog: priorityDialog } = usePriorityReveal({
     due: lineLatch?.next === 'priority',
     revealAt,
@@ -4267,6 +4245,10 @@ function Inbox() {
   // first-run screen. The person's Inbox stays loaded underneath
   // and comes back as it was.
   const tourOn = route.page === 'tour';
+  // The Group tip (bandTip.ts): a band's one-time tooltip about its menu. Held back as every one-time thing is: another
+  // dialog or tip of this load claimed or up, the page not clear, something typed or open, a menu, a toast or a dialog.
+  // A thread covering the list (a phone, a stacked window, full screen) or a hidden page: the list is out of sight.
+  const bandTipHost = useBandTipHost(bandTipDue(settings) && !tourOn && !firstRun && lineLatch !== null, () => revealBlocked || lineBusy || !listIntroClear || revealHeldBack() || modalOpen() || (route.thread !== null && (phone || stack.thread || full)) || document.visibilityState === 'hidden');
   // Ask AI, on in every Inbox but the tour's (off, this reads nothing and draws nothing), and
   // only once the settings say which this page is. A linked machine's thread has no chat here.
   const [askReply, setAskReply] = useState<{ threadId: string; words: string } | null>(null);
@@ -5633,6 +5615,7 @@ function Inbox() {
           onSendNow={(row) => void sendNowFromRow(row)}
           onRowAction={rowAction}
           bulk={bulk}
+          bandTip={bandTipHost}
           onSnooze={snoozeOn ? (row, until) => void snooze(row, until) : undefined}
           snoozesOf={(row) => rowSnoozes(row, machines)}
           snoozeBlockedOf={(row) => (pageOffersUpdates(settings) ? snoozeBlockedBy(row, machines) : null)}
@@ -6100,21 +6083,16 @@ function Inbox() {
       {sidebarTip.stage === 'open' && <SidebarTipCard gone={!sidebarDocked || !listIntroClear || sidebarCustomizing} onSay={say} onLeave={sidebarTip.close} />}
       {listViewChoiceOpen && (
         <ListViewIntro
-          groups={listViewChoiceGroups}
-          flat={listViewChoiceFlat}
-          look={readListLook()}
-          awayMachines={machines.away}
-          projectNames={projectNames}
           phone={phone}
           current={listView}
-          onSmart={listViewReveal.close}
-          onDismiss={() => {
-            // Escape or a click outside: Not now for the line (the next dialog waits three days).
-            void inboxApi.revealNotNow('list_view');
+          onPick={(view) => {
+            // The ⋮ menu's own setter: the list switches at once, remembered in this browser.
+            setListView(view);
             listViewReveal.close();
           }}
-          onSimple={() => {
-            setListView('list');
+          onDismiss={() => {
+            // Escape or a click outside: the view stays; Not now for the line (the next dialog waits three days).
+            void inboxApi.revealNotNow('view_choice');
             listViewReveal.close();
           }}
         />

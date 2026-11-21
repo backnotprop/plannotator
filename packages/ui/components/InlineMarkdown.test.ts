@@ -426,9 +426,11 @@ describe('cross-repo owner/repo#N refs', () => {
   });
 
   test('schemeless hosts, addresses, prose pairs and names starting with punctuation are not refs', () => {
-    for (const text of ['example.com/page#1', 'www.example.com/x#1', 'john@owner/repo#1', 'and/or#1', '-owner/repo#7', '1/2#3']) {
+    for (const text of ['example.com/page#1', 'john@owner/repo#1', 'and/or#1', '-owner/repo#7', '1/2#3']) {
       expect(hrefs(render(text, GH))).toEqual([]);
     }
+    // A `www.` address is a web link (GFM autolink), whole, never a ref.
+    expect(hrefs(render('www.example.com/x#1', GH))).toEqual(['https://www.example.com/x#1']);
   });
 
   test('_owner/repo#1 is done_ stays italic', () => {
