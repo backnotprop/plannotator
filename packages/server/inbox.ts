@@ -4829,6 +4829,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           cliVersion: version,
           pluginsDir: claudePluginInstall.pluginsDir(),
           changedAt: claudePluginInstall.changedAt,
+          realPath: claudePluginInstall.realPath,
         });
       }
       if (host === "pi") return piSessionOutdated(plugin, version, { pinned: piPinned() });
@@ -4976,7 +4977,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       .list()
       .flatMap((agent) => (agent.device_id && agentDoor.inScopeOf(threadId, agent.device_id) ? [agent.device_id] : []));
   };
-  const agentDoor = createInboxAgentDoor({ store, agents: cloudAgents, devices: () => phones?.agentDevices ?? null, mcp: mcpContext });
+  // `route`: the window routes a paired agent's `inbox rows`, `projects`, `icon` and `export-decisions` use, answered by
+  // this listener's own handler as the same commands on this computer are (inbox-agent-routes.ts).
+  const agentDoor = createInboxAgentDoor({ store, agents: cloudAgents, devices: () => phones?.agentDevices ?? null, mcp: mcpContext, route: (req) => handle(req, "local") });
   const cloudWake = createInboxCloudWake({
     store,
     agents: cloudAgents,
@@ -5034,6 +5037,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     connection: live.deliveryConnectionOf,
     askerLive: live.askerLive,
     launchResumes: (threadId, session) => launch.resumes(threadId, session),
+    onePass: (read) => launch.onePass(read),
     hostOf: live.hostOf,
     // A Codex reply whose `codex queue` ran out of time may not have gone: its row says it is saved, not queued.
     uncertain: (session, itemId) => codexWake.uncertain(session, itemId) || qwenWake.uncertain(session, itemId) || t3Wake.uncertain(session, itemId) || antigravityWake.uncertain(session, itemId),

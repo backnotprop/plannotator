@@ -18,6 +18,9 @@ Send Feedback → feedback sent to agent session
 Approve → approved prompt sent to agent session (with the note/annotations when approving with notes)
 ```
 
+Local Perforce reviews open the default changelist when it has files. Otherwise
+they open the first numbered changelist with files in the provider's list.
+
 ### Color-free VCS output (#1661)
 
 Every git command the review servers parse goes through `prepareGitCommand`
@@ -780,6 +783,8 @@ Ask AI providers are detected independently from installed/authenticated local C
 DeepSeek Harness reviews opened by the `@plannotator/dsh` plugin's tool and commands (see "DeepSeek Harness" in `plan-review.md`) carry no session bridge yet, so they offer no "Ask this session" and no Settings row for the agent tool (`agentToolHostOf` has no `dsh` until the bridge has that host).
 
 Automatic resolution is session-only and never writes a preference. Explicit per-origin choices are persisted in cookies, so a user can override the automatic match for one agent without changing the default for another.
+
+**Reload recovery (#3670).** Plan review, annotate and code review keep the current Ask AI thread and its AI session id in the tab's `sessionStorage` (`useAIChat`'s optional `storageKey`, `aiChatPersistence.ts`). Each app waits for its initial payload before restoring; the key includes the surface and the running server's `serverSession` nonce, so a restart on the same port starts empty. A follow-up after a reload uses the existing AI session; if the server has since dropped it (it keeps a limited number), `ask` starts a new one quietly instead of answering "Session not found". A reply interrupted by the reload keeps its partial text with a stopped note, without a streaming indicator, waiting status or dead permission cards. Busy answers retain their full prompt and selection for retry; the already-delivered draft list is restored too. New chat clears the saved thread. Hosts that omit the option keep chats in memory, and blocked, full or malformed storage never prevents asking. This keeps only the current chat in that tab, with no past-chat picker or recovery after a server restart.
 
 **New chat (#1981).** Plan review, annotate and code review show a small **New chat** row above the Ask AI messages once there are any (`NewChatButton`, `packages/ui/components/ai/`; the optional `onNewChat` prop on `DocumentAIChatPanel` and the review `AITab`, absent for hosts, so their panel is unchanged; no keyboard shortcut). It calls `useAIChat().newChat()`: the thread and its Plannotator AI session id are cleared, so the next question starts a fresh session (a separate AI gets the full document or "changes under review" context again). Unlike `resetThread` (archive or goal setup; the editor no longer resets on a document switch, see #1001 below), `newChat` never stops anything: while a question is in flight (streaming, creating its session, or waiting on a busy "Ask this session"), or while a busy answer still offers "Ask when it finishes" / "Interrupt and ask now" (`hasPendingBusyChoice`), it returns false and the button is unavailable (`aria-disabled`, still focusable, the reason as its `aria-describedby` description), so no turn is aborted and no pending ask is dropped. It keeps the provider/model choice and the per-page record of the draft list the agent session already received (`deliveredDraftsRef`), because with "Ask this session" a new chat reaches the SAME host session, which still remembers earlier questions; there the button reads **Clear chat** and says so. Earlier chats are not kept to reopen.
 

@@ -66,6 +66,61 @@ describe("where an agent lives", () => {
     expect(changes.length).toBe(2);
   });
 
+  test("an idle close never drops a read that already started, and still closes once idle", async () => {
+    let clock = 1_000_000;
+    const changes: number[] = [];
+    const { fake, rex } = setup({}, { idleCloseMs: 150, readTimeoutMs: 1_000, now: () => clock, onChange: () => changes.push(rex.version()) });
+    const ids = fake.addSession("plannotator", "Claude Code");
+    fake.setStatus(ids.block, [{ state: "working", app: "claude-code", updated_at: "2026-11-20T10:00:00Z" }]);
+    const hints = new Map([["sess-1", placeOf(ids)]]);
+
+    expect((await placesRead(rex, hints)).get("sess-1")).toBe("Rex · plannotator / Claude Code");
+    expect(rex.statuses(hints).get("sess-1")).toEqual({ state: "working" });
+    expect(changes.length).toBe(1);
+    const attachesAfterFirst = fake.calls.filter((c) => c.method === "session.attach_all").length;
+    expect(attachesAfterFirst).toBe(1);
+
+    // Start the next read before idleCloseMs expires and let block.method finish well past idleCloseMs.
+    await Bun.sleep(30);
+    clock += 3_000;
+    fake.setDelay(200, "block.method");
+    expect((await placesRead(rex, hints)).get("sess-1")).toBe("Rex · plannotator / Claude Code");
+    expect(rex.statuses(hints).get("sess-1")).toEqual({ state: "working" });
+    expect(rex.appAttached()).toBe(true);
+    expect(changes.length).toBe(1);
+    // The existing connection was reused instead of dropped mid-read.
+    expect(fake.calls.filter((c) => c.method === "session.attach_all").length).toBe(attachesAfterFirst);
+
+    // Once truly idle past idleCloseMs, the connection closes and a later read opens a fresh one.
+    fake.setDelay(0, "block.method");
+    await Bun.sleep(250);
+    clock += 3_000;
+    expect((await placesRead(rex, hints)).get("sess-1")).toBe("Rex · plannotator / Claude Code");
+    expect(fake.calls.filter((c) => c.method === "session.attach_all").length).toBe(attachesAfterFirst + 1);
+  });
+
+  test("a faster overlapping read does not arm the idle close under a slower read still in flight", async () => {
+    let clock = 1_000_000;
+    const changes: number[] = [];
+    const { fake, rex } = setup({}, { idleCloseMs: 60, readTimeoutMs: 1_000, now: () => clock, onChange: () => changes.push(rex.version()) });
+    const ids = fake.addSession("plannotator", "Claude Code");
+    fake.setStatus(ids.block, [{ state: "working", app: "claude-code", updated_at: "2026-11-20T10:00:00Z" }]);
+    const hints = new Map([["sess-1", placeOf(ids)]]);
+
+    expect((await placesRead(rex, hints)).get("sess-1")).toBe("Rex · plannotator / Claude Code");
+    expect(changes.length).toBe(1);
+
+    // Delay only block.method so readNow stays in flight longer than idleCloseMs while paneGone completes immediately.
+    clock += 3_000;
+    fake.setDelay(180, "block.method");
+    rex.places(hints);
+    expect(await rex.paneGone(placeOf(ids))).toBe(false);
+    await rex.settled();
+    expect(rex.places(hints).get("sess-1")).toBe("Rex · plannotator / Claude Code");
+    expect(rex.statuses(hints).get("sess-1")).toEqual({ state: "working" });
+    expect(changes.length).toBe(1);
+  });
+
   test("the last read stands until the next replaces it: no gap after a quiet spell; a slow Rex keeps it until stale", async () => {
     let clock = 1_000_000;
     const { fake, rex } = setup({}, { readTimeoutMs: 150, now: () => clock });
