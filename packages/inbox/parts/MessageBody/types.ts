@@ -65,6 +65,11 @@ export interface MessageBodyProps {
    * `recordFor` names the record a block draws (null: the block stays text
    * and ends the run); `render` draws a run's records, in body order.
    */
+  /**
+   * `:::run` and `:::secret` blocks (parts/RunBlocks): the host's card for one block, by its opening line; undefined
+   * leaves the block as text (a callout, its command with Copy).
+   */
+  renderRunBlock?: (block: { startLine: number; directiveKind?: string }) => React.ReactNode | undefined;
   renderActions?: {
     recordFor: (block: { startLine: number; content: string }) => InboxQuestion | null;
     render: (records: InboxQuestion[]) => React.ReactNode;

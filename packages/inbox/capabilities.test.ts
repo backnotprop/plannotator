@@ -54,6 +54,18 @@ describe('event: capabilities', () => {
     expect(hear(JSON.stringify({ board: { on: true }, steps: { on: true } }), on.settings).settings.float_drafts).toEqual({ on: true });
   });
 
+  test('thread panes turned on, then off, in Settings (this window or another): the window follows; a frame without them leaves them', () => {
+    // The server names `split_view` only in the frame of its own change (inbox.ts onCapabilities).
+    const on = hear(JSON.stringify({ board: { on: false }, steps: { on: true }, split_view: { on: true } }), { ...OFF, split_view: { on: false } } as Held);
+    expect(on.reread).toBe(false);
+    expect((on.settings as { split_view?: unknown }).split_view).toEqual({ on: true });
+    const off = hear(JSON.stringify({ board: { on: false }, steps: { on: true }, split_view: { on: false } }), on.settings);
+    expect((off.settings as { split_view?: unknown }).split_view).toEqual({ on: false });
+    expect((hear(JSON.stringify({ board: { on: true }, steps: { on: true } }), on.settings).settings as { split_view?: unknown }).split_view).toEqual({ on: true });
+    // A frame naming only it is applied, not a reason to read the settings again.
+    expect(hear(JSON.stringify({ split_view: { on: true } }), OFF).reread).toBe(false);
+  });
+
   test('a frame without the Board leaves it; a malformed Board value is not applied', () => {
     const on = { ...OFF, board: { on: true } };
     expect(hear(JSON.stringify({ steps: { on: false } }), on).settings).toEqual({ ...on, steps: { on: false } });

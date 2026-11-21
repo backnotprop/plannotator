@@ -88,7 +88,7 @@ function TokenHoverCardContent({
   const remaining = referenceCount - references.length;
   const inertProps = interactive ? {} : { tabIndex: -1, 'aria-disabled': true as const };
   // Out of the tab order, and out of the affordance: the card's own footer
-  // says "Click a location to jump", so a location that still underlines on
+  // says "Click to jump", so a location that still underlines on
   // hover and shows a hand cursor is advertising something that does nothing.
   // Appended to each button's own classes, never replacing them, so the
   // display-only card stays the same card.
@@ -183,11 +183,11 @@ function TokenHoverCardContent({
       {/* Frozen copy: the card teaches exactly one thing, and the Alt-click
           alias is deliberately not advertised here. */}
       <div className="border-t border-border px-3.5 py-1.5 text-xs text-muted-foreground">
-        Click a location to jump.{' '}
+        Click to jump ·{' '}
         <kbd className="rounded border border-border bg-muted px-1 font-mono text-xs">
           {modKey}
         </kbd>
-        {modKey === '⌘' ? '' : '+'}click a token for the full References panel.
+        {modKey === '⌘' ? ' ' : '+'}click for all references
       </div>
     </>
   );

@@ -124,6 +124,14 @@ export function inboxRowUnread(section: InboxSectionId, unseen: number, draftOnl
   return section === "new" && !draftOnly;
 }
 
+/**
+ * A row in New only for the person's own unsent words or comments: nothing
+ * new arrived, so it is not bold (`inboxRowUnread`'s `draftOnly`).
+ */
+export function inboxRowDraftOnly(section: InboxSectionId, unseen: number, answeredNotSent: boolean, unsent: InboxRowUnsent | null | undefined): boolean {
+  return section === "new" && unseen === 0 && !answeredNotSent && inboxHasUnsent(unsent);
+}
+
 function byId(left: InboxListRow, right: InboxListRow): number {
   return left.thread_id.localeCompare(right.thread_id);
 }

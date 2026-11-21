@@ -516,7 +516,7 @@ export function DecisionCard(props: DecisionCardProps) {
           <p className="ib-dm-sentline" data-decision-sent={props.sending && !props.sent ? undefined : ''} data-decision-sending={props.sending && !props.sent ? '' : undefined}>
             <Icon name={props.sending && !props.sent ? 'clock' : 'check'} size={16} />
             <span>
-              <b>{props.sending && !props.sent ? 'Sending' : 'Sent'}</b> · {kind === 'action' ? (q.action_result?.outcome === 'cant' ? "Can't do it" : 'Done') : answerWords(q.answer)}
+              <b>{props.sending && !props.sent ? 'Sending' : 'Sent'}</b> · {kind === 'action' ? (q.action_result?.outcome === 'cant' ? "Can't do it" : q.action_result?.outcome === 'skip' ? 'Skipped' : 'Done') : answerWords(q.answer)}
             </span>
           </p>
         )}

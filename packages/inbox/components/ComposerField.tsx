@@ -46,6 +46,7 @@ import { inboxSkillFilter } from '../skills';
 import { builtinSkillIcon } from './BuiltinSkillIcon';
 import { hashtagMenuLeft, useHashtagPicker, useInitiativeTags } from '../hashtags';
 import { useReplyMentions } from '../replyMentions';
+import { FieldLead } from './FieldLead';
 
 /** The chip class a tag gets in the composer's highlight layer (inbox.css: colour, background and box-shadow only). */
 export const TAG_TOKEN_CLASS = 'ib-tg-tok';
@@ -116,6 +117,11 @@ export interface InboxComposerFieldProps {
    * approval "inbox-drag-threads"): a dragged row, the row menu's Mention in reply, a pasted thread link. Absent: none.
    */
   mentionThread?: string;
+  /**
+   * Drawn at the start of the field's first line, the words flowing after it (`FieldLead`): the reply box's recipient
+   * chip in a thread with several agents. Absent: the field as ever.
+   */
+  lead?: React.ReactNode;
 }
 
 const NO_PEOPLE: readonly MentionPerson[] = [];
@@ -139,6 +145,7 @@ export function InboxComposerField({
   skillFilter = OUTSIDE_A_REVIEW,
   commands,
   mentionThread,
+  lead,
 }: InboxComposerFieldProps) {
   const innerRef = useRef<HTMLTextAreaElement | null>(null);
   const attach = useCallback(
@@ -306,6 +313,7 @@ export function InboxComposerField({
           {(boundary) => <TagPicker id={tagListboxId} menu={tagMenu} options={options} onSelect={select} field={textarea} boundary={boundary} />}
         </FloatingSkillMenu>
       ) : null}
+      {lead ? <FieldLead value={value}>{lead}</FieldLead> : null}
       <ComposerTokenTextarea
         textareaRef={attach}
         value={value}
