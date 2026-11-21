@@ -88,10 +88,11 @@ export function fakeLaunchHost() {
       };
     },
   };
-  /** The session polls: live, busy or idle; each poll shows new life. */
+  /** The session polls: live, busy or idle; each poll shows new life. An idle spell begins at the first idle poll after a busy one. */
   const poll = (session: string, busy: boolean, at: number) => {
     const s = sessions.get(session)!;
-    s.live = { busy, busySince: busy ? (s.live?.busySince ?? at) : null, polls: (s.live?.polls ?? 0) + 1 };
+    const idleSince = busy ? null : s.live?.busy === false ? (s.live.idleSince ?? at) : at;
+    s.live = { busy, busySince: busy ? (s.live?.busySince ?? at) : null, polls: (s.live?.polls ?? 0) + 1, idleSince };
   };
   /** The session asks to run a command: the question lands in the launch's thread. */
   const ask = (root: InboxMessage, session: string) => {

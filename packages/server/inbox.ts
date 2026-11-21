@@ -4817,7 +4817,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...(options.sessionsNow ? { now: options.sessionsNow } : {}),
     store,
     serverSession,
-    resolveRoot: async (path) => (await projectRoots.resolve(path)).root,
+    resolveRoot: async (path) => (await projectRoots.resolveNamed(path)).root,
     outdatedOf: (host, plugin, folder) => {
       if (host === "claude-code") {
         return claudeSessionOutdated({
@@ -8110,7 +8110,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
       // #1813: an image a message's body shows, read from wherever it is on this
       // computer outside the home folder's hidden folders (packages/server/inbox-message-images.ts).
-      const image = await inboxMessageImageRoute(req, url, store);
+      const image = await inboxMessageImageRoute(req, url, store, imageCapture.shown);
       if (image) return image;
 
       // "Open in": an attachment in its own app, by id only (packages/server/inbox-open-in.ts).

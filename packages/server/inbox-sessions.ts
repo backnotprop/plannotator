@@ -1289,9 +1289,11 @@ export function createInboxLiveSessions(options: {
   };
 
   /** A live session's turn state (a launched thread's run line); null when it is not live. */
-  const runStateOf = (session: string): { busy: boolean | null; busySince: number | null; polls: number } | null => {
+  const runStateOf = (session: string): { busy: boolean | null; busySince: number | null; polls: number; idleSince: number | null } | null => {
     const entry = sessions.get(session);
-    return entry && isLive(entry) ? { busy: entry.busy, busySince: entry.busy === true ? (entry.busySince ?? null) : null, polls: entry.polls ?? 0 } : null;
+    return entry && isLive(entry)
+      ? { busy: entry.busy, busySince: entry.busy === true ? (entry.busySince ?? null) : null, polls: entry.polls ?? 0, idleSince: entry.busy === false ? entry.idleSince : null }
+      : null;
   };
 
   /**

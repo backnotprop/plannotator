@@ -108,7 +108,7 @@ import { createCodexLaunchHost } from "./inbox-launch-codex";
 import { createOpenCodeLaunchHost } from "./inbox-launch-opencode";
 import { launchPlainEnv, launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
 import { pathFoldersOf } from "./env-path";
-import type { LaunchAvailability, LaunchDelivery, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions, LaunchStartFailure, LaunchTrustOffer } from "./inbox-launch-host";
+import type { LaunchAvailability, LaunchDelivery, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions, LaunchStartFailure, LaunchTrustOffer, LaunchTurnError } from "./inbox-launch-host";
 import { openPermissionSince } from "./inbox-launch-permission";
 import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, INBOX_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { samePlace } from "./agent-files";
@@ -209,11 +209,27 @@ interface Memo {
   turnError?: { key: string; at: number } | null;
   turnErrorNoted?: string | null;
   turnErrorTried?: string | null;
+  /**
+   * The last read of the host's turn error while the session was idle: what it found, when, the idle spell it was
+   * read in (`spell`) and how long until the next read in that spell (`wait`, TURN_ERROR_READ_MS doubling to
+   * TURN_ERROR_READ_MAX_MS). Cleared while the session is busy or away.
+   */
+  turnErrorRead?: { found: LaunchTurnError | null; at: number; spell: string; wait: number } | null;
   /** Clone from a git URL: the reply that started the clone again last (once per reply, as a respawn). */
   cloneFor?: string | null;
   /** When the running clone began: its percent shows only after a few seconds (E2). */
   cloneStartedAt?: number;
 }
+
+/**
+ * An idle launched session's turn error (`LaunchHost.turnError`, Claude Code's transcript, a few file calls in the
+ * person's folder and Claude's) is read when the session turns idle, on that same sweep, then again after 1 s, 2 s,
+ * 4 s, 8 s and every 10 s while it stays idle. A turn the Inbox saw end is read at once, as before; a transcript
+ * written a moment after the session said idle is seen within as long again; a turn the Inbox never saw (a
+ * connection that does not say busy) within 10 s. Before, every second, for every idle launch (#2788).
+ */
+const TURN_ERROR_READ_MS = 1_000;
+const TURN_ERROR_READ_MAX_MS = 10_000;
 
 /** The clone percent shows once a clone has run this long (E2: a big repo, not every clone). */
 const CLONE_PCT_AFTER_MS = 3_000;
@@ -768,6 +784,21 @@ export function createInboxLaunch(options: {
   };
 
   /**
+   * The host's turn error for an idle session: read again only when the idle spell is new (a turn ended since, or the
+   * session came back) or its wait passed (TURN_ERROR_READ_MS); otherwise the last read stands, with no file call.
+   */
+  const readTurnError = (host: LaunchHost, launch: InboxLaunchRecord, session: string, live: LaunchLive, memo: Memo): LaunchTurnError | null => {
+    const spell = `${session}:${live.busy}:${live.idleSince ?? ""}`;
+    const last = memo.turnErrorRead;
+    const at = now();
+    // A clock set back reads at once.
+    if (last && last.spell === spell && at >= last.at && at - last.at < last.wait) return last.found;
+    const found = host.turnError!(launch, session);
+    memo.turnErrorRead = { found, at, spell, wait: last && last.spell === spell ? Math.min(last.wait * 2, TURN_ERROR_READ_MAX_MS) : TURN_ERROR_READ_MS };
+    return found;
+  };
+
+  /**
    * A launched session whose host writes its failed turns down (Claude Code): once it is idle, the error its last turn
    * ended in becomes one note in the thread, from the session, in the words Codex's and Pi's failed turns use, and the
    * run line's "couldn't answer" with Try again. A turn that runs, or a last turn that ended well, clears the line;
@@ -782,7 +813,8 @@ export function createInboxLaunch(options: {
     const live = liveOf(host, root, memo);
     const was = memo.turnError ?? null;
     // Not connected (stopped, or not yet back): the stopped line says what it is. A turn runs: its end decides.
-    let found = !live || live.busy === true ? null : host.turnError(launch, session);
+    let found = !live || live.busy === true ? null : readTurnError(host, launch, session, live, memo);
+    if (!live || live.busy === true) memo.turnErrorRead = null;
     if (found && found.key === memo.turnErrorTried) found = null;
     memo.turnError = found ? { key: found.key, at: found.at } : null;
     if (found && memo.turnErrorNoted !== found.key) {
