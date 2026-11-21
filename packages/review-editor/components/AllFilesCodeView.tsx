@@ -35,7 +35,7 @@ import { useConfigValue } from '@plannotator/ui/config';
 import type { SemDiffClient, SemDiffResult } from '../semDiff/semDiffClient';
 import type { PowerUpConfig, PowerUpFileState, PowerUpStatus } from '../semDiff/powerUp';
 import { POWER_UP_PERIOD_MS, POWER_UP_ROW, powerUpCss } from '../semDiff/powerUpCss';
-import { SemanticFileNote, type SemanticFileState } from '../semDiff/SemanticFileNote';
+import type { SemanticFileState } from '../semDiff/semanticFileState';
 import type { DiffFile, AnnotationScrollTarget } from '../types';
 import type { MarkdownFileView } from '../utils/markdownPreview';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
@@ -857,6 +857,8 @@ const EMPTY_CONTEXT_NOTES: readonly ContextNoteAnchor[] = [];
 const noopAIMarkerClick = () => {};
 
 const SCROLL_SPEED_FRESH_MS = 100;
+const FRAME_MS = 16;
+const SETTLE_FRAMES = 10;
 const SWAP_LEAD_MS = 100;
 
 function stickyHeaderHeight(node: HTMLElement | undefined): number {
@@ -1359,8 +1361,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const moved = () => {
       if (!page) return;
       const now = { top: page.scrollTop, at: performance.now() };
-      scrollSpeedRef.current = { pxPerMs: Math.abs(now.top - last.top) / Math.max(1, now.at - last.at), at: now.at };
+      const gap = now.at - last.at;
+      scrollSpeedRef.current = { pxPerMs: Math.abs(now.top - last.top) / (gap > SCROLL_SPEED_FRESH_MS ? FRAME_MS : Math.max(1, gap)), at: now.at };
       last = now;
+      if (now.top > 0) engage();
     };
     moves?.addEventListener('scroll', moved, { passive: true });
     return () => {
@@ -2117,6 +2121,20 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   useEffect(() => () => {
     if (augmentFlushTimerRef.current != null) clearTimeout(augmentFlushTimerRef.current);
   }, []);
+  const landingsRef = useRef(new Map<string, () => boolean>());
+  const landingFrameRef = useRef<number | null>(null);
+  const landInFrame = useCallback((itemId: string, decide: () => boolean) => {
+    landingsRef.current.set(itemId, decide);
+    landingFrameRef.current ??= requestAnimationFrame(() => {
+      landingFrameRef.current = null;
+      const decisions = [...landingsRef.current.values()];
+      landingsRef.current.clear();
+      if (decisions.map((decide) => decide()).includes(true)) viewerRef.current?.getInstance()?.render(true);
+    });
+  }, []);
+  useEffect(() => () => {
+    if (landingFrameRef.current != null) cancelAnimationFrame(landingFrameRef.current);
+  }, []);
 
   const [semanticNotes, setSemanticNotes] = useState<ReadonlyMap<string, SemanticMinimapNote[]>>(new Map());
   const openHeldFolds = useStableCallback((itemId: string, fileDiff: FileDiffMetadata, annotations: readonly { side: string; lineNumber: number }[] | undefined): FileDiffMetadata => {
@@ -2164,6 +2182,57 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     handle.updateItem(item);
   });
 
+  const heldLengthRef = useRef<((keep?: boolean) => { px: number; height: number } | null) | null>(null);
+  const toggleInPlace = useStableCallback((itemId: string, on: boolean) => {
+    const root = scrollRef.current;
+    const page = root && (scrollsWithPageRef.current ? pageScrollRef.current?.page ?? null : root);
+    const node = itemNodeRef.current.get(itemId);
+    const most = page ? Math.ceil(node?.isConnected ? node.getBoundingClientRect().height : page.clientHeight) : 0;
+    const held = heldLengthRef.current?.(true) ?? null;
+    if (root && page && (held || (page.scrollTop > 0 && page.scrollHeight - page.scrollTop - page.clientHeight < most))) {
+      const height = held?.height ?? page.scrollHeight;
+      let px = (held?.px ?? 0) + most;
+      root.style.paddingBottom = `${px}px`;
+      let settled = false;
+      let calm = 0;
+      let last = -1;
+      let frame = 0;
+      const settle = () => {
+        const natural = page.scrollHeight - px;
+        calm = natural === last ? calm + 1 : 0;
+        last = natural;
+        if (calm < SETTLE_FRAMES) {
+          frame = requestAnimationFrame(settle);
+          return;
+        }
+        px = Math.min(px, Math.max(0, Math.max(height, page.scrollTop + page.clientHeight) - natural));
+        root.style.paddingBottom = px > 0 ? `${px}px` : '';
+        settled = true;
+      };
+      frame = requestAnimationFrame(settle);
+      const moves = page === document.documentElement ? window : page;
+      const check = () => {
+        if (settled && px > 0 && page.scrollTop + page.clientHeight <= page.scrollHeight - px) heldLengthRef.current?.();
+      };
+      const gesture = () => {
+        if (settled && px === 0) heldLengthRef.current?.();
+      };
+      const gestures = ['wheel', 'touchstart', 'keydown'] as const;
+      moves.addEventListener('scroll', check, { passive: true });
+      for (const type of gestures) document.addEventListener(type, gesture, { capture: true, passive: true });
+      heldLengthRef.current = (keep = false) => {
+        cancelAnimationFrame(frame);
+        moves.removeEventListener('scroll', check);
+        for (const type of gestures) document.removeEventListener(type, gesture, { capture: true });
+        if (!keep) root.style.paddingBottom = '';
+        heldLengthRef.current = null;
+        return settled && px === 0 ? null : { px, height };
+      };
+    }
+    showSemantic(itemId, on);
+  });
+  useEffect(() => () => void heldLengthRef.current?.(), [fileSetKey]);
+
   const allMinimapMarks = useMemo(
     () => (semanticNotes.size === 0 ? minimapMarks : [...(minimapMarks ?? []), ...[...semanticNotes.values()].flat()]),
     [minimapMarks, semanticNotes],
@@ -2172,7 +2241,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const semanticWasEnabledRef = useRef(semanticEnabled);
   const semanticAskedForRef = useRef(new Set<string>());
   useEffect(() => {
-    if (semanticEnabled && !semanticWasEnabledRef.current) semanticAskedForRef.current = new Set([...itemNodeRef.current.keys()].map((itemId) => `${fileSetKeyRef.current}::${itemId}`));
+    if (semanticEnabled && !semanticWasEnabledRef.current) semanticAskedForRef.current = new Set([...itemNodeRef.current.keys()].filter((itemId) => !semDiffsRef.current.has(itemId)).map((itemId) => `${fileSetKeyRef.current}::${itemId}`));
     semanticWasEnabledRef.current = semanticEnabled;
     for (const itemId of semDiffsRef.current.keys()) showSemantic(itemId, semanticEnabled);
     for (const itemId of semStateRef.current.keys()) if (!semDiffsRef.current.has(itemId) || itemId === editSession.editingItemIdRef.current) refreshItem(itemId);
@@ -2263,17 +2332,22 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       semantic.cacheKey = `${generation}::${itemId}#semantic${links.length > 0 ? `:${links.map((link) => link.candidateId).join(',')}` : ''}`;
       const previous = semDiffsRef.current.get(itemId);
       const plain = previous?.plain ?? (previewAppliedRef.current.has(itemId) ? fullDiffsRef.current.get(itemId) ?? item.fileDiff : item.fileDiff);
-      const drawnSemantic = previous != null && semStateRef.current.get(itemId)?.status === 'semantic';
-      semDiffsRef.current.set(itemId, { plain, semantic });
-      if (swap && !arrowLoadedRef.current.has(`${generation}::${itemId}`) && swapsUnseen(itemId, secondOpinion)) {
-        semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
-        pendingSummaryRef.current.delete(itemId);
-        showSemantic(itemId, semanticEnabledRef.current);
-        return;
-      }
-      if (drawnSemantic) pendingSummaryRef.current.set(itemId, result.summary);
-      else semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
-      refreshItem(itemId);
+      const landed = { plain, semantic };
+      semDiffsRef.current.set(itemId, landed);
+      landInFrame(itemId, () => {
+        if (stale() || semDiffsRef.current.get(itemId) !== landed) return false;
+        const drawnSemantic = previous != null && semStateRef.current.get(itemId)?.status === 'semantic';
+        if (swap && !arrowLoadedRef.current.has(`${generation}::${itemId}`) && swapsUnseen(itemId, secondOpinion)) {
+          semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
+          pendingSummaryRef.current.delete(itemId);
+          showSemantic(itemId, semanticEnabledRef.current);
+          return true;
+        }
+        if (drawnSemantic) pendingSummaryRef.current.set(itemId, result.summary);
+        else semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
+        refreshItem(itemId);
+        return false;
+      });
     });
   });
 
@@ -2357,7 +2431,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         const { file, oldText, newText, generation, signal } = texts;
         const stale = () => signal.aborted || fileSetKeyRef.current !== generation;
         void client.diff(file.path, oldText, newText, signal).then((result) => {
-          if (result && !stale()) applySemanticResult(itemId, file, oldText, newText, generation, stale, result, () => {});
+          if (result && !stale()) applySemanticResult(itemId, file, oldText, newText, generation, stale, result, () => {}, true, undefined, true);
         });
       }
       powerUpFilesRef.current = new Map();
@@ -4067,10 +4141,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           </button>
         }
         onCollapseToggle={() => toggleItemCollapsed(item.id)}
-        semanticNote={(() => {
+        semantic={(() => {
           const semState = semStateRef.current.get(item.id);
           if (!semState || !semanticEnabledRef.current) return undefined;
-          return <SemanticFileNote state={semState} onToggle={() => showSemantic(item.id, semState.status !== 'semantic')} />;
+          return { state: semState, onToggle: () => toggleInPlace(item.id, semState.status !== 'semantic') };
         })()}
         />
         {/* A collapsed generated file must read as an intentional fold, never

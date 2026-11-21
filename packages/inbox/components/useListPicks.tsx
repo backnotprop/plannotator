@@ -21,6 +21,8 @@ export interface ListPicksInput {
   sections: readonly InboxListSection[];
   /** A group's rows are drawn (open, or in List every group's but a folded Snoozed band). */
   isOpen: (group: InboxListGroupId) => boolean;
+  /** The rows a view draws besides the open groups' (the Agents view: an open agent's shown rows); Select all picks these too. */
+  drawn?: readonly string[] | null;
   body: RefObject<HTMLElement | null>;
   bulk?: BulkWrites;
   phone: boolean;
@@ -79,7 +81,7 @@ export function useListPicks(input: ListPicksInput) {
   }, [input.scope, leave]);
   /** The rows as drawn that can be picked, for a Shift press's range (an Archived group's are not). */
   const order = () => [...(body.current?.querySelectorAll('[data-thread-id]') ?? [])].map((el) => el.getAttribute('data-thread-id')!).filter((id) => listed.has(id));
-  const drawnIds = sections.filter((section) => isOpen(section.id)).flatMap((section) => section.threads.map((row) => row.thread_id));
+  const drawnIds = [...(input.drawn ?? []), ...sections.filter((section) => isOpen(section.id)).flatMap((section) => section.threads.map((row) => row.thread_id))];
   const rows = sections.flatMap((section) => section.threads).filter((row, i, all) => picks.picked.has(row.thread_id) && all.findIndex((r) => r.thread_id === row.thread_id) === i);
   const rules: PickRules = {
     drawn: (row) => sectionOf(row.thread_id),

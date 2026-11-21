@@ -8,6 +8,8 @@ struct ActionBook {
   var notices: [ThreadID: InboxSession.Notice] = [:]
   /// The one Undo on offer (a new one replaces it, as the window's one toast does).
   var undo: UndoOffer?
+  /// The one Undo of an act on several rows at once (BulkActs.swift): each row's own offer, taken back together.
+  var undoGroup: BulkUndo?
   /// Acts the computer took whose effect the last list read may not hold yet: still drawn over it.
   var landed: [Landed] = []
   var landSeq = 0
@@ -22,6 +24,10 @@ struct ActionBook {
   /// A list read this pump already made for a waited act.
   var checked = false
   var needsListRead = false
+  /// Several writes are being held together: the outbox is saved once after all of them.
+  var batching = false
+  /// How long an Undo is on offer (longer while a screen reader reads the toast).
+  var undoSeconds = UndoOffer.seconds
   /// The Archived group as last read (`GET threads/archived`) and how many it asks for.
   var archived: ArchivedModel?
   var archivedLimit = UndoOffer.archivedFirst
@@ -113,8 +119,11 @@ extension InboxSession {
     guard var model = list else { return nil }
     let acts = drawnActs
     guard !acts.isEmpty else { return model }
+    // By thread, once: an act on a thousand rows draws in one pass over the list, not one per act.
+    let byThread = Dictionary(grouping: acts, by: \.thread)
     func draw(_ row: InboxListRow) -> InboxListRow {
-      acts.filter { $0.thread == row.threadId.rawValue }.reduce(row) { row, write in write.act!.drawn(row, at: SnoozeRules.iso(write.madeAt)) }
+      guard let own = byThread[row.threadId.rawValue] else { return row }
+      return own.reduce(row) { row, write in write.act!.drawn(row, at: SnoozeRules.iso(write.madeAt)) }
     }
     for index in model.sections.indices { model.sections[index].threads = model.sections[index].threads.map(draw) }
     model.snoozed = model.snoozed?.map(draw)
@@ -142,8 +151,11 @@ extension InboxSession {
   /// A thread's row as the list draws it, else as its last read carried it.
   public func row(_ thread: ThreadID, now: Date? = nil) -> InboxListRow? {
     let now = now ?? clock.now()
-    if let row = listView(now: now)?.row(thread) { return row }
-    if let row = archivedRows().first(where: { $0.threadId == thread }) { return row }
+    _ = book.tick
+    // The row itself, as it stands by `now`: found without drawing the whole list (its groups and their order),
+    // since every act asks for one row.
+    if let row = shownList()?.everyRow.first(where: { $0.threadId == thread }) { return ListRules.asOf(row, now: now) }
+    if book.archived != nil, let row = archivedRows().first(where: { $0.threadId == thread }) { return row }
     guard let row = threads[thread]?.row else { return nil }
     let acts = drawnActs.filter { $0.thread == thread.rawValue }
     return ListRules.asOf(acts.reduce(row) { $1.act!.drawn($0, at: SnoozeRules.iso($1.madeAt)) }, now: now)
@@ -154,18 +166,36 @@ extension InboxSession {
   public func archivedRows() -> [InboxListRow] {
     let acts = drawnActs
     var rows = book.archived?.threads ?? ListView.of(list ?? ListModel(serverSession: "", version: "", cursor: 0, projects: [], sections: [])).archived
-    rows = rows.map { row in acts.filter { $0.thread == row.threadId.rawValue }.reduce(row) { $1.act!.drawn($0, at: SnoozeRules.iso($1.madeAt)) } }
+    // The list is read more often than the Archived group: a thread it carries is as the list last said it (one
+    // unarchived since the group was read is no longer here; one archived since is).
+    if book.archived != nil, let model = list {
+      let listed = Dictionary(model.everyRow.map { ($0.threadId, $0) }, uniquingKeysWith: { first, _ in first })
+      rows = rows.map { listed[$0.threadId] ?? $0 }
+      let known = Set(rows.map(\.threadId))
+      for row in listed.values where ListRules.archived(row) && !known.contains(row.threadId) { rows.append(row) }
+    }
+    let byThread = Dictionary(grouping: acts, by: \.thread)
+    rows = rows.map { row in (byThread[row.threadId.rawValue] ?? []).reduce(row) { $1.act!.drawn($0, at: SnoozeRules.iso($1.madeAt)) } }
     // A thread archived here and not read back yet joins the group.
-    for write in acts where write.act == .archive && !rows.contains(where: { $0.threadId.rawValue == write.thread }) {
-      if let row = list.flatMap({ ListView.of($0).row(ThreadID(write.thread)) }) { rows.append(write.act!.drawn(row, at: SnoozeRules.iso(write.madeAt))) }
+    var have = Set(rows.map(\.threadId.rawValue))
+    let archivedHere = acts.filter { $0.act == .archive && !have.contains($0.thread) }
+    if !archivedHere.isEmpty, let model = list {
+      let listed = Dictionary(model.everyRow.map { ($0.threadId.rawValue, $0) }, uniquingKeysWith: { first, _ in first })
+      for write in archivedHere where have.insert(write.thread).inserted {
+        if let row = listed[write.thread] { rows.append((byThread[write.thread] ?? []).reduce(row) { $1.act!.drawn($0, at: SnoozeRules.iso($1.madeAt)) }) }
+      }
     }
     return ListRules.archivedRows(rows)
   }
 
+  /// The Archived group as the screen shows it: twenty, then twenty more each time, up to a hundred, as the window
+  /// pages it (the read holds that many; threads the list carries or archived since are paged the same way).
+  public func archivedPage() -> [InboxListRow] { Array(archivedRows().prefix(book.archivedLimit)) }
+
   /// Whether the Archived group has more to show.
   public var archivedHasMore: Bool {
-    guard let read = book.archived else { return false }
-    return Int64(read.threads.count) < read.total && book.archivedLimit < UndoOffer.archivedMax
+    guard book.archivedLimit < UndoOffer.archivedMax else { return false }
+    return max(Int(book.archived?.total ?? 0), archivedRows().count) > book.archivedLimit
   }
 
   /// Read the Archived group (`GET threads/archived`): 20 first, then 20 more each time, up to 100, as the window.
@@ -185,11 +215,17 @@ extension InboxSession {
   /// Whether this Inbox offers the act (a route it does not list is never called).
   public func canAct(_ act: ThreadAct) -> Bool { standing == .ok && (skew == nil || offers(act.route)) }
 
-  /// Do one act on a thread: drawn at once, held while the computer is away, sent in order with the thread's other
-  /// writes. `undo`: offer the window's Undo for it.
+  /// How long an Undo is on offer: the window's seven seconds, or longer while a screen reader reads the toast.
+  public var undoSeconds: TimeInterval {
+    get { book.undoSeconds }
+    set { book.undoSeconds = max(newValue, UndoOffer.seconds) }
+  }
+
+  /// Hold one act on a thread: drawn at once and in the outbox before anything else can run, with its Undo on
+  /// offer. Nothing is sent yet (`deliverAct` does). Nil when this Inbox does not offer the act.
   @discardableResult
-  public func act(_ act: ThreadAct, on thread: ThreadID, undo: Bool = true) async -> ActOutcome {
-    guard canAct(act) else { return .notOffered }
+  public func holdAct(_ act: ThreadAct, on thread: ThreadID, undo: Bool = true) -> String? {
+    guard canAct(act) else { return nil }
     book.notices[thread] = nil
     let earlier = row(thread)
     let starIndex = list?.pins?.firstIndex { $0.threadId == thread }
@@ -197,11 +233,24 @@ extension InboxSession {
     let (request, body) = act.request(thread: thread, key: key)
     enqueue(kind: .state, thread: thread, message: nil, request: request, body: body, key: key, act: act, shown: shownState(thread, earlier))
     if undo, let kind = Self.undoKind(act, earlier: earlier) {
-      book.undo = UndoOffer(id: key, thread: thread, kind: kind, expires: clock.now().addingTimeInterval(UndoOffer.seconds), earlier: earlier, starIndex: starIndex)
+      book.undo = UndoOffer(id: key, thread: thread, kind: kind, expires: clock.now().addingTimeInterval(book.undoSeconds), earlier: earlier, starIndex: starIndex)
     }
+    return key
+  }
+
+  /// Send a held act, in order with its thread's other writes, and say what came of it.
+  public func deliverAct(_ key: String, on thread: ThreadID) async -> ActOutcome {
     await pump(thread.rawValue)
     if book.notices[thread] != nil { return .refused }
     return held.contains { $0.id == key } ? .waits : .done
+  }
+
+  /// Do one act on a thread: drawn at once, held while the computer is away, sent in order with the thread's other
+  /// writes. `undo`: offer the window's Undo for it.
+  @discardableResult
+  public func act(_ act: ThreadAct, on thread: ThreadID, undo: Bool = true) async -> ActOutcome {
+    guard let key = holdAct(act, on: thread, undo: undo) else { return .notOffered }
+    return await deliverAct(key, on: thread)
   }
 
   /// Which acts the window offers an Undo for (Star and a new order have none).
@@ -310,6 +359,7 @@ extension InboxSession {
   func noteRefusedAct(_ write: HeldWrite, _ notice: Notice) {
     leaveGroup(write)
     let thread = ThreadID(write.thread)
+    notTaken(write)
     if case .refused(_, let code) = notice, [WireErrorCode.threadNotFound.rawValue, WireErrorCode.messageNotFound.rawValue].contains(code) {
       missingThreads.insert(thread)
       return
@@ -317,6 +367,13 @@ extension InboxSession {
     book.notices[thread] = notice
     if book.undo?.id == write.id { book.undo = nil }
     book.needsListRead = true
+  }
+
+  /// A write of an act on several rows that was never taken leaves its one Undo: that Undo sends no reverse of it.
+  private func notTaken(_ write: HeldWrite) {
+    guard let group = book.undoGroup, group.threads.contains(ThreadID(write.thread)) else { return }
+    let next = group.without(write.id, thread: ThreadID(write.thread), act: write.act)
+    book.undoGroup = next.count == 0 ? nil : next
   }
 
   /// The thread's row as the computer last said it, with none of the person's acts drawn over it.
@@ -369,6 +426,7 @@ extension InboxSession {
       settleWithGroup(write)
       book.notices[thread] = .gaveWay
       if book.undo?.id == write.id { book.undo = nil }
+      notTaken(write)
       return true
     }
   }

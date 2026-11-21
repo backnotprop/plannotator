@@ -46,6 +46,8 @@ struct QuestionCard: View {
   @Environment(\.cardKey) private var cardKey
   @FocusState private var focus: Field?
   enum Field { case other, note, text }
+  /// The choices' mark at this text size: what stands under a row starts in the column of its words (`$side`).
+  @MarkSide private var side
 
   private var answer: QuestionAnswer? { question.answer }
   private var live: Bool { question.state == .openValue || question.state == .picked }
@@ -56,43 +58,56 @@ struct QuestionCard: View {
   private var id: String { "\(message.rawValue)/\(question.key)" }
   private var picked: [String] { CardAnswers.selected(question) }
 
+  /// The card's parts, top to bottom, each a step quieter than the prompt: where it stands among the questions and
+  /// what it holds up; what happened to the pick, if anything, where the person reads first; the prompt; its
+  /// context; the answers; the note; where the pick stands; then, under a hairline, what else can be done.
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
+    let refusal = session.refusal(message: message, key: question.key)
+    let acts = known && live
+    VStack(alignment: .leading, spacing: 0) {
       header.lineEdge("head")
-      if let refusal = session.refusal(message: message, key: question.key) {
-        // A pick the computer did not take, in the app's own words, where the person reads first; it stays until
-        // they act on this question. A clash with another device's answer never comes here: it settles quietly.
+      if let refusal {
+        // A pick the computer did not take, in the app's own words, where the person reads first (and VoiceOver
+        // before the prompt); it stays until they act on this question. A clash with another device's answer
+        // never comes here in red: it settles quietly.
         let calm = refusal == .gaveWay
-        Label(PhoneWords.pickNotice(refusal, computer: session.computer.name), systemImage: calm ? "arrow.triangle.2.circlepath" : "exclamationmark.circle")
-          .font(.footnote)
-          .foregroundStyle(calm ? Token.mutedForeground : Token.destructive)
-          .fixedSize(horizontal: false, vertical: true)
+        CardNotice(words: PhoneWords.pickNotice(refusal, computer: session.computer.name), symbol: calm ? "arrow.triangle.2.circlepath" : "exclamationmark.circle", role: calm ? .quiet : .stop)
           .lineEdge("refusal")
+          .padding(.top, Space.near)
       }
       Text(question.prompt)
-        .font(.title3.weight(.semibold))
+        .font(TextRole.prompt)
         .foregroundStyle(Token.foreground)
         .fixedSize(horizontal: false, vertical: true)
         .accessibilityAddTraits(.isHeader)
         .lineEdge("prompt")
+        .padding(.top, refusal == nil ? Space.close : Space.step)
       ForEach([question.context, question.stakes].compactMap { $0 }.filter { !$0.isEmpty }, id: \.self) { line in
-        Text(line).font(.subheadline).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true).lineEdge("context/\(line)")
+        Text(line).font(TextRole.secondary).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true).lineEdge("context/\(line)").padding(.top, Space.trim)
       }
-      if !known {
-        Label(PhoneWords.answerOnComputer, systemImage: "desktopcomputer").font(.subheadline).foregroundStyle(Token.mutedForeground)
-      } else if !live {
-        settledAnswer.lineEdge("settled")
-      } else if question.kind == .text {
-        textAnswer
-      } else {
-        choices
+      VStack(alignment: .leading, spacing: Space.close) {
+        if !known {
+          Label(PhoneWords.answerOnComputer, systemImage: "desktopcomputer").font(TextRole.secondary).foregroundStyle(Token.mutedForeground)
+        } else if !live {
+          settledAnswer.lineEdge("settled")
+        } else if question.kind == .text {
+          textAnswer
+        } else {
+          choices
+        }
+        if acts, draft.noteOpen { noteField }
+        status
       }
-      if known, live { footer }
-      status
+      .padding(.top, Space.snug)
+      if acts {
+        Hairline().padding(.top, Space.step)
+        footer
+      }
     }
-    .padding(16)
-    .background(Token.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-    .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Token.border.opacity(0.6)))
+    .padding([.top, .horizontal], Space.card)
+    // The foot's words stand in a 44-point row that already holds the air under them.
+    .padding(.bottom, acts ? Space.tight : Space.card)
+    .cardSurface(drafted: live && question.state == .picked && refusal == nil)
     .accessibilityElement(children: .contain)
     .onAppear {
       adopt()
@@ -133,36 +148,38 @@ struct QuestionCard: View {
     ViewThatFits(in: .horizontal) {
       HStack(alignment: .firstTextBaseline) {
         kindText
-        Spacer(minLength: 8)
+        Spacer(minLength: Space.close)
         marks
       }
-      VStack(alignment: .leading, spacing: 4) {
+      VStack(alignment: .leading, spacing: Space.tight) {
         kindText
         marks
       }
       .frame(maxWidth: .infinity, alignment: .leading)
     }
-    .font(.subheadline)
+    .font(TextRole.meta)
     .foregroundStyle(Token.mutedForeground)
   }
 
   @ViewBuilder private var kindText: some View {
-    if let place { Text(PhoneWords.eyebrow(place.index, place.count, multi: question.kind == .multi)) }
+    if let place { Text(PhoneWords.eyebrow(place.index, place.count, multi: question.kind == .multi)).fontWeight(.medium) }
   }
 
+  /// What rides on the answer, said in its role's colour: amber is a caution, and work held up until the person
+  /// answers.
   @ViewBuilder private var marks: some View {
-    HStack(spacing: 10) {
-      if question.reversible?.value == false { Text(PhoneWords.cantBeUndone).foregroundStyle(Token.warning).fontWeight(.semibold) }
-      if !question.holdsUp.isEmpty { Text(PhoneWords.holdingUp(question.holdsUp)) }
+    HStack(alignment: .firstTextBaseline, spacing: Space.near) {
+      if question.reversible?.value == false { Text(PhoneWords.cantBeUndone).foregroundStyle(Role.caution.ink).fontWeight(.semibold) }
+      // Amber while the answer is still wanted; a settled card (sent, replaced) holds nothing up any more.
+      if !question.holdsUp.isEmpty { RoleLine(words: PhoneWords.holdingUp(question.holdsUp), role: live ? .hold : .quiet) }
     }
   }
 
   // MARK: Choices
 
   private var choices: some View {
-    VStack(spacing: 0) {
+    VStack(alignment: .leading, spacing: Space.hair) {
       ForEach(Array(question.choices.enumerated()), id: \.element.label) { index, choice in
-        if index > 0 { Divider().overlay(Token.border) }
         ChoiceRow(label: choice.label, detail: choice.description, recommended: choice.recommended, multi: question.kind == .multi, selected: picked.contains(choice.label), enabled: enabled) {
           apply(CardAnswers.tap(question, label: choice.label))
         }
@@ -170,7 +187,6 @@ struct QuestionCard: View {
       }
       if let suggestion = CardAnswers.suggestion(of: question) {
         // The agent's own answer that is none of its choices: a row of its own, as in the window.
-        Divider().overlay(Token.border)
         ChoiceRow(label: suggestion, detail: nil, recommended: true, multi: question.kind == .multi, selected: CardAnswers.suggestionPicked(question), enabled: enabled) {
           let picked = CardAnswers.suggestionPicked(question)
           if !picked {
@@ -182,26 +198,32 @@ struct QuestionCard: View {
         }
         .lineEdge("suggestion")
       }
-      Divider().overlay(Token.border)
-      ChoiceRow(label: PhoneWords.other, detail: nil, recommended: false, multi: question.kind == .multi, selected: !(answer?.other ?? "").isEmpty && !CardAnswers.suggestionPicked(question), enabled: enabled, value: CardAnswers.suggestionPicked(question) ? nil : answer?.other) {
+      ChoiceRow(label: PhoneWords.other, detail: nil, recommended: false, multi: question.kind == .multi, selected: !(answer?.other ?? "").isEmpty && !CardAnswers.suggestionPicked(question), enabled: enabled, value: CardAnswers.suggestionPicked(question) ? nil : answer?.other, open: true) {
         draft.otherOpen = true
         focus = .other
       }
       .lineEdge("other")
       if draft.otherOpen {
+        // Under the row it belongs to, in the column of its words.
         field(PhoneWords.otherHint, text: Bindable(draft).other, focus: .other)
           .lineEdge("otherField")
-          .padding(.leading, 40)
-          .padding(.bottom, 4)
+          .padding(.leading, $side)
+          .padding(.top, Space.tight)
       }
     }
   }
 
   private var textAnswer: some View {
-    VStack(alignment: .leading, spacing: 8) {
+    VStack(alignment: .leading, spacing: Space.close) {
       // The agent's suggestion is said as one, never drawn as if it were already typed.
       if let suggested = question.suggestedText, !suggested.isEmpty {
-        Text("\(PhoneWords.recommended): \(suggested)").font(.subheadline).foregroundStyle(Token.mutedForeground).lineEdge("suggested")
+        HStack(alignment: .firstTextBaseline, spacing: Space.close) {
+          Chip(words: PhoneWords.recommended, tone: .accent)
+          Text(suggested).font(TextRole.secondary).foregroundStyle(Token.foreground).fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(PhoneWords.recommended): \(suggested)")
+        .lineEdge("suggested")
       }
       field(PhoneWords.answerHint, text: Bindable(draft).text, focus: .text).lineEdge("textField")
     }
@@ -209,34 +231,42 @@ struct QuestionCard: View {
 
   /// A card that is settled (sent, replaced, closed) shows what was answered as words, with nothing to tap.
   private var settledAnswer: some View {
-    VStack(alignment: .leading, spacing: 8) {
+    VStack(alignment: .leading, spacing: Space.close) {
       if skipped {
-        Label(PhoneWords.skipped, systemImage: "arrow.uturn.right").foregroundStyle(Token.mutedForeground)
+        answered(PhoneWords.skipped, symbol: "arrow.uturn.right", quiet: true)
       }
       ForEach(answer?.selected ?? [], id: \.self) { label in
-        Label(label, systemImage: "checkmark").foregroundStyle(Token.foreground)
+        answered(label, symbol: "checkmark")
       }
       ForEach([answer?.other, answer?.text].compactMap { $0 }.filter { !$0.isEmpty }, id: \.self) { words in
-        Label(words, systemImage: "checkmark").foregroundStyle(Token.foreground)
+        answered(words, symbol: "checkmark")
       }
       if let note = answer?.note, !note.isEmpty {
-        Text("\(PhoneWords.note): \(note)").font(.subheadline).foregroundStyle(Token.mutedForeground)
+        Text("\(PhoneWords.note): \(note)").font(TextRole.secondary).foregroundStyle(Token.mutedForeground).padding(.leading, $side)
       }
     }
-    .font(.body.weight(.medium))
     .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  /// One answered line: its tick stands where the choices' marks stood, its words where theirs did.
+  private func answered(_ words: String, symbol: String, quiet: Bool = false) -> some View {
+    HStack(alignment: .firstTextBaseline, spacing: Space.step) {
+      Image(systemName: symbol).font(.system(size: side * 0.68, weight: .bold)).foregroundStyle(quiet ? Token.mutedForeground : Role.done.ink).frame(width: side).accessibilityHidden(true)
+      Text(words).font(TextRole.label).foregroundStyle(quiet ? Token.mutedForeground : Token.foreground).fixedSize(horizontal: false, vertical: true)
+    }
+    .accessibilityElement(children: .combine)
   }
 
   private func field(_ hint: String, text: Binding<String>, focus which: Field) -> some View {
     TextField(hint, text: text, axis: .vertical)
       .lineLimit(1...5)
-      .font(.body)
+      .font(TextRole.body)
       .focused($focus, equals: which)
       .disabled(!enabled)
-      .padding(.horizontal, 12)
-      .padding(.vertical, 10)
-      .frame(minHeight: 44)
-      .fieldGround(radius: Token.radius)
+      .padding(.horizontal, Space.step)
+      .padding(.vertical, Space.near)
+      .frame(minHeight: Space.touch)
+      .fieldGround(focused: focus == which)
       .toolbar {
         if focus == which {
           ToolbarItemGroup(placement: .keyboard) {
@@ -250,45 +280,65 @@ struct QuestionCard: View {
 
   // MARK: Note, Skip
 
-  private var footer: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      if draft.noteOpen {
-        Text(PhoneWords.note).font(.footnote.weight(.semibold)).foregroundStyle(Token.mutedForeground).accessibilityHidden(true)
-        field(PhoneWords.noteHint, text: Bindable(draft).note, focus: .note).lineEdge("noteField")
-      }
-      if live {
-        ViewThatFits(in: .horizontal) {
-          HStack { footerButtons }
-          VStack(alignment: .leading, spacing: 4) { footerButtons }
-        }
-        .font(.subheadline.weight(.medium))
-        .buttonStyle(.borderless)
-        .frame(minHeight: 44)
-        .disabled(!enabled)
-        .lineEdge("footer")
-      }
+  private var noteField: some View {
+    VStack(alignment: .leading, spacing: Space.trim) {
+      Text(PhoneWords.note).font(TextRole.metaStrong).foregroundStyle(Token.mutedForeground).accessibilityHidden(true)
+      field(PhoneWords.noteHint, text: Bindable(draft).note, focus: .note).lineEdge("noteField")
     }
+    .padding(.top, Space.tight)
   }
 
-  @ViewBuilder private var footerButtons: some View {
-    Button(draft.noteOpen ? PhoneWords.hideNote : PhoneWords.addNote) {
+  /// What else can be done with the question, in one row: the quiet ways on the left, the agent's own answer, when
+  /// it has one, as the one tinted button on the right. One under the other when the words are too large.
+  private var footer: some View {
+    ViewThatFits(in: .horizontal) {
+      HStack(spacing: 0) { footerButtons(spread: true) }
+      VStack(alignment: .leading, spacing: 0) { footerButtons(spread: false) }
+    }
+    .buttonStyle(PressStyle())
+    .disabled(!enabled)
+    .lineEdge("footer")
+  }
+
+  @ViewBuilder private func footerButtons(spread: Bool) -> some View {
+    Button {
       draft.noteOpen.toggle()
       focus = draft.noteOpen ? .note : nil
+    } label: {
+      quietWords(draft.noteOpen ? PhoneWords.hideNote : PhoneWords.addNote, whole: spread)
     }
-    Spacer(minLength: 8)
-    if CardAnswers.offersAccept(question) {
-      Button(PhoneWords.acceptRecommended) {
-        draft.replacedOther = nil
-        apply(CardAnswers.acceptRecommended(question))
-      }
-      Spacer(minLength: 8)
-    }
-    Button(skipped ? PhoneWords.undoSkip : PhoneWords.skip) {
+    Button {
       save()
       if let now = CardSaver.current(session: session, thread: thread, message: message, key: question.key) {
         CardSaver.apply(CardAnswers.toggleSkip(now), session: session, thread: thread, message: message, question: now)
       }
+    } label: {
+      quietWords(skipped ? PhoneWords.undoSkip : PhoneWords.skip, leading: spread ? Space.page : 0, whole: spread)
     }
+    if spread { Spacer(minLength: Space.step) }
+    if CardAnswers.offersAccept(question) {
+      Button {
+        draft.replacedOther = nil
+        apply(CardAnswers.acceptRecommended(question))
+      } label: {
+        Text(PhoneWords.acceptRecommended)
+          .fixedSize(horizontal: spread, vertical: true)
+          .font(TextRole.link)
+          .foregroundStyle(Token.primary)
+          .padding(.horizontal, Space.step)
+          .frame(minHeight: Size.capsule)
+          .background(Token.primary.opacity(0.14), in: Capsule())
+          .touchTarget()
+      }
+    }
+  }
+
+  /// Words alone to touch: the air before them is theirs to touch too, and the whole is 44 points at least. In
+  /// the one row they are `whole`: never squeezed onto two lines there (when they do not fit whole, the row gives
+  /// way to one under the other, where they may wrap).
+  private func quietWords(_ words: String, leading: CGFloat = 0, whole: Bool) -> some View {
+    // In the foreground, as in the window: the accent in this row is the agent's own answer alone.
+    Text(words).font(TextRole.link).foregroundStyle(Token.foreground).fixedSize(horizontal: whole, vertical: true).padding(.leading, leading).touchTarget()
   }
 
   @ViewBuilder private var status: some View {
@@ -311,7 +361,7 @@ struct QuestionCard: View {
       }
     }()
     if let line {
-      Text(line).font(.footnote).foregroundStyle(Token.mutedForeground).lineEdge("status")
+      Text(line).font(TextRole.meta).foregroundStyle(Token.mutedForeground).lineEdge("status").padding(.top, Space.tight)
     }
   }
 }
@@ -344,75 +394,5 @@ enum CardSaver {
     // The note is read against the answer as it stands after the words above.
     guard let now = current(session: session, thread: thread, message: message, key: key) else { return }
     if draft.note != now.answer?.note ?? "" { apply(CardAnswers.note(now, words: draft.note), session: session, thread: thread, message: message, question: now) }
-  }
-}
-
-/// One choice: a whole row to tap, 44 points at least.
-struct ChoiceRow: View {
-  let label: String
-  let detail: String?
-  let recommended: Bool
-  let multi: Bool
-  let selected: Bool
-  let enabled: Bool
-  /// What VoiceOver reads as the row's value (the words typed under "Other…").
-  var value: String?
-  let action: () -> Void
-
-  private var symbol: String {
-    if multi { return selected ? "checkmark.square.fill" : "square" }
-    return selected ? "checkmark.circle.fill" : "circle"
-  }
-
-  var body: some View {
-    Button(action: action) {
-      HStack(alignment: .firstTextBaseline, spacing: 12) {
-        Image(systemName: symbol)
-          .font(.title2)
-          .foregroundStyle(selected ? Token.primary : Token.mutedForeground)
-          .frame(minWidth: 28)
-          .accessibilityHidden(true)
-        VStack(alignment: .leading, spacing: 2) {
-          ViewThatFits(in: .horizontal) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-              labelText
-              badge
-            }
-            VStack(alignment: .leading, spacing: 2) {
-              labelText
-              badge
-            }
-          }
-          if let detail, !detail.isEmpty {
-            Text(detail).font(.subheadline).foregroundStyle(Token.mutedForeground).multilineTextAlignment(.leading)
-          }
-        }
-        Spacer(minLength: 0)
-      }
-      .padding(.vertical, 12)
-      .frame(minHeight: 44)
-      .contentShape(Rectangle())
-    }
-    // A settled card keeps its words at full contrast: only the touch is off.
-    .buttonStyle(ChoiceStyle())
-    .allowsHitTesting(enabled)
-    .accessibilityElement(children: .combine)
-    .accessibilityLabel([label, recommended ? PhoneWords.recommended : nil, detail].compactMap { $0 }.joined(separator: ", "))
-    .accessibilityValue(value ?? "")
-    .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-  }
-
-  private var labelText: some View {
-    Text(label).font(.body.weight(.semibold)).foregroundStyle(Token.foreground).multilineTextAlignment(.leading)
-  }
-
-  @ViewBuilder private var badge: some View {
-    if recommended { Text(PhoneWords.recommended).font(.footnote.weight(.semibold)).foregroundStyle(Token.success) }
-  }
-}
-
-struct ChoiceStyle: ButtonStyle {
-  func makeBody(configuration: Configuration) -> some View {
-    configuration.label.opacity(configuration.isPressed ? 0.6 : 1)
   }
 }

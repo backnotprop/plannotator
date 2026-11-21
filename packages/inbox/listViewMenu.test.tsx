@@ -2,7 +2,7 @@
  * The List view in the list (approval "inbox-list-view", 2026-11-05): its ⋮ menu choice, what List draws, "N new ·
  * Show" in its place above the rows in both views, and a row archived in place (R7) faded, left out of its count.
  *
- * What this catches: a menu choice a screen reader does not hear as one of two with its state; List hiding a thread
+ * What this catches: a menu choice a screen reader does not hear as one of three with its state; List hiding a thread
  * the grouped view shows (folded Quiet, Sent) or drawing section bands; a choice forgotten on the next load; the tour
  * following this browser's choice; List losing "N new · Show" or moving it; a row archived in place that reads as live
  * (not faded, counted in its group) or an Archive all that never shows the project's empty state.
@@ -141,11 +141,11 @@ const rowIds = (el: HTMLElement) => [...el.querySelectorAll('.ib-lbody [data-thr
 const bands = (el: HTMLElement) => [...el.querySelectorAll('.ib-lbody .ib-band')].map((node) => node.closest('[data-section-id]')!.getAttribute('data-section-id'));
 
 describe.skipIf(!hasDom)('the ⋮ menu choice', () => {
-  test('two choices a screen reader hears with their state, Grouped chosen in an untouched browser', async () => {
+  test('three choices a screen reader hears with their state, Grouped chosen in an untouched browser', async () => {
     const popup = await openMenu(render());
     const radios = [...popup.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
-    expect(radios.map((radio) => radio.textContent)).toEqual(['Smart groups', 'Simple list']);
-    expect(radios.map((radio) => radio.getAttribute('aria-checked'))).toEqual(['true', 'false']);
+    expect(radios.map((radio) => radio.textContent)).toEqual(['Smart groups', 'Simple list', 'Agents']);
+    expect(radios.map((radio) => radio.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false']);
     // Under its own label, before the rows' options, as the menu's other groups are.
     const group = radios[0]!.closest('[role="group"]')!;
     expect(document.getElementById(group.getAttribute('aria-labelledby')!)?.textContent).toBe('View');
@@ -163,7 +163,7 @@ describe.skipIf(!hasDom)('the ⋮ menu choice', () => {
     expect(bands(el)).toEqual(['snoozed']);
     // The snoozed thread keeps the grouped view's rule: folded in its band.
     expect(el.querySelector('[data-thread-id="zz"]')).toBeNull();
-    expect([...popup.querySelectorAll('[role="menuitemradio"]')].map((radio) => radio.getAttribute('aria-checked'))).toEqual(['false', 'true']);
+    expect([...popup.querySelectorAll('[role="menuitemradio"]')].map((radio) => radio.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false']);
     // The menu stays open, as a tick leaves it.
     expect(document.querySelector('[data-tidy-menu-popup]')).not.toBeNull();
   });

@@ -40,7 +40,7 @@ import { join, sep } from "node:path";
 import { resolveWindowsCommandShim } from "@plannotator/ai/providers/command-path";
 import { createProvider } from "@plannotator/ai/provider";
 import { AI_ERROR_CONTEXT_WINDOW_EXCEEDED, type AIProvider, type AISession, type CatalogModel, type ClaudeAgentSDKConfig, type CodexSDKConfig, type PiSDKConfig } from "@plannotator/ai/types";
-import { inboxPullIsOpen, type InboxPull, type InboxPullRiskAgent, type InboxPullRiskAnswer, type InboxPullRiskJudgment, type InboxPullRiskModels } from "@plannotator/core/inbox-types";
+import { inboxPullIsOpen, inboxPullRepoKey, inboxPullRiskAutoOf, type InboxPull, type InboxPullRiskAgent, type InboxPullRiskAnswer, type InboxPullRiskAuto, type InboxPullRiskAutoRun, type InboxPullRiskJudgment, type InboxPullRiskModels } from "@plannotator/core/inbox-types";
 import { resolveModelChoice } from "@plannotator/core/model-catalog";
 import { childPath } from "@plannotator/shared/child-env";
 import { loadConfig, saveConfig } from "@plannotator/shared/config";
@@ -49,6 +49,9 @@ import { buildRiskPrompt, parseRiskAnswer, riskFailureLine, riskFence, RISK_SYST
 import { INBOX_PULL_DIFF_MAX_BYTES, type InboxPulls } from "./inbox-pulls";
 
 export const INBOX_PULL_RISK_FILE = "pull-risk.json";
+
+export type PullRiskEarlier = "none" | "same_head" | "new_head";
+const earlierOf = (one: { head: string } | undefined, pull: Pick<InboxPull, "head_sha">): PullRiskEarlier => (!one ? "none" : one.head === pull.head_sha ? "same_head" : "new_head");
 /** A few at a time. */
 export const RISK_CONCURRENCY = 3;
 /** One judgment gets this long, a large diff's slow answer included: past it the run counts as failed. */
@@ -248,6 +251,7 @@ export interface PullRiskSettings {
   model: string | null;
   /** Rank the branches agents report too (Branch reviews): off unless the person turned it on. */
   branches: boolean;
+  auto: InboxPullRiskAuto | null;
 }
 
 interface Kept extends InboxPullRiskJudgment {
@@ -262,7 +266,7 @@ export interface PullRisk {
   /** The settings, and the judgments and failures of the PRs the last `assess` saw. */
   answer(): InboxPullRiskAnswer;
   /** Start judging what has none yet. Never waits, never throws. */
-  assess(pulls: readonly InboxPull[]): void;
+  assess(pulls: readonly InboxPull[], read?: { covered?: readonly string[]; board?: boolean }): void;
   /**
    * A branch an agent just reported (Branch reviews): judged once at that head, only while the person's `branches`
    * switch is on. Never waits, never throws. Nothing else ever queues a branch.
@@ -274,6 +278,10 @@ export interface PullRisk {
   branchPending(key: string, head: string | null, base: string | null): boolean;
   /** A branch may be judged now: the person's `branches` switch, rules, an agent that is here, Code review and Branch reviews on. */
   branchRankable(): boolean;
+  levelOf(pull: InboxPull): InboxPullRiskJudgment["level"] | null;
+  listed(): readonly InboxPull[];
+  /** The repositories (`host/owner/repo`, lowercased) whose every open PR `listed` holds. */
+  covered(): ReadonlySet<string>;
   /** Save the dialog. Throws InboxError on a bad input or a config that can't be written. */
   save(input: unknown): void;
   models(provider: string): Promise<InboxPullRiskModels>;
@@ -296,6 +304,8 @@ export interface PullRiskOptions {
   agents?: () => InboxPullRiskAgent[];
   listModels?: (provider: string, cwd: string) => Promise<CatalogModel[]>;
   now?: () => number;
+  onJudged?: (pull: InboxPull, level: InboxPullRiskJudgment["level"], earlier: PullRiskEarlier) => void;
+  autoRuns?: () => Record<string, InboxPullRiskAutoRun>;
 }
 
 function settingsOf(value: unknown): PullRiskSettings {
@@ -305,6 +315,7 @@ function settingsOf(value: unknown): PullRiskSettings {
     provider: typeof raw.provider === "string" && raw.provider ? raw.provider : null,
     model: typeof raw.model === "string" && raw.model ? raw.model : null,
     branches: raw.branches === true,
+    auto: inboxPullRiskAutoOf(raw.auto),
   };
 }
 
@@ -372,8 +383,9 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
   };
 
   let listed: readonly InboxPull[] = [];
+  let covered = new Set<string>();
   /** A PR's layer or a reported branch: what the prompt and the store need, and how its diff is read. */
-  const queue: { job: string; pull: { key: string; head_sha: string; base: string; title: string }; rules: string; read: (signal: AbortSignal) => Promise<RiskDiff> }[] = [];
+  const queue: { job: string; pull: { key: string; head_sha: string; base: string; title: string }; listed?: InboxPull; earlier?: PullRiskEarlier; rules: string; read: (signal: AbortSignal) => Promise<RiskDiff> }[] = [];
   const queued = new Set<string>();
   /** When a job that failed may run again. */
   const waits = new Map<string, number>();
@@ -494,6 +506,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     const level = partial && judgment.level === "low" ? "medium" : judgment.level;
     const { where, ...ranked } = judgment;
     keep(pull.key, { ...ranked, level, ...(where && onScreen ? { where } : {}), head: pull.head_sha, base: pull.base, rules });
+    if (entry.listed) options.onJudged?.(entry.listed, level, entry.earlier ?? "none");
   };
 
   const pump = () => {
@@ -530,10 +543,28 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
         }
       }
       const { branches, ...shown } = current;
-      return { ...shown, ...(options.branchesOn?.() ? { branches } : {}), agents: agents(), judgments, failed, pending: queued.size, last_failure: lastFailure };
+      return { ...shown, ...(options.branchesOn?.() ? { branches } : {}), agents: agents(), judgments, failed, pending: queued.size, last_failure: lastFailure, auto_runs: options.autoRuns?.() ?? {} };
     },
-    assess(pulls) {
-      listed = pulls;
+    listed: () => listed,
+    covered: () => covered,
+    levelOf(pull) {
+      const { rules } = settings();
+      const one = rules && pull.head_sha ? load().get(pull.key) : undefined;
+      return one && one.head === pull.head_sha && one.base === pull.base && one.rules === hashOf(rules) ? one.level : null;
+    },
+    assess(pulls, read = {}) {
+      const repos = new Set(read.covered ?? []);
+      if (read.board) {
+        const named = new Set([...repos, ...pulls.map((pull) => inboxPullRepoKey(pull.host, pull.repo))]);
+        listed = [...listed.filter((pull) => !named.has(inboxPullRepoKey(pull.host, pull.repo))), ...pulls];
+        for (const repo of named) {
+          if (repos.has(repo)) covered.add(repo);
+          else covered.delete(repo);
+        }
+      } else {
+        listed = pulls;
+        covered = repos;
+      }
       if (stopping.signal.aborted || now() < agentPausedUntil) return;
       try {
         const { rules, provider } = settings();
@@ -550,6 +581,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
           if (reported) {
             const { where: _where, ...same } = reported;
             keep(pull.key, same);
+            options.onJudged?.(pull, same.level, earlierOf(one, pull));
             continue;
           }
           const job = `${pull.key}\u0000${pull.head_sha}\u0000${pull.base}\u0000${hash}`;
@@ -559,6 +591,8 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
           queue.push({
             job,
             pull: layer,
+            listed: layer,
+            earlier: earlierOf(one, pull),
             rules: hash,
             read: async (signal) => options.pulls.wholeDiff(layer.key, signal, options.roots ? await options.roots(layer.key).catch(() => []) : []),
           });
@@ -612,9 +646,11 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       if (typeof body.provider === "string" && !RISK_AGENTS.some((a) => a.id === body.provider)) throw new InboxError("validation_error", "provider: an agent from the list, or null.", { field: "provider" });
       if (body.model !== null && typeof body.model !== "string") throw new InboxError("validation_error", "model: a model from the list, or null.", { field: "model" });
       if (body.branches !== undefined && typeof body.branches !== "boolean") throw new InboxError("validation_error", "branches: true or false.", { field: "branches" });
+      if (body.auto !== undefined && body.auto !== null && !inboxPullRiskAutoOf(body.auto)) throw new InboxError("validation_error", "auto: { level: high or medium, make: guide or picture_it, agent? }, or null.", { field: "auto" });
+      const auto = body.auto === undefined ? settings().auto : inboxPullRiskAutoOf(body.auto);
       // Absent (a window from before Branch reviews, or with it off): what the person chose stays.
       const branches = typeof body.branches === "boolean" ? body.branches : settings().branches;
-      const next = { rules: body.rules.trim(), provider: (body.provider as string | null) || null, model: (body.model as string | null) || null, ...(branches ? { branches: true } : {}) };
+      const next = { rules: body.rules.trim(), provider: (body.provider as string | null) || null, model: (body.model as string | null) || null, ...(branches ? { branches: true } : {}), ...(auto ? { auto } : {}) };
       if (!saveConfig({ inboxPullRisk: next })) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
       // The person just looked at this: start over, with whatever they changed.
       lastFailure = null;

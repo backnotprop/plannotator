@@ -201,10 +201,14 @@ public struct SnoozeRules: Sendable {
     TimeWords.date(iso)
   }
 
-  public static func iso(_ date: Date) -> String {
+  public static func iso(_ date: Date) -> String { isoFormatter.string(from: date) }
+
+  /// Made once: a list of a thousand rows asks for a stamp per act drawn, and a formatter is costly to make.
+  /// `ISO8601DateFormatter` is safe to use from any thread once set up.
+  nonisolated(unsafe) private static let isoFormatter: ISO8601DateFormatter = {
     let formatter = ISO8601DateFormatter()
     formatter.timeZone = TimeZone(identifier: "UTC")
     formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    return formatter.string(from: date)
-  }
+    return formatter
+  }()
 }
