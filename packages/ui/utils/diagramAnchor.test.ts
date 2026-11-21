@@ -253,6 +253,50 @@ describe.if(hasDom)('scrubDiagramSvg (the belt over the engine output)', () => {
     expect(clean.querySelectorAll('[id]').length).toBe(raw.querySelectorAll('[id]').length);
     expect(clean.textContent?.replace(/\s+/gu, ' ').trim()).toBe(raw.textContent?.replace(/\s+/gu, ' ').trim());
   });
+
+  // A `$$...$$` label is KaTeX MathML, which the parse keeps (the parse itself
+  // is proven in a browser). Built with createElementNS: happy-dom's parser
+  // mislabels the MathML namespace.
+  function mathLabel() {
+    const MATHML = 'http://www.w3.org/1998/Math/MathML';
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg') as SVGSVGElement;
+    const math = document.createElementNS(MATHML, 'math');
+    const mrow = document.createElementNS(MATHML, 'mrow');
+    const mi = document.createElementNS(MATHML, 'mi');
+    mi.textContent = 'f';
+    const mo = document.createElementNS(MATHML, 'mo');
+    mo.textContent = '=';
+    const mn = document.createElementNS(MATHML, 'mn');
+    mn.textContent = '0.30';
+    mrow.append(mi, mo, mn);
+    math.append(mrow);
+    svg.append(math);
+    return { MATHML, svg, math, mrow, mi, mn };
+  }
+
+  test('a math label keeps its formula, and no MathML element keeps an href, xlink:href or src', () => {
+    const { svg, math, mrow, mi } = mathLabel();
+    math.setAttribute('display', 'block');
+    // An href on a MathML element is a link in Firefox.
+    mrow.setAttribute('href', 'https://example.com/x');
+    mi.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', 'https://example.com/y');
+    mi.setAttribute('src', 'https://example.com/z.png');
+    scrubDiagramSvg(svg);
+    expect(mrow.hasAttribute('href')).toBe(false);
+    expect(mi.attributes.length).toBe(0);
+    expect(math.getAttribute('display')).toBe('block');
+    expect(math.textContent).toBe('f=0.30');
+  });
+
+  test('drops mglyph, MathML\'s image element, and keeps the rest of the formula', () => {
+    const { MATHML, svg, mrow, mn } = mathLabel();
+    const glyph = document.createElementNS(MATHML, 'mglyph');
+    glyph.setAttribute('src', 'https://example.com/g.png');
+    mrow.insertBefore(glyph, mn);
+    scrubDiagramSvg(svg);
+    expect(svg.getElementsByTagNameNS(MATHML, 'mglyph').length).toBe(0);
+    expect(svg.contains(mn)).toBe(true);
+  });
 });
 
 describe.if(hasDom)('edge labels, duplicate labels, and the hit layer', () => {
