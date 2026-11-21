@@ -23,6 +23,35 @@ const HOSTS = ["app://hermes", "http://localhost:5173"];
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const directives = (csp: string) => new Map(csp.split(";").map((part) => part.trim().split(/\s+/)).map(([name, ...values]) => [name!, values]));
 
+describe("inboxFrameAncestorsRemote", () => {
+  test("merges exact HTTPS DNS origins, normalizes and deduplicates across both lists", () => {
+    expect(resolveInboxFrameAncestors(["app://hermes", "https://localhost"], undefined, [" HTTPS://EXAMPLE.COM:443 ", "https://example.com", "https://localhost", "https://app.example.com:8443"])).toEqual(["app://hermes", "https://localhost", "https://example.com", "https://app.example.com:8443"]);
+  });
+
+  test("drops non-origins, non-HTTPS and IP hosts with one line each", () => {
+    const invalid = ["http://example.com", "app://hermes", "https://127.0.0.1", "https://192.168.1.1", "https://2130706433", "https://[::1]", "https://[2001:db8::1]", "https://*.example.com", "'self'", "https://example.com/", "https://example.com/path", "https://example.com?q=1", "https://example.com#x", "https://user:pass@example.com", "https://example.com:*", "https://example.com; frame-src *", "https://-bad.example", "https://bad_host.example", 7, null];
+    const lines: string[] = [];
+    expect(resolveInboxFrameAncestors(undefined, (line) => lines.push(line), invalid)).toBe(NO_FRAME_ANCESTORS);
+    expect(lines).toHaveLength(invalid.length);
+    for (const line of lines) {
+      expect(line).toContain("inboxFrameAncestorsRemote:");
+      expect(line.split("\n")).toHaveLength(2);
+    }
+  });
+
+  test("unset or empty is unchanged, and a malformed remote list keeps local origins", () => {
+    const lines: string[] = [];
+    for (const remote of [undefined, null, []]) {
+      expect(resolveInboxFrameAncestors(undefined, (line) => lines.push(line), remote)).toBe(NO_FRAME_ANCESTORS);
+      expect(resolveInboxFrameAncestors(HOSTS, undefined, remote)).toEqual(HOSTS);
+    }
+    expect(lines).toEqual([]);
+    expect(resolveInboxFrameAncestors(HOSTS, (line) => lines.push(line), "https://example.com")).toEqual(HOSTS);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("inboxFrameAncestorsRemote is not a list");
+  });
+});
+
 describe("inboxFrameAncestors: what is kept", () => {
   test("exact origins of an app on this computer: loopback http(s) with or without a port, and app schemes with a host", () => {
     for (const origin of [

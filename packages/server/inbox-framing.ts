@@ -1,6 +1,6 @@
 /**
- * Plannotator Inbox: a trusted app on this computer framing the window
- * (#3299, config.json `inboxFrameAncestors`, read once at start).
+ * Plannotator Inbox: a trusted app framing the window (#3299, config.json
+ * `inboxFrameAncestors` and `inboxFrameAncestorsRemote`, read once at start).
  *
  * Unset or empty, every answer is as it always was: the window sends
  * `X-Frame-Options: DENY` and `frame-ancestors 'none'`, and the documents the
@@ -19,10 +19,12 @@
  * `localhost`, a `.localhost` name or 127/8, with a port or without one (the
  * scheme's default port only), or an app scheme with a host (`app://hermes`,
  * `tauri://localhost`). A wildcard, `'self'`, `file:`, a scheme alone, a path,
- * an IPv6 literal, or any other host is dropped with one stderr line, so
- * nothing in the list can widen the policy or add a directive to it.
+ * an IPv6 literal, or any other host is dropped with one stderr line.
+ * `inboxFrameAncestorsRemote` separately opts in to exact HTTPS origins with
+ * DNS hosts. Neither list can carry a wildcard or add a directive.
  */
 import { isLocalhostHostname, isLoopbackHostname } from "@plannotator/shared/loopback-host";
+import { isIP } from "node:net";
 
 /** No listed framers: every answer as it always was. */
 export const NO_FRAME_ANCESTORS: readonly string[] = Object.freeze([]);
@@ -75,21 +77,42 @@ export function inboxFrameAncestor(entry: unknown): string | null {
 }
 
 /**
- * config.json `inboxFrameAncestors`, kept entries only, each once, in the
- * order written. `warn` hears one line per entry it drops.
+ * config.json `inboxFrameAncestors`, then `inboxFrameAncestorsRemote`, kept
+ * entries only, each once, in order. `warn` hears one line per dropped entry.
  */
-export function resolveInboxFrameAncestors(value: unknown, warn: (line: string) => void = () => {}): readonly string[] {
+export function resolveInboxFrameAncestors(value: unknown, warn: (line: string) => void = () => {}, remote?: unknown): readonly string[] {
+  const kept = [...resolveFrameAncestors(value, "inboxFrameAncestors", inboxFrameAncestor, warn)];
+  for (const origin of resolveFrameAncestors(remote, "inboxFrameAncestorsRemote", inboxFrameAncestorRemote, warn)) {
+    if (!kept.includes(origin)) kept.push(origin);
+  }
+  return kept.length === 0 ? NO_FRAME_ANCESTORS : Object.freeze(kept);
+}
+
+/** One exact HTTPS origin with a DNS host, never an IP literal. */
+export function inboxFrameAncestorRemote(entry: unknown): string | null {
+  if (typeof entry !== "string") return null;
+  const value = entry.trim().toLowerCase();
+  if (!value.startsWith("https://") || !URL.canParse(value)) return null;
+  const url = new URL(value);
+  if (value !== url.origin && value !== `${url.origin}:443`) return null;
+  if (isIP(url.hostname) !== 0 || !new RegExp(`^${LABEL}(?:\\.${LABEL})*$`).test(url.hostname)) return null;
+  if (url.hostname.length > 253 || url.hostname.split(".").some((label) => label.length > 63)) return null;
+  return url.origin;
+}
+
+function resolveFrameAncestors(value: unknown, key: string, validate: (entry: unknown) => string | null, warn: (line: string) => void): readonly string[] {
   if (value === undefined || value === null) return NO_FRAME_ANCESTORS;
   if (!Array.isArray(value)) {
-    warn("Inbox: config.json inboxFrameAncestors is not a list of origins, so nothing may frame the Inbox.\n");
+    warn(`Inbox: config.json ${key} is not a list of origins, so nothing may frame the Inbox.\n`);
     return NO_FRAME_ANCESTORS;
   }
   const kept: string[] = [];
   for (const entry of value) {
-    const origin = inboxFrameAncestor(entry);
+    const origin = validate(entry);
     if (origin === null) {
       const shown = JSON.stringify(typeof entry === "string" ? entry.slice(0, 120) : entry) ?? String(entry);
-      warn(`Inbox: config.json inboxFrameAncestors: ${shown} is not used. List exact origins of an app on this computer, such as "app://myapp" or "http://localhost:5173".\n`);
+      const hint = key === "inboxFrameAncestors" ? 'List exact origins of an app on this computer, such as "app://myapp" or "http://localhost:5173".' : 'List exact HTTPS origins with a DNS host name, such as "https://example.com".';
+      warn(`Inbox: config.json ${key}: ${shown} is not used. ${hint}\n`);
       continue;
     }
     if (!kept.includes(origin)) kept.push(origin);

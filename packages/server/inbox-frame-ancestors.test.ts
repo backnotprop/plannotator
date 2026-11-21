@@ -25,7 +25,9 @@ import { INBOX_TOUR_MOCK_CSP } from "./inbox-tour";
 
 type Json = Record<string, any>;
 
-const HOSTS = ["app://hermes", "http://localhost:5173"];
+const LOCAL_HOSTS = ["app://hermes", "http://localhost:5173"];
+const REMOTE_HOSTS = ["https://app.example.com", "https://other.example.com:8443"];
+const HOSTS = [...LOCAL_HOSTS, ...REMOTE_HOSTS];
 const PAGE = "<!doctype html><title>Inbox</title><p>the window</p>";
 const MOCK = "/api/inbox/tour/assets/vscode-mockups.html";
 const MAGIC = "macbook-pro.tail0000.ts.net";
@@ -61,7 +63,7 @@ function world(config: Json = {}): string {
   setEnv("PLANNOTATOR_INBOX_PHONES", undefined);
   // Paired phones: never the hosted relay.
   setEnv("PLANNOTATOR_RELAY_URL", "http://127.0.0.1:9");
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify(config));
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxFrameAncestorsRemote: REMOTE_HOSTS, ...config }));
   return dataDir;
 }
 
@@ -131,7 +133,7 @@ test("with a list, the window's port: no X-Frame-Options and frame-ancestors exa
 
 test("a list of refused entries only, or none, changes nothing: DENY and the window's policy as it was, the documents' policies as they were", async () => {
   for (const frameAncestors of [["*", "'self'", "file://", "https://example.com", "http://[::1]:5173"], undefined]) {
-    const inbox = await start(world(), frameAncestors ? { frameAncestors } : {});
+    const inbox = await start(world({ inboxFrameAncestorsRemote: [] }), frameAncestors ? { frameAncestors } : {});
     const page = await fetch(`${base(inbox)}/`);
     expect(page.headers.get("x-frame-options")).toBe("DENY");
     expect(page.headers.get("content-security-policy")).toBe(INBOX_WINDOW_CSP);
@@ -177,7 +179,7 @@ test("framing grants the host page nothing: its own writes and reads are refused
 });
 
 test("config.json's list frames the window's port; the tailnet listener answers DENY / 'none' and the documents 'self' only, as without it", async () => {
-  const dataDir = world({ inboxTailscale: true, inboxFrameAncestors: HOSTS });
+  const dataDir = world({ inboxTailscale: true, inboxFrameAncestors: LOCAL_HOSTS });
   const inbox = await start(dataDir, { tailscale: fakeTailscale() });
   const local = await fetch(`${base(inbox)}/`);
   expect(local.headers.get("x-frame-options")).toBeNull();
@@ -208,7 +210,7 @@ test("config.json's list frames the window's port; the tailnet listener answers 
 
 test("the device door (phones, linked machines) answers the same with a list: no answer names a listed origin, and the window's documents are not on it", async () => {
   const answers = async (frameAncestors: string[] | undefined) => {
-    const inbox = await start(world(), { phones: true, ...(frameAncestors ? { frameAncestors } : {}) });
+    const inbox = await start(world({ inboxFrameAncestorsRemote: frameAncestors ? REMOTE_HOSTS : [] }), { phones: true, ...(frameAncestors ? { frameAncestors: LOCAL_HOSTS } : {}) });
     const made = (await (await fetch(`${base(inbox)}/api/inbox/pairing`, { method: "POST", body: "{}" })).json()) as Json;
     const pair = await fetch(`${base(inbox)}/api/inbox/device/pair`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: made.offer.code, name: "iPhone", platform: "ios" }) });
     const token = ((await pair.json()) as Json).token as string;
@@ -225,6 +227,7 @@ test("the device door (phones, linked machines) answers the same with a list: no
   const framed = await answers(HOSTS);
   expect(JSON.stringify(framed)).not.toContain("app://hermes");
   expect(JSON.stringify(framed)).not.toContain("localhost:5173");
+  for (const remote of REMOTE_HOSTS) expect(JSON.stringify(framed)).not.toContain(remote);
   expect(framed.find(([route]) => route === "threads")![1]).toBe(200);
   expect(framed.map(([route, status, headers]) => [route, status, headers["content-security-policy"] ?? null, headers["x-frame-options"] ?? null])).toEqual(
     (await answers(undefined)).map(([route, status, headers]) => [route, status, headers["content-security-policy"] ?? null, headers["x-frame-options"] ?? null]),
