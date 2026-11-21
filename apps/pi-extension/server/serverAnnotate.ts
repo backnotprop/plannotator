@@ -59,6 +59,7 @@ import {
 	handleCustomThemesScript,
 	customThemesPage,
 	handleFavicon,
+	handleAnnotateMediaRequest,
 	handleImageRequest,
 	handleStarAskRequest,
 	handleReferenceSkillsRequest,
@@ -69,7 +70,7 @@ import {
 	handleSaveNotesRequest,
 	handleUploadRequest,
 } from "./handlers.ts";
-import { handleApiNotFound, serveApp, json, parseBody, requestUrl, send } from "./helpers.ts";
+import { handleApiNotFound, serveApp, json, parseBody, requestUrl } from "./helpers.ts";
 import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.ts";
 import type { SessionBridge } from "../generated/ai/session-bridge.ts";
 
@@ -109,7 +110,7 @@ import {
 	resolveHtmlAssetRoute,
 	rewriteHtmlAssetReferences,
 } from "../generated/html-assets.ts";
-import { annotateMediaFile, folderSessionAssetAllowed, htmlAssetContext, htmlAssetFileState, htmlAssetPathRefused, inlineHtmlLocalAssets, isWithinDirectory, MAX_HTML_ASSET_BYTES, OUTSIDE_ROOT_HTML_DOCUMENT_CSP, outsideRootAssetAllowsCors, refusesOutsideRootHtmlAsset } from "../generated/html-assets-node.ts";
+import { folderSessionAssetAllowed, htmlAssetContext, htmlAssetFileState, htmlAssetPathRefused, inlineHtmlLocalAssets, isWithinDirectory, MAX_HTML_ASSET_BYTES, OUTSIDE_ROOT_HTML_DOCUMENT_CSP, outsideRootAssetAllowsCors, refusesOutsideRootHtmlAsset } from "../generated/html-assets-node.ts";
 import {
 	supportsAnnotateAgentTerminalMode,
 	type AgentTerminalCapability,
@@ -1237,10 +1238,7 @@ export async function startAnnotateServer(options: {
 		} else if (url.pathname === "/api/image") {
 			handleImageRequest(res, url);
 		} else if (url.pathname === "/api/annotate-media" && req.method === "GET") {
-			if (!isSameOriginRequest(req)) return send(res, "Access denied", 403);
-			const media = annotateMediaFile(url.searchParams.get("path"), url.searchParams.get("base"), servedMediaDocuments);
-			if (media.status !== 200) return send(res, "Video unavailable", media.status);
-			send(res, readFileSync(media.path), 200, htmlAssetHeaders(media.contentType));
+			handleAnnotateMediaRequest(req, res, url, servedMediaDocuments);
 		} else if (htmlAssets.handle(req, res, url)) {
 			return;
 		} else if (url.pathname === "/api/upload" && req.method === "POST") {

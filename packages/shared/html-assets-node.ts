@@ -3,10 +3,12 @@ import { dirname, isAbsolute, relative, resolve as resolvePath, posix as pathPos
 import {
   HTML_ASSET_DOCUMENT_CSP,
   htmlAssetContentType,
+  htmlAssetHeaders,
   refusesHiddenHtmlAssetPath,
   rewriteCssAssetReferences,
   rewriteHtmlAssetReferences,
 } from "./html-assets";
+import { decideByteRange } from "./byte-range";
 
 export const MAX_HTML_ASSET_BYTES = 50 * 1024 * 1024;
 
@@ -15,7 +17,7 @@ export function annotateMediaFile(
   path: string | null,
   base: string | null,
   servedDocuments: ReadonlySet<string>,
-): { path: string; contentType: string; status: 200 } | { status: 403 | 404 | 413 } {
+): { path: string; contentType: string; size: number; status: 200 } | { status: 403 | 404 | 413 } {
   if (!path || !base || !isAbsolute(base) || isAbsolute(path) || /^[a-z][a-z\d+.-]*:/i.test(path) || path.includes('\\')) {
     return { status: 403 };
   }
@@ -36,7 +38,50 @@ export function annotateMediaFile(
   const state = htmlAssetFileState(resolved, MAX_HTML_ASSET_BYTES);
   if (state === 'too-large') return { status: 413 };
   if (state !== 'ok') return { status: 404 };
-  return { status: 200, path: resolved, contentType };
+  // Serve the target the containment check resolved, not the link's name.
+  let target: string;
+  try {
+    target = realpathSync(resolved);
+  } catch {
+    return { status: 404 };
+  }
+  return { status: 200, path: target, contentType, size: statSync(target).size };
+}
+
+/**
+ * The `/api/annotate-media` answer, the same in every server (annotate and
+ * plan, Bun and Pi): an error status, or the headers and the byte span of the
+ * file to send. One `Range` (`bytes=a-b`, `bytes=a-`, `bytes=-n`) is a `206`
+ * with `Content-Range`; a range past the end is a `416`; none, several or an
+ * unreadable one is the whole file. A player needs the `206` to seek, and
+ * Safari plays nothing without it. The adapter streams the span from `path`.
+ */
+export function annotateMediaAnswer(
+  path: string | null,
+  base: string | null,
+  servedDocuments: ReadonlySet<string>,
+  range: string | null,
+):
+  | { status: 403 | 404 | 413 }
+  | { status: 416; headers: Record<string, string> }
+  | { status: 200 | 206; headers: Record<string, string>; path: string; start: number; end: number } {
+  const media = annotateMediaFile(path, base, servedDocuments);
+  if (media.status !== 200) return media;
+  const headers: Record<string, string> = {
+    ...htmlAssetHeaders(media.contentType),
+    "Cross-Origin-Resource-Policy": "same-origin",
+    "Accept-Ranges": "bytes",
+  };
+  // No validator is sent, so `If-Range` is not judged; a 206 is never capped.
+  const decision = decideByteRange(range, media.size, { maxLength: Number.POSITIVE_INFINITY });
+  if (decision.kind === "unsatisfiable") {
+    return { status: 416, headers: { ...headers, "Content-Range": `bytes */${media.size}`, "Content-Length": "0" } };
+  }
+  const start = decision.kind === "partial" ? decision.start : 0;
+  const end = decision.kind === "partial" ? decision.end : media.size - 1;
+  headers["Content-Length"] = String(Math.max(0, end - start + 1));
+  if (decision.kind === "partial") headers["Content-Range"] = `bytes ${start}-${end}/${media.size}`;
+  return { status: decision.kind === "partial" ? 206 : 200, headers, path: media.path, start, end };
 }
 
 /**

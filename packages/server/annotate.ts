@@ -21,7 +21,7 @@ import { isSameOriginRequest, refuseCrossOriginWrite } from "./request-origin-gu
 import { getSourceRepoInfo } from "./repo";
 import { createRefCards, refCardRouteResponse, refCardsTailnetAllowed, type RefRunner } from "./ref-cards";
 import type { Origin } from "@plannotator/shared/agents";
-import { handleImage, handleStarAsk, handleUpload, handleServerReady, handleApiNotFound, handleFavicon, handleCustomThemesScript, customThemesPage, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl, missingDraftResponse } from "./shared-handlers";
+import { handleAnnotateMedia, handleImage, handleStarAsk, handleUpload, handleServerReady, handleApiNotFound, handleFavicon, handleCustomThemesScript, customThemesPage, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl, missingDraftResponse } from "./shared-handlers";
 import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, resolveAllowedDocPath, type FolderAnnotateHistory } from "./reference-handlers";
 import { closeAllFileBrowserWatchers, handleFileBrowserFilesStream } from "./reference-watch";
 import { getExtraMarkdownExtensions, isAnnotatableTextPath, MAX_ANNOTATABLE_FILE_BYTES, resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
@@ -79,8 +79,6 @@ import { countUnsentDraftComments, hostSessionClosedEvent } from "@plannotator/s
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 import { isAIEndpointPath, isLongLivedAIEndpointPath, type AIEndpoints, type SessionBridge } from "@plannotator/ai";
 import { createHtmlAssetRegistry, framedDocumentNotFound } from "./html-assets";
-import { annotateMediaFile } from "@plannotator/shared/html-assets-node";
-import { htmlAssetHeaders } from "@plannotator/shared/html-assets";
 import { createBunAgentTerminalBridge, type AgentTerminalSocketData } from "./agent-terminal";
 import { startLiveAppProxy, type LiveAppProxy } from "./live-proxy";
 import {
@@ -1272,10 +1270,7 @@ export async function startAnnotateServer(
           }
 
           if (url.pathname === "/api/annotate-media" && req.method === "GET") {
-            if (!isSameOriginRequest(req)) return new Response("Access denied", { status: 403 });
-            const media = annotateMediaFile(url.searchParams.get("path"), url.searchParams.get("base"), servedMediaDocuments);
-            if (media.status !== 200) return new Response("Video unavailable", { status: media.status });
-            return new Response(Bun.file(media.path), { headers: htmlAssetHeaders(media.contentType) });
+            return handleAnnotateMedia(req, url, servedMediaDocuments);
           }
 
           const htmlAssetResponse = await htmlAssets.handle(req, url);

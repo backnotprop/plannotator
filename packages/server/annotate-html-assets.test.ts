@@ -6,6 +6,8 @@ import { createHtmlAssetRegistry, framedDocumentNotFound, inlineHtmlLocalAssets 
 import { HTML_ASSET_SUBRESOURCE_CSP } from "@plannotator/shared/html-assets";
 import { startAnnotateServer } from "./annotate";
 import { startAnnotateServer as startPiAnnotateServer } from "../../apps/pi-extension/server/serverAnnotate";
+import { startPlannotatorServer } from "./index";
+import { startPlanReviewServer as startPiPlanReviewServer } from "../../apps/pi-extension/server/serverPlan";
 
 describe("annotate raw HTML assets", () => {
   test("rewrites raw HTML support assets and serves them from the source directory", async () => {
@@ -535,6 +537,64 @@ for (const [runtime, startServer] of [["Bun", startAnnotateServer], ["Pi", start
     } finally {
       server.stop();
       rmSync(parent, { recursive: true, force: true });
+    }
+  });
+  test(`${runtime} local Markdown videos answer byte ranges, so a player can seek`, async () => {
+    const docDir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-markdown-video-range-")));
+    const filePath = join(docDir, "proof.md");
+    writeFileSync(filePath, '<video controls src="demo.mp4"></video>');
+    writeFileSync(join(docDir, "demo.mp4"), "0123456789");
+    const server = await startServer({ markdown: '<video controls src="demo.mp4"></video>', filePath, htmlContent: "<html></html>" });
+    const get = (range?: string) => fetch(`${server.url}/api/annotate-media?path=demo.mp4&base=${encodeURIComponent(docDir)}`, { headers: range ? { Range: range } : {} });
+    try {
+      const whole = await get();
+      expect(whole.status).toBe(200);
+      expect(whole.headers.get("accept-ranges")).toBe("bytes");
+      expect(whole.headers.get("content-type")).toContain("video/mp4");
+      expect(await whole.text()).toBe("0123456789");
+      for (const [range, contentRange, body] of [
+        ["bytes=0-1", "bytes 0-1/10", "01"],
+        ["bytes=4-", "bytes 4-9/10", "456789"],
+        ["bytes=-3", "bytes 7-9/10", "789"],
+        ["bytes=8-100", "bytes 8-9/10", "89"],
+      ] as const) {
+        const part = await get(range);
+        expect(part.status).toBe(206);
+        expect(part.headers.get("content-range")).toBe(contentRange);
+        expect(await part.text()).toBe(body);
+      }
+      const past = await get("bytes=10-");
+      expect(past.status).toBe(416);
+      expect(past.headers.get("content-range")).toBe("bytes */10");
+      // Several ranges, or one that is not a byte range, get the whole file.
+      for (const range of ["bytes=0-1,4-5", "bytes=5-2", "items=0-1"]) {
+        const answer = await get(range);
+        expect(answer.status).toBe(200);
+        expect(await answer.text()).toBe("0123456789");
+      }
+    } finally {
+      server.stop();
+      rmSync(docDir, { recursive: true, force: true });
+    }
+  });
+  test(`${runtime} plan review plays a linked document's local video once that document is open`, async () => {
+    const docDir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-plan-video-")));
+    const linked = join(docDir, "notes.md");
+    writeFileSync(linked, '<video controls src="clip.webm"></video>');
+    writeFileSync(join(docDir, "clip.webm"), "PLAN_VIDEO");
+    const server = runtime === "Bun"
+      ? await startPlannotatorServer({ plan: "# Plan\n\nSee notes.md", origin: "claude-code", htmlContent: "<html></html>" })
+      : await startPiPlanReviewServer({ plan: "# Plan\n\nSee notes.md", origin: "pi", htmlContent: "<html></html>" });
+    const media = `${server.url}/api/annotate-media?path=clip.webm&base=${encodeURIComponent(docDir)}`;
+    try {
+      expect((await fetch(media)).status).toBe(403);
+      expect((await fetch(`${server.url}/api/doc?path=${encodeURIComponent(linked)}`)).status).toBe(200);
+      const answer = await fetch(media, { headers: { Range: "bytes=0-3" } });
+      expect(answer.status).toBe(206);
+      expect(await answer.text()).toBe("PLAN");
+    } finally {
+      server.stop();
+      rmSync(docDir, { recursive: true, force: true });
     }
   });
   test(`${runtime} folder API resolves shared assets within the selected folder`, async () => {

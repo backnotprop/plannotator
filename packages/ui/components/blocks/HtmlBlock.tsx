@@ -6,7 +6,7 @@ import { holdsDroppedHtmlTag, opensDroppedHtmlTag } from "../../utils/inlineHtml
 import { SourceLikeInlineContext } from "../InlineMarkdown";
 import { paintAuthorColors } from "../../utils/authorColorContrast";
 import { parseSrcset, serializeSrcset, type SrcsetCandidate } from "../../utils/srcset";
-import { getImageSrc } from "../ImageThumbnail";
+import { getImageSrc, usesDefaultImageSrcResolver } from "../ImageThumbnail";
 import { UNAVAILABLE_IMAGE_CLASS, PreserveResolvedVideosContext, ResolvedResponsiveImagesContext, useImageResolver, type ImageResolver } from "../ImageResolverContext";
 import { isLocalLinkTarget, isNewTabClick, useLocalLinkMatch, useLocalLinkResolver, type LocalLinkResolver } from "../LocalLinkContext";
 import { sourceLineAttrs } from "../../utils/sourceLineAttrs";
@@ -163,13 +163,26 @@ function rewriteRelativeRefs(
       if (/^(https?:|data:|blob:)/i.test(src)) return;
       img.setAttribute('src', getImageSrc(src, imageBaseDir));
     });
-    if (imageBaseDir && !/^https?:\/\//i.test(imageBaseDir)) {
+    // A local video beside the document plays through the annotate and plan
+    // servers' `/api/annotate-media` (Range, so it seeks); a host with its own
+    // image resolver has no such route, so its videos are left as written.
+    if (imageBaseDir && !/^https?:\/\//i.test(imageBaseDir) && usesDefaultImageSrcResolver()) {
       root.querySelectorAll('video[src], video source[src]').forEach((media) => {
         const src = media.getAttribute('src');
         if (!src || /^(?:[a-z][a-z\d+.-]*:|\/)/i.test(src)) return;
-        media.setAttribute('src', `/api/annotate-media?path=${encodeURIComponent(src)}&base=${encodeURIComponent(imageBaseDir)}`);
+        // `clip.mp4#t=5` keeps its media fragment on the new URL; a query is dropped.
+        const hash = src.indexOf('#');
+        const fragment = hash >= 0 ? src.slice(hash) : '';
+        const file = src.slice(0, hash >= 0 ? hash : undefined).split('?')[0]!;
+        if (!file) return;
+        media.setAttribute('src', `/api/annotate-media?path=${encodeURIComponent(file)}&base=${encodeURIComponent(imageBaseDir)}${fragment}`);
       });
     }
+    root.querySelectorAll('video[poster]').forEach((video) => {
+      const poster = video.getAttribute('poster');
+      if (!poster || /^(https?:|data:|blob:)/i.test(poster)) return;
+      video.setAttribute('poster', getImageSrc(poster, imageBaseDir));
+    });
   }
 
   root.querySelectorAll('a').forEach((a) => {
