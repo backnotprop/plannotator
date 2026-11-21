@@ -2,6 +2,8 @@ import React, { useCallback, useId, useSyncExternalStore } from 'react';
 import { ListFilter } from 'lucide-react';
 import type { ReviewFileFilterInput } from '../hooks/useReviewFileFilter';
 
+const FIELD = 'h-7 min-w-0 rounded border-0 bg-foreground/[0.06] px-[7px] font-mono text-[13px] text-foreground placeholder:text-muted-foreground/50 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-0 focus-visible:outline-primary/50 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:text-base';
+
 export function ReviewFileFilterControls({ input, active, renderRow, shown, total }: {
   input: ReviewFileFilterInput;
   active: boolean;
@@ -11,6 +13,7 @@ export function ReviewFileFilterControls({ input, active, renderRow, shown, tota
 }) {
   const { draft, open } = useSyncExternalStore(input.subscribe, input.getSnapshot);
   const id = useId();
+  const showSummary = active && !!shown && total !== undefined;
   const handleFieldChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = event.currentTarget;
     if (name === 'include' || name === 'exclude') input.updateField(name, value);
@@ -36,9 +39,9 @@ export function ReviewFileFilterControls({ input, active, renderRow, shown, tota
   return (
     <>
       {renderRow ? renderRow(toggle) : toggle}
-      {open && (
-        <div id={id} className="col-span-full row-start-2 mt-2 mb-3 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 pe-1.5 text-xs text-muted-foreground">
-          {(['include', 'exclude'] as const).map((kind) => (
+      {(open || showSummary) && (
+        <div id={id} className={`col-span-full row-start-2 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 pe-1.5 text-xs text-muted-foreground ${open ? 'mt-2 mb-3' : 'mt-1.5 mb-1'}`}>
+          {open && (['include', 'exclude'] as const).map((kind) => (
             <React.Fragment key={kind}>
               <label htmlFor={`${id}-${kind}`} className="capitalize">{kind}</label>
               <input
@@ -51,11 +54,11 @@ export function ReviewFileFilterControls({ input, active, renderRow, shown, tota
                 spellCheck={false}
                 maxLength={2048}
                 onChange={handleFieldChange}
-                className="h-7 min-w-0 rounded-md border border-border bg-background px-2 font-mono text-foreground focus-visible:outline-2 focus-visible:outline-primary"
+                className={FIELD}
               />
             </React.Fragment>
           ))}
-          {active && !!shown && total !== undefined && (
+          {showSummary && (
             <div className="col-span-full flex items-center gap-2" data-review-file-filter-summary="">
               <span role="status" className="tabular-nums">{shown} of {total} files</span>
               <button type="button" onClick={input.clear} className="text-primary hover:underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-primary rounded-sm">Clear</button>
