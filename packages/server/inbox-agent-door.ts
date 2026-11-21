@@ -7,6 +7,7 @@ import { bodyShowsLocalImages } from "@plannotator/shared/inbox/inline-images";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxUploadAttachments, receiveInboxUpload, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
+import { inboxAgentFetchAction } from "./inbox-agent-files";
 import { bytesOfBase64, createInboxAgentPieces, inboxAgentPieceAction } from "./inbox-agent-pieces";
 import { hasCloudWake, type InboxCloudAgent, type InboxCloudAgents } from "./inbox-cloud-agents";
 import { prototypePlace } from "./inbox-live";
@@ -222,6 +223,8 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
     }
     const pieceResult = inboxAgentPieceAction(pieces, agent.session, tool, args);
     if (pieceResult) return pieceResult;
+    const fetched = await inboxAgentFetchAction(store, agent.session, tool, args);
+    if (fetched) return fetched;
 
     const tools = await servedTools(contextFor(agent, []));
     const fields = tools.get(tool);

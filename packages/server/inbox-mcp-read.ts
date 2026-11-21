@@ -40,6 +40,7 @@ import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { INBOX_TIDY_WITHDRAWN_HOST } from "@plannotator/shared/inbox/tidy";
 import { inboxViewingLine } from "@plannotator/shared/inbox/uploads";
 import { reviewAnchorBlock, reviewAnchorPlace } from "@plannotator/core/review-threads";
+import type { AgentFile } from "./inbox-agent-files";
 
 /** Messages read_thread shows in full by default: the newest six. */
 export const INBOX_THREAD_WINDOW = 6;
@@ -131,6 +132,8 @@ export interface AgentMessage {
   body_bytes?: number;
   questions?: AgentQuestion[];
   attachments?: { name: string; kind: string; size: number; path: string }[];
+  /** In place of `attachments` for a cloud agent (`ThreadReadInput.filesOf`): each file with the command that fetches it. */
+  files?: AgentFile[];
   /** The person's reaction (approval "inbox-reaction-tray"): always `reaction`, 👍 Looks good included. */
   ack?: { label: string; at: string; reaction: { emoji: string; label?: string } };
   guide?: { title: string };
@@ -215,6 +218,8 @@ export interface ThreadReadInput {
   /** The reader's session: a message addressed to it says `you`. */
   caller?: string | null;
   names?: SessionNameOf;
+  /** Through the agent door: a message's files as a cloud agent fetches them, in place of their paths on this computer. */
+  filesOf?: (message: InboxMessageWire) => AgentFile[];
 }
 
 export interface ThreadWindowResult {
@@ -459,7 +464,7 @@ function addressee(message: InboxMessageWire, caller: string | null, names?: Ses
   return { host: message.to.host, session: message.to.session, ...(name ? { name } : {}), you };
 }
 
-export function agentMessage(message: InboxMessageWire, form: AgentMessageForm = "window", caller: string | null = null, names?: SessionNameOf): AgentMessage {
+export function agentMessage(message: InboxMessageWire, form: AgentMessageForm = "window", caller: string | null = null, names?: SessionNameOf, filesOf?: ThreadReadInput["filesOf"]): AgentMessage {
   const source = form === "earlier" ? withoutAnswersSection(message) : message.body;
   const total = byteLength(message.body);
   const over = form !== "whole" && byteLength(source) > INBOX_BODY_CUT_BYTES;
@@ -475,7 +480,7 @@ export function agentMessage(message: InboxMessageWire, form: AgentMessageForm =
     body,
     ...(body !== message.body ? { body_bytes: total } : {}),
     ...(message.questions?.length ? { questions: agentQuestions(message.questions) } : {}),
-    ...(message.attachments?.length ? { attachments: message.attachments.map((a) => ({ name: a.name, kind: a.kind, size: a.size, path: a.path })) } : {}),
+    ...(filesOf ? filesField(filesOf(message)) : message.attachments?.length ? { attachments: message.attachments.map((a) => ({ name: a.name, kind: a.kind, size: a.size, path: a.path })) } : {}),
     ...(ack ? { ack: { label: ack.label, at: ack.at, reaction: agentReaction(ack.reaction) } } : {}),
     ...(message.guide ? { guide: { title: message.guide.title } } : {}),
     ...(message.to ? { to: addressee(message, caller, names) } : {}),
@@ -487,6 +492,8 @@ export function agentMessage(message: InboxMessageWire, form: AgentMessageForm =
     ...(message.review_anchor ? { review_comment: reviewCommentText(message) } : {}),
   };
 }
+
+const filesField = (files: AgentFile[]) => (files.length > 0 ? { files } : {});
 
 function reviewCommentText(message: InboxMessageWire): string {
   const resolved = message.review_resolved ? " The person resolved it." : "";
@@ -619,7 +626,7 @@ export function windowedThread(
       .map((card) => ({ id: card.id, title: card.title }));
   const messages = all
     .filter((m) => full.has(m.id))
-    .map((m) => agentMessage(m, formOf(m.id), caller, input.names))
+    .map((m) => agentMessage(m, formOf(m.id), caller, input.names, input.filesOf))
     .map((m) => (m.board_request ? { ...m, board_cards: linkedCards() } : m));
   const earlier = inRange.filter((m) => !full.has(m.id)).map((m) => agentMessageLine(m, caller, input.names));
   const leftOut = all.filter((m) => !shown.has(m.id));
@@ -768,6 +775,7 @@ export function messageText(message: AgentMessage, context: TranscriptContext): 
   if (message.viewing) lines.push(message.viewing);
   if (message.review_comment) lines.push(message.review_comment);
   if (message.questions?.length) lines.push(`Questions: ${message.questions.map((q) => questionWords(q)).join("; ")}`);
+  if (message.files?.length) lines.push(`Files: ${message.files.map((f) => `${f.name} (${f.kind}, ${sizeText(f.size)}): ${f.fetch}`).join("; ")}`);
   if (message.attachments?.length) {
     lines.push(`Files: ${message.attachments.map((a) => `${a.name} (${a.kind}, ${sizeText(a.size)}): ${a.path}`).join("; ")}`);
   }

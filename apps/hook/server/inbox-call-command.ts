@@ -42,7 +42,7 @@
  */
 
 import { resolve } from "node:path";
-import { decodeInboxAgentPairing, INBOX_AGENT_CALL_ACTIONS } from "@plannotator/shared/inbox/agent-pairing";
+import { decodeInboxAgentPairing, INBOX_AGENT_CALL_ACTIONS, INBOX_AGENT_FETCH_FILE } from "@plannotator/shared/inbox/agent-pairing";
 import { callInboxThroughRelay, inboxAgentSignalUrl, type InboxAgentRelayOutcome } from "@plannotator/shared/inbox/agent-relay-client";
 import { INBOX_HOST_NAMES, INBOX_QWEN_SESSION_ENV, INBOX_T3_HOST, INBOX_T3_THREAD_ENV, inboxTidyMcpLine, parseInboxSessionRef, type InboxTidyMark } from "@plannotator/core/inbox-types";
 import { INBOX_MAX_REQUEST_BYTES, INBOX_PEEK_META_KEY, inboxRequestTooLargeMessage, inboxToolCallParams, mcpAnswerOfResponse } from "@plannotator/shared/inbox/connection";
@@ -52,6 +52,7 @@ import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-che
 import type { InboxQuestionToCheck } from "@plannotator/core/inbox-questions";
 import { questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { hasHelpFlag, INBOX_CALL_ACTIONS, INBOX_CALL_USAGE, INBOX_PAIRED_CALL_USAGE } from "./cli";
+import { fetchPairedFile, type PairedCall } from "./inbox-call-fetch";
 import { pairedAttachments } from "./inbox-call-pieces";
 import { writeWholeToStdout } from "./write-whole-stdout";
 import { AUTHOR_TOOLS, fillInboxToolArguments, type InboxHostSession, INBOX_DSH_ROOT_FOR_ENV, INBOX_DSH_ROOT_SESSION_ENV, INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
@@ -338,20 +339,28 @@ async function runPairedCall(
     return { result: answer.result };
   };
 
+  // One piece of a file, either way: its result, or the Inbox's refusal as a code and words.
+  const pieceCall: PairedCall = async (tool, body) => {
+    const outcome = await transport(tool, body, PIECE_WAIT_MS);
+    if (outcome.kind === "refused") return { ok: false, code: outcome.code, message: outcome.message };
+    if (outcome.kind === "queued") return { ok: false, code: "no_answer", message: "The person's computer did not take the file in time. Nothing was sent. Try again later." };
+    const got = resultOf(outcome);
+    if ("code" in got) return { ok: false, ...got };
+    if (got.result.isError) {
+      const text = (got.result.content ?? []).map((part) => part.text ?? "").join("\n");
+      const match = /^([a-z][a-z0-9_]*): ([\s\S]*)$/.exec(text);
+      return { ok: false, code: match?.[1] ?? "inbox_error", message: match?.[2] ?? text };
+    }
+    return { ok: true, structured: got.result.structuredContent };
+  };
+  if (parsed.action === INBOX_AGENT_FETCH_FILE) {
+    const fetched = await fetchPairedFile(args, deps.cwd, pieceCall);
+    if (!fetched.ok) return refused(fetched.code, fetched.message);
+    await out(`${JSON.stringify(fetched.saved)}\n`);
+    return 0;
+  }
   if (Array.isArray(args.attachments)) {
-    const sent = await pairedAttachments(args.attachments, deps.cwd, async (tool, body) => {
-      const outcome = await transport(tool, body, PIECE_WAIT_MS);
-      if (outcome.kind === "refused") return { ok: false, code: outcome.code, message: outcome.message };
-      if (outcome.kind === "queued") return { ok: false, code: "no_answer", message: "The person's computer did not take the file in time. Nothing was sent. Try again later." };
-      const got = resultOf(outcome);
-      if ("code" in got) return { ok: false, ...got };
-      if (got.result.isError) {
-        const text = (got.result.content ?? []).map((part) => part.text ?? "").join("\n");
-        const match = /^([a-z][a-z0-9_]*): ([\s\S]*)$/.exec(text);
-        return { ok: false, code: match?.[1] ?? "inbox_error", message: match?.[2] ?? text };
-      }
-      return { ok: true };
-    });
+    const sent = await pairedAttachments(args.attachments, deps.cwd, pieceCall);
     if (!sent.ok) return refused(sent.code, sent.message);
     args.attachments = sent.items;
   }
