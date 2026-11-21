@@ -45,12 +45,13 @@ enum FileGlyph {
 struct FileTiles: View {
   let session: InboxSession
   let items: [AttachmentItem]
-  /// The thread they are in: a tile counts the comments on its file that ride the next Send.
+  /// The thread they are in: a tile counts the comments on its file that ride the next Send or wait for the
+  /// computer's network.
   var thread: ThreadID?
   @Environment(\.openFile) private var open
 
   var body: some View {
-    let riding = thread.map { session.commentsToSend($0) } ?? []
+    let riding = thread.map { session.commentsCounted($0) } ?? []
     VStack(spacing: 0) {
       ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
         if index > 0 { Hairline().padding(.leading, Media.rowThumb + Space.step) }

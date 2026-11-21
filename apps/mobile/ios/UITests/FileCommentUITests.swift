@@ -348,6 +348,7 @@ final class FileCommentUITests: XCTestCase {
     let app = launch(stage: "files,drawingonly")
     let strip = app.buttons["thread-comments"]
     XCTAssertTrue(strip.waitForExistence(timeout: 20))
+    XCTAssertEqual(strip.label, "1 comment", "the drawing is counted")
     let send = app.buttons["Send"]
     XCTAssertTrue(send.isEnabled, "Send can be pressed for the drawing")
     XCTAssertFalse(app.staticTexts["thread-needs-network"].exists, "the thread says nothing before Send")
@@ -358,7 +359,8 @@ final class FileCommentUITests: XCTestCase {
     XCTAssertEqual(line.label, "1 comment needs your computer's network")
     XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Will send when'")).firstMatch.exists, "nothing waits in the outbox")
     XCTAssertFalse(send.isEnabled, "Send has nothing more to do")
-    shot("r5-02-thread-line")
+    XCTAssertEqual(strip.label, "1 comment", "still in the list, and counted: the line and the strip agree")
+    shot("r5b-02-thread-line")
 
     // The comment is still in the list, marked, and still the person's to change.
     strip.tap()
@@ -366,7 +368,7 @@ final class FileCommentUITests: XCTestCase {
     XCTAssertTrue(row.waitForExistence(timeout: 5))
     XCTAssertTrue(row.label.contains("Needs your computer's network"), row.label)
     XCTAssertFalse(row.label.contains("Will send"), row.label)
-    shot("r5-01-list-marked")
+    shot("r5b-01-list-marked")
     app.navigationBars["1 comment"].buttons["Done"].tap()
 
     // Words make Send work again; they go now, and the drawing stays behind, marked.
@@ -375,11 +377,59 @@ final class FileCommentUITests: XCTestCase {
     field.tap()
     field.typeText("Ship it, the gap is the handshake.")
     XCTAssertTrue(send.isEnabled, "words make Send work again")
-    shot("r5-03-words-send-ready")
+    shot("r5b-03-words-send-ready")
     send.tap()
     XCTAssertTrue(app.staticTexts["Ship it, the gap is the handshake."].waitForExistence(timeout: 10))
     XCTAssertTrue(app.staticTexts["thread-needs-network"].waitForExistence(timeout: 5), "the drawing stays behind")
-    shot("r5-04-words-sent-drawing-stays")
+    XCTAssertEqual(strip.label, "1 comment", "in the list, counted")
+    shot("r5b-04-words-sent-drawing-stays")
+
+    // Still the person's to change there: a long press offers Edit and Remove.
+    strip.tap()
+    let listed = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Is this gap the handshake?'")).firstMatch
+    XCTAssertTrue(listed.waitForExistence(timeout: 5))
+    XCTAssertTrue(listed.label.contains("Needs your computer's network"), listed.label)
+    listed.press(forDuration: 1.0)
+    XCTAssertTrue(app.buttons["Edit the comment"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.buttons["Remove"].exists)
+    shot("r5b-05-list-edit-remove")
+    app.buttons["Remove"].tap()
+    // Removed, it leaves the list, the strip and the line.
+    XCTAssertFalse(app.staticTexts["thread-needs-network"].waitForExistence(timeout: 3))
+  }
+
+  @MainActor
+  func testAThreadWhoseOnlyWorkIsAWaitingDrawingSaysNoWillSend() {
+    let app = launch(stage: "files,drawingonly,drawingsent")
+    XCTAssertTrue(app.staticTexts["thread-needs-network"].waitForExistence(timeout: 20))
+    app.navigationBars.buttons.element(boundBy: 0).tap()
+    let row = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Relay retries: plan and evidence")).firstMatch
+    XCTAssertTrue(row.waitForExistence(timeout: 10))
+    XCTAssertFalse(row.label.contains("Will send"), row.label)
+    XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Will send'")).firstMatch.exists)
+    shot("r5b-06-list-row-no-will-send")
+  }
+
+  @MainActor
+  func testWithTheComputerAwayAWaitingDrawingAloneSaysNoWillSend() {
+    let app = launch(stage: "files,drawingonly,drawingsent,away")
+    XCTAssertTrue(app.staticTexts["thread-needs-network"].waitForExistence(timeout: 20))
+    app.navigationBars.buttons.element(boundBy: 0).tap()
+    XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH \"Can't reach Work Mac\"")).firstMatch.waitForExistence(timeout: 10), "the computer is away")
+    XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Will send'")).firstMatch.exists, "but nothing is queued to send")
+    shot("r5b-07-away-no-will-send")
+  }
+
+  @MainActor
+  func testADrawingThatWentByItselfIsTheYouMessageWithItsComment() {
+    let app = launch(stage: "files,drawingonly,drawingsent,drawingback")
+    // Gone from the list and the line; it is the person's message at the end of the thread.
+    XCTAssertTrue(app.staticTexts["Feedback on the attached files"].waitForExistence(timeout: 20), "the person's message carries the comment")
+    XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Is this gap the handshake?'")).firstMatch.exists)
+    XCTAssertFalse(app.staticTexts["thread-needs-network"].exists)
+    XCTAssertFalse(app.buttons["thread-comments"].exists)
+    app.swipeUp()
+    shot("r5b-08-went-by-itself")
   }
 
   // MARK: What a Send carries, and taking a change back
@@ -393,13 +443,13 @@ final class FileCommentUITests: XCTestCase {
   @MainActor
   func testACommentTheComputerDidNotKeepIsListedAndRidesNoSendAndARemovalIsUndone() {
     let app = launch(stage: "files,commented,commentstanding")
-    // The strip and the tiles count what the next Send carries: the three comments, not the drawing the computer
-    // refused, nor the one that waits for a way to the computer that can carry it.
+    // The strip and the tiles count what the next Send carries and the drawing that waits for the computer's
+    // network (it is in the list, marked): four comments, not the drawing the computer refused.
     let strip = app.buttons["thread-comments"]
     XCTAssertTrue(strip.waitForExistence(timeout: 20))
-    XCTAssertEqual(strip.label, "3 comments")
+    XCTAssertEqual(strip.label, "4 comments")
     XCTAssertTrue(tile(app, "retry-plan.md").label.contains("2 comments"), tile(app, "retry-plan.md").label)
-    XCTAssertFalse(tile(app, "reconnect-flamegraph.png").label.contains("comment"), tile(app, "reconnect-flamegraph.png").label)
+    XCTAssertTrue(tile(app, "reconnect-flamegraph.png").label.contains("1 comment"), tile(app, "reconnect-flamegraph.png").label)
     shot("r3-01-tiles-count-comments")
     strip.tap()
     // Every comment is listed; the ones that do not go say why, and the foot says what goes.
@@ -431,7 +481,7 @@ final class FileCommentUITests: XCTestCase {
     XCTAssertTrue(back.waitForExistence(timeout: 5), "Undo brought the comment back")
     XCTAssertTrue(back.label.contains("client drops its socket"), "on the same words: \(back.label)")
     app.navigationBars["5 comments"].buttons["Done"].tap()
-    XCTAssertEqual(app.buttons["thread-comments"].label, "3 comments")
+    XCTAssertEqual(app.buttons["thread-comments"].label, "4 comments")
 
     // The drawing that waits is drawn on the picture.
     app.buttons["thread-comments"].tap()

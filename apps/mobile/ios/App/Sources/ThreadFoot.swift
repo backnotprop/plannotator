@@ -188,8 +188,9 @@ struct Composer: View {
   }
 
   private func box(jumps: Bool) -> some View {
-    // What the Send carries; the strip stays while any comment waits, so the list says why one does not go.
-    let riding = session.commentsToSend(id).count
+    // What the Send carries and what waits for the computer's network; the strip stays while any comment waits, so
+    // the list says why one does not go.
+    let riding = session.commentsCounted(id).count
     let waiting = !session.comments(id).isEmpty
     return VStack(spacing: 0) {
       if jumps, waits != nil {

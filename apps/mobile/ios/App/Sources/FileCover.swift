@@ -218,8 +218,9 @@ struct FileCover: View {
           .accessibilityAddTraits(.isHeader)
           .accessibilityShowsLargeContentViewer { Text(current?.name ?? "") }
         }
-        // The number is what the next Send carries; the list also shows the comments that stay, and why.
-        let waiting = session.commentsToSend(thread).count
+        // The number is what the next Send carries and what waits for the computer's network; the list also shows the
+        // comments that stay, and why.
+        let waiting = session.commentsCounted(thread).count
         if !session.comments(thread).isEmpty {
           // What waits for the next Send, whichever file it is on: a touch lists it.
           ToolbarItem(placement: .topBarTrailing) {

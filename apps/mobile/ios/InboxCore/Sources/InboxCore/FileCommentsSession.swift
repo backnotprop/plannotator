@@ -380,6 +380,32 @@ extension InboxSession {
     for reply in held where reply.kind == .reply && reply.thread == thread { releaseHeldBackComments(reply) }
   }
 
+  /// Whether a write still on the phone is one the person sees as waiting to send ("Will send"): not a look at a
+  /// thread, and not a drawing (or its comment's save) that waits for the computer's own network. Nothing is queued
+  /// for those: their comments are in the list, marked.
+  public func willSend(_ write: HeldWrite) -> Bool {
+    switch write.kind {
+    case .seen: return false
+    case .markup, .annotation:
+      if heldBack(write) { return false }
+      let named = commentsNamed(by: write)
+      let kept = commentBook.kept[ThreadID(write.thread)] ?? []
+      let comments = kept.filter { named.contains($0.id) }
+      return comments.isEmpty || !comments.allSatisfy(drawingWaits)
+    default: return true
+    }
+  }
+
+  /// The comments the thread's strip, a file's tile and the cover count: the ones the next Send carries, and the
+  /// ones whose drawing waits for the computer's own network (they are in the list, marked, until they go).
+  public func commentsCounted(_ thread: ThreadID) -> [FileComment] {
+    let items = attachments(thread)
+    return comments(thread).filter { comment in
+      let standing = commentStanding(comment, items: items)
+      return standing.rides || standing == .drawingWaits
+    }
+  }
+
   // MARK: A comment that goes by itself
 
   /// Whether a comment names a drawing the computer does not have yet.

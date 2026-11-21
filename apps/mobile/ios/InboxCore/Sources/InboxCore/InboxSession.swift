@@ -1019,6 +1019,15 @@ public final class InboxSession {
     return false
   }
 
+  #if DEBUG
+    /// Debug builds only, for the stand-in's stages: the phone is back on the computer's network, so a drawing the
+    /// relay refused goes now (the stand-in has one way, which plays both).
+    public func standInBackOnNetwork() async {
+      parkedDrawings = [:]
+      await flush()
+    }
+  #endif
+
   /// While something waits and the computer does not answer, ask again now and then.
   func retryLater() {
     guard retry == nil else { return }

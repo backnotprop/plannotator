@@ -402,6 +402,15 @@ struct LaunchOptions {
             session.addComment(thread: StandInData.files, item: picture, version: .current, annotation: FileComments.picture(name: picture.name, comment: "Is this gap the handshake?", markup: nil), drawing: drawing, marks: [PictureMark(kind: .pin, points: [1500, 300], size: 40)])
             await session.deliverHeld(thread: StandInData.files)
           }
+        case "drawingsent":
+          // The person pressed Send for that drawing alone: nothing is queued; it goes by itself later.
+          _ = await session.send(thread: StandInData.files, words: "")
+        case "drawingback":
+          // Back on the computer's network: the drawing goes, then its comment, in a Send of its own.
+          await door.setOptions { $0.refusesMarkups = nil }
+          await session.standInBackOnNetwork()
+          await session.deliverHeld(thread: StandInData.files)
+          await session.refresh()
         case "filechangesnext":
           // The agent edits the plan after the phone last asked how the thread's files stand.
           if let plan = await door.thread(StandInData.files)?.messages.first?.attachments?.first {

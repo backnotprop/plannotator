@@ -296,6 +296,36 @@ final class DrawingNetworkTests: XCTestCase {
     XCTAssertTrue(again.commentBook.owed.isEmpty)
   }
 
+  /// What the person sees as waiting to send in a thread ("Will send" on its row, the away line).
+  private func willSend(_ session: InboxSession) -> [HeldWrite] { session.held.filter { $0.thread == retry.rawValue && session.willSend($0) } }
+
+  func testTheWaitingDrawingIsCountedAndNothingSaysWillSendForIt() async throws {
+    let ways = Ways()
+    let copy = LocalCopy(folder: folder())
+    let cache = folder()
+    let (door, session, made) = try await waiting(ways, copy: copy, cache: cache)
+    XCTAssertEqual(session.commentsCounted(retry).map(\.id), [made.id], "counted before Send")
+    _ = await session.send(thread: retry, words: "")
+    XCTAssertEqual(session.commentsCounted(retry).map(\.id), [made.id], "and after: it is in the list until it goes")
+    XCTAssertTrue(session.commentsToSend(retry).isEmpty, "though no Send carries it")
+    XCTAssertFalse(session.held.filter { $0.thread == retry.rawValue && $0.kind != .seen }.isEmpty, "its drawing and save are on the phone")
+    XCTAssertTrue(willSend(session).isEmpty, "but nothing is queued to send")
+
+    // The computer away altogether: still nothing to say "Will send" for.
+    await door.setOffline(true)
+    await session.refresh()
+    XCTAssertTrue(willSend(session).isEmpty)
+    session.stop()
+
+    // Opened again with the computer away: the relay's refusal is not known yet, and still nothing says it.
+    let (_, reopened, _) = try await relayed(ways, door: door, copy: copy, cache: cache, addFile: false)
+    XCTAssertTrue(willSend(reopened).isEmpty)
+    XCTAssertEqual(reopened.commentsCounted(retry).map(\.id), [made.id])
+    // A Send of words made now is truly queued: that one says it.
+    _ = await reopened.send(thread: retry, words: "Ship it.")
+    XCTAssertEqual(willSend(reopened).map(\.kind), [.reply])
+  }
+
   func testADrawingRefusedForGoodDoesNotGoByItselfAfterAChange() async throws {
     let ways = Ways()
     ways.direct = true
