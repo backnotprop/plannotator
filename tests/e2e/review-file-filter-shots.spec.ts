@@ -170,72 +170,89 @@ async function openFilter(page: Page) {
   await expect(page.locator('input[name="include"]').first()).toBeVisible();
 }
 
-async function allChanges(page: Page) {
-  const row = page.getByText('All changes', { exact: true }).first();
-  if (await row.isVisible().catch(() => false)) await row.click();
-  await page.waitForTimeout(800);
-}
 
-test.setTimeout(240_000);
+test.setTimeout(300_000);
 
-test('file filter screenshots', async ({ browser }) => {
+async function withSession(run: (url: string) => Promise<void>) {
   test.skip(!existsSync(binary), `compile the binary first: ${binary}`);
   const session = await startReview();
   try {
-    if (mode === 'before') {
-      for (const scheme of ['light', 'dark'] as const) {
-        const { context, page } = await open(browser, session.url, scheme, false);
-        await shot(page, `08-main-before-1280-${scheme}`);
-        await context.close();
-      }
-      const { context, page } = await open(browser, session.url, 'light', true);
-      await shot(page, `08-main-before-390-light`);
-      await context.close();
-      return;
-    }
+    await run(session.url);
+  } finally {
+    await session.close();
+  }
+}
+
+if (mode === 'before') {
+  test('main before', async ({ browser }) => withSession(async (url) => {
     for (const scheme of ['light', 'dark'] as const) {
-      const { context, page } = await open(browser, session.url, scheme, false);
+      const { context, page } = await open(browser, url, scheme, false);
+      await shot(page, `08-main-before-1280-${scheme}`);
+      await context.close();
+    }
+    const { context, page } = await open(browser, url, 'light', true);
+    await shot(page, '08-main-before-390-light');
+    await context.close();
+  }));
+} else {
+  test('empty states', async ({ browser }) => withSession(async (url) => {
+    for (const scheme of ['light', 'dark'] as const) {
+      const { context, page } = await open(browser, url, scheme, false);
       await shot(page, `01-no-filter-1280-${scheme}`);
       await openFilter(page);
       await shot(page, `02-open-empty-1280-${scheme}`);
       await context.close();
     }
-    {
-      const { context, page } = await open(browser, session.url, 'light', false);
+  }));
+
+  test('filters applied', async ({ browser }) => withSession(async (url) => {
+    for (const scheme of ['light', 'dark'] as const) {
+      const { context, page } = await open(browser, url, scheme, false);
       await openFilter(page);
       await setField(page, 'include', 'src/**');
-      await allChanges(page);
-      await shot(page, '03-include-src-1280-light');
+      await shot(page, `03-include-src-1280-${scheme}`);
       await setField(page, 'include', '');
       await setField(page, 'exclude', '**/*.{md,mdx}');
-      await shot(page, '04-exclude-md-1280-light');
+      await shot(page, `04-exclude-md-1280-${scheme}`);
       await setField(page, 'include', 'src/**, test/**');
       await setField(page, 'exclude', '**/*.test.ts');
-      await shot(page, '05-both-1280-light');
-      await setField(page, 'exclude', '');
-      await setField(page, 'include', 'src');
-      await shot(page, '06a-bare-src-no-match-1280-light');
-      await setField(page, 'include', '*.md');
-      await shot(page, '06b-star-md-root-only-1280-light');
-      await setField(page, 'include', 'src/{a,');
-      await shot(page, '06c-invalid-brace-1280-light');
-      await setField(page, 'include', 'src/**');
-      await page.locator('button[aria-label^="Filter files"]').first().click();
-      await page.waitForTimeout(400);
-      await shot(page, '06d-active-filter-closed-1280-light');
+      await shot(page, `05-both-1280-${scheme}`);
       await context.close();
     }
+  }));
+
+  test('no match and VS Code habits', async ({ browser }) => withSession(async (url) => {
+    const { context, page } = await open(browser, url, 'light', false);
+    await openFilter(page);
+    await setField(page, 'include', 'src');
+    await shot(page, '06a-bare-src-no-match-1280-light');
+    await setField(page, 'include', '*.md');
+    await shot(page, '06b-star-md-root-only-1280-light');
+    await setField(page, 'include', 'src/{a,');
+    await shot(page, '06c-invalid-brace-1280-light');
+    await context.close();
+  }));
+
+  test('closed with a filter on', async ({ browser }) => withSession(async (url) => {
+    const { context, page } = await open(browser, url, 'light', false);
+    await openFilter(page);
+    await setField(page, 'include', 'src/**');
+    await page.locator('button[aria-label^="Filter files"]').first().click();
+    await shot(page, '06d-active-filter-closed-1280-light');
+    await context.close();
+  }));
+
+  test('phone', async ({ browser }) => withSession(async (url) => {
     for (const scheme of ['light', 'dark'] as const) {
-      const { context, page } = await open(browser, session.url, scheme, true);
+      const { context, page } = await open(browser, url, scheme, true);
       await shot(page, `07a-phone-no-filter-390-${scheme}`);
       await openFilter(page);
+      await shot(page, `07b-phone-open-empty-390-${scheme}`);
       await setField(page, 'include', 'src/**');
-      await shot(page, `07b-phone-include-src-390-${scheme}`);
+      await shot(page, `07c-phone-include-src-390-${scheme}`);
       await setField(page, 'include', 'nothing/**');
-      await shot(page, `07c-phone-no-match-390-${scheme}`);
+      await shot(page, `07d-phone-no-match-390-${scheme}`);
       await context.close();
     }
-  } finally {
-    await session.close();
-  }
-});
+  }));
+}
