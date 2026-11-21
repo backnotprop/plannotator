@@ -399,14 +399,14 @@ function git(args: string[]): string {
   if (r.exitCode !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr.toString().trim()}`);
   return r.stdout.toString();
 }
-const lines = (text: string) => text.split('\n').map((l) => l.trim()).filter(Boolean);
+const gitPaths = (args: string[]) => git([args[0], '-z', ...args.slice(1)]).split('\0').filter(Boolean);
 
 /** The added and removed lines of the changed paths some rule reads lines of. */
 function diffLinesOf(base: string, head: string | null, changed: string[], rules: SliceRules): Record<string, string[]> {
   const wanted = changed.filter((f) => rules.rules.some((r) => r.lines && r.paths.some((p) => glob(p, f))));
   const out: Record<string, string[]> = {};
   for (const file of wanted) {
-    const diff = git(['diff', '-U0', '--no-color', '--no-ext-diff', base, ...(head ? [head] : []), '--', file]);
+    const diff = git(['--literal-pathspecs', 'diff', '-U0', '--no-color', '--no-ext-diff', base, ...(head ? [head] : []), '--', file]);
     out[file] = diff.split('\n').filter((l) => /^[+-]/.test(l) && !/^(\+\+\+|---) /.test(l)).map((l) => l.slice(1));
   }
   return out;
@@ -435,17 +435,17 @@ export function gather(opts: {
 }): Gathered {
   const mergeBase = git(['merge-base', opts.base, opts.head ?? 'HEAD']).trim();
   const changed = opts.head
-    ? lines(git(['diff', '--name-only', '--no-renames', mergeBase, opts.head]))
-    : [...lines(git(['diff', '--name-only', '--no-renames', mergeBase])), ...lines(git(['ls-files', '--others', '--exclude-standard']))];
+    ? gitPaths(['diff', '--name-only', '--no-renames', mergeBase, opts.head])
+    : [...gitPaths(['diff', '--name-only', '--no-renames', mergeBase]), ...gitPaths(['ls-files', '--others', '--exclude-standard'])];
   const head = opts.specsFromTree ? null : opts.head;
-  const specs = head ? lines(git(['ls-tree', '-r', '--name-only', head, '--', 'tests/e2e'])).filter((f) => SPEC_RE.test(f)) : specFiles();
+  const specs = head ? gitPaths(['ls-tree', '-r', '--name-only', head, '--', 'tests/e2e']).filter((f) => SPEC_RE.test(f)) : specFiles();
   const times = head ? (JSON.parse(git(['show', `${head}:tests/e2e/shard-times.json`])) as Record<string, number>) : specTimes();
   // The specs' and helpers' sources, only when a helper changed (they are read to follow its importers).
   const sources: Record<string, string> = {};
   if (changed.some((f) => isHelper(f) && !SPEC_RE.test(f))) {
     const files = head
-      ? lines(git(['ls-tree', '-r', '--name-only', head, '--', 'tests/e2e', 'tests/helpers']))
-      : lines(git(['ls-files', 'tests/e2e', 'tests/helpers'])).filter((f) => existsSync(join(repoRoot, f)));
+      ? gitPaths(['ls-tree', '-r', '--name-only', head, '--', 'tests/e2e', 'tests/helpers'])
+      : gitPaths(['ls-files', 'tests/e2e', 'tests/helpers']).filter((f) => existsSync(join(repoRoot, f)));
     for (const f of files.filter((f) => isHelper(f) && !/\.test\.tsx?$/.test(f))) sources[f] = head ? git(['show', `${head}:${f}`]) : readFileSync(join(repoRoot, f), 'utf8');
     if (!head) for (const f of changed) if (isHelper(f) && !(f in sources) && existsSync(join(repoRoot, f))) sources[f] = readFileSync(join(repoRoot, f), 'utf8');
   }
@@ -467,7 +467,7 @@ export function gather(opts: {
 }
 
 /** The reason the CI slice leaves out SMOKE_SPECS. */
-export const SMOKE_ELSEWHERE = { specs: SMOKE_SPECS, why: 'Browser smoke (browser-smoke.yml) runs it on every PR' };
+export const SMOKE_ELSEWHERE = { specs: SMOKE_SPECS, why: 'Browser smoke (browser-smoke.yml) runs it on every PR that reaches the binary or the app pages' };
 
 /** The plan job's outputs: the shard count, the matrix, whether a shard needs the release-numbered binary, and the shard timeout. */
 export function planOutputs(slice: Slice): string {

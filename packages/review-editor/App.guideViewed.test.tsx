@@ -141,6 +141,7 @@ interface Calls {
 }
 
 let calls: Calls = { progress: [], prViewed: [], reviewedPuts: [] };
+let guidesWhere: string | undefined;
 
 function makeFetch(pr: boolean): typeof fetch {
   // SAFETY: the app only ever calls fetch(input, init).
@@ -172,7 +173,7 @@ function makeFetch(pr: boolean): typeof fetch {
     if (url.pathname === "/api/agents/capabilities") return Response.json({ available: true, providers: [] });
     if (url.pathname === "/api/guides") {
       return Response.json([
-        { id: "g1", label: "PR #7", title: "Parser rework", savedAt: 1, progress: { reviewed: 0, total: 2 }, moved: false },
+        { id: "g1", label: "PR #7", title: "Parser rework", savedAt: 1, progress: { reviewed: 0, total: 2 }, moved: false, ...(guidesWhere ? { where: guidesWhere } : {}) },
       ]);
     }
     if (url.pathname.endsWith("/reviewed") && method === "PUT") {
@@ -235,7 +236,7 @@ async function mount(pr: boolean): Promise<void> {
   await act(async () => {
     root?.render(<App />);
   });
-  await waitFor(() => !!document.body.textContent?.includes("a.ts"), "the diff");
+  await waitFor(() => !!document.querySelector("[data-changes-tree]")?.shadowRoot?.textContent?.includes("a.ts"), "the diff");
   await settle(10);
 }
 
@@ -257,7 +258,7 @@ async function openLiveGuide(): Promise<void> {
   await waitFor(() => tickButtons().length === 2, "the guide's sections");
 }
 
-/** Open the guide takeover, then the saved guide from "Previous guides". */
+/** The Guide button opens the launch panel while no guide is open; open the saved guide from its list. */
 async function openSavedGuide(): Promise<void> {
   const guideButton = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
     .find((b) => b.title === "Open guided review");
@@ -359,5 +360,38 @@ describe.if(hasDom)("Guided Review: ticking a section marks its files viewed", (
       { filePaths: ["src/c.ts"], viewed: true },
       { filePaths: ["src/a.ts", "src/b.ts"], viewed: true },
     ]);
+  });
+});
+
+describe.if(hasDom)("the Guide button with a guide written for this diff", () => {
+  test("with no guide for this diff, opens the launch panel over the centre, not the Agents tab", async () => {
+    await mount(false);
+    const guideButton = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((b) => b.title === "Open guided review");
+    if (!guideButton) throw new Error("Guide button did not render");
+    await act(async () => guideButton.click());
+    await waitFor(() => !!Array.from(document.querySelectorAll("h1")).find((h) => h.textContent === "Start a guided review?"), "the launch panel");
+    expect(document.querySelector("[data-launch-pad]")).toBeNull();
+  });
+
+  test("shows the launch panel with that guide listed, and the guide opens from the list", async () => {
+    guidesWhere = "diff";
+    try {
+      await mount(false);
+      const guideButton = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((b) => b.title === "Open guided review");
+      if (!guideButton) throw new Error("Guide button did not render");
+      await act(async () => guideButton.click());
+      await waitFor(() => !!Array.from(document.querySelectorAll("h1")).find((h) => h.textContent === "Start a guided review?"), "the launch panel");
+      let entry: HTMLButtonElement | undefined;
+      await waitFor(() => {
+        entry = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+          .find((b) => b.textContent?.includes("PR #7") && b.textContent?.includes("Parser rework"));
+        return !!entry;
+      }, "the saved guide entry");
+      expect(tickButtons()).toHaveLength(0);
+      await act(async () => entry!.click());
+      await waitFor(() => tickButtons().length === 2, "the guide's sections");
+    } finally {
+      guidesWhere = undefined;
+    }
   });
 });

@@ -1,222 +1,266 @@
 /**
- * A tag's colour, in its sidebar right-click menu (approval "inbox-thread-tags", step 3; the approved pages are the
- * highlight study's 01-menu and own colour B): the Highlight rows item, which names the colour, and the list it swaps
- * the menu for in place, as Add tag and Snooze do. `‹ Highlight rows` goes back; the five presets, then the person's
- * own colours (the last three, on any tag) and a hue strip with a Hex field ("B · A colour strip and a code field");
- * a line that says what is on; None. A pick shows at once and the menu stays open. Every swatch and None is one
- * radio of the menu (its arrows reach them); the strip and the field take their own keys, and Up and Down step out
- * of them to the swatches and None. Draw inside a Base UI `ContextMenu.Popup`.
+ * A tag's colour, in its sidebar right-click menu (approval "inbox-thread-tags", step 3; the picker: approval
+ * "inbox-tag-colors-picker", `.product/approved/inbox-tag-colors-picker/`; two rows since the owner's 2026-11-16
+ * word): Highlight rows is a checkbox that turns the tag's tint on and off at once, and Color names the tag's colour
+ * (on or off) and swaps the menu for the picker in place, as Add tag and Snooze do. `‹ Color` goes back; twelve quick
+ * swatches (the first row vivid, the second calm), the person's own colours (the last three, on any tag), a
+ * two-dimensional square (ColorSquare.tsx), a hue strip and a Hex field; a line that says what is on. A pick shows at
+ * once, turns Highlight rows on, and the menu stays open.
+ *
+ * Keys: every swatch is one radio of the menu (its arrows reach them); Down from the last swatch goes to the strip,
+ * Up from the strip back to it, Down from the strip to the field and Up from the field to the strip, so the arrows
+ * pass the square by. The square is a Tab stop (Tab from a swatch, Shift+Tab from the strip; Tab goes on in the
+ * picker's order, swatch, square, strip, field, and round): its arrows move it and stay in it. Nothing is written by
+ * moving focus; a move on the square or the strip is written once, when a drag is let go or a key move rests, and only
+ * if the colour changed. Draw inside a Base UI `ContextMenu.Popup`.
  */
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { inboxTagHex, isInboxTagPreset } from '@plannotator/core/inbox-types';
 import { focusAfterSwap } from '@plannotator/ui/components/inbox-thread/SnoozeMenu';
 import { Icon } from '../icons';
-import { hueHex, ownColour, tagColourCaption, tagColourLong, tagColourName, TAG_PRESETS, tintAttrs } from '../tagColours';
+import { swatchInk, tagColourCaption, tagColourLong, tagColourName, tagOwnRecent, tagShownHex, TAG_PRESET_NAMES, TAG_SWATCHES } from '../tagColours';
+import { hexToHsv, hsvToHex } from '../tagColourMap';
+import { ColorSquare } from './ColorSquare';
 import type { TagColourControls } from '../useThreadTagsHost';
 import type { ListTag } from '../threadTags';
 
-/** The tag menu's Highlight rows item: the colour's name at its right ("Green", "Custom"), nothing with None. */
-export function TagColourItem({ colour, onOpen }: { colour: string | null; onOpen: () => void }) {
+/** The tag menu's Color item: a dot of the tag's colour where the icons sit, its name ("Teal", "Custom") at the right. */
+export function TagColourItem({ colour, onOpen }: { colour: string; onOpen: () => void }) {
   return (
-    <Menu.Item className="ib-pmi" label="Highlight rows" closeOnClick={false} onClick={onOpen} data-tag-action="colour">
-      <Icon name="sun" size={15} />
-      Highlight rows
+    <Menu.Item className="ib-pmi" label="Color" closeOnClick={false} onClick={onOpen} data-tag-action="colour">
+      <span className="ib-tagm-dot" aria-hidden="true" style={{ background: tagShownHex(colour) }} />
+      Color
       <span className="ib-zsub">
-        {colour && <span className="ib-tagm-n">{tagColourName(colour)}</span>}
+        <span className="ib-tagm-n">{tagColourName(colour)}</span>
         <Icon name="chevR" size={13} />
       </span>
     </Menu.Item>
   );
 }
 
-const NONE = 'none';
-
 /** The swapped-in list. */
 export function TagColourList({ tag, colours, onBack }: { tag: ListTag; colours: TagColourControls; onBack: () => void }) {
   const body = useRef<HTMLDivElement>(null);
   const strip = useRef<HTMLInputElement>(null);
   const field = useRef<HTMLInputElement>(null);
+  // What the rows show (null: Highlight rows off), and the tag's colour either way.
   const colour = colours.colourOf(tag.id);
-  const own = colour && !isInboxTagPreset(colour) ? colour : null;
-  const [typed, setTyped] = useState(own ?? '');
-  const [hue, setHue] = useState(() => (own ? (ownColour(own)?.hue ?? 30) : 30));
-  // Focus starts on the colour that is on (else the first): the menu keeps the index of Highlight rows across the swap.
+  const picked = colours.pickOf(tag.id);
+  // What the colour shows as: a stored name (an earlier Inbox's) as its calm colour, so accent checks Indigo.
+  const shown = tagShownHex(picked);
+  const quick = TAG_SWATCHES.some((sw) => sw.hex === shown);
+  const own = quick ? null : shown;
+  const [typed, setTyped] = useState(shown);
+  // The square and the strip: hue, saturation, brightness (whole percents). A grey keeps the hue it had. `origin` is
+  // the colour they were set from: back at its place they give that colour exactly, not a code read back from rounded
+  // percents (a swatch never drifts to a near Custom).
+  const [hsv, setHsv] = useState(() => hsvOf(shown, 30));
+  const origin = useRef({ hsv: hsvOf(shown, 30), hex: shown });
+  const hexAt = (at: Hsv) => (at.h === origin.current.hsv.h && at.s === origin.current.hsv.s && at.v === origin.current.hsv.v ? origin.current.hex : hsvToHex(at.h, at.s / 100, at.v / 100));
+  // Focus starts on the colour that is on: the menu keeps the index of the Color item across the swap.
   useLayoutEffect(() => focusAfterSwap(() => body.current?.querySelector<HTMLElement>('[role="menuitemradio"][aria-checked="true"]') ?? body.current?.querySelector<HTMLElement>('[role="menuitemradio"]')), []);
-  // The strip moved by keys or a screen reader's swipe is kept once it rests, so each step is not its own colour
-  // among the recent ones; dragged, it is kept when let go.
+  // A move on the square or the strip by keys (or a screen reader's swipe) is written once it rests, so each step is
+  // not its own colour among the recent ones; dragged, once it is let go.
   const dragging = useRef(false);
-  const stripKeep = useRef<{ timer: ReturnType<typeof setTimeout>; hex: string } | null>(null);
-  const keepStrip = (hex: string, wait: number) => {
-    if (stripKeep.current) clearTimeout(stripKeep.current.timer);
-    stripKeep.current = null;
-    if (wait === 0) return pick(hex);
-    stripKeep.current = { hex, timer: setTimeout(() => pick(hex), wait) };
+  const resting = useRef<{ timer: ReturnType<typeof setTimeout>; hex: string } | null>(null);
+  const stopResting = () => {
+    if (resting.current) clearTimeout(resting.current.timer);
+    resting.current = null;
   };
-  // Closing the menu keeps a strip move still resting; a colour only tried (Escape in the field) goes with it.
+  const pickedRef = useRef(shown);
+  pickedRef.current = shown;
+  // The end of a move: written if it changed the colour; else the rows go back to it (a tap on a thumb writes nothing).
+  const settle = (hex: string) => {
+    stopResting();
+    if (hex === pickedRef.current) colours.preview(tag, undefined);
+    else pick(hex);
+  };
+  const settleLater = (hex: string, wait: number) => {
+    stopResting();
+    resting.current = { hex, timer: setTimeout(() => settle(hex), wait) };
+  };
+  // Closing the menu writes a move still resting; a colour only tried (Escape in the field) goes with it.
   useEffect(
     () => () => {
-      const pending = stripKeep.current;
+      const pending = resting.current;
       if (pending) {
         clearTimeout(pending.timer);
-        colours.set(tag, pending.hex);
+        if (pending.hex !== pickedRef.current) colours.set(tag, pending.hex);
       }
       colours.preview(tag, undefined);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- on close only; `set` and `preview` reach the live host
     [],
   );
-  // The own colours: the recent ones, with the one on first when it is not among them.
-  const recent = own && !colours.recent.includes(own) ? [own, ...colours.recent].slice(0, 3) : colours.recent.slice(0, 3);
+  // The own colours: the recent ones (never a quick swatch), with the tag's own first when it is not among them.
+  const mine = tagOwnRecent(colours.recent);
+  const recent = own && !mine.includes(own) ? [own, ...mine].slice(0, 3) : mine.slice(0, 3);
   // A code typed and not yet kept: leaving the field keeps it. Once kept (or another colour picked), leaving does nothing.
   const typedOpen = useRef(false);
-  const pick = (next: string | null) => {
+  const pick = (next: string) => {
     typedOpen.current = false;
-    if (stripKeep.current) clearTimeout(stripKeep.current.timer);
-    stripKeep.current = null;
+    stopResting();
     colours.set(tag, next);
-    if (next && !isInboxTagPreset(next)) {
-      setTyped(next);
-      setHue(ownColour(next)?.hue ?? hue);
-    }
+    const hex = tagShownHex(next);
+    pickedRef.current = hex;
+    setTyped(hex);
+    // A move on the square kept as is: the thumb stays where it was. A colour from elsewhere sets them, and is their origin.
+    setHsv((was) => {
+      const at = hexAt(was) === hex ? was : hsvOf(hex, was.h);
+      origin.current = { hsv: at, hex };
+      return at;
+    });
   };
-  const radios = () => [...(body.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? [])];
-  // Up and Down leave the strip and the field for the swatch above or None below; every other key is theirs.
+  // A move on the square or the strip: shown on the rows at once, settled when let go (`wait` 0) or once it rests.
+  const tryHsv = (next: Hsv, wait: number | null) => {
+    setHsv(next);
+    const hex = hexAt(next);
+    setTyped(hex);
+    colours.preview(tag, hex);
+    if (wait === 0) settle(hex);
+    else if (wait !== null) settleLater(hex, wait);
+  };
+  // Up and Down leave the strip and the field (to the swatch above, the field below, the strip above); every other key is theirs.
   const stepOut = (event: KeyboardEvent<HTMLInputElement>, up: () => HTMLElement | null | undefined, down: () => HTMLElement | null | undefined) => {
     if (event.key === 'Escape') return;
     event.stopPropagation();
-    const to = event.key === 'ArrowUp' ? up() : event.key === 'ArrowDown' ? down() : null;
-    if (!to) return;
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
     event.preventDefault();
-    to.focus({ preventScroll: true });
+    (event.key === 'ArrowUp' ? up() : down())?.focus({ preventScroll: true });
   };
-  const lastSwatch = () => radios().filter((r) => r.getAttribute('data-colour') !== NONE).at(-1);
-  const noneItem = () => body.current?.querySelector<HTMLElement>(`[data-colour="${NONE}"]`);
+  const lastSwatch = () => [...(body.current?.querySelectorAll<HTMLElement>('.ib-tagc-swb') ?? [])].at(-1);
+  const ownName = (hex: string) => (isInboxTagPreset(picked) && hex === shown ? TAG_PRESET_NAMES[picked] : tagColourLong(hex));
   return (
     <div ref={body} data-tag-colour-list="">
-      <Menu.Item className="ib-pmi ib-zb" label="Highlight rows" closeOnClick={false} onClick={onBack} data-tag-colour-back="">
+      <Menu.Item className="ib-pmi ib-zb" label="Color" closeOnClick={false} onClick={onBack} data-tag-colour-back="">
         <Icon name="chevL" size={14} />
-        Highlight rows
+        Color
       </Menu.Item>
       <Menu.Separator className="ib-pm-sep" />
-      <Menu.RadioGroup value={colour ?? NONE} onValueChange={(next: string) => pick(next === NONE ? null : next)} aria-label={`Highlight colour for ${tag.name}`}>
-        <div className="ib-tagc-sw">
-          {TAG_PRESETS.map((preset) => (
-            <Swatch key={preset.id} value={preset.id} name={preset.name} on={colour === preset.id} />
-          ))}
-        </div>
+      {/* The checked swatch pressed again reports itself too: written only while Highlight rows is off (it turns it on). */}
+      <Menu.RadioGroup value={shown} onValueChange={(next: string) => (next !== shown || colour === null) && pick(next)} aria-label={`Color for ${tag.name}`}>
+        {[TAG_SWATCHES.slice(0, 6), TAG_SWATCHES.slice(6)].map((line, i) => (
+          <div key={i} className={`ib-tagc-sw${i > 0 ? ' ib-tagc-sw2' : ''}`}>
+            {line.map((sw) => (
+              <Swatch key={sw.hex} value={sw.hex} name={sw.name} on={shown === sw.hex} toStrip={() => strip.current} />
+            ))}
+          </div>
+        ))}
         {recent.length > 0 && (
           <div className="ib-tagc-sw ib-tagc-sw2">
             {recent.map((hex) => (
-              <Swatch key={hex} value={hex} name={tagColourLong(hex)} on={colour === hex} />
+              <Swatch key={hex} value={hex} name={ownName(hex)} on={shown === hex} toStrip={() => strip.current} />
             ))}
           </div>
         )}
-        <div className="ib-tagc-hue">
-          <input
-            ref={strip}
-            type="range"
-            min={0}
-            max={359}
-            value={hue}
-            aria-label="Colour, any hue"
-            aria-valuetext={`Hue ${hue}`}
-            data-tag-colour-hue=""
-            onChange={(event) => {
-              const next = Number(event.target.value);
-              setHue(next);
-              const hex = hueHex(next);
-              setTyped(hex);
-              colours.preview(tag, hex);
-              // Moved without a pointer (keys, a screen reader's swipe): kept once it rests.
-              if (!dragging.current) keepStrip(hex, 800);
-            }}
-            // The rows follow the strip while it moves; the colour is kept when it is let go.
-            onPointerDown={() => (dragging.current = true)}
-            onPointerUp={(event) => {
-              dragging.current = false;
-              keepStrip(hueHex(Number(event.currentTarget.value)), 0);
-            }}
-            onPointerCancel={(event) => {
-              dragging.current = false;
-              keepStrip(hueHex(Number(event.currentTarget.value)), 0);
-            }}
-            // Leaving the strip keeps a move still resting.
-            onBlur={() => stripKeep.current && keepStrip(stripKeep.current.hex, 0)}
-            onKeyUp={(event) => {
-              if (['ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) keepStrip(hueHex(Number(event.currentTarget.value)), 800);
-            }}
-            onKeyDown={(event) => stepOut(event, lastSwatch, () => field.current)}
-          />
-        </div>
-        <label className="ib-tagc-hex">
-          <span className="ib-tagc-hexl">Hex</span>
-          <input
-            ref={field}
-            value={typed}
-            placeholder="#rrggbb"
-            maxLength={7}
-            spellCheck={false}
-            autoComplete="off"
-            aria-label="Hex colour"
-            data-tag-colour-hex=""
-            onChange={(event) => {
-              setTyped(event.target.value);
-              typedOpen.current = true;
-              // A part-typed code does nothing; a whole one shows at once.
-              const hex = inboxTagHex(event.target.value);
-              if (hex && /^#?[0-9a-f]{6}$/i.test(event.target.value.trim())) colours.preview(tag, hex);
-            }}
-            onBlur={() => {
-              if (!typedOpen.current) return;
-              const hex = inboxTagHex(typed);
-              if (hex && hex !== colour) pick(hex);
-              else {
-                typedOpen.current = false;
-                colours.preview(tag, undefined);
-              }
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                event.stopPropagation();
-                const hex = inboxTagHex(typed);
-                if (hex) pick(hex);
-                return;
-              }
-              stepOut(event, () => strip.current, noneItem);
-            }}
-          />
-        </label>
-        <div className="ib-tagc-cap" data-tag-colour-caption="" aria-live="polite">
-          {tagColourCaption(colour, tag.name)}
-        </div>
-        <Menu.Separator className="ib-pm-sep" />
-        <Menu.RadioItem
-          value={NONE}
-          className="ib-pmi"
-          label="None"
-          closeOnClick={false}
-          data-colour={NONE}
-          onKeyDown={(event: KeyboardEvent<HTMLElement>) => {
-            if (event.key !== 'ArrowUp') return;
-            event.preventDefault();
-            event.stopPropagation();
-            field.current?.focus({ preventScroll: true });
-          }}
-        >
-          <Icon name="x" size={15} />
-          None
-          {colour === null ? <Icon name="check" size={15} className="ib-pmi-check ib-tagm-tick" /> : <span className="ib-tagm-slot" aria-hidden="true" />}
-        </Menu.RadioItem>
       </Menu.RadioGroup>
+      <ColorSquare
+        hue={hsv.h}
+        s={hsv.s}
+        v={hsv.v}
+        onMove={(s, v, by) => tryHsv({ ...hsv, s, v }, by === 'key' ? 800 : null)}
+        onLetGo={(s, v) => tryHsv({ ...hsv, s, v }, 0)}
+        onBlur={() => resting.current && settle(resting.current.hex)}
+      />
+      <div className="ib-tagc-hue">
+        <input
+          ref={strip}
+          type="range"
+          min={0}
+          max={359}
+          value={Math.round(hsv.h)}
+          aria-label="Hue"
+          aria-valuetext={`Hue ${Math.round(hsv.h)}`}
+          data-tag-colour-hue=""
+          onChange={(event) => {
+            // Moved without a pointer (keys, a screen reader's swipe): settled once it rests.
+            tryHsv({ ...hsv, h: Number(event.target.value) }, dragging.current ? null : 800);
+          }}
+          // The rows follow the strip while it moves; it is settled when let go (a tap on the thumb changes nothing).
+          onPointerDown={() => (dragging.current = true)}
+          onPointerUp={(event) => {
+            dragging.current = false;
+            tryHsv({ ...hsv, h: Number(event.currentTarget.value) }, 0);
+          }}
+          onPointerCancel={(event) => {
+            dragging.current = false;
+            tryHsv({ ...hsv, h: Number(event.currentTarget.value) }, 0);
+          }}
+          // Leaving the strip settles a move still resting.
+          onBlur={() => resting.current && settle(resting.current.hex)}
+          onKeyDown={(event) => stepOut(event, lastSwatch, () => field.current)}
+        />
+      </div>
+      <label className="ib-tagc-hex">
+        <span className="ib-tagc-hexl">Hex</span>
+        <input
+          ref={field}
+          value={typed}
+          placeholder="#rrggbb"
+          spellCheck={false}
+          autoComplete="off"
+          aria-label="Hex color"
+          data-tag-colour-hex=""
+          onChange={(event) => {
+            // Trimmed first, then held to a code's length (with or without "#"): a pasted "  #00FF88  " is kept whole. A
+            // key typed into a whole code is refused, as a length limit would (it never pushes the last letter out).
+            const value = event.target.value.trim();
+            const limit = value.startsWith('#') ? 7 : 6;
+            const full = typed.length >= (typed.startsWith('#') ? 7 : 6);
+            if (value.length > limit && full) return;
+            const code = value.slice(0, limit);
+            setTyped(code);
+            typedOpen.current = true;
+            // A part-typed code does nothing; a whole one shows at once.
+            const hex = inboxTagHex(code);
+            if (hex && /^#?[0-9a-f]{6}$/i.test(code)) {
+              colours.preview(tag, hex);
+              setHsv((was) => hsvOf(hex, was.h));
+            }
+          }}
+          onBlur={() => {
+            if (!typedOpen.current) return;
+            const hex = inboxTagHex(typed);
+            if (hex && hex !== shown) pick(hex);
+            else {
+              typedOpen.current = false;
+              colours.preview(tag, undefined);
+            }
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              event.stopPropagation();
+              const hex = inboxTagHex(typed);
+              if (hex) pick(hex);
+              return;
+            }
+            stepOut(event, () => strip.current, () => null);
+          }}
+        />
+      </label>
+      <div className="ib-tagc-cap" data-tag-colour-caption="" aria-live="polite">
+        {tagColourCaption(colour, tag.name)}
+      </div>
     </div>
   );
 }
 
-/** One round swatch: a radio of the menu, its name in its label and tooltip, a check when it is on. */
-function Swatch({ value, name, on }: { value: string; name: string; on: boolean }) {
-  const attrs = tintAttrs(value);
+type Hsv = { h: number; s: number; v: number };
+/** A colour on the square and strip: whole percents; a grey (no hue) keeps `hue`. */
+function hsvOf(hex: string, hue: number): Hsv {
+  const { h, s, v } = hexToHsv(hex);
+  // Whole degrees, as the strip has them, so a colour's place reads back as its origin (and gives it exactly).
+  return { h: s > 0 ? Math.round(h) % 360 : hue, s: Math.round(s * 100), v: Math.round(v * 100) };
+}
+
+/**
+ * One round swatch, the picked colour itself: a radio of the menu, its name in its label and tooltip, a check when it
+ * is on. Down from the last swatch goes on to the strip (`toStrip`), past the square; Tab to the square.
+ */
+function Swatch({ value, name, on, toStrip }: { value: string; name: string; on: boolean; toStrip: () => HTMLElement | null }) {
+  const style: CSSProperties = { background: value, color: swatchInk(value) };
   return (
     <Menu.RadioItem
       value={value}
@@ -226,17 +270,25 @@ function Swatch({ value, name, on }: { value: string; name: string; on: boolean 
       aria-label={name}
       title={name}
       data-colour={value}
-      data-tint={attrs['data-tint']}
-      style={attrs.style as CSSProperties | undefined}
+      data-on={on ? '' : undefined}
+      style={style}
       onKeyDown={(event: KeyboardEvent<HTMLElement>) => {
-        // Down from the last swatch goes on to the hue strip.
-        if (event.key !== 'ArrowDown') return;
         const list = event.currentTarget.closest('[data-tag-colour-list]');
-        const swatches = [...(list?.querySelectorAll<HTMLElement>('.ib-tagc-swb') ?? [])];
-        if (swatches.at(-1) !== event.currentTarget) return;
+        // Tab goes on to the square, Shift+Tab back to the field, as from the strip and the field (a menu item's Tab
+        // would close the menu).
+        if (event.key === 'Tab') {
+          const to = list?.querySelector<HTMLElement>(event.shiftKey ? '[data-tag-colour-hex]' : '[data-tag-colour-square]');
+          if (!to) return;
+          event.preventDefault();
+          event.stopPropagation();
+          to.focus({ preventScroll: true });
+          return;
+        }
+        if (event.key !== 'ArrowDown') return;
+        if ([...(list?.querySelectorAll<HTMLElement>('.ib-tagc-swb') ?? [])].at(-1) !== event.currentTarget) return;
         event.preventDefault();
         event.stopPropagation();
-        list?.querySelector<HTMLElement>('[data-tag-colour-hue]')?.focus({ preventScroll: true });
+        toStrip()?.focus({ preventScroll: true });
       }}
     >
       {on && <Icon name="check" size={15} />}

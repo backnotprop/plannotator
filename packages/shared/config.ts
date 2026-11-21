@@ -16,6 +16,8 @@ import {
   openSync,
   writeSync,
   closeSync,
+  fsyncSync,
+  utimesSync,
   statSync,
   unlinkSync,
   renameSync,
@@ -172,7 +174,6 @@ export interface PlannotatorConfig {
   reviewDefaults?: ReviewDefaults;
   /** Optional analysis layers used by code review. */
   reviewAnalysis?: {
-    /** Named-entity semantic diff. Enabled by default for backwards compatibility. */
     semanticDiff?: boolean;
     /** Call-stack impact analysis powered by the optional CallDiff runtime. */
     callFlow?: boolean;
@@ -403,7 +404,7 @@ export interface PlannotatorConfig {
     allowedOrigin?: string | null;
   };
   /**
-   * The Plannotator Inbox's question sound ("Ding-dong"), set from the Inbox
+   * The Plannotator Inbox's sound ("Ding-dong"), set from the Inbox
    * page (its Settings row and its one-time dialog), kept here for the same
    * reason as `inboxNotifications`: the Inbox's port, and so its origin, can
    * change. `enabled`: ring at all (unset: on). `volume`: 10 to 100 (unset:
@@ -552,6 +553,13 @@ export interface PlannotatorConfig {
    */
   inboxBro?: boolean;
   /**
+   * Agent status (owner, 2026-11-18; off by default): the status mark on every agent's icon in the Inbox (working,
+   * waiting on you in the Inbox or in the agent; no idle mark). Off or unset: only agents in a Rex pane
+   * carry one, as before. Written by Settings → General → Appearance and the list's ⋮ menu
+   * (`POST /api/inbox/settings` `{ agent_status: { on } }`), read on every list.
+   */
+  inboxAgentStatus?: boolean;
+  /**
    * Floating reply drafts (approval "inbox-reply-floaters"; the owner, 2026-11-08: off by default). On: a reply draft
    * set aside or left behind floats in the Inbox's bottom right corner. Off or unset: it stays in Drafts. Written by
    * Settings → Capabilities → Experimental (`POST /api/inbox/settings` `{ float_drafts: { on } }`), read on every request.
@@ -567,7 +575,7 @@ export interface PlannotatorConfig {
   /**
    * The warning before a Mark read that sets questions aside (the owner's ask, 2026-11-10). On unless false: false
    * once the person ticked "Don't show this again" in it. Written by the warning and by Settings → General → When an
-   * agent asks you (`POST /api/inbox/settings` `{ mark_read_warning: { on } }`), read on every request.
+   * agent sends you something (`POST /api/inbox/settings` `{ mark_read_warning: { on } }`), read on every request.
    */
   inboxMarkReadWarning?: boolean;
   /**
@@ -606,8 +614,9 @@ export interface PlannotatorConfig {
    * each new pull request against them. Empty or unset `rules`: nothing runs.
    * Written by the dialog (`POST /api/inbox/pulls/risk`), read on every request.
    * The rules are the person's own words: never logged, never sent in telemetry.
+   * `branches` (Branch reviews): rank the branches agents report too; off unless `true`.
    */
-  inboxPullRisk?: { rules?: string; provider?: string | null; model?: string | null };
+  inboxPullRisk?: { rules?: string; provider?: string | null; model?: string | null; branches?: boolean };
   /**
    * Chapter diagrams, under Code review (Settings → Capabilities → Chapter diagrams): on unless `false`. On, the
    * guide brief and the review skills offer agents one diagram per chapter (`sections[].diagram`). Off, no agent
@@ -632,12 +641,39 @@ export interface PlannotatorConfig {
    * no read of the library. Read on every request.
    */
   inboxPlans?: boolean;
+  /** The Spaces home's view, the person's choice (`POST /api/plans/view`): "cards" unless they chose "list". */
+  inboxSpacesView?: "cards" | "list";
+  /**
+   * Share this space (packages/shared/spaces/): the Share button on a plan's page in the Inbox, which puts a copy of
+   * the plan in a hosted space. Off unless set to `true` here (config only: no Settings row, no command); it also
+   * needs `inboxPlans`, and `PLANNOTATOR_SHARE=disabled` (or `share: "disabled"`) turns it off with every other
+   * share. Off: no share route, no button, no call to any host.
+   */
+  inboxSpaceShare?: boolean;
+  /**
+   * The Spaces origin a plan is shared to (`resolveSpacesUrl` in packages/shared/spaces/url.ts). Overridden by the
+   * PLANNOTATOR_SPACES_URL env var. `https`, or `http` on this computer only.
+   */
+  spacesUrl?: string;
   /**
    * System in the Inbox (approval "system-inbox"): a drawing of each project's code, kept current by an agent.
    * Shown only while Code review is on. Off unless turned on; config only until Settings → Capabilities' switch
    * lands. Read on every request.
    */
   inboxSystem?: boolean;
+  /**
+   * A preview of the Inbox's second thread pane ("Open to the side" in a row's menu): off unless `true`. Config only, no
+   * Settings row; the settings read carries `split_view` only while on. Read on every request.
+   */
+  inboxSplitView?: boolean;
+  /**
+   * Branch reviews in the Inbox (docs/agent-guides/inbox-files-and-guides.md, "Branch reviews"): agents report a branch
+   * ready for review (`send_message`'s `branch`), each report one review thread per project and branch in Reviews, and
+   * the by-hand list of branches nobody reported. Off unless `true`, and only while Code review is on. Config only, no
+   * Settings row; the Reviews read (`GET /api/inbox/reviews`) carries `branch_reviews` only while on. Read on every
+   * request.
+   */
+  inboxBranchReviews?: boolean;
   /**
    * Who the one-time "themes" dialog is for (approval "inbox-theme-chooser";
    * packages/shared/inbox/theme-chooser.ts). Written only by the Inbox server,
@@ -673,7 +709,7 @@ export interface PlannotatorConfig {
     notNowAt?: string;
     shownLoad?: string;
     agentNote?: { shownFor?: string[] };
-    waitingSince?: { theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; agent_rules?: string; list_view?: string; personal_agents?: string; priority?: string };
+    waitingSince?: { theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; agent_rules?: string; list_view?: string; view_choice?: string; personal_agents?: string; priority?: string; routines?: string };
     /** Code review's day-0 offer (approval "code-review-offer-card"): claimed once, as the Board's. */
     code_review?: { shownAt?: string; key?: string };
     board?: { shownAt?: string; key?: string };
@@ -688,11 +724,16 @@ export interface PlannotatorConfig {
     priority?: { shownAt?: string; key?: string; dueAt?: string };
     /** The Bro mode offer (approval "bro-mode"): claimed once, as the Board's. */
     bro?: { shownAt?: string; key?: string };
+    /** The Routines intro (reveals.ts `routines`): claimed once, as the Board's; its "Turn on" writes `inboxScheduledThreads`. */
+    routines?: { shownAt?: string; key?: string };
     /** The grill-me tip (shared/inbox/grill-me-tip.ts): claimed once, as the Board's; nothing to turn on. */
     grill_me_tip?: { shownAt?: string; key?: string };
     /** The "Star the repo" ask's claim in the line (config.json `starAsk` is its record across surfaces). */
     star?: { shownAt?: string; key?: string };
+    /** List view's two-choice dialog, retired (its entry left the line): kept as written, read by nothing. */
     list_view?: { shownAt?: string; key?: string };
+    /** "Which view do you prefer?" (reveals.ts `view_choice`): claimed once, as the Board's; a pick sets the browser's view. */
+    view_choice?: { shownAt?: string; key?: string };
     /**
      * The tab icon dialog (an update-day dialog): `dueAt` for someone who used an earlier Inbox, `freshAt` for a fresh
      * install (never due), both written at the first release start of the version that ships it; then claimed once.
@@ -704,11 +745,15 @@ export interface PlannotatorConfig {
     launch_tip?: { shownAt?: string; key?: string; launchedAt?: string };
     /** The Sidebar tip (packages/shared/inbox/sidebar-tip.ts): stamped once when shown, outside the line. */
     sidebar_tip?: { shownAt?: string; key?: string };
+    /** The Group tip (packages/shared/inbox/band-tip.ts): stamped once when shown, or when a band's menu was opened first. */
+    band_tip?: { shownAt?: string; key?: string; usedAt?: string };
   };
   /** `enabled` / `volume` are settings (config.json); `dialogDueFor` / `dialogShownFor` are machine state (state.json). */
   inboxSound?: {
     enabled?: boolean;
     volume?: number;
+    /** What rings it: "messages" (any new agent message; the default when absent) or "asks" (only an agent asking). */
+    when?: "messages" | "asks";
     dialogDueFor?: string;
     dialogShownFor?: string;
   };
@@ -792,9 +837,11 @@ export interface PlannotatorConfig {
    * is not a plain model name is ignored. `scratchDir`: Settings → Agents'
    * "Scratch folders", where "New scratch folder" makes each new folder (an
    * absolute path; default `<dataDir>/scratch`). Moving it applies to new
-   * folders only.
+   * folders only. `startIn`: Settings → Agents' "Start new agents in": `rex` starts each new agent that can run in
+   * Rex in a tab of Rex (superlogical.com/rex) when Rex is on this computer; anything else (the default) runs it in
+   * the background.
    */
-  inboxLaunch?: { enabled?: boolean; fullPermissions?: boolean; model?: string; settingsFile?: string; scratchDir?: string };
+  inboxLaunch?: { enabled?: boolean; fullPermissions?: boolean; model?: string; settingsFile?: string; scratchDir?: string; startIn?: "inbox" | "rex" };
   /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
@@ -859,7 +906,7 @@ export interface PlannotatorConfig {
    */
   cursorSandbox?: boolean;
   /**
-   * Let Claude Code agent jobs (code review, Code Tour, Guided Review) run
+   * Let Claude Code agent jobs (code review, Guided Review) run
    * under the user's own Claude Code sandbox setting. When true (default),
    * Plannotator passes nothing sandbox-related and the user's settings decide.
    * Set to false on systems where Claude Code's sandbox cannot start (Linux
@@ -1222,9 +1269,10 @@ function loadSettings(options: { quiet?: boolean }): Record<string, unknown> {
 }
 
 /**
- * config.json as saveConfig reads it before a merge. A missing file (or one
- * holding only whitespace) is an empty config, so a first save creates it as
- * before. A file that exists but cannot be read, or is not a JSON object, is
+ * config.json as saveConfig reads it before a merge. A missing file, or one
+ * holding only whitespace, is an empty config: there is nothing in it to lose,
+ * so a save writes it (writeConfigAtomic never leaves one empty). A file that
+ * exists but cannot be read, or whose content is not a JSON object, is
  * refused: merging onto loadConfig's `{}` and writing would replace every
  * setting in it with the one key being saved.
  */
@@ -1367,12 +1415,42 @@ function releaseConfigLock(lockPath: string): void {
   } catch { /* already gone (stale takeover by another writer): nothing to do */ }
 }
 
+/** Rename errors Windows gives while another program (antivirus, a sync client, an indexer) holds the file for a moment. */
+const RENAME_RETRY_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
+/** Backoff between rename tries: about 2 s in all. The config lock is touched before each wait so it never looks stale meanwhile. */
+const RENAME_RETRY_DELAYS_MS = [10, 20, 40, 80, 160, 320, 500, 500, 500];
+/** fsync errors that mean "this filesystem has no fsync", not "the data did not reach the disk". */
+const FSYNC_UNSUPPORTED_CODES = new Set(["EINVAL", "ENOTSUP", "EOPNOTSUPP"]);
+
+let renameForWrite: (from: string, to: string) => void = renameSync;
+let fsyncForWrite: (handle: number) => void = fsyncSync;
+let sleepForRetry: (ms: number) => void = sleepSync;
 /**
- * Write config.json in one step so a concurrent reader never observes a
- * half-written file: readers deliberately take no lock, and loadConfig treats
- * malformed JSON as an empty config, which would silently present as "all
- * settings reset". Writes through an existing symlink rather than replacing
- * it, so a dotfile-managed config.json keeps its link.
+ * Test-only seam: replaces the rename, fsync and retry wait writeConfigAtomic uses, so a test can make them fail
+ * (or skip the real waits) without a broken disk. Null, or a field left out, restores the real one.
+ */
+export function __setConfigWriteForTest(
+  seams: { rename?: (from: string, to: string) => void; fsync?: (handle: number) => void; sleep?: (ms: number) => void } | null,
+): void {
+  renameForWrite = seams?.rename ?? renameSync;
+  fsyncForWrite = seams?.fsync ?? fsyncSync;
+  sleepForRetry = seams?.sleep ?? sleepSync;
+}
+
+/**
+ * Write config.json (or state.json) in one step so a concurrent reader never observes a half-written file: readers
+ * deliberately take no lock, and loadConfig treats malformed JSON as an empty config, which would silently present
+ * as "all settings reset". Writes through an existing symlink rather than replacing it, so a dotfile-managed
+ * config.json keeps its link: the temp file goes beside the link's target, in the target's folder, so the rename
+ * never crosses a device.
+ *
+ * The file itself is never written in place. A plain write empties it first, so one that stopped partway (disk full,
+ * an I/O error, the process killed) left config.json empty, and the next save then wrote only its own keys. The temp
+ * file is fsynced before the rename, and an fsync error (a full disk or quota on a network home can show up only
+ * there) stops the write before the rename, unless it only says the filesystem has no fsync. A rename that fails
+ * with a Windows lock error is retried for about 2 s; when the temp file cannot be written, synced or renamed (a
+ * folder that is not writable, a full disk, a file still held after the retries), this throws and the file keeps
+ * its old bytes, and the caller reports the save as failed.
  */
 function writeConfigAtomic(configPath: string, contents: string): void {
   let targetPath = configPath;
@@ -1386,16 +1464,45 @@ function writeConfigAtomic(configPath: string, contents: string): void {
     if (existsSync(targetPath)) mode = statSync(targetPath).mode & 0o777;
   } catch { /* new file: keep the private default */ }
   const tempPath = `${targetPath}.${process.pid}.${Math.random().toString(36).slice(2, 10)}.tmp`;
+  let handle: number | null = null;
   try {
-    writeFileSync(tempPath, contents, { encoding: "utf-8", mode });
-    renameSync(tempPath, targetPath);
-  } catch {
+    handle = openSync(tempPath, "wx", mode);
+    writeFileSync(handle, contents, "utf-8");
+    // On disk before the rename, so a crash right after it cannot leave a renamed but empty file, and a write-back
+    // error (ENOSPC, EDQUOT, EIO) that only fsync reports never renames a short temp file over config.json.
+    try {
+      fsyncForWrite(handle);
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException)?.code;
+      if (!code || !FSYNC_UNSUPPORTED_CODES.has(code)) throw e;
+    }
+    closeSync(handle);
+    handle = null;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        renameForWrite(tempPath, targetPath);
+        break;
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException)?.code;
+        if (attempt >= RENAME_RETRY_DELAYS_MS.length || !code || !RENAME_RETRY_CODES.has(code)) throw e;
+        // The wait runs under saveConfig's lock: keep it fresh so no other writer takes it over as stale.
+        try {
+          const now = new Date();
+          utimesSync(getConfigLockPath(), now, now);
+        } catch { /* no lock held (writing unlocked): nothing to refresh */ }
+        sleepForRetry(RENAME_RETRY_DELAYS_MS[attempt]);
+      }
+    }
+  } catch (e) {
+    if (handle !== null) {
+      try {
+        closeSync(handle);
+      } catch { /* already closed */ }
+    }
     try {
       unlinkSync(tempPath);
     } catch { /* nothing to clean up */ }
-    // Same-directory rename should not fail, but a write that lands is better
-    // than a settings change that is lost to an exotic filesystem.
-    writeFileSync(targetPath, contents, "utf-8");
+    throw e;
   }
 }
 
@@ -1728,12 +1835,13 @@ function parseLaunchFlag(value: unknown): boolean | undefined {
  * in `enabled` or as `inboxLaunch` itself, is off. A config.json that does not parse reads as `{}` (`loadConfig`),
  * so as the default. `model` only when it is a plain model name;
  * `settingsFile` (Claude settings file) as typed, read at each start;
- * `scratchDir` only when it is an absolute path other than `/` (null: the default, `<dataDir>/scratch`).
+ * `scratchDir` only when it is an absolute path other than `/` (null: the default, `<dataDir>/scratch`);
+ * `startIn` `rex` only when it says exactly that (anything else: `inbox`).
  */
 export function resolveInboxLaunch(
   config: PlannotatorConfig,
   platform: NodeJS.Platform = process.platform,
-): { enabled: boolean; fullPermissions: boolean | null; model: string | null; settingsFile: string | null; scratchDir: string | null } {
+): { enabled: boolean; fullPermissions: boolean | null; model: string | null; settingsFile: string | null; scratchDir: string | null; startIn: "inbox" | "rex" } {
   const raw: unknown = config.inboxLaunch;
   const value = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as NonNullable<PlannotatorConfig["inboxLaunch"]>) : {};
   // `"inboxLaunch": false` (or "off") by hand: the whole feature off.
@@ -1745,6 +1853,7 @@ export function resolveInboxLaunch(
     model: typeof value.model === "string" && LAUNCH_MODEL.test(value.model) ? value.model : null,
     settingsFile: typeof value.settingsFile === "string" && value.settingsFile.trim() ? value.settingsFile.trim() : null,
     scratchDir: typeof value.scratchDir === "string" && isAbsolute(value.scratchDir) && resolve(value.scratchDir) !== resolve("/") ? resolve(value.scratchDir) : null,
+    startIn: value.startIn === "rex" ? "rex" : "inbox",
   };
 }
 

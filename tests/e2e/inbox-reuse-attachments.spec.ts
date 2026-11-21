@@ -700,12 +700,28 @@ test('a tab that read the thread before the agent changed the file adds what it 
   const path = art('stale.png', png(400, 300, [200, 200, 200]));
   const v1 = sha(readFileSync(path));
   const { thread_id } = await threadWithFiles({ attachments: [path] });
+  // Every read of the thread's files goes through here: answered until `held`, refused after. A read already on its
+  // way when the tab is held lands before the agent changes the file, so it can never bring the newer version in.
+  const reads = /\/api\/inbox\/threads\/[^/]+\/attachments/;
+  let held = false;
+  let inFlight = 0;
+  await page.route(reads, async (route) => {
+    if (held) return route.abort();
+    inFlight++;
+    try {
+      await route.fulfill({ response: await route.fetch() });
+    } catch {
+      await route.abort().catch(() => {});
+    } finally {
+      inFlight--;
+    }
+  });
   await open(page, thread_id);
   await tile(page, 'stale.png').scrollIntoViewIfNeeded();
   await expect(tile(page, 'stale.png')).not.toContainText('Changed');
   // This tab misses every later read of the thread's files: what it shows now is what it keeps showing.
-  const reads = /\/api\/inbox\/threads\/[^/]+\/attachments/;
-  await page.route(reads, (route) => route.abort());
+  held = true;
+  await expect.poll(() => inFlight).toBe(0);
   writeFileSync(path, png(400, 300, [10, 80, 200]));
   await tile(page, 'stale.png').hover();
   await button(page, 'tile', 'stale.png').click();
@@ -726,7 +742,7 @@ test('the viewer adds the version on screen: the version it sent stays the versi
   await tile(page, 'versions.png').click();
   const pane = page.locator('[data-attachment-pane]').first();
   await expect(pane).toHaveAttribute('data-version', 'current');
-  await pane.getByRole('button', { name: 'Open the version it sent' }).click();
+  await pane.getByRole('button', { name: 'View sent version' }).click();
   await expect(pane).toHaveAttribute('data-version', 'sent');
   const before = blobsOf(studio);
   await pane.locator('[data-reuse-surface="pane"], [data-reuse-surface="bar"]').first().click();

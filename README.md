@@ -65,6 +65,8 @@ Annotate plans, specs, messages, html, then send the feedback to your agent.
 
 Review local changes or remote PRs. Comment on diffs, suggest code. Your comments go back to the agent. Works with Git, GitButler, Jujutsu (`jj`), Perforce (`p4`), GitHub, and GitLab.
 
+For a big change, start a [guided review](https://plannotator.ai/code-review#guided-review): an agent sorts the diff into chapters, the most important first.
+
 </td>
 <td width="60%">
 
@@ -115,11 +117,40 @@ herdr plugin install plannotator/herdr-annotate
 
 Prefer it standalone? [Plannotator TUI](https://github.com/plannotator/plannotator-tui) powers the document review and runs without Herdr: `brew install plannotator/tap/plannotator-tui`.
 
-## Annotate HTML Artifacts
+## HTML artifacts, live sites, and guided reviews
 
-<p align="center">
-  <img src=".github/assets/html.webp" alt="Annotating a rendered HTML artifact" width="720" />
-</p>
+<table>
+<tr>
+<td width="40%" valign="middle">
+
+### Annotate HTML artifacts and live sites
+
+Annotate rendered HTML files, or any site running on your machine. A local address opens your app live through a local proxy: you comment on the real page, and hot reload keeps working.
+
+`plannotator annotate http://localhost:5173`
+
+</td>
+<td width="60%">
+
+<img src=".github/assets/html.webp" alt="Annotating a rendered HTML artifact" width="100%" />
+
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+
+### Guided reviews
+
+In code review, press **Guide** (or `Cmd/Ctrl+Shift+G`) and an agent sorts the diff into chapters: the heart of the change first, then its effects, then the glue. Each chapter puts a short overview next to the real diff. Comments you leave there go back to the agent with the rest of your review. [More on guided reviews](https://plannotator.ai/code-review#guided-review)
+
+</td>
+<td width="60%">
+
+<img src=".github/assets/guided-review.webp" alt="A guided review chapter: an overview of the change on the left, the annotatable diff on the right" width="100%" />
+
+</td>
+</tr>
+</table>
 
 ---
 
@@ -179,8 +210,15 @@ Small shares live in the link itself. Large ones are encrypted before upload and
 
 <p align="center">
   <a href="https://plannotator.ai/workspaces">
-    <img src=".github/assets/workspaces-cta.svg" alt="For teams: Workspaces. Join the waitlist." height="44" />
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset=".github/assets/workspaces-dark.png" />
+      <img src=".github/assets/workspaces-light.png" alt="Plannotator Workspaces: several cursors working in one shared space" width="720" />
+    </picture>
   </a>
+</p>
+
+<p align="center">
+  For teams: <a href="https://plannotator.ai/workspaces"><strong>join the Workspaces waitlist</strong></a>
 </p>
 
 ---
@@ -199,7 +237,7 @@ curl -fsSL https://plannotator.ai/install.sh | bash
 irm https://plannotator.ai/install.ps1 | iex
 ```
 
-The installer downloads the binary from GitHub Releases. A full install can also contact GitHub for release resolution and agent files, Ataraxy-Labs/sem for the optional `sem` sidecar, and npm for Pi, selected extra skills, or the managed agent-terminal runtime. Pinning `--version` skips only GitHub API release resolution, not the release download. See the [privacy policy](https://plannotator.ai/privacy) for the complete network boundaries.
+The installer downloads the binary from GitHub Releases. A full install can also contact GitHub for release resolution and agent files, and npm for Pi, selected extra skills, or the managed agent-terminal runtime. Pinning `--version` skips only GitHub API release resolution, not the release download. See the [privacy policy](https://plannotator.ai/privacy) for the complete network boundaries.
 
 Want just the binary and nothing else? Pass `--minimal` (or export `PLANNOTATOR_MINIMAL=1`) to install only the `plannotator` binary to `~/.local/bin`, skipping every skill, hook, slash command, and per-agent config:
 
@@ -244,6 +282,9 @@ Use `--purge` for a full removal of known local Plannotator data as well:
 plannotator uninstall --purge
 ```
 
+<details>
+<summary>What uninstall removes, what it keeps, and when it stops</summary>
+
 Purge requires typing `purge` at the prompt and explains that the data is
 local-only: it is not stored on a Plannotator server and cannot be recovered.
 For automation, pass `--yes` (or `-y`); non-interactive removal refuses to run
@@ -283,6 +324,8 @@ commands, immediately before the synchronous data-removal block; a replaced
 data directory is refused without touching either the old or replacement data.
 If your dedicated data directory is symlinked, point `PLANNOTATOR_DATA_DIR` at
 its resolved target and retry.
+
+</details>
 
 If you installed only the standalone Pi extension and do not have the
 `plannotator` CLI, use `pi remove npm:@plannotator/pi-extension`.

@@ -2,7 +2,7 @@
  * Stack badges' data, without the DOM (approval "stack-show-me", addendum 2026-11-06): what a badge's card lists and
  * which lines a file shows in the code popup.
  */
-import { parseDiffToFiles } from '@plannotator/core/diff-files';
+import { countPatchChanges, parseDiffToFiles } from '@plannotator/core/diff-files';
 import type { ShapeStack, ShapeStackChange, ShapeStackFile, ShapeStackPull } from '@plannotator/core/shape';
 
 /** The review's patch split into files, once: a card asks for each of its rows, and the patch is the same each time. */
@@ -44,13 +44,7 @@ export function stackFilePatch(patch: string, path: string, lines?: readonly (re
 export function stackFileCounts(file: ShapeStackFile, filePatch: string | null): { additions: number; deletions: number } | null {
   if (file.additions !== undefined || file.deletions !== undefined) return { additions: file.additions ?? 0, deletions: file.deletions ?? 0 };
   if (!filePatch) return null;
-  let additions = 0;
-  let deletions = 0;
-  for (const row of filePatch.split('\n')) {
-    if (row.startsWith('+') && !row.startsWith('+++')) additions++;
-    else if (row.startsWith('-') && !row.startsWith('---')) deletions++;
-  }
-  return { additions, deletions };
+  return countPatchChanges(filePatch);
 }
 
 /** What a badge opens: the PR, what it did in the part, and the other PRs that changed it too ("Also changed here by"). */

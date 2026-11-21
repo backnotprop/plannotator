@@ -60,3 +60,13 @@ export const model: InboxPullsAnswer = {
   cards: {},
 };
 export const STACK_ID = stack[2]!.key;
+
+export const SHA = 'a'.repeat(40);
+/** A comment kept for a layer's review, as the review keeps them (per head commit). */
+export function keepComment(p: InboxPull, text: string) {
+  const comment = { id: `c-${p.number}`, type: 'comment', scope: 'line', filePath: 'src/retry.ts', lineStart: 12, lineEnd: 12, side: 'new', text, createdAt: 1 };
+  window.localStorage.setItem(`plannotator-inbox-pull-review:${p.key}:layer:${p.head_sha ?? SHA}`, JSON.stringify({ comments: [comment], viewed: [] }));
+}
+
+export const GLOBAL = { id: 'g1', type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, side: 'new', text: 'Split this PR.', createdAt: 1 };
+export const LINE = { id: 'l1', type: 'comment', scope: 'line', filePath: 'src/retry.ts', lineStart: 12, lineEnd: 12, side: 'new', text: 'Cap the backoff.', createdAt: 2 };

@@ -19,6 +19,7 @@ export interface PageScroll {
   /** The next moves are a jump asked for by name (a line, a comment): take them as they come. */
   expectJump(): void;
   undo(): void;
+  page: HTMLElement;
 }
 
 /** How long a jump's moves can keep coming, its animation included. */
@@ -88,6 +89,7 @@ export function scrollWithPage(root: HTMLElement): PageScroll {
   for (const child of Array.from(page.children)) moved?.observe(child);
 
   return {
+    page,
     expectJump: () => {
       jumpUntil = performance.now() + JUMP_MS;
     },

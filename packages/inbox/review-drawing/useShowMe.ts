@@ -84,7 +84,7 @@ export function useShowMe({
   say,
 }: {
   threadId: string;
-  /** The review it is on; null: a board over its thread, with no review behind it. */
+  /** The review it is on; null: a board in its thread, with no review behind it. */
   reviewId: string | null;
   title: string;
   round: number;

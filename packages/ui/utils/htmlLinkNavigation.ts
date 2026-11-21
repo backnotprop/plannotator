@@ -213,8 +213,12 @@ export function htmlAssetRouteFromDocument(rawHtml: string | null | undefined): 
 	const withoutComments = rawHtml.replace(HTML_COMMENT_PATTERN, "");
 	const baseTag = /<base\b[^>]*>/i.exec(withoutComments);
 	if (!baseTag) return null;
-	const match = /\bhref\s*=\s*["']?\/api\/html-assets\/([A-Za-z0-9_-]+)\//i.exec(baseTag[0]);
-	return match ? `${HTML_ASSET_ROUTE_PREFIX}/${match[1]}/` : null;
+	const local = /\bhref\s*=\s*["']?\/api\/html-assets\/([A-Za-z0-9_-]+)\//i.exec(baseTag[0]);
+	if (local) return `${HTML_ASSET_ROUTE_PREFIX}/${local[1]}/`;
+	// A linked machine's page in the Inbox names that machine's route through the forward, as the Inbox writes it
+	// (`/api/inbox/m/<id>/html-assets/`, the id in capitals): matched exactly.
+	const far = /\bhref\s*=\s*["']?(\/api\/inbox\/m\/ibx_[0-9A-HJKMNP-TV-Z]{26}\/html-assets)\/([A-Za-z0-9_-]+)\//.exec(baseTag[0]);
+	return far ? `${far[1]}/${far[2]}/` : null;
 }
 
 /**

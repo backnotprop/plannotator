@@ -1,6 +1,7 @@
-import { useState, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
-import { inboxApi, type AgentToolHost, type InboxStorageModel, type SettingsModel } from '../../api';
+import { inboxApi, post, type AgentToolHost, type InboxStorageModel, type SettingsModel } from '../../api';
+import { inboxUrl } from '../../inboxUrl';
 import { scheduledApi } from '../../scheduled/client';
 
 export interface SettingsHost {
@@ -29,6 +30,7 @@ export function useSettingsSaves(
 ) {
   const saveSetting = settingsSaver(app);
   const { setSettings, setError: setSettingsError, refresh: refreshSettings, adoptStore, readStore, refreshList } = app;
+  adoptSplitView = (on) => setSettings((s) => (s ? ({ ...s, split_view: { on } } as SettingsModel) : s));
   const toggleTool = (host: AgentToolHost, next: boolean) =>
     saveSetting(
       (s) => ({ ...s, inbox_tool: { ...s.inbox_tool, hosts: { ...s.inbox_tool.hosts, [host]: next } } }),
@@ -66,7 +68,7 @@ export function useSettingsSaves(
   const toggleShape = (next: boolean) => saveSetting((s) => ({ ...s, shape: { on: next } }), () => inboxApi.saveShape(next), (s, saved) => ({ ...s, shape: saved.shape }), reloadSkillCatalog);
 
   const toggleScheduled = (next: boolean) =>
-    saveSetting((s) => ({ ...s, scheduled_threads: { ...s.scheduled_threads, on: next } }), () => scheduledApi.saveSwitch(next), (s, saved) => ({ ...s, scheduled_threads: saved.scheduled_threads ?? { on: next } }));
+    saveSetting((s) => ({ ...s, scheduled_threads: { ...s.scheduled_threads, on: next } }), () => scheduledApi.saveSwitch(next), (s, saved) => ({ ...s, scheduled_threads: saved.scheduled_threads ?? { on: next } }), reloadSkillCatalog);
 
   const toggleExperimental = (next: boolean) =>
     saveSetting(
@@ -111,4 +113,33 @@ export function useSettingsSaves(
     await refreshList(true);
   };
   return { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleShape, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject };
+}
+
+/** App's settings take a saved thread panes switch through this (set where App runs `useSettingsSaves`). */
+let adoptSplitView: ((on: boolean) => void) | null = null;
+
+/**
+ * Settings → General → Appearance → thread panes (config.json `inboxSplitView`, off by default). The save's own answer
+ * goes into the window's settings, so the switch and the panes agree even with the event stream down; every other
+ * window takes it from `event: capabilities`, which the save sends to all of them (capabilities.ts). Until the answer
+ * lands the switch shows the person's choice. A save that fails puts the switch back and says so.
+ */
+export function useSplitViewSwitch(saved: boolean): { on: boolean; failed: boolean; toggle: () => void } {
+  const [asked, setAsked] = useState<boolean | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setAsked(null), [saved]);
+  const on = asked ?? saved;
+  const toggle = () => {
+    const next = !on;
+    setAsked(next);
+    setFailed(false);
+    post<{ split_view: { on: boolean } }>(inboxUrl('/settings'), { split_view: { on: next } }).then(
+      (saved) => adoptSplitView?.(saved.split_view.on),
+      () => {
+        setAsked(null);
+        setFailed(true);
+      },
+    );
+  };
+  return { on, failed, toggle };
 }
