@@ -1,0 +1,36 @@
+{
+  "name": "plannotator",
+  "version": "0.29.1",
+  "description": "Interactive plan and code review for Codex: annotate plans, diffs, and markdown in the browser, then send structured feedback back to the agent. Ships the core Plannotator skills and an optional Stop hook for plan review.",
+  "author": {
+    "name": "backnotprop",
+    "url": "https://github.com/backnotprop"
+  },
+  "homepage": "https://plannotator.ai",
+  "repository": "https://github.com/backnotprop/plannotator",
+  "license": "MIT OR Apache-2.0",
+  "keywords": [
+    "planning",
+    "review",
+    "annotations",
+    "hooks",
+    "collaboration"
+  ],
+  "skills": "./core/",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "Plannotator",
+    "shortDescription": "Browser-based plan and code review for Codex",
+    "longDescription": "Open plans, git diffs, and documents in Plannotator's annotation UI. Approve, request changes, or send structured feedback back to Codex. Includes $plannotator-review, $plannotator-annotate, $plannotator-last, $plannotator-inbox, and the plannotator reference skill, plus an optional Stop hook that opens plan review when a Codex turn ends with a plan.",
+    "category": "Productivity",
+    "developerName": "backnotprop",
+    "websiteUrl": "https://plannotator.ai",
+    "privacyPolicyUrl": "https://plannotator.ai/privacy",
+    "logo": "./.codex-plugin/logo.png",
+    "defaultPrompt": [
+      "Open Plannotator code review for my current changes",
+      "Annotate this markdown file with Plannotator",
+      "Review the last reply in Plannotator"
+    ]
+  }
+}
