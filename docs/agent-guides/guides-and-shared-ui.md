@@ -378,6 +378,8 @@ type ShareableAnnotation =
 
 Known limitation: share links intentionally do not carry HTML element anchors or additional multi-select targets. Restore on the raw-HTML surface is text-search based; this is the contract asserted by `sharing.multiTarget.test.ts`.
 
+**Bot callbacks** (`packages/ui/utils/callback.ts`). A share link with `cb=<url>&ct=<token>` (query or hash) shows Approve and Send Feedback; a click POSTs `{ action, token, annotated_url }` to `cb`. A 2xx answer may carry `{ "return_url": "<http(s) url>" }`: the done screen shows for `CALLBACK_RETURN_DELAY_MS` (1.5 s), then the tab goes there (the issue the link came from). Another scheme, a body that is not JSON or no field leaves the page on the done screen, as before. Tests: `callback.test.ts`.
+
 ## Settings Persistence
 
 **Location:** `packages/ui/utils/storage.ts`, `planSave.ts`, `agentSwitch.ts`
