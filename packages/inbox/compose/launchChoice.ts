@@ -55,9 +55,15 @@ export function launchChoiceNotice(choices: InboxLaunchChoices): string | null {
   if (choices.reading) return "Reading OpenCode's models…";
   if (!choices.unread) return null;
   if (choices.unread === 'empty') return 'OpenCode has no models set up.';
-  const why = UNREAD_WHY[choices.unread];
-  // A code a newer Inbox sends that this window doesn't know: the line without a reason.
-  return why ? `Couldn't read OpenCode's models: ${why}` : "Couldn't read OpenCode's models.";
+  // A code a newer Inbox sends that this window doesn't know reads as an error.
+  return `Couldn't read OpenCode's models: ${UNREAD_WHY[choices.unread] || UNREAD_WHY.exit}`;
+}
+
+/** What the menu picks: "Model and variant", with OpenCode's agents "Model, variant and agent"; "Model" while there is no list. */
+export function launchChoiceMenuName(choices: InboxLaunchChoices): string {
+  if (choices.reading || choices.unread) return 'Model';
+  const effort = choices.effort_word.toLowerCase();
+  return choices.primary_agents?.length ? `Model, ${effort} and agent` : `Model and ${effort}`;
 }
 
 /** A full model name the CLI doesn't list (sent through the API) still shows as the last choice. */

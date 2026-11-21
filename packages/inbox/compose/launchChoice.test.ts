@@ -55,7 +55,7 @@ describe("the menu says why OpenCode's models are not there", () => {
     expect(launchChoiceNotice(named)).toBeNull();
   });
 
-  test('a reason a newer Inbox sends that this window does not know still says the list could not be read', () => {
-    expect(launchChoiceNotice(unread('later' as InboxLaunchChoices['unread']))).toBe("Couldn't read OpenCode's models.");
+  test('a reason a newer Inbox sends that this window does not know reads as an error, in the approved words', () => {
+    expect(launchChoiceNotice(unread('later' as InboxLaunchChoices['unread']))).toBe("Couldn't read OpenCode's models: OpenCode stopped with an error.");
   });
 });

@@ -338,7 +338,7 @@ export function createInboxCompose(options: {
         projects: withPlaces(sessionsModel(), here),
         ...(session ? { session: { session, live: live.askerLive(session) } } : {}),
         // Launch (only while `inboxLaunch.enabled`, on unless false; read live): the agents To offers to start and the folder menu's projects.
-        ...(options.launch ? { launch: await options.launch.composeBlock(owner && !isCrossSiteRequest(req) ? { pick: trustPick(url) } : null) } : {}),
+        ...(options.launch ? { launch: await options.launch.composeBlock(owner && !isCrossSiteRequest(req) ? { pick: trustPick(url) } : null, trustPick(url)) } : {}),
       });
     }
     if (path === "/api/inbox/messages") {

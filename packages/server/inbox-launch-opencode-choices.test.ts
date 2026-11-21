@@ -18,8 +18,8 @@ afterEach(() => {
 });
 
 /**
- * `opencode2 --version`, `opencode2 --standalone api GET /api/model/default` (the state file's `default`, else an
- * error), and `opencode2 --standalone api GET /api/model` (as the `mode` file says: good, slow, exit, garbage, nodata,
+ * `opencode2 --version`, `opencode2 --standalone api GET /api/model/default` (the folder's own opencode.json `model`,
+ * else the state file's `default`, else an error; `slowdefault`: 8 s), and `opencode2 --standalone api GET /api/model` (as the `mode` file says: good, slow, exit, garbage, nodata,
  * empty). Its models: the state file's, then each model of each
  * provider in the config named by OPENCODE_CONFIG (as OpenCode adds a file the person points it at). Entries carry the
  * fields a real model has (name, cost, limit, capabilities), so a big catalog is as big as it is in OpenCode.
@@ -31,6 +31,12 @@ const args = process.argv.slice(2);
 if (args[0] === "--version") { process.stdout.write("opencode v2.2.7\n"); process.exit(0); }
 const mode = fs.existsSync(path.join(__dirname, "mode")) ? fs.readFileSync(path.join(__dirname, "mode"), "utf8").trim() : "good";
 if (args[0] === "--standalone" && args[1] === "api" && args[2] === "GET" && args[3] === "/api/model/default") {
+  fs.appendFileSync(path.join(__dirname, "defaults.log"), process.cwd() + "\n");
+  if (mode === "slowdefault") { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 8000); process.exit(0); }
+  // A project's own opencode.json may set the model its sessions start on (as OpenCode reads the folder it runs in).
+  const local = path.join(process.cwd(), "opencode.json");
+  const own = fs.existsSync(local) ? JSON.parse(fs.readFileSync(local, "utf8")).model : null;
+  if (own) { const at = own.indexOf("/"); process.stdout.write(JSON.stringify({ data: { providerID: own.slice(0, at), id: own.slice(at + 1) } })); process.exit(0); }
   const fallback = JSON.parse(fs.readFileSync(path.join(__dirname, "state.json"), "utf8")).default;
   if (!fallback) { process.stderr.write("no default model\n"); process.exit(1); }
   process.stdout.write(JSON.stringify({ data: fallback }));
@@ -90,7 +96,9 @@ function setup(
     defaultModel = next;
     write();
   };
-  const mode = (next: "good" | "slow" | "exit" | "garbage" | "nodata" | "empty") => writeFileSync(join(bin, "mode"), next);
+  const mode = (next: "good" | "slow" | "exit" | "garbage" | "nodata" | "empty" | "slowdefault") => writeFileSync(join(bin, "mode"), next);
+  /** The folders the default was read in, in order. */
+  const defaultReads = () => (existsSync(join(bin, "defaults.log")) ? readFileSync(join(bin, "defaults.log"), "utf8").trim().split("\n") : []);
   state(models);
   writeFileSync(join(bin, "fake-opencode.cjs"), FAKE);
   writeFileSync(join(bin, "opencode2"), `#!/bin/sh\nexec "${process.execPath}" "${join(bin, "fake-opencode.cjs")}" "$@"\n`);
@@ -126,7 +134,7 @@ function setup(
   cleanup.push(() => host.close());
   const reads = () => (existsSync(join(bin, "reads.log")) ? readFileSync(join(bin, "reads.log"), "utf8").trim().split("\n").length : 0);
   const envNames = () => JSON.parse(readFileSync(join(bin, "env-names.json"), "utf8")) as string[];
-  return { host, root, home, bin, globalConfig, state, setDefault, mode, reads, envNames, loginReads: () => loginReads };
+  return { host, root, home, bin, globalConfig, state, setDefault, mode, defaultReads, reads, envNames, loginReads: () => loginReads };
 }
 
 /** Polls until `check` holds (a list read again runs in the background), or fails after `ms`. */
@@ -269,17 +277,74 @@ describe("OpenCode's model list reaches the picker", () => {
 });
 
 describe("OpenCode's default model and why its list could not be read", () => {
-  test("the default model OpenCode starts on comes with the list, as provider/model; none when OpenCode can't say", async () => {
+  test("the default model is read in the folder To names, never waited on; none is read when no folder is named", async () => {
     const t = setup([...zen, local], { defaultModel: { providerID: "opencode", id: "big-pickle" } });
     expect((await t.host.available()).ok).toBe(true);
-    const choices = await t.host.choices();
-    expect(choices!.default_model).toBe("opencode/big-pickle");
-    expect(choices!.unread).toBeUndefined();
+    expect((await t.host.choices())!.default_model).toBeUndefined();
+    expect(t.defaultReads()).toEqual([]);
+    // The home folder (a scratch folder not made yet): OpenCode's own default.
+    await until(async () => (await t.host.choices({ defaultIn: null }))!.default_model === "opencode/big-pickle");
+    expect(t.defaultReads()).toEqual([t.home]);
     const none = setup([...zen, local]);
     expect((await none.host.available()).ok).toBe(true);
-    const plain = await none.host.choices();
+    await none.host.choices({ defaultIn: null });
+    await until(async () => none.defaultReads().length === 1);
+    await Bun.sleep(100);
+    // OpenCode can't say: no name, and the list as it is.
+    const plain = await none.host.choices({ defaultIn: null });
     expect(plain!.models).toHaveLength(3);
     expect(plain!.default_model).toBeUndefined();
+  });
+
+  test("a project whose own opencode.json sets its model names that model; another folder names its own", async () => {
+    // A login read finished before the first list read: the list key stays the same from one read to the next.
+    const t = setup([...zen, local], { defaultModel: { providerID: "opencode", id: "big-pickle" }, noShellRead: true });
+    const project = join(t.root, "harbor-api");
+    const other = join(t.root, "billing-svc");
+    mkdirSync(project);
+    mkdirSync(other);
+    writeFileSync(join(project, "opencode.json"), JSON.stringify({ model: "ollama/qwen2.5-coder:32b" }));
+    expect((await t.host.available()).ok).toBe(true);
+    await until(async () => (await t.host.choices({ defaultIn: project }))!.default_model === "ollama/qwen2.5-coder:32b");
+    // To names another folder: its own default, read there; the first folder's is kept.
+    await until(async () => (await t.host.choices({ defaultIn: other }))!.default_model === "opencode/big-pickle");
+    expect((await t.host.choices({ defaultIn: project }))!.default_model).toBe("ollama/qwen2.5-coder:32b");
+    expect(t.defaultReads()).toEqual([project, other]);
+    // The list itself is read in the home folder, once.
+    expect(t.reads()).toBe(1);
+  });
+
+  test("a default read that fails names nothing", async () => {
+    const t = setup(zen);
+    expect((await t.host.available()).ok).toBe(true);
+    await t.host.choices({ defaultIn: null });
+    await until(async () => t.defaultReads().length === 1);
+    await Bun.sleep(100);
+    expect((await t.host.choices({ defaultIn: null }))!.default_model).toBeUndefined();
+  });
+
+  test("a slow default read never holds the list: the list answers at once, the name comes on a later read", async () => {
+    const t = setup(zen, { defaultModel: { providerID: "opencode", id: "big-pickle" } });
+    expect((await t.host.available()).ok).toBe(true);
+    t.mode("slowdefault");
+    const started = Date.now();
+    const choices = await t.host.choices({ defaultIn: null });
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect(choices!.models).toHaveLength(2);
+    expect(choices!.default_model).toBeUndefined();
+  });
+
+  test("a config change (a new list key) reads the default again", async () => {
+    const t = setup(zen, { defaultModel: { providerID: "opencode", id: "big-pickle" }, noShellRead: true });
+    expect((await t.host.available()).ok).toBe(true);
+    await until(async () => (await t.host.choices({ defaultIn: null }))!.default_model === "opencode/big-pickle");
+    t.setDefault({ providerID: "opencode", id: "flint-40b-free" });
+    // Unchanged config: the kept name.
+    expect((await t.host.choices({ defaultIn: null }))!.default_model).toBe("opencode/big-pickle");
+    writeFileSync(t.globalConfig, JSON.stringify({ plugins: ["@plannotator/opencode"], model: "opencode/flint-40b-free" }));
+    const later = new Date(Date.now() + 5_000);
+    utimesSync(t.globalConfig, later, later);
+    await until(async () => (await t.host.choices({ defaultIn: null }))!.default_model === "opencode/flint-40b-free");
   });
 
   test("each way a list read fails says why as a code, never what OpenCode printed", async () => {
@@ -350,7 +415,6 @@ describe("OpenCode's default model and why its list could not be read", () => {
     const served = await t.host.choices();
     expect(served!.unread).toBeUndefined();
     expect(served!.models).toHaveLength(2);
-    expect(served!.default_model).toBe("opencode/big-pickle");
     await until(async () => t.reads() === 2);
     await Bun.sleep(100);
     const after = await t.host.choices();

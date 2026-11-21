@@ -2198,7 +2198,9 @@ ${result.text}`);
         // always runs in the background: no new tab per run.
         ...(config().startIn === "rex" && host.rexCommand && input.background !== true ? { rex: {} } : {}),
       };
-      if (host.choices && input.keepLastChoice !== true) {
+      // Default sent while the lists were being read or could not be read (no menu to pick from): the saved pick stays.
+      const picked = !!(target.choice?.model || target.choice?.effort || target.choice?.primary_agent);
+      if (host.choices && input.keepLastChoice !== true && (lists || picked)) {
         try {
           writeLastLaunchChoice(options.dataDir, host.agent, target.choice ?? {});
         } catch {
@@ -2251,7 +2253,11 @@ ${result.text}`);
      * `owner`: the owner's window asks, so each agent says which folders it would Trust and start. That read is
      * cheap (the host's cached `trusts`); only `owner.pick`, the folder picked in To, has its files read.
      */
-    async composeBlock(owner: { pick: { agent: string; project: string } | null } | null = null): Promise<InboxComposeLaunch | undefined> {
+    async composeBlock(
+      owner: { pick: { agent: string; project: string } | null } | null = null,
+      /** The folder To names, from any window: where OpenCode's default model is read (`default_for`). */
+      named: { agent: string; project: string } | null = null,
+    ): Promise<InboxComposeLaunch | undefined> {
       if (!enabled()) return undefined;
       // New message is open: the first time, the login shell read ahead of a Send.
       warmLogin();
@@ -2298,11 +2304,19 @@ ${result.text}`);
           state.lastAvailable = ok;
           // `scratch_trusted`: whether it starts in the scratch root without a trust prompt (the trust-once row).
           if (!ok.ok) return [];
+          // Its default model is read in the folder To names: a project here (local, not on a drive that isn't
+          // answering) or the scratch pick (the home folder: the scratch folder is not made yet). Any other folder, or
+          // none named: no default, so no name that may be wrong.
+          const namedHere = named?.agent === host.agent ? named.project : null;
+          const namedProject = namedHere && namedHere !== INBOX_SCRATCH_PICK ? projects.find((p) => p.id === namedHere && p.exists && !p.slow && !outsideHome(options.homeDir, p.root)) : null;
+          const defaultIn = namedHere === INBOX_SCRATCH_PICK ? null : namedProject ? namedProject.root : undefined;
           // A list still being read past the wait, or one that could not be read: compose has Default and says so
           // (OpenCode), with no last pick (Default stays picked).
-          const lists = host.choices ? await withinLaunchWait(host.choices(), undefined, host.choicesWhileReading ?? null) : null;
+          const lists = host.choices ? await withinLaunchWait(host.choices(defaultIn === undefined ? {} : { defaultIn }), undefined, host.choicesWhileReading ?? null) : null;
           const last = launchChoicesReadable(lists) ? readLastLaunchChoice(options.dataDir, host.agent) : null;
-          const choices = lists ? { ...lists, ...(last && (last.model || last.effort || last.primary_agent) ? { last } : {}) } : null;
+          const choices = lists
+            ? { ...lists, ...(lists.default_model && namedHere ? { default_for: namedHere } : {}), ...(last && (last.model || last.effort || last.primary_agent) ? { last } : {}) }
+            : null;
           return [{ agent: host.agent, name: host.name, scratch_trusted: host.trusts(root), ...(owner ? { untrusted: untrustedOf(host, owner.pick) } : {}), ...(choices ? { choices } : {}) }];
         }),
       );

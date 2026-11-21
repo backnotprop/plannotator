@@ -119,6 +119,8 @@ const LIST_FAILED_AGAIN_MS = 15_000;
 const LIST_FAILED_AGAIN_MAX_MS = 5 * 60_000;
 /** Between a list key's parts: never in a path. */
 const LIST_KEY_CUT = "\u0000";
+/** How many (list key, folder) defaults the host keeps. */
+const DEFAULTS_KEPT = 32;
 /** A list read that found no login env runs the login shell again at most this often. */
 const LIST_LOGIN_AGAIN_MS = 5 * 60_000;
 /** The login shell's names this host keeps (`shellNames`): where OpenCode's files are, and an explicit config. */
@@ -497,10 +499,9 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
       e
         .run([path, "--standalone", "api", "GET", route], { timeoutMs: LAUNCH_CHOICES_RUN_MS, cwd: ctx.homeDir, env, cleanEnv: true, outputCap: OPENCODE_LIST_OUTPUT_CAP })
         .catch(() => null);
-    // The models; OpenCode's own agents (build, plan, …) a session can start as; and the model it starts on when none
-    // is picked (Default's name). An agent list or a default that can't be read leaves no Agent column or no name,
-    // never the models.
-    const [listed, agents, fallback] = await Promise.all([read("/api/model"), read("/api/agent"), read("/api/model/default")]);
+    // The models, and OpenCode's own agents (build, plan, …) a session can start as: an agent list that can't be read
+    // leaves no Agent column, never the models. The default's name is read apart (`defaultOf`): it never holds them.
+    const [listed, agents] = await Promise.all([read("/api/model"), read("/api/agent")]);
     const failed = openCodeListFailure(listed);
     if (failed) return openCodeUnread(failed);
     let answer: unknown;
@@ -521,9 +522,40 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
       }
     };
     const primary = parsed(ok(agents), parseOpenCodeAgents);
-    const defaultModel = parsed(ok(fallback), parseOpenCodeDefaultModel);
-    return { ...models, ...(primary && primary.length > 0 ? { primary_agents: primary } : {}), ...(defaultModel ? { default_model: defaultModel } : {}) };
+    return primary && primary.length > 0 ? { ...models, primary_agents: primary } : models;
   }, Date.now, { failedAgainMs: LIST_FAILED_AGAIN_MS, failedAgainMaxMs: LIST_FAILED_AGAIN_MAX_MS, binaryOf: (key) => key.slice(0, key.indexOf(LIST_KEY_CUT)) });
+
+  /**
+   * The model OpenCode starts on, read in the folder the session would start in (a project's own `opencode.json` may
+   * set `model`), per list key and folder: a new list key (a config or sign-in change) reads it again. A read that
+   * fails or is still running names nothing (`undefined` while it runs, null once it failed), so the button never
+   * shows a name that may be wrong; it is never waited on. A few entries, never a growing map.
+   */
+  const defaults = new Map<string, { model: string | null; done: boolean }>();
+  const defaultOf = (listKey: string, folder: string | null): string | null | undefined => {
+    const key = `${listKey}${LIST_KEY_CUT}${folder ?? ""}`;
+    const kept = defaults.get(key);
+    if (kept) return kept.done ? kept.model : undefined;
+    const entry = { model: null as string | null, done: false };
+    defaults.delete(key);
+    defaults.set(key, entry);
+    while (defaults.size > DEFAULTS_KEPT) defaults.delete(defaults.keys().next().value!);
+    void (async () => {
+      try {
+        const e = await ctx.environment();
+        const path = binOf(e);
+        if (!path) return;
+        const env = openCodeListEnv(listFrom ?? (await listSource()).env);
+        const ran = await e.run([path, "--standalone", "api", "GET", "/api/model/default"], { timeoutMs: LAUNCH_CHOICES_RUN_MS, cwd: folder ?? ctx.homeDir, env, cleanEnv: true });
+        if (ran.exitCode === 0 && !ran.timedOut) entry.model = parseOpenCodeDefaultModel(JSON.parse(ran.stdout));
+      } catch {
+        entry.model = null;
+      } finally {
+        entry.done = true;
+      }
+    })();
+    return undefined;
+  };
 
   return {
     agent: OPENCODE,
@@ -550,12 +582,20 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
 
     // The key: the binary (path@version), which env the read starts from, and OpenCode's config and sign-in files'
     // stamps, found with that same env. A provider added or signed in to shows on the next read, with no Inbox restart.
-    async choices() {
+    // `defaultIn`: the folder To names (null: the home folder, as for a scratch folder not made yet); absent, no
+    // default is read. Its read starts beside the list's and is never waited on: a slow one names it on a later read.
+    async choices(options: { defaultIn?: string | null } = {}) {
       if (choiceKey === null) return choiceLists(null);
       const key = choiceKey;
       const source = await listSource();
       listFrom = source.env;
-      return choiceLists([key, source.from, openCodeListStamp(createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env: source.env }))].join(LIST_KEY_CUT));
+      const listKey = [key, source.from, openCodeListStamp(createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env: source.env }))].join(LIST_KEY_CUT);
+      const wantsDefault = options.defaultIn !== undefined;
+      if (wantsDefault) defaultOf(listKey, options.defaultIn!);
+      const lists = await choiceLists(listKey);
+      if (!lists || lists.unread || !wantsDefault) return lists;
+      const model = defaultOf(listKey, options.defaultIn!);
+      return model ? { ...lists, default_model: model } : lists;
     },
 
     startOf: () => ({ full: false, ownMode: false, bypass: false }),

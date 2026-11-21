@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboard
 import type { InboxLaunchChoice, InboxLaunchChoices } from '@plannotator/core/inbox-launch-choice';
 import { Icon } from '../icons';
 import { launchEffortsFor } from '@plannotator/core/inbox-launch-choice';
-import { launchChoiceButton, launchChoiceButtonParts, launchChoiceNotice, launchDefaultRow, launchModelRows, pickLaunchModel, shortLaunchModel } from './launchChoice';
+import { launchChoiceButton, launchChoiceButtonParts, launchChoiceMenuName, launchChoiceNotice, launchDefaultRow, launchModelRows, pickLaunchModel, shortLaunchModel } from './launchChoice';
 import { filterLaunchModels, LAUNCH_MODEL_FILTER_FROM } from './modelFilter';
 
 export function LaunchChoiceButton({ choice, choices, open, onToggle, className }: { choice: InboxLaunchChoice; choices: InboxLaunchChoices; open: boolean; onToggle: () => void; className: string }) {
@@ -33,13 +33,6 @@ export function LaunchChoiceButton({ choice, choices, open, onToggle, className 
   );
 }
 
-/** What the menu picks: "Model and variant", or with OpenCode's agents "Model, variant and agent". */
-function launchChoiceMenuName(choices: InboxLaunchChoices): string {
-  if (choices.reading || choices.unread) return 'Model';
-  const effort = choices.effort_word.toLowerCase();
-  return choices.primary_agents?.length ? `Model, ${effort} and agent` : `Model and ${effort}`;
-}
-
 export function LaunchChoiceMenu({
   choice,
   choices,
@@ -54,11 +47,16 @@ export function LaunchChoiceMenu({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
+  const noticeId = useId();
+  /** Where focus goes as the menu opens: the filter (not on a touch screen), else the checked row. */
+  const placeFocus = () => {
     const filter = ref.current?.querySelector<HTMLInputElement>('[data-compose-choice-filter]');
     const touch = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
     if (filter && !touch) filter.focus();
     else ref.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
+  };
+  useEffect(() => {
+    placeFocus();
     const onDown = (event: PointerEvent) => {
       const target = event.target as Element | null;
       if (target && !ref.current?.contains(target) && !target.closest('.ib-cp-lchbtn')) onClose();
@@ -66,6 +64,21 @@ export function LaunchChoiceMenu({
     document.addEventListener('pointerdown', onDown, true);
     return () => document.removeEventListener('pointerdown', onDown, true);
   }, [onClose]);
+  const models = launchModelRows(choice, choices);
+  const efforts = launchEffortsFor(choices, choice.model);
+  // OpenCode's list being read or not readable: Default, then one line that says so.
+  const notice = launchChoiceNotice(choices);
+  // The list read while the menu is open (or its failure) can take away the focused row (a long list's column
+  // replaces the plain one): focus goes where a fresh open puts it, and is never taken from a row still in the menu.
+  const kind = choices.reading ? 'reading' : choices.unread ? 'unread' : models.length >= LAUNCH_MODEL_FILTER_FROM ? 'filter' : 'list';
+  const kindWas = useRef(kind);
+  useEffect(() => {
+    if (kindWas.current === kind) return;
+    kindWas.current = kind;
+    const menu = ref.current;
+    if (menu && !menu.contains(menu.ownerDocument.activeElement)) placeFocus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind]);
   const onKey = (event: ReactKeyboardEvent) => {
     if (event.key !== 'Escape' || event.nativeEvent.isComposing) return;
     event.preventDefault();
@@ -92,6 +105,8 @@ export function LaunchChoiceMenu({
             className="ib-cp-opt ib-cp-lchopt"
             data-compose-choice-value={value ?? 'default'}
             title={value ?? undefined}
+            // The line under Default says why it is the only row: read as its description.
+            aria-describedby={value === null && notice ? noticeId : undefined}
             onClick={() => {
               if (field === 'model') return onChoice(pickLaunchModel(choice, choices, value));
               const next = { ...choice };
@@ -112,17 +127,15 @@ export function LaunchChoiceMenu({
         );
       })}
       {notice && (
-        <div className="ib-cp-opt ib-cp-fnotice" aria-disabled="true" data-compose-choice-notice={choices.reading ? 'reading' : (choices.unread ?? '')}>
+        <div className="ib-cp-opt ib-cp-fnotice" role="menuitem" aria-disabled="true" aria-labelledby={noticeId} data-compose-choice-notice={choices.reading ? 'reading' : (choices.unread ?? '')}>
           {choices.reading ? <span className="ib-spin" aria-hidden="true" /> : <Icon name="info" size={15} />}
-          <span className="ib-cp-op">{notice}</span>
+          <span className="ib-cp-op" id={noticeId}>
+            {notice}
+          </span>
         </div>
       )}
     </div>
   );
-  const models = launchModelRows(choice, choices);
-  const efforts = launchEffortsFor(choices, choice.model);
-  // OpenCode's list being read or not readable: Default, then one line that says so.
-  const notice = launchChoiceNotice(choices);
   return (
     <div className="ib-cp-picker ib-cp-lch" ref={ref} role="menu" aria-label={launchChoiceMenuName(choices)} data-compose-choices="" data-phone={phone ? '' : undefined} onKeyDown={onKey}>
       {phone && (

@@ -12,8 +12,6 @@ export interface InboxLaunchChoice {
  */
 export type InboxLaunchChoicesUnread = "timeout" | "exit" | "unreadable" | "missing" | "not_started" | "empty";
 
-export const INBOX_LAUNCH_CHOICES_UNREAD: readonly InboxLaunchChoicesUnread[] = ["timeout", "exit", "unreadable", "missing", "not_started", "empty"];
-
 export interface InboxLaunchChoices {
   models: string[];
   efforts: string[];
@@ -21,8 +19,13 @@ export interface InboxLaunchChoices {
   model_efforts?: Record<string, string[]>;
   /** OpenCode's own agents a session may start as (`GET /api/agent`: primary, not hidden). Absent: no Agent column. */
   primary_agents?: string[];
-  /** The model the agent's CLI starts on when none is picked (OpenCode's `GET /api/model/default`), provider/model. Absent: unknown. */
+  /**
+   * The model the agent's CLI starts on when none is picked (OpenCode's `GET /api/model/default`, read in the folder
+   * To names), provider/model. Absent: unknown, or not read yet for that folder.
+   */
   default_model?: string;
+  /** The folder `default_model` was read for: the project id To named, or the scratch pick. The window names it only for that one. */
+  default_for?: string;
   /** OpenCode's list could not be read (the lists are empty): the menu has Default and says why. */
   unread?: InboxLaunchChoicesUnread;
   /** OpenCode's list is being read (the lists are empty): the menu has Default and says so. */

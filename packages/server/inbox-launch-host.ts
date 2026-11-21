@@ -267,8 +267,11 @@ export interface LaunchHost {
    * scopes); not cached. None: the machine's own setup.
    */
   available(folders?: readonly string[]): Promise<LaunchAvailability>;
-  /** Its model lists; OpenCode's may instead say why they could not be read (`unread`, lists empty). */
-  choices?(): Promise<Omit<InboxLaunchChoices, "last"> | null>;
+  /**
+   * Its model lists; OpenCode's may instead say why they could not be read (`unread`, lists empty). `defaultIn`: the
+   * folder To names (null: the home folder), for a host that names its default model there (OpenCode); absent, none.
+   */
+  choices?(options?: { defaultIn?: string | null }): Promise<Omit<InboxLaunchChoices, "last"> | null>;
   /** What compose gets while `choices` takes longer than the offer's wait (OpenCode: `reading`). None: no lists. */
   readonly choicesWhileReading?: Omit<InboxLaunchChoices, "last">;
   /** How a launch made now in `folder` starts; fixed on the record at Send. */
