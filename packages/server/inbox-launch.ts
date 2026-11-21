@@ -664,6 +664,30 @@ export function createInboxLaunch(options: {
   /** The reply's restart was refused because the agent does not trust the folder. */
   const respawnUntrustedOf = (memo: Memo): boolean => memo.respawn?.untrusted === true && respawnFailedOf(memo) !== null;
 
+  type Pending = (session: string) => InboxMessage[];
+  const pendingEach: Pending = (session) => store.pendingReplies(session, { tags: true });
+  const pendingOnePass = (): Pending => {
+    let found: { sessions: Set<string>; bySession: Map<string, InboxMessage[]> } | null = null;
+    return (session) => {
+      if (!found) {
+        const sessions = new Set(roots().flatMap((root) => (root.to ? [root.to.session] : [])));
+        found = { sessions, bySession: store.pendingRepliesFor(sessions, { tags: true }) };
+      }
+      return found.sessions.has(session) ? (found.bySession.get(session) ?? []) : pendingEach(session);
+    };
+  };
+  let pass: Pending | null = null;
+  const pendingOf: Pending = (session) => (pass ?? pendingEach)(session);
+  const inOnePass = <T>(read: () => T, pending: Pending = pendingOnePass()): T => {
+    if (pass) return read();
+    pass = pending;
+    try {
+      return read();
+    } finally {
+      pass = null;
+    }
+  };
+
   /**
    * A turn waits for the session: the root or a reply is not taken yet, or it
    * was taken since the latest start but the session has neither polled busy
@@ -671,7 +695,7 @@ export function createInboxLaunch(options: {
    */
   const turnWaitingOf = (root: InboxMessage, memo: Memo): boolean => {
     if (!root.delivery) return true;
-    if (root.to && store.pendingReplies(root.to.session, { tags: true }).length > 0) return true;
+    if (root.to && pendingOf(root.to.session).length > 0) return true;
     if (memo.busySeen) return false;
     const lastId = store.threadMessageIds(root.thread_id).at(-1);
     const last = lastId ? store.message(lastId) : null;
@@ -845,7 +869,9 @@ export function createInboxLaunch(options: {
     // The switch off governs new starts only: an agent already started keeps its line, its questions and its respawn.
     const all = roots().filter((root) => !root.launch!.deleted_at && hostOf(root.launch!));
     if (all.length === 0) return;
-    for (const root of all) maybeRespawn(root);
+    inOnePass(() => {
+      for (const root of all) maybeRespawn(root);
+    });
     for (const root of all) watchTurnError(root);
     for (const host of hostList) stateOf(host).permissions.sweep();
     if (!watched) return;
@@ -1327,8 +1353,7 @@ ${result.text}`);
       // A reply the person wrote after the clone ended: never the thread's own first message (it waits for the agent
       // too), nor one the clone already had (E7: Cancel stays cancelled, a failure stays failed, a restart included).
       const ended = launch.clone.ended_at ?? null;
-      const newest = store
-        .pendingReplies(root.to.session, { tags: true })
+      const newest = pendingOf(root.to.session)
         .filter((reply) => reply.id !== root.id && ended !== null && reply.created_at > ended)
         .at(-1);
       if (newest && memo.cloneFor !== newest.id) {
@@ -1360,7 +1385,7 @@ ${result.text}`);
     };
     const live = liveOf(host, root, memo);
     // The person's reply starts it again: from this computer or over the tailnet.
-    const newest = store.pendingReplies(root.to.session, { tags: true }).at(-1);
+    const newest = pendingOf(root.to.session).at(-1);
     const early = now() - memo.startedAt < INBOX_RUN_START_GRACE_MS;
     if (live || (early && !memo.paneClosed)) {
       // In Rex, its own pane closed (by the person, or Rex's API): the program went with it, while its last polls
@@ -2497,7 +2522,12 @@ ${result.text}`);
     rowDecorator(): <T extends InboxListRow>(row: T) => T {
       // One pass over the launches per list read, not one per row.
       const latest = new Map(roots().map((m) => [m.thread_id, m]));
-      return (row) => decorate(row, latest.get(row.thread_id) ?? null);
+      const pending = pendingOnePass();
+      return (row) => inOnePass(() => decorate(row, latest.get(row.thread_id) ?? null), pending);
+    },
+
+    onePass<T>(read: () => T): T {
+      return inOnePass(read);
     },
 
     /**
@@ -2548,12 +2578,14 @@ ${result.text}`);
      * no host here (a downgrade) is left out, as it has no line.
      */
     agents(): { launch_id: string; session: string; thread_id: string; host: string; project_id: string; started_at: string; started: boolean; run: InboxRun["state"] | null; scratch: string | null; scheduled: boolean; rex: boolean }[] {
-      return roots().flatMap((root) => {
-        const launch = root.launch!;
-        const session = inboxLaunchedSession(root);
-        if (launch.deleted_at || !session || !hostOf(launch)) return [];
-        return [{ launch_id: launch.id, session, thread_id: root.thread_id, host: launch.agent, project_id: root.project_id, started_at: launch.started_at, started: !!launch.session_ref, run: runOfRoot(root)?.state ?? null, scratch: launch.scratch ? basename(launch.folder) : null, scheduled: !!root.scheduled_run, rex: inboxLaunchRexUnstoppable(launch) }];
-      });
+      return inOnePass(() =>
+        roots().flatMap((root) => {
+          const launch = root.launch!;
+          const session = inboxLaunchedSession(root);
+          if (launch.deleted_at || !session || !hostOf(launch)) return [];
+          return [{ launch_id: launch.id, session, thread_id: root.thread_id, host: launch.agent, project_id: root.project_id, started_at: launch.started_at, started: !!launch.session_ref, run: runOfRoot(root)?.state ?? null, scratch: launch.scratch ? basename(launch.folder) : null, scheduled: !!root.scheduled_run, rex: inboxLaunchRexUnstoppable(launch) }];
+        }),
+      );
     },
 
     /** "Start new agents in" is Rex: every agent of this computer's in a Rex pane gets its place line, marks and Show. */
@@ -2616,12 +2648,14 @@ ${result.text}`);
 
     /** Changes when any launched thread's line would: part of the windows' delivery signature. */
     signature(): string {
-      return roots()
-        .map((root) => {
-          const line = runOfRoot(root);
-          return `${root.launch!.id}:${line ? `${line.state}${line.again ? "+" : ""}${line.since ?? ""}` : "-"}`;
-        })
-        .join(",");
+      return inOnePass(() =>
+        roots()
+          .map((root) => {
+            const line = runOfRoot(root);
+            return `${root.launch!.id}:${line ? `${line.state}${line.again ? "+" : ""}${line.since ?? ""}` : "-"}`;
+          })
+          .join(","),
+      );
     },
   };
 }

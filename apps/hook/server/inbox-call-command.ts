@@ -41,8 +41,10 @@
  * `<code>: <message>`. Exit 0 ok, 1 refused or unreachable, 2 bad usage.
  */
 
+import { statSync } from "node:fs";
 import { resolve } from "node:path";
-import { decodeInboxAgentPairing, INBOX_AGENT_CALL_ACTIONS } from "@plannotator/shared/inbox/agent-pairing";
+import { planAgentBodyPictures } from "@plannotator/shared/inbox/agent-pictures";
+import { decodeInboxAgentPairing, INBOX_AGENT_CALL_ACTIONS, INBOX_AGENT_FETCH_FILE, INBOX_AGENT_ROUTE, INBOX_AGENT_UPLOAD_FINISH, INBOX_AGENT_UPLOAD_PIECE, type InboxAgentPairing } from "@plannotator/shared/inbox/agent-pairing";
 import { callInboxThroughRelay, inboxAgentSignalUrl, type InboxAgentRelayOutcome } from "@plannotator/shared/inbox/agent-relay-client";
 import { INBOX_HOST_NAMES, INBOX_QWEN_SESSION_ENV, INBOX_T3_HOST, INBOX_T3_THREAD_ENV, inboxTidyMcpLine, parseInboxSessionRef, type InboxTidyMark } from "@plannotator/core/inbox-types";
 import { INBOX_MAX_REQUEST_BYTES, INBOX_PEEK_META_KEY, inboxRequestTooLargeMessage, inboxToolCallParams, mcpAnswerOfResponse } from "@plannotator/shared/inbox/connection";
@@ -52,6 +54,7 @@ import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-che
 import type { InboxQuestionToCheck } from "@plannotator/core/inbox-questions";
 import { questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { hasHelpFlag, INBOX_CALL_ACTIONS, INBOX_CALL_USAGE, INBOX_PAIRED_CALL_USAGE } from "./cli";
+import { fetchPairedFile, type PairedCall } from "./inbox-call-fetch";
 import { pairedAttachments } from "./inbox-call-pieces";
 import { writeWholeToStdout } from "./write-whole-stdout";
 import { AUTHOR_TOOLS, fillInboxToolArguments, type InboxHostSession, INBOX_DSH_ROOT_FOR_ENV, INBOX_DSH_ROOT_SESSION_ENV, INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
@@ -178,7 +181,9 @@ export function parseCallCommand(argv: readonly string[], actions: readonly stri
   // `steps` is left out of the list, as in the usage: it is served only while the person has thread steps on (and the
   // switch is the Inbox's, not known here), so an agent with them off reads no word of it.
   if (!actions.includes(action)) {
-    return { ok: false, code: "unknown_action", error: `${action} is not an Inbox action. Actions: ${actions.filter((name) => name !== "steps" && name !== "routine").join(", ")}.` };
+    // A paired agent's list (INBOX_AGENT_CALL_ACTIONS) names them all, as its usage does.
+    const named = actions === INBOX_CALL_ACTIONS ? actions.filter((name) => name !== "steps" && name !== "routine") : actions;
+    return { ok: false, code: "unknown_action", error: `${action} is not an Inbox action. Actions: ${named.join(", ")}.` };
   }
   if (more.length > 0) return { ok: false, code: "usage", error: "inbox call takes one JSON argument (quote it), or - to read it from stdin." };
   return { ok: true, action, json: json === "-" ? null : (json ?? null), stdin: json === "-", session };
@@ -216,6 +221,8 @@ export interface CallCommandDeps {
   timeoutMs?: number;
   /** Print the tool's lines of text instead of its structured result (`plannotator routine` without --json). */
   text?: boolean;
+  /** Tests: a paired call's one request (the relay or the door), so it runs with no relay and no Inbox. */
+  pairedTransport?: (tool: string, body: Record<string, unknown>, waitMs?: number) => Promise<InboxAgentRelayOutcome>;
 }
 
 /** Run `plannotator inbox call …`; resolves to the exit code. */
@@ -287,32 +294,42 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
 
 type CallResult = { content?: { text?: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean };
 
-/** A paired cloud agent's call: the agent door, with the pairing's token. Only on this computer until the relay carries it. */
-async function runPairedCall(
-  parsed: Extract<ParsedCallCommand, { ok: true }>,
-  deps: CallCommandDeps,
-  out: (text: string) => void | Promise<void>,
-  err: (text: string) => void,
-  refused: (code: string, message: string, exit?: number) => number,
-): Promise<number> {
+type PairedDeps = Pick<CallCommandDeps, "env" | "timeoutMs" | "pairedTransport">;
+type PairedLink = {
+  ok: true;
+  relayed: (InboxAgentPairing & { relay: NonNullable<InboxAgentPairing["relay"]> }) | null;
+  transport: (tool: string, body: Record<string, unknown>, waitMs?: number) => Promise<InboxAgentRelayOutcome>;
+  resultOf: (outcome: Extract<InboxAgentRelayOutcome, { kind: "answer" }>) => { result: CallResult } | { code: string; message: string };
+  /** One call whose result is read here (a piece of a file, a command's route): its structured result, or the refusal as a code and words. */
+  call: PairedCall;
+};
+
+/**
+ * The door actions and refusals only an older Inbox gives a call this command knows is real: `tool_not_allowed` for
+ * an action added since, or a path refusal it no longer makes. The person's Plannotator is older than this one.
+ * `routine` is refused by an older Inbox in words of its own; "routine is not an Inbox action" is a current Inbox with
+ * Routines off (Settings → Capabilities), which updating would not change.
+ */
+const NEWER_ACTIONS: readonly string[] = [INBOX_AGENT_FETCH_FILE, INBOX_AGENT_ROUTE, INBOX_AGENT_UPLOAD_PIECE, INBOX_AGENT_UPLOAD_FINISH, "routine"];
+const OLD_REFUSALS: readonly string[] = ["path_refused", "attachment_path_refused", "image_path_refused", "no_checkout"];
+const UPDATE_THERE = " Plannotator on the person's computer is older than this one: ask the person to update it.";
+export function inboxPairedSkewNote(tool: string, code: string, words = ""): string {
+  const switchedOff = tool === "routine" && /\broutine is not an Inbox action\b/.test(words);
+  return (code === "tool_not_allowed" && NEWER_ACTIONS.includes(tool) && !switchedOff) || OLD_REFUSALS.includes(code) ? UPDATE_THERE : "";
+}
+
+/** The way to the person's Inbox that PLANNOTATOR_PAIRING names: the agent door with its token, through the relay (or PLANNOTATOR_PAIRING_DOOR). */
+function pairedLink(deps: PairedDeps): PairedLink | { ok: false; code: string; message: string; exit: number } {
   const pairing = decodeInboxAgentPairing(deps.env.PLANNOTATOR_PAIRING);
-  if (!pairing) return refused("invalid_pairing", "PLANNOTATOR_PAIRING is not a whole pairing string from the Inbox: it is cut off or changed, or has spaces or line breaks in it. Ask the person to copy it again, whole (it starts with plannotator-pairing-).", 2);
+  if (!pairing) return { ok: false, exit: 2, code: "invalid_pairing", message: "PLANNOTATOR_PAIRING is not a whole pairing string from the Inbox: it is cut off or changed, or has spaces or line breaks in it. Ask the person to copy it again, whole (it starts with plannotator-pairing-)." };
   const door = deps.env.PLANNOTATOR_PAIRING_DOOR ? loopbackDoor(deps.env.PLANNOTATOR_PAIRING_DOOR) : null;
-  if (deps.env.PLANNOTATOR_PAIRING_DOOR && !door) return refused("pairing_door_needed", "PLANNOTATOR_PAIRING_DOOR must be the Inbox's address on this computer (http://127.0.0.1:<port>). Unset it to go through the relay.", 2);
+  if (deps.env.PLANNOTATOR_PAIRING_DOOR && !door) return { ok: false, exit: 2, code: "pairing_door_needed", message: "PLANNOTATOR_PAIRING_DOOR must be the Inbox's address on this computer (http://127.0.0.1:<port>). Unset it to go through the relay." };
   if (!door && !pairing.relay) {
-    return refused("pairing_without_relay", "This pairing string was made before the person's Inbox could reach its relay, so it works only on their computer. Ask the person to remove this agent and pair it again.", 1);
-  }
-  if (parsed.session !== null) return refused("invalid_session", "--session is not taken with PLANNOTATOR_PAIRING: the pairing names the agent.", 2);
-  let args: Record<string, unknown>;
-  try {
-    const value = JSON.parse((parsed.stdin ? await (deps.stdin ?? (() => Bun.stdin.text()))() : (parsed.json ?? "{}")).replace(/^\uFEFF/, "")) as unknown;
-    if (!value || typeof value !== "object" || Array.isArray(value)) return refused("invalid_json", "The arguments must be one JSON object.", 2);
-    args = value as Record<string, unknown>;
-  } catch (error) {
-    return refused("invalid_json", `The arguments are not JSON: ${error instanceof Error ? error.message : String(error)}`, 2);
+    return { ok: false, exit: 1, code: "pairing_without_relay", message: "This pairing string was made before the person's Inbox could reach its relay, so it works only on their computer. Ask the person to remove this agent and pair it again." };
   }
   const relayed = !door && pairing.relay ? { ...pairing, relay: pairing.relay } : null;
   const transport = async (tool: string, body: Record<string, unknown>, waitMs?: number): Promise<InboxAgentRelayOutcome> => {
+    if (deps.pairedTransport) return deps.pairedTransport(tool, body, waitMs);
     if (relayed) return callInboxThroughRelay(relayed, tool, body, waitMs ? { readWaitMs: waitMs } : {});
     try {
       const response = await fetch(`${door}/api/inbox/agent/call`, {
@@ -337,24 +354,104 @@ async function runPairedCall(
     if (outcome.status < 200 || outcome.status >= 300 || !answer?.result) return { code: answer?.code ?? "inbox_error", message: answer?.error ?? `The Inbox answered ${outcome.status}.` };
     return { result: answer.result };
   };
+  const call: PairedCall = async (tool, body) => {
+    const outcome = await transport(tool, body, PIECE_WAIT_MS);
+    if (outcome.kind === "refused") return { ok: false, code: outcome.code, message: outcome.message };
+    // Only a write is queued (isInboxAgentWrite): a piece of a file, whose message was never sent, or a command's
+    // change, applied once when the computer answers.
+    if (outcome.kind === "queued" && tool !== INBOX_AGENT_ROUTE) return { ok: false, code: "no_answer", message: "The person's computer did not take the file in time. Nothing was sent. Try again later." };
+    if (outcome.kind === "queued") return { ok: false, code: "queued", message: `${outcome.reason === "offline" ? "The person's computer is asleep or offline" : "The person's computer did not answer in time"}. This change waits at the relay and is applied once when it is back. Do not run it again.` };
+    const got = resultOf(outcome);
+    if ("code" in got) return { ok: false, ...got };
+    if (got.result.isError) {
+      const text = (got.result.content ?? []).map((part) => part.text ?? "").join("\n");
+      const match = /^([a-z][a-z0-9_]*): ([\s\S]*)$/.exec(text);
+      const code = match?.[1] ?? "inbox_error";
+      return { ok: false, code, message: `${match?.[2] ?? text}${inboxPairedSkewNote(tool, code, text)}` };
+    }
+    return { ok: true, structured: got.result.structuredContent };
+  };
+  return { ok: true, relayed, transport, resultOf, call };
+}
 
-  if (Array.isArray(args.attachments)) {
-    const sent = await pairedAttachments(args.attachments, deps.cwd, async (tool, body) => {
-      const outcome = await transport(tool, body, PIECE_WAIT_MS);
-      if (outcome.kind === "refused") return { ok: false, code: outcome.code, message: outcome.message };
-      if (outcome.kind === "queued") return { ok: false, code: "no_answer", message: "The person's computer did not take the file in time. Nothing was sent. Try again later." };
-      const got = resultOf(outcome);
-      if ("code" in got) return { ok: false, ...got };
-      if (got.result.isError) {
-        const text = (got.result.content ?? []).map((part) => part.text ?? "").join("\n");
-        const match = /^([a-z][a-z0-9_]*): ([\s\S]*)$/.exec(text);
-        return { ok: false, code: match?.[1] ?? "inbox_error", message: match?.[2] ?? text };
-      }
-      return { ok: true };
-    });
+/**
+ * For a command that is a thin client over the window's routes on the person's computer (`inbox rows`, `projects`,
+ * `icon`, `export-decisions`), run by a paired cloud agent: its request to `path` goes through the agent door's `route`
+ * (packages/server/inbox-agent-routes.ts), and the Inbox's answer comes back as the Response the command reads, so it
+ * prints exactly what it prints on that computer. A request that does not reach the Inbox answers 502 with its
+ * reason, in the routes' own `{ code, error }`.
+ */
+export function inboxPairedRouteFetch(deps: PairedDeps): ((path: string, init?: { method?: string; body?: string }) => Promise<Response>) | { code: string; message: string } {
+  const link = pairedLink(deps);
+  if (!link.ok) return { code: link.code, message: link.message };
+  return async (path, init = {}) => {
+    const method = init.method ?? "GET";
+    const got = await link.call(INBOX_AGENT_ROUTE, { method, path, ...(init.body !== undefined ? { body: JSON.parse(init.body) } : {}) });
+    if (!got.ok) return new Response(JSON.stringify({ code: got.code, error: got.message }), { status: 502, headers: { "Content-Type": "application/json" } });
+    const answer = got.structured as { status?: number; content_type?: string; body?: string } | undefined;
+    return new Response(answer?.body ?? "", { status: answer?.status ?? 502, headers: answer?.content_type ? { "Content-Type": answer.content_type } : {} });
+  };
+}
+
+/** A paired cloud agent's call: the agent door, with the pairing's token, through the relay. */
+async function runPairedCall(
+  parsed: Extract<ParsedCallCommand, { ok: true }>,
+  deps: CallCommandDeps,
+  out: (text: string) => void | Promise<void>,
+  err: (text: string) => void,
+  refused: (code: string, message: string, exit?: number) => number,
+): Promise<number> {
+  const link = pairedLink(deps);
+  if (!link.ok) return refused(link.code, link.message, link.exit);
+  if (parsed.session !== null) return refused("invalid_session", "--session is not taken with PLANNOTATOR_PAIRING: the pairing names the agent.", 2);
+  let args: Record<string, unknown>;
+  try {
+    const value = JSON.parse((parsed.stdin ? await (deps.stdin ?? (() => Bun.stdin.text()))() : (parsed.json ?? "{}")).replace(/^\uFEFF/, "")) as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return refused("invalid_json", "The arguments must be one JSON object.", 2);
+    args = value as Record<string, unknown>;
+  } catch (error) {
+    return refused("invalid_json", `The arguments are not JSON: ${error instanceof Error ? error.message : String(error)}`, 2);
+  }
+  const { relayed, transport, resultOf, call: pieceCall } = link;
+  if (parsed.action === INBOX_AGENT_FETCH_FILE) {
+    const fetched = await fetchPairedFile(args, deps.cwd, pieceCall);
+    if (!fetched.ok) return refused(fetched.code, fetched.message);
+    await out(`${JSON.stringify(fetched.saved)}\n`);
+    return 0;
+  }
+  // The pictures the body shows from this machine's disk, as a local agent writes them: sent with the message, each
+  // named by its file's name, which is what the door shows it by (packages/shared/inbox/agent-pictures.ts). A path
+  // that is no file here is left as it is, for the Inbox to read on the person's computer. The body is send_message's,
+  // or a submit_guide's guide intent when it sends none (the one the door shows the pictures of). A routine's files
+  // are paths each run reads there, so they go as they are (a `{ "path": … }` one as its path).
+  const isFile = (path: string) => {
+    try {
+      return statSync(path).isFile();
+    } catch {
+      return false;
+    }
+  };
+  const intent = parsed.action === "submit_guide" && typeof args.body !== "string" ? guideIntent(args.guide) : null;
+  const shown = typeof args.body === "string" ? args.body : intent?.intent;
+  const pictures =
+    typeof shown === "string" && parsed.action !== "routine" ? planAgentBodyPictures(shown, Array.isArray(args.attachments) ? args.attachments : [], deps.cwd, isFile) : null;
+  if (pictures && typeof args.body === "string") args.body = pictures.body;
+  else if (pictures && intent) args.guide = intent.with(pictures.body);
+  if (pictures && pictures.files.length > 0) args.attachments = [...(Array.isArray(args.attachments) ? args.attachments : [])];
+  let remote: number[] = [];
+  if (Array.isArray(args.attachments) && parsed.action !== "routine") {
+    const sent = await pairedAttachments(args.attachments, deps.cwd, pieceCall, pictures?.files ?? []);
     if (!sent.ok) return refused(sent.code, sent.message);
     args.attachments = sent.items;
+    remote = sent.remote;
+  } else if (Array.isArray(args.attachments)) {
+    args.attachments = args.attachments.map((item) => (item && typeof item === "object" && !Array.isArray(item) && typeof (item as { path?: unknown }).path === "string" && Object.keys(item).length === 1 ? (item as { path: string }).path : item));
   }
+  /** A refusal of a path left for the person's computer says it was looked for there. */
+  const sideOf = (words: string) => {
+    const at = /^[a-z][a-z0-9_]*: attachments\[(\d+)\]/.exec(words);
+    return at && remote.includes(Number(at[1])) ? `${words} (Looked for on the person's computer: it is no file on this machine, or was given as { "path": … }.)` : words;
+  };
   const outcome = await transport(parsed.action, args);
   if (outcome.kind === "refused") return refused(outcome.code, outcome.message);
   if (outcome.kind === "queued") {
@@ -371,10 +468,15 @@ async function runPairedCall(
   }
   const got = resultOf(outcome);
   if ("code" in got) return refused(got.code, got.message);
+  if (got.result.isError) {
+    const words = (got.result.content ?? []).map((part) => part.text ?? "").join("\n");
+    const code = /^([a-z][a-z0-9_]*): /.exec(words)?.[1] ?? "";
+    got.result.content = [{ text: `${sideOf(words)}${inboxPairedSkewNote(parsed.action, code, words)}` }];
+  }
   if (relayed && parsed.action === "whoami" && !got.result.isError) {
     got.result.structuredContent = { ...got.result.structuredContent, signal_url: await inboxAgentSignalUrl(relayed) };
   }
-  return printResult(got.result, out, err);
+  return printResult(got.result, out, err, deps.text === true);
 }
 
 /** `http://127.0.0.1:<port>` (or localhost, [::1]) with nothing after the port, else null. */
@@ -427,4 +529,20 @@ async function printResult(result: CallResult | undefined, out: (text: string) =
   if (typeof hint === "string" && hint) err(`${hint}\n`);
   await out(text ? `${words}\n` : `${JSON.stringify(result?.structuredContent ?? { text: words })}\n`);
   return 0;
+}
+
+/** A submit_guide's guide intent (the guide as an object or its JSON), and the guide with another intent in its place. */
+function guideIntent(guide: unknown): { intent: string; with: (intent: string) => unknown } | null {
+  let value = guide;
+  const asText = typeof guide === "string";
+  if (asText) {
+    try {
+      value = JSON.parse(guide as string);
+    } catch {
+      return null;
+    }
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value) || typeof (value as { intent?: unknown }).intent !== "string") return null;
+  const object = value as Record<string, unknown> & { intent: string };
+  return { intent: object.intent, with: (intent) => (asText ? JSON.stringify({ ...object, intent }) : { ...object, intent }) };
 }

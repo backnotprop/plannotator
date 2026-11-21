@@ -13,6 +13,7 @@ import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { inboxEnsureFailedWords, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { hasHelpFlag } from "./cli";
+import { localRouteFetch, type InboxRouteFetch } from "./inbox-route-fetch";
 import { writeWholeToStdout } from "./write-whole-stdout";
 
 export const INBOX_ICON_USAGE = [
@@ -61,6 +62,8 @@ export interface IconCommandDeps {
   out?: (text: string) => void | Promise<void>;
   err?: (text: string) => void;
   timeoutMs?: number;
+  /** A paired cloud agent's way to the person's Inbox (inbox-call-command.ts `inboxPairedRouteFetch`), in place of this computer's. */
+  fetchRoute?: InboxRouteFetch;
 }
 
 /** Run `plannotator inbox icon …`; resolves to the exit code. */
@@ -88,21 +91,21 @@ export async function runInboxIconCommand(argv: readonly string[], deps: IconCom
   } catch {
     return refused("no_file", `Can't read ${parsed.file}.`);
   }
-  let entry: InboxRegistryEntry;
-  try {
-    entry = await deps.ensureRunning();
-  } catch (error) {
-    return refused("not_running", inboxEnsureFailedWords(error));
+  let route: InboxRouteFetch;
+  if (deps.fetchRoute) route = deps.fetchRoute;
+  else {
+    let entry: InboxRegistryEntry;
+    try {
+      entry = await deps.ensureRunning();
+    } catch (error) {
+      return refused("not_running", inboxEnsureFailedWords(error));
+    }
+    route = localRouteFetch(entry.port, deps.timeoutMs ?? REQUEST_TIMEOUT_MS);
   }
   // The type named here is only a label: the Inbox sniffs the bytes.
   const type = TYPES[path.split(".").pop()?.toLowerCase() ?? ""] ?? "application/octet-stream";
   try {
-    const response = await fetch(`http://127.0.0.1:${entry.port}/api/inbox/icon-animate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ request: parsed.request, picture: `data:${type};base64,${bytes.toString("base64")}` }),
-      signal: AbortSignal.timeout(deps.timeoutMs ?? REQUEST_TIMEOUT_MS),
-    });
+    const response = await route("/api/inbox/icon-animate", { method: "POST", body: JSON.stringify({ request: parsed.request, picture: `data:${type};base64,${bytes.toString("base64")}` }) });
     const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
     if (response.status === 404 && body?.code === undefined) return refused("not_supported", "This Inbox is older than icon hand-backs. Tell the person where the file is; they can drop it on the icon.");
     if (response.status !== 200 || !body) return refused(typeof body?.code === "string" ? body.code : "error", typeof body?.error === "string" ? body.error : `The Inbox answered ${response.status}. Nothing changed.`);
