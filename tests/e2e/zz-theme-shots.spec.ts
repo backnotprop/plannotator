@@ -267,7 +267,7 @@ async function planReview(v: Variant): Promise<Plan> {
 
 async function selectText(page: Page, needle: string): Promise<void> {
   const box = await page.evaluate((text) => {
-    const root = document.querySelector('article') ?? document.body;
+    const root = document.querySelector('[data-print-region="content"]') ?? document.body;
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       const at = node.textContent?.indexOf(text) ?? -1;
@@ -344,12 +344,11 @@ async function planShots(browser: Browser, v: Variant): Promise<void> {
   const page = await context.newPage();
   try {
     await page.goto(plan.url);
-    await expect(page.locator('article').getByText('Move the invoice cache to Redis').first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole('heading', { name: 'Move the invoice cache to Redis' }).first()).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(1200);
     if (v.shots.includes('plan')) {
       await annotate(page, v);
       await page.evaluate(() => window.scrollTo(0, 0));
-      await page.locator('article h1').first().scrollIntoViewIfNeeded().catch(() => {});
       await snap(page, v, 'plan-review');
       await page.getByText('Budget', { exact: true }).first().scrollIntoViewIfNeeded().catch(() => {});
       await snap(page, v, 'plan-review-lower');
@@ -507,9 +506,26 @@ async function reviewShots(browser: Browser, v: Variant): Promise<void> {
     await expect(page.locator('diffs-container [data-column-number]').first()).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(1500);
     try {
-      const line = page.locator('diffs-container [data-line-type="change-addition"] [data-column-number]').first();
-      await line.click();
-      await page.waitForTimeout(500);
+      const at = await page.evaluate(() => {
+        let best: { x: number; y: number } | null = null;
+        const walk = (root: Document | ShadowRoot) => {
+          for (const el of root.querySelectorAll('[data-column-number]')) {
+            if ((el.textContent ?? '').trim() !== '16') continue;
+            const r = (el as HTMLElement).getBoundingClientRect();
+            if (r.width > 0 && (!best || r.x > best.x)) best = { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+          }
+          for (const el of root.querySelectorAll('*')) if ((el as HTMLElement).shadowRoot) walk((el as HTMLElement).shadowRoot!);
+        };
+        walk(document);
+        return best;
+      });
+      if (!at) throw new Error('no line 16');
+      await page.mouse.move(at.x, at.y);
+      await page.waitForTimeout(400);
+      const utility = page.locator('diffs-container [data-utility-button]').first();
+      if (await utility.count()) await utility.click();
+      else await page.mouse.click(at.x, at.y);
+      await page.waitForTimeout(600);
       const area = page.locator('textarea:visible').last();
       await area.fill('Cap the wait: with ten attempts this sleeps for eight minutes.', { timeout: 5_000 });
       const add = page.getByRole('button', { name: /^(Comment|Add comment|Add|Save)$/ }).last();
