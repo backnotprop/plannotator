@@ -36,10 +36,12 @@ import { ok, type ToolResult } from "./inbox-mcp-result";
 /**
  * One piece's bytes. Through the relay an answer of n bytes is a frame of
  * about 16n/9 under Cloudflare's 32 MiB (inbox-relay.ts), and the JSON
- * carries the piece as base64: 4 MiB is a frame of about 9.5 MiB, which the
- * agent's 10 s read of the relay takes on a slow link too.
+ * carries the piece as base64: 1 MiB is a frame of about 2.4 MiB, which the
+ * agent's 10 s read of the relay takes at 2 Mbit/s (4 MiB, about 9.5 MiB,
+ * needed 8 Mbit/s, and a piece missed in that window was left at the relay).
+ * A 100 MB file is 100 calls, each well under a second on a fast link.
  */
-export const INBOX_AGENT_FETCH_PIECE_BYTES = 4 * 1024 * 1024;
+export const INBOX_AGENT_FETCH_PIECE_BYTES = 1024 * 1024;
 
 const FIELDS = ["message_id", "file", "offset"] as const;
 const MB = 1024 * 1024;

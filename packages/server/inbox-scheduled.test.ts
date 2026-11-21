@@ -8,7 +8,8 @@
  * of runs; two starts at once are one run; an agent can neither turn one on first nor run it before the person did,
  * and the clock never runs one the person has not turned on; a folder runs as it is; nothing runs while off; a paired
  * cloud agent's change to a routine does what a local agent's does (the owner, 2026-11-21: "Allow fully, same as a
- * local agent"); a routine's name never shows as a picture, a tag or a link in a change line.
+ * local agent"); a routine's name in a change line reads as typed in the window, the list row's preview, a folded line
+ * and read_thread, and never shows as a picture, a tag, a link, a mention or an issue ref.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -18,9 +19,12 @@ import { InboxStore } from "@plannotator/shared/inbox/store";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { FAKE, fakeLaunchHost } from "../../tests/helpers/fake-launch-host";
 import { createInboxLaunch } from "./inbox-launch";
-import { createInboxScheduled, routineLineText, type InboxScheduledBy } from "./inbox-scheduled";
+import { createInboxScheduled, type InboxScheduledBy } from "./inbox-scheduled";
+import { routineLineText } from "@plannotator/core/inbox-scheduled";
 import { createInboxImageCapture } from "./inbox-message-images";
 import { inboxMessageImageRefs, inboxMessageImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
+import { firstWords } from "@plannotator/core/inbox-folding";
+import { inboxRowPreviewWords } from "../core/inbox-row-preview";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 
 const NY = "America/New_York";
@@ -721,29 +725,51 @@ describe("a paired cloud agent's change to a routine the person turned on", () =
 });
 
 describe("a routine's name in a change line", () => {
-  test("a name that writes a picture, a tag or a link shows as its words: nothing in the line is a picture, and nothing is read from disk for it", async () => {
+  // Each a name that would draw as something else were it written into the line as it is (the window's drawing of
+  // these lines: packages/inbox/scheduled/changeLineNames.test.tsx).
+  const NAMES = ["Maya's triage", "Deps: weekly", "@maya's sweep", "snake_case_name", "2 * 3 * 4", "Scan <img src=scan.png>", "Scan ![x](scan.png)", "Fix #123 now", "See https://e.co", "a `tick` and ``two``", "`edge`"];
+
+  test("reads exactly as typed in the list row's preview, a folded line and read_thread, and no picture is read for it", async () => {
     const w = world();
     // In the project's folder, where an agent's line would find it.
     writeFileSync(join(w.project.root, "scan.png"), PNG);
-    const name = "Scan ![x](scan.png) <img src=scan.png> https://e.co @maya";
     for (const by of [
       { kind: "agent" as const, host: "cloud-claude", session: "cloud.0123456789ab", name: "Nightly fixer", thread_id: null },
       { kind: "agent" as const, host: FAKE, session: "s-maya", name: "Fake Agent", thread_id: null },
     ]) {
-      const { record, told: made } = await w.scheduled.create({ name, prompt: "Triage.", schedule: null, folder: { project_id: w.project.id }, agent: FAKE }, by);
-      const { told: renamed } = await w.scheduled.update(record.id, { name: "Plain" }, by);
-      const { told: deleted } = await w.scheduled.remove(record.id, by);
-      const capture = createInboxImageCapture(w.store, { pauseMs: 0 });
-      for (const id of [made, renamed, deleted]) {
-        const line = w.store.message(id!)!;
-        expect([inboxMessageImageRefsInOrder(line.body), [...inboxMessageImageRefs(line.body)]]).toEqual([[], []]);
-        expect(line.body).not.toMatch(/<img|!\[|https:\/\//);
-        capture.schedule(line.thread_id);
+      for (const name of NAMES) {
+        const { record, told: made } = await w.scheduled.create({ name, prompt: "Triage.", schedule: null, folder: { project_id: w.project.id }, agent: FAKE }, by);
+        const { told: renamed } = await w.scheduled.update(record.id, { name: "Plain" }, by);
+        const { record: back } = await w.scheduled.update(record.id, { name }, by);
+        const { told: deleted } = await w.scheduled.remove(back.id, by);
+        const capture = createInboxImageCapture(w.store, { pauseMs: 0 });
+        for (const id of [made, renamed, deleted]) {
+          const line = w.store.message(id!)!;
+          expect([name, inboxMessageImageRefsInOrder(line.body), [...inboxMessageImageRefs(line.body)]]).toEqual([name, [], []]);
+          // The words (a rename's line names the old name too): the list row's line, a folded line, and the body
+          // read_thread gives an agent.
+          // The made line's name is its link's words, which drop [ and ] (as on main: they would end the link).
+          const words = id === made ? name.replace(/[[\]]/g, "") : name;
+          expect([name, inboxRowPreviewWords(line).includes(words), firstWords(line.body).includes(words), line.body.includes(words)]).toEqual([name, true, true, true]);
+          capture.schedule(line.thread_id);
+        }
+        await capture.idle();
+        capture.stop();
+        for (const id of [made, renamed, deleted]) expect(w.store.message(id!)!.inline_images ?? []).toEqual([]);
       }
-      await capture.idle();
-      capture.stop();
-      for (const id of [made, renamed, deleted]) expect(w.store.message(id!)!.inline_images ?? []).toEqual([]);
     }
-    expect(routineLineText("a ![b](c.png) <d> e&f")).toBe("a \\!\\[b\\]\\(c\\.png\\) &#60;d&#62; e&#38;f");
+  });
+
+  test("a folder's path reads as typed, and the Inbox's own words for a folder stay plain words", async () => {
+    const w = world();
+    const { record } = await w.make();
+    mkdirSync(join(w.home, "my-app_v2"), { recursive: true });
+    const { told } = await w.scheduled.update(record.id, { folder: { path: w.home + "/my-app_v2" } }, { kind: "agent", host: FAKE, session: "s-maya", name: "Fake Agent", thread_id: null });
+    const line = w.store.message(told!)!;
+    expect(firstWords(line.body)).toContain(`${w.home}/my-app_v2`);
+    expect(line.body).toContain(`${w.home}/my-app_v2`);
+    expect(line.body).toContain("It now works in `");
+    expect(routineLineText("a `b` c")).toBe("``a `b` c``");
+    expect(routineLineText("`x`")).toBe("`` `x` ``");
   });
 });

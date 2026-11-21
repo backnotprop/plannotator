@@ -113,6 +113,62 @@ describe("a paired cloud agent's commands go through its pairing", () => {
   });
 });
 
+describe("which computer a path is read on", () => {
+  test('{ "path": … } is the person\'s computer\'s, even when this machine has the file; a folder here is passed as written too', async () => {
+    const m = cloudMachine();
+    mkdirSync(join(m.cwd, "docs"));
+    writeFileSync(join(m.cwd, "docs", "plan.md"), "the agent's copy");
+    expect(await runInboxCallCommand(["send_message", JSON.stringify({ reply_to: "msg_1", body: "Theirs.", attachments: [{ path: "docs/plan.md" }, "docs", "docs/plan.md"] })], m.deps)).toBe(0);
+    expect(m.calls.at(-1)!.body.attachments).toEqual(["docs/plan.md", "docs", { name: "plan.md", data: Buffer.from("the agent's copy").toString("base64") }]);
+    expect(await runInboxCallCommand(["routine", JSON.stringify({ op: "create", name: "T", prompt: "T.", attachments: [{ path: "docs/plan.md" }] })], m.deps)).toBe(0);
+    expect(m.calls.at(-1)!.body.attachments).toEqual(["docs/plan.md"]);
+  });
+
+  test("a refusal of a path left for the person's computer says it was looked for there; one of a file sent from here does not", async () => {
+    const m = cloudMachine();
+    writeFileSync(join(m.cwd, "here.txt"), "x");
+    m.deps.pairedTransport = async (tool, body) => {
+      m.calls.push({ tool, body: structuredClone(body) });
+      const at = (body.attachments as unknown[]).findIndex((item) => typeof item === "string");
+      return { kind: "answer", status: 200, body: JSON.stringify({ result: { isError: true, content: [{ type: "text", text: `validation_error: attachments[${at < 0 ? 0 : at}]: gone.txt: no such file.` }] } }) };
+    };
+    expect(await runInboxCallCommand(["send_message", JSON.stringify({ reply_to: "msg_1", body: "x", attachments: ["here.txt", "gone.txt"] })], m.deps)).toBe(1);
+    expect(m.err.join("")).toBe('validation_error: attachments[1]: gone.txt: no such file. (Looked for on the person\'s computer: it is no file on this machine, or was given as { "path": … }.)\n');
+    const n = cloudMachine();
+    writeFileSync(join(n.cwd, "here.txt"), "x");
+    n.deps.pairedTransport = async () => ({ kind: "answer", status: 200, body: JSON.stringify({ result: { isError: true, content: [{ type: "text", text: "validation_error: attachments[0]: here.txt: too big." }] } }) });
+    expect(await runInboxCallCommand(["send_message", JSON.stringify({ reply_to: "msg_1", body: "x", attachments: ["here.txt"] })], n.deps)).toBe(1);
+    expect(n.err.join("")).toBe("validation_error: attachments[0]: here.txt: too big.\n");
+  });
+
+  test("a guide's intent shows a picture on this machine as a body does: sent with it under its file's name", async () => {
+    const m = cloudMachine();
+    mkdirSync(join(m.cwd, "out"));
+    writeFileSync(join(m.cwd, "out", "flow.png"), PNG);
+    const guide = { title: "How it works", intent: "See ![flow](out/flow.png).", sections: [] };
+    expect(await runInboxCallCommand(["submit_guide", JSON.stringify({ guide: JSON.stringify(guide) })], m.deps)).toBe(0);
+    const sent = m.calls.at(-1)!.body;
+    expect(JSON.parse(sent.guide as string).intent).toBe("See ![flow](out/flow.png).");
+    expect(sent.attachments).toEqual([{ name: "flow.png", data: PNG.toString("base64") }]);
+  });
+
+  test("an older Inbox on the person's computer: its refusal of an action this command knows says to update it there", async () => {
+    const m = cloudMachine();
+    m.deps.pairedTransport = async () => ({ kind: "answer", status: 200, body: JSON.stringify({ result: { isError: true, content: [{ type: "text", text: "tool_not_allowed: fetch_file is not an Inbox action. Actions: whoami, send_message." }] } }) });
+    expect(await runInboxCallCommand(["fetch_file", JSON.stringify({ message_id: "msg_1", file: "att_1" })], m.deps)).toBe(1);
+    expect(m.err.join("")).toContain("Plannotator on the person's computer is older than this one: ask the person to update it.");
+    const n = cloudMachine();
+    n.deps.pairedTransport = async () => ({ kind: "answer", status: 200, body: JSON.stringify({ result: { isError: true, content: [{ type: "text", text: "attachment_path_refused: attachments[0]: a path." }] } }) });
+    expect(await runInboxCallCommand(["send_message", JSON.stringify({ reply_to: "msg_1", body: "x", attachments: ["/elsewhere/a.txt"] })], n.deps)).toBe(1);
+    expect(n.err.join("")).toContain("ask the person to update it.");
+    // A tool this command does not know, refused: as the Inbox says it.
+    const o = cloudMachine();
+    o.deps.pairedTransport = async () => ({ kind: "answer", status: 200, body: JSON.stringify({ result: { isError: true, content: [{ type: "text", text: "tool_not_allowed: shell is not an Inbox action." }] } }) });
+    await runInboxCallCommand(["send_message", JSON.stringify({ reply_to: "msg_1", body: "x" })], o.deps);
+    expect(o.err.join("")).not.toContain("update");
+  });
+});
+
 describe("inbox rows, projects, icon and export-decisions over a pairing", () => {
   /** A cloud machine whose door answers each `route` as the person's Inbox would. */
   function routed(answer: (method: string, path: string, body: unknown) => { status: number; body: unknown; type?: string }) {
@@ -152,6 +208,9 @@ describe("inbox rows, projects, icon and export-decisions over a pairing", () =>
     ]);
     expect(m.out.join("")).toContain('"name": "api"');
     expect(m.out.at(-1)).toBe("# Decisions\n");
+    // The file's dates are the person's zone, which their Inbox knows: no zone of this machine's is sent.
+    const asked = m.calls.filter((call) => String(call.body.path).includes("/decisions"));
+    expect(asked.map((call) => [String(call.body.path).includes("tz="), JSON.stringify(call.body.body ?? {}).includes('"tz"')])).toEqual([[false, false]]);
     expect(m.err).toEqual([]);
   });
 

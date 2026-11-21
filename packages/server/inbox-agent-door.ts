@@ -100,7 +100,17 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
         const ids = items.filter((item): item is string => typeof item === "string" && sent.has(item));
         if (new Set(ids).size !== ids.length) throw new InboxError("validation_error", "attachments: each file once.");
         if (paths.length > 0 && !local.recordAttachments) throw new InboxError("validation_error", "attachments: not taken by this Inbox.");
-        const fromDisk = paths.length > 0 ? await local.recordAttachments!(paths, project, base) : [];
+        // A refusal names the path by its place in the agent's own list, not among the paths alone.
+        const at = items.flatMap((item, i) => (typeof item === "string" && sent.has(item) ? [] : [i]));
+        const fromDisk =
+          paths.length > 0
+            ? await local.recordAttachments!(paths, project, base).catch((error: unknown) => {
+                if (!(error instanceof InboxError)) throw error;
+                const place = (text: string) => text.replace(/^attachments\[(\d+)\]/, (whole, k: string) => (at[Number(k)] === undefined ? whole : `attachments[${at[Number(k)]}]`));
+                const field = typeof error.details.field === "string" ? place(error.details.field) : error.details.field;
+                throw new InboxError(error.code, place(error.message), { ...error.details, ...(field === undefined ? {} : { field }) });
+              })
+            : [];
         const fromBytes = ids.length > 0 ? await inboxUploadAttachments(store.dir, ids, new Date(local.now?.() ?? Date.now()).toISOString()) : [];
         let disk = 0;
         let bytes = 0;

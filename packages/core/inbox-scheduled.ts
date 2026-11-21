@@ -242,3 +242,18 @@ export function inboxScheduledDecide(input: {
   }
   return { kind: "run", due_at: handled_through, late, missed_before: due.count - 1, handled_through };
 }
+
+/**
+ * A routine's name (or a folder's path) as text in a change line: inline code, so it is never a picture, a link, a
+ * tag, a mention or an issue ref, whoever named it (a name is free text, an agent's anywhere), and still reads exactly
+ * as typed everywhere: the window draws a code span's text as it is, a plain-text line (a list row's preview, a folded
+ * line: core `cleanInline`) drops only the backticks, and an agent reading the thread reads it as literal text. The
+ * fence is one backtick longer than any run in the text, padded with a space when the text starts or ends with one, as
+ * CommonMark reads it; a line break reads as a space, so the span stays on its line.
+ */
+export function routineLineText(text: string): string {
+  const one = text.replace(/[\r\n]+/g, " ");
+  const ticks = "`".repeat(Math.max(0, ...[...one.matchAll(/`+/g)].map((m) => m[0].length)) + 1);
+  const pad = one.startsWith("`") || one.endsWith("`") || (one.startsWith(" ") && one.endsWith(" ")) ? " " : "";
+  return `${ticks}${pad}${one}${pad}${ticks}`;
+}

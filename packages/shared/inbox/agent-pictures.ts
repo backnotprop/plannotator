@@ -22,12 +22,19 @@ export interface AgentAttachedFile {
   name: string;
 }
 
-/** The names a src may mean: as written, without `?query` or `#fragment`, percent-decoded, without `./`, its file name. */
+/** A path from a root (`/…`, `~/…`, `\\…`, `C:\…`): it names one file on the person's computer, never a file sent by its name. */
+const fromRoot = (path: string) => /^(?:[/\\~]|[A-Za-z]:[/\\])/.test(path);
+
+/**
+ * The names a src may mean: as written, without `?query` or `#fragment`, percent-decoded, without `./`, and, for a
+ * relative path or a bare name, its file name. A path from a root means only itself: `![](/Users/x/site/logo.png)`
+ * is that file on the person's disk, not a `logo.png` sent with the message.
+ */
 function namesOf(src: string): Set<string> {
   const names = new Set<string>();
   for (const candidate of pathCandidates(src.trim())) {
     names.add(candidate.replace(/^\.\//, ""));
-    names.add(basename(candidate.replace(/\\/g, "/")));
+    if (!fromRoot(candidate)) names.add(basename(candidate.replace(/\\/g, "/")));
   }
   return names;
 }

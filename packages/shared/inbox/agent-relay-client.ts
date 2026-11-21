@@ -7,6 +7,14 @@ export const INBOX_AGENT_WRITE_WAIT_MS = 30_000;
 const POLL_MS = 300;
 const REQUEST_MS = 10_000;
 const BYTES_PER_EXTRA_SECOND = 256 * 1024;
+/**
+ * A result held at the relay that is older than this (by the clock of the computer that answered, which it seals in
+ * as `now`) is one no call waits for any more: a call waits at most INBOX_AGENT_WRITE_WAIT_MS, so anything past ten
+ * minutes was left by a call that was killed or gave up (or a write applied after its call stopped waiting). The next
+ * call acks it, so leftovers never pile up at the relay and slow or break every later call. Ten minutes leaves room
+ * for a clock between the two machines that is a few minutes off.
+ */
+export const INBOX_AGENT_STALE_RESULT_MS = 10 * 60_000;
 
 export const INBOX_AGENT_WRITE_ACTIONS: readonly string[] = ["send_message", "resolve_message", "snooze_thread", "thread_pulls", "submit_guide", "card", "steps", "routine", "route"];
 
@@ -91,12 +99,34 @@ export async function callInboxThroughRelay(
       signal: AbortSignal.timeout(REQUEST_MS + Math.ceil((text?.length ?? 0) / BYTES_PER_EXTRA_SECOND) * 1000),
     });
   };
+  // The highest item number already read: each poll after the first asks only for items after it, so a result left at
+  // the relay by an earlier call is downloaded once per call, not on every poll.
+  let seen = 0;
   const held = async (): Promise<{ items: HeldItem[]; online: boolean } | InboxAgentRelayOutcome> => {
-    const answer = await relay("GET", "/items?after=0");
+    const answer = await relay("GET", `/items?after=${seen}`);
     if (answer.status === 401 || answer.status === 404) return removed();
     if (!answer.ok) return { kind: "refused", code: "relay_error", message: `The Inbox's relay answered ${answer.status}. Nothing was sent. Try again later.` };
     const read = (await answer.json()) as { items?: HeldItem[]; inbox_online?: boolean };
-    return { items: Array.isArray(read.items) ? read.items : [], online: read.inbox_online === true };
+    const items = Array.isArray(read.items) ? read.items : [];
+    for (const item of items) if (Number.isSafeInteger(item.n) && item.n > seen) seen = item.n;
+    return { items, online: read.inbox_online === true };
+  };
+  type Opened = { type?: string; id?: string; status?: number; body_b64?: string; now?: string } | null;
+  const open = async (item: HeldItem): Promise<Opened> => {
+    try {
+      return JSON.parse(await decryptWithKey(item.ciphertext, keys.key)) as Opened;
+    } catch {
+      return null;
+    }
+  };
+  /** Acks each result no call waits for any more (INBOX_AGENT_STALE_RESULT_MS), one by one: a newer one may be another call's, still waited for. */
+  const clearStale = async (items: HeldItem[]) => {
+    const now = Date.now();
+    for (const item of items) {
+      const result = await open(item);
+      const at = result?.type === "result" && typeof result.now === "string" ? Date.parse(result.now) : NaN;
+      if (Number.isFinite(at) && now - at > INBOX_AGENT_STALE_RESULT_MS) await relay("POST", "/ack", { item: item.n }).catch(() => null);
+    }
   };
 
   let first: Awaited<ReturnType<typeof held>>;
@@ -106,6 +136,7 @@ export async function callInboxThroughRelay(
     return unreachable(error);
   }
   if ("kind" in first) return first;
+  await clearStale(first.items);
   if (!first.online && !write) return asleep();
 
   const id = `cmd_${randomBytes(16).toString("base64url")}`;
@@ -133,12 +164,7 @@ export async function callInboxThroughRelay(
     }
     if ("kind" in now) return now;
     for (const item of now.items) {
-      let result: { type?: string; id?: string; status?: number; body_b64?: string } | null = null;
-      try {
-        result = JSON.parse(await decryptWithKey(item.ciphertext, keys.key));
-      } catch {
-        result = null;
-      }
+      const result = await open(item);
       if (result?.type !== "result" || result.id !== id || typeof result.status !== "number") continue;
       await relay("POST", "/ack", { item: item.n }).catch(() => null);
       return { kind: "answer", status: result.status, body: Buffer.from(result.body_b64 ?? "", "base64").toString("utf8") };

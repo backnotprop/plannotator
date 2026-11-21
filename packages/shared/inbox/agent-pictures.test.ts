@@ -12,10 +12,14 @@ const shot = { id: "upl_1", name: "shot.png" };
 const chart = { id: "upl_2", name: "chart one.svg" };
 
 describe("matchAgentBodyPictures", () => {
-  test("a src names the attached file by its name, as written, with ./, by its file name or percent-encoded", () => {
-    for (const src of ["shot.png", "./shot.png", "out/shot.png", "/home/runner/work/shot.png", "shot.png?v=2"]) {
+  test("a src names the attached file by its name, as written, with ./, by a relative path's file name or percent-encoded", () => {
+    for (const src of ["shot.png", "./shot.png", "out/shot.png", "shot.png?v=2"]) {
       const { pictures, unmatched } = matchAgentBodyPictures(`See ![it](${src}).`, [shot]);
       expect([src, unmatched, pictures.get(src)]).toEqual([src, [], shot]);
+    }
+    // A path from a root is that file on the person's disk, never a file sent under its file name.
+    for (const src of ["/Users/x/site/shot.png", "~/site/shot.png", "C:\\site\\shot.png"]) {
+      expect([src, matchAgentBodyPictures(`See ![it](${src}).`, [shot]).unmatched]).toEqual([src, [src]]);
     }
     expect(matchAgentBodyPictures("![c](chart%20one.svg)", [shot, chart]).pictures.get("chart%20one.svg")).toEqual(chart);
     expect(matchAgentBodyPictures('<img src="shot.png" alt="x">', [shot]).pictures.get("shot.png")).toEqual(shot);
@@ -54,6 +58,8 @@ describe("planAgentBodyPictures", () => {
     expect(plan.files).toEqual([{ path: "/w/b/shot.png", name: "shot-2.png" }]);
     expect(plan.body).toBe("![a](out/shot.png) ![b](shot-2.png) ![m](missing.png)");
     expect(planAgentBodyPictures("![c](chart.svg)", [{ name: "chart.svg", data: "" }], "/w", isFile).files).toEqual([{ path: "/w/chart.svg", name: "chart-2.svg" }]);
+    // A path from a root that is a file here is sent, its src renamed to the name it is sent under (the door matches no root path by its file name).
+    expect(planAgentBodyPictures("![c](/w/chart.svg)", [], "/w", isFile)).toEqual({ body: "![c](chart.svg)", files: [{ path: "/w/chart.svg", name: "chart.svg" }] });
   });
 });
 

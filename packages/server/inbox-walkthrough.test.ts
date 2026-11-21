@@ -1,13 +1,15 @@
 /**
  * A walkthrough's read: what an agent names becomes a patch of context lines, or a refusal that says which file. The
  * read is the same for an agent here and a paired cloud agent: a .env file is never read (as named or through a link),
- * nothing outside the folder is, and no file past its cap, nor more than the guide's cap in all, is read whole.
+ * nothing outside the folder is, and the caps are on the lines taken (a big file's few lines read, as on main), never
+ * read whole past them.
  */
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
+import { inboxAttachmentNameRefusal } from "@plannotator/core/inbox-types";
 import { INBOX_WALKTHROUGH_FILE_MAX_BYTES, INBOX_WALKTHROUGH_TOTAL_MAX_BYTES, readInboxWalkthrough, walkthroughFilePatch, walkthroughRangesOf } from "./inbox-walkthrough";
 import { registerInboxGuideTools } from "./inbox-guides";
 import type { InboxMcpContext } from "./inbox-mcp";
@@ -119,18 +121,55 @@ describe("reading a guide", () => {
     expect(read.ok && read.patch).toContain(" on: push");
   });
 
-  test("a file past the per-file cap, or files past the guide's cap in all, are refused by name, never read whole", () => {
+  test("the caps are on the lines taken, not the file: a big file's few named lines read as on main; named lines past a cap are refused by name", () => {
     const { project } = folder();
     expect([INBOX_WALKTHROUGH_FILE_MAX_BYTES, INBOX_WALKTHROUGH_TOTAL_MAX_BYTES]).toEqual([5 * 1024 * 1024, 16 * 1024 * 1024]);
-    writeFileSync(join(project, "huge.ts"), Buffer.alloc(INBOX_WALKTHROUGH_FILE_MAX_BYTES + 1, "a"));
-    expect(refused(readInboxWalkthrough(guideOf([{ file: "huge.ts", lines: "1" }]), [project]))).toBe("huge.ts is larger than 5 MB, the most a walkthrough reads of one file. Name a smaller file, or send guide with patch instead.");
-    // Four files of 4.5 MB: each under its cap, the fourth past the guide's 16 MB.
+    // 7 MB of short lines: past the per-file cap as a whole, a few lines of it well under.
+    const big = Array.from({ length: 700_000 }, (_, i) => `row ${String(i + 1).padStart(5, "0")}`).join("\n") + "\n";
+    writeFileSync(join(project, "big.log.ts"), big);
+    const few = readInboxWalkthrough(guideOf([{ file: "big.log.ts", lines: "1-40, 699999-700000" }]), [project]);
+    expect(few.ok && few.patch).toContain("@@ -1,40 +1,40 @@\n row 00001\n");
+    expect(few.ok && few.patch).toContain("@@ -699999,2 +699999,2 @@\n row 699999\n row 700000\n");
+    expect(refused(readInboxWalkthrough(guideOf([{ file: "big.log.ts" }]), [project]))).toBe(
+      "big.log.ts: the lines named come to more than 5 MB, the most a walkthrough takes of one file. Name fewer lines, or send guide with patch instead.",
+    );
+    // Four files of 4.5 MB, each taken whole: each under its cap, the fourth past the guide's 16 MB; one line of each is fine.
     const part = Buffer.alloc(4.5 * 1024 * 1024, "b");
     for (const name of ["a.ts", "b.ts", "c.ts", "d.ts"]) writeFileSync(join(project, name), part);
-    expect(refused(readInboxWalkthrough(guideOf([{ file: "a.ts", lines: "1" }, { file: "b.ts", lines: "1" }, { file: "c.ts", lines: "1" }, { file: "d.ts", lines: "1" }]), [project]))).toBe(
-      "d.ts: the files this walkthrough names come to more than 16 MB, the most one reads. Name fewer or smaller files, or send guide with patch instead.",
+    expect(refused(readInboxWalkthrough(guideOf([{ file: "a.ts" }, { file: "b.ts" }, { file: "c.ts" }, { file: "d.ts" }]), [project]))).toBe(
+      "d.ts: the lines this walkthrough names come to more than 16 MB, the most one takes. Name fewer lines, or send guide with patch instead.",
     );
-    expect(readInboxWalkthrough(guideOf([{ file: "a.ts", lines: "1" }, { file: "b.ts", lines: "1" }, { file: "c.ts", lines: "1" }]), [project]).ok).toBe(true);
+    for (const name of ["a.ts", "b.ts", "c.ts", "d.ts"]) writeFileSync(join(project, name), `${"b".repeat(80)}\n`.repeat(60_000));
+    expect(readInboxWalkthrough(guideOf([{ file: "a.ts", lines: "1" }, { file: "b.ts", lines: "1" }, { file: "c.ts", lines: "1" }, { file: "d.ts", lines: "1" }]), [project]).ok).toBe(true);
+  });
+
+  test("the Inbox's own keys are never read into one, even with its data folder as the project", () => {
+    const { root } = folder();
+    const dataDir = join(root, "data");
+    mkdirSync(join(dataDir, "inbox", "device-secrets"), { recursive: true });
+    writeFileSync(join(dataDir, "inbox", "device-secrets", "dev_1"), "secret\n");
+    writeFileSync(join(dataDir, "inbox", "relay.json"), "{}\n");
+    writeFileSync(join(dataDir, "inbox", "notes.md"), "notes\n");
+    const before = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      for (const file of ["inbox/device-secrets/dev_1", "inbox/relay.json"]) {
+        expect(refused(readInboxWalkthrough(guideOf([{ file }]), [dataDir]))).toBe(`${file}: the Inbox's own keys are never attached or read (they would let anyone act as this Inbox or one of its devices).`);
+      }
+      expect(readInboxWalkthrough(guideOf([{ file: "inbox/notes.md" }]), [dataDir]).ok).toBe(true);
+    } finally {
+      if (before === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = before;
+    }
+  });
+
+  test("the .env rule is the attachments' rule, no stricter and no looser", () => {
+    const { project } = folder();
+    for (const name of [".env.example", ".env.sample", ".env.local", ".envrc", "notes.env", ".env.md", "env.ts", "settings.env.ts"]) {
+      writeFileSync(join(project, name), "A=1\n");
+      const read = readInboxWalkthrough(guideOf([{ file: name }]), [project]);
+      expect([name, read.ok]).toEqual([name, inboxAttachmentNameRefusal(join(project, name)) === null]);
+    }
   });
 
   test("every problem at once, each by name: a missing file, bad lines, a binary", () => {

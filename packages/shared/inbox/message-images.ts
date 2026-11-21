@@ -41,6 +41,7 @@ import { open, type FileHandle } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { isDotenvFileName } from "@plannotator/core/annotatable";
+import { inboxOwnSecretRefusal } from "./own-secrets";
 import { inboxInlineMediaKind } from "@plannotator/core/inbox-inline-media";
 import { MAX_REVIEW_IMAGE_PREVIEW_BYTES, MAX_REVIEW_IMAGE_PREVIEW_PIXELS, isReviewImagePath } from "../diff-paths";
 import { isLfsPointer, readImageDimensions, sniffImageContentType } from "../review-image";
@@ -78,7 +79,9 @@ const NOT_LOCAL_SRC_RE = /^(https?:|\/\/|\\\\|data:|blob:)/i;
  * Every image source the body names, as the window sends it: the markdown
  * `![alt](src)` target as written and each `<img src>` value decoded. Remote
  * (`http(s):`, protocol-relative `//host/…`), `data:` and `blob:` sources are
- * left out: the window never asks the server for them.
+ * left out: the window never asks the server for them. Nor does it for a
+ * picture written inside code (a fence or an inline code span, which it draws
+ * as the text it is), so those are left out too.
  */
 export function inboxMessageImageRefs(body: string): Set<string> {
   const refs = new Set<string>();
@@ -87,8 +90,9 @@ export function inboxMessageImageRefs(body: string): Set<string> {
     if (NOT_LOCAL_SRC_RE.test(src)) return;
     refs.add(src);
   };
-  for (const match of body.matchAll(MARKDOWN_IMAGE_RE)) add(match[1]);
-  for (const match of body.matchAll(HTML_IMG_SRC_RE)) add(decodeAttribute(match[1] ?? match[2] ?? match[3] ?? ""));
+  const text = blankCode(body);
+  for (const match of text.matchAll(MARKDOWN_IMAGE_RE)) add(match[1]);
+  for (const match of text.matchAll(HTML_IMG_SRC_RE)) add(decodeAttribute(match[1] ?? match[2] ?? match[3] ?? ""));
   return refs;
 }
 
@@ -356,6 +360,8 @@ function exemptsHidden(anchor: string, protectedHomes: readonly string[]): boole
  */
 function hiddenPath(path: string, anchors: readonly string[], homes: readonly string[]): boolean {
   if (isDotenvFileName(basename(path))) return true;
+  // The Inbox's own keys (own-secrets.ts), wherever its data folder is, for every agent.
+  if (inboxOwnSecretRefusal(path) !== null) return true;
   const dot = inboxHomeDotFolder(path, homes);
   // An anchor exempts it only from inside that hidden folder (a project in `~/.claude/worktrees/`), never from above it.
   return dot !== null && !anchors.some((folder) => isInside(path, folder) && isInside(folder, dot));

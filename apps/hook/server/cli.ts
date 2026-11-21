@@ -758,6 +758,7 @@ export const INBOX_PAIRED_CALL_USAGE = [
   "A path in attachments, or a picture's path in the body (![alt](shot.png)), that is a file on this",
   "machine is sent from here as bytes, a big file in pieces on its own (up to 100 MB a file); any other",
   "path is opened on the person's computer, as for an agent there.",
+  "An attachment written as {\"path\":\"docs/plan.md\"} is always opened on the person's computer.",
   "fetch_file saves a file of a message (read_thread lists each with its path and its command) on this",
   "machine, in a new temp folder or in \"folder\", and prints its path.",
   "plannotator inbox rows, projects, icon and export-decisions work through the pairing too.",

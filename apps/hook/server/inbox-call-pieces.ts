@@ -49,17 +49,35 @@ async function isFileHere(path: string): Promise<boolean> {
   }
 }
 
+/** `{ "path": "…" }`: a path on the person's computer, named so; never looked for on this machine. */
+const personsPath = (item: unknown): string | null =>
+  item && typeof item === "object" && !Array.isArray(item) && Object.keys(item).length === 1 && typeof (item as { path?: unknown }).path === "string" ? (item as { path: string }).path : null;
+
 /**
  * The send's attachments as the door takes them: a path that is a file on this machine read and sent as bytes (a big
- * file in pieces); any other path as it is, for the Inbox to open on the person's computer as a local agent's; every
- * other item as it is. `named`: more files to send under a given name (the body's pictures, planAgentBodyPictures).
+ * file in pieces); any other path (one that is not here, or a folder here) as it is, for the Inbox to open on the
+ * person's computer as a local agent's, and `{ "path": "…" }` as that path, whatever is here; every other item as it
+ * is. `named`: more files to send under a given name (the body's pictures, planAgentBodyPictures). `remote`: the
+ * places in `items` of the paths left for the person's computer, so a refusal of one can say where it was looked for.
  */
-export async function pairedAttachments(items: readonly unknown[], cwd: string, send: PairedSend, named: readonly { path: string; name: string }[] = []): Promise<{ ok: true; items: unknown[] } | Refusal> {
+export async function pairedAttachments(items: readonly unknown[], cwd: string, send: PairedSend, named: readonly { path: string; name: string }[] = []): Promise<{ ok: true; items: unknown[]; remote: number[] } | Refusal> {
   const sent: unknown[] = [];
+  const remote: number[] = [];
   let inline = 0;
   type File = { path: string; name: string; label: string };
   const all: (File | { item: unknown })[] = [
-    ...(await Promise.all(items.map(async (item) => (typeof item === "string" && (await isFileHere(resolve(cwd, item))) ? { path: resolve(cwd, item), name: basename(resolve(cwd, item)), label: item } : { item })))),
+    ...(await Promise.all(
+      items.map(async (item, i) => {
+        const there = personsPath(item);
+        if (there !== null) {
+          remote.push(i);
+          return { item: there };
+        }
+        if (typeof item === "string" && (await isFileHere(resolve(cwd, item)))) return { path: resolve(cwd, item), name: basename(resolve(cwd, item)), label: item };
+        if (typeof item === "string") remote.push(i);
+        return { item };
+      }),
+    )),
     ...named.map((file) => ({ ...file, label: file.path })),
   ];
   try {
@@ -83,5 +101,5 @@ export async function pairedAttachments(items: readonly unknown[], cwd: string, 
   } catch (error) {
     return { ok: false, code: "attachment_unreadable", message: error instanceof Error ? error.message : String(error) };
   }
-  return { ok: true, items: sent };
+  return { ok: true, items: sent, remote: remote.sort((a, b) => a - b) };
 }

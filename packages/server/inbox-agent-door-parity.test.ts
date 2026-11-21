@@ -98,6 +98,9 @@ describe("a folder and a file on the person's computer, named as a local agent n
     // The refusals a local agent gets, and no other: a .env file, a folder, a file that is not there.
     writeFileSync(join(w.ledger.root, ".env"), "TOKEN=1\n");
     for (const path of [".env", "src", "gone.txt"]) expect([path, w.error(await w.call("send_message", { project: "ledger", body: "No.", attachments: [path] }))?.split(":")[0]]).toEqual([path, "validation_error"]);
+    // A refusal names the path by its place in the agent's own list, bytes before it counted.
+    const bytes = { name: "a.txt", data: Buffer.from("a").toString("base64") };
+    expect(w.error(await w.call("send_message", { project: "ledger", body: "No.", attachments: [bytes, "src/pay.ts", "gone.txt"] }))).toStartWith("validation_error: attachments[2]: ");
   });
 
   test("a picture the body names by a path is read from the person's disk, a guide's intent too", async () => {

@@ -103,11 +103,13 @@ export async function runInboxExportDecisionsCommand(argv: readonly string[], de
     route = localRouteFetch(entry.port, deps.timeoutMs ?? REQUEST_TIMEOUT_MS);
   }
   const base = `/api/inbox/threads/${encodeURIComponent(parsed.thread)}/decisions`;
+  // Through a pairing the file's dates read in the person's zone, which their Inbox knows; here, this computer's.
+  const zone: Record<string, string> = deps.fetchRoute ? {} : { tz: localZone() };
   let response: Response;
   try {
     response = parsed.pr
-      ? await route(`${base}/post`, { method: "POST", body: JSON.stringify({ pull: parsed.pr, tz: localZone() }) })
-      : await route(`${base}?${new URLSearchParams({ format: parsed.format, tz: localZone() })}`);
+      ? await route(`${base}/post`, { method: "POST", body: JSON.stringify({ pull: parsed.pr, ...zone }) })
+      : await route(`${base}?${new URLSearchParams({ format: parsed.format, ...zone })}`);
   } catch (error) {
     return refused("inbox_no_answer", `Plannotator Inbox did not answer: ${error instanceof Error ? error.message : String(error)}`);
   }

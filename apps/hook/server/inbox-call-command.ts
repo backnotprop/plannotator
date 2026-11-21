@@ -44,7 +44,7 @@
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
 import { planAgentBodyPictures } from "@plannotator/shared/inbox/agent-pictures";
-import { decodeInboxAgentPairing, INBOX_AGENT_CALL_ACTIONS, INBOX_AGENT_FETCH_FILE, INBOX_AGENT_ROUTE, type InboxAgentPairing } from "@plannotator/shared/inbox/agent-pairing";
+import { decodeInboxAgentPairing, INBOX_AGENT_CALL_ACTIONS, INBOX_AGENT_FETCH_FILE, INBOX_AGENT_ROUTE, INBOX_AGENT_UPLOAD_FINISH, INBOX_AGENT_UPLOAD_PIECE, type InboxAgentPairing } from "@plannotator/shared/inbox/agent-pairing";
 import { callInboxThroughRelay, inboxAgentSignalUrl, type InboxAgentRelayOutcome } from "@plannotator/shared/inbox/agent-relay-client";
 import { INBOX_HOST_NAMES, INBOX_QWEN_SESSION_ENV, INBOX_T3_HOST, INBOX_T3_THREAD_ENV, inboxTidyMcpLine, parseInboxSessionRef, type InboxTidyMark } from "@plannotator/core/inbox-types";
 import { INBOX_MAX_REQUEST_BYTES, INBOX_PEEK_META_KEY, inboxRequestTooLargeMessage, inboxToolCallParams, mcpAnswerOfResponse } from "@plannotator/shared/inbox/connection";
@@ -304,6 +304,17 @@ type PairedLink = {
   call: PairedCall;
 };
 
+/**
+ * The door actions and refusals only an older Inbox gives a call this command knows is real: `tool_not_allowed` for
+ * an action added since, or a path refusal it no longer makes. The person's Plannotator is older than this one.
+ */
+const NEWER_ACTIONS: readonly string[] = [INBOX_AGENT_FETCH_FILE, INBOX_AGENT_ROUTE, INBOX_AGENT_UPLOAD_PIECE, INBOX_AGENT_UPLOAD_FINISH];
+const OLD_REFUSALS: readonly string[] = ["path_refused", "attachment_path_refused", "image_path_refused", "no_checkout"];
+const UPDATE_THERE = " Plannotator on the person's computer is older than this one: ask the person to update it.";
+export function inboxPairedSkewNote(tool: string, code: string): string {
+  return (code === "tool_not_allowed" && NEWER_ACTIONS.includes(tool)) || OLD_REFUSALS.includes(code) ? UPDATE_THERE : "";
+}
+
 /** The way to the person's Inbox that PLANNOTATOR_PAIRING names: the agent door with its token, through the relay (or PLANNOTATOR_PAIRING_DOOR). */
 function pairedLink(deps: PairedDeps): PairedLink | { ok: false; code: string; message: string; exit: number } {
   const pairing = decodeInboxAgentPairing(deps.env.PLANNOTATOR_PAIRING);
@@ -352,7 +363,8 @@ function pairedLink(deps: PairedDeps): PairedLink | { ok: false; code: string; m
     if (got.result.isError) {
       const text = (got.result.content ?? []).map((part) => part.text ?? "").join("\n");
       const match = /^([a-z][a-z0-9_]*): ([\s\S]*)$/.exec(text);
-      return { ok: false, code: match?.[1] ?? "inbox_error", message: match?.[2] ?? text };
+      const code = match?.[1] ?? "inbox_error";
+      return { ok: false, code, message: `${match?.[2] ?? text}${inboxPairedSkewNote(tool, code)}` };
     }
     return { ok: true, structured: got.result.structuredContent };
   };
@@ -406,25 +418,37 @@ async function runPairedCall(
   }
   // The pictures the body shows from this machine's disk, as a local agent writes them: sent with the message, each
   // named by its file's name, which is what the door shows it by (packages/shared/inbox/agent-pictures.ts). A path
-  // that is no file here is left as it is, for the Inbox to read on the person's computer. A routine's files are paths
-  // each run reads there, so they go as they are.
+  // that is no file here is left as it is, for the Inbox to read on the person's computer. The body is send_message's,
+  // or a submit_guide's guide intent when it sends none (the one the door shows the pictures of). A routine's files
+  // are paths each run reads there, so they go as they are (a `{ "path": … }` one as its path).
+  const isFile = (path: string) => {
+    try {
+      return statSync(path).isFile();
+    } catch {
+      return false;
+    }
+  };
+  const intent = parsed.action === "submit_guide" && typeof args.body !== "string" ? guideIntent(args.guide) : null;
+  const shown = typeof args.body === "string" ? args.body : intent?.intent;
   const pictures =
-    typeof args.body === "string" && parsed.action !== "routine"
-      ? planAgentBodyPictures(args.body, Array.isArray(args.attachments) ? args.attachments : [], deps.cwd, (path) => {
-          try {
-            return statSync(path).isFile();
-          } catch {
-            return false;
-          }
-        })
-      : null;
-  if (pictures) args.body = pictures.body;
+    typeof shown === "string" && parsed.action !== "routine" ? planAgentBodyPictures(shown, Array.isArray(args.attachments) ? args.attachments : [], deps.cwd, isFile) : null;
+  if (pictures && typeof args.body === "string") args.body = pictures.body;
+  else if (pictures && intent) args.guide = intent.with(pictures.body);
   if (pictures && pictures.files.length > 0) args.attachments = [...(Array.isArray(args.attachments) ? args.attachments : [])];
+  let remote: number[] = [];
   if (Array.isArray(args.attachments) && parsed.action !== "routine") {
     const sent = await pairedAttachments(args.attachments, deps.cwd, pieceCall, pictures?.files ?? []);
     if (!sent.ok) return refused(sent.code, sent.message);
     args.attachments = sent.items;
+    remote = sent.remote;
+  } else if (Array.isArray(args.attachments)) {
+    args.attachments = args.attachments.map((item) => (item && typeof item === "object" && !Array.isArray(item) && typeof (item as { path?: unknown }).path === "string" && Object.keys(item).length === 1 ? (item as { path: string }).path : item));
   }
+  /** A refusal of a path left for the person's computer says it was looked for there. */
+  const sideOf = (words: string) => {
+    const at = /^[a-z][a-z0-9_]*: attachments\[(\d+)\]/.exec(words);
+    return at && remote.includes(Number(at[1])) ? `${words} (Looked for on the person's computer: it is no file on this machine, or was given as { "path": … }.)` : words;
+  };
   const outcome = await transport(parsed.action, args);
   if (outcome.kind === "refused") return refused(outcome.code, outcome.message);
   if (outcome.kind === "queued") {
@@ -441,6 +465,11 @@ async function runPairedCall(
   }
   const got = resultOf(outcome);
   if ("code" in got) return refused(got.code, got.message);
+  if (got.result.isError) {
+    const words = (got.result.content ?? []).map((part) => part.text ?? "").join("\n");
+    const code = /^([a-z][a-z0-9_]*): /.exec(words)?.[1] ?? "";
+    got.result.content = [{ text: `${sideOf(words)}${inboxPairedSkewNote(parsed.action, code)}` }];
+  }
   if (relayed && parsed.action === "whoami" && !got.result.isError) {
     got.result.structuredContent = { ...got.result.structuredContent, signal_url: await inboxAgentSignalUrl(relayed) };
   }
@@ -497,4 +526,20 @@ async function printResult(result: CallResult | undefined, out: (text: string) =
   if (typeof hint === "string" && hint) err(`${hint}\n`);
   await out(text ? `${words}\n` : `${JSON.stringify(result?.structuredContent ?? { text: words })}\n`);
   return 0;
+}
+
+/** A submit_guide's guide intent (the guide as an object or its JSON), and the guide with another intent in its place. */
+function guideIntent(guide: unknown): { intent: string; with: (intent: string) => unknown } | null {
+  let value = guide;
+  const asText = typeof guide === "string";
+  if (asText) {
+    try {
+      value = JSON.parse(guide as string);
+    } catch {
+      return null;
+    }
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value) || typeof (value as { intent?: unknown }).intent !== "string") return null;
+  const object = value as Record<string, unknown> & { intent: string };
+  return { intent: object.intent, with: (intent) => (asText ? JSON.stringify({ ...object, intent }) : { ...object, intent }) };
 }

@@ -27,6 +27,7 @@ import {
   inboxScheduleWords,
   SCHEDULED_LATE_MS,
   SCHEDULED_TICK_MS,
+  routineLineText,
 } from "@plannotator/core/inbox-scheduled";
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
@@ -41,16 +42,6 @@ export const INBOX_SCHEDULED_OFF_TEXT =
 
 /** Who asked: the person in the window, or an agent session (and the thread it asked from). */
 export type InboxScheduledBy = { kind: "person" } | { kind: "agent"; host: string; session: string; name: string; thread_id: string | null };
-
-/**
- * A routine's name (or a folder's words) as text in a change line: never a picture, a link, a mention or HTML,
- * whoever named it (a name is free text, an agent's anywhere). Markdown's characters are backslash-escaped; `&`, `<`,
- * `>`, quotes, `:` and `@` are written as character references, so no tag, bare URL or address is left to find. The
- * window draws the name as it was written.
- */
-export function routineLineText(text: string): string {
-  return text.replace(/[\\`*_~[\]!()#|{}$.+-]/g, (c) => `\\${c}`).replace(/[&<>"':@]/g, (c) => `&#${c.charCodeAt(0)};`);
-}
 
 /** The fields a create or an update takes, as the routes and the tool read them. */
 export interface InboxScheduledInput {
@@ -251,8 +242,11 @@ export function createInboxScheduled(deps: {
   // ── What an agent's change says in its thread ──
 
   const linkOf = (record: InboxScheduledThread) => `[${routineLineText(record.name.replace(/[[\]]/g, ""))}](#routine=${record.id})`;
-  const folderWords = (folder: InboxScheduledFolder) =>
-    routineLineText("scratch" in folder ? "a new scratch folder" : "path" in folder ? deps.displayFolder(folder.path) : (store.project(folder.project_id) && deps.displayFolder(store.project(folder.project_id)!.root)) || "a folder that is gone");
+  const folderWords = (folder: InboxScheduledFolder) => {
+    if ("scratch" in folder) return "a new scratch folder";
+    const words = "path" in folder ? deps.displayFolder(folder.path) : store.project(folder.project_id) && deps.displayFolder(store.project(folder.project_id)!.root);
+    return words ? routineLineText(words) : "a folder that is gone";
+  };
   const agentWords = (agent: string) => INBOX_HOST_NAMES[agent] ?? agent;
   const scheduleSentence = (schedule: InboxScheduledSchedule) => (schedule ? inboxScheduleWords(schedule).replace(/^Every /, "every ").replace(/^Once /, "once ").replace(/^On the /, "on the ") : "only when someone runs it");
   const fence = (lines: string[]) => {
