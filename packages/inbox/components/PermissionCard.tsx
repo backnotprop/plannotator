@@ -33,7 +33,7 @@ import {
   readInboxPermissionBody,
   type InboxPermissionBody,
 } from '@plannotator/core/inbox-permission';
-import { inboxAgentName, type InboxMessageWire, type InboxQuestion, type InboxRun } from '@plannotator/core/inbox-types';
+import { inboxAgentName, inboxRunInRex, type InboxMessageWire, type InboxQuestion, type InboxRun } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { InboxApiError, inboxApi } from '../api';
 import { AuthorMark, Icon } from '../icons';
@@ -482,7 +482,7 @@ export function PermissionCard({
           {minutes && minutes >= 1 ? ` · ${minutes} min` : ''}
         </span>
         <span className="pc-sp" />
-        {run && run.state !== 'stopped' && run.state !== 'failed' && run.state !== 'missing' && (
+        {run && run.state !== 'stopped' && run.state !== 'failed' && run.state !== 'missing' && (!inboxRunInRex(run) || run.rex?.stops) && (
           <button
             type="button"
             className="pc-stop"

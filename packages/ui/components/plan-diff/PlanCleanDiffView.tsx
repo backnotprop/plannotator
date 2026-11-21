@@ -12,6 +12,7 @@ import { applyHighlight, codeBlockClassName, codeBlockKeepsLayout, ensureHighlig
 import { chunkSegments, codeSegmentsToHtml, wordDiffSegments } from "../../utils/codeDiffSegments";
 import { useFenceTheme } from "../../hooks/useFenceTheme";
 import { ListItemBody } from "../ListItemBody";
+import { SourceLikeInlineContext } from "../InlineMarkdown";
 import { BlockquoteBlock, BLOCKQUOTE_CLASS_NAME } from "../blocks/BlockquoteBlock";
 import { parseTableContent } from "../blocks/TableBlock";
 import type { Block, Annotation, EditorMode, ImageAttachment } from "../../types";
@@ -29,6 +30,8 @@ import { AnnotationToolbar } from "../AnnotationToolbar";
 import { CommentPopover } from "../CommentPopover";
 import { FloatingQuickLabelPicker } from "../FloatingQuickLabelPicker";
 import { getIdentity } from "../../utils/identity";
+import { UNAVAILABLE_IMAGE_CLASS, useImageResolver } from "../ImageResolverContext";
+import { useLocalLinkMatch, useLocalLinkResolver } from "../LocalLinkContext";
 import { useHighlightCopy } from "../../utils/highlightCopy";
 
 /**
@@ -111,11 +114,21 @@ const DEFAULT_UNCHANGED_CLASS = "opacity-60 hover:opacity-100 transition-opacity
  */
 const STRIKE_CLASS = "line-through decoration-destructive/30";
 
-export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
+/**
+ * The diff is a view of the source: `[^1]`, character references and bare
+ * `www.` / e-mail addresses stay as written in every block it draws (its own
+ * inline renderer, the shared quote and list pieces, a host's `renderBlock`).
+ */
+export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = (props) => (
+  <SourceLikeInlineContext.Provider value={true}>
+    <PlanCleanDiffViewBody {...props} />
+  </SourceLikeInlineContext.Provider>
+);
+
+const PlanCleanDiffViewBody: React.FC<PlanCleanDiffViewProps> = ({
   blocks,
   annotations = [],
   onAddAnnotation,
-  onSelectAnnotation,
   selectedAnnotationId = null,
   mode = "selection",
   wordLevel = true,
@@ -1097,6 +1110,12 @@ function sanitizeLinkUrl(url: string): string | null {
 }
 
 const InlineMarkdown: React.FC<{ text: string }> = ({ text }) => {
+  // A host's image and link rules (ImageResolverContext, LocalLinkContext and
+  // LocalLinkMatchContext), as the document view applies them. With no
+  // provider, every image and link renders exactly as before.
+  const resolveImage = useImageResolver();
+  const resolveLocalLink = useLocalLinkResolver();
+  const matchLocalLink = useLocalLinkMatch();
   const parts: React.ReactNode[] = [];
   let remaining = text;
   let key = 0;
@@ -1178,7 +1197,66 @@ const InlineMarkdown: React.FC<{ text: string }> = ({ text }) => {
       continue;
     }
 
+    // Images, only with a host resolver: what it answers is drawn (a
+    // placeholder for `unavailable`, its `src` otherwise). Without one, or
+    // when it answers null, `!` and the link render as they always have.
+    match = resolveImage ? remaining.match(/^!\[([^\]]*)\]\(([^)]+)\)/) : null;
+    const resolvedImage = match ? resolveImage!(match[2]) : null;
+    if (match && resolvedImage) {
+      parts.push(
+        resolvedImage.kind === "unavailable" ? (
+          <span key={key++} className={UNAVAILABLE_IMAGE_CLASS} title={resolvedImage.title} data-image-unavailable="">
+            {match[1] || "Image"}
+          </span>
+        ) : (
+          <img key={key++} src={resolvedImage.src} alt={match[1]} width={resolvedImage.width} className="max-w-full rounded my-2" loading="lazy" />
+        ),
+      );
+      remaining = remaining.slice(match[0].length);
+      previousChar = match[0][match[0].length - 1] || previousChar;
+      continue;
+    }
+
     match = remaining.match(/^\[([^\]]+)\]\(([^)]+)\)/);
+    const localLink = match && resolveLocalLink && matchLocalLink(match[2]) ? resolveLocalLink(match[2]) : null;
+    if (match && localLink) {
+      // A host's answer for this link: inert text with its tooltip, or a link
+      // whose click the host handles (the browser never follows it).
+      const label = <InlineMarkdown text={match[1]} />;
+      if (localLink.kind === "unavailable") {
+        const inert = (
+          <span className="text-muted-foreground underline decoration-dotted underline-offset-2" data-local-link="unavailable">
+            {label}
+          </span>
+        );
+        parts.push(
+          localLink.wrap ? (
+            <React.Fragment key={key++}>{localLink.wrap(inert)}</React.Fragment>
+          ) : (
+            <span key={key++} title={localLink.title}>{inert}</span>
+          ),
+        );
+        if (localLink.after) parts.push(<React.Fragment key={key++}>{localLink.after}</React.Fragment>);
+      } else {
+        const link = (
+          <a
+            href={localLink.href ?? match[2]}
+            title={localLink.wrap ? undefined : localLink.title}
+            onClick={(event) => {
+              event.preventDefault();
+              localLink.open();
+            }}
+            className="text-primary underline underline-offset-2 hover:text-primary/80"
+          >
+            {label}
+          </a>
+        );
+        parts.push(<React.Fragment key={key++}>{localLink.wrap ? localLink.wrap(link) : link}</React.Fragment>);
+      }
+      remaining = remaining.slice(match[0].length);
+      previousChar = match[0][match[0].length - 1] || previousChar;
+      continue;
+    }
     if (match) {
       // Recursively parse the anchor text so <ins>/<del> diff tags (and
       // other inline markdown) inside the link render correctly instead of

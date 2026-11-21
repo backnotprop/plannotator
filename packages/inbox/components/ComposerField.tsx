@@ -45,6 +45,8 @@ import { isPhone, isTouchScreen } from '../phone';
 import { inboxSkillFilter } from '../skills';
 import { builtinSkillIcon } from './BuiltinSkillIcon';
 import { hashtagMenuLeft, useHashtagPicker, useInitiativeTags } from '../hashtags';
+import { useReplyMentions } from '../replyMentions';
+import { FieldLead } from './FieldLead';
 
 /** The chip class a tag gets in the composer's highlight layer (inbox.css: colour, background and box-shadow only). */
 export const TAG_TOKEN_CLASS = 'ib-tg-tok';
@@ -110,6 +112,16 @@ export interface InboxComposerFieldProps {
   skillFilter?: (entry: SkillCatalogEntry) => boolean;
   /** The Inbox's own commands this field lists with the skills after a `/` (`ComposerCommand`). Absent: none. Keep its identity stable. */
   commands?: readonly ComposerCommand[];
+  /**
+   * The reply box (and full screen's reply): the thread it answers, which takes thread mentions (replyMentions.tsx,
+   * approval "inbox-drag-threads"): a dragged row, the row menu's Mention in reply, a pasted thread link. Absent: none.
+   */
+  mentionThread?: string;
+  /**
+   * Drawn at the start of the field's first line, the words flowing after it (`FieldLead`): the reply box's recipient
+   * chip in a thread with several agents. Absent: the field as ever.
+   */
+  lead?: React.ReactNode;
 }
 
 const NO_PEOPLE: readonly MentionPerson[] = [];
@@ -132,6 +144,8 @@ export function InboxComposerField({
   voiceNoteGlide = false,
   skillFilter = OUTSIDE_A_REVIEW,
   commands,
+  mentionThread,
+  lead,
 }: InboxComposerFieldProps) {
   const innerRef = useRef<HTMLTextAreaElement | null>(null);
   const attach = useCallback(
@@ -149,6 +163,17 @@ export function InboxComposerField({
     return voiceSession.attach(textareaField(innerRef.current, isTouchScreen));
   }, [voiceSession]);
   const voiceLive = voice ? voiceHidesCaret(voice.view) : false;
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  // Thread mentions (a reply's field only): every change of the words goes through `setText`, so the mentions move with them.
+  const threadMentions = useReplyMentions({ threadId: mentionThread ?? '', text: value, fieldRef: innerRef, wrapRef, voiceLive, off: mentionThread === undefined });
+  const commitMentions = threadMentions.commit;
+  const setText = useCallback(
+    (next: string, caret?: number | null, undo = false) => {
+      commitMentions(next, caret, undo);
+      onChange(next);
+    },
+    [commitMentions, onChange],
+  );
   // The commands as the list's rows: the built-ins' own row ("Plannotator" at its right end), and never a reference.
   const commandRows = useMemo<SkillCatalogEntry[] | undefined>(
     () => (commands?.length ? commands.map((command) => ({ name: command.name, root: 'plannotator', description: command.description, humanOnly: false })) : undefined),
@@ -157,7 +182,7 @@ export function InboxComposerField({
   const runCommand = useCallback((row: SkillCatalogEntry, words: string) => commands?.find((command) => command.name === row.name)?.run(words), [commands]);
   const skills = useSkillReferenceAutocomplete({
     text: value,
-    setText: onChange,
+    setText,
     textareaRef: innerRef,
     enabled: true,
     bareEscapeDismisses: escapeClosesMenu,
@@ -166,6 +191,9 @@ export function InboxComposerField({
     onCommand: runCommand,
     // Plannotator's built-ins are one group at the top of the list (the owner, 2026-11-09), whatever was typed.
     hostRowsFirst: true,
+    // A list opens when the person types, not when they delete (the owner, 2026-11-17): Backspace held back over a
+    // `/name` or `@name` in the words never pops a list; one open for the name being typed stays through a typo's fix.
+    quietOnDelete: true,
   });
   const [announce, setAnnounce] = useState('');
   const options = tags?.options;
@@ -188,10 +216,10 @@ export function InboxComposerField({
         : undefined,
     [options, people, onTagsChange],
   );
-  const mention = useMentionAutocomplete({ text: value, setText: onChange, textareaRef: innerRef, source });
+  const mention = useMentionAutocomplete({ text: value, setText, textareaRef: innerRef, source, quietOnDelete: true });
   // `#` names an initiative (approval "board-hashtags"): the skill list's menu, the skill list's keys.
   const initiativeTags = useInitiativeTags();
-  const hash = useHashtagPicker({ text: value, setText: onChange, fieldRef: innerRef, tags: initiativeTags, bareEscapeDismisses: escapeClosesMenu });
+  const hash = useHashtagPicker({ text: value, setText, fieldRef: innerRef, tags: initiativeTags, bareEscapeDismisses: escapeClosesMenu });
   const hashListboxId = `ib-hash-${useId().replace(/:/g, '')}`;
   const hashMenu = hash.menu && !mention.menu && !skills.menu ? hash.menu : null;
   const [hashShown, setHashShown] = useState(false);
@@ -227,7 +255,6 @@ export function InboxComposerField({
     mention.select(index);
     if (option?.taggable) setAnnounce(tagPickedWords(option));
   };
-  const wrapRef = useRef<HTMLDivElement | null>(null);
   // Whether the skill list is drawn (FloatingSkillMenu draws it only while the field is in sight): its keys and
   // `aria-expanded` follow what the person sees, so arrows never move through a list nobody can see.
   const [skillShown, setSkillShown] = useState(false);
@@ -237,9 +264,10 @@ export function InboxComposerField({
   const textarea = innerRef.current;
   const wrap = wrapRef.current;
   const host = textarea ? skillMenuHost(textarea) : null;
-  const describedBy = [ariaDescribedBy, showNotes ? notesId : null].filter(Boolean).join(' ') || undefined;
+  const describedBy = [ariaDescribedBy, showNotes ? notesId : null, threadMentions.describedBy].filter(Boolean).join(' ') || undefined;
+  const fieldTokens = hash.tokens.length > 0 || threadMentions.tokens.length > 0 ? [...skills.referenceTokens, ...hash.tokens, ...threadMentions.tokens].sort((a, b) => a.start - b.start) : skills.referenceTokens;
   return (
-    <div className="ib-cfield" ref={wrapRef} data-composer-field="" data-voice-live={voiceLive ? '' : undefined}>
+    <div className="ib-cfield" ref={wrapRef} data-composer-field="" data-voice-live={voiceLive ? '' : undefined} onPaste={threadMentions.onPaste}>
       {skills.menu && !tagMenu && textarea && wrap && host ? (
         <FloatingSkillMenu textarea={textarea} wrap={wrap} host={host} caret={caretMenu ?? null} onShown={setSkillShown}>
           {(boundary, maxListHeight) => (
@@ -285,13 +313,16 @@ export function InboxComposerField({
           {(boundary) => <TagPicker id={tagListboxId} menu={tagMenu} options={options} onSelect={select} field={textarea} boundary={boundary} />}
         </FloatingSkillMenu>
       ) : null}
+      {lead ? <FieldLead value={value}>{lead}</FieldLead> : null}
       <ComposerTokenTextarea
         textareaRef={attach}
         value={value}
         onChange={(event) => {
-          onChange(event.target.value);
-          skills.onSelect();
-          mention.onSelect();
+          // The browser's undo and redo bring back the thread mentions the words had (threadMentions.ts).
+          const kind = (event.nativeEvent as InputEvent).inputType;
+          setText(event.target.value, event.target.selectionEnd, kind === 'historyUndo' || kind === 'historyRedo');
+          skills.onEdit(kind);
+          mention.onEdit(kind);
           hash.onSelect();
         }}
         onKeyDown={(event) => {
@@ -303,9 +334,11 @@ export function InboxComposerField({
           if (tagMenuShown && mention.onKeyDown(event)) return;
           if (hashMenuShown && hash.onKeyDown(event)) return;
           if (skillMenuShown && skills.onKeyDown(event)) return;
+          if (threadMentions.onKeyDown(event)) return;
           onKeyDown?.(event);
         }}
         onSelectCaret={() => {
+          threadMentions.onSelect();
           skills.onSelect();
           mention.onSelect();
           hash.onSelect();
@@ -317,13 +350,14 @@ export function InboxComposerField({
         inputClassName="ib-rtext"
         mirrorClassName="ib-rmirror"
         skillReferences
-        tokens={hash.tokens.length > 0 ? [...skills.referenceTokens, ...hash.tokens].sort((a, b) => a.start - b.start) : skills.referenceTokens}
+        tokens={fieldTokens}
         mentionChips={source ? { people: mention.mentions, tokenClassName: TAG_TOKEN_CLASS } : null}
         listboxId={listboxId}
         listboxOpen={skillMenuShown || hashMenuShown || tagMenuShown}
         activeOptionId={activeOption}
         inputProps={{ 'aria-label': ariaLabel, 'aria-describedby': describedBy, rows: 2 }}
       />
+      {threadMentions.overlay}
       {voice && <VoiceNote voice={voice} glide={voiceNoteGlide} />}
       <HumanOnlySkillNotice skills={skills.humanOnlyReferences} destination={destination} />
       {options && showNotes && (tags?.note ? tags.note({ id: notesId, tagged, focusField: () => innerRef.current?.focus() }) : <TagNotes id={notesId} tagged={tagged} owner={owner} />)}

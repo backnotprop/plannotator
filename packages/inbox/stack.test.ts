@@ -37,6 +37,9 @@ test('the edges: stacking starts exactly where a pane would get less than its mi
   expect(stackFor(LIST_MIN_WIDTH + THREAD_BESIDE_FILE_WIDTH - 1, 2000).thread).toBe(true);
   expect(stackFor(2000, THREAD_BESIDE_FILE_WIDTH + FILE_MIN_WIDTH).file).toBe(false);
   expect(stackFor(2000, THREAD_BESIDE_FILE_WIDTH + FILE_MIN_WIDTH - 1).file).toBe(true);
+  // Two threads beside the list ("Open to the side") need room for both before the list stays beside them.
+  expect(stackFor(LIST_MIN_WIDTH + 2 * THREAD_BESIDE_FILE_WIDTH, 2000, 2).thread).toBe(false);
+  expect(stackFor(LIST_MIN_WIDTH + 2 * THREAD_BESIDE_FILE_WIDTH - 1, 2000, 2).thread).toBe(true);
   // Not measured yet (0): nothing stacks.
   expect(stackFor(0, 0)).toEqual(NONE);
 });
@@ -58,6 +61,8 @@ test('paneGutters: three gutters from --ib-gutter (Soft panes on), none when it 
     gutter = ' 8px';
     expect(paneGutters()).toBe(24);
     expect(paneGutters(root as Element)).toBe(24);
+    // Two thread panes: one more gutter between them.
+    expect(paneGutters(root as Element, 2)).toBe(32);
     gutter = '0px';
     expect(paneGutters()).toBe(0);
     gutter = '';

@@ -9,6 +9,7 @@ import {
   normalizeThemePair,
   resetDefaultThemePair,
   seedThemePair,
+  setCustomThemes,
   themesForHalf,
   themeSupportsHalf,
 } from '../utils/themeRegistry';
@@ -595,6 +596,40 @@ describe('ThemeProvider', () => {
     // And the mirror keeps writing the host's keys, not Plannotator's.
     expect(stored.get('host-mode')).toBe('system');
     expect(stored.get('host-palette')).toBe('kanagawa-wave');
+  });
+
+  // A custom theme from the page's `/plannotator-themes.js` (theme-files.ts): its tile comes first, is drawn from its
+  // own colours, and assigning it applies its class like a built-in's. A cookie naming it survives the first render.
+  test.skipIf(!hasDom)('a custom theme is a tile of its own colours, first in the grid, and selectable', async () => {
+    const swatch = { primary: '#4cc2ff', secondary: '#5fd4c4', accent: '#ffb547', background: '#0c0f14', foreground: '#d9dee7' };
+    setCustomThemes([{ id: 'instrument', name: 'Instrument', modeSupport: 'both', colors: { dark: swatch, light: swatch } }]);
+    try {
+      stored.set('plannotator-theme', 'dark');
+      stored.set('plannotator-dark-theme', 'instrument');
+      stored.set('plannotator-light-theme', DEFAULT_COLOR_THEME);
+      installMatchMedia(false);
+
+      await mountTheme(<ThemeTab />);
+      expect(themeState().colorTheme).toBe('instrument');
+      expect(document.documentElement.classList.contains('theme-instrument')).toBe(true);
+
+      expect(paletteNames()[0]).toBe('Instrument');
+      // The DOM may keep the hex as written or report rgb(): read either as hex.
+      const hex = (value: string) => {
+        const m = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(value);
+        return m ? `#${m.slice(1).map(n => Number(n).toString(16).padStart(2, '0')).join('')}` : value.toLowerCase();
+      };
+      const dots = Array.from(palette('Instrument').querySelectorAll<HTMLElement>('.rounded-full')).map(dot => hex(dot.style.backgroundColor));
+      expect(dots).toEqual([swatch.primary, swatch.secondary, swatch.accent, swatch.background, swatch.foreground]);
+
+      await act(async () => clickButton(palette('Plannotator')));
+      expect(themeState().darkTheme).toBe(DEFAULT_COLOR_THEME);
+      await act(async () => clickButton(palette('Instrument')));
+      expect(themeState().darkTheme).toBe('instrument');
+      expect(stored.get('plannotator-dark-theme')).toBe('instrument');
+    } finally {
+      setCustomThemes([]);
+    }
   });
 });
 

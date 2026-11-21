@@ -2,11 +2,14 @@
  * Pull requests in the Inbox: which agent thread owns a PR, as the person
  * chose it (Hand to an agent, Launch an agent). The one place that choice lives.
  *
- *   inbox/pull-links.json   { v: 1, links: { [pull key]: { thread_id, at, ask?, theirs? } }, landed?: { [thread and pull key]: InboxReviewLanding }, posted?: { [pull key]: { at, head } } }
+ *   inbox/pull-links.json   { v: 1, links: { [pull key]: { thread_id, at, ask?, theirs?, page? } }, landed?: { [thread and pull key]: InboxReviewLanding }, posted?: { [pull key]: { at, head } } }
  *
  * `ask`: what the hand-off asked the agent for first, a guided review (`guide`) or the person's own curation
- * (`custom`); the stack view says it until the review arrives. `theirs`: every PR of that hand-off was a teammate's
+ * (`custom`), or nothing first (`thread`: a PR page's Start a thread, the person's own question); the stack view says
+ * a review's ask until the review arrives. `theirs`: every PR of that hand-off was a teammate's
  * (from the Inbox's own pull list, never the window's word); a thread whose PRs are all theirs takes no verdict.
+ * `page`: the thread was started from the PR's page (the `thread` ask), so it is that PR's page from then on; kept when
+ * the same thread later asks for a guided review (its ask becomes `guide`), dropped when the PR goes to another thread.
  *
  * Written whole to a temp file, then renamed over the old one. A file that
  * cannot be read is moved aside (`pull-links.json.unreadable-<time>`), never
@@ -23,18 +26,21 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { join } from "node:path";
 import { inboxReviewLandingId, type InboxReviewLanding, type InboxReviewPosted, type InboxReviewStart } from "@plannotator/core/inbox-types";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
+import { isInboxPullAsk, type InboxPullAsk } from "@plannotator/core/inbox-types";
 
 export const INBOX_PULL_LINKS_FILE = "pull-links.json";
 /** At most this many PRs keep an owner: the oldest choices go first. */
 export const INBOX_PULL_LINKS_MAX = 2_000;
 
-export type InboxPullAsk = "guide" | "custom";
+export type { InboxPullAsk } from "@plannotator/core/inbox-types";
 
 export interface InboxPullOwner {
   thread_id: string;
   at: string;
   ask?: InboxPullAsk;
+  picture_it_at?: string;
   theirs?: true;
+  page?: true;
 }
 
 export interface InboxPullLinks {
@@ -83,8 +89,10 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
           links.set(key, {
             thread_id: owner.thread_id,
             at: owner.at,
-            ...(owner.ask === "guide" || owner.ask === "custom" ? { ask: owner.ask } : {}),
+            ...(isInboxPullAsk(owner.ask) && owner.ask !== "picture_it" ? { ask: owner.ask } : {}),
+            ...(typeof owner.picture_it_at === "string" ? { picture_it_at: owner.picture_it_at } : owner.ask === "picture_it" ? { picture_it_at: owner.at } : {}),
             ...(owner.theirs === true ? { theirs: true as const } : {}),
+            ...(owner.page === true ? { page: true as const } : {}),
           });
         }
       }
@@ -127,8 +135,15 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
     set(keys, threadId, extra = {}, at = new Date().toISOString()) {
       const map = load();
       for (const key of keys) {
+        // A thread started from the PR's page stays its page when that same thread is given the PR again.
+        const was = map.get(key);
+        const same = was?.thread_id === threadId;
+        const page = extra.ask === "thread" || (same && was.page === true);
+        const pictureIt = extra.ask === "picture_it";
+        const ask = pictureIt ? (same ? was.ask : undefined) : (extra.ask ?? undefined);
+        const pictureItAt = pictureIt ? at : same ? was.picture_it_at : undefined;
         map.delete(key);
-        map.set(key, { thread_id: threadId, at, ...(extra.ask ? { ask: extra.ask } : {}), ...(extra.theirs ? { theirs: true as const } : {}) });
+        map.set(key, { thread_id: threadId, at, ...(ask ? { ask } : {}), ...(pictureItAt ? { picture_it_at: pictureItAt } : {}), ...(extra.theirs ? { theirs: true as const } : {}), ...(page ? { page: true as const } : {}) });
       }
       while (map.size > INBOX_PULL_LINKS_MAX) map.delete(map.keys().next().value!);
       save(map);

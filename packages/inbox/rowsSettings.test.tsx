@@ -70,9 +70,11 @@ async function settle() {
 }
 
 const scope = (el: HTMLElement, control: string) => el.querySelector<HTMLElement>(`[data-rows-control="${control}"]`)!;
+/** A choice's words, without the picture some choices show before them (hidden from a screen reader too). */
+const wordsOf = (label: Element) => [...label.childNodes].filter((node) => !(node instanceof Element && node.getAttribute('aria-hidden') === 'true')).map((node) => node.textContent).join('');
 /** Pick a choice by its words in a control row, or a look to start from (`preset`). */
 async function pick(el: HTMLElement, control: string, words: string) {
-  const target = control === 'preset' ? [...el.querySelectorAll<HTMLButtonElement>('.ib-rws-presets button[data-preset]')].find((b) => b.textContent === words) : [...scope(el, control).querySelectorAll('label')].find((l) => l.textContent === words)?.querySelector('input');
+  const target = control === 'preset' ? [...el.querySelectorAll<HTMLButtonElement>('.ib-rws-presets button[data-preset]')].find((b) => b.textContent === words) : [...scope(el, control).querySelectorAll('label')].find((l) => wordsOf(l) === words)?.querySelector('input');
   if (!target) throw new Error(`${control}: no "${words}"`);
   act(() => target.click());
   await settle();
@@ -87,7 +89,7 @@ async function press(el: HTMLElement, selector: string) {
   await settle();
 }
 const pressed = (el: HTMLElement) => [...el.querySelectorAll('.ib-rws-presets button[data-preset]')].filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.getAttribute('data-preset'));
-const chosen = (el: HTMLElement, control: string) => [...scope(el, control).querySelectorAll('label')].filter((l) => l.querySelector('input')!.checked).map((l) => l.textContent);
+const chosen = (el: HTMLElement, control: string) => [...scope(el, control).querySelectorAll('label')].filter((l) => l.querySelector('input')!.checked).map(wordsOf);
 const said = (el: HTMLElement) => el.querySelector('[data-rows-last] [role="status"]')!.textContent;
 const on = () => rowsFromLook(readListLook());
 /** The server's saved look, as a settings read brings it. */
@@ -150,8 +152,9 @@ describe.if(hasDom)('Settings → Rows', () => {
     await press(el, '[data-rows-more]');
     expect([more.hidden, el.querySelector('[data-rows-more]')!.getAttribute('aria-expanded')]).toEqual([false, 'true']);
     expect([el.querySelector<HTMLButtonElement>('[data-rows-undo]')!.disabled, el.querySelector<HTMLButtonElement>('[data-rows-reset]')!.disabled, said(el), el.querySelector('[data-rows-undo-last]')]).toEqual([true, true, '', null]);
-    // Pull requests, Agent icons and Project name read "shown".
-    expect(['agents', 'project', 'pulls'].map((c) => sw(el, c).getAttribute('aria-checked'))).toEqual(['true', 'true', 'true']);
+    // Pull requests and Project name read "shown"; Agent icons, each agent's own (today's look).
+    expect(['project', 'pulls'].map((c) => sw(el, c).getAttribute('aria-checked'))).toEqual(['true', 'true']);
+    expect(chosen(el, 'agents')).toEqual(["Each agent's own"]);
   });
 
   test('a three-way choice never leaves its rival on, and each pick is one save', async () => {
@@ -168,11 +171,23 @@ describe.if(hasDom)('Settings → Rows', () => {
 
   test('a switch that shows a part is on while the part shows; each is one save of its own name', async () => {
     const el = render();
-    for (const control of ['agents', 'project', 'pulls', 'boldAll', 'pill', 'dividers']) await flip(el, control);
-    expect(saves.map((rows) => rows.filter((name) => name !== 'smallNames'))).toEqual([['hideAgents'], ['hideAgents', 'hideProject'], ['hideAgents', 'hideProject', 'hidePulls'], ['hideAgents', 'hideProject', 'boldNames', 'hidePulls'], ['highlight', 'hideAgents', 'hideProject', 'boldNames', 'hidePulls'], ['highlight', 'hideAgents', 'hideProject', 'dividers', 'boldNames', 'hidePulls']]);
-    expect(['agents', 'project', 'pulls', 'boldAll', 'pill', 'dividers'].map((c) => sw(el, c).getAttribute('aria-checked'))).toEqual(['false', 'false', 'false', 'true', 'true', 'true']);
+    for (const control of ['project', 'pulls', 'boldAll', 'pill', 'dividers']) await flip(el, control);
+    expect(saves.map((rows) => rows.filter((name) => name !== 'smallNames'))).toEqual([['hideProject'], ['hideProject', 'hidePulls'], ['hideProject', 'boldNames', 'hidePulls'], ['highlight', 'hideProject', 'boldNames', 'hidePulls'], ['highlight', 'hideProject', 'dividers', 'boldNames', 'hidePulls']]);
+    expect(['project', 'pulls', 'boldAll', 'pill', 'dividers'].map((c) => sw(el, c).getAttribute('aria-checked'))).toEqual(['false', 'false', 'true', 'true', 'true']);
     // The words under Pull requests describe the switch to a screen reader.
     expect(el.querySelector(`#${sw(el, 'pulls').getAttribute('aria-describedby')}`)!.textContent).toBe('Their state at the end of the row');
+  });
+
+  test('Agent icons is one three-way choice: each agent\'s own, from the project name, hidden; one save each, never two on', async () => {
+    const el = render();
+    await pick(el, 'agents', 'From the project name');
+    // Its words say what else it changes, and only while it is picked.
+    expect(el.querySelector(`#${scope(el, 'agents').querySelector('[role="radiogroup"]')!.getAttribute('aria-describedby')}`)!.textContent).toBe('Also the Agents list and threads. A face picked for one agent stays.');
+    await pick(el, 'agents', 'Hidden');
+    await pick(el, 'agents', 'From the project name');
+    await pick(el, 'agents', "Each agent's own");
+    expect(saves.map((rows) => rows.filter((name) => name !== 'smallNames'))).toEqual([['agentProjectIcons'], ['hideAgents'], ['agentProjectIcons'], []]);
+    expect([chosen(el, 'agents'), scope(el, 'agents').querySelector('[role="radiogroup"]')!.getAttribute('aria-describedby')]).toEqual([["Each agent's own"], null]);
   });
 
   test('each look to start from is exactly its list in one save; a look that matches none has none pressed and no "Custom" tag', async () => {
@@ -309,7 +324,7 @@ describe.if(hasDom)('Settings → Rows', () => {
     // Undoing the look re-lays every row too; undoing a small change tints its part.
     await press(el, '[data-rows-undo]');
     expect([tinted(), said(el).startsWith('Undid: ')]).toEqual([0, true]);
-    await flip(el, 'agents');
+    await pick(el, 'agents', 'Hidden');
     await press(el, '[data-rows-undo]');
     expect(tinted()).toBeGreaterThan(0);
     await press(el, '[data-rows-reset]');

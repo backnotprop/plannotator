@@ -8,6 +8,8 @@ import type { AgentFace } from './faceChoices';
 import { FAN_DWELL_MS, FAN_PRESS_MS, FaceFan, type FaceSources, type FanOpenedBy } from './FaceFan';
 import { AgentIconDialog, type AgentIconPlace } from './AgentIconDialog';
 import { agentFaceArtReady, agentRigOf, mountAgentMark, showAgentFace, unmountAgentMark } from './motion';
+import { ProjectTile, keptAgentFace, shownAgentFace, useAgentProjectTile, useProjectDefault } from './projectFace';
+import { RexMark, useRexMarkOf } from './rexMark';
 
 export { loadAgentFaceArt } from './faceArtLoad';
 
@@ -27,41 +29,78 @@ export { loadAgentFaceArt } from './faceArtLoad';
  */
 export type AgentMarkPicks = 'all' | 'shared' | 'none';
 
-export function AgentMark({ id, host, name, agent, picks = 'all' }: { id: string; host: string | null; name: string; agent?: Pick<InboxAgent, 'id' | 'session' | 'continues'>; picks?: AgentMarkPicks }) {
+/**
+ * The mark's size on the marks' scale (inbox.css `--ib-mark-N`): 24 everywhere, 44 on the list's Agents view
+ * (agentsView/). The same mark at either size: the same rig, faces, motion and picker, every place in step through
+ * the kept face (agentFaces.ts); the picker's plate grows with it (FaceFan.tsx).
+ */
+export type AgentMarkSize = 24 | 44;
+
+export function AgentMark({
+  id,
+  host,
+  name,
+  agent,
+  picks = 'all',
+  statusMarks = false,
+  size = 24,
+}: {
+  id: string;
+  host: string | null;
+  name: string;
+  agent?: Pick<InboxAgent, 'id' | 'session' | 'continues'>;
+  picks?: AgentMarkPicks;
+  /** The sidebar's Agents list: the "Agent status" marks too, while the setting is on (rexMark.tsx `useRexMarkOf`). */
+  statusMarks?: boolean;
+  size?: AgentMarkSize;
+}) {
   const ref = useRef<HTMLSpanElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const [plain, setPlain] = useState<HTMLElement | null>(null);
-  const face = useAgentFace(id);
+  const kept = useAgentFace(id);
+  // Started in Rex: its pane's status on the mark's corner (rexMark.tsx); any other agent: none.
+  const rexMark = useRexMarkOf(agent?.session ?? id, statusMarks);
+  // Its corner mark is drawn for the 24 px mark only.
+  const rex = rexMark && size === 24 ? <RexMark mark={rexMark} seed={id} size={24} side /> : null;
+  // Agent icons "From the project name" (Settings → Rows): no face picked draws the project's tile (projectFace.tsx).
+  const projectDefault = useProjectDefault(id);
+  const face = shownAgentFace(kept, projectDefault);
+  // The project's tile is a still in the mark's place; with nothing to draw, the agent's own mark, alive as ever.
+  const project = useAgentProjectTile(face === 'project' ? id : null);
+  const tiled = face === 'project' && project !== null;
+  // What the mark draws: under the setting, an agent whose project has nothing to draw shows (and the picker checks) its own mark.
+  const drawn = face === 'project' && !tiled ? 'agent' : face;
+  const moving = face === 'project' || face === 'mark' ? 'agent' : face;
   const rig = agentRigOf(host);
   const clicked = useRef(false);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    setPlain(mountAgentMark(el, { rig, face: 'agent', size: 24, seed: id }));
+    setPlain(mountAgentMark(el, { rig, face: 'agent', size, seed: id }));
     return () => {
       setPlain(null);
       unmountAgentMark(el);
     };
-  }, [rig, id]);
+  }, [rig, id, size]);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     const withMotion = clicked.current;
-    if (face === 'agent' || face.startsWith('own:') || face.startsWith('set:') || agentFaceArtReady()) {
-      showAgentFace(el, face, withMotion);
+    if (moving === 'agent' || moving.startsWith('own:') || moving.startsWith('set:') || agentFaceArtReady()) {
+      showAgentFace(el, moving, withMotion);
       return;
     }
     let live = true;
     loadAgentFaceArt().then(
       () => {
-        if (live) showAgentFace(el, face, withMotion);
+        if (live) showAgentFace(el, moving, withMotion);
       },
       () => {},
     );
     return () => {
       live = false;
     };
-  }, [face, rig, id]);
+  }, [moving, rig, id]);
 
   // The picker: opened by a rest of the pointer, a key or a long press; mounted from its first opening on.
   const [fan, setFan] = useState<{ open: boolean; by: FanOpenedBy } | null>(null);
@@ -113,7 +152,7 @@ export function AgentMark({ id, host, name, agent, picks = 'all' }: { id: string
   };
   const choose = (next: AgentFace) => {
     clicked.current = true;
-    keepAgentFace(agent ?? id, next);
+    keepAgentFace(agent ?? id, keptAgentFace(next, projectDefault));
     closeFan();
   };
   const endPress = () => {
@@ -189,7 +228,15 @@ export function AgentMark({ id, host, name, agent, picks = 'all' }: { id: string
     return (
       <>
         <span className="am-btn" data-agent-icon={id} data-picks="none">
-          <span ref={ref} className="am" aria-hidden="true" data-agent-mark={id} data-rig={rig ?? 'plain'} />
+          {/* The project's tile (projectFace.tsx) is a still beside the animated mark, which stays mounted (hidden) so
+              its motion and the plain mark's portal are never torn out from under React. */}
+          <span ref={ref} className="am" aria-hidden="true" data-agent-mark={id} data-rig={rig ?? 'plain'} data-size={size === 24 ? undefined : size} hidden={tiled} />
+          {tiled && project && (
+            <span className="am am-pf" aria-hidden="true" data-agent-tile={id} data-face="project" data-size={size === 24 ? undefined : size}>
+              <ProjectTile tile={project} host={host} />
+            </span>
+          )}
+          {rex}
         </span>
         {plain && createPortal(<HostMark host={host} />, plain)}
       </>
@@ -221,11 +268,19 @@ export function AgentMark({ id, host, name, agent, picks = 'all' }: { id: string
         onKeyDown={onKeyDown}
         onKeyUp={onKeyUp}
       >
-        <span ref={ref} className="am" aria-hidden="true" data-agent-mark={id} data-rig={rig ?? 'plain'} />
+        {/* The project's tile (projectFace.tsx) is a still beside the animated mark, which stays mounted (hidden) so
+              its motion and the plain mark's portal are never torn out from under React. */}
+          <span ref={ref} className="am" aria-hidden="true" data-agent-mark={id} data-rig={rig ?? 'plain'} data-size={size === 24 ? undefined : size} hidden={tiled} />
+          {tiled && project && (
+            <span className="am am-pf" aria-hidden="true" data-agent-tile={id} data-face="project" data-size={size === 24 ? undefined : size}>
+              <ProjectTile tile={project} host={host} />
+            </span>
+          )}
+          {rex}
       </button>
       {plain && createPortal(<HostMark host={host} />, plain)}
       {fan && button.current && (
-        <FaceFan anchor={button.current} open={fan.open} openedBy={fan.by} host={host} name={name} face={face} sources={sources} onChoose={choose} onOwn={picks === 'all' ? () => openDialog('own') : undefined} onSets={() => openDialog('sets')} onMark={() => toggle(pointer.current === 'touch' ? 'touch' : 'hover')} onClose={() => closeFan()} />
+        <FaceFan anchor={button.current} open={fan.open} openedBy={fan.by} host={host} agent={id} name={name} face={drawn} sources={sources} onChoose={choose} onOwn={picks === 'all' ? () => openDialog('own') : undefined} onSets={() => openDialog('sets')} onMark={() => toggle(pointer.current === 'touch' ? 'touch' : 'hover')} onClose={() => closeFan()} />
       )}
       {dialog && (
         <AgentIconDialog
@@ -233,7 +288,7 @@ export function AgentMark({ id, host, name, agent, picks = 'all' }: { id: string
           agent={agent ?? id}
           host={host}
           name={name}
-          face={face}
+          face={drawn}
           shared={picks === 'shared'}
           onClose={() => {
             clicked.current = true;

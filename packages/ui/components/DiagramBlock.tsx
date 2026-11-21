@@ -323,6 +323,8 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
           </>
         );
       }
+      // Refused by the host's check before it reached the page: the source, as code.
+      if (state.error?.refused) return <DiagramInlineSource block={block} kind={kind} />;
       if (state.error !== null && sourceOnError && !state.error.runtimeUnavailable) {
         return <DiagramInlineSource block={block} kind={kind} />;
       }
@@ -430,6 +432,10 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
             <DiagramViewer
               {...viewerProps}
               renderId={`${kind}-${block.id}`}
+              // In the document a plain wheel scrolls the page past the
+              // diagram; Ctrl/Cmd+wheel and a pinch zoom it. The popout
+              // (below) zooms on a plain wheel.
+              wheelZoom="modifier"
               onAskAI={handleAskAI}
               onResolutionChange={setResolution}
               onRenderState={setRenderState}

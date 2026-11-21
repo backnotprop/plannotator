@@ -39,7 +39,8 @@ import { inboxUploadAttachments } from "@plannotator/shared/inbox/uploads";
 import { resetServedHostnamesForTests } from "./request-host-guard";
 import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 import { startInboxServer } from "./inbox";
-import { createInboxDevices, takeDownInboxTailnet } from "./inbox-devices";
+import { createInboxDevices, doorReachOf, takeDownInboxTailnet } from "./inbox-devices";
+import { doorHealth } from "./inbox-door-version";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { GUIDE_BRIEF_EXAMPLE } from "./inbox-guides";
 
@@ -292,8 +293,13 @@ describe("the device door, on the binary", () => {
     const health = await door("health");
     expect(health.status).toBe(200);
     const h = (await health.json()) as Json;
-    expect(Object.keys(h).sort()).toEqual(["app", "event_streams", "inbox_id", "launch_from_machines", "machine_links", "machine_update", "message_deletions", "notify_reach", "ok", "peek", "pid", "self_update", "serverSession", "update", "update_no_change", "version", "window_controls"]);
+    expect(Object.keys(h).sort()).toEqual(["app", "door", "event_streams", "inbox_id", "launch_from_machines", "machine_links", "machine_update", "message_deletions", "notify_reach", "ok", "peek", "pid", "self_update", "serverSession", "update", "update_no_change", "version", "window_controls"]);
     expect(h).toMatchObject({ ok: true, app: "plannotator-inbox", serverSession });
+    // Section 14: through the door only, the contract and the routes a phone's token reaches; the window's own health has no `door`.
+    expect(h.door).toEqual(doorHealth(doorReachOf("ios")));
+    expect(h.door).toMatchObject({ contract: 1, grants: [], min_app_contract: 1 });
+    expect(h.door.routes).not.toContain("GET cards");
+    expect("door" in ((await (await fetch(`${base}/api/inbox/health`)).json()) as Json)).toBe(false);
     expect(await (await door("health", { token: null })).json()).toEqual({ error: "This request needs the phone's token.", code: "device_token_missing" });
   });
 
@@ -308,6 +314,10 @@ describe("the device door, on the binary", () => {
       ["GET", "open-in/file"],
       ["POST", "open-in/file"],
       ["GET", "attachments/att_x/page"],
+      // A Markdown file's pictures and a document next to a file: a linked machine's window only (the phone reads
+      // them through the tailnet as the owner).
+      ["GET", "attachments/att_x/markdown-image"],
+      ["GET", "attachments/att_x/linked-page"],
       ["POST", "restart"],
       ["POST", "mcp"],
       ["POST", "bridge/poll"],
@@ -793,7 +803,8 @@ describe("the device door, on the binary", () => {
     const listed = (await (await win("/api/inbox/devices")).json()) as Json;
     expect(Object.keys(listed)).toEqual(["devices"]);
     expect(listed.devices.map((d: Json) => d.name)).toEqual(["Work iPhone", "iPhone"]);
-    for (const device of listed.devices) expect(Object.keys(device).sort()).toEqual(DEVICE_KEYS);
+    // The list adds the app each device last named (section 14), null until it names one.
+    for (const device of listed.devices) expect(Object.keys(device).sort()).toEqual([...DEVICE_KEYS, "app"].sort());
     const mine = listed.devices.find((d: Json) => d.id === deviceId);
     expect(Date.parse(mine.last_seen_at)).toBeGreaterThan(Date.parse(mine.created_at));
 
@@ -969,9 +980,11 @@ describe("the device door, in process", () => {
       const crashed = await startInboxServer({ dataDir, binaryPath: null, phones: true, tailscale });
       const deadDoor = serve.get(8443)!;
       const record = readFileSync(recordFile, "utf8");
-      expect(JSON.parse(record)).toEqual({ v: 1, https_port: 8443, target: deadDoor, published: true });
+      // `made` keeps every target the Inbox pointed the mapping at, the newest last, through take-downs.
+      expect(JSON.parse(record)).toEqual({ v: 1, https_port: 8443, target: deadDoor, published: true, made: expect.arrayContaining([deadDoor]) });
+      expect(JSON.parse(record).made.at(-1)).toBe(deadDoor);
       crashed.stop();
-      expect(readRecord()).toEqual({ v: 1, https_port: 8443, target: deadDoor, published: false });
+      expect(readRecord()).toEqual({ v: 1, https_port: 8443, target: deadDoor, published: false, made: JSON.parse(record).made });
       // After a crash (kill -9) both stay: the mapping still points at the dead run's door listener.
       serve.set(8443, deadDoor);
       writeFileSync(recordFile, record);
@@ -1210,6 +1223,71 @@ describe("the device door, in process", () => {
     }
     expect(reached).toBe(0);
   });
+
+  test("a route the door does not open: a phone is told it is not a phone route, a linked machine that it is not there from another computer; the code is the same", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "plannotator-inbox-devices-refusal-words-"));
+    roots.push(dataDir);
+    let handed = 0;
+    const devices = createInboxDevices({
+      dataDir,
+      serverSession: "0".repeat(32),
+      port: () => 1,
+      registry: () => ({ v: 1, pid: process.pid, port: 1, url: "", version: "dev", token: "t".repeat(64), serverSession: "0".repeat(32), startedAt: "" }),
+      readBody: async (req) => (await req.json()) as Record<string, unknown>,
+      dispatch: async () => {
+        handed += 1;
+        return new Response("{}");
+      },
+    });
+    const pairUrl = new URL("http://127.0.0.1/api/inbox/device/pair");
+    const pair = async (body: Json) => (await (await devices.door(new Request(pairUrl, { method: "POST", body: JSON.stringify(body) }), pairUrl)).json()) as Json;
+    const made = (await (await devices.windowRoute(new Request("http://127.0.0.1/api/inbox/pairing", { method: "POST", body: "{}" }), new URL("http://127.0.0.1/api/inbox/pairing")))!.json()) as Json;
+    const phone = await pair({ code: made.offer.code, name: "iPhone", platform: "ios" });
+    const machine = await pair({ name: "MacBook", platform: "machine", secret: devices.machineDoor.openMachineOffer().secret });
+    expect(machine.device.platform).toBe("machine");
+    const PHONE = { error: "Not a phone route.", code: "device_route_not_found" };
+    const MACHINE = { error: "This isn't available from another computer.", code: "device_route_not_found" };
+    // An attached page's new tab and the Open in launch are this computer's only: neither caller reaches them.
+    for (const [method, route] of [
+      ["GET", "attachments/att_x/page"],
+      ["POST", "open-in"],
+      ["GET", "settings"],
+    ] as const) {
+      for (const [who, token, words] of [
+        ["phone", phone.token, PHONE],
+        ["machine", machine.token, MACHINE],
+      ] as const) {
+        const url = new URL(`http://127.0.0.1/api/inbox/device/${route}`);
+        const response = await devices.door(
+          new Request(url, { method, headers: { Authorization: `Bearer ${token}` }, ...(method === "POST" ? { body: JSON.stringify({ idempotency_key: `k-${who}-${route}` }) } : {}) }),
+          url,
+        );
+        expect([who, route, response.status, await response.json()]).toEqual([who, route, 404, words]);
+      }
+    }
+    // Through the relay's in-process path too, by the device it runs as.
+    for (const [who, id, words] of [
+      ["phone", phone.device.id, PHONE],
+      ["machine", machine.device.id, MACHINE],
+    ] as const) {
+      const relayed = await devices.asDevice(id, { method: "GET", path: "/api/inbox/device/attachments/att_x/page" });
+      expect([who, relayed.status, await relayed.json()]).toEqual([who, 404, words]);
+    }
+    expect(handed).toBe(0);
+    // A Markdown file's pictures and a document next to a file: handed to the window for a linked machine only.
+    for (const route of ["attachments/att_x/markdown-image?path=shot.png", "attachments/att_x/linked-page?path=notes.md"]) {
+      const url = new URL(`http://127.0.0.1/api/inbox/device/${route}`);
+      const fromPhone = (await devices.door(new Request(url, { headers: { Authorization: `Bearer ${phone.token}` } }), url))!;
+      expect([route, fromPhone.status, await fromPhone.json()]).toEqual([route, 404, PHONE]);
+      const relayed = await devices.asDevice(phone.device.id, { method: "GET", path: `/api/inbox/device/${route}` });
+      expect([route, relayed.status]).toEqual([route, 404]);
+      await relayed.arrayBuffer();
+      const fromMachine = (await devices.door(new Request(url, { headers: { Authorization: `Bearer ${machine.token}` } }), url))!;
+      expect([route, fromMachine.status]).toEqual([route, 200]);
+      await fromMachine.arrayBuffer();
+    }
+    expect(handed).toBe(2);
+  });
 });
 
 describe("the door's parity routes, in process (7.39 to 7.49)", () => {
@@ -1426,7 +1504,7 @@ describe("the door's parity routes, in process (7.39 to 7.49)", () => {
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, "SKILL.md"), "---\nname: readback\ndescription: State the request back.\ndisable-model-invocation: true\n---\n\n# Readback\n");
       const list = (await (await door("skills")).json()) as Json;
-      expect(list.skills.map((s: Json) => [s.name, s.humanOnly])).toEqual([["readback", true]]);
+      expect(list.skills.filter((s: Json) => s.root !== "plannotator").map((s: Json) => [s.name, s.humanOnly])).toEqual([["readback", true]]);
       const content = (await (await door("skills/content?name=readback")).json()) as Json;
       expect(content.skill).toMatchObject({ name: "readback", humanOnly: true, truncated: false });
       expect(content.skill.content).toContain("# Readback");

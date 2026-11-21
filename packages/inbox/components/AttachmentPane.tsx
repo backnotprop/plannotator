@@ -18,7 +18,7 @@ import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
-import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
+import { PaneToolstrip } from '../parts/PaneToolstrip';
 import { HtmlSurfaceControls } from '@plannotator/ui/components/HtmlSurfaceControls';
 import { HtmlViewer, type HtmlViewerFrame } from '@plannotator/ui/components/html-viewer';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
@@ -63,10 +63,11 @@ import { FIRST_NOTE, LAST_NOTE, stepAnnouncement, stepIndexOf, stepKeyIntent, ty
 import { Icon } from '../icons';
 import { FileName } from './FileName';
 import { useNarrowerThan } from '../narrower';
-import { showsContents, useContentsShown } from '../contents';
+import { contentsButtonMode, showsContents, useContentsRailWaited, useContentsShown } from '../contents';
+import { scrollerOf } from './fileScroller';
 import { CONTENTS_RAIL_MIN_PANE_WIDTH as RAIL_MIN_PAGE_WIDTH } from '@plannotator/ui/utils/annotationHelpers';
-import { ContentsHide, ContentsPanel, type ContentsButtonMode } from './ContentsPanel';
-import { DeferredMarkdownContentsRail } from '@plannotator/ui/components/DeferredMarkdownContentsRail';
+import { ContentsPanel, type ContentsButtonMode } from './ContentsPanel';
+import { FileContentsRail } from '../parts/FileContentsRail';
 import { FullViewBar, GATHERED, type FullViewBarHandle, type ToolbarState } from './FullViewBar';
 import { ArtifactPinButton } from './ArtifactPinButton';
 import { ReuseButton } from '../reuse';
@@ -104,6 +105,7 @@ import { useFileQuestionViewerProps, type FileQuestions } from '../fileQuestions
 import { whenStill } from '../whenStill';
 import { unsavedComposer, unsavedComposers } from './unsavedComposers';
 import { linkedValue, pageStartAt, splitLinked, usePageClear, usePageStart, type LinkedPage, type PageStart } from './htmlPageFrame';
+import { versionLineWords } from './versionLineWords';
 export { unsavedComposer, unsavedComposers };
 
 /**
@@ -138,9 +140,6 @@ export function fileFootRow(section: ParentNode): HTMLElement | null {
 
 /** Hide / Show tools: the html-annotate scope's existing chord (⌘⇧X), HTML files only, through the file viewer's scope. */
 const TOOLS_CHORD = inboxFileViewerShortcuts.shortcuts.toggleTools.bindings[0]!;
-
-/** How long the contents rail may take to load (its idle wait is 2 s at most) and measure before the Contents button stands in. */
-const RAIL_WAIT_MS = 2500;
 
 /** Drafts that close themselves on this same Escape (their own window listener): the selection toolbar, the quick-label picker. */
 const SELF_CLOSING_DRAFTS = '[data-pn-annotation-toolbar-row], [data-quick-label-picker]';
@@ -328,17 +327,6 @@ export function openPaneUnsaved(): boolean {
   return [...openPanes].some((pane) => pane.unsaved());
 }
 
-/** The element that scrolls the open file (a document, code, or an image at its own size). */
-function scrollerOf(pane: HTMLElement | null): HTMLElement | null {
-  if (!pane) return null;
-  // The file's own, never a linked Markdown document drawn over it.
-  const doc = pane.querySelector<HTMLElement>('.ib-docscroll:not(.ib-linkeddoc)');
-  if (doc) return doc;
-  const code = pane.querySelector('.ib-codeview diffs-container')?.shadowRoot?.querySelector<HTMLElement>('[data-code]');
-  if (code) return code;
-  return pane.querySelector<HTMLElement>('.ib-imgstage');
-}
-
 /**
  * A comment box's suggestion (the tour's, FileSuggestion) for words selected in a text file: offered when
  * the selection is on its phrase (selectionOnPhrase); a stray selection, a single word of it included, opens an empty box.
@@ -406,8 +394,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   // that cannot load is drawn as its alt text, as in a message body (Thread.tsx).
   const imageBaseDir = inboxMarkdownImageBase(attachment.id, effectiveVersion);
   const resolveImage = useCallback<ImageResolver>(
-    (src) => ({ kind: 'src', src: /^(https?:|data:|blob:)/i.test(src) ? src : getImageSrc(src, imageBaseDir) }),
-    [imageBaseDir],
+    (src) => source.markdownImage?.(src) ?? { kind: 'src', src: /^(https?:|data:|blob:)/i.test(src) ? src : getImageSrc(src, imageBaseDir) },
+    [imageBaseDir, source],
   );
   // Data and log files are drawn as code (inboxViewKind).
   const kind = inboxViewKind(attachment.kind, attachment.name);
@@ -1396,8 +1384,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   followLinkRef.current = followLink;
   // Stable across renders: ui's HtmlBlock redraws a raw HTML block whenever its link resolver changes.
   const resolveFileLink = useCallback<LocalLinkResolver>(
-    (href) => ({ kind: 'open', open: () => followLinkRef.current(href, pageFolder) }),
-    [pageFolder],
+    (href) => source.markdownLink?.(href) ?? { kind: 'open', open: () => followLinkRef.current(href, pageFolder) },
+    [pageFolder, source],
   );
   const linkedPath = linkedTop?.path ?? null;
   const openFromLinked = useCallback((href: string) => {
@@ -1419,7 +1407,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const annotations = useMemo(() => fileRecords.map(annotationOf), [fileRecords]);
   // The document's blocks keep their identity across saves (the Viewer re-renders on a new array);
   // only code comments, which carry their own lines, derive blocks from the annotations.
-  const documentBlocks = useMemo(() => (view && !isCode ? attachmentBlocks(kind, view.text, attachment.name) : []), [view, kind, isCode, attachment.name]);
+  const documentBlocks = useMemo(() => (view && !isCode ? (source.textBlocks ?? attachmentBlocks)(kind, view.text, attachment.name) : []), [view, kind, isCode, attachment.name, source]);
   const commentBlocks = useMemo(() => (isCode ? codeCommentBlocks(annotations) : []), [isCode, annotations]);
   const blocks = isCode ? commentBlocks : documentBlocks;
   // The file's question cards, answerable like the body's (issue #2828).
@@ -1465,7 +1453,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     ? (text: string, context: SelectionActionContext) =>
         props.onSide!(text, fileSideSource(attachment, props.version, { selected: text, blockId: context.blockId, blocks: isHtml ? [] : blocks, annotations }))
     : undefined;
-  // A Markdown file with 4 or more headings has Contents (contents.ts). On a desktop, Side by side and Full screen
+  // A Markdown file with 2 or more headings has Contents (contents.ts). On a desktop, Side by side and Full screen
   // alike: ui's contents rail in the page's right gutter. Where the rail yields (its own rule: a gutter under 68 px,
   // a pane under 480 px), when it is hidden, and on a phone: a Contents button over the file (ContentsPanel.tsx).
   const [contentsShown, setContentsShown] = useContentsShown();
@@ -1491,35 +1479,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   }, [scrollViewport]);
   const sideFits = !full && !phone && docWidth >= RAIL_MIN_PAGE_WIDTH;
   const railGutter = hasContents && sideFits && contentsShown;
-  // The rail loads once the page is idle (2 s at most) and then measures. While it may still be on its way no
-  // stand-in shows (no button flashes before the rail); past that, a rail that never drew leaves the Contents
-  // button and sheet. The wait starts again for each file and each Hide or Show.
-  const railWaitKey = `${docKey}:${contentsShown}`;
-  const [railWaited, setRailWaited] = useState<string | null>(null);
-  useEffect(() => {
-    if (!hasContents || phone) return;
-    const timer = setTimeout(() => setRailWaited(railWaitKey), RAIL_WAIT_MS);
-    return () => clearTimeout(timer);
-  }, [hasContents, phone, railWaitKey]);
-  const waited = railWaited === railWaitKey;
-  // The Contents button over the file (ContentsPanel.tsx): on a phone, the sheet; hidden, Show wherever the rail
-  // would fit (Side by side by its layout, Full screen by the rail's measure), else the sheet; shown, nothing while
-  // the rail is there or on its way, and the sheet where it does not fit or never drew.
-  const contentsButton: ContentsButtonMode | null = !hasContents
-    ? null
-    : phone
-      ? 'sheet'
-      : !contentsShown
-        ? sideFits || railFits === true
-          ? 'show'
-          : railFits === false || waited
-            ? 'sheet'
-            : null
-        : railFits === true
-          ? null
-          : (railFits === false && !sideFits) || waited
-            ? 'sheet'
-            : null;
+  // The rail loads once the page is idle (2 s at most) and then measures (contents.ts, shared with a plan's page):
+  // the wait starts again for each file and each Hide or Show.
+  const waited = useContentsRailWaited(hasContents && !phone, `${docKey}:${contentsShown}`);
+  // The Contents button over the file (Side by side decides by its layout, Full screen by the rail's measure).
+  const contentsButton: ContentsButtonMode | null = contentsButtonMode({ hasContents, phone, shown: contentsShown, sideFits, railFits, waited });
   // Hide and Show remove the control that has focus: focus moves to the one that takes its place (the Show
   // button; the rail's current tick).
   const contentsFocusRef = useRef<'show' | 'rail' | null>(null);
@@ -2236,61 +2200,43 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const inline = attachment.ref !== undefined;
   /** Its copy was taken the first time the thread was read (a message sent before capture), not when it was sent. */
   const onOpen = attachment.captured === 'on_open';
-  /** Who sent the message the file is in: the agent, or the person themself. */
-  const sender = props.fromPerson ? 'you' : props.agent;
   const firstOpened = whenTime(attachment.captured_at ?? attachment.sent_at);
-  let line: React.ReactNode = null;
-  if (currentUnavailable) {
-    line = (
-      <>
-        {attachment.unavailable!.message} {onOpen ? `This is the copy taken when you first opened it, ${firstOpened}.` : `This is the version ${sender} sent at ${sentAt}.`}
-      </>
-    );
-  } else if (effectiveVersion === 'sent') {
-    line = (
-      <>
-        {onOpen ? `The copy taken when you first opened it, ${firstOpened}.` : `The version ${sender} sent at ${sentAt}.`}
-        <button type="button" className="ib-vlink" onClick={() => chooseVersion('current')}>
-          Open the file as it is now
+  const shown = view?.attachment ?? attachment;
+  /** The version line's words (versionLineWords.ts): the line beside the thread and full screen's chip say the same. */
+  const words = versionLineWords({
+    unavailable: currentUnavailable ? attachment.unavailable!.message : null,
+    version: effectiveVersion,
+    changed: shown.changed_since_sent,
+    onOpen,
+    fromPerson: props.fromPerson === true,
+    agent: props.agent,
+    sentAt,
+    firstOpened,
+    editedAt: shown.current ? whenTime(shown.current.mtime) : null,
+  });
+  const line: React.ReactNode = words && (
+    <span className="ib-changed-b">
+      <span className="ib-changed-t">{words.sentence}</span>
+      {words.link && (
+        <button type="button" className="ib-vlink" onClick={() => chooseVersion(words.link!.to)}>
+          {words.link.label}
         </button>
-      </>
-    );
-  } else if ((view?.attachment ?? attachment).changed_since_sent) {
-    const current = (view?.attachment ?? attachment).current;
-    line = (
-      <>
-        {onOpen ? 'Changed since you first opened it.' : `Changed since ${sender} sent it at ${sentAt}.`}
-        {current ? ` Edited ${whenTime(current.mtime)}.` : ''}
-        <button type="button" className="ib-vlink" onClick={() => chooseVersion('sent')}>
-          {onOpen ? 'Open the version you first saw' : props.fromPerson ? 'Open the version you sent' : 'Open the version it sent'}
-        </button>
-      </>
-    );
-  }
+      )}
+    </span>
+  );
   /**
    * The changed line, compact, for full view (which drops the line): the same
    * facts and actions as a persistent chip at the file's top left, so a file
    * that opens in full view still says it changed, or which version is shown.
    */
   let versionChip: { text: string; action: { label: string; to: 'current' | 'sent' } | null; full: string } | null = null;
-  if (currentUnavailable) {
-    versionChip = {
-      text: attachment.unavailable!.code === 'attachment_missing' ? 'The file is gone; showing the sent copy' : 'The file is not that kind any more; showing the sent copy',
-      action: null,
-      full: `${attachment.unavailable!.message} ${onOpen ? `This is the copy taken when you first opened it, ${firstOpened}.` : `This is the version ${sender} sent at ${sentAt}.`}`,
-    };
-  } else if (effectiveVersion === 'sent') {
-    versionChip = {
-      text: onOpen ? 'Showing the copy from when you first opened it' : 'Showing the sent version',
-      action: { label: 'Open the file as it is now', to: 'current' },
-      full: onOpen ? `The copy taken when you first opened it, ${firstOpened}.` : `The version ${sender} sent at ${sentAt}.`,
-    };
-  } else if ((view?.attachment ?? attachment).changed_since_sent) {
-    versionChip = {
-      text: onOpen ? 'Changed since you first opened it' : 'Changed since sent',
-      action: { label: onOpen ? 'Open the version you first saw' : props.fromPerson ? 'Open the version you sent' : 'Open the version it sent', to: 'sent' },
-      full: onOpen ? 'Changed since you first opened it.' : `Changed since ${sender} sent it at ${sentAt}.`,
-    };
+  if (words) {
+    const text = currentUnavailable
+      ? attachment.unavailable!.code === 'attachment_missing' ? 'The file is gone; showing the sent copy' : 'The file is not that kind any more; showing the sent copy'
+      : effectiveVersion === 'sent'
+        ? onOpen ? 'Showing the copy from when you first opened it' : 'Showing the sent version'
+        : onOpen ? 'Changed since you first opened it' : 'Changed since sent';
+    versionChip = { text, action: words.link, full: words.sentence };
   }
 
   const annotationCounts = useMemo(() => {
@@ -2384,7 +2330,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             if (pinchTucks) setPinchShown(true);
             if (!pinchTucks || toolbar === 'tucked') setToolbar(next);
           }}
-          draft={hasComposer && !!props.composer && (props.composer.reply.value.trim() !== '' || props.composer.reply.files.length > 0)}
+          draft={hasComposer && !!props.composer && ((props.composer.reply.hasWords ?? props.composer.reply.value.trim() !== '') || props.composer.reply.files.length > 0)}
           commentDraft={commentWaits}
           restoreTarget={restoreTarget}
           announce={announce}
@@ -2711,17 +2657,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             </div>
           )}
           {view && isText && !linkedTop && !props.readOnly && (
-            <div className="ib-toolstrip">
-              <AnnotationToolstrip
-                inputMethod={inputMethod}
-                onInputMethodChange={setInputMethod}
-                mode={mode}
-                onModeChange={setMode}
-                showHelpLink={false}
-                hideQuickLabel
-                compact
-              />
-            </div>
+            <PaneToolstrip inputMethod={inputMethod} onInputMethodChange={setInputMethod} mode={mode} onModeChange={setMode} phone={phone} contents={contentsButton !== null} />
           )}
           {view && contentsButton && !linkedTop && (
             <ContentsPanel
@@ -2905,18 +2841,17 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             </div>
           )}
           {view && hasContents && !phone && (
-            // ui's contents rail (Workspaces' rail, approved 2026-10-03): ticks in the page's right gutter, the panel
-            // opening left over the page. Loaded once the page is interactive; it measures itself and yields where the
-            // gutter is short, then says so and the Contents button takes over. Hidden by choice, it still measures.
-            <DeferredMarkdownContentsRail
+            <FileContentsRail
               key={`rail:${docKey}`}
               blocks={documentBlocks}
               scrollViewport={scrollViewport}
-              contentSelector="[data-doc-text-root]"
               // A linked document over the file hides the file's Contents with it.
               hidden={!contentsShown || linkedTop !== null}
               onAvailableChange={(fits) => setRailFit({ key: docKey, fits })}
-              panelAction={<ContentsHide onHide={hideContents} />}
+              onHide={hideContents}
+              annotations={annotations}
+              selectedAnnotationId={selectedId}
+              onSelectAnnotation={setSelectedId}
             />
           )}
         </div>

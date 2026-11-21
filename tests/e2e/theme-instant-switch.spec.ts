@@ -12,7 +12,9 @@
  *    sidebar's toggle, Settings' Theme row, Match system and then the
  *    computer's own scheme changing, and the toggle again under reduced motion.
  *  - Plan review and code review (the packed apps from apps/hook/dist, served
- *    on loopback so they show their demo plan and diff), on Match system,
+ *    on loopback: the editor shows its demo plan, and `/api/diff` answers the
+ *    review app with the demo diff as a fixture, since a production build
+ *    shows its load error when `/api/diff` fails), on Match system,
  *    following the computer's scheme both ways.
  * And what must not change with it: a transition already running (here a
  * transform, as a sheet or menu runs) keeps running through the switch, and
@@ -30,6 +32,7 @@ import { createServer, type Server } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { openPackedApp, type PackedApp } from '../../packages/shared/packed-app';
+import { DEMO_DIFF } from '../../packages/review-editor/demoData';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
@@ -104,9 +107,15 @@ test.beforeAll(async () => {
         return;
       }
     }
+    if (path === '/api/diff') {
+      // The review app's diff: a fixture, as a review server would answer.
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ rawPatch: DEMO_DIFF, gitRef: 'demo' }));
+      return;
+    }
     const index = Object.keys(pages).indexOf(path);
     if (index < 0) {
-      // No Plannotator server: the editor shows its demo plan, the review app its demo diff.
+      // No Plannotator server: the editor shows its demo plan.
       res.writeHead(404, { 'content-type': 'application/json' });
       res.end('{}');
       return;
@@ -221,6 +230,8 @@ for (const [surface, path] of [['plan review', '/plan'], ['code review', '/revie
       const page = await context.newPage();
       await page.goto(`${origin}${path}`);
       await expect.poll(() => page.evaluate(() => document.documentElement.classList.contains('transitions-ready'))).toBe(true);
+      // Code review switches with the diff on screen, not an empty or error page.
+      if (path === '/review') await expect(page.locator('diffs-container [data-column-number]').first()).toBeVisible();
       await page.waitForTimeout(1500);
       expect(await shownLight(page)).toBe(true);
 

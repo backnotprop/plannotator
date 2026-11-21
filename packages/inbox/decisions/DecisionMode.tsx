@@ -1262,7 +1262,10 @@ function Overview({ queue, onPick }: { queue: QueueState; onPick: (id: string) =
 }
 
 function answerWordsOf(decision: InboxDecision): string {
-  if (isActionDecision(decision)) return decision.question.action_result?.outcome === 'cant' ? "Can't do it" : 'Done';
+  if (isActionDecision(decision)) {
+    const outcome = decision.question.action_result?.outcome;
+    return outcome === 'cant' ? "Can't do it" : outcome === 'skip' ? 'Skipped' : 'Done';
+  }
   return answerWords(decision.question.answer);
 }
 

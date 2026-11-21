@@ -12,6 +12,8 @@ import { INBOX_STILL_OPEN_LINE, sliceText } from './inbox-questions';
 import { withoutInboxSkillsBlock } from './skill-reference-block';
 import { INLINE_DESTINATION, stripInlineMarkup } from './inline-markdown';
 import { withoutInboxReplyQuoteLead } from './inbox-reply-quote';
+import { withoutInboxThreadMentions } from './inbox-thread-mention';
+import { parseInboxRunBlocks, parseInboxSecretBlocks } from './inbox-run-blocks';
 
 /**
  * Where "new since you looked" starts: the seq of the person's last look at
@@ -67,6 +69,14 @@ export function holdsUnsentPick(message: InboxMessageWire): boolean {
   return (message.questions ?? []).some((q) => q.state === 'picked');
 }
 
+/**
+ * An agent's message holding a `:::run` or `:::secret` card: it stays open like one with a pick, so a run's card
+ * (its result, Run again, a field) is not folded away under the person's reply that its run wrote.
+ */
+export function holdsRunCard(message: InboxMessageWire): boolean {
+  return message.author.kind === 'agent' && /^[ \t]*:::[ \t]*(run|secret)\b/im.test(message.body) && (parseInboxRunBlocks(message.body).length > 0 || parseInboxSecretBlocks(message.body).length > 0);
+}
+
 export interface FoldPlan {
   /** The messages that open folded to one line. */
   folded: Set<string>;
@@ -98,7 +108,7 @@ export const OPEN_NEWEST_MAX = 20;
  * newest OPEN_NEWEST_MAX (the read messages above it fold as before), so the
  * "New since you looked" line sits right above that fold and the thread
  * opens where it did. The thread's first message is never hidden. One
- * holding a pick not sent stays open, as before.
+ * holding a pick not sent, or a run or secret card (holdsRunCard), stays open, as before.
  */
 export function planFolds(messages: readonly InboxMessageWire[], fresh: ReadonlySet<string>, boundary: number | null): FoldPlan {
   const folded = new Set<string>();
@@ -123,7 +133,7 @@ export function planFolds(messages: readonly InboxMessageWire[], fresh: Readonly
     early = [];
   };
   messages.forEach((message, index) => {
-    const pick = holdsUnsentPick(message);
+    const pick = holdsUnsentPick(message) || holdsRunCard(message);
     if (many && index >= firstNew && index < newestFrom) {
       flush();
       if (pick) {
@@ -213,7 +223,8 @@ const ANSWERS_HEADING_LINE = new RegExp(`^#{1,6}\\s+${QUESTION_ANSWERS_HEADING}\
  * lead a quoting reply opens with (`withoutInboxReplyQuoteLead`).
  */
 export function replyWords(body: string): string {
-  const lines = withoutInboxSkillsBlock(body).split(/\r?\n/);
+  // A mentioned thread (inbox-thread-mention.ts) reads as its title; the list after the words is the agent's.
+  const lines = withoutInboxThreadMentions(withoutInboxSkillsBlock(body)).split(/\r?\n/);
   const at = lines.findIndex((line) => ANSWERS_HEADING_LINE.test(line.trim()) || INBOX_STILL_OPEN_LINE.test(line.trim()));
   const kept = (at >= 0 ? lines.slice(0, at) : lines).join('\n');
   // A quoting reply's lead ("Replying to your message from …", inbox-reply-quote.ts) is the agent's, not the person's words.
@@ -228,7 +239,12 @@ export function replyWords(body: string): string {
  * with none, the answers it sent (from `messages`, the thread); else the
  * names of the files it carries; else its first words.
  */
-export function foldSnippet(message: InboxMessageWire, messages: readonly InboxMessageWire[] = [message]): FoldSnippet {
+export function foldSnippet(
+  message: InboxMessageWire,
+  messages: readonly InboxMessageWire[] = [message],
+  // `firstWords` with its defaults; a caller that draws a long thread on every refresh can pass one that keeps its answers.
+  words: (markdown: string) => string = firstWords,
+): FoldSnippet {
   if (message.author.kind === 'person') {
     // A Re-ask note: what the person did, not the instructions the agent got.
     const reasked = message.reask?.length ?? 0;
@@ -247,25 +263,25 @@ export function foldSnippet(message: InboxMessageWire, messages: readonly InboxM
       }
       return { kind: 'words', text: reasked === 1 ? 'Asked to re-ask the open question' : `Asked to re-ask ${reasked} open questions in one message` };
     }
-    const words = firstWords(replyWords(message.body));
-    if (words) return { kind: 'words', text: words };
+    const said = words(replyWords(message.body));
+    if (said) return { kind: 'words', text: said };
     const sent = messages.flatMap((m) => (m.questions ?? []).filter((q) => q.sent_reply_id === message.id && q.answer !== null));
     if (sent.length > 0) return { kind: 'answers', parts: answeredParts(sent) };
     // Files pasted in with no words: name them, not the still-open line the agent reads.
     const files = message.attachments ?? [];
     if (files.length > 0) return { kind: 'words', text: files.map((file) => file.name).join(', ') };
-    return { kind: 'words', text: firstWords(withoutInboxSkillsBlock(message.body)) };
+    return { kind: 'words', text: words(withoutInboxSkillsBlock(message.body)) };
   }
   const questions = (message.questions ?? []).filter(live);
   if (questions.length > 0 && questions.every((q) => q.state === 'sent' && q.answer !== null)) {
     return { kind: 'answers', parts: answeredParts(questions) };
   }
-  const words = firstWords(message.body);
-  if (!words && questions.length > 0) return { kind: 'words', text: plainPrompt(questions[0]!.prompt) };
+  const first = words(message.body);
+  if (!first && questions.length > 0) return { kind: 'words', text: plainPrompt(questions[0]!.prompt) };
   // A message that is only an action item: its line ("Action item: Approve the deploy").
   const todo = (message.actions ?? []).find((a) => a.state !== 'superseded');
-  if (!words && todo) return { kind: 'words', text: `Action item: ${plainPrompt(todo.prompt)}` };
-  return { kind: 'words', text: words };
+  if (!first && todo) return { kind: 'words', text: `Action item: ${plainPrompt(todo.prompt)}` };
+  return { kind: 'words', text: first };
 }
 
 /** The snippet as one line of text, whole: a line's title and its screen-reader label. */

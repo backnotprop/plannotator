@@ -17,6 +17,7 @@ import {
 } from "../../utils/richClipboard";
 import {
   parseHtmlElementContext,
+  parseHtmlAnchorStructure,
   MAX_ELEMENT_CONTEXT_BYTES,
   MAX_PAGE_URL_LENGTH,
 } from "@plannotator/core/html-anchor";
@@ -251,7 +252,9 @@ export interface UseHtmlAnnotationOptions {
    *  href, already bounded and screened; the host resolves it (see
    *  `resolveHtmlLinkIntent`). Delivered in readOnly mode too — navigating is
    *  a read action — and never fired in live sessions, which navigate the
-   *  proxied app for real. */
+   *  proxied app for real. Arrives only on the link guard's port, taken
+   *  once per load the host started (`armLinkOffer`), never from a window
+   *  message. */
   onLinkClick?: (href: string) => void;
   /** scrollIntoView behavior for scroll-to (selecting an annotation).
    *  Absent: smooth, as before; pass 'auto' to honor reduced motion. */
@@ -282,6 +285,21 @@ export interface UseHtmlAnnotationOptions {
    *  (converted through `frameScale`). Delivered in readOnly mode too.
    *  Absent: ignored. */
   onPageTap?: (clientY: number) => void;
+  /**
+   * The host vouches that the document is, byte for byte, the one every
+   * annotation given was made on (`HtmlViewer` `structuralAnchors`). Then an
+   * element with no text and no stable id is anchored by its place and its
+   * signature (`HtmlElementAnchor.structure`). Default false: such an anchor
+   * from the page is dropped, and none is asked for on restore.
+   */
+  structuralAnchors?: boolean;
+  /**
+   * The composer's anchor carries the size of the element (or selection) it
+   * is for (`data-pin-width`, `data-pin-height`, on screen), so a comment card
+   * placed beside it clears the whole element and not only its top middle
+   * (`HtmlViewer` `inline`). Default false: a point, as before.
+   */
+  anchorSize?: boolean;
 }
 
 /** The page's laid-out width and the frame's own width, in the page's pixels. */
@@ -399,9 +417,20 @@ export function parseHtmlElementAnchor(value: unknown): HtmlElementAnchor | null
     return null;
   }
   const point = parseAnchorPoint(value.point);
-  if (text === undefined) return { selector, tagName, ...(point ? { point } : {}) };
+  // A structural anchor (core's caps: path depth, attribute count and length).
+  // One that is not valid rejects the whole anchor: it has nothing else to be
+  // found by. Whether this viewer takes structural anchors at all is decided
+  // where the message is handled (`structuralAnchors`).
+  let structure: HtmlElementAnchor["structure"];
+  if (value.structure !== undefined) {
+    const parsed = parseHtmlAnchorStructure(value.structure);
+    if (!parsed) return null;
+    structure = parsed;
+  }
+  const more = { ...(point ? { point } : {}), ...(structure ? { structure } : {}) };
+  if (text === undefined) return { selector, tagName, ...more };
   if (typeof text !== "string" || text.length > MAX_ANCHOR_TEXT_LENGTH) return null;
-  return { selector, tagName, text, ...(point ? { point } : {}) };
+  return { selector, tagName, text, ...more };
 }
 
 /** A `restore-draft` id (the host mints it): short, or none. */
@@ -606,6 +635,8 @@ export function useHtmlAnnotation({
   onContentWidth,
   onPageScrollUp,
   onPageTap,
+  structuralAnchors = false,
+  anchorSize = false,
 }: UseHtmlAnnotationOptions): Omit<
   UseAnnotationHighlighterReturn,
   "highlighterRef" | "highlightRange" | "highlightMathElement" | "commentDrafts" | "reopenCommentDraft" | "reopenComment"
@@ -635,7 +666,14 @@ export function useHtmlAnnotation({
   prepareReopen: (annotation: Annotation, onMissing?: () => void) => Record<string, unknown> | null;
   /** Give up on a restore-draft not answered yet: its `onMissing` runs. */
   expireReopen: (id: string) => void;
+  /** The host is loading a new document whose link guard carries this key
+   *  (null: none): take exactly one link offer with it (linkGuard.ts). */
+  armLinkOffer: (key: string | null) => void;
 } {
+  const anchorSizeRef = useRef(anchorSize);
+  anchorSizeRef.current = anchorSize;
+  const structuralAnchorsRef = useRef(structuralAnchors);
+  structuralAnchorsRef.current = structuralAnchors;
   const [toolbarState, setToolbarState] = useState<ToolbarState | null>(null);
   const [commentPopover, setCommentPopover] = useState<CommentPopoverState | null>(null);
   const [quickLabelPicker, setQuickLabelPicker] = useState<QuickLabelPickerState | null>(null);
@@ -698,6 +736,26 @@ export function useHtmlAnnotation({
   onPageChangeRef.current = onPageChange;
   const onLinkClickRef = useRef(onLinkClick);
   onLinkClickRef.current = onLinkClick;
+  // The link guard's port (linkGuard.ts) for the document the host loaded
+  // last, and the key that load's one offer must carry.
+  const linkPortRef = useRef<MessagePort | null>(null);
+  const linkOfferRef = useRef<{ key: string | null; taken: boolean }>({ key: null, taken: true });
+  useEffect(() => () => {
+    linkPortRef.current?.close();
+    linkPortRef.current = null;
+    linkOfferRef.current = { key: null, taken: true };
+  }, []);
+  /**
+   * The host is loading a new document into the frame (a srcdoc, an address,
+   * a reload) whose link guard carries `key`: the port of the document before
+   * it is dropped, and exactly one offer with this key is taken. Null: none
+   * (live mode, a blank frame).
+   */
+  const armLinkOffer = useCallback((key: string | null) => {
+    linkPortRef.current?.close();
+    linkPortRef.current = null;
+    linkOfferRef.current = { key, taken: false };
+  }, []);
   const onHostDraftRef = useRef(onHostDraft);
   const frameScaleRef = useRef(resolveFrameScale(frameScale));
   frameScaleRef.current = resolveFrameScale(frameScale);
@@ -793,6 +851,14 @@ export function useHtmlAnnotation({
     return anchorRef.current;
   }, []);
 
+  // `anchorSize`: the anchor says how large its element is on screen, for a comment box that goes beside it.
+  const sizeAnchor = useCallback((anchor: HTMLElement, rect: { width: number; height: number }) => {
+    if (!anchorSizeRef.current) return;
+    const s = frameScaleRef.current;
+    anchor.dataset.pinWidth = String(Math.max(0, rect.width * s));
+    anchor.dataset.pinHeight = String(Math.max(0, rect.height * s));
+  }, []);
+
   const positionAnchor = useCallback(
     (bridgeRect: { top: number; left: number; width: number; height: number }) => {
       const iframe = iframeRef.current;
@@ -809,14 +875,40 @@ export function useHtmlAnnotation({
       const s = frameScaleRef.current;
       anchor.style.top = `${iframeRect.top + bridgeRect.top * s}px`;
       anchor.style.left = `${iframeRect.left + (bridgeRect.left + bridgeRect.width / 2) * s}px`;
+      sizeAnchor(anchor, bridgeRect);
       return anchor;
     },
-    [iframeRef, getOrCreateAnchor],
+    [iframeRef, getOrCreateAnchor, sizeAnchor],
   );
 
   // A layout effect, like HtmlViewer's own listener: listening from the
   // commit that inserts the iframe, before its document can post anything.
   useLayoutEffect(() => {
+    // A link the person followed moves the host, so it never comes over the
+    // window, where the page's own script can post the same message. It comes
+    // on the link guard's port (linkGuard.ts): the guard runs first in the
+    // document and offers its port with the key of the load the host started.
+    // One offer per load is taken; a second one (a page that rewrote itself
+    // with document.open, or navigated its own frame to a copy with no guard),
+    // a wrong key or a forged ready gets nothing. Live sessions never report
+    // links (they navigate for real).
+    function takeLinkOffer(e: MessageEvent<unknown>) {
+      const offer = linkOfferRef.current;
+      const port = e.ports?.[0];
+      const key = isRecord(e.data) ? e.data.key : undefined;
+      if (!port) return;
+      if (offer.taken || offer.key === null || key !== offer.key) {
+        port.close();
+        return;
+      }
+      offer.taken = true;
+      port.onmessage = (event: MessageEvent<unknown>) => {
+        const message = parseBridgeMessage(event.data);
+        if (message?.type === `${PREFIX}link-click`) onLinkClickRef.current?.(message.href);
+      };
+      linkPortRef.current = port;
+    }
+
     function handler(e: MessageEvent<unknown>) {
       if (!e.source || e.source !== bridgeWindowOf(iframeRef.current, liveRef.current)) return;
       // Live sessions verify origin + session token BEFORE parsing. The
@@ -824,10 +916,20 @@ export function useHtmlAnnotation({
       // but the trust boundary does not relax.
       const liveSession = liveRef.current;
       if (liveSession && rejectsLiveMessage(liveSession, e.origin, e.data)) return;
+      if (isRecord(e.data) && e.data.type === `${PREFIX}link-offer`) {
+        if (liveSession) e.ports?.[0]?.close();
+        else takeLinkOffer(e);
+        return;
+      }
       const message = parseBridgeMessage(e.data);
       if (!message) return;
+      // A structural anchor is taken only by a viewer that asked for them: from any other page it is forged,
+      // and the element gets no anchor, as before.
+      if (!structuralAnchorsRef.current && "anchor" in message && message.anchor?.structure) message.anchor = undefined;
 
       const type = message.type;
+      // Taken from the link guard's port only (above): on the window it is forgeable.
+      if (type === `${PREFIX}link-click`) return;
 
       if (
         !enabledRef.current
@@ -840,8 +942,6 @@ export function useHtmlAnnotation({
         && type !== `${PREFIX}page-tap`
         // Page identity is navigation state, not an annotation mutation.
         && type !== `${PREFIX}page-change`
-        // Following a link is a read action; a read-only document still navigates.
-        && type !== `${PREFIX}link-click`
       ) {
         return;
       }
@@ -1093,6 +1193,7 @@ export function useHtmlAnnotation({
         const s = frameScaleRef.current;
         anchor.style.top = `${iframeRect.top + r.top * s}px`;
         anchor.style.left = `${iframeRect.left + (r.left + r.width / 2) * s}px`;
+        sizeAnchor(anchor, r);
         window.dispatchEvent(new Event("scroll"));
       }
 
@@ -1145,10 +1246,6 @@ export function useHtmlAnnotation({
 
       if (type === `${PREFIX}page-change`) {
         onPageChangeRef.current?.(message.pageUrl);
-      }
-
-      if (type === `${PREFIX}link-click`) {
-        onLinkClickRef.current?.(message.href);
       }
     }
 
@@ -1504,6 +1601,7 @@ export function useHtmlAnnotation({
           // and scopes the text search to it, falling back to document-wide.
           anchor: ann.htmlAnchor,
           additionalAnchors: additionalAnchors.length ? additionalAnchors : undefined,
+          ...(structuralAnchorsRef.current ? { structural: true } : {}),
         });
       }
     },
@@ -1536,5 +1634,6 @@ export function useHtmlAnnotation({
     prepareReopen,
     expireReopen,
     peekComment,
+    armLinkOffer,
   };
 }

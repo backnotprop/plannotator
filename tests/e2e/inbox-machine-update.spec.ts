@@ -103,7 +103,6 @@ function machine(name: string, bin: string): Machine {
       PLANNOTATOR_UPDATE_CHECK: '0',
       NO_ANON_PING: '1',
       PLANNOTATOR_MINIMAL: '1',
-      PLANNOTATOR_SKIP_SEM_INSTALL: '1',
       PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL: '1',
       PLANNOTATOR_RELAY_URL: CLOSED,
       PLANNOTATOR_FEEDBACK_URL: `${CLOSED}/feedback`,

@@ -19,7 +19,8 @@ button.ib-pick-box:focus-visible { outline: 2px solid var(--ring); outline-offse
    header, which a phone draws opaque and sticky. */
 .ib-listcol[data-picking] .ib-group { position: relative; }
 .ib-group > .ib-pick-box { position: absolute; left: 14px; top: 9px; z-index: 3; }
-.ib-listcol[data-picking] .ib-band { padding-left: 42px; }
+/* The Agents view's bands (agentsView/) draw no box: their words stay where they are. */
+.ib-listcol[data-picking] :not(.ib-agband) > .ib-band { padding-left: 42px; }
 
 /* The fills: a picked row is filled; the open row keeps only the hover's. */
 .ib-listcol[data-picking] :is(.ib-row, .ib-nrow).ib-sel:not(.ib-picked)::before { background: transparent !important; }
@@ -31,13 +32,13 @@ button.ib-pick-box:focus-visible { outline: 2px solid var(--ring); outline-offse
 .ib-listcol[data-picking] .ib-mrow.ib-picked { background: var(--ib-sel); }
 /* A tinted row (threadTags.css) keeps its tag's colour: picked, the colour's strongest step; the open row, not
    picked, its plain step. Over threadTags.css's own fills, which are !important. */
-.pn-inbox .ib-listcol[data-picking] .ib-rw :is(.ib-row, .ib-nrow)[data-tint].ib-sel:not(.ib-picked) { --ib-row-fill: color-mix(in oklab, var(--ib-tint) var(--ib-tint-a), var(--card)); }
-.pn-inbox .ib-listcol[data-picking] .ib-rw :is(.ib-row, .ib-nrow)[data-tint].ib-sel:not(.ib-picked):hover { --ib-row-fill: color-mix(in oklab, var(--ib-tint) var(--ib-tint-h), var(--card)); }
-.pn-inbox .ib-listcol[data-picking] .ib-rw :is(.ib-row, .ib-nrow)[data-tint].ib-picked { --ib-row-fill: color-mix(in oklab, var(--ib-tint) var(--ib-tint-sh), var(--card)); }
+.pn-inbox .ib-listcol[data-picking] .ib-rw :is(.ib-row, .ib-nrow)[data-tint].ib-sel:not(.ib-picked) { --ib-tint-fill: var(--ib-tint-0); --ib-row-fill: var(--ib-tint-fill); }
+.pn-inbox .ib-listcol[data-picking] .ib-rw :is(.ib-row, .ib-nrow)[data-tint].ib-sel:not(.ib-picked):hover { --ib-tint-fill: var(--ib-tint-1); }
+.pn-inbox .ib-listcol[data-picking] .ib-rw :is(.ib-row, .ib-nrow)[data-tint].ib-picked { --ib-tint-fill: var(--ib-tint-3); --ib-row-fill: var(--ib-tint-fill); }
 .pn-inbox .ib-listcol[data-picking] .ib-rw :is(.ib-row, .ib-nrow)[data-tint]::before { background: var(--ib-row-fill) !important; }
-.pn-inbox .ib-listcol[data-picking] .ib-mrow[data-tint].ib-picked { background: color-mix(in oklab, var(--ib-tint) var(--ib-tint-sh), var(--card)) !important; }
+.pn-inbox .ib-listcol[data-picking] .ib-mrow[data-tint].ib-picked { --ib-tint-fill: var(--ib-tint-3); }
 
-/* The bar (2A): the list header's place and height. "3 selected", Archive, Snooze, ⋯, then Done at the right. */
+/* The bar (2A): the list header's place and height. "3 selected", Archive, Snooze, Mark read, ⋯, then Done at the right. */
 .ib-pickbar { gap: 8px; }
 .ib-pickbar[hidden], .ib-lhead[hidden] { display: none; }
 .ib-pick-n { min-width: 0; margin: 0 6px 0 2px; font-size: var(--ib-fs-15, 15px); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }

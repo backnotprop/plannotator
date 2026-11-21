@@ -4,10 +4,12 @@ import { inboxNoteBlocks } from '@plannotator/core/inbox-context-notes';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
 import { withoutInboxReplyQuoteLead } from '@plannotator/core/inbox-reply-quote';
+import { linkInboxThreadMentions } from '@plannotator/core/inbox-thread-mention';
 import { linkReplyFeedback } from '../../replyFileLinks';
-import { splitReplyFeedback } from '../../replyFeedback';
+import { splitReplyFeedback, withoutElementDetails } from '../../replyFeedback';
 import { sentReplyParts } from '../../sentReply';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
+import { splitPullThreadDetails } from '../../pulls/threadDetails';
 import { linkHashtags, useLiveInitiatives } from '../../hashtags';
 import type { MessageBodyProps } from './types';
 
@@ -17,12 +19,17 @@ export function useBodyText({ message, sentActions, sentAnswers, replyFiles, pro
   // was sent: folded behind one quiet line (SkillsLine). An agent's message
   // is shown whole, whatever it says.
   const skills = useMemo(() => (message.author.kind === 'person' ? splitInboxSkillsBlock(message.body) : null), [message.author.kind, message.body]);
+  // A thread started from a PR's page: the PR's details that went after the person's words fold into one line too
+  // (`PullDetailsLine`).
+  const pullDetails = useMemo(() => (message.author.kind === 'person' ? splitPullThreadDetails(skills ? skills.before : message.body) : null), [message.author.kind, message.body, skills]);
   const actionsSent = (sentActions?.length ?? 0) > 0;
   const sent = useMemo(() => {
-    const raw = skills ? skills.before : message.body;
-    const words = message.author.kind === 'person' && message.quote ? withoutInboxReplyQuoteLead(raw) : raw;
+    const raw = pullDetails ? pullDetails.words : skills ? skills.before : message.body;
+    const unquoted = message.author.kind === 'person' && message.quote ? withoutInboxReplyQuoteLead(raw) : raw;
+    // A mentioned thread is a link to it; the list the agent reads after the words is left out (inbox-thread-mention.ts).
+    const words = message.author.kind === 'person' ? linkInboxThreadMentions(unquoted) : unquoted;
     return actionsSent ? withoutInboxActionsSection(words) : words;
-  }, [skills, message.body, message.author.kind, message.quote, actionsSent]);
+  }, [skills, pullDetails, message.body, message.author.kind, message.quote, actionsSent]);
   const replyParts = useMemo(() => sentReplyParts(message, sent, sentAnswers ?? []), [message, sent, sentAnswers]);
   // The files the reply's feedback names, as links (display only; replyFileLinks.ts).
   // Only the person's own message: an agent's text is drawn as it wrote it, whatever its headings say.
@@ -31,16 +38,20 @@ export function useBodyText({ message, sentActions, sentAnswers, replyFiles, pro
   const replyPeople = ownReply ? replyFiles?.personMessageIds : undefined;
   // `#Shape` naming a live initiative links to the Board filtered to it (approval "board-hashtags"; display only).
   const { initiatives: tagInitiatives, href: tagHref } = useLiveInitiatives();
+  // A pin on an HTML page: its outline and selector lines are the agent's; the person's own reply is drawn without them
+  // (replyFeedback.ts `withoutElementDetails`; display only).
   const linkFiles = useCallback(
-    (text: string) =>
-      linkHashtags(
+    (text: string) => {
+      const shownText = ownReply ? withoutElementDetails(text) : text;
+      return linkHashtags(
         replyFileList && replyPeople
-          ? linkReplyFeedback(text, { files: replyFileList, projectRoot, personMessageIds: replyPeople, replyAt: message.created_at })
-          : text,
+          ? linkReplyFeedback(shownText, { files: replyFileList, projectRoot, personMessageIds: replyPeople, replyAt: message.created_at })
+          : shownText,
         tagInitiatives,
         tagHref,
-      ),
-    [replyFileList, replyPeople, projectRoot, message.created_at, tagInitiatives, tagHref],
+      );
+    },
+    [ownReply, replyFileList, replyPeople, projectRoot, message.created_at, tagInitiatives, tagHref],
   );
   // The feedback the Send wrote after the person's words ("# Feedback on the attached files"…): a block of
   // its own, its headings at text size (replyFeedback.ts; display only). The person's own message only.
@@ -65,5 +76,5 @@ export function useBodyText({ message, sentActions, sentAnswers, replyFiles, pro
   const blocks = useMemo(() => parseMarkdownToBlocks(shown, { frontmatter: false, keepBlankLines: ownReply }), [shown, ownReply]);
   const restBlocks = useMemo(() => (restShown ? parseMarkdownToBlocks(restShown, { frontmatter: false, keepBlankLines: ownReply }) : []), [restShown, ownReply]);
   const feedbackBlocks = useMemo(() => (feedbackShown ? parseMarkdownToBlocks(feedbackShown, { frontmatter: false, keepBlankLines: ownReply }) : []), [feedbackShown, ownReply]);
-  return { skills, actionsSent, replyParts, ownReply, replyFileList, shown, noteBlocks, noteAtLine, notesRef, restShown, feedbackShown, blocks, restBlocks, feedbackBlocks };
+  return { skills, pullDetails: pullDetails?.details ?? null, actionsSent, replyParts, ownReply, replyFileList, shown, noteBlocks, noteAtLine, notesRef, restShown, feedbackShown, blocks, restBlocks, feedbackBlocks };
 }

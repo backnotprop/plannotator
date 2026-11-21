@@ -145,6 +145,14 @@ export function nextWhenWords(iso: string, now: Date = new Date()): string {
   return `${MONTH_DAY.format(d)}, ${time(d)}`;
 }
 
+/** The editor's foot: "On · next run today at 7:00 PM" ("tomorrow at", "Wed at", else "Nov 30 at"). */
+export function footNextWords(iso: string, now: Date = new Date()): string {
+  const d = new Date(iso);
+  const days = daysBetween(now, d);
+  const day = days === 0 ? 'today' : days === 1 ? 'tomorrow' : days > 1 && days < 7 ? WEEKDAY.format(d) : MONTH_DAY.format(d);
+  return `${day} at ${time(d)}`;
+}
+
 /** The editor's "Next run Mon, Nov 16 at 9:00 AM EST", in the schedule's own zone. */
 export function nextRunLine(iso: string, schedule: InboxScheduledSchedule, tzShort: string | null): string {
   const zone = schedule?.tz;

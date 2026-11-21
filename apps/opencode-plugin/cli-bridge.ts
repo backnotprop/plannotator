@@ -1145,6 +1145,7 @@ export async function handleCliCommand(input: {
           // render — nothing a new binary does can make an old plugin drop a
           // reviewer's note.
           supportsApprovalNotes: true,
+          ...(input.sessionId ? { inboxSession: input.sessionId } : {}),
           ...buildBridgePayload(input.bridge),
         }),
         readyLabel: "code review",

@@ -4,8 +4,8 @@
  * opens the thread's own review. The real ShapeLayer and board, the Inbox's doors stubbed at `fetch`. What regresses:
  *  - the Code tab or a What's changed tab comes back on the Inbox's board, or the review's facts and buttons do;
  *  - a drawn part's place in code opens a review other than the thread's newest, or at the wrong place;
- *  - a board in a thread with no review opens a review anyway;
- *  - the board under an open review takes the first Esc (closing its own panel) instead of leaving it to the review.
+ *  - a board in a thread with no review opens a review anyway.
+ * (A review open draws its own board, ReviewPane: the window never keeps this one under it.)
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -88,8 +88,6 @@ function board(): ShapeLoaded {
   return { shape: made.record, version: store.read(made.id)!, seen: 1, notes: [], session: { state: 'live', agent: 'Claude Code' } };
 }
 
-let cover: (on: boolean) => void = () => {};
-
 async function mount(thread: InboxThread | null): Promise<[string, ShapeReviewAt | null][]> {
   const loaded = board();
   const host: ShapeHost = {
@@ -107,16 +105,15 @@ async function mount(thread: InboxThread | null): Promise<[string, ShapeReviewAt
   document.body.appendChild(el);
   root = createRoot(el);
   const onOpenReview = (id: string, at: ShapeReviewAt | null) => opened.push([id, at]);
-  const draw = (covered: boolean) =>
+  const draw = () =>
     root!.render(
       <SidebarProvider open onOpenChange={() => {}}>
         <main className="ib-main" data-shape-open="">
-          <ShapeLayer host={host} id={loaded.shape.id} onClose={() => {}} thread={thread} onOpenReview={onOpenReview} covered={covered} />
+          <ShapeLayer host={host} id={loaded.shape.id} onClose={() => {}} thread={thread} onOpenReview={onOpenReview} />
         </main>
       </SidebarProvider>,
     );
-  cover = (on) => act(() => draw(on));
-  act(() => draw(false));
+  act(() => draw());
   for (let i = 0; i < 100 && !el.querySelector('.shp-dock'); i++) await wait();
   return opened;
 }
@@ -157,26 +154,4 @@ test.skipIf(!hasDom)('a thread with no review: a drawn part opens no review', as
   await wait();
   expect(tabs()).not.toContain('Code');
   expect(opened).toEqual([]);
-});
-
-test.skipIf(!hasDom)('with the review open over the board, Esc is the review\'s: the board is inert and keeps its panel', async () => {
-  await mount(THREAD);
-  await act(async () => document.querySelector<HTMLElement>('.shp-dock [title="References"]')!.click());
-  const panelOpen = () => !!document.querySelector('.shp-sidep.open');
-  expect(panelOpen()).toBe(true);
-  const esc = () => {
-    const e = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
-    act(() => void window.dispatchEvent(e));
-    return e;
-  };
-  cover(true);
-  expect(document.querySelector('[data-shape-layer]')!.hasAttribute('inert')).toBe(true);
-  // The host's own Esc (the Inbox: close the review) sees a key the board did not use.
-  expect(esc().defaultPrevented).toBe(false);
-  expect(panelOpen()).toBe(true);
-  // Back on the board: Esc closes its panel again, first.
-  cover(false);
-  expect(document.querySelector('[data-shape-layer]')!.hasAttribute('inert')).toBe(false);
-  expect(esc().defaultPrevented).toBe(true);
-  expect(panelOpen()).toBe(false);
 });

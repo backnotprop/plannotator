@@ -31,9 +31,8 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
   );
 
   const terminal = job ? isTerminalStatus(job.status) : false;
-  const isTour = job?.provider === 'tour';
   const isGuide = job?.provider === 'guide';
-  const [activeTab, setActiveTab] = useState<DetailTab>(isTour || isGuide ? 'logs' : 'findings');
+  const [activeTab, setActiveTab] = useState<DetailTab>(isGuide ? 'logs' : 'findings');
 
   const { fullCommand, userMessage, systemPrompt } = useMemo(() => {
     const cmd = job?.command ?? [];
@@ -132,15 +131,15 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
           <StatusDot status={job.status} />
           <ProviderPill provider={job.provider} engine={job.engine} model={job.model} />
           <span className="text-sm font-medium text-foreground truncate">{job.label}</span>
-          <span className="ml-auto text-[10px] font-mono text-muted-foreground">
+          <span className="ml-auto text-xs font-mono text-muted-foreground">
             {terminal && job.endedAt ? formatDuration(job.endedAt - job.startedAt) : <ElapsedTime startedAt={job.startedAt} />}
           </span>
         </div>
         {job.cwd && (
-          <p className="text-[10px] font-mono text-muted-foreground/50 mt-1 truncate" title={job.cwd}>{job.cwd}</p>
+          <p className="text-xs font-mono text-muted-foreground/50 mt-1 truncate" title={job.cwd}>{job.cwd}</p>
         )}
         {/* Inline details */}
-        <div className="flex items-center gap-3 mt-1.5 text-[10px] text-muted-foreground">
+        <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
           <span>Started {new Date(job.startedAt).toLocaleTimeString()}</span>
           {job.exitCode !== undefined && (
             <span>Exit <span className={`font-mono ${job.exitCode === 0 ? 'text-success' : 'text-destructive'}`}>{job.exitCode}</span></span>
@@ -159,7 +158,7 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
               <pre className="text-xs font-mono text-foreground/80 whitespace-pre-wrap break-words max-h-48 overflow-y-auto">{userMessage}</pre>
             </Disclosure>
             {systemPrompt && (
-              <Disclosure title={isTour ? "Tour Prompt" : isGuide ? "Guide Prompt" : "Review Prompt"} copyText={systemPrompt} nested>
+              <Disclosure title={isGuide ? "Guide Prompt" : "Review Prompt"} copyText={systemPrompt} nested>
                 <pre className="text-xs font-mono text-foreground/80 whitespace-pre-wrap break-words max-h-48 overflow-y-auto">{systemPrompt}</pre>
               </Disclosure>
             )}
@@ -169,12 +168,12 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
 
       {/* ── Tabs ── */}
       <div className="flex-shrink-0 px-8 flex gap-0.5 border-b border-border/40">
-        {!isTour && !isGuide && (
+        {!isGuide && (
           <TabButton active={activeTab === 'findings'} onClick={() => setActiveTab('findings')}>
             Findings{activeAnnotations.length > 0 && ` (${activeAnnotations.length})`}
           </TabButton>
         )}
-        {(isTour || isGuide) && (
+        {isGuide && (
           <TabButton active={activeTab === 'findings'} onClick={() => setActiveTab('findings')}>
             Status
           </TabButton>
@@ -187,14 +186,7 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
 
       {/* ── Content ── */}
       {activeTab === 'findings' ? (
-        isTour ? (
-          /* Tour status view — no findings, just status + Open Tour button */
-          <ScrollFade>
-            <div className="px-8 py-3 space-y-4 max-w-2xl">
-              <TourStatusCard summary={job.summary} terminal={terminal} jobId={jobId} />
-            </div>
-          </ScrollFade>
-        ) : isGuide ? (
+        isGuide ? (
           /* Guide status view — no findings, just status + Open guide button */
           <ScrollFade>
             <div className="px-8 py-3 space-y-4 max-w-2xl">
@@ -210,14 +202,14 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
             {displayAnnotations.length > 0 && (
               <>
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-xs text-muted-foreground">
                     {activeAnnotations.length} finding{activeAnnotations.length !== 1 ? 's' : ''}
                     {dismissedCount > 0 && ` · ${dismissedCount} dismissed`}
                   </span>
                   {copyAllText && <CopyButton text={copyAllText} variant="inline" label="Copy All" />}
                 </div>
                 {activeAnnotations.some(a => a.severity) && (
-                  <div className="flex items-center gap-3 text-[10px] text-muted-foreground/60">
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground/60">
                     <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-destructive" /> Important</span>
                     <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Nit</span>
                     <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-muted-foreground" /> Pre-existing</span>
@@ -283,7 +275,7 @@ function VerdictCard({ summary, isCorrect, terminal }: {
           <span className={`text-xs font-semibold ${isCorrect ? 'text-success' : 'text-destructive'}`}>
             {isCorrect ? 'Correct' : 'Incorrect'}
           </span>
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-xs text-muted-foreground">
             Confidence {Math.round(summary.confidence * 100)}%
           </span>
           <span className="ml-auto"><CopyButton text={verdictText} variant="inline" /></span>
@@ -296,65 +288,17 @@ function VerdictCard({ summary, isCorrect, terminal }: {
   return (
     <div className="rounded bg-muted/10 px-3 py-2.5">
       <div className="flex items-center gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
-          Review Verdict
+        <span className="text-xs font-semibold text-muted-foreground/50">
+          Review verdict
         </span>
         {!terminal && (
-          <span className="text-[10px] text-muted-foreground/40 animate-pulse">Pending...</span>
+          <span className="text-xs text-muted-foreground/40 animate-pulse">Pending...</span>
         )}
       </div>
       {terminal ? (
         <p className="text-xs text-muted-foreground/50 mt-1">No verdict available.</p>
       ) : (
         <p className="text-xs text-muted-foreground/50 mt-1">Will appear when the review completes.</p>
-      )}
-    </div>
-  );
-}
-
-function TourStatusCard({ summary, terminal, jobId }: {
-  summary: AgentJobInfo['summary'];
-  terminal: boolean;
-  jobId: string;
-}) {
-  const state = useReviewState();
-
-  if (summary) {
-    return (
-      <div className="space-y-3">
-        <div className="rounded px-3 py-2.5 bg-success/5">
-          <div className="flex items-baseline gap-2">
-            <span className="text-xs font-semibold text-success">Tour Generated</span>
-          </div>
-          <p className="text-xs text-foreground/80 leading-relaxed mt-1.5">{summary.explanation}</p>
-        </div>
-        <button
-          onClick={() => state.openTourPanel(jobId)}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors text-xs font-medium active:scale-[0.98]"
-        >
-          Open Tour
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <path d="M3 7h8M8 3.5L11 7l-3 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded bg-muted/10 px-3 py-2.5">
-      <div className="flex items-center gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
-          Tour Status
-        </span>
-        {!terminal && (
-          <span className="text-[10px] text-muted-foreground/40 animate-pulse">Generating...</span>
-        )}
-      </div>
-      {terminal ? (
-        <p className="text-xs text-muted-foreground/50 mt-1">Tour generation failed.</p>
-      ) : (
-        <p className="text-xs text-muted-foreground/50 mt-1">The tour will be ready when the agent finishes.</p>
       )}
     </div>
   );
@@ -391,7 +335,7 @@ function GuideStatusCard({ job, terminal, jobId }: {
             </svg>
           </button>
         ) : (
-          <p className="text-[11px] leading-snug text-muted-foreground/60">
+          <p className="text-xs leading-snug text-muted-foreground/60">
             {job.prUrl
               ? 'This guide belongs to a different PR — switch to it to open the guide.'
               : 'This guide belongs to the local diff — leave PR mode to open it.'}
@@ -404,17 +348,17 @@ function GuideStatusCard({ job, terminal, jobId }: {
   return (
     <div className="rounded bg-muted/10 px-3 py-2.5">
       <div className="flex items-center gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
-          Guide Status
+        <span className="text-xs font-semibold text-muted-foreground/50">
+          Guide status
         </span>
         {!terminal && (
-          <span className="text-[10px] text-muted-foreground/40 animate-pulse">Generating...</span>
+          <span className="text-xs text-muted-foreground/40 animate-pulse">Generating...</span>
         )}
       </div>
       {terminal ? (
         <>
           <p className="text-xs text-muted-foreground/50 mt-1">{job.error || 'Guide generation failed.'}</p>
-          <p className="text-[11px] text-muted-foreground/40 mt-1">
+          <p className="text-xs text-muted-foreground/40 mt-1">
             Open the Guide screen for recovery options — it can fix the captured output or run a fresh attempt.
           </p>
         </>
@@ -440,21 +384,17 @@ function StatusDot({ status }: { status: AgentJobInfo['status'] }) {
 
 function ProviderPill({ provider, engine, model }: { provider: string; engine?: string; model?: string }) {
   let label: string;
-  if (provider === 'tour') {
-    const engineLabel = engine === 'codex' ? 'Codex' : 'Claude';
-    label = model && engine !== 'codex' ? `Tour · ${engineLabel} ${model.charAt(0).toUpperCase() + model.slice(1)}` : `Tour · ${engineLabel}`;
-  } else if (provider === 'guide') {
-    // Guide's engine union is wider than Tour's (marker engines included) —
-    // only show the model for Claude, mirroring Tour's own "skip it for
-    // engines with verbose/technical model ids" convention.
+  if (provider === 'guide') {
+    // Only show the model for Claude: other engines have verbose/technical
+    // model ids.
     const engineLabel = engine === 'codex' ? 'Codex' : engine === 'cursor' ? 'Cursor' : engine === 'opencode' ? 'OpenCode' : engine === 'pi' ? 'Pi' : engine === 'copilot' ? 'Copilot' : 'Claude';
     label = model && engine === 'claude' ? `Guide · ${engineLabel} ${model.charAt(0).toUpperCase() + model.slice(1)}` : `Guide · ${engineLabel}`;
   } else {
     label = provider === 'claude' ? 'Claude' : provider === 'codex' ? 'Codex' : provider === 'cursor' ? 'Cursor' : provider === 'opencode' ? 'OpenCode' : provider === 'pi' ? 'Pi' : provider === 'copilot' ? 'Copilot' : 'Shell';
   }
   return (
-    <span className={`text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-      provider === 'tour' || provider === 'guide' ? 'bg-accent/10 text-accent' : 'bg-muted text-muted-foreground'
+    <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${
+      provider === 'guide' ? 'bg-accent/10 text-accent-text' : 'bg-muted text-muted-foreground'
     }`}>
       {label}
     </span>
@@ -488,12 +428,12 @@ function Disclosure({ title, copyText, nested, children }: {
       <div className="flex items-center justify-between">
         <button
           onClick={() => setOpen(!open)}
-          className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors duration-150"
+          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors duration-150"
         >
           <svg className={`w-2.5 h-2.5 transition-transform duration-150 ${open ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
           </svg>
-          <span className="font-medium uppercase tracking-wider">{title}</span>
+          <span className="font-medium">{title}</span>
         </button>
         {open && copyText && <CopyButton text={copyText} variant="inline" />}
       </div>
@@ -520,12 +460,12 @@ function AnnotationRow({ annotation: ann, dismissed, onClick, onExplain, explain
       }`}
       onClick={() => !dismissed && onClick(ann)}
     >
-      <div className="flex items-center gap-2 text-[10px]">
+      <div className="flex items-center gap-2 text-xs">
         {severity && (
           <span className={`w-2 h-2 rounded-full flex-shrink-0 ${severity.dot}`} title={severity.label} />
         )}
         {scope === 'general' ? (
-          <span className={`font-mono uppercase tracking-wider flex-shrink-0 ${dismissed ? 'line-through text-muted-foreground' : 'text-primary'}`}>
+          <span className={`font-mono flex-shrink-0 ${dismissed ? 'line-through text-muted-foreground' : 'text-primary'}`}>
             general
           </span>
         ) : (
@@ -534,7 +474,7 @@ function AnnotationRow({ annotation: ann, dismissed, onClick, onExplain, explain
               {ann.filePath}
             </span>
             {scope === 'file' ? (
-              <span className="text-muted-foreground flex-shrink-0 uppercase tracking-wider">file</span>
+              <span className="text-muted-foreground flex-shrink-0">file</span>
             ) : (
               <span className="text-muted-foreground flex-shrink-0">
                 L{ann.lineStart}{ann.lineEnd !== ann.lineStart ? `–${ann.lineEnd}` : ''}
@@ -543,12 +483,12 @@ function AnnotationRow({ annotation: ann, dismissed, onClick, onExplain, explain
           </>
         )}
         {ann.reviewProfileLabel && (
-          <span className="px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider bg-accent/10 text-accent/90 flex-shrink-0">
+          <span className="px-1.5 py-0.5 rounded text-xs bg-accent/10 text-accent-text/90 flex-shrink-0">
             {ann.reviewProfileLabel}
           </span>
         )}
         {dismissed && (
-          <span className="px-1 py-0.5 rounded text-[10px] uppercase tracking-wider bg-muted text-muted-foreground/60">dismissed</span>
+          <span className="px-1 py-0.5 rounded text-xs bg-muted text-muted-foreground/60">dismissed</span>
         )}
         {!dismissed && (copyText || onExplain) && (
           <span className="ml-auto flex items-center gap-1 opacity-0 group-hover/finding:opacity-100 group-focus-within/finding:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
@@ -563,7 +503,7 @@ function AnnotationRow({ annotation: ann, dismissed, onClick, onExplain, explain
         </p>
       )}
       {ann.reasoning && (
-        <p className="text-[11px] text-muted-foreground/60 leading-relaxed mt-1.5 break-words [overflow-wrap:anywhere]">
+        <p className="text-xs text-muted-foreground/60 leading-relaxed mt-1.5 break-words [overflow-wrap:anywhere]">
           {ann.reasoning}
         </p>
       )}

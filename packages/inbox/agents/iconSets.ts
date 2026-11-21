@@ -2,7 +2,8 @@
  * Icon sets for agents' icons ("Sets" in the face picker; packages/server/inbox-icon-sets.ts): the sets as the window
  * last read them, each set's icons once opened, and how a `set:<set>/<icon>` face is drawn.
  *
- * An icon is only ever drawn from its address on this Inbox (`/api/inbox/icon-sets/<set>/<icon>`): as an `<img>`
+ * An icon is only ever drawn from its address on this Inbox (`/api/inbox/icon-sets/<set>/<icon>`; a set the window
+ * bundles, `BUNDLED_SETS`, from the bundle): as an `<img>`
  * (pixel art: nearest-neighbour, at whole multiples of its native size only, agents.css), or, for a one-colour set,
  * as a CSS mask filled with the theme's text colour (an `<img>` cannot take it). Never as markup: an SVG in an image
  * or a mask runs no script and loads nothing. An icon that does not load (a set this machine lacks, an icon a later
@@ -12,6 +13,7 @@ import { useEffect, useSyncExternalStore } from 'react';
 import { inboxSetFaceParts, isInboxSetFace, type InboxIconSet, type InboxIconSetListing, type InboxSetFace } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 import { inboxUrl } from '../inboxUrl';
+import viewChoiceBlastoise from '../assets/view-choice/blastoise.png';
 
 export type SetFace = InboxSetFace;
 export const isSetFace = isInboxSetFace;
@@ -34,7 +36,18 @@ export const BUILT_IN_SET_LOOKS: Readonly<Record<string, SetLook>> = {
   dcss: { pixelated: true, size: 32 },
 };
 
-export const setIconSrc = (set: string, icon: string) => inboxUrl(`/icon-sets/${encodeURIComponent(set)}/${encodeURIComponent(icon)}`);
+/**
+ * Sets the window carries itself, never asked of the Inbox: the view choice's demo agent (components/viewChoiceDemo.ts)
+ * wears Blastoise, the Pokémon set's #9, trimmed as the Inbox trims a fetched set's icons (its manifest's `trim: true`),
+ * with that set's look. It is drawn as any set face is, without the set kept here and with no request.
+ */
+const BUNDLED_SETS: Readonly<Record<string, { look: SetLook; icons: Readonly<Record<string, string>> }>> = {
+  'view-choice': { look: {}, icons: { blastoise: viewChoiceBlastoise } },
+};
+/** The demo's Blastoise as a set face (BUNDLED_SETS). */
+export const VIEW_CHOICE_BLASTOISE_FACE = 'set:view-choice/blastoise';
+
+export const setIconSrc = (set: string, icon: string) => BUNDLED_SETS[set]?.icons[icon] ?? inboxUrl(`/icon-sets/${encodeURIComponent(set)}/${encodeURIComponent(icon)}`);
 export const setCreditsHref = (set: string) => inboxUrl(`/icon-sets/${encodeURIComponent(set)}`, 'credits=1');
 
 /* ---------- the sets ---------- */
@@ -82,7 +95,7 @@ export function useIconSets(): readonly InboxIconSet[] | null {
 
 /** A set's look: a built-in one's at once, a fetched one's once the sets are read (asked for here the first time). */
 export function setLookOf(set: string): SetLook | null {
-  const builtIn = BUILT_IN_SET_LOOKS[set];
+  const builtIn = BUILT_IN_SET_LOOKS[set] ?? BUNDLED_SETS[set]?.look;
   if (builtIn) return builtIn;
   const known = sets?.find((s) => s.id === set);
   if (known) return { pixelated: known.pixelated, size: known.size, mono: known.mono, zoom: known.zoom };

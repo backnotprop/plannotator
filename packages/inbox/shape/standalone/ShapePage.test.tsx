@@ -92,7 +92,9 @@ async function settle(until?: () => boolean) {
 describe.skipIf(!hasDom)('the standalone Shape page', () => {
   test('the address: a board and its view and panel, else the grid', () => {
     expect(parseShapeHash('')).toEqual({ shape: null, view: null, panel: null });
-    expect(parseShapeHash('#shape=shp_01ABC&view=how&panel=ask')).toEqual({ shape: 'shp_01ABC', view: 'how', panel: 'ask' });
+    expect(parseShapeHash('#shape=shp_01ABC&view=how&panel=refs')).toEqual({ shape: 'shp_01ABC', view: 'how', panel: 'refs' });
+    // The panel is References only: an older address's Ask panel opens none.
+    expect(parseShapeHash('#shape=shp_01ABC&view=how&panel=ask')).toEqual({ shape: 'shp_01ABC', view: 'how', panel: null });
     expect(parseShapeHash('#shape=../x&view=nope&panel=thread')).toEqual({ shape: null, view: null, panel: null });
     expect(shapeHash({ shape: 'shp_1', view: 'picture', panel: null })).toBe('#shape=shp_1');
     expect(shapeHash({ shape: 'shp_1', view: 'know', panel: 'refs' })).toBe('#shape=shp_1&view=know&panel=refs');

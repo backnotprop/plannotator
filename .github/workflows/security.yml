@@ -10,12 +10,19 @@ on:
   schedule:
     - cron: "23 15 * * 6"
   workflow_dispatch:
+    inputs:
+      as_if_changed:
+        description: "Preview a PR's run: plan as if a PR changed only these paths (space-separated). Empty runs everything."
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: security-scanning-${{ github.event.pull_request.number || github.ref }}
+  # A manual preview (as_if_changed) gets a group of its own, so it never cancels main's full scan.
+  group: security-scanning-${{ github.event.pull_request.number || (inputs.as_if_changed && format('preview-{0}', github.run_id)) || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -33,7 +40,45 @@ env:
   ZIZMOR_VERSION: 1.29.0
   ZIZMOR_LINUX_X64_SHA256: dd96df044a6e8538d5f423790f453bdd03d49e5b2bcc38214acc41a2f1297839
 
+# On a PR, Gitleaks always runs. The `changes` job (scripts/ci-affected.ts gate
+# security) decides the rest: Semgrep scans only the changed files it reads
+# (its rules are intrafile), the whole tree when its config changed or when the
+# picker cannot decide, and nothing on a docs-only change or one with no file
+# it reads; Trivy runs when a lockfile, a manifest, a Dockerfile or .github/
+# changed; zizmor when .github/ changed. A push to main, the weekly run and a
+# manual run scan everything (a manual run given as_if_changed plans as if a
+# PR changed those paths), and a failed gate runs every job in full.
 jobs:
+  changes:
+    name: Security scans (path gate)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      semgrep: ${{ steps.gate.outputs.semgrep }}
+      semgrep_files: ${{ steps.gate.outputs.semgrep_files }}
+      trivy: ${{ steps.gate.outputs.trivy }}
+      zizmor: ${{ steps.gate.outputs.zizmor }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The merge commit and both parents: HEAD^1..HEAD is the PR's change.
+          fetch-depth: 2
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      - name: Which scans does this change need?
+        id: gate
+        env:
+          CI_AFFECTED: ${{ vars.CI_AFFECTED }}
+          CI_AFFECTED_AS_IF: ${{ inputs.as_if_changed }}
+        run: bun run scripts/ci-affected.ts gate security
+
   gitleaks:
     name: Gitleaks
     runs-on: ubuntu-24.04
@@ -179,6 +224,8 @@ jobs:
 
   semgrep:
     name: Semgrep CE
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.semgrep != 'skip' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -319,14 +366,33 @@ jobs:
             exit 1
           fi
 
+      # On a PR the gate names the changed files Semgrep reads (`files`), and
+      # only they are scanned: the rules are intrafile, so a finding in one
+      # file never depends on another. `full` (or no answer from the gate)
+      # scans the whole tree, as on main.
       - name: Scan source with Semgrep CE
         id: scan
         shell: bash
+        env:
+          SEMGREP_MODE: ${{ needs.changes.outputs.semgrep }}
+          SEMGREP_FILES: ${{ needs.changes.outputs.semgrep_files }}
         run: |
           set -euo pipefail
           output_dir="$GITHUB_WORKSPACE/security-results"
           mkdir -p "$output_dir"
           chmod 777 "$output_dir"
+
+          mode=full
+          targets=(/src)
+          if [[ "$SEMGREP_MODE" == files ]]; then
+            mapfile -t files < <(jq -r '.[]' <<< "$SEMGREP_FILES")
+            targets=()
+            for f in "${files[@]}"; do
+              if [[ -f "$f" && ! -L "$f" ]]; then targets+=("/src/$f"); fi
+            done
+            if (( ${#targets[@]} > 0 )); then mode=files; else targets=(/src); fi
+          fi
+          echo "Semgrep scope: $mode (${#targets[@]} target(s))"
 
           # The source mount and scanner network are read-only/offline. Findings
           # remain local; only GitHub receives the validated reports below.
@@ -350,7 +416,7 @@ jobs:
               --json-output /out/semgrep.json \
               --sarif-output /out/semgrep.sarif \
               --config /src/.semgrep.yml \
-              /src 2>&1 | tee "$output_dir/semgrep-scan.log"
+              "${targets[@]}" 2>&1 | tee "$output_dir/semgrep-scan.log"
           scan_status=${PIPESTATUS[0]}
           set -e
           if [[ "$scan_status" -ne 0 ]]; then
@@ -358,17 +424,20 @@ jobs:
             exit "$scan_status"
           fi
 
-          jq -e --arg version "$SEMGREP_VERSION" '
+          # A whole-tree scan must reach every surface; a changed-files scan
+          # reaches what it was given.
+          jq -e --arg version "$SEMGREP_VERSION" --arg mode "$mode" '
             .version == $version and
             .engine_requested == "OSS" and
             (.errors | length) == 0 and
-            (.paths.scanned | length) >= 500 and
             all(.results[]; .extra.engine_kind == "OSS") and
-            any(.paths.scanned[]; startswith("/src/packages/server/")) and
-            any(.paths.scanned[]; startswith("/src/apps/pi-extension/server/")) and
-            any(.paths.scanned[]; startswith("/src/packages/ui/")) and
-            any(.paths.scanned[]; startswith("/src/apps/paste-service/")) and
-            any(.paths.scanned[]; startswith("/src/scripts/"))
+            ($mode == "files" or (
+              (.paths.scanned | length) >= 500 and
+              any(.paths.scanned[]; startswith("/src/packages/server/")) and
+              any(.paths.scanned[]; startswith("/src/apps/pi-extension/server/")) and
+              any(.paths.scanned[]; startswith("/src/packages/ui/")) and
+              any(.paths.scanned[]; startswith("/src/apps/paste-service/")) and
+              any(.paths.scanned[]; startswith("/src/scripts/"))))
           ' "$output_dir/semgrep.json" >/dev/null || {
             echo 'Semgrep JSON failed its OSS-engine, error-free, target-count, or required-surface assertions.' >&2
             exit 1
@@ -395,6 +464,7 @@ jobs:
           {
             echo '### Semgrep Community Edition'
             echo '- Scope: TypeScript/JavaScript (Bun, Pi/Node, React/DOM, Cloudflare) plus generic installer checks'
+            if [[ "$mode" == files ]]; then echo "- Diff-aware: only the PR's ${#targets[@]} changed file(s) Semgrep reads"; else echo '- Whole tree'; fi
             echo "- Engine: Semgrep OSS $SEMGREP_VERSION; $rule_count repository-owned rules (SHA-256 \`$rules_sha\`)"
             echo '- Network/data mode: scan runs offline; no token, Registry rules, metrics, version check, or Semgrep Cloud upload'
             echo "- Targets: $target_count"
@@ -416,12 +486,15 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+      # Outside a PR only a full scan is uploaded: a changed-files SARIF (a
+      # manual preview) would mark every alert in the files it skipped fixed.
       - name: Upload Semgrep SARIF
         if: >-
           always() &&
           steps.scan.outputs.report-ready == 'true' &&
-          (github.event_name != 'pull_request' ||
-          (github.event.pull_request.head.repo.full_name == github.repository &&
+          ((github.event_name != 'pull_request' && needs.changes.outputs.semgrep != 'files') ||
+          (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
           github.actor != 'dependabot[bot]'))
         uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         with:
@@ -430,6 +503,8 @@ jobs:
 
   trivy:
     name: Trivy
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.trivy != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -871,6 +946,8 @@ jobs:
 
   zizmor:
     name: zizmor
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.zizmor != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

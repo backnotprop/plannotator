@@ -94,7 +94,13 @@ async function render(body: string, inline: InboxInlineImage[], opened: InboxInl
   document.body.appendChild(host);
   await act(async () => {
     root = createRoot(host!);
-    root.render(
+  });
+  await redraw(body, inline, opened);
+}
+
+async function redraw(body: string, inline: InboxInlineImage[], opened: InboxInlineImage[]) {
+  await act(async () => {
+    root!.render(
       <MessageBody
         message={message(body, inline)}
         projectRoot="/work/shop"
@@ -327,4 +333,72 @@ test.skipIf(!hasDom)('a picture choice carries the size recorded when the messag
   expect(box(tiles[1]!).style.getPropertyValue('--question-picture-ratio')).toBe('');
   expect(tiles[1]!.hasAttribute('data-question-tile-shape')).toBe(false);
   expect(host!.querySelector('[data-question-tiles]')!.getAttribute('data-question-tiles-shape')).toBe('mixed');
+});
+
+test.skipIf(!hasDom)('a sound or a video the body shows is a native player in place, and a picture stays a picture', async () => {
+  await render(['![B](design/b.png)', '', 'Listen: ![Voice note](notes/hi.m4a)', '', '![Demo](rec/demo.MOV)', '', '![](rec/untitled.webm)'].join('\n'), [B], []);
+  expect(host!.querySelector('[data-inline-media][src$="untitled.webm"]')!.getAttribute('aria-label')).toBe('untitled.webm');
+  const url = (path: string) => `/api/inbox/messages/${ID}/image?path=${encodeURIComponent(path)}`;
+  expect(host!.querySelector<HTMLImageElement>('img[alt="B"]')!.getAttribute('src')).toBe(url('design/b.png'));
+  expect(host!.querySelectorAll('img')).toHaveLength(1);
+  const audio = host!.querySelector<HTMLAudioElement>('audio')!;
+  expect(audio.getAttribute('src')).toBe(url('notes/hi.m4a'));
+  expect(audio.getAttribute('aria-label')).toBe('Voice note');
+  expect(audio.hasAttribute('controls')).toBe(true);
+  expect(audio.getAttribute('preload')).toBe('metadata');
+  expect(audio.hasAttribute('autoplay')).toBe(false);
+  const video = host!.querySelector<HTMLVideoElement>('video')!;
+  expect(video.getAttribute('src')).toBe(url('rec/demo.MOV'));
+  expect(video.getAttribute('aria-label')).toBe('Demo');
+  expect(video.hasAttribute('playsinline')).toBe(true);
+  expect(video.getAttribute('preload')).toBe('metadata');
+  expect(video.hasAttribute('autoplay')).toBe(false);
+});
+
+test.skipIf(!hasDom)('a raw <img> naming a sound or a video draws the player in place, the same element across a redraw; one that fails to load is the chip', async () => {
+  const body = '<p>The run: <img src="rec/clip.mp4" alt="Clip"> and <img src="notes/hi.wav" alt="Voice"> end there.</p>\n\n![B](design/b.png)';
+  await render(body, [B], []);
+  const url = (path: string) => `/api/inbox/messages/${ID}/image?path=${encodeURIComponent(path)}`;
+  expect(host!.querySelectorAll('img[alt="Clip"], img[alt="Voice"]')).toHaveLength(0);
+  const video = host!.querySelector<HTMLVideoElement>('video[data-inline-media]')!;
+  expect([video.getAttribute('src'), video.getAttribute('aria-label'), video.hasAttribute('controls'), video.hasAttribute('playsinline'), video.hasAttribute('autoplay')]).toEqual([url('rec/clip.mp4'), 'Clip', true, true, false]);
+  const audio = host!.querySelector<HTMLAudioElement>('audio[data-inline-media]')!;
+  expect([audio.getAttribute('src'), audio.getAttribute('aria-label'), audio.getAttribute('preload')]).toEqual([url('notes/hi.wav'), 'Voice', 'metadata']);
+  await redraw(body, [{ ...B, width: 3200 }], []);
+  expect(host!.querySelector('video[data-inline-media]')).toBe(video);
+  expect(host!.querySelector('audio[data-inline-media]')).toBe(audio);
+  await act(async () => {
+    video.dispatchEvent(new Event('error'));
+  });
+  expect(host!.querySelector('[data-image-unavailable]')!.textContent).toBe('Clip');
+  expect(video.hidden).toBe(true);
+  expect(host!.textContent).toContain('end there.');
+});
+
+test.skipIf(!hasDom)('two copies of one raw clip both stay the same players across a redraw, and an element carrying the player attributes is ignored', async () => {
+  const url = `/api/inbox/messages/${ID}/image?path=${encodeURIComponent('rec/clip.mp4')}`;
+  const body = (alt: string) => `<p><span data-inline-media="video" data-inline-media-src="${url}">decoy</span> <img src="rec/clip.mp4" alt="${alt}"> and <img src="rec/clip.mp4" alt="Second"></p>\n\n![B](design/b.png)`;
+  await render(body('Clip'), [B], []);
+  const videos = [...host!.querySelectorAll<HTMLVideoElement>('video[data-inline-media]')];
+  expect(videos).toHaveLength(2);
+  expect(host!.querySelector('span[data-inline-media][data-inline-media-src]')!.hasAttribute('src')).toBe(false);
+  await redraw(body('Clip'), [{ ...B, width: 3200 }], []);
+  expect([...host!.querySelectorAll('video[data-inline-media]')]).toEqual(videos);
+  expect(host!.querySelector('span[data-inline-media-src]')!.textContent).toBe('decoy');
+  await redraw(body('Renamed'), [{ ...B, width: 3200 }], []);
+  expect([...host!.querySelectorAll('video[data-inline-media]')]).toEqual(videos);
+  expect(videos[0]!.getAttribute('aria-label')).toBe('Renamed');
+});
+
+test.skipIf(!hasDom)("ui's image rows stay out of a message body: its pictures keep the Inbox's own fit, one alone and several on a line", async () => {
+  const body = ['![window](shots/window.png)', '', '![a](shots/window.png) ![b](shots/icon.png) ![c](shots/page.png)', '', '- ![d](shots/window.png) ![e](shots/icon.png)'].join('\n');
+  await render(body, [WINDOW_SHOT, ICON_SHOT, PAGE_SHOT], []);
+  const bodyEl = host!.querySelector('.ib-body')!;
+  // ui would mark each of these paragraphs as a row (data-image-row) and cap or size its images with classes
+  // that fight `.ib-body img[data-ib-fit]`: the 70vh cap would become 30rem, a row would squeeze each picture to 12rem.
+  expect(bodyEl.querySelectorAll('[data-image-row]')).toHaveLength(0);
+  const imageClasses = Array.from(bodyEl.querySelectorAll('*')).flatMap((el) => [...el.classList].filter((cls) => cls.startsWith('[&_img]')));
+  expect(imageClasses).toEqual([]);
+  // The Inbox's own fit is on every picture with a record.
+  for (const alt of ['window', 'a', 'b', 'c', 'd', 'e']) expect(host!.querySelector(`img[alt="${alt}"]`)!.hasAttribute('data-ib-fit')).toBe(true);
 });

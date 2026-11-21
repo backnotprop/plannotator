@@ -2,9 +2,10 @@
  * Projects whose rows name their sessions: two or more live. Held so a row never flips back while someone looks; it
  * is let go only after SEVERAL_HOLD_MS with fewer than two, and only while the window is hidden or freshly shown.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { InboxAgent, InboxAgentsGroup } from '@plannotator/core/inbox-types';
 import { inboxAgentsNow, onInboxAgentsSet } from './agentsList';
+import { usePictureWorld } from './pictureWorld';
 
 export const SEVERAL_HOLD_MS = 10 * 60_000;
 
@@ -47,6 +48,22 @@ export function sessionsByProject(groups: readonly InboxAgentsGroup[] | null): {
   return { live, agents, heirs };
 }
 
+/**
+ * Whether two readings name the same sessions for the rows: the "several" projects, the heirs, and each project's
+ * agents by `session` and `label`, in order (all a row's slot reads, RowSlot.tsx). An agent's last poll moves on every
+ * read, and a row does not show it.
+ */
+function sameForRows(a: RowSessions, b: RowSessions): boolean {
+  if (a.several.size !== b.several.size || [...b.several].some((key) => !a.several.has(key))) return false;
+  if (a.heirs.size !== b.heirs.size || [...b.heirs].some(([key, heir]) => a.heirs.get(key) !== heir)) return false;
+  if (a.agents.size !== b.agents.size) return false;
+  for (const [key, list] of b.agents) {
+    const old = a.agents.get(key);
+    if (!old || old.length !== list.length || old.some((agent, i) => agent.session !== list[i]!.session || agent.label !== list[i]!.label)) return false;
+  }
+  return true;
+}
+
 let held = new Map<string, number>();
 let current: RowSessions = { several: new Set(), agents: new Map(), heirs: new Map() };
 let loaded = false;
@@ -58,7 +75,10 @@ function recompute(unseen: boolean): void {
   const { live, agents, heirs } = sessionsByProject(groups);
   held = nextSeveral(held, live, Date.now(), unseen || !loaded);
   loaded = true;
-  current = { several: new Set(held.keys()), agents, heirs };
+  const next: RowSessions = { several: new Set(held.keys()), agents, heirs };
+  // Nothing a row shows changed: the same object, so no row's slot draws again (every agent message reads the list).
+  if (sameForRows(current, next)) return;
+  current = next;
   for (const listener of listeners) listener();
 }
 
@@ -80,12 +100,21 @@ const snapshot = () => current;
 
 /** Plain state, not `useSyncExternalStore`: agents are set mid list read, and a store hook would draw before the read's own changes. */
 export function useRowSessions(): RowSessions {
+  // In a picture (pictureWorld.ts): its own agents, nothing held, the person's never read.
+  const world = usePictureWorld();
   const [sessions, setSessions] = useState(snapshot);
   useEffect(() => {
+    if (world) return;
     const read = () => setSessions(snapshot());
     const stop = subscribe(read);
     read();
     return stop;
-  }, []);
-  return sessions;
+  }, [world]);
+  const pictured = useMemo(() => (world ? worldSessions(world.agents) : null), [world]);
+  return pictured ?? sessions;
+}
+
+function worldSessions(groups: readonly InboxAgentsGroup[]): RowSessions {
+  const { live, agents, heirs } = sessionsByProject(groups);
+  return { several: new Set([...live].filter(([, count]) => count >= 2).map(([key]) => key)), agents, heirs };
 }
