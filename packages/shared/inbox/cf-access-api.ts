@@ -141,7 +141,6 @@ export async function runCfSetup(
   if (!isTeamDomain(team)) throw new CfApiError("Zero Trust is not set up on this account: open the Cloudflare dashboard, Zero Trust, pick a team name and the Free plan, then run setup again.");
   onStep("team", team);
 
-  // Check both names before editing anything, including a tunnel or app reused on a rerun.
   const apps = await api.call<AccessApplication[]>("GET", `${A}/access/apps`);
   const appNames = (app: AccessApplication) => [
     ...(app.self_hosted_domains ?? []),
