@@ -583,7 +583,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
               const option = at === null || !moved.current ? undefined : optionsRef.current[at];
               const shown = at === null ? null : document.getElementById(optionId(at));
               carry.current = option ? { key: optionKey(option), top: shown ? shown.getBoundingClientRect().top : null, height: listRef.current?.clientHeight ?? 0 } : null;
-              setAnswered((current) => (current && current.key === key ? { ...current, model: keepingRow(model, option) } : current));
+              setAnswered((current) => (current && current.key === key ? { ...current, model: keepingRow(model, option, current.model) } : current));
             };
             if (pressing.current) heldMerge.current = apply;
             else apply();
