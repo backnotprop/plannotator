@@ -116,18 +116,19 @@ export interface EngineCapability {
  * Per diagram type, what each engine offers in Plannotator today. Mermaid's
  * part comments come from the finder in `diagram-anchor.ts` (flowchart,
  * state, class, ER, requirement, sequence); Pele's from
- * `diagram-anchor-pele.ts`, which addresses flowcharts only. Every other
- * type is a whole-diagram comment under both engines.
+ * `diagram-anchor-pele.ts`, which addresses the same six types with the
+ * same anchors. Every other type is a whole-diagram comment under both
+ * engines.
  */
 export const PELE_CAPABILITIES: Readonly<Record<MermaidDiagramType, Readonly<Record<DiagramEngine, EngineCapability>>>> = (() => {
   const both = (mermaid: boolean, pele: boolean) => ({ mermaid: { partComments: mermaid }, pele: { partComments: pele } });
   return {
     flowchart: both(true, true),
-    sequence: both(true, false),
-    state: both(true, false),
-    class: both(true, false),
-    er: both(true, false),
-    requirement: both(true, false),
+    sequence: both(true, true),
+    state: both(true, true),
+    class: both(true, true),
+    er: both(true, true),
+    requirement: both(true, true),
     gantt: both(false, false),
     pie: both(false, false),
     gitGraph: both(false, false),
