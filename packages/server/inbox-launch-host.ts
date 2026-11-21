@@ -251,10 +251,16 @@ export interface LaunchHost {
   readonly name: string;
   /** What of Plannotator's connects a session, in the line's words: "plugin" (the default), Pi's "extension". */
   readonly connector?: string;
-  /** The login-shell names it keeps from each read (the rest of the env is never held). */
+  /** The login-shell names it keeps from each read (the rest of the env is held only by a host with `loginRead`). */
   readonly shellNames: readonly string[];
   /** Login-shell names it learns only whether they are set: kept as "1", never their values (a sign-in token). */
   readonly shellFlags?: readonly string[];
+  /**
+   * Each login read's whole env, as read (a stand-in from a shell that did not answer included: the host tells them
+   * apart with `LOGIN_ENV_FALLBACKS`). OpenCode holds it in memory for its model-list reads, so they see what the
+   * session sees (a key exported in the shell rc) without running the shell again. Never written, never logged.
+   */
+  loginRead?(login: Readonly<LaunchEnv>): void;
   /**
    * Whether To may offer it. The engine caches it 30 s. `folders`: whether it can start in at least one of these
    * (already checked) folders, by their own settings where the host reads any (Claude Code's project plugin

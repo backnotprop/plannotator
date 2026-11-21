@@ -1592,10 +1592,13 @@ export function useAnnotationHighlighter({
     //
     // Only on a page with a notes list: drawing a document's notes at its end
     // takes their paragraphs out of the flow and shifts every later `<p>`
-    // count, while block ids stay. Anywhere else the positions win, as they
-    // always did: after an edit above two copies, the stored block id names
-    // the wrong copy and the positions the right one.
-    const hasNotes = Boolean(containerRef.current?.querySelector('[data-footnotes]'));
+    // count, while block ids stay. The same on a page with raw HTML the
+    // sanitizer drops (`[data-html-dropped]`, HtmlBlock): such a line used to
+    // print as a paragraph of text, so every later `<p>` count is one lower.
+    // Anywhere else the positions win, as they always did: after an edit above
+    // two copies, the stored block id names the wrong copy and the positions
+    // the right one.
+    const hasNotes = Boolean(containerRef.current?.querySelector('[data-footnotes], [data-html-dropped]'));
     const paintedOutsideStoredBlock = (ann: Annotation, firstDom: Node | null | undefined): boolean => {
       if (!hasNotes || !ann.blockId) return false;
       const painted = blockElementOf(firstDom)?.dataset.blockId;
