@@ -7304,7 +7304,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (capable) return capable;
       // Search: a read route (and the recent searches the window writes on opening a result).
       const searched = await search.handle(req, url, {
-        online: () => machines.machinesView().filter((machine) => !machine.self && machine.state === "online").map((machine) => machine.id),
+        linked: () => machines.machinesView().filter((machine) => !machine.self && machine.state !== "revoked").map((machine) => ({ id: machine.id, name: machine.name, online: machine.state === "online" })),
         projectOwner: (projectId) => machines.projectOwner(projectId),
         forward: (forwarded, target) => machines.route(forwarded, target, via),
       });

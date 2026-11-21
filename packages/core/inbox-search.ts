@@ -542,4 +542,5 @@ export interface InboxSearchAnswer {
   groups: Partial<Record<InboxSearchGroupId, InboxSearchRow[]>> | null;
   /** An empty query with no filters: the threads the person looked at last. */
   recent: InboxSearchThreadRow[] | null;
+  unanswered?: string[];
 }

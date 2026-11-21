@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxAuthor } from "@plannotator/core/inbox-types";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
+import { InboxStore } from "@plannotator/shared/inbox/store";
 import { startInboxServer, type InboxServer } from "./inbox";
+import { createInboxSearchRoutes, INBOX_SEARCH_PATH } from "./inbox-search";
 
 type Json = Record<string, any>;
 
@@ -78,7 +80,7 @@ test("Cmd+K across linked machines: typed search and Recent merge, the other mac
 
   const page = await get(a.base, "/api/inbox/search?q=zebracorn&machines=1&group=threads&offset=1&limit=1");
   expect(page.totals.threads).toBe(3);
-  expect((page.groups.threads as Json[]).map((row) => row.project.machine)).toEqual([bId]);
+  expect((page.groups.threads as Json[]).map((row) => row.id)).toEqual([mine]);
 
   const recent = (await get(a.base, "/api/inbox/search?q=&machines=1")).recent as Json[];
   expect(recent.map((row) => row.id)).toEqual([titledB, mine, olderB]);
@@ -93,3 +95,62 @@ test("Cmd+K across linked machines: typed search and Recent merge, the other mac
   expect((await get(a.base, "/api/inbox/search?q=zebracorn&machines=1")).totals.threads).toBe(1);
   expect(((await get(a.base, "/api/inbox/search?q=&machines=1")).recent as Json[]).map((row) => row.id)).toEqual([mine]);
 }, 60_000);
+
+test("a machine that never answers costs one wait, Show all pages in the first view's order, and the missing machines are named", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-search-machines-")));
+  roots.push(root);
+  const id = (kind: string, last: string) => `${kind}_01K${"0".repeat(22)}${last}`;
+  const [B, C, D] = [id("ibx", "B"), id("ibx", "C"), id("ibx", "D")];
+  const seeded = (name: string, start: number, count: number) => {
+    let clock = Date.parse("2026-11-01T10:00:00Z") + start;
+    const store = InboxStore.open(join(root, name), { now: () => new Date((clock += 60_000)) });
+    const project = store.ensureProject({ name, root: join(root, name, "src") });
+    for (let i = 0; i < count; i++) store.sendMessage({ project_id: project.id, author: AGENT, subject: `Zebracorn ${name} ${i}`, body: "Steps.", thread: `${name}-${i}` });
+    const routes = createInboxSearchRoutes({ store, serverSession: name, machineWaitMs: 300 });
+    return { store, routes };
+  };
+  const a = seeded("a", 0, 30);
+  const b = seeded("b", -570_000, 40);
+  await Promise.all([a.routes.index.ensureBuilt(), b.routes.index.ensureBuilt()]);
+  const machines = {
+    linked: () => [
+      { id: B, name: "MacBook", online: true },
+      { id: C, name: "Mini", online: true },
+      { id: D, name: "Laptop", online: false },
+    ],
+    projectOwner: (project: string) => (project === id("prj", "D") ? D : null),
+    forward: (req: Request, url: URL): Promise<Response | null> => {
+      if (!url.pathname.startsWith(`/api/inbox/m/${B}/`)) return new Promise(() => {});
+      const door = new URL(`${INBOX_SEARCH_PATH}${url.search}`, url);
+      return b.routes.handle(new Request(door), door);
+    },
+  };
+  const ask = async (query: string) => {
+    const url = new URL(`http://127.0.0.1:1${INBOX_SEARCH_PATH}?machines=1&${query}`);
+    const started = Date.now();
+    const answer = (await (await a.routes.handle(new Request(url), url, machines))!.json()) as Json;
+    return { answer, took: Date.now() - started };
+  };
+  const ids = (answer: Json) => (answer.groups.threads as Json[]).map((row) => row.id as string);
+
+  const first = await ask("q=zebracorn");
+  const page = await ask("q=zebracorn&group=threads&limit=50");
+  const next = await ask("q=zebracorn&group=threads&offset=50&limit=50");
+  for (const { answer, took } of [first, page, next]) {
+    expect(answer.unanswered).toEqual(["Mini", "Laptop"]);
+    expect(took).toBeLessThan(550);
+  }
+  expect(page.answer.totals.threads).toBe(70);
+  expect(ids(page.answer).slice(0, ids(first.answer).length)).toEqual(ids(first.answer));
+  const all = [...(page.answer.groups.threads as Json[]), ...(next.answer.groups.threads as Json[])];
+  expect(new Set(all.map((row) => row.id)).size).toBe(70);
+  const scores = all.map((row) => row.score as number);
+  expect(scores).toEqual([...scores].sort((x, y) => y - x));
+  expect(new Set(all.slice(0, 10).map((row) => row.project.machine ?? "here"))).toEqual(new Set([B, "here"]));
+
+  const away = await ask(`q=&project=${id("prj", "D")}`);
+  expect(away.answer.unanswered).toEqual(["Laptop"]);
+  expect(away.answer.totals.threads).toBe(0);
+  a.routes.dispose();
+  b.routes.dispose();
+});

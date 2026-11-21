@@ -29,12 +29,10 @@ import { isInboxId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
+import { INBOX_SEARCH_MACHINE_WAIT_MS, searchAcrossMachines, type InboxSearchMachines } from "./inbox-search-machines";
 import {
-  INBOX_SEARCH_BROWSE_LIMIT,
-  INBOX_SEARCH_CAPS,
   INBOX_SEARCH_GROUPS,
   INBOX_SEARCH_LIMIT_MAX,
-  INBOX_SEARCH_RECENT_THREADS,
   INBOX_SEARCH_SORTS,
   INBOX_SEARCH_STATUSES,
   InboxSearchIndex,
@@ -42,7 +40,6 @@ import {
   type InboxSearchFrom,
   type InboxSearchGroupId,
   type InboxSearchIndexOptions,
-  type InboxSearchRow,
   type InboxSearchSort,
   type InboxSearchStatus,
 } from "@plannotator/shared/inbox/search";
@@ -57,13 +54,6 @@ export const INBOX_RECENT_SEARCHES_MAX = 6;
 export const INBOX_RECENT_SEARCHES_FILE = "recent-searches.json";
 /** How long a search waits for a build in progress before answering `indexing: true`. */
 export const INBOX_SEARCH_BUILD_WAIT_MS = 250;
-export const INBOX_SEARCH_MACHINE_WAIT_MS = 2_500;
-
-export interface InboxSearchMachines {
-  online(): string[];
-  projectOwner(projectId: string): string | null;
-  forward(req: Request, url: URL): Promise<Response | null>;
-}
 
 export interface InboxSearchRoutes {
   index: InboxSearchIndex;
@@ -122,7 +112,7 @@ function count(url: URL, name: string, min: number, max: number): number | null 
   return n;
 }
 
-export function createInboxSearchRoutes(input: { store: InboxStore; serverSession: string; index?: InboxSearchIndexOptions }): InboxSearchRoutes {
+export function createInboxSearchRoutes(input: { store: InboxStore; serverSession: string; index?: InboxSearchIndexOptions; machineWaitMs?: number }): InboxSearchRoutes {
   const { store, serverSession } = input;
   const index = new InboxSearchIndex(store, input.index);
 
@@ -158,95 +148,6 @@ export function createInboxSearchRoutes(input: { store: InboxStore; serverSessio
     return { serverSession, ...answer, ...recentSearches(answer) };
   };
 
-  const searchWithMachines = async (req: Request, url: URL, machines: InboxSearchMachines): Promise<Response> => {
-    const own = new URL(url);
-    own.searchParams.delete("machines");
-    const ask = async (machine: string, params: URLSearchParams): Promise<InboxSearchAnswer | null> => {
-      const target = new URL(`/api/inbox/m/${machine}/search?${params}`, url);
-      const controller = new AbortController();
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const asking = (async () => {
-        const response = await machines.forward(new Request(target, { headers: req.headers, signal: AbortSignal.any([controller.signal, req.signal]) }), target);
-        if (!response?.ok) return null;
-        const body = (await response.json()) as InboxSearchAnswer | null;
-        return body && typeof body === "object" && !body.indexing ? body : null;
-      })().catch(() => null);
-      try {
-        return await Promise.race([asking, new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), INBOX_SEARCH_MACHINE_WAIT_MS)))]);
-      } finally {
-        clearTimeout(timer);
-        controller.abort();
-      }
-    };
-    const paramsWith = (changes: Record<string, string | null>) => {
-      const params = new URLSearchParams(own.searchParams);
-      for (const [name, value] of Object.entries(changes)) {
-        if (value === null) params.delete(name);
-        else params.set(name, value);
-      }
-      return params;
-    };
-    const tagged = <T extends InboxSearchRow>(rows: readonly T[] | undefined, machine: string): T[] => (rows ?? []).map((row) => ({ ...row, project: { ...row.project, machine } }));
-
-    const project = own.searchParams.get("project");
-    if (project && isInboxId("prj", project) && !store.project(project)) {
-      const owner = machines.projectOwner(project);
-      if (owner) {
-        const share = machines.online().includes(owner) ? await ask(owner, paramsWith({})) : null;
-        const totals = share?.totals ?? Object.fromEntries(INBOX_SEARCH_GROUPS.map((id) => [id, 0]));
-        const groups = share?.groups ? Object.fromEntries(Object.entries(share.groups).map(([id, rows]) => [id, tagged(rows, owner)])) : { threads: [] };
-        const answer: SearchBody = { serverSession, q: share?.q ?? own.searchParams.get("q") ?? "", terms: share?.terms ?? [], took_ms: share?.took_ms ?? 0, indexing: false, threads: share?.threads ?? 0, totals: totals as SearchBody["totals"], groups, recent: null };
-        return json(answer);
-      }
-    }
-    const answer = await answerOf(own);
-    const online = machines.online();
-    if (project || own.searchParams.has("tag") || answer.indexing || online.length === 0) return json(answer);
-
-    if (answer.recent) {
-      const shares = await Promise.all(online.map(async (machine) => ({ machine, share: await ask(machine, paramsWith({})) })));
-      const theirs = shares.flatMap(({ machine, share }) => tagged(share?.recent ?? undefined, machine));
-      if (theirs.length > 0) {
-        const time = (at: string) => Date.parse(at) || 0;
-        answer.recent = [...answer.recent, ...theirs].map((row, at) => ({ row, at })).sort((a, b) => time(b.row.at) - time(a.row.at) || a.at - b.at).map(({ row }) => row).slice(0, INBOX_SEARCH_RECENT_THREADS);
-      }
-      return json(answer);
-    }
-    if (!answer.totals || !answer.groups) return json(answer);
-    const totals = { ...answer.totals };
-    const groups = { ...answer.groups };
-    const add = (share: InboxSearchAnswer | null) => {
-      for (const id of INBOX_SEARCH_GROUPS) totals[id] += share?.totals?.[id] ?? 0;
-    };
-
-    const group = own.searchParams.get("group") as InboxSearchGroupId | null;
-    if (group) {
-      const limit = Number(own.searchParams.get("limit")) || INBOX_SEARCH_LIMIT_MAX;
-      const rows = [...(groups[group] ?? [])];
-      let skip = (Number(own.searchParams.get("offset")) || 0) - answer.totals[group];
-      for (const machine of online) {
-        const wanted = limit - rows.length;
-        const share = await ask(machine, paramsWith({ offset: skip > 0 ? String(skip) : null, limit: String(Math.max(1, wanted)) }));
-        add(share);
-        if (wanted > 0) rows.push(...tagged(share?.groups?.[group], machine).slice(0, wanted));
-        skip -= share?.totals?.[group] ?? 0;
-      }
-      groups[group] = rows;
-    } else {
-      const shares = await Promise.all(online.map(async (machine) => ({ machine, share: await ask(machine, paramsWith({})) })));
-      const limit = Number(own.searchParams.get("limit")) || null;
-      for (const id of INBOX_SEARCH_GROUPS) {
-        const shown = groups[id];
-        if (!shown) continue;
-        const cap = Math.min(INBOX_SEARCH_LIMIT_MAX, limit ?? (answer.terms.length === 0 ? INBOX_SEARCH_BROWSE_LIMIT : INBOX_SEARCH_CAPS[id]));
-        const all = [...shown, ...shares.flatMap(({ machine, share }) => tagged(share?.groups?.[id], machine))];
-        groups[id] = all.map((row, at) => ({ row, at })).sort((a, b) => (b.row.score ?? 0) - (a.row.score ?? 0) || a.at - b.at).map(({ row }) => row).slice(0, cap);
-      }
-      for (const { share } of shares) add(share);
-    }
-    return json({ ...answer, totals, groups });
-  };
-
   const saveRecent = async (req: Request): Promise<Response> => {
     let body: Record<string, unknown>;
     try {
@@ -278,7 +179,9 @@ export function createInboxSearchRoutes(input: { store: InboxStore; serverSessio
       if (crossSite(req)) return json(CROSS_SITE_BODY, 403);
       if (url.pathname === INBOX_SEARCH_PATH) {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
-        if (machines && url.searchParams.get("machines") === "1") return searchWithMachines(req, url, machines);
+        if (machines && url.searchParams.get("machines") === "1") {
+          return json(await searchAcrossMachines({ req, url, machines, serverSession, waitMs: input.machineWaitMs ?? INBOX_SEARCH_MACHINE_WAIT_MS, hasProject: (id) => Boolean(store.project(id)), answerOf }));
+        }
         return json(await answerOf(url));
       }
       if (url.pathname === INBOX_SEARCH_RECENT_PATH) {
