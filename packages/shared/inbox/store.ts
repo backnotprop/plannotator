@@ -2046,10 +2046,15 @@ export class InboxStore {
    * can carry status that goes stale, and a plain reply repeated it every
    * time, so a plain reply takes the thread's short name, or null with none
    * (the connection then says `a reply`).
+   * The first message of a thread the person started and named in compose
+   * takes the name they typed: its subject is only the body's first words.
    * Everything else keeps the thread's subject (`plainReplyFor` says why).
    */
   agentTitle(message: InboxMessage, session: string | null): string | null {
-    return this.plainReplyFor(message, session) ? this.threadShortName(message.thread_id) : this.threadSubject(message.thread_id);
+    if (this.plainReplyFor(message, session)) return this.threadShortName(message.thread_id);
+    const root = this.messages.get(message.thread_id);
+    if (root?.id === message.id && root.started_by_person && root.named_by?.kind === "person") return this.threadShortName(root.id) ?? this.threadSubject(root.id);
+    return this.threadSubject(message.thread_id);
   }
 
   /**

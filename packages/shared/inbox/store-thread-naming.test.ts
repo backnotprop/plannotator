@@ -356,3 +356,20 @@ describe("a retried reply whose `thread` could not name anything", () => {
     expect(store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "ok", reply_to: person.id, thread: "Other", idempotency_key: "r2" }).message.id).toBe(r.message.id);
   });
 });
+
+describe("the title the first message of a thread the person started reaches the agent with (agentTitle)", () => {
+  test("is the name the person typed; with no name, or compose's suggestion, it stays the body's first words", () => {
+    const { store, project } = world();
+    const { message: typed } = store.startPersonThread({ project_id: project.id, body: IDEA, to: claude, idempotency_key: "k1", thread_name: "Retry budget" });
+    expect(store.agentTitle(typed, "ses_live")).toBe("Retry budget");
+    const { message: bare } = store.startPersonThread({ project_id: project.id, body: IDEA, to: claude, idempotency_key: "k2" });
+    expect(store.agentTitle(bare, "ses_live")).toBe(bare.subject);
+    const { message: auto } = store.startPersonThread({ project_id: project.id, body: IDEA, to: claude, idempotency_key: "k3", thread_name: "Board ideas", thread_name_auto: true });
+    expect(auto.thread_name).toBe("Board ideas");
+    expect(store.agentTitle(auto, "ses_live")).toBe(auto.subject);
+    expect(bare.subject).not.toBeNull();
+    // An agent's own thread, named by it: the root's subject, as before.
+    const own = store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "status", subject: "Nightly status", thread: "Nightly" }).message;
+    expect(store.agentTitle(own, "ses_a")).toBe("Nightly status");
+  });
+});
