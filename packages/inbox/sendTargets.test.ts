@@ -5,8 +5,9 @@
  * The owner's thread: one session, 8 messages, 11 questions; one answered.
  */
 import { describe, expect, test } from 'bun:test';
-import type { InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
+import { inboxAskingMessage, type InboxMessageWire, type InboxThread } from '@plannotator/core/inbox-types';
 import { replyKeysToRenew, sendTargetAnswerIds, sendTargetsOf, wordsMessage, type SentContents } from './sendTargets';
+import { askingSessionOf } from './thread/helpers';
 
 type State = 'open' | 'picked' | 'sent';
 const message = (id: string, session: string | null, states: State[]): InboxMessageWire =>
@@ -227,5 +228,79 @@ describe('wordsMessage: who the next reply goes to after a session ended', () =>
     expect(wordsMessage(thread([ended, moved, writer])).id).toBe('msg_3');
     const back = message('msg_4', 'ses_ended', []);
     expect(wordsMessage(thread([ended, moved, back])).id).toBe('msg_4');
+  });
+});
+
+describe("a script's post does not take the words from the session that wrote (no session, no host, no wake)", () => {
+  const script = (id: string, states: State[] = [], extra: Record<string, unknown> = {}) =>
+    ({ ...message(id, null, states), author: { kind: 'agent', host: null, session: null, name: null }, ...extra }) as unknown as InboxMessageWire;
+  const statesOf = (m: InboxMessageWire) => (m.questions ?? []).map((q) => q.state);
+
+  test('the words, and the session that asked, are the latest message that has a session', () => {
+    const m = [message('msg_a', 'ses_a', []), script('msg_s')];
+    expect(wordsMessage(thread(m)).id).toBe('msg_a');
+    expect(sendTargetsOf(thread(m)).map((t) => t.message.id)).toEqual(['msg_a']);
+    expect(inboxAskingMessage(m, statesOf, false)?.id).toBe('msg_a');
+  });
+
+  test("the person answered the script's own question: the words ride that reply, as before", () => {
+    const m = [message('msg_a', 'ses_a', []), script('msg_s', ['picked'])];
+    expect(wordsMessage(thread(m)).id).toBe('msg_s');
+    expect(sendTargetsOf(thread(m)).map((t) => t.message.id)).toEqual(['msg_s']);
+    expect(inboxAskingMessage(m, statesOf, false)?.id).toBe('msg_s');
+  });
+
+  test('a thread no session wrote in: the script, as before', () => {
+    const m = [script('msg_s1'), script('msg_s2')];
+    expect(wordsMessage(thread(m)).id).toBe('msg_s2');
+    expect(inboxAskingMessage(m, statesOf, false)?.id).toBe('msg_s2');
+  });
+
+  test("an agent's shell the CLI names (Gemini CLI: a name, no session, no host) keeps it, as before; a nameless one is a script", () => {
+    const gemini = { ...script('msg_g'), author: { kind: 'agent', host: null, session: null, name: 'Gemini CLI' } } as unknown as InboxMessageWire;
+    const m = [message('msg_a', 'ses_a', []), gemini];
+    expect(wordsMessage(thread(m)).id).toBe('msg_g');
+    expect(inboxAskingMessage(m, statesOf, false)?.id).toBe('msg_g');
+    expect(wordsMessage(thread([message('msg_a', 'ses_a', []), script('msg_s')])).id).toBe('msg_a');
+  });
+
+  test("the script's action item marked Done in the draft, nothing picked: the Send and the session that asked (the ended note's) agree on the script", () => {
+    const marked = {
+      ...script('msg_s'),
+      actions: [{ key: 'a-1', kind: 'action', state: 'picked', revision: 1, sent_revision: null, action_result: { outcome: 'done', note: null, at: '2026-10-26T09:00:00.000Z', by: 'person', message_id: null, staged: true } }],
+    } as unknown as InboxMessageWire;
+    const t = thread([{ ...message('msg_a', 'ses_a', []), wakes: true } as InboxMessageWire, marked]);
+    expect(sendTargetsOf(t).at(-1)!.message.id).toBe('msg_s');
+    // No session asked, so no ended note for ses_a: the window's note and its Send name the same message.
+    expect(askingSessionOf(t, { skip: new Set(), carries: false })).toBeNull();
+    expect(askingSessionOf(t, { skip: new Set(), carries: true })).toBeNull();
+  });
+
+  test('a permission prompt or a routine change line after the script: both rules pass over all three to the session', () => {
+    const prompt = message('msg_p', 'perm:ses_a', ['open']);
+    const change = { ...message('msg_c', 'ses_b', []), scheduled_change: { scheduled_id: 'r', name: 'nightly', op: 'edit' } } as unknown as InboxMessageWire;
+    const m = [message('msg_a', 'ses_a', []), script('msg_s'), prompt, change];
+    expect(wordsMessage(thread(m)).id).toBe('msg_a');
+    expect(inboxAskingMessage(m, statesOf, false)?.id).toBe('msg_a');
+  });
+
+  test("no script: a routine's change line last, or a permission prompt left open last: the Send's words and the session that asked are the agent's own message", () => {
+    const change = { ...message('msg_c', 'ses_a', []), scheduled_change: { scheduled_id: 'r', name: 'nightly', op: 'create' } } as unknown as InboxMessageWire;
+    const v1 = [message('msg_a', 'ses_a', []), change];
+    expect(wordsMessage(thread(v1)).id).toBe('msg_a');
+    expect(inboxAskingMessage(v1, statesOf, false)?.id).toBe('msg_a');
+    expect(askingSessionOf(thread(v1), { skip: new Set(), carries: false })?.message.id).toBe('msg_a');
+    const v2 = [message('msg_b', 'ses_b', []), message('msg_p', 'perm:ses_b', ['open'])];
+    expect(wordsMessage(thread(v2)).id).toBe('msg_b');
+    expect(inboxAskingMessage(v2, statesOf, false)?.id).toBe('msg_b');
+    expect(askingSessionOf(thread(v2), { skip: new Set(), carries: false })?.session).toBe('ses_b');
+  });
+
+  test('a sender with a session id and no host (a stdio shim outside a session), or one with a host and no session, keeps it, as before', () => {
+    const shim = { ...script('msg_shim'), author: { kind: 'agent', host: null, session: 'ses_shim', name: null } } as unknown as InboxMessageWire;
+    expect(wordsMessage(thread([message('msg_a', 'ses_a', []), shim])).id).toBe('msg_shim');
+    expect(inboxAskingMessage([message('msg_a', 'ses_a', []), shim], statesOf, false)?.id).toBe('msg_shim');
+    const named = { ...script('msg_h'), author: { kind: 'agent', host: 'cursor', session: null, name: null } } as unknown as InboxMessageWire;
+    expect(wordsMessage(thread([message('msg_a', 'ses_a', []), named])).id).toBe('msg_h');
   });
 });

@@ -14,6 +14,9 @@
  *   system with no such watch keeps the 30 s pickup);
  * - the list answers 304 to an `If-None-Match` that is still its `ETag` (nothing changed: no read, no body);
  * - one import at a time: the server is the library's one writer;
+ * - Share this space (packages/shared/spaces/share-job.ts): `/api/plans/:id/share…` answers only while its own switch
+ *   is on too (config.json `inboxSpaceShare`, and sharing not disabled); off, those paths are the 404 of any unknown
+ *   plan path, the settings answer says nothing of it, and no call leaves this computer;
  * - an import that fails is not tried again on every request: the next pickup waits, twice as long after each failure
  *   in a row (from 4 s up to 5 min), the error is logged once per distinct message, and the list says
  *   `import_error` (the window: "Could not read your earlier plans", with Try again: `GET /api/plans?retry=1`).
@@ -23,9 +26,13 @@ import { importPlanLibraryInSteps, type PlanImportReport } from "@plannotator/sh
 import { handlePlanRoute, PLANS_ROUTE_PREFIX } from "@plannotator/shared/plans/routes";
 import { plansOn, setPlansSwitch, setSpacesView, spacesView } from "@plannotator/shared/plans/switch";
 import { PLAN_IMPORT_SETTLE_MS } from "@plannotator/shared/plans/import";
+import { createSpaceShareJobs, handleSpaceShareRoute, isSpaceSharePath, type SpaceShareJobs, type SpaceShareJobsOptions } from "@plannotator/shared/spaces/share-job";
+import { resolveSpacesUrl, spaceShareOn } from "@plannotator/shared/spaces/url";
 import { existsSync, readdirSync, watch, type FSWatcher } from "node:fs";
 import { join } from "node:path";
 import type { InboxCapability, InboxCore } from "./inbox-capability";
+import { openBrowserDetached } from "./browser";
+import { isRemoteSession } from "./remote";
 
 /** On Linux, the most folders (projects and plans) in history/ the Inbox watches; above it, the 30 s pickup alone. */
 export const PLAN_HISTORY_WATCH_FOLDERS = 2000;
@@ -64,6 +71,10 @@ export interface PlansCapabilityOptions extends InboxCore {
   platform?: NodeJS.Platform;
   /** Tests: how long a heard history write must be still before the poll picks it up (default: the import's settle). */
   settleMs?: number;
+  /** Tests: Share this space on or off, over config.json `inboxSpaceShare`. */
+  shareFixed?: boolean;
+  /** Tests: the share's host, fetch, browser and clock. */
+  share?: Partial<SpaceShareJobsOptions>;
 }
 
 export interface PlansCapability extends InboxCapability {
@@ -71,6 +82,8 @@ export interface PlansCapability extends InboxCapability {
   importing(): Promise<PlanImportReport> | null;
   /** Run the import now (or join the running one). */
   sync(repair?: boolean): Promise<PlanImportReport>;
+  /** Share this space's runs (made on first use, and only while its switch is on). */
+  shares(): SpaceShareJobs;
 }
 
 export function createPlansCapability(options: PlansCapabilityOptions): PlansCapability {
@@ -123,6 +136,17 @@ export function createPlansCapability(options: PlansCapabilityOptions): PlansCap
   let logged: string | null = null;
   let notBefore = 0;
   const on = () => options.fixed ?? plansOn();
+  const shareOn = () => options.shareFixed ?? spaceShareOn();
+  let shareJobs: SpaceShareJobs | null = null;
+  const shares = () =>
+    (shareJobs ??= createSpaceShareJobs({
+      dataDir: options.dataDir,
+      store: storeOf,
+      host: () => resolveSpacesUrl(),
+      openBrowser: (url) => openBrowserDetached(url, { isRemote: isRemoteSession() }),
+      remote: () => isRemoteSession(),
+      ...options.share,
+    }));
   const log = options.log ?? ((line: string) => console.error(line));
 
   const sync = (repair = false): Promise<PlanImportReport> => {
@@ -182,6 +206,12 @@ export function createPlansCapability(options: PlansCapabilityOptions): PlansCap
         notBefore = 0;
         lastPickUp = 0;
       }
+      // Share this space, behind its own switch as well; off, the path falls through to the plan routes' 404.
+      const parts = url.pathname.split("/").slice(3).filter(Boolean);
+      if (isSpaceSharePath(parts) && shareOn()) {
+        const shared = await handleSpaceShareRoute({ method: req.method, parts, json: () => req.json() }, shares());
+        if (shared) return Response.json(shared.body, { status: shared.status, headers: NO_STORE });
+      }
       watchHistory();
       const poll = url.searchParams.get("poll") === "1";
       // Plan review wrote since the last pickup, and the write has settled (the import waits for that too): now.
@@ -209,13 +239,20 @@ export function createPlansCapability(options: PlansCapabilityOptions): PlansCap
       return Response.json(answer.body, { status: answer.status, headers });
     },
     // Present only while on: off, the settings answer is what it was before Plans existed.
-    settingsWire: () => (on() ? { plans: { on: true } } : {}),
+    // `share` only while Share this space is on: off, the answer is what it was before it existed.
+    settingsWire: () => (on() ? { plans: shareOn() ? { on: true, share: true } : { on: true } } : {}),
     started() {
       if (!on()) return;
       const timer = setTimeout(() => background(true), 0);
       (timer as { unref?: () => void }).unref?.();
     },
+    // Going down: the history watch, every share run and every sign-in listener end with the Inbox.
+    stopped() {
+      stopWatch();
+      shareJobs?.close();
+    },
     importing: () => running,
     sync,
+    shares,
   };
 }

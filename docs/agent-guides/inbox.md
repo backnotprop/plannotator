@@ -5,6 +5,7 @@ The Inbox details are split by topic. Read the foundation guide for command, ser
 - [`inbox-foundation.md`](inbox-foundation.md) — command (with `plannotator inbox call`, the scripting command, and who a script is per host), local and tailnet reach, registry, store, threads, and list.
 - [`inbox-window.md`](inbox-window.md) — main window, questions, and send behavior.
 - [`inbox-messages.md`](inbox-messages.md) — drafts, replies, thread actions, and project menu.
+- [`inbox-run-and-secrets.md`](inbox-run-and-secrets.md) — `:::run` (a command the person runs with one press, on the computer that owns the thread, the result sent to the agent) and `:::secret` (a value kept in the keychain, given only to a run that names it); who may press, storage per OS.
 - [`inbox-compose.md`](inbox-compose.md) — composing messages and routing them to agents.
 - [`inbox-launch.md`](inbox-launch.md) — starting Claude Code, Pi or Codex from New message (on by default; Settings → Agents' switch, `inboxLaunch.enabled`), the run line, Stop, Open and Delete.
 - [`inbox-routines.md`](inbox-routines.md) — routines: a saved prompt an agent runs on a schedule, every run in one thread (Settings → Capabilities, `inboxScheduledThreads`, off by default); the clock, missed runs, the agents' `routine` tool, start at login, linked machines.

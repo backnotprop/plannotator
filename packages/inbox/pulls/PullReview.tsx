@@ -34,7 +34,7 @@
  */
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
-import { GuideReaderPart, PanePart, PullAllFilesPart, PullRepoFilePart, ReaderPart } from '../lazyParts';
+import { GuideReaderPart, PanePart, PullAllFilesPart, PullChangesTreePart, PullRepoFilePart, ReaderPart } from '../lazyParts';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import { patchBlobIds, type DiffFile } from '@plannotator/core/diff-files';
 import { anchorStillMatches, captureAnchor } from '@plannotator/ui/utils/codeAnnotationAnchor';
@@ -65,12 +65,13 @@ import { forgeName } from './labels';
 import { FileTreeMark } from './fileTreeMark';
 import { TooltipEscapePassesThrough } from '@plannotator/ui/components/Tooltip';
 import { RailStack } from './RailStack';
-import { RailTree } from './RailTree';
+import { RailFilesHead } from './RailFilesHead';
+import type { PullChangesTreeHandle } from '../guide/pullRepoTypes';
 import { DetailsButton, DetailsTitle, PullDetails, usePullDetails } from './PullDetails';
 import { FILE_BAND_HEIGHT, FILE_BAND_HEIGHT_PHONE, FileThread, fileThreadOpen, LineThread, ThreadMemory } from './LineThreads';
 import { fileThreadKey, placeThreads, threadKey } from './threadPlaces';
 import type { GuideFileNote, GuideLineNote } from '../guide/types';
-import { RailScopeSwitch } from './RailScope';
+import { RailScopeSwitch, focusScopeWhenLost } from './RailScope';
 import { useTreeScope } from '@plannotator/ui/hooks/useTreeScope';
 import { useSheetEscape } from '../shortcuts/useSheetEscape';
 import { inOverlay } from '../shortcuts/guards';
@@ -392,7 +393,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
   const rawPatch = diff?.patch;
   const stamp = useMemo(() => (rawPatch === undefined ? null : stampOf(rawPatch)), [rawPatch]);
   // The files in the rail's order, as the review app has them: the diffs below follow it.
-  const { files, tree, loose, patch } = useMemo(() => reviewFiles(rawPatch ?? ''), [rawPatch]);
+  const { files, patch } = useMemo(() => reviewFiles(rawPatch ?? ''), [rawPatch]);
   const screen: OnScreen = { updatedAt: layer?.updated_at ?? null, listHead: layer?.head_sha ?? null, stamp, base: diff?.base ?? null, files };
   const words = (mode: 'read' | 'absorb' | 'move') => gather(layerKey, scope, keptId, screen, mode);
   const [comments, setComments] = useState<KeptComment[]>(() => words('read').comments);
@@ -597,6 +598,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
     return notes;
   }, [threads, layer, threadHead, threadMemory, openFileThreads, phone]);
   const openThreads = threads?.open;
+  const threadCount = useMemo(() => (openThreads ? (path: string) => openThreads.get(path) ?? 0 : undefined), [openThreads]);
   const detailsPanel = useRef<HTMLElement>(null);
   const detailsOpener = useRef<HTMLElement | null>(null);
   const toggleDetails = (event: React.MouseEvent<HTMLElement>) => {
@@ -630,9 +632,11 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
   useEffect(() => {
     if (sheet) setFilesSheet(false);
   }, [sheet]);
-  // Opening the Files sheet, focus goes to its first row.
+  // Opening the Files sheet, focus goes to the file open, else the first.
+  const changesTree = useRef<PullChangesTreeHandle>(null);
+  const allFilesTree = useRef<PullChangesTreeHandle>(null);
   useEffect(() => {
-    if (filesSheet) railRef.current?.querySelector<HTMLElement>('[data-review-files] button, [data-repo-file-tree] button, [data-pull-layer-row] button')?.focus({ preventScroll: true });
+    if (filesSheet) (allFilesTree.current ?? changesTree.current)?.focus();
   }, [filesSheet]);
   const closeComments = () => {
     // At once: on a phone the button can take focus only once the page shows again.
@@ -728,17 +732,19 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
   // A file of the repository the PR does not change, shown whole in place of the diff.
   const [repoOpen, setRepoOpen] = useState<string | null>(null);
   useEffect(() => setRepoOpen(null), [layerKey, scope, repoSha]);
-  // A file picked in the rail. From the sheet it closes, showing the file, and focus goes back to its button.
-  const pickFile = (path: string) => {
+  // A file picked in the rail. From the sheet it closes, showing the file, and focus goes back to its button; arrowing
+  // through the rows only shows each file.
+  const pickFile = (path: string, how?: { via: 'focus' }) => {
     setRepoOpen(null);
     move(path);
-    if (filesSheet) closeFiles();
+    if (filesSheet && how?.via !== 'focus') queueMicrotask(closeFiles);
   };
   const openRepoFile = (path: string) => {
     setRepoOpen(path);
     if (filesSheet) closeFiles();
   };
   const pickScope = (next: 'changes' | 'all') => {
+    if (railRef.current?.contains(document.activeElement)) focusScopeWhenLost(railRef.current, next);
     setTreeScope(next);
     if (next === 'changes') setRepoOpen(null);
   };
@@ -894,8 +900,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
     setFilesSheet((open) => !open);
     setSheet(false);
   };
-  const seenCount = files.filter((f) => viewedSet.has(f.path)).length;
   const scopeSwitch = repoSha ? <RailScopeSwitch scope={allFiles ? 'all' : 'changes'} changed={files.length} onSelect={pickScope} /> : undefined;
+  const filesHead = <RailFilesHead files={files} viewed={viewedSet} lead={scopeSwitch} />;
   const rail = (
     <>
       {stack.layers.length > 1 && <RailStack layers={stack.layers} here={layer} scope={scope} wholeTip={wholeTip} wholeCounts={scope === 'stack' ? diffCounts : undefined} onLayer={onLayer} />}
@@ -910,19 +916,26 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
             comments={comments}
             activePath={reveal?.path ?? null}
             openPath={repoOpen}
-            head={
-              <div className="ib-prp-fileshead">
-                {scopeSwitch}
-                <span className="ib-sp" />
-                {seenCount > 0 && <span>{seenCount} viewed</span>}
-              </div>
-            }
+            head={filesHead}
             onSelect={pickFile}
             onOpen={openRepoFile}
+            handleRef={allFilesTree}
           />
         </PanePart>
       ) : (
-        <RailTree tree={tree} loose={loose} files={files} viewed={viewedSet} commentCount={(path) => comments.filter((comment) => comment.filePath === path).length} threadCount={openThreads ? (path) => openThreads.get(path) ?? 0 : undefined} onSelect={pickFile} onToggleViewed={toggleViewed} head={scopeSwitch} />
+        <PanePart loading={<div className="ib-prp-files">{filesHead}</div>}>
+          <PullChangesTreePart.Part
+            files={files}
+            viewed={viewedSet}
+            showViewed
+            comments={comments}
+            threadCount={threadCount}
+            activePath={reveal?.path ?? null}
+            head={filesHead}
+            onSelect={pickFile}
+            handleRef={changesTree}
+          />
+        </PanePart>
       )}
     </>
   );

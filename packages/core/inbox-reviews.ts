@@ -250,7 +250,7 @@ export interface InboxReviewStart {
   branch: string | null;
   base: string | null;
   /** The words decide: none is a guided review, the person's own make it a custom curation. */
-  ask: "guide" | "custom";
+  ask: "guide" | "custom" | "picture_it";
   /** The agent it went to, and the project it works in. */
   host: string;
   project_id: string;
@@ -269,12 +269,12 @@ export function inboxReviewStartOf(value: unknown, where: Pick<InboxReviewStart,
     const ref = typeof review.url === "string" ? inboxPullRefOfUrl(review.url) : null;
     if (!ref) return null;
     const pull = { key: ref.key, url: review.url as string, number: ref.number, title: typeof review.title === "string" ? review.title.slice(0, 300) : "", platform: ref.platform, mine: review.mine === true };
-    return { kind: "link", changes: null, pull, branch: null, base: null, ask: review.ask === "custom" ? "custom" : "guide", ...where };
+    return { kind: "link", changes: null, pull, branch: null, base: null, ask: review.ask === "custom" || review.ask === "picture_it" ? review.ask : "guide", ...where };
   }
   if (review.kind === "walkthrough") return { kind: "walkthrough", changes: null, branch: null, base: null, ask: "custom", ...where };
   if (review.kind !== "local" || (review.changes !== "uncommitted" && review.changes !== "last" && review.changes !== "branch")) return null;
   const ref = (ref: unknown) => (typeof ref === "string" && ref.length > 0 && ref.length <= 200 ? ref : null);
-  return { kind: "local", changes: review.changes, branch: ref(review.branch), base: ref(review.base), ask: review.ask === "custom" ? "custom" : "guide", ...where };
+  return { kind: "local", changes: review.changes, branch: ref(review.branch), base: ref(review.base), ask: review.ask === "custom" || review.ask === "picture_it" ? review.ask : "guide", ...where };
 }
 
 /**
@@ -622,10 +622,12 @@ export function inboxReviewRows(input: {
     for (const stack of stacks) attached.add(stack.id);
     // A reported branch with no review yet waits on the person: they start the review (the owner, 2026-11-16).
     const reported = !review && input.started?.get(threadId)?.kind === "branch";
+    // A thread started from the PR's page asked for no review: nobody is curating, so the PR stays where its own state puts it.
+    const talk = !review && own?.link.via === "owner" && own.link.ask === "thread" && stacks[0] ? inboxReviewPullMove(stacks[0], input.posted) : null;
     rows.push({
       id: threadId,
       reviewed: true,
-      ...(reported ? { move: "on_you" as const, reason: "branch_ready" as const } : inboxReviewMove(review, open, !!review && open.every((pull) => (input.posted?.get(pull.key)?.at ?? "") >= review.reviewed_at))),
+      ...(reported ? { move: "on_you" as const, reason: "branch_ready" as const } : (talk ?? inboxReviewMove(review, open, !!review && open.every((pull) => (input.posted?.get(pull.key)?.at ?? "") >= review.reviewed_at)))),
       thread_id: threadId,
       review,
       stacks,

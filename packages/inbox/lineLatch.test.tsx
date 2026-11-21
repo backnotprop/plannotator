@@ -1,6 +1,6 @@
 /**
  * What a page load arms of the line of one-time dialogs as time passes on a tab left loaded (reveal.ts
- * `useLineLatch`), wired to a line dialog as App wires it (`useLineReveal`, List view's moment).
+ * `useLineLatch`), wired to a line dialog as App wires it (`useLineReveal`, the view choice's moment).
  *
  * What regresses: a tab loaded while the line was held (inside the gap after a dialog) never arming the dialog the
  * Inbox names later, so someone whose tab stays loaded for days never sees a one-time dialog (the owner, 2026-11-09:
@@ -152,12 +152,12 @@ interface State {
   frozen: boolean;
 }
 
-/** App's wiring: the latch over the page's settings, a reread that reads the Inbox's line into them, List view armed from it. */
+/** App's wiring: the latch over the page's settings, a reread that reads the Inbox's line into them, the view choice armed from it. */
 function Harness({ state, onRead }: { state: State; onRead: () => void }) {
   const latch = reveal.useLineLatch({ read: reveal.revealArmed({ reveal: state.line }), frozen: state.frozen, againAt: state.againAt, reread: onRead });
   reveal.useLineReveal({
-    id: 'list_view',
-    due: latch?.next === 'list_view' || (latch?.ahead.includes('list_view') ?? false),
+    id: 'view_choice',
+    due: latch?.next === 'view_choice' || (latch?.ahead.includes('view_choice') ?? false),
     blocked: false,
     rows: ROWS,
     toast: false,
@@ -165,7 +165,7 @@ function Harness({ state, onRead }: { state: State; onRead: () => void }) {
     clear: state.thread === null,
     place: state.thread ?? '',
     heldBack: () => false,
-    leaveCounts: (_visit, _now, _row, next) => reveal.listViewRevealLeaveCounts(next),
+    leaveCounts: (_visit, _now, _row, next) => reveal.viewChoiceRevealLeaveCounts(next),
     mayClaim: (pageAge) => pageAge >= TIMES.pageAgeMs,
     holds: () => true,
   });
@@ -205,7 +205,7 @@ async function readAndLeave(set: (next: Partial<State>) => void) {
 describe.skipIf(!hasDom)('what a load arms of the line, on a tab left loaded', () => {
   test('a tab loaded while the line was held reads it once at the moment the Inbox named, arms the dialog it names then, and claims it at its moment', async () => {
     // The gap after the last dialog ends in a moment (already past here: the timeout is the slack alone).
-    server = { line: { next: null, ahead: ['list_view'] }, againIn: null };
+    server = { line: { next: null, ahead: ['view_choice'] }, againIn: null };
     const set = mount({ next: null }, 400);
     await wait(TIMES.pageAgeMs + 20);
     await readAndLeave(set);
@@ -214,7 +214,7 @@ describe.skipIf(!hasDom)('what a load arms of the line, on a tab left loaded', (
     await until(() => rereads > 0);
     await readAndLeave(set);
     await until(() => claims.length > 0);
-    expect(claims).toEqual(['list_view']);
+    expect(claims).toEqual(['view_choice']);
     // One read for the one moment, and nothing scheduled after it: the Inbox named no other.
     await wait(SLACK * 3);
     expect(rereads).toBe(1);
@@ -224,7 +224,7 @@ describe.skipIf(!hasDom)('what a load arms of the line, on a tab left loaded', (
 
   test('the line moved past the dialog this tab was armed for (shown elsewhere): after the read it is not claimed here', async () => {
     server = { line: { next: null }, againIn: null };
-    const set = mount({ next: 'list_view' }, -1);
+    const set = mount({ next: 'view_choice' }, -1);
     await wait(TIMES.pageAgeMs + 20);
     await until(() => rereads > 0);
     await readAndLeave(set);
@@ -293,8 +293,8 @@ describe.skipIf(!hasDom)('what a load arms of the line, on a tab left loaded', (
     const set = mount({ next: null }, -1, true);
     await wait(TIMES.pageAgeMs + 20);
     expect(scheduled).toEqual([]);
-    // A settings read for another reason names List view: this load still arms nothing.
-    set({ line: { next: 'list_view' } });
+    // A settings read for another reason names the view choice: this load still arms nothing.
+    set({ line: { next: 'view_choice' } });
     await readAndLeave(set);
     expect(claims).toEqual([]);
     expect(rereads).toBe(0);

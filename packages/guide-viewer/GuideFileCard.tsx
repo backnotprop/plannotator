@@ -307,7 +307,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
         onClickCapture={
           fitContent && !opened
             ? (event) => {
-                if (event.nativeEvent.composedPath().some((node) => node instanceof Element && node.hasAttribute('data-expand-button'))) setOpened(true);
+                if (event.nativeEvent.composedPath().some((node) => node instanceof Element && (node.hasAttribute('data-expand-button') || node.hasAttribute('data-unmodified-lines')))) setOpened(true);
               }
             : undefined
         }

@@ -12,7 +12,9 @@
  * draft and the thread alone, from the transcript, the header and a press on
  * the header's plain surface, and bare keys stay out of the Inbox; the window
  * stands on a phone, where Enter is a new line and nothing is sent, and Reply
- * in the thread leaves the reply in sight.
+ * in the thread leaves the reply in sight; a minimized chat is the circle in
+ * the window's corner (the owner, 2026-11-20): its 44 px target opens it again
+ * and never takes a click meant for Send or the bin beside it.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-ask-window.spec.ts`.
@@ -372,12 +374,12 @@ test('no Ask on a phone for now; on the desktop, Side reopens a chat and Reply i
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   const phone = await context.newPage();
   try {
-    // The first test's chat, on a phone: no top bar icon and no round button (the owner, 2026-11-09); its selection bar has no Side (packages/inbox/ask/side.test.tsx).
+    // The first test's chat, on a phone: no top bar icon and no circle (Ask is off on phones); its selection bar has no Side (packages/inbox/ask/side.test.tsx).
     await phone.goto(`${url}#thread=${threads.push}`);
     await expect(phone.locator('section.ib-pane .ib-body').first()).toBeVisible();
     await phone.waitForTimeout(1_500);
     await expect(askIcon(phone)).toHaveCount(0);
-    await expect(phone.locator('button[data-rf-corner], [data-rf-card="ask"]')).toHaveCount(0);
+    await expect(phone.locator('button[data-rf-corner], [data-rf-card="ask"], [data-side-chat-corner]')).toHaveCount(0);
     await phone.screenshot({ path: join(shotsDir, '6-phone-light.png') });
   } finally {
     await context.close();
@@ -399,6 +401,55 @@ test('no Ask on a phone for now; on the desktop, Side reopens a chat and Reply i
   await expect(frame()).toContainText('What was the plan?');
   await frame().getByRole('button', { name: 'Reply in the thread' }).click();
   await expect(reply).toHaveValue('A draft first\n\nWhat was the plan?');
+});
+
+test('minimized, a chat is a circle in the window corner: a 44 px target that opens it again, and Send and the bin beside it keep their clicks', async () => {
+  const { page, url } = world;
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const corner = await world.send(world.projects.relay, 'ses-corner', 'claude-code', 'Claude Code', 'Corner circle', 'The retry budget is four calls.');
+  writeInboxAsk(join(world.dataDir, 'inbox'), savedChat(corner, 'ses-corner', 'claude-code', 3, 'Does a 429 count?', 'Yes, every non-2xx answer counts.', true));
+  await page.goto(`${url}#thread=${corner}`);
+  await expect(page.locator('section.ib-pane .ib-phead')).toBeVisible();
+  // A thread's chat starts minimized: the circle, named, with the agent's mark, in the window's very corner; the pane beside it is cut.
+  const circle = page.locator('[data-side-chat-corner]');
+  await expect(circle).toBeVisible();
+  await expect(circle).toHaveAccessibleName('Side chat');
+  await expect(circle.locator('.ib-mk svg')).toHaveCount(1);
+  expect(await circle.boundingBox()).toEqual({ x: 1396, y: 856, width: 44, height: 44 });
+  await expect(page.locator('section.ib-pane[data-side-scoop]')).toHaveCount(1);
+  const hitAt = (x: number, y: number) => page.evaluate(([px, py]) => document.elementFromPoint(px!, py!)?.closest('[data-side-chat-corner]') !== null, [x, y]);
+  // The circle's centre, the window's corner, the ground along each edge out to 44 px: the circle's.
+  for (const [x, y] of [[1421, 881], [1439, 899], [1398, 898], [1438, 858]] as const) expect(await hitAt(x, y), `${x},${y}`).toBe(true);
+  // The pane outside the pocket, inside the 44 px box: never the circle's.
+  for (const [x, y] of [[1400, 860], [1400, 886], [1426, 860]] as const) expect(await hitAt(x, y), `${x},${y}`).toBe(false);
+
+  // A press brings the chat back; its header has the chevron and no ×; the chevron puts it back, focus on the circle.
+  await circle.click();
+  await expect(frame()).toBeVisible();
+  await expect(frame()).toContainText('every non-2xx answer counts');
+  await expect(circle).toHaveCount(0);
+  await expect(frame().getByRole('button', { name: 'Close' })).toHaveCount(0);
+  await frame().getByRole('button', { name: 'Minimize' }).click();
+  await expect(frame()).toHaveCount(0);
+  await expect(circle).toBeFocused();
+
+  // The reply box beside it: Send and the bin are where they always were, and keep every click.
+  await page.locator('section.ib-pane .ib-pfoot button', { hasText: 'Reply' }).click();
+  await page.locator('section.ib-pane textarea').fill('Count it once per Retry-After window.');
+  const send = page.locator('section.ib-pane button', { hasText: 'Send' });
+  await expect(send).toBeEnabled();
+  const bin = page.locator('section.ib-pane [data-reply-discard]');
+  for (const target of [send, bin]) {
+    const b = (await target.boundingBox())!;
+    // Its right edge and its bottom edge (the sides that face the circle), and its centre.
+    for (const [x, y] of [[b.x + b.width - 2, b.y + b.height / 2], [b.x + b.width / 2, b.y + b.height - 2], [b.x + b.width / 2, b.y + b.height / 2]] as const) {
+      expect(await target.evaluate((el, [px, py]) => el.contains(document.elementFromPoint(px!, py!)), [x, y])).toBe(true);
+    }
+  }
+  await send.click();
+  await expect.poll(async () => ((await (await fetch(new URL(`/api/inbox/threads/${corner}`, url))).json()) as { thread: { messages: unknown[] } }).thread.messages.length).toBe(2);
+  await expect(circle).toBeVisible();
+  await shot(page, '7-corner-circle-light', 'light');
 });
 
 test('no page error, and the agent got the surface from the thread', async () => {
