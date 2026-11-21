@@ -11,6 +11,7 @@
  */
 
 import { diffLines, diffWordsWithSpace, type Change } from "diff";
+import { planTextLines } from "@plannotator/core/plans";
 import { parseMarkdownToBlocks } from "./parser";
 import type { Block } from "../types";
 
@@ -619,6 +620,11 @@ export function computePlanDiff(
   oldText: string,
   newText: string
 ): { blocks: PlanDiffBlock[]; stats: PlanDiffStats } {
+  // CRLF (a plan saved on Windows) and LF read the same to a person; diffLines does not know that and would
+  // report every line as changed. Compare both sides with every line ending as LF.
+  oldText = planTextLines(oldText);
+  newText = planTextLines(newText);
+
   // Pre-pass: collapse every fenced code block to a single-line sentinel
   // so diffLines treats each whole fence atomically. See the comment on
   // FENCE_BLOCK_PATTERN for the failure this prevents.
