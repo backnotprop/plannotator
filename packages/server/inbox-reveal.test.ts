@@ -1394,3 +1394,53 @@ describe("the Sidebar tip: outside the line, stamped once when shown, never for 
     expect((await tailnet.post("/api/inbox/reveal", { id: "sidebar_tip", answer: "not_now" })).status).toBe(422);
   });
 });
+
+describe("the Group tip: a band's one-time tooltip, outside the line, stamped once, never on a first-run day", () => {
+  const KEY = "band-tip-key-1";
+
+  test("due a day or more after first use; the claim stamps only inboxReveals.band_tip and starts no gap; another window gets no; the same key again yes", async () => {
+    const w = await world();
+    expect((await w.settings()).reveal.band_tip).toBe(true);
+    const lineBefore = (await w.settings()).reveal.next;
+    expect((await w.claim("band_tip", KEY)).show).toBe(true);
+    const saved = w.saved().inboxReveals;
+    expect(saved.band_tip).toEqual({ shownAt: expect.stringMatching(/^\d{4}-/), key: KEY });
+    // A tooltip the person's own pointer called up: none of the line's stamps move and the line's next stays next.
+    expect(saved.lastShownAt).toBeUndefined();
+    expect(saved.dayShownAt).toBeUndefined();
+    expect((await w.settings()).reveal.next).toBe(lineBefore);
+    expect((await w.settings()).reveal.band_tip).toBe(false);
+    expect((await w.claim("band_tip", "another-key-22")).show).toBe(false);
+    expect((await w.claim("band_tip", KEY)).show).toBe(true);
+    expect(w.saved().inboxReveals.band_tip.shownAt).toBe(saved.band_tip.shownAt);
+  });
+
+  test("not on a first-run day; not reported due within a dialog's gap", async () => {
+    const fresh = await world({ days: 0 });
+    expect((await fresh.settings()).reveal.band_tip).toBe(false);
+    expect((await fresh.claim("band_tip", KEY)).show).toBe(false);
+    const dialogFirst = await world();
+    expect((await dialogFirst.claim("board")).show).toBe(true);
+    expect((await dialogFirst.settings()).reveal.band_tip).toBe(false);
+  });
+
+  test("a band's menu opened (`used`) retires it on a first-run day and inside a dialog's gap: stamped, never shown, the next day too", async () => {
+    const fresh = await world({ days: 0 });
+    const used = await fresh.post("/api/inbox/reveal", { id: "band_tip", used: true });
+    expect(((await used.json()) as Json).show).toBe(false);
+    expect(fresh.saved().inboxReveals.band_tip).toEqual({ shownAt: expect.stringMatching(/^\d{4}-/), usedAt: expect.stringMatching(/^\d{4}-/) });
+    expect((await fresh.claim("band_tip", KEY)).show).toBe(false);
+    const inGap = await world();
+    expect((await inGap.claim("board")).show).toBe(true);
+    expect(((await (await inGap.post("/api/inbox/reveal", { id: "band_tip", used: true })).json()) as Json).show).toBe(false);
+    expect(inGap.saved().inboxReveals.band_tip.usedAt).toMatch(/^\d{4}-/);
+    // Stamped already (shown once): nothing moves.
+    const shown = await world();
+    expect((await shown.claim("band_tip", KEY)).show).toBe(true);
+    const stamp = shown.saved().inboxReveals.band_tip;
+    await shown.post("/api/inbox/reveal", { id: "band_tip", used: true });
+    expect(shown.saved().inboxReveals.band_tip).toEqual(stamp);
+    // `used` is the Group tip's alone.
+    expect((await shown.post("/api/inbox/reveal", { id: "sidebar_tip", used: true })).status).toBe(422);
+  });
+});
