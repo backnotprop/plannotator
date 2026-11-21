@@ -118,6 +118,8 @@ export function worldEnv(w: InboxWorld): Record<string, string> {
     PLANNOTATOR_INBOX_PHONES: w.phones ? "1" : "0",
     // Never run a real agent's CLI: a world's PATH holds the person's own (packages/server/inbox-agents.ts).
     PLANNOTATOR_INBOX_CONNECT: "0",
+    // A world's scratch data dir counts as one the person turned the Inbox on in (packages/shared/inbox/turned-on.ts).
+    PLANNOTATOR_TEST_INBOX_ON: "1",
     TMPDIR: tmpdir(),
   };
 }

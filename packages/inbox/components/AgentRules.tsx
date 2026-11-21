@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { INBOX_PROMPT_HOSTS, type InboxPromptHost, type InboxPromptsChange, type InboxPromptsSettings } from '@plannotator/core/inbox-types';
+import { INBOX_PROMPT_HOSTS, type InboxMcpTier, type InboxPromptHost, type InboxPromptsChange, type InboxPromptsSettings } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 import { RULES_COUNT_WITHIN, takeRulesEditorWish } from '../agentRules';
 import { HostMark, Icon } from '../icons';
@@ -15,11 +15,9 @@ const slotName = (slot: Slot) => (slot === 'shared' ? 'All agents' : AGENT_NAME[
 
 export function AgentRulesSection({
   rules,
-  editable,
   onPrompts,
 }: {
   rules: Rules;
-  editable: boolean;
   onPrompts?: (next: InboxPromptsSettings) => void;
 }) {
   const id = useId();
@@ -27,8 +25,8 @@ export function AgentRulesSection({
   const textOf = (slot: Slot) => (slot === 'shared' ? rules.shared : rules.runtimes[slot]);
   const set = SLOTS.filter((slot) => textOf(slot) !== null);
   useEffect(() => {
-    if (editable && takeRulesEditorWish()) setEditing('shared');
-  }, [editable]);
+    if (takeRulesEditorWish()) setEditing('shared');
+  }, []);
 
   return (
     <section className="ib-sgroup ib-sgroup-first" aria-labelledby={`${id}-h`} data-rules-section="">
@@ -43,11 +41,9 @@ export function AgentRulesSection({
             <span className="ar-t">
               <span className="ar-l">No rules yet</span>
             </span>
-            {editable && (
-              <button type="button" className="ib-btn ib-sm ib-pri" onClick={() => setEditing('shared')} data-rules-add="">
-                Add rules
-              </button>
-            )}
+            <button type="button" className="ib-btn ib-sm ib-pri" onClick={() => setEditing('shared')} data-rules-add="">
+              Add rules
+            </button>
           </div>
         ) : (
           set.map((slot) => (
@@ -55,17 +51,16 @@ export function AgentRulesSection({
               <div className="pm-head">
                 {slot === 'shared' ? <span className="ib-chip pm-custom">All agents</span> : <span className="ar-who"><HostMark host={slot} />{AGENT_NAME[slot]}</span>}
                 <span className="pm-sp" />
-                {editable && (
-                  <button type="button" className="ib-btn ib-sm" onClick={() => setEditing(slot)} data-rules-edit={slot} aria-label={`Edit the rules for ${slotName(slot).toLowerCase()}`}>
-                    Edit
-                  </button>
-                )}
+                <button type="button" className="ib-btn ib-sm" onClick={() => setEditing(slot)} data-rules-edit={slot} aria-label={`Edit the rules for ${slotName(slot).toLowerCase()}`}>
+                  Edit
+                </button>
               </div>
               <p className="pm-text" data-rules-text={slot}>
                 {textOf(slot)}
               </p>
               {slot !== 'shared' && rules.dropped.includes(slot) && <DroppedNote hosts={[slot]} />}
               {slot === 'shared' && <DroppedNote hosts={rules.dropped.filter((host) => rules.runtimes[host] === null)} />}
+              {slot === 'shared' && rules.mcp && rules.mcp.dropped.length > 0 && <McpDroppedNote mcp={rules.mcp} />}
             </div>
           ))
         )}
@@ -84,6 +79,43 @@ function DroppedNote({ hosts }: { hosts: InboxPromptHost[] }) {
   );
 }
 
+type Mcp = NonNullable<Rules['mcp']>;
+const chars = (n: number) => n.toLocaleString('en-US');
+
+/**
+ * Agents connected through MCP read the rules in the MCP server's instructions, whose room depends on
+ * the client (InboxMcpTier): Claude Code keeps 4,096 characters of them; before 2.1.296, other Claude
+ * apps and unnamed clients are given 2,048; other agents no known limit. The note names who misses the
+ * rules, widest first.
+ */
+function McpDroppedNote({ mcp }: { mcp: Mcp }) {
+  const text = mcp.dropped.includes('other')
+    ? `Not sent to agents connected through MCP (T3 Code, Codex and others): they take rules up to ${chars(mcp.rooms.other)} characters.`
+    : mcp.dropped.includes('claude_code')
+      ? `Not sent to Claude Code or other Claude apps when they connect through MCP (T3 Code's Claude threads too): Claude Code 2.1.296 and later takes rules up to ${chars(mcp.rooms.claude_code)} characters there, the others ${chars(mcp.rooms.claude_code_old)}. Codex and other agents get them.`
+      : `Not sent to older Claude Code (before 2.1.296), other Claude apps, or clients that do not name themselves, when they connect through MCP: they take rules up to ${chars(mcp.rooms.claude_code_old)} characters there.`;
+  return (
+    <p className="pm-over" data-rules-dropped="mcp">
+      {text}
+    </p>
+  );
+}
+
+/** Who a list of MCP tiers is, for the reminder's note. */
+export function mcpWho(tiers: readonly InboxMcpTier[]): string {
+  if (INBOX_MCP_TIER_LIST.every((tier) => tiers.includes(tier))) return 'agents connected through MCP (T3 Code, Codex and others)';
+  const claude =
+    tiers.includes('claude_code_old') && tiers.includes('claude_code')
+      ? 'Claude Code and other Claude apps'
+      : tiers.includes('claude_code_old')
+        ? 'older Claude Code (before 2.1.296) and other Claude apps'
+        : tiers.includes('claude_code')
+          ? 'Claude Code 2.1.296 and later'
+          : null;
+  return [claude, tiers.includes('other') ? 'agents other than Claude Code' : null].filter(Boolean).join(' and ') + ' through MCP';
+}
+const INBOX_MCP_TIER_LIST: readonly InboxMcpTier[] = ['claude_code_old', 'claude_code', 'other'];
+
 function RulesEditor({ rules, first, onClose, onPrompts }: { rules: Rules; first: Slot; onClose: () => void; onPrompts?: (next: InboxPromptsSettings) => void }) {
   const phone = usePhone();
   const [slot, setSlot] = useState<Slot>(first);
@@ -95,6 +127,8 @@ function RulesEditor({ rules, first, onClose, onPrompts }: { rules: Rules; first
   const room = slot === 'shared' ? rules.room.shared : rules.room.runtimes[slot];
   const length = draft.trim().length;
   const over = length > room;
+  // Agents connected through MCP get the rules for all agents; the count is current Claude Code's room, the tightest current client. Never a reason to refuse Save.
+  const mcpRoom = slot === 'shared' ? (rules.mcp?.room ?? null) : null;
   const own = saved(slot) !== '';
   const can = !saving && !over && draft.trim() !== saved(slot).trim() && draft.trim() !== '';
 
@@ -147,6 +181,12 @@ function RulesEditor({ rules, first, onClose, onPrompts }: { rules: Rules; first
             <span className="pm-count" data-over={over || undefined} data-rules-count="">
               {' '}
               {length.toLocaleString('en-US')} / {room.toLocaleString('en-US')}
+            </span>
+          )}
+          {mcpRoom !== null && length >= mcpRoom - RULES_COUNT_WITHIN && (
+            <span className="pm-count" data-over={length > mcpRoom || undefined} data-rules-count="mcp">
+              {' '}
+              {length.toLocaleString('en-US')} / {mcpRoom.toLocaleString('en-US')} for Claude Code through MCP
             </span>
           )}
         </p>

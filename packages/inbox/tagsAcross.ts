@@ -9,6 +9,7 @@ import { InboxApiError, InboxHeldError, inboxApi } from './api';
 import { restoreInitiatives, type InitiativesRestored } from './board/initiativeUndo';
 import { machineTakes, type MachinesModel } from './machines';
 import { tagById, tagIdOn, tagNamed, type ListTag } from './threadTags';
+import { tagColoursApi } from './data/actions/tagColours';
 
 export type TagChange = { op: 'rename'; name: string } | { op: 'delete' } | { op: 'restore' };
 
@@ -26,8 +27,34 @@ export interface TagsAcross {
   change: (tag: ListTag, change: TagChange) => Promise<TagChanged>;
   /** Deleted tags back: this Inbox's copies through `restoreInitiatives` (its Undo's rules), then the linked machines'. */
   restore: (tags: readonly ListTag[]) => Promise<InitiativesRestored & TagChanged>;
-  /** This Inbox's id for a tag a card goes in (cards are this Inbox's own): its copy, made by name when only a linked machine holds one. */
+  /** This Inbox's id for a tag one of its own cards goes in: its copy, made by name when only a linked machine holds one. */
   here: (id: string | null) => Promise<string | null>;
+  /** What a linked machine's card is put in: that machine's id for the tag, else its name, which that machine makes. */
+  there: (id: string | null, machine: string) => string | null | { name: string };
+  /**
+   * A tag's row colour, as of `at`, on this Inbox's copy and each linked machine's that takes tag colours, so every
+   * machine shows the same one (inbox-tag-colours.ts `inboxTagLookOf`). An older machine keeps its own.
+   */
+  colour: (tag: ListTag, colour: string | null, at: string, kept?: string | null) => Promise<TagChanged>;
+}
+
+/** "Show tag colors" on this Inbox and every linked machine that takes tag colours, as of `at`. */
+export async function showTagColoursAcross(on: boolean, at: string, machines: MachinesModel): Promise<TagChanged> {
+  let held: InboxHeldError | null = null;
+  try {
+    await tagColoursApi.shown(on, at);
+  } catch (cause) {
+    return { refused: cause, held };
+  }
+  for (const machine of machines.linked) {
+    if (!(machine.marks ?? []).includes('tag-colours')) continue;
+    try {
+      await tagColoursApi.shown(on, at, machine.id);
+    } catch (cause) {
+      if (cause instanceof InboxHeldError) held = cause;
+    }
+  }
+  return { refused: null, held };
 }
 
 export function tagsAcross(tags: readonly ListTag[], machines: MachinesModel): TagsAcross {
@@ -104,6 +131,33 @@ export function tagsAcross(tags: readonly ListTag[], machines: MachinesModel): T
       }
       madeHere.set(key, made);
       return made;
+    },
+    there: (id, machine) => {
+      const tag = id ? tagById(tags, id) : null;
+      if (!tag) return id;
+      return tagIdOn(tag, machine, machines.self) ?? { name: tag.name };
+    },
+    colour: async (tag, colour, at, kept) => {
+      let refused: unknown = null;
+      let held: InboxHeldError | null = null;
+      const own = tagIdOn(tag, null, machines.self);
+      if (own) {
+        try {
+          await tagColoursApi.set(own, colour, at, null, kept);
+        } catch (cause) {
+          return { refused: cause, held };
+        }
+      }
+      for (const [machine, id] of Object.entries(tag.machines ?? {})) {
+        if (machine === machines.self || !machineTakes({ machine }, machines, 'tag-colours')) continue;
+        try {
+          await tagColoursApi.set(id, colour, at, machine, kept);
+        } catch (cause) {
+          if (cause instanceof InboxHeldError) held = cause;
+          else refused ??= cause;
+        }
+      }
+      return { refused, held };
     },
   };
 }

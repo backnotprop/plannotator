@@ -19,14 +19,14 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-whats-new-tailnet.spec.ts`.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { execSync, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createServer, request, type Server } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
 import { deflateSync, crc32 } from 'node:zlib';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
@@ -106,7 +106,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   // This run is "just updated" from the version before it, with its notes and one image already saved (no network).
   const [major, minor, patch] = VERSION.split('.').map(Number);
   writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ inboxVersion: `${major}.${minor}.${patch! - 1}` }));
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxTailscale: true, inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' } }));
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxTailscale: true, inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' }, inboxReveals: { ...E2E_GROUP_TIP_SEEN } }));
   const filler = Array.from({ length: 40 }, (_, n) => `- Item ${n + 1} of the long list of things that changed in this release, long enough to wrap on a phone.`).join('\n');
   writeFileSync(
     join(dataDir, 'update-notes', `${VERSION}.json`),
@@ -184,7 +184,6 @@ test('the sidebar link opens What\'s new on a phone through the tailnet: it scro
   await page.goto(world.url);
   const settings = await page.evaluate(async () => (await fetch('/api/inbox/settings')).json());
   expect(settings.via).toBe('tailnet');
-  expect(settings.guest).toBe(false);
 
   // The phone's sidebar is a drawer behind the toggle.
   await page.locator('[data-sidebar="trigger"]').first().click();

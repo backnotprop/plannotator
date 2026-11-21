@@ -5,7 +5,7 @@
  * A row's click is a tile's: it opens the PR, or in select mode picks it, a shift-click picking the range from the last
  * one. Narrow, Risk goes first, then Updated and Size (prs.css).
  */
-import type { MouseEvent as ReactMouseEvent } from 'react';
+import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { inboxPullIsOpen, inboxPullLabel, type InboxPull, type InboxPullRiskJudgment, type InboxPullStack } from '@plannotator/core/inbox-types';
 import { Icon } from '../icons';
 import { Face, Named } from '../pulls/Face';
@@ -21,6 +21,7 @@ export interface TableSection {
   key: string;
   host: string;
   repo: string;
+  platform: InboxPull['platform'];
   label: string;
   outside: boolean;
   units: InboxPullStack[];
@@ -62,6 +63,8 @@ export function SheetTable(props: {
   onOpenStack: (stack: InboxPullStack) => void;
   labelledBy: string;
   select?: TableSelect;
+  /** A repository row's Hide repository (SheetPage's), at its end. */
+  repoHide?: (section: TableSection) => ReactNode;
 }) {
   const { now, risk, sort, query, select } = props;
   const span = COLUMNS.length;
@@ -201,6 +204,7 @@ export function SheetTable(props: {
                   </span>
                   {section.outside && <span className="ib-prs-outside">not a project</span>}
                   <span className="ib-prtb-gn">{section.count}</span>
+                  {props.repoHide?.(section)}
                 </span>
               </th>
             </tr>

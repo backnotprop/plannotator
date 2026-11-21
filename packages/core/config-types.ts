@@ -20,6 +20,18 @@ export interface ThemeConfig {
   dark?: string;
 }
 
+/**
+ * The view an annotate session opens in (config.json `annotateView`): the
+ * document toolbar's Wide, Focus or Edit. Config only; the UI never writes it.
+ */
+export const ANNOTATE_VIEWS = ['wide', 'focus', 'edit'] as const;
+export type AnnotateView = (typeof ANNOTATE_VIEWS)[number];
+
+/** A known view, or undefined (unset, a typo, another type: today's default). */
+export function parseAnnotateView(value: unknown): AnnotateView | undefined {
+  return (ANNOTATE_VIEWS as readonly unknown[]).includes(value) ? (value as AnnotateView) : undefined;
+}
+
 export interface DiffOptions {
   diffStyle?: 'split' | 'unified';
   overflow?: 'scroll' | 'wrap';
@@ -34,4 +46,5 @@ export interface DiffOptions {
   expandUnchanged?: boolean;
   defaultDiffType?: DefaultDiffType;
   lineBgIntensity?: DiffLineBgIntensity;
+  semantic?: boolean;
 }

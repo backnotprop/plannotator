@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import { loadConfig } from "@plannotator/shared/config";
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
+import { writeOldConfig } from "../../tests/helpers/saved-config";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { INBOX_NOTE_START } from "./inbox-agent-notes";
 import { claudePluginStateFromScopes, createAgentEnvironmentFor } from "./inbox-agents";
@@ -471,7 +472,7 @@ test("a config from 0.28.18 (offered, no list): the agents that could take a not
   writeFileSync(join(fake.home, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "plannotator@plannotator": true } }));
   const s = await start();
   await s.connectAgents();
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxAgentNotes: { offered: true } }));
+  writeOldConfig(dataDir, { inboxAgentNotes: { offered: true } });
   const migrated = (await get(s)) as Asked;
   expect(migrated.notes_asked).toEqual(["claude-code", "codex"]);
   expect(loadConfig().inboxAgentNotes).toEqual({ offered: true, asked: ["claude-code", "codex"] });
@@ -492,7 +493,7 @@ test("a config from 0.28.18 whose person said yes: an agent with the note counts
   await s.connectAgents();
   // 0.28.18: the card's Add wrote Codex's note and saved only `offered`.
   await post(s, "/api/inbox/agents/notes", { add: ["codex"], asked: ["codex"] });
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxAgentNotes: { offered: true } }));
+  writeOldConfig(dataDir, { inboxAgentNotes: { offered: true } });
   const migrated = (await get(s)) as Asked;
   expect(migrated.notes_asked).toEqual(["codex", "gemini"]);
   const removed = (await (await post(s, "/api/inbox/agents", { agent: "codex", note: false })).json()) as Asked;
@@ -536,7 +537,7 @@ test("a note already in an agent's file (written by hand or an older Inbox, no r
   await s.connectAgents();
   // The run wrote it by itself; forget that, as an Inbox that never kept a record.
   rmSync(join(dataDir, "inbox", "agent-notes.json"), { force: true });
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({}));
+  writeOldConfig(dataDir, { inboxAgentNotes: undefined });
   writeFileSync(join(fake.home, ".codex", "AGENTS.md"), `Mine.\n\n${(await get(s) as unknown as { note_text: string }).note_text}\n`);
   const model = (await get(s)) as Asked;
   expect(row(model, "codex").note?.state).toBe("added");

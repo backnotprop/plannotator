@@ -32,7 +32,7 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-pages-only.spec.ts`.
  */
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { createServer as createHttpServer, type Server } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
@@ -195,10 +195,12 @@ test('an attached page shows its web pictures; the window asks the web for none,
       await tab.goto(`${url}#thread=${page.thread_id}`);
       await tab.locator(`button[data-attachment-id="${pageId}"]`).first().click();
       const frameEl = tab.locator('.ib-htmlframe iframe');
-      await expect(frameEl).toHaveAttribute('src', /^\/api\/inbox\/pages\/[0-9a-f]{32}$/);
+      // The kept page's address, with this load's link key (`__pnk`, linkGuard.ts), which the page never sees.
+      await expect(frameEl).toHaveAttribute('src', /^\/api\/inbox\/pages\/[0-9a-f]{32}\?__pnk=[0-9a-f]{32}$/);
       await expect(frameEl).toHaveAttribute('sandbox', 'allow-scripts allow-modals');
       const frame = tab.frameLocator('.ib-htmlframe iframe');
       await expect(frame.locator('h1')).toHaveText('Pictures from the web');
+      expect(await frame.locator('body').evaluate(() => location.search)).toBe('');
       const width = (id: string) => frame.locator(`#${id}`).evaluate((img: HTMLImageElement) => (img.complete ? img.naturalWidth : -1));
       await expect.poll(() => width('web')).toBe(2);
       await expect.poll(() => width('far')).toBe(2);

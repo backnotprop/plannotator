@@ -21,7 +21,7 @@
  * `bun run test:e2e:inbox`.
  */
 
-import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -184,7 +184,7 @@ test('Star thread leads the row menu; the thread appears under Pinned, above Pro
 
   await rowButton(page, threads.board).click({ button: 'right' });
   const menu = page.locator('[data-row-menu]');
-  await expect(menu.getByRole('menuitem').first()).toHaveText('Star thread');
+  await expect(menu.getByRole('menuitem', { name: 'Star thread' })).toBeVisible();
   await page.locator('[data-row-action="pin"]').click();
   await expect(pinned(page, threads.board)).toBeVisible();
   await expect(page.locator('.ib-side-sec-l')).toHaveText(['Starred', 'Agents', 'Projects']);

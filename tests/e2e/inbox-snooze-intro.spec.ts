@@ -23,12 +23,13 @@
  * apps/review build && bun run build:hook), then `bunx playwright test -c tests/e2e/playwright.config.ts
  * inbox-snooze-intro.spec.ts`. PNGs land in PLANNOTATOR_E2E_PROOF_DIR/snooze-intro, or .local/proof/snooze-intro/.
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { savedConfig } from '../helpers/saved-config';
 
 const repo = resolve(__dirname, '../..');
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'snooze-intro');
@@ -89,7 +90,7 @@ async function world(): Promise<World> {
       inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
       // The Sidebar tip: shown long ago. Since the tips keep the line's 40-minute gap both ways, a tip claimed by a tab
       // left idle (the second tab here, a minute into the page) would hold Snooze's dialog back for the gap.
-      inboxReveals: { sidebar_tip: { shownAt: past } },
+      inboxReveals: { ...E2E_GROUP_TIP_SEEN, sidebar_tip: { shownAt: past } },
     }),
   );
   const env = {
@@ -119,7 +120,7 @@ async function world(): Promise<World> {
 }
 
 function saved(w: World): { firstUseAt?: string; snoozedAt?: string; shownAt?: string } | undefined {
-  return JSON.parse(readFileSync(join(w.dataDir, 'config.json'), 'utf8')).inboxSnoozeIntro;
+  return savedConfig(w.dataDir).inboxSnoozeIntro;
 }
 
 async function context(browser: Browser, options: { phone?: boolean; dark?: boolean } = {}): Promise<BrowserContext> {

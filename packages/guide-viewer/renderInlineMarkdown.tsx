@@ -21,6 +21,11 @@ function GuideCodeSpan({ text, children }: { text: string; children: React.React
   return <>{wrap && isCodeFilePath(text) ? wrap(text, children) : children}</>;
 }
 
+// An http(s) link's or image's destination, with the optional title markdown
+// allows after it. The URL reads one level of balanced parentheses, as
+// `INLINE_DESTINATION` and `GUIDE_LINK_TARGET_SOURCE` already do.
+const URL_DESTINATION = String.raw`(https?:\/\/(?:[^()\s]|\([^()\s]*\))*)(?:[ \t]+(?:"[^"]*"|'[^']*'))?`;
+
 export interface InlineMarkdownOptions {
   renderLink?: GuideLinkRenderer;
   resolveImageSrc?: (src: string) => string;
@@ -67,7 +72,7 @@ function renderInline(text: string, startKey: number, opts?: InlineMarkdownOptio
   // The last alternative is a guide link: [label](code:…|symbol:…|chapter:…),
   // its target read as guide-links reads it (balanced parentheses allowed).
   const regex = new RegExp(
-    String.raw`(\[([^\]]+)\]\((https?:\/\/[^)]+)\)|` + '`[^`]+`' + String.raw`|\*\*[^*]+\*\*|(?<!\w)_([^_\s](?:[\s\S]*?[^_\s])?)_(?!\w)|\*[^*]+\*|https?:\/\/[^\s<)\]]+|\[([^\]]+)\]\((${GUIDE_LINK_TARGET_SOURCE})\))`,
+    String.raw`(\[([^\]]+)\]\(${URL_DESTINATION}\)|` + '`[^`]+`' + String.raw`|\*\*[^*]+\*\*|(?<!\w)_([^_\s](?:[\s\S]*?[^_\s])?)_(?!\w)|\*[^*]+\*|https?:\/\/[^\s<)\]]+|\[([^\]]+)\]\((${GUIDE_LINK_TARGET_SOURCE})\))`,
     'g',
   );
   let lastIndex = 0;

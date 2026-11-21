@@ -60,11 +60,16 @@ export interface SearchFilters {
   project: string | null;
   status: InboxSearchStatus | null;
   from: InboxSearchFrom | null;
+  /**
+   * The Tag chip (approval "inbox-thread-tags", step 2: a filter, never results): every machine's id of each picked
+   * tag (searchTags.ts), so the server finds its own threads in the tag whatever id the window lists it by.
+   */
+  tags: readonly string[];
 }
 
-export const NO_FILTERS: SearchFilters = { project: null, status: null, from: null };
+export const NO_FILTERS: SearchFilters = { project: null, status: null, from: null, tags: [] };
 
-export const filtersSet = (filters: SearchFilters): boolean => Boolean(filters.project || filters.status || filters.from);
+export const filtersSet = (filters: SearchFilters): boolean => Boolean(filters.project || filters.status || filters.from || filters.tags.length > 0);
 
 /** The rows "Show 50 more" adds at a time, and the most one group shows before it. */
 export const SEARCH_PAGE = 50;
@@ -140,8 +145,8 @@ export const FROM_OPTIONS: readonly { value: InboxSearchFrom | null; label: stri
   { value: 'me', label: 'Me' },
 ];
 
-/** What a set chip reads: "Only in plannotator" (a picked project says so), "Archived", "From me". */
-export function chipText(kind: keyof SearchFilters, filters: SearchFilters, projectName: (id: string) => string): string {
+/** What a set chip reads: "Only in plannotator" (a picked project says so), "Archived", "From me". The Tag chip's: searchTags.ts. */
+export function chipText(kind: 'project' | 'status' | 'from', filters: SearchFilters, projectName: (id: string) => string): string {
   if (kind === 'project') return filters.project ? `Only in ${projectName(filters.project)}` : 'All projects';
   if (kind === 'status') return STATUS_OPTIONS.find((o) => o.value === filters.status)?.label ?? 'Any status';
   return filters.from === 'me' ? 'From me' : filters.from === 'agent' ? 'From agents' : 'From anyone';
@@ -169,12 +174,13 @@ export function projectNames(projects: readonly { id: string; name: string; root
 }
 
 /** "Searched only plannotator, Archived", or with a picked type "Searched only files in plannotator": the scope a "No matches" names. */
-export function scopeWords(filters: SearchFilters, projectName: (id: string) => string, type: InboxSearchGroupId | null = null): string[] {
+export function scopeWords(filters: SearchFilters, projectName: (id: string) => string, type: InboxSearchGroupId | null = null, tagWords: string | null = null): string[] {
   const out: string[] = [];
   if (type) out.push(filters.project ? `${GROUP_LABELS[type].noun} in ${projectName(filters.project)}` : GROUP_LABELS[type].noun);
   else if (filters.project) out.push(projectName(filters.project));
   if (filters.status) out.push(STATUS_OPTIONS.find((o) => o.value === filters.status)!.label);
   if (filters.from) out.push(filters.from === 'me' ? 'From me' : 'From agents');
+  if (tagWords) out.push(tagWords);
   return out;
 }
 

@@ -52,6 +52,7 @@ import {
   type PlannotatorToolInput,
 } from "@plannotator/shared/plannotator-tool";
 import type { CliLaunch } from "./cli-bridge";
+import { directFetchInit } from "@plannotator/shared/loopback-proxy";
 
 export type LaunchKind = "plan" | "annotate" | "review" | "last";
 
@@ -549,12 +550,12 @@ async function hostRequest(
   if (!launch.port) return null;
   const doFetch = deps.fetch ?? ((url: string, options: RequestInit) => fetch(url, options));
   try {
-    const response = await doFetch(`http://127.0.0.1:${launch.port}${pathname}`, {
+    const response = await doFetch(`http://127.0.0.1:${launch.port}${pathname}`, directFetchInit({
       ...init,
       // No Origin header: the server refuses browser requests here.
       headers: { ...(init.headers as Record<string, string> | undefined), authorization: `Bearer ${launch.token ?? ""}` },
       signal: AbortSignal.timeout(HOST_REQUEST_TIMEOUT_MS),
-    });
+    }));
     return { status: response.status, text: await response.text() };
   } catch {
     return null;

@@ -2,7 +2,8 @@
  * Plannotator Inbox: the tags the person put on a thread or took off it
  * (approval "inbox-thread-tags", step 1).
  *
- *   inbox/tags.json   { v: 1, marks: [{ thread_id, tag, on, seq, at }] }, 0600, written whole (temp, then rename)
+ *   inbox/tags.json   { v: 1, marks: [{ thread_id, tag, on, seq, at }], looks?: { [ini_id]: { colour, by, at, kept_colour? } },
+ *                     show?: { on, at }, recent?: [{ colour, at }] }, 0600, written whole (temp, then rename)
  *
  * A tag is an initiative record (`ini_` id, initiatives in the event log); this
  * file holds only the person's own marks on threads, one per (thread, tag), the
@@ -17,7 +18,7 @@
 
 import { chmodSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { isInboxId } from "@plannotator/core/inbox-types";
+import { INBOX_TAG_RECENT_MAX, inboxTagLook, isInboxId, isInboxTagLook, type InboxTagLook } from "@plannotator/core/inbox-types";
 import { InboxError } from "./schema";
 
 export const INBOX_TAGS_FILE = "tags.json";
@@ -83,6 +84,66 @@ function fileState(inboxDirPath: string): { state: "missing" | "ok" | "bad" | "n
   if (file.v !== 1 || !Array.isArray(file.marks)) return { state: "bad", rest: none };
   const { v: _v, marks: _marks, ...rest } = file;
   return { state: "ok", rest };
+}
+
+/**
+ * The tags' colours (inbox-tag-colours.ts), beside the marks: each tag's look by id (a deleted tag keeps its look, so
+ * its Undo brings the colour back), the "Show tag colors" switch, and the person's own colours. Read as the marks
+ * are: a file this version cannot read gives none, and a bad entry is skipped.
+ */
+export interface InboxTagColoursFile {
+  looks: Map<string, InboxTagLook>;
+  show: { on: boolean; at: string } | null;
+  recent: { colour: string; at: string }[];
+}
+
+export function readInboxTagColours(inboxDirPath: string): InboxTagColoursFile {
+  const none: InboxTagColoursFile = { looks: new Map(), show: null, recent: [] };
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(fileOf(inboxDirPath), "utf8"));
+  } catch {
+    return none;
+  }
+  const file = value as { v?: unknown; looks?: unknown; show?: unknown; recent?: unknown } | null;
+  if (!file || typeof file !== "object" || file.v !== 1) return none;
+  const looks = new Map<string, InboxTagLook>();
+  if (file.looks && typeof file.looks === "object" && !Array.isArray(file.looks)) {
+    for (const [id, look] of Object.entries(file.looks as Record<string, unknown>)) {
+      if (isInboxId("ini", id) && isInboxTagLook(look)) looks.set(id, inboxTagLook(look.colour, look.by, look.at, look.kept_colour));
+    }
+  }
+  const show = file.show as { on?: unknown; at?: unknown } | null | undefined;
+  const recent = Array.isArray(file.recent)
+    ? file.recent.flatMap((e: unknown) => {
+        const entry = e as { colour?: unknown; at?: unknown } | null;
+        return entry && typeof entry.colour === "string" && /^#[0-9a-f]{6}$/.test(entry.colour) && typeof entry.at === "string" ? [{ colour: entry.colour, at: entry.at }] : [];
+      })
+    : [];
+  return {
+    looks,
+    show: show && typeof show === "object" && typeof show.on === "boolean" && typeof show.at === "string" ? { on: show.on, at: show.at } : null,
+    recent: recent.slice(0, INBOX_TAG_RECENT_MAX),
+  };
+}
+
+/** Write the colours, keeping the marks and anything else the file holds. A newer file is refused, as for the marks. */
+export function writeInboxTagColours(inboxDirPath: string, colours: InboxTagColoursFile): void {
+  const file = fileOf(inboxDirPath);
+  const { state, rest } = fileState(inboxDirPath);
+  if (state === "newer") throw new InboxError("tags_newer", "tags.json was written by a newer Plannotator; update Plannotator to change tags.");
+  const marks = state === "ok" ? readInboxThreadTags(inboxDirPath) : [];
+  if (state === "bad") renameSync(file, `${file}.unreadable-${new Date().toISOString().replace(/[:.]/g, "-")}`);
+  const { looks: _looks, show: _show, recent: _recent, ...kept } = rest;
+  const next: Record<string, unknown> = { ...kept };
+  if (colours.looks.size > 0) next.looks = Object.fromEntries([...colours.looks].map(([id, look]) => [id, inboxTagLook(look.colour, look.by, look.at, look.kept_colour)]));
+  if (colours.show) next.show = { on: colours.show.on, at: colours.show.at };
+  if (colours.recent.length > 0) next.recent = colours.recent.map((r) => ({ colour: r.colour, at: r.at }));
+  const wire = marks.map((m) => ({ thread_id: m.thread_id, tag: m.tag, on: m.on, seq: m.seq, at: m.at }));
+  const temp = `${file}.${process.pid}.tmp`;
+  writeFileSync(temp, `${JSON.stringify({ ...next, v: 1, marks: wire })}\n`, { mode: 0o600 });
+  chmodSync(temp, 0o600);
+  renameSync(temp, file);
 }
 
 /**

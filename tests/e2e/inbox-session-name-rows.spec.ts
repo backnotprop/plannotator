@@ -4,12 +4,12 @@
  * window, or a window back from offline that never catches up; rows flipping back when the second-last session ends.
  * ROW_NAMES_SHOTS writes PNGs. Build the binary first (see inbox.spec.ts).
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { INBOX_BRIDGE_POLL_PATH } from '../../packages/shared/inbox/connection';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
@@ -103,7 +103,7 @@ test.beforeAll(async () => {
       inboxThemeChooser: { notNeededAt: past },
       inboxSnoozeIntro: { shownAt: past },
       inboxBoardIntro: { shownAt: past },
-      inboxReveals: { lastShownAt: past },
+      inboxReveals: { ...E2E_GROUP_TIP_SEEN, lastShownAt: past },
     }),
   );
   const env = {

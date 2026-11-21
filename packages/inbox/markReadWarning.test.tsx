@@ -1,8 +1,7 @@
 /**
  * The warning before a Mark read that sets questions aside (the owner's ask, 2026-11-10): what it counts and when it
  * asks (pure, always run), and under DOM_TESTS=1 (happy-dom, from tests/dom-test-list.txt) the dialog itself: Enter
- * goes on, Escape and Cancel change nothing, "Don't show this again" is passed on only when ticked, and a guest is not
- * offered it. The whole window over a real Inbox is packages/inbox/markReadWarningWindow.test.tsx (CI).
+ * goes on, Escape and Cancel change nothing, "Don't show this again" is passed on only when ticked. The whole window over a real Inbox is packages/inbox/markReadWarningWindow.test.tsx (CI).
  *
  * What regresses: a warning on a Mark read that closes nothing, a Mark read that goes on after Cancel, a count that
  * disagrees with what the store closes, or a "Don't show this again" that is not kept.

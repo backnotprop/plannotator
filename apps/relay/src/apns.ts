@@ -18,9 +18,6 @@ export interface ApnsKey {
 
 export type ApnsEnvironment = "sandbox" | "production";
 
-/** The bundle id the app ships under: the push topic. */
-export const APNS_TOPIC = "ai.plannotator.app";
-
 const APNS_HOSTS: Record<ApnsEnvironment, string> = {
   sandbox: "https://api.sandbox.push.apple.com",
   production: "https://api.push.apple.com",
@@ -71,18 +68,24 @@ export interface ApnsResult {
  * local HTTP/2 server in the relay's own proof (`APNS_ORIGIN` under
  * `wrangler dev`, loopback only; any other host is ignored); `http:` there
  * means cleartext HTTP/2.
+ *
+ * `alert` is the sealed push (`apnsBody`, under the device's topic, with the
+ * collapse id); `liveactivity` is a Live Activity update (src/live.ts, under
+ * `<topic>.push-type.liveactivity`, no collapse id).
  */
 export async function sendPush(input: {
   apns: ApnsKey;
   token: string;
   environment: ApnsEnvironment;
-  collapseId: string;
-  envelope: string;
+  topic: string;
+  pushType: "alert" | "liveactivity";
+  collapseId: string | null;
+  body: string;
   origin?: string;
 }): Promise<ApnsResult> {
   const target = new URL(loopbackOverride("APNS_ORIGIN", input.origin) || APNS_HOSTS[input.environment]);
   const tls = target.protocol === "https:";
-  const body = encoder.encode(apnsBody(input.envelope));
+  const body = encoder.encode(input.body);
   const answer = await h2Request({
     hostname: target.hostname,
     port: Number(target.port) || (tls ? 443 : 80),
@@ -90,10 +93,11 @@ export async function sendPush(input: {
     path: `/3/device/${input.token}`,
     headers: [
       ["authorization", `bearer ${await providerToken(input.apns, Date.now())}`],
-      ["apns-push-type", "alert"],
-      ["apns-priority", "10"],
-      ["apns-topic", APNS_TOPIC],
-      ["apns-collapse-id", input.collapseId],
+      ["apns-push-type", input.pushType],
+      // A Live Activity update at 5: Apple budgets priority-10 updates per hour and throttles past it.
+      ["apns-priority", input.pushType === "liveactivity" ? "5" : "10"],
+      ["apns-topic", input.topic],
+      ...(input.collapseId ? [["apns-collapse-id", input.collapseId] as [string, string]] : []),
       ["content-type", "application/json"],
       ["content-length", String(body.length)],
     ],

@@ -19,7 +19,7 @@
  * PLANNOTATOR_REFRESH_SHOTS, else .local/proof/inbox-refresh/.
  */
 
-import { devices, expect, test, type Page } from '@playwright/test';
+import { devices, expect, test, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -86,7 +86,7 @@ const turning = (page: Page, sel: string) =>
 
 async function heldArrival(page: Page, subject: string): Promise<string> {
   const id = await agentWrites(subject);
-  await expect(notice(page)).toContainText('1 new');
+  await expect(notice(page)).toContainText(/^New from .+: “/);
   await expect(row(page, id)).toHaveCount(0);
   return id;
 }

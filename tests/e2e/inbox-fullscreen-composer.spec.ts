@@ -24,7 +24,7 @@
  * PNGs land in PLANNOTATOR_E2E_SHOTS_DIR (default .local/proof/fullscreen-composer).
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -801,10 +801,10 @@ test('the line says "as first sent" with the sent version on screen, or the sent
   const { open, send } = await takes('Versions', ['shots/revised.png']);
   writeFileSync(shot, Buffer.concat([bytes, Buffer.from('changed')]));
   await page.goto(open('revised.png'));
-  await page.getByRole('button', { name: 'Open the version it sent' }).first().click();
+  await page.getByRole('button', { name: 'View sent version' }).first().click();
   await expect.poll(() => new URLSearchParams(new URL(page.url()).hash.slice(1)).get('v')).toBe('sent');
   expect((await send(page, 'On the sent one.')).viewing).toContain('viewing `revised.png` as first sent, from the ');
-  await page.getByRole('button', { name: 'Open the file as it is now' }).first().click();
+  await page.getByRole('button', { name: 'View current file' }).first().click();
   await expect.poll(() => new URLSearchParams(new URL(page.url()).hash.slice(1)).get('v')).not.toBe('sent');
   expect((await send(page, 'On the current one.')).viewing).not.toContain('as first sent');
   rmSync(shot);

@@ -267,7 +267,7 @@ test('the link is the Inbox one address plus #thread=, and the items follow the 
 test.skipIf(!hasDom)('a right-click opens the menu on that row, without opening the thread; Copy link writes its address', async () => {
   await renderApp();
   await openMenu(ids.waiting);
-  expect(items()).toEqual(['Star thread', 'Add to Priority', 'Add tag', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Archive']);
+  expect(items()).toEqual(['Select', 'Star thread', 'Add to Priority', 'Add tag', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Archive']);
   expect(menu()!.querySelector('[role="separator"]')).not.toBeNull();
   // The row keeps a muted background while its menu is open; nothing opened, nothing selected.
   expect(rowWrap(ids.waiting)!.hasAttribute('data-menu')).toBe(true);
@@ -334,7 +334,7 @@ test.skipIf(!hasDom)('Mark read leaves the row in place, read, with its toast; i
   });
   await until(() => !!rowButton(ids.waiting), 'the row in Quiet');
   await openMenu(ids.waiting);
-  expect(items()).toEqual(['Star thread', 'Add to Priority', 'Add tag', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark unread', 'Move back', 'Archive']);
+  expect(items()).toEqual(['Select', 'Star thread', 'Add to Priority', 'Add tag', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark unread', 'Move back', 'Archive']);
   const before = JSON.parse((await loopback(`/api/inbox/threads/${ids.waiting}`)).text) as { thread: { messages: { questions?: { state: string }[] }[] } };
   await choose('mark-unread');
   expect(posted.some((p) => p.path === `/api/inbox/threads/${ids.waiting}/mark-unread`)).toBe(true);
@@ -371,7 +371,7 @@ test.skipIf(!hasDom)('a row Mark unread brought back keeps Move back in its menu
   await loopback(`/api/inbox/threads/${ids.waiting}/mark-unread`, 'POST', '{}');
   await renderApp();
   await openMenu(ids.waiting);
-  expect(items()).toEqual(['Star thread', 'Add to Priority', 'Add tag', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Move back', 'Archive']);
+  expect(items()).toEqual(['Select', 'Star thread', 'Add to Priority', 'Add tag', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Move back', 'Archive']);
   await choose('unread');
   await until(async () => (await serverSections()).get(ids.waiting) === 'waiting', 'the question reopened');
   const thread = JSON.parse((await loopback(`/api/inbox/threads/${ids.waiting}`)).text) as { thread: { messages: { questions?: { state: string }[] }[] } };
@@ -556,10 +556,11 @@ test.skipIf(!hasDom)('the context-menu key: the keyup `contextmenu` (Chromium on
     (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   });
   await until(() => !menu(), 'the menu to close');
-  // The guard went with that one event: the next right-click outside the rows is the browser's again.
+  // The guard went with that one event: the next right-click outside the rows is the browser's again. On the list's
+  // body itself, not a band: a band has its own menu (RowMenu.tsx `bands`), which takes the right-click.
   const later = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 });
   await act(async () => {
-    document.querySelector<HTMLElement>('.ib-band')!.dispatchEvent(later);
+    rowButton(ids.stopped)!.closest<HTMLElement>('.ib-lbody')!.dispatchEvent(later);
   });
   expect(later.defaultPrevented).toBe(false);
 });

@@ -21,11 +21,15 @@ export function takeBackRefusal(error: unknown, name: string): string {
   return 'It was not taken back. Try again.';
 }
 
-export function takeBackOffered(message: InboxMessageWire, only: boolean): boolean {
+/** A reply that sent answers (to questions or action items) is never taken back: the server refuses it. */
+export const carriesAnswers = (message: InboxMessageWire, messages: readonly InboxMessageWire[]): boolean =>
+  messages.some((m) => [...(m.questions ?? []), ...(m.actions ?? [])].some((q) => q.sent_reply_id === message.id));
+
+export function takeBackOffered(message: InboxMessageWire, only: boolean, messages: readonly InboxMessageWire[]): boolean {
   if (message.author.kind !== 'person' || message.delivery || message.taken_back_at || message.read_by_agent || message.launch || message.handoff || message.review_verdict) return false;
   if (message.ack_of || message.tidy || (message.set_aside?.length ?? 0) > 0 || (message.reopened?.length ?? 0) > 0 || (message.reask?.length ?? 0) > 0) return false;
   if (message.tags?.some((tag) => tag.delivery || tag.read_at)) return false;
-  if ((message.sent_annotations ?? 0) > 0) return false;
+  if ((message.sent_annotations ?? 0) > 0 || carriesAnswers(message, messages)) return false;
   return message.id !== message.thread_id || only;
 }
 

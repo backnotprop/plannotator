@@ -634,16 +634,18 @@ describe("Inbox Open in: the real launcher, with stubs on PATH", () => {
     const stubs = join(root, "stubs");
     mkdirSync(stubs);
     const log = join(stubs, "launches.log");
-    for (const name of ["open", "code", "subl"]) {
+    for (const name of ["open", "code", "subl", "webstorm"]) {
       writeFileSync(join(stubs, name), `#!/bin/sh\nfor a in "$@"; do echo "${name}|$a" >> "${log}"; done\nexit 0\n`);
       chmodSync(join(stubs, name), 0o755);
     }
     setEnv("PATH", stubs);
     const code = getOpenInApp("vscode")!;
     const sublime = getOpenInApp("sublime-text")!;
+    const webstorm = getOpenInApp("webstorm")!;
     const file = "/work/my app/src/a#b.ts";
     expect(await openWithApp(code, file, 12)).toEqual({ ok: true });
     expect(await openWithApp(sublime, file, 12)).toEqual({ ok: true });
+    expect(await openWithApp(webstorm, file, 12)).toEqual({ ok: true });
     expect(await openWithApp(code, file)).toEqual({ ok: true });
     const lines = readFileSync(log, "utf8").trim().split("\n");
     if (process.platform === "darwin") {
@@ -655,12 +657,27 @@ describe("Inbox Open in: the real launcher, with stubs on PATH", () => {
         "open|-a",
         "open|Sublime Text",
         `open|${file}`,
+        // JetBrains has no URL scheme; its own launcher takes the line (openInMacArgv).
+        "open|-na",
+        "open|WebStorm",
+        "open|--args",
+        "open|--line",
+        "open|12",
+        `open|${file}`,
         "open|-a",
         "open|Visual Studio Code",
         `open|${file}`,
       ]);
     } else {
-      expect(lines).toEqual([`code|--goto`, `code|${file}:12`, `subl|${file}:12`, `code|${file}`]);
+      expect(lines).toEqual([
+        `code|--goto`,
+        `code|${file}:12`,
+        `subl|${file}:12`,
+        `webstorm|--line`,
+        `webstorm|12`,
+        `webstorm|${file}`,
+        `code|${file}`,
+      ]);
     }
   });
 });

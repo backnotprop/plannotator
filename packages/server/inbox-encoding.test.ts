@@ -17,7 +17,7 @@ import { recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
 import { packApp } from "@plannotator/shared/packed-app";
 import { mp4 } from "../../tests/helpers/video-fixtures";
 import { startInboxServer, type InboxServer } from "./inbox";
-import { INBOX_JSON_COMPRESS_MIN_BYTES } from "./inbox-encoding";
+import { encodeInboxResponse, INBOX_JSON_COMPRESS_MIN_BYTES } from "./inbox-encoding";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -240,4 +240,21 @@ test("a browser on this computer never waits on a one-time compression; a proxy,
   const gzipOnly = await raw(lazy, { "Accept-Encoding": "gzip", "X-Forwarded-For": "127.0.0.1" });
   expect(gzipOnly.headers.get("content-encoding")).toBe("gzip");
   expect(gunzipSync(await bytes(gzipOnly)).toString("utf8")).toBe(LAZY);
+});
+
+test("an attached page's document goes out compressed with its own headers; other HTML answers as they were", async () => {
+  const html = `<!doctype html><script>${"bridge();".repeat(20_000)}</script>`;
+  const page = () => new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "sandbox allow-scripts", "Cache-Control": "no-store" } });
+  const ask = (path: string) => new Request(`http://127.0.0.1${path}`, { headers: { "Accept-Encoding": "gzip" } });
+
+  const sent = await encodeInboxResponse(ask("/api/inbox/pages/0123456789abcdef0123456789abcdef"), page());
+  expect(sent.headers.get("Content-Encoding")).toBe("gzip");
+  expect(sent.headers.get("Content-Security-Policy")).toBe("sandbox allow-scripts");
+  expect(sent.headers.get("Cache-Control")).toBe("no-store");
+  const bytes = Buffer.from(await sent.arrayBuffer());
+  expect(bytes.length).toBeLessThan(html.length / 4);
+  expect(gunzipSync(bytes).toString("utf8")).toBe(html);
+
+  const other = page();
+  expect(await encodeInboxResponse(ask("/api/inbox/embeds/0123"), other)).toBe(other);
 });

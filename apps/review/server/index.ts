@@ -16,6 +16,8 @@
  */
 
 import { $ } from "bun";
+import { semDiffSourcesFromDir } from "@plannotator/shared/sem-diff-assets";
+import { fileURLToPath } from "node:url";
 import {
   startReviewServer,
   handleReviewServerReady,
@@ -66,6 +68,7 @@ const server = await startReviewServer({
   rawPatch,
   gitRef: displayRef,
   htmlContent,
+  semDiff: semDiffSourcesFromDir(fileURLToPath(new URL("../dist/sem-diff", import.meta.url))),
   // This dev server emits the full decision JSON below — feedback included on
   // approve — so it advertises approve-with-notes (spec §6.4).
   approvalNotesSupported: true,

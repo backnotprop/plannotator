@@ -18,7 +18,7 @@
  * Pictures: LAUNCH_TRUST_SHOTS_DIR (default .local/proof/launch-trust), wide light at 2x.
  * Build the binary first, then `bunx playwright test -c tests/e2e/playwright.config.ts inbox-launch-trust.spec.ts`.
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -26,7 +26,7 @@ import { NO_BROWSER } from '../helpers/no-browser';
 import { refuseRealClaudeConfig } from '../helpers/real-data-dir';
 import { markTourDecided } from '../helpers/tour-decided';
 import { installFakeClaude, type FakeClaude } from '../helpers/fake-claude';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -117,7 +117,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const fake = installFakeClaude({ bin, state: join(root, 'fake-claude'), config: { trustCheck: true, workMs: 300 } });
   world = { home, config, url: '', port: 0, fake, context: undefined as never, page: undefined as never, errors: [] };
   markTourDecided(dataDir);
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxLaunch: { enabled: true, fullPermissions: false } }));
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxLaunch: { enabled: true, fullPermissions: false }, inboxReveals: { ...E2E_GROUP_TIP_SEEN } }));
   const env: Record<string, string> = {
     // Only the fakes and the system's own tools: never the agents installed on the machine running the spec.
     PATH: `${bin}:/usr/bin:/bin`,

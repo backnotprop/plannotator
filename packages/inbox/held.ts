@@ -91,6 +91,14 @@ function hasNewAgentActivity(old: InboxListRow | undefined, row: InboxListRow, o
 }
 
 /**
+ * The thread's row now (`current`) carries agent activity the row drawn on screen (`drawn`) does not show: that news
+ * waits behind "N new · Show". Mark all as read (markAllRead.ts) leaves such a thread out, so it stays new.
+ */
+export function waitsBehindShow(drawn: InboxListRow, current: InboxListRow): boolean {
+  return hasNewAgentActivity(drawn, current);
+}
+
+/**
  * The thread the held list treats as open (design record
  * "inbox-new-in-open-thread", approved 2026-10-12): the thread the person
  * has open, or the one they just closed until the list settles. While it is
@@ -124,6 +132,20 @@ function newsRows(shown: readonly InboxListSection[], latest: readonly InboxList
   return [...rowsById(latest).values()].filter((row) => !isOpenRow(row, open) && hasNewAgentActivity(before.get(row.thread_id), row, openedHere));
 }
 
+/**
+ * The news that waits (`newsRows`), each with the row the list on screen has for that thread (undefined: the list
+ * lacks it): what the held line's words read (newsWords.ts), new thread, question or reply.
+ */
+export function heldArrivalRows(
+  shown: readonly InboxListSection[],
+  latest: readonly InboxListSection[],
+  openedHere?: ReadonlySet<string>,
+  open?: OpenThread | null,
+): { row: InboxListRow; was: InboxListRow | undefined }[] {
+  const before = rowsById(shown);
+  return newsRows(shown, latest, openedHere, open).map((row) => ({ row, was: before.get(row.thread_id) }));
+}
+
 /** What "N new" says of the news that waits (`newsRows`): how many threads, and the one project they are in. */
 export function heldNotice(
   shown: readonly InboxListSection[],
@@ -143,21 +165,6 @@ export function heldNotice(
   if (projects.size !== 1) return { count, text: `${count} new` };
   const project = [...projects.values()][0]!;
   return { count, text: `${count} new in ${project}`, project };
-}
-
-/**
- * One thread behind "N new", for the list's own pill (listNewPill.ts). `key`
- * is the thread and when its agent last wrote, so a second message there is a
- * new key; `lands` is the group Show puts the row in.
- */
-export interface HeldNews {
-  key: string;
-  lands: InboxListGroupId;
-}
-
-/** The threads "N new" counts (`newsRows`, the same arguments as `heldNotice`), each with where Show lands it. */
-export function heldNews(shown: readonly InboxListSection[], latest: readonly InboxListSection[], openedHere?: ReadonlySet<string>, open?: OpenThread | null): HeldNews[] {
-  return newsRows(shown, latest, openedHere, open).map((row) => ({ key: `${row.thread_id} ${row.snooze_back ?? lastAgentAt(row)}`, lands: groupOf(row) }));
 }
 
 /**
@@ -195,7 +202,8 @@ export function showLandsIn(shown: readonly InboxListSection[], latest: readonly
  * delivered, an agent read it, the thread was resolved) shows its state as it
  * now is, so a Sent row stops saying "Saved for" once the agent has the
  * reply. A row with new agent activity keeps what was on screen: that change
- * waits behind "N new". A row whose thread is gone stays as it was.
+ * waits behind "N new". A row whose thread is gone stays as it was here;
+ * `goneRows` says which leave (archived or deleted elsewhere).
  */
 export function refreshHeldRows(shown: readonly InboxListSection[], latest: readonly InboxListSection[], open?: OpenThread | null): InboxListSection[] {
   const fresh = rowsById(latest);
@@ -216,6 +224,33 @@ export function refreshHeldRows(shown: readonly InboxListSection[], latest: read
     return { ...section, threads };
   });
   return changed ? sections : (shown as InboxListSection[]);
+}
+
+/**
+ * The rows on screen whose thread the read no longer lists: archived or deleted in another window, on the phone, or
+ * by its agent. They leave every window's list at once, as a pin or a snooze from elsewhere moves its row (the
+ * owner, 2026-11-10). Two stay: the open thread's (`open`), and one this window archived itself (drawn archived in
+ * place until the list next settles; `archiving` while its write is on its way).
+ */
+export function goneRows(shown: readonly InboxListSection[] | null, latest: readonly InboxListSection[], open: string | null, archiving: ReadonlySet<string> = new Set()): Set<string> {
+  const out = new Set<string>();
+  if (!hasRows(shown)) return out;
+  const listed = rowsById(latest);
+  for (const section of shown!) {
+    for (const row of section.threads) if (!listed.has(row.thread_id) && row.thread_id !== open && row.resolved_at == null && !archiving.has(row.thread_id)) out.add(row.thread_id);
+  }
+  return out;
+}
+
+/** Rows the person reads in place: the folded Snoozed band alone holds nothing still, so a read is adopted whole. */
+export function hasRows(sections: readonly InboxListSection[] | null): boolean {
+  return !!sections && sections.some((s) => s.id !== 'snoozed' && s.threads.length > 0);
+}
+
+/** The list on screen without these rows; nothing else moves. */
+export function withoutRows(shown: readonly InboxListSection[], ids: ReadonlySet<string>): InboxListSection[] {
+  if (ids.size === 0) return shown as InboxListSection[];
+  return shown.map((section) => (section.threads.some((row) => ids.has(row.thread_id)) ? { ...section, threads: section.threads.filter((row) => !ids.has(row.thread_id)) } : section));
 }
 
 /** The list's own order within a section (packages/shared/inbox/list.ts): newest first, ties on the thread id. */
@@ -538,4 +573,15 @@ export function waitingCount(sections: readonly InboxListSection[], projectId?: 
     for (const row of section.threads) if (!projectId || row.project.id === projectId) n += 1;
   }
   return n;
+}
+
+/**
+ * The rows on screen once a list read or a record brought `latest`: nothing on screen yet, the whole list; adopted
+ * (an action, Show), the whole list, the open thread's row kept where it is (`keep`); else held, each row's own
+ * state following at once and the rows `gone` (archived or deleted elsewhere) left out.
+ */
+export function shownAfter(shown: InboxListSection[] | null, latest: InboxListSection[], how: { adopt: boolean; keep: string | null; open: OpenThread | null; gone: ReadonlySet<string> }): InboxListSection[] {
+  if (shown === null || !hasRows(shown)) return latest;
+  if (how.adopt) return how.keep ? adoptKeepingOpen(shown, latest, how.keep) : latest;
+  return withoutRows(refreshHeldRows(shown, latest, how.open), how.gone);
 }

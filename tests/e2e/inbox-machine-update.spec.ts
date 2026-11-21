@@ -17,7 +17,7 @@
  * built first (see inbox.spec.ts).
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -103,7 +103,6 @@ function machine(name: string, bin: string): Machine {
       PLANNOTATOR_UPDATE_CHECK: '0',
       NO_ANON_PING: '1',
       PLANNOTATOR_MINIMAL: '1',
-      PLANNOTATOR_SKIP_SEM_INSTALL: '1',
       PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL: '1',
       PLANNOTATOR_RELAY_URL: CLOSED,
       PLANNOTATOR_FEEDBACK_URL: `${CLOSED}/feedback`,

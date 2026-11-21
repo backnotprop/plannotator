@@ -77,8 +77,9 @@ export class OpenCodeProvider implements AIProvider {
 	/** Spawn this process's OpenCode server if it is not already running. */
 	async ensureServer(): Promise<void> {
 		if (this.client) return;
+		const epoch = this.startEpoch;
 		this.startPromise ??= this.doStart().catch((err) => {
-			this.startPromise = null;
+			if (epoch === this.startEpoch) this.startPromise = null;
 			throw err;
 		});
 		return this.startPromise;
@@ -402,7 +403,7 @@ class OpenCodeSession extends BaseSession {
 				}
 
 				try {
-					await this.config.client.session.promptAsync({
+					const result = await this.config.client.session.promptAsync({
 						path: { id: this.config.sessionId },
 						body: {
 							...(!this._firstQuerySent &&
@@ -415,6 +416,11 @@ class OpenCodeSession extends BaseSession {
 							parts: [{ type: "text", text: prompt }],
 						},
 					});
+					// The SDK resolves HTTP errors as result objects by default.
+					if (result.error) {
+						const detail = typeof result.error === "string" ? result.error : result.error.data?.message;
+						throw new Error(detail || `HTTP ${result.response.status}`);
+					}
 				} catch (err) {
 					yield {
 						type: "error",

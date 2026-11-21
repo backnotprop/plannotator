@@ -79,7 +79,7 @@ export function filterGroups(groups: readonly ComposeGroup[], query: string, mac
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return [...groups];
   const matches = (target: ComposeTarget) => {
-    const hay = [hostLabel(target.host), target.host, target.label ?? '', target.project.name, target.project.root, target.last_thread?.subject ?? '', machine].join(' ').toLowerCase();
+    const hay = [hostLabel(target.host), target.host, target.label ?? '', target.project.name, target.project.root, target.last_thread?.subject ?? '', target.place?.line ?? '', machine].join(' ').toLowerCase();
     return words.every((word) => hay.includes(word));
   };
   return groups.map((group) => ({ ...group, sessions: group.sessions.filter(matches) })).filter((group) => group.sessions.length > 0);
@@ -125,8 +125,12 @@ export function startedLine(target: Pick<ComposeTarget, 'started_at'>): string {
   return `started ${whenTime(target.started_at)}`;
 }
 
-/** The status chip: a word, never colour alone. */
-export const busyWord = (target: Pick<ComposeTarget, 'busy'>): 'Working' | 'Idle' => (target.busy ? 'Working' : 'Idle');
+/**
+ * The status chip: a word, never colour alone. Null for a host that reports no turns (`busy` null: Codex, Qwen Code,
+ * T3 Code, Antigravity): no word, never "Idle" (the owner's truth rules, 2026-11-18). Every place that names a live
+ * session's state goes through this.
+ */
+export const busyWord = (target: Pick<ComposeTarget, 'busy'>): 'Working' | 'Idle' | null => (target.busy === true ? 'Working' : target.busy === false ? 'Idle' : null);
 
 /** The subject a message starts its thread with: the store's own rule for a thread the person starts (core), so the preview never differs. */
 export function subjectPreview(body: string, files: readonly string[] = []): string | null {
@@ -549,9 +553,9 @@ export function newSessionTip(name: string, machineName: string | null, asleep: 
   return `New session in ${named}${asleep ? ", starts when it's back" : ''}`;
 }
 
-/** "+" on project rows at all (F1-F7): while agents can be started from New message here, and never on a tailnet guest's page (a guest can't start one). */
-export function projectPlusOn(launchEnabled: boolean | undefined, guestPage: boolean): boolean {
-  return launchEnabled === true && !guestPage;
+/** "+" on project rows at all (F1-F7): while agents can be started from New message here. */
+export function projectPlusOn(launchEnabled: boolean | undefined): boolean {
+  return launchEnabled === true;
 }
 
 /**
