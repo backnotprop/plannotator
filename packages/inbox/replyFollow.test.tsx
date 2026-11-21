@@ -2,16 +2,18 @@
  * Who gets the reply follows the agent that wrote last while the reply box is empty (the owner's decision of
  * 2026-11-21, "Yes, follow until I type or pick"; thread/replyAim.ts), in a thread with more than one agent. The
  * failure this catches, the one that sends words to the wrong agent: a chip that changes under words being written,
- * when an agent writes between a keystroke and Send. Also: an empty box that keeps naming an agent who is no longer
- * the last to write, a pick or a draft that a new message takes back, an ended agent followed, a one-agent thread that
- * grows a chip.
+ * when an agent writes between a keystroke, a pick saving, dictation or a failed Send and the Send. Also: an empty box
+ * that keeps naming an agent who is no longer the last to write, a pick or a draft that a new message takes back, an
+ * agent that ended passed over (its thread still takes a message; the chip says it ended and Send stops once, as
+ * before), a one-agent thread that grows a chip.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
+import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
+import type { InboxMessageWire, InboxProject, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import type { TaggableSession } from './api';
 import type { RecipientRow } from './replyRecipients';
 import { followedSession } from './thread/replyAim';
@@ -23,7 +25,7 @@ const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as ty
 const PROJECT: InboxProject = { id: 'prj_1', key: 'orders-abcdef', name: 'orders', root: '/work/orders', created_at: '2026-11-01T10:00:00.000Z' };
 const CLAUDE = { kind: 'agent' as const, host: 'claude-code', session: 'ses_claude', name: null };
 const PI = { kind: 'agent' as const, host: 'pi', session: 'ses_pi', name: null };
-/** Not in the live list: ended. */
+/** A session the Inbox wakes itself (Codex), off the live list: ended to the window, yet its thread takes a message. */
 const GONE = { kind: 'agent' as const, host: 'codex', session: 'ses_gone', name: null };
 const PERSON = { kind: 'person' } as InboxMessageWire['author'];
 const M1 = 'msg_01M4H6G73M9H3Z32T859E72DPY';
@@ -58,6 +60,14 @@ let savedFetch: typeof fetch;
 let savedXhr: typeof XMLHttpRequest;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
 let savedDraft: Record<string, unknown> | null = null;
+/** Each thread's draft as the last save left it (its route's path), read back when the thread opens again. */
+let drafts = new Map<string, Record<string, unknown> | null>();
+/** The live sessions (the `@` model and the live list); one taken out reads as ended at the next read. */
+let live: TaggableSession[] = [];
+/** How many Sends are refused for now (429, nothing written) before they go. */
+let replyFails = 0;
+/** A pick's save never answers while set: the pick is still saving. */
+let holdPicks = false;
 
 /** An upload that never finishes: the tile stays in the box, uploading. */
 class HeldXhr {
@@ -80,22 +90,36 @@ beforeEach(() => {
   globalThis.XMLHttpRequest = HeldXhr as unknown as typeof XMLHttpRequest;
   posted = [];
   savedDraft = null;
-  const taggable = [tagged('ses_claude', 'claude-code'), tagged('ses_pi', 'pi')];
+  drafts = new Map();
+  replyFails = 0;
+  holdPicks = false;
+  live = [tagged('ses_claude', 'claude-code'), tagged('ses_pi', 'pi')];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (init?.method === 'POST') {
       const body = JSON.parse(String(init.body)) as Record<string, unknown>;
       posted.push({ path, body });
-      if (path.endsWith('/draft')) return Response.json({ draft: { thread_id: M1, body: body.body, updated_at: new Date(Date.now() + posted.length).toISOString(), ...(body.recipients ? { recipients: body.recipients } : {}) } });
+      if (path.endsWith('/draft')) {
+        const draft = { v: 1, thread_id: path.split('/').at(-2), body: body.body, created_at: '2026-11-01T10:40:00.000Z', updated_at: new Date(Date.now() + posted.length).toISOString(), ...(body.recipients ? { recipients: body.recipients } : {}) };
+        drafts.set(path, String(body.body ?? '') === '' ? null : draft);
+        return Response.json({ draft });
+      }
+      if (path.endsWith('/picks') && holdPicks) return new Promise<Response>(() => {});
+      if (path.endsWith('/reply') && replyFails > 0) {
+        replyFails -= 1;
+        return Response.json({ error: 'Too many replies at once; try again.', code: 'rate_limited' }, { status: 429 });
+      }
       if (path.endsWith('/reply')) return Response.json({ reply: {}, questions: [], replayed: false });
       return Response.json({ questions: [] });
     }
-    if (path.endsWith('/draft')) return Response.json({ draft: savedDraft });
-    if (path.includes('/taggable')) return Response.json({ serverSession: 's', owner: null, sessions: taggable });
+    if (path.endsWith('/draft')) return Response.json({ draft: drafts.has(path) ? drafts.get(path) : savedDraft });
+    if (path.includes('/taggable')) return Response.json({ serverSession: 's', owner: null, sessions: live });
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
     if (path.includes('/sessions')) {
-      const sessions = taggable.map((t) => ({ session: t.session, host: t.host, started_at: t.last_at, last_seen_at: t.last_at, busy: false, idle_since: null, wrote_thread: true }));
-      return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions });
+      const sessions = live.map((t) => ({ session: t.session, host: t.host, started_at: t.last_at, last_seen_at: t.last_at, busy: false, idle_since: null, wrote_thread: true }));
+      // `?asker=`: whether the session asked is live, as the live list says.
+      const asked = new URL(path, 'http://inbox.test').searchParams.get('asker');
+      return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions, ...(asked ? { asker: { session: asked, live: live.some((t) => t.session === asked) } } : {}) });
     }
     return Response.json({});
   }) as typeof fetch;
@@ -362,23 +386,25 @@ test.skipIf(!hasDom)('a saved draft holds its own target: a newer agent message 
   expect(answered()).toEqual([M2]);
 });
 
-test.skipIf(!hasDom)('an agent that ended, the person\'s own message and an Inbox note move nothing: it follows the newest agent that can take a reply', async () => {
+test.skipIf(!hasDom)('an agent that ended is still followed (the chip says it ended); the person\'s own message and an Inbox note move nothing', async () => {
   const t = growing(message(M1, CLAUDE, 41), message(M2, GONE, 45));
   const el = await render(t.thread);
   await openBox(el);
-  expect(named(el)).toBe('Claude Code');
+  expect(named(el)).toBe('Codex');
+  expect(chip(el)!.hasAttribute('data-ended')).toBe(true);
   act(() => t.add(message(M3, PI, 46)));
   await settle();
   expect(named(el)).toBe('Pi');
+  expect(chip(el)!.hasAttribute('data-ended')).toBe(false);
   act(() => t.add(message(M4, GONE, 47)));
   await settle();
-  expect(named(el)).toBe('Pi');
+  expect(named(el)).toBe('Codex');
   act(() => t.add(message(M5, PERSON, 48)));
   await settle();
-  expect(named(el)).toBe('Pi');
-  act(() => t.add(message('msg_01M4H7EEEEEEEEEEEEEEEEEEEE', PERSON, 49, { ack_of: M3 })));
+  expect(named(el)).toBe('Codex');
+  act(() => t.add(message('msg_01M4H7EEEEEEEEEEEEEEEEEEEE', PERSON, 49, { ack_of: M4 })));
   await settle();
-  expect(named(el)).toBe('Pi');
+  expect(named(el)).toBe('Codex');
 });
 
 test.skipIf(!hasDom)('one agent: no chip and no indent, before or after it writes again; the reply goes to its newest message', async () => {
@@ -410,20 +436,18 @@ test.skipIf(!hasDom)('a second agent writes into a one-agent thread while the pe
 
 const row = (session: string, state: RecipientRow['state'] = 'live', extra: Partial<RecipientRow> = {}): RecipientRow => ({ session, host: 'pi', label: session, short: session, state, ...extra });
 
-test('followedSession: the newest agent message whose session can take a reply; a permission prompt, a routine\'s change line, an ended or unknown session and a person\'s message are passed over', () => {
+test('followedSession: the newest agent message, an ended session\'s too; a permission prompt, a routine\'s change line, a session not in the list and a person\'s message are passed over', () => {
   const rows = [row('ses_claude'), row('ses_pi'), row('ses_gone', 'ended'), row('ses_reader', 'reader'), row('ses_old', 'old'), row('perm:ses_claude')];
   const base = [message(M1, CLAUDE, 41), message(M2, PI, 45)];
   expect(followedSession(threadOf(...base), rows, 'x')).toBe('ses_pi');
-  expect(followedSession(threadOf(...base, message(M3, GONE, 46)), rows, 'x')).toBe('ses_pi');
+  expect(followedSession(threadOf(...base, message(M3, GONE, 46)), rows, 'x')).toBe('ses_gone');
   expect(followedSession(threadOf(...base, message(M3, PERSON, 46)), rows, 'x')).toBe('ses_pi');
   expect(followedSession(threadOf(...base, message(M3, { ...CLAUDE, session: 'perm:ses_claude' }, 46)), rows, 'x')).toBe('ses_pi');
   expect(followedSession(threadOf(...base, message(M3, CLAUDE, 46, { scheduled_change: { at: 'x' } as unknown as InboxMessageWire['scheduled_change'] })), rows, 'x')).toBe('ses_pi');
   expect(followedSession(threadOf(...base, message(M3, { ...CLAUDE, session: 'ses_stranger' }, 46)), rows, 'x')).toBe('ses_pi');
-  // An agent that reads the Inbox, or one on an older Plannotator, still takes a reply.
   expect(followedSession(threadOf(...base, message(M3, { ...PI, session: 'ses_reader' }, 46)), rows, 'x')).toBe('ses_reader');
   expect(followedSession(threadOf(...base, message(M3, { ...PI, session: 'ses_old' }, 46)), rows, 'x')).toBe('ses_old');
-  // Nobody can take it: the words' own default.
-  expect(followedSession(threadOf(message(M1, GONE, 41)), rows, 'ses_gone')).toBe('ses_gone');
+  expect(followedSession(threadOf(message(M1, PERSON, 41)), rows, 'fallback')).toBe('fallback');
   expect(followedSession(threadOf(...base), [], 'fallback')).toBe('fallback');
 });
 
@@ -432,3 +456,146 @@ test('followedSession: a thread handed to another session keeps the hand-off\'s 
   const handoff = message(M3, PERSON, 46, { tags: [{ host: 'pi', session: 'ses_pi', wakes: true }], handoff: {} as InboxMessageWire['handoff'], to: { host: 'pi', session: 'ses_pi' } } as Partial<InboxMessageWire>);
   expect(followedSession(threadOf(message(M1, CLAUDE, 41), handoff, message(M4, CLAUDE, 47)), rows, 'ses_pi')).toBe('ses_pi');
 });
+
+const QUESTION_BODY = ['Which totals?', '', ':::question', 'Which totals should the report use?', '', '- [ ] The old totals', '- [ ] The new totals', ':::'].join('\n');
+
+/** QUESTION_BODY's question on `messageId`, asked by `session`: open, or picked and not sent yet. */
+function question(messageId: string, session: string, state: 'open' | 'picked'): InboxQuestion[] {
+  return parseInboxQuestionBlocks(QUESTION_BODY).map((q) => ({
+    key: q.key,
+    position: q.position,
+    kind: q.kind,
+    prompt: q.prompt,
+    context: q.parsed.context,
+    choices: q.parsed.choices,
+    recommendation: null,
+    suggested_text: null,
+    stopped: q.stopped,
+    holds_up: q.holds_up,
+    asked_by_agent_id: session,
+    orphaned: false,
+    state,
+    answer: state === 'picked' ? { v: 1, key: q.key, kind: 'single', prompt: q.prompt, selected: ['The old totals'] } : null,
+    revision: 1,
+    sent_revision: 0,
+    picked_by: null,
+    picked_at: state === 'picked' ? '2026-11-01T10:42:00.000Z' : null,
+    sent_reply_id: null,
+    message_id: messageId,
+    superseded_by: null,
+  }));
+}
+const asking = (id: string, author: InboxMessageWire['author'], minute: number, state: 'open' | 'picked') =>
+  message(id, author, minute, { body: QUESTION_BODY, questions: question(id, author.kind === 'agent' ? author.session! : '', state) });
+const wordsReply = () => replies().filter((r) => typeof r.body.words === 'string' && r.body.words !== '');
+
+test.skipIf(!hasDom)('the closed foot\'s Send with an answer picked on the question of an agent that ended and wrote last: it stops once and posts nothing; a live agent picked in the list, the answer goes to it', async () => {
+  const el = await render(threadOf(message(M1, CLAUDE, 41), asking(M2, GONE, 45, 'picked')));
+  expect(field(el)).toBeNull();
+  act(() => button(el.querySelector('.ib-pfoot') as HTMLElement, 'Send').click());
+  await settle();
+  await settle();
+  expect(replies()).toEqual([]);
+  expect(el.querySelector('[data-recipient-list]')).not.toBeNull();
+  // The chip names the agent that asked, ended, as it did before the follow rule.
+  expect(named(el)).toBe('Codex');
+  expect(chip(el)!.hasAttribute('data-ended')).toBe(true);
+  act(() => (el.querySelector('[data-recipient-row="ses_claude"] .ib-rpick-name') as HTMLButtonElement).click());
+  await settle();
+  expect(named(el)).toBe('Claude Code');
+  act(() => button(el, 'Send').click());
+  await settle();
+  await settle();
+  expect(replies().map((r) => [r.path.split('/').at(-2), r.body.to ?? null, (r.body.questions as unknown[] | undefined)?.length ?? 0])).toEqual([[M2, { host: 'claude-code', session: 'ses_claude' }, 1]]);
+});
+
+test.skipIf(!hasDom)('a session the Inbox wakes itself that dropped off the live list and wrote last: the chip names it, ended, and Send stops once, then goes to it and waits', async () => {
+  const el = await render(threadOf(message(M1, CLAUDE, 41), message(M2, PI, 45), message(M3, GONE, 47)));
+  await write(el, 'Still on the export?');
+  expect(named(el)).toBe('Codex');
+  expect(chip(el)!.hasAttribute('data-ended')).toBe(true);
+  await send(el);
+  expect(replies()).toEqual([]);
+  expect(el.querySelector('[data-recipient-list]')).not.toBeNull();
+  await send(el);
+  expect(answered()).toEqual([M3]);
+  expect(replies()[0]!.body.to).toBeUndefined();
+});
+
+test.skipIf(!hasDom)('an answer saved and a new message from another agent in ONE thread read: the choice holds on the name that was painted', async () => {
+  const t = growing(asking(M1, CLAUDE, 41, 'open'), message(M2, PI, 45));
+  const el = await render(t.thread);
+  await openBox(el);
+  expect(named(el)).toBe('Pi');
+  act(() => {
+    const read = { ...t.thread, messages: [asking(M1, CLAUDE, 41, 'picked'), message(M2, PI, 45), message(M3, CLAUDE, 47)] };
+    draw(read);
+  });
+  await settle();
+  expect(named(el)).toBe('Pi');
+  await write(el, 'And use them for March.');
+  await send(el);
+  expect(wordsReply().map((r) => r.path.split('/').at(-2))).toEqual([M2]);
+});
+
+test.skipIf(!hasDom)('an answer still saving holds the choice: a new message before the save answers does not move it', async () => {
+  holdPicks = true;
+  const t = growing(message(M1, CLAUDE, 41), asking(M2, PI, 45, 'open'));
+  const el = await render(t.thread);
+  await openBox(el);
+  expect(named(el)).toBe('Pi');
+  const option = [...el.querySelectorAll<HTMLElement>('[data-question-option]')].find((r) => r.textContent?.includes('The new totals'))!.querySelector('input')!;
+  act(() => option.click());
+  await settle();
+  expect(posted.some((p) => p.path.endsWith('/picks'))).toBe(true);
+  act(() => t.add(message(M3, CLAUDE, 47)));
+  await settle();
+  expect(named(el)).toBe('Pi');
+});
+
+test.skipIf(!hasDom)('a Send refused for now, another agent writes, Send again: the same agent, the same message and the same idempotency key', async () => {
+  replyFails = 1;
+  const t = growing(message(M1, CLAUDE, 41), message(M2, PI, 45));
+  const el = await render(t.thread);
+  await write(el, 'Use the old totals.');
+  await send(el);
+  expect(answered()).toEqual([M2]);
+  act(() => t.add(message(M3, CLAUDE, 47)));
+  await settle();
+  expect(named(el)).toBe('Pi');
+  await send(el);
+  expect(answered()).toEqual([M2, M2]);
+  expect(replies()[1]!.body.idempotency_key).toBe(replies()[0]!.body.idempotency_key as string);
+});
+
+test.skipIf(!hasDom)('typed (no pick), to another thread and back after an agent wrote there: the words and their agent come back', async () => {
+  const X = growing(message(M1, CLAUDE, 41), message(M2, PI, 45));
+  const el = await render(X.thread);
+  await write(el, 'Half a thought');
+  await settle(1100);
+  const other = 'msg_01M4H9ZZZZZZZZZZZZZZZZZZZZ';
+  act(() => draw({ ...threadOf({ ...message(other, CLAUDE, 30), thread_id: other, reply_to: null }), thread_id: other }));
+  await settle();
+  await settle();
+  act(() => X.add(message(M3, CLAUDE, 47)));
+  await settle();
+  await settle();
+  expect(field(el)?.value).toBe('Half a thought');
+  expect(named(el)).toBe('Pi');
+});
+
+test.skipIf(!hasDom)('the followed agent ends while the box is empty: the chip still names the newest writer, now marked ended, and follows the next one', async () => {
+  const t = growing(message(M1, CLAUDE, 41), message(M2, PI, 45));
+  const el = await render(t.thread);
+  await openBox(el);
+  expect(named(el)).toBe('Pi');
+  expect(chip(el)!.hasAttribute('data-ended')).toBe(false);
+  live = live.filter((s) => s.session !== 'ses_pi');
+  // The open box reads who is live every 10 seconds (TagPicker.tsx).
+  await settle(10_300);
+  expect(named(el)).toBe('Pi');
+  expect(chip(el)!.hasAttribute('data-ended')).toBe(true);
+  act(() => t.add(message(M3, CLAUDE, 47)));
+  await settle();
+  expect(named(el)).toBe('Claude Code');
+}, 20_000);

@@ -163,6 +163,7 @@ packages/inbox/listRowEnded.test.tsx
 packages/inbox/multiAgentNames.test.tsx
 packages/inbox/replyRecipient.test.tsx
 packages/inbox/replyFollow.test.tsx
+packages/inbox/replyFollowVoice.test.tsx
 packages/inbox/replyQuote.test.tsx
 packages/inbox/phoneComposer.test.tsx
 packages/inbox/compose.test.tsx

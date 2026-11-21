@@ -2,10 +2,12 @@
  * Who gets the reply in a thread with more than one agent (approval "inbox-reply-recipient"), and when that choice
  * holds. The owner's decision of 2026-11-21, "Yes, follow until I type or pick": while the reply is empty and the
  * person has not picked, it goes to the agent that wrote last (`followedSession`), so an agent writing while the
- * thread is open moves it. The moment the reply holds anything (a character, a file, a comment, an answer picked, a
- * saved draft) or the person picks (the list, the Reply arrow), it holds, whatever arrives after: it never changes
- * under words being written. Emptied again without a pick (the words deleted, a Send), it follows again; a pick holds
- * until a Send, the box closed with no draft, or another thread (as a pick always did). */
+ * thread is open moves it. The moment the reply holds anything (a character, a file, a comment, an answer picked or
+ * still saving, dictation under way, a saved draft) or the person picks (the list, the Reply arrow), it holds,
+ * whatever arrives after: it never changes under words being written. Emptied again without a pick (the words
+ * deleted, a Send), it follows again; a pick holds until a Send, the box closed with no draft, or another thread (as
+ * a pick always did).
+ */
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import type { InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
@@ -16,10 +18,12 @@ import { activeHandoff } from '../tags';
 
 /**
  * The session the reply follows while the box is empty: the newest agent message's (a permission prompt's and a
- * routine's change line passed over, as the words' default does) whose session can take a reply now (a row of the
- * list, not ended, that can take it alone). The person's own messages and the Inbox's notes are not an agent's. A
- * thread handed to another session, or taken over from one that ended, keeps the words' own rule (`fallback`, from
- * `wordsMessage`): the former owner writing again never takes the words back. No such session: `fallback`.
+ * routine's change line passed over, as the words' default does), also when that session has ended: the chip then
+ * says so, and Send stops once to show it (an ended agent's thread still takes a message that waits for it, and a
+ * session the Inbox wakes itself drops off the live list while it can still take one). The person's own messages and
+ * the Inbox's notes are not an agent's. A thread handed to another session, or taken over from one that ended, keeps
+ * the words' own rule (`fallback`, from `wordsMessage`): the former owner writing again never takes the words back.
+ * No agent message in the list: `fallback`.
  */
 export function followedSession(thread: InboxThread, rows: readonly RecipientRow[], fallback: string | null): string | null {
   if (rows.length === 0 || activeHandoff(thread) !== null || tookOverReply(thread) !== null) return fallback;
@@ -28,7 +32,7 @@ export function followedSession(thread: InboxThread, rows: readonly RecipientRow
     const session = m.author.kind === 'agent' ? m.author.session : null;
     if (!session || isInboxPermissionSession(session) || m.scheduled_change) continue;
     const row = rows.find((r) => r.session === session);
-    if (row && !row.start && row.state !== 'ended' && row.alone !== false) return session;
+    if (row && !row.start && row.alone !== false) return session;
   }
   return fallback;
 }
@@ -78,7 +82,10 @@ export function useReplyAim(input: {
   /** `followedSession` now (with no control: the words' default). */
   follow: string | null;
   text: ReplyText;
-  /** Anything else the reply holds that a Send carries: files, comments, answers picked, a draft's words or files with the box closed. */
+  /**
+   * Anything else the reply holds: files, comments, answers picked (a pick still saving too), dictation under way,
+   * a draft's words or files with the box closed.
+   */
   carries: boolean;
   /** The saved draft's choice, and whether there is a draft. */
   saved: readonly string[] | undefined;

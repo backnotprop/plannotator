@@ -1138,7 +1138,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // agent that wrote last until the box holds something or the person picks; kept with the draft (its `recipients`).
   const rcptAim = useReplyAim({
     threadId: thread.thread_id, active: pillActive, boxOpen: box.open, boxOpenNow: () => boxRef.current.open, follow: followedSession(thread, rcptAgents, rcptDefault), text: replyText,
-    carries: replyFiles.files.length > 0 || records.length > 0 || thread.messages.some(answersItself) || (!box.open && (keptWords !== '' || draftPastes > 0)), saved: replyDraft.draft?.recipients, hasDraft: !!replyDraft.draft,
+    carries: replyFiles.files.length > 0 || records.length > 0 || thread.messages.some(answersItself) || [...pending.values()].some(Boolean) || voice.busy || (!box.open && (keptWords !== '' || draftPastes > 0)), saved: replyDraft.draft?.recipients, hasDraft: !!replyDraft.draft,
   });
   const { listOpen: rcptOpen, setListOpen: setRcptOpen } = rcptAim;
   /**

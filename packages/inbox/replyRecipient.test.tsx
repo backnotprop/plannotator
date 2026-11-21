@@ -2,8 +2,7 @@
  * Who gets the reply (approval "inbox-reply-recipient"; placed by "inbox-reply-target-chip", option B, 2026-11-20): in
  * a thread with more than one agent, a chip at the start of the words' first line names the recipient; its list
  * switches it, adds a second one ("2 agents"), and the Reply arrow on an older message aims it. The failure this
- * catches: a reply that goes to another agent than the one the chip names, a chip that moves under words when an agent
- * writes (an empty box follows the last writer: replyFollow.test.tsx),
+ * catches: a reply that goes to another agent than the one the chip names, a chip that moves when an agent writes,
  * one that becomes part of the words (Backspace, the field's name, the tab order), or a one-agent thread that grows
  * new UI.
  *
@@ -516,12 +515,9 @@ test.skipIf(!hasDom)('an agent from another folder: its head reads "in plannotat
   ]);
 });
 
-test.skipIf(!hasDom)('Send to an agent that ended (picked: the chip follows the live one) opens the list once; pressed again, the reply goes to it and waits', async () => {
+test.skipIf(!hasDom)('Send to an agent that ended opens the list once; pressed again, the reply goes to it and waits', async () => {
   const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, GONE, 45)));
   await write(el, 'Are you there?');
-  expect(pillName(el)).toBe('Claude Code');
-  await openList(el);
-  await only(el, 'ses_gone');
   expect(pill(el)?.hasAttribute('data-ended')).toBe(true);
   await send(el);
   expect(replies()).toEqual([]);
@@ -531,12 +527,10 @@ test.skipIf(!hasDom)('Send to an agent that ended (picked: the chip follows the 
   expect(replies()[0]!.body.to).toBeUndefined();
 });
 
-test.skipIf(!hasDom)('the only live agent is on an older Plannotator (it can\'t be tagged, but it takes a reply): Send to the ended agent, picked, still opens the list first', async () => {
+test.skipIf(!hasDom)('the only live agent is on an older Plannotator (it can\'t be tagged, but it takes a reply): Send to the ended agent still opens the list first', async () => {
   taggable = taggable.map((t) => (t.session === 'ses_claude' ? { ...t, taggable: false } : t));
   const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, GONE, 45)));
   await write(el, 'Are you there?');
-  await openList(el);
-  await only(el, 'ses_gone');
   await send(el);
   expect(replies()).toEqual([]);
   expect(el.querySelector('[data-recipient-list]')).not.toBeNull();
