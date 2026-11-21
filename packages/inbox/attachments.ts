@@ -420,7 +420,8 @@ export function recordTag(record: InboxAnnotationRecord): string | null {
   // element of a live html block names the element ("HTML · rect").
   if (record.message && annotationOf(record).htmlBlockAnchor != null) {
     const tag = annotationTag(annotationOf(record));
-    return tag ? `HTML · ${tag}` : 'HTML';
+    // No-break spaces: the tag stays on one line in a narrow list (a phone), and the name beside it is cut instead.
+    return tag ? `HTML\u00a0·\u00a0${tag}` : 'HTML';
   }
   if (record.message && annotationOf(record).diagramAnchor == null) return null;
   return annotationTag(annotationOf(record));

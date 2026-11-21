@@ -138,8 +138,10 @@ describe('an element with no text of its own (a bar of a chart)', () => {
 });
 
 describe("the reply box's list", () => {
-  test('tags the row with the element: "HTML · rect"', () => {
-    expect(recordTag(record('h1', 'Pro, W3', 'Label it.', BAR))).toBe('HTML · rect');
+  test('tags the row with the element, "HTML · rect", on one line (no-break spaces: a phone cuts the name, not the tag)', () => {
+    const tag = recordTag(record('h1', 'Pro, W3', 'Label it.', BAR))!;
+    expect(tag.replace(/\u00a0/g, ' ')).toBe('HTML · rect');
+    expect(tag).not.toContain(' ');
   });
   test('words selected inside a block are tagged "HTML"; words of the message itself keep no tag', () => {
     expect(recordTag(record('h1', 'Weekly signups', 'x', { htmlBlockAnchor: BAR.htmlBlockAnchor }))).toBe('HTML');
