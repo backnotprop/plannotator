@@ -164,6 +164,12 @@ extension StandInDoor {
 final class Ways: @unchecked Sendable {
   private let lock = NSLock()
   private var up = false
+  private var relayFaster = false
+  /// The relay answers first even with the direct way up (the direct way is the slower one).
+  var relayFirst: Bool {
+    get { lock.withLock { relayFaster } }
+    set { lock.withLock { relayFaster = newValue } }
+  }
   private var refusedDrawings = 0
   var direct: Bool {
     get { lock.withLock { up } }
@@ -178,6 +184,7 @@ struct DirectWay: DoorTransport {
   let ways: Ways
   func send(_ call: DoorCall) async throws -> DoorAnswerBytes {
     guard ways.direct else { throw URLError(.cannotConnectToHost) }
+    if ways.relayFirst { try? await Task.sleep(for: .milliseconds(400)) }
     return try await inner.send(call)
   }
   func events(_ call: DoorCall) async throws -> AsyncThrowingStream<Data, Error>? { ways.direct ? try await inner.events(call) : nil }
@@ -187,7 +194,7 @@ struct RelayWay: DoorTransport {
   let inner: StandInTransport
   let ways: Ways
   func send(_ call: DoorCall) async throws -> DoorAnswerBytes {
-    if ways.direct { try? await Task.sleep(for: .milliseconds(400)) }
+    if ways.direct, !ways.relayFirst { try? await Task.sleep(for: .milliseconds(400)) }
     if call.method == .post, call.path.hasSuffix("markups") {
       ways.refusedOne()
       let error = DoorError(error: "Files and drawings are sent over the Wi-Fi or the tailnet, not the relay.", code: "relay_upload_unavailable")

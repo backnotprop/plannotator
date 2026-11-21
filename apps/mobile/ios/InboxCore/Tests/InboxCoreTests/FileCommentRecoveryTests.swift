@@ -302,7 +302,9 @@ final class FileCommentRecoveryTests: XCTestCase {
   }
 
   func testASendOfOnlyCommentsADrawingRefusedForGoodEmptiesIsToldAboutAndItsCommentStays() async throws {
-    let (door, session) = try await seated()
+    let copy = LocalCopy(folder: folder())
+    let cache = folder()
+    let (door, session) = try await seated(copy: copy, cache: cache)
     _ = await door.addFile(thread: thread, message: StandInData.filesSecond, name: "flame.png", kind: .image, bytes: png(1), mediaType: "image/png", width: 8, height: 8)
     await session.readAttachments(thread)
     let item = try file(session, "flame.png")
@@ -320,6 +322,55 @@ final class FileCommentRecoveryTests: XCTestCase {
     XCTAssertNotNil(session.notices[thread], "the person is told")
     XCTAssertEqual(session.comments(thread).map(\.id), [made.id], "the comment stays, with its reason")
     XCTAssertNotNil(session.commentRefusal(made.id))
+    // Told after the app opens again too, until it is read.
+    session.stop()
+    let again = await pairedSession(door: door, copy: copy, bytes: AttachmentCache(folder: cache))
+    await again.start()
+    XCTAssertEqual(again.notices[thread], session.notices[thread], "the notice is kept")
+    XCTAssertNil(again.takeReturnedWords(thread), "and no empty words come back to the reply field")
+    again.clearNotice(thread)
+    let third = await pairedSession(door: door, copy: copy, bytes: AttachmentCache(folder: cache))
+    await third.start()
+    XCTAssertNil(third.notices[thread], "read, it is gone")
+  }
+
+  func testADrawingWaitingForAnotherWayGoesWhenTheDirectWayComesBackWithNoRefresh() async throws {
+    let ways = Ways()
+    let (door, session, picture) = try await relayed(ways)
+    let retry = StandInData.retry
+    XCTAssertNil(session.pathSearch, "no timer while nothing waits for another way")
+    session.pathSearchEvery = .milliseconds(100)
+    let made = try XCTUnwrap(session.addComment(thread: retry, item: picture, version: .current, annotation: FileComments.picture(name: picture.name, comment: "Crop the top.", markup: nil), drawing: png(9)))
+    await settled(session, retry)
+    XCTAssertEqual(ways.drawingsOnRelay, 1)
+    XCTAssertNotNil(session.pathSearch, "a slow look for a better way while the drawing waits")
+    // The phone is back on the computer's network; nothing else happens (no refresh, no reconnect).
+    ways.direct = true
+    for _ in 0..<200 where session.drawingWaits(made) { try? await Task.sleep(for: .milliseconds(10)) }
+    XCTAssertFalse(session.drawingWaits(made), "the drawing found the direct way")
+    let markups = await door.posts("markups")
+    XCTAssertEqual(markups.count, 1)
+    for _ in 0..<100 where session.pathSearch != nil { try? await Task.sleep(for: .milliseconds(10)) }
+    XCTAssertNil(session.pathSearch, "and the look stops")
+    // Out of the front, it never starts.
+    session.setInFront(false)
+    XCTAssertNil(session.pathSearch)
+  }
+
+  func testWithADrawingWaitingTheDirectWayIsTakenEvenWhenTheRelayAnswersFirst() async throws {
+    let ways = Ways()
+    let (door, session, picture) = try await relayed(ways)
+    let retry = StandInData.retry
+    let made = try XCTUnwrap(session.addComment(thread: retry, item: picture, version: .current, annotation: FileComments.picture(name: picture.name, comment: "Crop the top.", markup: nil), drawing: png(9)))
+    await settled(session, retry)
+    XCTAssertTrue(session.drawingWaits(made))
+    ways.relayFirst = true
+    ways.direct = true
+    await session.refresh()
+    await settled(session, retry)
+    XCTAssertFalse(session.drawingWaits(made))
+    let markups = await door.posts("markups")
+    XCTAssertEqual(markups.count, 1, "carried by the direct way, though the relay answered first")
   }
 
   func testASendQueuedWithACommentWhoseDrawingTheRelayRefusesGoesWithoutIt() async throws {

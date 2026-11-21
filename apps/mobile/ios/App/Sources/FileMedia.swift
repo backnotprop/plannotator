@@ -414,8 +414,10 @@ struct PDFPage: UIViewRepresentable {
 ///   was in a field of the page's own. It listens first (it is added before any of the page's scripts), so the
 ///   page cannot move the focus before it looks. Only that world can post to its handler.
 /// - `focus`, in the page's own world, since that is where the page calls `focus()`: it wraps `focus()` on HTML
-///   and SVG elements, before the page's scripts run, to say the script moved the focus. The page can post to this
-///   one too, which only keeps links closed.
+///   and SVG elements, before the page's scripts run, to say the script moved the focus. Everything the wrapper
+///   calls is taken before the page runs (`Reflect.apply`, the handler and its `postMessage`), so a page that
+///   replaces `Function.prototype.apply` or the handlers cannot reach the browser's own `focus()` through it, and
+///   the wrapper itself cannot be replaced. The page can post to this one too, which only keeps links closed.
 enum PageWatch {
   static let keyHandler = "plannotatorKey"
   static let focusHandler = "plannotatorScriptFocus"
@@ -444,18 +446,25 @@ enum PageWatch {
 
   static let focus = """
     (() => {
+      "use strict";
+      const apply = Reflect.apply;
+      const define = Object.defineProperty;
       const handlers = window.webkit && window.webkit.messageHandlers;
       const handler = handlers && handlers.\(focusHandler);
       if (!handler) return;
-      const post = handler.postMessage.bind(handler);
-      for (const kind of [window.HTMLElement, window.SVGElement, window.MathMLElement]) {
-        const proto = kind && kind.prototype;
+      const postMessage = handler.postMessage;
+      if (typeof postMessage !== "function") return;
+      const kinds = [window.HTMLElement, window.SVGElement, window.MathMLElement];
+      for (let i = 0; i < kinds.length; i += 1) {
+        const proto = kinds[i] && kinds[i].prototype;
         const original = proto && proto.focus;
         if (typeof original !== "function") continue;
-        Object.defineProperty(proto, "focus", { configurable: true, writable: true, value: function focus(...rest) {
-          try { post(1); } catch (_) {}
-          return original.apply(this, rest);
-        } });
+        const focus = function focus(options) {
+          try { apply(postMessage, handler, [1]); } catch (_) {}
+          return apply(original, this, [options]);
+        };
+        // Not configurable, not writable: the page cannot put the browser's own back.
+        define(proto, "focus", { value: focus, configurable: false, writable: false, enumerable: true });
       }
     })();
     """

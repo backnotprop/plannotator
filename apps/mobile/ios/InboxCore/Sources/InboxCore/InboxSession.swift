@@ -162,6 +162,12 @@ public final class InboxSession {
   /// Drawings a way refused to carry (the relay takes no uploads), by held write, with the way that refused. Such a
   /// drawing is tried again only on another way; meanwhile it holds back only itself and its comment.
   @ObservationIgnored var parkedDrawings: [String: Int] = [:]
+  /// Threads whose notice is a refusal given back with no words: kept across a relaunch like given-back words.
+  @ObservationIgnored var noticesKept: Set<ThreadID> = []
+  /// While a drawing waits for another way, the better ways are asked now and then (only with the app in front).
+  var pathSearchEvery: Duration = .seconds(60)
+  @ObservationIgnored private(set) var pathSearch: Task<Void, Never>?
+  @ObservationIgnored private var inFront = true
   /// Sends whose comments' texts are being read before they go (a short wait, never past `feedbackTextWait`).
   @ObservationIgnored var resolving: Set<String> = []
   /// How long a Send waits for the texts its comments' lines are read from; after that they go with no line.
@@ -201,7 +207,7 @@ public final class InboxSession {
     // Words a refused Send handed back, and why: kept until the composer takes them.
     let kept = copy.givenBack()
     for (thread, back) in kept {
-      returned[ThreadID(thread)] = back.words
+      if back.words.isEmpty { noticesKept.insert(ThreadID(thread)) } else { returned[ThreadID(thread)] = back.words }
       notices[ThreadID(thread)] = back.notice
     }
     loadDrafts()
@@ -225,6 +231,8 @@ public final class InboxSession {
   }
 
   public func stop() {
+    pathSearch?.cancel()
+    pathSearch = nil
     stopListening()
     book.wake?.cancel()
     book.wake = nil
@@ -255,6 +263,8 @@ public final class InboxSession {
     let token = computer.token
     let app = self.app
     let candidates = connector(computer).map { DoorClient(transport: $0, token: token, app: app) }
+    // While a drawing waits for a way other than the relay, a better way that answers is taken over a faster one.
+    let preferBetter = !parkedDrawings.isEmpty
     enum Probe: Sendable { case answered(Int, HealthRead), refused(DoorFailure), silent }
     let probe = await withTaskGroup(of: Probe.self) { group -> Probe in
       for (index, candidate) in candidates.enumerated() {
@@ -279,13 +289,18 @@ public final class InboxSession {
         }
       }
       var refusal: Probe?
+      var best: (index: Int, read: HealthRead)?
       for await result in group {
-        if case .answered = result {
-          group.cancelAll()
-          return result
+        if case .answered(let index, let read) = result {
+          if best.map({ index < $0.index }) ?? true { best = (index, read) }
+          if !preferBetter || index == 0 {
+            group.cancelAll()
+            return .answered(best!.index, best!.read)
+          }
         }
         if case .refused = result { refusal = result }
       }
+      if let best { return .answered(best.index, best.read) }
       return refusal ?? .silent
     }
     switch probe {
@@ -295,6 +310,7 @@ public final class InboxSession {
       let wayChanged = pathIndex != index && !parkedDrawings.isEmpty
       pathIndex = index
       if wayChanged { Task { [weak self] in await self?.flush() } }
+      lookForAnotherWay()
       skew = read.skew
       reach = .here
       switch read.skew {
@@ -502,6 +518,9 @@ public final class InboxSession {
   func keepGivenBack() {
     var kept: [String: LocalCopy.GivenBack] = [:]
     for (thread, words) in returned { kept[thread.rawValue] = LocalCopy.GivenBack(words: words, notice: notices[thread]) }
+    // A refusal that gave back no words (a Send of only comments) is kept too, until it is read.
+    noticesKept = noticesKept.filter { notices[$0] != nil }
+    for thread in noticesKept where kept[thread.rawValue] == nil { kept[thread.rawValue] = LocalCopy.GivenBack(words: "", notice: notices[thread]) }
     copy.saveGivenBack(kept)
   }
 
@@ -578,6 +597,8 @@ public final class InboxSession {
         held.removeAll { emptied.contains($0.id) }
         copy.saveOutbox(held)
         notices[ThreadID(write.thread)] = notice
+        noticesKept.insert(ThreadID(write.thread))
+        keepGivenBack()
       }
     case .annotationRemove:
       commentRefused(write, notice)
@@ -788,6 +809,7 @@ public final class InboxSession {
       // comment goes without it (the comment stays, "Will send", for a later Send).
       if write.kind == .markup, case .refused(_, let error) = failure, error.code == WireErrorCode.relayUploadUnavailable.rawValue {
         parkedDrawings[write.id] = pathIndex ?? -1
+        lookForAnotherWay()
         if let index = held.firstIndex(where: { $0.id == write.id }), held[index].waited != true {
           held[index].waited = true
           copy.saveOutbox(held)
@@ -932,6 +954,63 @@ public final class InboxSession {
   private func flush() async {
     var seen: Set<String> = []
     for thread in held.map(\.thread) where seen.insert(thread).inserted { await pump(thread) }
+  }
+
+  /// The app is in front (or not): the search for a better way runs only in front.
+  public func setInFront(_ on: Bool) {
+    inFront = on
+    if on {
+      lookForAnotherWay()
+    } else {
+      pathSearch?.cancel()
+      pathSearch = nil
+    }
+  }
+
+  /// While a drawing waits for a way other than the one in use (the relay takes no uploads), the better ways (the
+  /// Wi-Fi, the tailnet) are asked every `pathSearchEvery`; the first that answers carries the session, and what
+  /// waited goes. No timer otherwise: it stops once nothing waits for another way, or the app is not in front.
+  func lookForAnotherWay() {
+    guard pathSearch == nil, inFront, !removed, parkedDrawings.values.contains(where: { $0 > 0 }) else { return }
+    pathSearch = Task { [weak self] in
+      while let self, !Task.isCancelled {
+        try? await Task.sleep(for: self.pathSearchEvery)
+        guard !Task.isCancelled, self.inFront, !self.removed, let current = self.pathIndex, current > 0,
+          self.parkedDrawings.values.contains(current)
+        else { break }
+        if await self.takeBetterWay(than: current) { break }
+      }
+      self?.pathSearch = nil
+    }
+  }
+
+  /// Ask each way better than `current` for `health`, best first; take the first that answers.
+  private func takeBetterWay(than current: Int) async -> Bool {
+    let token = computer.token
+    let app = self.app
+    let candidates = connector(computer).map { DoorClient(transport: $0, token: token, app: app) }
+    for index in 0..<min(current, candidates.count) {
+      let candidate = candidates[index]
+      let read = await withTaskGroup(of: HealthRead?.self) { race in
+        race.addTask { try? await candidate.health() }
+        race.addTask {
+          try? await Task.sleep(for: .seconds(3))
+          return nil
+        }
+        let first = await race.next() ?? nil
+        race.cancelAll()
+        return first
+      }
+      guard let read, case .ok = read.skew, !removed else { continue }
+      client = candidate
+      pathIndex = index
+      skew = read.skew
+      stopListening()
+      listen()
+      await flush()
+      return true
+    }
+    return false
   }
 
   /// While something waits and the computer does not answer, ask again now and then.
@@ -1108,7 +1187,10 @@ public final class InboxSession {
   /// A reply of this thread that waits for the computer.
   public func hasHeldReply(_ id: ThreadID) -> Bool { held.contains { $0.kind == .reply && $0.thread == id.rawValue } }
 
-  public func clearNotice(_ id: ThreadID) { notices[id] = nil }
+  public func clearNotice(_ id: ThreadID) {
+    notices[id] = nil
+    keepGivenBack()
+  }
 
   /// The words of a Send the computer refused, handed back once for the composer.
   public func takeReturnedWords(_ id: ThreadID) -> String? {
