@@ -896,6 +896,25 @@ export interface PlannotatorConfig {
    */
   bitbucketTokenCommand?: string[];
   /**
+   * API tokens for Forgejo / Gitea instances, keyed by origin: scheme, host and
+   * port as they appear in the PR URL (`"https://forgejo.example.com"`,
+   * `"http://forgejo.lan:3000"`). A token is sent only to the origin it is keyed
+   * to, so a link to any other host, or to the same host over another scheme,
+   * never receives it. Scopes: `read:repository` and `read:issue` to read a PR and its
+   * attachments, `write:repository` to post a review.
+   * Stored in plain text in config.json, so prefer PLANNOTATOR_FORGEJO_TOKEN
+   * with PLANNOTATOR_FORGEJO_URL. Never sent to the browser: getServerConfig()
+   * allowlists its keys.
+   */
+  forgejoTokens?: Record<string, string>;
+  /**
+   * Forgejo / Gitea hosts, `forgejo.example.com` or `forgejo.example.com:8443`, for the Inbox's links and hover
+   * cards: a link names a Forgejo's pull requests by its path, but only a host named here (or one that has a token in
+   * `forgejoTokens`, or is PLANNOTATOR_FORGEJO_URL) is fetched from, and a token goes only to those. codeberg.org
+   * is always one. Same shape as `gitlabHosts`.
+   */
+  forgejoHosts?: string[];
+  /**
    * Pass `--sandbox enabled` when launching Cursor's `agent` CLI for review
    * jobs. When true (default), review jobs run with Cursor's sandbox forced
    * on as part of their read-only posture. Set to false on systems where
@@ -2917,6 +2936,93 @@ export function resolveBitbucketTokenCommand(
   if (!Array.isArray(argv) || argv.length === 0 || !argv.every((part) => typeof part === "string" && part !== "")) return null;
   const email = typeof config.bitbucketEmail === "string" && config.bitbucketEmail.trim() !== "" ? config.bitbucketEmail.trim() : undefined;
   return { argv: [...argv], ...(email ? { email } : {}) };
+}
+
+/**
+ * The origin of an http(s) URL in its canonical form (lower-case host, default
+ * port dropped), or null for anything else, including a URL with credentials.
+ * Forgejo tokens are matched on this, so `https://Forgejo.Example.com:443` and
+ * `https://forgejo.example.com` are one instance.
+ */
+export function normalizeForgejoOrigin(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    if (url.username || url.password) return null;
+    return url.origin.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+const FORGEJO_HOST = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d{1,5})?$/;
+
+/** A Forgejo host as `forgejoHosts` writes it (`name` or `name:port`, lower case), or null. */
+export function forgejoHostName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const host = value.trim().replace(/^(["'])(.*)\1$/, "$2").toLowerCase();
+  return FORGEJO_HOST.test(host) ? host : null;
+}
+
+/**
+ * Every Forgejo host the person has named, as `name` or `name:port`: the `forgejoHosts` list, the host of each
+ * `forgejoTokens` origin, and the host of PLANNOTATOR_FORGEJO_URL. These are the hosts the Inbox may fetch hover
+ * cards from, and the only ones a token is sent to. codeberg.org is not listed here: it is always a Forgejo
+ * (`learnForgejoHosts` adds it).
+ */
+export function resolveForgejoHosts(
+  config: PlannotatorConfig,
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  const hosts = new Set<string>();
+  const add = (value: unknown) => {
+    const host = forgejoHostName(value);
+    if (host) hosts.add(host);
+  };
+  if (Array.isArray(config.forgejoHosts)) config.forgejoHosts.forEach(add);
+  const tokens = config.forgejoTokens;
+  if (tokens && typeof tokens === "object" && !Array.isArray(tokens)) {
+    for (const origin of Object.keys(tokens)) {
+      const normalized = normalizeForgejoOrigin(origin);
+      if (normalized) add(new URL(normalized).host);
+    }
+  }
+  const envUrl = normalizeForgejoOrigin(env.PLANNOTATOR_FORGEJO_URL ?? "");
+  if (envUrl) add(new URL(envUrl).host);
+  return [...hosts];
+}
+
+/**
+ * The API token for one Forgejo / Gitea instance, or null. A token goes only to
+ * the origin it is configured for (scheme, host and port), so a PR or a link
+ * naming any other host, or the same host over http, gets none.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_FORGEJO_TOKEN, used only for the origin named by
+ *   PLANNOTATOR_FORGEJO_URL  →  config.forgejoTokens[origin]
+ *
+ * Empty values count as unset. Never log the result.
+ */
+export function resolveForgejoToken(
+  config: PlannotatorConfig,
+  origin: string,
+  env: Record<string, string | undefined> = process.env,
+): string | null {
+  const wanted = normalizeForgejoOrigin(origin);
+  if (!wanted) return null;
+  const clean = (v: unknown): string | undefined =>
+    typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
+  const envToken = clean(env.PLANNOTATOR_FORGEJO_TOKEN);
+  const envUrl = clean(env.PLANNOTATOR_FORGEJO_URL);
+  if (envToken && envUrl && normalizeForgejoOrigin(envUrl) === wanted) return envToken;
+  const tokens = config.forgejoTokens;
+  if (tokens && typeof tokens === "object" && !Array.isArray(tokens)) {
+    for (const [key, value] of Object.entries(tokens)) {
+      const token = clean(value);
+      if (token && normalizeForgejoOrigin(key) === wanted) return token;
+    }
+  }
+  return null;
 }
 
 /**

@@ -28,6 +28,7 @@
  */
 
 import { forgePullUrl, forgeRefKey, forgeRefLabel, parseForgeRefUrl, type ForgeRef } from "@plannotator/core/forge-ref-card";
+import { classifyForgeHost } from "@plannotator/core/forge-refs";
 import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
 import { inboxPullUrlsIn, inboxThreadPullText, parseInboxThreadPullRef, type InboxThreadPullRef } from "@plannotator/core/inbox-types";
 import { blankCode } from "@plannotator/shared/inbox/message-images";
@@ -146,7 +147,8 @@ const GITHUB_NUMBER_MAX = 2 ** 31 - 1;
  * The GitHub numbers the text names, as PR refs in text order, read lazily so
  * a caller can stop: `owner/repo#12` (github.com, or the project's host when
  * it is the project's repository) and a bare `#12` (the project's
- * repository). `own` marks the project's.
+ * repository). `own` marks the project's. On a host the person named as a
+ * Forgejo / Gitea the ref is a Forgejo's (its pull is `/pulls/12`, not `/pull/12`).
  */
 function* githubNumbersIn(text: string, repo: InboxKnownPulls["repo"]): Generator<{ index: number; ref: ForgeRef; own: boolean }> {
   const at = repo ? repo.repo.lastIndexOf("/") : -1;
@@ -154,7 +156,7 @@ function* githubNumbersIn(text: string, repo: InboxKnownPulls["repo"]): Generato
   const entry = (index: number, host: string, owner: string, name: string, number: number, own: boolean) =>
     number > GITHUB_NUMBER_MAX || [owner, name].some((part) => part === "." || part === "..")
       ? null
-      : { index, ref: { platform: "github" as const, host, owner, repo: name, number, kind: "pull" as const }, own };
+      : { index, ref: { platform: classifyForgeHost(host) === "forgejo" ? ("forgejo" as const) : ("github" as const), host, owner, repo: name, number, kind: "pull" as const }, own };
   const short = text.matchAll(SHORT_GITHUB_REF);
   const bare = project ? text.matchAll(BARE_NUMBER) : null;
   // Each scan is in text order; merged by position, so the stream is too.

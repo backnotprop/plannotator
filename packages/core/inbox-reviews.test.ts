@@ -500,7 +500,25 @@ describe("a pull request link", () => {
     for (const text of ["https://--hostname/o/r/pull/1", "https://github.com/-o/r/pull/1", "https://github.com/o/-r/pull/1", "-o/r#1"]) expect(inboxReviewLinkOf(text)).toBeNull();
     expect(inboxReviewLinkOf("https://bitbucket.org/acme/mobile/pull-requests/88")).toEqual({ unsupported: "bitbucket" });
     expect(inboxReviewLinkOf("https://dev.azure.com/o/p/_git/r/pullrequest/5")).toEqual({ unsupported: "host" });
+    // A Forgejo / Gitea link (`/pulls/N`) is its own answer, never read as GitHub's `/pull/N` (it was rewritten to one).
+    // A host nobody named is not read; one the person named (codeberg.org is built in) is, as a Forgejo's, at its own address.
+    for (const text of ["https://git.example.test/acme/w/pulls/7/files", "https://git.example.test/acme/w/pulls/7#issuecomment-3"]) {
+      expect(inboxReviewLinkOf(text)).toEqual({ unsupported: "forgejo" });
+    }
+    expect(inboxReviewLinkOf("https://codeberg.org/acme/w/pulls/7")).toMatchObject({
+      url: "https://codeberg.org/acme/w/pulls/7",
+      ref: { platform: "forgejo", host: "codeberg.org", repo: "acme/w", number: 7, key: "codeberg.org/acme/w#7" },
+    });
+    // GitHub's own page, and a Forgejo's issue page, are as before.
+    expect(inboxReviewLinkOf("https://github.com/acme/w/pulls/7")).toMatchObject({ url: "https://github.com/acme/w/pull/7", ref: { platform: "github" } });
+    expect(inboxReviewLinkOf("https://git.example.test/acme/w/issues/7")).toBeNull();
     for (const text of ["", "retries", "https://github.com/northwind/payments", "file:///etc/pull/1", "o/r#x"]) expect(inboxReviewLinkOf(text)).toBeNull();
+  });
+
+  test("a Send's link start on a Forgejo keeps the PR by its own key and address", () => {
+    const where = { host: "pi", project_id: "p", at: "2026-11-05T10:00:00.000Z" };
+    const start = inboxReviewStartOf({ kind: "link", url: "https://codeberg.org/acme/w/pulls/7", title: "Add a widget", mine: false, ask: "guide" }, where);
+    expect(start).toMatchObject({ kind: "link", pull: { key: "codeberg.org/acme/w#7", number: 7, title: "Add a widget" } });
   });
 
   test("a Send's link start keeps the PR named by its own address, whatever else it says", () => {

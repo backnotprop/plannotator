@@ -15,9 +15,10 @@
  */
 
 import { forgeRefKey } from "./forge-ref-card";
+import { classifyForgeHost } from "./forge-refs";
 import type { InboxPullRiskJudgment } from "./inbox-pull-risk";
 
-export type InboxPullPlatform = "github" | "gitlab";
+export type InboxPullPlatform = "github" | "gitlab" | "forgejo";
 export type InboxPullState = "open" | "draft" | "merged" | "closed";
 export type InboxPullChecks = "success" | "failure" | "pending";
 export type InboxPullReview = "approved" | "changes_requested" | "review_required";
@@ -663,7 +664,8 @@ export function inboxPullRefOfUrl(url: string): { key: string; platform: InboxPu
   const host = match[1]!.toLowerCase();
   const repo = match[2]!;
   const number = Number(match[4]);
-  const platform = match[3] === "-/merge_requests" ? "gitlab" : "github";
+  // `/pulls/N` is a Forgejo's (GitHub's own page is `/pull/N`), when the host is one.
+  const platform: InboxPullPlatform = match[3] === "-/merge_requests" ? "gitlab" : match[3] === "pulls" ? (classifyForgeHost(host) === "forgejo" ? "forgejo" : "github") : "github";
   const at = repo.lastIndexOf("/");
   // The key the list gives the same PR.
   const key = forgeRefKey({ platform, host, owner: repo.slice(0, at), repo: repo.slice(at + 1), number, kind: "pull" });
@@ -674,13 +676,22 @@ export function inboxPullRefOfUrl(url: string): { key: string; platform: InboxPu
 export function inboxPullRefOfKey(key: string): { key: string; platform: InboxPull["platform"]; host: string; repo: string; number: number } | null {
   const match = /^([A-Za-z0-9.-]+)\/(.+)#(\d+)(:pull)?$/.exec(key);
   if (!match || !INBOX_PULL_REPO.test(match[2]!)) return null;
-  return { key, platform: match[4] ? "gitlab" : "github", host: match[1]!.toLowerCase(), repo: match[2]!, number: Number(match[3]) };
+  const host = match[1]!.toLowerCase();
+  // A key says GitLab by its `:pull`; a Forgejo's looks like GitHub's, so only the host tells them apart.
+  const platform: InboxPullPlatform = match[4] ? "gitlab" : classifyForgeHost(host) === "forgejo" ? "forgejo" : "github";
+  return { key, platform, host, repo: match[2]!, number: Number(match[3]) };
+}
+
+/** A pull request's web address on its forge: GitHub's `/pull/N`, GitLab's `/-/merge_requests/N`, a Forgejo's `/pulls/N`. */
+export function inboxPullUrlOf(ref: { platform: InboxPullPlatform; host: string; repo: string; number: number }): string {
+  const page = ref.platform === "gitlab" ? "-/merge_requests" : ref.platform === "forgejo" ? "pulls" : "pull";
+  return `https://${ref.host}/${ref.repo}/${page}/${ref.number}`;
 }
 
 /** A pull key's web address, for reading one PR that isn't on the list. */
 export function inboxPullUrlOfKey(key: string): string | null {
   const ref = inboxPullRefOfKey(key);
-  return ref && `https://${ref.host}/${ref.repo}/${ref.platform === "gitlab" ? "-/merge_requests" : "pull"}/${ref.number}`;
+  return ref && inboxPullUrlOf(ref);
 }
 
 /**

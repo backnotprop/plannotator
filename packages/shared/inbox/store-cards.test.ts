@@ -414,6 +414,8 @@ describe("parseInboxCardPr", () => {
     expect(parseInboxCardPr("owner/repo#0123")).toEqual({ ref: "owner/repo#123", url: "https://github.com/owner/repo/pull/123" });
     expect(parseInboxCardPr("https://gitlab.com/g/sub/p/-/merge_requests/12/diffs")).toEqual({ ref: "g/sub/p!12", url: "https://gitlab.com/g/sub/p/-/merge_requests/12" });
     expect(parseInboxCardPr("https://bitbucket.org/ws/r/pull-requests/7")).toEqual({ ref: "ws/r#7", url: "https://bitbucket.org/ws/r/pull-requests/7" });
+    // A Forgejo's PR keeps its own `/pulls/N` page and its host in the ref: never the GitHub-shaped `/pull/N` link.
+    expect(parseInboxCardPr("https://codeberg.org/acme/w/pulls/7/files")).toEqual({ ref: "codeberg.org/acme/w#7", url: "https://codeberg.org/acme/w/pulls/7" });
     expect(parseInboxCardPr("https://ghe.corp/o/r/pull/5")).toEqual({ ref: "ghe.corp/o/r#5", url: "https://ghe.corp/o/r/pull/5" });
     for (const bad of ["#12", "PR 12", "https://github.com/o/r/issues/1", "", 12, null]) expect(parseInboxCardPr(bad)).toBeNull();
   });

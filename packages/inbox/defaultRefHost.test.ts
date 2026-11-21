@@ -5,6 +5,7 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { getCrossRepoRefsWithoutRepo, resetCrossRepoRefsWithoutRepo, setCrossRepoRefsWithoutRepo } from '@plannotator/ui/components/InlineMarkdown';
+import { classifyForgeHost } from '@plannotator/core/forge-refs';
 import { defaultRefHost, learnDefaultRefHost, resetDefaultRefHost } from './defaultRefHost';
 
 const gl = { repo_host: 'gitlab.example.com' };
@@ -54,5 +55,25 @@ describe('ui hears it', () => {
     expect(getCrossRepoRefsWithoutRepo()).toBe(true);
     learnDefaultRefHost([gh]);
     expect(getCrossRepoRefsWithoutRepo()).toEqual({ host: 'github.com' });
+  });
+});
+
+describe('a Forgejo the server tagged', () => {
+  afterEach(() => resetDefaultRefHost());
+
+  test('its projects teach the window the host, so #12 links there; a list with none forgets it', () => {
+    const fj = { repo_host: 'git.acme.com', repo_forge: 'forgejo' as const };
+    expect(classifyForgeHost('git.acme.com')).toBeNull();
+    // Most projects are on it: a repoless thread's owner/repo#123 links on that Forgejo.
+    learnDefaultRefHost([fj, fj, gh]);
+    expect(classifyForgeHost('git.acme.com')).toBe('forgejo');
+    expect(defaultRefHost([fj, fj, gh])).toBe('git.acme.com');
+    learnDefaultRefHost([gh]);
+    expect(classifyForgeHost('git.acme.com')).toBeNull();
+  });
+
+  test('a host the server did not tag is not taught: an untagged remote stays opaque', () => {
+    learnDefaultRefHost([{ repo_host: 'git.acme.com' }]);
+    expect(classifyForgeHost('git.acme.com')).toBeNull();
   });
 });

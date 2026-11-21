@@ -12,10 +12,11 @@
  * A real store in a temp dir and send_message's own handler; no Inbox
  * server, no network: the lookup after a send reads a stand-in forge.
  */
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { learnForgejoHosts } from "@plannotator/core/forge-refs";
 import { INBOX_THREAD_PULLS_MAX, parseInboxThreadPullRefs } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxMcpServer, type InboxMcpContext } from "./inbox-mcp";
@@ -75,6 +76,47 @@ test("a PR's URL or a GitLab short ref in the agent's words is read; code, quote
   // Not a number the agent named: code, a quote, an HTML entity, a link's fragment.
   expect(keys(["`#13`", "> #13", "&#13;", "see page#13", "```", "#13", "```"].join("\n"), knowing("github.com/acme/api#13"))).toEqual([]);
   expect(keys("PR#13 is up.", knowing("github.com/acme/api#13"))).toEqual(["github.com/acme/api#13"]);
+});
+
+describe("a Forgejo / Gitea PR in the agent's words", () => {
+  const FJ = "https://git.example.test/acme/widgets/pulls/7";
+  const named = () => learnForgejoHosts(["git.example.test"]);
+  afterEach(() => learnForgejoHosts([]));
+  const forgejoKnowing = (...pulls: string[]): InboxKnownPulls => ({ repo: { host: "git.example.test", repo: "acme/widgets" }, isPull: (key) => pulls.includes(key) });
+
+  test("its URL is read like any forge's; an issue link, code and a quote are not", () => {
+    expect(keys(`Opened ${FJ} for this.`)).toEqual(["git.example.test/acme/widgets#7"]);
+    expect(keys(`See [the PR](${FJ}/files).`)).toEqual(["git.example.test/acme/widgets#7"]);
+    expect(keys("Tracked in https://git.example.test/acme/widgets/issues/7.")).toEqual([]);
+    expect(keys(`> you said ${FJ}\nYes.`)).toEqual([]);
+    expect(keys(["```sh", FJ, "```", `and \`${FJ}\``].join("\n"))).toEqual([]);
+  });
+
+  test("an agent that names one in a message is nudged to attach it, and the nudge's ref adds it as a Forgejo PR", async () => {
+    named();
+    const w = world({ known: forgejoKnowing() });
+    const sent = await w.send("ses_a", { body: `Opened ${FJ} for review.` });
+    expect(sent.last).toBe(nudge("#7", FJ));
+    // The ref the nudge offers is one thread_pulls takes, and it is the Forgejo PR the agent named.
+    expect(parseInboxThreadPullRefs([FJ], "add").refs?.map((r) => [r.key, r.ref.platform])).toEqual([["git.example.test/acme/widgets#7", "forgejo"]]);
+  });
+
+  test("a bare #12 or the project's own owner/repo#12, in a project on a Forgejo the person named, is a Forgejo PR whose page is /pulls/12", () => {
+    named();
+    const known = forgejoKnowing("git.example.test/acme/widgets#12");
+    for (const words of ["Fixed in #12.", "PR#12 is up.", "See acme/widgets#12."]) {
+      const [ref] = pullsNamedInBody(words, "git.example.test", known);
+      expect([ref?.key, ref?.ref.platform, ref?.url]).toEqual(["git.example.test/acme/widgets#12", "forgejo", "https://git.example.test/acme/widgets/pulls/12"]);
+    }
+    // A number the Inbox does not know as a PR is still no PR, and another repository's owner/repo#12 is GitHub's.
+    expect(pullsNamedInBody("Fixed in #13.", "git.example.test", known)).toEqual([]);
+    // Only a host the person named is a Forgejo: a project on any other host keeps the ref it always had.
+    for (const host of ["git.unnamed.test", "gitlab.acme.dev"]) {
+      const there: InboxKnownPulls = { repo: { host, repo: "acme/widgets" }, isPull: () => true };
+      expect(pullsNamedInBody("Fixed in #12.", host, there).map((r) => r.ref.platform)).toEqual(["github"]);
+    }
+    expect(pullsNamedInBody("See other/thing#12.", "git.example.test", forgejoKnowing("github.com/other/thing#12")).map((r) => [r.ref.platform, r.url])).toEqual([["github", "https://github.com/other/thing/pull/12"]]);
+  });
 });
 
 test("a question counts with two or more choices and no pros, cons or prototype anywhere", () => {
