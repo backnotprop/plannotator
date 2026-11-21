@@ -15,6 +15,8 @@ import {
   parseDiffMetadataPathLines,
   OVERSIZED_REVIEW_STUB_MARKER,
   oversizedReviewStubBytesLine,
+  parseLfsPointerDiff,
+  type LfsPointer,
 } from "./diff-paths";
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
 
@@ -2858,6 +2860,7 @@ export interface PatchFileEntry {
   hasHunks: boolean;
   isBinary: boolean;
   isOversizedStub: boolean;
+  lfsPointers?: { old?: LfsPointer; new?: LfsPointer };
 }
 
 /**
@@ -2904,6 +2907,8 @@ export function findPatchFileEntry(patch: string, filePath: string): PatchFileEn
         : oldPath && newPath && oldPath !== newPath
           ? "renamed"
           : "modified";
+    const pointers = parseLfsPointerDiff(patch.slice(start, end));
+    const lfsPointers = pointers && !!pointers.old === !!oldPath && !!pointers.new === !!newPath ? pointers : null;
     return {
       path,
       ...(oldPath ? { oldPath } : {}),
@@ -2912,6 +2917,7 @@ export function findPatchFileEntry(patch: string, filePath: string): PatchFileEn
       hasHunks: hunkIndex !== -1,
       isBinary: binaryLine !== undefined,
       isOversizedStub: headerLines.includes(OVERSIZED_REVIEW_STUB_MARKER),
+      ...(lfsPointers ? { lfsPointers } : {}),
     };
   }
   return null;

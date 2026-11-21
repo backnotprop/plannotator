@@ -47,6 +47,12 @@ afterEach(() => {
 const signal = () => new AbortController().signal;
 
 describe('review image cache', () => {
+  test('204 is unchanged, without an empty image Blob or cache entry', async () => {
+    globalThis.fetch = (async () => new Response(null, { status: 204 })) as unknown as typeof fetch;
+    expect(await fetchReviewImage('snap', 'a.png', 'new', signal())).toEqual({ ok: true, image: null });
+    expect(urlCounter).toBe(0);
+    expect(reviewImageCacheStats().entries).toBe(0);
+  });
   test('total cached bytes stay under the byte cap', async () => {
     const size = 10 * 1024 * 1024;
     serveBytes(size);
@@ -84,7 +90,7 @@ describe('review image cache', () => {
       fetchReviewImage('snap', 'a.png', 'new', signal()),
       fetchReviewImage('snap', 'a.png', 'new', signal()),
     ]);
-    if (!first.ok || !second.ok) throw new Error('expected ok');
+    if (!first.ok || !first.image || !second.ok || !second.image) throw new Error('expected images');
     expect(second.image.url).toBe(first.image.url);
     expect(revoked).not.toContain(first.image.url);
     expect(peekReviewImage('snap', 'a.png', 'new')?.url).toBe(first.image.url);
@@ -94,7 +100,7 @@ describe('review image cache', () => {
   test('an evicted URL a mounted image still uses is revoked only on release', async () => {
     serveBytes(64 * 1024 * 1024);
     const first = await fetchReviewImage('snap', 'a.png', 'new', signal());
-    if (!first.ok) throw new Error('expected ok');
+    if (!first.ok || !first.image) throw new Error('expected an image');
     const release = retainReviewImageUrl(first.image.url);
     // Two more 64 MB sides push the first out of the 128 MB cache.
     await fetchReviewImage('snap', 'b.png', 'new', signal());

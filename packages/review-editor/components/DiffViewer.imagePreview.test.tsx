@@ -59,6 +59,17 @@ const ADDED = [
 
 const PNG_A = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
 const PNG_B = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 4, 5, 6]);
+const LFS = [
+  'diff --git a/assets/logo.png b/assets/logo.png',
+  '--- a/assets/logo.png',
+  '+++ b/assets/logo.png',
+  '@@ -1,3 +1,3 @@',
+  ' version https://git-lfs.github.com/spec/v1',
+  `-oid sha256:${'1'.repeat(64)}`,
+  `+oid sha256:${'2'.repeat(64)}`,
+  ' size 7',
+  '',
+].join('\n');
 
 type Responder = (side: string) => Response | Promise<Response>;
 
@@ -105,7 +116,7 @@ describe.if(hasDom)('image preview in the single-file view (DOM)', () => {
   const image = (bytes: Uint8Array) =>
     new Response(bytes, { headers: { 'content-type': 'image/png', 'x-image-width': '4', 'x-image-height': '3' } });
 
-  async function render(patch: string, filePath: string, available: boolean) {
+  async function render(patch: string, filePath: string, available: boolean, lfs = false) {
     host = document.createElement('div');
     document.body.appendChild(host);
     root = createRoot(host);
@@ -117,6 +128,7 @@ describe.if(hasDom)('image preview in the single-file view (DOM)', () => {
           status={patch === ADDED ? 'added' : 'modified'}
           reviewSnapshotId="snap-1"
           imagePreviewAvailable={available}
+          lfsImagePreviewAvailable={lfs}
           diffStyle="unified"
           annotations={[]}
           selectedAnnotationId={null}
@@ -151,6 +163,46 @@ describe.if(hasDom)('image preview in the single-file view (DOM)', () => {
     host = null;
     globalThis.fetch = originalFetch;
     globalThis.IntersectionObserver = originalObserver;
+  });
+
+  test('an LFS preview hides pointer source only with the separate capability', async () => {
+    installFetch((side) => image(side === 'old' ? PNG_A : PNG_B));
+    const el = await render(LFS, 'assets/logo.png', true, true);
+    expect(el.querySelector('[data-image-diff-preview]')).not.toBeNull();
+    expect(el.querySelector<HTMLElement>('[data-diff-content]')?.hidden).toBe(true);
+    expect(imageRequests).toHaveLength(2);
+  });
+
+  test('an old server keeps the pointer source and issues no image reads', async () => {
+    installFetch(() => image(PNG_A));
+    const el = await render(LFS, 'assets/logo.png', true);
+    expect(el.querySelector<HTMLElement>('[data-diff-content]')?.hidden).toBe(false);
+    expect(imageRequests).toHaveLength(0);
+  });
+
+  test('when neither LFS side is resolvable, the pointer source returns', async () => {
+    installFetch(() => new Response(JSON.stringify({ reason: 'lfs-pointer' }), { status: 415 }));
+    const el = await render(LFS, 'assets/logo.png', true, true);
+    expect(el.querySelector('[data-image-diff-preview]')).toBeNull();
+    expect(el.querySelector<HTMLElement>('[data-diff-content]')?.hidden).toBe(false);
+  });
+
+  test('equal LFS object ids show unchanged without reading images', async () => {
+    installFetch(() => { throw new Error('must not read'); });
+    const el = await render(LFS.replace('2'.repeat(64), '1'.repeat(64)), 'assets/logo.png', true, true);
+    expect(el.querySelector('[data-image-unchanged]')?.textContent).toContain('contents unchanged');
+    expect(el.querySelector('img')).toBeNull();
+    expect(imageRequests).toHaveLength(0);
+  });
+
+  test('an equal-object 204 uses the existing unchanged caption without decoding an empty image', async () => {
+    installFetch(() => new Response(null, { status: 204 }));
+    const el = await render(MODIFIED, 'assets/logo.png', true);
+    expect(imageRequests).toHaveLength(2);
+    expect(el.querySelector('[data-image-unchanged]')?.textContent).toContain('contents unchanged');
+    expect(el.querySelector('img')).toBeNull();
+    expect(el.querySelector('[aria-label="Loading image"]')).toBeNull();
+    expect(el.querySelector('[data-image-error]')).toBeNull();
   });
 
   test('with the advert, a changed image renders Before and After instead of the notice', async () => {

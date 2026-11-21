@@ -14,6 +14,7 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -157,6 +158,7 @@ for (const [runtime, startServer] of [
       const payload = (await fetch(`${server.url}/api/diff`).then((r) => r.json())) as {
         snapshotId: string;
         imagePreviewSupported?: boolean;
+        lfsImagePreviewSupported?: boolean;
       };
       const image = (path: string, side: "old" | "new", init?: RequestInit) =>
         fetch(
@@ -168,6 +170,46 @@ for (const [runtime, startServer] of [
 
     const bodyBytes = async (response: Response) => new Uint8Array(await response.arrayBuffer());
     const reason = async (response: Response) => ((await response.json()) as { reason: string }).reason;
+
+    test("LFS pointers preview only verified local objects, including added/deleted/renamed sides", async () => {
+      const repo = makeTempDir("plannotator-review-lfs-route-");
+      git(repo, ["init", "-q"]);
+      git(repo, ["config", "user.email", "test@example.com"]);
+      git(repo, ["config", "user.name", "Test"]);
+      const before = png(4, 3, 1);
+      const after = png(8, 6, 2);
+      const cache = (bytes: Uint8Array) => {
+        const oid = createHash("sha256").update(bytes).digest("hex");
+        const dir = join(repo, ".git", "lfs", "objects", oid.slice(0, 2), oid.slice(2, 4));
+        mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, oid), bytes);
+        return { pointer: `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${bytes.length}\n`, object: join(dir, oid) };
+      };
+      const old = cache(before); const next = cache(after);
+      for (const name of ["mod.png", "gone.png", "ren-old.png"]) writeFileSync(join(repo, name), old.pointer);
+      git(repo, ["add", "-A"]); git(repo, ["commit", "-qm", "initial"]);
+      writeFileSync(join(repo, "mod.png"), next.pointer);
+      writeFileSync(join(repo, "added.png"), next.pointer);
+      rmSync(join(repo, "gone.png"));
+      git(repo, ["mv", "ren-old.png", "ren-new.png"]);
+      writeFileSync(join(repo, "ren-new.png"), next.pointer);
+      const { server, payload, image } = await start({ repo, outside: repo, files: {} });
+      try {
+        expect(payload.lfsImagePreviewSupported).toBe(true);
+        for (const [path, side, bytes] of [["mod.png", "old", before], ["mod.png", "new", after], ["added.png", "new", after], ["gone.png", "old", before], ["ren-new.png", "new", after]] as const) {
+          const response = await image(path, side);
+          expect(response.status).toBe(200);
+          expect(await bodyBytes(response)).toEqual(bytes);
+        }
+        expect(await reason(await image("added.png", "old"))).toBe("absent");
+        expect(await reason(await image("gone.png", "new"))).toBe("absent");
+        writeFileSync(next.object, new Uint8Array(after.length));
+        const mismatch = await image("mod.png", "new");
+        expect(mismatch.status).toBe(502); expect(await reason(mismatch)).toBe("lfs-mismatch");
+        rmSync(next.object);
+        const missing = await image("mod.png", "new");
+        expect(missing.status).toBe(415); expect(await reason(missing)).toBe("lfs-pointer");
+      } finally { server.stop(); }
+    }, 20_000);
 
     test("serves both sides byte-for-byte, resolved from the chunk", async () => {
       const fixture = buildRepo();

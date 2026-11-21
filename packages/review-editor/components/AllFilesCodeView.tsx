@@ -266,6 +266,7 @@ export interface AllFilesCodeViewProps {
     tooLargeFallback?: React.ReactNode;
     onHeightChange: () => void;
   }) => React.ReactNode;
+  lfsImagePreviewAvailable?: boolean;
   /**
    * Package changes under a package.json or lockfile header. A render prop
    * like `renderImagePreview`, so read-only hosts (the guide chain,
@@ -892,6 +893,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   contextExpansionAvailable = true,
   fetchFileContent,
   renderImagePreview,
+  lfsImagePreviewAvailable = false,
   renderImageViewControl,
   renderPackageChanges,
   headerHeightHint,
@@ -1239,7 +1241,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const ids = new Set<string>();
     if (renderImagePreview) {
       for (const [id, file] of itemIdToFile) {
-        if (isImagePreviewCandidate(file.patch, file.path, file.oldPath)) ids.add(id);
+        if (isImagePreviewCandidate(file.patch, file.path, file.oldPath, lfsImagePreviewAvailable)) ids.add(id);
       }
     }
     // Package changes cards are measured the same way.
@@ -1247,7 +1249,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       for (const [id, file] of itemIdToFile) if (packageFileKind(file.path)) ids.add(id);
     }
     return ids;
-  }, [itemIdToFile, renderImagePreview, renderPackageChanges]);
+  }, [itemIdToFile, renderImagePreview, renderPackageChanges, lfsImagePreviewAvailable]);
 
   // Markdown files shown as a rendered preview (see the `markdownPreview` prop).
   const markdownPreviewRef = useRef(markdownPreview);
@@ -4013,7 +4015,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const fileHeaderInputs = useMemo(
     () => ({}),
     [
-      itemIdToFilePath, itemIdToFile, markdownPreview, previewItemIds, fileCommentsByPath, renderImagePreview, editEnabled,
+      itemIdToFilePath, itemIdToFile, markdownPreview, previewItemIds, fileCommentsByPath, renderImagePreview, lfsImagePreviewAvailable, editEnabled,
       editSession.editingItemId, measuredHeaderItemIds, compactTouchLayout, headerKeepsFolder, readOnly, commentOnly, fileOpenIn,
       viewedFiles, generatedFiles, onToggleViewed, showViewedControls, stagedFiles, stagingFile, onStage, canStagePath,
       canStageFiles, showStageControls, stageError, onAddFileCommentForFile, hostFileNotesByPath, renderPackageChanges,
@@ -4046,7 +4048,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const isBinaryNotice = !isOversizedStub && isContentlessBinaryPatch(file.patch);
     const notice = isOversizedStub || isBinaryNotice ? null : changeNotice(file.patch);
     const remeasure = () => refreshItem(item.id);
-    const imagePreview = !collapsed && renderImagePreview && isImagePreviewCandidate(file.patch, file.path, file.oldPath)
+    const imagePreview = !collapsed && renderImagePreview && isImagePreviewCandidate(file.patch, file.path, file.oldPath, lfsImagePreviewAvailable)
       ? renderImagePreview({
           file,
           fallback: isOversizedStub
