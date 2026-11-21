@@ -13,7 +13,7 @@ import { expect, test } from 'bun:test';
 import type { InboxAgent, InboxAgentsGroup, InboxListRow } from '@plannotator/core/inbox-types';
 import type { MachineView } from '../api';
 import { machinesModel } from '../machines';
-import { agentFacts, agentListFilter, agentRowName, agentsGroups, agentThread, filterAgentRows } from './model';
+import { agentFacts, agentListFilter, agentRowName, agentsGroups, agentThread, filterAgentRows, sortAgentEntries } from './model';
 
 const SELF = 'ibx_01K0000000000000000000000S';
 const MAC = 'ibx_01K0000000000000000000000M';
@@ -58,6 +58,18 @@ test('linked: one group per machine in the machines\' order, each with its own a
   expect(groups.map((g) => g.agents.map((e) => e.agent.id))).toEqual([['ses_s'], ['ses_m', 'ses_w'], []]);
   // A waiting agent whose session ended still waits on the person: listed.
   expect(groups[1]!.agents[1]!.agent.state).toBe('waiting');
+});
+
+test('when agent status is on, waiting marks sort first, then working marks, while other agents keep their order', () => {
+  const entries = [
+    { agent: agent('idle-1'), machine: null, name: 'Idle 1', thread: null },
+    { agent: agent('working-1', { status_mark: { state: 'working' } }), machine: null, name: 'Working 1', thread: null },
+    { agent: agent('waiting-1', { status_mark: { state: 'blocked', where: 'inbox' } }), machine: null, name: 'Waiting 1', thread: null },
+    { agent: agent('idle-2'), machine: null, name: 'Idle 2', thread: null },
+    { agent: agent('waiting-2', { status_mark: { state: 'blocked', kind: 'question', where: 'terminal' } }), machine: null, name: 'Waiting 2', thread: null },
+  ];
+  expect(sortAgentEntries(entries, true).map((entry) => entry.agent.id)).toEqual(['waiting-1', 'waiting-2', 'working-1', 'idle-1', 'idle-2']);
+  expect(sortAgentEntries(entries, false).map((entry) => entry.agent.id)).toEqual(['idle-1', 'working-1', 'waiting-1', 'idle-2', 'waiting-2']);
 });
 
 test("an agent opens its launch's thread, else its own thread on its machine, one waiting on the person first", () => {

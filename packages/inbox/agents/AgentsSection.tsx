@@ -55,7 +55,7 @@ export interface AgentsSectionProps {
   labelId: string;
   bodyId: string;
   /** The section header (shared with Pinned and Projects), drawn with the goggles. */
-  header: (icon: ReactNode) => ReactNode;
+  header: (icon: ReactNode, waitingCount: number) => ReactNode;
   onMachine?: (machineId: string) => void;
   onMachineUpdate?: (machineId: string) => void;
   /** Show one agent's threads (`#agent=<id>`); null: everything again. */
@@ -362,10 +362,12 @@ function RexShowNote({ session }: { session: string }) {
 
 export function AgentsSection(props: AgentsSectionProps) {
   const groupsRead = useInboxAgents();
-  const groups = useMemo(() => agentsGroups(groupsRead, props.machines, props.rows), [groupsRead, props.machines, props.rows]);
+  const statusOn = useAgentStatusOn();
+  const groups = useMemo(() => agentsGroups(groupsRead, props.machines, props.rows, statusOn), [groupsRead, props.machines, props.rows, statusOn]);
   // A machine with no agent shows nothing, and a machine's name shows only while agents show from more than one
   // machine (the owner, 2026-11-09): with one, the agents alone.
   const filled = groups.filter((group) => group.agents.length > 0);
+  const waitingCount = statusOn ? filled.reduce((count, group) => count + group.agents.filter((entry) => entry.agent.status_mark?.state === 'blocked').length, 0) : 0;
   const captions = filled.filter((group) => group.machine !== null).length > 1;
   const empty = filled.length === 0;
   const machineOn = (id: string) => props.page === 'inbox' && props.machineId === id;
@@ -418,7 +420,7 @@ export function AgentsSection(props: AgentsSectionProps) {
     // background"). Its heading carries Add machine, then Add agent (under Tags' New tag); closed, nothing under it.
     <div className="ib-agentsec" data-agents-surface="" data-closed={props.closed ? '' : undefined}>
       <div className="ib-secrow" data-agents-head="" data-one-add={props.onAddMachine ? undefined : ""}>
-        {props.header(<GogglesMark />)}
+        {props.header(<GogglesMark />, waitingCount)}
         {props.onAddMachine && (
           <Tip content="Add machine">
             <button type="button" className="ib-proj-sort ib-agents-add" aria-label="Add machine" data-agents-add="machine" onClick={props.pick(() => props.onAddMachine?.())}>
