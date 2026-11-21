@@ -2,10 +2,12 @@ import React, { useCallback, useId, useSyncExternalStore } from 'react';
 import { ListFilter } from 'lucide-react';
 import type { ReviewFileFilterInput } from '../hooks/useReviewFileFilter';
 
-export function ReviewFileFilterControls({ input, active, renderRow }: {
+export function ReviewFileFilterControls({ input, active, renderRow, shown, total }: {
   input: ReviewFileFilterInput;
   active: boolean;
   renderRow?: (toggle: React.ReactNode) => React.ReactNode;
+  shown?: number;
+  total?: number;
 }) {
   const { draft, open } = useSyncExternalStore(input.subscribe, input.getSnapshot);
   const id = useId();
@@ -20,7 +22,7 @@ export function ReviewFileFilterControls({ input, active, renderRow }: {
       aria-label={active ? 'Filter files (active)' : 'Filter files'}
       aria-expanded={open}
       aria-controls={open ? id : undefined}
-      title="Filter files"
+      title={active && shown !== undefined && total !== undefined ? `Filter files: ${shown} of ${total} shown` : 'Filter files'}
       onClick={input.toggle}
       className={`relative col-start-2 row-start-1 grid size-7 shrink-0 place-items-center self-center rounded-md focus-visible:ring-2 focus-visible:ring-primary [@media(pointer:coarse)]:size-11 ${
         open || active ? 'bg-primary/15 text-primary hover:bg-primary/20' : 'text-muted-foreground hover:bg-muted'
@@ -53,6 +55,12 @@ export function ReviewFileFilterControls({ input, active, renderRow }: {
               />
             </React.Fragment>
           ))}
+          {active && !!shown && total !== undefined && (
+            <div className="col-span-full flex items-center gap-2" data-review-file-filter-summary="">
+              <span role="status" className="tabular-nums">{shown} of {total} files</span>
+              <button type="button" onClick={input.clear} className="text-primary hover:underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-primary rounded-sm">Clear</button>
+            </div>
+          )}
         </div>
       )}
     </>

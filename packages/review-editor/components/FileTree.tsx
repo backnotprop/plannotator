@@ -464,6 +464,8 @@ export const FileTree: React.FC<FileTreeProps> = ({
     <ReviewFileFilterControls
       input={fileFilter}
       active={header?.fileFilterActive ?? false}
+      shown={visiblePaths?.size}
+      total={files.length}
       renderRow={filterInTree ? undefined : (toggle) => (
         <div className="flex items-center justify-end gap-1">
           {searchField && <div className="min-w-0 flex-1">{searchField}</div>}
