@@ -167,6 +167,14 @@ final class FileCommentRecoveryTests: XCTestCase {
     XCTAssertTrue(session.comments(thread).isEmpty)
   }
 
+  func testAnInboxThatListsNoCommentsIsNotAskedAgainOnEveryPass() async throws {
+    let (door, session) = try await seated()
+    await door.setOptions { $0.omitsComments = true }
+    session.reloadSoon(comments: thread)
+    try? await Task.sleep(for: .milliseconds(900))
+    XCTAssertFalse(session.commentsChanged.contains(thread), "an answer with no list is an answer")
+  }
+
   // MARK: A drawing
 
   private func pictureComment(_ door: StandInDoor, _ session: InboxSession, words: String = "Too red.", marks: [PictureMark]? = nil) async throws -> FileComment {
@@ -202,7 +210,7 @@ final class FileCommentRecoveryTests: XCTestCase {
   private func relayed(_ ways: Ways) async throws -> (StandInDoor, InboxSession, AttachmentItem) {
     let door = StandInDoor()
     _ = await door.addFile(thread: StandInData.retry, name: "flame.png", kind: .image, bytes: png(1), mediaType: "image/png", width: 8, height: 8)
-    let session = await twoWaySession(door: door, ways: ways, bytes: AttachmentCache(folder: folder()))
+    let session = await twoWaySession(door: door, ways: ways, bytes: AttachmentCache(folder: folder()), retryEvery: .milliseconds(100))
     await session.start()
     await session.open(StandInData.retry)
     await session.readAttachments(StandInData.retry)
@@ -259,6 +267,59 @@ final class FileCommentRecoveryTests: XCTestCase {
     let last = await door.posts("/reply").map(body).last
     XCTAssertEqual(last?["annotation_ids"]?.items.first?.text, made.id)
     XCTAssertFalse((last?["feedback"]?.text ?? "").contains(PendingDrawing.scheme))
+  }
+
+  func testASendOfOnlyCommentsWaitsWholeForItsDrawingAndGoesWhenAWayCarriesIt() async throws {
+    let ways = Ways()
+    let (door, session, picture) = try await relayed(ways)
+    let retry = StandInData.retry
+    // Made, and sent with no words, with the computer away.
+    await door.setOffline(true)
+    await session.refresh()
+    let made = try XCTUnwrap(session.addComment(thread: retry, item: picture, version: .current, annotation: FileComments.picture(name: picture.name, comment: "Crop the top.", markup: nil), drawing: png(9)))
+    let queued = await session.send(thread: retry, words: "")
+    XCTAssertTrue(queued)
+    // Back through the relay only: the drawing cannot go. The Send stays, whole, as the person made it.
+    await door.setOffline(false)
+    await session.refresh()
+    await settled(session, retry)
+    XCTAssertEqual(ways.drawingsOnRelay, 1)
+    let none = await door.posts("/reply")
+    XCTAssertTrue(none.isEmpty)
+    XCTAssertEqual(session.heldReplies(retry).count, 1, "still shown as the message that waits")
+    XCTAssertEqual(session.heldComments(try XCTUnwrap(session.heldReplies(retry).first)), 1)
+    // Nothing is asked again on this way: the retry that was running for the computer being away ends.
+    for _ in 0..<60 where session.retry != nil { try? await Task.sleep(for: .milliseconds(10)) }
+    XCTAssertNil(session.retry, "nothing is asked again on this way")
+    // A way that carries it: the drawing, the comment, then the Send, whole.
+    ways.direct = true
+    await session.refresh()
+    await settled(session, retry)
+    let replies = await door.posts("/reply").map(body)
+    XCTAssertEqual(replies.count, 1)
+    XCTAssertEqual(replies.first?["annotation_ids"]?.items.first?.text, made.id)
+    XCTAssertTrue(session.heldReplies(retry).isEmpty)
+  }
+
+  func testASendOfOnlyCommentsADrawingRefusedForGoodEmptiesIsToldAboutAndItsCommentStays() async throws {
+    let (door, session) = try await seated()
+    _ = await door.addFile(thread: thread, message: StandInData.filesSecond, name: "flame.png", kind: .image, bytes: png(1), mediaType: "image/png", width: 8, height: 8)
+    await session.readAttachments(thread)
+    let item = try file(session, "flame.png")
+    await door.setOffline(true)
+    await session.refresh()
+    let made = try XCTUnwrap(session.addComment(thread: thread, item: item, version: .current, annotation: FileComments.picture(name: item.name, comment: "Too red.", markup: nil), drawing: png(9)))
+    let queued = await session.send(thread: thread, words: "")
+    XCTAssertTrue(queued)
+    await door.setOptions { $0.refusesMarkups = "markup_too_large" }
+    await door.setOffline(false)
+    await session.refresh()
+    await delivered(session)
+    let replies = await door.posts("/reply")
+    XCTAssertTrue(replies.isEmpty)
+    XCTAssertNotNil(session.notices[thread], "the person is told")
+    XCTAssertEqual(session.comments(thread).map(\.id), [made.id], "the comment stays, with its reason")
+    XCTAssertNotNil(session.commentRefusal(made.id))
   }
 
   func testASendQueuedWithACommentWhoseDrawingTheRelayRefusesGoesWithoutIt() async throws {
@@ -344,6 +405,58 @@ final class FileCommentRecoveryTests: XCTestCase {
     XCTAssertEqual(calls.suffix(2), ["annotations", "annotations/\(made.id)/remove"], "in order")
     let left = await door.pendingComments(thread)
     XCTAssertTrue(left.isEmpty, "and the comment is gone from the computer")
+  }
+
+  func testAnEditAfterASaveWithNoAnswerThenARemovalStillRemovesItOnTheComputer() async throws {
+    let gate = Gate()
+    let (door, session) = try await seated(gate: gate)
+    // The save reaches the computer; its answer is lost.
+    await gate.lose({ $0.method == .post && $0.path == "annotations" }, arrives: true)
+    let made = try planComment(session)
+    for _ in 0..<100 where session.held.contains(where: { $0.kind == .annotation && $0.mayHaveArrived != true }) { try? await Task.sleep(for: .milliseconds(5)) }
+    // Edited with the computer away, then removed.
+    await door.setOffline(true)
+    await session.refresh()
+    session.editComment(made.id, thread: thread, words: "Say which one.")
+    XCTAssertEqual(session.held.first { $0.kind == .annotation }?.mayHaveArrived, true, "the new save passes the mark on")
+    session.removeComment(made.id, thread: thread)
+    XCTAssertTrue(session.held.contains { $0.kind == .annotationRemove }, "the removal is queued")
+    await door.setOffline(false)
+    await session.refresh()
+    await delivered(session)
+    let left = await door.pendingComments(thread)
+    XCTAssertTrue(left.isEmpty, "the comment does not come back")
+  }
+
+  func testASaveTheAppEndedDuringKeepsItsMarkThroughATryThatNeverLeft() async throws {
+    let copy = LocalCopy(folder: folder())
+    let cache = folder()
+    let gate = Gate()
+    let (door, session) = try await seated(copy: copy, cache: cache, gate: gate)
+    await gate.stop { $0.method == .post && $0.path == "annotations" }
+    let made = try planComment(session)
+    await gate.reached()
+    session.stop()
+
+    // Opened again: its first try at the save cannot reach the computer.
+    let again = Gate()
+    await again.cannotConnect(times: 1000) { $0.method == .post && $0.path == "annotations" }
+    let reopened = await pairedSession(door: door, copy: copy, bytes: AttachmentCache(folder: cache), gate: again)
+    await reopened.start()
+    await reopened.open(thread)
+    let tried = await again.unreachedCalls
+    XCTAssertGreaterThan(tried, 0, "the save was tried, and did not leave")
+    XCTAssertEqual(reopened.held.first { $0.kind == .annotation }?.mayHaveArrived, true, "a try that never left does not clear what an earlier one may have done")
+    reopened.removeComment(made.id, thread: thread)
+    XCTAssertTrue(reopened.held.contains { $0.kind == .annotationRemove })
+    await again.cannotConnect(times: 0) { _ in false }
+    for _ in 0..<200 where reopened.held.contains(where: { $0.thread == thread.rawValue && $0.kind != .seen }) {
+      await reopened.deliverHeld(thread: thread)
+      try? await Task.sleep(for: .milliseconds(5))
+    }
+    let left = await door.pendingComments(thread)
+    XCTAssertTrue(left.isEmpty, "the comment does not come back")
+    await gate.open()
   }
 
   func testASaveTheAppEndedDuringIsFollowedByARemovalMadeAfterTheAppOpensAgain() async throws {

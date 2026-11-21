@@ -6,13 +6,15 @@ import Foundation
 ///
 /// A touch counts only when it was a tap: down and up in nearly one place, briefly. A finger that scrolls the page,
 /// or rests on it, arms nothing, so a page cannot send the person to a site while they read. A key that activates
-/// (Return, Space) counts as a tap does. Each tap or key opens one link at most.
+/// (Return, Space) counts as a tap does, unless it was typed into the page's own field (`editing`). Each tap or
+/// key opens one link at most.
 ///
 /// With VoiceOver or Switch Control there is no touch on the page: the person moves the focus onto a link, then
 /// activates it. So under them a link opens only within `reach` after the focus landed on a link in the page, one
 /// link per landing. A landing counts only when it is the person's move: not one in the second after the page
 /// loaded or the app came back to the front (VoiceOver puts its focus back by itself then), so after a link opened
-/// and the person returns, a new landing is needed. Never two links within a second.
+/// and the person returns, a new landing is needed. Nor one within a second of the page's script moving the focus
+/// itself (`scriptedFocus`), before or after it. Never two links within a second.
 ///
 /// What a page can still do under them: once the person lands on a link (any element the page calls a link, as
 /// `role="link"`), its script can open one link of its choosing, within `reach`, in place of the person.
@@ -35,6 +37,7 @@ public struct PageGate: Sendable {
   private var focusedAt: Date?
   private var openedAt = Date.distantPast
   private var frontAt = Date.distantPast
+  private var scriptedAt = Date.distantPast
 
   public init() {}
 
@@ -60,8 +63,18 @@ public struct PageGate: Sendable {
 
   public mutating func touchCancelled() { down = nil }
 
-  /// Return or Space was pressed on the page.
-  public mutating func keyPressed(at now: Date) { armed = now }
+  /// Return or Space was pressed on the page; `editing`: while a field of the page's own (a text box, a menu,
+  /// anything editable) had the focus, so it was typed, not a link activated.
+  public mutating func keyPressed(at now: Date, editing: Bool) {
+    guard !editing else { return }
+    armed = now
+  }
+
+  /// The page's script moved the focus itself (`focus()`): a landing near it may be the script's, not the person's.
+  public mutating func scriptedFocus(at now: Date) {
+    scriptedAt = now
+    if let focusedAt, abs(now.timeIntervalSince(focusedAt)) < Self.settle { self.focusedAt = nil }
+  }
 
   /// The page (re)loaded.
   public mutating func pageLoaded(at now: Date) { loadedAt = now }
@@ -71,7 +84,7 @@ public struct PageGate: Sendable {
 
   /// VoiceOver's or Switch Control's focus landed on something inside the page; `onLink`: on a link.
   public mutating func focusLanded(at now: Date, onLink: Bool) {
-    guard onLink, now.timeIntervalSince(loadedAt) >= Self.settle, now.timeIntervalSince(frontAt) >= Self.settle else { return }
+    guard onLink, now.timeIntervalSince(loadedAt) >= Self.settle, now.timeIntervalSince(frontAt) >= Self.settle, now.timeIntervalSince(scriptedAt) >= Self.settle else { return }
     focusedAt = now
   }
 

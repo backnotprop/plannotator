@@ -100,10 +100,12 @@ struct WebPage: UIViewRepresentable {
     configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
     configuration.allowsInlineMediaPlayback = true
     configuration.setURLSchemeHandler(context.coordinator.server, forURLScheme: Self.scheme)
-    // Its own controller, kept: the rule list goes on it before the page loads. No message handler; one script of
-    // the app's own, in its own world (`PagePins`).
+    // Its own controller, kept: the rule list goes on it before the page loads. The app's scripts: pins, in their
+    // own world (`PagePins`); and what tells the link gate what the person did (`PageWatch`): keys, heard in that
+    // world, and the page's own moves of the focus, heard in the page's.
     configuration.userContentController = context.coordinator.content
     context.coordinator.content.addUserScript(WKUserScript(source: PagePins.script, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: PagePins.world))
+    PageWatch.install(on: context.coordinator.content, for: context.coordinator.touches)
     let view = WKWebView(frame: .zero, configuration: configuration)
     view.navigationDelegate = context.coordinator
     view.uiDelegate = context.coordinator
@@ -197,7 +199,7 @@ struct WebPage: UIViewRepresentable {
 
     /// VoiceOver and Switch Control activate a link with no touch on the page: what they show instead is where
     /// their focus lands (`focusLanded`). (A hardware keyboard, Full Keyboard Access included, is seen by its key:
-    /// `pressesBegan`.)
+    /// `keyPressed`.)
     static var assistive: Bool { UIAccessibility.isVoiceOverRunning || UIAccessibility.isSwitchControlRunning }
 
     private weak var page: UIView?
@@ -261,11 +263,12 @@ struct WebPage: UIViewRepresentable {
       gate.touchCancelled()
       state = .failed
     }
-    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent) {
-      // Return, Enter or Space on a hardware keyboard activates the link that has the focus.
-      let activates: Set<UIKeyboardHIDUsage> = [.keyboardReturnOrEnter, .keypadEnter, .keyboardSpacebar]
-      if presses.contains(where: { $0.key.map { activates.contains($0.keyCode) } ?? false }) { gate.keyPressed(at: Date()) }
-    }
+    // Return, Enter or Space on a hardware keyboard activates the link that has the focus. Heard from the page
+    // (`PageWatch`), which knows whether the focus was in a field of its own: typed there, it arms nothing.
+    func keyPressed(editing: Bool) { gate.keyPressed(at: Date(), editing: editing) }
+
+    /// The page's script moved the focus itself.
+    func scriptedFocus() { gate.scriptedFocus(at: Date()) }
 
     func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
   }
@@ -401,5 +404,84 @@ struct PDFPage: UIViewRepresentable {
 
   func updateUIView(_ view: PDFView, context: Context) {
     if view.document?.documentURL != url { view.document = PDFDocument(url: url) }
+  }
+}
+
+/// What the page tells the link gate, through two small scripts of the app's own, in every frame, from the start.
+///
+/// - `keys`, in the pins' own world (`PagePins.world`), which the page's scripts cannot see or reach: on Return,
+///   Enter or Space that the person pressed (`isTrusted`: a script's made-up key event is not), whether the focus
+///   was in a field of the page's own. It listens first (it is added before any of the page's scripts), so the
+///   page cannot move the focus before it looks. Only that world can post to its handler.
+/// - `focus`, in the page's own world, since that is where the page calls `focus()`: it wraps `focus()` on HTML
+///   and SVG elements, before the page's scripts run, to say the script moved the focus. The page can post to this
+///   one too, which only keeps links closed.
+enum PageWatch {
+  static let keyHandler = "plannotatorKey"
+  static let focusHandler = "plannotatorScriptFocus"
+
+  static let keys = """
+    (() => {
+      const handlers = window.webkit && window.webkit.messageHandlers;
+      const handler = handlers && handlers.\(keyHandler);
+      if (!handler) return;
+      const post = handler.postMessage.bind(handler);
+      const editable = (element) => {
+        let at = element;
+        while (at && at.shadowRoot && at.shadowRoot.activeElement) at = at.shadowRoot.activeElement;
+        if (!at) return false;
+        if (at.isContentEditable) return true;
+        // A focused element whose inside the app cannot see (a closed shadow root, a frame) counts as a field.
+        if (at.shadowRoot === null && at.tagName.includes("-")) return true;
+        return ["INPUT", "TEXTAREA", "SELECT", "IFRAME", "FRAME", "OBJECT", "EMBED"].includes(at.tagName);
+      };
+      window.addEventListener("keydown", (event) => {
+        if (!event.isTrusted || !["Enter", " "].includes(event.key)) return;
+        post({ editing: editable(document.activeElement) });
+      }, true);
+    })();
+    """
+
+  static let focus = """
+    (() => {
+      const handlers = window.webkit && window.webkit.messageHandlers;
+      const handler = handlers && handlers.\(focusHandler);
+      if (!handler) return;
+      const post = handler.postMessage.bind(handler);
+      for (const kind of [window.HTMLElement, window.SVGElement, window.MathMLElement]) {
+        const proto = kind && kind.prototype;
+        const original = proto && proto.focus;
+        if (typeof original !== "function") continue;
+        Object.defineProperty(proto, "focus", { configurable: true, writable: true, value: function focus(...rest) {
+          try { post(1); } catch (_) {}
+          return original.apply(this, rest);
+        } });
+      }
+    })();
+    """
+
+  @MainActor
+  static func install(on content: WKUserContentController, for touches: WebPage.TouchWatch) {
+    content.addUserScript(WKUserScript(source: keys, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: PagePins.world))
+    content.addUserScript(WKUserScript(source: focus, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
+    let heard = Heard(touches)
+    content.add(heard, contentWorld: PagePins.world, name: keyHandler)
+    content.add(heard, contentWorld: .page, name: focusHandler)
+  }
+
+  /// The handler, holding the watch weakly (the controller keeps its handlers).
+  private final class Heard: NSObject, WKScriptMessageHandler {
+    private weak var touches: WebPage.TouchWatch?
+    init(_ touches: WebPage.TouchWatch) { self.touches = touches }
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+      switch message.name {
+      case PageWatch.keyHandler:
+        let editing = ((message.body as? [String: Any])?["editing"] as? Bool) ?? true
+        MainActor.assumeIsolated { touches?.keyPressed(editing: editing) }
+      case PageWatch.focusHandler:
+        MainActor.assumeIsolated { touches?.scriptedFocus() }
+      default: break
+      }
+    }
   }
 }

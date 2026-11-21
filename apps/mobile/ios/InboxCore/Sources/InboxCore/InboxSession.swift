@@ -169,7 +169,7 @@ public final class InboxSession {
   private var stream: Task<Void, Never>?
   private var reload: Task<Void, Never>?
   private var connecting: Task<Bool, Never>?
-  private var retry: Task<Void, Never>?
+  private(set) var retry: Task<Void, Never>?
   private var pumping: Set<String> = []
   private let retryEvery: Duration
 
@@ -291,7 +291,10 @@ public final class InboxSession {
     switch probe {
     case .answered(let index, let read):
       client = candidates[index]
+      // Another way than the one a drawing was refused on: what waited for it goes now.
+      let wayChanged = pathIndex != index && !parkedDrawings.isEmpty
       pathIndex = index
+      if wayChanged { Task { [weak self] in await self?.flush() } }
       skew = read.skew
       reach = .here
       switch read.skew {
@@ -568,7 +571,14 @@ public final class InboxSession {
       // goes without it, and nothing else of the Send is held back.
       let named = commentsNamed(by: write)
       commentRefused(write, notice)
-      releaseSends(after: write, without: named)
+      // A Send that carried only those comments cannot go at all: it leaves the queue, and the thread says why
+      // (its comments stay, each with the reason).
+      let emptied = releaseSends(after: write, without: named)
+      if !emptied.isEmpty {
+        held.removeAll { emptied.contains($0.id) }
+        copy.saveOutbox(held)
+        notices[ThreadID(write.thread)] = notice
+      }
     case .annotationRemove:
       commentRefused(write, notice)
     }
@@ -719,9 +729,11 @@ public final class InboxSession {
     }
     // A comment's save is marked as possibly arrived before it leaves, and kept so: if the app ends while it is on its
     // way, a removal made later still follows it.
+    var markedNow = false
     if write.kind == .annotation, let index = held.firstIndex(where: { $0.id == write.id }), held[index].mayHaveArrived != true {
       held[index].mayHaveArrived = true
       copy.saveOutbox(held)
+      markedNow = true
     }
     quietly(quiet) { _ = book.inFlight.insert(write.id) }
     defer { quietly(quiet) { _ = book.inFlight.remove(write.id) } }
@@ -747,8 +759,9 @@ public final class InboxSession {
         // Sent, and no definite answer: the computer may have taken it.
         var arrives = false
         if case .unreachable(_, mayHaveArrived: false) = failure {
-          // It never left: it is not on the computer.
-          if let index = held.firstIndex(where: { $0.id == write.id }), held[index].mayHaveArrived == true, !book.inDoubt.contains(write.id) {
+          // This try never left. The mark goes only if this try set it: an earlier one (before the app last ended,
+          // or with no answer) may still have arrived.
+          if markedNow, let index = held.firstIndex(where: { $0.id == write.id }), held[index].mayHaveArrived == true {
             held[index].mayHaveArrived = nil
             copy.saveOutbox(held)
           }
@@ -906,8 +919,10 @@ public final class InboxSession {
       book.needsListRead = false
       await readList()
     }
-    // Left on the phone (the computer away, refused, or in need of an update): what is left has waited.
-    if held.contains(where: { $0.thread == thread }) {
+    // Left on the phone (the computer away, refused, or in need of an update): what is left has waited. Not what
+    // waits only for a drawing this way cannot carry: that waits for another way, not for the computer, and asks
+    // nothing again until one answers.
+    if held.contains(where: { $0.thread == thread && !heldBack($0) }) {
       markWaited()
       retryLater()
     }
@@ -926,9 +941,9 @@ public final class InboxSession {
       while let self, !Task.isCancelled {
         try? await Task.sleep(for: self.retryEvery)
         if Task.isCancelled { return }
-        if self.held.isEmpty || self.standing != .ok { break }
+        if self.held.isEmpty || self.onlyHeldBack() || self.standing != .ok { break }
         if await self.connect() { await self.resume() }
-        if self.held.isEmpty { break }
+        if self.held.isEmpty || self.onlyHeldBack() { break }
       }
       self?.retry = nil
     }
@@ -1178,7 +1193,7 @@ public final class InboxSession {
           continue
         }
         self.commentsChanged.remove(id)
-        if await self.readAttachments(id) == nil { self.commentsChanged.insert(id) }
+        if case .failed = await self.readComments(id) { self.commentsChanged.insert(id) }
       }
     }
   }

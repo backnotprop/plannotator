@@ -80,6 +80,18 @@ actor Gate {
   private(set) var answers: [(path: String, status: Int)] = []
 
   private var losing: (match: @Sendable (DoorCall) -> Bool, arrives: Bool)?
+  private var unreached: (match: @Sendable (DoorCall) -> Bool, times: Int)?
+  private(set) var unreachedCalls = 0
+
+  /// The next `times` calls that match cannot reach the computer at all (they never leave the phone).
+  func cannotConnect(times: Int = 1, _ match: @escaping @Sendable (DoorCall) -> Bool) { unreached = (match, times) }
+
+  func unreaches(_ call: DoorCall) -> Bool {
+    guard let current = unreached, current.match(call) else { return false }
+    unreached = current.times > 1 ? (current.match, current.times - 1) : nil
+    unreachedCalls += 1
+    return true
+  }
 
   /// Stop the answer to the next call that matches.
   func stop(_ match: @escaping @Sendable (DoorCall) -> Bool) { self.match = match }
@@ -129,6 +141,7 @@ struct GatedTransport: DoorTransport {
   let inner: StandInTransport
   let gate: Gate
   func send(_ call: DoorCall) async throws -> DoorAnswerBytes {
+    if await gate.unreaches(call) { throw URLError(.cannotConnectToHost) }
     let lost = await gate.loses(call)
     if lost == false { throw URLError(.networkConnectionLost) }
     let answer = try await inner.send(call)
@@ -186,10 +199,10 @@ struct RelayWay: DoorTransport {
 }
 
 @MainActor
-func twoWaySession(door: StandInDoor, ways: Ways, copy: LocalCopy = LocalCopy(folder: nil), bytes: AttachmentCache? = nil) async -> InboxSession {
+func twoWaySession(door: StandInDoor, ways: Ways, copy: LocalCopy = LocalCopy(folder: nil), bytes: AttachmentCache? = nil, retryEvery: Duration = .seconds(15)) async -> InboxSession {
   let issued = await door.issueToken()
   let computer = PairedComputer(id: issued.device.rawValue, name: "Work Mac", token: issued.token, secret: "s", addresses: [])
-  return InboxSession(computer: computer, app: testApp, copy: copy, bytes: bytes) { _ in
+  return InboxSession(computer: computer, app: testApp, copy: copy, retryEvery: retryEvery, bytes: bytes) { _ in
     let inner = StandInTransport(door: door)
     return [DirectWay(inner: inner, ways: ways), RelayWay(inner: inner, ways: ways)]
   }

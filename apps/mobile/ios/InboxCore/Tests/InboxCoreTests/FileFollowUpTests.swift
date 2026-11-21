@@ -99,9 +99,31 @@ final class FileFollowUpTests: XCTestCase {
     XCTAssertFalse(tap.open(at: start.addingTimeInterval(0.15), assistive: false))
     // Return or Space on a hardware keyboard.
     var keys = PageGate()
-    keys.keyPressed(at: start)
+    keys.keyPressed(at: start, editing: false)
     XCTAssertTrue(keys.allows(at: start.addingTimeInterval(0.05), assistive: false))
     XCTAssertFalse(keys.allows(at: start.addingTimeInterval(PageGate.window + 0.1), assistive: false))
+    // Return typed into the page's own field arms nothing: a script clicking a link as the person types opens none.
+    var typing = PageGate()
+    typing.keyPressed(at: start, editing: true)
+    XCTAssertFalse(typing.allows(at: start.addingTimeInterval(0.05), assistive: false))
+  }
+
+  func testAFocusThePagesScriptMovedIsNotThePersonsLanding() {
+    // The script calls focus() on a link, and VoiceOver's focus lands there just after: no link opens.
+    var after = PageGate()
+    after.pageLoaded(at: start)
+    after.scriptedFocus(at: start.addingTimeInterval(5))
+    after.focusLanded(at: start.addingTimeInterval(5.2), onLink: true)
+    XCTAssertFalse(after.allows(at: start.addingTimeInterval(5.5), assistive: true))
+    // The landing is heard before the script's word of it: it is taken back.
+    var before = PageGate()
+    before.pageLoaded(at: start)
+    before.focusLanded(at: start.addingTimeInterval(5), onLink: true)
+    before.scriptedFocus(at: start.addingTimeInterval(5.3))
+    XCTAssertFalse(before.allows(at: start.addingTimeInterval(5.5), assistive: true))
+    // The person's own landing later still opens their link.
+    after.focusLanded(at: start.addingTimeInterval(8), onLink: true)
+    XCTAssertTrue(after.allows(at: start.addingTimeInterval(8.5), assistive: true))
   }
 
   // MARK: A document's links

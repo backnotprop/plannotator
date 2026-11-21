@@ -67,23 +67,40 @@ extension InboxSession {
   /// on them wait for a Send. Returns the ids of the comments it listed, when it listed them.
   @discardableResult
   public func readAttachments(_ thread: ThreadID) async -> Set<String>? {
+    if case .listed(let ids) = await readComments(thread) { return ids }
+    return nil
+  }
+
+  /// What a read of a thread's files said about its comments.
+  enum CommentsRead {
+    /// The comments it listed.
+    case listed(Set<String>)
+    /// It answered, with no list to read: an older Inbox, or comments this app cannot read. Asking again changes
+    /// nothing.
+    case unlisted
+    /// No answer: worth asking again.
+    case failed
+  }
+
+  func readComments(_ thread: ThreadID) async -> CommentsRead {
     if client == nil { _ = await connect() }
-    guard let client, offers(DoorRoutes.getThreadAttachments) else { return nil }
+    guard let client else { return .failed }
+    guard offers(DoorRoutes.getThreadAttachments) else { return .unlisted }
     // What the computer answers about a comment from here on is newer than this list.
     let started = commentBook.landSeq
-    guard let answer = try? await client.call(Door.getThreadAttachments(thread: thread)) else { return nil }
+    guard let answer = try? await client.call(Door.getThreadAttachments(thread: thread)) else { return .failed }
     if let read = try? JSONDecoder().decode(DoorThreadAttachmentsAnswer.self, from: answer.body) {
       files.states[thread] = read.attachments + (read.inlineImages ?? [])
       // The comments that wait for a Send, the window's among them (an older Inbox's door lists none).
-      guard let waiting = read.annotations else { return nil }
+      guard let waiting = read.annotations else { return .unlisted }
       takeComments(thread, from: waiting, started: started)
-      return Set(waiting.map(\.id))
+      return .listed(Set(waiting.map(\.id)))
     } else if case .object(var fields)? = try? JSONDecoder().decode(JSONValue.self, from: answer.body) {
       // A comment this app cannot read never hides the files: they are read without the comments.
       fields["annotations"] = nil
       if let read = try? JSONDecoder().decode(DoorThreadAttachmentsAnswer.self, from: JSONEncoder().encode(JSONValue.object(fields))) { files.states[thread] = read.attachments + (read.inlineImages ?? []) }
     }
-    return nil
+    return .unlisted
   }
 
   /// The route a file's bytes come from, and whether it takes a Range. A picture comes whole (its ETag is its

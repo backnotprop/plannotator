@@ -150,9 +150,16 @@ extension InboxSession {
 
   private func holdSave(_ comment: FileComment) {
     // A save of the same comment that has not left yet is replaced by this one: the computer gets the last words.
-    held.removeAll { $0.kind == .annotation && $0.subject == comment.id && !book.inFlight.contains($0.id) }
+    // One that may have reached the computer passes that on, so a removal made later still goes after it.
+    let replaced = held.filter { $0.kind == .annotation && $0.subject == comment.id && !book.inFlight.contains($0.id) }
+    let mayHave = replaced.contains { book.inDoubt.contains($0.id) || $0.mayHaveArrived == true }
+    held.removeAll { write in replaced.contains { $0.id == write.id } }
     let key = UUID().uuidString
     enqueue(kind: .annotation, thread: comment.thread, message: nil, request: Door.postAnnotations(), body: saveBody(comment, key: key), key: key, subject: comment.id)
+    if mayHave, let index = held.firstIndex(where: { $0.id == key }) {
+      held[index].mayHaveArrived = true
+      saveOutbox()
+    }
   }
 
   /// A drawing on its way to the computer, unless one is already (the same drawing is kept once, by its hash).
@@ -307,14 +314,28 @@ extension InboxSession {
 
   // MARK: A drawing a way cannot carry
 
-  /// A write held back by a drawing this way refused to carry: the drawing itself, and its comment's save.
+  /// A write held back by a drawing this way refused to carry: the drawing itself, its comment's save, and a Send
+  /// that carries only comments, one of them that one (it goes whole once the drawing has found a way).
   func heldBack(_ write: HeldWrite) -> Bool {
     switch write.kind {
     // Still held back while away: which way comes next is not known yet.
     case .markup: return parkedDrawings[write.id].map { parked in pathIndex == nil || parked == pathIndex } ?? false
     case .annotation: return PendingDrawing.hashes(in: write.body).contains(where: drawingHeldBack)
+    case .reply:
+      guard !parkedDrawings.isEmpty, let body = try? JSONDecoder().decode(DoorReplyBody.self, from: write.body), Self.onlyComments(body), let ids = body.annotationIds else { return false }
+      let kept = commentBook.kept[ThreadID(write.thread)] ?? []
+      return ids.contains { id in kept.first(where: { $0.id == id }).map(commentHeldBack) ?? false }
     default: return false
     }
+  }
+
+  /// A Send with no words, no answer and no action: what it carries is its comments.
+  static func onlyComments(_ body: DoorReplyBody) -> Bool { (body.words ?? "").isEmpty && (body.questions ?? []).isEmpty && (body.actions ?? []).isEmpty }
+
+  /// Whether every write of this thread that waits is held back by a drawing (nothing to retry until another way).
+  func onlyHeldBack(_ thread: String? = nil) -> Bool {
+    let waiting = held.filter { thread == nil || $0.thread == thread }
+    return !waiting.isEmpty && waiting.allSatisfy(heldBack)
   }
 
   func drawingHeldBack(_ hash: String) -> Bool { held.contains { $0.kind == .markup && $0.subject == hash && heldBack($0) } }
@@ -330,7 +351,7 @@ extension InboxSession {
     guard let ids = (try? JSONDecoder().decode(DoorReplyBody.self, from: reply.body))?.annotationIds, !ids.isEmpty else { return false }
     let kept = commentBook.kept[ThreadID(reply.thread)] ?? []
     let blocked = Set(ids.filter { id in kept.first(where: { $0.id == id }).map(commentHeldBack) ?? false })
-    return !blocked.isEmpty && strip(reply.id, of: blocked)
+    return !blocked.isEmpty && strip(reply.id, of: blocked) == .stripped
   }
 
   /// The comments a refused save or drawing is about.
@@ -344,32 +365,32 @@ extension InboxSession {
     }
   }
 
-  /// The Sends made after `write` go without these comments (they stay for a later Send).
-  func releaseSends(after write: HeldWrite, without ids: Set<String>) {
-    guard !ids.isEmpty, let start = held.firstIndex(where: { $0.id == write.id }) else { return }
+  /// The Sends made after `write` go without these comments (they stay for a later Send). Returns the Sends that
+  /// would be left with nothing at all: those are not changed here (they are the person's, and are told about).
+  func releaseSends(after write: HeldWrite, without ids: Set<String>) -> [String] {
+    guard !ids.isEmpty, let start = held.firstIndex(where: { $0.id == write.id }) else { return [] }
     let later = held[(start + 1)...].filter { $0.thread == write.thread && $0.kind == .reply }.map(\.id)
-    for reply in later { strip(reply, of: ids) }
+    return later.filter { strip($0, of: ids) == .wouldEmpty }
   }
 
-  /// Take comments out of a Send that waits: its feedback is written again for the rest, and a Send left with no
-  /// words, no answer and no comment is not made at all. True when it changed.
+  enum Stripped { case unchanged, stripped, wouldEmpty }
+
+  /// Take comments out of a Send that waits: its feedback is written again for the rest. A Send that would be left
+  /// with no words, no answer and no comment is never emptied: it is left as it is (`wouldEmpty`).
   @discardableResult
-  func strip(_ reply: String, of ids: Set<String>) -> Bool {
+  func strip(_ reply: String, of ids: Set<String>) -> Stripped {
     guard let index = held.firstIndex(where: { $0.id == reply }), !book.inFlight.contains(reply), var body = try? JSONDecoder().decode(DoorReplyBody.self, from: held[index].body),
       let carried = body.annotationIds, carried.contains(where: ids.contains)
-    else { return false }
+    else { return .unchanged }
     let thread = ThreadID(held[index].thread)
     let left = carried.filter { !ids.contains($0) }
+    if left.isEmpty, Self.onlyComments(body) { return .wouldEmpty }
     let kept = commentBook.kept[thread] ?? []
     body.annotationIds = left.isEmpty ? nil : left
     body.feedback = left.isEmpty ? nil : feedback(left.compactMap { id in kept.first { $0.id == id } }, thread: thread)
-    if left.isEmpty, (body.words ?? "").isEmpty, (body.questions ?? []).isEmpty, (body.actions ?? []).isEmpty {
-      held.remove(at: index)
-    } else {
-      held[index].body = (try? JSONEncoder().encode(body)) ?? held[index].body
-    }
+    held[index].body = (try? JSONEncoder().encode(body)) ?? held[index].body
     saveOutbox()
-    return true
+    return .stripped
   }
 
   /// A drawing no comment names any more, or one the computer has: its bytes leave the phone.
