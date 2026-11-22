@@ -12,10 +12,11 @@
  *  4. Two minutes later the toast is gone and the line stays; at five minutes it goes.
  *  5. Three closed: "Closed 3: …"; the line's Undo reopens exactly those three.
  *  6. The board as Reviews' right pane, three picked with Merge: still one row, Close outside the field.
- *  7. A phone: one row in the sheet, Close last, short of the right corner where Clear was.
+ *  7. A phone: one row in the sheet, Close last, short of the right corner where Clear was; still so with Merge shown
+ *     and on Merge's second tap (shot 09).
  *  8. Light theme of 1. Close in the warning colour in both, unlike the other actions.
  *
- * Shots land in PLANNOTATOR_E2E_PROOF_DIR/inbox-pr-board-close, `01-…png` to `08-…png`.
+ * Shots land in PLANNOTATOR_E2E_PROOF_DIR/inbox-pr-board-close, `01-…png` to `09-…png`.
  */
 import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
@@ -296,6 +297,25 @@ test('a phone: one row in the sheet, Close last and short of the corner where Cl
     expect(close.x + close.width, 'Close ends well short of the right corner').toBeLessThan(390 - 80);
     await expect(sheet.locator('[data-pr-select], [data-pr-clear]')).toHaveCount(0);
     await shot(page, '07-phone-sheet-light.png');
+
+    // An own PR too: Merge shows, and on its first tap asks again; the row stays one row inside the sheet, Close last
+    // and still clear of the corner.
+    await board.locator(`[data-pr-tile="${key('web-app', 2050)}"]`).click();
+    await expect(sheet.locator('[data-pr-merge]')).toHaveText('Merge 1');
+    const oneRowClearOfCorner = async (what: string) => {
+      const tops = new Set<number>();
+      for (const b of await buttons.all()) tops.add(Math.round((await box(b)).y));
+      expect([...tops], `${what}: one row`).toHaveLength(1);
+      expect(await sheet.locator('.ib-prs-pickrow > :last-child').getAttribute('data-pr-close'), `${what}: Close last`).toBe('');
+      const end = await box(sheet.locator('[data-pr-close]'));
+      expect(end.x + end.width, `${what}: Close short of the corner`).toBeLessThanOrEqual(390 - 36);
+      expect(await sheet.evaluate((el) => el.scrollWidth <= el.clientWidth), `${what}: nothing past the sheet's edge`).toBe(true);
+    };
+    await oneRowClearOfCorner('Merge shown');
+    await sheet.locator('[data-pr-merge]').click();
+    await expect(sheet.locator('[data-pr-merge="confirm"]')).toBeVisible();
+    await oneRowClearOfCorner("Merge's second tap");
+    await shot(page, '09-phone-sheet-merge-confirm-light.png');
   } finally {
     await context.close();
   }

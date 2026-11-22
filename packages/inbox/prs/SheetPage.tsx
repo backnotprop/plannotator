@@ -791,6 +791,7 @@ export function SheetPage(props: SheetPageProps) {
       {chosen.size} selected
     </span>
   );
+  // A phone's sheet keeps one row, so its second tap says "Confirm"; the note under it says what merges.
   const mergeControl =
     live.at === 'running' ? (
       <span className="ib-prs-merging" role="status" data-pr-merging="" data-pr-running={live.verb}>
@@ -805,7 +806,7 @@ export function SheetPage(props: SheetPageProps) {
         onClick={pressMerge}
         data-pr-merge={live.at === 'confirm' ? 'confirm' : 'merge'}
       >
-        {live.at === 'confirm' ? 'Confirm merge' : `Merge ${plan.merge.length}`}
+        {live.at === 'confirm' ? (phone ? 'Confirm' : 'Confirm merge') : `Merge ${plan.merge.length}`}
       </button>
     ) : null;
   // Close: every pick is open; the host refuses one that isn't any more, in its words.

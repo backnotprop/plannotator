@@ -370,6 +370,7 @@ import { createInboxTagsRoute } from "./inbox-tags";
 import { createThreadPullStates, createThreadPullsRoute, threadPullsChangedForWake, type ThreadPullFixture } from "./inbox-thread-pulls";
 import { createInboxStepsRoute, inboxStepsStale, inboxStepsWaitOnPerson as stepsListWaitsOnPerson } from "./inbox-steps";
 import { createInboxDebugLog } from "./inbox-debug-log";
+import { keepPullClose } from "./inbox-pull-closes";
 import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller, type InboxDoorTimers } from "./inbox-devices";
 import { inboxRequestSentFrom } from "./inbox-sent-from";
 import { doorHealth } from "./inbox-door-version";
@@ -6765,7 +6766,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const key = typeof body.key === "string" && body.key.length > 0 && body.key.length <= 600 ? body.key : null;
         if (!key) throw new InboxError("validation_error", "key: a pull request key from the list.", { field: "key" });
         const reopen = path === "/api/inbox/pulls/reopen";
-        // One debug-log line per close and per reopen, whatever its end (`pull_close`, debug-log.ts): the key, never the title.
+        // One line per close and per reopen, whatever its end: kept in pull-closes.jsonl always, and in the debug log
+        // while it is on (`pull_close`, debug-log.ts). The key, never the title.
         const [answer, status] = await (async (): Promise<[Record<string, unknown>, number]> => {
           const closedHere = closedByInbox.get(key);
           if (reopen && !reopenAllowed(closedHere?.at, Date.now())) {
@@ -6786,7 +6788,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
           return [{ serverSession, ok: true, key, url: pull.url }, 200];
         })();
-        debugLog?.note("pull_close", pullCloseFields(reopen ? "reopen" : "close", key, status, answer.code, via, fromDeviceDoor.has(req) ? "machine" : "window"));
+        const closeLine = pullCloseFields(reopen ? "reopen" : "close", key, status, answer.code, via, fromDeviceDoor.has(req) ? "machine" : "window");
+        keepPullClose(join(dataDir, "inbox"), closeLine);
+        debugLog?.note("pull_close", closeLine);
         return json(answer, status);
       }
       if (path === "/api/inbox/events" && req.method === "GET") {

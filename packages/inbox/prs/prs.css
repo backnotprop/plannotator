@@ -357,7 +357,9 @@ td.ib-prtb-size { font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px
    a shorter field, then "Review", then the field's icon alone; it never wraps. */
 .ib-prs-bar[data-fit] { flex-wrap: nowrap; }
 .ib-prs-bar[data-fit] .ib-prs-end { margin-left: 0; flex: none; }
-.ib-prs-acts { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
+/* As tall as Open | Merged (.ib-seg: 28 px, 2 px padding, 1 px border) whose place it takes, so the row keeps its
+   height and the field and Done stay exactly where they were before the pick. */
+.ib-prs-acts { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; min-height: 34px; }
 .ib-prs-acts .ib-prs-picked { margin-right: 6px; }
 .ib-prs-acts > [data-pr-close] { margin-left: 8px; }
 .ib-prs-short { display: none; }
@@ -446,7 +448,7 @@ button.ib-prs-box:focus-visible { outline: 2px solid var(--ring); outline-offset
 .ib-prs-pickhead { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .ib-prs-pickhead .ib-prs-mnote { font-size: var(--ib-fs-13, 13px); }
 .ib-prs-picksheet .ib-prs-mlist { font-size: var(--ib-fs-14, 14px); }
-.ib-prs-picksheet .ib-prs-btn { height: 44px; padding: 0 14px; font-size: var(--ib-fs-15, 15px); }
+.ib-prs-picksheet .ib-prs-btn { height: 44px; padding: 0 12px; font-size: var(--ib-fs-15, 15px); }
 /* The window's toast (Close's count with Undo) sits above the phone's pick sheet, never over its buttons (SheetPage's useToastAbove). */
 .pn-inbox[data-prs-sheet] .ib-toast { bottom: calc(var(--ib-prs-sheet-h, 0px) + 8px); }
 .ib-prs[data-phone] .ib-prs-bar .ib-prs-btn { height: 36px; padding: 0 14px; }

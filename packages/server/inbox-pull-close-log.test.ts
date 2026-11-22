@@ -1,19 +1,21 @@
 /**
- * The board's Close and its Undo each leave one line in the Inbox's debug log (approval "inbox-pr-board-close-safe",
- * so a past close can be confirmed later): `pull_close` with what (`act`), the PR's key, how it ended and how the
- * press came, and the request lines name the routes as themselves. What regresses: a close or a reopen with no line,
- * a refused reopen with no line, the PR's title in a line, or the routes logged as `/api/inbox/*\/*`.
+ * The board's Close and its Undo each leave one line (approval "inbox-pr-board-close-safe", so a past close can be
+ * confirmed later): always in `inbox/pull-closes.jsonl`, and as `pull_close` in the debug log while it is on, with
+ * what (`act`), the PR's key, how it ended and how the press came; the request lines name the routes as themselves.
+ * What regresses: a close or a reopen with no line, a refused reopen with no line, no line with the debug log off, the
+ * PR's title in a line, or the routes logged as `/api/inbox/*\/*`.
  *
  * Starts an Inbox (one, on loopback, under a temp data dir, its gh a script): CI runs it.
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RefRunner } from "@plannotator/shared/ref-cards";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { startInboxServer } from "./inbox";
 import { flushInboxDebugLogs } from "./inbox-debug-log";
+import { PULL_CLOSES_FILE } from "./inbox-pull-closes";
 import { waitFor } from "../../tests/helpers/inbox-world";
 
 type Json = Record<string, any>;
@@ -95,6 +97,10 @@ test("a close, its reopen and a refused reopen each write one pull_close line wi
       { act: "reopen", key: KEY, ok: false, status: 409, code: "reopen_not_closed_here", via: "local", by: "window" },
     ]);
     for (const line of closes) expect(typeof line.t).toBe("number");
+    // The same three, kept in their own file.
+    const kept = keptLines(dataDir);
+    expect(kept.map(({ act, key, ok, code }) => ({ act, key, ok, code }))).toEqual(closes.map(({ act, key, ok, code }) => ({ act, key, ok, code })));
+    for (const line of kept) expect(typeof line.t).toBe("number");
     const routes = all.filter((line) => line.ev === "req_start").map((line) => line.route);
     expect(routes).toContain("/api/inbox/pulls/close");
     expect(routes).toContain("/api/inbox/pulls/reopen");
@@ -102,3 +108,26 @@ test("a close, its reopen and a refused reopen each write one pull_close line wi
     server.stop();
   }
 });
+
+test("with the debug log off, a close still keeps its line in pull-closes.jsonl, and no debug log is written", async () => {
+  const dir = join(dataDir, "off");
+  mkdirSync(dir);
+  writeFileSync(join(dir, "config.json"), "{}");
+  const server = await startInboxServer({ dataDir: dir, binaryPath: null, phones: false, tailscale, codeReview: true, debug: false, refRunner: fakeGh(), readProjectRepo: async () => null });
+  try {
+    const at = (path: string) => `http://127.0.0.1:${server.port}${path}`;
+    const session = ((await (await fetch(at("/api/inbox/health"))).json()) as Json).serverSession as string;
+    await waitFor("the PR on the board", async () => (((await (await fetch(at("/api/inbox/pulls?everywhere=1"))).json()) as Json).pulls as Json[]).some((p) => p.key === KEY));
+    const res = await fetch(at("/api/inbox/pulls/close"), { method: "POST", headers: { "Content-Type": "application/json", Origin: at("") }, body: JSON.stringify({ serverSession: session, idempotency_key: "off-1", key: KEY }) });
+    expect(res.status).toBe(200);
+    expect(keptLines(dir).map(({ act, key, ok }) => ({ act, key, ok }))).toEqual([{ act: "close", key: KEY, ok: true }]);
+    expect(readFileSync(join(dir, "inbox", PULL_CLOSES_FILE), "utf8")).not.toContain(TITLE);
+    expect(existsSync(join(dir, "inbox", "debug.log"))).toBe(false);
+  } finally {
+    server.stop();
+  }
+});
+
+function keptLines(dir: string): Json[] {
+  return readFileSync(join(dir, "inbox", PULL_CLOSES_FILE), "utf8").trim().split("\n").map((line) => JSON.parse(line) as Json);
+}
