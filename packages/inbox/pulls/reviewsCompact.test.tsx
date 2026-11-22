@@ -133,13 +133,13 @@ afterEach(() => {
 const opened: string[] = [];
 const openedLayers: string[] = [];
 const hid: string[][] = [];
-function draw(selected: string | null, selectedLayer: string | null = null, phone = false) {
+function draw(selected: string | null, selectedLayer: string | null = null, phone = false, rows: InboxReviewRow[] = ROWS) {
   const node = (
-    <ReviewsMenu className="ib-lbody" rows={ROWS} links={{}} phone={false} onTarget={() => {}} onHide={(pulls) => hid.push(pulls.map((p) => p.key))}>
+    <ReviewsMenu className="ib-lbody" rows={rows} links={{}} phone={false} onTarget={() => {}} onHide={(pulls) => hid.push(pulls.map((p) => p.key))}>
       <ReviewsList
-        answer={ANSWER}
+        answer={{ ...ANSWER, rows }}
         model={MODEL}
-        rows={ROWS}
+        rows={rows}
         filter="all"
         judgments={JUDGMENTS}
         projectNames={new Map()}
@@ -275,11 +275,11 @@ test.skipIf(!hasDom)("a deleted account's PR, open: a grey person leads its seco
 
 
 /** The list drawn anew, as App draws it after a screen in front of it closes. */
-function redraw(selected: string | null, selectedLayer: string | null = null) {
+function redraw(selected: string | null, selectedLayer: string | null = null, rows: InboxReviewRow[] = ROWS, phone = false) {
   act(() => root?.unmount());
   root = null;
   host?.remove();
-  draw(selected, selectedLayer);
+  draw(selected, selectedLayer, phone, rows);
 }
 
 test.skipIf(!hasDom)("back to a stack from a layer's diff: the layer's row is the selected one, with its second line", () => {
@@ -324,6 +324,31 @@ test.skipIf(!hasDom)("a stack opened by a layer's key unfolds onto that layer's 
   act(() => $('[data-reviews-stack-toggle="thr_all"]')!.click());
   expect($('[data-reviews-stack="thr_all"] [data-reviews-layer]')).toBeNull();
   expect(row('thr_all').getAttribute('aria-current')).toBe('true');
+});
+
+/** What the eye reads on a line: its text without what only a screen reader hears. */
+function seen(el: Element): string {
+  const copy = el.cloneNode(true) as Element;
+  for (const sr of copy.querySelectorAll('.ib-sr')) sr.remove();
+  return copy.textContent ?? '';
+}
+
+// A stack with a merged layer under it and a draft on top, beside an open one.
+const MIXED = [pull(600, { state: 'merged', merged_at: ago(DAY) }), pull(601, { base: 'b600' }), pull(602, { base: 'b601', state: 'draft' })];
+const MIXED_ROWS = [reviewed('thr_mixed', MIXED)];
+
+test.skipIf(!hasDom)("a layer's second line, a desktop's and a phone's: Draft, Merged or nothing before its number, never the stack's repository again", () => {
+  for (const [i, words] of [[0, 'Merged · #600'], [1, '#601'], [2, 'Draft · #602']] as const) {
+    redraw('thr_mixed', MIXED[i]!.key, MIXED_ROWS);
+    const line = $(`[data-reviews-layer="${MIXED[i]!.key}"] [data-reviews-line2] .ib-pv`)!;
+    expect(line.textContent).toBe(words);
+    // The state was said at the row's start: on this line it is for the eye only.
+    expect(spoken(line)).toBe(`#${600 + i}`);
+  }
+  // A phone's layer line says the same.
+  redraw(null, null, MIXED_ROWS, true);
+  act(() => $('[data-reviews-stack-toggle="thr_mixed"]')!.click());
+  expect(MIXED.map((p) => seen($(`[data-reviews-layer="${p.key}"] [data-reviews-line2-phone] .ib-pv`)!))).toEqual(['Merged · #600', '#601', 'Draft · #602']);
 });
 
 test.skipIf(!hasDom)("Tab reaches a stack's row, then its count, then each of its layers", () => {
@@ -412,5 +437,5 @@ test.skipIf(!hasDom)("on a phone every row has two lines: status words in their 
   // A stack: its count of open and merged in place of a number; a layer: its own number, its state for the eye.
   expect(row('thr_all').querySelector('[data-reviews-line2-phone]')!.textContent).toContain('ledger · 120 open');
   act(() => $('[data-reviews-stack-toggle="thr_all"]')!.click());
-  expect($(`[data-reviews-layer="${TALL[2]!.key}"] [data-reviews-line2-phone]`)!.textContent).toContain('ledger #502');
+  expect($(`[data-reviews-layer="${TALL[2]!.key}"] [data-reviews-line2-phone] .ib-pv`)!.textContent).toBe('#502');
 });

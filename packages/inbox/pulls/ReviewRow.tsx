@@ -336,8 +336,11 @@ export function ReviewRowItem({ row, links, place, selected, phone, now, judgmen
   );
 }
 
-/** "#412", "#412 merged": a layer's number, and its state unless open. */
-const layerLead = (layer: InboxPull) => `${inboxPullLabel(layer)}${layer.state === 'open' ? '' : ` ${layer.state}`}`;
+/**
+ * A layer's state for the eye on its second line, a phone's and a desktop's alike: "Draft", "Merged" or "Closed"
+ * before its number, nothing for an open one. Its row says the state first to a screen reader already.
+ */
+const layerStateWord = (layer: InboxPull) => (layer.state === 'open' ? null : <span aria-hidden="true">{STATE_WORD[layer.state]}</span>);
 
 /**
  * One layer of an unfolded stack: its own row, indented under the stack's with a tree line. It opens that layer, is
@@ -393,16 +396,19 @@ function LayerRow({ layer, place, selected, phone, now, judgments, riskFailed, m
           <Age iso={layer.updated_at} now={now} spoken={!twoLine} />
         </span>
       </span>
-      {/* A layer's state is said at its start: on its second line, for the eye only. */}
-      {twoLine && <PhoneLine lead={live ? null : <span aria-hidden="true">{STATE_WORD[layer.state]}</span>} quietRisk={quietRisk} riskFailure={riskFailure} where={placeAndLead(place, inboxPullLabel(layer))} age={relativeWords(layer.updated_at, now)} />}
+      {/* A layer's state is said at its start: on its second line, for the eye only; its number alone, as on a desktop. */}
+      {twoLine && <PhoneLine lead={layerStateWord(layer)} quietRisk={quietRisk} riskFailure={riskFailure} where={inboxPullLabel(layer)} age={relativeWords(layer.updated_at, now)} />}
       {selected && !twoLine && (
         <span className="ib-rvr-l2" data-reviews-line2="">
           <span className="ib-lead">
             <AuthorLead pull={layer} />
           </span>
           <span className="ib-pr-l3">
+            {/* Its number alone: the stack's row above names the repository. */}
             <span className="ib-pv" dir="auto">
-              {layerLead(layer)} · <span data-pulls-repo="">{place}</span>
+              {layerStateWord(layer)}
+              {layer.state !== 'open' && <span aria-hidden="true"> · </span>}
+              {inboxPullLabel(layer)}
             </span>
           </span>
           {quietRisk && <RiskMark judgment={quietRisk} />}
