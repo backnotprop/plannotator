@@ -325,7 +325,7 @@ async function expectNoOverlap(review: Locator, ref: LineRef, opts: { long: bool
     const textRight = () => Math.max(...g.text.map((r) => r.x + r.width));
     if (g.wrap) {
       // Every row of the wrapped text ends before the mark.
-      for (const r of g.text) expect(r.x + r.width, `wrapped text row ends before the mark`).toBeLessThanOrEqual(mark!.x + 0.5);
+      for (const r of g.text) expect(r.x + r.width, `wrapped text row ends before the mark`).toBeLessThanOrEqual(mark!.x + 1);
       if (opts.long) expect(new Set(g.text.map((r) => Math.round(r.y))).size).toBeGreaterThan(1);
       return;
     }
@@ -333,14 +333,16 @@ async function expectNoOverlap(review: Locator, ref: LineRef, opts: { long: bool
     expect(g.markBg).toBe(g.lineBg);
     expect(g.markBg).not.toMatch(/rgba\(.*,\s*0\)|transparent/);
     if (!opts.long) {
-      expect(textRight()).toBeLessThanOrEqual(mark!.x + 0.5);
+      expect(textRight()).toBeLessThanOrEqual(mark!.x + 1);
       return;
     }
     expect(textRight()).toBeGreaterThan(mark!.x); // it does reach the edge, the case this proves
     await scrollColumns(review, file, 'end');
     const end = await lineGeometry(review, ref);
     const endMark = (await markOf(cdp, ref))!;
-    expect(Math.max(...end.text.map((r) => r.x + r.width)), 'scrolled to the end, the last character is clear of the mark').toBeLessThanOrEqual(endMark.x + 0.5);
+    // The protocol's box is on whole pixels, the text's on fractions: within 1px is "where the mark begins" (its bars
+    // start 6px further in).
+    expect(Math.max(...end.text.map((r) => r.x + r.width)), 'scrolled to the end, the last character is clear of the mark').toBeLessThanOrEqual(endMark.x + 1);
     expect(Math.abs(endMark.x + endMark.width - end.visibleRight)).toBeLessThanOrEqual(1.5);
     await scrollColumns(review, file, 'start');
   } finally {
