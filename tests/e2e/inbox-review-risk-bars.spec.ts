@@ -553,9 +553,15 @@ test('light theme close-ups of both marks', async () => {
   const rowBox = (await treeRow('retry.ts').boundingBox())!;
   const name = (await treeRow('retry.ts').locator('[data-item-section="content"]').boundingBox())!;
   await page.screenshot({ path: join(proofDir, '03-closeup-tree-light.png'), clip: { x: rowBox.x, y: rowBox.y - 4, width: name.x + name.width + 12 - rowBox.x, height: rowBox.height + 8 } });
-  const line = review.locator('[data-guide-file-shell="src/charges/retry.ts"] [data-additions] [data-line="21"]').first();
-  await line.scrollIntoViewIfNeeded();
-  const g = await lineGeometry(review, { file: 'src/charges/retry.ts', column: 'additions', line: 21 });
+  // A new theme draws the code again (its highlighting comes back): take the line once it holds still.
+  const ref: LineRef = { file: 'src/charges/retry.ts', column: 'additions', line: 21 };
+  let g!: Awaited<ReturnType<typeof lineGeometry>>;
+  await expect(async () => {
+    await review.locator(lineSelector(ref)).first().scrollIntoViewIfNeeded({ timeout: 2000 });
+    g = await lineGeometry(review, ref);
+  }).toPass({ timeout: 15_000 });
+  await page.waitForTimeout(300);
+  g = await lineGeometry(review, ref);
   await page.screenshot({ path: join(proofDir, '03-closeup-diff-light.png'), clip: { x: g.visibleRight - 240, y: g.line.y - g.lineHeight, width: 240, height: g.lineHeight * 3 } });
 });
 
@@ -590,7 +596,10 @@ test('long lines: split, unified and wrapped, old and new sides, the mark covers
     // Contrast of the bars' tone (3:1, non-text) on the tree and both line colours, dark then light.
     for (const theme of ['dark', 'light'] as const) {
       await scheme(theme);
-      const c = await markColours(review, 'charges.ts');
+      let c!: Awaited<ReturnType<typeof markColours>>;
+      await expect(async () => {
+        c = await markColours(review, 'charges.ts');
+      }).toPass({ timeout: 15_000 });
       for (const [on, bg] of Object.entries({ tree: c.treeBg, added: c.added, removed: c.removed })) {
         const ratio = await contrast(c.tone, bg);
         contrastSeen[`${theme} ${on}`] = ratio;
