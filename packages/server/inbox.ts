@@ -108,6 +108,7 @@ import {
   type InboxAgentsGroup,
   type InboxListRow,
   type InboxMessage,
+  type InboxSentFrom,
   type InboxProject,
   type InboxProjectRepo,
   type InboxRestartAgents,
@@ -370,8 +371,12 @@ import { createThreadPullStates, createThreadPullsRoute, threadPullsChangedForWa
 import { createInboxStepsRoute, inboxStepsStale, inboxStepsWaitOnPerson as stepsListWaitsOnPerson } from "./inbox-steps";
 import { createInboxDebugLog } from "./inbox-debug-log";
 import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller, type InboxDoorTimers } from "./inbox-devices";
+import { inboxRequestSentFrom } from "./inbox-sent-from";
 import { doorHealth } from "./inbox-door-version";
 import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
+import { agentFileDoorAnswer, agentReadDoorAnswer } from "./inbox-far-read";
+import { agentSearchDoorAnswer, agentThreadsDoorAnswer } from "./inbox-far-find";
+import { farRemoteOf } from "./inbox-machine-agent-find";
 import { archivedAskOf, farRowTags, mergeArchived } from "./inbox-archived-merged";
 import { createShowArchived, type InboxShowArchived } from "./inbox-show-archived";
 import { mergePullBoards } from "./inbox-machine-pulls";
@@ -1861,6 +1866,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     chapterDiagramsOn: () => chapterDiagramsOn(),
     // A thread only a linked machine holds goes through the window's own forward (inbox-machines.ts).
     snoozeOnMachine: async (threadId, until) => (machines ? machines.snoozeThread(threadId, until) : null),
+    readOnMachine: async (ask) => (machines ? machines.readThread(ask) : null),
+    filePieceOnMachine: async (args, offset) => (machines ? machines.filePiece(args, offset) : null),
+    farThreadMachine: (threadId) => machines?.farThreadMachine(threadId) ?? null,
+    // search and read_thread's list ask the linked machines too, naming a project by its git remote (inbox-mcp-far-find.ts).
+    findOnMachines: () => machines?.agentFind ?? null,
+    projectRemoteKey: (root, waitMs) => farRemoteOf(repos, root, waitMs),
     snoozeMade: () => markSnoozeUsed(),
     ...(options.mcpNow ? { now: options.mcpNow } : {}),
   };
@@ -5535,6 +5546,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let cfAccess: InboxCfAccess | null = null;
   let cfRoutes: ReturnType<typeof createCfAccessRoutes> | null = null;
   const fromCfDoor = new WeakSet<Request>();
+  /** Where the person wrote a message, told from this request (inbox-sent-from.ts); null on this computer or when not known. */
+  const sentFromOf = (req: Request, via: RequestVia): InboxSentFrom | null => {
+    const door = fromDeviceDoor.get(req);
+    // The name this Inbox shows for a linked computer, else (missing or empty) its device's name: inbox-sent-from.ts picks.
+    const machineName = door?.platform === MACHINE_PLATFORM ? (machines?.machineOfDevice(door.device_id)?.name ?? null) : null;
+    return inboxRequestSentFrom({
+      via,
+      ownNode: fromOwnTailnetNode.has(req),
+      cloudflare: fromCfDoor.has(req),
+      door: door ? { platform: door.platform, machineName, deviceName: door.name, place: door.place ?? null } : null,
+    });
+  };
 
   const readBody = async (req: Request): Promise<Record<string, unknown>> => {
     try {
@@ -7336,9 +7359,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The device door is never the owner here: it may not trust a folder, so it is offered none.
       // A linked machine is the owner's other computer: it may trust a folder for a press in its window (remote launch).
       const machineDoor = door?.platform === MACHINE_PLATFORM;
-      const composed = await compose.route(req, url, !door || machineDoor, door ? { machine: machineDoor, window: door.window, from: machineDoor ? machines.machineOfDevice(door.device_id) : null } : null, via === "local" && !door);
+      const composed = await compose.route(req, url, !door || machineDoor, door ? { machine: machineDoor, window: door.window, from: machineDoor ? machines.machineOfDevice(door.device_id) : null } : null, via === "local" && !door, sentFromOf(req, via));
       if (composed) return composed;
-      const reviewed = await liveReview.route(req, url, !door);
+      const reviewed = await liveReview.route(req, url, !door, () => sentFromOf(req, via));
       if (reviewed) return reviewed;
       // Reply drafts: the reply box's words per thread (approval "inbox-reply-drafts").
       const drafted = await replyDrafts.route(req, url);
@@ -7994,6 +8017,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 feedback: typeof body.feedback === "string" ? body.feedback : undefined,
                 annotation_ids: body.annotation_ids as never,
                 viewing: body.viewing,
+                sent_from: sentFromOf(req, via),
                 // A verdict on a review (Approve / Send feedback in the review's header): only while Code review is on.
                 ...(body.review_verdict !== undefined && body.review_verdict !== null
                   ? codeReviewOn()
@@ -8062,7 +8086,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             const asked = body.to === undefined ? undefined : store.message(messageId);
             const to = body.to === undefined || !asked ? undefined : live.replyTarget(asked.thread_id, body.to);
             // The key and `to` only: Re-ask all's left picks are never taken from a body.
-            const result = store.sendReask(messageId, messageReaskInput(body, to));
+            const result = store.sendReask(messageId, { ...messageReaskInput(body, to), sent_from: sentFromOf(req, via) });
             return json({
               message_id: messageId,
               questions: store.questionsOf(messageId),
@@ -8121,7 +8145,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
       // Step 8: the live sessions of a thread's project, and New message.
       // Session labels (issue #2450) ride these two.
-      const newMessage = await live.route(req, path);
+      const newMessage = await live.route(req, path, () => sentFromOf(req, via));
       if (newMessage) return newMessage;
       // Tags (approval "inbox-tag-agents"): who the person can tag with `@` (packages/server/inbox-tags.ts).
       const taggable = tagsRoute.route(req, path);
@@ -8326,6 +8350,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       relay: { paired: async (device) => (relay ? relay.paired(device) : null), revoked: (device) => relay?.revoked(device) },
       phones: phonesOn,
       machines: () => machines ?? null,
+      // A linked machine's agents read this Inbox's threads and their files (inbox-far-read.ts).
+      agentRead: { read: (url) => agentReadDoorAnswer(mcpContext, url), file: (url) => agentFileDoorAnswer(store, url) },
+      // ...and search and list them (inbox-far-find.ts): a project named by its git remote (unknown while git has not said).
+      agentFind: {
+        search: (url) => agentSearchDoorAnswer({ store, searchIndex: search.index, remoteOf: (root, waitMs) => farRemoteOf(repos, root, waitMs) }, url),
+        threads: (url) => agentThreadsDoorAnswer({ store, remoteOf: (root, waitMs) => farRemoteOf(repos, root, waitMs) }, url),
+      },
       machineUpdate: {
         read: () => updates.machineRead(),
         start: () => updates.machineStart(),
@@ -8353,6 +8384,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           // config.json could not be written: this machine keeps its own switch until the next read.
         }
       },
+      sentFrom: sentFromOf,
       timings: options.machineLinkTimings,
     });
     relay = createInboxRelay({

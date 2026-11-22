@@ -35,6 +35,7 @@ export const SCHEMA_SOURCES = [
   'packages/core/inbox-reviews.ts',
   'packages/core/inbox-rows-words.ts',
   'packages/core/inbox-scheduled-types.ts',
+  'packages/core/inbox-sent-from.ts',
   'packages/core/inbox-snooze.ts',
   'packages/core/inbox-steps.ts',
   'packages/core/inbox-surface-bridge.ts',

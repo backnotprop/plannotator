@@ -15,24 +15,41 @@
  *   markup beyond the rules it always had (an `<a>`'s link, a `<style>`'s text,
  *   a reference that is not a fragment or http(s)): one line per element or
  *   attribute that differs from the DOMPurify parse alone.
+ * - `remoteLoads(on)`: `configurePlannotatorUI({ diagramRemoteLoads: on })`,
+ *   as a host calls it (diagram-remote-loads.spec.ts).
+ * - `removePurifyHooks(all)`: what a host's own code may do to the shared
+ *   DOMPurify: `removeAllHooks()`, or (`all` false) `removeHooks('uponSanitizeAttribute')`.
+ *
+ * `buildDiagramUiBundle({ splitPurify: true })` gives Mermaid its own copy of
+ * DOMPurify, as a host bundle that does not dedupe it would.
+ * `buildDiagramUiBundle({ realKatex: true })` keeps the real KaTeX (the webview
+ * options stub it out) so a `$$...$$` label is typeset as in the apps
+ * (diagram-math-labels.spec.ts, with `katexCss()` on the page).
  */
 import type { Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 const EXTENSION = resolve(__dirname, '../../apps/vscode-extension');
 const UI = resolve(__dirname, '../../packages/ui');
 
-export function buildDiagramUiBundle(): string {
+export function buildDiagramUiBundle(options: { splitPurify?: boolean; realKatex?: boolean } = {}): string {
   const work = mkdtempSync(join(tmpdir(), 'pn-diagram-scrub-'));
   try {
     const entry = join(work, 'entry.ts');
+    // The ES build of DOMPurify, the file ui's own `import DOMPurify from 'dompurify'` bundles.
+    const purify = join(dirname(createRequire(join(UI, 'package.json')).resolve('dompurify')), 'purify.es.mjs');
+    const purifyCopy = join(work, 'purify-copy.mjs');
+    if (options.splitPurify) copyFileSync(purify, purifyCopy);
     writeFileSync(entry, `
+import DOMPurify from ${JSON.stringify(purify)};
 import { parseDiagramSvg, renderDiagram, sanitizeDiagramSvg } from ${JSON.stringify(join(UI, 'utils/diagram-render.ts'))};
 import { loadMermaidRuntime } from ${JSON.stringify(join(UI, 'utils/mermaid.ts'))};
 import { applyMermaidTheme, mermaidThemeKey } from ${JSON.stringify(join(UI, 'utils/mermaidTheme.ts'))};
+import { configurePlannotatorUI } from ${JSON.stringify(join(UI, 'configure.ts'))};
 const host = () => document.getElementById('host')!;
 let seq = 0;
 /** A reference the post-pass always dropped (not a fragment, not http(s)). */
@@ -51,9 +68,17 @@ function describe(el: Element): string[] {
     host().replaceChildren(r.svgNode);
     return { ok: true, refused: false, message: '' };
   },
+  remoteLoads(on: boolean) {
+    configurePlannotatorUI({ diagramRemoteLoads: on });
+  },
+  removePurifyHooks(all: boolean) {
+    if (all) DOMPurify.removeAllHooks();
+    else DOMPurify.removeHooks('uponSanitizeAttribute');
+  },
   async measure(source: string) {
+    // One render first, so the runtime carries the config renderDiagram gives it (the theme, and the remote-loads policy).
+    await renderDiagram('mermaid', 'pn-warm-' + ++seq, 'flowchart LR\\n  W[w]', { colorTheme: 'plannotator', mode: 'light' });
     const mermaid = await loadMermaidRuntime();
-    applyMermaidTheme(mermaid, mermaidThemeKey('plannotator', 'light'));
     const id = 'pn-measure-' + ++seq;
     try {
       return (await mermaid.render(id, source)).svg;
@@ -83,13 +108,23 @@ import { configs } from ${JSON.stringify(join(EXTENSION, 'scripts/esbuild.config
 const webview = configs.find((c) => String(c.outdir ?? '').endsWith('dist') && c.format === 'iife');
 if (!webview) throw new Error('no webview build config');
 const { entryPoints: _e, outdir: _o, ...options } = webview;
-await build({ ...options, absWorkingDir: ${JSON.stringify(EXTENSION)}, entryPoints: [${JSON.stringify(entry)}], outfile: ${JSON.stringify(out)}, logLevel: 'silent' });
+// splitPurify: Mermaid's own import of dompurify resolves to a second copy.
+const split = ${JSON.stringify(options.splitPurify ? purifyCopy : '')};
+const plugins = [...(options.plugins ?? []), ...(split ? [{ name: 'split-purify', setup(b) { b.onResolve({ filter: /^dompurify$/ }, (a) => (/[\\/\\\\]mermaid[\\/\\\\]dist[\\/\\\\]/.test(a.importer) ? { path: split } : undefined)); } }] : [])];
+// realKatex: Mermaid's math labels get the real KaTeX, not the webview's stub.
+const alias = ${JSON.stringify(!!options.realKatex)} ? Object.fromEntries(Object.entries(options.alias ?? {}).filter(([name]) => name !== 'katex')) : options.alias;
+await build({ ...options, alias, plugins, absWorkingDir: ${JSON.stringify(EXTENSION)}, entryPoints: [${JSON.stringify(entry)}], outfile: ${JSON.stringify(out)}, logLevel: 'silent' });
 `);
     execFileSync('bun', [build], { cwd: EXTENSION, stdio: 'pipe' });
     return readFileSync(out, 'utf8');
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
+}
+
+/** KaTeX's own stylesheet, as the apps load it (packages/ui/theme.css imports it). Its font URLs resolve to nothing on the test page. */
+export function katexCss(): string {
+  return readFileSync(createRequire(join(UI, 'package.json')).resolve('katex/dist/katex.min.css'), 'utf8');
 }
 
 /** The utilities an app's stylesheet carries (Tailwind's own output for these class names). */
@@ -123,15 +158,22 @@ export const NAVIGATING_LABELS = [
  * artifact tile with its real CSS. Pictures from PICTURE_HOST load; every
  * other request is recorded in `requests` (a form submission as `document`)
  * and aborted; every navigation of the page after it loaded is recorded in
- * `navigations`.
+ * `navigations`. `csp`: the page's Content-Security-Policy (a meta tag).
+ * `origin` (e.g. `http://app.test`): the page is served from that origin
+ * (fulfilled here, nothing leaves the machine) instead of about:blank, so a
+ * protocol-relative `//host/…` resolves and is requested as in an app.
+ * `css`: more stylesheet text for the page (KaTeX's, `katexCss()`).
  */
-export async function openDiagramPage(page: Page, bundle: string, options: { tile?: boolean } = {}) {
+export async function openDiagramPage(page: Page, bundle: string, options: { tile?: boolean; csp?: string; origin?: string; css?: string } = {}) {
   const errors: string[] = [];
   const requests: string[] = [];
   const navigations: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
+  const home = options.origin ? `${options.origin}/` : '';
+  let html = '';
   await page.route(/^(?!data:|about:)/, (route) => {
     const url = route.request().url();
+    if (home && url === home) return route.fulfill({ status: 200, contentType: 'text/html', body: html });
     if (url.startsWith(`${PICTURE_HOST}/`)) return route.fulfill({ status: 200, contentType: 'image/png', body: PNG });
     requests.push(`${route.request().resourceType()} ${url}`);
     return route.abort();
@@ -139,12 +181,15 @@ export async function openDiagramPage(page: Page, bundle: string, options: { til
   const box = options.tile
     ? `<div class="ib-art-prev" id="box" style="width:240px;margin:20px 0 0 20px"><span class="ib-art-svg" id="host" data-drawn></span></div>`
     : `<div id="box" style="position:relative;width:700px;height:450px;overflow:hidden"><div id="host" style="position:absolute;inset:0"></div></div>`;
-  await page.setContent(`<!DOCTYPE html><html><head><style>body{margin:0}${APP_UTILITIES}${options.tile ? artifactTileCss() : ''}</style></head><body>
+  html = `<!DOCTYPE html><html><head>${options.csp ? `<meta http-equiv="Content-Security-Policy" content="${options.csp}">` : ''}<style>body{margin:0}${APP_UTILITIES}${options.tile ? artifactTileCss() : ''}</style>${options.css ? `<style>${options.css}</style>` : ''}</head><body>
 <div style="height:60px"><button id="app-button">Approve</button></div>
 ${box}
 <div style="height:300px;padding:20px 0 0 300px"><button id="app-below">Send</button></div>
 <script>${bundle.replace(/<\/script/gi, '<\\/script')}</script>
-</body></html>`);
+</body></html>`;
+  // `origin`: served from a (route-fulfilled) http origin, so a protocol-relative `//host/…` resolves and loads as it would in an app.
+  if (home) await page.goto(home);
+  else await page.setContent(html);
   await page.waitForFunction(() => !!(window as any).__d, null, { timeout: 30_000 }).catch(() => {
     throw new Error(`The diagram bundle did not load: ${errors.join(' | ') || 'no error reported'}`);
   });

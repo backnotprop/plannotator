@@ -47,7 +47,7 @@ export default defineConfig({
   projects: [
     // Every spec but the WebKit-only ones, in Chromium. A project's testIgnore replaces the top-level one, so it repeats OWN_CONFIG.
     { name: 'chromium', testIgnore: [...OWN_CONFIG, WEBKIT_ONLY] },
-    // The WebKit-only specs, and the toolstrip's right-to-left check in WebKit too. No Chromium flags here: WebKit refuses them.
-    { name: 'webkit', testMatch: [WEBKIT_ONLY, 'toolstrip-rtl.spec.ts', 'inbox-inline-html.spec.ts', 'inbox-debug-log.spec.ts', 'inbox-links-in-place.spec.ts', 'inbox-reuse-attachments.spec.ts', 'inbox-inline-media.spec.ts', 'pele-labels.spec.ts'], use: { browserName: 'webkit', launchOptions: { args: [] } } },
+    // The WebKit-only specs, and a few that run in WebKit too (diagram remote loads, math labels in diagrams, the toolstrip's right-to-left check, …). No Chromium flags here: WebKit refuses them.
+    { name: 'webkit', testMatch: [WEBKIT_ONLY, 'diagram-remote-loads.spec.ts', 'diagram-math-labels.spec.ts', 'toolstrip-rtl.spec.ts', 'inbox-inline-html.spec.ts', 'inbox-debug-log.spec.ts', 'inbox-links-in-place.spec.ts', 'inbox-reuse-attachments.spec.ts', 'inbox-inline-media.spec.ts', 'pele-labels.spec.ts'], use: { browserName: 'webkit', launchOptions: { args: [] } } },
   ],
 });

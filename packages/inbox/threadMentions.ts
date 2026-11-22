@@ -18,11 +18,11 @@
  * (`useMentionBoxOpener`) and takes it as its field mounts.
  */
 import { useEffect, useRef } from 'react';
-import { inboxThreadMentionWords, remapReplyMentions, standingReplyMentions } from '@plannotator/core/inbox-thread-mention';
+import { inboxThreadMentionWords, remapReplyMentions, standingReplyMentions, type InboxThreadMentionReach } from '@plannotator/core/inbox-thread-mention';
 import type { InboxReplyDraft, InboxReplyMention } from '@plannotator/core/inbox-types';
 import { readRoute } from './app/route';
 import { writeRoute } from './app/writeRoute';
-import { machineOf, selfMachineId } from './inboxUrl';
+import { linkedMachineFacts, machineOf, selfMachineId, selfMachineName } from './inboxUrl';
 
 /** A thread as a mention names it: its id, title, project, whether it is archived, and the machine whose Inbox holds it. */
 export interface MentionRef {
@@ -213,16 +213,40 @@ export function replyReaderMachine(threadId: string): string | null {
   return machineOf(threadId) ?? selfMachineId();
 }
 
-/** Whether the agent the reply to `threadId` goes to can open the mentioned thread (its Inbox holds it). */
+/**
+ * Whether the agent the reply to `threadId` goes to can read the mentioned thread: its own Inbox holds it, or reads it
+ * from a linked machine (mark `agent-read`). That is this window's machine and one it links to, in either direction:
+ * the reader's Inbox must take the mark and, when the thread is here, hold a link back to this one (`both_ways`). A
+ * linked machine too old for it must update first: the thread's machine when the thread is there, the reader's own
+ * when the thread is here, each named. A linked machine whose list is not read yet (asleep since a restart here) is not
+ * called old: its marks are not known, so the agent is told to read it, and the read says if it cannot be reached. A
+ * third machine, or one not heard of yet: false.
+ */
+export function mentionReach(threadId: string, mention: { machine?: string | null }): InboxThreadMentionReach {
+  const self = selfMachineId();
+  const at = mention.machine ?? self;
+  const reader = replyReaderMachine(threadId);
+  if (at === reader) return true;
+  if (at !== self && reader !== self) return false;
+  const far = at === self ? reader : at;
+  const facts = far ? linkedMachineFacts(far) : null;
+  if (!facts || (at === self && !facts.both_ways)) return false;
+  if (facts.marks.includes('agent-read')) return true;
+  if (facts.state !== 'needs_update' && !facts.listed) return true;
+  const here = selfMachineName() ?? 'this machine';
+  return at === self ? { update: 'reader', thread: here, reader: facts.name } : { update: 'thread', thread: facts.name, reader: here };
+}
+
+/** Whether the agent the reply to `threadId` goes to can open the mentioned thread (`mentionReach`). */
 export function mentionReadable(threadId: string, mention: { machine?: string | null }): boolean {
-  return (mention.machine ?? selfMachineId()) === replyReaderMachine(threadId);
+  return mentionReach(threadId, mention) === true;
 }
 
 /** The words the agent reads for this reply: each mention standing in them in its place, then the list (core). */
 export function replyWordsWithMentions(threadId: string, words: string): string {
   const mentions = mentionsFor(threadId, words);
   if (mentions.length === 0) return words;
-  return inboxThreadMentionWords(words, mentions, (m) => mentionReadable(threadId, m));
+  return inboxThreadMentionWords(words, mentions, (m) => mentionReach(threadId, m));
 }
 
 /** A drop never splits a word: an offset inside one moves to its end. */

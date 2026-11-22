@@ -234,6 +234,12 @@ export const FileTree: React.FC<FileTreeProps> = ({
     () => (effectiveGroupBy === 'status' && sinceBaseSections ? buildFileStatusBlocks(files, sinceBaseSections, stagedFiles, visiblePaths) : null),
     [effectiveGroupBy, files, sinceBaseSections, stagedFiles, visiblePaths],
   );
+  // A staged file's row carries a Staged mark (#3683), as a viewed one is
+  // dimmed: off with the header's Git add button. The Changes tree leaves it
+  // out while grouped by git status, where the Staged group already says so;
+  // All files is a plain folder tree with no Staged group, so it keeps it.
+  const repoStagedFiles = showStageControls ? stagedFiles : undefined;
+  const rowStagedFiles = statusBlocks ? undefined : repoStagedFiles;
   const kindBlocks = useMemo(
     () => (effectiveGroupBy === 'kind' ? buildFileKindBlocks(files, generatedFiles, visiblePaths) : null),
     [files, effectiveGroupBy, generatedFiles, visiblePaths],
@@ -644,6 +650,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
             hiddenFiles={hiddenFiles}
             hideViewedFiles={hideViewedFiles}
             showViewedControls={showViewedControls}
+            stagedFiles={rowStagedFiles}
             getSectionEntry={getSectionEntry}
             annotationCounts={annotationCounts}
             markdownPreviewedPaths={markdownPreviewedPaths}
@@ -670,6 +677,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
               activePath={activeRepoPath ?? treeActivePath}
               viewedFiles={viewedFiles}
               showViewedControls={showViewedControls}
+              stagedFiles={repoStagedFiles}
               getSectionEntry={getSectionEntry}
               annotationCounts={annotationCounts}
               markdownPreviewedPaths={markdownPreviewedPaths}

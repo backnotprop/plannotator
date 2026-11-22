@@ -74,7 +74,7 @@ function concrete(row: { route: string; pattern: string }): string | null {
 
 describe("the route table: one source for health.door.routes", () => {
   test("every row is plain words that the door answers with the entry it came from, for the token the row names", () => {
-    const own = new Set(["POST pair", "POST revoke", "GET accounts", "GET update", "POST update", "POST link-back", "POST unlink"]);
+    const own = new Set(["POST pair", "POST revoke", "GET accounts", "GET agent-read", "GET agent-file", "GET agent-search", "GET agent-threads", "GET update", "POST update", "POST link-back", "POST unlink"]);
     const rows = doorRouteTable();
     expect(new Set(rows.map((row) => row.name)).size).toBe(rows.length);
     for (const row of rows) {
@@ -119,7 +119,7 @@ describe("the route table: one source for health.door.routes", () => {
     expect(phone).toEqual(doorRouteTable().filter((row) => row.grant === "phone").map((row) => row.name));
     expect(phone).toContain("GET health");
     expect(phone).toContain("POST revoke");
-    for (const only of ["GET cards", "POST threads/:id/tags", "POST link-back", "GET accounts"]) {
+    for (const only of ["GET cards", "POST threads/:id/tags", "POST link-back", "GET accounts", "GET agent-read", "GET agent-file", "GET agent-search", "GET agent-threads"]) {
       expect(phone).not.toContain(only);
       expect(machine).toContain(only);
     }
@@ -128,23 +128,31 @@ describe("the route table: one source for health.door.routes", () => {
   });
 
   test("a linked machine's own routes are listed exactly when this Inbox answers them, and each listed one answers", async () => {
-    const own = ["GET accounts", "POST link-back", "POST unlink", "GET update", "POST update"];
+    const own = ["GET accounts", "GET agent-read", "GET agent-file", "GET agent-search", "GET agent-threads", "POST link-back", "POST unlink", "GET update", "POST update"];
     const bare = door();
     expect(own.filter((name) => bare.devices.doorReach("machine").routes.includes(name))).toEqual(["GET accounts"]);
     const lone = await bare.machine();
-    for (const name of ["POST link-back", "POST unlink", "GET update", "POST update"]) {
+    for (const name of ["GET agent-read", "GET agent-file", "GET agent-search", "GET agent-threads", "POST link-back", "POST unlink", "GET update", "POST update"]) {
       const [method, route] = name.split(" ");
       const answer = await bare.call(lone.token, route!, method === "POST" ? { body: { idempotency_key: `k-${route}` } } : {});
       expect([name, answer.status, ((await answer.json()) as Json).code]).toEqual([name, 404, "device_route_not_found"]);
     }
     const machines = { linkBack: async () => Response.json({ linked: true }), unlinkedBy: () => Response.json({ unlinked: true }), hasLinks: () => true };
-    const full = door(undefined, { machines: () => machines, machineUpdate: { read: () => ({ state: "idle" }), start: async () => ({ outcome: "started" }) } });
+    const agentRead = { read: () => Response.json({ thread_id: "msg_1" }), file: async () => new Response("bytes") };
+    const agentFind = { search: async () => Response.json({ total: 0, results: [] }), threads: () => Response.json({ total: 0, threads: [] }) };
+    const full = door(undefined, { machines: () => machines, agentRead, agentFind, machineUpdate: { read: () => ({ state: "idle" }), start: async () => ({ outcome: "started" }) } });
     expect(own.filter((name) => full.devices.doorReach("machine").routes.includes(name))).toEqual(own);
     const linked = await full.machine();
     for (const name of own) {
       const [method, route] = name.split(" ");
       const answer = await full.call(linked.token, route!, method === "POST" ? { body: { idempotency_key: `k-${route}` } } : {});
       expect([name, answer.status]).toEqual([name, 200]);
+    }
+    // A phone's token never reaches a linked machine's agents' reads.
+    const phone = await full.phone();
+    for (const route of ["agent-read", "agent-file", "agent-search", "agent-threads"]) {
+      const answer = await full.call(phone.token, `${route}?thread_id=msg_1`);
+      expect([route, answer.status, ((await answer.json()) as Json).code]).toEqual([route, 404, "device_route_not_found"]);
     }
   });
 });
