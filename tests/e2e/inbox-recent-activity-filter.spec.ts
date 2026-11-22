@@ -2,19 +2,22 @@
  * The list filter's "Recent activity" (approval "inbox-recent-activity-filter") in a real Chromium against the
  * compiled binary, agents writing through `plannotator inbox mcp` (scripts/inbox-sim.ts):
  *
- *  - the funnel's menu offers Recent activity beside Not seen, counting the threads the person did something in;
- *  - the person opens two threads by clicking their rows (Charlie Dunn's, then Ada Novak's), stars a third (Bob
- *    Tully's: tidying, which never counts) and leaves a fourth alone (only an agent wrote there);
- *  - on, the list holds the two opened threads only, Ada Novak's first (opened last), though Charlie Dunn's has the
- *    newer message; the funnel counts one pick; a reload keeps it;
+ *  - the person opens two threads by clicking their rows (Charlie Dunn's, then Bob Tully's: both wait on them), gives
+ *    a third a 👍 Looks good (Ada Novak's, which goes to Quiet), stars a fourth (tidying, which never counts) and
+ *    leaves a fifth alone (only an agent wrote there);
+ *  - the funnel's menu offers Recent activity beside Not seen, with a mark of its own (not Updated's clock), counting
+ *    the three;
+ *  - on, the list holds those three only, in two groups: Waiting on you holds Bob Tully's above Charlie Dunn's (opened
+ *    later, though Charlie Dunn's has the newer message), and Quiet holds Ada Novak's, acted in last; a reload keeps it;
  *  - ticked again, it turns off: every thread back, in the list's own order, and no badge.
  *
- * What this catches: an open by the person that the server never records (the opening look without `opened`), a
- * star that counts, the filter sorting by the newest message instead of the person's own act, a pick that does not
- * hold a reload or does not turn off from the same row.
+ * What this catches: an open by the person that the server never records (the opening look without `opened`), a 👍
+ * that does not count, a star that does, the filter sorting by the newest message instead of the person's own act, a
+ * pick that does not hold a reload or does not turn off from the same row, the pick drawn with Updated's clock.
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/recent-activity-filter: 01 the menu open, 02 the list with the filter on,
- * 03 the list after turning it off. Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
+ * 03 the list after turning it off, 04 (dark) and 05 (light) the filtered list with both groups open. Build the
+ * binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
 
 import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
@@ -35,7 +38,9 @@ interface World {
   context: BrowserContext;
   page: Page;
   errors: string[];
-  threads: { ada: string; bob: string; charlie: string; untouched: string };
+  threads: { ada: string; bob: string; charlie: string; starred: string; untouched: string };
+  /** Ada Novak's agent message: the one the 👍 goes on. */
+  adaMessage: string;
 }
 
 let world: World;
@@ -52,6 +57,23 @@ async function shot(page: Page, name: string) {
   // The menu's entrance has played.
   await page.waitForTimeout(400);
   await page.screenshot({ path: join(proofDir, name) });
+}
+
+/** The same list in dark (`dark`) and light (`light`), then back to the page's light. */
+async function shotBoth(page: Page, dark: string, light: string) {
+  for (const [scheme, name] of [['dark', dark], ['light', light]] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await shot(page, name);
+  }
+  await page.emulateMedia({ colorScheme: 'light' });
+}
+
+/** Quiet's band, opened when it is folded. */
+async function openQuiet(page: Page) {
+  const band = page.locator('.ib-lbody [data-section-id="quiet"] .ib-band');
+  await expect(band).toBeVisible();
+  if ((await band.getAttribute('aria-expanded')) !== 'true') await band.click();
+  await expect(band).toHaveAttribute('aria-expanded', 'true');
 }
 
 const ask = (prompt: string) => ['The draft is ready for a look.', '', ':::question', prompt, '', '- [ ] Yes', '- [ ] Not yet', ':::'].join('\n');
@@ -76,10 +98,11 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const billing = scratchProject(join(root, 'src'), 'billing-svc');
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const codex = await SimAgent.connect({ binary, env, name: 'Codex', host: 'codex' });
-  // Oldest first: the list's own order is newest message first (untouched, Charlie Dunn's, Bob Tully's, Ada Novak's).
-  const ada = await claude.send({ project_path: billing, subject: 'Ada Novak: refund retries', thread: 'ada', body: ask('Retry refunds after 24 hours?') });
+  // Oldest first: the list's own order is newest message first. Ada Novak's asks nothing, so a 👍 can close it.
+  const ada = await claude.send({ project_path: billing, subject: 'Ada Novak: refund retries', thread: 'ada', body: 'Refund retries now wait 24 hours. CI is green.' });
   const bob = await codex.send({ project_path: billing, subject: 'Bob Tully: landing copy', thread: 'bob', body: ask('Ship the new hero line?') });
   const charlie = await claude.send({ project_path: billing, subject: 'Charlie Dunn: invoice export', thread: 'charlie', body: ask('Export invoices as CSV too?') });
+  const starred = await codex.send({ project_path: billing, subject: 'Release notes for 2.4', thread: 'notes', body: ask('Lead with the export change?') });
   const untouched = await codex.send({ project_path: billing, subject: 'Nightly e2e run', thread: 'nightly', body: 'All green tonight.' });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
@@ -93,7 +116,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     context,
     page,
     errors,
-    threads: { ada: ada.thread_id as string, bob: bob.thread_id as string, charlie: charlie.thread_id as string, untouched: untouched.thread_id as string },
+    threads: { ada: ada.thread_id as string, bob: bob.thread_id as string, charlie: charlie.thread_id as string, starred: starred.thread_id as string, untouched: untouched.thread_id as string },
+    adaMessage: ada.message_id as string,
   };
 });
 
@@ -107,7 +131,7 @@ test.afterAll(async () => {
   }
 });
 
-test('the person opens two threads and stars a third; only the opens are recorded', async () => {
+test('the person opens two threads, gives a third a 👍 and stars a fourth; only the opens and the 👍 are recorded', async () => {
   const { page, threads } = world;
   await expect(rowButton(page, threads.charlie)).toBeVisible();
   // Nothing done yet: no thread carries a time (the page loading on the list opened none).
@@ -116,20 +140,26 @@ test('the person opens two threads and stars a third; only the opens are recorde
   await rowButton(page, threads.charlie).click();
   await expect.poll(async () => (await actedAt(page))[threads.charlie]).not.toBeNull();
   await page.waitForTimeout(50);
-  await rowButton(page, threads.ada).click();
+  await rowButton(page, threads.bob).click();
+  await expect.poll(async () => (await actedAt(page))[threads.bob]).not.toBeNull();
+  await page.waitForTimeout(50);
+  // 👍 Looks good on Ada Novak's thread, never opened: the press alone counts, and the thread goes to Quiet.
+  const acked = await page.evaluate(async (id) => (await fetch(`/api/inbox/messages/${id}/ack`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, world.adaMessage);
+  expect(acked).toBe(200);
   await expect.poll(async () => (await actedAt(page))[threads.ada]).not.toBeNull();
   // A star is tidying: it never counts.
-  const starred = await page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}/pin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pinned: true }) })).status, threads.bob);
-  expect(starred).toBe(200);
+  const pinned = await page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}/pin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pinned: true }) })).status, threads.starred);
+  expect(pinned).toBe(200);
 
   const acted = await actedAt(page);
-  expect(acted[threads.bob]).toBeNull();
+  expect(acted[threads.starred]).toBeNull();
   expect(acted[threads.untouched]).toBeNull();
-  expect(Date.parse(acted[threads.ada]!)).toBeGreaterThanOrEqual(Date.parse(acted[threads.charlie]!));
+  expect(Date.parse(acted[threads.bob]!)).toBeGreaterThanOrEqual(Date.parse(acted[threads.charlie]!));
+  expect(Date.parse(acted[threads.ada]!)).toBeGreaterThanOrEqual(Date.parse(acted[threads.bob]!));
   expect(world.errors).toEqual([]);
 });
 
-test("the funnel's menu offers Recent activity beside Not seen, counting the two", async () => {
+test("the funnel's menu offers Recent activity beside Not seen, with its own mark, counting the three", async () => {
   const { page, threads } = world;
   // Back to the list with no thread open.
   await page.goto(world.url);
@@ -137,29 +167,40 @@ test("the funnel's menu offers Recent activity beside Not seen, counting the two
   await listFilter(page).click();
   await expect(recentPick(page)).toBeVisible();
   await expect(recentPick(page)).toHaveText(/Recent activity/);
-  await expect(recentPick(page).locator('.ib-pmi-n')).toHaveText('2');
+  await expect(recentPick(page).locator('.ib-pmi-n')).toHaveText('3');
   await expect(recentPick(page)).toHaveAttribute('aria-checked', 'false');
   // It sits right under Not seen, before Updated.
-  const words = await page.locator('[data-list-filter-menu] [role="menuitemcheckbox"], [data-list-filter-menu] [role="menuitem"]').evaluateAll((items) => items.map((item) => item.querySelector('.ib-pmi-l')?.textContent ?? ''));
+  const items = page.locator('[data-list-filter-menu] [role="menuitemcheckbox"], [data-list-filter-menu] [role="menuitem"]');
+  const words = await items.evaluateAll((all) => all.map((item) => item.querySelector('.ib-pmi-l')?.textContent ?? ''));
   expect(words.slice(0, 3)).toEqual(['Not seen', 'Recent activity', 'Today']);
+  // Its mark is its own, not the clock the Updated rows under it draw.
+  const marks = await items.evaluateAll((all) => all.slice(1, 3).map((item) => item.querySelector('svg')?.innerHTML ?? ''));
+  expect(marks[0]).not.toBe('');
+  expect(marks[0]).not.toBe(marks[1]);
   await shot(page, '01-menu-open.png');
   expect(world.errors).toEqual([]);
 });
 
-test('on: only the opened threads, the one opened last first; a reload keeps it', async () => {
+test('on: only the three, each group newest first by the act; a reload keeps it', async () => {
   const { page, threads } = world;
   await recentPick(page).click();
   await expect(recentPick(page)).toHaveAttribute('aria-checked', 'true');
   await page.keyboard.press('Escape');
-  await expect(rowButton(page, threads.bob)).toHaveCount(0);
+  await expect(rowButton(page, threads.starred)).toHaveCount(0);
   await expect(rowButton(page, threads.untouched)).toHaveCount(0);
-  await expect.poll(() => listOrder(page)).toEqual([threads.ada, threads.charlie]);
   await expect(page.locator('[data-list-filter-count]')).toHaveText('1');
+  await openQuiet(page);
+  // Two groups: Waiting on you (Bob Tully's, opened after Charlie Dunn's) above Quiet (Ada Novak's, the 👍 last).
+  await expect.poll(() => listOrder(page)).toEqual([threads.bob, threads.charlie, threads.ada]);
+  await expect(page.locator(`.ib-lbody [data-section-id="quiet"] [data-thread-id="${threads.ada}"]`)).toBeVisible();
+  await page.mouse.move(1300, 800);
   await shot(page, '02-filter-on.png');
+  await shotBoth(page, '04-grouped-two-groups.png', '05-grouped-two-groups-light.png');
 
   await page.reload();
-  await expect(rowButton(page, threads.ada)).toBeVisible();
-  await expect.poll(() => listOrder(page)).toEqual([threads.ada, threads.charlie]);
+  await expect(rowButton(page, threads.bob)).toBeVisible();
+  await openQuiet(page);
+  await expect.poll(() => listOrder(page)).toEqual([threads.bob, threads.charlie, threads.ada]);
   expect(world.errors).toEqual([]);
 });
 
@@ -170,10 +211,11 @@ test('ticked again it turns off: every thread back in the list order, no badge',
   await expect(recentPick(page)).toHaveAttribute('aria-checked', 'false');
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-list-filter-count]')).toHaveCount(0);
+  await openQuiet(page);
   for (const id of Object.values(threads)) await expect(rowButton(page, id)).toBeVisible();
-  // The list's own order again: Charlie Dunn's newer message above Ada Novak's.
+  // The list's own order again: Charlie Dunn's newer message above Bob Tully's.
   const order = await listOrder(page);
-  expect(order.indexOf(threads.charlie)).toBeLessThan(order.indexOf(threads.ada));
+  expect(order.indexOf(threads.charlie)).toBeLessThan(order.indexOf(threads.bob));
   await shot(page, '03-filter-off.png');
   expect(world.errors).toEqual([]);
 });
