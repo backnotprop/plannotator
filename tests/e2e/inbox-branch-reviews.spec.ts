@@ -168,7 +168,7 @@ test('on: a report is one review thread, a local branch On you, with the person\
   await expect(page.locator('[data-pulls-group="on_you"]')).toContainText('retry-jitter');
   await shot(page, '1-reported-row');
   await row.click();
-  await expect(row.locator('.ib-pr-l3')).toHaveText(/^retry-jitter · .+ · Ready for review$/);
+  await expect(row.locator('.ib-pr-l3')).toHaveText(/^retry-jitter · .+ · (?:.+, )?Ready for review$/); // the agent's name, for a screen reader, before the status
   await expect(page.locator('.ib-rvctx')).toContainText('Local branch: retry-jitter, against main');
   await expect(page.locator('[data-review-branch-ask]')).toBeVisible();
   await shot(page, '2-reported-thread');
