@@ -297,7 +297,9 @@ export function createCombineAcross(deps: CombineAcrossDeps) {
           Object.assign(file, { upload: upload.upload_id, size: upload.size, sha256: upload.sha256 });
         } catch (error) {
           const code = error instanceof InboxError ? error.code : "not_copied";
-          file.missed = code === "upload_too_large" && room < INBOX_UPLOAD_MAX_BYTES ? "files_too_large" : code;
+          // Cut off by what was left of the total, not by the one file's own bound.
+          const pastTotal = code === "upload_too_large" && INBOX_UPLOAD_MAX_BYTES > room;
+          file.missed = pastTotal ? "files_too_large" : code;
         }
       }
       deps.save();
