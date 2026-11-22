@@ -347,6 +347,9 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^combine$/, window: () => "/api/inbox/combine", machineOnly: true },
   { method: "POST", route: /^combine$/, window: () => "/api/inbox/combine", machineOnly: true },
   { method: "POST", route: /^combine\/(cmb_[^/]+)\/(cancel|undo)$/, window: (m) => `/api/inbox/combine/${m[1]}/${m[2]}`, machineOnly: true },
+  // A linked computer's Combine that holds some of this Inbox's threads marks them busy here while it waits, and lets go
+  // (approval "inbox-combine-across-computers"; inbox-combine-across.ts). A machine's token only: the route knows which.
+  { method: "POST", route: /^combine\/hold$/, window: () => "/api/inbox/combine/hold", machineOnly: true },
   // A launched agent's Stop, Try again, Trust folder and Delete from a linked machine's window (remote launch). Open in
   // Terminal and the launch settings never cross: they are this computer's.
   { method: "POST", route: /^launch\/([^/]+)\/(stop|retry|trust|delete)$/, window: (m) => `/api/inbox/launch/${m[1]}/${m[2]}`, machineOnly: true },
