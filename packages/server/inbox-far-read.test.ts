@@ -318,8 +318,9 @@ describe("read_thread of a thread on a linked machine", () => {
 describe("where the person wrote it, as the reading agent's computer sees it", () => {
   /**
    * A thread on MacBook, answered from everywhere: in Studio's window (forwarded, recorded as Studio), on the phone
-   * through Studio, in MacBook's own window, over MacBook's tailnet, and in Mini's window. Studio shows MacBook as
-   * "Work MacBook"; MacBook records Studio as "Studio".
+   * through Studio, in MacBook's own window (here), over MacBook's tailnet, and in Mini's window; and written as the
+   * person with no record: a message from before the records, and the Inbox's own PR-risk thread. Studio shows
+   * MacBook as "Work MacBook"; MacBook records Studio as "Studio".
    */
   async function answered() {
     const studio = machine("Studio");
@@ -329,7 +330,9 @@ describe("where the person wrote it, as the reading agent's computer sees it", (
     const ids = {
       studio: macbook.store.thread(id)!.messages.at(-1)!.id,
       studioPhone: reply("studio-phone", { kind: "machine", name: "Studio", via: "phone" }),
-      macbook: reply("macbook"),
+      macbook: reply("macbook", { kind: "here" }),
+      old: reply("old"),
+      auto: macbook.store.sendReply(id, { words: "The Inbox sent this on its own: a pull request looks risky.", idempotency_key: `pull-risk-auto:${id}` }).reply.id,
       tailnet: reply("tailnet", { kind: "tailnet" }),
       mini: reply("mini", { kind: "machine", name: "Mini" }),
     };
@@ -340,16 +343,18 @@ describe("where the person wrote it, as the reading agent's computer sees it", (
   const line = (sent_from: InboxSentFrom) => inboxSentFromLine({ sent_from });
   const linesOf = (messages: { id: string; sent_from?: string }[]) => Object.fromEntries(messages.map((m) => [m.id, m.sent_from ?? null]));
 
-  test("Studio's agent: its own computer gets no line, MacBook's own window reads as that linked computer, the rest as they are", async () => {
+  test("Studio's agent: its own computer gets no line, MacBook's own window reads as that linked computer, no record none, the rest as they are", async () => {
     const { id, ids, tools } = await answered();
     const expected = {
       [ids.studio]: null,
       [ids.studioPhone]: line({ kind: "phone" }),
       [ids.macbook]: line({ kind: "machine", name: "Work MacBook" }),
+      [ids.old]: null,
+      [ids.auto]: null,
       [ids.tailnet]: line({ kind: "tailnet" }),
       [ids.mini]: line({ kind: "machine", name: "Mini" }),
     };
-    const read = await tools.read_thread!.handler({ thread_id: id }, {});
+    const read = await tools.read_thread!.handler({ thread_id: id, limit: 10 }, {});
     expect(read.isError).toBeUndefined();
     const shown = linesOf(read.structuredContent!.thread.messages);
     for (const [message, words] of Object.entries(expected)) expect([message, shown[message]]).toEqual([message, words]);
@@ -369,13 +374,14 @@ describe("where the person wrote it, as the reading agent's computer sees it", (
     expect(shown[ids.studio]).toBe(line({ kind: "machine", name: "Studio" }));
     expect(shown[ids.studioPhone]).toBe(line({ kind: "machine", name: "Studio", via: "phone" }));
     expect(shown[ids.macbook]).toBeNull();
+    expect(shown[ids.old]).toBeNull();
     // A far read in between changes nothing in MacBook's own read (its own first read moved the cursor: read it again).
     const again = (await macbook.tools().read_thread!.handler({ thread_id: id }, {})).content[0]!.text;
     await readerTools(studio, [link], { [link.id]: "Work MacBook" }).tools.read_thread!.handler({ thread_id: id }, {});
     expect((await macbook.tools().read_thread!.handler({ thread_id: id }, {})).content[0]!.text).toBe(again);
   });
 
-  test("another computer's token, an older reader, and a name with a backtick", async () => {
+  test("another computer's token, an older reader, a name two linked computers share, and a name with a backtick", async () => {
     const { macbook, id, ids } = await answered();
     const ask = (reader: string, shownAs?: string) =>
       agentReadDoorAnswer({ store: macbook.store, stepsOn: () => false }, new URL(`http://door.local/api/inbox/device/agent-read?thread_id=${id}${shownAs === undefined ? "" : `&shown_as=${encodeURIComponent(shownAs)}`}`), reader).json() as Promise<any>;
@@ -384,10 +390,15 @@ describe("where the person wrote it, as the reading agent's computer sees it", (
     expect(mini[ids.studio]).toBe(line({ kind: "machine", name: "Studio" }));
     expect(mini[ids.mini]).toBeNull();
     expect(mini[ids.macbook]).toBe(line({ kind: "machine", name: "MacBook" }));
+    expect(mini[ids.old]).toBeNull();
     // An older reader names nothing: MacBook's own window stays silent, Studio's own still drops.
     const older = linesOf((await ask("Studio")).result.thread.messages);
     expect(older[ids.macbook]).toBeNull();
     expect(older[ids.studio]).toBeNull();
+    // Two linked computers record "Studio": the door knows no name for the reader, so Studio's forward names it.
+    const shared = linesOf((await ask("", "MacBook")).result.thread.messages);
+    expect(shared[ids.studio]).toBe(line({ kind: "machine", name: "Studio" }));
+    expect(shared[ids.macbook]).toBe(line({ kind: "machine", name: "MacBook" }));
     // The name the reader says is cleaned as a record's name: one line, no backtick.
     const odd = linesOf((await ask("Studio", "Work`\nMac")).result.thread.messages);
     expect(odd[ids.macbook]).toBe(line({ kind: "machine", name: "Work' Mac" }));

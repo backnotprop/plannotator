@@ -598,12 +598,12 @@ describe("where the person wrote it reaches the agent (inbox-sent-from.ts)", () 
     return parseInboxBridgeCommands(await response.text());
   };
 
-  test("this computer's window adds nothing; the owner over the tailnet gets the line in the delivered turn", async () => {
+  test("this computer's window records here and adds nothing; the owner over the tailnet gets the line in the delivered turn", async () => {
     const w = await world();
     await poll(w);
     const TAILNET = inboxSentFromLine({ sent_from: { kind: "tailnet" } });
     for (const [caller, key, expected] of [
-      ["local", "00000000-0000-4000-8000-000000000401", undefined],
+      ["local", "00000000-0000-4000-8000-000000000401", { kind: "here" }],
       ["owner", "00000000-0000-4000-8000-000000000402", { kind: "tailnet" }],
     ] as const) {
       const id = ask(w, `where-${caller}`);
@@ -616,14 +616,14 @@ describe("where the person wrote it reaches the agent (inbox-sent-from.ts)", () 
     }
   });
 
-  test("the owner's own browser at this computer's own tailnet address is this computer: nothing is recorded", async () => {
+  test("the owner's own browser at this computer's own tailnet address is this computer: here, and nothing is said", async () => {
     const w = await world();
     await poll(w);
     const id = ask(w, "where-own-node");
     const response = await call(w, "owner", { path: `/api/inbox/messages/${id}/reply`, body: { idempotency_key: "00000000-0000-4000-8000-000000000405", words: WORDS, questions: [] } }, { "X-Forwarded-For": SELF_IP });
     expect(response.status).toBe(200);
     const { reply } = (await response.json()) as Json;
-    expect(w.inbox.store.message(reply.id)!).not.toHaveProperty("sent_from");
+    expect(w.inbox.store.message(reply.id)!.sent_from).toEqual({ kind: "here" });
     expect((await poll(w)).find((c) => c.id === reply.id)?.body).toBe(WORDS);
   });
 
@@ -708,6 +708,16 @@ describe("where the person wrote it, read by an agent on the linked computer (in
     expect(there.status).toBe(200);
     replies.there = ((await there.json()) as Json).reply.id as string;
     expect(peer.inbox.store.message(replies.local)!.sent_from).toEqual({ kind: "machine", name: "Studio" });
+    expect(peer.inbox.store.message(replies.there)!.sent_from).toEqual({ kind: "here" });
+    // Written as the person with no record (a program's call to the store, as the Inbox's own notes are): no line anywhere.
+    replies.program = peer.inbox.store.sendReply(id, { words: "Large (program).", idempotency_key: "far-reader-program" }).reply.id;
+    // Re-ask all pressed over this computer's tailnet, forwarded there: each note says where.
+    const block = [":::question", "Which colour?", "", "- [ ] Red", "- [ ] Green", ":::"].join("\n");
+    const colour = peer.inbox.store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: SESSION, name: "Claude Code" }, body: block, idempotency_key: "far-reader-colour" }).message;
+    const reaskAll = await call(peer, "owner", { path: `/api/inbox/threads/${colour.thread_id}/reask`, body: { batch_id: "far-reader-batch" } });
+    expect(reaskAll.status).toBe(200);
+    const note = ((await reaskAll.json()) as Json).asked[0].reply_id as string;
+    expect(peer.inbox.store.message(note)!.sent_from).toEqual({ kind: "tailnet" });
 
     const client = new Client({ name: "inbox-far-reader-test", version: "1.0.0" });
     await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${w.inbox.port}/mcp`)));
@@ -720,6 +730,7 @@ describe("where the person wrote it, read by an agent on the linked computer (in
       expect(lines[replies.local]).toBeNull();
       expect(lines[replies.owner]).toBe(inboxSentFromLine({ sent_from: { kind: "tailnet" } }));
       expect(lines[replies.there]).toBe(inboxSentFromLine({ sent_from: { kind: "machine", name: shownAs } }));
+      expect(lines[replies.program]).toBeNull();
       expect(read.content[0]!.text).not.toContain(inboxSentFromLine({ sent_from: { kind: "machine", name: "Studio" } }));
     } finally {
       await client.close().catch(() => {});

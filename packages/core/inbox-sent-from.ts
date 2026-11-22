@@ -2,7 +2,9 @@
  * Where the person wrote a message, as the Inbox that accepted it could tell from the request itself (never from what
  * the page says): another device over the tailnet, through Cloudflare Access, the Plannotator phone app, or a linked
  * computer (named as the Inbox names it), which may say it came to it from one of the first three. This computer's own
- * window, and anything the Inbox cannot tell, record nothing, so most messages carry no field and read as before.
+ * window records `here`, which no agent here is ever shown: only an agent on a linked computer reading the thread is
+ * told it was written on this one (inbox-sent-from-reader.ts in the server). Anything the Inbox cannot tell (a
+ * program, an older Inbox's message, a note the Inbox writes) records nothing.
  * The agent reads it as one line under the person's words (`inboxSentFromLine`); the window draws nothing.
  */
 
@@ -11,6 +13,8 @@ export type InboxSentFromPlace = "tailnet" | "cloudflare" | "phone";
 
 export type InboxSentFrom =
   | { kind: InboxSentFromPlace }
+  /** This computer's own window. Never a line here: a linked computer's agent reading the thread reads it as written on this one. */
+  | { kind: "here" }
   /** Forwarded by a linked computer: its name here, and where the person was when it was not that computer's own window. */
   | { kind: "machine"; name: string; via?: InboxSentFromPlace };
 
@@ -56,6 +60,7 @@ export function inboxSentFromOf(value: unknown): InboxSentFrom | null {
   if (!value || typeof value !== "object") return null;
   const record = value as { kind?: unknown; name?: unknown; via?: unknown };
   if (isInboxSentFromPlace(record.kind)) return { kind: record.kind };
+  if (record.kind === "here") return { kind: "here" };
   if (record.kind !== "machine" || typeof record.name !== "string") return null;
   const name = inboxSentFromName(record.name);
   if (!name) return null;
@@ -70,11 +75,12 @@ const PLACE_WORDS: Record<InboxSentFromPlace, string> = {
 
 /**
  * The one line an agent reads for a message the person wrote away from this computer. Context only: where they were,
- * and the one fact that follows from it. Empty when the message says nothing (this computer, or not known).
+ * and the one fact that follows from it. Empty when the message says nothing (this computer, `here`, or not known).
  */
 export function inboxSentFromLine(message: { sent_from?: unknown }): string {
   const from = inboxSentFromOf(message.sent_from);
-  if (!from) return "";
+  // This computer's own window: nothing to say to an agent on this computer.
+  if (!from || from.kind === "here") return "";
   const where =
     from.kind === "machine"
       ? from.via

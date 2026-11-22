@@ -4173,6 +4173,19 @@
               "properties": {
                 "kind": {
                   "type": "string",
+                  "const": "here"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
                   "const": "machine"
                 },
                 "name": {
