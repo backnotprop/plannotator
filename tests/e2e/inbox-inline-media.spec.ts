@@ -372,7 +372,8 @@ test('a small picture named before it is written shows in the open thread withou
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const scratch = inboxScratch('plannotator-inbox-late-picture-e2e-');
   const root = realpathSync(scratch);
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  // The debug log on: the window then marks each try of a failed picture with what asked for it (PictureRetry.tsx).
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_INBOX_DEBUG: '1' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -384,6 +385,16 @@ test('a small picture named before it is written shows in the open thread withou
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: 'reduce' });
     const page = await context.newPage();
     const drawn = (img: Player) => img.evaluate((el: HTMLImageElement) => !el.hidden && el.complete && el.naturalWidth);
+    /** What asked for each try of a message's failed pictures since `since` (the page's clock). */
+    const triesSince = (message: string, since: number) =>
+      page.evaluate(
+        ({ message, since }) =>
+          performance
+            .getEntriesByName('pn:picture-retry')
+            .filter((entry) => entry.startTime >= since && (entry as PerformanceMark).detail?.message === message)
+            .map((entry) => (entry as PerformanceMark).detail.why as string),
+        { message, since },
+      );
 
     await test.step('with the next message: shows when it arrives', async () => {
       const sent = await agent.send({ project_path: project, subject: 'Export chart', body: 'The export chart:\n\n![Export chart](media/late-a.png)' });
@@ -392,14 +403,18 @@ test('a small picture named before it is written shows in the open thread withou
       await page.evaluate(() => ((window as unknown as { stayed: boolean }).stayed = true));
       const body = page.locator(`[data-message-id="${sent.message_id}"]`);
       await expect(body.locator('[data-image-unavailable]', { hasText: 'Export chart' })).toBeVisible(WAIT);
-      // Past the window's first try on its own (2 s after the failure): what shows it now is the next message.
-      await page.waitForTimeout(2500);
+      // Past the window's second try on its own (about 6 s after the failure), 8 s before its third: what shows it
+      // now is the next message.
+      await page.waitForTimeout(6500);
+      const since = await page.evaluate(() => performance.now());
       writeFileSync(join(project, 'media', 'late-a.png'), PNG);
       const note = await agent.send({ project_path: project, reply_to: sent.message_id as string, body: 'Written now.' });
       await expect(page.locator(`[data-message-id="${note.message_id}"]`)).toBeVisible(WAIT);
       const img = body.locator('img[alt="Export chart"]');
-      await expect.poll(() => drawn(img), { timeout: 3000, message: 'drawn soon after the next message' }).toBe(1);
+      await expect.poll(() => drawn(img), { timeout: 5000, message: 'drawn soon after the next message' }).toBe(1);
       await expect(body.locator('[data-image-unavailable]')).toHaveCount(0);
+      // The one try since the file was written was the new message's, not a timer's.
+      expect(await triesSince(sent.message_id as string, since), 'tried because the thread gained a message').toEqual(['thread']);
       await expect(img).toHaveAttribute('role', 'button');
       expect(await page.evaluate(() => (window as unknown as { stayed?: boolean }).stayed), 'no reload').toBe(true);
     });

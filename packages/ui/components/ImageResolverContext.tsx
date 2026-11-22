@@ -42,9 +42,10 @@ export function useImageResolver(): ImageResolver | null {
 /**
  * A host's say on pictures that failed to load (a markdown image, or an inline
  * `<img>`, drawn through the resolver): when `key` changes, each failed one
- * whose URL `retries` accepts is loaded again off the page and drawn once it
- * loads; its placeholder stays meanwhile, and stays when it fails again. For a
- * picture that may be written after the document names it.
+ * whose URL `retries` accepts is loaded again off the page (at most four at a
+ * time in the window, imageRetryProbe.ts) and drawn once it loads; its
+ * placeholder stays meanwhile, and stays when it fails again. For a picture
+ * that may be written after the document names it.
  */
 export type ImageRetry = { key: string | number; retries: (src: string) => boolean };
 

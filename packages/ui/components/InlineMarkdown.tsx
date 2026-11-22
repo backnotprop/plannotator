@@ -8,6 +8,7 @@ import { transformPlainText } from "../utils/inlineTransforms";
 import { hasLinkedDocExtension } from "../utils/markdownExtensions";
 import { getImageSrc } from "./ImageThumbnail";
 import { ImageRetryContext, InlineImageTagsContext, UNAVAILABLE_IMAGE_CLASS, useImageResolver } from "./ImageResolverContext";
+import { probeImage } from "./imageRetryProbe";
 import { useCodePathValidation, type CodePathValidationContextValue } from "./CodePathValidationContext";
 import { BarePathContext, CodeSpan, isNewTabClick, useLocalLinkMatch, useLocalLinkResolver, type BarePathWrap } from "./LocalLinkContext";
 import type { ValidationEntry } from "../hooks/useValidatedCodePaths";
@@ -486,24 +487,13 @@ const HostResolvedImage: React.FC<{
   const retrying = failed && retry !== null && failure.key !== retryKey && retry.retries(src);
   useEffect(() => {
     if (!retrying) return;
-    // Off the page first: the placeholder stays until the picture is there.
-    let live = true;
-    const probe = new Image();
-    probe.onload = () => {
-      if (!live) return;
+    // Off the page first (a few at a time in the window): the placeholder stays until the picture is there.
+    return probeImage(src, (loaded) => {
+      if (!loaded) return setFailure({ src, key: retryKey });
       // The same element, a new URL string: WebKit does not load again a URL that failed for it when it is set again.
       setReloaded((last) => ({ src, n: last?.src === src ? last.n + 1 : 1 }));
       setFailure(null);
-    };
-    probe.onerror = () => {
-      if (live) setFailure({ src, key: retryKey });
-    };
-    probe.src = src;
-    return () => {
-      live = false;
-      probe.onload = null;
-      probe.onerror = null;
-    };
+    });
   }, [retrying, src, retryKey]);
   const shownSrc = reloaded?.src === src && !src.includes('#') ? `${src}#retry-${reloaded.n}` : src;
   return (
