@@ -64,8 +64,11 @@ function failures(vars: PeleThemeVariables): string[] {
 }
 
 describe('Pele theme adapter', () => {
-  test('every palette in packages/ui/themes is swept', () => {
-    expect(themeFiles.length).toBe(55);
+  test('every palette the app ships (theme.css imports) is swept', () => {
+    // The list is the stylesheet's own, so a new palette needs no edit here (a fixed count broke when main added two).
+    const shipped = Array.from(readFileSync(join(themesDir, '..', 'theme.css'), 'utf8').matchAll(/@import\s+"\.\/themes\/([\w-]+\.css)"/gu), (m) => m[1] as string).sort();
+    expect(shipped.length).toBeGreaterThan(0);
+    expect(themeFiles).toEqual(expect.arrayContaining(shipped));
   });
 
   for (const file of themeFiles) {
