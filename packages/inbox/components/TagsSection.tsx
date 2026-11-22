@@ -61,7 +61,6 @@ export interface TagsSectionProps {
 export function TagsSection(props: TagsSectionProps) {
   const { closed } = props;
   const sort = useTagSort();
-  // Only most recent reads the activity, so another order does not sort again when a row's time changes.
   const activity = sort === 'recent' ? props.activity : undefined;
   const tags = useMemo(() => sortTags(props.tags, sort, activity), [props.tags, sort, activity]);
   const sortControl = tagSortControl(sort);

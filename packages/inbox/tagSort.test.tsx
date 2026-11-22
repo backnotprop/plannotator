@@ -48,10 +48,8 @@ afterEach(() => {
 });
 
 const tag = (id: string, name: string, made: string): InboxInitiative => ({ id, name, created_at: made, created_by: { kind: 'person' }, updated_at: made, deleted_at: null });
-// The server's order: oldest tag first.
 const TAGS = [tag('ini_z', 'zephyr', '2026-10-01T09:00:00.000Z'), tag('ini_a', 'Atlas', '2026-10-02T09:00:00.000Z'), tag('ini_r', 'release', '2026-10-03T09:00:00.000Z'), tag('ini_q', 'quiet', '2026-10-04T09:00:00.000Z')];
 const row = (thread_id: string, tags: string[], last_at: string) => ({ thread_id, tags, last_at }) as unknown as InboxListRow;
-// Most recent: zephyr and release share a thread (Nov 3), a tie that keeps today's order; then Atlas (Nov 1); quiet holds no thread.
 const ROWS = [row('t1', ['ini_a'], '2026-11-01T09:00:00.000Z'), row('t2', ['ini_r', 'ini_z'], '2026-11-03T09:00:00.000Z'), row('t3', ['ini_z'], '2026-10-20T09:00:00.000Z')];
 const ACTIVITY = tagActivity(ROWS, (r) => r.tags ?? []);
 const noop = () => {};
@@ -106,7 +104,6 @@ test.skipIf(!hasDom)('the first press goes A to Z, then one button goes between 
   expect(names()).toEqual(['Atlas', 'quiet', 'release', 'zephyr']);
   expect(stored.get(TAGS_SORT_COOKIE)).toBe('name');
   press();
-  // A tie keeps today's order; a tag with no thread in the list goes last.
   expect(names()).toEqual(['zephyr', 'release', 'Atlas', 'quiet']);
   expect(stored.get(TAGS_SORT_COOKIE)).toBe('recent');
   press();
@@ -137,7 +134,6 @@ test.skipIf(!hasDom)("most recent follows the list: a new message moves its tag 
 });
 
 test.skipIf(!hasDom)("a tag's activity is its newest thread, read through the window's tags of a row", () => {
-  // A linked machine's row carries that machine's ids; the window reads it with the merged ones.
   const far = row('t9', ['far_rel'], '2026-11-09T09:00:00.000Z');
   const merged: RowTags = (r) => (r.tags ?? []).map((id) => (id === 'far_rel' ? 'ini_r' : id));
   expect(Object.fromEntries(tagActivity([...ROWS, far], merged))).toEqual({
