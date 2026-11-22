@@ -51,6 +51,12 @@ public enum DocumentBlocks {
     return true
   }
 
+  /// The block a line of the file is in: the last one that starts at or before it.
+  public static func block(onLine line: Int, in blocks: [DocumentBlock]) -> DocumentBlock? {
+    guard line >= 1 else { return nil }
+    return blocks.last { $0.startLine <= line }
+  }
+
   /// A Markdown file's front matter is not part of what is read (`.md` and `.mdx`, as the window decides it).
   public static func stripsFrontmatter(name: String) -> Bool { name.firstMatch(of: /\.mdx?$/.ignoresCase()) != nil }
 

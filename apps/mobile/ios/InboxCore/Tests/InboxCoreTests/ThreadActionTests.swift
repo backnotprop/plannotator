@@ -492,6 +492,9 @@ final class ThreadActionTests: XCTestCase {
     let reads = await door.calls.filter { $0.path == "threads" }.count
     let wake = try XCTUnwrap(session.book.wake, "a timer waits for the snooze's end")
 
+    // The timer's task must be asleep on the clock before the clock moves: moved first, it would sleep from the new
+    // time and never wake (the test then hung, now and then).
+    while clock.sleepers == 0 { await Task.yield() }
     clock.move(by: 3601)
     await wake.value
     // Its time is over: back in its own section, bold, and the list was read again.
@@ -597,6 +600,8 @@ final class HandClock: @unchecked Sendable {
   init(_ start: Date) { time = start }
 
   var now: Date { lock.withLock { time } }
+  /// How many sleeps wait on the clock now.
+  var sleepers: Int { lock.withLock { waits.count } }
 
   func move(by seconds: TimeInterval) {
     let due: [CheckedContinuation<Void, Never>] = lock.withLock {

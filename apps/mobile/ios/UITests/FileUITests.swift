@@ -25,6 +25,12 @@ final class FileUITests: XCTestCase {
     try? XCUIScreen.main.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: folder).appendingPathComponent("\(name)-\(look).png"))
   }
 
+  /// Words on screen: a label's, or a document's (its blocks are text views, whose words are their value).
+  @MainActor
+  private func read(_ app: XCUIApplication, _ text: String) -> XCUIElement {
+    app.descendants(matching: .any).matching(NSPredicate(format: "(elementType == %d OR elementType == %d) AND (label CONTAINS %@ OR value CONTAINS %@)", XCUIElement.ElementType.staticText.rawValue, XCUIElement.ElementType.textView.rawValue, text, text)).firstMatch
+  }
+
   /// A tile, brought onto the screen (the first message's tiles are above where the thread lands).
   @MainActor
   private func tile(_ app: XCUIApplication, _ name: String, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
@@ -134,11 +140,11 @@ final class FileUITests: XCTestCase {
     let app = launch()
     tile(app, "retry-plan.md").tap()
     // The document, drawn: its title, a list, and further down its table and code.
-    XCTAssertTrue(app.staticTexts["Retry plan for the relay client"].waitForExistence(timeout: 20))
+    XCTAssertTrue(read(app, "Retry plan for the relay client").waitForExistence(timeout: 20))
     XCTAssertTrue(app.staticTexts["File 1 of 11"].exists || app.otherElements.containing(NSPredicate(format: "label CONTAINS 'File 1 of 11'")).firstMatch.exists)
-    XCTAssertTrue(app.staticTexts["Problem"].exists)
+    XCTAssertTrue(read(app, "Problem").exists)
     // Nothing of the file's own marks is left in the words.
-    XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS '## ' OR label CONTAINS '|---'")).firstMatch.exists)
+    XCTAssertFalse((read(app, "## ").exists || read(app, "|---").exists))
     shot("06-document-top")
     app.swipeUp()
     usleep(500_000)
@@ -171,7 +177,7 @@ final class FileUITests: XCTestCase {
     shot("10-log")
     app.swipeLeft()
     XCTAssertTrue(app.scrollViews["file-text"].waitForExistence(timeout: 10))
-    XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Stand-up, Tuesday'")).firstMatch.exists)
+    XCTAssertTrue(read(app, "Stand-up, Tuesday").exists)
     shot("11-text")
 
     app.buttons["Done"].tap()
@@ -231,11 +237,11 @@ final class FileUITests: XCTestCase {
     shot("17-tile-changed")
     plan.tap()
     XCTAssertTrue(app.staticTexts["Changed since sent"].waitForExistence(timeout: 20))
-    XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'capped at 30 seconds'")).firstMatch.waitForExistence(timeout: 10))
+    XCTAssertTrue(read(app, "capped at 30 seconds").waitForExistence(timeout: 10))
     shot("18-document-changed")
     app.buttons["View sent version"].tap()
     XCTAssertTrue(app.staticTexts["Showing the sent version"].waitForExistence(timeout: 10))
-    XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'capped at 60 seconds'")).firstMatch.waitForExistence(timeout: 10))
+    XCTAssertTrue(read(app, "capped at 60 seconds").waitForExistence(timeout: 10))
     shot("19-document-sent-version")
     app.buttons["View current file"].tap()
     XCTAssertTrue(app.staticTexts["Changed since sent"].waitForExistence(timeout: 10))
@@ -248,7 +254,7 @@ final class FileUITests: XCTestCase {
     XCTAssertTrue(plan.label.contains("No longer on disk"))
     plan.tap()
     XCTAssertTrue(app.staticTexts["The file is gone; showing the sent copy"].waitForExistence(timeout: 20))
-    XCTAssertTrue(app.staticTexts["Retry plan for the relay client"].waitForExistence(timeout: 10))
+    XCTAssertTrue(read(app, "Retry plan for the relay client").waitForExistence(timeout: 10))
     shot("20-document-gone")
   }
 
@@ -257,7 +263,7 @@ final class FileUITests: XCTestCase {
     // The plan was opened earlier, then the computer went away.
     let app = launch(stage: "files,fileskept,away")
     tile(app, "retry-plan.md").tap()
-    XCTAssertTrue(app.staticTexts["Retry plan for the relay client"].waitForExistence(timeout: 20))
+    XCTAssertTrue(read(app, "Retry plan for the relay client").waitForExistence(timeout: 20))
     // The next file was never opened: it says the computer cannot be reached.
     app.swipeLeft()
     XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'File 2 of 11'")).firstMatch.waitForExistence(timeout: 10))
@@ -282,7 +288,7 @@ final class FileUITests: XCTestCase {
     XCTAssertLessThanOrEqual(tile.frame.maxX, screen.maxX + 0.5)
     shot("22-tiles-largest-type")
     tile.tap()
-    let title = app.staticTexts["Retry plan for the relay client"]
+    let title = read(app, "Retry plan for the relay client")
     XCTAssertTrue(title.waitForExistence(timeout: 20))
     XCTAssertLessThanOrEqual(title.frame.maxX, screen.maxX + 0.5)
     XCTAssertTrue(app.buttons["Done"].exists)
