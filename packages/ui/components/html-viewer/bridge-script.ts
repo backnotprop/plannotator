@@ -642,9 +642,9 @@ ${SANDBOX_SHIM_SCRIPT}
   // navigation reach the page untouched. Text drag-selection commenting stays
   // LIVE in both modes (a real drag opens the comment toolbar even in
   // Interact), committed overlay artifacts stay visible in both modes, and
-  // marker buttons keep their own clicks. BOTH surface kinds start ARMED —
-  // Esc (or the header pen) drops to Interact.
-  var annotateModeActive = true;
+  // marker buttons keep their own clicks. Stay passive until the parent
+  // sends its current mode, including after iframe navigation.
+  var annotateModeActive = false;
   // A native host decides link navigations itself (HtmlViewer hostNavigates).
   var hostNavigates = false;
   // Forms and in-page links work as in a tab (the host's opt-in, \`pageNavigation\`).

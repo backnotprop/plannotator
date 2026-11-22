@@ -840,6 +840,14 @@ export const SETTINGS = {
       return value === undefined ? {} : { agentSwitch: value };
     },
   },
+  htmlAnnotateOnStartup: {
+    defaultValue: false as boolean,
+    fromCookie: () => storage.getItem('plannotator-html-annotate-on-startup') === 'true',
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-html-annotate-on-startup', String(value)),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
   /**
    * Where the annotate-mode Agent TUI docks: 'left' (where it always docked),
    * 'right', or 'hidden' (no slot until the user opens it for the session).

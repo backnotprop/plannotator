@@ -151,6 +151,7 @@ interface SettingsProps {
    * applies the `documentFontFamily` setting (`hooks/useDocumentFont`).
    */
   showDocumentFont?: boolean;
+  showHtmlAnnotateStartup?: boolean;
   onUIPreferencesChange?: (prefs: UIPreferences) => void;
   /** Claude Code's permission mode was changed here (plan review). The host
    *  keeps its own copy in step, since its Approve sends the mode and its
@@ -1302,7 +1303,19 @@ const CommentsTab: React.FC = () => {
   );
 };
 
-export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, onPermissionModeChange, externalOpen, onExternalClose, aiProviders = [], gitUser, autoUpdateSetting, updateCheckSetting, cookieHostSetting, packageChangesSetting, agentToolSetting, onAgentToolChange, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false, hideEnterSavesComment = false, hideRepoOwnerSetting = false, showDocumentTextSize = false, showDocumentFont = false }) => {
+function HtmlAnnotateStartupSetting() {
+  const enabled = useConfigValue('htmlAnnotateOnStartup');
+  return (
+    <ToggleSwitch
+      checked={enabled}
+      onChange={(value) => configStore.set('htmlAnnotateOnStartup', value)}
+      label="Start in Annotate mode"
+      description="Turn on pinpoint annotation when opening HTML pages and live apps."
+    />
+  );
+}
+
+export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, onPermissionModeChange, externalOpen, onExternalClose, aiProviders = [], gitUser, autoUpdateSetting, updateCheckSetting, cookieHostSetting, packageChangesSetting, agentToolSetting, onAgentToolChange, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false, hideEnterSavesComment = false, hideRepoOwnerSetting = false, showDocumentTextSize = false, showDocumentFont = false, showHtmlAnnotateStartup = false }) => {
   const webmcpTools = useWebMcpToolsEnabled();
   const autoUpdate = useConfigValue('autoUpdate');
   const updateChecksOn = updateCheckSetting ? updateCheckSetting.on : true;
@@ -2117,6 +2130,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
 
                 {activeTab === 'display' && mode !== 'review' && (
                   <>
+                    {annotateDocumentTabs && showHtmlAnnotateStartup && <HtmlAnnotateStartupSetting />}
                     {/* Text size (#2066): the document only, not the app around it */}
                     {showDocumentTextSize && (<>
                     <div className="space-y-3" data-document-text-size-setting>

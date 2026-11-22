@@ -1054,6 +1054,8 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       type: "plannotator-bridge-set-input-method",
       method: "pinpoint",
     });
+    expect(document.body.hasAttribute("data-plannotator-pinpoint-cursor")).toBe(false);
+    postBridge({ type: "plannotator-bridge-set-annotate-mode", active: true });
     // Mode affordance: crosshair cursor attribute while pinpoint is active.
     expect(document.body.hasAttribute("data-plannotator-pinpoint-cursor")).toBe(true);
 

@@ -502,6 +502,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
             origin={origin}
             mode={annotateMode ? 'annotate' : 'plan'}
             annotateParity
+            showHtmlAnnotateStartup={Boolean(onToggleHtmlAnnotate)}
             onUIPreferencesChange={onUIPreferencesChange}
             onPermissionModeChange={onPermissionModeChange}
             externalOpen={mobileSettingsOpen}

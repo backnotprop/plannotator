@@ -532,18 +532,13 @@ describe.if(hasDom)('live bridge gate (composed body in the eval harness)', () =
     return p as HTMLElement;
   }
 
-  test('live sessions start ARMED: pinpoint capture and the cursor affordance are live before any parent message', () => {
-    // No set-annotate-mode or set-input-method has arrived yet — the default
-    // must already be pinpoint-armed on the live surface.
-    expect(bridgeDocument.body.hasAttribute('data-plannotator-pinpoint-cursor')).toBe(true);
-    const probe = clickProbe(probeButton());
-    expect(probe.prevented).toBe(true);
-    expect(probe.selections).toBe(1);
-    expect(selectionPosts().at(-1)!.data.pinpoint).toBe(true);
-    postToBridge({ type: 'plannotator-bridge-cancel-selection', token: bridgeToken });
+  test('live sessions start in Interact and allow native clicks before any parent message', () => {
+    expect(bridgeDocument.body.hasAttribute('data-plannotator-pinpoint-cursor')).toBe(false);
+    expect(clickProbe(probeButton())).toEqual({ prevented: false, selections: 0 });
   });
 
   test('forged disarm attempts (no token / wrong origin) are ignored', () => {
+    postToBridge({ type: 'plannotator-bridge-set-annotate-mode', active: true, token: bridgeToken });
     postToBridge({ type: 'plannotator-bridge-set-annotate-mode', active: false });
     postToBridge({ type: 'plannotator-bridge-set-input-method', method: 'drag' });
     postToBridge(
