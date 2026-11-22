@@ -92,6 +92,16 @@ describe('forgejoImageHandling', () => {
     expect(handling.prepare(`![a](/acme/widgets/attachments/${uuid})`)).toBe(`![a](https://forgejo.example.com/acme/widgets/attachments/${uuid})`);
   });
 
+  test('leaves an upload link inside fenced or inline code as written', () => {
+    const own = `![dot.png](/attachments/${uuid})`;
+    const fenced = ['```md', own, '```', '~~~', own, '~~~'].join('\n');
+    expect(handling.prepare(fenced)).toBe(fenced);
+    expect(handling.prepare(`Write \`${own}\` to embed it.`)).toBe(`Write \`${own}\` to embed it.`);
+    // Text after a closed fence, and beside a code span, is still rewritten.
+    expect(handling.prepare(['```', 'code', '```', own].join('\n'))).toBe(['```', 'code', '```', `![dot.png](https://forgejo.example.com/attachments/${uuid})`].join('\n'));
+    expect(handling.prepare(`\`x\` ${own}`)).toBe(`\`x\` ![dot.png](https://forgejo.example.com/attachments/${uuid})`);
+  });
+
   test('leaves any other image as written', () => {
     for (const text of ['![x](/somewhere/else.png)', '![x](/other/repo/attachments/' + uuid + ')', '![x](https://example.com/attachments/' + uuid + ')', '![x](/attachments/not-a-uuid)']) {
       expect(handling.prepare(text)).toBe(text);

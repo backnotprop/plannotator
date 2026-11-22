@@ -204,6 +204,9 @@ function forgejoArtifactKind(
   const origin = getForgejoOrigin(metadata).toLowerCase();
   if (providerOrigin(metadata) !== origin || !isSameOrigin(url, origin)) return null;
   if (url.username !== '' || url.password !== '') return null;
+  // An encoded slash, backslash, dot or percent stays inside one segment here, but a reverse proxy
+  // in front of the instance may decode it and route `raw/branch/..%2F..%2Fapi/...` to the API.
+  if (/%(?:2f|5c|2e|25)/i.test(url.pathname) || url.pathname.includes('\\')) return null;
   const parts = url.pathname.split('/');
   if (parts.length === 3 && parts[1] === 'attachments') {
     return FORGEJO_UUID_RE.test(parts[2] ?? '') ? 'attachment' : null;
@@ -440,7 +443,14 @@ function shouldSendProviderAuth(url: URL, metadata: PRMetadata): boolean {
  * Our credentials were not accepted. Name the command that fixes it: the alternative is a
  * bare transport status, which reads as a broken artifact rather than a missing login.
  */
-function providerAuthRequiredError(metadata: PRMetadata): PRArtifactDocumentError {
+function providerAuthRequiredError(metadata: PRMetadata, sentToken = false): PRArtifactDocumentError {
+  if (metadata.platform === 'forgejo' && sentToken) {
+    return new PRArtifactDocumentError(
+      `Artifact host requires authentication: the token for ${providerOrigin(metadata)} was refused: check it `
+        + '(scopes read:issue and read:repository), in forgejoTokens in config.json or PLANNOTATOR_FORGEJO_TOKEN',
+      401,
+    );
+  }
   if (metadata.platform === 'forgejo') {
     return new PRArtifactDocumentError(
       `Artifact host requires authentication: add a token for ${providerOrigin(metadata)} under forgejoTokens in config.json `
@@ -607,6 +617,7 @@ async function fetchArtifactContent(
   }
 
   const providerHeaders = await providerAuthHeaders(runtime, metadata);
+  const sentToken = Object.keys(providerHeaders).length > 0;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   const requestedUrl = new URL(rawUrl);
@@ -639,7 +650,7 @@ async function fetchArtifactContent(
         const nextUrl = new URL(location, currentUrl);
         // Forgejo sends a signed-out request on an instance that requires sign-in to its login page.
         if (metadata.platform === 'forgejo' && isSameOrigin(nextUrl, providerOrigin(metadata)) && nextUrl.pathname === '/user/login') {
-          throw providerAuthRequiredError(metadata);
+          throw providerAuthRequiredError(metadata, sentToken);
         }
         if (!mayFollowProviderRedirect(currentUrl, nextUrl, metadata) || (options.followRedirect && !options.followRedirect(nextUrl))) {
           throw new PRArtifactDocumentError('Artifact document redirected to a blocked address', 403);
@@ -647,9 +658,10 @@ async function fetchArtifactContent(
         // A sign-in hop returns HTTP 200 with a login/SSO page. Following it would render
         // that page as the artifact, so fail loudly instead.
         if (SIGN_IN_PATH_RE.test(nextUrl.pathname)) {
-          throw providerAuthRequiredError(metadata);
+          throw providerAuthRequiredError(metadata, sentToken);
         }
-        currentUrl = nextUrl;
+        // A Forgejo `src` page is read as its raw file on a redirect hop too.
+        currentUrl = metadata.platform === 'forgejo' ? forgejoContentUrl(nextUrl, metadata) : nextUrl;
         continue;
       }
       if (!response.ok) {
@@ -663,7 +675,7 @@ async function fetchArtifactContent(
           continue;
         }
         if (isProviderAuthRefusal(response.status, metadata)) {
-          throw providerAuthRequiredError(metadata);
+          throw providerAuthRequiredError(metadata, sentToken);
         }
         throw new PRArtifactDocumentError(`Artifact host returned HTTP ${response.status}`, 502);
       }

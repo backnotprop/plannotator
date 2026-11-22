@@ -1006,6 +1006,17 @@ describe('Forgejo artifacts: which URLs are provider artifacts', () => {
       '/acme/widgets/raw/branch',
       '/acme/widgets/raw/blob/0123abc',
       '/acme/widgets/raw/main/review.md',
+      // Encoded separators stay in one segment here, but a reverse proxy may decode them and
+      // route the token to the API: an encoded slash, backslash or dot, in either case, and a
+      // double-encoded one.
+      '/acme/widgets/raw/branch/..%2F..%2F..%2F..%2Fapi%2Fv1%2Frepos%2Fvictim%2Fprivate%2Fraw%2FREADME.md',
+      '/acme/widgets/raw/branch/main/..%2f..%2fapi%2fv1%2fuser',
+      '/acme/widgets/raw/branch/main/..%5C..%5Capi',
+      '/acme/widgets/raw/branch/main/..%5capi',
+      '/acme/widgets/raw/branch/%2E%2E/%2e%2e/api/v1/user',
+      '/acme/widgets/raw/branch/main/a%2Eb.md',
+      '/acme/widgets/raw/branch/..%252F..%252Fapi%252Fv1%252Fuser',
+      '/acme/widgets/raw/branch/main\\..\\..\\api\\v1\\user',
     ];
     for (const path of refused) {
       expect(isPRArtifactDocumentUrlAllowed(`${forgejoOrigin}${path}`, forgejoMetadata, forgejoContext(path))).toBe(false);
@@ -1175,6 +1186,16 @@ describe('Forgejo artifacts: fetching', () => {
     ]);
   });
 
+  test('a redirect to a src page on the same instance is read as its raw file', async () => {
+    const path = '/acme/widgets/raw/branch/main/old.md';
+    const { failure, seen } = await redirected(path, '/acme/widgets/src/branch/main/new.md');
+    expect(failure).toBeNull();
+    expect(seen.map((request) => request.url)).toEqual([
+      `${forgejoOrigin}${path}`,
+      `${forgejoOrigin}/acme/widgets/raw/branch/main/new.md`,
+    ]);
+  });
+
   test('refuses a same-instance redirect to a route that is not an artifact, such as the API', async () => {
     const path = `/attachments/${forgejoUuid}`;
     const { failure, seen } = await redirected(path, '/api/v1/user');
@@ -1188,6 +1209,25 @@ describe('Forgejo artifacts: fetching', () => {
     expect(failure?.status).toBe(401);
     expect(failure?.message).toContain('forgejoTokens');
     expect(seen).toHaveLength(1);
+  });
+
+  test('a configured token that is refused is named as refused, not as missing', async () => {
+    const path = `/attachments/${forgejoUuid}`;
+    for (const status of [401, 403]) {
+      const failure = await withFetch(
+        () => new Response('no', { status }),
+        () => fetchPRArtifactDocument(
+          runtimeWith({ [forgejoOrigin]: 'stale-token' }),
+          forgejoMetadata,
+          forgejoContext(path),
+          `${forgejoOrigin}${path}`,
+        ).then(() => null, (error: unknown) => error as Error & { status?: number }),
+      );
+      expect(failure?.status).toBe(401);
+      expect(failure?.message).toContain(`the token for ${forgejoOrigin} was refused`);
+      expect(failure?.message).not.toContain('add a token');
+      expect(failure?.message).not.toContain('stale-token');
+    }
   });
 
   test('a refused token says where to configure one, not which CLI to log in with', async () => {

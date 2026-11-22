@@ -9,7 +9,8 @@
  * <PR URL>` headlessly against an existing PR and checks the diff, metadata,
  * context (comments, reviews, inline threads) and file content it serves.
  *
- * FULL (the default). Against a real instance it:
+ * FULL (only with FORGEJO_SMOKE_WRITE=1; without it nothing is written).
+ * Against a real instance it:
  *   1. creates a throwaway PRIVATE repo (plannotator-smoke-<stamp>) in the
  *      token's account (the only repo this script ever deletes),
  *   2. commits a base and two feature commits through the contents API (no git
@@ -54,6 +55,8 @@ const READONLY_PR = process.env.FORGEJO_SMOKE_READONLY_PR ?? "";
 const TOKEN = process.env.PLANNOTATOR_FORGEJO_TOKEN ?? "";
 const REVIEWER_TOKEN = process.env.PLANNOTATOR_FORGEJO_REVIEWER_TOKEN ?? "";
 const KEEP = process.env.FORGEJO_SMOKE_KEEP === "1";
+/** Creating, writing and deleting on the instance happens only when asked for by name. */
+const WRITE = process.env.FORGEJO_SMOKE_WRITE === "1";
 const WITH_LOCAL = process.env.FORGEJO_SMOKE_LOCAL === "1";
 const STAMP = Date.now().toString(36);
 /** An existing repository to use, as owner/name; empty means create a throwaway one. */
@@ -424,7 +427,11 @@ async function full() {
 
 try {
   if (READONLY_PR) await readOnly(READONLY_PR);
-  else await full();
+  else if (WRITE) await full();
+  else {
+    log("==> Nothing run: the FULL mode creates, writes and deletes on the instance and needs FORGEJO_SMOKE_WRITE=1; set FORGEJO_SMOKE_READONLY_PR=<PR URL> for the read-only checks");
+    process.exit(2);
+  }
 } catch (err) {
   failures++;
   log(`ERROR ${err instanceof Error ? err.message : String(err)}`);

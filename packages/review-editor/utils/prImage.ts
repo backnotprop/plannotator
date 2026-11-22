@@ -40,6 +40,23 @@ export function prImageSrcset(srcset: string, resolve: (src: string) => string =
 
 type ForgejoPR = Extract<PRMetadata, { platform: 'forgejo' }>;
 
+/** Applies `rewrite` to the text outside fenced code blocks and inline code spans, which stay as written. */
+function outsideCode(markdown: string, rewrite: (text: string) => string): string {
+  let fence: string | null = null;
+  return markdown.split('\n').map((line) => {
+    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (fence !== null) {
+      if (marker && marker[0] === fence[0] && marker.length >= fence.length && /^ {0,3}[`~]+\s*$/.test(line)) fence = null;
+      return line;
+    }
+    if (marker) {
+      fence = marker;
+      return line;
+    }
+    return line.split(/(`+[^`]*`+)/).map((part, index) => (index % 2 === 1 ? part : rewrite(part))).join('');
+  }).join('\n');
+}
+
 /**
  * A Forgejo PR's own uploads in comment text. The editor writes them as
  * relative links (`![a.png](/attachments/<uuid>)`), which the comment renderer
@@ -62,10 +79,10 @@ export function forgejoImageHandling(pr: PRMetadata | null | undefined): {
     }
   };
   return {
-    prepare: (markdown) => markdown.replace(/!\[([^\]]*)\]\((\/[^)\s]+)\)/g, (whole, alt: string, path: string) => {
+    prepare: (markdown) => outsideCode(markdown, (text) => text.replace(/!\[([^\]]*)\]\((\/[^)\s]+)\)/g, (whole, alt: string, path: string) => {
       const url = known(path);
       return url ? `![${alt}](${url.href})` : whole;
-    }),
+    })),
     src: (src) => {
       const url = known(src);
       return url ? artifactContentProxyUrl(url.href) : src;

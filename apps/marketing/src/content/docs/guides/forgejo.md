@@ -16,7 +16,7 @@ or, from your agent, `/plannotator-review https://<host>/<owner>/<repo>/pulls/<i
 
 A Forgejo or Gitea address names a pull request by `/pulls/<id>` (GitHub's is `/pull/<id>`), so Plannotator recognises it on any host with nothing to configure. A port stays part of the host, and an `http://` address works for an instance on your own network.
 
-You get the pull request diff, its existing comments in the **PR Comments** tab, the commit status checks, the images and files its description embeds, a local checkout for agents and Guided Review, and you can post your review back to the instance.
+You get the pull request diff, its existing comments in the **PR Comments** tab, the commit status checks, a local checkout for agents and Guided Review, and you can post your review back to the instance. Pictures and files uploaded to the pull request, and files of its repository linked from it, open in the **Artifacts** panel, and pictures in comments show in place. Pictures in the description are not shown in the **Summary** tab's description.
 
 ## Create an access token
 
@@ -28,6 +28,7 @@ Forgejo has no command-line tool like `gh` or `glab`, so Plannotator talks to th
    - `read:repository`
    - `read:issue`
    - `write:repository` (needed to post a review)
+   - `read:user` is optional: with it, Plannotator knows which account you are.
 4. Generate the token and copy it. The instance shows it only once.
 
 A public repository reads without a token. An instance that requires you to sign in to use its API (it answers `Only signed in user is allowed to call APIs`), or a private repository, needs one.
@@ -56,7 +57,7 @@ For several instances, put them in `~/.plannotator/config.json`, one token per o
 
 That file stores the tokens in plain text, so prefer the environment variables for one instance. The environment variables take precedence. Plannotator never logs a token and never sends one to the browser.
 
-If the token is missing, rejected, or lacks a scope, `plannotator review` stops with a message that says which. A `404` can also mean the account may not see the repository: it is private, or the account is a *restricted* one that has not been added to it.
+For a private repository, or an instance that requires sign-in, `plannotator review` stops with a message that says what is wrong if the token is missing, rejected, or lacks a scope. A public repository opens without one. A `404` can also mean the account may not see the repository: it is private, or the account is a *restricted* one that has not been added to it.
 
 ## Local checkout
 
@@ -84,3 +85,5 @@ Forgejo refuses to approve, or request changes on, your own pull request. **Comm
 - Viewed files are not synced to the instance. Plannotator still remembers them locally.
 - Stacked pull request discovery is not available.
 - An instance served under a sub-path (`https://example.com/forgejo/...`) is not supported.
+- Attachments do not show on an instance that serves uploads straight from object storage (`SERVE_DIRECT`).
+- Git LFS files (`/media/` links) and release downloads (`/releases/download/` links) do not load.

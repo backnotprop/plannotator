@@ -7,7 +7,7 @@
 # runs this checkout's `plannotator review <PR URL>` headlessly and checks the
 # diff, metadata, context (comments, reviews, inline threads) and file content.
 #
-# FULL: creates a throwaway PRIVATE repository (plannotator-smoke-<stamp>) in
+# FULL (only with FORGEJO_SMOKE_WRITE=1): creates a throwaway PRIVATE repository (plannotator-smoke-<stamp>) in
 # the token's account, opens a PR, runs the review headlessly, posts a comment
 # review with inline comments (new side, old side, multi-line), checks that
 # approving and requesting changes on your OWN PR are refused with Forgejo's
@@ -48,7 +48,7 @@
 #
 # Usage:
 #   set -a; . ~/path/to/forgejo-credentials.env; set +a
-#   scripts/forgejo-live-smoke.sh
+#   FORGEJO_SMOKE_WRITE=1 scripts/forgejo-live-smoke.sh
 #
 # Needs the built UI: `bun run --cwd apps/review build && bun run build:hook`.
 # The tokens are never printed: the driver redacts them from everything it writes.
@@ -63,6 +63,11 @@ export FORGEJO_SMOKE_READONLY_PR="${FORGEJO_SMOKE_READONLY_PR:-}"
 
 if [[ ! -f apps/hook/dist/index.html ]]; then
   echo "The hook UI is not built. Run: bun run --cwd apps/review build && bun run build:hook" >&2
+  exit 2
+fi
+
+if [[ -z "$FORGEJO_SMOKE_READONLY_PR" && "${FORGEJO_SMOKE_WRITE:-}" != "1" ]]; then
+  echo "Nothing run: set FORGEJO_SMOKE_READONLY_PR=<PR URL> for the read-only checks, or FORGEJO_SMOKE_WRITE=1 for the FULL mode, which creates, writes and deletes on the instance (see the header of $0)." >&2
   exit 2
 fi
 
