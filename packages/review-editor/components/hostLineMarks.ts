@@ -8,9 +8,10 @@
  * - Wrapped lines (`data-overflow="wrap"`): the line keeps that much room free at its end, so its text wraps before
  *   the mark; the mark sits on the line's first row.
  * - Lines that scroll sideways (`data-overflow="scroll"`): the mark follows the line's text and sticks to the column's
- *   visible right edge (`position: sticky` between `--diffs-column-width` minus its width and 0), so on that line the
- *   code ends where the mark begins, like the column's own edge; the mark adds its width to the line, so scrolled all
- *   the way, the line's last character sits clear of it.
+ *   visible right edge (`position: sticky`, between 0 from the right and the column's width minus its own from the
+ *   left; the width is `100cqi` of the column, which Pierre makes a size container under line-info separators, as the
+ *   PR page draws them), so on that line the code ends where the mark begins, like the column's own edge; the
+ *   mark adds its width to the line, so scrolled all the way, the line's last character sits clear of it.
  *
  * Split and unified views, old and new sides: the selectors find the line by its number on its side.
  */
@@ -54,7 +55,7 @@ export function hostLineMarksCss(marks: readonly HostLineMark[]): string {
       const box = `width: ${w}; height: 1lh; box-sizing: border-box; background-color: inherit; background-repeat: no-repeat; ${mark.paint}`;
       return `
 ${inMode('scroll')} { padding-inline-end: 0; }
-${inMode('scroll', '::after')} { ${content} display: inline-block; vertical-align: top; position: sticky; right: 0; left: calc(var(--diffs-column-width) - ${w}); ${box} }
+${inMode('scroll', '::after')} { ${content} display: inline-block; vertical-align: top; position: sticky; right: 0; left: calc(100cqi - ${w}); ${box} }
 ${inMode('wrap')} { padding-inline-end: ${w}; }
 ${inMode('wrap', '::after')} { ${content} position: absolute; top: 0; right: 0; ${box} }`;
     })

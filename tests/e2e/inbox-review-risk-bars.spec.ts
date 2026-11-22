@@ -319,8 +319,10 @@ async function expectNoOverlap(review: Locator, ref: LineRef, opts: { long: bool
     let g!: Awaited<ReturnType<typeof lineGeometry>>;
     let mark: Box | undefined;
     await expect(async () => {
+      // Into view by the file (a line's own scroll would also move the column sideways), the column at its start.
       await review.locator(`[data-guide-file-shell="${file}"]`).scrollIntoViewIfNeeded();
-      await review.locator(lineSelector(ref)).first().scrollIntoViewIfNeeded({ timeout: 2000 });
+      await expect(review.locator(lineSelector(ref)).first()).toBeInViewport({ timeout: 2000 });
+      await scrollColumns(review, file, 'start');
       g = await lineGeometry(review, ref);
       mark = await markOf(cdp, ref);
       expect(mark, `${JSON.stringify(ref)} has a mark`).toBeTruthy();
@@ -557,7 +559,8 @@ test('light theme close-ups of both marks', async () => {
   const ref: LineRef = { file: 'src/charges/retry.ts', column: 'additions', line: 21 };
   let g!: Awaited<ReturnType<typeof lineGeometry>>;
   await expect(async () => {
-    await review.locator(lineSelector(ref)).first().scrollIntoViewIfNeeded({ timeout: 2000 });
+    await review.locator('[data-guide-file-shell="src/charges/retry.ts"]').scrollIntoViewIfNeeded();
+    await expect(review.locator(lineSelector(ref)).first()).toBeInViewport({ timeout: 2000 });
     g = await lineGeometry(review, ref);
   }).toPass({ timeout: 15_000 });
   await page.waitForTimeout(300);
