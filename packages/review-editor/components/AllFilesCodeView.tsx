@@ -1135,7 +1135,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // Whether the reader has scrolled this file set (see viewScrollRef). Gates
   // the at-bottom signal and new pass candidates.
   const readerScrolledRef = useRef(false);
+  // Listened for only where auto-view is wired: a read-only or portable host
+  // gets no window key listener from this view.
+  const tracksReaderInput = onFileScrolledPast != null && !readOnly;
   useEffect(() => {
+    if (!tracksReaderInput) return;
     const readerMoved = (event: Event) => {
       if (!viewScrollRef.current) return;
       if (event.type === 'keydown' && isTextEntryTarget(event)) return;
@@ -1145,7 +1149,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     return () => {
       for (const type of READER_INPUT_EVENTS) window.removeEventListener(type, readerMoved, { capture: true });
     };
-  }, []);
+  }, [tracksReaderInput]);
 
   // The file CodeView last reported a selection / line-click in. The toolbar is
   // keyed off this file's path + patch, but the value is sourced from the
@@ -1657,7 +1661,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (previousVisible) {
       const restoreId = filePathToItemId.get(previousVisible);
       if (restoreId != null) {
-        viewScrollRef.current = true;
+        viewScrollRef.current = tracksReaderInput;
         requestAnimationFrame(() => {
           restoringRef.current = true;
           try {
