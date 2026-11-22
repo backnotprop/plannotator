@@ -439,8 +439,10 @@ export function isT3ThreadOwnTools(names: readonly unknown[]): boolean {
  * The terminal, the panel and T3 take a later turn from a plugin while the
  * process lives (the panel and T3 show it as a turn of the thread), so the mod
  * runs there as in the terminal. The desktop app's Code tab does too, but
- * there the mod adds only the Inbox reply wake: everything else stays as in a
- * `headless` session (#3239). A `headless` session may be a one-shot run that exits
+ * there the mod adds only the Inbox link's tick and what rides on it: the
+ * reply wake, Send now, Ask AI questions from the Inbox, auto reload and the
+ * session's liveness in the Inbox (#3239). The reviews, plan review and the
+ * reminder stay as in a `headless` session. A `headless` session may be a one-shot run that exits
  * as its turn ends, and nothing at `session.start` says whether it is: there
  * a decision or a reply promised for later could be lost, so the flows that
  * deliver later keep the classic, blocking path and the Inbox tool sends
@@ -467,7 +469,7 @@ export function sessionKindOf(s: { isInteractive: boolean; panel: boolean; deskt
 export const SESSION_KIND_FEATURES: Readonly<Record<SessionKind, { reviews: boolean; planReview: boolean; inboxTool: boolean; wake: boolean; reminder: boolean }>> = {
   terminal: { reviews: true, planReview: true, inboxTool: true, wake: true, reminder: true },
   panel: { reviews: true, planReview: true, inboxTool: true, wake: true, reminder: true },
-  // The Code tab: a headless session plus the reply wake (#3239).
+  // The Code tab: a headless session plus the Inbox tick (#3239): the reply wake, Send now, Ask AI, auto reload.
   desktop: { reviews: false, planReview: false, inboxTool: true, wake: true, reminder: false },
   t3: { reviews: true, planReview: false, inboxTool: true, wake: true, reminder: true },
   headless: { reviews: false, planReview: false, inboxTool: true, wake: false, reminder: false },
@@ -475,8 +477,9 @@ export const SESSION_KIND_FEATURES: Readonly<Record<SessionKind, { reviews: bool
 
 /**
  * A prompt's `origin.kind` as the mod reads it. In a panel session (VS Code,
- * Orca) or a T3 Code thread the person's Enter reaches Claude Code as the SDK
- * host's own turn (`sdk`: the host sends what the person typed), so there it
+ * Orca), a Code tab of the Claude desktop app or a T3 Code thread the person's
+ * Enter reaches Claude Code as the SDK host's own turn (`sdk`: the host sends
+ * what the person typed), so there it
  * reads as `composer`, the person's Enter in the terminal: a prompt they type
  * takes over the turn answering an "Ask this session" question and pulls the
  * session's leases to this process, as in the terminal. Everywhere else, and

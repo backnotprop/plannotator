@@ -158,10 +158,17 @@ and deletes `CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION` from that environment
 (both read in the 4.23118 app; Cowork's `local-agent` stays `headless`).
 `isDesktopCodeTabSession` in `enabled.ts` applies the panel's checks, so a
 `claude -p` started inside a Code tab is `headless`. A `desktop` session is a
-`headless` one plus the reply wake: the Inbox link ticks from the start and
-its sends carry the wake mark. It gets no reminder, no `plannotator` tool, no
-commands and no Bash take-over, and ExitPlanMode goes on to the classic hook.
-Before this, a Code tab was `headless`, so its first send was stored
+`headless` one plus the Inbox link's tick (`wake: true`): the link ticks from
+the start and its sends carry the wake mark. What rides on that tick comes
+with it, as in the terminal: the reply wake, Send now (`$.session.append`),
+Inbox Ask AI questions (`InboxLink.startAskClient`; the question runs as a
+plugin turn of the Code tab's conversation), auto reload (`auto-reload.ts`),
+and the session's liveness on the Inbox's Agents list (its polls). The
+person's prompt arrives as `sdk` and reads as `composer` (`promptOriginKind`),
+so typing in the Code tab takes over an Ask AI turn and pulls the Inbox lease
+to this process, as in the panel. It gets no reminder, no `plannotator` tool,
+no commands and no Bash take-over, and ExitPlanMode goes on to the classic
+hook. Before this, a Code tab was `headless`, so its first send was stored
 without `wakes` ("Saved for Claude Code…"). Its reply then went in only when
 the self-heal's second look armed the tick (`ensureTicking`, about 60 s after
 the session started). A wake the app refuses (`{ drop }`) is held as in the
