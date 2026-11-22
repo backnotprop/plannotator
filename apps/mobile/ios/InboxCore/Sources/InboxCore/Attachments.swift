@@ -10,6 +10,8 @@ public struct AttachmentItem: Hashable, Sendable, Identifiable {
   /// An unknown kind is a file (packages/core/inbox-attachments.ts `inboxAttachmentKindOf`).
   public var kind: InboxAttachmentKind
   public var name: String
+  /// Where the file is on the computer: the feedback names it by this, inside its project.
+  public var path: String = ""
   /// The size it was sent at.
   public var size: Int64
   public var sentSha256: String
@@ -44,6 +46,7 @@ public struct AttachmentItem: Hashable, Sendable, Identifiable {
     self.message = message
     kind = Self.known(record.kind)
     name = record.name
+    path = record.path
     size = record.size
     sentSha256 = record.sentSha256
     sentAt = record.sentAt
@@ -59,6 +62,7 @@ public struct AttachmentItem: Hashable, Sendable, Identifiable {
     message = state.messageId
     kind = Self.known(state.kind)
     name = state.name
+    path = state.path
     size = state.size
     sentSha256 = state.sentSha256
     sentAt = state.sentAt

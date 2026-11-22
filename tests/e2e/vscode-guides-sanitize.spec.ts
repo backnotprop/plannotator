@@ -5,16 +5,24 @@
  * `<script>`), so this proof runs the webview's own `markdown.ts` and
  * `diagram.ts`, bundled as the extension bundles them, in real Chromium under
  * the webview's CSP. No binary or VS Code is needed.
+ *
+ * The last tests prove the diagram sanitizer itself (`diagram-render.ts`, the
+ * one Plannotator's app uses) on what only a real browser shows: the MathML
+ * a `$$...$$` label is drawn with, and MathML mutation XSS. The webview
+ * stubs KaTeX out, so they run the same engine bundled with real KaTeX, on a
+ * page with no CSP, so a handler or a fetch that survived would happen.
  */
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 const EXTENSION = resolve(__dirname, '../../apps/vscode-extension');
 const WEBVIEW = join(EXTENSION, 'src/guides/webview');
+const UI = resolve(__dirname, '../../packages/ui');
 let bundle = '';
+let uiBundle = '';
 let work = '';
 
 test.beforeAll(() => {
@@ -35,8 +43,58 @@ const host = () => document.getElementById('host')!;
   },
 };
 `);
+  const uiEntry = join(work, 'ui-entry.ts');
+  writeFileSync(uiEntry, `
+import DOMPurify from 'dompurify';
+import { renderDiagram, sanitizeDiagramSvg } from ${JSON.stringify(join(UI, 'utils/diagram-render.ts'))};
+const host = () => document.getElementById('host')!;
+// The test's handle on the sanitizer's own DOMPurify call (the one asking for a
+// DOM fragment): it records the markup that call parsed, and can turn the
+// MathML profile off for one sanitize, with no switch in the product.
+const purify = DOMPurify as any;
+const sanitize = purify.sanitize;
+let parsed = '';
+let mathProfileOff = false;
+purify.sanitize = (dirty: unknown, cfg?: any) => {
+  if (cfg && cfg.RETURN_DOM_FRAGMENT) {
+    if (typeof dirty === 'string') parsed = dirty;
+    if (mathProfileOff) cfg = { ...cfg, USE_PROFILES: { ...cfg.USE_PROFILES, mathMl: false } };
+  }
+  return sanitize(dirty, cfg);
+};
+let seq = 0;
+(window as any).__ui = {
+  async render(source: string) {
+    parsed = '';
+    const r = await renderDiagram('mermaid', 'pn-ui-diagram-' + ++seq, source, { colorTheme: 'plannotator', mode: 'light' });
+    if (!r.ok) return { ok: false, message: r.message, raw: '' };
+    host().replaceChildren(r.svgNode);
+    return { ok: true, message: '', raw: parsed };
+  },
+  mount(markup: string, how: 'node' | 'markup') {
+    const svg = sanitizeDiagramSvg(markup);
+    if (!svg) return false;
+    if (how === 'node') host().replaceChildren(svg);
+    else host().innerHTML = svg.outerHTML;
+    return true;
+  },
+  sanitized(markup: string, mathProfile: boolean) {
+    mathProfileOff = !mathProfile;
+    try {
+      return sanitizeDiagramSvg(markup)?.outerHTML ?? null;
+    } finally {
+      mathProfileOff = false;
+    }
+  },
+};
+`);
   const out = join(work, 'bundle.js');
+  const uiOut = join(work, 'ui-bundle.js');
   // The extension's own webview build options (define, aliases, minify), with this entry.
+  // The ui bundle drops the KaTeX stub (Mermaid's math labels need the real one) and
+  // points every 'dompurify' import at the file packages/ui resolves, so the entry's
+  // handle is the sanitizer's own instance.
+  const purifyModule = join(dirname(realpathSync(require.resolve('dompurify', { paths: [UI] }))), 'purify.es.mjs');
   const build = join(work, 'build.ts');
   writeFileSync(build, `
 import { build } from ${JSON.stringify(join(EXTENSION, 'node_modules/esbuild/lib/main.js'))};
@@ -45,9 +103,12 @@ const webview = configs.find((c) => String(c.outdir ?? '').endsWith('dist') && c
 if (!webview) throw new Error('no webview build config');
 const { entryPoints: _e, outdir: _o, ...options } = webview;
 await build({ ...options, absWorkingDir: ${JSON.stringify(EXTENSION)}, entryPoints: [${JSON.stringify(entry)}], outfile: ${JSON.stringify(out)}, logLevel: 'silent' });
+const alias = { ...Object.fromEntries(Object.entries(options.alias ?? {}).filter(([name]) => name !== 'katex')), dompurify: ${JSON.stringify(purifyModule)} };
+await build({ ...options, alias, absWorkingDir: ${JSON.stringify(EXTENSION)}, entryPoints: [${JSON.stringify(uiEntry)}], outfile: ${JSON.stringify(uiOut)}, logLevel: 'silent' });
 `);
   execFileSync('bun', [build], { cwd: EXTENSION, stdio: 'pipe' });
   bundle = readFileSync(out, 'utf8');
+  uiBundle = readFileSync(uiOut, 'utf8');
 });
 
 test.afterAll(() => {
@@ -176,4 +237,133 @@ test('a diagram label cannot carry data-external or data-link either', async ({ 
   expect(r.ok).toBe(true);
   const attrs = await page.evaluate(() => Array.from(document.querySelectorAll('#host [data-external], #host [data-link]')).map((el) => [el.getAttribute('data-external'), el.getAttribute('data-link')]));
   expect(attrs).toEqual([[null, 'chapter:2']]);
+});
+
+// The diagram sanitizer itself (see the header): real Mermaid, KaTeX and DOMPurify, no CSP.
+
+const MATHML = 'http://www.w3.org/1998/Math/MathML';
+
+async function openUi(page: import('@playwright/test').Page) {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.setContent(`<!DOCTYPE html><html><head></head><body><div id="host"></div>
+<script>window.__pwned = 0;</script>
+<script>${uiBundle.replace(/<\/script/gi, '<\\/script')}</script>
+</body></html>`);
+  await page.waitForFunction(() => !!(window as any).__ui, null, { timeout: 30_000 }).catch(() => {
+    throw new Error(`The diagram bundle did not load: ${errors.join(' | ') || 'no error reported'}`);
+  });
+}
+
+const MATH_DIAGRAM = 'flowchart LR\n  A["$$x^2+\\frac{a}{b}$$"] --> B';
+
+test('a $$...$$ label in a Mermaid diagram is drawn as MathML, not an empty box', async ({ page }) => {
+  // What regresses: the sanitizer's parse drops <math> with its content (no
+  // MathML profile), so the node draws with no label.
+  await openUi(page);
+  const r = await page.evaluate((src) => (window as any).__ui.render(src), MATH_DIAGRAM);
+  expect(r.ok, r.message).toBe(true);
+  const maths = await page.evaluate((ns) => Array.from(document.getElementById('host')!.getElementsByTagNameNS(ns, 'math')).map((m) => ({
+    msup: Array.from(m.getElementsByTagNameNS(ns, 'msup')).map((e) => (e.textContent ?? '').replace(/\s+/g, '')),
+    mfrac: Array.from(m.getElementsByTagNameNS(ns, 'mfrac')).map((e) => (e.textContent ?? '').replace(/\s+/g, '')),
+  })), MATHML);
+  expect(maths.length).toBeGreaterThan(0);
+  for (const m of maths) {
+    expect(m.msup).toEqual(['x2']);
+    expect(m.mfrac).toEqual(['ab']);
+  }
+});
+
+test('a link or a picture on a MathML element is dropped, and nothing is fetched', async ({ page }) => {
+  await openUi(page);
+  const fetched: string[] = [];
+  await page.route(/evil\.test/, (route) => {
+    fetched.push(route.request().url());
+    return route.abort();
+  });
+  const markup = '<svg id="r"><foreignObject><div><math><mrow href="https://evil.test/a"><mi xlink:href="https://evil.test/b" src="https://evil.test/c">x</mi></mrow><mglyph src="https://evil.test/g.png"/></math></div></foreignObject></svg>';
+  expect(await page.evaluate((m) => (window as any).__ui.mount(m, 'node'), markup)).toBe(true);
+  await page.waitForTimeout(300);
+  const seen = await page.evaluate((ns) => {
+    const host = document.getElementById('host')!;
+    return {
+      refs: Array.from(host.querySelectorAll('*')).flatMap((el) => Array.from(el.attributes).filter((a) => a.localName === 'href' || a.localName === 'src').map((a) => `${el.localName}@${a.name}`)),
+      mathGlyphs: host.getElementsByTagNameNS(ns, 'mglyph').length,
+      anyGlyphs: host.getElementsByTagName('mglyph').length,
+      maths: host.getElementsByTagNameNS(ns, 'math').length,
+      text: host.textContent,
+    };
+  }, MATHML);
+  expect(seen.refs).toEqual([]);
+  expect(seen.mathGlyphs).toBe(0);
+  expect(seen.anyGlyphs).toBe(0);
+  expect(seen.maths).toBe(1);
+  expect(seen.text).toBe('x');
+  expect(fetched).toEqual([]);
+  // The watch is live: a picture this page does load is seen.
+  await page.evaluate(() => {
+    const img = document.createElement('img');
+    img.src = 'https://evil.test/control.png';
+    document.body.append(img);
+  });
+  await expect.poll(() => fetched.includes('https://evil.test/control.png')).toBe(true);
+});
+
+/** Known MathML mutation-XSS shapes (namespace confusion through mglyph, annotation-xml, an svg in mi, maction). */
+const MXSS = [
+  '<math><mtext><table><mglyph><style><img src=x onerror=window.__pwned=1>',
+  '<math><mtext><table><mglyph><style><!--</style><img title="--&gt;&lt;img src=1 onerror=window.__pwned=2&gt;">',
+  '<math><annotation-xml encoding="text/html"><style><img src=x onerror=window.__pwned=3>',
+  '<math><mi><svg><style><img src=x onerror=window.__pwned=4>',
+  '<math><maction actiontype="statusline" xlink:href="https://evil.test"><mi>x</mi></maction>',
+];
+
+for (const how of ['node', 'markup'] as const) {
+  test(`MathML mutation XSS stays inert, mounted as ${how === 'node' ? 'the sanitized node' : 'its markup parsed again'}`, async ({ page }) => {
+    // `markup`: the sanitized tree serialized and parsed again, where a
+    // namespace confusion would turn text into elements.
+    await openUi(page);
+    for (const payload of MXSS) {
+      expect(await page.evaluate(([m, h]) => (window as any).__ui.mount(m, h), [`<svg><foreignObject><div>${payload}`, how] as const), payload).toBe(true);
+      await page.waitForTimeout(100);
+      const seen = await page.evaluate(() => {
+        const els = Array.from(document.querySelectorAll('#host *'));
+        return {
+          tags: els.map((el) => el.localName),
+          handlers: els.flatMap((el) => el.getAttributeNames().filter((n) => /^on/i.test(n)).map((n) => `${el.localName}@${n}`)),
+        };
+      });
+      expect(seen.tags.filter((t) => t === 'annotation-xml' || t === 'maction' || t === 'semantics'), payload).toEqual([]);
+      expect(seen.handlers, payload).toEqual([]);
+      expect(await page.evaluate(() => (window as any).__pwned), payload).toBe(0);
+    }
+  });
+}
+
+test('a diagram with no math sanitizes the same with or without the MathML profile', async ({ page }) => {
+  await openUi(page);
+  const sanitized = (markup: string, mathProfile: boolean) =>
+    page.evaluate(([m, p]) => (window as any).__ui.sanitized(m, p) as string | null, [markup, mathProfile] as const);
+  // The toggle reaches the sanitizer's own call: with the profile off, a math label loses its math.
+  const math = await page.evaluate((src) => (window as any).__ui.render(src), MATH_DIAGRAM);
+  expect(math.ok, math.message).toBe(true);
+  expect(math.raw).toContain('<math');
+  expect(await sanitized(math.raw, true)).toContain('<mfrac');
+  expect(await sanitized(math.raw, false)).not.toContain('<math');
+
+  const plain = await page.evaluate((src) => (window as any).__ui.render(src), [
+    'flowchart LR',
+    '  A[Start] -->|yes| B{Decide}',
+    '  B --> C(Done)',
+    '  subgraph S [Group]',
+    '    C',
+    '  end',
+    '  classDef hot fill:#f96',
+    '  class A hot',
+  ].join('\n'));
+  expect(plain.ok, plain.message).toBe(true);
+  expect(plain.raw.toLowerCase()).toContain('<foreignobject');
+  const withProfile = await sanitized(plain.raw, true);
+  expect(withProfile).toContain('Decide');
+  expect(withProfile).toBe(await sanitized(plain.raw, false));
 });

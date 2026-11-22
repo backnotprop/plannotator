@@ -45,7 +45,7 @@
 import { basename } from "node:path";
 import type { InboxFirstSeen } from "./inbox-first-seen";
 import { INBOX_AGENT_FACES_KEPT, INBOX_AGENTS_LISTED_MAX, inboxAgentNamesChecked, readInboxAgentFaces, type InboxAgent, type InboxAgentsGroup, type InboxRunState } from "@plannotator/core/inbox-types";
-import type { InboxAgentSession } from "./inbox-sessions";
+import { contextPercentOf, effortLevelOf, modelIdOf, type InboxAgentSession } from "./inbox-sessions";
 import { withAgentStatusMark } from "./inbox-agent-mark";
 
 /** A launched session (inbox-launch.ts `agents`). */
@@ -170,6 +170,9 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
       live: entry.live,
       started_at: iso(entry.startedAt),
       last_seen_at: iso(entry.lastSeen),
+      ...(entry.live && entry.model !== null ? { model: entry.model } : {}),
+      ...(entry.live && entry.effort !== null ? { effort: entry.effort } : {}),
+      ...(entry.live && entry.context !== null ? { context: entry.context } : {}),
     });
     seen.set(entry.session, entry.firstSeen ?? entry.startedAt);
   }
@@ -280,6 +283,17 @@ export function inboxMergedAgents(self: string, own: InboxAgentsGroup, machines:
   return [{ machine: self, ...own }, ...machines.filter((group) => group.machine !== self)];
 }
 
+function sessionFactsChecked(agent: InboxAgent): InboxAgent {
+  const { model, effort, context, ...rest } = agent;
+  const checked = { model: modelIdOf(model), effort: effortLevelOf(effort), context: contextPercentOf(context) };
+  return {
+    ...rest,
+    ...(checked.model === null ? {} : { model: checked.model }),
+    ...(checked.effort === null ? {} : { effort: checked.effort }),
+    ...(checked.context === null ? {} : { context: checked.context }),
+  };
+}
+
 /**
  * Another machine's group as its list sent it (`agents`, one group): only what parses, capped, named by `machine`.
  * Null when its list has none (an older Inbox): the window then knows nothing of its agents.
@@ -291,7 +305,7 @@ export function inboxPeerAgentsGroup(value: unknown, machine: string, cap = INBO
   // Where it lives in that machine's Rex, its pane's status and mark, as that machine's Inbox read them (checked as
   // sent). Show in Rex as that machine offers it to a linked machine's reader: only while a Rex app is attached to its
   // Rex from another computer, never for its own screen's app (an older Inbox there offers none).
-  const agents = raw.agents!.filter((agent): agent is InboxAgent => !!agent && typeof agent === "object" && typeof agent.id === "string" && typeof agent.session === "string" && STATES.has(agent.state)).slice(0, cap).map((agent) => inboxAgentNamesChecked(agent, { show: true }));
+  const agents = raw.agents!.filter((agent): agent is InboxAgent => !!agent && typeof agent === "object" && typeof agent.id === "string" && typeof agent.session === "string" && STATES.has(agent.state)).slice(0, cap).map((agent) => sessionFactsChecked(inboxAgentNamesChecked(agent, { show: true })));
   const count = (n: unknown, floor: number) => (typeof n === "number" && Number.isSafeInteger(n) && n >= floor ? n : floor);
   // Its agents' faces and given names live there (inbox-linked-marks): passed through as that machine sent them.
   const faces = raw.faces !== undefined ? { faces: Object.fromEntries(Object.entries(readInboxAgentFaces(raw.faces)).slice(-INBOX_AGENT_FACES_KEPT)), faces_rev: count(raw.faces_rev, 0) } : {};

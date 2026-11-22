@@ -99,9 +99,9 @@ describe('a band’s menu: only that band’s rows', () => {
     expect(ids(bandArchiveAllRows(band('quiet')))).toEqual(['q1']);
   });
 
-  test('the items each band offers: Quiet and Sent only Archive all; Snoozed nothing, so no menu', () => {
+  test('the items each band offers: Quiet and Sent only Archive all; Snoozed nothing, so no menu; Re-ask all only on a band of open questions', () => {
     expect(bandMenuActions(band('new'))).toEqual(['read', 'archive']);
-    expect(bandMenuActions(band('waiting'))).toEqual(['read', 'archive']);
+    expect(bandMenuActions(band('waiting'))).toEqual(['read', 'archive', 'reask']);
     expect(bandMenuActions(band('quiet'))).toEqual(['archive']);
     expect(bandMenuActions(band('sent'))).toEqual(['archive']);
     expect(bandMenuActions(band('snoozed'))).toEqual([]);

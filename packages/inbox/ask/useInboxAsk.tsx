@@ -5,7 +5,9 @@ import { useOpenInCodeRegion } from '../components/OpenIn';
 import { AskChat } from './AskChat';
 import { onAskChange } from './askEvents';
 import { readAsk } from './askReads';
-import { askUnseen } from './askModel';
+import { askNewestAnswer, askUnseen } from './askModel';
+import { closeSideCircle, readSideClosed, reopenSideCircle, sideCircleClosed, subscribeSideClosed } from '../data/sideCircleClosed';
+import { useKeptState } from '../data/keptState';
 import { sideQuote } from './askWords';
 import { sideButtonFor, type SideButton } from './sideButton';
 import { SideChatCorner, takeSideFlight, type SideFlight } from './SideChatCorner';
@@ -15,8 +17,10 @@ interface ChatState {
   unseen: boolean;
   answering: boolean;
   host: string | null;
+  /** The newest answer's time: a Close on the circle holds until a newer one comes (data/sideCircleClosed.ts). */
+  newest: string | null;
 }
-const NO_CHAT: ChatState = { hasChat: false, unseen: false, answering: false, host: null };
+const NO_CHAT: ChatState = { hasChat: false, unseen: false, answering: false, host: null, newest: null };
 
 /**
  * The minimized chat's circle shows (the owner, 2026-11-20): Ask on, the open thread has a chat and its window is
@@ -120,7 +124,7 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
     if (at instanceof HTMLElement && at !== document.body && !at.closest('[data-side-corner], [data-chat-window]')) opener.current = at;
   };
 
-  const [read, setRead] = useState<{ threadId: string; model: InboxAskModel } | null>(null);
+  const [read, keepRead, setRead] = useKeptState<{ threadId: string; model: InboxAskModel } | null>(null);
   const [picked, setPicked] = useState<InboxAskChat | null>(null);
   const [focusRequest, setFocusRequest] = useState(0);
   /** SideChatCorner draws the circle (not hidden for want of a pane to cut, or for something else's corner). */
@@ -146,7 +150,9 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
     const seq = ++readSeq.current;
     readAsk(reading).then(
       (model) => {
-        if (seq === readSeq.current) setRead({ threadId: reading, model });
+        // The same answer keeps the held one: a `deliveries` frame (about once a second while agents work) reads
+        // every thread's Ask, and a new object each time drew the whole window again for nothing.
+        if (seq === readSeq.current) keepRead({ threadId: reading, model });
       },
       () => {
         // Nothing to show for this thread; the next event reads again.
@@ -177,6 +183,7 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
   const model = read?.threadId === askFor ? read.model : null;
   const pick = (chat: InboxAskChat) => {
     if (chat.thread_id === askFor) return;
+    reopenSideCircle(chat.thread_id);
     openChats.current.add(chat.thread_id);
     setPicked(chat);
     askForFocus(chat.thread_id);
@@ -200,6 +207,7 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
       const thread = onScreen.current;
       if (!thread) return;
       noteOpener();
+      reopenSideCircle(thread);
       openChats.current.add(thread);
       store.setMinimized(false);
       // No words (a bare `/side`): the chat opens with its box as it was.
@@ -216,10 +224,24 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
   // What the corner last knew of each thread's chat: a switch keeps the circle and the cut as they were until the
   // new thread's read lands (`model` is null until then), and the read corrects them.
   const live: ChatState | null = model
-    ? { hasChat: (model.conversation?.turns.length ?? 0) > 0, unseen: askUnseen(model.conversation ?? null) !== null, answering: (model.running ?? null) !== null, host: model.agent?.host ?? null }
+    ? {
+        hasChat: (model.conversation?.turns.length ?? 0) > 0,
+        unseen: askUnseen(model.conversation ?? null) !== null,
+        answering: (model.running ?? null) !== null,
+        host: model.agent?.host ?? null,
+        newest: askNewestAnswer(model.conversation ?? null),
+      }
     : null;
   if (live && askFor) known.current.set(askFor, live);
   const chat = live ?? (askFor ? known.current.get(askFor) : undefined) ?? NO_CHAT;
+  // Close on the circle (the owner, 2026-11-21): this thread's circle stays away, its chat kept, until the agent
+  // answers again or a side chat opens on it (askWith, a pick in the dropdown, a press).
+  const kept = useSyncExternalStore(subscribeSideClosed, () => (askFor ? readSideClosed(askFor) : null), () => null);
+  const closed = sideCircleClosed(kept, chat.newest);
+  const answeredSince = kept !== null && !closed && live !== null;
+  useEffect(() => {
+    if (answeredSince && askFor) reopenSideCircle(askFor);
+  }, [answeredSince, askFor]);
 
   const corner: AskCorner = {
     on,
@@ -232,6 +254,7 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
     open: () => {
       if (!askFor) return;
       noteOpener();
+      reopenSideCircle(askFor);
       openChats.current.add(askFor);
       store.setMinimized(false);
       askForFocus(askFor);
@@ -242,7 +265,7 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
     },
   };
   // Mounted while it may show; on screen only where SideChatCorner draws it.
-  const showCircle = sideCircle(corner, phone);
+  const showCircle = sideCircle(corner, phone) && !closed;
   corner.circle = showCircle && drawn;
 
   const canAsk = model?.can_ask === true;
@@ -294,7 +317,7 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
         {region.window}
         {showCircle && (
           <ChatFrameLauncher store={store}>
-            <SideChatCorner host={corner.host} unseen={corner.unseen} answering={corner.answering} onOpen={corner.open} flight={flight} opener={opener} onShown={setDrawn} />
+            <SideChatCorner host={corner.host} unseen={corner.unseen} answering={corner.answering} onOpen={corner.open} flight={flight} opener={opener} onShown={setDrawn} onClose={() => askFor && closeSideCircle(askFor, chat.newest)} />
           </ChatFrameLauncher>
         )}
       </div>

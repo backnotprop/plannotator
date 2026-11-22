@@ -171,6 +171,17 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     },
   },
   {
+    id: 'tritanopia',
+    name: 'Tritanopia',
+    builtIn: true,
+    modeSupport: 'both',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#3cc6d9', secondary: '#2a2e37', accent: '#f0657d', background: '#16181d', foreground: '#eaedf2' },
+      light: { primary: '#0b7a8c', secondary: '#e7eaef', accent: '#b82944', background: '#f8f9fb', foreground: '#22262e' },
+    },
+  },
+  {
     id: 'dark-plus',
     name: 'Dark+',
     builtIn: true,
@@ -364,6 +375,16 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     colors: {
       dark: { primary: '#7e57c2', secondary: '#0b253a', accent: '#82aaff', background: '#011627', foreground: '#d6deeb' },
       light: { primary: '#7e57c2', secondary: '#0b253a', accent: '#82aaff', background: '#011627', foreground: '#d6deeb' },
+    },
+  },
+  {
+    id: 'nightfox',
+    name: 'Nightfox',
+    builtIn: true,
+    modeSupport: 'dark-only',
+    colors: {
+      dark: { primary: '#719cd6', secondary: '#29394f', accent: '#63cdcf', background: '#192330', foreground: '#cdcecf' },
+      light: { primary: '#719cd6', secondary: '#29394f', accent: '#63cdcf', background: '#192330', foreground: '#cdcecf' },
     },
   },
   {

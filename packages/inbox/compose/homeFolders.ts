@@ -224,6 +224,7 @@ export interface FolderDrive {
   path: string;
   name: string;
   network?: true;
+  shortcut?: false;
 }
 
 /** Where a typed path is: one of the drives (the longest that holds it), else home (`null`). */
