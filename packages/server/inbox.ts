@@ -108,6 +108,7 @@ import {
   type InboxAgentsGroup,
   type InboxListRow,
   type InboxMessage,
+  type InboxSentFrom,
   type InboxProject,
   type InboxProjectRepo,
   type InboxRestartAgents,
@@ -369,6 +370,7 @@ import { createThreadPullStates, createThreadPullsRoute, threadPullsChangedForWa
 import { createInboxStepsRoute, inboxStepsStale, inboxStepsWaitOnPerson as stepsListWaitsOnPerson } from "./inbox-steps";
 import { createInboxDebugLog } from "./inbox-debug-log";
 import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller, type InboxDoorTimers } from "./inbox-devices";
+import { inboxRequestSentFrom } from "./inbox-sent-from";
 import { doorHealth } from "./inbox-door-version";
 import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
 import { archivedAskOf, farRowTags, mergeArchived } from "./inbox-archived-merged";
@@ -5534,6 +5536,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let cfAccess: InboxCfAccess | null = null;
   let cfRoutes: ReturnType<typeof createCfAccessRoutes> | null = null;
   const fromCfDoor = new WeakSet<Request>();
+  /** Where the person wrote a message, told from this request (inbox-sent-from.ts); null on this computer or when not known. */
+  const sentFromOf = (req: Request, via: RequestVia): InboxSentFrom | null => {
+    const door = fromDeviceDoor.get(req);
+    const machineName = door?.platform === MACHINE_PLATFORM ? (machines?.machineOfDevice(door.device_id)?.name ?? door.name) : null;
+    return inboxRequestSentFrom({ via, ownNode: fromOwnTailnetNode.has(req), cloudflare: fromCfDoor.has(req), door: door ? { platform: door.platform, machineName, place: door.place ?? null } : null });
+  };
 
   const readBody = async (req: Request): Promise<Record<string, unknown>> => {
     try {
@@ -7335,7 +7343,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The device door is never the owner here: it may not trust a folder, so it is offered none.
       // A linked machine is the owner's other computer: it may trust a folder for a press in its window (remote launch).
       const machineDoor = door?.platform === MACHINE_PLATFORM;
-      const composed = await compose.route(req, url, !door || machineDoor, door ? { machine: machineDoor, window: door.window, from: machineDoor ? machines.machineOfDevice(door.device_id) : null } : null, via === "local" && !door);
+      const composed = await compose.route(req, url, !door || machineDoor, door ? { machine: machineDoor, window: door.window, from: machineDoor ? machines.machineOfDevice(door.device_id) : null } : null, via === "local" && !door, sentFromOf(req, via));
       if (composed) return composed;
       const reviewed = await liveReview.route(req, url, !door);
       if (reviewed) return reviewed;
@@ -7976,6 +7984,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 feedback: typeof body.feedback === "string" ? body.feedback : undefined,
                 annotation_ids: body.annotation_ids as never,
                 viewing: body.viewing,
+                sent_from: sentFromOf(req, via),
                 // A verdict on a review (Approve / Send feedback in the review's header): only while Code review is on.
                 ...(body.review_verdict !== undefined && body.review_verdict !== null
                   ? codeReviewOn()
@@ -8337,6 +8346,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           // config.json could not be written: this machine keeps its own switch until the next read.
         }
       },
+      sentFrom: sentFromOf,
       timings: options.machineLinkTimings,
     });
     relay = createInboxRelay({

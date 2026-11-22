@@ -65,6 +65,7 @@ import {
   type InboxLaunchError,
   type InboxLaunchRecord,
   type InboxReplyViewing,
+  type InboxSentFrom,
   type InboxAuthor,
   type InboxDecision,
   type InboxGuideRef,
@@ -378,6 +379,8 @@ export interface InboxReplyInput {
    * `{ attachment_id, time?, page?, as_sent? }`. Context only, so anything off about it drops it and never refuses the Send.
    */
   viewing?: unknown;
+  /** Where the person wrote it, as the server told it from the request (`InboxMessage.sent_from`); absent from this computer. */
+  sent_from?: InboxSentFrom | null;
   /**
    * The person chose another live session to take this reply, because the
    * session that asked has ended (the window's choice at Send). Absent: the
@@ -5243,6 +5246,7 @@ export class InboxStore {
         : {}),
       ...(verdict ? { review_verdict: verdict } : {}),
       ...(viewing ? { viewing } : {}),
+      ...(input.sent_from ? { sent_from: input.sent_from } : {}),
       ...(reviewCommentsOf.length > 0 ? { review_comments_of: reviewCommentsOf } : {}),
       ...(quoted ? { quote: quoted.quote } : {}),
       ...(input.review_anchor ? { review_anchor: input.review_anchor } : {}),
@@ -7342,6 +7346,8 @@ export class InboxStore {
     review_live?: InboxReviewLive;
     review_anchor?: InboxReviewAnchor;
     review_batch?: InboxReviewBatch;
+    /** Where the person wrote it (`InboxMessage.sent_from`); absent from this computer. */
+    sent_from?: InboxSentFrom | null;
   }): { message: InboxMessage; replayed: boolean } {
     const key = typeof input.idempotency_key === "string" ? input.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
@@ -7386,6 +7392,7 @@ export class InboxStore {
       ...(input.review_live ? { review_live: input.review_live } : {}),
       ...(input.review_anchor ? { review_anchor: input.review_anchor } : {}),
       ...(input.review_batch ? { review_batch: input.review_batch } : {}),
+      ...(input.sent_from ? { sent_from: input.sent_from } : {}),
       ...(threadName ? { thread_name: threadName, named_by: { kind: auto ? ("auto" as const) : ("person" as const), at } } : {}),
       ...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
     };

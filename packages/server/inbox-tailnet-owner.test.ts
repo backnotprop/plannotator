@@ -19,7 +19,8 @@
  */
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { inboxId } from "@plannotator/core/inbox-types";
+import { inboxId, inboxSentFromLine } from "@plannotator/core/inbox-types";
+import { INBOX_BRIDGE_POLL_PATH, parseInboxBridgeCommands } from "@plannotator/shared/inbox/connection";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
@@ -571,6 +572,75 @@ describe("a launched agent's permission prompt over the tailnet", () => {
     expect((await forwarded("picks", { idempotency_key: "00000000-0000-4000-8000-000000000306", questions: [answer("Allow once")(peer, id)], unsent_only: true })).status).toBe(200);
     expect((await forwarded("reply", { idempotency_key: "00000000-0000-4000-8000-000000000305", words: "", questions: [answer("Allow once")(peer, id)] })).status).toBe(200);
     expect(stateOf(peer, id)).toBe("sent");
+  });
+});
+
+describe("where the person wrote it reaches the agent (inbox-sent-from.ts)", () => {
+  const SESSION = "ses-where";
+  const WORDS = "send me the link to the preview you built";
+  const projectOf = (w: World) => {
+    const root = join(w.dataDir, "shop");
+    mkdirSync(root, { recursive: true });
+    return { root, project: w.inbox.store.ensureProject({ name: "shop", root }) };
+  };
+  const ask = (w: World, key: string) =>
+    w.inbox.store.sendMessage({ project_id: projectOf(w).project.id, author: { kind: "agent", host: "claude-code", session: SESSION, name: "Claude Code" }, body: "The preview is up.", idempotency_key: key }).message.id;
+  const poll = async (w: World) => {
+    const response = await fetch(`http://127.0.0.1:${w.inbox.port}${INBOX_BRIDGE_POLL_PATH}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${w.inbox.token}` },
+      body: JSON.stringify({ session: SESSION, host: "claude-code", waitMs: 0, project_path: projectOf(w).root, started_at: Date.now(), busy: false, tags: true }),
+    });
+    expect(response.status).toBe(200);
+    return parseInboxBridgeCommands(await response.text());
+  };
+
+  test("this computer's window adds nothing; the owner over the tailnet gets the line in the delivered turn", async () => {
+    const w = await world();
+    await poll(w);
+    const TAILNET = inboxSentFromLine({ sent_from: { kind: "tailnet" } });
+    for (const [caller, key, expected] of [
+      ["local", "00000000-0000-4000-8000-000000000401", undefined],
+      ["owner", "00000000-0000-4000-8000-000000000402", { kind: "tailnet" }],
+    ] as const) {
+      const id = ask(w, `where-${caller}`);
+      const response = await call(w, caller, { path: `/api/inbox/messages/${id}/reply`, body: { idempotency_key: key, words: WORDS, questions: [] } });
+      expect(response.status).toBe(200);
+      const { reply } = (await response.json()) as Json;
+      expect(w.inbox.store.message(reply.id)!.sent_from).toEqual(expected);
+      const command = (await poll(w)).find((c) => c.id === reply.id);
+      expect(command?.body).toBe(caller === "local" ? WORDS : `${WORDS}\n\n${TAILNET}`);
+    }
+  });
+
+  test("a reply forwarded by a linked computer says that computer, and where the person was when not at its window", async () => {
+    setEnv("PLANNOTATOR_TEST_SANDBOX", process.env.PLANNOTATOR_TEST_SANDBOX ?? "1");
+    const peer = await world({ phones: false });
+    const w = await world({ phones: false });
+    const bearer = (inbox: InboxServer) => ({ Authorization: `Bearer ${inbox.token}`, "Content-Type": "application/json" });
+    const offer = (await (await fetch(`http://127.0.0.1:${peer.inbox.port}/api/inbox/control/machines/offer`, { method: "POST", headers: bearer(peer.inbox), body: "{}" })).json()) as Json;
+    const linked = await fetch(`http://127.0.0.1:${w.inbox.port}/api/inbox/control/machines/link`, {
+      method: "POST",
+      headers: bearer(w.inbox),
+      body: JSON.stringify({ link: offer.link, address: `http://127.0.0.1:${peer.inbox.port}`, one_way: true }),
+    });
+    expect(linked.status).toBe(201);
+    const machine = ((await linked.json()) as Json).machine.id as string;
+    await waitOnline(w, machine);
+    for (const [caller, key] of [
+      ["local", "00000000-0000-4000-8000-000000000403"],
+      ["owner", "00000000-0000-4000-8000-000000000404"],
+    ] as const) {
+      const id = ask(peer, `far-${caller}`);
+      const response = await call(w, caller, { path: `/api/inbox/m/${machine}/messages/${id}/reply`, body: { seen_through_seq: Number.MAX_SAFE_INTEGER, idempotency_key: key, words: WORDS, questions: [] } });
+      expect(response.status).toBe(200);
+      const { reply } = (await response.json()) as Json;
+      const from = peer.inbox.store.message(reply.id)!.sent_from as Json;
+      expect(from.kind).toBe("machine");
+      expect(typeof from.name === "string" && from.name.length > 0).toBe(true);
+      expect(from.via).toBe(caller === "owner" ? "tailnet" : undefined);
+      expect(inboxSentFromLine({ sent_from: from })).toContain(from.name);
+    }
   });
 });
 
