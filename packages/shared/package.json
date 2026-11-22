@@ -91,6 +91,7 @@
     "./url-to-markdown": "./url-to-markdown.ts",
     "./html-assets": "./html-assets.ts",
     "./html-assets-node": "./html-assets-node.ts",
+    "./byte-range": "./byte-range.ts",
     "./packed-app": "./packed-app.ts",
     "./guide": "./guide.ts",
     "./guide-prompt": "./guide-prompt.ts",
