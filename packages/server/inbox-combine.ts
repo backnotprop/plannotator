@@ -6,7 +6,7 @@
  * - `POST /api/inbox/combine { thread_ids, session, words?, idempotency_key }`: asks the session, with one wake (a
  *   Tidy note whose run is the Combine's id). A replay of the key answers the Combine it made.
  * - `POST /api/inbox/combine/:id/cancel`: the person stops a Combine still waiting; an undelivered wake is withdrawn.
- * - `POST /api/inbox/combine/:id/undo`: the picked threads come back from the archive.
+ * - `POST /api/inbox/combine/:id/undo`: the picked threads come back from the archive, but those archived before it.
  *
  * The picked threads are archived (the person's archive) only once the new thread arrives: a root message from the
  * asked session whose `idempotency_key` is the Combine's id, and nothing else (another new thread of that session is
@@ -108,6 +108,10 @@ export function createInboxCombine(deps: InboxCombineDeps) {
   const shown = (): InboxCombineRecord[] =>
     combines.filter((c) => c.state === "asked" || now() - Date.parse(c.settled_at ?? c.at) <= SHOWN_MS).map(wire);
 
+  const isArchived = (threadId: string) => {
+    const row = store.listRow(threadId);
+    return !!row && inboxRowArchived(row);
+  };
   const pickedOf = (value: unknown, min: number): string[] => {
     const ids = typeof value === "string" ? value.split(",") : Array.isArray(value) ? value : null;
     if (!ids || ids.length < min || ids.length > PICKED_MAX || ids.some((id) => typeof id !== "string" || !isInboxId("msg", id))) {
@@ -117,8 +121,6 @@ export function createInboxCombine(deps: InboxCombineDeps) {
     for (const id of out) {
       const root = store.message(id);
       if (!root || root.thread_id !== id) throw new InboxError("thread_not_found", `No thread ${id} on this machine.`, { field: "thread_ids" });
-      const row = store.listRow(id);
-      if (row && inboxRowArchived(row)) throw new InboxError("thread_archived", `${store.threadSubject(id) ?? id} is archived.`, { field: "thread_ids" });
     }
     return out;
   };
@@ -185,12 +187,13 @@ export function createInboxCombine(deps: InboxCombineDeps) {
     const id = inboxId("cmb");
     const ref = inboxSessionRef(agent.host, agent.session);
     const text = [inboxCombineInstruction(id), ...(words ? [inboxCombineWordsLine(words)] : []), ...(ref ? [inboxCombineSessionLine(ref)] : []), ...inboxCombineThreadLines(wakeThreads(threadIds))].join("\n\n");
+    const archived = new Set(threadIds.filter(isArchived));
     const { notes } = store.sendTidy({ run: id, to: { host: agent.host ?? "agent", session: agent.session }, threadIds, body: text, idempotency_key: key });
     const record: Stored = {
       id,
       key,
       wake: notes[0]!.id,
-      threads: threadIds.map((t) => ({ id: t, subject: store.threadSubject(t) ?? "(no subject)" })),
+      threads: threadIds.map((t) => ({ id: t, subject: store.threadSubject(t) ?? "(no subject)", ...(archived.has(t) ? { archived: true as const } : {}) })),
       session: agent.session,
       host: agent.host,
       name: inboxCombineAgentLabel(agent, agents),
@@ -220,6 +223,7 @@ export function createInboxCombine(deps: InboxCombineDeps) {
   };
   const archive = (record: Stored, resolved: boolean) => {
     for (const thread of record.threads) {
+      if (resolved ? isArchived(thread.id) : thread.archived) continue;
       try {
         if (resolved && store.message(thread.id)?.resolved_at != null) store.resolveThread(thread.id, false, "person");
         store.resolveThread(thread.id, resolved, "person");

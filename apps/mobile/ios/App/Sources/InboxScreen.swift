@@ -117,7 +117,7 @@ struct InboxScreen: View {
       let groups = Self.shown(view)
       let pins = view?.pins ?? []
       let starred = Set(pins.map(\.threadId))
-      let held = Set(session.held.filter { $0.kind != .seen }.map(\.thread))
+      let held = Set(session.held.filter(session.willSend).map(\.thread))
       let archived = session.archivedRows().count
       let folds = folds
       List(selection: $actions.picked) {
@@ -537,7 +537,7 @@ struct AwayNotice: View {
   let session: InboxSession
 
   var body: some View {
-    let waiting = session.held.filter { $0.kind != .seen }.count
+    let waiting = session.held.filter(session.willSend).count
     HStack(alignment: .firstTextBaseline, spacing: Space.near) {
       Image(systemName: "moon.fill").font(TextRole.meta).foregroundStyle(Token.mutedForeground).accessibilityHidden(true)
       VStack(alignment: .leading, spacing: Space.hair) {
