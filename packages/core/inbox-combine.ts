@@ -68,8 +68,8 @@ export function inboxCombineAgentLabel(agent: InboxCombineAgent, all: readonly I
  * What the line under an agent's name adds to tell it from the others whose name reads the same: when it last wrote
  * (`when` formats it), then its project, then the end of its session id ("session 3f9a"), each only while another of
  * them still matches everything before it. None for an agent whose name no other has. Two such agents never get the
- * same parts: at the first of these where they differ, both say it. There is no machine step: the agents of one
- * Combine are all on the machine holding its threads.
+ * same parts: at the first of these where they differ, both say it. There is no machine step: the dialog ends each
+ * line with the agent's computer whenever a linked one is involved (picks on two computers list both computers' agents).
  */
 export function inboxCombineAgentApart(agent: InboxCombineAgent, all: readonly InboxCombineAgent[], when: (iso: string) => string): string[] {
   const label = inboxCombineAgentLabel(agent, all);

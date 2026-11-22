@@ -3506,8 +3506,11 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * window (`projects/:id/tags`, by the tag's name), kept there. `agent-read`: a linked machine's agents read this
  * Inbox's threads and fetch their files through its door (`agent-read`, `agent-file`; inbox-far-read.ts in the server).
  * `agent-search`: they search and list this Inbox's threads too (`agent-search`, `agent-threads`; inbox-far-find.ts).
+ * `combine-across` (approval "inbox-combine-across-computers"): a Combine here takes picked threads of a linked
+ * machine too (read there, archived there through the outbox), so a linked machine's window offers this Inbox's
+ * agents for picks on both.
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**

@@ -153,6 +153,7 @@ import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/sha
 import { DecisionDataAborted, decisionDataCsv, decisionDataSummary, readDecisionLines } from "@plannotator/shared/inbox/decision-data";
 import { createInboxSearchRoutes } from "./inbox-search";
 import { createInboxCombine } from "./inbox-combine";
+import { createInboxCombineFar, type InboxCombineFar } from "./inbox-combine-far";
 import { inboxSkillsBlockFor, inboxSkillsRoute } from "./inbox-skills";
 import { assertTestHome } from "./test-home-guard";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
@@ -5774,6 +5775,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
 
   // Combine (packages/server/inbox-combine.ts): picked threads, one agent writes a new thread, then they are archived.
+  let combineFar: InboxCombineFar | undefined;
   const combine = createInboxCombine({
     store,
     serverSession,
@@ -5782,6 +5784,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     titleOf: (session) => live.labelOf(session) ?? live.titles()[session] ?? null,
     readBody,
     json,
+    // Picked threads on a linked machine (inbox-combine-far.ts): read there, archived there through the outbox.
+    far: () => {
+      if (!machines?.hasLinks()) return null;
+      const linked = machines;
+      return (combineFar ??= createInboxCombineFar({
+        readThread: (ask) => linked.readThread(ask),
+        rowOf: (threadId) => linked.rows().find((row) => row.thread_id === threadId) ?? null,
+        hold: (machine, route, body, thread, waitMs) => linked.holdWrite(machine, route, body, thread, waitMs),
+      }));
+    },
   });
 
   /** The optional debug log (inbox-debug-log.ts): null, the default, changes nothing and writes nothing. */

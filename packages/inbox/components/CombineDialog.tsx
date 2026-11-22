@@ -3,15 +3,18 @@
  * say what it should be about, and presses Combine. Nothing is archived now: the picked threads go to the archive once
  * the new thread arrives (inbox-combine.ts), and the toast's Undo stops it until then (useCombines.ts).
  *
- * Who can be asked: a running session that wrote in a picked thread, on the machine that holds them, since an agent
- * reads only its own machine's threads. Threads on two machines, or on a machine that cannot be asked now, are said so
- * and nobody is offered.
+ * Who can be asked: a running session that wrote in a picked thread, on the machine that holds that thread. Picks on
+ * this computer and a linked one (approval "inbox-combine-across-computers") list the agents of both, each with its
+ * computer; the chosen agent's computer runs the Combine and keeps the new thread, and reads and archives the other's
+ * picked threads there (combineAcross.ts). A machine that cannot be asked now, or runs an older Plannotator, is said
+ * so and nobody is offered.
  */
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
-import type { InboxCombineAgent, InboxCombineRecord, InboxListRow } from '@plannotator/core/inbox-types';
+import type { InboxCombineRecord, InboxListRow } from '@plannotator/core/inbox-types';
 import { INBOX_COMBINE_WORDS_MAX, inboxCombineAgentApart, inboxCombineAgentLabel, inboxRowArchived, inboxTidyWords } from '@plannotator/core/inbox-types';
 import { formatCount, plural, whenTime } from '@plannotator/core/inbox-format';
 import { combineApi } from '../combineApi';
+import { combineAgentKey, combineGroups, combineMachineName, mergeCombineAgents, type CombineAgent } from '../combineAcross';
 import { PressKeys } from '../pressKeys';
 import { HostMark } from '../icons';
 import { isAway, rowMachine, type MachinesModel } from '../machines';
@@ -21,18 +24,19 @@ import { Modal } from './Updates';
 const FIRST = 4;
 const NO_MACHINES: MachinesModel = { self: null, all: [], linked: [], names: new Map(), away: new Set() };
 
-/** Why nobody can be asked about these threads, or null when their machine can be. */
+/**
+ * Why nobody can be asked about these threads, or null when their machines can be: each linked machine that holds a
+ * pick must be there and take Combines, and, with picks on more than one computer, take them across computers.
+ */
 export function combineBlocked(rows: readonly InboxListRow[], machines: MachinesModel): string | null {
   const held = [...new Set(rows.map((row) => rowMachine(row, machines)))];
-  const nameOf = (id: string | null) => (id === null ? (machines.all.find((m) => m.self)?.name ?? 'this computer') : (machines.names.get(id) ?? 'another machine'));
-  if (held.length > 1) {
-    const names = held.map(nameOf);
-    return `These threads are on ${names.length === 2 ? 'two' : names.length} machines, ${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}. An agent reads only the threads on its own machine: pick threads from one machine to combine them.`;
+  for (const machine of held) {
+    if (machine === null) continue;
+    const view = machines.linked.find((m) => m.id === machine);
+    if (!view || isAway(view)) return `${combineMachineName(machine, machines)} can’t be asked now: it is away.`;
+    const marks = view.marks ?? [];
+    if (!marks.includes('combine') || (held.length > 1 && !marks.includes('combine-across'))) return `${combineMachineName(machine, machines)} runs an older Plannotator: update it to combine its threads.`;
   }
-  const machine = held[0] ?? null;
-  const view = machine ? machines.linked.find((m) => m.id === machine) : null;
-  if (machine && (!view || isAway(view))) return `${nameOf(machine)} can’t be asked now: it is away.`;
-  if (machine && !(view!.marks ?? []).includes('combine')) return `${nameOf(machine)} runs an older Plannotator: update it to combine its threads.`;
   return null;
 }
 
@@ -42,9 +46,11 @@ export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted
   const back = rows.filter((row) => !inboxRowArchived(row)).length;
   const undoLine = back === n ? `Undo brings the ${formatCount(n)} back.` : back === 0 ? 'They stay archived.' : `Undo brings back the ${formatCount(back)} not already archived.`;
   const blocked = combineBlocked(rows, machines);
-  const machine = rows[0] ? rowMachine(rows[0], machines) : null;
-  const machineName = machine ? machines.names.get(machine) : null;
-  const [agents, setAgents] = useState<InboxCombineAgent[] | null>(null);
+  const groups = combineGroups(rows, machines);
+  // Picks on two computers: every agent says which it runs on. On one linked machine: its name, as before.
+  const across = groups.length > 1;
+  const machineOf = (agent: CombineAgent) => (across || agent.machine !== null ? combineMachineName(agent.machine, machines) : null);
+  const [agents, setAgents] = useState<CombineAgent[] | null>(null);
   const [who, setWho] = useState<string | null>(null);
   const [words, setWords] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -53,36 +59,39 @@ export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted
   const [keys] = useState(() => new PressKeys('combine'));
   // Two presses before the button greys out read the same `sending`: this one is set at once.
   const pressed = useRef(false);
-  const ids = rows.map((row) => row.thread_id).join(',');
+  // Each computer is asked about its own picks; the answers make one list.
+  const asks = JSON.stringify(groups);
   useEffect(() => {
     if (blocked) return;
     let live = true;
-    combineApi
-      .plan(ids.split(','), machine)
-      .then((plan) => {
-        if (!live) return;
-        setAgents(plan.agents ?? []);
-        setWho((current) => current ?? plan.agents?.[0]?.session ?? null);
-      })
-      .catch((cause) => live && (setAgents([]), setError(cause instanceof Error ? cause.message : 'Who can be asked could not be read.')));
+    const each = JSON.parse(asks) as typeof groups;
+    void Promise.allSettled(each.map(({ machine, ids }) => combineApi.plan(ids, machine).then((plan) => ({ machine, agents: plan.agents ?? [] })))).then((answers) => {
+      if (!live) return;
+      const read = answers.flatMap((a) => (a.status === 'fulfilled' ? [a.value] : []));
+      const failed = answers.find((a): a is PromiseRejectedResult => a.status === 'rejected');
+      const merged = mergeCombineAgents(read);
+      setAgents(merged);
+      setWho((current) => current ?? (merged[0] ? combineAgentKey(merged[0]) : null));
+      if (failed) setError(failed.reason instanceof Error ? failed.reason.message : 'Who can be asked could not be read.');
+    });
     return () => {
       live = false;
     };
-  }, [ids, machine, blocked]);
+  }, [asks, blocked]);
   const [shown, setShown] = useState(FIRST);
-  const chosen = agents?.find((a) => a.session === who) ?? null;
+  const chosen = agents?.find((a) => combineAgentKey(a) === who) ?? null;
   // Down from the last row shown shows them all and moves on, so the arrows reach every agent.
   const focusAgent = (session: string) => requestAnimationFrame(() => document.querySelector<HTMLInputElement>(`[data-combine-agent="${CSS.escape(session)}"] input`)?.focus());
   const onArrow = (event: KeyboardEvent) => {
     if (!agents || shown >= agents.length || (event.key !== 'ArrowDown' && event.key !== 'ArrowRight')) return;
-    if (agents.findIndex((a) => a.session === who) !== shown - 1) return;
+    if (agents.findIndex((a) => combineAgentKey(a) === who) !== shown - 1) return;
     event.preventDefault();
-    const next = agents[shown]!.session;
+    const next = agents[shown]!;
     setShown(agents.length);
-    setWho(next);
-    focusAgent(next);
+    setWho(combineAgentKey(next));
+    focusAgent(next.session);
   };
-  const nameOf = (agent: InboxCombineAgent) => inboxCombineAgentLabel(agent, agents ?? []);
+  const nameOf = (agent: CombineAgent) => inboxCombineAgentLabel(agent, agents ?? []);
   const combine = async () => {
     if (!chosen || pressed.current) return;
     pressed.current = true;
@@ -90,8 +99,9 @@ export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted
     setError(null);
     try {
       const words1 = inboxTidyWords(words);
-      const { combine: record } = await combineApi.start({ thread_ids: rows.map((row) => row.thread_id), session: chosen.session, idempotency_key: keys.for(), ...(words1 ? { words: words1 } : {}) }, machine);
-      onStarted(record, machine);
+      // The chosen agent's computer runs it: the new thread lives there, and it reads and archives the others' picks.
+      const { combine: record } = await combineApi.start({ thread_ids: rows.map((row) => row.thread_id), session: chosen.session, idempotency_key: keys.for(), ...(words1 ? { words: words1 } : {}) }, chosen.machine);
+      onStarted(record, chosen.machine);
       onClose();
     } catch (cause) {
       keys.failed(null, cause);
@@ -120,15 +130,15 @@ export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted
               {agents?.length === 0 && !error && <p className="ib-cmb-why">No agent that wrote in these threads is running. Combine needs one to read them and write the new thread.</p>}
               <div className="ib-cmb-list" data-all={shown === agents?.length && (agents?.length ?? 0) > FIRST ? '' : undefined} onKeyDown={onArrow}>
               {agents?.slice(0, shown).map((agent) => (
-                <label key={agent.session} className="ib-cmb-opt" data-on={agent.session === who ? '' : undefined} data-combine-agent={agent.session}>
-                  <input type="radio" name={`${id}-who`} checked={agent.session === who} onChange={() => setWho(agent.session)} />
+                <label key={combineAgentKey(agent)} className="ib-cmb-opt" data-on={combineAgentKey(agent) === who ? '' : undefined} data-combine-agent={agent.session} data-combine-machine={agent.machine ?? undefined}>
+                  <input type="radio" name={`${id}-who`} checked={combineAgentKey(agent) === who} onChange={() => setWho(combineAgentKey(agent))} />
                   <HostMark host={agent.host} agent={agent.session} />
                   <span className="ib-cmb-nm">
                     <b dir="auto">{nameOf(agent)}</b>
                     <small>
                       {agent.threads} of these
                       {inboxCombineAgentApart(agent, agents, (iso) => whenTime(iso)).map((part) => ` · ${part}`).join('')}
-                      {machineName ? ` · ${machineName}` : ''}
+                      {machineOf(agent) ? ` · ${machineOf(agent)}` : ''}
                     </small>
                   </span>
                 </label>

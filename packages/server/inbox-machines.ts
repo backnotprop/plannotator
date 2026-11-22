@@ -1263,8 +1263,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
 
   // ── The merged view (only with machines=1) ──
 
-  const rows = (): (InboxListRow & { machine: string })[] => [...peers.values()].flatMap((peer) => peer.list?.rows ?? []);
-  const projects = (): Record<string, unknown>[] => [...peers.values()].flatMap((peer) => peer.list?.projects ?? []);
+  const rows = (): (InboxListRow & { machine: string })[] => [...peers.values()].flatMap((peer) => peer.list?.rows ?? []);  const projects = (): Record<string, unknown>[] => [...peers.values()].flatMap((peer) => peer.list?.projects ?? []);
   /** Each linked machine's agents, as its list last said (kept in memory while it is away, like its rows); none from an older Inbox. */
   const agents = (): InboxAgentsGroup[] => [...peers.values()].flatMap((peer) => (peer.list?.agents ? [peer.list.agents] : []));
   const sessionNames = (): { labels: Record<string, string>; titles: Record<string, string> } => {
@@ -1371,6 +1370,20 @@ export function createInboxMachines(context: InboxMachinesContext) {
     branchLists: () => machineBranches.start((machine) => links.get(machine)?.name ?? null),
     farCard,
     snoozeThread,
+    /**
+     * A write this Inbox makes itself on a linked machine's thread (a Combine's archive there, and its Undo;
+     * inbox-combine-far.ts): held in the outbox as the window's writes are, so one queue and one key per write, sent
+     * now while that machine is online and when it is back otherwise. Waits up to `waitMs` for its answer. Null when
+     * that machine is not linked.
+     */
+    holdWrite: (machine: string, route: string, body: Record<string, unknown>, thread: string, waitMs: number): Promise<OutboxEntry | null> | null => {
+      const peer = peers.get(machine);
+      if (!peer) return null;
+      const { entry } = outbox.submit(machine, route, body, thread);
+      if (peer.state === "online") peer.flush();
+      else peer.poke();
+      return outbox.waitSettled(entry.key, peer.state === "online" ? waitMs : 0);
+    },
     readThread: agentRead.readThread,
     /** A piece of a linked machine's file, for a paired cloud agent's fetch_file (inbox-machine-agent-piece.ts). */
     filePiece: agentRead.filePiece,

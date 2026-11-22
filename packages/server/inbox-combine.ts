@@ -13,6 +13,11 @@
  * its own work). A session that ends, ends its turn without one, or never gets to it fails the Combine; nothing is
  * archived, and a thread with the key that still comes settles it then.
  * Bun only, like the rest of the Inbox; the records live in `inbox/combines.json`, outside the event log.
+ *
+ * Across linked computers (approval "inbox-combine-across-computers"): a picked thread this store does not hold is
+ * one on a linked machine (inbox-combine-far.ts). It is read there at the start, listed in the wake like a local one,
+ * and archived there (and brought back by Undo) through the outbox; the Combine, its wake and the new thread are this
+ * computer's, the chosen agent's.
  */
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -39,6 +44,7 @@ import {
   type InboxTidyReach,
 } from "@plannotator/core/inbox-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import type { InboxCombineFar, InboxCombineFarThread } from "./inbox-combine-far";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { INBOX_TIDY_WITHDRAWN_HOST } from "@plannotator/shared/inbox/tidy";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
@@ -57,6 +63,8 @@ const CHECK_MS = 10_000;
 /** After a start, sessions this long to connect again before a missing one counts as ended (connections live in memory). */
 const RECONNECT_GRACE_MS = 2 * 60_000;
 const PICKED_MAX = 50;
+/** How long Undo waits for the other computer to bring its threads back: under the forward's own wait, when it came through one. */
+const FAR_UNDO_WAIT_MS = 2_000;
 
 export interface InboxCombineDeps {
   store: InboxStore;
@@ -70,6 +78,8 @@ export interface InboxCombineDeps {
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
   now?: () => number;
+  /** The linked machines, once they are up (inbox-combine-far.ts): null while none can be asked. */
+  far?: () => InboxCombineFar | null;
 }
 
 interface Stored extends InboxCombineRecord {
@@ -78,6 +88,8 @@ interface Stored extends InboxCombineRecord {
   wake: string;
   /** Kept by an older run; never read. */
   projects?: string[];
+  /** The picked threads on a linked machine, by id: that machine, and whether it is archived again with a new archive line. */
+  far?: Record<string, { machine: string; reopened?: true }>;
 }
 
 const hostName = (host: string | null) => (host ? (INBOX_HOST_NAMES[host] ?? host) : "An agent");
@@ -104,7 +116,7 @@ export function createInboxCombine(deps: InboxCombineDeps) {
     writeFileSync(temp, `${JSON.stringify({ v: 1, combines })}\n`, { mode: 0o600 });
     renameSync(temp, path());
   };
-  const wire = ({ key: _key, wake: _wake, projects: _projects, ...record }: Stored): InboxCombineRecord => record;
+  const wire = ({ key: _key, wake: _wake, projects: _projects, far: _far, ...record }: Stored): InboxCombineRecord => record;
   const shown = (): InboxCombineRecord[] =>
     combines.filter((c) => c.state === "asked" || now() - Date.parse(c.settled_at ?? c.at) <= SHOWN_MS).map(wire);
 
@@ -112,13 +124,17 @@ export function createInboxCombine(deps: InboxCombineDeps) {
     const row = store.listRow(threadId);
     return !!row && inboxRowArchived(row);
   };
-  const pickedOf = (value: unknown, min: number): string[] => {
+  /** Is this store's own thread (a message id that is not a root here is not a thread anywhere). */
+  const holds = (id: string) => store.message(id) !== null;
+  /** The picked ids, in order; with `far`, an id this store does not hold is left for a linked machine to answer. */
+  const pickedOf = (value: unknown, min: number, far = false): string[] => {
     const ids = typeof value === "string" ? value.split(",") : Array.isArray(value) ? value : null;
     if (!ids || ids.length < min || ids.length > PICKED_MAX || ids.some((id) => typeof id !== "string" || !isInboxId("msg", id))) {
       throw new InboxError("validation_error", `thread_ids: ${min} to ${PICKED_MAX} thread ids.`, { field: "thread_ids" });
     }
     const out = [...new Set(ids as string[])];
     for (const id of out) {
+      if (far && !holds(id)) continue;
       const root = store.message(id);
       if (!root || root.thread_id !== id) throw new InboxError("thread_not_found", `No thread ${id} on this machine.`, { field: "thread_ids" });
     }
@@ -157,8 +173,10 @@ export function createInboxCombine(deps: InboxCombineDeps) {
     return agents.sort((a, b) => b.threads - a.threads || lastOf(b).localeCompare(lastOf(a)) || inboxCombineAgentLabel(a, agents).localeCompare(inboxCombineAgentLabel(b, agents)));
   };
 
-  const wakeThreads = (threadIds: readonly string[]): InboxCombineWakeThread[] =>
+  const wakeThreads = (threadIds: readonly string[], far: ReadonlyMap<string, InboxCombineFarThread> = new Map()): InboxCombineWakeThread[] =>
     threadIds.map((threadId) => {
+      const there = far.get(threadId);
+      if (there) return { id: threadId, subject: there.subject, project: there.project, messages: there.messages, open: there.open };
       const ids = store.threadMessageIds(threadId);
       const open: InboxCombineWakeThread["open"] = [];
       for (const id of ids) {
@@ -170,36 +188,65 @@ export function createInboxCombine(deps: InboxCombineDeps) {
       return { id: threadId, subject: store.threadSubject(threadId) ?? "(no subject)", project: store.project(root.project_id)?.name ?? "", messages: ids.filter((id) => !store.message(id)?.tidy).length, open };
     });
 
-  const start = (body: Record<string, unknown>): InboxCombineRecord => {
+  /** Once a thread is in a Combine still waiting, it is not asked about in another. */
+  const refuseBusy = (threadIds: readonly string[], subjectOf: (id: string) => string | null) => {
+    const busy = threadIds.find((id) => combines.some((c) => c.state === "asked" && c.threads.some((t) => t.id === id)));
+    if (busy) throw new InboxError("already_combining", `${subjectOf(busy) ?? busy} is already being combined.`, { field: "thread_ids" });
+  };
+  /** Presses of one key still reading the other computer's threads: a second answers the first's Combine. */
+  const starting = new Map<string, Promise<InboxCombineRecord>>();
+
+  const start = async (body: Record<string, unknown>): Promise<InboxCombineRecord> => {
     const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
     if (!key || key.length > 128) throw new InboxError("validation_error", "idempotency_key: required, at most 128 characters.", { field: "idempotency_key" });
     const replay = combines.find((c) => c.key === key);
     if (replay) return wire(replay);
-    const threadIds = pickedOf(body.thread_ids, 2);
+    const pending = starting.get(key);
+    if (pending) return pending;
+    const run = begin(key, body);
+    starting.set(key, run);
+    try {
+      return await run;
+    } finally {
+      starting.delete(key);
+    }
+  };
+
+  const begin = async (key: string, body: Record<string, unknown>): Promise<InboxCombineRecord> => {
+    const far = deps.far?.() ?? null;
+    const threadIds = pickedOf(body.thread_ids, 2, far !== null);
+    const local = threadIds.filter(holds);
     const session = typeof body.session === "string" ? body.session : "";
-    const agents = agentsFor(threadIds);
+    const agents = agentsFor(local);
     const agent = agents.find((a) => a.session === session);
     if (!agent) throw new InboxError("session_not_live", "That agent cannot be asked now: it ended, or it never wrote in these threads.", { field: "session" });
     const words = inboxTidyWords(body.words).slice(0, INBOX_COMBINE_WORDS_MAX);
-    // Once a thread is in a Combine still waiting, it is not asked about in another.
-    const busy = threadIds.find((id) => combines.some((c) => c.state === "asked" && c.threads.some((t) => t.id === id)));
-    if (busy) throw new InboxError("already_combining", `${store.threadSubject(busy) ?? busy} is already being combined.`, { field: "thread_ids" });
+    refuseBusy(threadIds, (id) => store.threadSubject(id));
+    // The other computer's threads, read there now: nothing is written before each one is read.
+    const farIds = threadIds.filter((t) => !holds(t));
+    const there = new Map<string, InboxCombineFarThread>();
+    if (far) for (const thread of await Promise.all(farIds.map((t) => far.thread(t)))) there.set(thread.id, thread);
+    // Read there meanwhile: another Combine may have taken one of them, or the session ended.
+    refuseBusy(threadIds, (id) => there.get(id)?.subject ?? store.threadSubject(id));
+    if (farIds.length > 0 && agentsFor(local).every((a) => a.session !== agent.session)) throw new InboxError("session_not_live", "That agent cannot be asked now: it ended, or it never wrote in these threads.", { field: "session" });
     const id = inboxId("cmb");
     const ref = inboxSessionRef(agent.host, agent.session);
-    const text = [inboxCombineInstruction(id), ...(words ? [inboxCombineWordsLine(words)] : []), ...(ref ? [inboxCombineSessionLine(ref)] : []), ...inboxCombineThreadLines(wakeThreads(threadIds))].join("\n\n");
-    const archived = new Set(threadIds.filter(isArchived));
-    const { notes } = store.sendTidy({ run: id, to: { host: agent.host ?? "agent", session: agent.session }, threadIds, body: text, idempotency_key: key });
+    const text = [inboxCombineInstruction(id), ...(words ? [inboxCombineWordsLine(words)] : []), ...(ref ? [inboxCombineSessionLine(ref)] : []), ...inboxCombineThreadLines(wakeThreads(threadIds, there))].join("\n\n");
+    const archived = new Set([...local.filter(isArchived), ...[...there.values()].filter((t) => t.archived).map((t) => t.id)]);
+    // The notes, the wake first, go in this computer's picked threads: the other computer's are only read.
+    const { notes } = store.sendTidy({ run: id, to: { host: agent.host ?? "agent", session: agent.session }, threadIds: local, body: text, idempotency_key: key });
     const record: Stored = {
       id,
       key,
       wake: notes[0]!.id,
-      threads: threadIds.map((t) => ({ id: t, subject: store.threadSubject(t) ?? "(no subject)", ...(archived.has(t) ? { archived: true as const } : {}) })),
+      threads: threadIds.map((t) => ({ id: t, subject: there.get(t)?.subject ?? store.threadSubject(t) ?? "(no subject)", ...(archived.has(t) ? { archived: true as const } : {}) })),
       session: agent.session,
       host: agent.host,
       name: inboxCombineAgentLabel(agent, agents),
       ...(words ? { words } : {}),
       at: new Date(now()).toISOString(),
       state: "asked",
+      ...(there.size > 0 ? { far: Object.fromEntries([...there.values()].map((t) => [t.id, { machine: t.machine, ...(t.reopened ? { reopened: true as const } : {}) }])) } : {}),
     };
     combines.push(record);
     save();
@@ -221,8 +268,39 @@ export function createInboxCombine(deps: InboxCombineDeps) {
       }
     }
   };
+  /**
+   * The other computer's picked threads, archived there (or brought back), each under its own key: an archive, and
+   * before it, for one written in since its last archive, a step back (as here, so it gets a new archive line). The
+   * same keys again (a restart, a second call) send nothing new. Resolves when each was answered, or after `waitMs`.
+   */
+  const archiveFar = (record: Stored, resolved: boolean, waitMs = 0): Promise<unknown> => {
+    const far = deps.far?.() ?? null;
+    if (!far || !record.far) return Promise.resolve();
+    const sent: Promise<void>[] = [];
+    for (const thread of record.threads) {
+      const there = record.far[thread.id];
+      if (!there || thread.archived) continue;
+      const send = (to: boolean, step: string) => sent.push(far.resolve(there.machine, thread.id, to, `${record.id}-${step}-${thread.id}`, waitMs).catch(() => {}));
+      if (resolved && there.reopened) send(false, "reopen");
+      send(resolved, resolved ? "archive" : "undo");
+    }
+    return Promise.all(sent);
+  };
+  /** Once per run: a done or undone Combine's writes on the other computer, in case this Inbox stopped before they were held. */
+  let farChecked = false;
+  const checkFar = () => {
+    if (farChecked || !deps.far?.()) return;
+    farChecked = true;
+    for (const record of combines) {
+      if (!record.far || (record.state !== "done" && record.state !== "undone") || now() - Date.parse(record.settled_at ?? record.at) > SHOWN_MS) continue;
+      void archiveFar(record, true);
+      if (record.state === "undone") void archiveFar(record, false);
+    }
+  };
+
   const archive = (record: Stored, resolved: boolean) => {
     for (const thread of record.threads) {
+      if (record.far?.[thread.id]) continue;
       if (resolved ? isArchived(thread.id) : thread.archived) continue;
       try {
         if (resolved && store.message(thread.id)?.resolved_at != null) store.resolveThread(thread.id, false, "person");
@@ -245,12 +323,16 @@ export function createInboxCombine(deps: InboxCombineDeps) {
     const record = combines.find((c) => arrived(c, message));
     if (!record) return;
     settle(record, { state: "done", reason: undefined, thread: { id: message.id, subject: store.threadSubject(message.id) ?? message.subject ?? "(no subject)" } });
-    // After the line that told us: the archive is its own writes.
-    queueMicrotask(() => archive(record, true));
+    // After the line that told us: the archive is its own writes. The other computer's go through the outbox.
+    queueMicrotask(() => {
+      archive(record, true);
+      void archiveFar(record, true);
+    });
   });
 
   /** A Combine still waiting whose session ended, ended its turn without the thread, or never got to it. */
   const check = () => {
+    checkFar();
     const waiting = combines.filter((c) => c.state === "asked");
     if (waiting.length === 0) return;
     const reachOf = deps.reachFor();
@@ -276,7 +358,8 @@ export function createInboxCombine(deps: InboxCombineDeps) {
   const timer = setInterval(check, CHECK_MS);
   (timer as { unref?: () => void }).unref?.();
 
-  const change = (id: string, action: "cancel" | "undo"): InboxCombineRecord => {
+  const change = async (id: string, action: "cancel" | "undo"): Promise<InboxCombineRecord> => {
+    checkFar();
     const record = combines.find((c) => c.id === id);
     if (!record) throw new InboxError("combine_not_found", `No Combine ${id}.`);
     if (action === "cancel") {
@@ -287,6 +370,9 @@ export function createInboxCombine(deps: InboxCombineDeps) {
       if (record.state !== "done") return wire(record);
       archive(record, false);
       settle(record, { state: "undone" });
+      // Held behind the archive in that machine's queue, so it lands after it. Waited for a moment, so the window's next
+      // writes (a snooze put back) find the thread there unarchived; asleep, it applies when that machine is back.
+      await archiveFar(record, false, FAR_UNDO_WAIT_MS);
     }
     return wire(record);
   };
@@ -306,10 +392,10 @@ export function createInboxCombine(deps: InboxCombineDeps) {
     if (req.method !== "POST") return deps.json({ error: "Use GET or POST." }, 405);
     const body = await deps.readBody(req);
     if (checkServerSession(body, deps.serverSession) === "mismatch") return deps.json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-    if (url.pathname === "/api/inbox/combine") return deps.json({ serverSession: deps.serverSession, combine: start(body) });
+    if (url.pathname === "/api/inbox/combine") return deps.json({ serverSession: deps.serverSession, combine: await start(body) });
     const match = /^\/api\/inbox\/combine\/(cmb_[0-9A-HJKMNP-TV-Z]{26})\/(cancel|undo)$/.exec(url.pathname);
     if (!match) return deps.json({ error: "Not found.", code: "not_found" }, 404);
-    return deps.json({ serverSession: deps.serverSession, combine: change(match[1]!, match[2] as "cancel" | "undo") });
+    return deps.json({ serverSession: deps.serverSession, combine: await change(match[1]!, match[2] as "cancel" | "undo") });
   };
 
   const close = () => {

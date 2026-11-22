@@ -1,0 +1,233 @@
+/**
+ * Combine across linked computers (approval "inbox-combine-across-computers"; "Combine…" in
+ * docs/agent-guides/inbox-messages.md), in a real browser against two compiled Inboxes on loopback, linked through the
+ * real CLI pairing. Studio is the window's; Mini is the other computer. An agent on each (SimAgent over its own
+ * `inbox mcp`) wrote one thread there.
+ *
+ *  1. Picked on both computers, Combine… lists the agents of both, each line ending with its computer, and nothing
+ *     says the threads are on two machines.
+ *  2. The agent on Mini chosen: "Asked … to combine 2 threads", both rows say "Combining…", the Combine is Mini's.
+ *  3. Its new thread arrives on Mini: "Combined 2 threads", both rows leave the list, each archived on its own
+ *     computer.
+ *  4. Undo: both come back, on both computers.
+ *  5. The agent on Studio chosen, the other way round: Mini's thread archived on Mini by Studio.
+ *
+ * Pictures (1440×900, light; the dialog in dark too) land in PLANNOTATOR_COMBINE_MACHINES_SHOTS, else
+ * .local/proof/combine-across-computers/ (CI keeps .local/proof/ as the shard's "inbox-window-proof" artifact).
+ * Build the binary first (see inbox.spec.ts).
+ */
+
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
+import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { NO_BROWSER } from '../helpers/no-browser';
+
+const repo = resolve(__dirname, '../..');
+const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
+const shots = resolve(process.env.PLANNOTATOR_COMBINE_MACHINES_SHOTS ?? join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'combine-across-computers'));
+const CLOSED = 'http://127.0.0.1:9';
+const ask = (line: string) => [line, '', ':::question', line, '', '- [ ] Yes', '- [ ] No', ':::'].join('\n');
+
+interface Machine {
+  name: string;
+  dataDir: string;
+  root: string;
+  env: Record<string, string>;
+  id: string;
+  url: string;
+}
+
+let studio: Machine;
+let mini: Machine;
+let context: BrowserContext;
+let page: Page;
+const errors: string[] = [];
+const agents: SimAgent[] = [];
+
+function machine(name: string): Machine {
+  const root = inboxScratch(`plannotator-combine-machines-${name.toLowerCase()}-`);
+  const path = join(root, 'bin');
+  mkdirSync(path, { recursive: true });
+  writeFileSync(join(path, 'tailscale'), '#!/bin/sh\nexit 1\n');
+  chmodSync(join(path, 'tailscale'), 0o755);
+  const dataDir = join(root, 'data');
+  return {
+    name,
+    root,
+    dataDir,
+    id: '',
+    url: '',
+    env: {
+      PATH: `${path}:/usr/bin:/bin`,
+      HOME: root,
+      PLANNOTATOR_DATA_DIR: dataDir,
+      PLANNOTATOR_TEST_SANDBOX: root,
+      PLANNOTATOR_BROWSER: NO_BROWSER,
+      PLANNOTATOR_MACHINE_NAME: name,
+      PLANNOTATOR_INBOX_CONNECT: '0',
+      PLANNOTATOR_INBOX_PHONES: '0',
+      PLANNOTATOR_INBOX_NOTES: '0',
+      PLANNOTATOR_UPDATE_CHECK: '0',
+      NO_ANON_PING: '1',
+      PLANNOTATOR_RELAY_URL: CLOSED,
+      PLANNOTATOR_UPDATE_API_URL: `${CLOSED}/releases/latest`,
+      PLANNOTATOR_INSTALL_SCRIPT_URL: `${CLOSED}/install.sh`,
+      PLANNOTATOR_RELEASE_DOWNLOAD_URL: `${CLOSED}/download`,
+      PLANNOTATOR_FEEDBACK_URL: `${CLOSED}/feedback`,
+    },
+  };
+}
+
+const cli = (m: Machine, ...args: string[]) => {
+  const run = spawnSync(binary, ['inbox', ...args], { env: m.env, cwd: m.root, encoding: 'utf8', timeout: 60_000 });
+  return { status: run.status ?? -1, out: run.stdout ?? '', err: run.stderr ?? '' };
+};
+const base = (m: Machine) => `http://127.0.0.1:${(JSON.parse(readFileSync(join(m.dataDir, 'inbox', 'inbox.json'), 'utf8')) as { port: number }).port}`;
+const read = async <T>(m: Machine, path: string): Promise<T> => (await (await fetch(`${base(m)}${path}`)).json()) as T;
+
+async function start(m: Machine): Promise<void> {
+  const run = cli(m, '--background');
+  rememberInboxOf(m.dataDir);
+  expect(run.status, run.err).toBe(0);
+  m.url = run.out.trim();
+  await expect.poll(async () => (m.id = (await read<{ inbox_id: string }>(m, '/api/inbox/health').catch(() => ({ inbox_id: '' }))).inbox_id), { timeout: 15_000 }).not.toBe('');
+}
+
+function link(from: Machine, to: Machine): void {
+  const offered = cli(to, 'link', '--offer');
+  expect(offered.status, offered.err).toBe(0);
+  const linked = cli(from, 'link', offered.out.trim(), '--address', base(to), '--back', base(from));
+  expect(linked.status, linked.err).toBe(0);
+}
+
+/** An agent on `m` and the thread it started there, drawn in Studio's list. */
+async function agentWith(m: Machine, name: string, host: string, subject: string): Promise<{ agent: SimAgent; thread: string; project: string }> {
+  const agent = await SimAgent.connect({ binary, env: m.env, name, host, cwd: m.root });
+  agents.push(agent);
+  const project = scratchProject(join(m.root, 'code'), m === studio ? 'billing-svc' : 'ledger');
+  const sent = await agent.send({ project_path: project, subject, body: ask(`${subject}: ship it?`) });
+  const thread = sent.thread_id as string;
+  await expect.poll(async () => JSON.stringify(await read(studio, '/api/inbox/threads?machines=1')).includes(thread), { timeout: 20_000 }).toBe(true);
+  return { agent, thread, project };
+}
+
+const row = (id: string) => page.locator(`.ib-lbody [data-thread-id="${id}"]`);
+const dialog = () => page.locator('[data-dialog="combine"]');
+const toast = () => page.locator('[data-inbox-toast]');
+const archivedOn = async (m: Machine, id: string) => (await read<{ thread: { resolved_at: string | null } }>(m, `/api/inbox/threads/${id}`)).thread.resolved_at !== null;
+const settled = () => page.evaluate(() => Promise.all(document.getAnimations().filter((motion) => motion.effect?.getTiming().iterations !== Infinity).map((motion) => motion.finished.catch(() => {}))));
+
+/** Both rows picked, Combine… pressed: the dialog with every computer's agents read. */
+async function openCombine(ids: string[]): Promise<void> {
+  for (const id of ids) await row(id).click({ modifiers: ['ControlOrMeta'] });
+  await page.locator('[data-pick-bar] [data-pick-combine]').click();
+  await expect(dialog()).toBeVisible();
+  await expect(dialog().locator('[data-combine-agent]')).toHaveCount(2);
+}
+
+const agentLine = (machine: Machine) => dialog().locator(machine === studio ? '[data-combine-agent]:not([data-combine-machine])' : `[data-combine-machine="${machine.id}"]`);
+
+test.describe.configure({ mode: 'serial' });
+
+test.beforeAll(async ({ browser }: { browser: Browser }) => {
+  expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
+  mkdirSync(shots, { recursive: true });
+  studio = machine('Studio');
+  mini = machine('Mini');
+  await start(studio);
+  await start(mini);
+  link(studio, mini);
+  await expect.poll(async () => (await read<{ machines: { id: string; state: string; marks?: string[] }[] }>(studio, '/api/inbox/machines')).machines.find((m) => m.id === mini.id)?.marks ?? [], { timeout: 30_000 }).toContain('combine-across');
+  context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
+  page = await context.newPage();
+  page.on('pageerror', (error) => errors.push(error.message));
+});
+
+test.afterAll(async () => {
+  try {
+    for (const agent of agents) await agent.close().catch(() => {});
+    await context?.close();
+  } finally {
+    await removeInboxScratch();
+  }
+});
+
+let here: { agent: SimAgent; thread: string; project: string };
+let there: { agent: SimAgent; thread: string; project: string };
+
+test('1-4. Picks on both computers: both agents offered with their computer; the Mini agent combines; Undo brings both back', async () => {
+  here = await agentWith(studio, 'Claude Code', 'claude-code', 'Invoice retries');
+  there = await agentWith(mini, 'Codex', 'codex', 'Retry worker backoff');
+  await page.goto(studio.url);
+  await expect(row(here.thread)).toBeVisible();
+  await expect(row(there.thread)).toBeVisible();
+
+  // 1. The dialog: no "two machines" line, an agent from each computer, each saying which.
+  await openCombine([here.thread, there.thread]);
+  await expect(dialog().locator('.ib-cmb-why')).toHaveCount(0);
+  await expect(agentLine(studio).locator('small')).toContainText('Studio');
+  await expect(agentLine(mini).locator('small')).toContainText('Mini');
+  await settled();
+  await page.screenshot({ path: join(shots, '01-dialog-both-computers-light.png') });
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await settled();
+  await page.screenshot({ path: join(shots, '01-dialog-both-computers-dark.png') });
+  await page.emulateMedia({ colorScheme: 'light' });
+
+  // 2. The agent on Mini: the Combine is Mini's, and both rows say "Combining…".
+  await agentLine(mini).locator('input').check();
+  await expect(dialog().locator('.ib-cmb-what')).toContainText('Codex');
+  await page.screenshot({ path: join(shots, '02-mini-agent-chosen.png') });
+  await dialog().locator('[data-combine-go]').click();
+  await expect(dialog()).toHaveCount(0);
+  await expect(toast()).toContainText('to combine 2 threads');
+  await expect(row(here.thread)).toContainText('Combining…');
+  await expect(row(there.thread)).toContainText('Combining…');
+  await settled();
+  await page.screenshot({ path: join(shots, '03-combining.png') });
+  const combine = (await read<{ combines: { id: string; state: string; session: string }[] }>(mini, '/api/inbox/combine')).combines[0]!;
+  expect(combine.state).toBe('asked');
+  expect((await read<{ combines: unknown[] }>(studio, '/api/inbox/combine')).combines).toEqual([]);
+
+  // 3. Mini's agent writes the new thread on Mini: both picked threads go, each on its own computer.
+  await there.agent.send({ project_path: there.project, subject: 'Retries, combined', body: 'Where the invoice retries and the worker backoff stand.', idempotency_key: combine.id });
+  await expect(toast()).toContainText('Combined 2 threads', { timeout: 20_000 });
+  await expect.poll(() => archivedOn(mini, there.thread), { timeout: 20_000 }).toBe(true);
+  await expect.poll(() => archivedOn(studio, here.thread), { timeout: 20_000 }).toBe(true);
+  await expect(row(here.thread)).toHaveCount(0, { timeout: 20_000 });
+  await expect(row(there.thread)).toHaveCount(0, { timeout: 20_000 });
+  await settled();
+  await page.screenshot({ path: join(shots, '04-combined.png') });
+
+  // 4. Undo: both come back, on both computers.
+  await toast().getByRole('button', { name: 'Undo' }).click();
+  await expect(page.locator('[data-inbox-live]')).toContainText('Combine undone.');
+  await expect.poll(() => archivedOn(mini, there.thread), { timeout: 20_000 }).toBe(false);
+  await expect.poll(() => archivedOn(studio, here.thread), { timeout: 20_000 }).toBe(false);
+  await expect(row(here.thread)).toBeVisible({ timeout: 20_000 });
+  await expect(row(there.thread)).toBeVisible({ timeout: 20_000 });
+  await settled();
+  await page.screenshot({ path: join(shots, '05-undone.png') });
+  expect(errors).toEqual([]);
+});
+
+test('5. The agent on Studio combines: Mini’s thread is archived on Mini by Studio', async () => {
+  const a = await agentWith(studio, 'Claude Code', 'claude-code', 'Ledger export');
+  const b = await agentWith(mini, 'Codex', 'codex', 'Refund totals');
+  await page.reload();
+  await expect(row(a.thread)).toBeVisible();
+  await expect(row(b.thread)).toBeVisible();
+  await openCombine([a.thread, b.thread]);
+  await agentLine(studio).locator('input').check();
+  await dialog().locator('[data-combine-go]').click();
+  await expect(toast()).toContainText('to combine 2 threads');
+  const combine = (await read<{ combines: { id: string; state: string }[] }>(studio, '/api/inbox/combine')).combines.find((c) => c.state === 'asked')!;
+  await a.agent.send({ project_path: a.project, subject: 'Exports and refunds', body: 'One thread for both.', idempotency_key: combine.id });
+  await expect(toast()).toContainText('Combined 2 threads', { timeout: 20_000 });
+  await expect.poll(() => archivedOn(mini, b.thread), { timeout: 20_000 }).toBe(true);
+  await expect.poll(() => archivedOn(studio, a.thread), { timeout: 20_000 }).toBe(true);
+  expect(errors).toEqual([]);
+});
