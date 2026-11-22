@@ -252,10 +252,13 @@ export interface PlannotatorUIConfig {
    * sanitizer keep only `#fragment` references and `data:` pictures
    * (png, jpeg, gif, webp, avif), drop every style declaration and attribute
    * that fetches, and directives and front matter can no longer set CSS
-   * (`themeCSS`, the font families). A few sources still load while Mermaid
-   * draws, before any sanitizer (a picture node, a state or class diagram's
-   * style line, a sequence actor's icon): a page CSP closes them (HANDOFF.md
-   * "Diagrams that load nothing from another host"). Read at each render.
+   * (`themeCSS`, the font families). Some sources still load while Mermaid
+   * draws, before any sanitizer: a diagram's own `style` / `classDef`
+   * statements, which Mermaid applies itself (seen in state, class, block and
+   * treemap diagrams), plus picture nodes and sequence actor icons. For a
+   * guarantee the page's CSP is REQUIRED, not optional:
+   * `img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:`
+   * (HANDOFF.md "Diagrams that load nothing from another host"). Read at each render.
    */
   diagramRemoteLoads?: boolean;
   /** Re-hydrate settings from the installed (SYNCHRONOUS) storageBackend after install. */

@@ -1,7 +1,8 @@
 /**
  * `configurePlannotatorUI({ diagramRemoteLoads: false })`, for a host that
  * must never let a diagram call another host (a signed-in hosted app). Proven
- * with real Mermaid and DOMPurify (diagram-ui-bundle.ts), on a page with no
+ * with real Mermaid and DOMPurify (diagram-ui-bundle.ts), on a page served
+ * from an http origin (so a protocol-relative `//host/…` resolves) with no
  * CSP, every request that reaches the network recorded (and aborted):
  *
  * - off: no diagram source in the classes Mermaid lets through to its label
@@ -13,9 +14,15 @@
  *   classDef colours, a `data:` picture in a label and as a picture node);
  * - on (the default, every Plannotator app): exactly as before, and a host's
  *   late call reaches the next render;
- * - what Mermaid itself loads before any sanitizer (a picture node, a state or
- *   class diagram's style line, a sequence actor's icon) does load without a
- *   CSP, and the page CSP the HANDOFF names stops all of it.
+ * - the label hook survives a host removing DOMPurify's hooks, and a bundle
+ *   where Mermaid has its own DOMPurify falls back to the stricter label pass
+ *   (still nothing loads);
+ * - what Mermaid itself loads before any sanitizer (a diagram's own `style` /
+ *   `classDef` statements, which Mermaid applies itself; picture nodes; a
+ *   sequence actor's icon) does load without a CSP, and the page CSP the
+ *   HANDOFF names stops all of it; under that CSP every such diagram draws
+ *   (without the picture) except a picture node pointing at another host,
+ *   which fails to draw.
  *
  * Runs in Chromium and WebKit (playwright.config.ts).
  */
@@ -23,9 +30,14 @@ import { expect, test, type Page } from '@playwright/test';
 import { buildDiagramUiBundle, openDiagramPage } from './diagram-ui-bundle';
 
 let bundle = '';
+let splitBundle = '';
 test.beforeAll(() => {
   bundle = buildDiagramUiBundle();
+  splitBundle = buildDiagramUiBundle({ splitPurify: true });
 });
+
+/** The page's own origin (fulfilled by the test, nothing leaves the machine). */
+const APP = 'http://app.test';
 
 const FAR = 'https://far.test';
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
@@ -36,6 +48,8 @@ const pad = 'x'.repeat(4200);
 const CLOSED: Record<string, string> = {
   'label img': flow(`<img src='${FAR}/img.png' width=20 height=20>`),
   'label img, leading space': flow(`<img src=' ${FAR}/img2.png' width=20 height=20>`),
+  'label img, //host': flow(`<img src='//far.test/img3.png' width=20 height=20>`),
+  'label style url, //host': flow(`<span style='background:url(//far.test/bg2.png)'>x</span>`),
   'label srcset': flow(`<img srcset='${FAR}/srcset.png 1x' width=20 height=20>`),
   'label picture': flow(`<picture><source srcset='${FAR}/pic.png'><img width=20 height=20></picture>`),
   'label video poster': flow(`<video poster='${FAR}/poster.png' width=40 height=20></video>`),
@@ -62,21 +76,43 @@ const CLOSED: Record<string, string> = {
   'front matter fontFamily': `---\nconfig:\n  fontFamily: "x; background-image: url(${FAR}/fmf.png)"\n---\n${flow('x')}`,
 };
 
-/** What Mermaid loads while it draws, before any sanitizer or config check: only a page CSP stops these. */
-const BEFORE_ANY_SANITIZER: Record<string, string> = {
-  'state classDef': `stateDiagram-v2\n  classDef bad background-image:url(${FAR}/scd.png)\n  [*] --> s1\n  class s1 bad`,
-  'class diagram style': `classDiagram\n  class A\n  style A fill:url(${FAR}/c.svg),background-image:url(${FAR}/cb.png)`,
-  'sequence actor icon': `sequenceDiagram\n  participant A\n  properties A: {"icon": "${FAR}/icon.png"}\n  A->>B: hi`,
-  'picture node': `flowchart LR\n  A@{ img: "${FAR}/shape.png", label: "pic", w: 40, h: 40 } --> B`,
-  'picture node, quoted key': `flowchart LR\n  A@{ "img": "${FAR}/shape2.png" } --> B`,
+/** A CSS-escaped `https://far.test/<file>`: the style grammars reject a plain `https://`. */
+const escaped = (file: string) => `https\\00003a\\00002f\\00002ffar.test\\00002f${file}`;
+
+/**
+ * What Mermaid loads while it draws, before any sanitizer or config check: a
+ * diagram's own `style` / `classDef` statements (Mermaid applies them itself),
+ * picture nodes, a sequence actor's icon. Only a page CSP stops these.
+ * `everywhere`: loads in both Chromium and WebKit without a CSP (an external
+ * svg paint server in `fill: url(…)` is fetched by Chromium only).
+ */
+const BEFORE_ANY_SANITIZER: Record<string, { source: string; everywhere: boolean }> = {
+  'state classDef': { everywhere: true, source: `stateDiagram-v2\n  classDef bad background-image:url(${FAR}/scd.png)\n  [*] --> s1\n  class s1 bad` },
+  'state classDef, //host': { everywhere: true, source: 'stateDiagram-v2\n  classDef bad background-image:url(//far.test/scd2.png)\n  [*] --> s1\n  class s1 bad' },
+  'state classDef, escaped': { everywhere: true, source: `stateDiagram-v2\n  classDef bad background-image:url(${escaped('scd3.png')})\n  [*] --> s1\n  class s1 bad` },
+  'state style, //host': { everywhere: true, source: 'stateDiagram-v2\n  [*] --> s1\n  style s1 background-image:url(//far.test/ssb.png)' },
+  'state style, escaped': { everywhere: true, source: `stateDiagram-v2\n  [*] --> s1\n  style s1 background-image:url(${escaped('sse.png')})` },
+  'state style fill, //host': { everywhere: false, source: 'stateDiagram-v2\n  [*] --> s1\n  style s1 fill:url(//far.test/sst.svg)' },
+  'class diagram style': { everywhere: true, source: `classDiagram\n  class A\n  style A fill:url(${FAR}/c.svg),background-image:url(${FAR}/cb.png)` },
+  'class diagram style, escaped': { everywhere: true, source: `classDiagram\n  class A\n  style A fill:#fff,background-image:url(${escaped('cse.png')})` },
+  'class diagram style fill, //host': { everywhere: false, source: 'classDiagram\n  class A\n  style A fill:url(//far.test/csf.svg)' },
+  'block classDef, //host': { everywhere: true, source: 'block-beta\n  a b\n  classDef bad background-image:url(//far.test/bcd.png)\n  class a bad' },
+  'block classDef, escaped': { everywhere: true, source: `block-beta\n  a b\n  classDef bad background-image:url(${escaped('bcd2.png')})\n  class a bad` },
+  'block style fill, //host': { everywhere: false, source: 'block-beta\n  a b\n  style a fill:url(//far.test/bst.svg)' },
+  'treemap classDef, //host': { everywhere: true, source: 'treemap-beta\n"Root"\n    "A":::bad\n      "A1": 10\n    "B": 20\nclassDef bad background-image:url(//far.test/tcd.png)' },
+  'treemap classDef, escaped': { everywhere: true, source: `treemap-beta\n"Root"\n    "A":::bad\n      "A1": 10\n    "B": 20\nclassDef bad background-image:url(${escaped('tce.png')})` },
+  'sequence actor icon': { everywhere: true, source: `sequenceDiagram\n  participant A\n  properties A: {"icon": "${FAR}/icon.png"}\n  A->>B: hi` },
+  'picture node': { everywhere: true, source: `flowchart LR\n  A@{ img: "${FAR}/shape.png", label: "pic", w: 40, h: 40 } --> B` },
+  'picture node, quoted key': { everywhere: true, source: `flowchart LR\n  A@{ "img": "${FAR}/shape2.png" } --> B` },
+  'picture node, //host': { everywhere: true, source: 'flowchart LR\n  A@{ img: "//far.test/shape3.png", label: "pic", w: 40, h: 40 } --> B' },
 };
 
 /** The policy the HANDOFF names for a host that must load nothing from another host. */
 const HOST_CSP = "img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:";
 
 /** Every request that reaches the network (one the page's CSP blocks never does), recorded and aborted. */
-async function open(page: Page, csp?: string) {
-  const { requests } = await openDiagramPage(page, bundle, { csp });
+async function open(page: Page, csp?: string, engine = bundle) {
+  const { requests } = await openDiagramPage(page, engine, { csp, origin: APP });
   return requests;
 }
 
@@ -155,18 +191,81 @@ test('on (the default): as before, and a late call reaches the next render eithe
   expect(seen.some((line) => line.includes(`${FAR}/bg.png`))).toBe(true);
 });
 
+test('the label hook survives a host removing DOMPurify hooks', async ({ page }) => {
+  const seen = await open(page);
+  await remoteLoads(page, false);
+  const label = CLOSED['label img']!;
+  const styled = CLOSED['label style url']!;
+  for (const all of [true, false]) {
+    await render(page, flow('first'));
+    await page.evaluate((a) => (window as any).__d.removePurifyHooks(a), all);
+    seen.length = 0;
+    expect((await render(page, label)).ok).toBe(true);
+    expect((await render(page, styled)).ok).toBe(true);
+    await settle(page);
+    expect([all ? 'removeAllHooks' : 'removeHooks', seen]).toEqual([all ? 'removeAllHooks' : 'removeHooks', []]);
+    // Mermaid's label pass still ran the hook (not the fallback): the colour of a label is kept.
+    await render(page, `flowchart LR\n  A["<span id=red style='color:red'>red</span>"] --> B`);
+    expect(await page.evaluate(() => getComputedStyle(document.querySelector('#host [id$=red]')!).color)).toBe('rgb(255, 0, 0)');
+  }
+});
+
+test('where Mermaid has its own DOMPurify, the stricter label pass still loads nothing', async ({ page }) => {
+  const seen = await open(page, undefined, splitBundle);
+  await remoteLoads(page, false);
+  for (const [name, source] of Object.entries(CLOSED)) {
+    seen.length = 0;
+    const r = await render(page, source);
+    expect([name, r.ok, r.message]).toEqual([name, true, '']);
+    await settle(page);
+    expect([name, seen]).toEqual([name, []]);
+  }
+  // The fallback is what ran (the hook cannot reach that copy): a label keeps its words, not its colour.
+  await render(page, `flowchart LR\n  A["<span id=red style='color:red'>red</span>"] --> B`);
+  expect(await page.locator('#host').textContent()).toContain('red');
+  expect(await page.evaluate(() => document.querySelector('#host [style*="color:red"], #host [style*="color: red"]'))).toBeNull();
+});
+
 test('what Mermaid loads before any sanitizer loads without a CSP, and the HANDOFF policy stops all of it', async ({ browser }) => {
   for (const csp of [undefined, HOST_CSP]) {
     const page = await browser.newPage();
     const seen = await open(page, csp);
     await remoteLoads(page, false);
-    for (const [name, source] of Object.entries(BEFORE_ANY_SANITIZER)) {
+    for (const [name, { source, everywhere }] of Object.entries(BEFORE_ANY_SANITIZER)) {
       seen.length = 0;
       await render(page, source);
       await settle(page);
-      // Without the CSP each of these still loads (so this list in the HANDOFF is current); with it, none does.
-      expect([name, csp ? 'CSP' : 'none', seen.length > 0]).toEqual([name, csp ? 'CSP' : 'none', !csp]);
+      // Without the CSP these still load (so the HANDOFF's description is current); with it, none does.
+      if (csp) expect([name, seen]).toEqual([name, []]);
+      else if (everywhere) expect([name, seen.length > 0]).toEqual([name, true]);
     }
     await page.close();
   }
+});
+
+test('under the HANDOFF policy each of them draws without its picture, except a picture node pointing at another host', async ({ page }) => {
+  const seen = await open(page, HOST_CSP);
+  await remoteLoads(page, false);
+  for (const [name, { source }] of Object.entries(BEFORE_ANY_SANITIZER)) {
+    const r = await render(page, source);
+    if (name.startsWith('picture node')) {
+      // Mermaid sizes a picture node from the decoded picture; a blocked one fails the whole diagram.
+      expect([name, r.ok]).toEqual([name, false]);
+      continue;
+    }
+    expect([name, r.ok, r.message]).toEqual([name, true, '']);
+    const far = await page.evaluate(() =>
+      [
+        ...Array.from(document.querySelectorAll('#host *')).flatMap((e) => Array.from(e.attributes).filter((a) => a.value.includes('far.test')).map((a) => `${e.localName}@${a.name}`)),
+        ...Array.from(document.querySelectorAll('#host style')).filter((e) => (e.textContent ?? '').includes('far.test')).map(() => 'style'),
+      ],
+    );
+    expect([name, far]).toEqual([name, []]);
+  }
+  // A data: picture node still shows.
+  const r = await render(page, `flowchart LR\n  A@{ img: "${PNG}", label: "pic", w: 40, h: 40 } --> B`);
+  expect(r.ok, r.message).toBe(true);
+  expect(await page.locator('#host image').getAttribute('href')).toBe(PNG);
+  await settle(page);
+  expect(seen).toEqual([]);
 });

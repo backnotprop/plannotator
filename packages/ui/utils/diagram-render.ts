@@ -362,7 +362,6 @@ function keepLocalAttributes(el: Element): void {
   }
 }
 
-let labelHookInstalled = false;
 /** Set by the hook whenever it sees a marked config: how `probeLabelHook` knows it reached Mermaid. */
 let labelHookSeen = false;
 
@@ -371,31 +370,41 @@ let labelHookSeen = false;
  * another host: the label config carries MERMAID_NO_REMOTE_LABEL_MARK (see
  * `mermaidConfigForRemoteLoads`), and the hook applies `keepLocalAttributes`'
  * rules to each attribute of a label before Mermaid puts it in the live page.
- * Any other sanitize call (no mark) is left alone. Installed on the first
- * render with the option off (never otherwise), on the DOMPurify this module
- * imports; `probeLabelHook` checks that Mermaid sanitizes with that same one.
+ * Any other sanitize call (no mark) is left alone.
  */
-export function installNoRemoteLabelHook(): void {
-  if (labelHookInstalled) return;
-  labelHookInstalled = true;
-  DOMPurify.addHook('uponSanitizeAttribute', (_node, data, config) => {
-    if ((config as Record<string, unknown> | undefined)?.[MERMAID_NO_REMOTE_LABEL_MARK] !== true) return;
-    labelHookSeen = true;
-    const name = data.attrName;
-    if (REFERENCE_LIST_ATTRIBUTES.has(name) || (REFERENCE_ATTRIBUTES.has(name) && !isLocalReference(data.attrValue))) {
-      data.keepAttr = false;
-    } else if (name === 'style') {
-      const kept = keepDeclarations(data.attrValue, cssLoads);
-      if (kept === null) data.keepAttr = false;
-      else data.attrValue = kept;
-    } else if (!TEXT_ATTRIBUTES.has(name) && !name.startsWith('data-') && !name.startsWith('aria-') && cssLoads(data.attrValue)) {
-      data.keepAttr = false;
-    }
-  });
+const noRemoteLabelHook = (_node: Element, data: { attrName: string; attrValue: string; keepAttr: boolean }, config: unknown): void => {
+  if ((config as Record<string, unknown> | undefined)?.[MERMAID_NO_REMOTE_LABEL_MARK] !== true) return;
+  labelHookSeen = true;
+  const name = data.attrName;
+  if (REFERENCE_LIST_ATTRIBUTES.has(name) || (REFERENCE_ATTRIBUTES.has(name) && !isLocalReference(data.attrValue))) {
+    data.keepAttr = false;
+  } else if (name === 'style') {
+    const kept = keepDeclarations(data.attrValue, cssLoads);
+    if (kept === null) data.keepAttr = false;
+    else data.attrValue = kept;
+  } else if (!TEXT_ATTRIBUTES.has(name) && !name.startsWith('data-') && !name.startsWith('aria-') && cssLoads(data.attrValue)) {
+    data.keepAttr = false;
+  }
+};
+
+let labelHookEverInstalled = false;
+
+/**
+ * Put the hook on the DOMPurify this module imports, before each render with
+ * the option off (never otherwise). Re-added every time, since a host's own
+ * code may have removed it (`removeHook`, `removeAllHooks`); when it had gone
+ * missing, every runtime's probe is run again. True when it was in place.
+ */
+export function installNoRemoteLabelHook(): boolean {
+  const wasThere = DOMPurify.removeHook('uponSanitizeAttribute', noRemoteLabelHook) !== undefined;
+  DOMPurify.addHook('uponSanitizeAttribute', noRemoteLabelHook);
+  const intact = wasThere || !labelHookEverInstalled;
+  labelHookEverInstalled = true;
+  return intact;
 }
 
-/** Per runtime: whether its label pass runs the hook (one probe render each, shared by concurrent renders). */
-const labelHookReach = new WeakMap<Mermaid, Promise<boolean>>();
+/** Per runtime: whether its label pass runs the hook (one probe render each, shared by concurrent renders; reset when the hook had been removed). */
+let labelHookReach = new WeakMap<Mermaid, Promise<boolean>>();
 
 /**
  * Whether Mermaid's label pass sanitizes with this module's DOMPurify (so the
@@ -424,7 +433,7 @@ async function probeLabelHook(runtime: Mermaid, themeKey: string): Promise<boole
  * to reach it (`'local'`), else its fallback (`'local-fallback'`).
  */
 async function remoteLoadsMode(runtime: Mermaid, themeKey: string): Promise<RemoteLoadsMode> {
-  installNoRemoteLabelHook();
+  if (!installNoRemoteLabelHook()) labelHookReach = new WeakMap();
   let reach = labelHookReach.get(runtime);
   if (reach === undefined) {
     reach = probeLabelHook(runtime, themeKey);

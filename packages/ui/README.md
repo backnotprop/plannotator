@@ -48,7 +48,7 @@ configurePlannotatorUI({
   loadSettingsFromBackend,     // true: re-hydrate settings from your (synchronous) storageBackend after install, applied last
   pageMarks,                   // true: <body data-pn-popout> while a PopoutDialog is open, <html data-pn-selection-chooser> while the code review's selection chooser shows, so a host's build can key theme.css's / comments.css's html:has(…) / body:has(…) on them (default false)
   clickAWord,                  // false: a click on a word in the Viewer's Select input method makes nothing, as before (default true: it highlights the word); the Viewer's own clickAWord prop wins
-  diagramRemoteLoads,          // false: a diagram loads nothing from another host (labels, styles, directives keep only #fragments and data: pictures); a few sources Mermaid loads itself need your page CSP (HANDOFF "Diagrams that load nothing from another host"). Default true, as before
+  diagramRemoteLoads,          // false: labels, styles, directives and front matter keep only #fragments and data: pictures; a diagram's own style / classDef statements, which Mermaid applies itself (seen in state, class, block and treemap diagrams), plus picture nodes and sequence actor icons still load unless your page CSP blocks them, so the CSP is REQUIRED for a guarantee: img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data: (HANDOFF "Diagrams that load nothing from another host"). Default true, as before
 });
 ```
 
