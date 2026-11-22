@@ -40,13 +40,12 @@ import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly 
 import { QUESTION_OPENERS_WITH_TEXT_MAX, questionOpenersWithText, questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxSendResult, InboxStore } from "@plannotator/shared/inbox/store";
-import { inboxViewingLine } from "@plannotator/shared/inbox/uploads";
 import type { InboxAttachment, InboxListRow, InboxLiveSiteRef, InboxMessageWire } from "@plannotator/core/inbox-types";
 import { inboxAgentFilesOf } from "./inbox-agent-files";
 import { registerInboxGuideTools } from "./inbox-guides";
 import { inboxSendUploadPictures, type InboxSendUpload } from "./inbox-cloud-pictures";
 import { lastContactOf, noteSessionRead, staleThreadOf, staleThreadText } from "./inbox-session-reads";
-import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, clip, shortTime, sizeText, windowedThread, windowedThreadText } from "./inbox-mcp-read";
+import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, clip, inboxFullReadLines, shortTime, sizeText, windowedThread, windowedThreadText } from "./inbox-mcp-read";
 import { registerInboxSearchTool } from "./inbox-mcp-search";
 import { registerInboxCardTool } from "./inbox-mcp-cards";
 export { INBOX_BOARD_OFF_TEXT } from "./inbox-mcp-cards";
@@ -1479,8 +1478,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             // The full records, as before the window (tests, scripts, a jq over the result).
             const records = store.agentThread(threadId, reader)!;
             store.recordAgentRead(records.messages.map((m) => m.id), reader);
-            // What was on screen reads the same here as in the transcript: the line, not its parts.
-            const thread = { ...records, messages: records.messages.map((m) => (m.viewing ? { ...m, viewing: inboxViewingLine(m) } : m)) };
+            // What was on screen, and where the person wrote it, read the same here as in the transcript: the line, not its parts.
+            const thread = { ...records, messages: records.messages.map(inboxFullReadLines) };
             const replies = thread.messages.filter((m) => m.author.kind === "person").length;
             return ok(
               `Thread ${threadId}${thread.subject ? ` (${thread.subject})` : ""}: ${thread.messages.length} message${thread.messages.length === 1 ? "" : "s"}, ${replies} from the person${thread.resolved_at ? ", resolved" : ""}.${naming?.line ?? ""}`,

@@ -65,6 +65,7 @@ import { INBOX_DEVICE_MARKUP_MAX_BYTES } from "@plannotator/shared/inbox/markups
 import { inboxDiskFullError, INBOX_UPLOAD_MAX_BYTES } from "@plannotator/shared/inbox/uploads";
 import { describeTailscaleFailure, runTailscale, serveStatusProxy, TAILSCALE_CLI_TIMEOUT_MS, TAILSCALE_SERVE_TIMEOUT_MS, type TailscaleRunner, type TailscaleRunResult } from "@plannotator/shared/tailscale";
 import { MACHINE_WINDOW_HEADER } from "./inbox-outbox";
+import { INBOX_SENT_FROM_HEADER, inboxSentFromPlaceOf, type InboxSentFromPlace } from "@plannotator/core/inbox-types";
 import { formatInboxAppHeader } from "@plannotator/core/inbox-door-version";
 import { APP_HEADER, APP_UPGRADE, appBelowFloor, parseAppHeader, type DoorDeviceApp } from "./inbox-door-version";
 import { INBOX_SNOOZE_HELD } from "./inbox-snooze";
@@ -623,6 +624,8 @@ export interface InboxDoorCaller {
   name: string;
   platform: string;
   window: boolean;
+  /** A linked machine says where the person was when not at its own window (`X-Plannotator-Sent-From`); a phone's never counts. */
+  place?: InboxSentFromPlace | null;
 }
 
 /** What the door hands to inbox-machines.ts. */
@@ -1027,6 +1030,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
       name: device.name,
       platform: device.platform,
       window: device.platform === MACHINE_PLATFORM && req.headers.get(MACHINE_WINDOW_HEADER) === "1",
+      place: device.platform === MACHINE_PLATFORM ? inboxSentFromPlaceOf(req.headers.get(INBOX_SENT_FROM_HEADER)) : null,
     };
     return context.dispatch(new Request(`http://127.0.0.1:${context.port()}${windowPath}${search}`, { method: req.method, headers, body, signal }), from);
   };

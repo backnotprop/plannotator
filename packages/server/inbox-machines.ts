@@ -24,7 +24,7 @@
  *    (`link-back`, `unlink`).
  */
 
-import { INBOX_LINKED_MARKS, inboxPullUrlOfKey, inboxRowArchived, isInboxId, type InboxAgentsGroup, type InboxCardWire, type InboxInitiative, type InboxListRow, type InboxMachineAccountsRead, type InboxTagColours } from "@plannotator/core/inbox-types";
+import { INBOX_LINKED_MARKS, inboxPullUrlOfKey, inboxRowArchived, isInboxId, type InboxAgentsGroup, type InboxCardWire, type InboxInitiative, type InboxListRow, type InboxMachineAccountsRead, type InboxSentFrom, type InboxTagColours } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSnoozeRefusal, inboxSnoozeRunning } from "@plannotator/core/inbox-snooze";
@@ -43,6 +43,7 @@ import { createMachineAgentRead, FAR_READ_REFUSALS } from "./inbox-machine-agent
 import { createMachineAgentFind } from "./inbox-machine-agent-find";
 import { INBOX_RUN_WINDOW_ONLY_BODY } from "./inbox-run-routes";
 import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
+import { inboxForwardedPlace } from "./inbox-sent-from";
 import { createMachineBranches } from "./inbox-machine-branches";
 import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerCards, type PeerLinkTimings, type PeerRecord, type PeerRereadEvent } from "./inbox-peer-link";
 import { installCommandFor, isNewerStableVersion, normalizeStableVersion } from "@plannotator/shared/update-check";
@@ -133,6 +134,8 @@ export interface InboxMachinesContext {
   ownVersions?: () => { current: string; latest: string | null };
   /** A linked machine's list was read: this Inbox takes its "Show archived" switch when that one is newer. */
   showArchivedSaid?: (value: InboxShowArchived) => void;
+  /** Where the person wrote a write this Inbox forwards, told from the request (inbox-sent-from.ts). */
+  sentFrom?: (req: Request, via: "local" | "tailnet") => InboxSentFrom | null;
   /** Tests: the links' clocks. */
   timings?: MachineLinkTimings;
   now?: () => Date;
@@ -981,7 +984,9 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (SNOOZE_ROUTE.test(route) && !outbox.get(String(body.idempotency_key)) && inboxSnoozeRefusal(body.until) === "past") throw new InboxError("snooze_past", "That time has passed.", { field: "until" });
     // The window names the thread a write is about, so a held answer shows even where that thread cannot open.
     const named = req.headers.get("X-Plannotator-Thread")?.trim() ?? "";
-    const { entry, fresh } = outbox.submit(machine, route, body, THREAD_HINT.test(named) ? named : null, window);
+    // Where the person was, when not at this window, said on so that machine's agent reads where they wrote it.
+    const place = inboxForwardedPlace(context.sentFrom?.(req, via) ?? null);
+    const { entry, fresh } = outbox.submit(machine, route, body, THREAD_HINT.test(named) ? named : null, window, place);
     if (peer.state === "online") peer.flush();
     else peer.poke();
     const settled = (await outbox.waitSettled(entry.key, peer.state === "online" ? MACHINE_WRITE_WAIT_MS : 0)) ?? entry;

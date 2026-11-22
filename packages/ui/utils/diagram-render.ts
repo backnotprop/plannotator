@@ -47,9 +47,10 @@ import { MERMAID_FINDER, type DiagramFinder } from './diagram-anchor';
 import { GRAPHVIZ_FINDER } from './diagram-anchor-graphviz';
 import { getGraphvizRetryDelayMs, loadGraphvizRuntime, type GraphvizRuntime } from './graphviz';
 import { loadMathRenderer } from './math';
-import { getMermaidRetryDelayMs, loadMermaidRuntime, MERMAID_LABEL_FORBIDDEN_ATTRS } from './mermaid';
+import { getDiagramRemoteLoads } from './diagramRemoteLoadsPolicy';
+import { getMermaidRetryDelayMs, loadMermaidRuntime, MERMAID_LABEL_FORBIDDEN_ATTRS, MERMAID_NO_REMOTE_LABEL_MARK } from './mermaid';
 import { hasMermaidMath } from './mermaid-math-slot';
-import { applyMermaidTheme, mermaidThemeKey, type MermaidThemeMode } from './mermaidTheme';
+import { applyMermaidTheme, mermaidThemeKey, type MermaidThemeMode, type RemoteLoadsMode } from './mermaidTheme';
 
 export type { DiagramKind } from '@plannotator/core/diagram-anchor';
 
@@ -235,9 +236,12 @@ const NAVIGATING_ATTRIBUTES = new Set(MERMAID_LABEL_FORBIDDEN_ATTRS);
  * `formaction`, `ping`, `target`, `usemap`), and a `position` other than
  * static, relative or absolute goes from every `style` attribute and every
  * kept rule (`keepContainedDeclarations`). A diagram with none of these
- * comes out exactly as before.
+ * comes out exactly as before. With `configurePlannotatorUI({ diagramRemoteLoads: false })`
+ * every reference and declaration that loads from another host goes as well
+ * (`keepLocalAttributes`, `scopeDiagramCss`'s `remoteLoads`).
  */
 export function scrubDiagramSvg(root: SVGSVGElement): void {
+  const remoteLoads = getDiagramRemoteLoads();
   for (const el of Array.from(root.querySelectorAll(FORBIDDEN_ELEMENTS))) el.remove();
   for (const el of Array.from(root.querySelectorAll(NAVIGATING_ELEMENTS))) el.remove();
   for (const el of Array.from(root.querySelectorAll(UNWRAPPED_ELEMENTS)).reverse()) el.replaceWith(...Array.from(el.childNodes));
@@ -247,7 +251,7 @@ export function scrubDiagramSvg(root: SVGSVGElement): void {
   // wholesale; each keeps only rules scoped under the svg's root id.
   const rootId = root.getAttribute('id') ?? '';
   for (const style of Array.from(root.querySelectorAll('style'))) {
-    const kept = scopeDiagramCss(style.textContent ?? '', rootId);
+    const kept = scopeDiagramCss(style.textContent ?? '', rootId, { remoteLoads });
     if (kept === '') style.remove();
     else style.textContent = kept;
   }
@@ -257,14 +261,15 @@ export function scrubDiagramSvg(root: SVGSVGElement): void {
   }
   const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
   for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
-    scrubAttributes(node as Element);
+    scrubAttributes(node as Element, remoteLoads);
   }
-  scrubAttributes(root);
+  scrubAttributes(root, remoteLoads);
 }
 
 const MATHML_NS = 'http://www.w3.org/1998/Math/MathML';
 
-function scrubAttributes(el: Element): void {
+function scrubAttributes(el: Element, remoteLoads: boolean): void {
+  if (!remoteLoads) keepLocalAttributes(el);
   // A math label (KaTeX MathML) carries no link and loads nothing; an `href`
   // on a MathML element is a link in Firefox, so a MathML element keeps none.
   const isMath = el.namespaceURI === MATHML_NS;
@@ -279,7 +284,11 @@ function scrubAttributes(el: Element): void {
       el.removeAttribute(attribute.name);
       continue;
     }
+    // With nothing loading from another host the references were already
+    // narrowed to a `#fragment` or a `data:` picture (`keepLocalAttributes`),
+    // and a `data:` picture is kept so it draws.
     if (
+      remoteLoads &&
       (name === 'href' || name === 'xlink:href' || name === 'src') &&
       !value.startsWith('#') &&
       !value.startsWith('http://') &&
@@ -295,6 +304,153 @@ function scrubAttributes(el: Element): void {
       else if (kept !== attribute.value) el.setAttribute(attribute.name, kept);
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Diagrams that load nothing from another host (`diagramRemoteLoads: false`)
+// ---------------------------------------------------------------------------
+
+/** Attributes whose value is a reference the browser loads (or follows). */
+const REFERENCE_ATTRIBUTES = new Set(['src', 'href', 'xlink:href', 'poster', 'background', 'lowsrc', 'dynsrc']);
+/** Lists of references: never kept when nothing may load from another host. */
+const REFERENCE_LIST_ATTRIBUTES = new Set(['srcset', 'imagesrcset']);
+/** Attributes that are words, never read as CSS or a reference. */
+const TEXT_ATTRIBUTES = new Set(['alt', 'title', 'id', 'class', 'name', 'lang', 'dir', 'role']);
+
+/** A `data:` picture a browser draws without loading anything (svg+xml is not one: an svg document can reference). */
+const LOCAL_PICTURE = /^data:image\/(?:png|jpeg|gif|webp|avif)[;,]/u;
+
+/**
+ * A reference that names nothing on another host: a `#fragment`, or a `data:`
+ * picture. Read the way a browser reads a URL attribute: leading and trailing
+ * C0 controls and spaces dropped, tabs and line breaks anywhere ignored.
+ */
+export function isLocalReference(value: string): boolean {
+  // eslint-disable-next-line no-control-regex
+  const url = value.replace(/^[\u0000-\u0020]+|[\u0000-\u0020]+$/gu, '').replace(/[\t\n\r]/gu, '').toLowerCase();
+  return url.startsWith('#') || LOCAL_PICTURE.test(url);
+}
+
+/** CSS functions that load, with or without a vendor prefix. */
+const CSS_LOADERS = /(?:^|[^a-z0-9_-])(?:-[a-z]+-)?(?:image-set|image|cross-fade|src|element|paint)\(/u;
+
+/**
+ * Whether CSS text loads anything: a `url(` that is not a `#fragment` (a
+ * `data:` one included), any other loading function, `@import`, or a `src:`
+ * descriptor. Escapes are decoded first, so `u\72l(` and `\75 rl(` are
+ * `url(`; anything after `url(` other than `#` counts, however its address
+ * is spelled.
+ */
+export function cssLoads(text: string): boolean {
+  // Comments are left in: a `url(` inside one is counted too (never a miss), and `/*` inside a string is no comment.
+  const css = decodeCssEscapes(text).toLowerCase();
+  if (css.includes('@import') || CSS_LOADERS.test(css) || /(?:^|[;{\s])src\s*:/u.test(css)) return true;
+  for (let at = css.indexOf('url('); at !== -1; at = css.indexOf('url(', at + 4)) {
+    const arg = css.slice(at + 4).replace(/^[\s\u0000-\u001f]+/u, '').replace(/^["']/u, '');
+    if (!arg.startsWith('#')) return true;
+  }
+  return false;
+}
+
+/**
+ * With nothing allowed to load from another host: every reference keeps only
+ * a `#fragment` or a `data:` picture, a reference list goes, a `style` loses
+ * each declaration that loads, and any other attribute whose value loads as
+ * CSS (`fill="url(…)"`, `filter`, `mask`, `cursor`) goes.
+ */
+function keepLocalAttributes(el: Element): void {
+  for (const attribute of Array.from(el.attributes)) {
+    const name = attribute.name.toLowerCase();
+    if (REFERENCE_LIST_ATTRIBUTES.has(name) || (REFERENCE_ATTRIBUTES.has(name) && !isLocalReference(attribute.value))) {
+      el.removeAttribute(attribute.name);
+    } else if (name === 'style') {
+      const kept = keepDeclarations(attribute.value, cssLoads);
+      if (kept === null) el.removeAttribute(attribute.name);
+      else if (kept !== attribute.value) el.setAttribute(attribute.name, kept);
+    } else if (!TEXT_ATTRIBUTES.has(name) && !name.startsWith('data-') && !name.startsWith('aria-') && !REFERENCE_ATTRIBUTES.has(name) && cssLoads(attribute.value)) {
+      el.removeAttribute(attribute.name);
+    }
+  }
+}
+
+/** Set by the hook whenever it sees a marked config: how `probeLabelHook` knows it reached Mermaid. */
+let labelHookSeen = false;
+
+/**
+ * The attribute hook Mermaid's own label pass runs when nothing may load from
+ * another host: the label config carries MERMAID_NO_REMOTE_LABEL_MARK (see
+ * `mermaidConfigForRemoteLoads`), and the hook applies `keepLocalAttributes`'
+ * rules to each attribute of a label before Mermaid puts it in the live page.
+ * Any other sanitize call (no mark) is left alone.
+ */
+const noRemoteLabelHook = (_node: Element, data: { attrName: string; attrValue: string; keepAttr: boolean }, config: unknown): void => {
+  if ((config as Record<string, unknown> | undefined)?.[MERMAID_NO_REMOTE_LABEL_MARK] !== true) return;
+  labelHookSeen = true;
+  const name = data.attrName;
+  if (REFERENCE_LIST_ATTRIBUTES.has(name) || (REFERENCE_ATTRIBUTES.has(name) && !isLocalReference(data.attrValue))) {
+    data.keepAttr = false;
+  } else if (name === 'style') {
+    const kept = keepDeclarations(data.attrValue, cssLoads);
+    if (kept === null) data.keepAttr = false;
+    else data.attrValue = kept;
+  } else if (!TEXT_ATTRIBUTES.has(name) && !name.startsWith('data-') && !name.startsWith('aria-') && cssLoads(data.attrValue)) {
+    data.keepAttr = false;
+  }
+};
+
+let labelHookEverInstalled = false;
+
+/**
+ * Put the hook on the DOMPurify this module imports, before each render with
+ * the option off (never otherwise). Re-added every time, since a host's own
+ * code may have removed it (`removeHook`, `removeAllHooks`); when it had gone
+ * missing, every runtime's probe is run again. True when it was in place.
+ */
+export function installNoRemoteLabelHook(): boolean {
+  const wasThere = DOMPurify.removeHook('uponSanitizeAttribute', noRemoteLabelHook) !== undefined;
+  DOMPurify.addHook('uponSanitizeAttribute', noRemoteLabelHook);
+  const intact = wasThere || !labelHookEverInstalled;
+  labelHookEverInstalled = true;
+  return intact;
+}
+
+/** Per runtime: whether its label pass runs the hook (one probe render each, shared by concurrent renders; reset when the hook had been removed). */
+let labelHookReach = new WeakMap<Mermaid, Promise<boolean>>();
+
+/**
+ * Whether Mermaid's label pass sanitizes with this module's DOMPurify (so the
+ * hook runs): one tiny render with an attribute in a label, once per runtime,
+ * with the no-remote config already applied. A host bundle with two copies of
+ * DOMPurify answers false, and the label pass falls back to dropping every
+ * picture, reference and style in a label.
+ */
+async function probeLabelHook(runtime: Mermaid, themeKey: string): Promise<boolean> {
+  applyMermaidTheme(runtime, themeKey, undefined, 'local');
+  labelHookSeen = false;
+  const probeId = 'pn-label-hook-probe';
+  try {
+    await runtime.render(probeId, 'flowchart LR\n  P["<b title=probe>p</b>"]');
+  } catch {
+    // The answer is whether the hook ran, not whether the probe drew.
+  } finally {
+    removeMermaidLeftovers(probeId);
+  }
+  return labelHookSeen;
+}
+
+/**
+ * The runtime's config for the policy before a render, when diagrams may not
+ * load from other hosts: the no-remote label pass, checked once per runtime
+ * to reach it (`'local'`), else its fallback (`'local-fallback'`).
+ */
+async function remoteLoadsMode(runtime: Mermaid, themeKey: string): Promise<RemoteLoadsMode> {
+  if (!installNoRemoteLabelHook()) labelHookReach = new WeakMap();
+  let reach = labelHookReach.get(runtime);
+  if (reach === undefined) {
+    reach = probeLabelHook(runtime, themeKey);
+    labelHookReach.set(runtime, reach);
+  }
+  return (await reach) ? 'local' : 'local-fallback';
 }
 
 /** The only `position` values a diagram's styles may set: none of them takes an element out of its diagram's box. */
@@ -370,10 +526,19 @@ function declarationEscapes(declaration: string): boolean {
  * back unchanged, byte for byte, when there are none; null when nothing is left.
  */
 export function keepContainedDeclarations(text: string): string | null {
+  return keepDeclarations(text, declarationEscapes);
+}
+
+/**
+ * A declaration list without the declarations `refused` names, split the way
+ * a browser splits it (`splitDeclarations`). The text comes back unchanged,
+ * byte for byte, when none is refused; null when nothing is left.
+ */
+function keepDeclarations(text: string, refused: (declaration: string) => boolean): string | null {
   const declarations = splitDeclarations(text);
-  if (!declarations.some(declarationEscapes)) return text;
+  if (!declarations.some(refused)) return text;
   const kept = declarations
-    .filter((declaration) => !declarationEscapes(declaration))
+    .filter((declaration) => !refused(declaration))
     .map((declaration) => declaration.trim())
     .filter(Boolean);
   return kept.length === 0 ? null : kept.join('; ');
@@ -540,7 +705,8 @@ function splitSelectors(list: string): string[] {
  * and the grouping rules, which are filtered recursively. A brace-matching
  * pass over the text: a detached `<style>` has no CSSOM to ask.
  */
-export function scopeDiagramCss(css: string, rootId: string): string {
+export function scopeDiagramCss(css: string, rootId: string, options: { remoteLoads?: boolean } = {}): string {
+  const remoteLoads = options.remoteLoads ?? true;
   const text = css.replace(/\/\*[\s\S]*?\*\//gu, '');
   const scoped = (selector: string): boolean => {
     if (rootId === '') return false;
@@ -593,10 +759,10 @@ export function scopeDiagramCss(css: string, rootId: string): string {
     if (prelude.startsWith('@')) {
       const name = /^@([\w-]+)/u.exec(prelude)?.[1]?.toLowerCase() ?? '';
       if (/^(?:-\w+-)?keyframes$/u.test(name)) {
-        if (!cssFetches(prelude) && !cssFetches(body)) out += `${prelude}{${body}}`;
+        if (!cssFetches(prelude) && !cssFetches(body) && (remoteLoads || (!cssLoads(prelude) && !cssLoads(body)))) out += `${prelude}{${body}}`;
       } else if (name === 'media' || name === 'supports' || name === 'container' || name === 'layer') {
-        if (cssFetches(prelude)) continue;
-        const inner = scopeDiagramCss(body, rootId);
+        if (cssFetches(prelude) || (!remoteLoads && cssLoads(prelude))) continue;
+        const inner = scopeDiagramCss(body, rootId, options);
         if (inner !== '') out += `${prelude}{${inner}}`;
       }
       continue;
@@ -604,7 +770,7 @@ export function scopeDiagramCss(css: string, rootId: string): string {
     if (cssFetches(body)) continue;
     const selectors = splitSelectors(prelude);
     if (selectors.length === 0 || !selectors.every(scoped)) continue;
-    const kept = keepContainedDeclarations(body);
+    const kept = remoteLoads ? keepContainedDeclarations(body) : keepDeclarations(body, (declaration) => declarationEscapes(declaration) || cssLoads(declaration));
     if (kept !== null) out += `${prelude}{${kept}}`;
   }
   return out;
@@ -779,7 +945,12 @@ const mermaidRenderer: DiagramRenderer = {
     // themed on its first render and re-initialized only when one changes.
     // With no tokens on the page it is a no-op and the static
     // MERMAID_CONFIG (securityLevel strict) applies.
-    applyMermaidTheme(runtime, mermaidThemeKey(theme.colorTheme, theme.mode, theme.shadowAmount));
+    //
+    // With `configurePlannotatorUI({ diagramRemoteLoads: false })`, read here
+    // at each render, the runtime is initialized with the no-remote label
+    // pass (`remoteLoadsMode`); otherwise exactly as before.
+    const themeKey = mermaidThemeKey(theme.colorTheme, theme.mode, theme.shadowAmount);
+    applyMermaidTheme(runtime, themeKey, undefined, getDiagramRemoteLoads() ? 'remote' : await remoteLoadsMode(runtime, themeKey));
     return renderMermaid(runtime, renderId, source, options);
   },
 };

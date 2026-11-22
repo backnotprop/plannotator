@@ -36,7 +36,7 @@
 
 import { homedir } from "node:os";
 import { basename } from "node:path";
-import { INBOX_AUTO_SEND_AFTER_MS, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
+import { INBOX_AUTO_SEND_AFTER_MS, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSentFrom, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { INBOX_BLOCKED_AT_FIELD, INBOX_BLOCKED_FIELD, INBOX_BLOCKED_STALE_MS, parseInboxBlocked, type InboxBlockedKind } from "@plannotator/shared/inbox/connection";
 import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_CONTEXT_POLL_FIELD, INBOX_CONTINUES_POLL_FIELD, INBOX_EFFORT_LEVELS, INBOX_EFFORT_POLL_FIELD, INBOX_MODEL_POLL_FIELD, INBOX_PLACE_POLL_FIELD, parseInboxPlace, type InboxPlace, INBOX_FIRST_STARTED_POLL_FIELD, INBOX_HELD_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD, INBOX_TITLE_POLL_FIELD } from "@plannotator/shared/inbox/connection";
@@ -1376,8 +1376,11 @@ export function createInboxLiveSessions(options: {
       headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" },
     });
 
-  /** The window's routes; null when the path is not one of them. A session carries its `label` here. */
-  const route = async (req: Request, path: string): Promise<Response | null> => {
+  /**
+   * The window's routes; null when the path is not one of them. A session carries its `label` here.
+   * `sentFrom`: where the person wrote a New message, as the server told it from the request (inbox-sent-from.ts).
+   */
+  const route = async (req: Request, path: string, sentFrom: () => InboxSentFrom | null = () => null): Promise<Response | null> => {
     const sessionsMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/sessions$/.exec(path);
     if (sessionsMatch) {
       if (req.method !== "GET") return answer({ error: "Use GET." }, 405);
@@ -1446,6 +1449,7 @@ export function createInboxLiveSessions(options: {
       body: body.body,
       idempotency_key: body.idempotency_key,
       to: target ? { host: target.host, session: target.session } : null,
+      sent_from: sentFrom(),
     });
     if (!result.replayed) options.onSent?.(req, body, result.message);
     return answer({ message: result.message, replayed: result.replayed });
