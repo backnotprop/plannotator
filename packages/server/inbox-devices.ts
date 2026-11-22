@@ -65,6 +65,7 @@ import { INBOX_DEVICE_MARKUP_MAX_BYTES } from "@plannotator/shared/inbox/markups
 import { inboxDiskFullError, INBOX_UPLOAD_MAX_BYTES } from "@plannotator/shared/inbox/uploads";
 import { describeTailscaleFailure, runTailscale, serveStatusProxy, TAILSCALE_CLI_TIMEOUT_MS, TAILSCALE_SERVE_TIMEOUT_MS, type TailscaleRunner, type TailscaleRunResult } from "@plannotator/shared/tailscale";
 import { MACHINE_WINDOW_HEADER } from "./inbox-outbox";
+import { INBOX_SENT_FROM_HEADER, inboxSentFromPlaceOf, type InboxSentFromPlace } from "@plannotator/core/inbox-types";
 import { formatInboxAppHeader } from "@plannotator/core/inbox-door-version";
 import { APP_HEADER, APP_UPGRADE, appBelowFloor, parseAppHeader, type DoorDeviceApp } from "./inbox-door-version";
 import { INBOX_SNOOZE_HELD } from "./inbox-snooze";
@@ -367,14 +368,20 @@ const ALLOWLIST: readonly DoorRoute[] = [
 /**
  * The door's own routes, beside the allowlist: `pair` (no token, answered before the token is read), `revoke`, and a
  * linked machine's own (never on the allowlist, so no phone reaches them): its link-back and unlink (inbox-machines.ts
- * answers them), this computer's update, read and started for a linked machine's window, and this computer's
- * accounts. `serve` answers the machine's through `machineOwn`, typed by this list, so a route here without an answer,
+ * answers them), this computer's update, read and started for a linked machine's window, this computer's accounts,
+ * and its agents' reads of this computer's threads and their files (`agent-read`, `agent-file`), search and list (`agent-search`, `agent-threads`). `serve` answers the machine's through `machineOwn`, typed by this list, so a route here without an answer,
  * or an answer not here, does not compile. `needs`: answered only while this Inbox has it, and only then listed.
  */
 const DOOR_OWN_ROUTES = [
   { method: "POST", route: "pair", grant: "phone" },
   { method: "POST", route: "revoke", grant: "phone" },
   { method: "GET", route: "accounts", grant: "machine" },
+  // A linked machine's agent reads this Inbox's threads and fetches the files they list (inbox-far-read.ts, mark `agent-read`).
+  { method: "GET", route: "agent-read", grant: "machine", needs: "machines" },
+  { method: "GET", route: "agent-file", grant: "machine", needs: "machines" },
+  // Its agent's search and thread list of this Inbox's threads (inbox-far-find.ts, mark `agent-search`).
+  { method: "GET", route: "agent-search", grant: "machine", needs: "machines" },
+  { method: "GET", route: "agent-threads", grant: "machine", needs: "machines" },
   { method: "POST", route: "link-back", grant: "machine", needs: "machines" },
   { method: "POST", route: "unlink", grant: "machine", needs: "machines" },
   { method: "GET", route: "update", grant: "machine", needs: "machine_update" },
@@ -596,6 +603,10 @@ export interface InboxDevicesContext {
   phones?: boolean;
   /** Linked machines (inbox-machines.ts): the two door routes only a machine calls. Bound after both exist. */
   machines?: () => InboxDoorMachines | null;
+  /** A linked machine's agents' reads of this Inbox's threads and their files (inbox-far-read.ts). */
+  agentRead?: { read: (url: URL, device: InboxDevice) => Response; file: (url: URL) => Promise<Response> };
+  /** A linked machine's agents' search and thread list of this Inbox's threads (inbox-far-find.ts). */
+  agentFind?: { search: (url: URL) => Promise<Response>; threads: (url: URL) => Response | Promise<Response> };
   /** A linked machine's Update (inbox-updates.ts). */
   machineUpdate?: { read: () => unknown; start: () => Promise<{ outcome: string }> };
   /** Tests: the door's look-again clock (`INBOX_DOOR_REPUBLISH`). Default: unref'd timers. */
@@ -613,6 +624,8 @@ export interface InboxDoorCaller {
   name: string;
   platform: string;
   window: boolean;
+  /** A linked machine says where the person was when not at its own window (`X-Plannotator-Sent-From`); a phone's never counts. */
+  place?: InboxSentFromPlace | null;
 }
 
 /** What the door hands to inbox-machines.ts. */
@@ -1017,6 +1030,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
       name: device.name,
       platform: device.platform,
       window: device.platform === MACHINE_PLATFORM && req.headers.get(MACHINE_WINDOW_HEADER) === "1",
+      place: device.platform === MACHINE_PLATFORM ? inboxSentFromPlaceOf(req.headers.get(INBOX_SENT_FROM_HEADER)) : null,
     };
     return context.dispatch(new Request(`http://127.0.0.1:${context.port()}${windowPath}${search}`, { method: req.method, headers, body, signal }), from);
   };
@@ -1142,6 +1156,12 @@ export function createInboxDevices(context: InboxDevicesContext) {
   const machineOwn: Record<MachineOwnName, (req: Request, url: URL, device: InboxDevice) => Promise<Response>> = {
     // Only this Inbox's own read, so it never passes on a third machine's. Of the query, only Refresh's `fresh`.
     "GET accounts": (req, url, device) => toWindow(req, device, "/api/inbox/accounts", url.searchParams.get("fresh") === "1" ? "?fresh=1" : "", null, req.signal),
+    // read_thread's read of one of this Inbox's threads, and a file it lists: reads only, as a guest's.
+    "GET agent-read": async (_req, url, device) => context.agentRead?.read(url, device) ?? routeNotFound(device),
+    "GET agent-file": async (_req, url, device) => (context.agentRead ? await context.agentRead.file(url) : routeNotFound(device)),
+    // Its agent's search and thread list here: reads only, as a guest's.
+    "GET agent-search": async (_req, url, device) => (context.agentFind ? await context.agentFind.search(url) : routeNotFound(device)),
+    "GET agent-threads": async (_req, url, device) => (context.agentFind ? await context.agentFind.threads(url) : routeNotFound(device)),
     "POST link-back": async (req, _url, device) => context.machines?.()?.linkBack(device.id, await context.readBody(req)) ?? routeNotFound(device),
     "POST unlink": async (_req, _url, device) => context.machines?.()?.unlinkedBy(device.id) ?? routeNotFound(device),
     // The body is never read, so a machine cannot name a version or a place to download from.

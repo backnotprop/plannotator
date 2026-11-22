@@ -9,7 +9,7 @@
  */
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { InboxCombineAgent, InboxCombineRecord, InboxListRow } from '@plannotator/core/inbox-types';
-import { INBOX_COMBINE_WORDS_MAX, inboxCombineAgentApart, inboxCombineAgentLabel, inboxTidyWords } from '@plannotator/core/inbox-types';
+import { INBOX_COMBINE_WORDS_MAX, inboxCombineAgentApart, inboxCombineAgentLabel, inboxRowArchived, inboxTidyWords } from '@plannotator/core/inbox-types';
 import { formatCount, plural, whenTime } from '@plannotator/core/inbox-format';
 import { combineApi } from '../combineApi';
 import { PressKeys } from '../pressKeys';
@@ -39,6 +39,8 @@ export function combineBlocked(rows: readonly InboxListRow[], machines: Machines
 export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted }: { rows: readonly InboxListRow[]; machines?: MachinesModel; onClose: () => void; onStarted: (record: InboxCombineRecord, machine: string | null) => void }) {
   const id = useId();
   const n = rows.length;
+  const back = rows.filter((row) => !inboxRowArchived(row)).length;
+  const undoLine = back === n ? `Undo brings the ${formatCount(n)} back.` : back === 0 ? 'They stay archived.' : `Undo brings back the ${formatCount(back)} not already archived.`;
   const blocked = combineBlocked(rows, machines);
   const machine = rows[0] ? rowMachine(rows[0], machines) : null;
   const machineName = machine ? machines.names.get(machine) : null;
@@ -148,7 +150,7 @@ export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted
             <textarea id={`${id}-words`} className="ib-cmb-words" rows={3} maxLength={INBOX_COMBINE_WORDS_MAX} placeholder="For example: just the billing release work, drop the CSV details" value={words} onChange={(event) => setWords(event.target.value)} data-combine-words="" />
             {chosen && (
               <p className="ib-cmb-what">
-                <b dir="auto">{nameOf(chosen)}</b> gets one prompt with the {plural(n, 'thread')}. Open questions are asked again in the new thread. Undo brings the {formatCount(n)} back.
+                <b dir="auto">{nameOf(chosen)}</b> gets one prompt with the {plural(n, 'thread')}. Open questions are asked again in the new thread. {undoLine}
               </p>
             )}
           </>

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useMemo, useSyncExternalStore } from "react";
+import React, { createContext, useContext, useEffect, useState, useMemo, useSyncExternalStore } from "react";
 import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePath } from "@plannotator/core/code-file";
 import { findCrossRepoRef, forgeRefLinks, gitlabHostsSnapshot, matchCrossRepoRef, subscribeGitlabHosts, type CrossRepoRef } from "@plannotator/core/forge-refs";
 import { CodeSnippetPreview } from "./CodeSnippetPreview";
@@ -7,7 +7,8 @@ import { matchInlineHtml } from '../utils/inlineHtmlTags';
 import { transformPlainText } from "../utils/inlineTransforms";
 import { hasLinkedDocExtension } from "../utils/markdownExtensions";
 import { getImageSrc } from "./ImageThumbnail";
-import { InlineImageTagsContext, UNAVAILABLE_IMAGE_CLASS, useImageResolver } from "./ImageResolverContext";
+import { ImageRetryContext, InlineImageTagsContext, UNAVAILABLE_IMAGE_CLASS, useImageResolver } from "./ImageResolverContext";
+import { probeImage } from "./imageRetryProbe";
 import { useCodePathValidation, type CodePathValidationContextValue } from "./CodePathValidationContext";
 import { BarePathContext, CodeSpan, isNewTabClick, useLocalLinkMatch, useLocalLinkResolver, type BarePathWrap } from "./LocalLinkContext";
 import type { ValidationEntry } from "../hooks/useValidatedCodePaths";
@@ -476,8 +477,25 @@ const HostResolvedImage: React.FC<{
   writtenSrc?: string;
   onImageClick?: (src: string, alt: string) => void;
 }> = ({ src, alt, width, height, writtenSrc, onImageClick }) => {
-  const [failedSrc, setFailedSrc] = useState<string | null>(null);
-  const failed = failedSrc === src;
+  const retry = useContext(ImageRetryContext);
+  /** The src that failed, and the host's retry key then (`ImageRetryContext`). */
+  const [failure, setFailure] = useState<{ src: string; key: string | number | undefined } | null>(null);
+  const failed = failure?.src === src;
+  /** A src that failed, then loaded off the page: the element loads it again under a new fragment (not sent). */
+  const [reloaded, setReloaded] = useState<{ src: string; n: number } | null>(null);
+  const retryKey = retry?.key;
+  const retrying = failed && retry !== null && failure.key !== retryKey && retry.retries(src);
+  useEffect(() => {
+    if (!retrying) return;
+    // Off the page first (a few at a time in the window): the placeholder stays until the picture is there.
+    return probeImage(src, (loaded) => {
+      if (!loaded) return setFailure({ src, key: retryKey });
+      // The same element, a new URL string: WebKit does not load again a URL that failed for it when it is set again.
+      setReloaded((last) => ({ src, n: last?.src === src ? last.n + 1 : 1 }));
+      setFailure(null);
+    });
+  }, [retrying, src, retryKey]);
+  const shownSrc = reloaded?.src === src && !src.includes('#') ? `${src}#retry-${reloaded.n}` : src;
   return (
     <>
       {failed && (
@@ -487,7 +505,7 @@ const HostResolvedImage: React.FC<{
       )}
       <img
         key="image"
-        src={src}
+        src={shownSrc}
         alt={failed ? '' : alt}
         width={width}
         height={height}
@@ -499,7 +517,7 @@ const HostResolvedImage: React.FC<{
         loading="lazy"
         // Only for a host's smaller copy (`width`): the default stays as it was for every other host.
         decoding={width ? 'async' : undefined}
-        onError={() => setFailedSrc(src)}
+        onError={() => setFailure({ src, key: retryKey })}
         onClick={(e) => {
           e.stopPropagation();
           if (!failed) onImageClick?.(src, alt);

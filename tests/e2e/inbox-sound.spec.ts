@@ -7,17 +7,15 @@
  * (scripts/inbox-sim.ts).
  *
  * Never audible: an init script replaces AudioContext with a stub that only
- * counts oscillators (each sound is four, so four oscillators are one ring)
- * and the Felt note's D5 (`notes`).
+ * counts oscillators (the sound is four, so four oscillators are one ring).
  * Whether the tab is in front is set the way notifications.spec.ts sets it
  * (document.visibilityState and document.hasFocus()). A fake `tailscale`
  * that always fails is first on PATH, so the real one never runs; the update
  * check is off and points at a dead port, so nothing asks GitHub.
  *
  * Proves: a question while the tab is hidden rings once; a burst of three
- * rings once; a visible tab rings nothing; a plain reply plays the Felt note
- * under the default ("every agent message") and nothing under "questions and
- * new threads";
+ * rings once; a visible tab rings nothing; a plain reply rings under the
+ * default ("every agent message") and not under "questions and new threads";
  * a question right after agent chatter still rings;
  * the sound off rings nothing (and notifications stop being silent); two tabs
  * ring once; the two sound choices stay inside their Settings row from 320 to
@@ -46,7 +44,7 @@ const VERSION = '0.29.0';
 
 declare global {
   interface Window {
-    __sound: { oscillators: number; contexts: number; notes: number };
+    __sound: { oscillators: number; contexts: number };
     __front: { visible: boolean; focused: boolean };
     __notified: { title: string; silent: boolean }[];
   }
@@ -54,10 +52,9 @@ declare global {
 
 /** Runs in every page before its own code. */
 function stubPage(): void {
-  const sound = { oscillators: 0, contexts: 0, notes: 0 };
+  const sound = { oscillators: 0, contexts: 0 };
   window.__sound = sound;
-  const param = () => ({ value: 1, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} });
-  const frequency = () => ({ ...param(), setValueAtTime: (value: number) => void (Math.abs(value - 440 * Math.pow(2, 5 / 12)) < 0.01 && sound.notes++) });
+  const param = () => ({ value: 1, setValueAtTime() {}, exponentialRampToValueAtTime() {} });
   class CountingAudioContext {
     state = 'running';
     currentTime = 0;
@@ -76,7 +73,7 @@ function stubPage(): void {
     }
     createOscillator() {
       sound.oscillators++;
-      return { type: 'sine', frequency: frequency(), connect: (to: unknown) => to, start() {}, stop() {} };
+      return { type: 'sine', frequency: param(), connect: (to: unknown) => to, start() {}, stop() {} };
     }
   }
   (window as unknown as { AudioContext: unknown }).AudioContext = CountingAudioContext;
@@ -187,7 +184,6 @@ async function agent(world: World, name = 'Claude Code', host = 'claude-code'): 
 const config = (world: World): { inboxSound?: Record<string, unknown> } => savedConfig(world.dataDir);
 
 const rings = (page: Page) => page.evaluate(() => window.__sound.oscillators / 4);
-const notes = (page: Page) => page.evaluate(() => window.__sound.notes);
 
 /** Put the tab in front or away, with the events a browser fires when that happens. */
 async function setFront(page: Page, visible: boolean, focused: boolean): Promise<void> {
@@ -327,19 +323,17 @@ test('with the tab visible and focused nothing rings', async () => {
   expect(await rings(page)).toBe(before);
 });
 
-test('by default a plain reply plays the Felt note once; a question right after it still rings (chatter never swallows a question)', async () => {
+test('by default a plain reply rings once; a question right after it still rings (chatter never swallows a question)', async () => {
   await awayAgain(page);
   const before = await rings(page);
-  const notesBefore = await notes(page);
   const started = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'Starting the migration now.' });
   await settled(page, started.thread_id);
   await expect.poll(() => rings(page)).toBe(before + 1);
-  // A fresh burst, then a plain reply in that thread: it plays the note, not the Ding-dong.
+  // A fresh burst, then a plain reply in that thread: it rings.
   await awayAgain(page);
   const reply = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'The migration finished. Nothing needed from you.', reply_to: started.thread_id as string });
   await settled(page, reply.thread_id);
   await expect.poll(() => rings(page)).toBe(before + 2);
-  expect(await notes(page)).toBe(notesBefore + 1);
   // Another plain reply seconds later: within the burst, quiet.
   const more = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'Indexes rebuilt too.', reply_to: started.thread_id as string });
   await settled(page, more.thread_id);
