@@ -14,6 +14,7 @@
  */
 import { useEffect } from 'react';
 import { apiPost } from './api';
+import { inboxUrl } from './inboxUrl';
 import { readRoute } from './app/route';
 import { noteActedHere } from './listFilterRecent';
 
@@ -63,7 +64,8 @@ export function mediaPlayed(now = Date.now(), post: (threadId: string) => Promis
   void post(thread).catch(() => {});
 }
 
-const postActed = (threadId: string) => apiPost(`/api/inbox/threads/${encodeURIComponent(threadId)}/acted`, {});
+// This Inbox's own route, also for a linked machine's thread: the merged list reads the note for its row.
+const postActed = (threadId: string) => apiPost(inboxUrl(`/threads/${encodeURIComponent(threadId)}/acted`), {});
 
 /** The window's listeners for the above, while the Inbox is on screen. */
 export function useRecentActs(): void {
