@@ -20,7 +20,7 @@
  */
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { InboxLocalDiffAnswer, InboxLocalWork, InboxLocalWorkAnswer } from "@plannotator/core/inbox-local-work";
+import type { InboxLocalDiffAnswer, InboxLocalWork, InboxLocalWorkAnswer } from "@plannotator/core/inbox-types";
 import type { InboxProject } from "@plannotator/core/inbox-types";
 import { getDefaultBranch, runGitDiff, type ReviewGitRuntime } from "@plannotator/shared/review-core";
 import { branchBaseName, offlineGit, OFFLINE_GIT_TOO_OLD, readBranchDiff, readUnreportedBranches } from "./inbox-branch-reports";
