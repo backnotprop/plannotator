@@ -33,10 +33,15 @@ interface Box {
   height: number;
 }
 
-/** Leave only the formula painted: the svg's shapes, lines and text hidden, the formula in black on the white page. */
+/**
+ * Leave only the formula painted: the svg's shapes, lines, text and label
+ * backgrounds transparent, the formula in black on the white page. Not
+ * `visibility: hidden`: WebKit then skips a foreignObject's content unless
+ * it has a layer of its own, which is the very thing under test.
+ */
 const ONLY_THE_FORMULA = `
-#host svg, #host svg * { visibility: hidden !important; }
-#host svg math, #host svg math * { visibility: visible !important; color: #000 !important; }
+#host svg, #host svg * { fill: transparent !important; stroke: transparent !important; color: transparent !important; background: transparent !important; border-color: transparent !important; box-shadow: none !important; filter: none !important; }
+#host svg math, #host svg math * { color: #000 !important; }
 `;
 
 /** Render, then read where the formula's label belongs (its node, edge label or foreignObject) and its own layout box. */
