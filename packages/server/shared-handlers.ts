@@ -12,6 +12,7 @@ import { openBrowser as openBrowserImpl } from "./browser";
 import { browserNoneReason, resolveBrowserIntent } from "@plannotator/shared/browser-intent";
 import { isLocalOnlyAdvertisedUrl } from "@plannotator/shared/advertised-url";
 import { writeUrlQr } from "./qr";
+import { buildAnotherComputerUrl } from "./remote";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration, missingDraftHeaders } from "./draft";
 import { faviconBody, faviconIcoBody } from "@plannotator/shared/favicon";
@@ -330,7 +331,8 @@ export function setServerReadyTarget(target: string | readonly string[] | undefi
 
 export function writeServerReadyMetadata(readyFile: string, metadata: ServerReadyMetadata): void {
   mkdirSync(dirname(readyFile), { recursive: true });
-  appendFileSync(readyFile, `${JSON.stringify(metadata)}\n`, "utf8");
+  // 0600 when this creates it: the URL may carry the network key.
+  appendFileSync(readyFile, `${JSON.stringify(metadata)}\n`, { encoding: "utf8", mode: 0o600 });
 }
 
 /**
@@ -387,6 +389,11 @@ export async function handleServerReady(
       writeUrlQr(url);
     } else {
       process.stderr.write(`  Open it on your local machine (forward port ${port} if needed).\n`);
+      // Over SSH: the keyed link for a browser on another computer
+      // (packages/shared/network-key.ts). A person's terminal only: never an
+      // agent's Bash call, a hook or a plugin, which read the URL above.
+      const another = process.stderr.isTTY ? buildAnotherComputerUrl(port, url) : null;
+      if (another) process.stderr.write(`  From another computer: ${another}\n`);
     }
   }
 

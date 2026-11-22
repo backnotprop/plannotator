@@ -27,6 +27,7 @@ import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control.ts";
 import { createPiRefCards, handleRefCards, type RefRunner } from "./ref-cards.ts";
 import { createRequestHostGuard } from "./request-host-guard.ts";
+import { createNetworkKeyGuard } from "./network-key-guard.ts";
 import { isSameOriginRequest, refuseCrossOriginWrite } from "./request-origin-guard.ts";
 import { getPlanVersion, getVersionCount, listVersions } from "../generated/storage.ts";
 import { computeAnnotateHistory, deriveAnnotateHistorySlug, persistAnnotateSubmission, type AnnotateHistoryResult } from "../generated/annotate-history.ts";
@@ -926,9 +927,12 @@ export async function startAnnotateServer(options: {
 
 	const app = openPackedApp(options.htmlContent, { page: (html) => customThemesPage(html) });
 	const requestHostGuard = createRequestHostGuard();
+	const networkKeyGuard = createNetworkKeyGuard();
 	const server = createServer(async (req, res) => {
 		// Host allowlist first, before any route (request-host-guard.ts).
 		if (requestHostGuard.refuse(req, res)) return;
+		// Then, over SSH, this machine's key from any other computer (network-key-guard.ts).
+		if (networkKeyGuard.refuse(req, res)) return;
 		// Then no write from another site, before any route (request-origin-guard.ts).
 		if (refuseCrossOriginWrite(req, res)) return;
 		const url = requestUrl(req);
@@ -1574,6 +1578,7 @@ export async function startAnnotateServer(options: {
 	let listened: Awaited<ReturnType<typeof listenOnPort>>;
 	try {
 		requestHostGuard.attach(server);
+		networkKeyGuard.attach(server);
 		listened = await listenOnPort(server);
 	} catch (error) {
 		disposeFailedStart();

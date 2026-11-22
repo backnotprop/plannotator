@@ -146,7 +146,7 @@ import { allowIgnoredLine } from "@plannotator/shared/inbox/tailnet-refusal";
 import { planReviewEnvFor, scrubModSessionEnv } from "./mod-session-env";
 import { resolveAnnotateTarget } from "./annotate-resolution";
 import { annotateDecisionTarget, reviewDecisionTarget, takeHostReviewId, targetText } from "./decision-target";
-import { formatSessionsJson, formatSessionsTable } from "./sessions-output";
+import { formatSessionsJson, formatSessionsTable, isPersonAtTerminal } from "./sessions-output";
 import {
   annotateContextLine,
   annotateHostResult,
@@ -195,6 +195,8 @@ import { buildReviewOutput, supportsReviewApprovalNotes } from "./review-output"
 import { registerSession, unregisterSession, listSessions, listInProcessSessions, type SessionInfo } from "@plannotator/server/sessions";
 import { enableAutoUpdateNotice, isManagedBinary, scheduleAutoUpdateCheck } from "@plannotator/server/auto-update";
 import { openBrowser, openBrowserDetached } from "@plannotator/server/browser";
+import { withAdvertisedNetworkKey } from "@plannotator/server/remote";
+import { loadNetworkKey } from "@plannotator/shared/network-key";
 import { inlineHtmlLocalAssets } from "@plannotator/server/html-assets";
 import { installAgentTerminalRuntime } from "@plannotator/server/agent-terminal-runtime";
 import { installCallFlowRuntime } from "@plannotator/shared/call-flow";
@@ -1402,7 +1404,9 @@ if (args[0] === "sessions") {
     }
     // false when nothing opened (PLANNOTATOR_BROWSER=none says why on its own
     // line, a failed launch is left to the URL): never claim a tab that isn't there.
-    const opened = await openBrowser(session.url);
+    // The registry never holds the network key; a session another computer
+    // opens directly gets it back here (packages/server/remote.ts).
+    const opened = await openBrowser(withAdvertisedNetworkKey(session.url));
     console.error(opened
       ? `Opened ${session.mode} session in browser: ${session.url}`
       : `${session.mode} session: ${session.url}`);
@@ -1415,8 +1419,14 @@ if (args[0] === "sessions") {
   }
 
   // List sessions as a table (stderr, as before): mode, pn- id, project,
-  // url, age and the FULL target, so same-named files are told apart.
-  console.error(formatSessionsTable(sessions));
+  // url, age and the FULL target, so same-named files are told apart. Over
+  // SSH, a person at a terminal also gets each session's link for another
+  // computer, with the key (sessions-output.ts); a pipe or an agent never does.
+  const networkKey = sessions.some((s) => s.anotherComputerUrl !== undefined)
+    && isPersonAtTerminal(process.stdout.isTTY, process.stderr.isTTY, process.env)
+    ? loadNetworkKey(getPlannotatorDataDir())
+    : undefined;
+  console.error(formatSessionsTable(sessions, Date.now(), networkKey));
   process.exit(0);
 
 } else if (args[0] === "setup-goal") {

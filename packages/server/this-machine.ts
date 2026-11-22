@@ -23,6 +23,11 @@ export function notePeer(req: Request, server: { requestIP(req: Request): { addr
   if (address) peers.set(req, address);
 }
 
+/** The TCP peer `notePeer` saw for this request, if any. */
+export function peerOf(req: Request): string | undefined {
+  return peers.get(req);
+}
+
 /**
  * In a remote session only SSH turned on: whether this request came over
  * loopback with a loopback Host and no proxy header, so it is answered as in

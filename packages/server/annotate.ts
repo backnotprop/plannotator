@@ -16,6 +16,7 @@ import { likelyAppHtmlEncoding, prewarmAppHtml } from "@plannotator/shared/app-h
 import { openPackedApp, packedAppResponse } from "@plannotator/shared/packed-app";
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl, getLocalUrlHostname } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
+import { createNetworkKeyGuard } from "./network-key-guard";
 import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { isSameOriginRequest, refuseCrossOriginWrite } from "./request-origin-guard";
 import { getSourceRepoInfo } from "./repo";
@@ -911,6 +912,7 @@ export async function startAnnotateServer(
   let liveAppUrl = "";
 
   const requestHostGuard = createRequestHostGuard();
+  const networkKeyGuard = createNetworkKeyGuard();
   const server = await startBunServerOnAvailablePort((port) =>
     Bun.serve<AgentTerminalSocketData>(withPlannotatorServerHeader({
         hostname: getServerHostname(),
@@ -925,6 +927,9 @@ export async function startAnnotateServer(
           // Host allowlist first, before any route (request-host-guard.ts).
           const hostRefusal = requestHostGuard.check(req);
           if (hostRefusal) return hostRefusal;
+          // Then, over SSH, this machine's key from any other computer (network-key-guard.ts).
+          const keyRefusal = networkKeyGuard.check(req);
+          if (keyRefusal) return keyRefusal;
           // Published over the tailnet: only this computer's owner gets past here (single player; session-tailnet.ts).
           if (options.tailnetPublished === true) {
             const notOwner = refuseTailnetPeer(req);

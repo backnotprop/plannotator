@@ -22,6 +22,8 @@ import {
   existsSync,
 } from "fs";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { withoutNetworkKey } from "@plannotator/shared/network-key";
+import { anotherComputerRegistryUrl } from "./remote";
 
 export interface SessionInfo {
   pid: number;
@@ -39,6 +41,19 @@ export interface SessionInfo {
   target?: string;
   /** Set on a server running inside this host's process, not the binary's. */
   host?: InProcessHost;
+  /**
+   * Set when the session asks another computer for this machine's network key
+   * (over SSH alone, packages/shared/network-key.ts): where another computer
+   * opens it, without the key ("" when the address is not known). The person's
+   * `plannotator sessions` adds the key (never `--json`).
+   */
+  anotherComputerUrl?: string;
+}
+
+/** What the registry holds for a session: never the network key. */
+function registryEntry<T extends Pick<SessionInfo, "url" | "port">>(info: T): T & Pick<SessionInfo, "anotherComputerUrl"> {
+  const another = anotherComputerRegistryUrl(info.port, info.url);
+  return { ...info, url: withoutNetworkKey(info.url), ...(another !== undefined ? { anotherComputerUrl: another } : {}) };
 }
 
 /** Hosts that run Plannotator's servers in their own process. */
@@ -73,7 +88,10 @@ function isAlive(pid: number): boolean {
  */
 export function registerSession(info: SessionInfo): void {
   try {
-    writeAtomic(sessionPath(info.pid), JSON.stringify(info, null, 2));
+    // Never the network key (packages/shared/network-key.ts): another account
+    // on this machine may read the registry. `plannotator sessions` adds it
+    // back for the person at a terminal, and `--open` for the browser it opens.
+    writeAtomic(sessionPath(info.pid), JSON.stringify(registryEntry(info), null, 2));
   } catch {
     // Session discovery is unavailable; the session itself is unaffected.
   }
@@ -204,7 +222,7 @@ export function registerInProcessSession(host: InProcessHost, info: Omit<Session
     path = join(dir, `${process.pid}-${info.port}.json`);
     mkdirSync(dir, { recursive: true });
     sweepDeadEntries(dir);
-    writeAtomic(path, JSON.stringify({ ...info, pid: process.pid, host }, null, 2));
+    writeAtomic(path, JSON.stringify({ ...registryEntry(info), pid: process.pid, host }, null, 2));
     ownInProcessFiles.add(path);
   } catch {
     return () => {};

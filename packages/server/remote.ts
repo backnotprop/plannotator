@@ -10,7 +10,9 @@
 
 import { parsePortSelection } from "@plannotator/shared/port-range";
 import { loadConfig, resolveLocalUrlHostname } from "@plannotator/shared/config";
-import { resolveAdvertisedSessionUrl } from "@plannotator/shared/advertised-url";
+import { isLocalOnlyAdvertisedUrl, resolveAdvertisedSessionUrl } from "@plannotator/shared/advertised-url";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { anotherComputerBaseUrl, anotherComputerUrl, loadNetworkKey, withNetworkKey, withoutNetworkKey } from "@plannotator/shared/network-key";
 
 const DEFAULT_REMOTE_PORT = 19432;
 const LOOPBACK_HOST = "127.0.0.1";
@@ -202,7 +204,19 @@ export async function startBunServerOnAvailablePort<TServer>(
  * forwards reach loopback.
  */
 export function getServerHostname(): string {
+  if (loopbackBindForTests) return LOOPBACK_HOST;
   return isRemoteSession() ? "0.0.0.0" : LOOPBACK_HOST;
+}
+
+let loopbackBindForTests = false;
+
+/**
+ * Tests only: bind loopback even in a remote session, so a test of remote
+ * behaviour never listens on every interface (it plays another computer
+ * through the network key's peer seam instead). `false` restores the rule.
+ */
+export function setLoopbackBindForTests(on: boolean): void {
+  loopbackBindForTests = on;
 }
 
 /**
@@ -215,7 +229,43 @@ export function getLocalUrlHostname(): string | undefined {
   return resolveLocalUrlHostname(loadConfig());
 }
 
-/** Compose the display-only URL advertised for a bound server port. */
+/**
+ * Compose the display-only URL advertised for a bound server port. In a
+ * remote session SSH alone turned on, a URL another computer opens directly
+ * (a urlHost, a public URL) carries this machine's network key
+ * (packages/shared/network-key.ts); a localhost URL never needs it (it only
+ * reaches this machine, or a tunnel, which arrives over loopback).
+ */
 export function buildAdvertisedUrl(port: number): string {
-  return resolveAdvertisedSessionUrl(port, isRemoteSession());
+  return withAdvertisedNetworkKey(resolveAdvertisedSessionUrl(port, isRemoteSession()));
+}
+
+/** `url` with the network key when an advertised URL would carry it (see buildAdvertisedUrl). */
+export function withAdvertisedNetworkKey(url: string): string {
+  if (!isSshDetectedRemote() || isLocalOnlyAdvertisedUrl(url)) return url;
+  return withNetworkKey(url, loadNetworkKey(getPlannotatorDataDir()));
+}
+
+/**
+ * The ready-made link for a browser on another computer, with the key: only
+ * in a remote session SSH alone turned on, only when the advertised URL is a
+ * localhost one (otherwise that URL is the link), and only when the SSH
+ * connection's own address is known and still this machine's. Else null.
+ */
+export function buildAnotherComputerUrl(port: number, advertisedUrl: string): string | null {
+  if (!isSshDetectedRemote() || !isLocalOnlyAdvertisedUrl(advertisedUrl)) return null;
+  return anotherComputerUrl(port, process.env.SSH_CONNECTION, loadNetworkKey(getPlannotatorDataDir()));
+}
+
+/**
+ * For the session registry, so `plannotator sessions` can give the person the
+ * link (packages/shared/network-key.ts): where another computer opens this
+ * session, never with the key. Undefined unless the session asks another
+ * computer for the key (a remote session SSH alone turned on); "" when the
+ * address is not known.
+ */
+export function anotherComputerRegistryUrl(port: number, advertisedUrl: string): string | undefined {
+  if (!isSshDetectedRemote()) return undefined;
+  if (!isLocalOnlyAdvertisedUrl(advertisedUrl)) return withoutNetworkKey(advertisedUrl);
+  return anotherComputerBaseUrl(port, process.env.SSH_CONNECTION) ?? "";
 }
