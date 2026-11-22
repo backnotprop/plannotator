@@ -1,0 +1,21 @@
+/* Quiet words in the top strip ("Open source ★ 20.4k"), between the name and
+   the light/dark switch. They live inside the strip's 50px and scroll away
+   with it. On a wide screen their right edge sits 12px inside the right page
+   rail; on a phone they drop into the gap the page already leaves above the
+   headline. A further word goes before the others in .lk; the gap spaces them. */
+.lk{display:flex;align-items:center;gap:28px;min-width:0;margin-left:auto;padding-right:calc(var(--m) + 25.5px);font:500 15px/1 var(--sans);letter-spacing:-.005em}
+/* The side padding (taken back by the margin) gives the focus ring room around the words. */
+.lk a{display:inline-flex;align-items:center;gap:7px;min-width:0;height:50px;margin:0 -8px;padding:0 8px;color:var(--soft);white-space:nowrap}
+.lk a:hover{color:var(--ink)}
+.lk a:focus-visible{outline:2px solid var(--iris);outline-offset:-4px;color:var(--ink)}
+/* A long (translated) word shortens with an ellipsis; the count never does. */
+.lk-w{min-width:0;overflow:hidden;text-overflow:ellipsis;line-height:1.4}
+.lk-n{flex:none;display:inline-flex;align-items:center;gap:4px;margin-left:2px;line-height:1.4;color:var(--ink);font-weight:550;font-variant-numeric:tabular-nums}
+.lk-st{flex:none;display:block;color:var(--soft)}
+/* 8px keeps the link's padded box (and its focus ring) clear of the switch. */
+@media (max-width:1180px){.lk{padding-right:8px}}
+@media (max-width:640px){
+  .lk{position:absolute;top:50px;left:16px;right:16px;height:30px;justify-content:flex-end;gap:20px;padding:0;font-size:14px}
+  .lk a{height:30px}
+}
+@media (max-width:360px){.lk{gap:14px}.lk a{gap:5px}}
