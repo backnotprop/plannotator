@@ -1,0 +1,36 @@
+{
+  "total": 20436,
+  "repoCount": 27,
+  "fetchedAt": "2026-11-22",
+  "set": {
+    "repos": [
+      "backnotprop/plannotator"
+    ],
+    "orgs": [
+      "plannotator"
+    ],
+    "rule": "listed repos plus every public non-fork repo of each org"
+  },
+  "top": [
+    {
+      "repo": "backnotprop/plannotator",
+      "stars": 14366
+    },
+    {
+      "repo": "plannotator/effective-html",
+      "stars": 4299
+    },
+    {
+      "repo": "plannotator/herdr-annotate",
+      "stars": 784
+    },
+    {
+      "repo": "plannotator/artifact-server",
+      "stars": 296
+    },
+    {
+      "repo": "plannotator/plannotator-tui",
+      "stars": 268
+    }
+  ]
+}

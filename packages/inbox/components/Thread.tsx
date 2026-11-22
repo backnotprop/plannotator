@@ -4321,7 +4321,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   );
 
   // A thread mentioned from outside the box (approval "inbox-drag-threads"): a closed box opens and takes it.
-  useMentionBoxOpener(thread.thread_id, box.open, sending, openBox);
+  useMentionBoxOpener(thread.thread_id, box.open, sending || replyDraft.loadedFor !== thread.thread_id, openBox, hasWords && !sending);
   // The warning toast's Reply: the reply box opens, once.
   useEffect(() => {
     if (replyRequest !== thread.thread_id) return;

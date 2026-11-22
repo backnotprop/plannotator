@@ -28,6 +28,9 @@ html:root.pn-os-linux body {
 html:not(.transitions-ready) body .shf-face {
   transition-duration: 240ms, 240ms !important;
 }
+html:not(.transitions-ready) body .fan-pen {
+  transition-duration: 240ms !important;
+}
 html:not(.transitions-ready) body .proof {
   transition-duration: 0.5s !important;
 }
