@@ -7,16 +7,18 @@
  *    leaves a fifth alone (only an agent wrote there);
  *  - the funnel's menu offers Recent activity beside Not seen, with a mark of its own (not Updated's clock), counting
  *    the three;
- *  - on, the list holds those three only, in two groups: Waiting on you holds Bob Tully's above Charlie Dunn's (opened
- *    later, though Charlie Dunn's has the newer message), and Quiet holds Ada Novak's, acted in last; a reload keeps it;
- *  - ticked again, it turns off: every thread back, in the list's own order, and no badge.
+ *  - on, the list holds those three only, as one list with no group bands, newest act first: Ada Novak's (the 👍, in
+ *    Quiet), Bob Tully's, Charlie Dunn's (though Charlie Dunn's has the newest message); a reload keeps it, and so does
+ *    the Agents view;
+ *  - ticked again, it turns off: the Smart groups back as they were, every thread in the list's own order, no badge.
  *
  * What this catches: an open by the person that the server never records (the opening look without `opened`), a 👍
  * that does not count, a star that does, the filter sorting by the newest message instead of the person's own act, a
- * pick that does not hold a reload or does not turn off from the same row, the pick drawn with Updated's clock.
+ * pick that does not hold a reload or does not turn off from the same row, the pick drawn with Updated's clock, a
+ * filtered list that still draws groups (a fresh act in Quiet under an old one waiting), a view that does not come back.
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/recent-activity-filter: 01 the menu open, 02 the list with the filter on,
- * 03 the list after turning it off, 04 (dark) and 05 (light) the filtered list with both groups open. Build the
+ * 03 the list after turning it off, 04 (dark) and 05 (light) the filtered list, one list newest first. Build the
  * binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
 
@@ -66,6 +68,18 @@ async function shotBoth(page: Page, dark: string, light: string) {
     await shot(page, name);
   }
   await page.emulateMedia({ colorScheme: 'light' });
+}
+
+/** The list's group bands (none while the list is one list). */
+const bands = (page: Page) => page.locator('.ib-lbody .ib-band');
+
+/** The ⋮ menu's View choice. */
+async function chooseView(page: Page, view: 'grouped' | 'list' | 'agents') {
+  await page.locator('.ib-listcol [data-tidy-menu]').first().click();
+  await page.locator(`[data-tidy-menu-popup] [data-list-view="${view}"]`).click();
+  await expect(page.locator(`[data-tidy-menu-popup] [data-list-view="${view}"]`)).toHaveAttribute('aria-checked', 'true');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-tidy-menu-popup]')).toHaveCount(0);
 }
 
 /** Quiet's band, opened when it is folded. */
@@ -181,7 +195,7 @@ test("the funnel's menu offers Recent activity beside Not seen, with its own mar
   expect(world.errors).toEqual([]);
 });
 
-test('on: only the three, each group newest first by the act; a reload keeps it', async () => {
+test('on: only the three, one list newest first by the act, no group bands; a reload and the Agents view keep it', async () => {
   const { page, threads } = world;
   await recentPick(page).click();
   await expect(recentPick(page)).toHaveAttribute('aria-checked', 'true');
@@ -189,22 +203,25 @@ test('on: only the three, each group newest first by the act; a reload keeps it'
   await expect(rowButton(page, threads.starred)).toHaveCount(0);
   await expect(rowButton(page, threads.untouched)).toHaveCount(0);
   await expect(page.locator('[data-list-filter-count]')).toHaveText('1');
-  await openQuiet(page);
-  // Two groups: Waiting on you (Bob Tully's, opened after Charlie Dunn's) above Quiet (Ada Novak's, the 👍 last).
-  await expect.poll(() => listOrder(page)).toEqual([threads.bob, threads.charlie, threads.ada]);
-  await expect(page.locator(`.ib-lbody [data-section-id="quiet"] [data-thread-id="${threads.ada}"]`)).toBeVisible();
+  // One list: Ada Novak's 👍 (in Quiet) first, then Bob Tully's and Charlie Dunn's opens (both waiting on the person).
+  await expect.poll(() => listOrder(page)).toEqual([threads.ada, threads.bob, threads.charlie]);
+  await expect(bands(page)).toHaveCount(0);
   await page.mouse.move(1300, 800);
   await shot(page, '02-filter-on.png');
-  await shotBoth(page, '04-grouped-two-groups.png', '05-grouped-two-groups-light.png');
+  await shotBoth(page, '04-flat-newest-first.png', '05-flat-newest-first-light.png');
 
   await page.reload();
   await expect(rowButton(page, threads.bob)).toBeVisible();
-  await openQuiet(page);
-  await expect.poll(() => listOrder(page)).toEqual([threads.bob, threads.charlie, threads.ada]);
+  await expect.poll(() => listOrder(page)).toEqual([threads.ada, threads.bob, threads.charlie]);
+  // The Agents view draws the same one list while the pick is on, and the groups' view is chosen back.
+  await chooseView(page, 'agents');
+  await expect.poll(() => listOrder(page)).toEqual([threads.ada, threads.bob, threads.charlie]);
+  await expect(bands(page)).toHaveCount(0);
+  await chooseView(page, 'grouped');
   expect(world.errors).toEqual([]);
 });
 
-test('ticked again it turns off: every thread back in the list order, no badge', async () => {
+test('ticked again it turns off: the Smart groups back, every thread in the list order, no badge', async () => {
   const { page, threads } = world;
   await listFilter(page).click();
   await recentPick(page).click();
@@ -213,7 +230,8 @@ test('ticked again it turns off: every thread back in the list order, no badge',
   await expect(page.locator('[data-list-filter-count]')).toHaveCount(0);
   await openQuiet(page);
   for (const id of Object.values(threads)) await expect(rowButton(page, id)).toBeVisible();
-  // The list's own order again: Charlie Dunn's newer message above Bob Tully's.
+  // The groups again: Ada Novak's in Quiet, and Charlie Dunn's newer message above Bob Tully's.
+  await expect(page.locator(`.ib-lbody [data-section-id="quiet"] [data-thread-id="${threads.ada}"]`)).toBeVisible();
   const order = await listOrder(page);
   expect(order.indexOf(threads.charlie)).toBeLessThan(order.indexOf(threads.bob));
   await shot(page, '03-filter-off.png');

@@ -8,14 +8,17 @@
  * later. Tidying from the list (a star, Priority, a snooze, archive, a tag, mark read or unread) and anything an
  * agent does never sets it.
  *
- * The order holds as the list does (held.ts, listView.ts): each row is placed by the time it had when the list was
- * last sorted whole (`ListSort`: Show, a thread closing, a refresh, another folder), so a row the person just acted
- * in moves to the top when the list settles, never under the pointer. Each group keeps its place, as with every
- * other filter; the Snoozed band keeps its own order. This file holds no routes or server calls.
+ * While on, the list is one list, newest first by that time, whatever the view (Smart groups, Simple list or Agents):
+ * the owner asked for "the most recent ones I actually interacted with", so a minute-old act in Quiet never draws
+ * under a week-old one in Waiting on you. It is Simple list's own drawing (InboxList.tsx draws List while
+ * `ListSort.by` is set; listView.ts `flatRows`), its folded Snoozed band included; the view chosen in the ⋮ menu is
+ * left as it is and comes back when the pick goes. The order holds as the list does (held.ts): each row is placed by
+ * the time it had when the list was last sorted whole (`ListSort`: Show, a thread closing, a refresh, another folder),
+ * so a row the person just acted in moves to the top when the list settles, never under the pointer. This file holds
+ * no routes or server calls.
  */
 import { useMemo, useState } from 'react';
-import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import { INBOX_SNOOZED_BAND } from '@plannotator/core/inbox-snooze';
+import type { InboxListRow } from '@plannotator/core/inbox-types';
 import type { ListSort } from './listView';
 
 /** How far back "recent" reaches. */
@@ -50,14 +53,6 @@ export function rowRecentlyActed(row: Pick<InboxListRow, 'thread_id' | 'acted_at
 
 /** A row's place in the order: the later the time, the higher. */
 export type ActedKey = (row: InboxListRow) => string;
-
-/** Each group's rows newest first by `key` (ties keep the group's order); the Snoozed band as it is. */
-export function sortByActed(sections: readonly InboxListSection[], key: ActedKey): InboxListSection[] {
-  const time = (row: InboxListRow) => Date.parse(key(row)) || 0;
-  return sections.map((section) =>
-    section.id === INBOX_SNOOZED_BAND.id || section.threads.length < 2 ? section : { ...section, threads: [...section.threads].sort((a, b) => time(b) - time(a)) },
-  );
-}
 
 /**
  * The rows' places while Recent activity is on (null while off): a row takes the time it has when first drawn after

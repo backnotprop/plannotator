@@ -98,7 +98,10 @@ export function resetListViewForTests(): void {
 export interface ListSort {
   epoch: number;
   keep: string | null;
-  /** The time a row is placed by; absent: its `last_at`. Recent activity's (listFilterRecent.ts): when the person last acted there. */
+  /**
+   * The time a row is placed by; absent: its `last_at`. Recent activity's (listFilterRecent.ts): when the person last
+   * acted there. Set, InboxList draws List's one list whatever the view.
+   */
   by?: (row: InboxListRow) => string;
 }
 

@@ -3,7 +3,7 @@
  * listFilter.ts, the window's notes in recentActs.ts): which rows it keeps, their order, how it holds and how it goes.
  *
  * What this catches: a row kept with no act of the person's, or past the 30 days, or one dropped inside them; rows not
- * newest first by the act (or by `last_at` instead), the Snoozed band reordered, a group dropped; a row that moves
+ * newest first by the act across the groups (or by `last_at` instead), a snoozed row drawn among them; a row that moves
  * under the person before the list settles, or one that stays put after it does; the List view still sorting by
  * `last_at` with the filter on, or keeping the filter's order once it is off; the pick lost on reload, or still
  * counted once off; a thread counted as opened without the person's gesture (shown on load, opened by an agent, or
@@ -14,7 +14,7 @@ import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-typ
 import { INBOX_SNOOZED_BAND } from '@plannotator/core/inbox-snooze';
 import { setStorageBackend, resetStorageBackend } from '@plannotator/ui/utils/storage';
 import { LIST_FILTER_COOKIE, NO_LIST_FILTER, filterListSections, parseListFilter, pickCount, resetListFilterForTests, writeListFilter } from './listFilter';
-import { RECENT_ACTIVITY_DAYS, actedPlaces, noteActedHere, resetActedHereForTests, rowActedAt, rowRecentlyActed, sortByActed } from './listFilterRecent';
+import { RECENT_ACTIVITY_DAYS, actedPlaces, noteActedHere, resetActedHereForTests, rowActedAt, rowRecentlyActed } from './listFilterRecent';
 import { flatRows } from './listView';
 import { gestured, mediaPlayed, personOpened, resetRecentActsForTests, routeChanged } from './recentActs';
 
@@ -76,12 +76,15 @@ describe('which rows Recent activity keeps', () => {
 });
 
 describe('the order', () => {
-  test('each group newest first by when the person acted, never by last_at; the Snoozed band as it was', () => {
+  test('one list newest first by when the person acted, across the groups and never by last_at; the Snoozed band left out', () => {
+    // A minute-old act in Quiet comes before a week-old one waiting on the person.
     const sections = [
-      section('waiting', [row('old', { acted: ago(48), last: ago(0.1) }), row('new', { acted: ago(1), last: ago(30) }), row('mid', { acted: ago(5) })]),
-      section(INBOX_SNOOZED_BAND.id, [row('s1', { acted: ago(9) }), row('s2', { acted: ago(1) })]),
+      section('waiting', [row('charlie', { acted: ago(24 * 7), last: ago(0.1) }), row('bob', { acted: ago(24), last: ago(0.2) })]),
+      section('quiet', [row('ada', { acted: ago(1 / 60), last: ago(30) })]),
+      section(INBOX_SNOOZED_BAND.id, [row('snoozed', { acted: ago(0) })]),
     ];
-    expect(ids(sortByActed(sections, actedPlaces(null, null).key))).toEqual(['waiting:new,mid,old', `${INBOX_SNOOZED_BAND.id}:s1,s2`]);
+    const flat = flatRows(sections, null, { epoch: 1, keep: null, by: actedPlaces(null, null).key });
+    expect(flat.rows.map((r) => r.row.thread_id)).toEqual(['ada', 'bob', 'charlie']);
   });
 
   test('a row keeps its place until the next whole sort; the open thread kept through one keeps it then too', () => {

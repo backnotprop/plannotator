@@ -727,11 +727,11 @@ export function InboxList(props: InboxListProps) {
   });
   // The list's look options in its ⋮ menu (listLook.ts): smaller thread names on by default, the others off.
   const [look, setLook] = useListLook(props.rememberLook !== false);
-  // Grouped (the default) or List (listView.ts), this browser's choice in the same ⋮ menu.
+  // Grouped (the default) or List (listView.ts), this browser's choice in the same ⋮ menu; Recent activity (`sort.by`) draws List's one list whatever it is.
   const [view, setView] = useListView(props.rememberLook !== false);
-  const asList = view === 'list';
+  const asList = view === 'list' || props.sort?.by !== undefined;
   // Agents (agentsView/): its drawn rows (Select all picks only those), its Shows (each opens the agents rows land under).
-  const asAgents = view === 'agents', [agentRows, setAgentRows] = useState<readonly string[] | null>(null), [shows, setShows] = useState(0);
+  const asAgents = view === 'agents' && !asList, [agentRows, setAgentRows] = useState<readonly string[] | null>(null), [shows, setShows] = useState(0);
   // The starred threads as pills above the list, or (off, the default) the sidebar's Starred section (starredPills.ts).
   const [starredAbove, setStarredAbove] = useStarredAbove(props.rememberLook !== false);
   const showArchived = useShowArchived();
@@ -913,7 +913,7 @@ export function InboxList(props: InboxListProps) {
     // The groups the rows land in open with the press (the owner, 2026-11-08), in the same render as the
     // rows: closed, they would come in out of sight and Show would seem to do nothing.
     const lands = props.notice?.lands;
-    if (lands && view === 'grouped') groups.open(lands); else if (asAgents) setShows((n) => n + 1);
+    if (lands && !asList && !asAgents) groups.open(lands); else if (asAgents) setShows((n) => n + 1);
     props.onShowNew();
   };
   // The row whose right-click menu is open: a muted background, as the project row's.

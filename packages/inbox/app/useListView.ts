@@ -15,7 +15,7 @@ import { filterAgentRows } from '../agents/model';
 import { filterTagRows } from '../threadTags';
 import { withLiveTagPicks } from '../listFilterTags';
 import { routineHold, useRoutineThreads } from '../listFilterRoutines';
-import { sortByActed, useActedKeys } from '../listFilterRecent';
+import { useActedKeys } from '../listFilterRecent';
 import { useRecentActs } from '../recentActs';
 import type { ListSort } from '../listView';
 import { useThreadTagsHost } from '../useThreadTagsHost';
@@ -123,20 +123,17 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
   const routineTest = routines.state === 'ready' ? routines.test : undefined;
   /** A saved Routine pick while the routines are not read: the list waits, drawing no row and no empty words. */
   const listHeld = routineHold(routines, listFilterApplied);
-  // Recent activity (listFilterRecent.ts): newest first by when the person last acted, placed as of the last whole sort.
+  // Recent activity (listFilterRecent.ts): one list, newest first by when the person last acted, placed as of the last whole sort.
   const actedKey = useActedKeys(listFilterApplied.recent, listSort);
   /** The list as the person reads it: `filterList`, then the filter. "N new" and the rows read this. */
   const filterShown = useCallback(
-    (sections: readonly InboxListSection[]) => {
+    (sections: readonly InboxListSection[]) =>
       // The Tag picks keep a thread tagged itself or in a tagged project (projectTags.ts).
-      if (listHeld) return filterList(sections).map((section) => ({ ...section, threads: [] }));
-      const kept = filterListSections(filterList(sections), listFilterApplied, Date.now(), heldRead, filterTagsOfRow, routineTest);
-      return actedKey ? sortByActed(kept, actedKey) : kept;
-    },
+      listHeld ? filterList(sections).map((section) => ({ ...section, threads: [] })) : filterListSections(filterList(sections), listFilterApplied, Date.now(), heldRead, filterTagsOfRow, routineTest),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the day: a new one reads the spans again.
-    [filterList, listFilterApplied, listFilterDay, heldRead, filterTagsOfRow, routineTest, listHeld, actedKey],
+    [filterList, listFilterApplied, listFilterDay, heldRead, filterTagsOfRow, routineTest, listHeld],
   );
-  /** The sort InboxList's List view reads: Recent activity's places while it is on. */
+  /** The sort InboxList reads: Recent activity's places while it is on, which also draws List's one list whatever the view. */
   const listSortShown = useMemo(() => (actedKey ? { ...listSort, by: actedKey } : listSort), [listSort, actedKey]);
   /** The rows before the filter: its menu's counts and choices. */
   const listFilterRows = useMemo(() => {
