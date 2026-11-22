@@ -511,6 +511,128 @@ describe("Over your tailnet publishes by itself once Tailscale is back", () => {
   });
 });
 
+/**
+ * A reboot (#3591): the Inbox stops cleanly as the computer shuts down, but Tailscale is going down too, so its take-down
+ * reads an empty `serve status` and an unreadable `status`, and believes the mapping gone. Tailscale keeps the mapping
+ * and brings it back at the next boot, pointing at the last run's proxy port, where nothing listens.
+ */
+describe("after a reboot, the Inbox takes back its own mapping and never anyone else's", () => {
+  const MAPPING_WORDS = `Another tailscale serve mapping already uses port ${PORT}, the Inbox's port. The Inbox never replaces it: remove it with "tailscale serve --https=${PORT} off" if nothing needs it.`;
+
+  /** The fake, and a run that misreads Tailscale as it shuts down (`shuttingDown`). */
+  function rebootingTailscale() {
+    const ts = fakeTailscale();
+    ts.tailscale.backend = "Running";
+    const box = { shuttingDown: false };
+    const run: TailscaleRunner = (args, ms) => {
+      if (box.shuttingDown && args[0] === "serve" && args[1] === "status") return { status: 0, stdout: "{}", stderr: "" };
+      if (box.shuttingDown && args[0] === "status") return { status: 1, stdout: "", stderr: "failed to connect to local tailscaled" };
+      return ts.run(args, ms);
+    };
+    return { ts, box, run };
+  }
+
+  /** The first run publishes, then stops cleanly while Tailscale shuts down: the mapping stays with Tailscale. */
+  function publishThenShutDown(dataDir: string, run: TailscaleRunner, box: { shuttingDown: boolean }, ts: ReturnType<typeof fakeTailscale>) {
+    const first = create(dataDir, run, fakeClock());
+    first.module.start();
+    const left = ts.serve.get(PORT)!;
+    expect(left).toBe(`http://127.0.0.1:${first.module.listenerPort()}`);
+    box.shuttingDown = true;
+    first.module.stop();
+    box.shuttingDown = false;
+    // Nothing was taken down: the stop believed the mapping gone, and Tailscale kept it.
+    expect(ts.serve.get(PORT)).toBe(left);
+    return { left, kept: first.registry.tailscale };
+  }
+
+  test("the mapping the last run made, brought back by Tailscale at boot to a proxy port nothing listens on: re-pointed at this run's listener", async () => {
+    const dataDir = world();
+    const { ts, box, run } = rebootingTailscale();
+    const { left, kept } = publishThenShutDown(dataDir, run, box, ts);
+    expect(kept?.made).toEqual({ https_port: PORT, proxy_ports: [Number(left.split(":").at(-1))] });
+
+    const clock = fakeClock();
+    const next = create(dataDir, run, clock, kept);
+    const before = ts.calls.length;
+    next.module.start();
+    // The start never probes (it would block): it finds a mapping on its port, and a look runs at once.
+    expect(clock.waits()).toEqual([0]);
+    await clock.fire();
+    expect(next.module.state()).toMatchObject({ url: `https://${MAGIC}:${PORT}/`, error: null });
+    expect(ts.serve.get(PORT)).toBe(`http://127.0.0.1:${next.module.listenerPort()}`);
+    expect(next.republished).toHaveLength(1);
+    expect(clock.waits()).toEqual([]);
+    // Re-pointed in place: one serve, no take-down of anything.
+    expect(ts.calls.slice(before).filter((args) => args[0] === "serve" && args[1] !== "status")).toEqual([["serve", "--bg", `--https=${PORT}`, `http://127.0.0.1:${next.module.listenerPort()}`]]);
+  });
+
+  test("a mapping on the Inbox's port that it never made, after the same reboot: never touched, the words unchanged", async () => {
+    const dataDir = world();
+    const { ts, box, run } = rebootingTailscale();
+    const { kept } = publishThenShutDown(dataDir, run, box, ts);
+    // Someone else's service took the port while the Inbox was down (its target is one this Inbox never mapped).
+    const theirs = `http://127.0.0.1:${await freePort()}`;
+    ts.serve.set(PORT, theirs);
+
+    const clock = fakeClock();
+    const next = create(dataDir, run, clock, kept);
+    const before = ts.calls.length;
+    next.module.start();
+    await clock.fire();
+    expect(next.module.state()).toMatchObject({ url: null, error: MAPPING_WORDS });
+    expect(ts.serve.get(PORT)).toBe(theirs);
+    expect(ts.calls.slice(before).filter((args) => args[0] === "serve" && args[1] !== "status")).toEqual([]);
+    // No fast loop: the slow look only.
+    expect(clock.waits()).toEqual([INBOX_TAILSCALE_REPUBLISH.stuckMs]);
+  });
+
+  test("a stale record (it names one dead proxy port, the mapping points at another the Inbox made, dead too): re-pointed", async () => {
+    const dataDir = world();
+    const ts = fakeTailscale();
+    ts.tailscale.backend = "Running";
+    const named = await freePort();
+    const older = await freePort();
+    ts.serve.set(PORT, `http://127.0.0.1:${older}`);
+    const clock = fakeClock();
+    const { module } = create(dataDir, ts.run, clock, { url: null, error: null, https_port: PORT, proxy_port: named, made: { https_port: PORT, proxy_ports: [older, named] } });
+    module.start();
+    await clock.fire();
+    expect(module.state()).toMatchObject({ url: `https://${MAGIC}:${PORT}/`, error: null });
+    expect(ts.serve.get(PORT)).toBe(`http://127.0.0.1:${module.listenerPort()}`);
+  });
+
+  test("taken back once, then started again twice: each start publishes at once with one serve, and the record stays bounded", async () => {
+    const dataDir = world();
+    const { ts, box, run } = rebootingTailscale();
+    let { kept } = publishThenShutDown(dataDir, run, box, ts);
+    const clock = fakeClock();
+    const reclaimed = create(dataDir, run, clock, kept);
+    reclaimed.module.start();
+    await clock.fire();
+    expect(reclaimed.module.state().url).toBe(`https://${MAGIC}:${PORT}/`);
+    // A clean stop with Tailscale running takes it down for real.
+    reclaimed.module.stop();
+    expect(ts.serve.has(PORT)).toBe(false);
+    kept = reclaimed.registry.tailscale;
+
+    for (let round = 0; round < 2; round++) {
+      const clock = fakeClock();
+      const next = create(dataDir, run, clock, kept);
+      const before = ts.calls.length;
+      next.module.start();
+      expect(next.module.state()).toMatchObject({ url: `https://${MAGIC}:${PORT}/`, error: null });
+      expect(ts.serve.get(PORT)).toBe(`http://127.0.0.1:${next.module.listenerPort()}`);
+      expect(clock.waits()).toEqual([]);
+      const writes = ts.calls.slice(before).filter((args) => args[0] === "serve" && args[1] !== "status");
+      expect(writes.filter((args) => args.includes("--bg"))).toHaveLength(1);
+      kept = next.registry.tailscale;
+      expect(kept?.made?.proxy_ports.length).toBeLessThanOrEqual(3);
+      next.module.stop();
+    }
+  });
+});
+
 describe("the tailnet listener tells this computer's own window from another computer's", () => {
   test("serve's X-Forwarded-For naming one of this machine's own tailnet addresses is this computer's window; a peer's address, none or several is not", async () => {
     const dataDir = world();
