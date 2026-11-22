@@ -41,3 +41,38 @@ test('a long unbroken title keeps its end from a separator; words, short runs an
   const split = titleTail(`${'x'.repeat(20)}👩‍💻👩‍💻👩‍💻👩‍💻👩‍💻👩‍💻👩‍💻👩‍💻👩‍💻👩‍💻👩‍💻👩‍💻`);
   expect(split!.tail).toBe('👩‍💻'.repeat(10));
 });
+
+test('the last word is counted in characters a person sees: emoji never make a short word long, nor a tail start with a space', () => {
+  // Four emoji are twenty UTF-16 units but four characters: a short word, cut at the end.
+  expect(titleTail('Ship it 👩‍💻👩‍💻👩‍💻👩‍💻')).toBeNull();
+  const title = `Ship it ${'👩‍💻'.repeat(20)}`;
+  const split = titleTail(title)!;
+  expect(split.tail).toBe('👩‍💻'.repeat(10));
+  expect(split.head + split.tail).toBe(title);
+  // Trailing spaces are no part of the kept end.
+  const spaced = titleTail('Review: fix/retry-jitter-on-charge-timeouts   ')!;
+  expect(spaced.tail).toBe('timeouts');
+  expect(/^\s/.test(spaced.tail)).toBe(false);
+});
+
+test('right-to-left scripts past U+FFFF are cut at the end, never split', () => {
+  for (const title of [
+    `fix/${'𞤀𞤁𞤂𞤃'.repeat(6)}`, // Adlam
+    `release/${'𐴀𐴁𐴂'.repeat(8)}`, // Hanifi Rohingya
+    `branch-${'𐲀𐲁𐲂'.repeat(8)}`, // Old Hungarian
+    `${'a'.repeat(24)}𐡀`, // one Imperial Aramaic letter at the end
+  ]) {
+    expect(titleTail(title)).toBeNull();
+  }
+});
+
+test('without Intl.Segmenter a long run is cut at its end, never split inside a glyph', () => {
+  const kept = Intl.Segmenter;
+  try {
+    (Intl as { Segmenter?: unknown }).Segmenter = undefined;
+    expect(titleTail('Review billing: fix/retry-jitter-on-charge-timeouts')).toBeNull();
+  } finally {
+    (Intl as { Segmenter?: unknown }).Segmenter = kept;
+  }
+  expect(titleTail('Review billing: fix/retry-jitter-on-charge-timeouts')).not.toBeNull();
+});
