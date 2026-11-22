@@ -16,6 +16,10 @@
  *     Mini and says "Combine undone." only once Mini is back and its thread is back there too.
  *  6. Mini stopped while the dialog is open: the dialog says Mini can't be asked now, in the person's words, and
  *     offers nobody.
+ *  7. Any running agent, always (the owner, 2026-11-22): with both picks on Studio the dialog still lists Mini's agents,
+ *     each line with its computer (07-…); picks on both (08-…), Studio's agent writes it after Mini's thread got a new
+ *     message: that thread stays open on Mini, and the combined thread carries Studio's pick's file and one quiet line,
+ *     "Still open on Mini: …" (09-…).
  *
  * Pictures (1440×900, light; the dialog in dark too) land in PLANNOTATOR_COMBINE_MACHINES_SHOTS, else
  * .local/proof/combine-across-computers/ (CI keeps .local/proof/ as the shard's "inbox-window-proof" artifact).
@@ -314,5 +318,63 @@ test('6. Mini stopped while the dialog is open: the person’s words that it is 
   await expect(dialog()).not.toContainText('Ask the person');
   await shootBoth('combine-dialog-away');
   await dialog().locator('[data-combine-cancel]').click();
+  expect(errors).toEqual([]);
+});
+
+test('7. Any running agent, also with every pick on one computer; every pick’s files and one quiet line for what stayed open on Mini', async () => {
+  await start(mini);
+  await expect.poll(() => stateOf(studio, mini), { timeout: 45_000 }).toBe('online');
+  await expect.poll(async () => (await read<{ machines: { id: string; marks?: string[] }[] }>(studio, '/api/inbox/machines')).machines.find((m) => m.id === mini.id)?.marks ?? [], { timeout: 30_000 }).toContain('combine-across');
+  const c1 = await agentWith(studio, 'Claude Code', 'claude-code', 'Invoice for Charlie Dunn');
+  writeFileSync(join(c1.project, 'invoice-charlie-dunn.md'), '# Invoice for Charlie Dunn\n\nTwo lines, paid in full.\n');
+  await c1.agent.send({ project_path: c1.project, reply_to: c1.thread, body: 'The invoice, as sent.', attachments: ['invoice-charlie-dunn.md'] });
+  const c2 = await agentWith(studio, 'Claude Code', 'claude-code', 'Export for Bob Tully');
+  const d = await agentWith(mini, 'Codex', 'codex', 'Refund for Ada Novak');
+  await page.reload();
+  for (const id of [c1.thread, c2.thread, d.thread]) await expect(row(id)).toBeVisible({ timeout: 20_000 });
+
+  // (a) Both picks on Studio: Mini's running agents are offered too, after the ones that wrote, each with its computer.
+  await openCombine([c1.thread, c2.thread]);
+  const more = dialog().locator('[data-combine-more]');
+  if ((await more.count()) > 0) await more.click();
+  const subs = await dialog().locator('[data-combine-agent] small').allTextContents();
+  expect(subs.slice(0, 2).every((sub) => sub.startsWith('1 of these'))).toBe(true);
+  expect(subs.slice(2).every((sub) => sub.startsWith('0 of these'))).toBe(true);
+  expect(subs.every((sub) => sub.endsWith(' · Studio') || sub.endsWith(' · Mini'))).toBe(true);
+  await expect(linesOf(mini)).not.toHaveCount(0);
+  await expect(dialog().locator('.ib-cmb-why')).toHaveCount(0);
+  await settled();
+  await page.screenshot({ path: join(shots, '07-dialog-picks-on-one-computer.png') });
+  await dialog().locator('[data-combine-cancel]').click();
+  await expect(dialog()).toHaveCount(0);
+
+  // (b) Picks on both computers.
+  await page.reload();
+  await expect(row(d.thread)).toBeVisible({ timeout: 20_000 });
+  await openCombine([c1.thread, d.thread]);
+  await expect(agentLine(studio).locator('small')).toContainText('Studio');
+  await expect(agentLine(mini).locator('small')).toContainText('Mini');
+  await settled();
+  await page.screenshot({ path: join(shots, '08-dialog-picks-on-both-computers.png') });
+  await agentLine(studio).locator('input').check();
+  await dialog().locator('[data-combine-go]').click();
+  await expect(dialog()).toHaveCount(0);
+  const combine = (await read<{ combines: { id: string; state: string }[] }>(studio, '/api/inbox/combine')).combines.find((c) => c.state === 'asked')!;
+
+  // (c) Mini's thread moves on after the Combine read it; then the new thread arrives on Studio.
+  await d.agent.send({ project_path: d.project, reply_to: d.thread, body: 'One more refund for Ada Novak came in.' });
+  const made = (await c1.agent.send({ project_path: c1.project, subject: 'Charlie Dunn and Ada Novak, combined', body: 'Where the invoice and the refund stand.', idempotency_key: combine.id })).thread_id as string;
+  await expect(toast()).toContainText('Combined 2 threads', { timeout: 20_000 });
+  await expect.poll(() => archivedOn(studio, c1.thread), { timeout: 20_000 }).toBe(true);
+  const first = async () => (await read<{ thread: { messages: { combine_left?: unknown; attachments?: { name: string }[] }[] } }>(studio, `/api/inbox/threads/${made}`)).thread.messages[0]!;
+  await expect.poll(async () => (await first()).combine_left ?? null, { timeout: 30_000 }).toEqual({ open: [{ machine: 'Mini', subject: 'Refund for Ada Novak' }] });
+  await expect.poll(async () => ((await first()).attachments ?? []).map((a) => a.name), { timeout: 30_000 }).toEqual(['invoice-charlie-dunn.md']);
+  expect(await archivedOn(mini, d.thread)).toBe(false);
+  await row(made).click();
+  const quiet = page.locator('[data-combine-left]');
+  await expect(quiet).toHaveText('Still open on Mini: Refund for Ada Novak', { timeout: 20_000 });
+  await quiet.scrollIntoViewIfNeeded();
+  await settled();
+  await page.screenshot({ path: join(shots, '09-combined-thread-quiet-line.png') });
   expect(errors).toEqual([]);
 });

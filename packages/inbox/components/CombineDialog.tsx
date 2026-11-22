@@ -3,18 +3,18 @@
  * say what it should be about, and presses Combine. Nothing is archived now: the picked threads go to the archive once
  * the new thread arrives (inbox-combine.ts), and the toast's Undo stops it until then (useCombines.ts).
  *
- * Who can be asked: a running session that wrote in a picked thread, on the machine that holds that thread. Picks on
- * this computer and a linked one (approval "inbox-combine-across-computers") list the agents of both, each with its
- * computer; the chosen agent's computer runs the Combine and keeps the new thread, and reads and archives the other's
- * picked threads there (combineAcross.ts). A machine that cannot be asked now, or runs an older Plannotator, is said
- * so and nobody is offered.
+ * Who can be asked (approval "inbox-combine-across-computers": "Any running agent on either computer, always"): every
+ * running session on this computer and on a linked one, those that wrote in a picked thread first, each with its
+ * computer while one is linked; the chosen agent's computer runs the Combine and keeps the new thread, and reads and
+ * archives the other's picked threads there (combineAcross.ts). A machine holding picks that cannot be asked now, or
+ * runs an older Plannotator, is said so and nobody is offered; one holding none is left out quietly.
  */
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { InboxCombineRecord, InboxListRow } from '@plannotator/core/inbox-types';
 import { INBOX_COMBINE_WORDS_MAX, inboxCombineAgentApart, inboxCombineAgentLabel, inboxRowArchived, inboxTidyWords } from '@plannotator/core/inbox-types';
 import { formatCount, plural, whenTime } from '@plannotator/core/inbox-format';
 import { combineApi } from '../combineApi';
-import { combineAgentKey, combineAwayLine, combineFailure, combineGroups, combineMachineName, combineOlderLine, combineSpread, mergeCombineAgents, type CombineAgent } from '../combineAcross';
+import { combineAgentKey, combineAsks, combineAwayLine, combineFailure, combineGroups, combineMachineName, combineOlderLine, combineSpread, mergeCombineAgents, type CombineAgent } from '../combineAcross';
 import { PressKeys } from '../pressKeys';
 import { HostMark } from '../icons';
 import { isAway, rowMachine, type MachinesModel } from '../machines';
@@ -51,9 +51,9 @@ export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted
   const undoLine = back === n ? `Undo brings the ${formatCount(n)} back.` : back === 0 ? 'They stay archived.' : `Undo brings back the ${formatCount(back)} not already archived.`;
   const blocked = combineBlocked(rows, machines);
   const groups = combineGroups(rows, machines);
-  // Picks on two computers: every agent says which it runs on. On one linked machine: its name, as before.
   const across = groups.length > 1;
-  const machineOf = (agent: CombineAgent) => (across || agent.machine !== null ? combineMachineName(agent.machine, machines) : null);
+  // A computer linked: every agent says which it runs on. None: no computer names.
+  const machineOf = (agent: CombineAgent) => (machines.linked.length > 0 || agent.machine !== null ? combineMachineName(agent.machine, machines) : null);
   const [agents, setAgents] = useState<CombineAgent[] | null>(null);
   const [who, setWho] = useState<string | null>(null);
   const [words, setWords] = useState('');
@@ -63,20 +63,19 @@ export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted
   const [keys] = useState(() => new PressKeys('combine'));
   // Two presses before the button greys out read the same `sending`: this one is set at once.
   const pressed = useRef(false);
-  // Each computer is asked about its own picks; the answers make one list. With picks on two computers each lists every
-  // running agent there (`all`): any of them can write it.
-  const asks = JSON.stringify(groups);
+  // Each computer is asked (`all`: every running agent there, any of which can write it); the answers make one list.
+  const asks = JSON.stringify(combineAsks(groups, machines));
   const machinesRef = useRef(machines);
   machinesRef.current = machines;
   useEffect(() => {
     if (blocked) return;
     let live = true;
-    const each = JSON.parse(asks) as typeof groups;
-    const all = each.length > 1;
-    const reads = each.map(({ machine, ids }) =>
-      combineApi.plan(ids, machine, all).then(
+    const each = JSON.parse(asks) as ReturnType<typeof combineAsks>;
+    const reads = each.map(({ machine, ids, holds }) =>
+      combineApi.plan(ids, machine, true).then(
         (plan) => ({ machine, agents: plan.agents ?? [] }),
-        (cause: unknown) => Promise.reject({ machine, cause }),
+        // One that holds no pick and cannot be read now: its agents are left out, the Combine is not about it.
+        (cause: unknown) => (holds ? Promise.reject({ machine, cause }) : { machine, agents: [] }),
       ),
     );
     void Promise.allSettled(reads).then((answers) => {
@@ -121,7 +120,7 @@ export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted
       keys.failed(null, cause);
       pressed.current = false;
       setSending(false);
-      setError((across ? combineFailure(cause, chosen.machine, machines) : null) ?? (cause instanceof Error ? cause.message : 'The Combine did not start.'));
+      setError((across || chosen.machine !== (groups[0]?.machine ?? null) ? combineFailure(cause, chosen.machine, machines) : null) ?? (cause instanceof Error ? cause.message : 'The Combine did not start.'));
     }
   };
   // Cancel takes the focus: Combine is greyed until the agents are read, and a focused field would open a phone's keyboard.
@@ -141,7 +140,7 @@ export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted
             <fieldset className="ib-cmb-who">
               <legend>Who writes it</legend>
               {agents === null && <p className="ib-cmb-why">Finding the agents of these threads…</p>}
-              {agents?.length === 0 && !error && <p className="ib-cmb-why">No agent that wrote in these threads is running. Combine needs one to read them and write the new thread.</p>}
+              {agents?.length === 0 && !error && <p className="ib-cmb-why">No agent is running. Combine needs one to read them and write the new thread.</p>}
               <div className="ib-cmb-list" data-all={shown === agents?.length && (agents?.length ?? 0) > FIRST ? '' : undefined} onKeyDown={onArrow}>
               {agents?.slice(0, shown).map((agent) => (
                 <label key={combineAgentKey(agent)} className="ib-cmb-opt" data-on={combineAgentKey(agent) === who ? '' : undefined} data-combine-agent={agent.session} data-combine-machine={agent.machine ?? undefined}>

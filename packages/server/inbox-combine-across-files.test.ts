@@ -4,7 +4,8 @@
  *
  * What regresses: copies that fill the disk (a stopped Combine still copying, a stopped or long-failed one's copies kept
  * from the upload sweep for good, no cap on their total); files silently missing after a restart (the copy not picked up
- * again, or the attach never run once the thread had arrived); a file attached twice when the attach is replayed.
+ * again, or the attach never run once the thread had arrived); a file attached twice when the attach is replayed; this
+ * computer's picks' files left behind in their archived threads; a file left out without a word on the new thread.
  */
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
@@ -27,15 +28,45 @@ type Kept = { name: string; upload?: string; missed?: string; attached?: true };
 const keptFiles = (c: Computer): Kept[] => JSON.parse(readFileSync(join(c.store.dir, "combines.json"), "utf8")).combines[0].files ?? [];
 const start = async (c: Computer, threads: string[], key: string) => (await route(c, "POST", "/api/inbox/combine", { thread_ids: threads, session: "ses_studio", idempotency_key: key })).body.combine as InboxCombineRecord;
 
-/** A thread on Mini whose first message has `n` files of 30 bytes each. */
-async function withFiles(mini: Computer, n: number) {
+/** A thread on Mini (or `c`) whose first message has `n` files of 30 bytes each. */
+async function withFiles(mini: Computer, n: number, stem = "part", session = "ses_mini") {
   const folder = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-combine-copies-")));
   roots.push(folder);
-  const names = Array.from({ length: n }, (_, i) => `part-${i}.md`);
+  const names = Array.from({ length: n }, (_, i) => `${stem}-${i}.md`);
   for (const name of names) writeFileSync(join(folder, name), `${name.padEnd(29, ".")}\n`);
   const attachments = await recordInboxAttachments(mini.store.dir, names, { base: folder, at: new Date().toISOString() });
-  return mini.store.sendMessage({ project_id: mini.project, author: agent("ses_mini"), subject: "Notes", body: "See the parts.", attachments }).message;
+  return mini.store.sendMessage({ project_id: mini.project, author: agent(session), subject: "Notes", body: "See the parts.", attachments }).message;
 }
+
+test("every pick's files go on the new thread: this computer's as they are, the other computer's copied in", async () => {
+  const { studio, mini } = world();
+  const here = await withFiles(studio, 2, "local", "ses_studio");
+  const there = await withFiles(mini, 1);
+  const record = await start(studio, [here.id, there.id], "k-all-files");
+  await until(() => keptFiles(studio).every((f) => f.upload || (f as { local?: true }).local));
+  const made = studio.store.sendMessage({ project_id: studio.project, author: agent("ses_studio"), subject: "Combined", body: "Where it stands.", idempotency_key: record.id }).message;
+  await until(() => (studio.store.message(made.id)!.attachments ?? []).length === 3);
+  const on = studio.store.message(made.id)!.attachments!;
+  expect(on.map((a) => a.name)).toEqual(["local-0.md", "local-1.md", "part-0.md"]);
+  // This computer's: the same bytes as in the old thread, which keeps its own.
+  expect(on.slice(0, 2).map((a) => a.sent_sha256)).toEqual(here.attachments!.map((a) => a.sent_sha256));
+  expect(on.slice(0, 2).map((a) => a.id)).not.toEqual(here.attachments!.map((a) => a.id));
+  expect(studio.store.message(here.id)!.attachments).toHaveLength(2);
+  expect(studio.store.message(made.id)!.combine_left).toBeUndefined();
+});
+
+test("a file that could not be copied is named on the new thread", async () => {
+  const { studio, mini, s1 } = world();
+  const m = await withFiles(mini, 3);
+  studio.combine.close();
+  studio.combine = engine(studio, { filesMaxBytes: 70 });
+  const record = await start(studio, [s1.id, m.id], "k-left-out");
+  await until(() => keptFiles(studio).every((f) => f.upload || f.missed));
+  const made = studio.store.sendMessage({ project_id: studio.project, author: agent("ses_studio"), subject: "Combined", body: "Where it stands.", idempotency_key: record.id }).message;
+  await until(() => (studio.store.message(made.id)!.attachments ?? []).length === 2);
+  await until(() => studio.store.message(made.id)!.combine_left !== undefined);
+  expect(studio.store.message(made.id)!.combine_left).toEqual({ files: ["part-2.md"] });
+});
 
 test("a stopped Combine copies nothing more, and its copies are left to the upload sweep", async () => {
   const { studio, mini, s1 } = world();

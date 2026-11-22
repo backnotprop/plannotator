@@ -120,6 +120,7 @@ import {
 } from './ReplyRoute';
 import { ReaskNote } from './ReaskNote';
 import { TidyNote } from './Tidy';
+import { CombineLeftNote } from './CombineLeftNote';
 import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } from '../reask';
 import { ChangedNotice, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
 import type { ComposerCommand } from './ComposerField';
@@ -5296,12 +5297,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     newestKeycap={!file}
                   />
                 )}
+                {isAgent && <CombineLeftNote left={message.combine_left} />}
                 {message.guide &&
                   (codeReview && message.guide.review ? (
                     <ReviewCard guide={message.guide} outcome={reviewOutcomes.get(message.id) ?? null} verdict={!thread.pull_theirs && !message.guide.walkthrough} onInReviews={onInReviews} onOpen={() => onOpenGuide(message.id)} />
-                  ) : (
-                    <GuideCard guide={message.guide} onOpen={() => onOpenGuide(message.id)} />
-                  ))}
+                  ) : <GuideCard guide={message.guide} onOpen={() => onOpenGuide(message.id)} />)}
                 {isAgent && message.ack && (
                   <AckPill ack={message.ack} agent={name} wakes={message.wakes === true} connection={message.id === ackWaiting?.id ? ackConnection : undefined} messageId={message.id} />
                 )}

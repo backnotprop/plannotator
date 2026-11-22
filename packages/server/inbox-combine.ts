@@ -1,9 +1,11 @@
 /**
  * Combine's routes (approval "inbox-multi-select", 4A; packages/core/inbox-combine.ts):
  *
- * - `GET /api/inbox/combine?threads=<id>,<id>`: the running sessions that can be asked (each wrote in at least one of
- *   the picked threads, so it reads them on this machine), and the Combines worth showing. Without `threads`: those only.
- * - `POST /api/inbox/combine { thread_ids, session, words?, idempotency_key }`: asks the session, with one wake (a
+ * - `GET /api/inbox/combine?threads=<id>,<id>`: the running sessions that wrote in at least one of the picked threads,
+ *   and with `all=1` (the window's) every other running session after them, and the Combines worth showing. Without
+ *   `threads`: those only.
+ * - `POST /api/inbox/combine { thread_ids, session, words?, idempotency_key }`: asks the session, any running one
+ *   (approval "inbox-combine-across-computers": "Any running agent on either computer, always"), with one wake (a
  *   Tidy note whose run is the Combine's id). A replay of the key answers the Combine it made.
  * - `POST /api/inbox/combine/:id/cancel`: the person stops a Combine still waiting; an undelivered wake is withdrawn.
  * - `POST /api/inbox/combine/:id/undo`: the picked threads come back from the archive, but those archived before it.
@@ -190,8 +192,9 @@ export function createInboxCombine(deps: InboxCombineDeps) {
   };
 
   /**
-   * Picks on two computers (approval "inbox-combine-across-computers": "Any running agent on either computer"): the
-   * ones that wrote in a pick here first, as `agentsFor` orders them, then every other running session here.
+   * Who can write it (approval "inbox-combine-across-computers": "Any running agent on either computer, always"): the
+   * ones that wrote in a pick here first, as `agentsFor` orders them, then every other running session here. With no
+   * pick here, only a session that has a thread here: its wake goes in its own last thread (`carrier`).
    */
   const everyone = (threadIds: readonly string[]): InboxCombineAgent[] => {
     const wrote = agentsFor(threadIds);
@@ -199,6 +202,7 @@ export function createInboxCombine(deps: InboxCombineDeps) {
     const lastThreads = store.lastThreadsBySession();
     const others = (deps.liveSessions?.() ?? [])
       .filter((s, i, all) => !isInboxPermissionSession(s.session) && reachOf(s.session) !== null && !wrote.some((a) => a.session === s.session) && all.findIndex((x) => x.session === s.session) === i)
+      .filter((s) => threadIds.length > 0 || carrier(s.session) !== null)
       .map((s): InboxCombineAgent => {
         const last = lastThreads.get(s.session);
         const project = s.root ? (store.projectByRoot(s.root)?.name ?? basename(s.root)) : undefined;
@@ -207,6 +211,12 @@ export function createInboxCombine(deps: InboxCombineDeps) {
       })
       .sort((a, b) => (b.wrote_at ?? "").localeCompare(a.wrote_at ?? ""));
     return [...wrote, ...others];
+  };
+
+  /** With no pick on this computer, the thread here that carries the wake: the session's own last thread, still here. */
+  const carrier = (session: string): string | null => {
+    const last = store.lastThreadsBySession().get(session)?.id ?? null;
+    return last && store.message(last)?.thread_id === last ? last : null;
   };
 
   const wakeThreads = (threadIds: readonly string[], far: ReadonlyMap<string, InboxCombineFarThread> = new Map()): InboxCombineWakeThread[] =>
@@ -223,6 +233,15 @@ export function createInboxCombine(deps: InboxCombineDeps) {
       const root = store.message(threadId)!;
       return { id: threadId, subject: store.threadSubject(threadId) ?? "(no subject)", project: store.project(root.project_id)?.name ?? "", messages: ids.filter((id) => !store.message(id)?.tidy).length, open };
     });
+
+  /** A pick of this computer's files and pictures, in thread order, for the new thread (attached as they are, not copied). */
+  const localFiles = (threadId: string) => ({
+    local: true as const,
+    files: store.threadMessageIds(threadId).flatMap((mid) => {
+      const m = store.message(mid);
+      return !m || m.tidy ? [] : [...(m.attachments ?? []), ...(m.inline_images ?? [])].map((a) => ({ message: m.id, file: a.id, name: a.name, size: a.size }));
+    }),
+  });
 
   const busyHere = (id: string) => combines.some((c) => c.state === "asked" && c.threads.some((t) => t.id === id));
   /** Once a thread is in a Combine still waiting, here or on a linked computer, it is not asked about in another. */
@@ -255,12 +274,11 @@ export function createInboxCombine(deps: InboxCombineDeps) {
     const local = threadIds.filter(holds);
     const farIds = threadIds.filter((t) => !holds(t));
     const session = typeof body.session === "string" ? body.session : "";
-    // On one computer, a session that wrote in a pick; with picks on two, any session running here.
-    const pool = () => (farIds.length > 0 ? everyone(local) : agentsFor(local));
+    // Any session running here, whether or not it wrote in a pick: it then owns the new thread.
+    const pool = () => everyone(local);
     const agents = pool();
     const agent = agents.find((a) => a.session === session);
-    if (!agent) throw new InboxError("session_not_live", "That agent cannot be asked now: it ended, or it never wrote in these threads.", { field: "session" });
-    if (farIds.length > 0 && local.length === 0) throw new InboxError("validation_error", "thread_ids: a Combine runs on a computer that holds some of the picked threads.", { field: "thread_ids" });
+    if (!agent) throw new InboxError("session_not_live", "That agent cannot be asked now: it ended.", { field: "session" });
     const words = inboxTidyWords(body.words).slice(0, INBOX_COMBINE_WORDS_MAX);
     refuseBusy(threadIds, (id) => store.threadSubject(id));
     // The other computer's threads, read there now: nothing is written before each one is read.
@@ -275,7 +293,7 @@ export function createInboxCombine(deps: InboxCombineDeps) {
     if (farMachines[0]) await across.acquire(id, farMachines[0], farIds);
     const record = (() => {
       try {
-        if (!pool().some((a) => a.session === agent.session)) throw new InboxError("session_not_live", "That agent cannot be asked now: it ended, or it never wrote in these threads.", { field: "session" });
+        if (!pool().some((a) => a.session === agent.session)) throw new InboxError("session_not_live", "That agent cannot be asked now: it ended.", { field: "session" });
         refuseBusy(local, (t) => store.threadSubject(t));
         return write(id, key, agent, agents, words, threadIds, local, there);
       } catch (error) {
@@ -283,8 +301,9 @@ export function createInboxCombine(deps: InboxCombineDeps) {
         throw error;
       }
     })();
-    // The other computer's files, copied in while it is surely on; attached when the new thread is here.
-    if (there.size > 0) void across.copyFiles(record, [...there.values()]).catch(() => {});
+    // Every pick's files: this computer's attached as they are, the other computer's copied in while it is surely on;
+    // all of them on the new thread once it is here.
+    void across.copyFiles(record, threadIds.map((t) => there.get(t) ?? localFiles(t))).catch(() => {});
     return wire(record);
   };
 
@@ -294,8 +313,10 @@ export function createInboxCombine(deps: InboxCombineDeps) {
     const text = [inboxCombineInstruction(id), ...(words ? [inboxCombineWordsLine(words)] : []), ...(ref ? [inboxCombineSessionLine(ref)] : []), ...inboxCombineThreadLines(wakeThreads(threadIds, there))].join("\n\n");
     const archived = new Set([...local.filter(isArchived), ...[...there.values()].filter((t) => t.archived).map((t) => t.id)]);
     // The notes, the wake first, go in this computer's picked threads, to the chosen session (it may have written in
-    // none of them): the other computer's are only read.
-    const { notes } = store.sendTidy({ run: id, to: { host: agent.host ?? "agent", session: agent.session }, threadIds: local, body: text, idempotency_key: key });
+    // none of them): the other computer's are only read. With none here, the wake goes in the session's own thread.
+    const carried = local.length > 0 ? local : [carrier(agent.session)].filter((t): t is string => t !== null);
+    const { notes } = store.sendTidy({ run: id, to: { host: agent.host ?? "agent", session: agent.session }, threadIds: carried, body: text, idempotency_key: key });
+    if (!notes[0]) throw new InboxError("session_not_live", "That agent cannot be asked now: it ended.", { field: "session" });
     const record: Stored = {
       id,
       key,
@@ -420,9 +441,11 @@ export function createInboxCombine(deps: InboxCombineDeps) {
       }
       check();
       const threads = url.searchParams.get("threads");
-      // `all=1`: picks on two computers, so every running session here is offered (approval "inbox-combine-across-computers").
+      // `all=1` (the window's): every running session here is offered (approval "inbox-combine-across-computers").
       const all = url.searchParams.get("all") === "1";
-      const plan: InboxCombinePlan = { serverSession: deps.serverSession, ...(threads ? { agents: (all ? everyone : agentsFor)(pickedOf(threads, 1)) } : {}), combines: shown() };
+      // Asked about picks it holds none of (the other computer's): its running agents, any of which may write it there.
+      const picked = threads ? pickedOf(threads, 1, all && (deps.far?.() ?? null) !== null) : [];
+      const plan: InboxCombinePlan = { serverSession: deps.serverSession, ...(threads ? { agents: all ? everyone(picked.filter(holds)) : agentsFor(picked) } : {}), combines: shown() };
       return deps.json(plan);
     }
     if (req.method !== "POST") return deps.json({ error: "Use GET or POST." }, 405);

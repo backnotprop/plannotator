@@ -138,8 +138,8 @@ test.skipIf(!hasDom)('the wide bar has Tidy… and Combine…; Combine… is gre
   expect(dialog.querySelector('h2')?.textContent).toBe('Combine 2 threads');
   // Not the field: on a phone a focused field opens the keyboard over the dialog.
   expect(document.activeElement?.textContent).toBe('Cancel');
-  // One computer: only the agents that wrote in the picks are asked for, as before (no `all=1`).
-  expect(requests.filter((r) => r.method === 'GET' && r.url.includes('/combine')).map((r) => r.url)).toEqual(['/api/inbox/combine?threads=a,b']);
+  // No computer linked: every running agent here is asked for (`all=1`: any of them may write it), and none says a computer.
+  expect(requests.filter((r) => r.method === 'GET' && r.url.includes('/combine')).map((r) => r.url)).toEqual(['/api/inbox/combine?threads=a,b&all=1']);
   const option = dialog.querySelector('[data-combine-agent="ses_a"]')!;
   expect(option.querySelector('input')!.checked).toBe(true);
   // Named by host and title, the count under it.
@@ -250,6 +250,61 @@ test.skipIf(!hasDom)('threads on two computers: each computer lists every runnin
   expect(sent.body).toMatchObject({ thread_ids: ['a', 'b'], session: 'ses_m' });
   // The toasts that follow name the agent as the dialog did, not as one computer names it among its own.
   expect(started).toEqual([{ machine: 'm_mini', label: 'Codex · ledger' }]);
+});
+
+test.skipIf(!hasDom)('every pick on one computer: both computers’ running agents are offered, the writers first, each with its computer; one on the other computer takes it there', async () => {
+  answers = (url, method) => {
+    if (method === 'POST') return { combine: { ...RECORD, session: 'ses_m' } };
+    if (url.startsWith('/api/inbox/m/m_mini/combine')) return { serverSession: 's', agents: [{ session: 'ses_m', host: 'codex', name: 'Codex', project: 'ledger', wrote_at: '2026-11-22T11:00:00.000Z', threads: 0 }], combines: [] };
+    return { serverSession: 's', agents: [{ session: 'ses_a', host: 'claude-code', name: 'Claude Code', title: 'Billing work', wrote_at: '2026-11-22T09:00:00.000Z', threads: 2 }, { session: 'ses_idle_a', host: 'pi', name: 'Pi', title: 'Release prep', threads: 0 }], combines: [] };
+  };
+  const started: { machine: string | null; label: string }[] = [];
+  host = document.body.appendChild(document.createElement('div'));
+  root = createRoot(host);
+  act(() => root!.render(<div className="pn-inbox"><CombineDialog rows={[row('a'), row('b')]} machines={TWO} onClose={() => {}} onStarted={(_record, machine, label) => void started.push({ machine, label })} /></div>));
+  await settle();
+  // Both computers asked about the same picks: the one that holds none answers with its running agents.
+  expect(requests.filter((r) => r.method === 'GET').map((r) => r.url).sort()).toEqual(['/api/inbox/combine?threads=a,b&all=1', '/api/inbox/m/m_mini/combine?threads=a,b&all=1']);
+  const dialog = document.querySelector('[data-dialog="combine"]')!;
+  expect([...dialog.querySelectorAll('[data-combine-agent]')].map((el) => `${el.getAttribute('data-combine-agent')} ${el.querySelector('small')!.textContent}`)).toEqual(['ses_a 2 of these · MacBook', 'ses_m 0 of these · Mac mini', 'ses_idle_a 0 of these · MacBook']);
+  click(dialog.querySelector('[data-combine-agent="ses_m"] input'));
+  click(dialog.querySelector('[data-combine-go]'));
+  await settle();
+  const sent = requests.find((r) => r.method === 'POST')!;
+  // Mac mini runs it, and owns the new thread: the picks are this computer's.
+  expect(sent.url).toBe('/api/inbox/m/m_mini/combine');
+  expect(sent.body).toMatchObject({ thread_ids: ['a', 'b'], session: 'ses_m' });
+  expect(started).toEqual([{ machine: 'm_mini', label: 'Codex · ledger' }]);
+});
+
+test.skipIf(!hasDom)('every pick on one computer, the other one not read: its agents are left out, without a word, and this one’s are offered', async () => {
+  answers = (url) =>
+    url.startsWith('/api/inbox/m/m_mini/combine')
+      ? { status: 503, code: 'machine_offline', error: AGENT_WORDS }
+      : { serverSession: 's', agents: [{ session: 'ses_a', host: 'claude-code', name: 'Claude Code', title: 'Billing work', threads: 2 }], combines: [] };
+  host = document.body.appendChild(document.createElement('div'));
+  root = createRoot(host);
+  act(() => root!.render(<div className="pn-inbox"><CombineDialog rows={[row('a'), row('b')]} machines={TWO} onClose={() => {}} onStarted={() => {}} /></div>));
+  await settle();
+  const dialog = document.querySelector('[data-dialog="combine"]')!;
+  expect(dialog.querySelector('.ib-cmb-err')).toBeNull();
+  expect([...dialog.querySelectorAll('[data-combine-agent]')].map((el) => el.getAttribute('data-combine-agent'))).toEqual(['ses_a']);
+  expect(dialog.querySelector<HTMLButtonElement>('[data-combine-go]')!.disabled).toBe(false);
+});
+
+test.skipIf(!hasDom)('every pick on the linked computer: this computer’s running agents are offered too', async () => {
+  answers = (url) =>
+    url.startsWith('/api/inbox/m/m_mini/combine')
+      ? { serverSession: 's', agents: [{ session: 'ses_m', host: 'codex', name: 'Codex', project: 'ledger', threads: 2 }], combines: [] }
+      : { serverSession: 's', agents: [{ session: 'ses_a', host: 'claude-code', name: 'Claude Code', title: 'Billing work', threads: 0 }], combines: [] };
+  host = document.body.appendChild(document.createElement('div'));
+  root = createRoot(host);
+  const on = (id: string) => row(id, { machine: 'm_mini' } as Partial<InboxListRow>);
+  act(() => root!.render(<div className="pn-inbox"><CombineDialog rows={[on('a'), on('b')]} machines={TWO} onClose={() => {}} onStarted={() => {}} /></div>));
+  await settle();
+  expect(requests.filter((r) => r.method === 'GET').map((r) => r.url).sort()).toEqual(['/api/inbox/combine?threads=a,b&all=1', '/api/inbox/m/m_mini/combine?threads=a,b&all=1']);
+  const dialog = document.querySelector('[data-dialog="combine"]')!;
+  expect([...dialog.querySelectorAll('[data-combine-agent]')].map((el) => `${el.getAttribute('data-combine-agent')} ${el.querySelector('small')!.textContent}`)).toEqual(['ses_m 2 of these · Mac mini', 'ses_a 0 of these · MacBook']);
 });
 
 const THREE: MachinesModel = {

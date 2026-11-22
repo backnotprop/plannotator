@@ -13,21 +13,30 @@
  *    while the Combine may still use them (`uploads`).
  *  - Archived there on arrival with what the read saw (`archive`; inbox-combine-guard.ts skips it there when the
  *    thread moved on); an archive still waiting after `FAR_ARCHIVE_MAX_MS` is taken back quietly (`check`).
+ *  - One left open there (skipped, taken back, refused) is named on the new thread's first message (`combine_left`,
+ *    one quiet line in the window), with every file that was not copied in (`noteLeft`).
  *  - Undo (`undo`): an archive that never left is taken back; one that landed is undone there (whatever was written in
  *    since: what it undoes did land); one skipped there is left; one still on its way is undone once it lands (`check`).
  * Every write is this Inbox's own in the outbox (`auto`): never the person's waiting writes or notices.
+ *
+ * This computer's picks' files and pictures go on the new thread too ("All the picked threads' files, from both
+ * computers"): attached as they are (the same blob), nothing copied, so every pick's files open from the new thread.
  */
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { INBOX_UPLOAD_MAX_BYTES, isInboxId } from "@plannotator/core/inbox-types";
+import { inboxAttachmentId, INBOX_UPLOAD_MAX_BYTES, isInboxId, type InboxCombineLeft } from "@plannotator/core/inbox-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxUploadAttachments, receiveInboxUpload, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
-import type { InboxCombineFar, InboxCombineFarThread } from "./inbox-combine-far";
+import type { InboxCombineFar, InboxCombineFarFile } from "./inbox-combine-far";
 import { FAR_READ_REFUSALS } from "./inbox-machine-agent-read";
 import type { OutboxEntry } from "./inbox-outbox";
 
+/** How long the archive there is waited for before the new thread says what stayed open (`check` looks again later). */
+const ARCHIVE_WAIT_MS = 4_000;
+/** What stayed open there is looked at this long after the new thread arrived: past the day an archive may wait. */
+const LEFT_WATCH_MS = 2 * 24 * 60 * 60_000;
 /** A held archive this long after the new thread arrived is taken back: the same day the toast's Undo follows. */
 export const FAR_ARCHIVE_MAX_MS = 24 * 60 * 60_000;
 /** A hold from another computer lasts at most this long: as long as a Combine can wait (24 h undelivered, then 2 h). */
@@ -53,8 +62,9 @@ export interface FarPick {
   questions: string[];
 }
 
-/** A file of the other computer's picked threads, copied in at the start: its upload here, or why it was left out. */
+/** A file of a picked thread: one of this computer's (`local`, attached as it is), or the other computer's, copied in at the start: its upload here, or why it was left out. */
 export interface CombineFile {
+  local?: true;
   from: string;
   file: string;
   name: string;
@@ -73,7 +83,7 @@ export interface AcrossRecord {
   state: string;
   at: string;
   settled_at?: string;
-  threads: { id: string; archived?: true }[];
+  threads: { id: string; subject?: string; archived?: true }[];
   thread?: { id: string };
   far?: Record<string, FarPick>;
   files?: CombineFile[];
@@ -195,12 +205,15 @@ export function createCombineAcross(deps: CombineAcrossDeps) {
   const archive = (record: AcrossRecord) => {
     const far = deps.far();
     if (!far || !record.far) return;
+    const sent: Promise<unknown>[] = [];
     for (const { id, pick } of picks(record)) {
       const guard = { seen_through_message: pick.seen, seen_questions: pick.questions };
       if (pick.reopened) void far.write(pick.machine, resolveRoute(id), { resolved: false, idempotency_key: key(record, "reopen", id), ...guard }, id, 0).catch(() => {});
-      void far.write(pick.machine, resolveRoute(id), { resolved: true, idempotency_key: key(record, "archive", id), ...guard }, id, 0).catch(() => {});
+      sent.push(far.write(pick.machine, resolveRoute(id), { resolved: true, idempotency_key: key(record, "archive", id), ...guard }, id, ARCHIVE_WAIT_MS).catch(() => null));
     }
     release(record);
+    // Answered there (or not yet: `check` looks again): the new thread says which stayed open.
+    if (sent.length > 0) void Promise.all(sent).then(() => noteLeft(record));
   };
 
   /** An archive that landed there (or may have, given up after 5xx): its Undo is due. One skipped there, or never sent, has nothing to undo. */
@@ -255,6 +268,7 @@ export function createCombineAcross(deps: CombineAcrossDeps) {
       if (!record.far) continue;
       const late = now() - Date.parse(record.settled_at ?? record.at) > FAR_ARCHIVE_MAX_MS;
       if (record.state === "done" && late) for (const { id } of picks(record)) for (const step of ["reopen", "archive"] as const) far.cancel(key(record, step, id));
+      if (record.state === "done" && now() - Date.parse(record.settled_at ?? record.at) <= LEFT_WATCH_MS) noteLeft(record);
       if (record.state === "undone" && !late) {
         for (const { id, pick } of picks(record)) if (landed(far.entry(key(record, "archive", id))) && !far.entry(key(record, "undo", id))) void sendUndo(far, record, id, pick, 0);
       }
@@ -272,10 +286,12 @@ export function createCombineAcross(deps: CombineAcrossDeps) {
   const filesMax = deps.filesMaxBytes ?? FILES_MAX_BYTES;
   /** The Combine may still use its files: it waits, or its thread is here (they go on it). Stopped, failed or undone: no more is copied. */
   const inUse = (record: AcrossRecord) => record.state === "asked" || record.state === "done";
-  const reached = (file: CombineFile) => !!(file.upload || file.missed || file.attached);
-  /** Something left to do: a file not reached while the Combine may still use it, or a copy its thread has not got yet. */
+  const reached = (file: CombineFile) => !!(file.local || file.upload || file.missed || file.attached);
+  /** Ready for the new thread and not on it yet: a copy, or one of this computer's files. */
+  const toAttach = (file: CombineFile) => !!(file.local || file.upload) && !file.attached && !file.missed;
+  /** Something left to do: a file not reached while the Combine may still use it, or a file its thread has not got yet. */
   const unfinished = (record: AcrossRecord) =>
-    inUse(record) && now() - Date.parse(record.settled_at ?? record.at) <= FILES_KEPT_MS && (record.files ?? []).some((f) => !reached(f) || (record.state === "done" && f.upload && !f.attached && !f.missed));
+    inUse(record) && now() - Date.parse(record.settled_at ?? record.at) <= FILES_KEPT_MS && (record.files ?? []).some((f) => !reached(f) || (record.state === "done" && toAttach(f)));
 
   /** The files not reached yet, one at a time, while the Combine may use them and that computer is on; past the total, left out. */
   const copy = async (record: AcrossRecord) => {
@@ -286,7 +302,8 @@ export function createCombineAcross(deps: CombineAcrossDeps) {
       // Stopped, failed or undone meanwhile; or that computer went: the rest waits for the next check (a restart too).
       if (!inUse(record) || !far.online(machine)) return;
       if (reached(file)) continue;
-      const room = filesMax - record.files.reduce((sum, f) => sum + (f.upload || f.attached ? (f.size ?? 0) : 0), 0);
+      // This computer's own files cost nothing: only copies count toward the total.
+      const room = filesMax - record.files.reduce((sum, f) => sum + (!f.local && (f.upload || f.attached) ? (f.size ?? 0) : 0), 0);
       if ((file.size ?? 0) > INBOX_UPLOAD_MAX_BYTES) file.missed = "file_too_large";
       else if ((file.size ?? 0) > room) file.missed = "files_too_large";
       else {
@@ -310,21 +327,65 @@ export function createCombineAcross(deps: CombineAcrossDeps) {
   const attach = async (record: AcrossRecord) => {
     if (record.state !== "done" || !record.thread || !record.files) return;
     for (const file of record.files) {
-      if (!file.upload || file.attached || file.missed) continue;
+      if (!toAttach(file)) continue;
       try {
-        // Attached before a restart that came before it was written down: not again.
-        const on = store.message(record.thread.id)?.attachments ?? [];
-        if (!on.some((a) => a.sent_sha256 === file.sha256 && a.name === file.name)) {
-          const [attachment] = await inboxUploadAttachments(store.dir, [file.upload], new Date(now()).toISOString());
-          store.attachReferencedFile(record.thread.id, attachment!);
+        if (file.local) {
+          attachLocal(record.thread.id, file);
+        } else {
+          // Attached before a restart that came before it was written down: not again.
+          const on = store.message(record.thread.id)?.attachments ?? [];
+          if (!on.some((a) => a.sent_sha256 === file.sha256 && a.name === file.name)) {
+            const [attachment] = await inboxUploadAttachments(store.dir, [file.upload!], new Date(now()).toISOString());
+            store.attachReferencedFile(record.thread.id, attachment!);
+          }
         }
         file.attached = true;
         deps.save();
-        removeInboxUploads(store.dir, [file.upload]);
+        if (file.upload) removeInboxUploads(store.dir, [file.upload]);
       } catch (error) {
         file.missed = error instanceof InboxError ? error.code : "not_attached";
         deps.save();
       }
+    }
+    noteLeft(record);
+  };
+
+  /** One of this computer's files on the new thread: the same record (its blob, its path) under a new id; gone since, left out. */
+  const attachLocal = (threadId: string, file: CombineFile) => {
+    const message = store.message(file.from);
+    const found = message?.attachments?.find((a) => a.id === file.file) ?? message?.inline_images?.find((a) => a.id === file.file);
+    if (!found) throw new InboxError("attachment_not_found", `No file ${file.file}.`);
+    const { ref: _ref, captured: _captured, captured_at: _at, ...attachment } = found as typeof found & { ref?: string; captured?: string; captured_at?: string };
+    // Already on it (the agent attached it itself, or a restart replays this): not twice.
+    const on = store.message(threadId)?.attachments ?? [];
+    if (on.some((a) => a.sent_sha256 === attachment.sent_sha256 && a.name === attachment.name)) return;
+    store.attachReferencedFile(threadId, { ...attachment, id: inboxAttachmentId(now()) });
+  };
+
+  // ── What stayed where it was ──
+
+  /** A far pick left open there: its archive skipped there, taken back after its day, or refused (one gone there is not open). */
+  const leftOpen = (far: InboxCombineFar, record: AcrossRecord, id: string) => {
+    const entry = far.entry(key(record, "archive", id));
+    if (!entry) return false;
+    const code = (entry.answer as { code?: unknown } | null)?.code;
+    return skippedThere(entry) || entry.state === "cancelled" || (entry.state === "refused" && code !== "thread_not_found" && code !== "message_not_found");
+  };
+
+  /** What of the picks the new thread does not hold: one quiet line on its first message, written when it changes. */
+  const noteLeft = (record: AcrossRecord) => {
+    if (record.state !== "done" || !record.thread) return;
+    const far = deps.far();
+    const subjects = new Map(record.threads.map((t) => [t.id, t.subject ?? "(no subject)"]));
+    const open = far ? picks(record).flatMap(({ id, pick }) => (leftOpen(far, record, id) ? [{ machine: deps.nameOf(pick.machine), subject: subjects.get(id)! }] : [])) : [];
+    const files = (record.files ?? []).flatMap((f) => (f.missed ? [f.name] : []));
+    const left: InboxCombineLeft | null = open.length > 0 || files.length > 0 ? { ...(open.length > 0 ? { open } : {}), ...(files.length > 0 ? { files } : {}) } : null;
+    const message = store.message(record.thread.id);
+    if (!message || JSON.stringify(message.combine_left ?? null) === JSON.stringify(left)) return;
+    try {
+      store.setCombineLeft(record.thread.id, left);
+    } catch {
+      // The thread went meanwhile: nothing to say it on.
     }
   };
 
@@ -352,11 +413,18 @@ export function createCombineAcross(deps: CombineAcrossDeps) {
     return run;
   };
 
-  /** The other computer's files listed at the start, then copied in while it is on (`finish`). */
-  const copyFiles = (record: AcrossRecord, threads: readonly InboxCombineFarThread[]): Promise<void> => {
-    const all = threads.flatMap((t) => t.files);
+  /**
+   * Every pick's files listed at the start, in pick order: this computer's (`local`) attached as they are once the new
+   * thread is here, the other computer's copied in while it is on (`finish`). One file twice (the same bytes and name) is listed once.
+   */
+  const copyFiles = (record: AcrossRecord, threads: readonly { files: readonly InboxCombineFarFile[]; local?: boolean }[]): Promise<void> => {
+    const seen = new Set<string>();
+    const all = threads.flatMap((t) => t.files.map((f) => ({ ...f, local: t.local === true }))).filter((f) => {
+      const id = f.local ? `local:${f.file}` : `${f.message}/${f.file}`;
+      return !seen.has(id) && !!seen.add(id);
+    });
     if (all.length === 0) return Promise.resolve();
-    record.files = all.map((f, i) => ({ from: f.message, file: f.file, name: f.name, size: f.size, ...(i >= FILES_MAX ? { missed: "too_many" } : {}) }));
+    record.files = all.map((f, i) => ({ ...(f.local ? { local: true as const } : {}), from: f.message, file: f.file, name: f.name, size: f.size, ...(i >= FILES_MAX ? { missed: "too_many" } : {}) }));
     deps.save();
     return finish(record);
   };

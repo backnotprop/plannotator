@@ -71,6 +71,7 @@ import {
   type InboxGuideRef,
   type InboxLine,
   type InboxMessage,
+  type InboxCombineLeft,
   type InboxMessageWire,
   type InboxPicker,
   type InboxProject,
@@ -5770,6 +5771,19 @@ export class InboxStore {
     if (held) return held;
     this.appendMessage({ ...message, attachments: [...(message.attachments ?? []), attachment] }, this.stamp());
     return attachment;
+  }
+
+  /**
+   * What a Combine left where it was, on its new thread's first message (`InboxMessage.combine_left`; inbox-combine-across.ts):
+   * one more line for the message, its latest snapshot with it (or without it, `null`). The Inbox's own status: no unread.
+   */
+  setCombineLeft(messageId: string, left: InboxCombineLeft | null): InboxMessage {
+    const message = this.messages.get(messageId);
+    if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
+    const { combine_left: _was, ...rest } = message;
+    const next: InboxMessage = left ? { ...rest, combine_left: left } : rest;
+    this.appendMessage(next, this.stamp());
+    return next;
   }
 
   /** The person's annotations in a thread still waiting for a Send (not removed, not sent). */

@@ -1,12 +1,13 @@
 /**
  * Combine across linked computers (approval "inbox-combine-across-computers"): the picks may be on this computer and
- * on a linked one. "Who writes it" lists the running agents of each computer that wrote in its picked threads (each
- * computer is asked about its own picks), and the chosen agent's computer is where the Combine runs and the new
- * thread lives: it reads the other computer's threads there and archives them there. Pure.
+ * on a linked one. "Who writes it" lists every running agent of both computers ("Any running agent on either computer,
+ * always", the owner), also with every pick on one of them, so the person can hand the work to another agent: each
+ * computer is asked about the picks, and the chosen agent's computer is where the Combine runs and the new thread
+ * lives: it reads the other computer's threads there and archives them there. Pure.
  */
 import type { InboxCombineAgent, InboxListRow } from '@plannotator/core/inbox-types';
 import { InboxApiError } from './apiError';
-import { rowMachine, type MachinesModel } from './machines';
+import { isAway, rowMachine, type MachinesModel } from './machines';
 
 /** An agent the dialog offers, with the computer it runs on (null: this one). */
 export type CombineAgent = InboxCombineAgent & { machine: string | null };
@@ -19,6 +20,22 @@ export function combineGroups(rows: readonly InboxListRow[], machines: MachinesM
     groups.set(machine, [...(groups.get(machine) ?? []), row.thread_id]);
   }
   return [...groups].map(([machine, ids]) => ({ machine, ids }));
+}
+
+/**
+ * The computers asked who can write it: each that holds picks, and with every pick on one computer, the other one too
+ * (each linked computer that is there and combines across computers, when the picks are here; this one, when they are
+ * all on a linked one that does). `holds`: whether it holds picks (one that holds none and cannot be read is left out).
+ */
+export function combineAsks(groups: readonly { machine: string | null; ids: string[] }[], machines: MachinesModel): { machine: string | null; ids: string[]; holds: boolean }[] {
+  const asks = groups.map((g) => ({ ...g, holds: true }));
+  if (groups.length !== 1) return asks;
+  const ids = groups[0]!.ids;
+  const across = (id: string) => machines.linked.some((m) => m.id === id && !isAway(m) && (m.marks ?? []).includes('combine-across'));
+  const held = groups[0]!.machine;
+  if (held === null) for (const m of machines.linked) if (across(m.id)) asks.push({ machine: m.id, ids, holds: false });
+  if (held !== null && across(held)) asks.push({ machine: null, ids, holds: false });
+  return asks;
 }
 
 /**

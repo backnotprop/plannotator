@@ -7,8 +7,9 @@
  * What regresses: the other computer's thread missing from the wake or its open questions; a note written in it; an
  * archive on either computer before the new thread arrives, or when it never does; the other computer's thread left
  * unarchived, or archived twice; Undo that brings back only this computer's threads; a restart that loses the archive
- * there, or replays one past its day; a double press that starts two Combines; the agents offered with picks on two
- * computers limited to the ones that wrote in them.
+ * there, or replays one past its day; a double press that starts two Combines; the agents offered limited to the ones
+ * that wrote in the picks (on one computer or two), or to the computer that holds some of them; a thread left open on
+ * the other computer (written in since, or that computer away past the day) not named on the new thread.
  */
 import { afterEach, expect, test } from "bun:test";
 import type { InboxCombineAgent, InboxCombineRecord } from "@plannotator/core/inbox-types";
@@ -52,10 +53,10 @@ for (const writerOn of ["Studio", "Mini"] as const) {
   });
 }
 
-test("picks on two computers offer every running agent here, the ones that wrote first; one that wrote in no pick writes it, woken in this computer's own pick", async () => {
+test("any running agent here is offered, the ones that wrote first; one that wrote in no pick writes it, on one computer or two, woken in this computer's own pick", async () => {
   const { studio, s1, m1 } = world();
   studio.live.set("ses_idle", "wakes");
-  // One computer: only the ones that wrote, as before; `all=1` (picks on two): every running session.
+  // The window's read (`all=1`): every running session; without it (an older window), only the ones that wrote.
   const one = (await route(studio, "GET", `/api/inbox/combine?threads=${s1.id}`)).body.agents as InboxCombineAgent[];
   expect(one.map((a) => [a.session, a.threads])).toEqual([["ses_studio", 1]]);
   const all = (await route(studio, "GET", `/api/inbox/combine?threads=${s1.id}&all=1`)).body.agents as InboxCombineAgent[];
@@ -63,9 +64,12 @@ test("picks on two computers offer every running agent here, the ones that wrote
     ["ses_studio", 1],
     ["ses_idle", 0],
   ]);
-  // A one-computer Combine still takes only one that wrote in a pick.
+  // Every pick on this computer: one that wrote in none takes it ("I want you to combine these and then own the next thread").
   const s2 = studio.store.sendMessage({ project_id: studio.project, author: agent("ses_studio"), subject: "Ledger", body: "x" }).message;
-  expect((await route(studio, "POST", "/api/inbox/combine", { thread_ids: [s1.id, s2.id], session: "ses_idle", idempotency_key: "k-one" })).body.code).toBe("session_not_live");
+  const here = (await route(studio, "POST", "/api/inbox/combine", { thread_ids: [s1.id, s2.id], session: "ses_idle", idempotency_key: "k-one" })).body.combine as InboxCombineRecord;
+  expect(here).toMatchObject({ state: "asked", session: "ses_idle" });
+  expect(studio.store.pendingReplies("ses_idle").some((m) => m.tidy?.id === here.id && m.tidy?.wake === true && m.thread_id === s1.id)).toBe(true);
+  await route(studio, "POST", `/api/inbox/combine/${here.id}/cancel`, {});
   // Picks on two: it is taken, and woken in this computer's pick.
   const record = (await route(studio, "POST", "/api/inbox/combine", { thread_ids: [s1.id, m1.id], session: "ses_idle", idempotency_key: "k-idle" })).body.combine as InboxCombineRecord;
   expect(record.session).toBe("ses_idle");
@@ -73,7 +77,52 @@ test("picks on two computers offer every running agent here, the ones that wrote
   expect(studio.store.pendingReplies("ses_studio").some((m) => m.tidy?.id === record.id)).toBe(false);
   studio.store.sendMessage({ project_id: studio.project, author: agent("ses_idle"), subject: "Combined", body: "x", idempotency_key: record.id });
   await tick();
-  expect(((await route(studio, "GET", "/api/inbox/combine")).body.combines as InboxCombineRecord[])[0]!.state).toBe("done");
+  expect(((await route(studio, "GET", "/api/inbox/combine")).body.combines as InboxCombineRecord[]).find((c) => c.id === record.id)!.state).toBe("done");
+});
+
+test("every pick on the other computer: this computer's running agents are offered and one writes it here, woken in its own thread; the picks are archived there", async () => {
+  const { studio, mini, s1, m1 } = world();
+  const m2 = mini.store.sendMessage({ project_id: mini.project, author: agent("ses_mini"), subject: "Refund totals", body: "x" }).message;
+  // A running session with no thread here has nowhere to be woken: not offered for picks all on the other computer.
+  studio.live.set("ses_new", "wakes");
+  const offered = (await route(studio, "GET", `/api/inbox/combine?threads=${m1.id},${m2.id}&all=1`)).body.agents as InboxCombineAgent[];
+  expect(offered.map((a) => [a.session, a.threads])).toEqual([["ses_studio", 0]]);
+  const record = (await route(studio, "POST", "/api/inbox/combine", { thread_ids: [m1.id, m2.id], session: "ses_studio", idempotency_key: "k-there" })).body.combine as InboxCombineRecord;
+  expect(record.state).toBe("asked");
+  const wake = studio.store.pendingReplies("ses_studio").find((m) => m.tidy?.id === record.id && m.tidy.wake)!;
+  expect(wake.thread_id).toBe(s1.id);
+  expect(wake.body).toContain(`(thread ${m2.id}, 1 message)`);
+  expect([mini.store.threadMessageIds(m1.id).length, mini.store.threadMessageIds(m2.id).length]).toEqual([1, 1]);
+  const made = studio.store.sendMessage({ project_id: studio.project, author: agent("ses_studio"), subject: "Refunds, combined", body: "x", idempotency_key: record.id }).message;
+  await tick();
+  expect([archived(mini, m1.id), archived(mini, m2.id), archived(studio, s1.id), archived(studio, made.id)]).toEqual([true, true, false, false]);
+});
+
+test("the other computer's thread written in since the read: its archive is skipped there, and the new thread names it as still open there", async () => {
+  const { studio, mini, s1, m1 } = world();
+  const record = (await route(studio, "POST", "/api/inbox/combine", { thread_ids: [s1.id, m1.id], session: "ses_studio", idempotency_key: "k-moved" })).body.combine as InboxCombineRecord;
+  mini.store.sendMessage({ project_id: mini.project, author: agent("ses_mini"), reply_to: m1.id, body: "One more thing." });
+  const made = studio.store.sendMessage({ project_id: studio.project, author: agent("ses_studio"), subject: "Combined", body: "x", idempotency_key: record.id }).message;
+  await tick();
+  expect([archived(studio, s1.id), archived(mini, m1.id), mini.applied]).toEqual([true, false, [`skip ${m1.id}`]]);
+  expect(studio.store.message(made.id)!.combine_left).toEqual({ open: [{ machine: "Mini", subject: "Retry worker backoff" }] });
+});
+
+test("the other computer away for a day after the thread came: its archive is dropped, and the new thread names that thread as still open there", async () => {
+  const { studio, mini, s1, m1 } = world();
+  const record = (await route(studio, "POST", "/api/inbox/combine", { thread_ids: [s1.id, m1.id], session: "ses_studio", idempotency_key: "k-away" })).body.combine as InboxCombineRecord;
+  mini.awake = false;
+  const made = studio.store.sendMessage({ project_id: studio.project, author: agent("ses_studio"), subject: "Combined", body: "x", idempotency_key: record.id }).message;
+  await tick();
+  expect(studio.store.message(made.id)!.combine_left).toBeUndefined();
+  studio.clock.now += 25 * 60 * 60_000;
+  studio.combine.check();
+  await tick();
+  expect(studio.store.message(made.id)!.combine_left).toEqual({ open: [{ machine: "Mini", subject: "Retry worker backoff" }] });
+  mini.awake = true;
+  studio.combine.check();
+  await tick();
+  expect([archived(mini, m1.id), mini.applied]).toEqual([false, []]);
 });
 
 test("the other computer asleep at the start: refused with its id, nothing written on either computer", async () => {
