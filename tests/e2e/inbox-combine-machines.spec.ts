@@ -12,8 +12,8 @@
  *  4. Undo: both come back, on both computers.
  *  5. The agent on Studio chosen, the other way round: the dialog lists every running agent of both computers, the
  *     ones that wrote in no pick after the writers, each with its computer; the toasts name the agent as the dialog
- *     did; Mini's thread archived on Mini by Studio. Mini stopped, Undo says it waits for Mini and says "Combine
- *     undone." only once Mini is back and its thread is back there too.
+ *     did; Mini's thread archived on Mini by Studio. Mini stopped (the window greys its rows), Undo says it waits for
+ *     Mini and says "Combine undone." only once Mini is back and its thread is back there too.
  *  6. Mini stopped while the dialog is open: the dialog says Mini can't be asked now, in the person's words, and
  *     offers nobody.
  *
@@ -277,6 +277,8 @@ test('5. The agent on Studio combines: every running agent offered; Mini’s thr
   await expect.poll(() => archivedOn(mini, b.thread), { timeout: 20_000 }).toBe(true);
   await expect.poll(() => archivedOn(studio, a.thread), { timeout: 20_000 }).toBe(true);
   await stopScratchInbox(mini.dataDir);
+  // The window knows Mini is away (its earlier thread greyed) before the Undo: the toast says Mini's state as it is then.
+  await expect(row(there.thread)).toHaveAttribute('data-away', '', { timeout: 45_000 });
   release();
   await page.unroute(held);
   await expect(toast()).toContainText('Combined 2 threads', { timeout: 20_000 });

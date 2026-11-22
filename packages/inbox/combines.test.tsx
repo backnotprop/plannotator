@@ -175,6 +175,7 @@ test.skipIf(!hasDom)('one that failed and is then done after all is told again, 
 /** A linked computer, by an id the window forwards to (`/api/inbox/m/<id>/…`). */
 const MINI = `ibx_01JZ${'0'.repeat(20)}MN`;
 const LINKED = { self: 'm_self', all: [{ id: 'm_self', name: 'MacBook', self: true }], linked: [{ id: MINI, name: 'Mac mini', marks: ['combine', 'combine-across'], state: 'online' }], names: new Map([[MINI, 'Mac mini']]), away: new Set() } as unknown as MachinesModel;
+const LINKED_ASLEEP = { ...LINKED, linked: [{ ...(LINKED.linked[0] as object), state: 'offline' }], away: new Set([MINI]) } as unknown as MachinesModel;
 const ASKED: InboxCombineRecord = { ...base, id: 'cmb_two', state: 'asked', name: 'Codex' };
 const pickedRows = (machine: string | null) =>
   [
@@ -246,7 +247,8 @@ test.skipIf(!hasDom)('an Undo that still waits for the other computer gives back
     done.onUndo!();
     await wait();
   });
-  expect(toasts.at(-1)).toMatchObject({ icon: 'clock', lead: 'Waiting for Mac mini: this applies when Mac mini is back.' });
+  // Mac mini is online, only slower than the wait: it applies once Mac mini confirms, not "when it is back".
+  expect(toasts.at(-1)).toMatchObject({ icon: 'clock', lead: 'Sending to Mac mini: this applies once Mac mini confirms.' });
   expect(said).toEqual([]);
   // This computer's row is back now; Mac mini's when Mac mini is.
   expect(restored).toEqual(['snooze a 2026-12-01T09:00:00.000Z', 'priority a high']);
@@ -259,4 +261,23 @@ test.skipIf(!hasDom)('an Undo that still waits for the other computer gives back
   expect(restored).toEqual(['snooze a 2026-12-01T09:00:00.000Z', 'priority a high', 'snooze b null', 'priority b low']);
   await tick();
   expect(said).toEqual(['Combine undone.']);
+});
+
+test.skipIf(!hasDom)('an Undo still waiting for the other computer asleep says it applies when that computer is back', async () => {
+  reset();
+  handPoll();
+  model = LINKED_ASLEEP;
+  lists = { here: [] };
+  await load();
+  act(() => tracker!.begin(ASKED, null, pickedRows(MINI), 'Codex · ledger'));
+  const doneRecord: InboxCombineRecord = { ...ASKED, state: 'done', thread: { id: 'n', subject: 'Billing' }, settled_at: AT };
+  lists = { here: [doneRecord] };
+  await tick();
+  posted = () => ({ status: 200, body: { combine: { ...doneRecord, state: 'undone', waiting_on: [MINI] } } });
+  await act(async () => {
+    toasts.find((t) => t.lead === 'Combined 2 threads')!.onUndo!();
+    await wait();
+  });
+  expect(toasts.at(-1)).toMatchObject({ icon: 'clock', lead: 'Waiting for Mac mini: this applies when Mac mini is back.' });
+  expect(said).toEqual([]);
 });

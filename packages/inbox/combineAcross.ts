@@ -64,7 +64,8 @@ const OLDER = new Set(['machine_needs_update', 'device_route_not_found']);
  */
 export function combineFailure(cause: unknown, asked: string | null, machines: MachinesModel): string | null {
   if (!(cause instanceof InboxApiError)) return null;
-  const away = AWAY.has(cause.code) || (cause.code === 'thread_not_found' && cause.machineId !== null);
+  // A thread deleted there is not away: the Inbox's own words say it is not there.
+  const away = AWAY.has(cause.code);
   if (!away && !OLDER.has(cause.code)) return null;
   const name = combineMachineName(cause.machineId ?? asked, machines);
   return away ? combineAwayLine(name) : combineOlderLine(name);

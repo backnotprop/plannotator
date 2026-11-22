@@ -150,8 +150,13 @@ export function useCombines(bulk: BulkWrites | undefined, machines: MachinesMode
       try {
         const { combine } = await combineApi.change(t.record.id, 'undo', t.machine);
         const first = combine.state === 'undone' ? combine.waiting_on?.[0] : undefined;
-        // The other computer asleep: the held words, as a write held for it says them.
-        if (first !== undefined) host.showToast({ icon: 'clock', lead: heldWords({ name: combineMachineName(first, machinesRef.current ?? NO_MACHINES), state: 'offline' }), wrap: true });
+        // Still on its way to the other computer: the held words for its state now, as a write held for it says them
+        // (asleep: when it is back; online and only slower: once it confirms).
+        if (first !== undefined) {
+          const model = machinesRef.current ?? NO_MACHINES;
+          const state = model.all.concat(model.linked).find((m) => m.id === first)?.state ?? 'offline';
+          host.showToast({ icon: 'clock', lead: heldWords({ name: combineMachineName(first, model), state }), wrap: true });
+        }
         if (await landUndo(t, combine)) return void host.afterWrite(ids);
       } catch (cause) {
         host.showToast(errorToast(cause, 'The threads did not come back.'));

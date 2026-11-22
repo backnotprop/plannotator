@@ -109,7 +109,7 @@ export const drain = (here: Computer, there: Computer) =>
     return { status: 200, body: {} };
   });
 
-export function engine(c: Computer, options: { far?: boolean; editRead?: (answer: any) => any } = {}) {
+export function engine(c: Computer, options: { far?: boolean; editRead?: (answer: any) => any; fetchFile?: (args: { message_id: string; file: string }, real: () => Promise<Response>) => Promise<Response>; filesMaxBytes?: number } = {}) {
   const read = () => createMachineAgentRead({ peers: () => [linkTo(c.other!)], nameOf: () => c.other!.name });
   const made = createInboxCombine({
     store: c.store,
@@ -119,6 +119,7 @@ export function engine(c: Computer, options: { far?: boolean; editRead?: (answer
     readBody: (req) => req.json() as Promise<Record<string, unknown>>,
     json: (body, status = 200) => Response.json(body, { status }),
     now: () => c.clock.now,
+    ...(options.filesMaxBytes !== undefined ? { filesMaxBytes: options.filesMaxBytes } : {}),
     liveSessions: () => [...c.live.keys()].map((session) => ({ session, host: "claude-code", root: null })),
     nameOf: () => c.other?.name ?? "another computer",
     doorMachine: (req) => req.headers.get("x-test-machine"),
@@ -142,7 +143,8 @@ export function engine(c: Computer, options: { far?: boolean; editRead?: (answer
             },
             heldWrite: (key) => c.outbox.get(key),
             cancelHeld: (key) => c.outbox.cancel(key),
-            fetchFile: (args) => read().fetchFile(args),
+            fetchFile: (args) => (options.fetchFile ? options.fetchFile(args, () => read().fetchFile(args)) : read().fetchFile(args)),
+            online: () => c.other!.awake,
           }),
   });
   closers.push(() => made.close());

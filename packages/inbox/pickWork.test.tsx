@@ -304,7 +304,6 @@ test.skipIf(!hasDom)('the other computer not read: the person’s line, never th
 test.skipIf(!hasDom)('a start that fails on a computer: the person’s line for the computer the refusal names, never the server’s words', async () => {
   const cases = [
     [{ code: 'machine_offline', machine: 'm_mini' }, 'ses_a', 'Mac mini can’t be asked now: it is away.'],
-    [{ code: 'thread_not_found', machine: 'm_mini' }, 'ses_a', 'Mac mini can’t be asked now: it is away.'],
     [{ code: 'machine_needs_update', machine: 'm_mini' }, 'ses_a', 'Mac mini runs an older Plannotator: update it to combine its threads.'],
     // Mac mini runs it and could not read this computer: this computer's own id is this computer.
     [{ code: 'machine_answer_unreadable', machine: 'm_self' }, 'ses_m', 'MacBook can’t be asked now: it is away.'],
@@ -332,6 +331,24 @@ test.skipIf(!hasDom)('a start that fails on a computer: the person’s line for 
   }
   root = null;
   host = null;
+});
+
+test.skipIf(!hasDom)('a thread deleted on the other computer since it was picked: the Inbox’s words that it is not there, never that the computer is away', async () => {
+  const gone = 'No thread msg_b on this machine.';
+  answers = (url, method) => {
+    if (method === 'POST') return { status: 409, code: 'thread_not_found', machine: 'm_mini', error: gone };
+    if (url.startsWith('/api/inbox/m/m_mini/combine')) return { serverSession: 's', agents: [], combines: [] };
+    return { serverSession: 's', agents: [{ session: 'ses_a', host: 'claude-code', name: 'Claude Code', title: 'Billing work', threads: 1 }], combines: [] };
+  };
+  host = document.body.appendChild(document.createElement('div'));
+  root = createRoot(host);
+  act(() => root!.render(<div className="pn-inbox"><CombineDialog rows={[row('a'), row('b', { machine: 'm_mini' } as Partial<InboxListRow>)]} machines={TWO} onClose={() => {}} onStarted={() => {}} /></div>));
+  await settle();
+  const dialog = document.querySelector('[data-dialog="combine"]')!;
+  click(dialog.querySelector('[data-combine-agent="ses_a"] input'));
+  click(dialog.querySelector('[data-combine-go]'));
+  await settle();
+  expect(dialog.querySelector('.ib-cmb-err')?.textContent).toBe(gone);
 });
 
 test.skipIf(!hasDom)('threads on two computers, the other one away or older: the dialog says so, offers nobody and reads nothing', async () => {

@@ -29,7 +29,9 @@
  *
  * Plus the design review's bound: a write the owner keeps failing with 5xx is
  * parked after OUTBOX_MAX_SERVER_ERRORS tries as "may have been delivered",
- * so one poison entry never blocks a machine's queue for ever.
+ * so one poison entry never blocks a machine's queue for ever. A write this
+ * Inbox makes itself (`auto`) that gets a 5xx steps aside until the next try:
+ * the person's writes behind it are never held by it.
  *
  * Files: `inbox/outbox/<machine id>.jsonl`, 0600. Each line is a full
  * snapshot of one entry (the store's line rules: the last line per key wins,
@@ -539,9 +541,12 @@ export class InboxOutbox {
   }
 
   private async drainOnce(machine: string, send: (entry: OutboxEntry) => Promise<OutboxAnswer>): Promise<DrainResult> {
+    // This Inbox's own writes (`auto`) yield: once one fails with a 5xx, they all wait (in their order) for the next
+    // try, and the person's writes behind them go now.
+    let ownFailed = false;
     for (;;) {
-      const head = this.list(machine, "pending")[0];
-      if (!head) return "empty";
+      const head = this.list(machine, "pending").find((e) => !(ownFailed && e.auto));
+      if (!head) return ownFailed ? "server_error" : "empty";
       // Rule 10: on disk as having left before a byte goes out.
       const leaving = head.left ? head : this.save({ ...head, state: "sending", left: true });
       let answer: OutboxAnswer;
@@ -572,6 +577,10 @@ export class InboxOutbox {
         continue;
       }
       this.save({ ...current, errors });
+      if (current.auto) {
+        ownFailed = true;
+        continue;
+      }
       return "server_error";
     }
   }

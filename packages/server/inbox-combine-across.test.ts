@@ -177,3 +177,51 @@ test("this Inbox's own writes are never the person's: not listed as notices, eve
   await studio.outbox.drain(mini.id, async () => ({ status: 404, body: { code: "message_not_found" } }));
   expect(studio.outbox.notices().map((e) => e.key)).toEqual(["person-1"]);
 });
+
+test("Undo of an archive that landed brings the thread back there, even with a note written in it since", async () => {
+  const { studio, mini, s1, m1 } = world();
+  const record = (await start(studio, [s1.id, m1.id], "ses_studio", "k-undo-note")).combine as InboxCombineRecord;
+  await arrive(studio, "ses_studio", record.id);
+  expect(archived(mini, m1.id)).toBe(true);
+  mini.store.sendMessage({ project_id: mini.project, author: { kind: "person" }, reply_to: m1.id, body: "Noted." } as never);
+  expect(archived(mini, m1.id)).toBe(true);
+  await route(studio, "POST", `/api/inbox/combine/${record.id}/undo`, {});
+  await drain(studio, mini);
+  expect(mini.applied).toEqual([`archive ${m1.id}`, `undo ${m1.id}`]);
+  expect(archived(mini, m1.id)).toBe(false);
+  expect((await combined(studio, record.id)).waiting_on).toBeUndefined();
+});
+
+test("a thread deleted on the other computer between the read and the hold: the words for a thread not there, not that the computer is away", async () => {
+  const { studio, mini, s1, m1 } = world();
+  studio.combine.close();
+  studio.combine = engine(studio, {
+    editRead: (answer) => {
+      mini.store.deleteThread(m1.id);
+      return answer;
+    },
+  });
+  const refused = await start(studio, [s1.id, m1.id], "ses_studio", "k-deleted");
+  expect(refused).toMatchObject({ code: "thread_not_found", error: `No thread ${m1.id} on this machine.` });
+  expect(refused.machine).toBeUndefined();
+});
+
+test("a write of this Inbox's own that keeps failing never holds the person's writes behind it", async () => {
+  const { studio, mini } = world();
+  const resolve = (n: number) => `messages/msg_01M8000000000000000000000${n}/resolve`;
+  studio.outbox.submit(mini.id, resolve(0), { idempotency_key: "own-1", resolved: true }, null, false, null, true);
+  studio.outbox.submit(mini.id, resolve(1), { idempotency_key: "own-2", resolved: true }, null, false, null, true);
+  studio.outbox.submit(mini.id, resolve(2), { idempotency_key: "person-1", resolved: true });
+  const sent: string[] = [];
+  const result = await studio.outbox.drain(mini.id, async (entry) => {
+    sent.push(entry.key);
+    return entry.key === "own-1" ? { status: 500, body: {} } : { status: 200, body: {} };
+  });
+  // The person's write went; this Inbox's own wait for the next try, in their order.
+  expect(sent).toEqual(["own-1", "person-1"]);
+  expect(result).toBe("server_error");
+  expect(studio.outbox.get("person-1")!.state).toBe("delivered");
+  expect([studio.outbox.get("own-1")!.state, studio.outbox.get("own-2")!.state]).toEqual(["sending", "queued"]);
+  await studio.outbox.drain(mini.id, async (entry) => (sent.push(entry.key), { status: 200, body: {} }));
+  expect(sent).toEqual(["own-1", "person-1", "own-1", "own-2"]);
+});

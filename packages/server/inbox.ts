@@ -5799,6 +5799,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         heldWrite: (key) => linked.heldWrite(key),
         cancelHeld: (key) => linked.cancelHeld(key),
         fetchFile: (args) => linked.fetchFile(args),
+        online: (machine) => linked.machinesView().some((m) => m.id === machine && m.state === "online"),
       }));
     },
     // Every running agent here: the ones with a connection (New message's), and the ones reached at their next MCP call.

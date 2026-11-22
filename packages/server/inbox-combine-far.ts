@@ -65,6 +65,8 @@ export interface InboxCombineFar {
   cancel: (key: string) => OutboxEntry | null;
   /** One file of a far message, streamed, after the far fetch's refusals (a dotenv name, past 100 MB). */
   fetchFile: (args: { message_id: string; file: string }) => Promise<Response>;
+  /** Whether that machine can be reached now (its files are copied only then). */
+  online: (machine: string) => boolean;
 }
 
 export interface InboxCombineFarDeps {
@@ -77,6 +79,7 @@ export interface InboxCombineFarDeps {
   heldWrite: (key: string) => OutboxEntry | null;
   cancelHeld: (key: string) => OutboxEntry | null;
   fetchFile: (args: { message_id: string; file: string }) => Promise<Response>;
+  online: (machine: string) => boolean;
 }
 
 type FarRecord = { id?: unknown; name?: unknown; size?: unknown };
@@ -133,12 +136,14 @@ export function createInboxCombineFar(deps: InboxCombineFarDeps): InboxCombineFa
         if (error instanceof InboxError && machine) throw new InboxError(error.code, error.message, { ...error.details, machine });
         throw error;
       }
-      if (!read) throw new InboxError("thread_not_found", FAR_READ_REFUSALS.notHere(threadId), { field: "thread_ids" });
+      // Deleted, or never there: the words a Combine says of a thread this computer does not hold.
+      if (!read) throw new InboxError("thread_not_found", `No thread ${threadId} on this machine.`, { field: "thread_ids" });
       return farCombineThread(threadId, read.machine, read.answer, deps.rowOf(threadId));
     },
     write: async (machine, route, body, thread, waitMs) => (await deps.hold(machine, route, body, thread, waitMs)) ?? null,
     entry: deps.heldWrite,
     cancel: deps.cancelHeld,
     fetchFile: deps.fetchFile,
+    online: deps.online,
   };
 }

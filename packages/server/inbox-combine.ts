@@ -87,6 +87,8 @@ export interface InboxCombineDeps {
   nameOf?: (machine: string) => string;
   /** The linked machine a request came from through its door, or null (a window, a phone, an agent). */
   doorMachine?: (req: Request) => string | null;
+  /** The most bytes of the other computer's files one Combine copies in (inbox-combine-across.ts `FILES_MAX_BYTES`). */
+  filesMaxBytes?: number;
 }
 
 interface Stored extends InboxCombineRecord {
@@ -125,7 +127,7 @@ export function createInboxCombine(deps: InboxCombineDeps) {
     writeFileSync(temp, `${JSON.stringify({ v: 1, combines })}\n`, { mode: 0o600 });
     renameSync(temp, path());
   };
-  const across = createCombineAcross({ store, far: () => deps.far?.() ?? null, now, save: () => save(), nameOf: (machine) => deps.nameOf?.(machine) ?? "another computer" });
+  const across = createCombineAcross({ store, far: () => deps.far?.() ?? null, now, save: () => save(), nameOf: (machine) => deps.nameOf?.(machine) ?? "another computer", ...(deps.filesMaxBytes !== undefined ? { filesMaxBytes: deps.filesMaxBytes } : {}) });
   const wire = ({ key: _key, wake: _wake, projects: _projects, far: _far, files: _files, ...record }: Stored): InboxCombineRecord => {
     // Its archive or Undo on the other computer still on the way: the window waits for it before it says so.
     const waiting = record.state === "done" || record.state === "undone" ? across.waitingOn({ ...record, far: _far }) : [];
@@ -356,7 +358,7 @@ export function createInboxCombine(deps: InboxCombineDeps) {
     queueMicrotask(() => {
       archive(record, true);
       across.archive(record);
-      void across.attach(record).catch(() => {});
+      void across.finish(record).catch(() => {});
     });
   });
 
