@@ -9,7 +9,7 @@ import { describe, expect, test } from 'bun:test'
 import { INBOX_T3_HOST, INBOX_T3_NAME, isT3ThreadId as coreIsT3ThreadId } from '@plannotator/core/inbox-types'
 import { inboxModClaimDir } from '@plannotator/shared/inbox/claims'
 import { inboxHostSessionFromEnv, inboxSessionProjectFromEnv } from '../../server/inbox-mcp-shim'
-import { isPanelEntrypoint, isT3ThreadId, isT3ThreadOwnTools, panelHostOwnsPlanMode, sessionKindOf, SESSION_KIND_FEATURES, t3ThreadOf, type T3SessionEnv } from './enabled'
+import { isDesktopCodeTabEntrypoint, isDesktopCodeTabSession, isPanelEntrypoint, isT3ThreadId, isT3ThreadOwnTools, panelHostOwnsPlanMode, sessionKindOf, SESSION_KIND_FEATURES, t3ThreadOf, type T3SessionEnv } from './enabled'
 import { inboxAgentProjectEnvValue, inboxSessionDirName, inboxSessionDirOf, inboxT3Agent } from './inbox'
 
 /** Every id form T3 gives a thread (packages/core/inbox-t3.ts), and look-alikes it never gives. */
@@ -110,23 +110,53 @@ describe('what the mod does in each kind of session', () => {
     expect(['claude-vscode', 'orca'].filter(panelHostOwnsPlanMode)).toEqual(['orca'])
   })
 
-  test('sorted: the terminal first, then the VS Code panel, then a T3 thread, else headless', () => {
-    expect(sessionKindOf({ isInteractive: true, panel: false, t3Thread: null })).toBe('terminal')
-    expect(sessionKindOf({ isInteractive: false, panel: true, t3Thread: null })).toBe('panel')
-    expect(sessionKindOf({ isInteractive: false, panel: false, t3Thread: thread })).toBe('t3')
-    expect(sessionKindOf({ isInteractive: false, panel: false, t3Thread: null })).toBe('headless')
+  // #3239: the desktop app's Code tab gets the reply wake only, so its entrypoints must never read as a panel host's.
+  test("the desktop app's Code tab: exactly claude-desktop and claude-desktop-3p, and neither is a panel host", () => {
+    for (const entrypoint of ['claude-desktop', 'claude-desktop-3p']) {
+      expect([entrypoint, isDesktopCodeTabEntrypoint(entrypoint), isPanelEntrypoint(entrypoint), panelHostOwnsPlanMode(entrypoint)]).toEqual([entrypoint, true, false, false])
+    }
+    // Cowork (local-agent), the other hosts, and look-alikes.
+    for (const entrypoint of ['local-agent', 'claude-vscode', 'orca', 't3-code', 'sdk-ts', 'sdk-cli', 'cli', 'Claude-Desktop', 'claude-desktop-3P', 'claude-desktop-insiders', ' claude-desktop', 'constructor', '', undefined, 1]) {
+      expect([entrypoint, isDesktopCodeTabEntrypoint(entrypoint)]).toEqual([entrypoint, false])
+    }
+  })
+
+  test("a Code tab session under the panel's guards: a run started inside it (either nested-run variable, another session's tag) is not the Code tab", () => {
+    const tab = (extra: Record<string, unknown> = {}) => ({ entrypoint: 'claude-desktop', claudecode: undefined, childSession: undefined, sessionTag: undefined, ...extra })
+    expect(isDesktopCodeTabSession(tab(), 'sess-1')).toBe(true)
+    expect(isDesktopCodeTabSession(tab({ entrypoint: 'claude-desktop-3p' }), 'sess-1')).toBe(true)
+    // A module reload in its own session: the tag the mod set names this session.
+    expect(isDesktopCodeTabSession(tab({ sessionTag: 'claude-code:sess-1' }), 'sess-1')).toBe(true)
+    // An empty variable counts as unset, as for the panel.
+    expect(isDesktopCodeTabSession(tab({ claudecode: '', childSession: '' }), 'sess-1')).toBe(true)
+    expect(isDesktopCodeTabSession(tab({ claudecode: '1', childSession: '1' }), 'sess-1')).toBe(false)
+    expect(isDesktopCodeTabSession(tab({ claudecode: '1' }), 'sess-1')).toBe(false)
+    expect(isDesktopCodeTabSession(tab({ childSession: '1' }), 'sess-1')).toBe(false)
+    expect(isDesktopCodeTabSession(tab({ sessionTag: 'claude-code:the-code-tab-session' }), 'sess-1')).toBe(false)
+    expect(isDesktopCodeTabSession(tab({ entrypoint: 'local-agent' }), 'sess-1')).toBe(false)
+  })
+
+  test('sorted: the terminal first, then a panel host, then the Code tab, then a T3 thread, else headless', () => {
+    expect(sessionKindOf({ isInteractive: true, panel: false, desktop: false, t3Thread: null })).toBe('terminal')
+    expect(sessionKindOf({ isInteractive: true, panel: false, desktop: true, t3Thread: null })).toBe('terminal')
+    expect(sessionKindOf({ isInteractive: false, panel: true, desktop: false, t3Thread: null })).toBe('panel')
+    expect(sessionKindOf({ isInteractive: false, panel: false, desktop: true, t3Thread: null })).toBe('desktop')
+    expect(sessionKindOf({ isInteractive: false, panel: false, desktop: false, t3Thread: thread })).toBe('t3')
+    expect(sessionKindOf({ isInteractive: false, panel: false, desktop: false, t3Thread: null })).toBe('headless')
   })
 
   // The owner's rule (2026-11-14): the mod is active in every session; a feature stays classic only where it
   // cannot work. A one-shot run ends with its turn, so nothing promised for later may depend on it.
   test('the table', () => {
     expect(SESSION_KIND_FEATURES).toEqual({
-      terminal: { reviews: true, planReview: true, inboxTool: true, wake: true },
-      panel: { reviews: true, planReview: true, inboxTool: true, wake: true },
+      terminal: { reviews: true, planReview: true, inboxTool: true, wake: true, reminder: true },
+      panel: { reviews: true, planReview: true, inboxTool: true, wake: true, reminder: true },
+      // #3239: the Code tab is headless plus the reply wake, nothing else.
+      desktop: { reviews: false, planReview: false, inboxTool: true, wake: true, reminder: false },
       // T3 owns Plan mode: its own plan card stays.
-      t3: { reviews: true, planReview: false, inboxTool: true, wake: true },
+      t3: { reviews: true, planReview: false, inboxTool: true, wake: true, reminder: true },
       // The Inbox tool sends and reads; reviews and plans keep the CLI, which waits for the decision inside the run.
-      headless: { reviews: false, planReview: false, inboxTool: true, wake: false },
+      headless: { reviews: false, planReview: false, inboxTool: true, wake: false, reminder: false },
     })
   })
 })
