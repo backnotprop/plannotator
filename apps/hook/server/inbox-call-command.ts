@@ -55,6 +55,7 @@ import type { InboxQuestionToCheck } from "@plannotator/core/inbox-questions";
 import { questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { hasHelpFlag, INBOX_CALL_ACTIONS, INBOX_CALL_USAGE, INBOX_PAIRED_CALL_USAGE } from "./cli";
 import { fetchPairedFile, type PairedCall } from "./inbox-call-fetch";
+import { fetchFarFile } from "./inbox-call-far-fetch";
 import { pairedAttachments } from "./inbox-call-pieces";
 import { writeWholeToStdout } from "./write-whole-stdout";
 import { AUTHOR_TOOLS, fillInboxToolArguments, type InboxHostSession, INBOX_DSH_ROOT_FOR_ENV, INBOX_DSH_ROOT_SESSION_ENV, INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
@@ -159,6 +160,9 @@ export function inboxCallerOf(flag: string | null, env: Record<string, string | 
   return { ok: true, caller: named[0] ?? null };
 }
 
+/** On this computer, `fetch_file` too: it saves a linked machine's file here (inbox-call-far-fetch.ts). Not listed in the usage. */
+const INBOX_LOCAL_CALL_ACTIONS: readonly string[] = [...INBOX_CALL_ACTIONS, INBOX_AGENT_FETCH_FILE];
+
 export type ParsedCallCommand =
   | { ok: true; action: string; json: string | null; stdin: boolean; session: string | null }
   | { ok: false; code: string; error: string };
@@ -182,7 +186,7 @@ export function parseCallCommand(argv: readonly string[], actions: readonly stri
   // switch is the Inbox's, not known here), so an agent with them off reads no word of it.
   if (!actions.includes(action)) {
     // A paired agent's list (INBOX_AGENT_CALL_ACTIONS) names them all, as its usage does.
-    const named = actions === INBOX_CALL_ACTIONS ? actions.filter((name) => name !== "steps" && name !== "routine") : actions;
+    const named = actions === INBOX_CALL_ACTIONS || actions === INBOX_LOCAL_CALL_ACTIONS ? actions.filter((name) => name !== "steps" && name !== "routine" && name !== INBOX_AGENT_FETCH_FILE) : actions;
     return { ok: false, code: "unknown_action", error: `${action} is not an Inbox action. Actions: ${named.join(", ")}.` };
   }
   if (more.length > 0) return { ok: false, code: "usage", error: "inbox call takes one JSON argument (quote it), or - to read it from stdin." };
@@ -239,7 +243,7 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
     await out(`${usage}\n`);
     return 0;
   }
-  const parsed = parseCallCommand(argv, paired ? INBOX_AGENT_CALL_ACTIONS : INBOX_CALL_ACTIONS);
+  const parsed = parseCallCommand(argv, paired ? INBOX_AGENT_CALL_ACTIONS : INBOX_LOCAL_CALL_ACTIONS);
   if (!parsed.ok) {
     err(`${parsed.code}: ${parsed.error}\n${usage}\n`);
     return 2;
@@ -251,6 +255,18 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
   const text = parsed.stdin ? await (deps.stdin ?? (() => Bun.stdin.text()))() : (parsed.json ?? "{}");
   const input = argumentsOf(text, deps.cwd);
   if ("error" in input) return refused(input.code, input.error, 2);
+  if (parsed.action === INBOX_AGENT_FETCH_FILE) {
+    let running: InboxRegistryEntry;
+    try {
+      running = await deps.ensureRunning();
+    } catch (error) {
+      return refused("inbox_not_running", inboxEnsureFailedWords(error));
+    }
+    const fetched = await fetchFarFile(input.args, deps.cwd, running);
+    if (!fetched.ok) return refused(fetched.code, fetched.message);
+    await out(`${JSON.stringify(fetched.saved)}\n`);
+    return 0;
+  }
 
   // With no project_path, the session's own project (its host's PLANNOTATOR_SESSION_PROJECT), wherever the shell has cd'd to.
   const call = fillInboxToolArguments({ method: "tools/call", params: { name: parsed.action, arguments: input.args } }, deps.cwd, null, caller.caller, null, inboxSessionProjectFromEnv(deps.env));
