@@ -173,7 +173,9 @@ export async function openDiagramPage(page: Page, bundle: string, options: { til
   let html = '';
   await page.route(/^(?!data:|about:)/, (route) => {
     const url = route.request().url();
-    if (home && url === home) return route.fulfill({ status: 200, contentType: 'text/html', body: html });
+    // UTF-8 said out loud: without it the page decodes as windows-1252, and the bundle's raw
+    // non-ASCII (Pele's own `[ -‍﻿]` class) turns into a range out of order.
+    if (home && url === home) return route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: html });
     if (url.startsWith(`${PICTURE_HOST}/`)) return route.fulfill({ status: 200, contentType: 'image/png', body: PNG });
     requests.push(`${route.request().resourceType()} ${url}`);
     return route.abort();
