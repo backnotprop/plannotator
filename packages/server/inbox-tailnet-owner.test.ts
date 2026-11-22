@@ -21,6 +21,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { inboxId, inboxSentFromLine } from "@plannotator/core/inbox-types";
 import { INBOX_BRIDGE_POLL_PATH, parseInboxBridgeCommands } from "@plannotator/shared/inbox/connection";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
@@ -665,6 +666,59 @@ describe("where the person wrote it reaches the agent (inbox-sent-from.ts)", () 
       expect(typeof from.name === "string" && from.name.length > 0).toBe(true);
       expect(from.via).toBe(caller === "owner" ? "tailnet" : undefined);
       expect(inboxSentFromLine({ sent_from: from })).toContain(from.name);
+    }
+  });
+});
+
+describe("where the person wrote it, read by an agent on the linked computer (inbox-sent-from-reader.ts)", () => {
+  const SESSION = "ses-far-reader";
+  test("the computer that forwarded it is the reader's own: no line; the thread's own window names that computer", async () => {
+    setEnv("PLANNOTATOR_TEST_SANDBOX", process.env.PLANNOTATOR_TEST_SANDBOX ?? "1");
+    const peer = await world({ phones: false });
+    const w = await world({ phones: false });
+    const bearer = (inbox: InboxServer) => ({ Authorization: `Bearer ${inbox.token}`, "Content-Type": "application/json" });
+    const offer = (await (await fetch(`http://127.0.0.1:${peer.inbox.port}/api/inbox/control/machines/offer`, { method: "POST", headers: bearer(peer.inbox), body: "{}" })).json()) as Json;
+    const linked = await fetch(`http://127.0.0.1:${w.inbox.port}/api/inbox/control/machines/link`, {
+      method: "POST",
+      headers: bearer(w.inbox),
+      body: JSON.stringify({ link: offer.link, address: `http://127.0.0.1:${peer.inbox.port}`, one_way: true }),
+    });
+    expect(linked.status).toBe(201);
+    const machine = ((await linked.json()) as Json).machine.id as string;
+    await waitOnline(w, machine);
+    const root = join(peer.dataDir, "shop");
+    mkdirSync(root, { recursive: true });
+    const project = peer.inbox.store.ensureProject({ name: "shop", root });
+    const id = peer.inbox.store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: SESSION, name: "Claude Code" }, body: "Which size?", idempotency_key: "far-reader" }).message.id;
+    // In this computer's window, and over its tailnet: forwarded to the thread's computer, which records where.
+    const replies: Record<string, string> = {};
+    for (const [caller, key] of [
+      ["local", "00000000-0000-4000-8000-000000000407"],
+      ["owner", "00000000-0000-4000-8000-000000000408"],
+    ] as const) {
+      const response = await call(w, caller, { path: `/api/inbox/m/${machine}/messages/${id}/reply`, body: { seen_through_seq: Number.MAX_SAFE_INTEGER, idempotency_key: key, words: `Large (${caller}).`, questions: [] } });
+      expect(response.status).toBe(200);
+      replies[caller] = ((await response.json()) as Json).reply.id as string;
+    }
+    // In the thread's computer's own window.
+    const there = await call(peer, "local", { path: `/api/inbox/messages/${id}/reply`, body: { idempotency_key: "00000000-0000-4000-8000-000000000409", words: "Large (there).", questions: [] } });
+    expect(there.status).toBe(200);
+    replies.there = ((await there.json()) as Json).reply.id as string;
+    expect((peer.inbox.store.message(replies.local)!.sent_from as Json).kind).toBe("machine");
+
+    const client = new Client({ name: "inbox-far-reader-test", version: "1.0.0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${w.inbox.port}/mcp`)));
+    try {
+      const read = (await client.callTool({ name: "read_thread", arguments: { thread_id: id } })) as { isError?: boolean; content: { text: string }[]; structuredContent: Json };
+      expect(read.isError).toBeFalsy();
+      const shownAs = read.structuredContent.machine.name as string;
+      const lines = Object.fromEntries((read.structuredContent.thread.messages as Json[]).map((m) => [m.id, m.sent_from ?? null]));
+      expect(lines[replies.local]).toBeNull();
+      expect(lines[replies.owner]).toBe(inboxSentFromLine({ sent_from: { kind: "tailnet" } }));
+      expect(lines[replies.there]).toBe(inboxSentFromLine({ sent_from: { kind: "machine", name: shownAs } }));
+      expect(read.content[0]!.text).not.toContain(inboxSentFromLine({ sent_from: peer.inbox.store.message(replies.local)!.sent_from }));
+    } finally {
+      await client.close().catch(() => {});
     }
   });
 });

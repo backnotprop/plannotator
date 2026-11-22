@@ -20,6 +20,7 @@ import { fetchFarFile } from "../../apps/hook/server/inbox-call-far-fetch";
 import { FETCHED_FILE_WORDS } from "@plannotator/shared/inbox/saved-file";
 import { openInboxAgentFile } from "./inbox-agent-files";
 import { createInboxMcpServer, type InboxMcpContext } from "./inbox-mcp";
+import { inboxSentFromLine, type InboxSentFrom } from "@plannotator/core/inbox-types";
 import type { PeerLink } from "./inbox-peer-link";
 
 type Result = { content: { text: string }[]; isError?: boolean; structuredContent?: Record<string, any> };
@@ -66,8 +67,8 @@ function machine(name: string) {
 }
 type Machine = ReturnType<typeof machine>;
 
-/** A thread an agent there started, with the person's reply, and a file when asked. */
-async function thread(m: Machine, files: string[] = []) {
+/** A thread an agent there started, with the person's reply (written where `sentFrom` says), and a file when asked. */
+async function thread(m: Machine, files: string[] = [], sentFrom?: InboxSentFrom) {
   for (const file of files) writeFileSync(join(m.projectRoot, file), `bytes of ${file}`);
   const sent = await m.tools().send_message!.handler(
     { project_path: m.projectRoot, agent_session: "ses_builder", agent_host: "claude-code", agent_name: "Builder", subject: "Rate limits", body: "Which limit do we ship?", ...(files.length ? { attachments: files } : {}) },
@@ -75,15 +76,16 @@ async function thread(m: Machine, files: string[] = []) {
   );
   expect(sent.isError).toBeUndefined();
   const id = String(sent.structuredContent!.thread_id);
-  m.store.sendReply(id, { words: "The lower one, 100 a minute.", idempotency_key: `reply-${id}` });
+  m.store.sendReply(id, { words: "The lower one, 100 a minute.", idempotency_key: `reply-${id}`, ...(sentFrom ? { sent_from: sentFrom } : {}) });
   return id;
 }
 
 /** A stand-in link to `far`: its door's two agent routes answered in process, its list and state as given. */
-function linkTo(far: Machine, options: { id?: string; state?: string; marks?: string[] | null; rows?: string[]; request?: PeerLink["request"] } = {}): PeerLink {
+function linkTo(far: Machine, options: { id?: string; state?: string; marks?: string[] | null; rows?: string[]; request?: PeerLink["request"]; reader?: string } = {}): PeerLink {
   const door = async (route: string, search: string): Promise<Response> => {
     const url = new URL(`http://door.local/api/inbox/device/${route}${search}`);
-    if (route === "agent-read") return agentReadDoorAnswer({ store: far.store, stepsOn: () => false }, url);
+    // `reader`: the name `far` records for the reading computer, as its door tells it from the token.
+    if (route === "agent-read") return agentReadDoorAnswer({ store: far.store, stepsOn: () => false }, url, options.reader);
     if (route === "agent-file") return agentFileDoorAnswer(far.store, url);
     return Response.json({ error: "Not a door route.", code: "device_route_not_found" }, { status: 404 });
   };
@@ -132,8 +134,9 @@ describe("read_thread of a thread on a linked machine", () => {
   test("reads exactly as a local read there, after one line naming the computer, both ways", async () => {
     const studio = machine("Studio");
     const mini = machine("Mini");
-    const onMini = await thread(mini);
-    const onStudio = await thread(studio);
+    // Written over the tailnet there: from either computer's side, the same line.
+    const onMini = await thread(mini, [], { kind: "tailnet" });
+    const onStudio = await thread(studio, [], { kind: "tailnet" });
     const toMini = linkTo(mini, { rows: [onMini] });
     const toStudio = linkTo(studio, { rows: [onStudio] });
     const studioReads = readerTools(studio, [toMini], { [toMini.id]: "Mini" });
@@ -216,7 +219,7 @@ describe("read_thread of a thread on a linked machine", () => {
   test("takes exactly what a local read takes: a stop notice's id, a fractional cursor, a message the thread lacks", async () => {
     const studio = machine("Studio");
     const mini = machine("Mini");
-    const id = await thread(mini);
+    const id = await thread(mini, [], { kind: "phone" });
     const reply = mini.store.thread(id)!.messages.at(-1)!.id;
     const link = linkTo(mini, { rows: [id] });
     const { tools } = readerTools(studio, [link], { [link.id]: "Mini" });
@@ -309,6 +312,85 @@ describe("read_thread of a thread on a linked machine", () => {
     expect(sent.content[0]!.text).toStartWith("thread_on_other_machine: ");
     expect(sent.content[0]!.text).toContain("replying there is not available from this computer yet");
     expect(studio.store.thread(id)).toBeNull();
+  });
+});
+
+describe("where the person wrote it, as the reading agent's computer sees it", () => {
+  /**
+   * A thread on MacBook, answered from everywhere: in Studio's window (forwarded, recorded as Studio), on the phone
+   * through Studio, in MacBook's own window, over MacBook's tailnet, and in Mini's window. Studio shows MacBook as
+   * "Work MacBook"; MacBook records Studio as "Studio".
+   */
+  async function answered() {
+    const studio = machine("Studio");
+    const macbook = machine("MacBook");
+    const id = await thread(macbook, [], { kind: "machine", name: "Studio" });
+    const reply = (key: string, sent_from?: InboxSentFrom) => macbook.store.sendReply(id, { words: `Reply ${key}.`, idempotency_key: `${key}-${id}`, ...(sent_from ? { sent_from } : {}) }).reply.id;
+    const ids = {
+      studio: macbook.store.thread(id)!.messages.at(-1)!.id,
+      studioPhone: reply("studio-phone", { kind: "machine", name: "Studio", via: "phone" }),
+      macbook: reply("macbook"),
+      tailnet: reply("tailnet", { kind: "tailnet" }),
+      mini: reply("mini", { kind: "machine", name: "Mini" }),
+    };
+    const link = linkTo(macbook, { rows: [id], reader: "Studio" });
+    const { tools } = readerTools(studio, [link], { [link.id]: "Work MacBook" });
+    return { studio, macbook, id, ids, tools, link };
+  }
+  const line = (sent_from: InboxSentFrom) => inboxSentFromLine({ sent_from });
+  const linesOf = (messages: { id: string; sent_from?: string }[]) => Object.fromEntries(messages.map((m) => [m.id, m.sent_from ?? null]));
+
+  test("Studio's agent: its own computer gets no line, MacBook's own window reads as that linked computer, the rest as they are", async () => {
+    const { id, ids, tools } = await answered();
+    const expected = {
+      [ids.studio]: null,
+      [ids.studioPhone]: line({ kind: "phone" }),
+      [ids.macbook]: line({ kind: "machine", name: "Work MacBook" }),
+      [ids.tailnet]: line({ kind: "tailnet" }),
+      [ids.mini]: line({ kind: "machine", name: "Mini" }),
+    };
+    const read = await tools.read_thread!.handler({ thread_id: id }, {});
+    expect(read.isError).toBeUndefined();
+    const shown = linesOf(read.structuredContent!.thread.messages);
+    for (const [message, words] of Object.entries(expected)) expect([message, shown[message]]).toEqual([message, words]);
+    // The text says the same, and never that Studio is somewhere else.
+    expect(read.content[0]!.text).not.toContain(line({ kind: "machine", name: "Studio" }));
+    expect(read.content[0]!.text).toContain(line({ kind: "machine", name: "Work MacBook" }));
+    // The full records: the same lines, as a local full read words them.
+    const full = await tools.read_thread!.handler({ thread_id: id, format: "full" }, {});
+    const records = linesOf(full.structuredContent!.thread.messages.filter((m: { author: { kind: string } }) => m.author.kind === "person"));
+    expect(records).toEqual(expected);
+  });
+
+  test("MacBook's own agent reads the same thread exactly as before", async () => {
+    const { macbook, id, ids, studio, link } = await answered();
+    const before = await macbook.tools().read_thread!.handler({ thread_id: id }, {});
+    const shown = linesOf(before.structuredContent!.thread.messages);
+    expect(shown[ids.studio]).toBe(line({ kind: "machine", name: "Studio" }));
+    expect(shown[ids.studioPhone]).toBe(line({ kind: "machine", name: "Studio", via: "phone" }));
+    expect(shown[ids.macbook]).toBeNull();
+    // A far read in between changes nothing in MacBook's own read (its own first read moved the cursor: read it again).
+    const again = (await macbook.tools().read_thread!.handler({ thread_id: id }, {})).content[0]!.text;
+    await readerTools(studio, [link], { [link.id]: "Work MacBook" }).tools.read_thread!.handler({ thread_id: id }, {});
+    expect((await macbook.tools().read_thread!.handler({ thread_id: id }, {})).content[0]!.text).toBe(again);
+  });
+
+  test("another computer's token, an older reader, and a name with a backtick", async () => {
+    const { macbook, id, ids } = await answered();
+    const ask = (reader: string, shownAs?: string) =>
+      agentReadDoorAnswer({ store: macbook.store, stepsOn: () => false }, new URL(`http://door.local/api/inbox/device/agent-read?thread_id=${id}${shownAs === undefined ? "" : `&shown_as=${encodeURIComponent(shownAs)}`}`), reader).json() as Promise<any>;
+    // Mini reads: Studio's word is Studio's, Mini's own is none.
+    const mini = linesOf((await ask("Mini", "MacBook")).result.thread.messages);
+    expect(mini[ids.studio]).toBe(line({ kind: "machine", name: "Studio" }));
+    expect(mini[ids.mini]).toBeNull();
+    expect(mini[ids.macbook]).toBe(line({ kind: "machine", name: "MacBook" }));
+    // An older reader names nothing: MacBook's own window stays silent, Studio's own still drops.
+    const older = linesOf((await ask("Studio")).result.thread.messages);
+    expect(older[ids.macbook]).toBeNull();
+    expect(older[ids.studio]).toBeNull();
+    // The name the reader says is cleaned as a record's name: one line, no backtick.
+    const odd = linesOf((await ask("Studio", "Work`\nMac")).result.thread.messages);
+    expect(odd[ids.macbook]).toBe(line({ kind: "machine", name: "Work' Mac" }));
   });
 });
 

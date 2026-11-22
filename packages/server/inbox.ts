@@ -372,6 +372,7 @@ import { createInboxStepsRoute, inboxStepsStale, inboxStepsWaitOnPerson as steps
 import { createInboxDebugLog } from "./inbox-debug-log";
 import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller, type InboxDoorTimers } from "./inbox-devices";
 import { inboxRequestSentFrom } from "./inbox-sent-from";
+import { inboxMachineRecordName } from "./inbox-sent-from-reader";
 import { doorHealth } from "./inbox-door-version";
 import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
 import { agentFileDoorAnswer, agentReadDoorAnswer } from "./inbox-far-read";
@@ -8351,7 +8352,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       phones: phonesOn,
       machines: () => machines ?? null,
       // A linked machine's agents read this Inbox's threads and their files (inbox-far-read.ts).
-      agentRead: { read: (url) => agentReadDoorAnswer(mcpContext, url), file: (url) => agentFileDoorAnswer(store, url) },
+      // Each message's place is worded from the reading computer's side: who it is comes from its token (inbox-sent-from-reader.ts).
+      agentRead: { read: (url, device) => agentReadDoorAnswer(mcpContext, url, inboxMachineRecordName(machines?.machineOfDevice(device.id)?.name, device.name)), file: (url) => agentFileDoorAnswer(store, url) },
       // ...and search and list them (inbox-far-find.ts): a project named by its git remote (unknown while git has not said).
       agentFind: {
         search: (url) => agentSearchDoorAnswer({ store, searchIndex: search.index, remoteOf: (root, waitMs) => farRemoteOf(repos, root, waitMs) }, url),

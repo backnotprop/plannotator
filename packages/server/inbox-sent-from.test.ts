@@ -18,6 +18,7 @@ import { agentMessage, agentMessageLine, inboxFullReadLines, messageLineText, me
 import { InboxOutbox } from "./inbox-outbox";
 import { createInboxLiveSessions } from "./inbox-sessions";
 import { inboxForwardedPlace, inboxRequestSentFrom, type InboxSentFromFacts } from "./inbox-sent-from";
+import { inboxMachineRecordName, inboxMessageForReader, inboxSentFromForReader, inboxSentFromReader } from "./inbox-sent-from-reader";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -218,5 +219,54 @@ describe("every read an agent has, from the store", () => {
     expect(inboxBodyForAgent(odd)).toBe(WORDS);
     expect(agentMessage(odd as never)).not.toHaveProperty("sent_from");
     expect(inboxFullReadLines(odd)).not.toHaveProperty("sent_from");
+  });
+});
+
+describe("an agent on a linked computer reads the thread here (a far read)", () => {
+  // This computer is "MacBook" to the reader, which this Inbox calls "Studio".
+  const STUDIO = inboxSentFromReader("Studio", "MacBook");
+  const reply = (sent_from?: InboxSentFrom | Record<string, unknown>): { author: { kind: string }; idempotency_key: string | null; sent_from?: unknown } => ({ author: { kind: "person" }, idempotency_key: "k1", ...(sent_from ? { sent_from } : {}) });
+  const CASES: { name: string; message: ReturnType<typeof reply> & Record<string, unknown>; reader?: ReturnType<typeof inboxSentFromReader>; from: InboxSentFrom | null }[] = [
+    { name: "written in the reader's own window: its own computer, no line", message: reply({ kind: "machine", name: "Studio" }), from: null },
+    { name: "on the phone through the reader's computer: the phone, as the reader's own record would say", message: reply({ kind: "machine", name: "Studio", via: "phone" }), from: { kind: "phone" } },
+    { name: "over the reader's tailnet: the tailnet", message: reply({ kind: "machine", name: "Studio", via: "tailnet" }), from: { kind: "tailnet" } },
+    { name: "in this computer's own window: this computer, as the reader shows it", message: reply(), from: { kind: "machine", name: "MacBook" } },
+    { name: "over this computer's tailnet: as it is", message: reply({ kind: "tailnet" }), from: { kind: "tailnet" } },
+    { name: "through this computer's Cloudflare door: as it is", message: reply({ kind: "cloudflare" }), from: { kind: "cloudflare" } },
+    { name: "this computer's phone app: as it is", message: reply({ kind: "phone" }), from: { kind: "phone" } },
+    { name: "a third computer: as it is", message: reply({ kind: "machine", name: "Mini", via: "tailnet" }), from: { kind: "machine", name: "Mini", via: "tailnet" } },
+    { name: "a record of another shape: none, as a local read", message: reply({ kind: "satellite" }), from: null },
+    { name: "an older reader that names nothing: this computer's own window says nothing", message: reply(), reader: inboxSentFromReader("Studio", null), from: null },
+    { name: "a reader this Inbox has no name for: nothing is its own", message: reply({ kind: "machine", name: "Studio" }), reader: inboxSentFromReader("", "MacBook"), from: { kind: "machine", name: "Studio" } },
+    { name: "an agent's message: never a line", message: { ...reply(), author: { kind: "agent" } }, from: null },
+    { name: "the Inbox's note for a 👍 (no key): never a line", message: { ...reply(), idempotency_key: null, ack_of: "msg_x" }, from: null },
+    { name: "a run's note (no key): never a line", message: { ...reply(), idempotency_key: null }, from: null },
+    { name: "a Tidy note: never a line", message: { ...reply(), tidy: { id: "run", wake: true } }, from: null },
+    { name: "a routine's run divider: never a line", message: { ...reply(), scheduled_run: { run: 1 } }, from: null },
+  ];
+  for (const { name, message, reader, from } of CASES) {
+    test(name, () => expect(inboxSentFromForReader(message, reader ?? STUDIO)).toEqual(from));
+  }
+
+  test("the reader is told from what this Inbox records for its computer, so a forward and a read agree by construction", () => {
+    for (const [machineName, deviceName] of [["Studio", null], ["", "Bob's Mini"], ["Mini`\n‮evil", null]] as const) {
+      const recorded = inboxRequestSentFrom({ ...LOCAL, door: { platform: MACHINE_PLATFORM, machineName, deviceName, place: null } });
+      const reader = inboxSentFromReader(inboxMachineRecordName(machineName, deviceName), "MacBook");
+      expect(inboxSentFromForReader(reply(recorded!), reader)).toBeNull();
+    }
+  });
+
+  test("the name the reader says for this computer is cleaned as a record's name: one line, no backtick, at most 64", () => {
+    const from = inboxSentFromForReader(reply(), inboxSentFromReader("Studio", `Mac\`Book\n‮${"x".repeat(80)}`));
+    expect(from).toEqual({ kind: "machine", name: inboxSentFromName(`Mac\`Book\n‮${"x".repeat(80)}`) });
+    expect(inboxSentFromLine({ sent_from: from })).not.toContain("\n");
+    expect((from as { name: string }).name.length).toBeLessThanOrEqual(64);
+  });
+
+  test("a message moved to the reader's side keeps everything else; none left means no field", () => {
+    const own = { ...reply({ kind: "machine", name: "Studio" }), body: "Yes." };
+    expect(inboxMessageForReader(own, STUDIO)).toEqual({ author: { kind: "person" }, idempotency_key: "k1", body: "Yes." });
+    expect(inboxMessageForReader(own, STUDIO)).not.toHaveProperty("sent_from");
+    expect(inboxMessageForReader({ ...reply(), body: "Yes." }, STUDIO).sent_from).toEqual({ kind: "machine", name: "MacBook" });
   });
 });

@@ -5,8 +5,9 @@
  * caller (a paired phone, or a linked computer with the place its own Inbox told the same way). See "Where the person
  * wrote it" in docs/agent-guides/inbox-messages.md.
  */
-import { inboxSentFromName, type InboxSentFrom, type InboxSentFromPlace } from "@plannotator/core/inbox-types";
+import type { InboxSentFrom, InboxSentFromPlace } from "@plannotator/core/inbox-types";
 import { AGENT_PLATFORM, MACHINE_PLATFORM } from "./inbox-devices";
+import { inboxMachineRecordName } from "./inbox-sent-from-reader";
 
 export interface InboxSentFromFacts {
   /** The listener: the window's loopback port, or the tailnet's (the Cloudflare door dispatches as the tailnet too). */
@@ -29,7 +30,7 @@ export function inboxRequestSentFrom(facts: InboxSentFromFacts): InboxSentFrom |
   if (door) {
     if (door.platform === MACHINE_PLATFORM) {
       // Cleaned as the line reads it (one line, no controls, 64 characters), so the record holds what the agent reads.
-      const name = inboxSentFromName(door.machineName ?? "") || inboxSentFromName(door.deviceName ?? "");
+      const name = inboxMachineRecordName(door.machineName, door.deviceName);
       return name ? { kind: "machine", name, ...(door.place ? { via: door.place } : {}) } : null;
     }
     // A cloud agent is never the person, and its token is refused at the door anyway.

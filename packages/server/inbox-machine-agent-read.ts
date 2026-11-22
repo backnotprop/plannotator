@@ -141,7 +141,7 @@ export function createMachineAgentRead(deps: MachineAgentReadDeps) {
     if (stop) return stop;
     try {
       const signal = AbortSignal.timeout(waitMs);
-      const response = await peer.request(AGENT_READ_ROUTE, farReadQuery(ask), { method: "GET", headers: {}, signal, timeoutMs: waitMs });
+      const response = await peer.request(AGENT_READ_ROUTE, farReadQuery(ask, deps.nameOf(peer.id)), { method: "GET", headers: {}, signal, timeoutMs: waitMs });
       if (response.status === 404) {
         const { code, error } = await refusalOf(response, waitMs);
         if (routeUnknown(code)) return { kind: "older", name };
