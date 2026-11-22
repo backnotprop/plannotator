@@ -110,6 +110,8 @@ import {
   resolveInboxToolEnabled,
   resolvePlanReviewEnabled,
   isPanelEntrypoint,
+  isDesktopCodeTabEntrypoint,
+  isDesktopCodeTabSession,
   panelHostOwnsPlanMode,
   planSwitchAction,
   HOST_PLAN_CARD_ENV,
@@ -875,14 +877,15 @@ async function pickShellOf($: Engine, dataDir: string): Promise<ModShell | null>
 /**
  * Which SDK host this non-interactive session is: a panel host's chat (VS
  * Code, Orca: `isPanelSession`), whether its host draws its own plan card
- * (`panelHostOwnsPlanMode`), or a T3 Code thread (`t3ThreadOf`), all in
+ * (`panelHostOwnsPlanMode`), a Code tab of the Claude desktop app
+ * (`isDesktopCodeTabSession`), or a T3 Code thread (`t3ThreadOf`), all in
  * enabled.ts. Each variable is named as a literal (env-get-literal.test.ts).
  */
-async function sdkHostOf($: Engine): Promise<{ panel: boolean; hostPlanMode: boolean; t3Thread: string | null }> {
-  const none = { panel: false, hostPlanMode: false, t3Thread: null }
+async function sdkHostOf($: Engine): Promise<{ panel: boolean; hostPlanMode: boolean; desktop: boolean; t3Thread: string | null }> {
+  const none = { panel: false, hostPlanMode: false, desktop: false, t3Thread: null }
   const entrypoint = await $.env.get('CLAUDE_CODE_ENTRYPOINT')
-  // Read the rest only for a panel host's or T3's entrypoint: every other session decides on the first read.
-  if (!isPanelEntrypoint(entrypoint) && entrypoint !== T3_ENTRYPOINT) return none
+  // Read the rest only for a panel host's, the desktop app's or T3's entrypoint: every other session decides on the first read.
+  if (!isPanelEntrypoint(entrypoint) && !isDesktopCodeTabEntrypoint(entrypoint) && entrypoint !== T3_ENTRYPOINT) return none
   const env = {
     entrypoint,
     claudecode: await $.env.get('CLAUDECODE'),
@@ -895,6 +898,7 @@ async function sdkHostOf($: Engine): Promise<{ panel: boolean; hostPlanMode: boo
     // panel (an inherited tag, a nested run) still sits under Orca's card.
     return { ...none, panel, hostPlanMode: panelHostOwnsPlanMode(entrypoint) }
   }
+  if (isDesktopCodeTabEntrypoint(entrypoint)) return { ...none, desktop: isDesktopCodeTabSession(env, String(await $.session.id())) }
   return { ...none, t3Thread: t3ThreadOf({ ...env, thread: await $.env.get('T3CODE_THREAD_ID') }) }
 }
 
@@ -940,7 +944,7 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
   // there would hand Plannotator's own agent Plannotator's tools and the person's Inbox.
   if ((await $.env.get('PLANNOTATOR_ASK_AI_CHILD')) === '1') return null
   const isInteractive = e.isInteractive === true
-  const host = isInteractive ? { panel: false, hostPlanMode: false, t3Thread: null } : await sdkHostOf($)
+  const host = isInteractive ? { panel: false, hostPlanMode: false, desktop: false, t3Thread: null } : await sdkHostOf($)
   const kind = sessionKindOf({ isInteractive, ...host })
   const features = SESSION_KIND_FEATURES[kind]
   const dataDir = await resolveDataDir(
@@ -988,7 +992,7 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
     planReview: features.planReview && !host.hostPlanMode && resolvePlanReviewEnabled(planSwitch === 'clear' ? undefined : planSwitchValue, configText),
     inboxTool: inboxOn,
     autoReload: resolveAutoReloadEnabled(await $.env.get('PLANNOTATOR_AUTO_RELOAD'), configText),
-    inboxReminder: features.wake && inboxOn && resolveInboxReminderEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
+    inboxReminder: features.reminder && inboxOn && resolveInboxReminderEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
     inboxReminderCustom: resolveInboxReminderCustom(configText),
     inboxReminderRules: resolveInboxReminderRules(configText),
     panel: host.panel,

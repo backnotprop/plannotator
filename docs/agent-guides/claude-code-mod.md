@@ -49,6 +49,7 @@ and each kind gets what works there:
 | `terminal` (interactive) | yes | yes | yes | the mod's |
 | `panel` (VS Code chat panel) | yes | yes | yes | the mod's |
 | `panel` (Orca chat) | yes | yes | yes | Orca's own plan card |
+| `desktop` (the Claude desktop app's Code tab) | yes | yes | no: the classic CLI | the classic hook |
 | `t3` (a T3 Code thread) | yes, as the thread | yes, as the thread | yes | T3's own Plan mode |
 | `headless` (`claude -p`, any other SDK app) | yes | no | no: the classic CLI | the classic hook |
 
@@ -149,6 +150,22 @@ review off.
 Seen in a real Orca 1.4.259 run: Orca's card shows and waits, no Plannotator
 plan server starts, and the debug log says the switch was set and that both
 ExitPlanMode and its permission request were passed on.
+
+**The Claude desktop app's Code tab (#3239).** The desktop app runs a Code
+tab's Claude Code through the Agent SDK with `CLAUDE_CODE_ENTRYPOINT`
+`claude-desktop` (`claude-desktop-3p` with a third-party inference provider),
+and deletes `CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION` from that environment
+(both read in the 4.23118 app; Cowork's `local-agent` stays `headless`).
+`isDesktopCodeTabSession` in `enabled.ts` applies the panel's checks, so a
+`claude -p` started inside a Code tab is `headless`. A `desktop` session is a
+`headless` one plus the reply wake: the Inbox link ticks from the start and
+its sends carry the wake mark. It gets no reminder, no `plannotator` tool, no
+commands and no Bash take-over, and ExitPlanMode goes on to the classic hook.
+Before this, a Code tab was `headless`, so its first send was stored
+without `wakes` ("Saved for Claude Code…"). Its reply then went in only when
+the self-heal's second look armed the tick (`ensureTicking`, about 60 s after
+the session started). A wake the app refuses (`{ drop }`) is held as in the
+panel.
 
 **A T3 Code thread.** T3 Code (pingdotgg/t3code) runs a thread's Claude through
 the Agent SDK with no `settingSources`, so the user's plugins, this one
