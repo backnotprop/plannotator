@@ -72,6 +72,14 @@ const settle = async () => {
     });
   }
 };
+/** Waits, a bounded while, for what a lazy part (the reader) draws once its code is loaded: a busy machine loads it later. */
+const until = async (ok: () => boolean) => {
+  for (let i = 0; i < 200 && !ok(); i++) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    });
+  }
+};
 /** Every request the window makes, answered from `routes` (else 404), with its method. */
 const fetches = (routes: Record<string, unknown>) => {
   const seen: { url: string; method: string }[] = [];
@@ -172,6 +180,7 @@ test.skipIf(!hasDom)("a branch row opens its diff beside the list: that branch's
   expect(window.location.hash).toBe('#reviews&local=prj_plannotator&branch=fix%2Fguide-global-comment-keep-words');
   // App passes the address's row back in.
   await render(page({ local: readRoute().local }));
+  await until(() => drawn.length > 0);
   const pane = document.querySelector('[data-local-diff]');
   expect(pane?.getAttribute('data-local-diff')).toBe('branch');
   expect(document.querySelector('[data-local-title]')?.textContent).toBe('fix/guide-global-comment-keep-words');

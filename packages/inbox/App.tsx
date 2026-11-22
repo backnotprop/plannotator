@@ -5085,8 +5085,7 @@ function Inbox() {
     return (
     <PullsPage
       state={pulls}
-      stackId={route.stack ?? null} layerId={route.layer ?? route.backLayer ?? null}
-      local={threadId ? null : (route.local ?? null)}
+      stackId={route.stack ?? null} layerId={route.layer ?? route.backLayer ?? null} local={threadId ? null : (route.local ?? null)}
       threadId={threadId}
       onHide={threadId && !stack.thread ? () => setThreadFull(true) : undefined}
       project={project}
