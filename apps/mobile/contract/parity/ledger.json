@@ -21763,6 +21763,20 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-window-api-inbox-threads-id-acted",
+      "title": "window:/api/inbox/threads/:id/acted",
+      "surface": [
+        "window:/api/inbox/threads/:id/acted"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }
