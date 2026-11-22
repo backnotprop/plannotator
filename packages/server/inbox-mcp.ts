@@ -58,6 +58,7 @@ export { fail, guarded, ok, okComplete, PROJECT_PATH_DESCRIPTION, type ToolResul
 import type { InboxSearchIndex } from "@plannotator/shared/inbox/search";
 import { isInsideFolder, type InboxProjectRoot } from "./inbox-project-root";
 import { registerInboxSnoozeTool, type InboxSnoozeMcpContext } from "./inbox-mcp-snooze";
+import { farReplyRefusal, farThreadRead, type InboxFarReadMcpContext } from "./inbox-mcp-far-read";
 import { notePullFoundLater, pullsToLookUp, quietHint, type InboxKnownPulls } from "./inbox-mcp-hints";
 import { registerInboxScheduledTool, type InboxScheduledMcpContext } from "./inbox-mcp-scheduled";
 import type { ProjectHostOf } from "./inbox-thread-pulls";
@@ -268,7 +269,7 @@ export const SEND_ROUTING_FIELDS = {
   agent_host: z.string().optional().describe("Your agent host, e.g. claude-code, codex, cursor."),
 };
 
-export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMcpContext, InboxBranchMcpContext {
+export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMcpContext, InboxBranchMcpContext, InboxFarReadMcpContext {
   store: InboxStore;
   /** The Inbox's base URL, `http://localhost:<port>/`. */
   baseUrl: () => string;
@@ -625,6 +626,8 @@ export async function sendProject(
   refuseBadSubject(input.subject);
   if (input.reply_to) {
     const parent = context.store.message(ownMessageId(context.store, input.reply_to));
+    const far = parent ? null : (context.farThreadMachine?.(input.reply_to) ?? null);
+    if (far) throw new InboxError("thread_on_other_machine", farReplyRefusal(input.reply_to, far));
     if (!parent) throw new InboxError("message_not_found", `No message ${input.reply_to}.`);
     return context.store.project(parent.project_id)!;
   }
@@ -1445,6 +1448,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           after: ownMessageId(store, asked.after),
           ...(asked.expand ? { expand: asked.expand.map((id) => ownMessageId(store, id)) } : {}),
         };
+        // A thread only a linked machine holds: read there, the same read (inbox-mcp-far-read.ts).
+        const far = await farThreadRead(context, input);
+        if (far) return far;
         const threadId = threadOf(store, input);
         if (threadId) {
           const naming = namingHint(store, threadId, input.agent_session?.trim() || null);

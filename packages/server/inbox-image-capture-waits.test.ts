@@ -2,8 +2,9 @@
  * The on-open capture of a message's images (createInboxImageCapture) and an image not on disk (#2788): an agent
  * may name a path anywhere, a sleeping disk or an automount included, and each read of it holds the Inbox. A source
  * refused before any read waits INBOX_IMAGE_CAPTURE_MISS_WAITS_MS before it is read again, however often its thread
- * is opened; one that appears is captured once its wait passes, or at once when the image route serves it (the
- * window draws it); the table of waits is bounded. A real store over a temp data dir; no Inbox is started.
+ * is opened; one that appears is captured once its wait passes, at once when the image route serves it (the
+ * window draws it), or on the next open after its thread changed (a new message: the window does not ask the route
+ * again for a picture that failed); the table of waits is bounded. A real store over a temp data dir; no Inbox is started.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -118,6 +119,45 @@ describe("an image not on disk", () => {
     expect(gaps.slice(0, INBOX_IMAGE_CAPTURE_MISS_WAITS_MS.length)).toEqual([...INBOX_IMAGE_CAPTURE_MISS_WAITS_MS]);
     expect(gaps.slice(INBOX_IMAGE_CAPTURE_MISS_WAITS_MS.length).every((gap) => gap === last)).toBe(true);
     expect(times.length).toBeLessThan(12);
+  });
+
+  test("written later, then the thread takes a new message: captured on the next open, not after the wait", async () => {
+    const w = world();
+    const message = w.send("Soon:\n\n![after](shots/after.png)");
+    await w.open(message.thread_id);
+    expect(w.reads).toEqual(["shots/after.png"]);
+    // The window keeps the thread open; its broken picture is not asked for again, so the route never serves it.
+    writeFileSync(join(w.project, "shots", "after.png"), png(4));
+    w.clock.now += 1_000;
+    w.store.sendMessage({ project_id: w.store.message(message.id)!.project_id, author: { kind: "agent", host: "claude-code", session: "s-1", name: "Claude" }, body: "One more note.", reply_to: message.id, idempotency_key: "k-note" });
+    await w.open(message.thread_id);
+    expect(w.captured(message.id)).toEqual(["shots/after.png"]);
+  });
+
+  test("a new message that came while the capture that missed it was still running: the next open captures it", async () => {
+    const w = world();
+    const message = w.send("![after](shots/after.png)");
+    w.during.then = async () => {
+      writeFileSync(join(w.project, "shots", "after.png"), png(5));
+      w.store.sendMessage({ project_id: w.store.message(message.id)!.project_id, author: { kind: "agent", host: "claude-code", session: "s-1", name: "Claude" }, body: "Written now.", reply_to: message.id, idempotency_key: "k-note" });
+    };
+    await w.open(message.thread_id);
+    expect(w.captured(message.id)).toEqual([]);
+    await w.open(message.thread_id);
+    expect(w.captured(message.id)).toEqual(["shots/after.png"]);
+  });
+
+  test("still missing when the thread changes: read once for the change, then it waits again", async () => {
+    const w = world();
+    const message = w.send("![after](shots/after.png)");
+    await w.open(message.thread_id);
+    w.clock.now += 1_000;
+    w.store.sendMessage({ project_id: w.store.message(message.id)!.project_id, author: { kind: "agent", host: "claude-code", session: "s-1", name: "Claude" }, body: "No picture yet.", reply_to: message.id, idempotency_key: "k-note" });
+    for (let i = 0; i < 10; i++) {
+      w.clock.now += 1_000;
+      await w.open(message.thread_id);
+    }
+    expect(w.reads).toEqual(["shots/after.png", "shots/after.png"]);
   });
 
   test("the image route serving it ends the wait: captured at once, as the window draws it", async () => {
