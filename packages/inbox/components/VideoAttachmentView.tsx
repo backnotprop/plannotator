@@ -132,7 +132,10 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
   const [rate, setRate] = useState(readPlaybackRate);
   // Words, the pinned moment, its frame and a drawing the row held when this file last closed: back in it, and
   // read again as it closes.
-  const waiting = useRowDraft(() => (readOnly || sentWords.current === text ? null : { kind: 'row', text, markup, time: pinned, frame: frameRef.current?.blob ?? null, files: files.kept() }));
+  const waiting = useRowDraft(() => {
+    const kept = files.kept();
+    return readOnly || (sentWords.current === text && kept.length === 0) ? null : { kind: 'row', text, markup, time: pinned, frame: frameRef.current?.blob ?? null, files: kept };
+  });
   const [text, setText] = useState(waiting?.text ?? '');
   const [pinned, setPinned] = useState<number | null>(waiting?.time ?? null);
   const [frame, setFrame] = useState<Frame | null>(() => (waiting?.frame ? { blob: waiting.frame, url: URL.createObjectURL(waiting.frame) } : null));
@@ -143,8 +146,12 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
   const sentWords = useRef<string | null>(null);
   const sendRow = async (annotation: Annotation) => {
     sentWords.current = text;
+    const back = files.sending(annotation.images);
     const ok = await onSave(annotation);
-    if (!ok) sentWords.current = null;
+    if (!ok) {
+      sentWords.current = null;
+      back();
+    }
     return ok;
   };
   // The drawing the ✓ just added to the reply: its comment, for a note, a redraw or ×.

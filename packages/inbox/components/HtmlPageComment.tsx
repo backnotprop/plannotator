@@ -336,7 +336,10 @@ export function HtmlPageCommentRow({
   /** The words as a save took them: the file closing before the save answers keeps no draft of them. */
   const sentWords = useRef<string | null>(null);
   const wordsRef = useRef('');
-  const waiting = useRowDraft(() => (sentWords.current === wordsRef.current ? null : { kind: 'row', text: wordsRef.current, markup: null, files: filesRef.current?.kept() }));
+  const waiting = useRowDraft(() => {
+    const kept = filesRef.current?.kept() ?? [];
+    return sentWords.current === wordsRef.current && kept.length === 0 ? null : { kind: 'row', text: wordsRef.current, markup: null, files: kept };
+  });
   const [parked] = useState(() => (parking.current?.key === fileKey ? parking.current : null));
   const [words, setWords] = useState(() => waiting?.text ?? parked?.text ?? '');
   wordsRef.current = words;
@@ -353,7 +356,7 @@ export function HtmlPageCommentRow({
     return () => {
       const text = wordsRef.current;
       const kept = filesRef.current.kept();
-      parking.current = (text.trim() !== '' || kept.length > 0) && sentWords.current !== text ? { key: fileKey, text, files: kept } : null;
+      parking.current = text.trim() !== '' && sentWords.current !== text ? { key: fileKey, text, files: kept } : kept.length > 0 ? { key: fileKey, text: '', files: kept } : null;
     };
   }, [fileKey, parking]);
 
@@ -376,6 +379,7 @@ export function HtmlPageCommentRow({
     if ((!text && images.length === 0) || saving || files.uploading) return;
     setSaving(true);
     sentWords.current = words;
+    const back = files.sending(images);
     const ok = await onSave({
       id: pageCommentId(),
       blockId: '',
@@ -391,6 +395,7 @@ export function HtmlPageCommentRow({
     setSaving(false);
     if (!ok) {
       sentWords.current = null;
+      back();
       return;
     }
     setWords('');

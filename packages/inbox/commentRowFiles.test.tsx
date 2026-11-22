@@ -182,13 +182,10 @@ function record(annotation: object, id: string, attachmentId = shot.id): InboxAn
 }
 
 let toasts: Omit<InboxToastModel, 'id'>[] = [];
-/** The thread's records from outside the pane: an edit in the panel, a Send that closes them. */
-let setThreadRecords: (update: (now: InboxAnnotationRecord[]) => InboxAnnotationRecord[]) => void = () => {};
 
 /** The pane with its records kept as the thread keeps them (a save upserts, a removal drops). */
 function Harness({ attachment, initial = [], uploads = true }: { attachment: InboxAttachmentState; initial?: InboxAnnotationRecord[]; uploads?: boolean }) {
   const [records, setRecords] = useState(initial);
-  setThreadRecords = setRecords;
   const noop = () => {};
   return (
     <CommentFilesContext.Provider value={uploads ? host_ : null}>

@@ -96,8 +96,10 @@ export interface CommentFiles {
   uploading: boolean;
   /** How many files are uploaded and ready to go with the comment. */
   ready: number;
-  /** The finished uploads, for the row's draft as the file closes. */
+  /** The finished uploads not on their way in a save, for the row's draft as the file closes. */
   kept: () => InboxUpload[];
+  /** A save carries these entries: the uploads they name are no draft's while it is on its way. The way back if it fails. */
+  sending: (images: readonly ImageAttachment[] | undefined) => () => void;
   /** The comment was saved: its files go with it. */
   clear: () => void;
   /** Files to attach (a drop the card hands over). */
@@ -140,6 +142,8 @@ export function useCommentFiles({ initial, phone = false, focus }: { initial?: r
       </div>
     ) : null;
   const current = files.current;
+  /** Uploads a save on its way carries (by id). */
+  const inSave = useRef(new Set<string>());
   return {
     on,
     clip,
@@ -162,7 +166,14 @@ export function useCommentFiles({ initial, phone = false, focus }: { initial?: r
     images: () => current().flatMap((file) => (file.state === 'done' && file.upload ? [commentImageOf(file.upload)] : [])),
     uploading: files.uploading,
     ready: files.uploaded.length,
-    kept: () => current().flatMap((file) => (file.state === 'done' && file.upload ? [file.upload] : [])),
+    kept: () => current().flatMap((file) => (file.state === 'done' && file.upload && !inSave.current.has(file.upload.upload_id) ? [file.upload] : [])),
+    sending: (images) => {
+      const ids = (images ?? []).map((image) => image.path.split('/')[0]!).filter((id) => current().some((file) => file.upload?.upload_id === id));
+      for (const id of ids) inSave.current.add(id);
+      return () => {
+        for (const id of ids) inSave.current.delete(id);
+      };
+    },
     clear: files.reset,
     add,
   };

@@ -147,15 +147,22 @@ export function ImageAttachmentView({
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const [failed, setFailed] = useState(false);
   // Words (and a drawing) the box held when this file last closed: back in it, and read again as it closes.
-  const waiting = useRowDraft(() => (readOnly || sentWords.current === text ? null : { kind: 'row', text, markup, files: commentFiles.kept() }));
+  const waiting = useRowDraft(() => {
+    const files = commentFiles.kept();
+    return readOnly || (sentWords.current === text && files.length === 0) ? null : { kind: 'row', text, markup, files };
+  });
   const [text, setText] = useState(waiting?.text ?? suggestion ?? '');
   const [markup, setMarkup] = useState<ImageAttachment | null>(waiting?.markup ?? null);
   /** The row's words as a save took them: the file closing before the save answers (and the row clears) keeps no draft of them. */
   const sentWords = useRef<string | null>(null);
   const sendRow = async (annotation: Annotation) => {
     sentWords.current = text;
+    const back = commentFiles.sending(annotation.images);
     const ok = await onSave(annotation);
-    if (!ok) sentWords.current = null;
+    if (!ok) {
+      sentWords.current = null;
+      back();
+    }
     return ok;
   };
   // The drawing the ✓ just added to the reply: its comment's id, for a note, a redraw or ×.
