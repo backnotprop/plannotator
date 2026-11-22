@@ -10238,6 +10238,7 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-rvr-l2 > .ib-pr-l3 { flex: 0 1 auto; display: flex; align-items: center; gap: 6px; min-width: 0; }
 .ib-rvr-l2 .ib-pv { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-rvr-l2 > .ib-risk { flex: none; margin-left: -3px; }
+.ib-rvr-l2 > .ib-risk::before { content: "·"; content: "·" / ""; margin-right: 6px; font-style: normal; font-weight: 400; color: var(--muted-foreground); }
 .ib-pr-av { display: inline-flex; align-items: center; justify-content: center; flex: none; width: var(--ib-mark-20, 20px); height: var(--ib-mark-20, 20px); border-radius: var(--ib-mark-20-r, 6px); background: color-mix(in oklch, var(--primary) 14%, var(--card)); color: var(--primary); font-size: var(--ib-fs-10-5, 10.5px); font-weight: 650; letter-spacing: -0.02em; }
 .ib-pr-chain { display: inline-flex; align-items: center; flex: none; }
 .ib-pr-link { display: inline-flex; align-items: center; }
