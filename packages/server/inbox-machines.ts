@@ -40,6 +40,7 @@ import { MACHINE_IMAGE_CSP, MACHINE_LINKED_PAGE_ROUTE, MACHINE_MARKDOWN_IMAGE_RO
 import { farCsp, MACHINE_ASSET_ROUTE, MACHINE_PAGE_ROUTE, MACHINE_VIEW_ROUTE, machineAssetAnswer, machineAssetCsp, machinePageAnswer, machineViewAnswer } from "./inbox-machine-page";
 import { createMachineLaunchReads, MACHINE_SESSIONS_ROUTE } from "./inbox-machine-launch-reads";
 import { createMachineAgentRead, FAR_READ_REFUSALS } from "./inbox-machine-agent-read";
+import { inboxFarReaderName, inboxMachineRecordName } from "./inbox-sent-from-reader";
 import { createMachineAgentFind } from "./inbox-machine-agent-find";
 import { INBOX_RUN_WINDOW_ONLY_BODY } from "./inbox-run-routes";
 import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
@@ -1381,6 +1382,16 @@ export function createInboxMachines(context: InboxMachinesContext) {
       return peer ? (links.get(peer.id)?.name ?? "A linked machine") : null;
     },
     /** The linked machine a device on this Inbox's door belongs to (a launch it starts here records it), or null. */
+    /**
+     * The name a forward from the linked machine on this door device records here, for a far read of its agent
+     * (inbox-sent-from-reader.ts); none when another linked machine records the same name.
+     */
+    readerNameOfDevice: (deviceId: string, deviceName: string): string => {
+      const all = links.list();
+      const record = all.find((l) => l.device_id === deviceId);
+      const others = all.filter((l) => l !== record).map((l) => inboxMachineRecordName(l.name, null));
+      return inboxFarReaderName(inboxMachineRecordName(record?.name, deviceName), others);
+    },
     machineOfDevice: (deviceId: string): { machine: string; name: string } | null => {
       const record = links.list().find((l) => l.device_id === deviceId);
       return record ? { machine: record.id, name: record.name } : null;

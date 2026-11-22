@@ -215,7 +215,7 @@ export function createInboxLiveReview(options: {
   };
 
   /** `sentFrom`: where the person wrote a Send, as the server told it from the request (inbox-sent-from.ts). */
-  const route = async (req: Request, url: URL, onThisComputer = true, sentFrom: () => InboxSentFrom | null = () => null): Promise<Response | null> => {
+  const route = async (req: Request, url: URL, onThisComputer = true, sentFrom: (body: Record<string, unknown>) => InboxSentFrom | null = () => null): Promise<Response | null> => {
     const path = url.pathname;
     if (path === REVIEW_THREADS_PATH) {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -228,7 +228,7 @@ export function createInboxLiveReview(options: {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
       const body = await options.readBody(req);
       if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-      return send(body, sentFrom());
+      return send(body, sentFrom(body));
     }
     const open = /^\/api\/inbox\/review-threads\/([A-Za-z0-9_]+)\/open$/.exec(path);
     if (open) {

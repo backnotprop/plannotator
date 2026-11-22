@@ -328,7 +328,7 @@ export function createInboxCompose(options: {
    * starts an agent only for a press in a window there (`window`), and the launch records which machine (`from`).
    * `sentFrom`: where the person wrote it, as the server told it from the request (inbox-sent-from.ts).
    */
-  const route = async (req: Request, url: URL, owner: boolean = false, door: InboxComposeDoor | null = null, here: boolean = false, sentFrom: InboxSentFrom | null = null): Promise<Response | null> => {
+  const route = async (req: Request, url: URL, owner: boolean = false, door: InboxComposeDoor | null = null, here: boolean = false, sentFrom: (body: Record<string, unknown>) => InboxSentFrom | null = () => null): Promise<Response | null> => {
     const path = url.pathname;
     if (path === "/api/inbox/sessions") {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -348,7 +348,7 @@ export function createInboxCompose(options: {
       const body = await options.readBody(req);
       // Another machine starts an agent here only for what the person pressed in a window there: never an agent's call.
       if (door?.machine && !door.window && body.to && typeof body.to === "object" && "launch" in body.to) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
-      return staleTab(body) ?? trustRefused(req, body, owner, door) ?? (await startThread(body, door?.machine ? door.from : null, (message) => options.onSent?.(req, body, message), sentFrom));
+      return staleTab(body) ?? trustRefused(req, body, owner, door) ?? (await startThread(body, door?.machine ? door.from : null, (message) => options.onSent?.(req, body, message), sentFrom(body)));
     }
     const toMatch = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/to$/.exec(path);
     if (toMatch) {

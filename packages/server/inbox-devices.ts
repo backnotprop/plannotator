@@ -604,7 +604,7 @@ export interface InboxDevicesContext {
   /** Linked machines (inbox-machines.ts): the two door routes only a machine calls. Bound after both exist. */
   machines?: () => InboxDoorMachines | null;
   /** A linked machine's agents' reads of this Inbox's threads and their files (inbox-far-read.ts). */
-  agentRead?: { read: (url: URL) => Response; file: (url: URL) => Promise<Response> };
+  agentRead?: { read: (url: URL, device: InboxDevice) => Response; file: (url: URL) => Promise<Response> };
   /** A linked machine's agents' search and thread list of this Inbox's threads (inbox-far-find.ts). */
   agentFind?: { search: (url: URL) => Promise<Response>; threads: (url: URL) => Response | Promise<Response> };
   /** A linked machine's Update (inbox-updates.ts). */
@@ -1157,7 +1157,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
     // Only this Inbox's own read, so it never passes on a third machine's. Of the query, only Refresh's `fresh`.
     "GET accounts": (req, url, device) => toWindow(req, device, "/api/inbox/accounts", url.searchParams.get("fresh") === "1" ? "?fresh=1" : "", null, req.signal),
     // read_thread's read of one of this Inbox's threads, and a file it lists: reads only, as a guest's.
-    "GET agent-read": async (_req, url, device) => context.agentRead?.read(url) ?? routeNotFound(device),
+    "GET agent-read": async (_req, url, device) => context.agentRead?.read(url, device) ?? routeNotFound(device),
     "GET agent-file": async (_req, url, device) => (context.agentRead ? await context.agentRead.file(url) : routeNotFound(device)),
     // Its agent's search and thread list here: reads only, as a guest's.
     "GET agent-search": async (_req, url, device) => (context.agentFind ? await context.agentFind.search(url) : routeNotFound(device)),

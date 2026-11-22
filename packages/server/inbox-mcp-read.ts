@@ -41,6 +41,7 @@ import { INBOX_TIDY_WITHDRAWN_HOST } from "@plannotator/shared/inbox/tidy";
 import { inboxViewingLine } from "@plannotator/shared/inbox/uploads";
 import { reviewAnchorBlock, reviewAnchorPlace } from "@plannotator/core/review-threads";
 import type { AgentFile } from "./inbox-agent-files";
+import { inboxMessageForReader, type InboxSentFromReader } from "./inbox-sent-from-reader";
 
 /** Messages read_thread shows in full by default: the newest six. */
 export const INBOX_THREAD_WINDOW = 6;
@@ -223,6 +224,8 @@ export interface ThreadReadInput {
   names?: SessionNameOf;
   /** Through the agent door: a message's files with their paths here and the command that fetches each to the agent's machine. */
   filesOf?: (message: InboxMessageWire) => AgentFile[];
+  /** A far read's reader (inbox-sent-from-reader.ts): where the person wrote each message, as its computer sees it. */
+  farReader?: InboxSentFromReader;
 }
 
 export interface ThreadWindowResult {
@@ -577,7 +580,9 @@ export function windowedThread(
   const withdrawn = thread.messages.some((m) => m.tidy)
     ? new Set(store.tidyNotes().filter((m) => m.tidy?.wake && m.to && m.delivery?.host === INBOX_TIDY_WITHDRAWN_HOST).map((m) => `${m.tidy!.id}|${m.to!.session}`))
     : null;
-  const listed = withdrawn && withdrawn.size > 0 ? thread.messages.filter((m) => !(m.tidy && m.to && withdrawn.has(`${m.tidy.id}|${m.to.session}`))) : thread.messages;
+  const kept = withdrawn && withdrawn.size > 0 ? thread.messages.filter((m) => !(m.tidy && m.to && withdrawn.has(`${m.tidy.id}|${m.to.session}`))) : thread.messages;
+  const { farReader } = input;
+  const listed = farReader ? kept.map((m) => inboxMessageForReader(m, farReader)) : kept;
   const all = listed.map((message) => {
     // A Tidy note reads as one line here: its session had the whole list in its wake.
     if (message.tidy) return { ...message, body: `Tidy: the person asked ${INBOX_HOST_NAMES[message.to?.host ?? ""] ?? "the agent"} to tidy its threads; this one was listed.` };
