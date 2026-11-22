@@ -61,7 +61,7 @@ import { appendFeedbackRecord, type FeedbackDecision } from "@plannotator/shared
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { readImprovementHook, getImprovementHookExpectedPath } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
-import { handleImage, handleStarAsk, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, missingDraftResponse, handleApiNotFound, handleFavicon, handleCustomThemesScript, customThemesPage, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, type OpencodeClient } from "./shared-handlers";
+import { handleAnnotateMedia, handleImage, handleStarAsk, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, missingDraftResponse, handleApiNotFound, handleFavicon, handleCustomThemesScript, customThemesPage, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft, loadDraft } from "./draft";
 import { handleDoc, handleDocExists, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, handleFileBrowserFiles } from "./reference-handlers";
 import { closeAllFileBrowserWatchers, handleFileBrowserFilesStream } from "./reference-watch";
@@ -252,6 +252,8 @@ export async function startPlannotatorServer(
   // `planRevisions` pushes revised plans into the open review (updatePlan).
   let plan = options.plan;
   let planFile = mode === "archive" ? null : readPlanFile(planFilePath, plan);
+  // Linked documents this review served: their folders may play local videos.
+  const servedMediaDocuments = new Set<string>();
   // Bumped by every accepted updatePlan; decisions echo the revision the tab
   // shows and a stale one is refused (409), so nobody approves unseen text.
   let planRevision = 0;
@@ -560,8 +562,14 @@ export async function startPlannotatorServer(
             if (!isSameOriginRequest(req)) return Response.json(crossOriginRefusalBody(), { status: 403 });
             return handleDoc(req, {
               planFile,
+              onDocumentServed: (path) => servedMediaDocuments.add(path),
               anyPath: isThisMachineRequest(req),
             });
+          }
+
+          // API: A linked document's local <video> (HtmlBlock rewrites its src here)
+          if (url.pathname === "/api/annotate-media" && req.method === "GET") {
+            return handleAnnotateMedia(req, url, servedMediaDocuments);
           }
 
           // API: Batch existence check for code-file paths the renderer detected
