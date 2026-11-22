@@ -1137,24 +1137,57 @@ describe('Forgejo artifacts: fetching', () => {
     expect(requested).toEqual([`${forgejoOrigin}/acme/widgets/raw/branch/main/docs/review.md`]);
   });
 
-  test('does not send the token to a host the instance redirects to', async () => {
-    const path = `/attachments/${forgejoUuid}`;
+  /** The outcome of one fetch: its status on failure, and every request with the token it carried. */
+  async function redirected(path: string, location: string, metadata: ForgejoPRMetadata = forgejoMetadata) {
+    const origin = new URL(metadata.url).origin;
     const seen: Array<{ url: string; authorization: string | null }> = [];
-    await withFetch((url, init) => {
+    const failure = await withFetch((url, init) => {
       seen.push({ url, authorization: new Headers(init?.headers).get('authorization') });
-      return url.startsWith(forgejoOrigin)
-        ? new Response(null, { status: 302, headers: { location: 'https://storage.example.net/blob/abc' } })
+      return url === `${origin}${path}`
+        ? new Response(null, { status: 302, headers: { location } })
         : markdown();
     }, () => fetchPRArtifactDocument(
-      runtimeWith({ [forgejoOrigin]: 'secret-token' }),
-      forgejoMetadata,
+      runtimeWith({ [origin]: 'secret-token' }),
+      metadata,
       forgejoContext(path),
-      `${forgejoOrigin}${path}`,
-    ));
+      `${origin}${path}`,
+    ).then(() => null, (error: unknown) => error as Error & { status?: number }));
+    return { failure, seen };
+  }
+
+  test('follows no redirect off the instance, so nothing is fetched from the other host', async () => {
+    const path = `/attachments/${forgejoUuid}`;
+    for (const location of ['https://storage.example.net/blob/abc', 'http://127.0.0.1:9000/bucket/abc', '//forgejo.example.com.evil.example/x']) {
+      const { failure, seen } = await redirected(path, location);
+      expect(failure?.status).toBe(403);
+      expect(seen).toEqual([{ url: `${forgejoOrigin}${path}`, authorization: 'token secret-token' }]);
+    }
+  });
+
+  test('follows a redirect to another artifact route on the same instance, a private-network one included', async () => {
+    const lan: ForgejoPRMetadata = { ...forgejoMetadata, host: '192.168.1.20:3000', scheme: 'http', url: 'http://192.168.1.20:3000/acme/widgets/pulls/5' };
+    const path = '/acme/widgets/raw/branch/main/old.md';
+    const { failure, seen } = await redirected(path, '/acme/widgets/raw/branch/main/new.md', lan);
+    expect(failure).toBeNull();
     expect(seen).toEqual([
-      { url: `${forgejoOrigin}${path}`, authorization: 'token secret-token' },
-      { url: 'https://storage.example.net/blob/abc', authorization: null },
+      { url: `http://192.168.1.20:3000${path}`, authorization: 'token secret-token' },
+      { url: 'http://192.168.1.20:3000/acme/widgets/raw/branch/main/new.md', authorization: 'token secret-token' },
     ]);
+  });
+
+  test('refuses a same-instance redirect to a route that is not an artifact, such as the API', async () => {
+    const path = `/attachments/${forgejoUuid}`;
+    const { failure, seen } = await redirected(path, '/api/v1/user');
+    expect(failure?.status).toBe(403);
+    expect(seen).toHaveLength(1);
+  });
+
+  test('a redirect to the sign-in page says a token is needed, and is not followed', async () => {
+    const path = `/attachments/${forgejoUuid}`;
+    const { failure, seen } = await redirected(path, '/user/login?redirect_to=%2Fattachments');
+    expect(failure?.status).toBe(401);
+    expect(failure?.message).toContain('forgejoTokens');
+    expect(seen).toHaveLength(1);
   });
 
   test('a refused token says where to configure one, not which CLI to log in with', async () => {

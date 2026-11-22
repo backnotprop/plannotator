@@ -370,6 +370,9 @@ const GITHUB_UPLOAD_BUCKET_RE = /^github-production-user-asset-[0-9a-z]+\.s3\.am
 function mayFollowProviderRedirect(currentUrl: URL, nextUrl: URL, metadata: PRMetadata): boolean {
   if (currentUrl.protocol === 'https:' && nextUrl.protocol !== 'https:') return false;
   if (nextUrl.protocol !== 'https:' && nextUrl.protocol !== 'http:') return false;
+  // Forgejo: only to another artifact route on the instance the review was opened on, which may
+  // itself be on a private network. Object storage served directly (SERVE_DIRECT) is not followed.
+  if (metadata.platform === 'forgejo') return forgejoArtifactKind(nextUrl, metadata) !== null;
   if (nextUrl.username || nextUrl.password || isPrivateNetworkUrl(nextUrl)) return false;
   if (metadata.platform !== 'github' || providerOrigin(metadata) !== 'https://github.com') return true;
   if (nextUrl.origin.toLowerCase() === 'https://media.githubusercontent.com') {
@@ -634,6 +637,10 @@ async function fetchArtifactContent(
           throw new PRArtifactDocumentError('Artifact document redirected too many times', 502);
         }
         const nextUrl = new URL(location, currentUrl);
+        // Forgejo sends a signed-out request on an instance that requires sign-in to its login page.
+        if (metadata.platform === 'forgejo' && isSameOrigin(nextUrl, providerOrigin(metadata)) && nextUrl.pathname === '/user/login') {
+          throw providerAuthRequiredError(metadata);
+        }
         if (!mayFollowProviderRedirect(currentUrl, nextUrl, metadata) || (options.followRedirect && !options.followRedirect(nextUrl))) {
           throw new PRArtifactDocumentError('Artifact document redirected to a blocked address', 403);
         }

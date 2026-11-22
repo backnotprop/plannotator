@@ -83,3 +83,4 @@ Forgejo refuses to approve, or request changes on, your own pull request. **Comm
 - Comments on a whole file are added to the review body instead of posted as file comments.
 - Viewed files are not synced to the instance. Plannotator still remembers them locally.
 - Stacked pull request discovery is not available.
+- An instance served under a sub-path (`https://example.com/forgejo/...`) is not supported.
