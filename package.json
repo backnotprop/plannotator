@@ -57,23 +57,23 @@
     "test:parity:inbox-thread": "bun scripts/inbox-thread-parity.ts"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.303",
-    "@opencode-ai/sdk": "1.19.3",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.325",
+    "@opencode-ai/sdk": "1.19.5",
     "@pierre/diffs": "1.7.0-beta.3",
     "diff": "^8.0.4",
     "dockview-react": "^5.2.0",
-    "dompurify": "^3.4.17",
+    "dompurify": "^3.4.18",
     "marked": "^17.0.6",
     "sonner": "^2.0.8"
   },
   "devDependencies": {
     "@pierre/diffs-sem": "file:vendor/pierre-diffs/pierre-diffs-1.7.0-beta.3-sem.6.tgz",
     "@agentclientprotocol/sdk": "1.9.0",
-    "@modelcontextprotocol/client": "2.3.1",
-    "@playwright/test": "1.64.1",
-    "@types/node": "^26.6.5",
+    "@modelcontextprotocol/client": "2.4.0",
+    "@playwright/test": "1.65.1",
+    "@types/node": "^26.6.6",
     "@types/turndown": "^5.0.6",
-    "bun-types": "^1.4.3",
+    "bun-types": "^1.4.4",
     "typescript": "7.0.2"
   },
   "overrides": {
