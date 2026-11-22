@@ -12186,13 +12186,12 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 }
 
 /* The risk bars' card (pulls/RiskBarsCard.tsx): ui's Popover surface on the diff's bars, saying what an open risk
-   row said (its head wraps as the open row's did). Fits a phone's width. Hidden while its bars are scrolled out. */
+   row said (its head wraps as the open row's did). Fits a phone's width. */
 .ib-riskcard { width: min(320px, calc(100vw - 24px)); padding: 8px 12px 10px; color: var(--foreground); }
 .ib-riskcard .ib-ctxn-h { display: block; overflow-wrap: anywhere; }
 .ib-riskcard .ib-ctxn-h > svg { display: inline-block; vertical-align: -2px; margin-right: 6px; }
 .ib-riskcard .ib-ctxn-h > .ib-ctxn-risk { display: inline-flex; margin-left: 6px; vertical-align: 1px; }
 .ib-riskcard-note + .ib-riskcard-note { margin-top: 8px; }
-[data-anchor-hidden] > .ib-riskcard { visibility: hidden; }
 
 /* The list's filter (components/ListFilter.tsx, listFilter.ts): the funnel alone in the list header, at every width.
    With picks it takes the accent colour and a count in its corner (the icon cut round it, as the PR badge's count
