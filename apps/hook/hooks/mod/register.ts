@@ -102,6 +102,7 @@ import {
   T3_THREAD_SERVER,
   type SessionKind,
   resolveAgentToolEnabled,
+  resolveAutoReloadEnabled,
   resolveClaudeModEnabled,
   resolveInboxReminderCustom,
   resolveInboxReminderEnabled,
@@ -119,7 +120,10 @@ import {
   claudeTranscriptPaths,
   conversationResumed,
   discoverInboxTools,
+  engineAtLeast,
   engineHasSessionAppend,
+  effortLevelOf,
+  SESSION_USAGE_MIN_ENGINE,
   inboxFirstPromptContext,
   inboxRegistryPathOf,
   inboxT3Agent,
@@ -225,6 +229,20 @@ function readEngineVersion($: Engine): Promise<string | null> {
   return engineVersion
 }
 
+async function readModel($: Engine): Promise<string | null> {
+  const model = await $.session.model()
+  return typeof model === 'string' && model ? model : null
+}
+
+let mainEffort: string | null = null
+
+async function readContextPercent($: Engine): Promise<number | null> {
+  if (!engineAtLeast(await readEngineVersion($), SESSION_USAGE_MIN_ENGINE)) return null
+  const usage = await $.session.usage()
+  const percent = usage?.context?.percent
+  return typeof percent === 'number' && Number.isFinite(percent) ? Math.min(100, Math.max(0, Math.round(percent))) : null
+}
+
 /** Every closure over `$` the logic uses. `debugPath` set: lines go to that file. */
 function hostOf($: Engine, debugPath: string | null): Host {
   return {
@@ -328,6 +346,8 @@ interface Allowed {
   planReview: boolean
   /** Connect to the Plannotator Inbox (the inbox tool switch, on by default). */
   inboxTool: boolean
+  /** Reload Plannotator by itself after an update (`autoReload`, on by default). Off: the manual notice. */
+  autoReload: boolean
   /** With the Inbox tool: the one-line reminder at the start of each conversation (`inboxReminder`, on by default). */
   inboxReminder: boolean
   /** The person's own reminder text (config.json `prompts.inbox`), or null: the built-in line. */
@@ -660,6 +680,8 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
     // The switch's marker follows the session id (`/clear`, a resume): a binary honors a marked `0` only in its session's hook.
     if (settings.planSwitch === 'set') await Promise.resolve($.env.set('PLANNOTATOR_PLAN_REVIEW_SET_BY', `claude-code:${sessionId}`)).catch(() => undefined)
     const host = hostOf($, settings.debugPath)
+    // Auto reload off (`autoReload`): a host that cannot run the reload never reloads itself.
+    if (!settings.autoReload) delete host.runReload
     const title = sessionTitleOf($, host, String(sessionId))
     // A branched conversation (a new session id) says which session it continues: the Inbox hands it that one's replies.
     const forkedFrom = new TranscriptForkedFrom(host, String(sessionId), transcriptCandidatesOf($, String(sessionId)))
@@ -677,6 +699,9 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
       root: async () => String(await $.session.root()),
       label: async () => (await title.read().catch(() => null)) ?? sessionNameOf($, String(sessionId)),
       title: () => title.generatedTitle() ?? '',
+      model: () => readModel($),
+      effort: () => mainEffort,
+      contextPercent: () => readContextPercent($),
       firstStart: (startedAt) => sessionFirstStartOf($, String(sessionId), startedAt),
       continues: async () => [...new Set([...(await forkedFrom.read()), ...(await continuedIn.read())])],
       place: () => placeOf($),
@@ -962,6 +987,7 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
     // Another session's `0` (its marker names that session) counts as unset here.
     planReview: features.planReview && !host.hostPlanMode && resolvePlanReviewEnabled(planSwitch === 'clear' ? undefined : planSwitchValue, configText),
     inboxTool: inboxOn,
+    autoReload: resolveAutoReloadEnabled(await $.env.get('PLANNOTATOR_AUTO_RELOAD'), configText),
     inboxReminder: features.wake && inboxOn && resolveInboxReminderEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
     inboxReminderCustom: resolveInboxReminderCustom(configText),
     inboxReminderRules: resolveInboxReminderRules(configText),
@@ -1512,7 +1538,10 @@ export function register(on: On) {
   })
 
   on('turn.step', async function* ($: Engine, e: any, next: Next) {
-    if (!e.agentId) await plainReminderAgain($)
+    if (!e.agentId) {
+      mainEffort = effortLevelOf(e.effort)
+      await plainReminderAgain($)
+    }
     const instance = allowed ? mod : null
     // A model request of this loop: whatever it waited on in the terminal was answered (terminal-prompts.ts).
     if (instance && !instance.isDisposed) instance.onLoopStep(typeof e.agentId === 'string' ? e.agentId : undefined)

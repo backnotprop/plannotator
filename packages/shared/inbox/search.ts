@@ -1084,7 +1084,7 @@ export class InboxSearchIndex {
       for (const { doc, score } of topOf(list, offset + limit).slice(offset, offset + limit)) {
         const row = this.row(this.docs[doc]!, terms, labels);
         if (!row) continue;
-        rows.push(row);
+        rows.push({ ...row, score });
         ranks.push(score);
       }
       answer[id] = rows;

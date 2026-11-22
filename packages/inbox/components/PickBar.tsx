@@ -14,7 +14,7 @@ import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { formatCount } from '@plannotator/core/inbox-format';
 import { SnoozeTimes, type SnoozeView } from '@plannotator/ui/components/inbox-thread/SnoozeMenu';
 import { Icon, type IconName } from '../icons';
-import { bulkTargets, type BoxState, type BulkAction, type PickRules } from '../rowPicks';
+import { bulkTargets, offersPicksReask, type BoxState, type BulkAction, type PickRules } from '../rowPicks';
 import type { BulkWrites } from '../bulkWrites';
 import { useToastAbove } from '../toastAbove';
 import { BulkTagList, useBulkTagsShown } from './BulkTags';
@@ -113,6 +113,7 @@ export function WorkItems({ act, anchor }: { act: PickActions; anchor?: () => HT
 
 const ITEMS: { action: BulkAction; label: string; icon: IconName; iconClass?: string }[] = [
   { action: 'read', label: 'Mark read', icon: 'checkCircle' },
+  { action: 'reask', label: 'Re-ask', icon: 'refresh' },
   { action: 'unread', label: 'Mark unread', icon: 'envelope' },
   { action: 'star', label: 'Star threads', icon: 'star' },
   { action: 'unstar', label: 'Unstar threads', icon: 'star', iconClass: 'ib-star-on' },
@@ -129,6 +130,7 @@ export function runBulk(act: PickActions, action: BulkAction, until?: string): P
   if (action === 'archive') void bulk.archive(rows);
   else if (action === 'snooze' && until) void bulk.snooze(rows, until);
   else if (action === 'read') return bulk.markRead(rows);
+  else if (action === 'reask') void bulk.reaskAll(rows);
   else if (action === 'unread') void bulk.markUnread(rows);
   else if (action === 'star' || action === 'unstar') void bulk.star(rows, action === 'star');
   else if (action === 'priority-add' || action === 'priority-remove') void bulk.priority(rows, action === 'priority-add');
@@ -137,13 +139,15 @@ export function runBulk(act: PickActions, action: BulkAction, until?: string): P
 }
 
 /**
- * The ⋯'s items (and a picked row's menu's, after Archive and Snooze): Mark read, Mark unread, Star or Unstar, Add to
- * or Remove from Priority, then Add tag. An item no picked row takes is not offered; Star shows while any picked row
+ * The ⋯'s items (and a picked row's menu's, after Archive and Snooze): Mark read, Re-ask, Mark unread, Star or Unstar,
+ * Add to or Remove from Priority, then Add tag. An item no picked row takes is not offered; Star shows while any picked row
  * is not starred, Unstar once all are.
  */
 export function BulkItems({ act, onTags, skip }: { act: PickActions; onTags: () => void; skip?: BulkAction }) {
   const has = (action: BulkAction) => bulkTargets(act.rows, action, act.rules).length > 0;
-  const shown = ITEMS.filter(({ action }) => action !== skip).filter(({ action }) => (action === 'unstar' ? !has('star') && has('unstar') : action === 'priority-remove' ? !has('priority-add') && has('priority-remove') : has(action)));
+  const shown = ITEMS.filter(({ action }) => action !== skip).filter(({ action }) =>
+    action === 'unstar' ? !has('star') && has('unstar') : action === 'priority-remove' ? !has('priority-add') && has('priority-remove') : action === 'reask' ? offersPicksReask(act.rows, act.rules) : has(action),
+  );
   const tags = useBulkTagsShown(act.rows);
   return (
     <>

@@ -3,6 +3,9 @@ import Foundation
 /// A row's count of what waits on the person, as the window words it (`waitCount`, `questionCount` and
 /// `formatCount` in packages/core/inbox-format.ts). Not yet in the contract's generated words.
 public enum CountWords {
+  /// The comments that wait for a Send: "1 comment", "3 comments" (packages/inbox/components/AnnotationsChip.tsx, `plural(count, 'comment')`).
+  public static func comments(_ n: Int) -> String { "\(count(n)) comment\(n == 1 ? "" : "s")" }
+
   static func count(_ n: Int) -> String {
     let formatter = NumberFormatter()
     formatter.locale = Locale(identifier: "en_US")

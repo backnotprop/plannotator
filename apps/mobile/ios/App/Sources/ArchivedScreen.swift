@@ -15,7 +15,7 @@ struct ArchivedScreen: View {
       ForEach(rows, id: \.threadId) { row in
         ZStack {
           NavigationLink(value: ListRoute.thread(row.threadId)) { EmptyView() }.opacity(0)
-          ThreadRow(row: row, held: session.held.contains { $0.thread == row.threadId.rawValue && $0.kind != .seen }, starred: row.pinnedAt != nil)
+          ThreadRow(row: row, held: session.held.contains { $0.thread == row.threadId.rawValue && session.willSend($0) }, starred: row.pinnedAt != nil)
         }
         .listRowBackground(Token.background)
         .listRowInsets(EdgeInsets(top: Space.near, leading: InboxScreen.edge, bottom: Space.near, trailing: InboxScreen.edge))

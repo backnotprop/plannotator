@@ -18,7 +18,7 @@ import type { InboxArtifactPin, InboxArtifactsPage, InboxArtifactType } from '@p
 import type { CloudflareAccessSettings, TailscaleSettings } from './data/reach';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
-import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
+import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, rememberSearchMachines, selfMachineId, setSelfMachine } from './inboxUrl';
 import { threadPullsOf } from './threadPulls/model';
 import { learnPullMachines, pullMachine, pullUrl } from './pulls/pullMachines';
 import { learnProjects } from './projectPictures';
@@ -1052,7 +1052,7 @@ export interface SearchRequest {
   offset?: number;
   limit?: number;
   tags?: readonly string[] | null;
-  /** The project open in the list: a tie boost, never a filter. */
+  machines?: boolean;
   current?: string | null;
   /** Newest first instead of best match (sent only for `newest`, so a best-match request is what it was). */
   sort?: InboxSearchSort | null;
@@ -1207,7 +1207,7 @@ export function uploadFile(
 
 /** Search (read only). `signal` aborts a request a newer query replaced. */
 export async function searchInbox(request: SearchRequest, signal?: AbortSignal): Promise<SearchModel> {
-  const query = new URLSearchParams({ q: request.q });
+  const query = new URLSearchParams({ q: request.q, ...(request.machines && selfMachineId() ? { machines: '1' } : {}) });
   for (const key of ['project', 'status', 'from'] as const) if (request[key]) query.set(key, request[key]!);
   for (const tag of request.tags ?? []) query.append('tag', tag);
   if (request.group) query.set('group', request.group);
@@ -1215,7 +1215,7 @@ export async function searchInbox(request: SearchRequest, signal?: AbortSignal):
   if (request.limit) query.set('limit', String(request.limit));
   if (request.current) query.set('current', request.current);
   if (request.sort === 'newest') query.set('sort', 'newest');
-  return readJson<SearchModel>(await fetch(inboxUrl(`/search?${query}`), { headers: { Accept: 'application/json' }, cache: 'no-store', signal }));
+  return rememberSearchMachines(await readJson<SearchModel>(await fetch(inboxUrl(`/search?${query}`), { headers: { Accept: 'application/json' }, cache: 'no-store', signal })));
 }
 
 /** Remember a search the person opened a result from (the last 6), or forget them all. */

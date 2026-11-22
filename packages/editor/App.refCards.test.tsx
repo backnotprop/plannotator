@@ -7,7 +7,8 @@
  * state at first render); a card that shows a loading or failure state to a
  * person without gh / glab (plan review must look exactly as before then); a
  * request made before anyone hovers; a route the server does not serve (an
- * older server, a remote session) being asked again on every hover.
+ * older server, a remote session) being asked again on every hover; a Linear
+ * issue link that gets no card, or a card for a person without a Linear key.
  *
  * Run with DOM_TESTS=1.
  */
@@ -80,6 +81,22 @@ const CARD: ForgeRefCardResult = {
   },
 };
 
+const LINEAR_URL = "https://linear.app/acme/issue/ENG-123/retry-webhook-deliveries";
+
+// SAFETY: a Linear card travels as a ForgeRefCardResult whose `platform` is "linear" at runtime (core linear-ref-card).
+const LINEAR_CARD = {
+  ...CARD,
+  data: {
+    ...CARD.data,
+    platform: "linear",
+    repo: "ENG",
+    number: 123,
+    url: LINEAR_URL,
+    title: "Retry webhook deliveries",
+    linear: { identifier: "ENG-123", team: "Engineering", stateName: "In Review", stateType: "started", stateColor: "0f783c", priority: null, project: null, estimate: null },
+  },
+} as unknown as ForgeRefCardResult;
+
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let refRequests: string[] = [];
@@ -94,7 +111,7 @@ function responder(refAnswer: RefAnswer): typeof fetch {
     const url = new URL(rawUrl, "http://localhost");
     if (url.pathname === "/api/plan") {
       return Response.json({
-        plan: "# Ship the widget\n\nThis fixes #12 before the release.",
+        plan: `# Ship the widget\n\nThis fixes #12 before the release.\n\nTracked in [ENG-123](${LINEAR_URL}).`,
         origin: "claude-code",
         repoInfo: { display: "acme/widgets", branch: "main", host: "github.com" },
         sharingEnabled: false,
@@ -103,10 +120,12 @@ function responder(refAnswer: RefAnswer): typeof fetch {
       });
     }
     if (url.pathname === "/api/ref") {
-      refRequests.push(url.searchParams.get("url") ?? "");
+      const asked = url.searchParams.get("url") ?? "";
+      refRequests.push(asked);
       if (refAnswer === "absent") return Response.json({ error: "Not found" }, { status: 404 });
-      if (refAnswer === "cli_missing") return Response.json({ serverSession: "session-1", ok: false, error: "cli_missing", fetchedAt: 0 });
-      return Response.json({ serverSession: "session-1", ...CARD });
+      // Without a Linear key the server answers a Linear link `signed_out`.
+      if (refAnswer === "cli_missing") return Response.json({ serverSession: "session-1", ok: false, error: asked === LINEAR_URL ? "signed_out" : "cli_missing", fetchedAt: 0 });
+      return Response.json({ serverSession: "session-1", ...(asked === LINEAR_URL ? LINEAR_CARD : CARD) });
     }
     if (url.pathname === "/api/ai/capabilities") return Response.json({ available: false, providers: [] });
     if (url.pathname === "/api/draft") return Response.json({ error: "Not found" }, { status: 404 });
@@ -189,6 +208,23 @@ describe.if(hasDom)("plan review: hover cards for #refs", () => {
     expect(document.querySelector("[data-ref-card]")).toBeNull();
     expect(link.getAttribute("href")).toBe(ISSUE_URL);
     expect(link.getAttribute("target")).toBe("_blank");
+  });
+
+  test("a Linear issue link shows Linear's card", async () => {
+    await mountApp("card");
+    await hover(document.querySelector<HTMLAnchorElement>(`a[href="${LINEAR_URL}"]`)!);
+    expect(refRequests).toEqual([LINEAR_URL]);
+    const card = document.querySelector<HTMLElement>("[data-ref-card]");
+    expect(card?.textContent).toContain("Retry webhook deliveries");
+    expect(card?.textContent).toContain("In Review");
+    expect(card?.getAttribute("aria-label")).toContain("Linear issue ENG-123");
+  });
+
+  test("no Linear key on this computer: a Linear issue link gets no card at all", async () => {
+    await mountApp("cli_missing");
+    await hover(document.querySelector<HTMLAnchorElement>(`a[href="${LINEAR_URL}"]`)!);
+    expect(refRequests).toEqual([LINEAR_URL]);
+    expect(document.querySelector("[data-ref-card]")).toBeNull();
   });
 
   test("a server without the route (older, or a remote session) is asked once, then never again", async () => {

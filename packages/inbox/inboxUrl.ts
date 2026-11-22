@@ -96,6 +96,15 @@ export function rememberMachine(ids: Iterable<string>, machine: string | null | 
   }
 }
 
+type SearchRowIds = { id: string; project: { id: string; machine?: string }; thread_id?: string; message_id?: string };
+
+export function rememberSearchMachines<T extends { groups: Partial<Record<string, readonly SearchRowIds[]>> | null; recent: readonly SearchRowIds[] | null }>(model: T): T {
+  for (const row of [...Object.values(model.groups ?? {}).flat(), ...(model.recent ?? [])]) {
+    if (row?.project.machine) rememberMachine([row.id, row.project.id, row.thread_id ?? '', row.message_id ?? ''], row.project.machine);
+  }
+  return model;
+}
+
 /** Ids this Inbox's own answers named: theirs for good (an earlier claim by another machine is dropped). */
 export function rememberLocal(ids: Iterable<string>): void {
   for (const id of ids) {
