@@ -734,3 +734,6 @@ html:not(.light) .fan-pen path{stroke-width:2.8}
 @media (hover:hover) and (min-width:1181px){.shf-fan:has(.shf-card[data-source]:hover,.shf-card[data-card="review"]:hover)+.fan-pen{opacity:0}}
 @media (prefers-reduced-motion:reduce){.fanbox .fan-pen{transition:none}}
 /* fan6:end */
+/* phone6:start */
+@media (max-width:1180px){.copy .act{margin-top:24px}.art{grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))}}
+/* phone6:end */
