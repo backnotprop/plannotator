@@ -24,6 +24,7 @@
 
 import { readFileSync, realpathSync, statSync } from "fs";
 import { basename, dirname, join, posix } from "path";
+import { planTextLines } from "@plannotator/core/plans";
 import { parseCodePath, type ParsedCodePath } from "./code-file";
 import {
 	getAnnotatableDocRegex,
@@ -212,7 +213,8 @@ export function readPlanFile(planFilePath: unknown, plan: string): PlanFile | nu
 	try {
 		const stat = statSync(path);
 		if (!stat.isFile() || stat.size > MAX_ANNOTATABLE_FILE_BYTES) return null;
-		if (readFileSync(path, "utf8").trimEnd() !== plan.trimEnd()) return null;
+		// Compare as planTextLines so a CRLF file on disk still matches an LF plan string (#3800).
+		if (planTextLines(readFileSync(path, "utf8")).trimEnd() !== planTextLines(plan).trimEnd()) return null;
 		const real = realpathSync(path);
 		return { path: real, dir: dirname(real), targets: planLinkTargets(plan) };
 	} catch {
