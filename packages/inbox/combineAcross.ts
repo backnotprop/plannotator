@@ -5,6 +5,7 @@
  * thread lives: it reads the other computer's threads there and archives them there. Pure.
  */
 import type { InboxCombineAgent, InboxListRow } from '@plannotator/core/inbox-types';
+import { InboxApiError } from './apiError';
 import { rowMachine, type MachinesModel } from './machines';
 
 /** An agent the dialog offers, with the computer it runs on (null: this one). */
@@ -20,7 +21,10 @@ export function combineGroups(rows: readonly InboxListRow[], machines: MachinesM
   return [...groups].map(([machine, ids]) => ({ machine, ids }));
 }
 
-/** Each computer's agents in one list, as one computer orders its own: most picked threads first, then the one that wrote last. */
+/**
+ * Each computer's agents in one list, as one computer orders its own: most picked threads first, then the one that wrote
+ * last. With picks on two computers each lists every running agent (`all=1`): the ones that wrote in no pick (0) last.
+ */
 export function mergeCombineAgents(lists: readonly { machine: string | null; agents: readonly InboxCombineAgent[] }[]): CombineAgent[] {
   const all = lists.flatMap(({ machine, agents }) => agents.map((agent, order) => ({ agent: { ...agent, machine }, order })));
   if (lists.length < 2) return all.map((a) => a.agent);
@@ -32,5 +36,36 @@ export const combineAgentKey = (agent: Pick<CombineAgent, 'machine' | 'session'>
 
 /** The computer an agent runs on, as the dialog names it under the agent: this one by its own name. */
 export function combineMachineName(machine: string | null, machines: MachinesModel): string {
-  return machine === null ? (machines.all.find((m) => m.self)?.name ?? 'this computer') : (machines.names.get(machine) ?? 'another machine');
+  // This computer's own id (a refusal or a record from the other computer names it so) is this computer.
+  return machine === null || machine === machines.self ? (machines.all.find((m) => m.self)?.name ?? 'this computer') : (machines.names.get(machine) ?? 'another machine');
+}
+
+/** The dialog's words for a computer that cannot be asked now, and for one too old to take this Combine. */
+export const combineAwayLine = (name: string) => `${name} can’t be asked now: it is away.`;
+export const combineOlderLine = (name: string) => `${name} runs an older Plannotator: update it to combine its threads.`;
+
+/**
+ * Picks on two linked computers neither of which is this one, or on three or more: no computer can be asked about them
+ * all (a Combine reads only its own computer's picks and one linked computer's). Main's words for picks on two machines.
+ */
+export function combineSpread(held: readonly (string | null)[], machines: MachinesModel): string | null {
+  if (held.length < 3 && (held.length < 2 || held.includes(null))) return null;
+  const names = held.map((machine) => combineMachineName(machine, machines));
+  return `These threads are on ${names.length === 2 ? 'two' : names.length} machines, ${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}. An agent reads only the threads on its own machine: pick threads from one machine to combine them.`;
+}
+
+const AWAY = new Set(['machine_offline', 'machine_answer_unreadable', 'machine_conflict']);
+const OLDER = new Set(['machine_needs_update', 'device_route_not_found']);
+
+/**
+ * The person's words for a failed read or start that is about a computer (asleep, unreachable or too old), never the
+ * server's refusal, which is written for agents. `asked`: the computer the request went to, named when the refusal
+ * names none. Null: not about a computer; the dialog shows the Inbox's own words as before.
+ */
+export function combineFailure(cause: unknown, asked: string | null, machines: MachinesModel): string | null {
+  if (!(cause instanceof InboxApiError)) return null;
+  const away = AWAY.has(cause.code) || (cause.code === 'thread_not_found' && cause.machineId !== null);
+  if (!away && !OLDER.has(cause.code)) return null;
+  const name = combineMachineName(cause.machineId ?? asked, machines);
+  return away ? combineAwayLine(name) : combineOlderLine(name);
 }

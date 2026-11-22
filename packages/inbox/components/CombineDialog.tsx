@@ -14,7 +14,7 @@ import type { InboxCombineRecord, InboxListRow } from '@plannotator/core/inbox-t
 import { INBOX_COMBINE_WORDS_MAX, inboxCombineAgentApart, inboxCombineAgentLabel, inboxRowArchived, inboxTidyWords } from '@plannotator/core/inbox-types';
 import { formatCount, plural, whenTime } from '@plannotator/core/inbox-format';
 import { combineApi } from '../combineApi';
-import { combineAgentKey, combineGroups, combineMachineName, mergeCombineAgents, type CombineAgent } from '../combineAcross';
+import { combineAgentKey, combineAwayLine, combineFailure, combineGroups, combineMachineName, combineOlderLine, combineSpread, mergeCombineAgents, type CombineAgent } from '../combineAcross';
 import { PressKeys } from '../pressKeys';
 import { HostMark } from '../icons';
 import { isAway, rowMachine, type MachinesModel } from '../machines';
@@ -25,22 +25,26 @@ const FIRST = 4;
 const NO_MACHINES: MachinesModel = { self: null, all: [], linked: [], names: new Map(), away: new Set() };
 
 /**
- * Why nobody can be asked about these threads, or null when their machines can be: each linked machine that holds a
- * pick must be there and take Combines, and, with picks on more than one computer, take them across computers.
+ * Why nobody can be asked about these threads, or null when their machines can be: the picks are on one computer, or on
+ * this one and one linked one; each linked machine that holds a pick must be there and take Combines, and, with picks on
+ * two computers, take them across computers.
  */
 export function combineBlocked(rows: readonly InboxListRow[], machines: MachinesModel): string | null {
   const held = [...new Set(rows.map((row) => rowMachine(row, machines)))];
+  const spread = combineSpread(held, machines);
+  if (spread) return spread;
   for (const machine of held) {
     if (machine === null) continue;
     const view = machines.linked.find((m) => m.id === machine);
-    if (!view || isAway(view)) return `${combineMachineName(machine, machines)} can’t be asked now: it is away.`;
+    if (!view || isAway(view)) return combineAwayLine(combineMachineName(machine, machines));
     const marks = view.marks ?? [];
-    if (!marks.includes('combine') || (held.length > 1 && !marks.includes('combine-across'))) return `${combineMachineName(machine, machines)} runs an older Plannotator: update it to combine its threads.`;
+    if (!marks.includes('combine') || (held.length > 1 && !marks.includes('combine-across'))) return combineOlderLine(combineMachineName(machine, machines));
   }
   return null;
 }
 
-export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted }: { rows: readonly InboxListRow[]; machines?: MachinesModel; onClose: () => void; onStarted: (record: InboxCombineRecord, machine: string | null) => void }) {
+/** `onStarted`'s `label`: the chosen agent as the dialog named it, for the toasts that follow (useCombines.ts). */
+export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted }: { rows: readonly InboxListRow[]; machines?: MachinesModel; onClose: () => void; onStarted: (record: InboxCombineRecord, machine: string | null, label: string) => void }) {
   const id = useId();
   const n = rows.length;
   const back = rows.filter((row) => !inboxRowArchived(row)).length;
@@ -59,20 +63,30 @@ export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted
   const [keys] = useState(() => new PressKeys('combine'));
   // Two presses before the button greys out read the same `sending`: this one is set at once.
   const pressed = useRef(false);
-  // Each computer is asked about its own picks; the answers make one list.
+  // Each computer is asked about its own picks; the answers make one list. With picks on two computers each lists every
+  // running agent there (`all`): any of them can write it.
   const asks = JSON.stringify(groups);
+  const machinesRef = useRef(machines);
+  machinesRef.current = machines;
   useEffect(() => {
     if (blocked) return;
     let live = true;
     const each = JSON.parse(asks) as typeof groups;
-    void Promise.allSettled(each.map(({ machine, ids }) => combineApi.plan(ids, machine).then((plan) => ({ machine, agents: plan.agents ?? [] })))).then((answers) => {
+    const all = each.length > 1;
+    const reads = each.map(({ machine, ids }) =>
+      combineApi.plan(ids, machine, all).then(
+        (plan) => ({ machine, agents: plan.agents ?? [] }),
+        (cause: unknown) => Promise.reject({ machine, cause }),
+      ),
+    );
+    void Promise.allSettled(reads).then((answers) => {
       if (!live) return;
-      const read = answers.flatMap((a) => (a.status === 'fulfilled' ? [a.value] : []));
-      const failed = answers.find((a): a is PromiseRejectedResult => a.status === 'rejected');
-      const merged = mergeCombineAgents(read);
+      const failed = answers.find((a): a is PromiseRejectedResult => a.status === 'rejected')?.reason as { machine: string | null; cause: unknown } | undefined;
+      // One computer not read: nobody is offered, since the Combine reads both.
+      const merged = failed ? [] : mergeCombineAgents(answers.flatMap((a) => (a.status === 'fulfilled' ? [a.value] : [])));
       setAgents(merged);
       setWho((current) => current ?? (merged[0] ? combineAgentKey(merged[0]) : null));
-      if (failed) setError(failed.reason instanceof Error ? failed.reason.message : 'Who can be asked could not be read.');
+      if (failed) setError((each.length > 1 ? combineFailure(failed.cause, failed.machine, machinesRef.current) : null) ?? (failed.cause instanceof Error ? failed.cause.message : 'Who can be asked could not be read.'));
     });
     return () => {
       live = false;
@@ -101,13 +115,13 @@ export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted
       const words1 = inboxTidyWords(words);
       // The chosen agent's computer runs it: the new thread lives there, and it reads and archives the others' picks.
       const { combine: record } = await combineApi.start({ thread_ids: rows.map((row) => row.thread_id), session: chosen.session, idempotency_key: keys.for(), ...(words1 ? { words: words1 } : {}) }, chosen.machine);
-      onStarted(record, chosen.machine);
+      onStarted(record, chosen.machine, nameOf(chosen));
       onClose();
     } catch (cause) {
       keys.failed(null, cause);
       pressed.current = false;
       setSending(false);
-      setError(cause instanceof Error ? cause.message : 'The Combine did not start.');
+      setError((across ? combineFailure(cause, chosen.machine, machines) : null) ?? (cause instanceof Error ? cause.message : 'The Combine did not start.'));
     }
   };
   // Cancel takes the focus: Combine is greyed until the agents are read, and a focused field would open a phone's keyboard.
