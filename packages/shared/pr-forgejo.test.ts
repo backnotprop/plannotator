@@ -4,8 +4,9 @@
  * checked against its swagger spec and a public test repository); names and
  * text are synthetic.
  */
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
+  FORGEJO_LIMITS,
   checkFjAuth,
   fetchFjFileBytes,
   fetchFjFileContent,
@@ -15,9 +16,11 @@ import {
   fetchFjTree,
   forgejoInlineAnchor,
   getFjUser,
+  latestForgejoStatuses,
   mapForgejoThreads,
   submitFjPRReview,
 } from "./pr-forgejo";
+import { join } from "node:path";
 import { fetchPR, submitPRReview } from "./pr-provider";
 import type { ForgejoPRRef, PRReviewFileComment, PRRuntime } from "./pr-types";
 
@@ -217,6 +220,27 @@ describe("authentication", () => {
     expect(off.calls.map((c) => c.url)).not.toContain("https://storage.example.net/x");
   });
 
+  test("an http link to a server that answers on https says which link to use, and is still not followed", async () => {
+    const httpRef: ForgejoPRRef = { ...ref, host: "codeberg.org", scheme: "http" };
+    const { runtime, calls } = fake(() => new Response(null, { status: 301, headers: { location: "https://codeberg.org/api/v1/repos/acme/widgets/pulls/5" } }));
+    const error = await fetchFjPR(runtime, httpRef).then(() => null, (e: Error) => e);
+    expect(error?.message).toContain("this server answers on https. Use the PR's https:// link (https://codeberg.org/…) instead.");
+    expect(calls.every((c) => c.url.startsWith("http://codeberg.org/"))).toBe(true);
+  });
+
+  test("the token hint names the config file this process reads", async () => {
+    const before = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = "/tmp/plannotator-forgejo-hint-test";
+    try {
+      const error = await fetchFjPR(fake(() => status(404, "The target couldn't be found.")).runtime, ref).then(() => null, (e: Error) => e);
+      expect(error?.message).toContain(`forgejoTokens in ${join("/tmp/plannotator-forgejo-hint-test", "config.json")}`);
+      expect(error?.message).not.toContain("~/.plannotator");
+    } finally {
+      if (before === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = before;
+    }
+  });
+
   test("getUser is null without a token and when the token lacks read:user", async () => {
     expect(await getFjUser(fake(() => ok({ login: "rivka" })).runtime, ref)).toBeNull();
     expect(await getFjUser(fake(() => status(403, "token does not have at least one of required scope(s)"), { [ORIGIN]: "t" }).runtime, ref)).toBeNull();
@@ -363,7 +387,7 @@ describe("fetchFjPRContext", () => {
     expect(calls.some((c) => c.url.includes("/reviews/2/comments"))).toBe(false);
   });
 
-  test("a list is read across pages by following Link rel=next, whatever page size the instance clamps to", async () => {
+  test("a list is read across pages by number, whatever page size the instance clamps to", async () => {
     const comment = (id: number) => ({ id, body: `c${id}`, html_url: "", created_at: "", user: { login: "bo" } });
     const { runtime, calls } = fake(({ url }) => {
       if (url.includes("/issues/5/comments")) {
@@ -385,6 +409,84 @@ describe("fetchFjPRContext", () => {
     }, { [ORIGIN]: "secret" });
     await fetchFjPRContext(runtime, ref);
     expect(calls.some((c) => c.url.startsWith("https://evil.example.net"))).toBe(false);
+  });
+
+  const comment = (id: number) => ({ id, body: `c${id}`, html_url: "", created_at: "", user: { login: "bo" } });
+  /** Comments 1-3 in pages of 2, `page` read from the request; `link` writes each page's Link header. */
+  const pagedComments = (link: (page: number) => Record<string, string>) => fake(({ url }) => {
+    if (url.includes("/issues/5/comments")) {
+      const page = Number(new URL(url).searchParams.get("page") ?? "1");
+      const items = [comment(1), comment(2), comment(3)].slice((page - 1) * 2, page * 2);
+      return ok(items, page === 1 ? link(page) : {});
+    }
+    return contextRoutes()({ method: "GET", url, authorization: null, body: undefined });
+  }, { [ORIGIN]: "secret" });
+
+  test("an instance whose own address differs (ROOT_URL) still gives every page, read from the origin typed", async () => {
+    const { runtime, calls } = pagedComments(() => ({ link: '<https://forgejo.internal:3000/api/v1/repos/acme/widgets/issues/5/comments?limit=2&page=2>; rel="next"' }));
+    const ctx = await fetchFjPRContext(runtime, ref);
+    expect(ctx.comments.map((c) => c.id)).toEqual(["1", "2", "3"]);
+    const pages = calls.filter((c) => c.url.includes("/issues/5/comments"));
+    expect(pages.map((c) => new URL(c.url).origin)).toEqual([ORIGIN, ORIGIN]);
+    expect(calls.some((c) => c.url.includes("forgejo.internal"))).toBe(false);
+  });
+
+  test("a relative Link works, and X-Total-Count ends the pages", async () => {
+    const relative = pagedComments(() => ({ link: '</api/v1/repos/acme/widgets/issues/5/comments?limit=2&page=2>; rel="next"' }));
+    expect((await fetchFjPRContext(relative.runtime, ref)).comments.map((c) => c.id)).toEqual(["1", "2", "3"]);
+    const counted = pagedComments(() => ({ "x-total-count": "3" }));
+    expect((await fetchFjPRContext(counted.runtime, ref)).comments.map((c) => c.id)).toEqual(["1", "2", "3"]);
+    expect(counted.calls.filter((c) => c.url.includes("/issues/5/comments"))).toHaveLength(2);
+  });
+
+  test("a check is its context's newest status, not the whole history", async () => {
+    const ctx = await fetchFjPRContext(fake(contextRoutes({
+      statuses: [
+        // Newest first, as Forgejo lists them; the order must not matter.
+        { id: 9, context: "ci/build", status: "success", created_at: "2026-11-01T10:09:00Z" },
+        { id: 8, context: "ci/lint", status: "skipped", created_at: "2026-11-01T10:08:00Z" },
+        { id: 7, context: "ci/test", status: "success", created_at: "2026-11-01T10:07:00Z" },
+        { id: 1, context: "ci/build", status: "pending", created_at: "2026-11-01T10:01:00Z" },
+        { id: 3, context: "ci/build", status: "failure", created_at: "2026-11-01T10:03:00Z" },
+        { id: 2, context: "ci/test", status: "pending", created_at: "2026-11-01T10:02:00Z" },
+        { id: 4, context: "ci/test", status: "pending", created_at: "2026-11-01T10:04:00Z" },
+        { id: 5, context: "ci/lint", status: "pending", created_at: "2026-11-01T10:05:00Z" },
+      ],
+    })).runtime, ref);
+    expect(ctx.checks.map((c) => [c.name, c.status, c.conclusion]).sort()).toEqual([
+      ["ci/build", "COMPLETED", "SUCCESS"], ["ci/lint", "COMPLETED", "SKIPPED"], ["ci/test", "COMPLETED", "SUCCESS"],
+    ]);
+    // Without ids, the later time wins.
+    expect(latestForgejoStatuses([
+      { context: "x", status: "failure", created_at: "2026-11-01T10:00:00Z" },
+      { context: "x", status: "success", created_at: "2026-11-01T11:00:00Z" },
+    ]).map((s) => s.status)).toEqual(["success"]);
+  });
+
+  test("relative links (Forgejo Actions' target_url) open on the instance, never on the local server", async () => {
+    const ctx = await fetchFjPRContext(fake(contextRoutes({
+      pr: pullRequest({ requested_reviewers: [{ login: "ana", avatar_url: "/avatars/a" }] }),
+      reviews: [review(1, "ana", "COMMENT", { comments_count: 1, html_url: "/acme/widgets/pulls/5#issuecomment-1", user: { login: "ana", avatar_url: "/avatars/a" } })],
+      reviewComments: { 1: [{ id: 11, body: "x", path: "a.txt", position: 1, html_url: "/acme/widgets/pulls/5/files#issuecomment-11", user: { login: "ana", avatar_url: "/avatars/a" }, pull_request_review_id: 1 }] },
+      comments: [{ id: 9, body: "hi", html_url: "/acme/widgets/pulls/5#issuecomment-9", created_at: "", user: { login: "bo", avatar_url: "/avatars/b" } }],
+      statuses: [
+        { id: 1, context: "actions", status: "success", target_url: "/acme/widgets/actions/runs/218645/jobs/0" },
+        { id: 2, context: "external", status: "success", target_url: "https://ci.example.com/build/1" },
+        { id: 3, context: "script", status: "success", target_url: "javascript:alert(1)" },
+        { id: 4, context: "none", status: "success" },
+      ],
+    })).runtime, ref);
+    expect(Object.fromEntries(ctx.checks.map((c) => [c.name, c.detailsUrl]))).toEqual({
+      actions: `${ORIGIN}/acme/widgets/actions/runs/218645/jobs/0`,
+      // A link on another origin stays as given: the person opens it in a new tab.
+      external: "https://ci.example.com/build/1",
+      script: "",
+      none: "",
+    });
+    expect(ctx.comments[0]).toMatchObject({ url: `${ORIGIN}/acme/widgets/pulls/5#issuecomment-9`, avatarUrl: `${ORIGIN}/avatars/b` });
+    expect(ctx.reviews[0]).toMatchObject({ url: `${ORIGIN}/acme/widgets/pulls/5#issuecomment-1`, avatarUrl: `${ORIGIN}/avatars/a` });
+    expect(ctx.reviewThreads[0]!.comments[0]).toMatchObject({ url: `${ORIGIN}/acme/widgets/pulls/5/files#issuecomment-11`, avatarUrl: `${ORIGIN}/avatars/a` });
+    expect(ctx.requestedReviewers).toEqual([{ login: "ana", avatarUrl: `${ORIGIN}/avatars/a` }]);
   });
 
   test("comments, reviews or statuses that fail to load do not fail the whole context", async () => {
@@ -625,5 +727,67 @@ describe("registered as the forgejo provider", () => {
     const { runtime, calls } = fake(() => ok({ id: 1 }), { [ORIGIN]: "secret" });
     await submitPRReview(runtime, ref, SHA_HEAD, "comment", "Overall fine", [], [{ path: "a.txt", body: "rename this file" }]);
     expect((calls[0]!.body as { body: string }).body).toBe("Overall fine\n\n**a.txt:** rename this file");
+  });
+});
+
+describe("every request has a deadline and a size cap", () => {
+  const saved = { ...FORGEJO_LIMITS };
+  afterEach(() => Object.assign(FORGEJO_LIMITS, saved));
+
+  test("the caps are 30 s, 10 MB for API JSON and 50 MB for the diff and raw files", () => {
+    expect(saved).toEqual({ timeoutMs: 30_000, jsonMaxBytes: 10 * 1024 * 1024, diffMaxBytes: 50 * 1024 * 1024 });
+  });
+
+  test("a server that never answers is given up on, in plain words", async () => {
+    FORGEJO_LIMITS.timeoutMs = 30;
+    const { runtime } = fake(() => new Promise<Response>(() => {}));
+    await expect(fetchFjPR(runtime, ref)).rejects.toThrow("The Forgejo server took too long to answer.");
+  });
+
+  test("a body that starts and never ends is given up on too", async () => {
+    FORGEJO_LIMITS.timeoutMs = 30;
+    const { runtime } = fake(() => new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode("[")); } })));
+    await expect(fetchFjPRList(runtime, ref)).resolves.toEqual([]);
+    await expect(checkFjAuth(fake(() => new Response(new ReadableStream({ start(c) { c.enqueue(new Uint8Array(1)); } })), { [ORIGIN]: "t" }).runtime, ref))
+      .rejects.toThrow("took too long");
+  });
+
+  test("an API answer past its cap is refused once the read passes it, not downloaded whole", async () => {
+    FORGEJO_LIMITS.jsonMaxBytes = 1000;
+    let chunks = 0;
+    const endless = () => new Response(new ReadableStream({ pull(controller) { chunks++; controller.enqueue(new Uint8Array(400).fill(32)); } }));
+    await expect(checkFjAuth(fake(endless, { [ORIGIN]: "t" }).runtime, ref)).rejects.toThrow("The Forgejo server sent more than 1000 bytes.");
+    expect(chunks).toBeLessThan(10);
+    const declared = () => new Response("{}", { headers: { "content-length": "5000" } });
+    await expect(checkFjAuth(fake(declared, { [ORIGIN]: "t" }).runtime, ref)).rejects.toThrow("sent more than 1000 bytes");
+  });
+
+  test("the diff has its own larger cap", async () => {
+    FORGEJO_LIMITS.jsonMaxBytes = 2000;
+    FORGEJO_LIMITS.diffMaxBytes = 4000;
+    const bigDiff = ONE_FILE_DIFF + "+x\n".repeat(900);
+    const routes = (diff: string): Handler => ({ url }) => (url.endsWith(".diff") ? text(diff) : ok(pullRequest()));
+    // Past the JSON cap but within the diff's: read.
+    expect((await fetchFjPR(fake(routes(bigDiff)).runtime, ref)).rawPatch).toBe(bigDiff);
+    await expect(fetchFjPR(fake(routes(bigDiff + "+x\n".repeat(600))).runtime, ref)).rejects.toThrow("sent more than 4000 bytes");
+  });
+
+  test("a refusal's long body is cut for its message, not refused as too large", async () => {
+    FORGEJO_LIMITS.jsonMaxBytes = 100;
+    const error = await fetchFjPR(fake(() => status(500, "x".repeat(5000))).runtime, ref).then(() => null, (e: Error) => e);
+    expect(error?.message).toStartWith("Failed to fetch PR metadata: Forgejo HTTP 500");
+  });
+});
+
+describe("a 303 after a post", () => {
+  test("continues as a GET without the body, on the same origin only", async () => {
+    const { runtime, calls } = fake(({ method }) =>
+      method === "POST" ? new Response(null, { status: 303, headers: { location: `${ORIGIN}/api/v1/repos/acme/widgets/pulls/5/reviews/77` } }) : ok({ id: 77 }),
+    { [ORIGIN]: "secret" });
+    expect(await submitFjPRReview(runtime, ref, SHA_HEAD, "comment", "hi", [])).toEqual({ status: "complete" });
+    expect(calls.map((c) => [c.method, c.body === undefined])).toEqual([["POST", false], ["GET", true]]);
+    const off = fake(() => new Response(null, { status: 303, headers: { location: "https://elsewhere.example.net/x" } }), { [ORIGIN]: "secret" });
+    await expect(submitFjPRReview(off.runtime, ref, SHA_HEAD, "comment", "hi", [])).rejects.toThrow("off the API origin");
+    expect(off.calls).toHaveLength(1);
   });
 });
