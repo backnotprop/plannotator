@@ -903,8 +903,8 @@ export const SETTINGS = {
     },
   },
   htmlAnnotateOnStartup: {
-    defaultValue: false as boolean,
-    fromCookie: () => storage.getItem('plannotator-html-annotate-on-startup') === 'true',
+    defaultValue: true as boolean,
+    fromCookie: () => storage.getItem('plannotator-html-annotate-on-startup') !== 'false',
     toCookie: (value: boolean) =>
       storage.setItem('plannotator-html-annotate-on-startup', String(value)),
     serverKey: undefined, fromServer: undefined, toServer: undefined,
