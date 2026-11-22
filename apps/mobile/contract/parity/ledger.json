@@ -21567,6 +21567,188 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-window-api-inbox-threads-id-reask",
+      "title": "window:/api/inbox/threads/:id/reask",
+      "surface": [
+        "window:/api/inbox/threads/:id/reask"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-agent-file",
+      "title": "door:GET agent-file",
+      "surface": [
+        "door:GET agent-file"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-agent-read",
+      "title": "door:GET agent-read",
+      "surface": [
+        "door:GET agent-read"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-control-machines-fetch-file",
+      "title": "window:/api/inbox/control/machines/fetch-file",
+      "surface": [
+        "window:/api/inbox/control/machines/fetch-file"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxmessagewire-sent-from-via-cloudflare",
+      "title": "enum:InboxMessageWire.sent_from.via.cloudflare",
+      "surface": [
+        "enum:InboxMessageWire.sent_from.via.cloudflare"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxmessagewire-sent-from-via-phone",
+      "title": "enum:InboxMessageWire.sent_from.via.phone",
+      "surface": [
+        "enum:InboxMessageWire.sent_from.via.phone"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxmessagewire-sent-from-via-tailnet",
+      "title": "enum:InboxMessageWire.sent_from.via.tailnet",
+      "surface": [
+        "enum:InboxMessageWire.sent_from.via.tailnet"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxsentfromplace-cloudflare",
+      "title": "enum:InboxSentFromPlace.cloudflare",
+      "surface": [
+        "enum:InboxSentFromPlace.cloudflare"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxsentfromplace-phone",
+      "title": "enum:InboxSentFromPlace.phone",
+      "surface": [
+        "enum:InboxSentFromPlace.phone"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxsentfromplace-tailnet",
+      "title": "enum:InboxSentFromPlace.tailnet",
+      "surface": [
+        "enum:InboxSentFromPlace.tailnet"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-sent-from",
+      "title": "field:InboxMessageWire.sent_from",
+      "surface": [
+        "field:InboxMessageWire.sent_from"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-agent-search",
+      "title": "door:GET agent-search",
+      "surface": [
+        "door:GET agent-search"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-agent-threads",
+      "title": "door:GET agent-threads",
+      "surface": [
+        "door:GET agent-threads"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

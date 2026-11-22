@@ -181,7 +181,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
 
   useEffect(() => {
     model.refreshRows();
-  }, [model, props.viewedFiles, props.annotationCounts, props.markdownPreviewedPaths, props.showViewedControls, props.threadCount, repo.onDisk, files]);
+  }, [model, props.viewedFiles, props.stagedFiles, props.annotationCounts, props.markdownPreviewedPaths, props.showViewedControls, props.threadCount, repo.onDisk, files]);
 
   const openFocused = useCallback(() => {
     const focused = model.getFocusedPath();

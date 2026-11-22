@@ -29,6 +29,7 @@ import { INBOX_UPLOAD_MAX_BYTES, isInboxTextKind, type InboxAttachment, type Inb
 import { INBOX_AGENT_FETCH_FILE } from "@plannotator/shared/inbox/agent-pairing";
 import { openInboxAttachmentVersion } from "@plannotator/shared/inbox/attachments";
 import { inboxMarkupsDir, isInboxMarkupName } from "@plannotator/shared/inbox/markups";
+import { inboxOwnSecretRefusal } from "@plannotator/shared/inbox/own-secrets";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { ok, type ToolResult } from "./inbox-mcp-result";
@@ -44,6 +45,8 @@ import { ok, type ToolResult } from "./inbox-mcp-result";
 export const INBOX_AGENT_FETCH_PIECE_BYTES = 1024 * 1024;
 
 const FIELDS = ["message_id", "file", "offset"] as const;
+/** What fetch_file takes, for a far message's pieces too (inbox-agent-door.ts). */
+export const inboxAgentFetchFields: readonly string[] = FIELDS;
 const MB = 1024 * 1024;
 const OPEN_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
 const DRAWING_NAME = /^[0-9a-f]{64}\.(?:png|jpg|webp)/;
@@ -122,15 +125,23 @@ async function openSource(inboxDirPath: string, source: Source): Promise<{ handl
   return { handle, size: stat.size, sha256: name.slice(0, 64), contentType: DRAWING_TYPES[name.slice(65)] ?? "application/octet-stream" };
 }
 
+/** A file of a message, found and opened for an agent: what it is, and its bytes' handle (the caller closes it). */
+export interface OpenedAgentFile {
+  file: string;
+  name: string;
+  kind: string;
+  handle: FileHandle;
+  size: number;
+  sha256: string;
+  contentType: string;
+}
+
 /**
- * `fetch_file` at the agent door, or null for any other action. `session` is
- * the agent's own, from its pairing: the read it may make is the one
- * read_thread makes for it.
+ * One file of a message read_thread shows `session` (null: a linked machine's agent, which reads as a guest), opened
+ * after the refusals: no such message or file, a dotenv name, the Inbox's own keys (own-secrets.ts), past 100 MB.
+ * `whose`: who is fetching, for the size refusal's words.
  */
-export async function inboxAgentFetchAction(store: InboxStore, session: string, tool: string, args: Record<string, unknown>): Promise<ToolResult | null> {
-  if (tool !== INBOX_AGENT_FETCH_FILE) return null;
-  const extra = Object.keys(args).find((field) => !(FIELDS as readonly string[]).includes(field));
-  if (extra) throw refuse("validation_error", `${extra}: not taken. ${tool} takes: ${FIELDS.join(", ")}.`);
+export async function openInboxAgentFile(store: InboxStore, session: string | null, args: Record<string, unknown>, whose = "a cloud agent"): Promise<OpenedAgentFile> {
   const messageId = typeof args.message_id === "string" ? args.message_id.trim() : "";
   if (!messageId) throw refuse("validation_error", "message_id: the id of the message the file is on, as read_thread shows it.");
   const stored = store.message(messageId);
@@ -146,12 +157,31 @@ export async function inboxAgentFetchAction(store: InboxStore, session: string, 
   const hit = files.find((f) => f.file === wanted || f.path === wanted) ?? (named.length === 1 ? named[0] : undefined);
   if (!hit) throw refuse("file_not_found", `${messageId} has no file ${JSON.stringify(wanted)}${named.length > 1 ? " by that name alone" : ""}. Its files: ${listed}.`);
   if (isDotenvFileName(hit.name)) throw refuse("attachment_refused", `${hit.name}: the Inbox does not hand out a .env file.`);
+  const ownKey = "record" in hit.source ? inboxOwnSecretRefusal(hit.source.record.path) : null;
+  if (ownKey) throw refuse("attachment_refused", `${hit.name}: ${ownKey}`);
+  const opened = await openSource(store.dir, hit.source);
+  if (opened.size > INBOX_UPLOAD_MAX_BYTES) {
+    await opened.handle.close().catch(() => {});
+    throw refuse("file_too_large", `${hit.name} is ${Math.ceil(opened.size / MB)} MB; ${whose} fetches a file of at most ${INBOX_UPLOAD_MAX_BYTES / MB} MB.`);
+  }
+  return { file: hit.file, name: hit.name, kind: hit.kind, ...opened };
+}
 
+/**
+ * `fetch_file` at the agent door, or null for any other action. `session` is
+ * the agent's own, from its pairing: the read it may make is the one
+ * read_thread makes for it.
+ */
+export async function inboxAgentFetchAction(store: InboxStore, session: string, tool: string, args: Record<string, unknown>): Promise<ToolResult | null> {
+  if (tool !== INBOX_AGENT_FETCH_FILE) return null;
+  const extra = Object.keys(args).find((field) => !(FIELDS as readonly string[]).includes(field));
+  if (extra) throw refuse("validation_error", `${extra}: not taken. ${tool} takes: ${FIELDS.join(", ")}.`);
   const offset = args.offset ?? 0;
   if (typeof offset !== "number" || !Number.isInteger(offset) || offset < 0) throw refuse("validation_error", "offset: where the piece starts, in bytes from 0 (the next_offset of the piece before).");
-  const opened = await openSource(store.dir, hit.source);
+  const opened = await openInboxAgentFile(store, session, args);
+  const messageId = (args.message_id as string).trim();
+  const hit = opened;
   try {
-    if (opened.size > INBOX_UPLOAD_MAX_BYTES) throw refuse("file_too_large", `${hit.name} is ${Math.ceil(opened.size / MB)} MB; a cloud agent fetches a file of at most ${INBOX_UPLOAD_MAX_BYTES / MB} MB.`);
     if (offset > opened.size) throw refuse("validation_error", `offset: ${hit.name} has ${opened.size} bytes.`);
     const length = Math.min(INBOX_AGENT_FETCH_PIECE_BYTES, opened.size - offset);
     const bytes = Buffer.alloc(length);
