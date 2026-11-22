@@ -21525,6 +21525,48 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-field-inboxagent-context",
+      "title": "field:InboxAgent.context",
+      "surface": [
+        "field:InboxAgent.context"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagent-effort",
+      "title": "field:InboxAgent.effort",
+      "surface": [
+        "field:InboxAgent.effort"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagent-model",
+      "title": "field:InboxAgent.model",
+      "surface": [
+        "field:InboxAgent.model"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

@@ -1475,6 +1475,15 @@
             }
           ]
         },
+        "model": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        },
+        "context": {
+          "type": "number"
+        },
         "place": {
           "$ref": "#/$defs/InboxAgentPlace"
         },
