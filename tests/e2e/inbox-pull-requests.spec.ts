@@ -981,13 +981,14 @@ test("compact rows (approval inbox-reviews-compact-list): one 30px line each, th
   const phoneRows = await list.locator('[data-reviews-row], [data-reviews-layer]').evaluateAll((els) =>
     els.map((el) => {
       const second = el.querySelector<HTMLElement>('[data-reviews-line2-phone] .ib-pv');
-      return { height: Math.round(el.getBoundingClientRect().height), second: second ? Math.round(second.getBoundingClientRect().height) : null, inRow: second ? second.getBoundingClientRect().right <= el.getBoundingClientRect().right : null };
+      return { layer: el.hasAttribute('data-reviews-layer'), height: Math.round(el.getBoundingClientRect().height), second: second ? Math.round(second.getBoundingClientRect().height) : null, inRow: second ? second.getBoundingClientRect().right <= el.getBoundingClientRect().right : null };
     }),
   );
   expect(phoneRows.length).toBeGreaterThan(6);
   for (const row of phoneRows) {
-    expect(row.height).toBeGreaterThanOrEqual(54);
-    expect(row.height).toBeLessThanOrEqual(58);
+    // A stack's layers a little tighter, still over a finger's 44px.
+    expect(row.height).toBeGreaterThanOrEqual(row.layer ? 48 : 54);
+    expect(row.height).toBeLessThanOrEqual(row.layer ? 51 : 58);
     expect(row.second).not.toBeNull();
     expect(row.second!).toBeLessThanOrEqual(20);
     expect(row.inRow).toBe(true);
@@ -1005,13 +1006,27 @@ test("compact rows (approval inbox-reviews-compact-list): one 30px line each, th
     }),
   );
   expect(trees).toEqual(trees.map(() => ({ inside: true, elbow: true })));
+  // The unfolded stack is one block: no divider inside it, one after its last layer, no gap between its rows, and one
+  // tree line from the stack's mark down (each piece runs on from the one above it).
+  const block = await list.locator(`[data-reviews-stack="${STACK_ID}"]`).evaluate((stack) => {
+    const rows = [stack.querySelector('[data-reviews-row]')!, ...stack.querySelectorAll('[data-reviews-layer]')];
+    const trees = rows.slice(1).map((row) => row.querySelector('[data-reviews-tree]')!.getBoundingClientRect());
+    const mark = rows[0]!.querySelector('.ib-rvr-mark')!.getBoundingClientRect();
+    return {
+      dividers: rows.map((row) => getComputedStyle(row).borderBottomWidth),
+      gaps: rows.slice(1).map((row, i) => Math.round(row.getBoundingClientRect().top - rows[i]!.getBoundingClientRect().bottom)),
+      fromMark: trees[0]!.top >= mark.top && trees[0]!.top <= mark.bottom,
+      runsOn: trees.slice(1).every((tree, i) => tree.top <= trees[i]!.bottom - 4),
+    };
+  });
+  expect(block).toEqual({ dividers: ['0px', '0px', '0px', '0px', '1px'], gaps: [0, 0, 0, 0], fromMark: true, runsOn: true });
   await page.mouse.move(0, 0);
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   await page.waitForTimeout(400);
-  await proof('compact-05-phone-two-line-dark.png');
+  await proof('compact-07-phone-stack-block-dark.png');
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
   await page.waitForTimeout(400);
-  await proof('compact-05-phone-two-line-light.png');
+  await proof('compact-07-phone-stack-block-light.png');
   // A phone's group labels stay at the top while their rows scroll under them, on the list's own ground.
   await page.setViewportSize({ width: 390, height: 420 });
   const body = list.locator('.ib-lbody');
@@ -1027,6 +1042,20 @@ test("compact rows (approval inbox-reviews-compact-list): one 30px line each, th
     return { gap: Math.round(el.getBoundingClientRect().top - scroller.getBoundingClientRect().top), scrolled: scroller.scrollTop > 0, background: getComputedStyle(el).backgroundColor === ground };
   });
   expect(stuck).toEqual({ gap: 0, scrolled: true, background: true });
+  // Shift+Tab onto a row partly under the stuck label scrolls it out from under it.
+  await body.evaluate((scroller) => {
+    const label = scroller.querySelector('[data-reviews-fold="not_reviewed"]')!.getBoundingClientRect();
+    const items = [...scroller.querySelectorAll<HTMLElement>('[data-pulls-group="not_reviewed"] [data-reviews-item]')];
+    items.find((el) => el.getBoundingClientRect().top >= label.bottom + 40)!.focus({ preventScroll: true });
+  });
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Shift+Tab');
+  const clear = await body.evaluate((scroller) => {
+    const label = scroller.querySelector('[data-reviews-fold="not_reviewed"]')!.getBoundingClientRect();
+    const focused = document.activeElement!;
+    return { inList: scroller.contains(focused) && focused !== scroller.querySelector('[data-reviews-fold="not_reviewed"]'), below: focused.getBoundingClientRect().top >= label.bottom - 1 };
+  });
+  expect(clear).toEqual({ inList: true, below: true });
   await body.evaluate((el) => (el.scrollTop = 0));
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });

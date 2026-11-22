@@ -10680,6 +10680,16 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
      list's ground behind them, so no row shows through. */
   .ib-rvr-gl, .pn-inbox .ib-prlist .ib-lbody .ib-pr-foldbtn { position: sticky; top: 0; z-index: 2; background: var(--card); }
   .pn-inbox .ib-prlist .ib-lbody .ib-pr-foldbtn { border-radius: 0; }
+  /* Focus moved by Tab or Shift+Tab never lands under a stuck label (the fold's 44px, the tallest). */
+  .pn-inbox .ib-prlist .ib-lbody { scroll-padding-top: 44px; }
+  /* An unfolded stack is one block: no divider between its row and its layers or between its layers, one after the
+     last. A layer's row is a little tighter, 49px (4 + 22 + 1 + 18 + 4, over a finger's 44), and its tree line one
+     trunk from the stack's mark down: the first reaches the stack's mark (52px up: the stack's row is 55px without
+     its divider), each next one runs on from the elbow above it. */
+  .ib-rvr-stk[data-open] > .ib-mrow.ib-prrow, .ib-rvr-layers > .ib-mrow.ib-prrow:not(:last-child) { border-bottom-width: 0; }
+  .ib-rvr-layers > .ib-mrow.ib-prrow { padding-top: 4px; padding-bottom: 4px; --ib-rvr-l1c: calc(4px + var(--ib-rvr-h) / 2); --ib-rvr-pitch: 49px; }
+  .ib-rvr-layers > .ib-mrow.ib-prrow:first-child { --ib-rvr-pitch: 52px; }
+  .ib-rvr-layers > .ib-mrow.ib-prrow:not(:first-child) { --ib-rvr-above: 10px; }
 }
 @media (forced-colors: active) {
   .ib-pr-pill, .pn-inbox .ib-pr-chip { border: 1px solid CanvasText; }
