@@ -322,6 +322,8 @@ test('6. Mini stopped while the dialog is open: the person’s words that it is 
 });
 
 test('7. Any running agent, also with every pick on one computer; every pick’s files and one quiet line for what stayed open on Mini', async () => {
+  // Mini restarted, three agents and two Combine dialogs: longer than the file's default.
+  test.setTimeout(360_000);
   await start(mini);
   await expect.poll(() => stateOf(studio, mini), { timeout: 45_000 }).toBe('online');
   await expect.poll(async () => (await read<{ machines: { id: string; marks?: string[] }[] }>(studio, '/api/inbox/machines')).machines.find((m) => m.id === mini.id)?.marks ?? [], { timeout: 30_000 }).toContain('combine-across');
@@ -370,7 +372,8 @@ test('7. Any running agent, also with every pick on one computer; every pick’s
   await expect.poll(async () => (await first()).combine_left ?? null, { timeout: 30_000 }).toEqual({ open: [{ machine: 'Mini', subject: 'Refund for Ada Novak' }] });
   await expect.poll(async () => ((await first()).attachments ?? []).map((a) => a.name), { timeout: 30_000 }).toEqual(['invoice-charlie-dunn.md']);
   expect(await archivedOn(mini, d.thread)).toBe(false);
-  await row(made).click();
+  // Opened as a link to it opens it (an agent's thread with no question may sit in a folded group of the list).
+  await page.goto(`${studio.url}#thread=${made}`);
   const quiet = page.locator('[data-combine-left]');
   await expect(quiet).toHaveText('Still open on Mini: Refund for Ada Novak', { timeout: 20_000 });
   await quiet.scrollIntoViewIfNeeded();
