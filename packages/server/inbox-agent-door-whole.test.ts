@@ -112,7 +112,7 @@ describe("a cloud agent uses the whole Inbox", () => {
     expect(view.project?.id).toBe(ledger);
   });
 
-  test("a question's prototype is a page it attaches or an https address; an address on a computer is refused, saying what works", async () => {
+  test("a question's prototype is a page it attaches, an https address or a running app on this computer, as a local agent's", async () => {
     const w = await doorWorld(cleanups);
     const { pairing } = await w.pair();
     const page = Buffer.from("<!doctype html><title>Mock</title><p>New pricing</p>").toString("base64");
@@ -125,10 +125,13 @@ describe("a cloud agent uses the whole Inbox", () => {
     expect(web.error).toBeNull();
     const webMessage = (await w.thread(web.result!.structuredContent!.thread_id as string)).messages[0]!;
     expect(webMessage.live_sites!.map((site) => [site.url, site.web])).toEqual([["https://preview.example.com/pricing", true]]);
-    for (const address of ["http://localhost:3000/", "http://preview.example.com/pricing"]) {
-      const refused = (await w.door(pairing.token, "send_message", { subject: "Pricing", body: ask(address) })).error;
-      expect(refused).toContain(`Prototype: ${address}:`);
-      expect(refused).toContain("https://");
-    }
+    // A running app on this computer is checked as a local agent's is: it answers with a page, so it is the prototype.
+    const app = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("<!doctype html><title>App</title><p>Pricing</p>", { headers: { "Content-Type": "text/html" } }) });
+    cleanups.push(() => app.stop(true));
+    const address = `http://localhost:${app.port}/`;
+    const running = await w.door(pairing.token, "send_message", { subject: "Pricing", body: ask(address) });
+    expect(running.error).toBeNull();
+    const runningMessage = (await w.thread(running.result!.structuredContent!.thread_id as string)).messages[0]!;
+    expect(runningMessage.live_sites!.map((site) => site.url).join(" ")).toContain(`:${app.port}`);
   });
 });

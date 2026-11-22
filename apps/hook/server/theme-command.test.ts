@@ -198,7 +198,7 @@ describe("plannotator theme", () => {
     w.run("use", "tomorrow-night");
     const listed = JSON.parse(w.run("list", "--json").stdout);
     expect(listed.custom).toEqual([{ id: "tomorrow-night", name: "Tomorrow Night", halves: ["dark"], in_use: ["dark"] }]);
-    expect(listed.built_in).toHaveLength(55);
+    expect(listed.built_in).toHaveLength(56);
     const removed = w.run("remove", "tomorrow-night");
     expect(removed.code).toBe(0);
     expect(removed.stdout).toContain("back on Plannotator");
