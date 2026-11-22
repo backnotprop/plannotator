@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useMemo, useSyncExternalStore } from "react";
+import React, { createContext, useContext, useEffect, useState, useMemo, useSyncExternalStore } from "react";
 import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePath } from "@plannotator/core/code-file";
 import { findCrossRepoRef, forgeRefLinks, gitlabHostsSnapshot, matchCrossRepoRef, subscribeGitlabHosts, type CrossRepoRef } from "@plannotator/core/forge-refs";
 import { CodeSnippetPreview } from "./CodeSnippetPreview";
@@ -480,8 +480,8 @@ const HostResolvedImage: React.FC<{
   /** The src that failed, and the host's retry key then (`ImageRetryContext`). */
   const [failure, setFailure] = useState<{ src: string; key: string | number | undefined } | null>(null);
   const failed = failure?.src === src;
-  const imgRef = useRef<HTMLImageElement>(null);
-  const reload = useRef(false);
+  /** A src that failed, then loaded off the page: the element loads it again under a new fragment (not sent). */
+  const [reloaded, setReloaded] = useState<{ src: string; n: number } | null>(null);
   const retryKey = retry?.key;
   const retrying = failed && retry !== null && failure.key !== retryKey && retry.retries(src);
   useEffect(() => {
@@ -491,7 +491,8 @@ const HostResolvedImage: React.FC<{
     const probe = new Image();
     probe.onload = () => {
       if (!live) return;
-      reload.current = true;
+      // The same element, a new URL string: WebKit does not load again a URL that failed for it when it is set again.
+      setReloaded((last) => ({ src, n: last?.src === src ? last.n + 1 : 1 }));
       setFailure(null);
     };
     probe.onerror = () => {
@@ -504,12 +505,7 @@ const HostResolvedImage: React.FC<{
       probe.onerror = null;
     };
   }, [retrying, src, retryKey]);
-  // Shown again with its alt: the same element asks again (it never leaves the document, above), and the probe's copy answers.
-  useLayoutEffect(() => {
-    if (!reload.current) return;
-    reload.current = false;
-    imgRef.current?.setAttribute('src', src);
-  });
+  const shownSrc = reloaded?.src === src && !src.includes('#') ? `${src}#retry-${reloaded.n}` : src;
   return (
     <>
       {failed && (
@@ -519,8 +515,7 @@ const HostResolvedImage: React.FC<{
       )}
       <img
         key="image"
-        ref={imgRef}
-        src={src}
+        src={shownSrc}
         alt={failed ? '' : alt}
         width={width}
         height={height}
