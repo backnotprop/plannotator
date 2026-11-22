@@ -1692,6 +1692,12 @@ export function inboxPlaceFromEnv(env: {
 /** Kept apart from `label`: only list rows show a generated title. Empty or absent clears it. */
 export const INBOX_TITLE_POLL_FIELD = 'title'
 
+export const INBOX_MODEL_POLL_FIELD = 'model'
+export const INBOX_EFFORT_POLL_FIELD = 'effort'
+export const INBOX_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+
+export const INBOX_CONTEXT_POLL_FIELD = 'context'
+
 /**
  * On a poll, when the session first started (epoch ms), as its connection kept it across its own restarts (a plugin
  * reload starts the connection again, so `started_at` moves later). The Agents list orders by the earliest it heard
