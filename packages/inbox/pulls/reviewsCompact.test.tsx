@@ -164,6 +164,19 @@ function draw(selected: string | null, selectedLayer: string | null = null, phon
 const $ = (selector: string) => document.querySelector<HTMLElement>(selector);
 const row = (id: string) => $(`[data-reviews-row="${id}"]`)!;
 
+/**
+ * What a screen reader hears from an element: its text, without what is hidden from it. An aria-label counts only on
+ * an element with a role (an image, a button): on a plain span some screen readers never read it.
+ */
+function spoken(el: Element): string {
+  let out = '';
+  for (const node of el.childNodes) {
+    if (node.nodeType === 3) out += node.textContent;
+    else if (node instanceof Element && node.getAttribute('aria-hidden') !== 'true') out += (node.hasAttribute('role') || node.tagName === 'BUTTON' ? node.getAttribute('aria-label') : null) ?? spoken(node);
+  }
+  return out;
+}
+
 test.skipIf(!hasDom)("closed rows are one line; the open row's second line says its number, repository, agent, status in its tone and Medium", () => {
   draw('thr_mid');
   for (const el of document.querySelectorAll<HTMLElement>('[data-reviews-row]')) {
@@ -171,8 +184,10 @@ test.skipIf(!hasDom)("closed rows are one line; the open row's second line says 
     expect(el.querySelector('[data-reviews-line2]') !== null).toBe(el.getAttribute('aria-current') === 'true');
   }
   const line2 = row('thr_mid').querySelector<HTMLElement>('[data-reviews-line2]')!;
-  expect(line2.querySelector('.ib-pr-l3')!.textContent).toBe('#41 · ledger · Changes requested');
-  expect(line2.querySelector('[data-pulls-row-agent]')!.getAttribute('aria-label')).toBe('Claude Code');
+  expect(line2.querySelector('.ib-pr-l3')!.textContent).toBe('#41 · ledger · Claude Code, Changes requested');
+  // The agent, named once, as text a screen reader reads (a plain span's aria-label is not).
+  expect(spoken(row('thr_mid')).split('Claude Code')).toHaveLength(2);
+  expect(spoken(line2)).toContain('Claude Code, Changes requested');
   expect(line2.querySelector('[data-reviews-status]')!.getAttribute('data-tone')).toBe('warn');
   expect(line2.querySelector('[data-pulls-author="charlie-dunn"]')).not.toBeNull();
   expect(line2.querySelector('[data-pull-risk]')!.getAttribute('data-pull-risk')).toBe('medium');
@@ -258,15 +273,6 @@ test.skipIf(!hasDom)("a deleted account's PR, open: a grey person leads its seco
   expect(ghost.querySelector('img')).toBeNull();
 });
 
-/** What a screen reader hears from an element: its text, without what is hidden from it. */
-function spoken(el: Element): string {
-  let out = '';
-  for (const node of el.childNodes) {
-    if (node.nodeType === 3) out += node.textContent;
-    else if (node instanceof Element && node.getAttribute('aria-hidden') !== 'true') out += node.getAttribute('aria-label') ?? spoken(node);
-  }
-  return out;
-}
 
 /** The list drawn anew, as App draws it after a screen in front of it closes. */
 function redraw(selected: string | null, selectedLayer: string | null = null) {

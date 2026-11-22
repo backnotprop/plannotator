@@ -311,8 +311,13 @@ export function ReviewRowItem({ row, links, place, selected, phone, now, judgmen
               <span data-pulls-repo="">{place}</span>
               {(line.agent || line.status) && ' · '}
               {line.agent && (
-                <span className="ib-pr-magent" data-pulls-row-agent={line.agent.host ?? ''} title={line.agent.name} aria-label={line.agent.name}>
+                <span className="ib-pr-magent" data-pulls-row-agent={line.agent.host ?? ''} title={line.agent.name}>
                   <HostMark host={line.agent.host} />
+                  {/* Its name as text, not a plain span's aria-label, which some screen readers skip. */}
+                  <span className="ib-sr">
+                    {line.agent.name}
+                    {line.status && ', '}
+                  </span>
                 </span>
               )}
               {line.status && (
