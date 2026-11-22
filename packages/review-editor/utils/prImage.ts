@@ -67,6 +67,8 @@ function outsideCode(markdown: string, rewrite: (text: string) => string): strin
 export function forgejoImageHandling(pr: PRMetadata | null | undefined): {
   prepare: (markdown: string) => string;
   src: (src: string) => string;
+  /** The same, for a renderer that asks about each image as written (the PR description). */
+  resolve: ImageResolver;
 } | null {
   if (!pr || pr.platform !== 'forgejo') return null;
   const origin = new URL(pr.url).origin;
@@ -86,6 +88,10 @@ export function forgejoImageHandling(pr: PRMetadata | null | undefined): {
     src: (src) => {
       const url = known(src);
       return url ? artifactContentProxyUrl(url.href) : src;
+    },
+    resolve: (src) => {
+      const url = known(src);
+      return url ? { kind: 'src', src: artifactContentProxyUrl(url.href) } : null;
     },
   };
 }

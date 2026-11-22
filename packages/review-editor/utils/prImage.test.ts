@@ -115,6 +115,12 @@ describe('forgejoImageHandling', () => {
     expect(handling.src('https://forgejo.example.com/acme/widgets/raw/branch/main/a.png')).toBe('https://forgejo.example.com/acme/widgets/raw/branch/main/a.png');
   });
 
+  test('resolves the PR\'s own upload, as written, for the description renderer; anything else keeps its default', () => {
+    expect(handling.resolve(`/attachments/${uuid}`)).toEqual({ kind: 'src', src: proxied(`https://forgejo.example.com/attachments/${uuid}`) });
+    expect(handling.resolve(`https://evil.example/attachments/${uuid}`)).toBeNull();
+    expect(handling.resolve('/somewhere/else.png')).toBeNull();
+  });
+
   test('is off for a PR that is not Forgejo', () => {
     expect(forgejoImageHandling({ ...pr, platform: 'github' } as unknown as PRMetadata)).toBeNull();
     expect(forgejoImageHandling(null)).toBeNull();

@@ -16,7 +16,7 @@ or, from your agent, `/plannotator-review https://<host>/<owner>/<repo>/pulls/<i
 
 A Forgejo or Gitea address names a pull request by `/pulls/<id>` (GitHub's is `/pull/<id>`), so Plannotator recognises it on any host with nothing to configure. A port stays part of the host, and an `http://` address works for an instance on your own network.
 
-You get the pull request diff, its existing comments in the **PR Comments** tab, the commit status checks, a local checkout for agents and Guided Review, and you can post your review back to the instance. Pictures and files uploaded to the pull request, and files of its repository linked from it, open in the **Artifacts** panel, and pictures in comments show in place. Pictures in the description are not shown in the **Summary** tab's description.
+You get the pull request diff, its existing comments in the **PR Comments** tab, the commit status checks, a local checkout for agents and Guided Review, and you can post your review back to the instance. Pictures and files uploaded to the pull request, and files of its repository linked from it, open in the **Artifacts** panel, and pictures in the description and in comments show in place.
 
 ## Create an access token
 
