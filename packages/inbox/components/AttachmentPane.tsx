@@ -88,8 +88,8 @@ import { OptionCaption } from './OptionCaption';
 import { FIRST_OPTION_NOTE, LAST_OPTION_NOTE, optionAnnouncement, type OptionSet } from '../optionSets';
 import { createPortal } from 'react-dom';
 import type { Notice } from './Markup';
-import { MarkupPicture } from './Markup';
-import { isWordlessMarkup, MARKUP_ONLY_TEXT } from '../markup';
+import { fileCardBody } from './Markup';
+import { isWordlessMarkup, MARKUP_ONLY_TEXT, markupOf } from '../markup';
 import { useShortcutScope } from '../panes/scope';
 import { inboxFileViewerShortcuts } from '../shortcuts/fileViewer.shortcuts';
 import { ShortcutHint, withShortcut } from '../shortcuts/hint';
@@ -1761,9 +1761,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       const row = read();
       if (row && draftHasWords(row)) taken.push(row);
     }
-    // An HTML page's row words, its row off screen (out of full screen): kept as the row's draft, as if it were drawn.
-    const parked = pageParking.current;
-    if (parked?.key === draftKeyRef.current && parked.text.trim() !== '') taken.push({ kind: 'row', text: parked.text, markup: null });
+    const parked = pageParking.current; // An HTML page's row words and files, its row off screen (out of full screen): kept as its draft, as if drawn.
+    const parkedRow: RowDraft | null = parked?.key === draftKeyRef.current ? { kind: 'row', text: parked.text, markup: null, files: parked.files } : null;
+    if (parkedRow && draftHasWords(parkedRow)) taken.push(parkedRow);
     pageParking.current = null;
     const page = htmlComment.kept() ?? null;
     if (page) taken.push({ kind: 'comment', annotation: page });
@@ -2915,7 +2915,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 ? (annotation) => {
                     const time = readInboxVideoTime(annotation);
                     if (time === null) return null;
-                    const frame = annotation.images?.[0];
+                    const frame = markupOf(annotation);
                     return (
                       <span className="ib-vcardtop">
                         <Tip content={`Go to ${formatInboxVideoTime(time)}`}>
@@ -2956,7 +2956,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               if (isVideo && readInboxVideoTime(annotation) !== null) return wordless ? { quote: false, images: false, text: false } : { quote: false, images: false };
               return wordless ? { quote: false, images: false, text: false } : {};
             }}
-            renderCardBody={(annotation) => (isWordlessMarkup(annotation) ? <MarkupPicture image={annotation.images![0]!} /> : null)}
+            renderCardBody={(annotation) => fileCardBody(annotation, isVideo)}
             title="Comments"
             // A linked page takes no comments: the panel lists the attached page's, and says so.
             titleNote={isVideo ? 'By time' : linkedTop ? `Off on ${linkedTop.name}` : undefined}

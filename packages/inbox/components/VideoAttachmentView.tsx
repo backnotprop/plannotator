@@ -13,7 +13,8 @@ import { Tip } from './Tip';
 import { FullScreenCommentBin, FullScreenComposer, FullScreenComposerContext } from './FullScreenComposer';
 import { useConfigValue } from '@plannotator/ui/config';
 import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
-import { markupWords, noteOnto } from '../markup';
+import { addedToComment, markupOf, markupWords, noteOnto } from '../markup';
+import { useCommentFiles } from '../commentFiles';
 import { DRAWING_SCREEN, KeptMarkup, markupAddedToast, OverWindow, type Notice } from './Markup';
 import { useRowDraft } from '../fileCommentDrafts';
 import { markImageComposer } from '../pageMarks';
@@ -131,11 +132,13 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
   const [rate, setRate] = useState(readPlaybackRate);
   // Words, the pinned moment, its frame and a drawing the row held when this file last closed: back in it, and
   // read again as it closes.
-  const waiting = useRowDraft(() => (readOnly || sentWords.current === text ? null : { kind: 'row', text, markup, time: pinned, frame: frameRef.current?.blob ?? null }));
+  const waiting = useRowDraft(() => (readOnly || sentWords.current === text ? null : { kind: 'row', text, markup, time: pinned, frame: frameRef.current?.blob ?? null, files: files.kept() }));
   const [text, setText] = useState(waiting?.text ?? '');
   const [pinned, setPinned] = useState<number | null>(waiting?.time ?? null);
   const [frame, setFrame] = useState<Frame | null>(() => (waiting?.frame ? { blob: waiting.frame, url: URL.createObjectURL(waiting.frame) } : null));
   const [markup, setMarkup] = useState<ImageAttachment | null>(waiting?.markup ?? null);
+  // Pictures and files added to the comment (the reply box's paperclip, paste and drop): they go with its words.
+  const files = useCommentFiles({ initial: waiting?.files, phone, focus: () => textRef.current?.focus({ preventScroll: true }) });
   /** The row's words as a save took them: the file closing before the save answers (and the row clears) keeps no draft of them. */
   const sentWords = useRef<string | null>(null);
   const sendRow = async (annotation: Annotation) => {
@@ -258,10 +261,11 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
     setKept(null);
     replaceFrame(null);
     setComposing(false);
+    files.clear();
   };
 
   const shownTime = pinned ?? current;
-  const canSave = !saving && (text.trim() !== '' || markup !== null);
+  const canSave = !saving && !files.uploading && (text.trim() !== '' || markup !== null || files.ready > 0);
 
   /** Take the added drawing out of the reply (its × or the toast's Undo). */
   const removeKept = (id: string) => {
@@ -281,11 +285,10 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
     const redraw = kept && keptNow ? keptNow : null;
     const time = redraw && kept ? kept.time : pinned ?? videoTimeOf(videoRef.current?.currentTime ?? current);
     const id = redraw?.id ?? newId();
-    const ok = await sendRow(
-      redraw
-        ? ({ ...redraw, text: noteOnto(redraw, words), images: [image] } as Annotation)
-        : videoCommentAnnotation({ id, name: attachment.name, time, text: markupWords(words, true), frame: image }),
-    );
+    // Pictures and files added in the row go with the words typed (with none, they wait for the note).
+    const added = words && !files.uploading ? files.images() : [];
+    const made = redraw ? ({ ...redraw, text: noteOnto(redraw, words), images: [image, ...addedToComment(redraw)] } as Annotation) : videoCommentAnnotation({ id, name: attachment.name, time, text: markupWords(words, true), frame: image });
+    const ok = await sendRow(added.length > 0 ? { ...made, images: [...(made.images ?? []), ...added] } : made);
     if (!ok) {
       // Not saved (the error shows): the drawing waits in the row for Comment, as before.
       setMarkup(image);
@@ -308,7 +311,9 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
     if (kept && keptNow) {
       setSaving(true);
       // (A redraw whose save failed waits as `markup`: it goes with the note.)
-      const ok = await sendRow({ ...keptNow, text: noteOnto(keptNow, text), ...(markup ? { images: [markup] } : {}) } as Annotation);
+      const added = files.images();
+      const images = [...(markup ? [markup, ...addedToComment(keptNow)] : (keptNow.images ?? [])), ...added];
+      const ok = await sendRow({ ...keptNow, text: noteOnto(keptNow, text), ...(markup || added.length > 0 ? { images } : {}) } as Annotation);
       setSaving(false);
       if (ok) reset();
       return;
@@ -325,7 +330,9 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
         onError(cause instanceof InboxApiError ? `The frame was not kept: ${cause.message}` : 'The frame was not kept; the comment was saved without it.');
       }
     }
-    const ok = await sendRow(videoCommentAnnotation({ id: newId(), name: attachment.name, time, text: markupWords(text, markup !== null), frame: image }));
+    const made = videoCommentAnnotation({ id: newId(), name: attachment.name, time, text: markupWords(text, markup !== null), frame: image });
+    const added = files.images();
+    const ok = await sendRow(added.length > 0 ? { ...made, images: [...(made.images ?? []), ...added] } : made);
     setSaving(false);
     if (ok) reset();
   };
@@ -384,7 +391,8 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
   // The comment row: under the film beside the thread (a phone opens it from "Comment at"), inside the
   // full-screen composer's Comment tab in full screen.
   const commentCard = (
-    <div className="ib-ccard">
+    <div className="ib-ccard" onPaste={files.onPaste} {...files.drop?.handlers}>
+      {files.tiles}
       {chip}
       {kept ? (
         <KeptMarkup image={kept.image} onRedraw={() => setAnnotating(true)} onRemove={() => removeKept(kept.id)} wide />
@@ -445,6 +453,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
           </button>
         </Tip>
       )}
+      {files.clip}
       {phone && !fullComposer && (
         <button type="button" className="ib-btn ib-ccancel" onClick={reset} data-video-cancel="">
           Cancel
@@ -454,6 +463,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
       <button type="button" className="ib-btn ib-pri ib-csave" onClick={() => void submit()} disabled={!canSave} data-video-comment-save="">
         {kept ? 'Add note' : 'Comment'}
       </button>
+      {files.drop?.cover}
     </div>
   );
   const composer = fullComposer ? (
@@ -650,7 +660,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
             <div className="ib-vlbl">Comments</div>
             {sorted.map((annotation) => {
               const time = readInboxVideoTime(annotation)!;
-              const image = annotation.images?.[0];
+              const image = markupOf(annotation);
               return (
                 <button
                   key={annotation.id}

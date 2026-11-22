@@ -3978,6 +3978,7 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .pn-inbox .ib-ccard .ib-ta { flex: 1 1 auto; min-height: 44px; padding: 11px 8px; font-size: var(--ib-fs-16-in, 16px); }
   .pn-inbox .ib-ccard .ib-btn { height: 44px; min-width: 44px; justify-content: center; }
   .pn-inbox .ib-ccard .ib-cbtn { width: 44px; padding: 0; }
+  .pn-inbox .ib-imgcompose .ib-ccard .ib-cclip { width: 44px; height: 44px; }
   .ib-ccard .ib-cbtn-l { display: none; }
   .ib-ccard .ib-markup, .pn-inbox .ib-kept .ib-kept-img { width: 44px; height: 44px; }
   .pn-inbox .ib-kept.ib-kept-wide .ib-kept-img { width: 56px; }
@@ -8551,7 +8552,7 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 .ib-fcomp[data-fcomp-sized] > * { flex: none; }
 /* The field's row never goes under the field's own least (one line): a card too low for its parts shows as the body
    overflowing, which composerDrag.ts reads to grow it. */
-.ib-fcomp[data-fcomp-sized] > .ib-fcomp-body { flex: 1 1 auto; min-height: 0; grid-template-rows: auto minmax(min-content, 1fr) auto; }
+.ib-fcomp[data-fcomp-sized] > .ib-fcomp-body { flex: 1 1 auto; min-height: 0; grid-template-rows: auto auto minmax(min-content, 1fr) auto; }
 .ib-fcomp[data-fcomp-sized] .ib-fcomp-field { align-self: stretch; display: flex; flex-direction: column; }
 .ib-fcomp[data-fcomp-sized] .ib-fcomp-field :is(.ib-cfield, .ib-cfield > .relative) { flex: 1 1 0; display: flex; flex-direction: column; }
 .pn-inbox .ib-fcomp[data-fcomp-sized] .ib-fcomp-field .ib-rtext { flex: 1 1 0; max-height: none; field-sizing: fixed; }
@@ -8607,8 +8608,8 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
    comment and its card are display: contents); the reply's row is one flex line (`.ib-fcomp-foot`) across it. */
 .ib-fcomp-body {
   display: grid; align-items: center; column-gap: 2px;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
-  grid-template-areas: "thumbs thumbs thumbs thumbs" "field field field field" "tools mid end pri";
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+  grid-template-areas: "thumbs thumbs thumbs thumbs thumbs" "files files files files files" "field field field field field" "tools clip mid end pri";
   padding: 0 8px 8px;
 }
 .ib-fcomp :is(.ib-fcomp-slot, .ib-fcomp-comment, .ib-ccard) { display: contents; }
@@ -8642,7 +8643,7 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 
 /* The reply's row, and under it the refused Send's words. */
 .ib-fcomp-err { margin: 0 12px 10px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--destructive); }
-.ib-fcomp-foot { grid-row: 3; grid-column: 1 / -1; display: flex; align-items: center; gap: 4px; min-width: 0; min-height: 30px; margin: 2px 0 0; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-fcomp-foot { grid-row: 4; grid-column: 1 / -1; display: flex; align-items: center; gap: 4px; min-width: 0; min-height: 30px; margin: 2px 0 0; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-fcomp-foot > .ib-fcomp-chips { padding: 0 4px; }
 .pn-inbox .ib-fcomp-foot > .ib-fcomp-link { margin-left: auto; }
 .ib-fcomp-foot > .ib-fcomp-link ~ .ib-fcomp-bin { margin-left: 2px; }
@@ -8657,6 +8658,18 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 /* The reply box's file tiles and its drop target, in the card. */
 .ib-fcomp .ib-fcomp-files { padding: 4px 2px 2px; max-height: min(136px, 22vh); overflow-y: auto; overscroll-behavior: contain; }
 .ib-fcomp[data-drop-over] { border-style: dashed; border-color: var(--primary); }
+/* A comment's own files (commentFiles.tsx): the reply's paperclip after the pencil, the reply's tiles over the field. */
+.ib-fcomp .ib-ccard > .ib-tipwrap:has(> .ib-cclip) { grid-area: clip; }
+.ib-fcomp .ib-ccard > .ib-cfiles { grid-area: files; padding: 8px 2px 0; max-height: min(136px, 22vh); overflow-y: auto; overscroll-behavior: contain; }
+/* Beside the thread: the tiles take their own line over the row, the paperclip the row's 34 px (44 on a phone). */
+.ib-imgcompose .ib-ccard { position: relative; }
+.ib-imgcompose .ib-ccard:has(> .ib-cfiles) { flex-wrap: wrap; }
+.ib-imgcompose .ib-ccard > .ib-cfiles { flex: 0 0 100%; padding: 2px 2px 4px; }
+.pn-inbox .ib-imgcompose .ib-cclip { width: 34px; height: 34px; padding: 0; cursor: pointer; }
+.pn-inbox .ib-imgcompose .ib-cclip:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-imgcompose .ib-ccard > .ib-rdrop { border-radius: var(--ib-r12-s, 12px); }
+/* A film's comment card in the panel: the pictures and files added to it (its image row is off; Markup.tsx `fileCardBody`). */
+.ib-cardadded { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .ib-fcomp .ib-fcomp-drop { border-radius: 13px; }
 .ib-fcomp-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 1; min-width: 0; }
 .ib-fcomp-chip { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 999px; background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); font-weight: 600; }

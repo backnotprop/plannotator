@@ -11,14 +11,15 @@
  */
 import { createContext, useContext, useLayoutEffect, useRef, useState } from 'react';
 import type { Annotation, ImageAttachment } from '@plannotator/ui/types';
+import type { InboxUpload } from '@plannotator/core/inbox-types';
 
 export type FileCommentDraft =
   /** A comment composer of the viewer (a selection's, a pin's, code lines', a diagram part's): its anchor, its words as `text`. */
   | { kind: 'comment'; annotation: Annotation }
   /** A saved comment's edit box, its words changed and not saved. */
   | { kind: 'edit'; id: string; text: string }
-  /** The file's own comment row (an image's, a film's): its words, a drawing not yet added, a film's pinned moment and frame. */
-  | { kind: 'row'; text: string; markup: ImageAttachment | null; time?: number | null; frame?: Blob | null };
+  /** The file's own comment row (an image's, a film's): its words, a drawing not yet added, a film's pinned moment and frame, the files added to it. */
+  | { kind: 'row'; text: string; markup: ImageAttachment | null; time?: number | null; frame?: Blob | null; files?: readonly InboxUpload[] };
 
 const drafts = new Map<string, FileCommentDraft[]>();
 
@@ -50,7 +51,7 @@ export function draftHasWords(draft: FileCommentDraft): boolean {
     case 'edit':
       return true;
     case 'row':
-      return draft.text.trim() !== '' || draft.markup !== null;
+      return draft.text.trim() !== '' || draft.markup !== null || (draft.files?.length ?? 0) > 0;
   }
 }
 

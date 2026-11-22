@@ -34,6 +34,9 @@ import { useRowDraft } from '../fileCommentDrafts';
 import { InboxComposerField, type InboxComposerTags } from './ComposerField';
 import { FullScreenCommentBin } from './FullScreenComposer';
 import { TagNotes } from './TagPicker';
+import { useCommentDropTarget, useCommentFiles, type CommentFiles } from '../commentFiles';
+import { usePhone } from '../phone';
+import type { InboxUpload } from '@plannotator/core/inbox-types';
 
 export interface HtmlPageCommentOptions {
   /** The card can open: a phone's full screen on a page that takes comments. Off, any open draft goes. */
@@ -83,20 +86,28 @@ export function useHtmlPageComment({ enabled, fileKey, threadId, name, viewer, t
   const stepping = useRef(false);
   /** Words a kept comment had, for the draft the page hands over next (`expectWords`). */
   const expected = useRef<string | null>(null);
+  /** Pictures and files added to the comment (a phone's card: the paperclip and a paste). They go with its words. */
+  const fieldRef = useRef<HTMLTextAreaElement | null>(null);
+  const files = useCommentFiles({ phone: true, focus: () => fieldRef.current?.focus({ preventScroll: true }) });
+  const clearFiles = files.clear;
+  /** Files wait in the card: as words do, they keep it open. */
+  const holdsFiles = useRef(false);
+  holdsFiles.current = files.ready > 0 || files.uploading;
 
   const drop = useCallback(() => {
     setDraft(null);
     setWords('');
+    clearFiles();
     mentions.current = [];
     restore.current?.();
     restore.current = null;
-  }, []);
+  }, [clearFiles]);
 
   const onHostDraft = useCallback(
     (next: HostDraft | null) => {
       if (next === null) {
         // The selection went away while words wait for it: the quote is in the draft, so they can still be saved.
-        if (wordsRef.current.trim() === '') drop();
+        if (wordsRef.current.trim() === '' && !holdsFiles.current) drop();
         return;
       }
       if (threadId) {
@@ -122,7 +133,7 @@ export function useHtmlPageComment({ enabled, fileKey, threadId, name, viewer, t
   }, []);
 
   const onMinimized = useCallback(() => {
-    if (!draftRef.current || wordsRef.current.trim() !== '') return;
+    if (!draftRef.current || wordsRef.current.trim() !== '' || holdsFiles.current) return;
     draftRef.current.cancel();
     drop();
     // Minimize asked for the pill, whatever the card was before the comment.
@@ -132,9 +143,10 @@ export function useHtmlPageComment({ enabled, fileKey, threadId, name, viewer, t
   const submit = async () => {
     const held = draftRef.current;
     const text = wordsRef.current.trim();
-    if (!held || !text || saving) return;
+    const images = files.images();
+    if (!held || (!text && images.length === 0) || saving || files.uploading) return;
     setSaving(true);
-    const annotation: Annotation = { ...held.annotation, text, ...(mentions.current.length > 0 ? { mentions: mentions.current } : {}) };
+    const annotation: Annotation = { ...held.annotation, text, ...(mentions.current.length > 0 ? { mentions: mentions.current } : {}), ...(images.length > 0 ? { images } : {}) };
     const ok = await onSave(annotation);
     setSaving(false);
     if (!ok) return;
@@ -182,6 +194,8 @@ export function useHtmlPageComment({ enabled, fileKey, threadId, name, viewer, t
       name={name}
       words={words}
       onWords={setWords}
+      fieldRef={fieldRef}
+      files={files}
       saving={saving}
       tags={fieldTags}
       onSubmit={() => void submit()}
@@ -201,6 +215,8 @@ function HtmlCommentCard({
   name,
   words,
   onWords,
+  fieldRef,
+  files,
   saving,
   tags,
   onSubmit,
@@ -211,6 +227,8 @@ function HtmlCommentCard({
   name: string;
   words: string;
   onWords: (text: string) => void;
+  fieldRef: RefObject<HTMLTextAreaElement | null>;
+  files: CommentFiles;
   saving: boolean;
   tags?: InboxComposerTags;
   onSubmit: () => void;
@@ -218,7 +236,7 @@ function HtmlCommentCard({
   stepping: RefObject<boolean>;
 }) {
   const enterSavesComment = useConfigValue('enterSavesComment');
-  const fieldRef = useRef<HTMLTextAreaElement | null>(null);
+  useCommentDropTarget(files);
   const pin = draft.intent === 'compose';
   // The words it is on, as the approved card reads; an element with none (a picture) has its kind.
   const target = shortLabel(draft.annotation.originalText) || draft.label || '';
@@ -249,7 +267,8 @@ function HtmlCommentCard({
           </>
         )}
       </div>
-      <div className="ib-ccard">
+      <div className="ib-ccard" onPaste={files.onPaste}>
+        {files.tiles}
         <div className="ib-fcomp-field">
           <InboxComposerField
             textareaRef={fieldRef}
@@ -267,8 +286,9 @@ function HtmlCommentCard({
             tags={tags}
           />
         </div>
+        {files.clip}
         <FullScreenCommentBin />
-        <button type="button" className="ib-btn ib-pri ib-csave" onClick={onSubmit} disabled={saving || words.trim() === ''} data-html-comment-save="">
+        <button type="button" className="ib-btn ib-pri ib-csave" onClick={onSubmit} disabled={saving || files.uploading || (words.trim() === '' && files.ready === 0)} data-html-comment-save="">
           Comment
         </button>
       </div>
@@ -276,8 +296,8 @@ function HtmlCommentCard({
   );
 }
 
-/** Where a page row's words wait while the row is off screen and the file still open (a linked page over it). */
-export type PageCommentParking = { current: { key: string; text: string } | null };
+/** Where a page row's words (and the files added to it) wait while the row is off screen and the file still open (a linked page over it). */
+export type PageCommentParking = { current: { key: string; text: string; files?: readonly InboxUpload[] } | null };
 
 /** A fresh id for a comment on the whole page. */
 function pageCommentId(): string {
@@ -316,9 +336,15 @@ export function HtmlPageCommentRow({
   /** The words as a save took them: the file closing before the save answers keeps no draft of them. */
   const sentWords = useRef<string | null>(null);
   const wordsRef = useRef('');
-  const waiting = useRowDraft(() => (sentWords.current === wordsRef.current ? null : { kind: 'row', text: wordsRef.current, markup: null }));
-  const [words, setWords] = useState(() => waiting?.text ?? (parking.current?.key === fileKey ? parking.current.text : ''));
+  const waiting = useRowDraft(() => (sentWords.current === wordsRef.current ? null : { kind: 'row', text: wordsRef.current, markup: null, files: filesRef.current?.kept() }));
+  const [parked] = useState(() => (parking.current?.key === fileKey ? parking.current : null));
+  const [words, setWords] = useState(() => waiting?.text ?? parked?.text ?? '');
   wordsRef.current = words;
+  const fieldRef = useRef<HTMLTextAreaElement | null>(null);
+  // Pictures and files added to the comment (the reply box's paperclip, paste and drop): they go with its words.
+  const files = useCommentFiles({ initial: waiting?.files ?? parked?.files, phone: usePhone(), focus: () => fieldRef.current?.focus({ preventScroll: true }) });
+  const filesRef = useRef(files);
+  filesRef.current = files;
   const [saving, setSaving] = useState(false);
   const mentions = useRef<readonly string[]>([]);
   // Off screen with the file still open: the words wait here, and the row takes them back when it is drawn again.
@@ -326,7 +352,8 @@ export function HtmlPageCommentRow({
     parking.current = null;
     return () => {
       const text = wordsRef.current;
-      parking.current = text.trim() !== '' && sentWords.current !== text ? { key: fileKey, text } : null;
+      const kept = filesRef.current.kept();
+      parking.current = (text.trim() !== '' || kept.length > 0) && sentWords.current !== text ? { key: fileKey, text, files: kept } : null;
     };
   }, [fileKey, parking]);
 
@@ -345,7 +372,8 @@ export function HtmlPageCommentRow({
 
   const submit = async () => {
     const text = words.trim();
-    if (!text || saving) return;
+    const images = files.images();
+    if ((!text && images.length === 0) || saving || files.uploading) return;
     setSaving(true);
     sentWords.current = words;
     const ok = await onSave({
@@ -358,6 +386,7 @@ export function HtmlPageCommentRow({
       originalText: '',
       createdA: Date.now(),
       ...(mentions.current.length > 0 ? { mentions: mentions.current } : {}),
+      ...(images.length > 0 ? { images } : {}),
     });
     setSaving(false);
     if (!ok) {
@@ -366,13 +395,16 @@ export function HtmlPageCommentRow({
     }
     setWords('');
     mentions.current = [];
+    files.clear();
   };
 
   return (
     <div className="ib-fcomp-comment" data-image-composer="" data-html-page-comment="" hidden={hidden || undefined}>
-      <div className="ib-ccard">
+      <div className="ib-ccard" onPaste={files.onPaste}>
+        {files.tiles}
         <div className="ib-fcomp-field">
           <InboxComposerField
+            textareaRef={fieldRef}
             value={words}
             onChange={setWords}
             onKeyDown={(event) => {
@@ -387,8 +419,9 @@ export function HtmlPageCommentRow({
             tags={fieldTags}
           />
         </div>
+        {files.clip}
         <FullScreenCommentBin />
-        <button type="button" className="ib-btn ib-pri ib-csave" onClick={() => void submit()} disabled={saving || words.trim() === ''} data-html-page-comment-save="">
+        <button type="button" className="ib-btn ib-pri ib-csave" onClick={() => void submit()} disabled={saving || files.uploading || (words.trim() === '' && files.ready === 0)} data-html-page-comment-save="">
           Comment
         </button>
       </div>
