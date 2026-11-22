@@ -1,28 +1,22 @@
 /**
- * The Reviews list (approval "inbox-reviews-page", round 2): the Inbox's own rows and bands, grouped by whose move it
- * is: On you, With your agents, Ready to land, then the folded Waiting on others and Open, not reviewed. A row is a
- * review thread (the same thread the Inbox lists, never a copy) or a listed PR nobody has reviewed. The fold state
- * is remembered. No new keyboard shortcuts.
+ * The Reviews list (approval "inbox-reviews-page", round 2; compact rows from "inbox-reviews-compact-list"): one line
+ * per review (ReviewRow.tsx) under plain group labels, grouped by whose move it is: On you, With your agents, Ready to
+ * land, then the folded Waiting on others and Open, not reviewed. A row is a review thread (the same thread the Inbox
+ * lists, never a copy) or a listed PR nobody has reviewed. The fold state is remembered. No new keyboard shortcuts.
  */
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
-import { inboxPullIsOpen, inboxPullRepoKey, inboxReviewGroups, type InboxPull, type InboxPullHidden, type InboxRepoHidden, type InboxPullLink, type InboxPullsAnswer, type InboxPullStack, type InboxReviewMove, type InboxReviewRow, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
+import { inboxPullIsOpen, inboxPullRepoKey, inboxReviewGroups, type InboxPull, type InboxPullHidden, type InboxRepoHidden, type InboxPullsAnswer, type InboxReviewRow, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
-import { HostMark, Icon } from '../icons';
-import { RefMarkIcon } from '../board/RefMark';
-import { Tip } from '../components/Tip';
-import { relativeTime, relativeWords, useRelativeClock } from '../relativeTime';
-import { pullFilterEmptyWords, pullNounWord, stackTitle, type PullFilter } from './model';
-import { initials, repoLabels, repoName } from './labels';
+import { Icon } from '../icons';
+import { useRelativeClock } from '../relativeTime';
+import { pullFilterEmptyWords, stackTitle, type PullFilter } from './model';
+import { repoLabels, repoName } from './labels';
 import { pullsEmptyWords, pullsNotices } from './notices';
-import { chainMarks } from './topology';
-import { readReviewFolds, reviewRowLanding, reviewRowLine, reviewRowProject, reviewRowTitle, saveReviewFolds, type ReviewFolds } from './reviewsModel';
-import { riskOrder, rowRisk, rowRiskFailure, type RiskFailures, type RiskFilterValue, type RiskJudgments } from './risk';
-import { RiskMark } from './RiskMark';
-import { Named, usePicture } from './Face';
-import { facesOnce } from './words';
-import { pullAvatarUrl } from './pullUrls';
+import { readReviewFolds, reviewRowProject, reviewRowTitle, saveReviewFolds, type ReviewFolds } from './reviewsModel';
+import { riskOrder, type RiskFailures, type RiskFilterValue, type RiskJudgments } from './risk';
+import { ReviewRowItem, ReviewStack } from './ReviewRow';
 import type { InboxPullRiskAutoRun } from '@plannotator/core/inbox-types';
 import { useContextMenuTrigger } from '../components/useContextMenuTrigger';
 import { focusWhenGone, hiddenInProject, hiddenLabel, hiddenRepo, itemsBy, repoChangeKey } from './hiddenPulls';
@@ -32,199 +26,24 @@ const NO_JUDGMENTS: RiskJudgments = {};
 const NO_FAILURES: RiskFailures = {};
 
 /**
- * A PR row's top-left spot: always the PR author's profile picture (the person's own PRs too; a stack's bottom layer's
- * author), read through the Inbox's own route (`GET /api/inbox/pulls/avatar`): the window's CSP never loads a remote
- * image. The initials show while it loads and stay when it cannot; a deleted account is a grey person.
+ * A group of the list: a plain one-line label and its count, no band. A folded group's label is a button with its
+ * chevron, and its rows show only while it is open. Every group (and a new one) is this one shape.
  */
-function AuthorLead({ stack }: { stack: InboxPullStack }) {
-  const bottom = stack.layers[0]!;
-  const author = bottom.author;
-  const src = author ? pullAvatarUrl(bottom.host, author) : null;
-  // The same picture state as every face (`Face.tsx`), so a picture that failed in one is never asked again here.
-  const { shown, failed, state, onLoad, onError } = usePicture(src);
-  if (!author || !src) {
-    return (
-      <Tip content="A deleted account">
-        <span className="ib-pr-av ib-pr-av-ghost" role="img" aria-label="A deleted account" data-pulls-ghost="">
-          <Icon name="user" size={13} />
-        </span>
-      </Tip>
-    );
-  }
-  return (
-    <Tip content={author}>
-      <span className="ib-pr-av" role="img" aria-label={author} data-pulls-author={author} data-pulls-bot={author.endsWith('[bot]') ? '' : undefined} data-pulls-avatar={state}>
-        {!shown && <span aria-hidden="true">{initials(author)}</span>}
-        {!failed && (
-          <img
-            src={src}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            referrerPolicy="no-referrer"
-            draggable={false}
-            data-shown={shown ? '' : undefined}
-            onLoad={onLoad}
-            onError={onError}
-          />
-        )}
-      </span>
-    </Tip>
-  );
-}
-
-/** The chain of PR marks, bottom (lands first) to top: past five layers, the first two, "+N" and the last two. */
-function Chain({ stack }: { stack: InboxPullStack }) {
-  return (
-    <span className="ib-pr-chain" aria-hidden="true" data-pulls-chain={stack.layers.length}>
-      {chainMarks(stack.layers).map((mark, i) => (
-        <span key={'more' in mark ? 'more' : mark.key} className="ib-pr-link">
-          {i > 0 && <span className="ib-pr-dash" />}
-          {'more' in mark ? (
-            <span className="ib-pr-more" data-pulls-chain-more={mark.more}>
-              +{mark.more}
-            </span>
-          ) : (
-            <span className="ib-bc-mark" data-card-mark={mark.state} data-card-mark-kind="pr">
-              <RefMarkIcon kind="pr" state={mark.state} size={13} />
-            </span>
-          )}
-        </span>
-      ))}
-    </span>
-  );
-}
-
-function ReviewRowItem({
-  row,
-  links,
-  place,
-  selected,
-  phone,
-  now,
-  judgments,
-  riskFailed,
-  autoRuns,
-  menu = false,
-  onOpen,
-}: {
-  row: InboxReviewRow;
-  links: Readonly<Record<string, InboxPullLink>>;
-  place: string;
-  selected: boolean;
-  phone: boolean;
-  now: number;
-  judgments: RiskJudgments;
-  riskFailed: RiskFailures;
-  autoRuns?: Readonly<Record<string, InboxPullRiskAutoRun>>;
-  /** Its right-click menu is open (the muted background the Inbox's rows take then). */
-  menu?: boolean;
-  onOpen: () => void;
-}) {
-  const stack = row.stacks[0] ?? null;
-  // A thread's row is judged by the PRs it owns, a reported branch by its report; a local review has neither, so no mark.
-  const judged = rowRisk(row, judgments);
-  const riskFailure = rowRiskFailure(row, judgments, riskFailed);
-  const line = reviewRowLine(row, autoRuns);
-  const layers = stack?.layers.length ?? 0;
-  const focusPull = stack?.layers.find((pull) => pull.state === 'open' || pull.state === 'draft') ?? stack?.layers[0] ?? null;
-  return (
-    <button
-      type="button"
-      className={`${phone ? 'ib-mrow' : 'ib-nrow'} ib-prrow${row.move === 'on_you' && row.reviewed ? ' ib-u' : ''}${selected ? ' ib-sel' : ''}`}
-      onClick={onOpen}
-      aria-current={selected ? 'true' : undefined}
-      data-reviews-row={row.id}
-      data-reviews-kind={row.reviewed ? 'reviewed' : 'listed'}
-      // The thread's row, for the window's J and K and its way back; a listed PR is no thread.
-      data-row={row.reviewed ? (row.thread_id ?? undefined) : undefined}
-      data-thread-id={row.reviewed ? (row.thread_id ?? undefined) : undefined}
-      data-pulls-row={stack?.id}
-      data-pulls-move={row.move}
-      data-pulls-layers={stack ? layers : undefined}
-      data-menu={menu ? '' : undefined}
-    >
-      <div className="ib-l1">
-        <span className="ib-from ib-lead">
-          {stack ? (
-            <AuthorLead stack={stack} />
-          ) : (
-            <span className="ib-pr-av" aria-hidden="true" data-reviews-project-tile="">
-              <span>{initials(place)}</span>
-            </span>
-          )}
-          <span className="ib-p" dir="auto" data-pulls-repo="">
-            {place}
-          </span>
-        </span>
-        {judged && <RiskMark judgment={judged} />}
-        {riskFailure && <RiskMark failed={riskFailure} />}
-        <span className="ib-t">
-          <span aria-hidden="true">{relativeTime(row.updated_at, now)}</span>
-          <span className="ib-sr">{relativeWords(row.updated_at, now)}</span>
-        </span>
-      </div>
-      <div className="ib-l2">
-        <span className="ib-title" dir="auto">
-          {reviewRowTitle(row, (s) => stackTitle(s, links))}
-        </span>
-      </div>
-      <div className="ib-l3 ib-pr-l3">
-        {line.kind === 'stack' && stack ? (
-          <Chain stack={stack} />
-        ) : line.kind === 'pr' ? (
-          <span className="ib-bc-mark" data-card-mark={focusPull?.state ?? reviewRowLanding(row)?.state ?? 'open'} data-card-mark-kind="pr" aria-hidden="true">
-            <RefMarkIcon kind="pr" state={focusPull?.state ?? reviewRowLanding(row)?.state ?? 'open'} size={13} />
-          </span>
-        ) : (
-          <Icon name={line.mark ?? 'laptop'} size={14} />
-        )}
-        <span className="ib-pv" dir="auto">
-          {layers > 1 && stack && (
-            <span className="ib-sr">
-              A stack of {layers} {pullNounWord(stack.platform)}s:{' '}
-            </span>
-          )}
-          {line.lead}
-          {line.lead && (line.agent || line.status) && ' · '}
-          {line.agent && (
-            <span className="ib-pr-magent" data-pulls-row-agent={line.agent.host ?? ''} title={line.agent.name} aria-label={line.agent.name}>
-              <HostMark host={line.agent.host} />
-            </span>
-          )}
-          {line.status && (
-            <span className="ib-pr-mstatus" data-tone={line.tone ?? undefined} data-reviews-status="">
-              {/* A face by each name, but not twice: the person the row's left circle shows keeps only their name. */}
-              <Named words={facesOnce(line.parts, stack ? [stack.layers[0]!.author] : [])} host={stack?.layers[0]!.host ?? null} />
-            </span>
-          )}
-        </span>
-      </div>
-    </button>
-  );
-}
-
-function FoldedGroup({ label, name, rows, open, onToggle, draw }: { label: string; name: InboxReviewMove; rows: readonly InboxReviewRow[]; open: boolean; onToggle: () => void; draw: (row: InboxReviewRow) => React.ReactNode }) {
+function ReviewGroup({ label, name, rows, fold, draw }: { label: string; name: string; rows: readonly InboxReviewRow[]; fold?: { open: boolean; onToggle: () => void }; draw: (row: InboxReviewRow) => React.ReactNode }) {
   if (rows.length === 0) return null;
   return (
-    <div className="ib-group ib-pr-fold" role="group" aria-label={label} data-pulls-group={name}>
-      <button type="button" className="ib-pr-foldbtn" onClick={onToggle} aria-expanded={open} data-reviews-fold={name}>
-        <Icon name={open ? 'chevD' : 'chevR'} size={14} />
-        {label} <span className="ib-n">{formatCount(rows.length)}</span>
-      </button>
-      {open && rows.map(draw)}
-    </div>
-  );
-}
-
-function Band({ label, name, rows, draw }: { label: string; name: InboxReviewMove; rows: readonly InboxReviewRow[]; draw: (row: InboxReviewRow) => React.ReactNode }) {
-  if (rows.length === 0) return null;
-  return (
-    <div className="ib-group" role="group" aria-label={label} data-pulls-group={name}>
-      <div className="ib-band">
-        {label} <span className="ib-n">{formatCount(rows.length)}</span>
-      </div>
-      {rows.map(draw)}
+    <div className={`ib-group ib-rvr-grp${fold ? ' ib-pr-fold' : ''}`} role="group" aria-label={label} data-pulls-group={name}>
+      {fold ? (
+        <button type="button" className="ib-pr-foldbtn" onClick={fold.onToggle} aria-expanded={fold.open} data-reviews-fold={name}>
+          <Icon name={fold.open ? 'chevD' : 'chevR'} size={14} />
+          {label} <span className="ib-n">{formatCount(rows.length)}</span>
+        </button>
+      ) : (
+        <div className="ib-rvr-gl">
+          {label} <span className="ib-n">{formatCount(rows.length)}</span>
+        </div>
+      )}
+      {(!fold || fold.open) && rows.map(draw)}
     </div>
   );
 }
@@ -500,6 +319,13 @@ export function ReviewsList({
   // A row opened from a folded group keeps its group open.
   const waitingOpen = unfolded('waiting') || groups.waiting.some(isOpenRow);
   const listedOpen = unfolded('not_reviewed') || groups.not_reviewed.some(isOpenRow);
+  const [unfoldedStacks, setUnfoldedStacks] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleStack = (id: string) =>
+    setUnfoldedStacks((was) => {
+      const next = new Set(was);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
   // Those High could not place, behind one quiet line; one opened from there keeps them shown.
   const [notRankedFolded, setNotRankedOpen] = useState(false);
   const notRankedOpen = notRankedFolded || notRanked.some(isOpenRow);
@@ -540,9 +366,12 @@ export function ReviewsList({
     return project ?? row.review?.source?.repo ?? 'A project';
   };
   const links = reviewLinksOf(model, answer);
-  const draw = (row: InboxReviewRow) => (
-    <ReviewRowItem key={row.id} row={row} links={links} place={placeOf(row)} selected={isOpenRow(row)} phone={phone} now={now} judgments={judgments} riskFailed={riskFailed} autoRuns={autoRuns} menu={menuRow === row.id} onOpen={() => onOpen(row)} />
-  );
+  const draw = (row: InboxReviewRow) => {
+    const props = { row, links, place: placeOf(row), selected: isOpenRow(row), phone, now, judgments, riskFailed, autoRuns, menu: menuRow === row.id, onOpen: () => onOpen(row) };
+    // A stack of several PRs unfolds its layers under its row; the choice lasts while the page is open.
+    if ((row.stacks[0]?.layers.length ?? 0) > 1) return <ReviewStack key={row.id} {...props} open={unfoldedStacks.has(row.id)} onToggle={() => toggleStack(row.id)} />;
+    return <ReviewRowItem key={row.id} {...props} />;
+  };
   // Under a project filter, that project's hidden PRs and repositories only, as the rest of the page (its count follows).
   const hiddenFold = onShowAgain ? <HiddenFold hidden={hiddenInProject(answer.hidden ?? [], project, answer.projects)} repos={hiddenInProject(answer.hidden_repos ?? [], project, answer.projects)} onShow={onShowAgain} onShowRepo={onShowRepo} onOpenThread={onOpenThread} /> : null;
   // High: what it can't place, behind one quiet line in the fold's own shape.
@@ -613,11 +442,11 @@ export function ReviewsList({
   return (
     <>
       {notice}
-      <Band label="On you" name="on_you" rows={groups.on_you} draw={draw} />
-      <Band label="With your agents" name="agents" rows={groups.agents} draw={draw} />
-      <Band label="Ready to land" name="ready" rows={groups.ready} draw={draw} />
-      <FoldedGroup label="Waiting on others" name="waiting" rows={groups.waiting} open={waitingOpen} onToggle={() => toggle('waiting')} draw={draw} />
-      <FoldedGroup label="Open, not reviewed" name="not_reviewed" rows={groups.not_reviewed} open={listedOpen} onToggle={() => toggle('not_reviewed')} draw={draw} />
+      <ReviewGroup label="On you" name="on_you" rows={groups.on_you} draw={draw} />
+      <ReviewGroup label="With your agents" name="agents" rows={groups.agents} draw={draw} />
+      <ReviewGroup label="Ready to land" name="ready" rows={groups.ready} draw={draw} />
+      <ReviewGroup label="Waiting on others" name="waiting" rows={groups.waiting} fold={{ open: waitingOpen, onToggle: () => toggle('waiting') }} draw={draw} />
+      <ReviewGroup label="Open, not reviewed" name="not_reviewed" rows={groups.not_reviewed} fold={{ open: listedOpen, onToggle: () => toggle('not_reviewed') }} draw={draw} />
       {notJudgedLine}
       {notRankedLine}
       {localGroup}

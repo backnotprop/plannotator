@@ -134,7 +134,8 @@ test.skipIf(!hasDom)('the group is at the foot of the whole list, folded, with i
   expect(toggle().textContent).toBe('On this computer 3');
   expect(rows()).toHaveLength(0);
   await act(async () => toggle().click());
-  expect(rows().map((row) => [row.querySelector('.ib-local-name')?.textContent, row.querySelector('[data-local-project]')?.textContent, row.querySelector('.ib-local-age')?.textContent])).toEqual([
+  const nameOf = (row: HTMLElement) => row.querySelector('.ib-rvr-t .ib-sr')?.textContent ?? row.querySelector('.ib-rvr-t')?.textContent;
+  expect(rows().map((row) => [nameOf(row), row.querySelector('[data-local-project]')?.textContent, row.querySelector('.ib-rvr-age [aria-hidden]')?.textContent])).toEqual([
     ['Uncommitted on main', 'plannotator', '3m'],
     ['fix/guide-global-comment-keep-words', 'plannotator', '12m'],
     ['feat/spaces-share-link', 'spaces-site', '2h'],

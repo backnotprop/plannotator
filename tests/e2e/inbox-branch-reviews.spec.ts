@@ -161,10 +161,12 @@ test('on: a report is one review thread, a local branch On you, with the person\
   await page.goto(`${world.url}#reviews`);
   const row = page.locator(`[data-reviews-row="${threadId}"]`);
   await expect(row).toBeVisible();
-  await expect(row.locator('.ib-pr-l3')).toHaveText('retry-jitter · Ready for review');
+  // Closed, the row is one line; open, its second line says where the branch is, its project and why it waits.
+  await expect(row.locator('.ib-pr-l3')).toHaveCount(0);
   await expect(page.locator('[data-pulls-group="on_you"]')).toContainText('retry-jitter');
   await shot(page, '1-reported-row');
   await row.click();
+  await expect(row.locator('.ib-pr-l3')).toHaveText(/^retry-jitter · .+ · Ready for review$/);
   await expect(page.locator('.ib-rvctx')).toContainText('Local branch: retry-jitter, against main');
   await expect(page.locator('[data-review-branch-ask]')).toBeVisible();
   await shot(page, '2-reported-thread');

@@ -10,8 +10,8 @@ import { useEffect, useRef, useState } from 'react';
 import { inboxLocalWorkKey, inboxLocalWorkLabel, type InboxLocalWork, type InboxLocalWorkAnswer } from '@plannotator/core/inbox-types';
 import { formatCount } from '@plannotator/core/inbox-format';
 import { Icon } from '../icons';
-import { FileName } from '../components/FileName';
-import { relativeTime, relativeWords, useRelativeClock } from '../relativeTime';
+import { Age, Title } from './ReviewRow';
+import { useRelativeClock } from '../relativeTime';
 import { localWorkIn, readLocalFoldOpen, readLocalWork, saveLocalFoldOpen } from './localWork';
 
 export interface OnThisComputerProps {
@@ -57,7 +57,7 @@ export function OnThisComputer({ project, projectNames, openKey, phone, readAgai
     saveLocalFoldOpen(!open);
   };
   return (
-    <div ref={group} className="ib-group ib-pr-fold" role="group" aria-label="On this computer" data-reviews-local="">
+    <div ref={group} className="ib-group ib-rvr-grp ib-pr-fold" role="group" aria-label="On this computer" data-reviews-local="">
       <button type="button" className="ib-pr-foldbtn" onClick={toggle} aria-expanded={open} data-reviews-local-toggle="">
         <Icon name={open ? 'chevD' : 'chevR'} size={14} />
         On this computer <span className="ib-n">{formatCount(items.length)}</span>
@@ -67,28 +67,31 @@ export function OnThisComputer({ project, projectNames, openKey, phone, readAgai
   );
 }
 
+/** One line, as a compact Reviews row (ReviewRow.tsx): the mark, the work (a long branch cut in its middle), the project quiet, the age. */
 function LocalRow({ item, projectName, selected, phone, now, onOpen }: { item: InboxLocalWork; projectName: string | null; selected: boolean; phone: boolean; now: number; onOpen: () => void }) {
-  const label = inboxLocalWorkLabel(item);
   return (
     <button
       type="button"
       className={`${phone ? 'ib-mrow' : 'ib-nrow'} ib-prrow ib-local-row${selected ? ' ib-sel' : ''}`}
       onClick={onOpen}
       aria-current={selected ? 'true' : undefined}
-      aria-label={`${label}${projectName ? `, ${projectName}` : ''}, ${relativeWords(item.at, now)}`}
       data-local-row={inboxLocalWorkKey(item)}
       data-local-kind={item.kind}
     >
-      <Icon name={item.kind === 'branch' ? 'gitBranch' : 'laptop'} size={15} />
-      {/* Cut in the middle when short of room: a branch's end is what tells it from its neighbours. */}
-      <FileName name={label} className="ib-local-name" />
-      {projectName && (
-        <span className="ib-local-project" dir="auto" data-local-project="">
-          {projectName}
+      <span className="ib-rvr-l1">
+        <span className="ib-rvr-mark" aria-hidden="true">
+          <Icon name={item.kind === 'branch' ? 'gitBranch' : 'laptop'} size={15} />
         </span>
-      )}
-      <span className="ib-local-age" aria-hidden="true">
-        {relativeTime(item.at, now)}
+        <Title text={inboxLocalWorkLabel(item)} />
+        <span className="ib-rvr-end">
+          {projectName && <span className="ib-sr">, </span>}
+          {projectName && (
+            <span className="ib-local-project" dir="auto" data-local-project="">
+              {projectName}
+            </span>
+          )}
+          <Age iso={item.at} now={now} />
+        </span>
       </span>
     </button>
   );
