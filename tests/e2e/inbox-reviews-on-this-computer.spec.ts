@@ -162,25 +162,25 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
 }
 
-const group = (page: Page) => page.locator('[data-reviews-local]');
+const group = (page: Page) => page.locator('[data-pulls-group="local"]');
 const row = (page: Page, key: string) => group(page).locator(`[data-local-row="${key}"]`);
 
 test('the group sits folded at the foot of the list, with its count', async () => {
   const { page } = world;
   await page.goto(`${world.url}#reviews`);
   await expect(page.locator('[data-reviews-row]').first()).toBeVisible();
-  const toggle = group(page).locator('[data-reviews-local-toggle]');
+  const toggle = group(page).locator('[data-reviews-fold="local"]');
   await expect(toggle).toHaveText('On this computer 3');
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await expect(group(page).locator('[data-local-row]')).toHaveCount(0);
   // The last group of the list.
-  expect(await page.locator('.ib-lbody [role="group"]').last().getAttribute('data-reviews-local')).toBe('');
+  expect(await page.locator('.ib-lbody [role="group"]').last().getAttribute('data-pulls-group')).toBe('local');
   await shot(page, '01-group-folded');
 });
 
 test('open, each row is one line: its work, its project, its age', async () => {
   const { page } = world;
-  await group(page).locator('[data-reviews-local-toggle]').click();
+  await group(page).locator('[data-reviews-fold="local"]').click();
   const rows = group(page).locator('[data-local-row]');
   await expect(rows).toHaveCount(3);
   await expect(rows.nth(0)).toContainText('Uncommitted on main');
@@ -234,6 +234,6 @@ test("the Uncommitted row opens the folder's own changes; Close returns to the l
   await shot(page, '04-uncommitted-diff');
   await pane.locator('[data-local-close]').click();
   await expect(page.locator('[data-local-diff]')).toHaveCount(0);
-  await expect(group(page).locator('[data-reviews-local-toggle]')).toHaveAttribute('aria-expanded', 'true');
+  await expect(group(page).locator('[data-reviews-fold="local"]')).toHaveAttribute('aria-expanded', 'true');
   await expect(group(page).locator('[data-local-row]')).toHaveCount(3);
 });

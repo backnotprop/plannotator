@@ -121,8 +121,8 @@ const render = async (node: React.ReactNode) => {
   await act(async () => root!.render(node));
   await settle();
 };
-const group = () => document.querySelector<HTMLElement>('[data-reviews-local]');
-const toggle = () => document.querySelector<HTMLButtonElement>('[data-reviews-local-toggle]')!;
+const group = () => document.querySelector<HTMLElement>('[data-pulls-group="local"]');
+const toggle = () => document.querySelector<HTMLButtonElement>('[data-reviews-fold="local"]')!;
 const rows = () => [...document.querySelectorAll<HTMLElement>('[data-local-row]')];
 
 test.skipIf(!hasDom)('the group is at the foot of the whole list, folded, with its count; open, each row says its work, project and age', async () => {
@@ -143,6 +143,13 @@ test.skipIf(!hasDom)('the group is at the foot of the whole list, folded, with i
   expect(rows().map((row) => row.getAttribute('data-local-kind'))).toEqual(['uncommitted', 'branch', 'branch']);
   // Nothing but the list was asked for: no diff until a click.
   expect(seen.some((r) => r.url.includes('/reviews/local/diff'))).toBe(false);
+  // Its fold is kept with the list's others, and comes back open.
+  expect(JSON.parse(window.localStorage.getItem('plannotator-inbox-reviews-folds')!)).toEqual({ waiting: false, not_reviewed: false, local: true });
+  await act(async () => root!.unmount());
+  root = null;
+  await mount(page());
+  expect(toggle().getAttribute('aria-expanded')).toBe('true');
+  expect(rows()).toHaveLength(3);
 });
 
 test.skipIf(!hasDom)("a project filter keeps that project's rows only, and the old \"Branches nobody reported\" never shows beside it", async () => {
@@ -206,4 +213,12 @@ test.skipIf(!hasDom)('a read that fails draws no group, never "nothing" made up'
   fetches({});
   await mount(page());
   expect(group()).toBeNull();
+});
+
+test.skipIf(!hasDom)('an answer without rows (an older Inbox) draws no group, and the list stays', async () => {
+  fetches({ '/reviews/local': { serverSession: 's' } });
+  await mount(page());
+  expect(group()).toBeNull();
+  // The list's own view is drawn: the group's answer took nothing down.
+  expect(document.querySelector('[data-pulls-empty="nothing"]')).not.toBeNull();
 });

@@ -326,7 +326,7 @@ export function PullsPage(given: PullsPageProps) {
             onShowRepo={(repo) => void showRepoWithToast(repo, props.onToast)}
             onOpenThread={props.onOpenThread}
             project={props.project}
-            localGroup={<OnThisComputer project={props.project} projectNames={props.projectNames} openKey={localOpenKey(localOpen)} phone={phone} readAgain={answer} onOpen={(work) => openLocal({ project: work.project_id, branch: work.kind === 'branch' ? work.branch : null }, phone)} />}
+            localGroup={(fold) => <OnThisComputer project={props.project} projectNames={props.projectNames} openKey={localOpenKey(localOpen)} phone={phone} readAgain={answer} fold={fold} onOpen={(work) => openLocal({ project: work.project_id, branch: work.kind === 'branch' ? work.branch : null }, phone)} />}
           />
         )}
       </ReviewsMenu>

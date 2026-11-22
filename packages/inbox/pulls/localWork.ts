@@ -20,21 +20,3 @@ export function readLocalDiff(project: string, branch: string | null, signal?: A
 export function localWorkIn(items: readonly InboxLocalWork[], project: string | null): InboxLocalWork[] {
   return project ? items.filter((item) => item.project_id === project) : [...items];
 }
-
-const OPEN_KEY = 'plannotator-inbox-reviews-local-open';
-
-export function readLocalFoldOpen(): boolean {
-  try {
-    return localStorage.getItem(OPEN_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-export function saveLocalFoldOpen(open: boolean): void {
-  try {
-    localStorage.setItem(OPEN_KEY, open ? '1' : '0');
-  } catch {
-    // Storage refused (private mode, quota): the choice lasts this window only.
-  }
-}

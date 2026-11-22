@@ -8,11 +8,11 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { inboxLocalWorkKey, inboxLocalWorkLabel, type InboxLocalWork, type InboxLocalWorkAnswer } from '@plannotator/core/inbox-types';
-import { formatCount } from '@plannotator/core/inbox-format';
 import { Icon } from '../icons';
 import { Age, Title } from './ReviewRow';
 import { useRelativeClock } from '../relativeTime';
-import { localWorkIn, readLocalFoldOpen, readLocalWork, saveLocalFoldOpen } from './localWork';
+import { localWorkIn, readLocalWork } from './localWork';
+import { ReviewGroup, type ReviewGroupFold } from './ReviewGroup';
 
 export interface OnThisComputerProps {
   /** The list's project filter. */
@@ -23,47 +23,45 @@ export interface OnThisComputerProps {
   phone: boolean;
   /** A new list read: the group reads again (the server's kept answer, until it is old). */
   readAgain: unknown;
+  /** The group's saved fold (ReviewsList's `folds.local`): closed until opened. */
+  fold: ReviewGroupFold;
   onOpen: (work: InboxLocalWork) => void;
 }
 
-export function OnThisComputer({ project, projectNames, openKey, phone, readAgain, onOpen }: OnThisComputerProps) {
+export function OnThisComputer({ project, projectNames, openKey, phone, readAgain, fold, onOpen }: OnThisComputerProps) {
   const now = useRelativeClock(true);
   const [answer, setAnswer] = useState<InboxLocalWorkAnswer | null>(null);
-  const [folded, setFolded] = useState(() => !readLocalFoldOpen());
   useEffect(() => {
     const controller = new AbortController();
-    // A read that fails keeps what was last read: the group never says "nothing" for a read it did not get.
-    readLocalWork(controller.signal).then(setAnswer, () => {});
+    // A read that fails, or answers without rows (an older Inbox), keeps what was last read: the group never says
+    // "nothing" for a read it did not get, and never takes the list down with it.
+    readLocalWork(controller.signal).then(
+      (read) => {
+        if (Array.isArray(read?.items)) setAnswer(read);
+      },
+      () => {},
+    );
     return () => controller.abort();
   }, [readAgain]);
   // Back from a row's diff: the focus it left goes back to its row.
   const wasOpen = useRef(openKey);
-  const group = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const was = wasOpen.current;
     wasOpen.current = openKey;
     if (!was || openKey) return;
     requestAnimationFrame(() => {
       const lost = !document.activeElement || document.activeElement === document.body;
-      if (lost) group.current?.querySelector<HTMLElement>(`[data-local-row="${CSS.escape(was)}"]`)?.focus({ preventScroll: true });
+      if (lost) document.querySelector<HTMLElement>(`[data-pulls-group="local"] [data-local-row="${CSS.escape(was)}"]`)?.focus({ preventScroll: true });
     });
   }, [openKey]);
   const items = answer ? localWorkIn(answer.items, project) : [];
   if (items.length === 0) return null;
   // A row open beside the list keeps its group open.
-  const open = !folded || items.some((item) => inboxLocalWorkKey(item) === openKey);
-  const toggle = () => {
-    setFolded(open);
-    saveLocalFoldOpen(!open);
-  };
+  const open = fold.open || items.some((item) => inboxLocalWorkKey(item) === openKey);
   return (
-    <div ref={group} className="ib-group ib-rvr-grp ib-pr-fold" role="group" aria-label="On this computer" data-reviews-local="">
-      <button type="button" className="ib-pr-foldbtn" onClick={toggle} aria-expanded={open} data-reviews-local-toggle="">
-        <Icon name={open ? 'chevD' : 'chevR'} size={14} />
-        On this computer <span className="ib-n">{formatCount(items.length)}</span>
-      </button>
-      {open && items.map((item) => <LocalRow key={inboxLocalWorkKey(item)} item={item} projectName={projectNames.get(item.project_id) ?? null} selected={inboxLocalWorkKey(item) === openKey} phone={phone} now={now} onOpen={() => onOpen(item)} />)}
-    </div>
+    <ReviewGroup label="On this computer" name="local" count={items.length} fold={{ open, onToggle: fold.onToggle }}>
+      {items.map((item) => <LocalRow key={inboxLocalWorkKey(item)} item={item} projectName={projectNames.get(item.project_id) ?? null} selected={inboxLocalWorkKey(item) === openKey} phone={phone} now={now} onOpen={() => onOpen(item)} />)}
+    </ReviewGroup>
   );
 }
 

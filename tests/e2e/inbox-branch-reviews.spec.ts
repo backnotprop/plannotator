@@ -199,9 +199,9 @@ test('"On this computer" leaves the reported branch to its row; another branch\'
   const id = projects.projects?.find((p) => p.root === world.project)?.id;
   expect(id).toBeTruthy();
   await page.goto(`${world.url}#reviews`);
-  const group = page.locator('[data-reviews-local]');
+  const group = page.locator('[data-pulls-group="local"]');
   await expect(group).toBeVisible();
-  await group.locator('[data-reviews-local-toggle]').click();
+  await group.locator('[data-reviews-fold="local"]').click();
   const idea = group.locator(`[data-local-row="${id}:old-idea"]`);
   await expect(idea).toBeVisible();
   // The reported branch is the report's row, never listed here.
