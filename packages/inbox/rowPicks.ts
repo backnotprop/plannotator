@@ -68,12 +68,12 @@ export function bulkTargets(rows: readonly InboxListRow[], action: BulkAction, r
       case 'snooze':
         return !archived && rules.snoozes(row);
       case 'read':
-        return offersRowMarkRead(row, rules.drawn(row));
+        return rules.drawn(row) !== 'archived' && offersRowMarkRead(row, rules.drawn(row));
       case 'reask':
         // Re-ask all on the picks (reaskAll.ts): a row with a question open, drawn in a group of open questions.
         return offersRowReask(row, rules.drawn(row));
       case 'unread':
-        return canMarkUnread(row);
+        return rules.drawn(row) !== 'archived' && canMarkUnread(row);
       case 'star':
         return rules.starred(row) === false;
       case 'unstar':

@@ -19,8 +19,8 @@ export type InboxCombineFailure = "ended" | "nothing" | "timeout";
 
 export interface InboxCombineRecord {
   id: string;
-  /** The picked threads, in the order the person saw them. */
-  threads: { id: string; subject: string }[];
+  /** The picked threads, in the order the person saw them; `archived`: archived before the Combine, so Undo leaves it there. */
+  threads: { id: string; subject: string; archived?: true }[];
   session: string;
   host: string | null;
   /** How the person sees the agent ("Claude Code", or its session's title). */
