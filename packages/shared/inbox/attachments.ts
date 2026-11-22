@@ -28,7 +28,9 @@
 import { createHash } from "node:crypto";
 import { constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync, type Stats } from "node:fs";
 import { lstat, open, realpath, type FileHandle } from "node:fs/promises";
-import { basename, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { getPlannotatorDataDir } from "../data-dir";
+import { inboxOwnSecretRefusal } from "./own-secrets";
 import { isShapeProjectPath } from "@plannotator/core/shape";
 import { isNetworkPath } from "./network-paths";
 import {
@@ -300,6 +302,8 @@ export function sweepStaleInboxSendTemps(inboxDirPath: string, now = Date.now())
  */
 export async function recordInboxAttachments(inboxDirPath: string, paths: readonly unknown[], options: { base: string; at: string }): Promise<InboxAttachment[]> {
   const checked: { named: string; real: string; stat: Stats; field: string }[] = [];
+  // This store's data folder, and the one this process uses (the same one but in tests).
+  const guarded = [dirname(inboxDirPath), getPlannotatorDataDir()];
   paths.forEach((value, index) => {
     const field = `attachments[${index}]`;
     const refuse = (message: string): never => {
@@ -317,6 +321,9 @@ export async function recordInboxAttachments(inboxDirPath: string, paths: readon
     }
     const realRefusal = inboxAttachmentNameRefusal(real);
     if (realRefusal) refuse(`${basename(named)} resolves to ${basename(real)}: ${realRefusal}`);
+    // The Inbox's own keys (own-secrets.ts), as named and where it leads, for every agent.
+    const ownKey = inboxOwnSecretRefusal(named, guarded) ?? inboxOwnSecretRefusal(real, guarded);
+    if (ownKey) refuse(`${basename(named)}: ${ownKey}`);
     let stat: Stats;
     try {
       stat = statSync(real);
@@ -586,7 +593,7 @@ export async function checkInboxReadableFile(
   let refusedAny = false;
   for (const named of candidates) {
     if (!isAbsolute(named) || /[\u0000-\u001f\u007f]/.test(named)) continue;
-    if (isNetworkPath(named, platform) || inboxAttachmentNameRefusal(named) || refused(named)) {
+    if (isNetworkPath(named, platform) || inboxAttachmentNameRefusal(named) || inboxOwnSecretRefusal(named) || refused(named)) {
       refusedAny = true;
       continue;
     }
@@ -596,7 +603,7 @@ export async function checkInboxReadableFile(
     } catch {
       continue;
     }
-    if (isNetworkPath(real, platform) || inboxAttachmentNameRefusal(real) || refused(real)) {
+    if (isNetworkPath(real, platform) || inboxAttachmentNameRefusal(real) || inboxOwnSecretRefusal(real) || refused(real)) {
       refusedAny = true;
       continue;
     }
