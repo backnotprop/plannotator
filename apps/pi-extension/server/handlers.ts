@@ -4,9 +4,10 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
+import { pipeline } from "node:stream";
 import { join, resolve as resolvePath } from "node:path";
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration, missingDraftHeaders } from "../generated/draft.ts";
 import { type createReviewDraftSession, type ReviewDraftKeys } from "../generated/review-draft.ts";
@@ -19,6 +20,7 @@ import { listReferenceSkills, readReferenceSkillContent } from "../generated/rev
 import { crossOriginRefusalBody } from "../generated/request-origin.ts";
 import { checkServerSession, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { localImageContentType, localImageResponseHeaders } from "../generated/local-image.ts";
+import { annotateMediaAnswer } from "../generated/html-assets-node.ts";
 import { starAskRoute, starAskService, type StarAskSurface } from "../generated/star-ask.ts";
 import { piPingVersion } from "./daily-ping.ts";
 import { json, parseBody, send, toWebRequest } from "./helpers.ts";
@@ -93,6 +95,23 @@ function validateUploadExtension(fileName: string): {
 	}
 
 	return { valid: true, ext };
+}
+
+/**
+ * `/api/annotate-media` (packages/server/shared-handlers.ts
+ * `handleAnnotateMedia`): the same answer, its byte span streamed from disk.
+ */
+export function handleAnnotateMediaRequest(req: IncomingMessage, res: Res, url: URL, servedDocuments: ReadonlySet<string>): void {
+	if (!isSameOriginRequest(req)) return send(res, "Access denied", 403);
+	const range = typeof req.headers.range === "string" ? req.headers.range : null;
+	const answer = annotateMediaAnswer(url.searchParams.get("path"), url.searchParams.get("base"), servedDocuments, range);
+	if (!("headers" in answer)) return send(res, "Video unavailable", answer.status);
+	res.writeHead(answer.status, answer.headers);
+	if (!("path" in answer) || answer.end < answer.start) {
+		res.end();
+		return;
+	}
+	pipeline(createReadStream(answer.path, { start: answer.start, end: answer.end }), res, () => {});
 }
 
 // Every /api/image answer carries the sandbox CSP, nosniff and CORP (see
