@@ -364,3 +364,62 @@ test('a raw <img> naming a sound or a video plays in place and keeps playing whe
     await removeInboxScratch(scratch);
   }
 });
+
+// The test above draws its late picture through `![Later](media/later.png)` too, but 2000 px wide: once captured it is
+// asked for as a smaller copy (`?w=1600`), a new URL, so it loaded again by itself. A picture no wider than a message
+// keeps its URL, and the window kept it failed until a reload (QA F1 on 0.29.1 and 0.29.2).
+test('a small picture named before it is written shows in the open thread without a reload: with the next message, and with no message at all', async ({ browserName }) => {
+  expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
+  const scratch = inboxScratch('plannotator-inbox-late-picture-e2e-');
+  const root = realpathSync(scratch);
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
+  expect(started.status, started.stderr).toBe(0);
+  const url = started.stdout.trim();
+  const project = scratchProject(join(root, 'src'), 'late-pictures');
+  mkdirSync(join(project, 'media'), { recursive: true });
+  const agent = await SimAgent.connect({ binary, env, name: 'Claude', host: 'claude-code' });
+  const browser = browserName === 'webkit' ? await webkit.launch() : await chromium.launch({ args: CHROMIUM_ARGS });
+  try {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: 'reduce' });
+    const page = await context.newPage();
+    const drawn = (img: Player) => img.evaluate((el: HTMLImageElement) => !el.hidden && el.complete && el.naturalWidth);
+
+    await test.step('with the next message: shows when it arrives', async () => {
+      const sent = await agent.send({ project_path: project, subject: 'Export chart', body: 'The export chart:\n\n![Export chart](media/late-a.png)' });
+      expect(JSON.stringify(sent)).toContain('not_yet');
+      await page.goto(`${url}#thread=${sent.thread_id}`);
+      await page.evaluate(() => ((window as unknown as { stayed: boolean }).stayed = true));
+      const body = page.locator(`[data-message-id="${sent.message_id}"]`);
+      await expect(body.locator('[data-image-unavailable]', { hasText: 'Export chart' })).toBeVisible(WAIT);
+      // Past the window's first try on its own (2 s after the failure): what shows it now is the next message.
+      await page.waitForTimeout(2500);
+      writeFileSync(join(project, 'media', 'late-a.png'), PNG);
+      const note = await agent.send({ project_path: project, reply_to: sent.message_id as string, body: 'Written now.' });
+      await expect(page.locator(`[data-message-id="${note.message_id}"]`)).toBeVisible(WAIT);
+      const img = body.locator('img[alt="Export chart"]');
+      await expect.poll(() => drawn(img), { timeout: 3000, message: 'drawn soon after the next message' }).toBe(1);
+      await expect(body.locator('[data-image-unavailable]')).toHaveCount(0);
+      await expect(img).toHaveAttribute('role', 'button');
+      expect(await page.evaluate(() => (window as unknown as { stayed?: boolean }).stayed), 'no reload').toBe(true);
+    });
+
+    await test.step('with no message: shows on its own within 20 s', async () => {
+      const sent = await agent.send({ project_path: project, subject: 'Latency chart', body: 'The latency chart:\n\n![Latency chart](media/late-b.png)' });
+      await page.goto(`${url}#thread=${sent.thread_id}`);
+      await page.evaluate(() => ((window as unknown as { stayed: boolean }).stayed = true));
+      const body = page.locator(`[data-message-id="${sent.message_id}"]`);
+      await expect(body.locator('[data-image-unavailable]', { hasText: 'Latency chart' })).toBeVisible(WAIT);
+      writeFileSync(join(project, 'media', 'late-b.png'), PNG);
+      const img = body.locator('img[alt="Latency chart"]');
+      await expect.poll(() => drawn(img), { timeout: 20_000, message: 'drawn with no new message' }).toBe(1);
+      await expect(body.locator('[data-image-unavailable]')).toHaveCount(0);
+      expect(await page.evaluate(() => (window as unknown as { stayed?: boolean }).stayed), 'no reload').toBe(true);
+    });
+    await context.close();
+  } finally {
+    await agent.close().catch(() => {});
+    await browser.close().catch(() => {});
+    await removeInboxScratch(scratch);
+  }
+});

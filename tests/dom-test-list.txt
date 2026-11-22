@@ -76,6 +76,7 @@ packages/ui/components/HostTitle.dom.test.tsx
 packages/ui/components/RefHoverCard.dom.test.tsx
 packages/inbox/images.test.tsx
 packages/inbox/inlineImages.test.tsx
+packages/inbox/latePictures.test.tsx
 packages/inbox/refusedImages.test.tsx
 packages/inbox/codeAttachment.test.tsx
 packages/inbox/copyFile.test.tsx

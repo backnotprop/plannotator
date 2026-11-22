@@ -3145,6 +3145,13 @@ An `<img>` tag inside a table cell or a sentence is not an HTML block, so `Inlin
 - **New context `InlineImageTagsContext`** (`components/ImageResolverContext`, default `false`). With it `true` and an image resolver, an inline `<img>` goes through the resolver as `![alt](src)` does: `src` resolved, `unavailable` is the quiet chip. Only `src`, `alt`, `width` and `height` (whole numbers) are read; nothing else of the tag reaches the page.
 - **A host that provides nothing sees no change.** The Plannotator Inbox turns it on for a PR's text.
 
+## `ImageRetryContext`: a picture that failed is tried again (unreleased; additive, opt-in, no core change)
+
+A document may name a picture before it exists (an agent writes the file after its message). A markdown image or an inline `<img>` drawn through a resolver kept its placeholder for good once it failed, while its URL stayed the same.
+
+- **New context `ImageRetryContext`** (`components/ImageResolverContext`, `{ key, retries(src) }`, default `null`). When `key` changes, each failed picture whose resolved URL `retries` accepts is loaded again with an off-page `Image`; the placeholder stays until it loads, then the same `<img>` element asks again (it never leaves the document) and shows. A picture that fails again keeps its placeholder until the next key.
+- **A host that provides nothing sees no change.** The Plannotator Inbox provides it per message body (`packages/inbox/parts/MessageBody/PictureRetry.tsx`). Raw-HTML blocks, question cards' pictures and sounds and videos do not read it.
+
 ## `RenderedMarkdown` `renderParagraph` and fullscreen in HTML frames (unreleased; one opt-in prop, fullscreen for every host)
 
 - **`RenderedMarkdown` `renderParagraph?: (block: Block, fallback: React.ReactNode) => React.ReactNode`**: called for each paragraph block, with the standard rendering as `fallback`. Return `fallback` to keep it. Absent: paragraphs render as before, with the same keys and DOM. Plannotator passes it only for a github.com PR description, where a paragraph that is only a bare `github.com/user-attachments` URL becomes a video player once the attachment proxy answers `video/*`.
