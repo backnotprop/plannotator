@@ -813,11 +813,15 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   const onYou = list.locator('[data-pulls-group="on_you"] [data-pulls-row]');
   await expect(onYou).toHaveCount(2);
   await expect(list.locator('[data-pulls-group="on_you"] [data-pulls-row="github.com/northwind/web-app#880"]')).toContainText("Review requested · tomas's PR");
-  // A face by every name, but not twice in a row: tomas is pictured at the row's left, so his name in the words has none.
+  // Closed, a row is one line: the words are on the open row's second line.
   const asked = list.locator('[data-pulls-row="github.com/northwind/web-app#880"] [data-reviews-status]');
+  await expect(asked).toHaveCount(0);
+  // A face by every name, but not twice in a row: tomas is pictured at the second line's start, so his name in the words has none.
+  await list.locator('[data-pulls-row="github.com/northwind/web-app#880"]').click();
   await expect(asked).toHaveText("Review requested · tomas's PR");
   await expect(asked.locator('[data-person="tomas"]')).toHaveCount(1);
   await expect(asked.locator('[data-face]')).toHaveCount(0);
+  await page.locator('[data-launchpad] .ib-pr-bar [aria-label="Close"]').click();
   // The board's popover: who it waits on, with their picture, read through the Inbox's own route like the authors'.
   await page.locator('[data-prs-page] [data-pr-tile="github.com/northwind/web-app#869"]').hover();
   const waits = page.locator('[data-pr-pop="github.com/northwind/web-app#869"] .ib-prpop-status');
@@ -838,10 +842,19 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   await fold.click();
   const stackRow = list.locator(`[data-pulls-group="not_reviewed"] [data-pulls-row="${STACK_ID}"]`);
   await expect(stackRow).toHaveAttribute('data-pulls-layers', '4');
-  await expect(stackRow.locator('[data-pulls-chain] .ib-bc-mark')).toHaveCount(4);
+  // One row for the stack: its count unfolds its four layers under it, and folds them again.
+  const unfold = list.locator(`[data-reviews-stack-toggle="${STACK_ID}"]`);
+  await expect(unfold).toHaveText('4');
+  await unfold.click();
+  await expect(list.locator(`[data-reviews-stack="${STACK_ID}"] [data-reviews-layer]`)).toHaveCount(4);
+  await unfold.click();
+  await expect(list.locator(`[data-reviews-stack="${STACK_ID}"] [data-reviews-layer]`)).toHaveCount(0);
   await expect(stackRow).toContainText('3 open, 1 merged');
   await expect(stackRow.locator('.ib-lead .ib-atiles')).toHaveCount(0);
+  // The author's picture leads the open row's second line.
   for (const [row, login] of [[STACK_ID, 'dana'], ['github.com/northwind/web-app#880', 'tomas'], ['gitlab.com/northwind/ledger#58:pull', 'priya']] as const) {
+    await list.locator(`[data-pulls-row="${row}"]`).click();
+    if (row === STACK_ID) await expect(list.locator(`[data-pulls-row="${row}"] [data-pulls-chain] .ib-bc-mark`)).toHaveCount(4);
     const av = list.locator(`[data-pulls-row="${row}"] .ib-lead [data-pulls-author="${login}"]`);
     await expect(av).toHaveAttribute('data-pulls-avatar', 'shown');
     // Round, as in the details.
@@ -862,6 +875,51 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   // Remembered: a new read of the page finds it as the person left it (open for the rest of this spec).
   await page.reload();
   await expect(list.locator('[data-reviews-fold="not_reviewed"]')).toHaveAttribute('aria-expanded', 'true');
+});
+
+test("compact rows (approval inbox-reviews-compact-list): one 30px line each, the open row's second line, a stack unfolded, a phone", async () => {
+  const { page } = world;
+  const list = page.locator('[data-pulls-list]');
+  const asks = list.locator('[data-pulls-row="github.com/northwind/web-app#880"]');
+  await asks.click();
+  await expect(asks.locator('[data-reviews-line2]')).toBeVisible();
+  await page.mouse.move(0, 0);
+  // Measured: a closed row is one 30px line, the open one grows its second line; no title wraps.
+  const rows = await list.locator('[data-reviews-row]').evaluateAll((els) =>
+    els.map((el) => ({ open: el.getAttribute('aria-current') === 'true', height: el.getBoundingClientRect().height, title: el.querySelector('.ib-rvr-t')!.getBoundingClientRect().height })),
+  );
+  for (const row of rows) {
+    if (row.open) expect(row.height).toBeGreaterThan(44);
+    else expect(Math.round(row.height)).toBe(30);
+    expect(row.title).toBeLessThanOrEqual(20);
+  }
+  const open = rows.find((row) => row.open)!;
+  console.log(`compact rows: closed ${rows.find((row) => !row.open)!.height}px, open ${open.height}px, ${Math.floor(800 / 30)} closed rows per 800px`);
+  const proof = (name: string) => page.screenshot({ path: join(proofDir, name) });
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+  await page.waitForTimeout(400);
+  await proof('compact-01-selected-dark.png');
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+  await page.waitForTimeout(400);
+  await proof('compact-02-selected-light.png');
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+  const unfold = list.locator(`[data-reviews-stack-toggle="${STACK_ID}"]`);
+  await unfold.click();
+  await expect(list.locator(`[data-reviews-stack="${STACK_ID}"] [data-reviews-layer]`)).toHaveCount(4);
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(400);
+  await proof('compact-03-stack-unfolded-dark.png');
+  // A phone: the list alone, its rows a finger's 44px.
+  await page.goto(`${world.url}#reviews`);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(list.locator('[data-reviews-row]').first()).toBeVisible();
+  const phoneRow = await list.locator('[data-reviews-row]').first().evaluate((el) => el.getBoundingClientRect().height);
+  expect(Math.round(phoneRow)).toBeGreaterThanOrEqual(44);
+  await page.waitForTimeout(400);
+  await proof('compact-04-phone-390-dark.png');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+  if ((await unfold.getAttribute('aria-expanded')) === 'true') await unfold.click();
 });
 
 test('the stack view with the Board off: layers from main up, Lands next, its review thread, no Board UI, no merge button', async () => {
@@ -1040,7 +1098,7 @@ test('one PR with no review thread, on its launchpad: Guided review, the New rev
   await page.goto(`${world.url}#reviews&stack=${encodeURIComponent(LOCALE)}`);
   await page.reload();
   await expect(page.locator('[data-pulls-stack] [data-pulls-thread]')).toHaveAttribute('data-pulls-thread', threadId);
-  await expect(page.locator(`[data-pulls-row="${LOCALE}"]`)).toContainText('#869 · Curating…');
+  await expect(page.locator(`[data-pulls-row="${LOCALE}"] .ib-pr-l3`)).toContainText(/^#869 · web-app · .*Curating…$/);
   await expect(page.locator('[data-launch-line="guide"]')).toContainText('Claude Code is writing it…');
   await expect(page.locator('[data-pulls-stack] [data-launch-line="thread"]')).toBeVisible();
   await expect(page.locator('[data-pulls-stack] [data-launch-go="guide"]')).toBeDisabled();
