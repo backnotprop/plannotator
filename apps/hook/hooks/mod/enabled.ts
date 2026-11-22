@@ -27,15 +27,15 @@ export function parseClaudeModEnv(value: string | undefined): boolean | undefine
 }
 
 /**
- * config.json's `claudeCodeMod`, coerced like the CLI's other boolean keys
- * (`coerceConfigBoolean`): a boolean, or the strings true/1 and false/0.
+ * config.json's `claudeCodeMod` (or another `key`), coerced like the CLI's
+ * other boolean keys (`coerceConfigBoolean`): a boolean, or the strings true/1 and false/0.
  * Anything else, a missing key, or an unreadable file is the default: on.
  */
-export function parseClaudeModConfig(configText: string | null | undefined): boolean {
+export function parseClaudeModConfig(configText: string | null | undefined, key = 'claudeCodeMod'): boolean {
   if (!configText) return true
   let value: unknown
   try {
-    value = (JSON.parse(configText) as Record<string, unknown> | null)?.claudeCodeMod
+    value = (JSON.parse(configText) as Record<string, unknown> | null)?.[key]
   } catch {
     return true
   }
@@ -112,6 +112,14 @@ export function resolvePlanReviewEnabled(envValue: string | undefined, configTex
     if (v === 'false' || v === '0') return false
   }
   return true
+}
+
+/**
+ * Whether the mod reloads Plannotator by itself after an update (auto-reload.ts).
+ * Mirrors `resolveAutoReload(config, env)` in packages/shared/config.ts.
+ */
+export function resolveAutoReloadEnabled(envValue: string | undefined, configText: string | null | undefined): boolean {
+  return parseClaudeModEnv(envValue) ?? parseClaudeModConfig(configText, 'autoReload')
 }
 
 /**
