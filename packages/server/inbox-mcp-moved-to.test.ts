@@ -12,6 +12,7 @@ import { INBOX_DEFAULT_TOOLS } from "../../apps/hook/hooks/mod/inbox-default-too
 import { INBOX_MOVED_TO_FIELD_DESCRIPTION, INBOX_MOVED_TO_RULE, inboxAgentTool, inboxToolCall } from "@plannotator/shared/inbox/connection";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxMcpServer, type InboxMcpContext } from "./inbox-mcp";
+import { inboxPushSummary } from "./inbox-relay-push";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -62,6 +63,21 @@ test("read_thread of the old thread by the orchestrator or a third session (wind
   expect(waiting.map((m) => m.moved_note?.thread_id)).toEqual([String(brief.thread_id)]);
   expect(w.store.pendingReplies("ses_orch")).toEqual([]);
   expect(w.store.pendingReplies("ses_third")).toEqual([]);
+});
+
+test("the close-out pushes nothing to the person's phone: its one new message is the note, which pushes nothing", async () => {
+  const w = world();
+  const old = (await w.call("send_message", "ses_sub", { subject: "Retry policy", body: ASK("Retry failed charges?") })).structuredContent!;
+  const brief = (await w.call("send_message", "ses_orch", { subject: "Morning brief", body: ASK("Retry failed charges?") })).structuredContent!;
+  const written: string[] = [];
+  const stop = w.store.subscribe((line) => void (line.kind === "message" && written.push(line.record.id)));
+  await w.call("resolve_message", "ses_orch", { message_id: old.thread_id, moved_to: brief.thread_id });
+  stop();
+  const [note] = w.store.pendingReplies("ses_sub");
+  expect(note?.moved_note).toBeTruthy();
+  // The only new message the close-out wrote is the note (the archive is one more line on the old root), and it pushes nothing.
+  expect([...new Set(written)].filter((id) => id !== old.thread_id)).toEqual([note!.id]);
+  expect(inboxPushSummary(w.store, note!.id, () => w.store.listRows())).toBeNull();
 });
 
 test("a thread the caller never wrote in is refused, naming the field, and nothing is archived", async () => {

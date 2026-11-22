@@ -577,7 +577,7 @@ export const INBOX_ASK_RECOGNISE_RULE = 'Ask only about things the person would 
 
 /**
  * Closing out threads whose questions moved (the owner, 2026-11-20: "if it combines any previous threads, then it
- * should like close out the previous threads on its own"; approved 2026-11-21, the last sentence DRAFT): an agent that
+ * should like close out the previous threads on its own"; approved 2026-11-21, the last sentence 2026-11-22): an agent that
  * gathers questions from other threads into one archives each old thread with resolve_message's `moved_to`, which
  * writes nothing in it, instead of a withdrawal message that makes every old thread "New since you looked"; the
  * Inbox tells those threads' agents quietly, and it passes the person's answers on. On every copy of send_message's
@@ -586,7 +586,7 @@ export const INBOX_ASK_RECOGNISE_RULE = 'Ask only about things the person would 
 export const INBOX_MOVED_TO_RULE =
   "When you gather questions from other threads into one thread, archive each old thread with resolve_message and moved_to instead of writing a withdrawal into it. Pass the person's answers on to the agents whose threads you archived this way."
 
-/** resolve_message's `moved_to` (DRAFT words, with INBOX_MOVED_TO_RULE): the MCP field, so every host's copy, and --help. */
+/** resolve_message's `moved_to` (approved 2026-11-22, with INBOX_MOVED_TO_RULE): the MCP field, so every host's copy, and --help. */
 export const INBOX_MOVED_TO_FIELD_DESCRIPTION =
   "After you asked this thread's open questions again in another thread (one that gathers several): that thread's id, or a message id in it. It must be an open thread of this project where you asked a question. The person then sees a link to it on the archived thread; nothing is written there, and it does not show as new."
 
@@ -1825,7 +1825,7 @@ export function parseInboxBridgeCommands(text: string): InboxReplyCommand[] {
 
 /**
  * The second line of the wake carrying the Inbox's note that a session's questions moved to another thread
- * (`moved`): a notice, not the person's words, so nothing to answer (DRAFT words, waiting for the owner).
+ * (`moved`): a notice, not the person's words, so nothing to answer (approved 2026-11-22).
  */
 export const INBOX_MOVED_WAKE_INSTRUCTION = 'This is a notice from Plannotator Inbox, not a reply from the person. Nothing here needs an answer.'
 

@@ -1112,8 +1112,8 @@ export function composeInboxSetAsideBody(questions: readonly (Pick<InboxQuestion
 
 /**
  * The Inbox's note to an agent whose open questions another session moved into its own thread and then archived
- * this one (resolve_message's `moved_to`; the owner 2026-11-21: "The Inbox tells it, quietly"). DRAFT words, the
- * owner approves them. `{from}` / `{to}`: the threads' names in quotes, `{from_id}` / `{to_id}` their ids (so the
+ * this one (resolve_message's `moved_to`; the owner 2026-11-21: "The Inbox tells it, quietly"). Words approved
+ * 2026-11-22. `{from}` / `{to}`: the threads' names in quotes, `{from_id}` / `{to_id}` their ids (so the
  * agent can read_thread the other), `{agent}` the session that moved them.
  */
 export const INBOX_MOVED_NOTE_TEMPLATE =
