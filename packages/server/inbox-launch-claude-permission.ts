@@ -24,10 +24,11 @@
  * a one-line follow-up from the same identity supersedes the question,
  * "No longer waiting.". With no call held, a host read made since the
  * question that says the session went on (not waiting, not stopped)
- * withdraws it as "Answered in Terminal." once the hook stops calling for
- * a short grace window. Stop and Delete withdraw
- * at once. An Inbox restart forgets the leases: each open question gets a
- * fresh one, and the hook, retrying every 2 s, renews it. A question the host
+ * withdraws it as "Answered in Terminal." once the hook has not called for
+ * 5 s (it calls again at once after `waiting`, so between two held calls no
+ * call is held for a moment). Stop and Delete withdraw at once. An Inbox
+ * restart forgets the leases: each open question gets a fresh one, counted
+ * as just called, and the hook, retrying every 2 s, renews it. A question the host
  * takes no allow for (Approve in Terminal) is never withdrawn as answered in
  * Terminal: its dialog shows only after the hook ends, and may block the call
  * by itself, so "No longer waiting." is all that is known.
@@ -141,6 +142,7 @@ interface Lease {
   expires: number;
   /** Calls held open now: the lease does not run out while one is. */
   holding: number;
+  /** When the last held call ended (or an Inbox restart adopted the question): a live hook calls again within 5 s. */
   lastHeldAt?: number;
   askedAt: number;
 }
@@ -269,7 +271,7 @@ export function createLaunchPermissions(options: LaunchPermissionContext & { hol
       const t = now();
       for (const root of options.roots()) {
         for (const { message, at } of openPermissionQuestions(store, root.thread_id)) {
-          if (!leases.has(message.id)) leases.set(message.id, { launchId: root.launch!.id, expires: t + leaseMs, holding: 0, askedAt: at });
+          if (!leases.has(message.id)) leases.set(message.id, { launchId: root.launch!.id, expires: t + leaseMs, holding: 0, lastHeldAt: t, askedAt: at });
         }
       }
       for (const [messageId, lease] of leases) {

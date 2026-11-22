@@ -401,6 +401,35 @@ describe("the lease", () => {
     expect(((await response.json()) as { choice: string }).choice).toBe("deny");
   });
 
+  test("an Inbox restart with the session busy: the adopted question waits for the hook to come back, and is withdrawn only if it does not", async () => {
+    const first = setup();
+    const { body } = await first.call({ key: KEY, request_id: "req-00000013", event: EVENT });
+    first.clock.now += 30_000;
+    // The restarted Inbox's first host read says busy (a background worker is blocked on the prompt) before the hook's retry lands.
+    const host = { state: { status: "busy", state: "running", waitingFor: null } as InboxRunHostState, readAt: first.clock.now + 1_000 };
+    const restarted = createLaunchPermissions({
+      store: first.store,
+      launchDir: () => first.launchDir,
+      rootOf: () => first.store.message(first.root.id),
+      roots: () => [first.store.message(first.root.id)!],
+      displayFolder: (path) => path.replace("/work", "~"),
+      host: { stateOf: () => host.state, readAt: () => host.readAt },
+      onChange: () => {},
+      now: () => first.clock.now,
+      holdMs: 0,
+      leaseMs: LEASE,
+    });
+    restarted.sweep();
+    first.clock.now += 1_000;
+    restarted.sweep();
+    expect(first.store.questionsOf(body.message_id!)[0]!.state).toBe("open");
+    // The hook never came back: Claude Code ended it, so the person answered in Terminal.
+    first.clock.now += 5_000;
+    host.readAt = first.clock.now;
+    restarted.sweep();
+    expect(first.store.message(first.store.threadMessageIds(first.root.id).at(-1)!)!.body).toBe("Answered in Terminal.");
+  });
+
   test("Stop withdraws at once", async () => {
     const { store, root, permissions, call } = setup();
     const { body } = await call({ key: KEY, request_id: "req-00000009", event: EVENT });
