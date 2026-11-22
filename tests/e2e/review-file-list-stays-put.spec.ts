@@ -9,6 +9,8 @@
  *    first header's place.
  *  - Hide viewed on: the file you leave (auto-marked viewed) keeps its row
  *    while the pointer is in the panel, and goes once the pointer leaves.
+ *  - File filter: narrowing or clearing the list marks no file Viewed; only
+ *    the reader's own scrolling does.
  *
  * Nothing is mocked: `plannotator review` runs in a scratch git repository
  * under a temp PLANNOTATOR_DATA_DIR and HOME, with a PATH of its own (no agent
@@ -140,10 +142,15 @@ async function stopReview(child: ChildProcess | undefined, root: string) {
   rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 
-async function withReview(browser: Browser, run: (page: Page) => Promise<void>, prepare?: (page: Page) => Promise<void>) {
+async function withReview(
+  browser: Browser,
+  run: (page: Page) => Promise<void>,
+  prepare?: (page: Page) => Promise<void>,
+  setup: { build?: (root: string) => string; viewport?: { width: number; height: number } } = {},
+) {
   test.skip(!existsSync(binary), `compile the binary first: ${binary}`);
   const root = mkdtempSync(join(tmpdir(), 'plannotator-review-stays-put-'));
-  const repo = buildRepo(root);
+  const repo = (setup.build ?? buildRepo)(root);
   const readyFile = join(root, 'ready.jsonl');
   let child: ChildProcess | undefined;
   try {
@@ -151,7 +158,7 @@ async function withReview(browser: Browser, run: (page: Page) => Promise<void>, 
     await expect.poll(() => (existsSync(readyFile) ? readFileSync(readyFile, 'utf8') : ''), { timeout: 30_000 }).toContain('"url"');
     const url = (JSON.parse(readFileSync(readyFile, 'utf8').trim().split('\n')[0]!) as { url: string }).url;
     // The issue's window size.
-    const context = await browser.newContext({ viewport: { width: 1274, height: 1185 } });
+    const context = await browser.newContext({ viewport: setup.viewport ?? { width: 1274, height: 1185 } });
     await context.addCookies(Object.entries(FIRST_RUN).map(([name, value]) => ({ name, value, url })));
     const page = await context.newPage();
     await prepare?.(page);
@@ -170,7 +177,7 @@ async function withReview(browser: Browser, run: (page: Page) => Promise<void>, 
  * the one header part every mode draws; the action buttons change with the
  * session, e.g. "Choose app to open in" on a live checkout).
  */
-const mainHeaders = (page: Page) =>
+const mainHeaders = (page: Page, of: string[] = [...MODIFIED, ...ADDED]) =>
   page.evaluate((paths) => {
     const out: { path: string; top: number; height: number; nameX: number; nameY: number }[] = [];
     for (const path of paths) {
@@ -182,7 +189,7 @@ const mainHeaders = (page: Page) =>
       out.push({ path, top: box.top, height: box.height, nameX: nameBox.left + nameBox.width / 2, nameY: nameBox.top + nameBox.height / 2 });
     }
     return out.sort((a, b) => a.top - b.top);
-  }, [...MODIFIED, ...ADDED]);
+  }, of);
 
 const headerUnder = (page: Page, x: number, y: number) =>
   page.evaluate(
@@ -344,4 +351,73 @@ test('File header: hover shows Open in on the left of its actions, and nothing i
       expect(hovered[key].y, `${key} moved`).toBe(rest[key].y);
     }
   });
+});
+
+/**
+ * Release QA on 0.29.2: a file filter remounts the list, and putting the
+ * reader back on their file scrolled a shorter list to its end by itself;
+ * Viewed as you scroll then marked the last file, which nobody had read.
+ * Four long files, then two short ones under b/ and a shorter one after them.
+ */
+const LONG = ['a/long1.ts', 'a/long2.ts', 'a/long3.ts', 'a/long4.ts'];
+const SHORT = ['b/one.ts', 'b/two.ts'];
+const LAST = 'c/last.ts';
+function buildFilterRepo(root: string): string {
+  const repo = join(root, 'repo');
+  mkdirSync(repo);
+  git(repo, ['init', '-q']);
+  git(repo, ['branch', '-M', 'main']);
+  git(repo, ['config', 'user.email', 'test@example.com']);
+  git(repo, ['config', 'user.name', 'Test']);
+  write(repo, 'README.md', 'base\n');
+  git(repo, ['add', '-A']);
+  git(repo, ['commit', '-q', '-m', 'initial']);
+  git(repo, ['checkout', '-q', '-b', 'feature/short-files']);
+  for (const path of LONG) write(repo, path, lines(path, 60, 'new'));
+  for (const path of SHORT) write(repo, path, lines(path, 14, 'new'));
+  write(repo, LAST, lines(LAST, 4, 'new'));
+  git(repo, ['add', '-A']);
+  git(repo, ['commit', '-q', '-m', 'files']);
+  return repo;
+}
+
+test('File filter: narrowing or clearing the list marks nothing Viewed; only scrolling by hand does', async ({ browser }) => {
+  await withReview(
+    browser,
+    async (page) => {
+      const all = [...LONG, ...SHORT, LAST];
+      const viewedCount = page.locator('[data-panel-viewed-controls]');
+      await openAllChanges(page);
+      await expect.poll(async () => (await mainHeaders(page, all)).length).toBeGreaterThan(0);
+      await expect(viewedCount).toHaveText('0/7');
+
+      await page.getByRole('button', { name: 'Filter files', exact: true }).click();
+      const include = page.getByLabel('Include');
+      await include.fill('b/**');
+      await expect.poll(async () => (await mainHeaders(page, all)).map((h) => h.path)).toEqual(SHORT);
+      await page.waitForTimeout(1_500);
+      await expect(viewedCount).toHaveText('0/7');
+
+      // The two short files almost fit, so the list moves only a little: the
+      // reader's own wheel to its end does mark the last file there.
+      const first = (await mainHeaders(page, all))[0]!;
+      await page.mouse.move(first.nameX, first.nameY + 120);
+      await page.mouse.wheel(0, 600);
+      await expect(viewedCount).toHaveText('1/7', { timeout: 5_000 });
+
+      // Emptying the field as a person does: the full list comes back with
+      // b/two.ts, the file being read, still in view, and nothing newly Viewed.
+      await include.press('ControlOrMeta+a');
+      await include.press('Backspace');
+      await expect.poll(async () => (await mainHeaders(page, all)).map((h) => h.path)).toContain(LAST);
+      await page.waitForTimeout(1_500);
+      await expect(viewedCount).toHaveText('1/7');
+      const two = (await mainHeaders(page, all)).find((h) => h.path === 'b/two.ts');
+      expect(two, 'b/two.ts is drawn').toBeTruthy();
+      expect(two!.top).toBeGreaterThanOrEqual(0);
+      expect(two!.top).toBeLessThan(page.viewportSize()!.height - 40);
+    },
+    undefined,
+    { build: buildFilterRepo, viewport: { width: 1274, height: 640 } },
+  );
 });
