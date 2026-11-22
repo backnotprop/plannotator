@@ -23,6 +23,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { inboxPullStacks, type InboxPull, type InboxPullsAnswer, type InboxReviewRow, type InboxReviewThread, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import type { RiskJudgments } from './risk';
+import { relativeWords } from '../relativeTime';
 
 const hasDom = typeof document !== 'undefined';
 const { ReviewsList, ReviewsMenu, menuTargets } = (hasDom ? await import('./ReviewsList') : {}) as typeof import('./ReviewsList');
@@ -432,8 +433,9 @@ test.skipIf(!hasDom)("on a phone every row has two lines: status words in their 
   expect(said.split('Claude Code')).toHaveLength(2);
   expect(said.split('Changes requested')).toHaveLength(2);
   expect(said.split('Medium')).toHaveLength(2);
-  const age = said.slice(said.lastIndexOf(', ') + 2);
-  expect(said.endsWith(age)).toBe(true);
+  // The age's words, once, and last.
+  const age = relativeWords(ROWS[1]!.updated_at, Date.now());
+  expect(said.endsWith(`, ${age}`)).toBe(true);
   expect(said.split(age)).toHaveLength(2);
   expect(said.indexOf('Claude Code')).toBeLessThan(said.indexOf('Changes requested'));
   expect(said.indexOf('Medium')).toBeLessThan(said.indexOf('ledger #41'));
