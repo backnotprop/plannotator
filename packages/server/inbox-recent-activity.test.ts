@@ -187,7 +187,7 @@ describe("agents never read it", () => {
     const listed = (await w.call("/api/inbox/threads?archived=include")).json as { sections: InboxListSection[] };
     expect(listed.sections.flatMap((s) => s.threads).find((row) => row.thread_id === id)?.acted_at).toBeTruthy();
     // ...and nothing an agent reads does.
-    const local = (name: string, args: Record<string, unknown>) => w.mcp.callTool({ name, arguments: { agent_session: "ses-pi", agent_host: "pi", ...args } }) as Promise<DoorResult>;
+    const local = (name: string, args: Record<string, unknown>) => w.mcp.callTool({ name, arguments: { agent_session: "ses_reader", ...args } }) as Promise<DoorResult>;
     const { pairing } = await w.pair();
     const door = async (tool: string, args: Record<string, unknown>) => (await w.door(pairing.token, tool, args)).result!;
     const reads: [string, DoorResult][] = [
@@ -199,7 +199,7 @@ describe("agents never read it", () => {
       ["door search", await door("search", { query: "zebra" })],
     ];
     for (const [what, result] of reads) {
-      expect(result.isError, what).toBeFalsy();
+      expect(result.isError ? result.content[0]?.text : null, what).toBeNull();
       const text = JSON.stringify(result);
       expect(text, what).toContain(id);
       expect(text, what).not.toContain("acted_at");
