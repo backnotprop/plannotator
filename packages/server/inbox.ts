@@ -5539,8 +5539,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** Where the person wrote a message, told from this request (inbox-sent-from.ts); null on this computer or when not known. */
   const sentFromOf = (req: Request, via: RequestVia): InboxSentFrom | null => {
     const door = fromDeviceDoor.get(req);
-    const machineName = door?.platform === MACHINE_PLATFORM ? (machines?.machineOfDevice(door.device_id)?.name ?? door.name) : null;
-    return inboxRequestSentFrom({ via, ownNode: fromOwnTailnetNode.has(req), cloudflare: fromCfDoor.has(req), door: door ? { platform: door.platform, machineName, place: door.place ?? null } : null });
+    // The name this Inbox shows for a linked computer, else (missing or empty) its device's name: inbox-sent-from.ts picks.
+    const machineName = door?.platform === MACHINE_PLATFORM ? (machines?.machineOfDevice(door.device_id)?.name ?? null) : null;
+    return inboxRequestSentFrom({
+      via,
+      ownNode: fromOwnTailnetNode.has(req),
+      cloudflare: fromCfDoor.has(req),
+      door: door ? { platform: door.platform, machineName, deviceName: door.name, place: door.place ?? null } : null,
+    });
   };
 
   const readBody = async (req: Request): Promise<Record<string, unknown>> => {
@@ -7345,7 +7351,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const machineDoor = door?.platform === MACHINE_PLATFORM;
       const composed = await compose.route(req, url, !door || machineDoor, door ? { machine: machineDoor, window: door.window, from: machineDoor ? machines.machineOfDevice(door.device_id) : null } : null, via === "local" && !door, sentFromOf(req, via));
       if (composed) return composed;
-      const reviewed = await liveReview.route(req, url, !door);
+      const reviewed = await liveReview.route(req, url, !door, () => sentFromOf(req, via));
       if (reviewed) return reviewed;
       // Reply drafts: the reply box's words per thread (approval "inbox-reply-drafts").
       const drafted = await replyDrafts.route(req, url);
@@ -8055,6 +8061,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             const result = store.sendReask(messageId, {
               idempotency_key: body.idempotency_key as string,
               ...(to === undefined ? {} : { to }),
+              sent_from: sentFromOf(req, via),
             });
             return json({
               message_id: messageId,
@@ -8114,7 +8121,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
       // Step 8: the live sessions of a thread's project, and New message.
       // Session labels (issue #2450) ride these two.
-      const newMessage = await live.route(req, path);
+      const newMessage = await live.route(req, path, () => sentFromOf(req, via));
       if (newMessage) return newMessage;
       // Tags (approval "inbox-tag-agents"): who the person can tag with `@` (packages/server/inbox-tags.ts).
       const taggable = tagsRoute.route(req, path);

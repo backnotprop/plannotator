@@ -10,12 +10,13 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { inboxSentFromLine, inboxSentFromOf, inboxSentFromPlaceOf, type InboxMessage, type InboxSentFrom, type InboxSentFromPlace } from "@plannotator/core/inbox-types";
+import { inboxSentFromLine, inboxSentFromName, inboxSentFromOf, inboxSentFromPlaceOf, type InboxMessage, type InboxSentFrom, type InboxSentFromPlace } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxBodyForAgent } from "@plannotator/shared/inbox/uploads";
 import { AGENT_PLATFORM, MACHINE_PLATFORM } from "./inbox-devices";
 import { agentMessage, agentMessageLine, inboxFullReadLines, messageLineText, messageText } from "./inbox-mcp-read";
 import { InboxOutbox } from "./inbox-outbox";
+import { createInboxLiveSessions } from "./inbox-sessions";
 import { inboxForwardedPlace, inboxRequestSentFrom, type InboxSentFromFacts } from "./inbox-sent-from";
 
 const roots: string[] = [];
@@ -47,6 +48,32 @@ describe("what the server can vouch for, from the request alone", () => {
   for (const { name, facts, from } of CASES) {
     test(name, () => expect(inboxRequestSentFrom(facts)).toEqual(from));
   }
+
+  test("a linked computer's name is recorded clean, as the line reads it; an empty one falls back to its device's name", () => {
+    const named = (machineName: string | null, deviceName: string | null = null) => inboxRequestSentFrom({ ...LOCAL, door: { platform: MACHINE_PLATFORM, machineName, deviceName, place: null } });
+    expect(named("Mini`\n\u202eevil")).toEqual({ kind: "machine", name: "Mini' evil" });
+    expect(named("", "Bob's Mini")).toEqual({ kind: "machine", name: "Bob's Mini" });
+    expect(named("\u0000\u200b ", "Bob's Mini")).toEqual({ kind: "machine", name: "Bob's Mini" });
+    expect(named(null, "Bob's Mini")).toEqual({ kind: "machine", name: "Bob's Mini" });
+    expect(named("Ada's MacBook", "Bob's Mini")).toEqual({ kind: "machine", name: "Ada's MacBook" });
+    expect(named("", " ")).toBeNull();
+    // Long: cut to 64, and the record reads back as it was written.
+    const long = named("x".repeat(500)) as { name: string };
+    expect(long.name.length).toBe(64);
+    expect(inboxSentFromOf(long)).toEqual(long);
+  });
+
+  test("a long name is cut between whole characters: an emoji is never split", () => {
+    const family = "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}";
+    for (let pad = 50; pad < 64; pad++) {
+      const name = inboxSentFromName(`${"a".repeat(pad)}${family.repeat(4)}`);
+      expect(name.length).toBeLessThanOrEqual(64);
+      expect(name.endsWith("…")).toBe(true);
+      const kept = name.slice(pad, -1);
+      expect(kept.length % family.length).toBe(0);
+      expect(kept).toBe(family.repeat(kept.length / family.length));
+    }
+  });
 
   test("a linked computer says on only where the person was away from it, never another computer's word", () => {
     expect(inboxForwardedPlace(null)).toBeNull();
@@ -127,6 +154,55 @@ describe("every read an agent has, from the store", () => {
     const { store, project } = world();
     const { message } = store.startPersonThread({ project_id: project.id, body: WORDS, to: { host: "claude-code", session: "ses-a" }, idempotency_key: "n1", sent_from: { kind: "phone" } });
     expect(inboxBodyForAgent(message)).toBe(`${WORDS}\n\n${inboxSentFromLine({ sent_from: { kind: "phone" } })}`);
+  });
+
+  test("a New message in a thread from another device carries it; one from this computer carries nothing", () => {
+    const { dir, store, asked } = world();
+    const to = { host: "claude-code", session: "ses-a" };
+    const away = store.sendNewMessage(asked.thread_id, { body: WORDS, to, idempotency_key: "m1", sent_from: { kind: "cloudflare" } }).message;
+    expect(away.body).toBe(WORDS);
+    const stored = InboxStore.open(dir).message(away.id)!;
+    expect(stored.sent_from).toEqual({ kind: "cloudflare" });
+    expect(inboxBodyForAgent(stored)).toBe(`${WORDS}\n\n${inboxSentFromLine({ sent_from: { kind: "cloudflare" } })}`);
+    const here = store.sendNewMessage(asked.thread_id, { body: WORDS, to, idempotency_key: "m2", sent_from: null }).message;
+    expect(here).not.toHaveProperty("sent_from");
+    expect(inboxBodyForAgent(here)).toBe(WORDS);
+  });
+
+  test("a Re-ask pressed on the phone carries it", () => {
+    const { store, project } = world();
+    const asked = store.sendMessage({
+      project_id: project.id,
+      author: { kind: "agent", host: "claude-code", session: "ses-a", name: "Claude Code" },
+      body: ":::question\nWhich region?\n\n- [ ] EU\n- [ ] US\n:::",
+      idempotency_key: "a2",
+    }).message;
+    const { reply } = store.sendReask(asked.id, { idempotency_key: "q1", sent_from: { kind: "phone" } });
+    expect(reply.sent_from).toEqual({ kind: "phone" });
+    expect(inboxBodyForAgent(reply)).toContain(inboxSentFromLine({ sent_from: { kind: "phone" } }));
+  });
+
+  test("the thread's New message route records what the server told from the request, and nothing without it", async () => {
+    const { store, asked } = world();
+    const live = createInboxLiveSessions({ store, serverSession: "srv", resolveRoot: async (path) => path });
+    (await live.pollStarted("ses-a", "claude-code", {}))();
+    const send = async (key: string, sentFrom?: () => InboxSentFrom | null) => {
+      const req = new Request(`http://127.0.0.1:4000/api/inbox/threads/${asked.thread_id}/message`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session: "ses-a", body: WORDS, idempotency_key: key }),
+      });
+      const response = await live.route(req, new URL(req.url).pathname, sentFrom);
+      expect(response?.status).toBe(200);
+      return store.message(((await response!.json()) as { message: InboxMessage }).message.id)!;
+    };
+    const tailnet = await send("m1", () => inboxRequestSentFrom({ ...LOCAL, via: "tailnet" }));
+    expect(tailnet.sent_from).toEqual({ kind: "tailnet" });
+    expect(inboxBodyForAgent(tailnet)).toBe(`${WORDS}\n\n${inboxSentFromLine({ sent_from: { kind: "tailnet" } })}`);
+    const forwarded = await send("m2", () => inboxRequestSentFrom(door(MACHINE_PLATFORM, "Ada's MacBook", "phone")));
+    expect(forwarded.sent_from).toEqual({ kind: "machine", name: "Ada's MacBook", via: "phone" });
+    expect(await send("m3", () => inboxRequestSentFrom(LOCAL))).not.toHaveProperty("sent_from");
+    expect(await send("m4")).not.toHaveProperty("sent_from");
   });
 
   test("a reply from this computer, and one an older Inbox wrote, read exactly as before", () => {

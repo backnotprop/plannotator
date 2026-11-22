@@ -5,7 +5,7 @@
  * caller (a paired phone, or a linked computer with the place its own Inbox told the same way). See "Where the person
  * wrote it" in docs/agent-guides/inbox-messages.md.
  */
-import type { InboxSentFrom, InboxSentFromPlace } from "@plannotator/core/inbox-types";
+import { inboxSentFromName, type InboxSentFrom, type InboxSentFromPlace } from "@plannotator/core/inbox-types";
 import { AGENT_PLATFORM, MACHINE_PLATFORM } from "./inbox-devices";
 
 export interface InboxSentFromFacts {
@@ -15,8 +15,12 @@ export interface InboxSentFromFacts {
   ownNode: boolean;
   /** It came through the Cloudflare Access door (inbox-cf-access.ts). */
   cloudflare: boolean;
-  /** The device door's caller after its token was checked; null when the request did not come through the door. */
-  door: { platform: string; machineName: string | null; place: InboxSentFromPlace | null } | null;
+  /**
+   * The device door's caller after its token was checked; null when the request did not come through the door.
+   * `machineName`: the name this Inbox shows for a linked computer; `deviceName`: its paired device's name, used when
+   * the first is missing or nothing is left of it once cleaned.
+   */
+  door: { platform: string; machineName: string | null; deviceName?: string | null; place: InboxSentFromPlace | null } | null;
 }
 
 /** Null: this computer, or nothing the server can vouch for. Then the message records nothing. */
@@ -24,7 +28,8 @@ export function inboxRequestSentFrom(facts: InboxSentFromFacts): InboxSentFrom |
   const { door } = facts;
   if (door) {
     if (door.platform === MACHINE_PLATFORM) {
-      const name = door.machineName?.trim();
+      // Cleaned as the line reads it (one line, no controls, 64 characters), so the record holds what the agent reads.
+      const name = inboxSentFromName(door.machineName ?? "") || inboxSentFromName(door.deviceName ?? "");
       return name ? { kind: "machine", name, ...(door.place ? { via: door.place } : {}) } : null;
     }
     // A cloud agent is never the person, and its token is refused at the door anyway.

@@ -38,6 +38,8 @@ const OWNER = "ramos@example.com";
 /** Another Tailscale account: config.json `inboxTailscaleAllow` names it, which only a tagged machine heeds. */
 const OTHER = "other@example.com";
 const KEY = "sk-phone-0123456789abcd";
+/** This computer's own tailnet address (`Self.TailscaleIPs`): serve's X-Forwarded-For for a browser here on the tailnet address. */
+const SELF_IP = "100.64.0.7";
 
 type Caller = "local" | "owner" | "other";
 
@@ -71,7 +73,7 @@ function fakeTailscale(options: { tagged?: boolean } = {}) {
     const ok = (stdout = "") => ({ status: 0, stdout, stderr: "" });
     if (args[0] === "status") {
       const tagged = options.tagged === true;
-      return ok(JSON.stringify({ Self: { DNSName: `${MAGIC}.`, UserID: 42, ...(tagged ? { Tags: ["tag:server"] } : {}) }, User: { "42": { ID: 42, LoginName: tagged ? "tagged-devices" : OWNER } } }));
+      return ok(JSON.stringify({ Self: { DNSName: `${MAGIC}.`, UserID: 42, TailscaleIPs: [SELF_IP], ...(tagged ? { Tags: ["tag:server"] } : {}) }, User: { "42": { ID: 42, LoginName: tagged ? "tagged-devices" : OWNER } } }));
     }
     if (args[1] === "status") {
       if (serve.size === 0) return ok("{}");
@@ -611,6 +613,29 @@ describe("where the person wrote it reaches the agent (inbox-sent-from.ts)", () 
       const command = (await poll(w)).find((c) => c.id === reply.id);
       expect(command?.body).toBe(caller === "local" ? WORDS : `${WORDS}\n\n${TAILNET}`);
     }
+  });
+
+  test("the owner's own browser at this computer's own tailnet address is this computer: nothing is recorded", async () => {
+    const w = await world();
+    await poll(w);
+    const id = ask(w, "where-own-node");
+    const response = await call(w, "owner", { path: `/api/inbox/messages/${id}/reply`, body: { idempotency_key: "00000000-0000-4000-8000-000000000405", words: WORDS, questions: [] } }, { "X-Forwarded-For": SELF_IP });
+    expect(response.status).toBe(200);
+    const { reply } = (await response.json()) as Json;
+    expect(w.inbox.store.message(reply.id)!).not.toHaveProperty("sent_from");
+    expect((await poll(w)).find((c) => c.id === reply.id)?.body).toBe(WORDS);
+  });
+
+  test("a New message in a thread over the tailnet carries the line to the agent", async () => {
+    const w = await world();
+    await poll(w);
+    const threadId = w.inbox.store.message(ask(w, "where-new-message"))!.thread_id;
+    const response = await call(w, "owner", { path: `/api/inbox/threads/${threadId}/message`, body: { idempotency_key: "00000000-0000-4000-8000-000000000406", session: SESSION, body: WORDS } });
+    expect(response.status).toBe(200);
+    const { message } = (await response.json()) as Json;
+    expect(w.inbox.store.message(message.id)!.sent_from).toEqual({ kind: "tailnet" });
+    const command = (await poll(w)).find((c) => c.id === message.id);
+    expect(command?.body).toBe(`${WORDS}\n\n${inboxSentFromLine({ sent_from: { kind: "tailnet" } })}`);
   });
 
   test("a reply forwarded by a linked computer says that computer, and where the person was when not at its window", async () => {

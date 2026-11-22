@@ -459,6 +459,8 @@ export interface InboxReaskInput {
    * for but the server found it not live; nothing is written.
    */
   to?: InboxAddressee | null;
+  /** Where the person pressed it, as the server told it from the request (`InboxMessage.sent_from`); absent from this computer. */
+  sent_from?: InboxSentFrom | null;
 }
 
 export interface InboxReplyResult {
@@ -5474,6 +5476,7 @@ export class InboxStore {
       idempotency_key: key,
       reask: open.map((r) => r.id),
       ...(to ? { to: { host: to.host, session: to.session } } : {}),
+      ...(input.sent_from ? { sent_from: input.sent_from } : {}),
     };
     try {
       for (const record of answered) this.appendQuestion(record, at);
@@ -7213,7 +7216,16 @@ export class InboxStore {
    * message it wrote, and writes nothing. Whether the session is live is the
    * server's check: `to` null means it is not, and only a replay answers.
    */
-  sendNewMessage(threadId: string, input: { body: unknown; to: InboxAddressee | null; idempotency_key: unknown }): { message: InboxMessage; replayed: boolean } {
+  sendNewMessage(
+    threadId: string,
+    input: {
+      body: unknown;
+      to: InboxAddressee | null;
+      idempotency_key: unknown;
+      /** Where the person wrote it (`InboxMessage.sent_from`); absent from this computer. */
+      sent_from?: InboxSentFrom | null;
+    },
+  ): { message: InboxMessage; replayed: boolean } {
     const key = typeof input.idempotency_key === "string" ? input.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
     const root = this.messages.get(threadId);
@@ -7240,6 +7252,7 @@ export class InboxStore {
       resolved_at: null,
       idempotency_key: key,
       to: { host: input.to.host, session: input.to.session },
+      ...(input.sent_from ? { sent_from: input.sent_from } : {}),
     };
     this.appendMessage(message, at);
     this.endSnooze(threadId);

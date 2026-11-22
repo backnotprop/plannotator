@@ -30,14 +30,25 @@ export function inboxSentFromPlaceOf(header: string | null | undefined): InboxSe
   return isInboxSentFromPlace(value) ? value : null;
 }
 
-/** A machine's name for the line: one line, no controls, no backtick, a sane length. Empty when nothing is left. */
-function nameText(name: string): string {
+/**
+ * A machine's name for the line: one line, no controls, no backtick, at most 64 characters, cut between whole
+ * characters as a person sees them (an emoji is never split). Empty when nothing is left. The server cleans a name
+ * this way when it records it, and reads clean it again (a record an older Inbox wrote).
+ */
+export function inboxSentFromName(name: string): string {
   const line = name
-    .replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, " ")
+    // Every control and format character but the zero-width joiner, which holds an emoji like 👨‍👩‍👧 together.
+    .replace(/(?!\u200D)[\p{Cc}\p{Cf}\u2028\u2029]/gu, " ")
     .replace(/`/g, "'")
     .replace(/\s+/g, " ")
     .trim();
-  return line.length > NAME_MAX ? `${line.slice(0, NAME_MAX - 1)}…` : line;
+  if (line.length <= NAME_MAX) return line;
+  let kept = "";
+  for (const { segment } of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(line)) {
+    if (kept.length + segment.length > NAME_MAX - 1) break;
+    kept += segment;
+  }
+  return `${kept.trimEnd()}…`;
 }
 
 /** A stored value read back: null for anything not of the shape (an older or newer Inbox wrote it, or nothing did). */
@@ -46,7 +57,7 @@ export function inboxSentFromOf(value: unknown): InboxSentFrom | null {
   const record = value as { kind?: unknown; name?: unknown; via?: unknown };
   if (isInboxSentFromPlace(record.kind)) return { kind: record.kind };
   if (record.kind !== "machine" || typeof record.name !== "string") return null;
-  const name = nameText(record.name);
+  const name = inboxSentFromName(record.name);
   if (!name) return null;
   return { kind: "machine", name, ...(isInboxSentFromPlace(record.via) ? { via: record.via } : {}) };
 }
