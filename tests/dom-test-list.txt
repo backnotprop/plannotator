@@ -854,6 +854,7 @@ packages/inbox/threadTagsStep2.test.tsx
 packages/inbox/listPicks.test.tsx
 packages/inbox/pickWork.test.tsx
 packages/inbox/combines.test.tsx
+packages/inbox/tidyNote.test.tsx
 packages/inbox/tagColours.test.tsx
 packages/inbox/pressKeys.test.tsx
 packages/review-editor/components/AllFilesCodeView.lineTarget.test.tsx

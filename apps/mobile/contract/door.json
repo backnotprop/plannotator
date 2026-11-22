@@ -1755,6 +1755,22 @@
       "relay": true
     },
     {
+      "name": "POST combine/hold",
+      "method": "POST",
+      "path": "combine/hold",
+      "params": [],
+      "call": "postCombineHold",
+      "window": "/api/inbox/combine/hold",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "hold",
+      "write": "set",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "POST launch/:id/stop",
       "method": "POST",
       "path": "launch/{launch}/stop",
