@@ -31,6 +31,15 @@
  * click CALLBACKS but a `click A "https://..."` binding still wraps the node
  * in an svg `<a href>`, which would turn the pinpoint click on that node
  * into a navigation. The canvas owns every click.
+ *
+ * A label's own HTML never navigates or submits either: Mermaid's label pass
+ * drops image maps, forms and their controls (`MERMAID_LABEL_FORBIDDEN_TAGS` /
+ * `_ATTRS` in `./mermaid`, a secure key a directive cannot replace), and the
+ * post-pass drops them again for a runtime a host set up itself. And no
+ * style the diagram carries may pin an element to the window
+ * (`position` other than static, relative or absolute), in a `style`
+ * attribute or in a rule of its sheet; every mount outside the canvas also
+ * confines its diagram (`contain: paint`), so nothing drawn leaves its box.
  */
 import DOMPurify from 'dompurify';
 import type { TextMeasurer } from 'pele';
@@ -41,7 +50,7 @@ import { PELE_COMPAT_FINDER, PELE_FINDER } from './diagram-anchor-pele';
 import { diagramEngineFor, diagramEngineMode } from './diagram-engine';
 import { getGraphvizRetryDelayMs, loadGraphvizRuntime, type GraphvizRuntime } from './graphviz';
 import { loadMathRenderer } from './math';
-import { getMermaidRetryDelayMs, loadMermaidRuntime } from './mermaid';
+import { getMermaidRetryDelayMs, loadMermaidRuntime, MERMAID_LABEL_FORBIDDEN_ATTRS } from './mermaid';
 import { hasMermaidMath } from './mermaid-math-slot';
 import { applyMermaidTheme, mermaidThemeKey, type MermaidThemeMode } from './mermaidTheme';
 import { loadPeleRuntime, PELE_IN_BUILD, PELE_OUTPUT_LIMIT, PELE_SOURCE_LIMIT, peleFonts, peleSvgId, renderPeleSource } from './pele';
@@ -211,16 +220,36 @@ function sanitizeFor(svg: string, options: DiagramRenderOptions | undefined): SV
 }
 
 /**
+ * What an html label may not hold once drawn, the belt under Mermaid's own
+ * label pass (`MERMAID_LABEL_FORBIDDEN_TAGS` in `./mermaid`), for a runtime a
+ * host initialized without that config: what navigates or submits when
+ * clicked. Removed: the empty ones. Unwrapped (the element goes, its text
+ * stays): the rest.
+ */
+const NAVIGATING_ELEMENTS = 'input, area, base';
+const UNWRAPPED_ELEMENTS = 'form, button, select, option, optgroup, datalist, textarea, map';
+
+/** Attributes that navigate or submit (`MERMAID_LABEL_FORBIDDEN_ATTRS`), removed from every element. */
+const NAVIGATING_ATTRIBUTES = new Set(MERMAID_LABEL_FORBIDDEN_ATTRS);
+
+/**
  * Step two, in place on the tree that is about to be mounted: the belt that
  * does not depend on which DOMPurify profile a later config edit turns on.
  * Forbidden elements go, every `<style>` keeps only rules scoped under the
  * svg's own root id (`scopeDiagramCss`), every `<a>` loses its target (svg `<a>` from a
  * click binding, `<a>` in an html label alike — the element stays so the
- * label text survives), every `on*` attribute goes, and a reference
- * attribute keeps only a fragment or an http(s) URL.
+ * label text survives), every `on*` attribute goes, a reference
+ * attribute keeps only a fragment or an http(s) URL, what navigates or
+ * submits goes (an image map, a form and its controls, `action`,
+ * `formaction`, `ping`, `target`, `usemap`), and a `position` other than
+ * static, relative or absolute goes from every `style` attribute and every
+ * kept rule (`keepContainedDeclarations`). A diagram with none of these
+ * comes out exactly as before.
  */
 export function scrubDiagramSvg(root: SVGSVGElement): void {
   for (const el of Array.from(root.querySelectorAll(FORBIDDEN_ELEMENTS))) el.remove();
+  for (const el of Array.from(root.querySelectorAll(NAVIGATING_ELEMENTS))) el.remove();
+  for (const el of Array.from(root.querySelectorAll(UNWRAPPED_ELEMENTS)).reverse()) el.replaceWith(...Array.from(el.childNodes));
   // A `<style>` inside the svg is a page stylesheet once mounted: it can
   // restyle elements OUTSIDE the diagram and fetch (`@import`, `url(`).
   // Mermaid needs its own scoped sheet, so style elements are not dropped
@@ -255,6 +284,10 @@ function scrubAttributes(el: Element): void {
       el.removeAttribute(attribute.name);
       continue;
     }
+    if (NAVIGATING_ATTRIBUTES.has(name)) {
+      el.removeAttribute(attribute.name);
+      continue;
+    }
     if (
       (name === 'href' || name === 'xlink:href' || name === 'src') &&
       !value.startsWith('#') &&
@@ -263,8 +296,96 @@ function scrubAttributes(el: Element): void {
       value !== ''
     ) {
       el.removeAttribute(attribute.name);
+      continue;
+    }
+    if (name === 'style') {
+      const kept = keepContainedDeclarations(attribute.value);
+      if (kept === null) el.removeAttribute(attribute.name);
+      else if (kept !== attribute.value) el.setAttribute(attribute.name, kept);
     }
   }
+}
+
+/** The only `position` values a diagram's styles may set: none of them takes an element out of its diagram's box. */
+const CONTAINED_POSITIONS = new Set(['static', 'relative', 'absolute']);
+
+/**
+ * Split a declaration list where a browser would, on every top-level `;`,
+ * with comments read as a space. A split here is never missed: a quote or a
+ * bracket is tracked as the CSS tokenizer does (a string ends at a newline,
+ * an escape outside a string takes the next character), and any closer
+ * closes, so this splits at least where the browser does.
+ */
+function splitDeclarations(text: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let quote = '';
+  let current = '';
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i] as string;
+    if (quote !== '') {
+      if (ch === '\\') {
+        current += ch + (text[i + 1] ?? '');
+        i += 1;
+        continue;
+      }
+      if (ch === quote || ch === '\n' || ch === '\r' || ch === '\f') quote = '';
+      current += ch;
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '*') {
+      const close = text.indexOf('*/', i + 2);
+      i = close === -1 ? text.length : close + 1;
+      current += ' ';
+      continue;
+    }
+    if (ch === '\\' && text[i + 1] !== undefined && !/[\n\r\f]/u.test(text[i + 1] as string)) {
+      current += ch + (text[i + 1] as string);
+      i += 1;
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === '(' || ch === '[' || ch === '{') depth += 1;
+    else if (ch === ')' || ch === ']' || ch === '}') depth = Math.max(0, depth - 1);
+    else if (ch === ';' && depth === 0) {
+      out.push(current);
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  out.push(current);
+  return out;
+}
+
+/**
+ * A declaration that could take its element out of the diagram: a
+ * `position` (escapes decoded, any case) whose value is not one of
+ * CONTAINED_POSITIONS (`fixed`, `sticky`, `var(--p)`, `inherit`, … all
+ * refused), or a nested block (a nested rule in a sheet).
+ */
+function declarationEscapes(declaration: string): boolean {
+  if (/[{}]/u.test(declaration.replace(/"(?:[^"\\\n]|\\[\s\S])*"|'(?:[^'\\\n]|\\[\s\S])*'/gu, '""'))) return true;
+  const colon = declaration.indexOf(':');
+  if (colon === -1) return false;
+  if (decodeCssEscapes(declaration.slice(0, colon)).trim().toLowerCase() !== 'position') return false;
+  const value = decodeCssEscapes(declaration.slice(colon + 1)).replace(/!\s*important\s*$/iu, '').trim().toLowerCase();
+  return !CONTAINED_POSITIONS.has(value);
+}
+
+/**
+ * A declaration list (a `style` attribute, a rule's body) without the
+ * declarations that could take an element out of the diagram. The text comes
+ * back unchanged, byte for byte, when there are none; null when nothing is left.
+ */
+export function keepContainedDeclarations(text: string): string | null {
+  const declarations = splitDeclarations(text);
+  if (!declarations.some(declarationEscapes)) return text;
+  const kept = declarations
+    .filter((declaration) => !declarationEscapes(declaration))
+    .map((declaration) => declaration.trim())
+    .filter(Boolean);
+  return kept.length === 0 ? null : kept.join('; ');
 }
 
 /** The attribute an edge's widened hit path carries (its value is the
@@ -494,7 +615,8 @@ export function scopeDiagramCss(css: string, rootId: string): string {
     if (cssFetches(body)) continue;
     const selectors = splitSelectors(prelude);
     if (selectors.length === 0 || !selectors.every(scoped)) continue;
-    out += `${prelude}{${body}}`;
+    const kept = keepContainedDeclarations(body);
+    if (kept !== null) out += `${prelude}{${kept}}`;
   }
   return out;
 }

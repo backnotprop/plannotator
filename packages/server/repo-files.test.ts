@@ -285,6 +285,25 @@ for (const [runtime, startServer] of [
       }
     }, 30_000);
 
+    test("lazy filters find matching descendants in unopened folders", async () => {
+      const repo = buildRepo();
+      const { server, files, payload } = await start(repo, "uncommitted", { repoFilesLazyThreshold: 3 });
+      try {
+        const filter = "&include=**%2F*.%7Bmd%2Cts%7D&exclude=**%2Futil.ts%2CREADME.md";
+        const root = await files(filter);
+        expect(root.body.entries).toEqual([
+          { name: "notes", path: "notes", type: "dir", files: 1 },
+          { name: "src", path: "src", type: "dir", files: 1 },
+        ]);
+        expect((await files(filter + "&dir=src")).body.entries?.map((entry) => entry.path)).toEqual(["src/app.ts"]);
+        const response = await fetch(`${server.url}/api/repo-files/search?snapshot=${encodeURIComponent(payload.snapshotId)}&q=README`);
+        expect((await response.json()).matches?.map((entry: { path: string }) => entry.path)).toContain("README.md");
+        expect((await files()).body.entries?.some((entry) => entry.path === "README.md")).toBe(true);
+      } finally {
+        server.stop();
+      }
+    }, 30_000);
+
     test("Go to File searches the listing on the server: listed paths only, best first", async () => {
       const repo = buildRepo();
       const { server, payload } = await start(repo, "uncommitted", { repoFilesLazyThreshold: 3 });

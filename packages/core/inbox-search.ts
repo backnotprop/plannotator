@@ -457,6 +457,7 @@ export interface InboxSearchProjectRef {
   id: string;
   /** The project's name, with its parent folder when two projects share one ('api · work'). */
   name: string;
+  machine?: string;
 }
 
 interface RowBase {
@@ -466,6 +467,7 @@ interface RowBase {
   archived: boolean;
   /** ISO time: a message's, or a thread's latest message's. */
   at: string;
+  score?: number;
 }
 
 export interface InboxSearchThreadRow extends RowBase {
@@ -523,6 +525,7 @@ export interface InboxSearchProjectRow {
   name_marks: [number, number][];
   root: string;
   at: string;
+  score?: number;
 }
 
 export type InboxSearchRow = InboxSearchThreadRow | InboxSearchMessageRow | InboxSearchFileRow | InboxSearchProjectRow;
@@ -540,4 +543,5 @@ export interface InboxSearchAnswer {
   groups: Partial<Record<InboxSearchGroupId, InboxSearchRow[]>> | null;
   /** An empty query with no filters: the threads the person looked at last. */
   recent: InboxSearchThreadRow[] | null;
+  unanswered?: { id: string; name: string }[];
 }

@@ -296,7 +296,7 @@ export const JOB_MAP: Record<string, Record<string, string>> = {
   'e2e-slice.yml': { plan: 'slice', slice: 'slice' },
   'inbox-e2e.yml': { head: 'label', build: 'label', plan: 'label', 'inbox-window-e2e': 'label', blame: 'label', 'full-ci': 'label' },
   'dast.yml': { 'passive-baseline': 'no-pr' },
-  'deploy.yml': { 'detect-changes': 'no-pr', 'deploy-marketing': 'no-pr', 'deploy-portal': 'no-pr', 'deploy-paste': 'no-pr', 'deploy-waitlist': 'no-pr' },
+  'deploy.yml': { 'detect-changes': 'no-pr', 'site-lane': 'no-pr', 'deploy-marketing': 'no-pr', 'deploy-portal': 'no-pr', 'deploy-paste': 'no-pr', 'deploy-waitlist': 'no-pr' },
   'guides-show-deploy.yml': { publish: 'no-pr' },
   'snapshots-sign-check.yml': { 'sign-and-notarize': 'no-pr' },
 };

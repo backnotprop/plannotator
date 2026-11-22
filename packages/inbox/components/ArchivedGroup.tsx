@@ -47,6 +47,8 @@ export function UnarchiveAction({ row, label, onUnarchive }: { row: InboxListRow
 interface GroupProps {
   host: ArchivedGroupHost;
   renderRow: (row: InboxListRow, drawn: InboxListGroupId) => ReactNode;
+  /** The rows the group draws, as they change; none once it closes. */
+  onRows?: (rows: readonly InboxListRow[]) => void;
   phone: boolean;
   onSearch?: (opener: HTMLElement) => void;
 }
@@ -90,7 +92,7 @@ export function ArchivedGroup(props: GroupProps) {
 }
 
 /** The open group's rows and lines; it is not drawn while the group is closed, so nothing is read or held then. */
-function ArchivedRows({ host, renderRow, phone, onSearch, groupRef, focusedRow }: GroupProps & { groupRef: RefObject<HTMLDivElement | null>; focusedRow: RefObject<string | null> }) {
+function ArchivedRows({ host, renderRow, onRows, phone, onSearch, groupRef, focusedRow }: GroupProps & { groupRef: RefObject<HTMLDivElement | null>; focusedRow: RefObject<string | null> }) {
   const [count, setCount] = useState(ARCHIVED_STEP);
   // The list's filters dropped a row: the group reads up to its most at once, so the rows it shows are still 20.
   const [wide, setWide] = useState(false);
@@ -103,6 +105,8 @@ function ArchivedRows({ host, renderRow, phone, onSearch, groupRef, focusedRow }
     if (dropped) setWide(true);
   }, [dropped]);
   const shown = useMemo(() => kept.slice(0, count).map(asArchived), [kept, count]);
+  useEffect(() => onRows?.(shown), [onRows, shown]);
+  useEffect(() => () => onRows?.(NONE), [onRows]);
   const more = count < ARCHIVED_MOST && kept.length > count;
   const past = count >= ARCHIVED_MOST && (kept.length > ARCHIVED_MOST || (page?.total ?? 0) > rows.length);
   // After "Show 20 more", focus goes to the first row it brought (the button leaves at 100).

@@ -4504,7 +4504,7 @@
       "why": "",
       "source": "SCOPE 7. Send; M:L46",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -8244,24 +8244,28 @@
       "surface": [
         "field:InboxUpdate.current"
       ],
-      "flows": [],
+      "flows": [
+        "file-11"
+      ],
       "mobile": "rethink",
       "why": "native text selection with Comment and Redline in the edit menu; Global comment in the toolbar",
       "source": "SCOPE H. Comments and annotations; F L69, L79; P L113",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
       "id": "files-076",
       "title": "Comment on a code line or range (click, drag)",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-12"
+      ],
       "mobile": "v1",
       "why": "tap a line; long-press and drag for a range",
       "source": "SCOPE H. Comments and annotations; F L61, L69, L75",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -8280,12 +8284,14 @@
       "id": "files-078",
       "title": "Pin a comment on an HTML element (pinpoint), shift-click joins elements, Cmd/Ctrl-click pins a link, pen",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-14"
+      ],
       "mobile": "v1",
       "why": "tap to pin inside the web view; comment card as a sheet",
       "source": "SCOPE H. Comments and annotations; F L54, L65, L69",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -8304,12 +8310,15 @@
       "id": "files-080",
       "title": "Comment on an image: one row with words, \"Mark up\", Comment",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-13"
+      ],
       "mobile": "v1",
       "why": "comment row under the image",
       "source": "SCOPE H. Comments and annotations; F L70",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -8319,14 +8328,19 @@
         "door:GET markups/:id",
         "door:POST markups",
         "window:/api/inbox/markups",
-        "window:/api/inbox/markups/:id"
+        "window:/api/inbox/markups/:id",
+        "field:DoorMarkupAnswer.name",
+        "field:DoorMarkupAnswer.path",
+        "field:DoorMarkupAnswer.url"
       ],
-      "flows": [],
+      "flows": [
+        "file-13"
+      ],
       "mobile": "v1",
-      "why": "native drawing screen, undo banner",
+      "why": "native drawing screen, undo banner; a drawing goes on the computer's own network only (the relay carries no upload): away from it the comment stays in the list, \"Needs your computer's network\", queues no Send, and goes by itself once the drawing has gone (owner, 2026-11-21)",
       "source": "SCOPE H. Comments and annotations; F L71-L72",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -8338,7 +8352,7 @@
       "why": "overlay in the native viewer",
       "source": "SCOPE H. Comments and annotations; F L72",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -8381,24 +8395,29 @@
       "id": "files-086",
       "title": "Comments panel at the right; folds into a Comments button under 780 px; floats over the page in full screen (320 px)",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-15"
+      ],
       "mobile": "v1",
       "why": "comments sheet",
       "source": "SCOPE H. Comments and annotations; F L54, L76",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
       "id": "files-087",
       "title": "Panel foot: \"N annotations ride your next Send to <agent>. M are on other files.\" and Write the reply",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-15"
+      ],
       "mobile": "v1",
       "why": "sheet foot",
       "source": "SCOPE H. Comments and annotations; F L54",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -8417,10 +8436,10 @@
       "id": "files-089",
       "title": "Comment on words of an agent's message: toolbar with Delete, Comment, Looks good",
       "surface": [
-        "door:POST annotations/:id/remove",
         "door:POST messages/:id/annotations",
-        "window:/api/inbox/annotations/:id/remove",
-        "window:/api/inbox/messages/:id/annotations"
+        "window:/api/inbox/messages/:id/annotations",
+        "field:InboxAnnotationRecord.message",
+        "field:InboxMessageCommentTarget.at"
       ],
       "flows": [],
       "mobile": "rethink",
@@ -8501,12 +8520,15 @@
       "id": "files-095",
       "title": "Comments cannot be made on PDFs, plain files or unknown kinds",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-15"
+      ],
       "mobile": "v1",
       "why": "no comment control shown",
       "source": "SCOPE H. Comments and annotations; F L79",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -8822,12 +8844,14 @@
       "surface": [
         "field:DoorReplyBody.annotation_ids"
       ],
-      "flows": [],
+      "flows": [
+        "file-15"
+      ],
       "mobile": "v1",
       "why": "same export text",
       "source": "SCOPE L. What the Send carries (feedback export text); F L80, L109, L156",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -9010,7 +9034,17 @@
       "title": "Comment on diff lines: click a line number, drag across numbers, or select code",
       "surface": [
         "door:POST messages/:id/guide/annotations",
-        "window:/api/inbox/messages/:id/guide/annotations"
+        "window:/api/inbox/messages/:id/guide/annotations",
+        "field:InboxAnnotationRecord.guide",
+        "enum:InboxGuideCommentTarget.scope.general",
+        "enum:InboxGuideCommentTarget.side.new",
+        "enum:InboxGuideCommentTarget.side.old",
+        "field:InboxGuideCommentTarget.file",
+        "field:InboxGuideCommentTarget.line_end",
+        "field:InboxGuideCommentTarget.line_start",
+        "field:InboxGuideCommentTarget.scope",
+        "field:InboxGuideCommentTarget.side",
+        "field:InboxGuideCommentTarget.title"
       ],
       "flows": [],
       "mobile": "v1",
@@ -14092,7 +14126,7 @@
       "why": "native markup and comments",
       "source": "SCOPE 1. Inventory; P:18",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -16927,7 +16961,13 @@
         "check:file-07",
         "check:file-08",
         "check:file-09",
-        "check:file-10"
+        "check:file-10",
+        "check:file-11",
+        "check:file-12",
+        "check:file-13",
+        "check:file-14",
+        "check:file-15",
+        "check:file-16"
       ],
       "flows": [
         "file-01",
@@ -16939,7 +16979,13 @@
         "file-07",
         "file-08",
         "file-09",
-        "file-10"
+        "file-10",
+        "file-11",
+        "file-12",
+        "file-13",
+        "file-14",
+        "file-15",
+        "file-16"
       ],
       "mobile": "v1",
       "why": "The phone's own flow spec; each check is proved by a UI test.",
@@ -17222,14 +17268,54 @@
       "title": "The door route POST annotations",
       "surface": [
         "door:POST annotations",
-        "window:/api/inbox/annotations"
+        "window:/api/inbox/annotations",
+        "field:DoorAnnotationAnswer.annotation",
+        "field:DoorAnnotationBody.annotation",
+        "field:DoorAnnotationBody.attachment_id",
+        "field:DoorAnnotationBody.idempotency_key",
+        "field:DoorAnnotationBody.version",
+        "field:DoorAnnotationRemoveBody.idempotency_key",
+        "field:DoorThreadAttachmentsAnswer.annotations",
+        "field:InboxAnnotationRecord.annotation",
+        "field:InboxAnnotationRecord.attachment_id",
+        "field:InboxAnnotationRecord.created_at",
+        "field:InboxAnnotationRecord.id",
+        "field:InboxAnnotationRecord.message_id",
+        "field:InboxAnnotationRecord.path",
+        "field:InboxAnnotationRecord.project_id",
+        "field:InboxAnnotationRecord.removed_at",
+        "field:InboxAnnotationRecord.sent_reply_id",
+        "field:InboxAnnotationRecord.thread_id",
+        "field:InboxAnnotationRecord.updated_at",
+        "field:InboxAnnotationRecord.version"
       ],
-      "flows": [],
+      "flows": [
+        "file-15",
+        "file-16"
+      ],
       "mobile": "v1",
       "why": "Comments on any words (SCOPE 2, A thread).",
       "source": "seed: no SCOPE row names it",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e7e3f6b3dc4c8c2d"
+      }
+    },
+    {
+      "id": "door-post-annotation-remove",
+      "title": "The door route POST annotations/:id/remove",
+      "surface": [
+        "door:POST annotations/:id/remove",
+        "window:/api/inbox/annotations/:id/remove"
+      ],
+      "flows": [
+        "file-15"
+      ],
+      "mobile": "v1",
+      "why": "A comment on a file removed before it is sent (the list's Remove, a cleared comment): the phone sends the removal once the computer may have the comment.",
+      "source": "files-089 split: the route is used by comments on files, not by comments on a message's words",
+      "ios": {
+        "state": "building"
       }
     },
     {
@@ -17847,7 +17933,11 @@
         "window:/api/inbox/threads/:id/live/:id",
         "window:/api/inbox/threads/:id/live/:id/annotations",
         "window:/api/inbox/threads/:id/live/:id/frame",
-        "window:/api/inbox/threads/:id/live/:id/ping"
+        "window:/api/inbox/threads/:id/live/:id/ping",
+        "field:InboxAnnotationRecord.live",
+        "field:InboxLiveCommentTarget.page_url",
+        "field:InboxLiveCommentTarget.site_id",
+        "field:InboxLiveCommentTarget.url"
       ],
       "flows": [],
       "mobile": "later",
@@ -21432,6 +21522,62 @@
       "mobile": "undecided",
       "why": "",
       "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagent-context",
+      "title": "field:InboxAgent.context",
+      "surface": [
+        "field:InboxAgent.context"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagent-effort",
+      "title": "field:InboxAgent.effort",
+      "surface": [
+        "field:InboxAgent.effort"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagent-model",
+      "title": "field:InboxAgent.model",
+      "surface": [
+        "field:InboxAgent.model"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-threads-id-reask",
+      "title": "window:/api/inbox/threads/:id/reask",
+      "surface": [
+        "window:/api/inbox/threads/:id/reask"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
       "ios": {
         "state": "not-started"
       }

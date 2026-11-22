@@ -171,6 +171,10 @@ export interface LaunchLive {
   busy: boolean | null;
   busySince: number | null;
   polls: number;
+  /** When its current idle spell began (null while busy or not known): a new value is a turn that ended. */
+  idleSince?: number | null;
+  /** How many items it took as a turn: a new value is a turn that began, even one too short to be said busy. */
+  taken?: number;
 }
 
 /** One read of every session the host knows: a session's state by its `session_ref`, `absent` when not listed. */
