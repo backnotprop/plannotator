@@ -156,13 +156,17 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
   });
 
   test('a staged file carries a Staged mark before its numbers, redrawn as it is staged and unstaged (#3683)', async () => {
+    // One viewed set and one annotations array across the rerenders, so only
+    // the staged set changes: the rows must redraw for it alone.
+    const viewedFiles = new Set<string>();
+    const annotations: NonNullable<TreeProps['annotations']> = [];
     const tree = (staged: string[], extra: TreeProps = {}) => (
-      <Tree files={working} activeFileIndex={0} sinceBaseSections={sections} stagedFiles={new Set(staged)} {...extra} />
+      <Tree files={working} activeFileIndex={0} sinceBaseSections={sections} viewedFiles={viewedFiles} annotations={annotations} stagedFiles={new Set(staged)} {...extra} />
     );
     const mark = (el: HTMLElement, path: string) => row(el, path).querySelector<HTMLElement>('[data-item-section="trail"] [title="Staged"]');
     const el = await mount(tree(['src/staged.ts']));
     expect(mark(el, 'staged.ts')).not.toBeNull();
-    expect(mark(el, 'staged.ts')!.getAttribute('aria-label')).toBe('Staged');
+    // A mark, not a button.
     expect(mark(el, 'staged.ts')!.getAttribute('role')).toBeNull();
     expect(trail(el, 'staged.ts')).toEqual(['\u25cf', '+1']);
     expect(mark(el, 'edited.ts')).toBeNull();

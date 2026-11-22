@@ -288,6 +288,34 @@ describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
     expect(repoRow(el, 'packages/review-editor/utils/explorerTree.ts').querySelector('[title="Staged"]')).toBeNull();
   });
 
+  test('grouped by git status, All files still shows the Staged mark: it has no Staged group to say it (#3683)', async () => {
+    const staged = 'packages/review-editor/utils/fileKindTree.ts';
+    const sections = {
+      base: 'origin/main',
+      mergeBase: 'abc',
+      files: {
+        [staged]: { group: 'changes' as const, staged: true },
+        'packages/review-editor/utils/explorerTree.ts': { group: 'untracked' as const, staged: false },
+      },
+    };
+    // One viewed set, annotations array and listing across the rerender, so the
+    // rows must redraw for the staged set alone.
+    const viewedFiles = new Set<string>();
+    const annotations: NonNullable<TreeProps['annotations']> = [];
+    const repoFiles = repo(ready());
+    const tree = (extra: TreeProps = {}) => (
+      <Tree viewedFiles={viewedFiles} annotations={annotations} repoFiles={repoFiles} stagedFiles={new Set([staged])} sinceBaseSections={sections} groupBy="status" onSelectGroupBy={() => {}} statusGroupingAvailable {...extra} />
+    );
+    const hasMark = (el: HTMLElement) => repoRow(el, staged).querySelector('[data-item-section="trail"] [title="Staged"]') !== null;
+    const el = await mount(tree());
+    await settle();
+    expect(hasMark(el)).toBe(true);
+    // Still off with the header's Git add button.
+    await act(async () => root?.render(tree({ showStageControls: false })));
+    await settle();
+    expect(hasMark(el)).toBe(false);
+  });
+
   test('folders open and close; a changed row selects its diff, an unchanged one opens the file', async () => {
     const onSelectFile = mock((_index: number) => {});
     const onOpenRepoFile = mock((_path: string, _options: { pin: boolean }) => {});

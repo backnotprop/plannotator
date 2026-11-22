@@ -33,8 +33,13 @@ export const ROW_ICONS = `<svg xmlns="http://www.w3.org/2000/svg" style="display
 const icon = (name: string, size: number) => ({ name, width: size, height: size, viewBox: '0 0 24 24' });
 const EYE_ICON = icon('pn-eye', 12);
 const THREAD_ICON = icon('pn-thread', 12);
-/** A mark, not a button (staging is done from the file's header or the A key); drawn as All files draws its on-disk dot. */
-const STAGED_PART: FileTreeRowPart = { text: '\u25cf', title: 'Staged', label: 'Staged', color: 'var(--primary)' };
+/**
+ * A mark, not a button (staging is done from the file's header or the A key);
+ * drawn as All files draws its on-disk dot. Its hover title is its only text
+ * alternative: the row is a `treeitem` named by the file name, so an
+ * `aria-label` on this role-less span would never be read.
+ */
+const STAGED_PART: FileTreeRowPart = { text: '\u25cf', title: 'Staged', color: 'var(--primary)' };
 
 export const GROUP_ICONS: Record<string, FileTreeRowPart> = {
   code: { icon: icon('pn-kind-code', 14) },
