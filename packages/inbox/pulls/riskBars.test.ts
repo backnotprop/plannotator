@@ -19,11 +19,14 @@ const place = (file: string, lines: [number, number], side: 'new' | 'old' = 'new
 const judged = (level: InboxPullRiskJudgment['level'], where?: InboxPullRiskPlace[]): InboxPullRiskJudgment => ({ level, why: 'It changes billing.', ...(where ? { where } : {}) });
 
 describe('riskBarsOf', () => {
-  test('High: each named file once, each named range once at its first line', () => {
-    const bars = riskBarsOf(judged('high', [place('src/billing.ts', [11, 13]), place('src/auth.ts', [11, 11]), place('src/billing.ts', [11, 12])]), FILES);
+  test('High: each named file once, each named range once at its first line; two places on one line share its mark and both reasons', () => {
+    const second = { ...place('src/billing.ts', [11, 12]), why: 'And it skips the lock.', rule: 'Anything in billing.' };
+    const bars = riskBarsOf(judged('high', [place('src/billing.ts', [11, 13]), place('src/auth.ts', [11, 11]), second]), FILES);
     expect(bars?.level).toBe('high');
     expect([...bars!.files].sort()).toEqual(['src/auth.ts', 'src/billing.ts']);
     expect(bars!.ranges.map(({ file, side, line }) => `${file} ${side} ${line}`)).toEqual(['src/billing.ts new 11', 'src/auth.ts new 11']);
+    expect(bars!.ranges[0]!.notes).toEqual([{ why: 'Charges now retry.' }, { why: 'And it skips the lock.', rule: 'Anything in billing.' }]);
+    expect(riskBarsLineMarks(bars)[0]!.label).toBe('High risk: Charges now retry. And it skips the lock.');
   });
 
   test('Medium carries its places as High does; a removed line is marked on the old side', () => {
@@ -53,7 +56,7 @@ describe('the diff’s marks', () => {
   test('one mark per range, on its first line on its side, saying the level; none with no bars', () => {
     const bars = riskBarsOf(judged('high', [place('src/billing.ts', [12, 13]), place('src/billing.ts', [11, 11], 'old')]), FILES);
     const marks = riskBarsLineMarks(bars);
-    expect(marks.map(({ filePath, line, side, label }) => `${filePath} ${side} ${line} ${label}`)).toEqual(['src/billing.ts new 12 High risk', 'src/billing.ts old 11 High risk']);
+    expect(marks.map(({ filePath, line, side, label }) => `${filePath} ${side} ${line} ${label}`)).toEqual(['src/billing.ts new 12 High risk: Charges now retry.', 'src/billing.ts old 11 High risk: Charges now retry.']);
     expect(riskBarsLineMarks(null)).toEqual([]);
   });
 

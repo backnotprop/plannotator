@@ -38,7 +38,7 @@ import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { openedLinesQuote } from '../attachments';
 import { wholeFileReader, type KeptWholeFiles } from './wholeFileReader';
 import { useSemDiffClient } from './useSemDiffClient';
-import type { GuideFileNote, GuideLineMark, GuideLineNote, GuideReaderProps } from './types';
+import type { GuideFileNote, GuideLineMark, GuideLineNote, GuideReaderProps, OnGuideLineMark } from './types';
 import type ReaderShape from './reader-module';
 import { GuideHostProvider, GuideView, type GuideDiffRendererContext, type GuideDiffRendererProps, type GuideGlobalComments } from '@plannotator/guide-viewer';
 import { GuideCodeSpanContext } from '@plannotator/guide-viewer/renderInlineMarkdown';
@@ -122,13 +122,15 @@ export const GuideDiff: FC<
     lineNotes?: readonly GuideLineNote[];
     /** This file's marks at the right edge of lines (the PR page's risk bars). Absent: none. */
     lineMarks?: readonly GuideLineMark[];
+    /** Hears this file's marks. */
+    onLineMark?: OnGuideLineMark;
     /** What the host draws about this whole file, under its header (the PR page's threads on the file). Absent: none. */
     wholeFileNotes?: readonly GuideFileNote[];
     /** Context notes on this file's lines (review-editor's seam). Absent: none, as before. */
     contextNotes?: AllFilesCodeViewProps['contextNotes'];
     renderContextNote?: AllFilesCodeViewProps['renderContextNote'];
   }
-> = ({ comments, diffStyleOverride, plainSeparators, viewedFiles, onToggleViewed, fileOpenIn, lineNotes, lineMarks, wholeFileNotes, contextNotes, renderContextNote, ...props }) => {
+> = ({ comments, diffStyleOverride, plainSeparators, viewedFiles, onToggleViewed, fileOpenIn, lineNotes, lineMarks, onLineMark, wholeFileNotes, contextNotes, renderContextNote, ...props }) => {
   const savedDiffStyle = useConfigValue('diffStyle');
   const diffStyle = diffStyleOverride ?? savedDiffStyle;
   const diffOverflow = useConfigValue('diffOverflow');
@@ -159,6 +161,7 @@ export const GuideDiff: FC<
       annotations={comments?.annotations ?? NO_ANNOTATIONS}
       {...(lineNotes ? { hostLineNotes: lineNotes } : {})}
       {...(lineMarks ? { hostLineMarks: lineMarks } : {})}
+      {...(onLineMark ? { onHostLineMark: onLineMark } : {})}
       {...(wholeFileNotes ? { hostFileNotes: wholeFileNotes } : {})}
       selectedAnnotationId={comments?.selectedAnnotationId ?? null}
       scrollTargetAnnotation={comments?.scrollTargetAnnotation ?? null}
@@ -234,6 +237,7 @@ function Reader({
   collapseAll,
   lineNotes,
   lineMarks,
+  onLineMark,
   wholeFileNotes,
   contextNotes,
   renderContextNote,
@@ -459,7 +463,7 @@ function Reader({
   const fileMarks = useCallback((path: string): readonly GuideLineMark[] => {
     const next = marksByFile.get(path) ?? NO_LINE_MARKS;
     const kept = keptMarks.current.get(path);
-    const same = kept && kept.length === next.length && kept.every((mark, i) => mark.side === next[i]!.side && mark.line === next[i]!.line && mark.label === next[i]!.label && mark.paint === next[i]!.paint);
+    const same = kept && kept.length === next.length && kept.every((mark, i) => mark.id === next[i]!.id && mark.side === next[i]!.side && mark.line === next[i]!.line && mark.label === next[i]!.label && mark.paint === next[i]!.paint);
     if (same) return kept;
     keptMarks.current.set(path, next);
     return next;
@@ -499,12 +503,14 @@ function Reader({
       headerKeepsFolder?: boolean;
       lineNotes?: readonly GuideLineNote[];
       lineMarks?: readonly GuideLineMark[];
+      onLineMark?: OnGuideLineMark;
       wholeFileNotes?: readonly GuideFileNote[];
       contextNotes?: AllFilesCodeViewProps['contextNotes'];
       renderContextNote?: AllFilesCodeViewProps['renderContextNote'];
     } => ({
       ...(lineNotes ? { lineNotes: fileNotes(file.path) } : {}),
       ...(lineMarks ? { lineMarks: fileMarks(file.path) } : {}),
+      ...(onLineMark ? { onLineMark } : {}),
       ...(wholeFileNotes ? { wholeFileNotes: wholeNotesFor(file.path) } : {}),
       // The PR page: files flush, and a narrow header (a phone's) keeps the folder, so two files of one name read apart.
       ...(bare && { flushFiles: true, headerKeepsFolder: true }),
@@ -533,7 +539,7 @@ function Reader({
           }
         : {}),
     }),
-    [bare, contextNotes, renderContextNote, phone, asItIs, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, semDiffClient, fileOpenIn, lineNotes, fileNotes, lineMarks, fileMarks, wholeFileNotes, wholeNotesFor],
+    [bare, contextNotes, renderContextNote, phone, asItIs, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, semDiffClient, fileOpenIn, lineNotes, fileNotes, lineMarks, fileMarks, onLineMark, wholeFileNotes, wholeNotesFor],
   );
   // Global comments: the list under the header and its button, while the review takes comments (as line comments).
   // One chosen in the list is shown where the pane lists comments (its folded sheet opens on it).

@@ -78,9 +78,9 @@ import { inOverlay } from '../shortcuts/guards';
 import { reviewFiles } from './reviewFiles';
 import { layerVerdictLink, nextLayer, stackVerdictLink } from './topology';
 import { RiskMark } from './RiskMark';
-import { ContextNotesProvider, useContextNotes } from '../contextNotes/ContextNotes';
 import { placesWord, riskNotes, takeRiskPlaces } from '../contextNotes/model';
-import { riskBarsOf } from './riskBars';
+import { riskBarsMarkId, riskBarsOf } from './riskBars';
+import { useRiskBarsCard } from './RiskBarsCard';
 import { riskBarsLineMarks } from './riskBarsMarks';
 import { usePullRisk } from './usePullRisk';
 import { Named } from './Face';
@@ -750,8 +750,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
     setTreeScope(next);
     if (next === 'changes') setRepoOpen(null);
   };
-  // A high judgment's places (context notes, approval "inbox-context-notes"): on this layer's own diff, at the head it
-  // judged, each a row under its lines. Never comments. The header's "N places" steps through them.
+  // A high judgment's places (approval "inbox-context-notes"): on this layer's own diff, at the head it judged. The
+  // header's "N places" steps through them, opening each one's risk bars card (no row under the code: q-070bc2a3).
   const placeNotes = useMemo(
     () => (scope === 'layer' && judged && layer && diff?.head_sha && diff.head_sha === layer.head_sha ? riskNotes(judged, files) : []),
     [scope, judged, layer?.head_sha, diff?.head_sha, files], // eslint-disable-line react-hooks/exhaustive-deps
@@ -765,14 +765,14 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
   const treeRiskKey = riskBars ? `${riskBars.level}\u0000${[...riskBars.files].join('\u0000')}` : '';
   const treeRisk = useMemo(() => (riskBars ? { level: riskBars.level, files: riskBars.files } : null), [treeRiskKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const riskLineMarks = useMemo(() => riskBarsLineMarks(riskBars), [riskBars]);
-  const places = useContextNotes(placeNotes, {});
+  const riskCard = useRiskBarsCard(riskBars);
   const placeAt = useRef(-1);
   const goToPlace = (index: number) => {
     const note = placeNotes[index];
     if (!note) return;
     placeAt.current = index;
     move(note.file);
-    places.show(note.id);
+    riskCard.show(riskBarsMarkId(note.file, note.side, note.lineStart));
   };
   const nextPlace = () => goToPlace((placeAt.current + 1) % placeNotes.length);
   // The PR page's "See the N places": taken as this layer's diff mounts (the ask is gone after that, whatever it
@@ -1164,27 +1164,25 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
             // arrive says so here.
             <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch}>
               <OpenInCodeSpans scope={{ repo: repoKey ?? '', pull: layerKey }} on={!!repoKey}>
-                <ContextNotesProvider api={places.api}>
-                  <GuideReader
-                    bare
-                    controlsHost={controlsHost}
-                    hostDiffControls
-                    {...(collapseAll ? { collapseAll } : {})}
-                    snapshot={snapshot}
-                    reviewed={[]}
-                    onReviewedChange={() => {}}
-                    comments={readerComments}
-                    mode="files"
-                    reveal={reveal}
-                    viewed={{ files: viewedSet, onToggle: toggleViewed }}
-                    fileOpenIn={fileOpenIn}
-                    fileContents={fileContents}
-                    lineNotes={lineNotes}
-                    {...(riskLineMarks.length > 0 ? { lineMarks: riskLineMarks } : {})}
-                    wholeFileNotes={wholeFileNotes}
-                    {...(places.anchors.length > 0 ? { contextNotes: places.anchors, renderContextNote: places.renderContextNote } : {})}
-                  />
-                </ContextNotesProvider>
+                <GuideReader
+                  bare
+                  controlsHost={controlsHost}
+                  hostDiffControls
+                  {...(collapseAll ? { collapseAll } : {})}
+                  snapshot={snapshot}
+                  reviewed={[]}
+                  onReviewedChange={() => {}}
+                  comments={readerComments}
+                  mode="files"
+                  reveal={reveal}
+                  viewed={{ files: viewedSet, onToggle: toggleViewed }}
+                  fileOpenIn={fileOpenIn}
+                  fileContents={fileContents}
+                  lineNotes={lineNotes}
+                  {...(riskLineMarks.length > 0 ? { lineMarks: riskLineMarks, onLineMark: riskCard.onMark } : {})}
+                  wholeFileNotes={wholeFileNotes}
+                />
+                {riskCard.node}
               </OpenInCodeSpans>
             </ReaderPart>
           ) : (

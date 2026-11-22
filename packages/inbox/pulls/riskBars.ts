@@ -12,11 +12,21 @@ import type { InboxPullRiskJudgment } from '@plannotator/core/inbox-types';
 
 export type RiskBarsLevel = 'high' | 'medium';
 
+/** What the risk check said about one place: its reason, and the person's rule it touches when it named one. */
+export interface RiskBarsNote {
+  why: string;
+  rule?: string;
+}
+
 /** One mark in the diff: a named range, drawn at its first line. */
 export interface RiskBarsRange {
+  /** The mark's id on the page (`riskBarsMarkId`). */
+  id: string;
   file: string;
   side: 'old' | 'new';
   line: number;
+  /** The reasons of the places that start on this line, in the judgment's order (two places on one line are one mark). */
+  notes: RiskBarsNote[];
 }
 
 export interface RiskBars {
@@ -35,21 +45,27 @@ export interface RiskBarsFile {
 
 export const riskBarsWord: Record<RiskBarsLevel, string> = { high: 'High risk', medium: 'Medium risk' };
 
+/** The diff mark's id for a place's first line: the stepper finds a place's card by it. */
+export function riskBarsMarkId(file: string, side: 'old' | 'new', line: number): string {
+  return `risk\u0000${file}\u0000${side}\u0000${line}`;
+}
+
 export function riskBarsOf(judgment: InboxPullRiskJudgment | null | undefined, files: readonly RiskBarsFile[]): RiskBars | null {
   if (!judgment || (judgment.level !== 'high' && judgment.level !== 'medium')) return null;
   const patches = new Map(files.map((file) => [file.path, file.patch] as const));
   const named = new Set<string>();
   const ranges: RiskBarsRange[] = [];
-  const seen = new Set<string>();
   for (const place of judgment.where ?? []) {
     const patch = patches.get(place.file);
     if (patch === undefined) continue;
     named.add(place.file);
     const [start, end] = place.lines;
-    const key = `${place.file}\u0000${place.side}\u0000${start}`;
-    if (seen.has(key) || !isLineRangeInPatch(patch, start, end, place.side)) continue;
-    seen.add(key);
-    ranges.push({ file: place.file, side: place.side, line: start });
+    if (!isLineRangeInPatch(patch, start, end, place.side)) continue;
+    const note: RiskBarsNote = { why: place.why.trim(), ...(place.rule?.trim() ? { rule: place.rule.trim() } : {}) };
+    const id = riskBarsMarkId(place.file, place.side, start);
+    const same = ranges.find((range) => range.id === id);
+    if (same) same.notes.push(note);
+    else ranges.push({ id, file: place.file, side: place.side, line: start, notes: [note] });
   }
   return named.size > 0 ? { level: judgment.level, files: named, ranges } : null;
 }

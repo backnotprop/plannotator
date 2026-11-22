@@ -6,21 +6,23 @@
  *
  * Proved: a High PR's review marks each named file once in the tree, a clear gap before its icon, without moving the
  * row, and each named range once in the diff, on its first line at the column's right edge; a Medium PR the same with
- * two filled bars; a Low PR nothing. The diff's mark never covers code: on lines long enough to reach the edge, split and
- * unified, old and new sides, scrolling sideways or wrapped. A marked file at the tree's root keeps its mark inside its
- * row. The bars' tone keeps 3:1 against the tree and both diff line colours, light and dark (written to contrast.json).
- * Made-up people and code only.
+ * two filled bars; a Low PR nothing. The diff's mark (a button named "High risk: <reason>") never covers code: on lines
+ * long enough to reach the edge, split and unified, old and new sides, scrolling sideways or wrapped. No row under the
+ * code says the reason (q-070bc2a3): the bars' card does, on hover, keyboard focus or a press (pinned), and the header's
+ * "N places" opens each place's card in turn; the card moves nothing in the diff and is not cut by the column. A phone's
+ * tap opens it inside the screen. A marked file at the tree's root keeps its mark inside its row. The bars' tone keeps
+ * 3:1 against the tree and both diff line colours, light and dark (written to contrast.json). Made-up people and code
+ * only.
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/review-risk-bars:
- *   01-high-tree-and-diff-dark.png, 02-medium-tree-and-diff-dark.png, 03-closeup-tree-light.png,
- *   03-closeup-diff-light.png, 04-low-no-marks-dark.png, 05-long-line-split-dark.png, 06-long-line-unified-dark.png,
- *   07-root-file-tree-dark.png.
+ *   01-high-card-dark.png, 02-medium-card-dark.png, 03-closeup-tree-light.png, 03-closeup-diff-card-light.png,
+ *   04-low-no-marks-dark.png, 05-long-line-split-card-dark.png, 06-long-line-unified-card-dark.png,
+ *   07-root-file-tree-dark.png, 08-phone-card-dark.png.
  */
 import { expect, test, type BrowserContext, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import type { CDPSession } from '@playwright/test';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
@@ -204,60 +206,26 @@ let agent: SimAgent;
 
 const row = (n: number) => page.locator(`[data-pulls-row="${keyOf(n)}"]`);
 const treeMarks = () => page.locator('[data-review-files] [data-item-part-id="risk"]');
-/** The diff's marked lines (a mark is the line's own `::after`), as `<file> <column> <line number>`. */
+/** The diff's marked lines (a mark is a button, the line's last child), as `<file> <column> <line number>`. */
 async function diffMarks(scope: Locator): Promise<string[]> {
-  return scope.locator('[data-line]').evaluateAll((lines) =>
-    lines.flatMap((line) => {
-      const content = getComputedStyle(line, '::after').content;
-      if (!content || content === 'none' || content === 'normal') return [];
+  return scope.locator('[data-host-line-mark]').evaluateAll((marks) =>
+    marks.map((mark) => {
+      const line = mark.parentElement!;
       const host = (line.getRootNode() as ShadowRoot).host;
       const file = host?.closest('[data-guide-file-shell]')?.getAttribute('data-guide-file-shell');
       const column = line.closest('[data-additions]') ? 'additions' : line.closest('[data-deletions]') ? 'deletions' : 'unified';
-      return [`${file} ${column} ${line.getAttribute('data-line')}`];
+      return `${file} ${column} ${line.getAttribute('data-line')}`;
     }),
   );
-}
-
-type Box = { x: number; y: number; width: number; height: number };
-type CdpNode = { nodeId: number; nodeName: string; attributes?: string[]; children?: CdpNode[]; shadowRoots?: CdpNode[]; pseudoElements?: { pseudoType: string; nodeId: number }[] };
-const attrOf = (node: CdpNode, name: string) => {
-  const list = node.attributes ?? [];
-  for (let i = 0; i < list.length; i += 2) if (list[i] === name) return list[i + 1];
-  return undefined;
-};
-
-/**
- * The mark's own box: its `::after` box as the browser laid it out (sticky offset and all), through the DevTools
- * protocol (a pseudo-element has no DOM box of its own). Keyed `<column> <line number>` within one file.
- */
-async function markBoxes(cdp: CDPSession, file: string): Promise<{ column: string; line: string; type: string; box: Box }[]> {
-  const { root } = (await cdp.send('DOM.getDocument', { depth: -1, pierce: true })) as { root: CdpNode };
-  const found: { column: string; line: string; type: string; nodeId: number }[] = [];
-  const walk = (node: CdpNode, inFile: boolean, column: string) => {
-    const shell = attrOf(node, 'data-guide-file-shell');
-    const here = shell !== undefined ? shell === file : inFile;
-    const col = attrOf(node, 'data-additions') !== undefined ? 'additions' : attrOf(node, 'data-deletions') !== undefined ? 'deletions' : attrOf(node, 'data-unified') !== undefined ? 'unified' : column;
-    const line = attrOf(node, 'data-line');
-    const after = node.pseudoElements?.find((p) => p.pseudoType === 'after');
-    if (here && line !== undefined && after) found.push({ column: col, line, type: attrOf(node, 'data-line-type') ?? '', nodeId: after.nodeId });
-    for (const child of [...(node.shadowRoots ?? []), ...(node.children ?? [])]) walk(child, here, col);
-  };
-  walk(root, false, '');
-  const boxes: { column: string; line: string; type: string; box: Box }[] = [];
-  for (const { nodeId, ...where } of found) {
-    const { model } = (await cdp.send('DOM.getBoxModel', { nodeId })) as { model: { border: number[] } };
-    const q = model.border;
-    boxes.push({ ...where, box: { x: q[0]!, y: q[1]!, width: q[2]! - q[0]!, height: q[5]! - q[1]! } });
-  }
-  return boxes;
 }
 
 /** A marked line: its file, its column (`additions`, `deletions`, `unified`), its number, and in unified its kind. */
 type LineRef = { file: string; column: 'additions' | 'deletions' | 'unified'; line: number; type?: string };
 const lineSelector = (ref: LineRef) => `[data-guide-file-shell="${ref.file}"] [data-${ref.column}] [data-line="${ref.line}"]${ref.type ? `[data-line-type="${ref.type}"]` : ''}`;
-async function markOf(cdp: CDPSession, ref: LineRef): Promise<Box | undefined> {
-  return (await markBoxes(cdp, ref.file)).find((m) => m.column === ref.column && m.line === String(ref.line) && (!ref.type || m.type === ref.type))?.box;
-}
+/** A marked line's bars: the button at its end. */
+const barsOf = (review: Locator, ref: LineRef) => review.locator(`${lineSelector(ref)} > [data-host-line-mark]`).first();
+/** The bars' card (one at a time). */
+const riskCard = () => page.locator('.ib-riskcard');
 
 /** A marked line's geometry, in the page's coordinates: its box, its text's boxes, the column's visible box, colours. */
 async function lineGeometry(review: Locator, ref: LineRef) {
@@ -282,8 +250,9 @@ async function lineGeometry(review: Locator, ref: LineRef) {
     const codeRect = code.getBoundingClientRect();
     const wrap = node.closest('pre')?.getAttribute('data-overflow') === 'wrap';
     const style = getComputedStyle(node);
-    const after = getComputedStyle(node, '::after');
+    const button = node.querySelector<HTMLElement>(':scope > [data-host-line-mark]');
     return {
+      mark: button ? rect(button.getBoundingClientRect()) : undefined,
       line: rect(node.getBoundingClientRect()),
       text,
       // What the reader sees of the column: the scrolling box, or (wrapped, where the column has no box) the line.
@@ -291,7 +260,7 @@ async function lineGeometry(review: Locator, ref: LineRef) {
       wrap,
       lineHeight: parseFloat(style.lineHeight),
       lineBg: style.backgroundColor,
-      markBg: after.backgroundColor,
+      markBg: button ? getComputedStyle(button).backgroundColor : '',
       scroll: { left: code.scrollLeft, width: code.scrollWidth, client: code.clientWidth },
     };
   });
@@ -312,56 +281,78 @@ async function scrollColumns(review: Locator, file: string, to: 'start' | 'end')
  * line that ends before it (`short`) is clear of it as it is.
  */
 async function expectNoOverlap(review: Locator, ref: LineRef, opts: { long: boolean }) {
-  const cdp = await context.newCDPSession(page);
   const { file } = ref;
-  try {
-    // The diff may draw a file's lines again as it comes into view: take the line once it holds still.
-    let g!: Awaited<ReturnType<typeof lineGeometry>>;
-    let mark: Box | undefined;
-    await expect(async () => {
-      // Into view by the file (a line's own scroll would also move the column sideways), the column at its start.
-      await review.locator(`[data-guide-file-shell="${file}"]`).scrollIntoViewIfNeeded();
-      await expect(review.locator(lineSelector(ref)).first()).toBeInViewport({ timeout: 2000 });
-      await scrollColumns(review, file, 'start');
-      g = await lineGeometry(review, ref);
-      mark = await markOf(cdp, ref);
-      expect(mark, `${JSON.stringify(ref)} has a mark`).toBeTruthy();
-    }).toPass({ timeout: 15_000 });
-    expect(Math.abs(mark!.x + mark!.width - g.visibleRight)).toBeLessThanOrEqual(1.5);
-    expect(Math.abs(mark!.y - g.line.y)).toBeLessThanOrEqual(1);
-    expect(Math.abs(mark!.height - g.lineHeight)).toBeLessThanOrEqual(1);
-    const textRight = () => Math.max(...g.text.map((r) => r.x + r.width));
-    if (g.wrap) {
-      // Every row of the wrapped text ends before the mark.
-      for (const r of g.text) expect(r.x + r.width, `wrapped text row ends before the mark`).toBeLessThanOrEqual(mark!.x + 1);
-      if (opts.long) expect(new Set(g.text.map((r) => Math.round(r.y))).size).toBeGreaterThan(1);
-      return;
-    }
-    // Opaque, in the line's own colour: what runs under it does not show through.
-    expect(g.markBg).toBe(g.lineBg);
-    expect(g.markBg).not.toMatch(/rgba\(.*,\s*0\)|transparent/);
-    if (!opts.long) {
-      expect(textRight()).toBeLessThanOrEqual(mark!.x + 1);
-      return;
-    }
-    expect(textRight()).toBeGreaterThan(mark!.x); // it does reach the edge, the case this proves
-    // The line's own column to its end (split columns scroll together: the other one would hold this one back).
-    await review.locator(lineSelector(ref)).first().evaluate((node) => {
-      const code = node.closest('[data-code]') as HTMLElement;
-      code.scrollLeft = code.scrollWidth;
-    });
-    await page.waitForTimeout(150);
-    const end = await lineGeometry(review, ref);
-    expect(end.scroll.left + end.scroll.client, 'the column is at its end').toBeGreaterThanOrEqual(end.scroll.width - 1);
-    const endMark = (await markOf(cdp, ref))!;
-    // The protocol's box is on whole pixels, the text's on fractions: within 1px is "where the mark begins" (its bars
-    // start 6px further in).
-    expect(Math.max(...end.text.map((r) => r.x + r.width)), 'scrolled to the end, the last character is clear of the mark').toBeLessThanOrEqual(endMark.x + 1);
-    expect(Math.abs(endMark.x + endMark.width - end.visibleRight)).toBeLessThanOrEqual(1.5);
+  // The diff may draw a file's lines again as it comes into view: take the line once it holds still.
+  let g!: Awaited<ReturnType<typeof lineGeometry>>;
+  await expect(async () => {
+    // Into view by the file (a line's own scroll would also move the column sideways), the column at its start.
+    await review.locator(`[data-guide-file-shell="${file}"]`).scrollIntoViewIfNeeded();
+    await expect(review.locator(lineSelector(ref)).first()).toBeInViewport({ timeout: 2000 });
     await scrollColumns(review, file, 'start');
-  } finally {
-    await cdp.detach();
+    g = await lineGeometry(review, ref);
+    expect(g.mark, `${JSON.stringify(ref)} has a mark`).toBeTruthy();
+  }).toPass({ timeout: 15_000 });
+  const mark = g.mark!;
+  expect(Math.abs(mark.x + mark.width - g.visibleRight)).toBeLessThanOrEqual(1.5);
+  expect(Math.abs(mark.y - g.line.y)).toBeLessThanOrEqual(1);
+  expect(Math.abs(mark.height - g.lineHeight)).toBeLessThanOrEqual(1);
+  const textRight = () => Math.max(...g.text.map((r) => r.x + r.width));
+  if (g.wrap) {
+    // Every row of the wrapped text ends before the mark.
+    for (const r of g.text) expect(r.x + r.width, `wrapped text row ends before the mark`).toBeLessThanOrEqual(mark.x + 1);
+    if (opts.long) expect(new Set(g.text.map((r) => Math.round(r.y))).size).toBeGreaterThan(1);
+    return;
   }
+  // Opaque, in the line's own colour: what runs under it does not show through.
+  expect(g.markBg).toBe(g.lineBg);
+  expect(g.markBg).not.toMatch(/rgba\(.*,\s*0\)|transparent/);
+  if (!opts.long) {
+    expect(textRight()).toBeLessThanOrEqual(mark.x + 1);
+    return;
+  }
+  expect(textRight()).toBeGreaterThan(mark.x); // it does reach the edge, the case this proves
+  // The line's own column to its end (split columns scroll together: the other one would hold this one back).
+  await review.locator(lineSelector(ref)).first().evaluate((node) => {
+    const code = node.closest('[data-code]') as HTMLElement;
+    code.scrollLeft = code.scrollWidth;
+  });
+  await page.waitForTimeout(150);
+  const end = await lineGeometry(review, ref);
+  expect(end.scroll.left + end.scroll.client, 'the column is at its end').toBeGreaterThanOrEqual(end.scroll.width - 1);
+  const endMark = end.mark!;
+  // Within 1px is "where the mark begins" (its bars start 6px further in).
+  expect(Math.max(...end.text.map((r) => r.x + r.width)), 'scrolled to the end, the last character is clear of the mark').toBeLessThanOrEqual(endMark.x + 1);
+  expect(Math.abs(endMark.x + endMark.width - end.visibleRight)).toBeLessThanOrEqual(1.5);
+  await scrollColumns(review, file, 'start');
+}
+
+/**
+ * The bars' card, opened by a press on `ref`'s bars: it says `words`, is pinned, lies wholly on the screen and on top
+ * (no column cuts it), and nothing in the diff moved for it (the line under the marked one is where it was).
+ */
+async function openCard(review: Locator, ref: LineRef, words: string[]) {
+  const bars = barsOf(review, ref);
+  await bars.scrollIntoViewIfNeeded();
+  const before = (await review.locator(lineSelector(ref)).first().boundingBox())!;
+  const shell = (await review.locator(`[data-guide-file-shell="${ref.file}"]`).boundingBox())!;
+  await bars.click();
+  await expect(riskCard()).toBeVisible();
+  await expect(riskCard()).toHaveAttribute('data-risk-card-pinned', '');
+  for (const w of words) await expect(riskCard()).toContainText(w);
+  await expect(riskCard()).toBeInViewport({ ratio: 1 });
+  // Past its opening fade.
+  await page.waitForTimeout(250);
+  const box = (await riskCard().boundingBox())!;
+  const view = page.viewportSize()!;
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(view.width);
+  // On top: what draws at the card's centre is the card.
+  expect(await page.evaluate(([x, y]) => !!document.elementFromPoint(x!, y!)?.closest('.ib-riskcard'), [box.x + box.width / 2, box.y + box.height / 2])).toBe(true);
+  // Nothing moved: the line and its file are where they were.
+  const after = (await review.locator(lineSelector(ref)).first().boundingBox())!;
+  const shellAfter = (await review.locator(`[data-guide-file-shell="${ref.file}"]`).boundingBox())!;
+  expect(after).toEqual(before);
+  expect(shellAfter.height).toBe(shell.height);
 }
 
 async function openReview(n: number): Promise<Locator> {
@@ -409,11 +400,7 @@ async function expectBeforeIcon(marked: string, unmarked: string) {
 /** The diff's mark sits on the named range's first line (its column), at the column's right edge, over no code. */
 async function expectOnLine(review: Locator, ref: LineRef) {
   await expectNoOverlap(review, ref, { long: false });
-  const label = await review
-    .locator(lineSelector(ref))
-    .first()
-    .evaluate((node) => getComputedStyle(node, '::after').content);
-  expect(label).toMatch(/(High|Medium) risk/);
+  await expect(barsOf(review, ref)).toHaveAttribute('aria-label', /^(High|Medium) risk: /);
 }
 
 /** sRGB of any CSS colour, and WCAG's contrast ratio of two. */
@@ -533,14 +520,62 @@ test('a High PR: once on each named file in the tree, once on each named range i
   await expectBeforeIcon('retry.ts', 'retries.md');
   // Once per named range, nothing a third time (nothing beside the counts or in a header).
   await expect.poll(() => diffMarks(review).then((m) => m.sort())).toEqual(['src/charges/client.ts deletions 8', 'src/charges/retry.ts additions 21']);
-  await expectOnLine(review, { file: 'src/charges/retry.ts', column: 'additions', line: 21 });
-  await expectOnLine(review, { file: 'src/charges/client.ts', column: 'deletions', line: 8 });
+  const retry: LineRef = { file: 'src/charges/retry.ts', column: 'additions', line: 21 };
+  const client: LineRef = { file: 'src/charges/client.ts', column: 'deletions', line: 8 };
+  await expectOnLine(review, retry);
+  await expectOnLine(review, client);
   // The header's level stays as it was.
   await expect(review.locator('[data-pull-risk="high"]')).toHaveText(/High/);
 
-  await review.locator('[data-guide-file-shell="src/charges/retry.ts"]').scrollIntoViewIfNeeded();
+  // No row under the code says the reason (q-070bc2a3): the bars are a button that says it, and its card shows it.
+  await expect(review.locator('[data-context-note-row], .ib-ctxn-line')).toHaveCount(0);
+  await expect(review.getByRole('button', { name: 'High risk: Each retry charges the card twice.' })).toHaveCount(1);
+  await expect(review.getByRole('button', { name: 'High risk: Charges stop being idempotent.' })).toHaveCount(1);
   await scheme('dark');
-  await page.screenshot({ path: join(proofDir, '01-high-tree-and-diff-dark.png') });
+
+  // Hover: the card opens; the pointer leaving closes it.
+  await barsOf(review, retry).scrollIntoViewIfNeeded();
+  await barsOf(review, retry).hover();
+  await expect(riskCard()).toBeVisible();
+  for (const w of ['Risk', 'High', 'your rule “Anything in billing or charges.”', 'Each retry charges the card twice.']) await expect(riskCard()).toContainText(w);
+  await page.mouse.move(4, 450);
+  await expect(riskCard()).toHaveCount(0);
+  // Keyboard focus: the card opens; Escape closes it and the review stays.
+  await barsOf(review, client).focus();
+  await expect(riskCard()).toContainText('Charges stop being idempotent.');
+  await page.keyboard.press('Escape');
+  await expect(riskCard()).toHaveCount(0);
+  await expect(review).toBeVisible();
+  // A press pins it (it stays when the pointer leaves); a second press, and a press outside, close it.
+  await openCard(review, retry, ['Each retry charges the card twice.']);
+  await page.mouse.move(4, 450);
+  await page.waitForTimeout(700);
+  await expect(riskCard()).toBeVisible();
+  await barsOf(review, retry).click();
+  await expect(riskCard()).toHaveCount(0);
+  await barsOf(review, retry).click();
+  await expect(riskCard()).toBeVisible();
+  const tree = (await page.locator('[data-review-files]').boundingBox())!;
+  await page.mouse.click(tree.x + tree.width / 2, tree.y + tree.height - 24);
+  await expect(riskCard()).toHaveCount(0);
+
+  // The header's places stepper opens each place's card in turn, one at a time.
+  const stepper = review.locator('[data-pull-risk-places]');
+  await expect(stepper).toHaveText('2 places');
+  await stepper.click();
+  await expect(riskCard()).toContainText('Each retry charges the card twice.');
+  await expect(riskCard()).toBeInViewport();
+  await stepper.click();
+  await expect(riskCard()).toContainText('Charges stop being idempotent.');
+  await expect(riskCard()).toHaveCount(1);
+  await expect(riskCard()).toBeInViewport();
+  await page.keyboard.press('Escape');
+  await expect(riskCard()).toHaveCount(0);
+
+  await review.locator('[data-guide-file-shell="src/charges/retry.ts"]').scrollIntoViewIfNeeded();
+  await openCard(review, retry, ['Each retry charges the card twice.']);
+  await page.screenshot({ path: join(proofDir, '01-high-card-dark.png') });
+  await page.keyboard.press('Escape');
 });
 
 test('a Medium PR: two filled bars, on its one named file and its one range', async () => {
@@ -551,8 +586,12 @@ test('a Medium PR: two filled bars, on its one named file and its one range', as
   await expect.poll(() => diffMarks(review)).toEqual(['src/receipts/send.ts additions 5']);
   // The line the first build drew its mark over: now the mark sits at the edge, filled with the line's colour.
   await expectNoOverlap(review, { file: 'src/receipts/send.ts', column: 'additions', line: 5 }, { long: true });
+  await expect(review.getByRole('button', { name: 'Medium risk: It looks the charge up before sending.' })).toHaveCount(1);
   await scheme('dark');
-  await page.screenshot({ path: join(proofDir, '02-medium-tree-and-diff-dark.png') });
+  await openCard(review, { file: 'src/receipts/send.ts', column: 'additions', line: 5 }, ['Medium', 'It looks the charge up before sending.']);
+  await expect(riskCard()).toHaveAttribute('data-risk-card', 'medium');
+  await page.screenshot({ path: join(proofDir, '02-medium-card-dark.png') });
+  await page.keyboard.press('Escape');
 });
 
 test('light theme close-ups of both marks', async () => {
@@ -570,8 +609,16 @@ test('light theme close-ups of both marks', async () => {
     g = await lineGeometry(review, ref);
   }).toPass({ timeout: 15_000 });
   await page.waitForTimeout(300);
+  await openCard(review, ref, ['Each retry charges the card twice.']);
   g = await lineGeometry(review, ref);
-  await page.screenshot({ path: join(proofDir, '03-closeup-diff-light.png'), clip: { x: g.visibleRight - 240, y: g.line.y - g.lineHeight, width: 240, height: g.lineHeight * 3 } });
+  const card = (await riskCard().boundingBox())!;
+  const left = Math.min(card.x, g.visibleRight - 240) - 12;
+  const top = g.line.y - g.lineHeight;
+  await page.screenshot({
+    path: join(proofDir, '03-closeup-diff-card-light.png'),
+    clip: { x: left, y: top, width: g.visibleRight + 12 - left, height: Math.max(card.y + card.height, g.line.y + g.lineHeight * 2) + 12 - top },
+  });
+  await page.keyboard.press('Escape');
 });
 
 test('a Low PR: no marks anywhere', async () => {
@@ -580,6 +627,7 @@ test('a Low PR: no marks anywhere', async () => {
   await expect(review.locator('[data-guide-file-shell="README.md"]')).toBeVisible();
   await expect(treeMarks()).toHaveCount(0);
   expect(await diffMarks(review)).toEqual([]);
+  await expect(review.locator('[data-pull-risk-places]')).toHaveCount(0);
   await scheme('dark');
   await page.screenshot({ path: join(proofDir, '04-low-no-marks-dark.png') });
 });
@@ -617,7 +665,10 @@ test('long lines: split, unified and wrapped, old and new sides, the mark covers
     }
     await scheme('dark');
     await review.locator('[data-guide-file-shell="charges.ts"]').scrollIntoViewIfNeeded();
-    await page.screenshot({ path: join(proofDir, '05-long-line-split-dark.png') });
+    // The card on a long line's bars: at the column's right edge, wholly on screen, not cut by the column.
+    await openCard(review, { file: 'charges.ts', column: 'additions', line: 2 }, ['Medium', 'The request now carries a key.']);
+    await page.screenshot({ path: join(proofDir, '05-long-line-split-card-dark.png') });
+    await page.keyboard.press('Escape');
     const tree = (await treeRow('charges.ts').boundingBox())!;
     const other = (await treeRow('CHANGELOG.md').boundingBox())!;
     const top = Math.min(tree.y, other.y) - 34;
@@ -633,7 +684,9 @@ test('long lines: split, unified and wrapped, old and new sides, the mark covers
       await expectNoOverlap(review, { file: 'charges.ts', column: 'unified', line, type }, { long });
     }
     await review.locator('[data-guide-file-shell="charges.ts"]').scrollIntoViewIfNeeded();
-    await page.screenshot({ path: join(proofDir, '06-long-line-unified-dark.png') });
+    await openCard(review, { file: 'charges.ts', column: 'unified', line: 2, type: 'change-deletion' }, ['The old request had none.']);
+    await page.screenshot({ path: join(proofDir, '06-long-line-unified-card-dark.png') });
+    await page.keyboard.press('Escape');
 
     // Wrapped, split and unified: the text wraps before the mark.
     for (const style of ['split', 'unified'] as const) {
@@ -651,5 +704,34 @@ test('long lines: split, unified and wrapped, old and new sides, the mark covers
   } finally {
     writeFileSync(join(proofDir, 'contrast.json'), `${JSON.stringify(contrastSeen, null, 2)}\n`);
     await setLook('split', 'scroll');
+  }
+});
+
+test('a phone: a tap on the bars opens the card, inside the screen', async ({ browser }) => {
+  // The Medium PR's review, at its own address, on a phone.
+  await openReview(602);
+  await expect(page.locator(`[data-pull-review="${keyOf(602)}"]`)).toBeVisible();
+  const hash = await page.evaluate(() => location.hash);
+  expect(hash).toContain('layer=');
+  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: 'dark', hasTouch: true, isMobile: true, deviceScaleFactor: 2 });
+  try {
+    const tab = await phone.newPage();
+    await tab.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+    await tab.goto(`${url}${hash}`);
+    const bars = tab.locator(`[data-pull-review="${keyOf(602)}"] [data-host-line-mark]`).first();
+    await expect(bars).toBeAttached({ timeout: 30_000 });
+    await expect(bars).toHaveAttribute('aria-label', 'Medium risk: It looks the charge up before sending.');
+    await bars.scrollIntoViewIfNeeded();
+    await bars.tap();
+    const card = tab.locator('.ib-riskcard');
+    await expect(card).toContainText('It looks the charge up before sending.');
+    await expect(card).toBeInViewport({ ratio: 1 });
+    await tab.waitForTimeout(250);
+    const box = (await card.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(390);
+    await tab.screenshot({ path: join(proofDir, '08-phone-card-dark.png') });
+  } finally {
+    await phone.close();
   }
 });

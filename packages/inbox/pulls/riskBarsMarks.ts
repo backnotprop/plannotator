@@ -1,7 +1,8 @@
 /**
  * The risk bars in the diff (approval "review-risk-bars"): one mark at the right edge of each named range's first
- * line, drawn by the line itself through review-editor's host line marks (`hostLineMarks.ts`), so it never covers
- * code. The tree's mark is review-editor's `RISK_BARS_PARTS`: the same three bars.
+ * line, a button at the line's end through review-editor's host line marks (`hostLineMarks.ts`), so it never covers
+ * code; hovering, focusing or pressing it opens its card (`RiskBarsCard.tsx`). The tree's mark is review-editor's
+ * `RISK_BARS_PARTS`: the same three bars.
  *
  * The bars: 2px wide, 2px apart, 6, 9 and 12px tall, standing on one baseline, whole pixels so they stay sharp at 1x
  * and 2x; High fills all three, Medium two with the third faint (the shape still reads "2 of 3"). Tone: review-editor's
@@ -9,7 +10,7 @@
  */
 import { RISK_TONE, RISK_TONE_FAINT } from './riskBarsTone';
 import type { GuideLineMark } from '../guide/types';
-import { riskBarsWord, type RiskBars, type RiskBarsLevel } from './riskBars';
+import { riskBarsWord, type RiskBars, type RiskBarsLevel, type RiskBarsNote } from './riskBars';
 
 const bar = (color: string) => `linear-gradient(${color}, ${color})`;
 // The bars' top, whole pixels down from the line's: the 12px group centred in the line.
@@ -28,9 +29,15 @@ export function riskBarsPaint(level: RiskBarsLevel): string {
   ].join(' ');
 }
 
+/** The mark's accessible name: "High risk: <reason>" (its places' reasons, in order), or the level alone with none. */
+export function riskBarsLabel(level: RiskBarsLevel, notes: readonly RiskBarsNote[]): string {
+  const why = notes.map((note) => note.why).filter(Boolean).join(' ');
+  return why ? `${riskBarsWord[level]}: ${why}` : riskBarsWord[level];
+}
+
 /** Each named range the diff draws, as a mark on its first line. */
 export function riskBarsLineMarks(bars: RiskBars | null): GuideLineMark[] {
   if (!bars) return [];
   const paint = riskBarsPaint(bars.level);
-  return bars.ranges.map((range) => ({ filePath: range.file, side: range.side, line: range.line, label: riskBarsWord[bars.level], paint }));
+  return bars.ranges.map((range) => ({ id: range.id, filePath: range.file, side: range.side, line: range.line, label: riskBarsLabel(bars.level, range.notes), paint }));
 }
