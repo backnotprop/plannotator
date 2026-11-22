@@ -225,7 +225,7 @@ export function ImageAttachmentView({
   // whole on a phone; a tall screenshot fits its width from the top.
   const phone = usePhone();
   // Pictures and files added to the comment (the reply box's paperclip, paste and drop): they go with its words.
-  const commentFiles = useCommentFiles({ initial: waiting?.files, phone, focus: () => textRef.current?.focus({ preventScroll: true }) });
+  const commentFiles = useCommentFiles({ initial: waiting?.files, phone, inCard: composer !== null, focus: () => textRef.current?.focus({ preventScroll: true }) });
   const wide = natural !== null && natural.width > natural.height * WIDE_IMAGE_RATIO;
   const tall = natural !== null && natural.height > natural.width * 2;
   const fitAxis: FitAxis = natural ? imageFitAxis(natural, phone) : 'contain';
@@ -365,6 +365,7 @@ export function ImageAttachmentView({
   const commentCard = (
     <div className="ib-ccard" onPaste={commentFiles.onPaste} {...commentFiles.drop?.handlers}>
       {commentFiles.tiles}
+      {commentFiles.dropTarget}
       {kept && <KeptMarkup image={kept.image} onRedraw={() => setAnnotating(true)} onRemove={() => removeKept(kept.id)} />}
       {markup && (
         <Tip content="Your marked-up copy rides this comment">

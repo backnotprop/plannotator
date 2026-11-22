@@ -198,14 +198,6 @@ async function renderFull(name: string) {
   return host;
 }
 
-async function openFull(name: string) {
-  await act(async () => {
-    window.location.hash = `#thread=${world.openIn.thread}&file=${world.openIn.ids[name]}&view=full`;
-    window.dispatchEvent(new HashChangeEvent('hashchange'));
-  });
-  await until(() => host!.querySelector(`[data-attachment-pane="${world.openIn.ids[name]}"][data-full-view]`) !== null, `${name} full screen`);
-}
-
 const card = () => host!.querySelector<HTMLElement>('[data-fcomp]');
 const radio = (which: 'comment' | 'reply') => card()!.querySelector<HTMLButtonElement>(`[role="radio"][data-fcomp-mode="${which}"]`)!;
 const replyField = () => card()?.querySelector<HTMLTextAreaElement>('[data-fcomp-field] textarea') ?? null;
@@ -255,6 +247,13 @@ function pasteFiles(target: HTMLElement, files: File[]): boolean {
     target.dispatchEvent(event);
   });
   return event.defaultPrevented;
+}
+
+/** A key in full screen (→ and ← step files). */
+async function press(key: 'ArrowRight' | 'ArrowLeft') {
+  await act(async () => {
+    (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key, code: key, bubbles: true, cancelable: true }));
+  });
 }
 
 const allDone = (scope: ParentNode | null) => tiles(scope).length > 0 && tiles(scope).every((t) => t.getAttribute('data-compose-file') === 'done');
@@ -345,9 +344,13 @@ test.skipIf(!hasDom)('the comment’s words and pictures wait when the file clos
   type(commentField()!, 'Crop this tighter.');
   choose(commentClip()!, [image('legend-d.png')]);
   await until(() => allDone(commentFiles()), 'the picture uploaded');
-  await openFull('plan.md');
-  await openFull('shot.png');
-  await until(() => card() !== null && commentField() !== null, 'the image again');
+  const shot = world.openIn.ids['shot.png'];
+  // → steps to the next file (nothing asks), ← comes back.
+  await act(async () => (document.activeElement as HTMLElement | null)?.blur());
+  await press('ArrowRight');
+  await until(() => host!.querySelector(`[data-attachment-pane="${shot}"]`) === null, 'the next file');
+  await press('ArrowLeft');
+  await until(() => host!.querySelector(`[data-attachment-pane="${shot}"]`) !== null && commentField() !== null, 'the image again');
   expect(commentField()!.value).toBe('Crop this tighter.');
   expect(names(commentFiles())).toEqual(['legend-d.png']);
   expect(tiles(commentFiles())[0]!.getAttribute('data-compose-file')).toBe('done');

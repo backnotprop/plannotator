@@ -90,6 +90,8 @@ export interface CommentFiles {
   onPaste: (event: ClipboardEvent<HTMLElement>) => void;
   /** Beside the thread: the row's own drop target (its handlers and the "Drop to attach" cover). In full screen the card takes the drop. */
   drop: { handlers: ReturnType<typeof useFileDrop>['handlers']; cover: ReactNode } | null;
+  /** In full screen's card: drawn in the row (inside the card's Comment tab), it hands the card's drops to these files. */
+  dropTarget: ReactNode;
   /** The finished uploads as the comment's `images` entries. */
   images: () => ImageAttachment[];
   /** Any file still uploading: Comment waits. */
@@ -106,27 +108,26 @@ export interface CommentFiles {
   add: (list: FileList) => void;
 }
 
-/** Full screen's card hands its drops on the Comment tab to these files (for a row whose files are held above the card). */
-export function useCommentDropTarget(files: Pick<CommentFiles, 'on' | 'add'>): void {
+/** Full screen's card hands its drops on the Comment tab to `add`: drawn inside the tab, where the card's slot is. */
+function CommentDropTarget({ add }: { add: (list: FileList) => void }) {
   const slot = useContext(CommentDropContext);
-  const { on, add } = files;
-  useEffect(() => (slot && on ? slot.register(add) : undefined), [slot, on, add]);
+  useEffect(() => (slot ? slot.register(add) : undefined), [slot, add]);
+  return null;
 }
 
 /**
  * A comment row's files. `initial`: the uploads its draft kept (the file closed and opened again). `phone`: the
- * paperclip's size and its picker (the photo library), as the reply box's.
+ * paperclip's size and its picker (the photo library), as the reply box's. `inCard`: the row is full screen's Comment
+ * tab, whose card takes the drop (the row draws `dropTarget`); beside the thread the row is its own drop target.
  */
-export function useCommentFiles({ initial, phone = false, focus }: { initial?: readonly InboxUpload[] | null; phone?: boolean; focus?: () => void }): CommentFiles {
+export function useCommentFiles({ initial, phone = false, inCard = false, focus }: { initial?: readonly InboxUpload[] | null; phone?: boolean; inCard?: boolean; focus?: () => void }): CommentFiles {
   const host = useContext(CommentFilesContext);
-  const slot = useContext(CommentDropContext);
   const on = host !== null;
   const files = useComposeFiles(initial ?? [], { machine: host?.machine ?? null, ...(host ? { uploader: host.uploader } : {}) });
   const attach = useCallback((list: FileList) => (phone ? files.attach(list) : files.add(list)), [files.attach, files.add, phone]);
-  const own = useFileDrop((list) => files.add(list), on && slot === null);
+  const own = useFileDrop((list) => files.add(list), on && !inCard);
   // In full screen's card the drop is the card's: it hands it here.
   const add = useCallback((list: FileList) => void files.add(list), [files.add]);
-  useCommentDropTarget({ on, add });
   const clip = on ? <AttachFilesButton className="ib-fvb ib-fcomp-clip ib-cclip" iconSize={phone ? 18 : 15} phone={phone} inputData="data-comment-attach" onFiles={attach} /> : null;
   const tiles =
     files.files.length > 0 ? (
@@ -152,7 +153,7 @@ export function useCommentFiles({ initial, phone = false, focus }: { initial?: r
       if (on) files.paste(event);
     },
     drop:
-      on && slot === null
+      on && !inCard
         ? {
             handlers: own.handlers,
             cover: own.over ? (
@@ -163,6 +164,7 @@ export function useCommentFiles({ initial, phone = false, focus }: { initial?: r
             ) : null,
           }
         : null,
+    dropTarget: on && inCard ? <CommentDropTarget add={add} /> : null,
     images: () => current().flatMap((file) => (file.state === 'done' && file.upload ? [commentImageOf(file.upload)] : [])),
     uploading: files.uploading,
     ready: files.uploaded.length,

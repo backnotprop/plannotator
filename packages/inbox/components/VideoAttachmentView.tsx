@@ -141,7 +141,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
   const [frame, setFrame] = useState<Frame | null>(() => (waiting?.frame ? { blob: waiting.frame, url: URL.createObjectURL(waiting.frame) } : null));
   const [markup, setMarkup] = useState<ImageAttachment | null>(waiting?.markup ?? null);
   // Pictures and files added to the comment (the reply box's paperclip, paste and drop): they go with its words.
-  const files = useCommentFiles({ initial: waiting?.files, phone, focus: () => textRef.current?.focus({ preventScroll: true }) });
+  const files = useCommentFiles({ initial: waiting?.files, phone, inCard: fullComposer !== null, focus: () => textRef.current?.focus({ preventScroll: true }) });
   /** The row's words as a save took them: the file closing before the save answers (and the row clears) keeps no draft of them. */
   const sentWords = useRef<string | null>(null);
   const sendRow = async (annotation: Annotation) => {
@@ -400,6 +400,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
   const commentCard = (
     <div className="ib-ccard" onPaste={files.onPaste} {...files.drop?.handlers}>
       {files.tiles}
+      {files.dropTarget}
       {chip}
       {kept ? (
         <KeptMarkup image={kept.image} onRedraw={() => setAnnotating(true)} onRemove={() => removeKept(kept.id)} wide />

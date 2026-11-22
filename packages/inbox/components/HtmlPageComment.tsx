@@ -34,7 +34,7 @@ import { useRowDraft } from '../fileCommentDrafts';
 import { InboxComposerField, type InboxComposerTags } from './ComposerField';
 import { FullScreenCommentBin } from './FullScreenComposer';
 import { TagNotes } from './TagPicker';
-import { useCommentDropTarget, useCommentFiles, type CommentFiles } from '../commentFiles';
+import { useCommentFiles, type CommentFiles } from '../commentFiles';
 import { usePhone } from '../phone';
 import type { InboxUpload } from '@plannotator/core/inbox-types';
 
@@ -88,7 +88,7 @@ export function useHtmlPageComment({ enabled, fileKey, threadId, name, viewer, t
   const expected = useRef<string | null>(null);
   /** Pictures and files added to the comment (a phone's card: the paperclip and a paste). They go with its words. */
   const fieldRef = useRef<HTMLTextAreaElement | null>(null);
-  const files = useCommentFiles({ phone: true, focus: () => fieldRef.current?.focus({ preventScroll: true }) });
+  const files = useCommentFiles({ phone: true, inCard: true, focus: () => fieldRef.current?.focus({ preventScroll: true }) });
   const clearFiles = files.clear;
   /** Files wait in the card: as words do, they keep it open. */
   const holdsFiles = useRef(false);
@@ -236,7 +236,6 @@ function HtmlCommentCard({
   stepping: RefObject<boolean>;
 }) {
   const enterSavesComment = useConfigValue('enterSavesComment');
-  useCommentDropTarget(files);
   const pin = draft.intent === 'compose';
   // The words it is on, as the approved card reads; an element with none (a picture) has its kind.
   const target = shortLabel(draft.annotation.originalText) || draft.label || '';
@@ -269,6 +268,7 @@ function HtmlCommentCard({
       </div>
       <div className="ib-ccard" onPaste={files.onPaste}>
         {files.tiles}
+        {files.dropTarget}
         <div className="ib-fcomp-field">
           <InboxComposerField
             textareaRef={fieldRef}
@@ -345,7 +345,7 @@ export function HtmlPageCommentRow({
   wordsRef.current = words;
   const fieldRef = useRef<HTMLTextAreaElement | null>(null);
   // Pictures and files added to the comment (the reply box's paperclip, paste and drop): they go with its words.
-  const files = useCommentFiles({ initial: waiting?.files ?? parked?.files, phone: usePhone(), focus: () => fieldRef.current?.focus({ preventScroll: true }) });
+  const files = useCommentFiles({ initial: waiting?.files ?? parked?.files, phone: usePhone(), inCard: true, focus: () => fieldRef.current?.focus({ preventScroll: true }) });
   const filesRef = useRef(files);
   filesRef.current = files;
   const [saving, setSaving] = useState(false);
@@ -407,6 +407,7 @@ export function HtmlPageCommentRow({
     <div className="ib-fcomp-comment" data-image-composer="" data-html-page-comment="" hidden={hidden || undefined}>
       <div className="ib-ccard" onPaste={files.onPaste}>
         {files.tiles}
+        {files.dropTarget}
         <div className="ib-fcomp-field">
           <InboxComposerField
             textareaRef={fieldRef}
