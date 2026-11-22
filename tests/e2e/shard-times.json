@@ -219,6 +219,7 @@
   "inbox-supersede-read-webkit.spec.ts": 9,
   "inbox-tag-colors.spec.ts": 4,
   "inbox-tag-handoff.spec.ts": 44,
+  "inbox-tags-sort.spec.ts": 11,
   "inbox-tags.spec.ts": 27,
   "inbox-tailnet-owner.spec.ts": 6,
   "inbox-tailscale.spec.ts": 7,
