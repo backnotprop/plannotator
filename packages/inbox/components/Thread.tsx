@@ -11,7 +11,7 @@ import { noteReviews } from '../contextNotes/model';
 import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { inboxLaunchedSession } from '@plannotator/core/inbox-run-line';
 import { ThreadTagLine } from './ThreadTagLine';
-import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, inboxLaunchInRex, inboxLaunchRexUnstoppable, inboxLaunchStops, inboxPersonAnsweredSince, isInboxNote, isInboxT3WaitReason, type InboxAnnotationRecord, type InboxAttachmentState, type InboxDraftFile, type InboxInlineImage, type InboxMessageWire, type InboxQuestion, type InboxReplyDraft, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
+import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, inboxLaunchInRex, inboxLaunchRexUnstoppable, inboxLaunchStops, inboxPersonAnsweredSince, inboxSessionlessSend, isInboxNote, isInboxT3WaitReason, type InboxAnnotationRecord, type InboxAttachmentState, type InboxDraftFile, type InboxInlineImage, type InboxMessageWire, type InboxQuestion, type InboxReplyDraft, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { isQuestionAnswerEmpty, type QuestionAnswer } from '@plannotator/core/question-block';
 import { StartedBy } from './StartedBy';
 import { earlierRunsLabel, RunDivider, runFolds, ScheduledFoot } from '../scheduled/thread';
@@ -65,6 +65,7 @@ import { PermissionCard } from './PermissionCard';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { threadLink } from '../rowMenu';
 import { ArmScope, createMessageArms } from '../messageArming';
+import { usePassedNew, useWatchNew } from '../thread/pillWatch';
 import { reportUnsentReply } from '../unsent';
 import { registerReloadFlush } from '../stalePage';
 import { clearLateVoiceMiss, LATE_VOICE_MISSED, useLateVoiceMiss } from '../lateVoice';
@@ -126,8 +127,7 @@ import { VoiceMicButton, VoiceStatusLine } from './VoiceMic';
 import { ReplySummary } from './ReplySummary';
 import { ReplyRow } from './ReplyRow';
 import { sendFailure } from '../sendFailure';
-import { ReplyRecipient } from './ReplyRecipient';
-import { PhoneReplyRecipient } from './PhoneReplyRecipient';
+import { ReplyRecipientControl } from '../parts/ReplyRecipientControl';
 import { aimable, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, sessionFolder, toggleRecipient, type RecipientRow } from '../replyRecipients';
 import { replyRecipientList } from '../thread/recipientList';
 import { isStartRow, replyStartOf } from '../thread/replyStart';
@@ -227,7 +227,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   // Thread steps (approval "inbox-thread-steps"): the lists with steps, newest first; none while the switch is off.
-  const stepLists = useThreadSteps(thread.thread_id, threadSteps?.on ?? false, threadSteps?.subscribe ?? null);
+  const stepLists = useThreadSteps(thread.thread_id, threadSteps?.on ?? false, threadSteps?.subscribe ?? null, undefined, parked);
   // The person answered since a list (a reply or a 👍): that list no longer waits, by the row's rule (`steps_waiting`).
   const stepsAnswered = (since: string) => inboxPersonAnsweredSince(thread.messages, since);
   const root = thread.messages[0]!;
@@ -1033,7 +1033,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const wordsAsking = askingSessionOf(thread, { skip: skipIds, carries: sendCarries });
   const askerToWatch = wordsAsking && askerCanEnd(wordsAsking) ? wordsAsking.session : null;
   // New message (record 5.x): the project's live sessions, and what the button opened.
-  const { model: live, load: loadLive } = useLiveSessions(thread.thread_id, askerToWatch);
+  const { model: live, load: loadLive } = useLiveSessions(thread.thread_id, askerToWatch, true, undefined, parked);
   // A launched agent that stopped is not "ended": a reply starts it again (`claude respawn`), so no route choice.
   const launchResumes = !!launched && !launched.deleted_at && runLine !== undefined && runLine?.state !== 'missing' && runLine?.state !== 'failed';
   // Only the launched session (the root's `to`, the one the server's sweep starts again): another agent in the thread that ended is gone.
@@ -1041,7 +1041,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // Every other session this Send reaches is checked too (handoff "multi-agent-thread-model", failure 2): a pick
   // on an ended session's question, while the words go to a live one, opens the choice for that answer.
   const otherSessions = otherSendSessions(thread, { skip: skipIds, carries: sendCarries, records }, wordsAsking).filter((s) => s.session !== resumingSession);
-  const otherEnded = useEndedSessions(thread.thread_id, otherSessions.map((s) => s.session));
+  const otherEnded = useEndedSessions(thread.thread_id, otherSessions.map((s) => s.session), parked);
   const endedOthers = otherEnded.ended;
   const wordsEnded = !resolved && wordsAsking?.session !== resumingSession && askerHasEnded(wordsAsking, live);
   const endedOther = resolved || wordsEnded ? null : (otherSessions.filter((s) => endedOthers.has(s.session)).at(-1) ?? null);
@@ -1055,7 +1055,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // thread with more than one agent, read with the box closed too: the recipient pill and the message heads name
   // agents by their folders (approval "inbox-reply-recipient"), and a head must not change when the box opens.
   const multiAgent = participants.length > 1 || activeHandoff(thread) !== null || tookOverReply(thread) !== null;
-  const taggable = useTaggable(thread.thread_id, (box.open || !!file || multiAgent) && !resolved);
+  const taggable = useTaggable(thread.thread_id, (box.open || !!file || multiAgent) && !resolved, parked);
   // Each session's label (issue #2450): an agent message's author reads it, as the list read it.
   const sessionLabels = useSessionLabels();
   const { sessions, sessionNames } = useThreadSessions(participants, agentContext, machine, sessionLabels);
@@ -1119,8 +1119,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const anyOtherLive = asking !== null && othersLive(asking, live).length > 0;
   /** Another session can take an ended session's reply: a live one, or a new one (the start row). */
   const anotherTakes = anyOtherLive || replyStart !== null;
-  // Who gets the reply (approval "inbox-reply-recipient", option E): a pill under the box, right, in a thread with
-  // more than one agent, or one whose only agent ended while another can take it (it does the old route choice's job).
+  // Who gets the reply (approval "inbox-reply-recipient"): in a thread with more than one agent, or one whose only
+  // agent ended while another can take it (it does the old route choice's job).
   const pillActive = !resolved && (multiAgent || (askerEnded && anotherTakes));
   /** Whom the words go to unless the person aims them: the session of the message they answer (wordsMessage). */
   const rcptDefault = (() => {
@@ -1136,8 +1136,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** Sessions a Send was refused for as not live any more (the race): ended in the list from then on. */
   const [rcptGone, setRcptGone] = useState<ReadonlyMap<string, string | null>>(() => new Map());
   const rcptAgents = useMemo(
-    (): RecipientRow[] => (pillActive ? replyRecipientList({ participants, thread, askerEnded, asking, live, taggable, gone: rcptGone, rcptDefault, start: replyStart }) : []),
-    [pillActive, participants, thread, askerEnded, asking, live, taggable, rcptGone, rcptDefault, replyStart],
+    (): RecipientRow[] => (pillActive ? replyRecipientList({ participants, thread, askerEnded, asking, live, taggable, gone: rcptGone, rcptDefault, start: replyStart, givenNameOf: (session) => givenName(agentNames, session) }) : []),
+    [pillActive, participants, thread, askerEnded, asking, live, taggable, rcptGone, rcptDefault, replyStart, agentNames],
   );
   /** Whether a session can be the first recipient (a typed tag's, not in the list, is live). */
   const rcptAlone = (id: string) => rcptAgents.find((r) => r.session === id)?.alone !== false;
@@ -1484,9 +1484,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         stopHold();
         const inMessage = `[data-message-id="${CSS.escape(record.message_id)}"]`;
         const id = CSS.escape(record.id);
-        const mark = bodyRef.current?.querySelector<HTMLElement>(`${inMessage} [data-bind-id="${id}"], ${inMessage} [data-highlight-id="${id}"], ${inMessage} [data-diagram-badge="${id}"]`);
-        // A comment on a diagram part: the diagram is rung, and its own selection brings the part into view.
-        const onDiagram = annotationOf(record).diagramAnchor != null;
+        const mark = bodyRef.current?.querySelector<HTMLElement>(`${inMessage} [data-bind-id="${id}"], ${inMessage} [data-highlight-id="${id}"], ${inMessage} [data-diagram-badge="${id}"], ${inMessage} [data-html-embed-comments~="${id}"]`);
+        // A comment on a diagram part (or an element of a live html block): the diagram (block) is rung, and its own selection brings the part into view.
+        const onDiagram = annotationOf(record).diagramAnchor != null || annotationOf(record).htmlBlockAnchor != null;
         const target = mark?.closest<HTMLElement>('[data-diagram-block]') ?? mark ?? articleOf(record.message_id);
         if (!target) return;
         target.scrollIntoView?.({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' });
@@ -1605,22 +1605,18 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // lives in `pillCount`, which only the pill reads: a scroll redraws the pill, never every message of the thread.
   const [chrome, setChrome] = useState({ pill: false });
   const [pillCount] = useState(createCountStore);
-  /** The new messages the person has had on screen this visit (newBelow): the pill never counts them again. */
-  const passed = useRef<{ threadId: string; ids: Set<string> }>({ threadId: thread.thread_id, ids: new Set() });
-  const passedIds = useCallback((): Set<string> => {
-    if (passed.current.threadId !== thread.thread_id) passed.current = { threadId: thread.thread_id, ids: new Set() };
-    return passed.current.ids;
-  }, [thread.thread_id]);
+  /** The new messages the person has had on screen this visit (newBelow), and which can count (thread/pillWatch.ts). */
+  const { passedIds, watch: pillWatch } = usePassedNew(thread.thread_id);
   /** Whether what is on screen now counts as shown: the tab visible and nothing over the thread. */
   const showingRef = useRef(true);
   const updateChrome = useCallback(() => {
     const body = bodyRef.current;
     if (!body) return;
     const shown = showingRef.current && (typeof document === 'undefined' || document.visibilityState !== 'hidden');
-    const count = newBelow(body, passedIds(), shown).length;
+    const count = newBelow(body, passedIds(), shown, pillWatch.current).length;
     pillCount.set(count);
     setChrome((current) => (current.pill === count > 0 ? current : { pill: count > 0 }));
-  }, [passedIds, pillCount]);
+  }, [passedIds, pillCount, pillWatch]);
 
   // ── Seen on sight (design record "inbox-new-in-open-thread", variant A) ──
   // An agent message that arrives while the thread is open counts as seen once
@@ -1632,6 +1628,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const arrivals = useMemo(() => (onSeen ? unseenArrivals(thread.messages, seenThrough) : []), [onSeen, thread.messages, seenThrough]);
   /** The arrivals still to be seen (and those seen whose look is not recorded yet): the pill counts these first. */
   const arrivalIds = useMemo(() => new Set(arrivals.map((m) => m.id)), [arrivals]);
+  useWatchNew(pillWatch, arrivalIds, showNew ? fresh : NO_IDS, arms.element);
   const candidates = arrivals.filter((m) => !sightedIds.has(m.id) && !fold.folded.has(m.id) && !hiddenNow.has(m.id)).map((m) => m.id);
   /** A file over the thread: full screen, or where it cannot sit beside it (a phone, a stacked window). */
   const fileCovers = file !== null && shownFull;
@@ -2696,7 +2693,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     setStale([]);
     setGuard(false);
   };
-  // The action items whose Done or Can't do it waits in the draft (approval "inbox-action-items-in-reply"):
+  // The action items whose Done, Can't do it or Skip waits in the draft (approval "inbox-action-items-in-reply"):
   // listed in the reply box, counted beside Send ("Draft · 1 done"), carried by the Send.
   const draftActions: ActionRow[] = thread.messages.flatMap((m) =>
     m.author.kind !== 'agent'
@@ -2707,7 +2704,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           return [{ id: `${m.id}/${a.key}`, messageId: m.id, number: a.position + 1, prompt: a.prompt, outcome: mine.outcome, note: mine.note, seen: a.action_result?.by === 'agent' }];
         }),
   );
-  const draftCant = draftActions.filter((a) => a.outcome === 'cant' && !a.seen).length;
+  const [draftCant, draftSkipped] = (['cant', 'skip'] as const).map((o) => draftActions.filter((a) => a.outcome === o && !a.seen).length);
   /** Picks, annotations or action items wait for a Send. */
   const waiting = picksCount > 0 || records.length > 0 || draftActions.length > 0;
   /** The box is closed and its words are kept as a draft (Cancel or Escape kept them): Edit draft brings them back. */
@@ -2718,7 +2715,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** What a phone's Edit draft counts (approval "reply-bar-pairs"): the picks, comments and marked action items. */
   const draftCount = picksCount + records.length + draftActions.length;
   /** The same in words: "your reply, 1 pick, 1 comment". */
-  const draftWords = unsentWords({ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant, cant: draftCant }, false);
+  const draftWords = unsentWords({ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant - draftSkipped, cant: draftCant, skipped: draftSkipped }, false);
 
   // The answers this reply carries, as the cards show them now: a saved pick, or one being
   // saved. The box lists them live (ReplyAnswers); they never go into the words, where a
@@ -3577,7 +3574,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const waitingOnWake = replyWaiting || (!replySession && ackWaiting !== null);
   // How that session is connected now ("Queued", "Sending", Send now), and, for compose, whether it
   // stopped before it took it (after the asker grace). Read every few seconds while the reply waits.
-  const { model: pendingLive, load: loadPendingLive } = useLiveSessions(thread.thread_id, recipientSession, waitingOnWake, 3_000);
+  const { model: pendingLive, load: loadPendingLive } = useLiveSessions(thread.thread_id, recipientSession, waitingOnWake, 3_000, parked);
   const undelivered = !!lastTo && !last.delivery && pendingLive?.asker?.session === lastTo.session && pendingLive.asker.live === false;
   // Taken by that session's connection, which stopped while delivering it: that session never gets it, so it may move.
   const stuck = !!replySession && !last.delivery && pendingLive?.asker?.session === replySession && pendingLive.asker.stuck?.includes(last.id) === true;
@@ -3591,7 +3588,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const anotherCanTake = (pendingLive?.sessions ?? []).some((s) => s.session !== lastTo?.session && !lastTags.some((tag) => tag.session === s.session && tag.delivery && !tag.handed_away));
   const ownerHost = lastTo?.host ?? (repliedTo?.author.kind === 'agent' ? (repliedTo.author.host ?? null) : null);
   const waitingTags = lastTags.filter((t) => t.wakes && !t.delivery).map((t) => t.session);
-  const { connections: tagConnections, load: loadTagConnections } = useTagConnections(thread.thread_id, waitingTags, waitingTags.length > 0);
+  const { connections: tagConnections, load: loadTagConnections } = useTagConnections(thread.thread_id, waitingTags, waitingTags.length > 0, parked);
   const tagLines = lastTags.map((tag) => {
     const name = tagName(tag, ownerHost, replySession);
     const line = tagDeliveryLine(tag, name, tagConnections[tag.session], whenTime, last.id);
@@ -3628,7 +3625,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             wakes: (wakingSession !== null || (askedSession !== null && recipientConnection != null)) && !uncertainItem(recipientConnection, last.id),
             sendingNow: !!last.deliver_now_at,
             connection: recipientConnection,
-            askerEnded: wordsEnded && wordsAsking ? { name: wordsAsking.name } : null,
+            askerEnded: wordsEnded && wordsAsking && !(repliedTo && inboxSessionlessSend(repliedTo)) ? { name: wordsAsking.name } : null, // never for a reply to a script's post
             stuck,
             handed: handedItem(recipientConnection, last.id),
             ...waitInputs(recipientConnection, last.id, { ...last, into_turn: last.delivery?.into_turn ?? null }),
@@ -3819,7 +3816,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const guideTarget = guideRequestTarget(thread);
   const guideSession = guideTarget && guideTargetCanEnd(guideTarget) ? guideTarget.to.session : null;
   const guideWatch = guideSession !== null && guideSession !== askerToWatch ? guideSession : null;
-  const { model: guideLive } = useLiveSessions(thread.thread_id, guideWatch, guideWatch !== null);
+  const { model: guideLive } = useLiveSessions(thread.thread_id, guideWatch, guideWatch !== null, undefined, parked);
   const guideLiveNow = guideSession === null ? null : guideSession === askerToWatch ? live : guideLive;
   const guideEnded = guideSession !== null && guideLiveNow?.asker?.session === guideSession && guideLiveNow.asker.live === false;
   const guideOffered = guideTarget !== null && !guideEnded;
@@ -4194,11 +4191,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     aimReply(next);
     announce(`This reply goes to ${namesList(next.map((id) => rcptAgents.find((r) => r.session === id)?.label ?? id))}.`);
   };
-  // The one place the reply's recipient control splits: a phone's is in the box's row with its sheet (approval
-  // "inbox-phone-composer-picker"), a computer's is the pill. Both show by the same rule (`pillActive`): a thread with
-  // one agent has no control at all.
-  const rcptPill = !pillActive ? null : phone ? (
-    <PhoneReplyRecipient
+  // The reply's recipient control: a phone's in the box's row, a computer's the field's lead (parts/ReplyRecipientControl).
+  const rcptPill = !pillActive ? null : (
+    <ReplyRecipientControl
+      phone={phone}
       rows={rcptAgents}
       chosen={rcptChosen}
       open={rcptOpen}
@@ -4210,8 +4206,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       labels={sessionLabels}
       folderOf={(session) => sessionFolder(session, thread, taggable) ?? thread.project.name}
     />
-  ) : (
-    <ReplyRecipient rows={rcptAgents} chosen={rcptChosen} open={rcptOpen} onOpen={setRcptOpen} onOnly={onlyRecipient} onToggle={toggleReplyRecipient} onTagAnother={tagAnother} labels={sessionLabels} folderOf={(session) => sessionFolder(session, thread, taggable) ?? thread.project.name} />
   );
   const routeChoice = asking ? (
     <RouteChoice
@@ -4326,7 +4320,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   );
 
   // A thread mentioned from outside the box (approval "inbox-drag-threads"): a closed box opens and takes it.
-  useMentionBoxOpener(thread.thread_id, box.open, sending, openBox);
+  useMentionBoxOpener(thread.thread_id, box.open, sending || replyDraft.loadedFor !== thread.thread_id, openBox, hasWords && !sending);
   // The warning toast's Reply: the reply box opens, once.
   useEffect(() => {
     if (replyRequest !== thread.thread_id) return;
@@ -5610,6 +5604,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   ariaLabel={`Reply to ${replyToNames}`}
                   ariaDescribedBy={[showAskerNote ? noteId : null, replyDraft.conflict !== null ? conflictId : null].filter(Boolean).join(' ') || undefined}
                   placeholder="Write a reply. Type / for a skill"
+                  lead={phone ? undefined : rcptPill}
                   destination="your reply"
                   skillFilter={skillFilter}
                   commands={replyCommands}
@@ -5715,7 +5710,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 }
                 chips={replyChips}
                 summary={<ReplySummary skip={replySkip} dropped={dropped.length} comments={takesAnnotations ? { props: commentsListProps, list: commentsList?.card ? null : commentsList, onList: setCommentsList } : null} />}
-                pill={rcptPill}
+                pill={phone ? rcptPill : null}
                 hint={noSkillsHint ? 'No skills are installed' : null}
                 discard={
                   // While the live-session choice is open it stands in for Send and the bin, as it did for Send's
@@ -5876,7 +5871,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               <div className="ib-footstatus" data-foot-status="">
                 <DraftFootNote
                   id={draftNoteId}
-                  unsent={{ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant, cant: draftCant }}
+                  unsent={{ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant - draftSkipped, cant: draftCant, skipped: draftSkipped }}
                   onComments={() => setCommentsList((open) => (open ? null : { at: null }))}
                   commentsOpen={commentsList !== null && !commentsList.card}
                 />

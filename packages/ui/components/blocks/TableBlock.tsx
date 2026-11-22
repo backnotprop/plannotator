@@ -113,7 +113,7 @@ export const TableBlock: React.FC<TableBlockProps> = ({
       {...sourceLineAttrs(block)}
     >
       <div className="overflow-x-auto">
-      <table className="min-w-full border-collapse text-sm">
+      <table className="min-w-full border-collapse text-sm [overflow-wrap:normal]">
         <thead>
           <tr className="border-b border-border">
             {headers.map((header, i) => (

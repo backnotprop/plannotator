@@ -13,7 +13,7 @@ Two providers are supported:
 - **Codex CLI** uses priority-based findings (P0 through P3)
 - **Claude Code** uses a multi-agent pipeline with severity-based findings (Important, Nit, Pre-existing)
 
-Both integrations are derived from official tooling. Claude's review model is based on Anthropic's [Claude Code Review](https://code.claude.com/docs/en/code-review) service and the open-source [code-review plugin](https://github.com/anthropics/claude-code/blob/main/plugins/code-review/README.md). Codex uses [OpenAI Codex CLI](https://github.com/openai/codex) structured output.
+Both integrations are derived from official tooling. Claude's review model is based on Anthropic's [Claude Code Review](https://code.claude.com/docs/en/code-review) service and the open-source [code-review plugin](https://github.com/anthropics/claude-plugins-official/blob/main/plugins/code-review/README.md). Codex uses [OpenAI Codex CLI](https://github.com/openai/codex) structured output.
 
 ## Flow
 

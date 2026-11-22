@@ -49,6 +49,8 @@ export interface CallTreeRequest {
 export interface ReviewState {
   // Files & diff
   files: DiffFile[];
+  filteredDiffFiles?: DiffFile[];
+  onClearFileFilter?: () => void;
   rawPatch: string;
   focusedFileIndex: number;
   focusedFilePath: string | null;

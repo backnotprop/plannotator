@@ -65,6 +65,7 @@ import {
   type InboxLaunchError,
   type InboxLaunchRecord,
   type InboxReplyViewing,
+  type InboxSentFrom,
   type InboxAuthor,
   type InboxDecision,
   type InboxGuideRef,
@@ -103,6 +104,8 @@ import {
   type InboxTag,
   inboxAskingMessage,
   inboxDefaultSkip,
+  inboxSessionlessSend,
+  inboxWordsDefault,
   inboxDeliveryState,
   type InboxDeliveryConnection,
   type InboxDeliveryDecision,
@@ -128,6 +131,7 @@ import { INBOX_T3_HOST, isInboxT3WaitReason, isT3ThreadId } from "@plannotator/c
 import { INBOX_PERMISSION_FULL, INBOX_PERMISSION_SESSION_PREFIX, isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { inboxProjectKey } from "./project-key";
 import { parseDiagramAnchor } from "@plannotator/core/diagram-anchor";
+import { parseHtmlBlockAnchor } from "@plannotator/core/html-block-anchor";
 import {
   INBOX_ANNOTATION_CURRENT,
   INBOX_LIVE_ANNOTATION_MAX,
@@ -375,6 +379,8 @@ export interface InboxReplyInput {
    * `{ attachment_id, time?, page?, as_sent? }`. Context only, so anything off about it drops it and never refuses the Send.
    */
   viewing?: unknown;
+  /** Where the person wrote it, as the server told it from the request (`InboxMessage.sent_from`); absent from this computer. */
+  sent_from?: InboxSentFrom | null;
   /**
    * The person chose another live session to take this reply, because the
    * session that asked has ended (the window's choice at Send). Absent: the
@@ -453,6 +459,15 @@ export interface InboxReaskInput {
    * for but the server found it not live; nothing is written.
    */
   to?: InboxAddressee | null;
+  /** Where the person pressed it, as the server told it from the request (`InboxMessage.sent_from`); absent from this computer. */
+  sent_from?: InboxSentFrom | null;
+  /**
+   * Re-ask all (reask-all.ts): the person's picks not sent stay as they are
+   * (still picked, still unsent, nothing marked sent) and are not in the note:
+   * from the list the person cannot see them, and a Send is the person's.
+   * Absent: the thread's own Re-ask, whose picks go with its note.
+   */
+  leave_picks?: boolean;
 }
 
 export interface InboxReplyResult {
@@ -711,6 +726,8 @@ export interface InboxDeliveryPresence {
   askerLive(session: string): boolean;
   /** Whether a reply to this session starts it again (a launched thread's own session): it has not ended. Absent: never. */
   launchResumes?(threadId: string, session: string): boolean;
+  /** Runs one list read with the launched sessions' pending replies found in one pass over the messages, dropped when it ends. Absent: none. */
+  onePass?<T>(read: () => T): T;
   /**
    * Whether an item may not have reached its session though it was handed on
    * (a Codex `codex queue` call that ran out of time): the row says it is
@@ -2043,10 +2060,33 @@ export class InboxStore {
    * can carry status that goes stale, and a plain reply repeated it every
    * time, so a plain reply takes the thread's short name, or null with none
    * (the connection then says `a reply`).
-   * Everything else keeps the thread's subject (`plainReplyFor` says why).
+   * A thread the person started that has a name takes its name as it stands
+   * now, the row's title, on everything it delivers, its first message and
+   * every first sight included, as a mail's subject goes with it: its
+   * subject is only the body's first words. The name is the person's
+   * (`named_by.kind` "person": typed in compose, or filled in by the Inbox
+   * for them), compose's suggestion left as it was ("auto", or the name a
+   * review or PR thread started with; the agent may still name the thread,
+   * `threadNamers`), or the agent's that named it ("agent"). A routine's
+   * thread keeps the routine's subject, and a thread an agent started its
+   * subject. Everything else keeps the thread's subject (`plainReplyFor`
+   * says why).
    */
   agentTitle(message: InboxMessage, session: string | null): string | null {
-    return this.plainReplyFor(message, session) ? this.threadShortName(message.thread_id) : this.threadSubject(message.thread_id);
+    if (this.plainReplyFor(message, session)) return this.threadShortName(message.thread_id);
+    if (this.titledByName(message.thread_id)) return this.threadShortName(message.thread_id) ?? this.threadSubject(message.thread_id);
+    return this.threadSubject(message.thread_id);
+  }
+
+  /**
+   * A thread the person started that has a name (theirs, compose's suggestion, or the agent's that named it), and not
+   * a routine's (its lines carry the routine's own subject): `agentTitle` titles it by that name.
+   */
+  private titledByName(threadId: string): boolean {
+    const root = this.messages.get(threadId);
+    if (!root?.started_by_person || root.scheduled_run || !root.thread_name?.trim()) return false;
+    const kind = root.named_by?.kind;
+    return kind === "person" || kind === "auto" || kind === "agent";
   }
 
   /**
@@ -2445,34 +2485,41 @@ export class InboxStore {
     const draft = this.replyDrafts.get(threadId) ?? null;
     // Comments waiting for a Send: on attached files, the guided review, the messages (kept per thread).
     const comments = this.unsentAnnotations.get(threadId) ?? 0;
-    // Action items whose Done or Can't do it waits in the reply draft (approval "inbox-action-items-in-reply").
+    // Action items whose Done, Can't do it or Skip waits in the reply draft (approval "inbox-action-items-in-reply").
     let draftDone = 0;
     let draftCant = 0;
+    let draftSkipped = 0;
     for (const message of messages) {
       if (message.author.kind !== "agent") continue;
       for (const q of this.questionsOf(message.id)) {
         if (!inboxActionInDraft(q)) continue;
         // The agent saw it done: it counts done, whatever the person had marked (their reason still goes).
         if (q.action_result?.by === "person" && q.action_result.outcome === "cant") draftCant += 1;
+        else if (q.action_result?.by === "person" && q.action_result.outcome === "skip") draftSkipped += 1;
         else draftDone += 1;
       }
     }
-    const unsent = draft !== null || summary.questions.picked > 0 || comments > 0 || draftDone + draftCant > 0
+    const unsent = draft !== null || summary.questions.picked > 0 || comments > 0 || draftDone + draftCant + draftSkipped > 0
       ? {
           reply_at: draft?.updated_at ?? null,
           picks: summary.questions.picked,
           comments,
           ...(draftDone > 0 ? { done: draftDone } : {}),
           ...(draftCant > 0 ? { cant: draftCant } : {}),
+          ...(draftSkipped > 0 ? { skipped: draftSkipped } : {}),
         }
       : null;
     const statesOf = (message: InboxMessage) => askingStates?.get(message.id) ?? [];
-    const asking = askingStates ? inboxAskingMessage(messages, statesOf, inboxDefaultSkip(messages, statesOf)) : null;
+    // The same "answers itself" test as the window's Send (`answersItself`): a saved pick, or an action item marked in the draft.
+    const answersItself = (message: InboxMessage) => this.questionsOf(message.id).some((q) => (q.kind !== "action" && q.state === "picked") || inboxActionInDraft(q));
+    const asking = askingStates ? inboxAskingMessage(messages, statesOf, inboxDefaultSkip(messages, statesOf), answersItself) : null;
     const delivery = this.rowDelivery(root, lastReal, asking, sent, recipients, root.resolved_at !== null && !agentAfterArchive);
     // "Session ended" on the row: the session this thread would reach, by the rule the thread's note uses (a waking
     // connection, not heard from, with the grace). A person's reply with its own `to` is not owed to that session.
     const presence = this.deliveryPresence;
-    const reached = asking ?? (lastReal.author.kind === "agent" ? lastReal : null);
+    // An agent wrote last: the message the person's words would answer, by the Send's own rule (`inboxWordsDefault`).
+    const lastAgentReal = lastReal.author.kind === "agent" ? lastReal : null;
+    const reached = asking ?? (lastAgentReal ? (inboxWordsDefault(messages.slice(0, messages.indexOf(lastAgentReal) + 1), answersItself) ?? lastAgentReal) : null);
     const reachedSession = reached?.author.kind === "agent" ? reached.author.session : null;
     const movedAway = lastReal.author.kind === "person" && !!lastReal.to;
     const resumes = (session: string | null | undefined) => !!session && presence?.launchResumes?.(root.id, session) === true;
@@ -2700,9 +2747,11 @@ export class InboxStore {
         ? (last.delivery?.at ?? recipients.find((r) => r.owner)?.delivered_at ?? null)
         : (sent?.checked_at ?? null);
       // The session that asked (the thread's own rule, with its defaults): called ended only when its message
-      // came through a waking connection and the Inbox has not heard from it (with the grace).
+      // came through a waking connection and the Inbox has not heard from it (with the grace). Never for a reply to a
+      // script's post (`inboxSessionlessSend`, its own question answered): that reply is the script's, not that session's.
       const askingAuthor = asking?.author.kind === "agent" ? asking.author : null;
-      const askerEnded = !resolved && asking?.wakes === true && !!askingAuthor?.session && !askerLive(askingAuthor.session);
+      const toScript = !!repliedTo && inboxSessionlessSend(repliedTo);
+      const askerEnded = !resolved && !toScript && asking?.wakes === true && !!askingAuthor?.session && !askerLive(askingAuthor.session);
       const decision = inboxDeliveryState({
         delivered: !!deliveredAt,
         stuck: replyWaiting && stuck(replySession, last.id),
@@ -2769,6 +2818,11 @@ export class InboxStore {
    * (`session`: the threads it started, joined or replied in).
    */
   listRows(filter: { projectId?: string | null; session?: string | null } = {}): InboxListRow[] {
+    const presence = this.deliveryPresence;
+    return presence?.onePass ? presence.onePass(() => this.listRowsRead(filter)) : this.listRowsRead(filter);
+  }
+
+  private listRowsRead(filter: { projectId?: string | null; session?: string | null }): InboxListRow[] {
     if (filter.projectId || filter.session) return this.buildRows(filter);
     // Every thread: the last answer while nothing it read changed (`rowsMemo`). A copy of the list, the same rows.
     const memo = this.rowsMemo;
@@ -3606,6 +3660,31 @@ export class InboxStore {
   }
 
   /**
+   * A note written as the person, at once, about what they did on an agent's message: a `:::run` they ran, a
+   * `:::secret` they saved (packages/server/inbox-run-routes.ts). Delivered like any reply (the wake). The caller
+   * makes sure it never carries a secret's value.
+   */
+  appendPersonNote(messageId: string, body: string): InboxMessage {
+    const message = this.messages.get(messageId);
+    if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
+    const at = this.stamp();
+    const note: InboxMessage = {
+      id: inboxId("msg"),
+      project_id: message.project_id,
+      thread_id: message.thread_id,
+      reply_to: message.id,
+      author: { kind: "person" },
+      subject: null,
+      body,
+      created_at: at,
+      resolved_at: null,
+      idempotency_key: null,
+    };
+    this.appendMessage(note, at);
+    return note;
+  }
+
+  /**
    * Whether a thread's owner can be known to have ended: it has a waking message, or it holds the thread by address
    * (only a connection can be addressed) and wrote nothing here. An agent that only reads through MCP cannot.
    */
@@ -4407,14 +4486,19 @@ export class InboxStore {
       this.appendQuestion({ ...record, superseded_by: by }, at);
     }
     // The action items the agent saw done: closed, nothing sent. A Done or Can't do it the person
-    // had waiting in their draft is kept under `person`: its note still goes with their Send (Q3).
+    // had waiting in their draft is kept under `person`: its note still goes with their Send (Q3). A skip
+    // the person already sent is kept the same way (nothing of it is left to send).
     for (const questionId of doneIds) {
       const record = this.questions.get(questionId)!;
-      const mine = record.action_result?.by === "person" && record.action_result.staged === true ? record.action_result : null;
+      const result = record.action_result?.by === "person" ? record.action_result : null;
+      const mine = result && (result.staged === true || result.outcome === "skip") ? result : null;
+      // A sent skip stays sent at its new revision: the person's reply keeps listing it, and a mark on it is still refused.
+      const wasSent = record.revision > 0 && record.sent_revision === record.revision;
       this.appendQuestion(
         {
           ...record,
           revision: record.revision + 1,
+          ...(wasSent ? { sent_revision: record.revision + 1 } : {}),
           action_result: {
             outcome: "done",
             note: null,
@@ -4570,9 +4654,11 @@ export class InboxStore {
       // Open, or the person's Done or Can't do it waiting in their draft: the agent's done settles that one, and the
       // person's note still goes with their Send (approval "inbox-action-items-in-reply", Q3). One the person marked
       // through the timed path (decision mode, the phone door), inside its Undo window, is theirs and goes as they said.
+      // One the person skipped and sent: the agent may still see it done (the person chose not to, the agent did it).
       const open = records.filter((r) => {
         const state = inboxQuestionState(r, resolved);
-        return state === "open" || (state === "picked" && r.action_result?.by === "person" && r.action_result.staged === true);
+        const mark = r.action_result?.by === "person" ? r.action_result : null;
+        return state === "open" || (state === "picked" && mark?.staged === true) || (state === "sent" && mark?.outcome === "skip");
       });
       if (open.length === 0) {
         const state = inboxQuestionState(records[0]!, resolved);
@@ -5169,6 +5255,7 @@ export class InboxStore {
         : {}),
       ...(verdict ? { review_verdict: verdict } : {}),
       ...(viewing ? { viewing } : {}),
+      ...(input.sent_from ? { sent_from: input.sent_from } : {}),
       ...(reviewCommentsOf.length > 0 ? { review_comments_of: reviewCommentsOf } : {}),
       ...(quoted ? { quote: quoted.quote } : {}),
       ...(input.review_anchor ? { review_anchor: input.review_anchor } : {}),
@@ -5364,7 +5451,8 @@ export class InboxStore {
       .filter((m) => !this.closedByArchive(m))
       // Open action items are asked again too (owner, #2059); one the person marked inside its Undo window is not open.
       .flatMap((m) => this.questionRecords(m.id));
-    const picked = records.filter((r) => inboxQuestionState(r, false) === "picked" && r.answer !== null);
+    // Re-ask all leaves the picks as they are: none goes, none is marked sent.
+    const picked = input.leave_picks ? [] : records.filter((r) => inboxQuestionState(r, false) === "picked" && r.answer !== null);
     const open = records.filter((r) => inboxQuestionState(r, false) === "open");
     if (open.length === 0) throw new InboxError("nothing_to_reask", "No open question or action item is left to ask again.");
 
@@ -5396,6 +5484,7 @@ export class InboxStore {
       idempotency_key: key,
       reask: open.map((r) => r.id),
       ...(to ? { to: { host: to.host, session: to.session } } : {}),
+      ...(input.sent_from ? { sent_from: input.sent_from } : {}),
     };
     try {
       for (const record of answered) this.appendQuestion(record, at);
@@ -5896,7 +5985,9 @@ export class InboxStore {
    * of one still waiting; approval "inbox-message-comments", 2026-10-19):
    * Plannotator's text-selection annotation, `originalText` the exact words
    * the person selected, or a comment on a rendered diagram part, with
-   * `diagramAnchor` and the part's label as `originalText`, or a Delete on
+   * `diagramAnchor` and the part's label as `originalText`, or a comment on an
+   * element of a live html block (`htmlBlockAnchor`, with the page's own
+   * `htmlAnchor` and `elementContext`), or a Delete on
    * selected words (`type` "DELETION", no words of its own needed; approval
    * "inbox-toolbar-delete"). An agent's message takes one, and the person's own
    * (approval "inbox-annotate-own-and-questions"), never one of the Inbox's own notes (a set-aside or reopened
@@ -5933,11 +6024,24 @@ export class InboxStore {
     if (!((deletion || pictured) && noText) && (typeof text !== "string" || text.trim() === "" || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX)) {
       throw new InboxError("validation_error", `annotation.text: the comment (1 to ${INBOX_MESSAGE_COMMENT_TEXT_MAX} characters).`, { field: "annotation.text" });
     }
+    // A comment on an element of a live html block in the message (the owner's pick "A · In place", 2026-11-20): the
+    // anchor names the block (its place, its source, its lines), and the element is the page's own anchor.
+    const htmlBlockAnchor = fields.htmlBlockAnchor === undefined ? undefined : parseHtmlBlockAnchor(fields.htmlBlockAnchor);
+    if (htmlBlockAnchor === null) throw new InboxError("validation_error", "annotation.htmlBlockAnchor: { v: 1, index, id, sourceLine }.", { field: "annotation.htmlBlockAnchor" });
     // A comment on a message's words points at no element or page and starts no reply thread.
     const images = this.commentPictures(fields.images);
     for (const field of ["elementContext", "pageUrl", "inReplyTo"] as const) {
+      if (field === "elementContext" && htmlBlockAnchor) continue;
       const value = fields[field];
       if (value !== undefined && value !== null && !(Array.isArray(value) && value.length === 0)) throw new InboxError("validation_error", `annotation.${field}: a comment on a message's text takes none.`, { field: `annotation.${field}` });
+    }
+    // What the block's page supplied about the element is capped, as a running site's is.
+    if (htmlBlockAnchor) {
+      for (const key of ["elementContext", "htmlAnchor", "htmlAdditionalTargets"] as const) {
+        if (fields[key] !== undefined && JSON.stringify(fields[key]).length > INBOX_LIVE_ELEMENT_MAX) {
+          throw new InboxError("validation_error", `annotation.${key}: at most ${INBOX_LIVE_ELEMENT_MAX} characters as JSON.`, { field: `annotation.${key}` });
+        }
+      }
     }
     // A comment on a part of a diagram in the message: the part's label is its "words", and the anchor names the part.
     // The same fail-closed parser as the external-annotations route: what the window and the export read is what is stored.
@@ -5961,7 +6065,7 @@ export class InboxStore {
       path: message.id,
       version: INBOX_ANNOTATION_CURRENT,
       message: { at: message.created_at },
-      annotation: { ...withoutExportLocation({ ...fields, images: undefined }), ...(images ? { images } : {}), ...(diagramAnchor ? { diagramAnchor } : {}) },
+      annotation: { ...withoutExportLocation({ ...fields, images: undefined }), ...(images ? { images } : {}), ...(diagramAnchor ? { diagramAnchor } : {}), ...(htmlBlockAnchor ? { htmlBlockAnchor } : {}) },
       created_at: existing?.created_at ?? at,
       updated_at: at,
       removed_at: null,
@@ -7120,7 +7224,16 @@ export class InboxStore {
    * message it wrote, and writes nothing. Whether the session is live is the
    * server's check: `to` null means it is not, and only a replay answers.
    */
-  sendNewMessage(threadId: string, input: { body: unknown; to: InboxAddressee | null; idempotency_key: unknown }): { message: InboxMessage; replayed: boolean } {
+  sendNewMessage(
+    threadId: string,
+    input: {
+      body: unknown;
+      to: InboxAddressee | null;
+      idempotency_key: unknown;
+      /** Where the person wrote it (`InboxMessage.sent_from`); absent from this computer. */
+      sent_from?: InboxSentFrom | null;
+    },
+  ): { message: InboxMessage; replayed: boolean } {
     const key = typeof input.idempotency_key === "string" ? input.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
     const root = this.messages.get(threadId);
@@ -7147,6 +7260,7 @@ export class InboxStore {
       resolved_at: null,
       idempotency_key: key,
       to: { host: input.to.host, session: input.to.session },
+      ...(input.sent_from ? { sent_from: input.sent_from } : {}),
     };
     this.appendMessage(message, at);
     this.endSnooze(threadId);
@@ -7253,6 +7367,8 @@ export class InboxStore {
     review_live?: InboxReviewLive;
     review_anchor?: InboxReviewAnchor;
     review_batch?: InboxReviewBatch;
+    /** Where the person wrote it (`InboxMessage.sent_from`); absent from this computer. */
+    sent_from?: InboxSentFrom | null;
   }): { message: InboxMessage; replayed: boolean } {
     const key = typeof input.idempotency_key === "string" ? input.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
@@ -7297,6 +7413,7 @@ export class InboxStore {
       ...(input.review_live ? { review_live: input.review_live } : {}),
       ...(input.review_anchor ? { review_anchor: input.review_anchor } : {}),
       ...(input.review_batch ? { review_batch: input.review_batch } : {}),
+      ...(input.sent_from ? { sent_from: input.sent_from } : {}),
       ...(threadName ? { thread_name: threadName, named_by: { kind: auto ? ("auto" as const) : ("person" as const), at } } : {}),
       ...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
     };

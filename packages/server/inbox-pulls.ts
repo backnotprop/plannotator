@@ -65,9 +65,11 @@ import {
   type InboxPullHost,
   inboxPullLabel,
   inboxPullSafeBranch,
+  type InboxPullAsk,
   type InboxPullCard,
   type InboxPullLink,
   type InboxPullReview,
+  type InboxPullStack,
   type InboxPullState,
 } from "@plannotator/core/inbox-types";
 import { parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
@@ -195,7 +197,9 @@ function shaOf(value: unknown): string | null {
 
 // --- the queries ---
 
-const GH_PULL = `number title url state isDraft updatedAt mergedAt baseRefName headRefName headRefOid additions deletions changedFiles reviewDecision mergeable
+const GH_WRITERS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+
+const GH_PULL = `number title url state isDraft authorAssociation updatedAt mergedAt baseRefName headRefName headRefOid additions deletions changedFiles reviewDecision mergeable
       repository { nameWithOwner } baseRepository { defaultBranchRef { name } } headRepository { nameWithOwner } author { login avatarUrl }
       reviewRequests(first: 5) { nodes { requestedReviewer { __typename ... on User { login avatarUrl } ... on Team { slug } } } }
       latestReviews(first: 5) { nodes { state author { login avatarUrl } } }
@@ -398,6 +402,7 @@ export interface ParsedPulls {
    * `issueCount`, GitLab `count`).
    */
   open_total?: number;
+  cut?: number[];
   /** GitHub's GraphQL budget after this read: what is left, and when it fills again (ISO). */
   rate?: { remaining: number; reset_at: string };
   /**
@@ -434,6 +439,10 @@ function cappedOf(lists: unknown[], countKey: "issueCount" | "count"): ParsedPul
 /** The Others reads' total count (GitHub `issueCount`, GitLab `count`). */
 function totalOf(lists: unknown[], countKey: "issueCount" | "count"): number {
   return lists.reduce<number>((sum, list) => sum + Math.max(num(obj(list)[countKey]), nodes(list).length), 0);
+}
+
+function cutOf(lists: [string, unknown][], countKey: "issueCount" | "count"): number[] {
+  return lists.filter(([, list]) => typeof obj(list)[countKey] !== "number" || num(obj(list)[countKey]) > nodes(list).length).map(([name]) => Number(name.replace(/^\D+/, "")));
 }
 
 /** Which lists an answer is read for: the person's own (requested, authored, assigned, merged), or Others. */
@@ -498,6 +507,7 @@ export function parseGithubPulls(stdout: string, host: string, part: PullsPart =
         title: str(item.title),
         author,
         mine: login !== null && author === login,
+        ...(GH_WRITERS.has(str(item.authorAssociation)) ? { author_member: true as const } : {}),
         requested: flag === "requested" || earlier?.requested === true,
         ...(flag === "assigned" || earlier?.assigned === true ? { assigned: true } : {}),
         state,
@@ -524,11 +534,12 @@ export function parseGithubPulls(stdout: string, host: string, part: PullsPart =
   const reset = str(rate.resetAt);
   const budget = typeof rate.remaining === "number" && reset ? { rate: { remaining: rate.remaining, reset_at: reset } } : {};
   if (part === "others") {
-    const others = Object.keys(data)
+    const named = Object.keys(data)
       .filter((k) => /^others\d+$/.test(k))
-      .map((k) => data[k]);
+      .map((k): [string, unknown] => [k, data[k]]);
+    const others = named.map(([, list]) => list);
     for (const list of others) read(list, null);
-    return { login, pulls: [...out.values()], avatars, open_total: totalOf(others, "issueCount"), ...budget };
+    return { login, pulls: [...out.values()], avatars, open_total: totalOf(others, "issueCount"), cut: cutOf(named, "issueCount"), ...budget };
   }
   const list = (name: "authored" | "merged" | "assigned" | "requested") => (part === "every" ? data[`every${name[0]!.toUpperCase()}${name.slice(1)}`] : data[name]);
   read(list("authored"), null);
@@ -621,11 +632,12 @@ export function parseGitlabPulls(stdout: string | readonly string[], host: strin
     }
   };
   if (part === "others") {
-    const projects = Object.keys(data)
+    const named = Object.keys(data)
       .filter((k) => /^p\d+$/.test(k))
-      .map((k) => obj(data[k]).mergeRequests);
+      .map((k): [string, unknown] => [k, obj(data[k]).mergeRequests]);
+    const projects = named.map(([, list]) => list);
     for (const list of projects) read(list, null);
-    return { login, pulls: [...out.values()], avatars, open_total: totalOf(projects, "count") };
+    return { login, pulls: [...out.values()], avatars, open_total: totalOf(projects, "count"), cut: cutOf(named, "count") };
   }
   read(user.authored, null);
   read(user.merged, null);
@@ -667,6 +679,8 @@ interface OthersAnswer {
   total: number | null;
   /** The projects' repositories when it was read (as `HostAnswer.repos`). */
   repos: string;
+  /** The repositories (lowercased) whose every open PR this answer holds: none of a search that came back cut. */
+  covered: string[];
 }
 
 /** The Others read of a host: separate from the person's own lists, which never fail with it. */
@@ -722,8 +736,11 @@ export interface InboxPulls {
      */
     options?: { refresh?: boolean; others?: boolean; everywhere?: boolean },
   ): Promise<{ fetched_at: string | null; hosts: InboxPullHost[]; pulls: InboxPull[]; clis: Partial<Record<RefCli, InboxPullCliState>>; unsigned: string[] }>;
+  /** The projects' repositories (`host/owner/repo`, lowercased) whose every open PR that list answer holds, Others' included. */
+  othersCovered(listed: object): readonly string[];
   /** A PR the last list named, by key. */
   find(key: string): InboxPull | null;
+  stack(key: string): InboxPullStack | null;
   /**
    * This Inbox merged the PR (the Pull requests page's Merge): every list from now on shows it merged, even a cached
    * answer read before the merge or a forge read that still says open (GitHub's search lags), for
@@ -1042,6 +1059,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   const gitRead = options.gitRead ?? pullFileGitRead;
   const now = options.now ?? Date.now;
   const hosts = new Map<string, HostState>();
+  const coveredOf = new WeakMap<object, string[]>();
   const holdUntil = new Map<string, number>();
   const fileHoldUntil = new Map<string, number>();
   /** GitHub's GraphQL budget nearly spent: list reads of the host wait until `resetAt` (diffs do not). */
@@ -1390,17 +1408,20 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const cli = state.cli;
       let calls: string[][];
       let covered: string[];
+      let groups: string[][];
       if (cli === "gh") {
         const plan = githubOthersSearches(ordered);
         covered = plan.covered;
+        groups = plan.searches.map((q) => q.split(" ").filter((t) => t.startsWith("repo:")).map((t) => t.slice(5)));
         calls = plan.searches.length ? [["api", "graphql", "--hostname", host, "-f", `query=${githubOthersQuery(plan.searches.length)}`, ...plan.searches.flatMap((q, i) => ["-f", `others${i}=${q}`])]] : [];
       } else {
         const plan = gitlabOthersQueries(ordered);
         covered = plan.covered;
+        groups = plan.covered.map((repo) => [repo]);
         calls = plan.queries.map((query) => ["api", "--hostname", host, "graphql", "-f", `query=${query}`]);
       }
       if (calls.length === 0) {
-        others.answer = { at: now(), pulls: [], avatars: {}, total: 0, repos: reposKey };
+        others.answer = { at: now(), pulls: [], avatars: {}, total: 0, repos: reposKey, covered: [] };
         others.error = null;
         return;
       }
@@ -1435,7 +1456,9 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       }
       spent(host, parsed);
       const all = covered.length >= new Set(repos.map((r) => r.toLowerCase())).size;
-      others.answer = { at: now(), pulls: parsed.pulls, avatars: parsed.avatars, total: all ? (parsed.open_total ?? 0) : null, repos: reposKey };
+      const cut = new Set(parsed.cut ?? []);
+      const whole = groups.flatMap((group, i) => (cut.has(i) ? [] : group.map((r) => r.toLowerCase())));
+      others.answer = { at: now(), pulls: parsed.pulls, avatars: parsed.avatars, total: all ? (parsed.open_total ?? 0) : null, repos: reposKey, covered: whole };
       others.error = null;
     })()
       .catch(() => {
@@ -1567,7 +1590,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         return othersTotal > shown ? { shown, total: othersTotal, of: "others" } : undefined;
       };
       const times = asked.map((a) => a.own.answer?.at).filter((t): t is number => typeof t === "number");
-      return {
+      const result = {
         fetched_at: times.length > 0 ? new Date(Math.min(...times)).toISOString() : null,
         hosts: asked.map(({ host, state, own, reposKey }): InboxPullHost => {
           const capped = cappedOfHost(host, state, own, reposKey);
@@ -1589,9 +1612,18 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         clis: { ...cliStates },
         unsigned: unsigned.sort(),
       };
+      coveredOf.set(result, asked.flatMap(({ host, state }) => (state.others.answer?.covered ?? []).filter((repo) => wanted.has(inboxPullRepoKey(host, repo))).map((repo) => inboxPullRepoKey(host, repo))));
+      return result;
+    },
+    othersCovered(listed) {
+      return coveredOf.get(listed) ?? [];
     },
     find(key) {
       return findKnown(key) ?? null;
+    },
+    stack(key) {
+      const pull = findKnown(key);
+      return (pull && stackOf(pull)) ?? null;
     },
     markMerged(key) {
       const at = now();
@@ -2102,6 +2134,7 @@ export interface InboxPullLinkStore {
   threadsOf(projectId: string): { thread_id: string; last_at: string }[];
   threadMessageIds(threadId: string): readonly string[];
   message(id: string): InboxMessage | null;
+  messageSeq?(id: string): number | null;
   threadSubject(threadId: string): string | null;
   /** The project a thread is in (canonical id), or null when there is no such thread. */
   threadProject(threadId: string): string | null;
@@ -2160,17 +2193,30 @@ export function previewOf(body: string): string {
 }
 
 /** What a thread says about the agent behind it. */
-function threadFacts(store: InboxPullLinkStore, threadId: string) {
+function threadFacts(store: InboxPullLinkStore, threadId: string, pictureItSince: string | null = null) {
   const ids = store.threadMessageIds(threadId);
   let last: InboxMessage | null = null;
   let guide: InboxMessage | null = null;
-  for (let i = ids.length - 1; i >= 0 && (!last || !guide); i--) {
+  let pictureIt: InboxMessage | null = null;
+  let replied = false;
+  let pictureItSeen = false;
+  let looking = pictureItSince !== null;
+  for (let i = ids.length - 1; i >= 0 && (!last || !guide || looking); i--) {
     const message = store.message(ids[i]!);
-    if (!message || message.author.kind !== "agent") continue;
+    if (!message) continue;
+    if (looking && message.created_at < pictureItSince!) looking = false;
+    if (looking && message.author.kind === "person") replied = true;
+    if (message.author.kind !== "agent") continue;
     if (!last) last = message;
     if (!guide && message.guide) guide = message;
+    if (looking && message.picture_it) {
+      pictureIt = message;
+      looking = false;
+      const seq = store.messageSeq?.(message.id) ?? null;
+      pictureItSeen = replied || (seq !== null && (store.message(threadId)?.person_seen_seq ?? 0) >= seq);
+    }
   }
-  return { last, guide };
+  return { last, guide, pictureIt, pictureItSeen };
 }
 
 /**
@@ -2201,7 +2247,7 @@ export function linkInboxPulls(
   pulls: readonly InboxPull[],
   store: InboxPullLinkStore,
   projectsByRepo: ReadonlyMap<string, readonly string[]>,
-  owners: ReadonlyMap<string, { thread_id: string; ask?: "guide" | "custom" | "thread"; page?: true }> = new Map(),
+  owners: ReadonlyMap<string, { thread_id: string; ask?: InboxPullAsk; picture_it_at?: string; page?: true }> = new Map(),
 ): Record<string, InboxPullLink> {
   const links: Record<string, InboxPullLink> = {};
   if (pulls.length === 0) return links;
@@ -2245,8 +2291,8 @@ export function linkInboxPulls(
     }
   }
 
-  const linkOf = (via: InboxPullLink["via"], threadId: string, projectId: string): InboxPullLink => {
-    const { last, guide } = threadFacts(store, threadId);
+  const linkOf = (via: InboxPullLink["via"], threadId: string, projectId: string, pictureItSince: string | null = null): InboxPullLink => {
+    const { last, guide, pictureIt, pictureItSeen } = threadFacts(store, threadId, pictureItSince);
     const root = store.message(threadId)?.to ?? null;
     return {
       via,
@@ -2259,6 +2305,7 @@ export function linkInboxPulls(
       guide: guide?.guide
         ? { message_id: guide.id, title: guide.guide.title, steps: guide.guide.sections, review: guide.guide.review === true, session: guide.author.kind === "agent" ? guide.author.session : null }
         : null,
+      ...(pictureIt?.picture_it ? { picture_it_page: { message_id: pictureIt.id, title: pictureIt.picture_it.title, at: pictureIt.created_at, ...(pictureItSeen ? { seen: true as const } : {}) } } : {}),
     };
   };
 
@@ -2266,7 +2313,7 @@ export function linkInboxPulls(
     const owner = owners.get(pull.key);
     const ownerProject = owner ? store.threadProject(owner.thread_id) : null;
     if (owner && ownerProject) {
-      links[pull.key] = { ...linkOf("owner", owner.thread_id, ownerProject), ...(owner.ask ? { ask: owner.ask } : {}), ...(owner.page ? { page: true as const } : {}) };
+      links[pull.key] = { ...linkOf("owner", owner.thread_id, ownerProject, owner.picture_it_at ?? null), ...(owner.ask ? { ask: owner.ask } : {}), ...(owner.picture_it_at ? { picture_it_asked_at: owner.picture_it_at } : {}), ...(owner.page ? { page: true as const } : {}) };
       continue;
     }
     const started = startedThread.get(pull.key);

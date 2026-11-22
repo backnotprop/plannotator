@@ -30,6 +30,7 @@ import type { InboxReviewSource } from "./inbox-reviews";
 import type { InboxTidyMark } from "./inbox-tidy";
 import type { InboxLaunchChoices } from "./inbox-launch-choice";
 import type { InboxRowSnooze } from "./inbox-snooze";
+import type { InboxSentFrom } from "./inbox-sent-from";
 import { INBOX_CODEX_QUEUE_MIN_VERSION } from "./inbox-codex";
 import { INBOX_QWEN_WAKE_MIN_VERSION } from "./inbox-qwen";
 import { INBOX_T3_HOST, isT3ThreadId, type InboxT3Status, type InboxT3WaitReason } from "./inbox-t3";
@@ -55,6 +56,8 @@ export * from "./inbox-tag-colours";
 export * from "./inbox-surface-bridge";
 // Tidy (the list header's and the Board's ⋮ menu), the same way.
 export * from "./inbox-tidy";
+// Where the person wrote a message (another device, the phone app, a linked computer), the same way.
+export * from "./inbox-sent-from";
 export * from "./inbox-combine";
 // Pull requests (code review in the Inbox, phase 2), the same way.
 export * from "./inbox-pulls";
@@ -820,6 +823,11 @@ export interface InboxMessage {
   rows_ask?: true;
   /** On a person's reply sent from full screen's floating box: the file on screen. Rendered for the agent at read time; the body never holds it. */
   viewing?: InboxReplyViewing;
+  /**
+   * On a person's message written away from this computer (another device, the phone app, a linked computer), as the
+   * server told it from the request (inbox-sent-from.ts). Rendered for the agent at read time; absent from this computer.
+   */
+  sent_from?: InboxSentFrom;
   /**
    * On the root of a thread the person started by launching an agent (To:
    * "New Claude Code session"), or on a person's reply sent to a new session in
@@ -1590,8 +1598,13 @@ export interface InboxActionFacts {
 
 /** What came of an action item (`InboxQuestionRecord.action_result`). */
 export interface InboxActionResult {
-  outcome: "done" | "cant";
-  /** The person's note with Done, or the reason with Can't do it; null for none. */
+  /**
+   * The person's mark: Done, Can't do it (with a reason), or Skip (they chose
+   * not to do it; approval "action-item-skip", option A). A record stored
+   * before Skip only ever holds "done" or "cant".
+   */
+  outcome: "done" | "cant" | "skip";
+  /** The person's note with Done, or the reason with Can't do it; null for none (always for Skip). */
   note: string | null;
   at: string;
   by: "person" | "agent";
@@ -1609,8 +1622,11 @@ export interface InboxActionResult {
    * (approval "inbox-action-items-in-reply", Q3). When it carries a note, the
    * note still goes with the person's next Send (`inboxActionInDraft`).
    */
-  person?: { outcome: "done" | "cant"; note: string | null; at: string } | null;
+  person?: { outcome: "done" | "cant" | "skip"; note: string | null; at: string } | null;
 }
+
+/** The person's mark on an action item (`InboxActionResult.outcome`). */
+export type InboxActionOutcome = InboxActionResult["outcome"];
 
 /**
  * An action item whose result waits in the person's reply draft (approval
@@ -1629,7 +1645,7 @@ export function inboxActionInDraft(
 }
 
 /** The person's own mark on an action item in their draft or sent: their staged mark, or the one the agent's done settled. */
-export function inboxActionPersonMark(result: InboxActionResult | null | undefined): { outcome: "done" | "cant"; note: string | null; at: string } | null {
+export function inboxActionPersonMark(result: InboxActionResult | null | undefined): { outcome: InboxActionOutcome; note: string | null; at: string } | null {
   if (!result) return null;
   if (result.by === "person") return { outcome: result.outcome, note: result.note, at: result.at };
   return result.person ?? null;
@@ -3271,6 +3287,7 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * measured by inbox-board-switch.test.ts's request shape at 16,451 (it had drifted about 330 bytes before this).
  * Tokens scaled at the entry's bytes per token (3.7), not counted on Pi.
  */
+/* Skip on action items (the action guide's sentence, and the connection's short `body` wording, 2026-11-19): +162 bytes, estimated (not measured), inside the 5%; the constants stay. */
 const INBOX_TOOL_COST_NOW = { bytes: 14522, tokens: 3906 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
 export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 16451, tokens: 4492 } as const;
@@ -3360,6 +3377,8 @@ export interface InboxRowUnsent {
   done?: number;
   /** Action items marked Can't do it waiting in the reply draft ("Draft · 1 can't do"). Absent: none. */
   cant?: number;
+  /** Action items skipped waiting in the reply draft ("Draft · 1 skipped"; approval "action-item-skip"). Absent: none. */
+  skipped?: number;
 }
 
 /**
@@ -3375,7 +3394,7 @@ export function inboxRowArchived(row: Pick<InboxListRow, "resolved_at" | "back_f
 
 /** The thread holds something the person has not sent: reply words, picks or comments. */
 export function inboxHasUnsent(unsent: InboxRowUnsent | null | undefined): boolean {
-  return !!unsent && (unsent.reply_at !== null || unsent.picks > 0 || unsent.comments > 0 || (unsent.done ?? 0) > 0 || (unsent.cant ?? 0) > 0);
+  return !!unsent && (unsent.reply_at !== null || unsent.picks > 0 || unsent.comments > 0 || (unsent.done ?? 0) > 0 || (unsent.cant ?? 0) > 0 || (unsent.skipped ?? 0) > 0);
 }
 
 /**
@@ -3484,9 +3503,11 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * `combine` (approval "inbox-multi-select"): a linked machine's window asks this Inbox's sessions to tidy or combine
  * this Inbox's threads, through its door. `pulls-looked` (approval "inbox-pr-dashboard"): the PR page's look at a PR
  * it lists is kept there ("Changed since you looked"). `project-tags`: its projects take tags from a linked machine's
- * window (`projects/:id/tags`, by the tag's name), kept there.
+ * window (`projects/:id/tags`, by the tag's name), kept there. `agent-read`: a linked machine's agents read this
+ * Inbox's threads and fetch their files through its door (`agent-read`, `agent-file`; inbox-far-read.ts in the server).
+ * `agent-search`: they search and list this Inbox's threads too (`agent-search`, `agent-threads`; inbox-far-find.ts).
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**
@@ -3610,8 +3631,9 @@ export interface InboxComposeProject {
 
 /**
  * One agent of a machine, as the list model names it for the sidebar's Agents section (`GET /api/inbox/threads`'
- * `agents`; packages/server/inbox-agents-list.ts). An agent is a live session, a session that owns a thread waiting on
- * the person (ended or not), a session that ended today, or a session the Inbox launched (a stopped one is idle).
+ * `agents`; packages/server/inbox-agents-list.ts) and the list's Agents view. An agent is a live session, a session
+ * that owns a thread waiting on the person (ended or not), a session that ended in the last seven days
+ * (`INBOX_AGENTS_ENDED_DAYS`), or a session the Inbox launched (a stopped one is idle).
  */
 export interface InboxAgent {
   /** Stable while the agent lasts: the launch id for a session the Inbox launched, else the session id. */
@@ -3659,6 +3681,9 @@ export interface InboxAgent {
   started_at: string | null;
   /** When this Inbox last heard from it (a poll, a state change, an Inbox tool call, its latest message); null when never. */
   last_seen_at: string | null;
+  model?: string;
+  effort?: string;
+  context?: number;
   /** Where it lives (`InboxAgentPlace`): a Rex pane Rex confirmed for this read. Absent when none. Additive. */
   place?: InboxAgentPlace;
   /**
@@ -3846,7 +3871,7 @@ export interface InboxComposeLaunch {
    * The drives mounted besides the machine's own disk (approval "inbox-launch-any-folder"): the folder menu's drive
    * rows and the folder browser's places. `network`: a network drive. Absent from an older Inbox (home only there).
    */
-  drives?: { path: string; name: string; network?: true }[];
+  drives?: { path: string; name: string; network?: true; shortcut?: false }[];
   /** macOS: this machine's own window may offer "Choose in Finder…". Absent elsewhere and from an older Inbox. */
   finder?: true;
 }

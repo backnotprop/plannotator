@@ -13,6 +13,7 @@ import { buildHeadingSlugMap } from '../utils/slugify';
 import { copyTextToClipboard } from '../utils/clipboard';
 import { getRichCopyEnabled } from '../utils/richCopyPolicy';
 import { BlockRenderer } from './BlockRenderer';
+import { FootnoteList, FootnoteProvider, useFootnotes } from './footnotes/Footnotes';
 import { sourceLineAttrs } from '../utils/sourceLineAttrs';
 import { BELOW_TITLE_SLOT_MARKER } from '../utils/belowTitleSlot';
 import { indexQuestionBlocks, isQuestionDirectiveKind, type IndexedQuestion, type ParsedQuestion, type QuestionAnswer } from '@plannotator/core/question-block';
@@ -1098,6 +1099,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // anchor ids stay stable across re-renders and duplicate heading texts get
   // `-1`/`-2`/... suffixes rather than colliding on the same id.
   const headingSlugMap = useMemo(() => buildHeadingSlugMap(blocks), [blocks]);
+  // GFM footnotes: null for a document that defines none (then nothing below changes).
+  const footnotes = useFootnotes(blocks);
   // `:::question` blocks: numbered in document order, answers drawn from the
   // annotations that carry `questionAnswer` (matched by question key, so an
   // answer follows its question across re-parses).
@@ -1966,6 +1969,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     <LocalLinkContext.Provider value={resolveLocalLink ?? null}>
     <DiagramAnchorClaimsContext.Provider value={diagramClaims}>
     <CommentDraftScopeContext.Provider value={commentDraftScope}>
+    <FootnoteProvider index={footnotes}>
     <div
       className={`relative z-50 w-full${fillHeight ? ' flex flex-col print:block' : ''}`}
       data-viewer-fill-height={fillHeight ? '' : undefined}
@@ -2061,7 +2065,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         )}
         {frontmatter && <><div className="clear-right md:hidden" /><FrontmatterCard frontmatter={frontmatter} markdown={markdown} /></>}
         {!frontmatter && blocks.length > 0 && blocks[0].type !== 'heading' && <div className="mt-4" />}
-        {withBelowTitle(groupBlocks(blocks).map(group =>
+        {withBelowTitle(groupBlocks(footnotes ? footnotes.bodyBlocks : blocks).map(group =>
           group.type === 'list-group' ? (
             (() => {
               const indices = computeListIndices(group.blocks);
@@ -2277,6 +2281,19 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             })()
           )
         ))}
+
+        {footnotes && (
+          <FootnoteList
+            index={footnotes}
+            imageBaseDir={imageBaseDir}
+            onImageClick={onBlockImageClick}
+            onOpenLinkedDoc={onOpenLinkedDoc}
+            onOpenCodeFile={onOpenCodeFile}
+            githubRepo={linkRepo?.display}
+            repoHost={linkRepo?.host}
+            onNavigateAnchor={scrollToAnchor}
+          />
+        )}
 
         {/* Text selection toolbar */}
         {selectionCommentsOn && !hostComposes && toolbarState && (
@@ -2528,6 +2545,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         document.body
       )}
     </div>
+    </FootnoteProvider>
     </CommentDraftScopeContext.Provider>
     </DiagramAnchorClaimsContext.Provider>
     </LocalLinkContext.Provider>

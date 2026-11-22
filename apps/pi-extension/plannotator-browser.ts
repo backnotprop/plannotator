@@ -538,7 +538,8 @@ async function createCodeReviewBrowserSession(
 				"Supported formats:\n" +
 				"  GitHub: https://github.com/owner/repo/pull/123\n" +
 				"  GitLab: https://gitlab.com/group/project/-/merge_requests/42\n" +
-				"  Bitbucket Cloud: https://bitbucket.org/workspace/repo/pull-requests/7",
+				"  Bitbucket Cloud: https://bitbucket.org/workspace/repo/pull-requests/7\n" +
+				"  Forgejo / Gitea: https://codeberg.org/owner/repo/pulls/5",
 			);
 		}
 

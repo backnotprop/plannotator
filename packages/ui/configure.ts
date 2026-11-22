@@ -12,7 +12,6 @@ import { setWebMcpPolicy, type WebMcpPolicy } from './webmcp/policy';
 import { setMathRendererLoader, type MathRenderer, type MathRendererLoader } from './utils/math';
 import { setIdentityGenerator, type IdentityGenerator } from './utils/generateIdentity';
 import { setAlertIconRenderer, type AlertIconRenderer } from './components/blocks/AlertBlock';
-import { setDirectiveRenderer, type DirectiveRenderer } from './components/blocks/directiveRenderer';
 import { setSkillInstructionsDestination } from './components/SkillReferenceMenu';
 import { setFenceThemeResolver, type FenceThemeResolver } from './utils/syntaxTheme';
 import { setCodeHighlightWorker, setDeferOffscreenCodeHighlight, type CodeHighlightWorker } from './utils/codeHighlight';
@@ -25,6 +24,7 @@ import { setCommentCardEnabled, setVisibleCommentDrafts, type CommentCardLayout 
 import { setTouchSelectionToolbar } from './utils/touchToolbarPlacement';
 import { setPageMarks } from './utils/pageMarks';
 import { setClickAWord } from './utils/clickAWordPolicy';
+import { setDiagramRemoteLoads } from './utils/diagramRemoteLoadsPolicy';
 import { setCrossRepoRefsWithoutRepo, setDigitHexIssueRefs, type CrossRepoRefsWithoutRepo } from './components/InlineMarkdown';
 import { setRefCardBitbucket, setRefCardTransport, type RefCardTransport } from './utils/refCard';
 
@@ -53,7 +53,6 @@ export type {
   MathRendererLoader,
   IdentityGenerator,
   AlertIconRenderer,
-  DirectiveRenderer,
   FenceThemeResolver,
   RefCardTransport,
   CodeHighlightWorker,
@@ -123,12 +122,6 @@ export interface PlannotatorUIConfig {
    * today; the package bundles no icon set. A host with one registers a renderer.
    */
   alertIconRenderer?: AlertIconRenderer;
-  /**
-   * Draw a directive container (`:::kind`) the host owns. Asked for each
-   * directive block that is not a question; return a node, or `undefined` to
-   * keep the callout. Default: none, every such block is a callout as today.
-   */
-  directiveRenderer?: DirectiveRenderer;
   /**
    * Pick the Shiki theme code fences render in, per (palette id, resolved
    * mode). Return `undefined` to keep the default resolution (the palette's
@@ -251,6 +244,23 @@ export interface PlannotatorUIConfig {
    * Inbox passes one (`packages/inbox/codeHighlightWorker.ts`).
    */
   codeHighlightWorker?: CodeHighlightWorker;
+  /**
+   * Whether a rendered diagram may load anything from another host: a
+   * label's picture or media, a style's `url()`, a picture node. Default:
+   * true, as before (the page's own policy decides). False, for a host that
+   * must never let a diagram call another host: Mermaid's label pass and the
+   * sanitizer keep only `#fragment` references and `data:` pictures
+   * (png, jpeg, gif, webp, avif), drop every style declaration and attribute
+   * that fetches, and directives and front matter can no longer set CSS
+   * (`themeCSS`, the font families). Some sources still load while Mermaid
+   * draws, before any sanitizer: a diagram's own `style` / `classDef`
+   * statements, which Mermaid applies itself (seen in state, class, block and
+   * treemap diagrams), plus picture nodes and sequence actor icons. For a
+   * guarantee the page's CSP is REQUIRED, not optional:
+   * `img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:`
+   * (HANDOFF.md "Diagrams that load nothing from another host"). Read at each render.
+   */
+  diagramRemoteLoads?: boolean;
   /** Re-hydrate settings from the installed (SYNCHRONOUS) storageBackend after install. */
   loadSettingsFromBackend?: boolean;
 }
@@ -274,7 +284,6 @@ export function configurePlannotatorUI(config: PlannotatorUIConfig): void {
   if (config.mathRendererLoader) setMathRendererLoader(config.mathRendererLoader);
   if (config.identityGenerator) setIdentityGenerator(config.identityGenerator);
   if (config.alertIconRenderer) setAlertIconRenderer(config.alertIconRenderer);
-  if (config.directiveRenderer) setDirectiveRenderer(config.directiveRenderer);
   if (config.fenceTheme) setFenceThemeResolver(config.fenceTheme);
   if (config.componentTooltips !== undefined) setComponentTooltips(config.componentTooltips);
   if (config.digitHexIssueRefs !== undefined) setDigitHexIssueRefs(config.digitHexIssueRefs);
@@ -285,6 +294,7 @@ export function configurePlannotatorUI(config: PlannotatorUIConfig): void {
   if (config.touchSelectionToolbar !== undefined) setTouchSelectionToolbar(config.touchSelectionToolbar);
   if (config.pageMarks !== undefined) setPageMarks(config.pageMarks);
   if (config.clickAWord !== undefined) setClickAWord(config.clickAWord);
+  if (config.diagramRemoteLoads !== undefined) setDiagramRemoteLoads(config.diagramRemoteLoads);
   if (config.refCardTransport) setRefCardTransport(config.refCardTransport);
   if (config.refCardBitbucket !== undefined) setRefCardBitbucket(config.refCardBitbucket);
   if (config.deferOffscreenCodeHighlight !== undefined) setDeferOffscreenCodeHighlight(config.deferOffscreenCodeHighlight);

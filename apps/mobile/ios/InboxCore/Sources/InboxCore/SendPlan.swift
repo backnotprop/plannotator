@@ -71,9 +71,26 @@ public enum SendPlan {
   public static func needsComputer(_ thread: InboxThread) -> Bool { activeHandoff(thread) || tookOver(thread) }
 
   /// The message the person's words answer: the latest agent message that is not a permission prompt's and not
-  /// a routine's change line (`wordsMessage`, sendTargets.ts:155).
+  /// a routine's change line (`wordsMessage`, sendTargets.ts:147). A script's post (no session, no host, no name:
+  /// `inboxSessionlessSend` and `inboxWordsDefault`, packages/core/inbox-delivery.ts) does not take the words from the latest agent
+  /// message that has a session, unless the Send answers its own questions or action items.
   static func wordsMessage(_ thread: InboxThread) -> InboxMessageWire? {
-    thread.messages.last { $0.author.kind == .agent && !($0.author.session ?? "").hasPrefix(permissionSessionPrefix) && $0.scheduledChange == nil } ?? thread.messages.first
+    let agents = thread.messages.filter { $0.author.kind == .agent && !($0.author.session ?? "").hasPrefix(permissionSessionPrefix) && $0.scheduledChange == nil }
+    guard let latest = agents.last else { return thread.messages.first }
+    let sessionless = (latest.author.session ?? "").isEmpty && (latest.author.host ?? "").isEmpty && (latest.author.name ?? "").isEmpty
+    let answered = (latest.questions ?? []).contains { $0.state == .picked && $0.kind != .action } || ActionMarks.items(of: latest).contains(where: actionInDraft)
+    guard sessionless, !answered else { return latest }
+    return agents.last { !($0.author.session ?? "").isEmpty } ?? latest
+  }
+
+  /// The message a reply to the agent that wrote `message` answers now: that agent session's latest message in the
+  /// thread (not a permission prompt's, not a routine's change line), as a Send to that agent would; `message` itself
+  /// when it has no session. Nil when the thread no longer has `message`.
+  static func latest(sessionOf message: MessageID, in thread: InboxThread) -> MessageID? {
+    guard let wrote = thread.messages.first(where: { $0.id == message }) else { return nil }
+    let own = group(of: wrote)
+    let latest = thread.messages.last { $0.author.kind == .agent && group(of: $0) == own && !isPermissionPrompt($0) && $0.scheduledChange == nil }
+    return latest?.id ?? wrote.id
   }
 
   public static func targets(in thread: InboxThread) -> [SendTarget] {

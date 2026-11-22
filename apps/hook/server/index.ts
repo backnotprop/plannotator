@@ -112,7 +112,7 @@ import {
   handleGoalSetupServerReady,
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
-import { loadConfig, resolveAIEnabled, resolvePlanReview, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
+import { loadConfig, saveConfig, resolveAIEnabled, resolvePlanReview, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
 import { formatIgnoredReviewWords, parseReviewArgs, resolveReviewTarget, withReviewDirectory, type ParsedReviewArgs } from "@plannotator/shared/review-args";
 import { resolveReviewOpenState, type ReviewOpenState } from "@plannotator/shared/review-open-state";
 import { listBranches, type AvailableBranches } from "@plannotator/shared/review-core";
@@ -274,7 +274,8 @@ import { runShapeOpen, runShapeServe } from "./shape-open";
 import { runShapeFrame } from "./shape-frame";
 import { isShapeAnimateHelp, SHAPE_ANIMATE_HELP } from "@plannotator/core/shape-animate";
 import { inboxHelpTopic } from "./inbox-help-before-after";
-import { runInboxCallCommand } from "./inbox-call-command";
+import { inboxPairedRouteFetch, runInboxCallCommand } from "./inbox-call-command";
+import { isInboxTurnedOn } from "@plannotator/shared/inbox/turned-on";
 import { runRoutineCommand } from "./routine-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
 import { runInboxPullsCommand } from "./inbox-pulls-command";
@@ -549,10 +550,17 @@ if (isReviewDrawCommand(rawArgs, () => {
   const args = rawArgs;
   if (args[0] === "inbox" && args[1] === "export-decisions") {
     const exportDataDir = getPlannotatorDataDir();
+    // A paired cloud agent's machine has no Inbox: the person's, through the agent door (inbox-call-command.ts).
+    const pairedRoute = process.env.PLANNOTATOR_PAIRING && !isInboxTurnedOn(exportDataDir) ? inboxPairedRouteFetch({ env: process.env }) : null;
+    if (pairedRoute && "code" in pairedRoute) {
+      process.stderr.write(`${pairedRoute.code}: ${pairedRoute.message}\n`);
+      process.exit(1);
+    }
     process.exit(
       await runInboxExportDecisionsCommand(args.slice(2), {
         cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
         ensureRunning: () => ensureInboxRunning(exportDataDir),
+        ...(pairedRoute ? { fetchRoute: pairedRoute } : {}),
       }),
     );
   }
@@ -568,6 +576,25 @@ if (isReviewDrawCommand(rawArgs, () => {
         env: process.env,
         askAiChild: isAskAiChild(process.env),
         ensureRunning: () => ensureInboxRunning(stepsDataDir),
+      }),
+    );
+  }
+}
+// `plannotator theme …`: the person's own theme files (theme-command.ts). Reads and writes the data dir
+// only, so it works with nothing running. Before the strict-annotate parse: it takes its own flags and --help.
+{
+  const args = rawArgs;
+  if (args[0] === "theme") {
+    const { runThemeCommand } = await import("./theme-command");
+    process.exit(
+      await runThemeCommand(args.slice(1), {
+        dataDir: getPlannotatorDataDir(),
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        loadTheme: () => {
+          const theme = loadConfig({ quiet: true }).theme;
+          return theme && typeof theme === "object" ? theme : undefined;
+        },
+        saveTheme: (theme) => saveConfig({ theme }),
       }),
     );
   }
@@ -1516,6 +1543,7 @@ if (args[0] === "sessions") {
       console.error("  GitHub: https://github.com/owner/repo/pull/123");
       console.error("  GitLab: https://gitlab.com/group/project/-/merge_requests/42");
       console.error("  Bitbucket Cloud: https://bitbucket.org/workspace/repo/pull-requests/7");
+      console.error("  Forgejo / Gitea: https://codeberg.org/owner/repo/pulls/5");
       process.exit(1);
     }
 

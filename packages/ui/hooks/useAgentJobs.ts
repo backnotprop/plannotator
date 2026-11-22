@@ -284,7 +284,11 @@ export function useAgentJobs(
 
       const data: unknown = await res.json();
       const job = parseLaunchJob(data);
-      if (job) setJobs((prev) => upsertJob(prev, job));
+      // The response shows a launch the stream has not announced yet (#980).
+      // It never replaces a job the stream already has: a job that exits
+      // within the POST's round trip is already done there, and this copy
+      // ("running") would leave it running for good.
+      if (job) setJobs((prev) => (prev.some((current) => current.id === job.id) ? prev : [...prev, job]));
       return job;
     },
     [],

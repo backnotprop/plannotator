@@ -42,7 +42,7 @@ import { join } from "node:path";
 import { JsonLines } from "@plannotator/shared/inbox/devices";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
-import { inboxTidyWords } from "@plannotator/core/inbox-types";
+import { inboxTidyWords, type InboxSentFromPlace } from "@plannotator/core/inbox-types";
 
 export const INBOX_OUTBOX_DIR = "outbox";
 /** The header a linked machine's Inbox sends with a write the person made in its window (`OutboxEntry.window`). */
@@ -101,6 +101,8 @@ export interface OutboxEntry {
    * `X-Plannotator-Window`: the other machine answers a permission prompt, or starts, stops or trusts an agent, only for one.
    */
   window?: true;
+  /** Where the person was when not at this Inbox's own window (inbox-sent-from.ts). Sent on as `X-Plannotator-Sent-From`. */
+  sent_from?: InboxSentFromPlace;
 }
 
 /** What one try got back: the owner's status and JSON body, or `null` when the machine could not be reached. */
@@ -223,6 +225,10 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST messages/:id/reask": "append",
   "POST messages/:id/handoff/undo": "set",
   "POST messages/:id/actions/(a-[0-9a-f]{8}(?:-\\d{1,3})?)": "set",
+  // A run starts, stops or opens a terminal now, and a secret's value is never written to the outbox: sent now from a
+  // press in a window there, or not at all (inbox-run-routes.ts).
+  "POST messages/:id/run": "now",
+  "POST messages/:id/secret": "now",
   "POST threads/:id/delete": "set",
   "POST annotations": "set",
   "POST annotations/:id/remove": "set",
@@ -395,7 +401,7 @@ export class InboxOutbox {
    * whatever state it is in, and queues nothing. The same key on another
    * route or machine is refused, as the door refuses it.
    */
-  submit(machine: string, route: string, body: Record<string, unknown>, thread: string | null = null, window = false): { entry: OutboxEntry; fresh: boolean } {
+  submit(machine: string, route: string, body: Record<string, unknown>, thread: string | null = null, window = false, sentFrom: InboxSentFromPlace | null = null): { entry: OutboxEntry; fresh: boolean } {
     if (!MACHINE_FILE.test(machine)) throw new InboxError("validation_error", "machine: an ibx_ id.", { field: "machine" });
     const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a write to another machine.", { field: "idempotency_key" });
@@ -428,6 +434,7 @@ export class InboxOutbox {
       dismissed: false,
       thread,
       ...(window ? { window: true as const } : {}),
+      ...(sentFrom ? { sent_from: sentFrom } : {}),
     });
     return { entry, fresh: true };
   }
