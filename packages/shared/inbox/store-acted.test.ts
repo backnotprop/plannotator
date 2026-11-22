@@ -1,0 +1,177 @@
+/**
+ * "Recent activity" (approval "inbox-recent-activity-filter"): when the person last did something in a thread, on a
+ * real store in a temp dir on a clock the test moves (acted.ts, `InboxStore.personActedAt`), and the file for what
+ * the log does not hold (acted.json). Failures to catch: a kind of the person's doing that leaves no time (a reply,
+ * a pick, Done, a Re-ask, a comment); tidying or an agent's message that sets one; a time lost on reload; a note
+ * written per save instead of once; the file growing without bound.
+ */
+import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { InboxAuthor, InboxMessage, InboxQuestionRecord } from "@plannotator/core/inbox-types";
+import { INBOX_ACTED_FILE, INBOX_ACTED_MAX, createInboxActed, personActOfMessage, personActOfQuestion, readInboxActed } from "./acted";
+import { InboxStore } from "./store";
+
+const roots: string[] = [];
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+const START = Date.parse("2026-11-20T09:00:00.000Z");
+const AGENT: Extract<InboxAuthor, { kind: "agent" }> = { kind: "agent", host: "claude-code", session: "ses_a", name: null };
+const BODY = ["The migration is ready.", "", ":::action", "Rotate the staging key", "Where: the vault", ":::", "", ":::question", "Ship it tonight?", "", "- [ ] Yes", "- [ ] No", ":::"].join("\n");
+
+function open(dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-acted-"))) {
+  if (!roots.includes(dir)) roots.push(dir);
+  const clock = { now: START };
+  const store = InboxStore.open(dir, { now: () => new Date(clock.now) });
+  return { store, dir, clock };
+}
+
+function setup() {
+  const opened = open();
+  const project = opened.store.ensureProject({ name: "billing", root: "/work/billing" });
+  const ask = () => opened.store.sendMessage({ project_id: project.id, author: AGENT, body: BODY }).message;
+  return { ...opened, project, ask };
+}
+
+const at = (ms: number) => new Date(ms).toISOString();
+
+describe("the store's record of what the person did in a thread", () => {
+  test("an agent's message alone sets nothing; each kind of the person's doing sets the time it happened", () => {
+    const { store, clock, ask } = setup();
+    const asked = ask();
+    expect(store.personActedAt(asked.thread_id)).toBeNull();
+
+    // A pick.
+    clock.now = START + 60_000;
+    const question = store.questionsOf(asked.id).find((q) => q.kind !== "action")!;
+    store.savePicks(asked.id, [{ key: question.key, revision: question.revision, answer: { v: 1, key: question.key, kind: question.kind as "single", prompt: question.prompt, selected: ["Yes"] } }]);
+    expect(store.personActedAt(asked.thread_id)).toBe(at(START + 60_000));
+
+    // Done on an action item.
+    clock.now = START + 120_000;
+    const action = store.questionsOf(asked.id).find((q) => q.kind === "action")!;
+    store.markAction(asked.id, action.key, { outcome: "done" });
+    expect(store.personActedAt(asked.thread_id)).toBe(at(START + 120_000));
+
+    // A reply.
+    clock.now = START + 180_000;
+    store.sendReply(asked.id, { idempotency_key: "r1", words: "Shipping tonight." });
+    expect(store.personActedAt(asked.thread_id)).toBe(at(START + 180_000));
+
+    // A comment on the agent's message.
+    clock.now = START + 240_000;
+    store.saveMessageAnnotation(asked.id, { id: "ann-1", blockId: "block-0", startOffset: 0, endOffset: 3, type: "COMMENT", text: "Which key?", originalText: "The", createdA: 1 });
+    expect(store.personActedAt(asked.thread_id)).toBe(at(START + 240_000));
+  });
+
+  test("a Re-ask is the person's doing", () => {
+    const { store, clock, ask } = setup();
+    const asked = ask();
+    clock.now = START + 90_000;
+    store.sendReask(asked.id, { idempotency_key: "q1" });
+    expect(store.personActedAt(asked.thread_id)).toBe(at(START + 90_000));
+  });
+
+  test("tidying never sets it: star, Priority, snooze, tag, mark read and unread, archive", () => {
+    const { store, clock, ask } = setup();
+    const asked = ask();
+    const id = asked.thread_id;
+    clock.now = START + 60_000;
+    store.setPinned(id, true);
+    store.setPriority(id, true);
+    store.setSnooze(id, at(START + 86_400_000));
+    store.setThreadTagNamed(id, "Launch", true);
+    store.markRead(id, true);
+    store.markRead(id, false);
+    store.markUnread(id);
+    store.resolveThread(id, true, "person");
+    expect(store.personActedAt(id)).toBeNull();
+  });
+
+  test("a reload of the store rebuilds it from the log, and another agent message never moves it", () => {
+    const { store, dir, clock, ask, project } = setup();
+    const asked = ask();
+    clock.now = START + 60_000;
+    store.sendReply(asked.id, { idempotency_key: "r1", words: "Go." });
+    clock.now = START + 600_000;
+    store.sendMessage({ project_id: project.id, author: AGENT, body: "Done, shipped.", reply_to: asked.id });
+    expect(store.personActedAt(asked.thread_id)).toBe(at(START + 60_000));
+    const again = InboxStore.open(dir, { now: () => new Date(clock.now) });
+    expect(again.personActedAt(asked.thread_id)).toBe(at(START + 60_000));
+  });
+});
+
+describe("which records are the person's doing", () => {
+  const message = (extra: Partial<InboxMessage>): InboxMessage =>
+    ({ id: "msg_01ARZ3NDEKTSV4RRFFQ69G5FAV", project_id: "prj_x", thread_id: "msg_01ARZ3NDEKTSV4RRFFQ69G5FAV", reply_to: null, author: { kind: "person" }, subject: null, body: "Yes", created_at: at(START), resolved_at: null, idempotency_key: null, ...extra }) as InboxMessage;
+
+  test("the person's own message counts; an agent's, the Inbox's notes and a routine's run do not", () => {
+    expect(personActOfMessage(message({}))).toBe(at(START));
+    expect(personActOfMessage(message({ author: AGENT }))).toBeNull();
+    expect(personActOfMessage(message({ set_aside: ["msg_x/q1"] }))).toBeNull();
+    expect(personActOfMessage(message({ ack_of: "msg_x" }))).toBeNull();
+    expect(personActOfMessage(message({ scheduled_run: { scheduled_id: "sch_1", run: 3, by: "schedule", due_at: at(START) } } as Partial<InboxMessage>))).toBeNull();
+  });
+
+  test("a pick or a mark is the person's only when they made it", () => {
+    const record = { picked_by: null, picked_at: null, action_result: null } as unknown as InboxQuestionRecord;
+    expect(personActOfQuestion(record)).toBeNull();
+    expect(personActOfQuestion({ ...record, action_result: { outcome: "done", note: null, at: at(START), by: "agent" } } as InboxQuestionRecord)).toBeNull();
+    expect(personActOfQuestion({ ...record, action_result: { outcome: "skip", note: null, at: at(START), by: "person" } } as InboxQuestionRecord)).toBe(at(START));
+    expect(personActOfQuestion({ ...record, picked_by: { id: "person", name: null }, picked_at: at(START + 5) } as InboxQuestionRecord)).toBe(at(START + 5));
+  });
+});
+
+describe("acted.json: what the log does not hold", () => {
+  const T1 = "msg_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  const T2 = "msg_01ARZ3NDEKTSV4RRFFQ69G5FAW";
+  const dirOf = () => {
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-acted-file-"));
+    roots.push(dir);
+    return dir;
+  };
+
+  test("notes wait for one write; an older time never replaces a newer one; a restart reads them back", () => {
+    const dir = dirOf();
+    const acted = createInboxActed(dir, { flushMs: 60_000 });
+    acted.note(T1, at(START + 10));
+    acted.note(T1, at(START + 30));
+    acted.note(T1, at(START + 20));
+    acted.note(T2, at(START));
+    expect(acted.at(T1)).toBe(at(START + 30));
+    // Nothing written yet: many saves are one write.
+    expect(existsSync(join(dir, INBOX_ACTED_FILE))).toBe(false);
+    acted.flush();
+    expect(readInboxActed(dir)).toEqual(new Map([[T1, at(START + 30)], [T2, at(START)]]));
+    expect(createInboxActed(dir).at(T1)).toBe(at(START + 30));
+  });
+
+  test("no note, no write; a value that is not a thread id is dropped; the file keeps the newest threads only", () => {
+    const dir = dirOf();
+    createInboxActed(dir).flush();
+    expect(existsSync(join(dir, INBOX_ACTED_FILE))).toBe(false);
+    const acted = createInboxActed(dir, { flushMs: 60_000 });
+    acted.note("../etc", at(START));
+    expect(acted.at("../etc")).toBeNull();
+    const ids = Array.from({ length: INBOX_ACTED_MAX + 5 }, (_, i) => `msg_${String(i).padStart(26, "0")}`);
+    ids.forEach((id, i) => acted.note(id, at(START + i * 1000)));
+    acted.flush();
+    const kept = readInboxActed(dir);
+    expect(kept.size).toBe(INBOX_ACTED_MAX);
+    expect(kept.has(ids[0]!)).toBe(false);
+    expect(kept.has(ids.at(-1)!)).toBe(true);
+  });
+
+  test("a file that does not read is none, and the next note writes a good one", () => {
+    const dir = dirOf();
+    writeFileSync(join(dir, INBOX_ACTED_FILE), "{nope");
+    const acted = createInboxActed(dir, { flushMs: 60_000 });
+    expect(acted.at(T1)).toBeNull();
+    acted.note(T1, at(START));
+    acted.flush();
+    expect(JSON.parse(readFileSync(join(dir, INBOX_ACTED_FILE), "utf8"))).toEqual({ v: 1, threads: { [T1]: at(START) } });
+  });
+});

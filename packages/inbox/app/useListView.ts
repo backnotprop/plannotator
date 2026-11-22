@@ -15,6 +15,9 @@ import { filterAgentRows } from '../agents/model';
 import { filterTagRows } from '../threadTags';
 import { withLiveTagPicks } from '../listFilterTags';
 import { routineHold, useRoutineThreads } from '../listFilterRoutines';
+import { sortByActed, useActedKeys } from '../listFilterRecent';
+import { useRecentActs } from '../recentActs';
+import type { ListSort } from '../listView';
 import { useThreadTagsHost } from '../useThreadTagsHost';
 import { projectsWithReadable, shownProjects } from '../projectMenu';
 import { projectActivity } from '../projectSort';
@@ -41,10 +44,14 @@ export interface ListViewInputs {
   openedHere: { readonly current: Set<string> };
   heldOpen: () => OpenThread | null;
   heldRead: ReadonlySet<string>;
+  /** When the list on screen was last sorted whole (App's): Recent activity's order holds between them. */
+  listSort: ListSort;
   tags: Omit<Parameters<typeof useThreadTagsHost>[0], 'routeTag' | 'machines' | 'windowRows' | 'openRow' | 'latestSections' | 'tagColours' | 'projects'>;
 }
 
-export function useListShown({ latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead, tags, combining }: ListViewInputs) {
+export function useListShown({ latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead, listSort, tags, combining }: ListViewInputs) {
+  // What this window tells the server for Recent activity: the person's opens and films (recentActs.ts).
+  useRecentActs();
   const latestSections = latest?.sections ?? [];
   // Every row the list knows, the Snoozed band's too: only counts read `latestSections`, which has none of those.
   const latestGroups = useMemo(() => (latest ? listGroups(latest) : []), [latest]);
@@ -116,14 +123,21 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
   const routineTest = routines.state === 'ready' ? routines.test : undefined;
   /** A saved Routine pick while the routines are not read: the list waits, drawing no row and no empty words. */
   const listHeld = routineHold(routines, listFilterApplied);
+  // Recent activity (listFilterRecent.ts): newest first by when the person last acted, placed as of the last whole sort.
+  const actedKey = useActedKeys(listFilterApplied.recent, listSort);
   /** The list as the person reads it: `filterList`, then the filter. "N new" and the rows read this. */
   const filterShown = useCallback(
-    (sections: readonly InboxListSection[]) =>
+    (sections: readonly InboxListSection[]) => {
       // The Tag picks keep a thread tagged itself or in a tagged project (projectTags.ts).
-      listHeld ? filterList(sections).map((section) => ({ ...section, threads: [] })) : filterListSections(filterList(sections), listFilterApplied, Date.now(), heldRead, filterTagsOfRow, routineTest),
+      if (listHeld) return filterList(sections).map((section) => ({ ...section, threads: [] }));
+      const kept = filterListSections(filterList(sections), listFilterApplied, Date.now(), heldRead, filterTagsOfRow, routineTest);
+      return actedKey ? sortByActed(kept, actedKey) : kept;
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the day: a new one reads the spans again.
-    [filterList, listFilterApplied, listFilterDay, heldRead, filterTagsOfRow, routineTest, listHeld],
+    [filterList, listFilterApplied, listFilterDay, heldRead, filterTagsOfRow, routineTest, listHeld, actedKey],
   );
+  /** The sort InboxList's List view reads: Recent activity's places while it is on. */
+  const listSortShown = useMemo(() => (actedKey ? { ...listSort, by: actedKey } : listSort), [listSort, actedKey]);
   /** The rows before the filter: its menu's counts and choices. */
   const listFilterRows = useMemo(() => {
     const drawn = listShown ?? shown;
@@ -158,5 +172,5 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
           elsewhere: lines?.elsewhere ?? null,
         }
       : null;
-  return { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listHeld, listTitle, notice, tagsOfRow, filterTag, threadTagsHost, sidebarTags, listColours };
+  return { listSortShown, latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listHeld, listTitle, notice, tagsOfRow, filterTag, threadTagsHost, sidebarTags, listColours };
 }

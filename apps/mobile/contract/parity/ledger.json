@@ -21749,6 +21749,20 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-field-inboxlistrow-acted-at",
+      "title": "field:InboxListRow.acted_at",
+      "surface": [
+        "field:InboxListRow.acted_at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

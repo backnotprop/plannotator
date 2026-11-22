@@ -1,0 +1,136 @@
+/**
+ * The list filter's "Recent activity" (approval "inbox-recent-activity-filter"; listFilterRecent.ts, the pick in
+ * listFilter.ts, the window's notes in recentActs.ts): which rows it keeps, their order, how it holds and how it goes.
+ *
+ * What this catches: a row kept with no act of the person's, or past the 30 days, or one dropped inside them; rows not
+ * newest first by the act (or by `last_at` instead), the Snoozed band reordered, a group dropped; a row that moves
+ * under the person before the list settles, or one that stays put after it does; the List view still sorting by
+ * `last_at` with the filter on, or keeping the filter's order once it is off; the pick lost on reload, or still
+ * counted once off; a thread counted as opened without the person's gesture (shown on load, opened by an agent), or
+ * not counted with one; a film played without a gesture written, or one written on every play.
+ */
+import { afterEach, describe, expect, test } from 'bun:test';
+import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+import { INBOX_SNOOZED_BAND } from '@plannotator/core/inbox-snooze';
+import { setStorageBackend, resetStorageBackend } from '@plannotator/ui/utils/storage';
+import { LIST_FILTER_COOKIE, NO_LIST_FILTER, filterListSections, parseListFilter, pickCount, resetListFilterForTests, writeListFilter } from './listFilter';
+import { RECENT_ACTIVITY_DAYS, actedPlaces, noteActedHere, resetActedHereForTests, rowActedAt, rowRecentlyActed, sortByActed } from './listFilterRecent';
+import { flatRows } from './listView';
+import { gestured, mediaPlayed, personOpened, resetRecentActsForTests, routeChanged } from './recentActs';
+
+const NOW = Date.parse('2026-11-22T12:00:00.000Z');
+const ago = (hours: number) => new Date(NOW - hours * 3_600_000).toISOString();
+
+function row(id: string, extra: { acted?: string; last?: string } = {}): InboxListRow {
+  return {
+    thread_id: id,
+    project: { id: 'prj_billing', name: 'billing' },
+    last_at: extra.last ?? ago(1),
+    author: { kind: 'agent', host: 'claude-code', session: `s_${id}`, name: null },
+    unread: false,
+    ...(extra.acted ? { acted_at: extra.acted } : {}),
+  } as unknown as InboxListRow;
+}
+const section = (id: string, rows: InboxListRow[]): InboxListSection => ({ id, label: id, threads: rows }) as InboxListSection;
+const ids = (sections: readonly InboxListSection[]) => sections.map((s) => `${s.id}:${s.threads.map((r) => r.thread_id).join(',')}`);
+
+afterEach(() => {
+  resetActedHereForTests();
+  resetRecentActsForTests();
+  resetStorageBackend();
+  resetListFilterForTests();
+});
+
+describe('which rows Recent activity keeps', () => {
+  const on = { ...NO_LIST_FILTER, recent: true };
+
+  test('only a thread the person acted in within the last 30 days, in every group, the groups kept', () => {
+    const sections = [
+      section('waiting', [row('charlie', { acted: ago(2) }), row('ada'), row('bob', { acted: ago(24 * (RECENT_ACTIVITY_DAYS + 1)) })]),
+      section('quiet', [row('dunn', { acted: ago(24 * (RECENT_ACTIVITY_DAYS - 1)) })]),
+    ];
+    expect(ids(filterListSections(sections, on, NOW))).toEqual(['waiting:charlie', 'quiet:dunn']);
+    // Off: the list as it was.
+    expect(filterListSections(sections, NO_LIST_FILTER, NOW)).toBe(sections);
+  });
+
+  test("a film played in this window counts before the list reads it back, and the later time wins", () => {
+    expect(rowRecentlyActed(row('ada'), NOW)).toBe(false);
+    noteActedHere('ada', ago(1));
+    expect(rowRecentlyActed(row('ada'), NOW)).toBe(true);
+    expect(rowActedAt(row('ada', { acted: ago(5) }))).toBe(ago(1));
+    expect(rowActedAt(row('ada', { acted: ago(0.5) }))).toBe(ago(0.5));
+  });
+
+  test('the pick is one in the badge, kept across a reload, and gone with Clear', () => {
+    const stored = new Map<string, string>();
+    setStorageBackend({ getItem: (k) => stored.get(k) ?? null, setItem: (k, v) => void stored.set(k, v), removeItem: (k) => void stored.delete(k) });
+    expect(pickCount(on)).toBe(1);
+    writeListFilter(on);
+    expect(parseListFilter(stored.get(LIST_FILTER_COOKIE)!).recent).toBe(true);
+    writeListFilter(NO_LIST_FILTER);
+    expect(stored.has(LIST_FILTER_COOKIE)).toBe(false);
+    // A cookie from before the pick loads without it.
+    expect(parseListFilter(JSON.stringify({ notSeen: true })).recent).toBe(false);
+  });
+});
+
+describe('the order', () => {
+  test('each group newest first by when the person acted, never by last_at; the Snoozed band as it was', () => {
+    const sections = [
+      section('waiting', [row('old', { acted: ago(48), last: ago(0.1) }), row('new', { acted: ago(1), last: ago(30) }), row('mid', { acted: ago(5) })]),
+      section(INBOX_SNOOZED_BAND.id, [row('s1', { acted: ago(9) }), row('s2', { acted: ago(1) })]),
+    ];
+    expect(ids(sortByActed(sections, actedPlaces(null, null).key))).toEqual(['waiting:new,mid,old', `${INBOX_SNOOZED_BAND.id}:s1,s2`]);
+  });
+
+  test('a row keeps its place until the next whole sort; the open thread kept through one keeps it then too', () => {
+    const first = actedPlaces(null, null);
+    expect(first.key(row('ada', { acted: ago(5) }))).toBe(ago(5));
+    // The person acts in it again while the list holds: its place does not move.
+    expect(first.key(row('ada', { acted: ago(0) }))).toBe(ago(5));
+    // The next whole sort places it by its new time...
+    expect(actedPlaces(first.keys, null).key(row('ada', { acted: ago(0) }))).toBe(ago(0));
+    // ...unless it is the thread the sort keeps in place.
+    expect(actedPlaces(first.keys, 'ada').key(row('ada', { acted: ago(0) }))).toBe(ago(5));
+  });
+
+  test('the List view sorts by the acted time while on, and by last_at again once off', () => {
+    const sections = [section('waiting', [row('ada', { acted: ago(1), last: ago(40) }), row('bob', { acted: ago(20), last: ago(2) })]), section('quiet', [row('charlie', { acted: ago(3), last: ago(1) })])];
+    const by = actedPlaces(null, null).key;
+    const onList = flatRows(sections, null, { epoch: 1, keep: null, by });
+    expect(onList.rows.map((r) => r.row.thread_id)).toEqual(['ada', 'charlie', 'bob']);
+    // Turned off at the same epoch: still a whole sort, by last_at.
+    const off = flatRows(sections, onList.places, { epoch: 1, keep: null });
+    expect(off.rows.map((r) => r.row.thread_id)).toEqual(['charlie', 'bob', 'ada']);
+  });
+});
+
+describe("what this window tells the server", () => {
+  test('a thread the person moved to is opened by them, once; one shown on load or by an agent is not', () => {
+    // Shown with no gesture (a launch link, an agent's open, the page loading on it).
+    routeChanged(NOW, 'msg_agent');
+    expect(personOpened('msg_agent', NOW + 200)).toBe(false);
+    // The person's click, then the route moves.
+    gestured(NOW + 1000);
+    routeChanged(NOW + 1050, 'msg_chosen');
+    expect(personOpened('msg_chosen', NOW + 1500)).toBe(true);
+    expect(personOpened('msg_chosen', NOW + 1600)).toBe(false);
+    // A gesture long before the route moved is not this open.
+    routeChanged(NOW + 9000, 'msg_later');
+    expect(personOpened('msg_later', NOW + 9100)).toBe(false);
+  });
+
+  test('a film the person played writes once per thread for a while; a play with no gesture writes nothing', () => {
+    const posted: string[] = [];
+    const post = async (id: string) => void posted.push(id);
+    mediaPlayed(NOW, post, 'msg_film');
+    expect(posted).toEqual([]);
+    gestured(NOW + 100);
+    mediaPlayed(NOW + 150, post, 'msg_film');
+    gestured(NOW + 5000);
+    mediaPlayed(NOW + 5050, post, 'msg_film');
+    expect(posted).toEqual(['msg_film']);
+    expect(rowActedAt(row('msg_film'))).toBe(new Date(NOW + 150).toISOString());
+  });
+});

@@ -1095,6 +1095,7 @@
       "InboxLaunchRex.unavailable",
       "InboxLaunchRex.why",
       "InboxListRow.ack",
+      "InboxListRow.acted_at",
       "InboxListRow.addressee",
       "InboxListRow.agent_after_archive",
       "InboxListRow.answered_not_sent",

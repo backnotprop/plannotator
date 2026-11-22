@@ -122,6 +122,7 @@ import { inboxClaimDirs } from "./claims";
 import { createInboxHandover, type InboxHandover } from "./handover";
 import { inboxTakeBackRefusal, type InboxHolder } from "./take-back";
 import { inboxWakeQuote } from "./wake-quote";
+import { laterActed, personActOfAnnotation, personActOfMessage, personActOfQuestion } from "./acted";
 import { inboxReplyQuoteExcerpt, inboxReplyQuoteLead, inboxReplyQuoteTime, type InboxReplyQuote, type InboxReplyQuoteWhose } from "@plannotator/core/inbox-reply-quote";
 import { whenTime } from "@plannotator/core/inbox-format";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
@@ -1017,6 +1018,11 @@ export class InboxStore {
   private readonly latestAgentIds = new Map<string, string>();
   /** Each session's first message id (by its first line's seq): one it wrote, or a person's addressed to it. `firstThreadsBySession`. */
   private readonly firstSessionIds = new Map<string, string>();
+  /**
+   * Per thread, when the person last did something there that the log holds (acted.ts: a message of theirs, a pick, an
+   * action item's mark, a comment), kept as each line is applied: the list row's `acted_at` reads it. A re-read builds it again.
+   */
+  private readonly personActs = new Map<string, string>();
   /** Per thread, how many message lines were applied to it: `threadVersion`. */
   private readonly threadLines = new Map<string, number>();
   /**
@@ -1165,6 +1171,7 @@ export class InboxStore {
     if (record.launch !== undefined && (record.thread_id === record.id || !record.scheduled_run)) this.launchedRootIds.add(record.id);
     if (record.scheduled_run) this.placeScheduledLine(record);
     if (!first) return;
+    this.notePersonAct(record.thread_id, personActOfMessage(record));
     this.messageSeq.set(record.id, firstSeq);
     this.noteAgentMessage(record, firstSeq);
     this.noteFirstSessionMessage(record, firstSeq);
@@ -1198,6 +1205,7 @@ export class InboxStore {
         break;
       case "question": {
         this.questions.set(line.record.id, line.record);
+        this.notePersonAct(this.messages.get(line.record.message_id)?.thread_id, personActOfQuestion(line.record));
         const ids = this.messageQuestions.get(line.record.message_id);
         if (ids) ids.add(line.record.id);
         else this.messageQuestions.set(line.record.message_id, new Set([line.record.id]));
@@ -6244,6 +6252,7 @@ export class InboxStore {
     const unsent = (r: InboxAnnotationRecord | undefined) => (r && r.sent_reply_id === null && r.removed_at === null ? 1 : 0);
     const before = this.annotations.get(record.id);
     this.annotations.set(record.id, record);
+    this.notePersonAct(record.thread_id, personActOfAnnotation(record));
     if (before && before.thread_id !== record.thread_id) this.bumpUnsent(before.thread_id, -unsent(before));
     this.bumpUnsent(record.thread_id, unsent(record) - (before && before.thread_id === record.thread_id ? unsent(before) : 0));
   }
@@ -6646,6 +6655,7 @@ export class InboxStore {
     this.changes += 1;
     this.latestAgentIds.clear();
     this.firstSessionIds.clear();
+    this.personActs.clear();
     this.threadLines.clear();
     this.latest.clear();
     this.projectsById.clear();
@@ -7778,6 +7788,21 @@ export class InboxStore {
       if (!known || known.seq < seq) latest.set(message.author.session, { message, seq });
     }
     return new Map([...latest].map(([session, { message }]) => [session, message]));
+  }
+
+  /** The person did something in the thread at `at` (acted.ts); an older time leaves the newer one. */
+  private notePersonAct(threadId: string | undefined, at: string | null): void {
+    if (!threadId || !at) return;
+    const next = laterActed(this.personActs.get(threadId), at);
+    if (next) this.personActs.set(threadId, next);
+  }
+
+  /**
+   * When the person last did something in the thread that the log holds (acted.ts), or null. Only the list the
+   * window and the phone read carries it (`acted_at`): never anything an agent reads.
+   */
+  personActedAt(threadId: string): string | null {
+    return this.personActs.get(threadId) ?? null;
   }
 
   /** A message first applied at `seq`: its session's latest, when it is an agent's and the newest of that session's. */

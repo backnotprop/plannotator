@@ -1896,6 +1896,14 @@ export interface InboxListRow extends InboxThreadSummary {
    */
   pinned_at?: string | null;
   /**
+   * When the person last did something in the thread (approval "inbox-recent-activity-filter"; the rule is shared's
+   * inbox/acted.ts): sent something, picked, marked an action item, commented, saved a draft, played a film, or opened
+   * it. The list filter's "Recent activity" keeps and sorts by it. Like `pinned_at`, only on the list model the window
+   * and the phone read, never on anything an agent reads; absent when the person has done nothing there (or from an
+   * older Inbox).
+   */
+  acted_at?: string;
+  /**
    * The live tags the thread is in (approval "inbox-thread-tags"), `ini_` ids, oldest tag first; absent when none.
    * Like `pinned_at`, only on the list model the window and the phone read, never on anything an agent reads.
    */

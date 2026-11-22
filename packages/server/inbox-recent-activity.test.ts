@@ -1,0 +1,131 @@
+/**
+ * "Recent activity" (approval "inbox-recent-activity-filter") through the Inbox's real doors on a running Inbox (temp
+ * data dir, loopback): each list row's `acted_at`, when the person last did something in the thread (shared's
+ * inbox/acted.ts). Counts: a reply, an open the person chose (`POST /seen { opened: true }`), a reply draft saved, a
+ * film played (`POST /threads/:id/acted`). Never: an agent's message, a look the person did not choose, tidying (star,
+ * Priority, snooze, tag, mark read and unread, archive). Kept across a restart, in `inbox/acted.json`, never in the
+ * event log or on the store's row agents read.
+ */
+import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import type { InboxListRow, InboxListSection } from "@plannotator/core/inbox-types";
+import { startInboxServer, type InboxServer } from "./inbox";
+
+const roots: string[] = [];
+const servers: InboxServer[] = [];
+const clients: Client[] = [];
+
+afterEach(async () => {
+  for (const client of clients.splice(0)) await client.close().catch(() => {});
+  for (const server of servers.splice(0)) server.stop();
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+async function start(dataDir: string) {
+  const server = await startInboxServer({ dataDir, binaryPath: null, setAsideDelayMs: 60_000 });
+  servers.push(server);
+  const client = new Client({ name: "inbox-recent-activity-test", version: "1.0.0" });
+  await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
+  clients.push(client);
+  const send = async (body: string, session: string) =>
+    (
+      (await client.callTool({ name: "send_message", arguments: { project_path: project(dataDir), agent_session: session, agent_name: "Claude Code", body } })) as {
+        structuredContent: { thread_id: string; message_id: string };
+      }
+    ).structuredContent;
+  return { server, send };
+}
+
+const project = (dataDir: string) => join(dataDir, "..", "billing-svc");
+
+async function setup() {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-recent-activity-")));
+  roots.push(root);
+  mkdirSync(join(root, "billing-svc"), { recursive: true });
+  const dataDir = join(root, "data");
+  return { dataDir, ...(await start(dataDir)) };
+}
+
+const url = (server: InboxServer, path: string) => `http://127.0.0.1:${server.port}${path}`;
+const post = (server: InboxServer, path: string, body: Record<string, unknown>) =>
+  fetch(url(server, path), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: server.serverSession, ...body }) });
+const rows = async (server: InboxServer): Promise<InboxListRow[]> =>
+  ((await (await fetch(url(server, "/api/inbox/threads?archived=include"))).json()) as { sections: InboxListSection[] }).sections.flatMap((s) => s.threads);
+const actedOf = async (server: InboxServer, threadId: string) => (await rows(server)).find((row) => row.thread_id === threadId)?.acted_at ?? null;
+const ok = async (response: Promise<Response>) => expect((await response).status).toBe(200);
+
+describe("the row's acted_at", () => {
+  test("a reply, a chosen open, a draft and a film each set it; an agent's message and a look not chosen do not", async () => {
+    const { server, send } = await setup();
+    const quiet = await send("Nightly e2e: all green.", "ses_q");
+    const replied = await send("Retry refunds after 24 hours?", "ses_r");
+    const opened = await send("Export invoices as CSV too?", "ses_o");
+    const looked = await send("Landing copy is up.", "ses_l");
+    const drafted = await send("The ledger export is ready.", "ses_d");
+    const film = await send("Here is the walkthrough recording.", "ses_f");
+
+    const before = Date.now();
+    await ok(post(server, `/api/inbox/messages/${replied.message_id}/reply`, { idempotency_key: "r1", words: "Yes, 24 hours." }));
+    await ok(post(server, `/api/inbox/threads/${opened.thread_id}/seen`, { opened: true }));
+    await ok(post(server, `/api/inbox/threads/${looked.thread_id}/seen`, {}));
+    await ok(post(server, `/api/inbox/threads/${drafted.thread_id}/draft`, { body: "Looks right, one quest", base: null }));
+    await ok(post(server, `/api/inbox/threads/${film.thread_id}/acted`, {}));
+
+    for (const id of [replied.thread_id, opened.thread_id, drafted.thread_id, film.thread_id]) {
+      const at = await actedOf(server, id);
+      expect(at, id).not.toBeNull();
+      expect(Date.parse(at!)).toBeGreaterThanOrEqual(before - 1000);
+    }
+    expect(await actedOf(server, quiet.thread_id)).toBeNull();
+    expect(await actedOf(server, looked.thread_id)).toBeNull();
+    // An agent writing again moves nothing.
+    const at = await actedOf(server, replied.thread_id);
+    await send("Done: retries now wait 24 hours.", "ses_r");
+    expect(await actedOf(server, replied.thread_id)).toBe(at);
+    // Agents never read it: the store's own row (what the MCP lists and reads) has no such field.
+    expect(server.store.listRow(replied.thread_id)).not.toHaveProperty("acted_at");
+  });
+
+  test("tidying never sets it: star, Priority, snooze, tag, mark read and unread, archive", async () => {
+    const { server, send } = await setup();
+    const t = await send("Ship the new hero line?\n\n:::question\nShip it?\n\n- [ ] Yes\n- [ ] No\n:::", "ses_t");
+    const id = t.thread_id;
+    await ok(post(server, `/api/inbox/threads/${id}/pin`, { pinned: true }));
+    await ok(post(server, `/api/inbox/threads/${id}/priority`, { priority: true }));
+    await ok(post(server, `/api/inbox/threads/${id}/snooze`, { until: new Date(Date.now() + 86_400_000).toISOString() }));
+    await ok(post(server, `/api/inbox/threads/${id}/snooze`, { until: null }));
+    await ok(post(server, `/api/inbox/threads/${id}/tags`, { name: "launch", on: true }));
+    await ok(post(server, `/api/inbox/threads/${id}/read`, {}));
+    await ok(post(server, `/api/inbox/threads/${id}/mark-unread`, {}));
+    await ok(post(server, `/api/inbox/messages/${id}/resolve`, { resolved: true }));
+    expect(await actedOf(server, id)).toBeNull();
+  });
+
+  test("kept across a restart in inbox/acted.json, never in the event log", async () => {
+    const { server, send, dataDir } = await setup();
+    const inbox = server.store.dir;
+    const t = await send("Export invoices as CSV too?", "ses_o");
+    await ok(post(server, `/api/inbox/threads/${t.thread_id}/seen`, { opened: true }));
+    const at = await actedOf(server, t.thread_id);
+    expect(at).not.toBeNull();
+    server.stop();
+    servers.splice(servers.indexOf(server), 1);
+    expect(JSON.parse(readFileSync(join(inbox, "acted.json"), "utf8")).threads[t.thread_id]).toBe(at);
+    const logs = readdirSync(inbox, { recursive: true }).map(String).filter((name) => name.endsWith(".jsonl"));
+    expect(logs.length).toBeGreaterThan(0);
+    for (const name of logs) expect(readFileSync(join(inbox, name), "utf8")).not.toContain("acted_at");
+    const again = await start(dataDir);
+    expect(await actedOf(again.server, t.thread_id)).toBe(at);
+  });
+
+  test("the film route: POST only, a thread id only, the page's session", async () => {
+    const { server } = await setup();
+    expect((await fetch(url(server, "/api/inbox/threads/msg_01ARZ3NDEKTSV4RRFFQ69G5FAV/acted"))).status).toBe(405);
+    expect((await post(server, "/api/inbox/threads/prj_01ARZ3NDEKTSV4RRFFQ69G5FAV/acted", {})).status).toBe(422);
+    expect((await fetch(url(server, "/api/inbox/threads/msg_01ARZ3NDEKTSV4RRFFQ69G5FAV/acted"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: "another" }) })).status).toBe(409);
+    expect(existsSync(join(server.store.dir, "acted.json"))).toBe(false);
+  });
+});

@@ -152,6 +152,7 @@ One long-lived local server per machine. Agents leave messages, `:::question` bl
   - The Pi and OpenCode connections keep `claims/<reply id>/` (delivery claims), `connection-tools.json` (the last tool list) and `leases/<host>-<session>.json` (which process of a session delivers).
   - The Claude Code mod keeps its claims and lease under `claude-code-mod/<session>/inbox/`.
   - `pins.json` holds the threads pinned to the sidebar, in order (outside the log; see "Pinned threads").
+  - `acted.json` holds when the person last opened a thread they chose, played a film in it or saved a draft there, `{ v: 1, threads: { <thread id>: <time> } }` (outside the log; the list filter's Recent activity, `inbox-window.md`; shared's `inbox/acted.ts`).
   - `snoozes.json` holds the threads the person snoozed and until when (outside the log; see "Snoozed threads" in `inbox-messages.md`).
   - `tags.json` holds the person's tag marks on threads (outside the log; see "Thread tags" in `inbox-messages.md`).
   - Compose keeps `drafts/<drf_id>.json` (drafts, outside the log), `uploads/pending/<upl_id>.json` (uploads not sent yet) and `uploads/<att_id>/<name>` (sent uploads: read-only copies of their blobs). See "Compose".

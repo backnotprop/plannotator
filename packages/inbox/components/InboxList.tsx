@@ -841,8 +841,8 @@ export function InboxList(props: InboxListProps) {
   const sortEpoch = props.sort?.epoch;
   const sortKeep = props.sort?.keep ?? null;
   const flat = useMemo(
-    () => (asList ? flatRows(props.sections, sortEpoch === undefined ? null : places.current, { epoch: sortEpoch ?? 0, keep: sortKeep }) : null),
-    [asList, props.sections, sortEpoch, sortKeep],
+    () => (asList ? flatRows(props.sections, sortEpoch === undefined ? null : places.current, { epoch: sortEpoch ?? 0, keep: sortKeep, by: props.sort?.by }) : null),
+    [asList, props.sections, sortEpoch, sortKeep, props.sort?.by],
   );
   useLayoutEffect(() => {
     places.current = flat?.places ?? null;
