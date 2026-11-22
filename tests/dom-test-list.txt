@@ -81,6 +81,7 @@ packages/ui/components/HostTitle.dom.test.tsx
 packages/ui/components/RefHoverCard.dom.test.tsx
 packages/inbox/images.test.tsx
 packages/inbox/inlineImages.test.tsx
+packages/inbox/latePictures.test.tsx
 packages/inbox/refusedImages.test.tsx
 packages/inbox/codeAttachment.test.tsx
 packages/inbox/copyFile.test.tsx
@@ -876,6 +877,7 @@ packages/ui/components/OpenInAppButton.line.test.tsx
 packages/ui/utils/openInLine.test.ts
 packages/editor/App.annotateView.test.tsx
 packages/inbox/replyMentionsField.test.tsx
+packages/inbox/mentionMenuShows.test.tsx
 packages/inbox/components/listDrops.test.tsx
 packages/inbox/agents/projectFaceMarks.test.tsx
 packages/ui/components/frame/frame.dom.test.tsx
@@ -901,3 +903,4 @@ packages/ui/components/html-viewer/bridgeStructuralAnchor.test.ts
 packages/inbox/reaskAllList.test.tsx
 packages/ui/utils/diagramLabelScrub.test.ts
 packages/ui/utils/diagramRemoteLoads.test.ts
+packages/review-editor/components/DiffViewer.selectionClears.test.tsx

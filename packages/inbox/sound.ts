@@ -1,20 +1,18 @@
 /**
- * The Inbox's sounds: a soft two-tone doorbell ("Ding-dong", chosen by the
- * owner from twelve) for a new question or a new thread, and one quiet "Felt"
- * note for a plain reply in a thread the person already has. Both are
- * generated live with Web Audio, so there are no audio files. Design of
- * record: .product/approved/inbox-sound/ (kept privately, not in this repo).
+ * The Inbox's sound: a soft two-tone doorbell ("Ding-dong", chosen by the
+ * owner from twelve), generated live with Web Audio, so there are no audio
+ * files. Design of record: .product/approved/inbox-sound/ (kept privately, not
+ * in this repo).
  *
- * When they play (the person's choice, `InboxSoundSettings.when`; the rules
- * are soundRing.ts): "for every agent message" (the default) rings the
- * Ding-dong for a new question or thread and plays the note for a plain reply;
- * "when an agent asks you or starts a thread" only the Ding-dong.
- * Either way only while no Inbox tab is in front, and one list read plays one
- * sound (the Ding-dong when it brought a question or a new thread). A question
- * rings unless another question came within 30 s; a plain reply plays unless
- * any news came within 30 s, and never holds a question back; a tab coming to
- * the front ends both bursts. Play in Settings plays the Ding-dong. It does
- * not depend on notifications. Several Inbox tabs ring once:
+ * When it rings (the person's choice, `InboxSoundSettings.when`; the rules
+ * are soundRing.ts): "for every agent message" (the default) for any new
+ * message from an agent (a reply, a new thread, a question); "when an agent
+ * asks you or starts a thread" for a new question or a new thread.
+ * Either way only while no Inbox tab is in front, and one list read rings
+ * once. A question rings unless another question came within 30 s; a plain
+ * reply rings unless any news came within 30 s, and never holds a question
+ * back; a tab coming to the front ends both bursts. It does not depend on
+ * notifications. Several Inbox tabs ring once:
  * they share a BroadcastChannel (who is in front, who rang) and a tab rings
  * only while it holds a short lock (a Web Lock, or localStorage without one).
  *
@@ -25,9 +23,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { INBOX_SOUND_DEFAULT_VOLUME, INBOX_SOUND_DEFAULT_WHEN, inboxSoundWhen, isInboxSoundVolume, type InboxSoundSettings, type InboxSoundWhen } from '@plannotator/core/inbox-types';
 import { inboxApi } from './api';
-import { decideRing, heardRing, QUIET_GATE, RING_LOCK_MS, type RangFor, type RingGate, type RingNews, type RingSound } from './soundRing';
+import { decideRing, heardRing, QUIET_GATE, RING_LOCK_MS, type RangFor, type RingGate, type RingNews } from './soundRing';
 
-export { decideRing, heardRing, plainMessageRings, questionRings, QUIET_GATE, RING_BURST_MS, RING_LOCK_MS, ringsFor, type RangFor, type RingGate, type RingNews, type RingSound } from './soundRing';
+export { decideRing, heardRing, plainMessageRings, questionRings, QUIET_GATE, RING_BURST_MS, RING_LOCK_MS, ringsFor, type RangFor, type RingGate, type RingNews } from './soundRing';
 
 // ───────────────────────────── The sound ─────────────────────────────
 
@@ -55,39 +53,6 @@ export const DING_DONG: readonly Note[] = [
 export const DING_DONG_MS = 1100;
 
 const ATTACK = 0.005;
-
-export const FELT_D5 = 440 * Math.pow(2, 5 / 12);
-const FELT_LEVEL = 0.1585;
-const FELT_TAU = 0.16;
-const FELT_PARTIALS = [
-  { ratio: 1, amp: 1, tau: FELT_TAU },
-  { ratio: 3.93, amp: 0.1, tau: FELT_TAU / 5 },
-  { ratio: 9.2, amp: 0.015, tau: FELT_TAU / 12 },
-  { ratio: 2, amp: 0.04, tau: FELT_TAU / 2 },
-] as const;
-const FELT_LENGTH = 0.45;
-const FELT_ATTACK = 0.003;
-const FELT_FADE = 0.008;
-
-function scheduleFelt(ctx: AudioContext, master: GainNode): void {
-  const start = ctx.currentTime;
-  for (const partial of FELT_PARTIALS) {
-    const amp = FELT_LEVEL * partial.amp;
-    const peak = amp * Math.exp(-FELT_ATTACK / partial.tau);
-    const tail = amp * Math.exp(-(FELT_LENGTH - FELT_FADE) / partial.tau);
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(FELT_D5 * partial.ratio, start);
-    gain.gain.setValueAtTime(0, start);
-    gain.gain.linearRampToValueAtTime(peak, start + FELT_ATTACK);
-    gain.gain.exponentialRampToValueAtTime(tail, start + FELT_LENGTH - FELT_FADE);
-    gain.gain.exponentialRampToValueAtTime(tail / 1000, start + FELT_LENGTH);
-    osc.connect(gain).connect(master);
-    osc.start(start);
-    osc.stop(start + FELT_LENGTH + 0.01);
-  }
-}
 
 function scheduleNote(ctx: AudioContext, master: GainNode, note: Note): void {
   const now = ctx.currentTime + note.t;
@@ -140,14 +105,13 @@ class InboxAudio {
     return allowed || ctx.state === 'running';
   }
 
-  /** Play `sound` at `volume` (10–100). Without a context yet, nothing (a ring before the first gesture is lost). */
-  play(volume: number, sound: RingSound, options: { create: boolean }): boolean {
+  /** Play the sound at `volume` (10–100). Without a context yet, nothing (a ring before the first gesture is lost). */
+  play(volume: number, options: { create: boolean }): boolean {
     const ctx = options.create ? this.ensure() : this.ctx;
     if (!ctx || !this.master) return false;
     if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
     this.master.gain.value = Math.max(0, Math.min(1, volume / 100));
-    if (sound === 'note') scheduleFelt(ctx, this.master);
-    else for (const note of DING_DONG) scheduleNote(ctx, this.master, note);
+    for (const note of DING_DONG) scheduleNote(ctx, this.master, note);
     return true;
   }
 
@@ -461,11 +425,10 @@ export function useInboxSound(options: {
     }
     const decided = decideRing(gate.current, { now, enabled, when, armed: armedRef.current, inFront: pageInFront(), otherTabInFront: otherTabInFront(), ...news });
     gate.current = decided.gate;
-    const sound = decided.sound;
-    if (!sound) return decided.rangFor;
+    if (!decided.ring) return decided.rangFor;
     // This tab rings, or another that decided the same within the lock's hold does: either way the bell rang for it.
     void withRingLock(() => {
-      audio.current?.play(settingsRef.current.volume, sound, { create: true });
+      audio.current?.play(settingsRef.current.volume, { create: true });
       try {
         channel.current?.postMessage({ type: 'rang', id: id.current, at: now, asked: decided.rangFor.asks, fresh: decided.rangFor.fresh } satisfies ChannelMessage);
       } catch {
@@ -500,7 +463,7 @@ export function useInboxSound(options: {
     // Play is a click: it arms the sound too.
     audio.current?.arm();
     setArmed(true);
-    audio.current?.play(volume ?? settingsRef.current.volume, 'bell', { create: true });
+    audio.current?.play(volume ?? settingsRef.current.volume, { create: true });
     setPlaying(true);
     if (playingTimer.current) clearTimeout(playingTimer.current);
     playingTimer.current = setTimeout(() => setPlaying(false), DING_DONG_MS);

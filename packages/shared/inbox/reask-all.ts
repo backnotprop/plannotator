@@ -23,7 +23,7 @@
 
 import { itemsOf, reaskSessionKey, reaskTargets } from "@plannotator/core/inbox-reask";
 import { isInboxPermissionSession } from "@plannotator/core/inbox-permission";
-import type { InboxMessageWire } from "@plannotator/core/inbox-types";
+import type { InboxMessageWire, InboxSentFrom } from "@plannotator/core/inbox-types";
 import { InboxError } from "./schema";
 import type { InboxReaskInput, InboxStore } from "./store";
 
@@ -78,9 +78,10 @@ export function messageReaskInput(body: Record<string, unknown>, to: InboxReaskI
 
 /**
  * Re-ask all on one thread. `key` is the press's own (a retry with it answers the notes already written, never a
- * second one); `reachable(message)` says whether the session that wrote `message` can still be woken.
+ * second one); `reachable(message)` says whether the session that wrote `message` can still be woken. `sentFrom`: where
+ * the person pressed it, as the server told it from the request (inbox-sent-from.ts), on every note, as a single Re-ask.
  */
-export function reaskThreadAll(store: InboxStore, threadId: string, key: string, reachable: (message: InboxMessageWire) => boolean): ThreadReaskAll {
+export function reaskThreadAll(store: InboxStore, threadId: string, key: string, reachable: (message: InboxMessageWire) => boolean, sentFrom: InboxSentFrom | null = null): ThreadReaskAll {
   if (!REASK_ALL_KEY.test(key)) throw new InboxError("validation_error", "batch_id: 1 to 128 of A-Z, a-z, 0-9, _ and -.", { field: "batch_id" });
   const thread = store.windowThread(threadId);
   if (!thread || thread.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
@@ -113,7 +114,7 @@ export function reaskThreadAll(store: InboxStore, threadId: string, key: string,
   for (const target of reached) {
     const who = { host: target.host, session: target.session };
     try {
-      const { reply } = store.sendReask(target.message.id, { idempotency_key: noteKey, leave_picks: true });
+      const { reply } = store.sendReask(target.message.id, { idempotency_key: noteKey, leave_picks: true, sent_from: sentFrom });
       out.asked.push({ ...who, message_id: target.message.id, reply_id: reply.id });
     } catch (error) {
       // Answered, superseded or archived between the read and the write: nothing left to ask that session.

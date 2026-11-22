@@ -121,6 +121,12 @@ export interface ReplyDraftState {
 
 /** Saves waiting or in flight anywhere on the page, and words left unsaved by a conflict (the restart guard reads them). */
 let unsaved = 0;
+/** When a save last ended (landed or not): a drafts list asked for before then may not have it yet. */
+let lastSaveEnded = 0;
+/** When a reply draft save last ended on this page (0: none yet); the row menu's Mention in reply reads it. */
+export function replyDraftSaveEndedAt(): number {
+  return lastSaveEnded;
+}
 /**
  * Per thread, the words a refused save carried (both windows hold words), not
  * saved. Module-level, not the hook's: the thread pane unmounts when the thread
@@ -671,6 +677,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
         } else leave();
       } finally {
         unsaved -= 1;
+        lastSaveEnded = Date.now();
         unsavedChanged();
       }
     });

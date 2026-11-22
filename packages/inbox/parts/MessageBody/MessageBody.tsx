@@ -25,6 +25,7 @@ import type { MessageBodyProps } from './types';
 import { NO_ANNOTATIONS, noop } from '../../thread/helpers';
 import { useBodyText } from './useBodyText';
 import { useBodyImages } from './useBodyImages';
+import { PictureRetry } from './PictureRetry';
 import { useBodyLinks } from './useBodyLinks';
 import { useFileRefs } from './useFileRefs';
 import { useQuestionCards } from './useQuestionCards';
@@ -87,7 +88,7 @@ export function MessageBody({
   // Hover cards for issue, PR and MR links in the body (ui RefHoverCard).
   const refCard = useRefHoverCards(bodyRef);
   const { refsOn, openFileRefRef } = useFileRefs({ message, projectRoot, onOpenFileRef, onOpenAttachment });
-  const { imageBaseDir, htmlEmbeds, resolveImage, fallback, setFallback, onImageClick, onZoomChoice, pictureSizeOf } = useBodyImages({ message, imageBase, bodyRef, onOpenInlineImage, inlineRefOf, onImage, onOpenOptionSet, openFileRefRef });
+  const { imageBaseDir, htmlEmbeds, resolveImage, fallback, setFallback, onImageClick, onZoomChoice, pictureSizeOf, refOf } = useBodyImages({ message, imageBase, bodyRef, onOpenInlineImage, inlineRefOf, onImage, onOpenOptionSet, openFileRefRef });
   const { tagLabels, tagHosts, tagLayerRef, tagMarks, resolveLocalLink } = useBodyLinks({ message, bodyRef, skills, replyFiles, replyFileList, projectRoot, openInFiles, onOpenAttachment, setFallback, refsOn, openFileRefRef });
   const { renderFooter, acceptBehavior, questionCard, belowPrompt, directiveBlock, afterChoices, answerLocked, statusLabel } = useQuestionCards({ message, projectRoot, readOnly, footerFor, answers, renderReplacedCard, renderReplacesLine, renderActions, renderRunBlock, onTryPrototype, blocks, noteAtLine, notesRef, refRepo });
   const pictures = useCommentPictures();
@@ -140,6 +141,8 @@ export function MessageBody({
 
   return (
     <ImageResolverContext.Provider value={resolveImage}>
+    {/* A picture named before it was written shows once it is there (PictureRetry). */}
+    <PictureRetry bodyRef={bodyRef} message={message} retries={(src) => refOf(src) !== null}>
     {/* The body fits its pictures itself (images.ts, `.ib-body img[data-ib-fit]`): no image rows from ui. */}
     <ImageRowsContext.Provider value={false}>
     <SoftLineBreaksContext.Provider value={ownReply}>
@@ -227,6 +230,7 @@ export function MessageBody({
     </OpenInCodeSpans>
     </SoftLineBreaksContext.Provider>
     </ImageRowsContext.Provider>
+    </PictureRetry>
     </ImageResolverContext.Provider>
   );
 }

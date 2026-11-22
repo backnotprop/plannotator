@@ -1380,7 +1380,7 @@ export function createInboxLiveSessions(options: {
    * The window's routes; null when the path is not one of them. A session carries its `label` here.
    * `sentFrom`: where the person wrote a New message, as the server told it from the request (inbox-sent-from.ts).
    */
-  const route = async (req: Request, path: string, sentFrom: () => InboxSentFrom | null = () => null): Promise<Response | null> => {
+  const route = async (req: Request, path: string, sentFrom: (body: Record<string, unknown>) => InboxSentFrom | null = () => null): Promise<Response | null> => {
     const sessionsMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/sessions$/.exec(path);
     if (sessionsMatch) {
       if (req.method !== "GET") return answer({ error: "Use GET." }, 405);
@@ -1449,7 +1449,7 @@ export function createInboxLiveSessions(options: {
       body: body.body,
       idempotency_key: body.idempotency_key,
       to: target ? { host: target.host, session: target.session } : null,
-      sent_from: sentFrom(),
+      sent_from: sentFrom(body),
     });
     if (!result.replayed) options.onSent?.(req, body, result.message);
     return answer({ message: result.message, replayed: result.replayed });

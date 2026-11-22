@@ -5,10 +5,11 @@
  *
  * The thread's own machine (B) answers two door routes only a linked machine's token reaches (`DOOR_OWN_ROUTES` in
  * inbox-devices.ts, mark `agent-read`):
- *  - `GET agent-read?thread_id=&message_id=&limit=&expand=&before=&after=&format=`: read_thread's read of one of its
- *    threads, as data (`windowedThread`, its PRs and steps lines), for a reader with no session here: it marks
- *    nothing read and settles nothing (a guest's read). Each message's files are listed as a cloud agent's are, with
- *    the command that saves a copy (`inboxAgentFilesOf`).
+ *  - `GET agent-read?thread_id=&message_id=&limit=&expand=&before=&after=&format=&shown_as=`: read_thread's read of
+ *    one of its threads, as data (`windowedThread`, its PRs and steps lines), for a reader with no session here: it
+ *    marks nothing read and settles nothing (a guest's read). Where the person wrote each message is worded from the
+ *    reader's side (`shown_as`: the reader's name for B; inbox-sent-from-reader.ts). Each message's files are listed
+ *    as a cloud agent's are, with the command that saves a copy (`inboxAgentFilesOf`).
  *  - `GET agent-file?message_id=&file=`: one of those files' bytes (`openInboxAgentFile`: a file read_thread lists, not
  *    a dotenv name, not the Inbox's own keys, at most 100 MB), with its name and SHA-256 in headers.
  * Nothing else on B's disk is reached: a file a message only names (`open-in/file/*`), a Markdown file's pictures and
@@ -23,10 +24,10 @@ import { inboxStopNoticeReply } from "@plannotator/shared/inbox/connection";
 import { FETCHED_FILE_NAME_HEADER, FETCHED_FILE_SHA_HEADER, FETCHED_FILE_SIZE_HEADER, fetchedNameHeader } from "@plannotator/shared/inbox/saved-file";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
-import { inboxViewingLine } from "@plannotator/shared/inbox/uploads";
 import { isInboxAttachmentId, isInboxId } from "@plannotator/core/inbox-types";
 import { inboxAgentFetchCommand, inboxAgentFilesOf, openInboxAgentFile, type AgentFile } from "./inbox-agent-files";
-import { windowedThread, windowedThreadText, type ThreadWindowResult } from "./inbox-mcp-read";
+import { inboxFullReadLines, windowedThread, windowedThreadText, type ThreadWindowResult } from "./inbox-mcp-read";
+import { FAR_READ_SHOWN_AS, inboxMessageForReader, inboxSentFromReader } from "./inbox-sent-from-reader";
 import { threadPullsText, type InboxPullsMcpContext } from "./inbox-mcp-pulls";
 import { threadStepsText } from "./inbox-mcp-steps";
 
@@ -58,8 +59,10 @@ export type FarReadAnswer =
  * The ask as a door query: only what read_thread takes. A bound keeps its type: a number goes as `#<number>`, a string
  * as it is, so the owner reads `before: 1.5` and `before: "1.5"` exactly as a local read_thread would.
  */
-export function farReadQuery(ask: FarReadAsk): string {
+export function farReadQuery(ask: FarReadAsk, shownAs = ""): string {
   const query = new URLSearchParams();
+  // The name this Inbox shows for the machine asked: what the person wrote there reads as written on it.
+  if (shownAs) query.set(FAR_READ_SHOWN_AS, shownAs);
   for (const key of ["thread_id", "message_id", "before", "after", "format"] as const) {
     const value = ask[key];
     if (typeof value === "number") query.set(key, `#${value}`);
@@ -133,20 +136,27 @@ const refusal = (error: unknown): Response => {
   return Response.json({ error: error.message, code: error.code }, { status, headers: { "Cache-Control": "no-store" } });
 };
 
-/** `GET agent-read` on B: read_thread's read of one of its threads, as data. Reads only: nothing is marked or settled. */
-export function agentReadDoorAnswer(host: AgentReadHost, url: URL): Response {
+/**
+ * `GET agent-read` on B: read_thread's read of one of its threads, as data. Reads only: nothing is marked or settled.
+ * `reader`: the name a message forwarded by the reading computer records here, from its door token
+ * (`inboxMachineRecordName`); with the query's `shown_as`, each message's "sent from" line is worded from the reader's
+ * side (inbox-sent-from-reader.ts).
+ */
+export function agentReadDoorAnswer(host: AgentReadHost, url: URL, reader = ""): Response {
   try {
     const { store } = host;
     const ask = askOf(store, url);
     const threadId = threadOfAsk(store, ask);
+    const farReader = inboxSentFromReader(reader, url.searchParams.get(FAR_READ_SHOWN_AS));
     if (ask.format === "full") {
       const records = store.agentThread(threadId, null);
       if (!records) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
-      const full = { ...records, messages: records.messages.map((m) => (m.viewing ? { ...m, viewing: inboxViewingLine(m) } : m)) };
+      // Each record's view and place as their lines, as a local full read gives them, the place from the reader's side.
+      const full = { ...records, messages: records.messages.map((m) => inboxFullReadLines(inboxMessageForReader(m, farReader))) };
       return Response.json({ thread_id: threadId, full } satisfies FarReadAnswer, { headers: { "Cache-Control": "no-store" } });
     }
     const filesOf = (message: Parameters<typeof inboxAgentFilesOf>[1]) => inboxAgentFilesOf(store.dir, message);
-    const { result, order } = windowedThread(store, threadId, { ...ask, caller: null, names: host.sessionName, filesOf }, "");
+    const { result, order } = windowedThread(store, threadId, { ...ask, caller: null, names: host.sessionName, filesOf, farReader }, "");
     const steps = host.stepsOn?.() ? threadStepsText(store, threadId, null, host.sessionName) : [];
     const pulls = threadPullsText(host, threadId, null);
     const answer: FarReadAnswer = {
