@@ -203,7 +203,8 @@ export function createCombineAcross(deps: CombineAcrossDeps) {
       }
       const current = far.entry(key(record, "archive", id));
       if (skippedThere(current) || (current?.state !== "delivered" && current?.state !== "sending" && current?.state !== "queued")) continue;
-      sent.push(far.write(pick.machine, resolveRoute(id), { resolved: false, idempotency_key: key(record, "undo", id) }, id, waitMs).catch(() => {}));
+      // Under the same guard: an archive still on its way may yet be skipped there, and then this undoes nothing.
+      sent.push(far.write(pick.machine, resolveRoute(id), { resolved: false, idempotency_key: key(record, "undo", id), seen_through_message: pick.seen, seen_questions: pick.questions }, id, waitMs).catch(() => {}));
     }
     await Promise.all(sent);
   };
