@@ -455,8 +455,10 @@ describe('review entry assets', () => {
   // (the Inbox surface, the Shape page, code review's diagram engine), and no
   // never-loaded lazy chunk in a packed app either. These markers are class
   // names only Pele's own svg writer prints (Plannotator's finder reads
-  // `pele-edge`, `pele-node`, `pele-marker`, never these).
-  const PELE_MARKERS = ['pele-shape-', 'pele-icon', 'pele-ticket', 'pele-slice-labels', 'pele-commit-label'];
+  // `pele-edge`, `pele-node`, `pele-marker`, never these). The last two are
+  // Plannotator's own Pele code (`utils/pele-labels.ts`), which the same
+  // switch keeps out: its math labels' attribute and class.
+  const PELE_MARKERS = ['pele-shape-', 'pele-icon', 'pele-ticket', 'pele-slice-labels', 'pele-commit-label', 'data-pele-tex', 'pele-math'];
   const builtFiles = [
     'apps/review/dist/index.html',
     'apps/review/dist/diagram-engine/engine.js',
