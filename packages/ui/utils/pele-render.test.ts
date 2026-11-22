@@ -121,5 +121,9 @@ describe.if(hasDom)('Pele render integration', () => {
     expect(own.svgNode.style.getPropertyValue('--pele-surface')).toBe('#cde498');
     expect(own.svgNode.style.getPropertyValue('--pele-line')).toBe('#123456');
     expect(plain.svgNode.style.getPropertyValue('--pele-surface')).toBe('');
+    // The author's theme brings its own ground, so its lines read on any page; the person's palette does not paint one.
+    expect(own.svgNode.style.backgroundColor).toBe('var(--pele-bg)');
+    expect(own.svgNode.style.getPropertyValue('--pele-bg')).toBe('#ffffff');
+    expect(plain.svgNode.style.backgroundColor).toBe('');
   });
 });

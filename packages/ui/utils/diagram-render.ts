@@ -843,7 +843,14 @@ async function renderPele(renderId: string, source: string, theme: DiagramTheme,
     scrubFetchingStyles(svgNode);
     // The person's palette, or the author's own colours when the source gives them (`peleAuthorTheme.ts`).
     const personColors = readPeleThemeVariables(theme.mode);
-    applyPeleThemeVariables(svgNode, peleAuthorThemeVariables(source, personColors) ?? personColors);
+    const authorColors = peleAuthorThemeVariables(source, personColors);
+    applyPeleThemeVariables(svgNode, authorColors ?? personColors);
+    // An author's theme brings its own ground: a light theme's lines would vanish on a dark page, so draw on it.
+    const authorGround = authorColors?.['--pele-bg'];
+    if (authorGround !== undefined && authorGround !== personColors?.['--pele-bg']) {
+      svgNode.style.backgroundColor = 'var(--pele-bg)';
+      svgNode.style.borderRadius = '6px';
+    }
     // The Diagram Shadow setting: one rule scoped under this svg (built here, after the sanitizer, from numbers only).
     const shadow = peleShadowCss(svgNode, theme.mode, theme.shadowAmount);
     if (shadow !== null) {
