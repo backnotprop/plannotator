@@ -9,7 +9,7 @@ import {
   type InboxCloudWake,
   type InboxCloudWakeItem,
 } from "@plannotator/core/inbox-cloud";
-import type { InboxMessage } from "@plannotator/core/inbox-types";
+import { inboxSentFromLine, type InboxMessage } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { hasCloudWake, type InboxCloudAgent, type InboxCloudAgents, type InboxCloudWakeAgent } from "./inbox-cloud-agents";
 import { postCloudWebhook } from "./inbox-cloud-post";
@@ -100,7 +100,11 @@ export function createInboxCloudWake(options: {
     (timer as { unref?: () => void }).unref?.();
   };
 
-  const wakeItem = (item: InboxMessage): InboxCloudWakeItem => ({ id: item.id, at: item.created_at, body: item.body, files: item.attachments?.length ?? 0 });
+  // Where the person wrote it, when away from this computer (inbox-sent-from.ts): the one line under their words.
+  const wakeItem = (item: InboxMessage): InboxCloudWakeItem => {
+    const from = inboxSentFromLine(item);
+    return { id: item.id, at: item.created_at, body: from ? `${item.body}\n\n${from}` : item.body, files: item.attachments?.length ?? 0 };
+  };
 
   const wakeThread = async (agent: InboxCloudWakeAgent, threadId: string, listed: InboxMessage[]): Promise<number | null> => {
     const thread = store.thread(threadId);

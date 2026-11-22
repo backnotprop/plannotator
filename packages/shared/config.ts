@@ -357,10 +357,13 @@ export interface PlannotatorConfig {
    */
   planReview?: boolean;
   /**
-   * Pi only: when the Plannotator extension on disk is newer than the one this
+   * Pi: when the Plannotator extension on disk is newer than the one this
    * Pi loaded, Pi reloads itself once the session is quiet (no run, no open
    * review, question or dialog, nothing typed for a while, an empty editor).
    * `false` turns it off: Pi then shows the one-line note with `/reload`.
+   * Claude Code (the mod): an idle session runs `/reload-plugins plannotator`
+   * when the Inbox says a newer plugin is installed. `false` turns it off: the
+   * Inbox tool stays, and the Inbox shows its manual `/reload-plugins` notice.
    * PLANNOTATOR_AUTO_RELOAD wins over this key. Unset: AUTO_RELOAD_DEFAULT.
    */
   autoReload?: boolean;
@@ -2241,15 +2244,16 @@ export function parseAgentToolEnv(env: NodeJS.ProcessEnv = process.env): boolean
 }
 
 /**
- * Whether Pi reloads itself for an updated Plannotator when neither the env
- * var nor config.json decides (owner's call 2026-10-29: on). The one place to
- * flip the default.
+ * Whether Pi and the Claude Code mod reload an updated Plannotator when neither
+ * the env var nor config.json decides (owner's call 2026-10-29: on). The one
+ * place to flip the default (the mod's mirror: apps/hook/hooks/mod/enabled.ts).
  */
 export const AUTO_RELOAD_DEFAULT = true;
 
 /**
- * Whether Pi reloads itself to load an updated Plannotator extension (see
- * `autoReload`, apps/pi-extension/auto-reload.ts).
+ * Whether Pi or the Claude Code mod reloads itself to load an updated
+ * Plannotator (see `autoReload`, apps/pi-extension/auto-reload.ts and
+ * apps/hook/hooks/mod/auto-reload.ts).
  *
  * Priority (highest wins):
  *   PLANNOTATOR_AUTO_RELOAD env var  →  config.autoReload  →  AUTO_RELOAD_DEFAULT

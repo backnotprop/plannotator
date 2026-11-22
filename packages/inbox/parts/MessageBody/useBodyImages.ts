@@ -94,6 +94,25 @@ export function useBodyImages({
     return image?.width && image.height ? { width: image.width, height: image.height } : null;
     // A new identity when the records change (an older message's pictures are captured on its first open).
   }, [imageOf, message.inline_images]);
+  /** One of the body's pictures as a button that opens it (not a question card's, not one that failed). */
+  const markButton = useCallback(
+    (img: HTMLImageElement) => {
+      // A question card's picture (a picture choice, `Shows:`): the card makes it pick, or opens it with its own button.
+      if (img.hasAttribute('data-question-picture')) return;
+      const src = img.getAttribute('src');
+      const ref = src ? refOf(src) : null;
+      if (ref === null || img.hasAttribute('data-ib-broken')) return;
+      const image = imageOf(src);
+      const name = image?.name ?? ref.split(/[\\/]/).pop() ?? 'image';
+      img.setAttribute('role', 'button');
+      img.tabIndex = 0;
+      img.setAttribute('aria-label', `Open ${name}${img.alt ? `, ${img.alt}` : ''}`);
+      if (image) img.setAttribute('data-inline-image', image.id);
+      else img.removeAttribute('data-inline-image');
+      img.style.cursor = 'zoom-in';
+    },
+    [imageOf, refOf],
+  );
   // Each picture's box, from its recorded size before it loads (no jump as the thread fills in), and the
   // "Show all" of a very long one. Before paint on every render; again when a picture loads, the body's
   // column changes width or the window changes height.
@@ -107,7 +126,13 @@ export function useBodyImages({
     const body = bodyRef.current;
     if (!body) return;
     const onLoad = (event: Event) => {
-      if (event.target instanceof HTMLImageElement) fitImages();
+      if (!(event.target instanceof HTMLImageElement)) return;
+      // A picture that failed and loaded since (written after its message: PictureRetry) is a button again.
+      if (event.target.hasAttribute('data-ib-broken')) {
+        event.target.removeAttribute('data-ib-broken');
+        markButton(event.target);
+      }
+      fitImages();
     };
     // Load does not bubble: a capture listener on the body hears every image in it.
     body.addEventListener('load', onLoad, true);
@@ -131,7 +156,7 @@ export function useBodyImages({
       window.removeEventListener('resize', fitImages);
       observer?.disconnect();
     };
-  }, [fitImages]);
+  }, [fitImages, markButton]);
   const onImageRef = useRef(onImage);
   onImageRef.current = onImage;
   const onImageClick = useCallback((src: string, alt: string) => (onImageRef.current ? onImageRef.current(src, alt) : void openImage(src, alt)), [openImage]);
@@ -147,23 +172,7 @@ export function useBodyImages({
     [imageOf, onImageClick],
   );
   useEffect(() => {
-    const body = bodyRef.current;
-    if (!body) return;
-    for (const img of body.querySelectorAll<HTMLImageElement>('img')) {
-      // A question card's picture (a picture choice, `Shows:`): the card makes it pick, or opens it with its own button.
-      if (img.hasAttribute('data-question-picture')) continue;
-      const src = img.getAttribute('src');
-      const ref = src ? refOf(src) : null;
-      if (ref === null || img.hasAttribute('data-ib-broken')) continue;
-      const image = imageOf(src);
-      const name = image?.name ?? ref.split(/[\\/]/).pop() ?? 'image';
-      img.setAttribute('role', 'button');
-      img.tabIndex = 0;
-      img.setAttribute('aria-label', `Open ${name}${img.alt ? `, ${img.alt}` : ''}`);
-      if (image) img.setAttribute('data-inline-image', image.id);
-      else img.removeAttribute('data-inline-image');
-      img.style.cursor = 'zoom-in';
-    }
+    for (const img of bodyRef.current?.querySelectorAll<HTMLImageElement>('img') ?? []) markButton(img);
   });
   useEffect(() => {
     const body = bodyRef.current;
@@ -199,5 +208,5 @@ export function useBodyImages({
       body.removeEventListener('error', onError, true);
     };
   }, [openImage]);
-  return { imageBaseDir, htmlEmbeds, resolveImage, fallback, setFallback, onImageClick, onZoomChoice, pictureSizeOf };
+  return { imageBaseDir, htmlEmbeds, resolveImage, fallback, setFallback, onImageClick, onZoomChoice, pictureSizeOf, refOf };
 }
