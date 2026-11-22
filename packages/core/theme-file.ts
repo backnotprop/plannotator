@@ -126,7 +126,7 @@ export const BUILT_IN_THEME_IDS: readonly string[] = [
   'aurora-x', 'ayu-dark', 'caffeine', 'catppuccin', 'cursor-hc', 'cursor', 'colorblind', 'tritanopia', 'dark-plus', 'doom-64',
   'dracula', 'everforest', 'everforest-hard', 'everforest-soft', 'github', 'gruvbox', 'houston', 'kanagawa-dragon',
   'kanagawa-lotus', 'kanagawa-wave', 'laserwave', 'material', 'cursor-midnight', 'min', 'monokai-pro', 'night-owl',
-  'nord', 'one-dark-pro', 'one-light', 'paulmillr', 'plastic', 'poimandres', 'quantum-rose', 'red', 'rose-pine',
+  'nightfox', 'nord', 'one-dark-pro', 'one-light', 'paulmillr', 'plastic', 'poimandres', 'quantum-rose', 'red', 'rose-pine',
   'slack', 'snazzy-light', 'soft-pop', 'solar-dusk', 'solarized', 'synthwave-84', 'terminal', 'tinacious',
   'tokyo-night', 'tokyo-night-moon', 'vesper', 'vitesse', 'vitesse-black', 'neutral',
 ];
@@ -137,7 +137,7 @@ export const BUILT_IN_THEME_IDS: readonly string[] = [
  */
 const BUILT_IN_DARK_ONLY: ReadonlySet<string> = new Set([
   'andromeeda', 'aurora-x', 'ayu-dark', 'cursor-hc', 'dracula', 'houston', 'kanagawa-dragon', 'kanagawa-wave',
-  'laserwave', 'cursor-midnight', 'monokai-pro', 'night-owl', 'nord', 'one-dark-pro', 'paulmillr', 'plastic',
+  'laserwave', 'cursor-midnight', 'monokai-pro', 'night-owl', 'nightfox', 'nord', 'one-dark-pro', 'paulmillr', 'plastic',
   'poimandres', 'red', 'synthwave-84', 'terminal', 'tokyo-night-moon', 'vesper', 'vitesse-black',
 ]);
 const BUILT_IN_LIGHT_ONLY: ReadonlySet<string> = new Set([

@@ -357,6 +357,7 @@
       "/api/inbox/threads/:id/priority",
       "/api/inbox/threads/:id/pulls",
       "/api/inbox/threads/:id/read",
+      "/api/inbox/threads/:id/reask",
       "/api/inbox/threads/:id/seen",
       "/api/inbox/threads/:id/sessions",
       "/api/inbox/threads/:id/snooze",

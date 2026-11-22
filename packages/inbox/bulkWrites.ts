@@ -14,7 +14,10 @@ import { InboxHeldError, inboxApi, type ListModel } from './api';
 import { drawnSection, listGroups, markHeldRowArchived, putRowBack, replaceHeldRow, settleThread } from './held';
 import { archivedRowPatch, patchShownRow, readRowPatch, shownRowOf } from './rowActions';
 import { setAsideCount, type SetAsideCount } from './markRead';
-import { currentArchiveAllRows, currentMarkAllRows } from './markAllRead';
+import { currentArchiveAllRows, currentMarkAllRows, currentReaskAllRows } from './markAllRead';
+import { postReaskAll } from './data/actions/reaskAll';
+import { reaskAllQuiet, reaskAllToast, tallyReaskAll } from './reaskAll';
+import { newUuid } from '@plannotator/ui/utils/uuid';
 import { batchToastWhy } from './projectMenu';
 import type { RowWrites, RowDrawing } from './data/actions/rows';
 import { errorToast } from './toastError';
@@ -74,6 +77,7 @@ const WORDS: Record<BulkAction, (n: string) => string> = {
   archive: (n) => `Archived ${n}`,
   snooze: (n) => `Snoozed ${n}`,
   read: (n) => `Marked ${n} read`,
+  reask: (n) => `Asked ${n} again`,
   unread: (n) => `Marked ${n} unread`,
   star: (n) => `Starred ${n}`,
   unstar: (n) => `Unstarred ${n}`,
@@ -306,6 +310,25 @@ export function bulkWrites(host: BulkHost) {
     return true;
   };
 
+  /**
+   * Re-ask all (a band's menu, the picks' Re-ask; reaskAll.ts): each thread's own Re-ask to every agent there with a
+   * question open, as the thread is now (`currentReaskAllRows`; news behind "N new · Show" leaves it out). One press,
+   * one key (a retry answers the same notes); an agent whose note still waits is not asked twice. Nothing is drawn
+   * here: each thread's row moves to Sent as its note lands. One toast, no Undo.
+   */
+  const reaskAll = async (drawn: readonly InboxListRow[]): Promise<boolean> => {
+    const rows = currentReaskAllRows(drawn, rowOf, (id) => drawnSection(shownRef.current, id));
+    if (rows.length === 0) return (say('Nothing to re-ask.'), false);
+    const batch = newUuid();
+    const outcomes = await eachRow(rows, (row) => postReaskAll(row.thread_id, batch));
+    await afterWrite(outcomes.flatMap((o) => (o.ok && o.value.asked.length > 0 ? [o.row.thread_id] : [])));
+    const tally = tallyReaskAll(outcomes);
+    const copy = reaskAllToast(tally);
+    if (!copy) return (say(reaskAllQuiet(tally)), false);
+    showToast(copy);
+    return true;
+  };
+
   const markUnread = async (rows: readonly InboxListRow[]) => {
     const outcomes = await eachRow(rows, (row) => inboxApi.markUnread(row.thread_id));
     await afterWrite(ids(outcomes));
@@ -349,7 +372,7 @@ export function bulkWrites(host: BulkHost) {
   };
 
   // The window's toasts, live region and writes for the picks' other actions (Combine's tracker, useCombines.ts).
-  return { archive, archiveAll, snooze, markRead, markAllRead, markUnread, star, priority, hidePulls, host };
+  return { archive, archiveAll, snooze, markRead, markAllRead, reaskAll, markUnread, star, priority, hidePulls, host };
 }
 
 /** With the Combines the window follows (useCombines.ts), which the picks' Combine… starts. */
