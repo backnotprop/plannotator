@@ -151,6 +151,7 @@
   "inbox-picture-layout.spec.ts": 13,
   "inbox-pins.spec.ts": 28,
   "inbox-plans-edit.spec.ts": 3,
+  "inbox-pr-board-close.spec.ts": 20,
   "inbox-priority.spec.ts": 11,
   "inbox-project-combine.spec.ts": 20,
   "inbox-project-labels.spec.ts": 2,

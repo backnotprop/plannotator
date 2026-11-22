@@ -6,10 +6,11 @@
  * says what the PR is and offers Open, Open on GitHub, and Merge when the forge said it can (a second click confirms).
  * A desktop's Grid | Table shows the same PRs as rows instead (SheetTable.tsx; approval "inbox-pr-board-bulk").
  * Select (the owner's pick B there) is a mode of its own: no box shows until it is pressed; then a tile's or a row's
- * click picks, a shift-click picks the range from the last one, and the bar in place of the filter row counts them
- * (a phone's sheet at the bottom). Done or Clear leaves it; outside it, clicks are as above. The bar's Merge N merges
- * the green picks one at a time after a second click and reports the rest (bulkMerge.ts); Close N closes every pick
- * without a confirm, one at a time, with the window's toast offering Undo, which reopens exactly those (bulkClose.ts).
+ * click picks, a shift-click picks the range from the last one, and the bar beside the filter counts them (a phone's
+ * sheet at the bottom; approval "inbox-pr-board-close-safe" for the bar). Done leaves it; outside it, clicks are as
+ * above. The bar's Merge N merges the green picks one at a time after a second click and reports the rest
+ * (bulkMerge.ts); Close N, last and in the warning colour, closes every pick without a confirm, one at a time; the
+ * toast names them with Undo, and a line under the bar keeps Undo for the server's five minutes (closedUndo.ts).
  * Start review thread starts one review thread per repository of the picks, on the machine whose list has them, and
  * links a pick that has one already (bulkReview.ts, startReviews.ts); the report under the bar opens each thread.
  *
@@ -17,11 +18,12 @@
  * once Enter pins it; Escape closes it back to the tile.
  */
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent as ReactFocusEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { inboxPullIsOpen, inboxPullLabel, type InboxPull, type InboxPullStack, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
+import { inboxPullIsOpen, inboxPullLabel, inboxPullRepoKey, type InboxPull, type InboxPullStack, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { Icon } from '../icons';
 import { SidebarTrigger } from '../shell/sidebar';
 import { inboxApi } from '../api';
+import { InboxApiError } from '../apiError';
 import { forgeName, hostName } from '../pulls/labels';
 import { pullsEmptyWords, pullsNotices } from '../pulls/notices';
 import { usePullRisk } from '../pulls/usePullRisk';
@@ -32,7 +34,10 @@ import { inboxPrBoardShortcuts } from '../shortcuts/prBoard.shortcuts';
 import { ChecksMark, checksLabel } from './ChecksMark';
 import { BoxMark, boxState, SelectBox } from './SelectBox';
 import { cantMergeLine, confirmWords, farMergeLine, mergeHint, mergePlan, notMergedLine, refusedLine, type MergePlan } from './bulkMerge';
-import { CLOSE_UNDO_MS, doneLine, runningWords, toastLead, type BulkVerb, type RunOutcome } from './bulkClose';
+import { CLOSE_UNDO_MS, closedToast, doneLine, reopenRefusedForGood, runningWords, toastLead, type BulkVerb, type RunOutcome } from './bulkClose';
+import { keepClosed, putBackClosed, takeClosed } from './closedUndo';
+import { ClosedLines } from './ClosedLines';
+import { useBarFit } from './useBarFit';
 import { ALREADY_HEADING, ALREADY_LEAD, alreadyPart, groupPart, notStartedLine, reviewPlan, startButtonWords, startedHeading, startedLead, startedToast, startingWords, stoppedToast, untiedLine, type ReviewReport } from './bulkReview';
 import { retryTies, startReview } from './startReviews';
 import { untiedStarts } from './reviewStarts';
@@ -453,7 +458,7 @@ export function SheetPage(props: SheetPageProps) {
         outcomes.push({ pull, ok: true });
         went(pull);
       } catch (cause) {
-        outcomes.push({ pull, ok: false, why: cause instanceof Error && cause.message ? cause.message : verb === 'merge' ? 'The merge didn’t go.' : 'It didn’t go.' });
+        outcomes.push({ pull, ok: false, why: cause instanceof Error && cause.message ? cause.message : verb === 'merge' ? 'The merge didn’t go.' : 'It didn’t go.', code: cause instanceof InboxApiError ? cause.code : undefined });
       }
     }
     return outcomes;
@@ -474,26 +479,38 @@ export function SheetPage(props: SheetPageProps) {
     });
   /**
    * Close (no confirm: the count with Undo is the pause, the owner's pick): each pick in turn, the host asked first. What
-   * closed leaves Open and the toast offers Undo, which reopens exactly those.
+   * closed leaves Open; the toast names it with Undo, and so does a line under the bar for as long as the server takes a
+   * reopen (closedUndo.ts). Either Undo reopens exactly those.
    */
   const runClose = (list: InboxPull[]) =>
     queue(async () => {
+      let firstAt = 0;
       const outcomes = await runEach('close', list, (pull) => inboxApi.pullClose(pull.key, pull.machine ?? null), (pull) => {
+        firstAt ||= Date.now();
         setReopenedHere((was) => withoutKey(was, pull.key));
         setClosedHere((was) => new Map(was).set(pull.key, pull.state));
       });
       const closed = outcomes.filter((o) => o.ok).map((o) => o.pull);
       report('close', outcomes, [], new Set([...chosen].filter((key) => !closed.some((p) => p.key === key))));
-      if (closed.length > 0) props.onToast?.({ icon: 'check', lead: toastLead('close', closed.length), onUndo: () => undoClose(closed), noKey: true }, CLOSE_UNDO_MS);
+      if (closed.length === 0) return;
+      const repos = Object.fromEntries(closed.map((p) => inboxPullRepoKey(p.host, p.repo)).map((key) => [key, labelOf(key)]));
+      const batch = keepClosed(closed, firstAt, repos);
+      props.onToast?.({ icon: 'check', ...closedToast(closed, (key) => repos[key] ?? key), onUndo: () => undoClose(batch.id), noKey: true }, CLOSE_UNDO_MS);
     });
-  /** Close's Undo: reopens exactly what that Close closed, picks them again, and says how each went. */
-  const undoClose = (closed: readonly InboxPull[]) =>
+  /**
+   * Close's Undo (the toast's or the line's): reopens exactly what that Close closed, once, picks them again, and says
+   * how each went; one the server may still take later goes back to the line.
+   */
+  const undoClose = (batchId: number) =>
     queue(async () => {
+      const batch = takeClosed(batchId);
+      if (!batch) return;
       setSelecting(true);
-      const outcomes = await runEach('reopen', closed, (pull) => inboxApi.pullReopen(pull.key, pull.machine ?? null), (pull) => {
+      const outcomes = await runEach('reopen', batch.pulls, (pull) => inboxApi.pullReopen(pull.key, pull.machine ?? null), (pull) => {
         setClosedHere((was) => withoutKey(was, pull.key));
         setReopenedHere((was) => new Map(was).set(pull.key, pull.state));
       });
+      putBackClosed(batch, outcomes.flatMap((o) => (!o.ok && !reopenRefusedForGood(o.code) ? [o.pull] : [])));
       const reopened = outcomes.filter((o) => o.ok).map((o) => o.pull.key);
       report('reopen', outcomes, [], new Set(reopened));
       if (reopened.length > 0) props.onToast?.({ icon: 'check', lead: toastLead('reopen', reopened.length) }, CLOSE_UNDO_MS);
@@ -562,7 +579,7 @@ export function SheetPage(props: SheetPageProps) {
             setBulk({ at: 'idle' });
             return;
           }
-          // Clear and the boxes go with select mode: focus they held moves to Select.
+          // The actions and the boxes go with select mode: focus they held moves to Select.
           const lost = !!document.activeElement?.closest('[data-pr-actions], .ib-prs-box, [data-pr-box]');
           leaveSelect();
           if (lost) setTimeout(() => barRef.current?.querySelector<HTMLElement>('[data-pr-select]')?.focus());
@@ -571,6 +588,10 @@ export function SheetPage(props: SheetPageProps) {
     },
   });
   const actions = selectOn && (chosen.size > 0 || live.at !== 'idle');
+  // A desktop's bar holds the picks' actions while something is picked (or a run or Merge's confirm is on); a run's
+  // report and Merge's note go under it, so the bar itself never changes height.
+  const picking = selectOn && !phone && (chosen.size > 0 || live.at === 'running' || live.at === 'confirm');
+  const fit = useBarFit(barRef, picking, `${chosen.size} ${plan.merge.length} ${live.at} ${reviews.groups.length}`);
   // Hide repository (hiddenPulls.ts): every PR in it leaves the board, Reviews and the counts, new ones too; nothing
   // changes on the forge. Always shown, quiet (prs.css); not while picking. Undo is the toast's.
   const repoHide = (section: { key: string; label: string; platform: InboxPull['platform'] }) =>
@@ -762,7 +783,8 @@ export function SheetPage(props: SheetPageProps) {
       }}
     />
   );
-  // Select mode's bar while something is picked: the count, Merge, its hint or confirm, Clear, then the list under it.
+  // Select mode's bar while something is picked: the count, Merge, Start review thread, Hide, Close, then Done; Merge's
+  // hint or confirm and the list under it.
   const confirmId = `${titleId}-merge`;
   const pickedWords = chosen.size > 0 && (
     <span className="ib-prs-picked" data-pr-picked="">
@@ -788,13 +810,15 @@ export function SheetPage(props: SheetPageProps) {
     ) : null;
   // Close: every pick is open; the host refuses one that isn't any more, in its words.
   const closeControl = live.at !== 'running' && pickedPulls.length > 0 && (
-    <button type="button" className="ib-prs-btn" onClick={() => runClose(pickedPulls)} data-pr-close="">
+    <button type="button" className="ib-prs-btn" data-danger="" onClick={() => runClose(pickedPulls)} data-pr-close="">
       Close {pickedPulls.length}
     </button>
   );
+  // A narrow bar (and a phone's sheet) says "Review"; the full words stay its title.
   const reviewControl = live.at !== 'running' && pickedPulls.length > 0 && (
-    <button type="button" className="ib-prs-btn" onClick={runReviews} data-pr-review="">
-      {startButtonWords(reviews.groups.length)}
+    <button type="button" className="ib-prs-btn" onClick={runReviews} title={startButtonWords(reviews.groups.length)} data-pr-review="">
+      <span className="ib-prs-long">{startButtonWords(reviews.groups.length)}</span>
+      <span className="ib-prs-short">Review</span>
     </button>
   );
   // Hide (hiddenPulls.ts): every pick leaves the board and Reviews at once, and select mode ends; nothing changes on the forge. The toast's Undo shows them again.
@@ -892,9 +916,9 @@ export function SheetPage(props: SheetPageProps) {
           </li>
         ))}
       </ul>
-    ) : live.at === 'report' ? (
+    ) : live.at === 'report' && (live.verb !== 'close' || live.outcomes.some((o) => !o.ok)) ? (
       <ul className="ib-prs-mlist" role="status" data-pr-merge-report={live.verb}>
-        {doneLine(live.verb, okPulls(live.outcomes)) && <li data-pr-merge-row={live.verb === 'merge' ? 'merged' : live.verb === 'close' ? 'closed' : 'reopened'}>{doneLine(live.verb, okPulls(live.outcomes))}</li>}
+        {live.verb !== 'close' && doneLine(live.verb, okPulls(live.outcomes)) && <li data-pr-merge-row={live.verb === 'merge' ? 'merged' : 'reopened'}>{doneLine(live.verb, okPulls(live.outcomes))}</li>}
         {live.outcomes.map((o) =>
           o.ok ? null : (
             <li key={o.pull.key} className="ib-prs-mbad" data-pr-merge-row="refused">
@@ -910,6 +934,9 @@ export function SheetPage(props: SheetPageProps) {
       </ul>
     ) : null;
 
+  // A phone's sheet: while something is picked, a run is on, or its report has something to say (a Close that all went
+  // says it on the Undo line instead).
+  const sheetShows = actions && phone && (chosen.size > 0 || live.at === 'running' || live.at === 'confirm' || !!mergeList);
   return (
     <section
       className={`ib-prs${mode === 'pane' ? ' ib-pane ib-prs-inpane' : ''}`}
@@ -918,7 +945,7 @@ export function SheetPage(props: SheetPageProps) {
       data-phone={phone ? '' : undefined}
       data-layout={layout}
       data-selecting={selectOn ? '' : undefined}
-      data-picking={actions ? '' : undefined}
+      data-picking={picking || sheetShows ? '' : undefined}
       style={layout === 'table' ? ({ '--ib-prs-bar-h': `${barHeight}px` } as CSSProperties) : undefined}
     >
       <div className="ib-prs-scroll">
@@ -952,38 +979,35 @@ export function SheetPage(props: SheetPageProps) {
             </p>
           )}
         </header>
-        {/* While something is picked the bar is select mode's own (a phone's is a sheet at the bottom instead). */}
-        <div className="ib-prs-bar" ref={barRef} data-pr-actions={actions && !phone ? '' : undefined}>
-          {actions && !phone ? (
-            <>
+        {/*
+          While something is picked (approval "inbox-pr-board-close-safe") the field stays and keeps filtering; the picks'
+          actions take the place of Open | Merged, Grid | Table and the closed link, Close last, then Done, which never
+          moves. One row at any width (useBarFit.ts). A phone's actions are a sheet at the bottom instead.
+        */}
+        <div className="ib-prs-bar" ref={barRef} data-pr-actions={picking ? '' : undefined} data-fit={picking ? fit : undefined}>
+          <label className="ib-prs-field" data-q={q ? '' : undefined} title={fit === 'icon' ? 'Filter pull requests' : undefined}>
+            <Icon name="search" size={14} />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={phone ? 'Filter by title, author, repo or #' : fit === 'full' ? 'Filter by title, author, repository or number' : 'Filter'}
+              aria-label="Filter pull requests"
+              spellCheck={false}
+              autoComplete="off"
+              data-pr-filter=""
+            />
+          </label>
+          {picking ? (
+            <div className="ib-prs-acts">
               {pickedWords}
               {mergeControl}
-              {closeControl}
               {reviewControl}
               {hideControl}
-              {mergeNote}
-              {!busy && (
-                <button type="button" className="ib-prs-btn ib-prs-end" onClick={leaveSelect} data-pr-clear="">
-                  Clear
-                </button>
-              )}
-              {mergeList}
-            </>
+              {closeControl}
+            </div>
           ) : (
             <>
-              <label className="ib-prs-field">
-                <Icon name="search" size={14} />
-                <input
-                  type="search"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={phone ? 'Filter by title, author, repo or #' : 'Filter by title, author, repository or number'}
-                  aria-label="Filter pull requests"
-                  spellCheck={false}
-                  autoComplete="off"
-                  data-pr-filter=""
-                />
-              </label>
               <div className="ib-seg ib-prs-seg" role="group" aria-label="State">
                 {(['open', 'merged'] as const).map((v) => (
                   <button
@@ -1017,14 +1041,21 @@ export function SheetPage(props: SheetPageProps) {
                   <Icon name="external" size={12} />
                 </a>
               ))}
-              {view === 'open' && (selecting || visible.length > 0) && (
-                <button type="button" className="ib-prs-btn ib-prs-end" onClick={selecting ? leaveSelect : startSelect} data-pr-select={selecting ? 'done' : 'select'}>
-                  {selecting ? 'Done' : 'Select'}
-                </button>
-              )}
             </>
           )}
+          {view === 'open' && (selecting || visible.length > 0) && (
+            <button type="button" className="ib-prs-btn ib-prs-end" onClick={selecting ? leaveSelect : startSelect} disabled={selecting && busy} data-pr-select={selecting ? 'done' : 'select'}>
+              {selecting ? 'Done' : 'Select'}
+            </button>
+          )}
         </div>
+        {selectOn && !phone && ((picking && mergeNote) || mergeList) && (
+          <div className="ib-prs-under">
+            {picking && mergeNote}
+            {mergeList}
+          </div>
+        )}
+        <ClosedLines onUndo={(batch) => undoClose(batch.id)} />
         {model && notices.length > 0 && !empty && (
           <div className="ib-prs-notices">
             {notices.map((n) => (
@@ -1046,21 +1077,22 @@ export function SheetPage(props: SheetPageProps) {
         <div className="ib-prs-body">{body}</div>
       </div>
       {popover}
-      {actions && phone && (
+      {/*
+        A phone: one row of actions, Close last and in the warning colour, left-aligned so it is never where Clear sat
+        (the sheet's right corner, a thumb's habit); the count and Merge's note under them; Done stays in the filter row.
+      */}
+      {sheetShows && (
         <div ref={pickSheet} className="ib-prs-picksheet" data-pr-actions="">
           {mergeList}
-          {mergeNote}
           <div className="ib-prs-pickrow">
-            {pickedWords}
             {mergeControl}
-            {closeControl}
             {reviewControl}
             {hideControl}
-            {!busy && (
-              <button type="button" className="ib-prs-btn ib-prs-end" onClick={leaveSelect} data-pr-clear="">
-                Clear
-              </button>
-            )}
+            {closeControl}
+          </div>
+          <div className="ib-prs-pickhead">
+            {pickedWords}
+            {mergeNote}
           </div>
         </div>
       )}
