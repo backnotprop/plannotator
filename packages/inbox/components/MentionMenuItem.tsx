@@ -11,15 +11,16 @@ import { formatCount } from '@plannotator/core/inbox-format';
 import { useInboxQueryClient } from '../data/client';
 import { replyDraftHasWords } from '../data/queries/drafts';
 import { knownMentionRef, mentionRefOf, noteMentionRefs } from '../data/threadMentionRefs';
-import { replyDraftUnsaved } from '../replyDraft';
+import { replyDraftSaveEndedAt, replyDraftUnsaved } from '../replyDraft';
 import { mentionInReply, mentionTarget } from '../threadMentions';
 import { ThreadGlyph } from '../replyMentions';
 
 export function MentionMenuItem({ rows, phone }: { rows: readonly InboxListRow[]; phone: boolean }) {
   const client = useInboxQueryClient();
-  // A saved draft's words, as the drafts list holds them (none listed is not known while a save is on its way).
+  // A saved draft's words, as the drafts list holds them. None listed is not known while a save is on its way, or
+  // when the list was asked for before the last save ended (it is read again just after): absent, and still remembered.
   const draftWords = (id: string) => {
-    const has = replyDraftHasWords(client, id);
+    const has = replyDraftHasWords(client, id, replyDraftSaveEndedAt());
     return has === false && replyDraftUnsaved() ? null : has;
   };
   const aim = rows.length > 0 ? mentionTarget(phone, draftWords) : null;

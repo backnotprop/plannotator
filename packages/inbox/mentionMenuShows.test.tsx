@@ -25,6 +25,8 @@ const { Menu } = (hasDom ? await import('@base-ui/react/menu') : {}) as typeof i
 const { resetReplyMentionsForTests } = (hasDom ? await import('./threadMentions') : {}) as typeof import('./threadMentions');
 const { createInboxQueryClient } = (hasDom ? await import('./data/client') : {}) as typeof import('./data/client');
 const { inboxKeys } = (hasDom ? await import('./data/keys') : {}) as typeof import('./data/keys');
+const { readDrafts } = (hasDom ? await import('./data/queries/drafts') : {}) as typeof import('./data/queries/drafts');
+const { REPLY_DRAFT_SAVE_MS, replyDraftUnsaved } = (hasDom ? await import('./replyDraft') : {}) as typeof import('./replyDraft');
 
 const LAST_KEY = 'plannotator-inbox-last-reply';
 const PROJECT: InboxProject = { id: 'prj_1', key: 'ledger-abcdef', name: 'ledger', root: '/work/ledger', created_at: '2026-11-20T10:00:00.000Z' };
@@ -57,25 +59,43 @@ const hosts: HTMLElement[] = [];
 let savedFetch: typeof fetch;
 let posted: string[] = [];
 let client: QueryClient;
+/** The scripted Inbox's reply drafts (thread id → words), and rows its drafts list adds (another device's). */
+let saved = new Map<string, string>();
+let elsewhere: InboxReplyDraftRow[] = [];
+/** A reply POST waits for this (a Send on its way). */
+let replyHeld: Promise<void> | null = null;
+
+const draftOf = (body: string) => ({ v: 1, thread_id: HERE, body, created_at: '2026-11-21T09:00:00.000Z', updated_at: new Date().toISOString() });
 
 beforeEach(() => {
   if (!hasDom) return;
   savedFetch = globalThis.fetch;
   posted = [];
+  saved = new Map();
+  elsewhere = [];
+  replyHeld = null;
   window.localStorage.clear();
   resetReplyMentionsForTests();
   client = createInboxQueryClient();
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
+    if (path.endsWith('/drafts')) {
+      const mine = [...saved].map(([id, words]) => draftRow(id, 'Retry worker', words));
+      return Response.json({ serverSession: 's', drafts: [], replies: [...mine, ...elsewhere] });
+    }
     if (init?.method === 'POST') {
       posted.push(path);
       if (path.endsWith('/draft')) {
         const body = String(JSON.parse(String(init.body)).body ?? '');
-        return Response.json({ draft: body ? { v: 1, thread_id: HERE, body, created_at: '2026-11-21T09:00:00.000Z', updated_at: new Date().toISOString() } : null });
+        if (body) saved.set(HERE, body);
+        else saved.delete(HERE);
+        return Response.json({ draft: body ? draftOf(body) : null });
       }
+      if (path.endsWith('/reply') && replyHeld) await replyHeld;
+      if (path.endsWith('/reply')) saved.delete(HERE);
       return Response.json({ message: {} });
     }
-    if (path.includes('/draft')) return Response.json({ serverSession: 's', draft: null });
+    if (path.includes('/draft')) return Response.json({ serverSession: 's', draft: saved.has(HERE) ? draftOf(saved.get(HERE)!) : null });
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
     if (path.includes('/sessions')) {
       const asked = new URL(path, 'http://inbox.test').searchParams.get('asker');
@@ -86,13 +106,20 @@ beforeEach(() => {
   }) as typeof fetch;
 });
 
-afterEach(() => {
+/** The drafts list read, as App reads it (on start and after each drafts event). */
+async function readTheDrafts() {
+  await act(async () => readDrafts(client));
+}
+
+afterEach(async () => {
   if (!hasDom) return;
   act(() => menuRoot?.unmount());
   act(() => paneRoot?.unmount());
   for (const el of hosts.splice(0)) el.remove();
   paneRoot = null;
   menuRoot = null;
+  // A pane that went saves what waited: it lands on the scripted Inbox, never on a real address.
+  for (let i = 0; i < 40 && replyDraftUnsaved(); i++) await settle(1);
   globalThis.fetch = savedFetch;
   window.location.hash = '';
   window.localStorage.clear();
@@ -170,10 +197,10 @@ async function pressReply() {
   await settle();
 }
 
-test.skipIf(!hasDom)('no thread open: no item, even with an older version’s remembered reply in localStorage', () => {
+test.skipIf(!hasDom)('no thread open: no item, even with an older version’s remembered reply in localStorage', async () => {
   window.localStorage.setItem(LAST_KEY, BRAND);
-  client.setQueryData(inboxKeys.drafts(), { serverSession: 's', drafts: [], replies: [] });
-  expect(rowMenu([row(OTHER, 'Rate limit for the public API')])).toBeNull();
+  await readTheDrafts();
+  expect(rowMenu([row(OTHER, 'Rate limit for the public API')])?.textContent ?? null).toBeNull();
   // Its draft holds no words: the old value is dropped, not kept for later.
   expect(window.localStorage.getItem(LAST_KEY)).toBeNull();
 });
@@ -181,12 +208,12 @@ test.skipIf(!hasDom)('no thread open: no item, even with an older version’s re
 test.skipIf(!hasDom)('a thread open with an empty reply box, closed or open: no item', async () => {
   await openThread();
   expect(replyField()).toBeNull();
-  expect(rowMenu([row(OTHER, 'Rate limit for the public API')])).toBeNull();
+  expect(rowMenu([row(OTHER, 'Rate limit for the public API')])?.textContent ?? null).toBeNull();
   await pressReply();
   expect(replyField()).not.toBeNull();
-  expect(rowMenu([row(OTHER, 'Rate limit for the public API')])).toBeNull();
+  expect(rowMenu([row(OTHER, 'Rate limit for the public API')])?.textContent ?? null).toBeNull();
   type(replyField()!, '   ');
-  expect(rowMenu([row(OTHER, 'Rate limit for the public API')])).toBeNull();
+  expect(rowMenu([row(OTHER, 'Rate limit for the public API')])?.textContent ?? null).toBeNull();
 });
 
 test.skipIf(!hasDom)('words typed and not sent: the item mentions into that reply; on its own thread there is none; after Send it is gone', async () => {
@@ -194,7 +221,7 @@ test.skipIf(!hasDom)('words typed and not sent: the item mentions into that repl
   await pressReply();
   type(replyField()!, 'Compare with');
   // Its own thread's row: nothing to mention there.
-  expect(rowMenu([row(HERE, 'Retry worker')])).toBeNull();
+  expect(rowMenu([row(HERE, 'Retry worker')])?.textContent ?? null).toBeNull();
   const item = rowMenu([row(OTHER, 'Rate limit for the public API')]);
   expect(item?.textContent).toBe('Mention in reply');
   await act(async () => {
@@ -209,7 +236,7 @@ test.skipIf(!hasDom)('words typed and not sent: the item mentions into that repl
   expect(posted).toContain(`/api/inbox/messages/${MESSAGE}/reply`);
   await settle();
   expect(replyField()?.value ?? '').toBe('');
-  expect(rowMenu([row(OTHER, 'Rate limit for the public API')])).toBeNull();
+  expect(rowMenu([row(OTHER, 'Rate limit for the public API')])?.textContent ?? null).toBeNull();
   // Sent: no longer the reply being written, on any device this browser opens.
   expect(window.localStorage.getItem(LAST_KEY)).toBeNull();
 });
@@ -220,13 +247,49 @@ test.skipIf(!hasDom)('the words emptied by hand: no item, and the reply is no lo
   type(replyField()!, 'Compare with');
   expect(window.localStorage.getItem(LAST_KEY)).toBe(HERE);
   type(replyField()!, '');
-  expect(rowMenu([row(OTHER, 'Rate limit for the public API')])).toBeNull();
+  expect(rowMenu([row(OTHER, 'Rate limit for the public API')])?.textContent ?? null).toBeNull();
   expect(window.localStorage.getItem(LAST_KEY)).toBeNull();
 });
 
-test.skipIf(!hasDom)('a phone’s sheet offers the reply being written only while its draft holds words, and names it', () => {
+test.skipIf(!hasDom)('while a Send is on its way the item is gone (the reply is sent; the box takes no words)', async () => {
+  await openThread();
+  await pressReply();
+  type(replyField()!, 'Compare with');
+  expect(rowMenu([row(OTHER, 'Rate limit for the public API')])?.textContent ?? null).not.toBeNull();
+  let release = () => {};
+  replyHeld = new Promise<void>((done) => (release = done));
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-reply-send]')!.click());
+  for (let i = 0; i < 40 && !posted.some((p) => p.endsWith('/reply')); i++) await settle(1);
+  expect(posted).toContain(`/api/inbox/messages/${MESSAGE}/reply`);
+  expect(rowMenu([row(OTHER, 'Rate limit for the public API')])?.textContent ?? null).toBeNull();
+  release();
+  await settle();
+  expect(rowMenu([row(OTHER, 'Rate limit for the public API')])?.textContent ?? null).toBeNull();
+});
+
+test.skipIf(!hasDom)('a closed box whose draft holds words: the item is there, and its mention opens the box with the words and lands at the end', async () => {
+  saved.set(HERE, 'Compare with');
+  await openThread();
+  // The thread opens holding its draft; the person closes the box, the draft kept.
+  expect(replyField()?.value).toBe('Compare with');
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-reply-close]')!.click());
+  await settle();
+  expect(replyField()).toBeNull();
+  const item = rowMenu([row(OTHER, 'Rate limit for the public API')]);
+  expect(item?.textContent).toBe('Mention in reply');
+  await act(async () => {
+    item!.click();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  for (let i = 0; i < 20 && !replyField(); i++) await settle(1);
+  await settle();
+  expect(replyField()!.value).toBe('Compare with Rate limit for the public API ');
+});
+
+test.skipIf(!hasDom)('a phone’s sheet offers the reply being written only while its draft holds words, and names it', async () => {
   window.localStorage.setItem(LAST_KEY, BRAND);
-  client.setQueryData(inboxKeys.drafts(), { serverSession: 's', drafts: [], replies: [draftRow(BRAND, 'Brand studio', 'Use the darker green for')] });
+  elsewhere = [draftRow(BRAND, 'Brand studio', 'Use the darker green for')];
+  await readTheDrafts();
   client.setQueryData(inboxKeys.list(), { sections: [{ threads: [row(BRAND, 'Brand studio')] }] });
   const item = rowMenu([row(OTHER, 'Rate limit for the public API')], true);
   expect(item).not.toBeNull();
@@ -235,15 +298,39 @@ test.skipIf(!hasDom)('a phone’s sheet offers the reply being written only whil
   expect(rowMenu([row(OTHER, 'Rate limit for the public API'), row(HERE, 'Retry worker')], true)?.textContent).toContain('Mention 2 in reply');
 
   // Sent or emptied elsewhere: the drafts list holds no words for it. No item, and it is forgotten.
-  client.setQueryData(inboxKeys.drafts(), { serverSession: 's', drafts: [], replies: [draftRow(BRAND, 'Brand studio', null)] });
-  expect(rowMenu([row(OTHER, 'Rate limit for the public API')], true)).toBeNull();
+  elsewhere = [draftRow(BRAND, 'Brand studio', null)];
+  await readTheDrafts();
+  expect(rowMenu([row(OTHER, 'Rate limit for the public API')], true)?.textContent ?? null).toBeNull();
   expect(window.localStorage.getItem(LAST_KEY)).toBeNull();
 });
 
 test.skipIf(!hasDom)('a phone with no reply being written, or the drafts not read yet: no item', () => {
-  expect(rowMenu([row(OTHER, 'Rate limit for the public API')], true)).toBeNull();
+  expect(rowMenu([row(OTHER, 'Rate limit for the public API')], true)?.textContent ?? null).toBeNull();
   window.localStorage.setItem(LAST_KEY, BRAND);
   // Not known yet: nothing offered, and the value is kept until the drafts are read.
-  expect(rowMenu([row(OTHER, 'Rate limit for the public API')], true)).toBeNull();
+  expect(rowMenu([row(OTHER, 'Rate limit for the public API')], true)?.textContent ?? null).toBeNull();
   expect(window.localStorage.getItem(LAST_KEY)).toBe(BRAND);
+});
+
+test.skipIf(!hasDom)('a phone: the first words saved, back to the list before the drafts list is read again; the reply is kept, then offered', async () => {
+  await readTheDrafts();
+  await openThread();
+  await pressReply();
+  type(replyField()!, 'Compare with');
+  // The save lands (it waits for a pause in typing), then the person leaves the thread for the list.
+  for (let i = 0; i < 40 && !saved.has(HERE); i++) await settle(1);
+  await settle(1);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, REPLY_DRAFT_SAVE_MS));
+  });
+  expect(saved.get(HERE)).toBe('Compare with');
+  act(() => paneRoot!.unmount());
+  paneRoot = null;
+  window.location.hash = '';
+  // The drafts list held was asked for before that save: not known yet. No item, and the reply is still remembered.
+  expect(rowMenu([row(OTHER, 'Rate limit for the public API')], true)?.textContent ?? null).toBeNull();
+  expect(window.localStorage.getItem(LAST_KEY)).toBe(HERE);
+  // Read again (App does so just after the drafts event): the sheet offers it.
+  await readTheDrafts();
+  expect(rowMenu([row(OTHER, 'Rate limit for the public API')], true)?.textContent ?? null).not.toBeNull();
 });

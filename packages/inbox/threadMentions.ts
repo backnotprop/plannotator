@@ -336,7 +336,9 @@ export function requestMention(threadId: string, refs: readonly MentionRef[]): v
 
 /**
  * The thread pane's half: a mention asked for while its box is closed opens the box (`open`, the pane's own opener),
- * unless a Send is on its way (the box takes no words then; it opens once the Send ends). `words`: the reply holds
+ * unless the pane is `busy`: a Send is on its way (the box takes no words then), or the thread's draft is not read yet
+ * (its words would be offered apart from the mention). It opens once that ends, unless the draft's words opened the
+ * box meanwhile (the mention then joins them at their end). `words`: the reply holds
  * words not sent yet (the open box's, or with the box closed its draft's), which the row menu's item waits for.
  */
 export function useMentionBoxOpener(threadId: string, boxOpen: boolean, busy: boolean, open: () => void, words = false): void {
@@ -356,7 +358,12 @@ export function useMentionBoxOpener(threadId: string, boxOpen: boolean, busy: bo
     };
   }, [threadId]);
   useEffect(() => {
-    if (!busy && !boxOpen && waiting.has(threadId)) openRef.current();
+    if (busy || boxOpen || !waiting.has(threadId)) return;
+    // After the pane's own effects of this turn have drawn (the draft just read may open the box with its words).
+    const later = setTimeout(() => {
+      if (!state.current.boxOpen && !state.current.busy && waiting.has(threadId)) openRef.current();
+    }, 0);
+    return () => clearTimeout(later);
   }, [busy, boxOpen, threadId]);
 }
 
