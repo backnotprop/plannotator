@@ -5,12 +5,13 @@
  * count and the age in a fixed column. The open row grows a second line with what the old third line said: the
  * author's picture, the number, the repository, the agent and why the row is where it is (its tone's colour), and a
  * Medium, Low or "Couldn't rank" mark. A stack unfolds its layers under it, each a row of its own that opens that
- * layer. A phone keeps 44px rows.
+ * layer. On a phone, where opening a row covers the list, every row has two lines, about 56px: the title's, and under
+ * it the status words in their colours, Medium or Low, the repository and number (`PhoneLine`).
  *
  * A screen reader hears a closed row once, in this order: its mark's state, the title, the risk, failing checks, the
  * agent, the status words, the number and repository, the age.
  */
-import type { InboxPull, InboxPullLink, InboxPullRiskAutoRun, InboxPullStack, InboxReviewRow } from '@plannotator/core/inbox-types';
+import type { InboxPull, InboxPullLink, InboxPullRiskAutoRun, InboxPullRiskJudgment, InboxPullStack, InboxReviewRow } from '@plannotator/core/inbox-types';
 import { formatCount } from '@plannotator/core/inbox-format';
 import { inboxPullLabel } from '@plannotator/core/inbox-types';
 import { HostMark, Icon } from '../icons';
@@ -117,12 +118,38 @@ function Title({ text }: { text: string }) {
   );
 }
 
-/** The age, in its fixed column; a screen reader hears it in words. */
-function Age({ iso, now }: { iso: string; now: number }) {
+/** The age, in its fixed column; a screen reader hears it in words (on a phone, at the end of the second line). */
+function Age({ iso, now, spoken = true }: { iso: string; now: number; spoken?: boolean }) {
   return (
     <span className="ib-t ib-rvr-age">
       <span aria-hidden="true">{reviewAge(iso, now)}</span>
-      <span className="ib-sr">{relativeWords(iso, now)}</span>
+      {spoken && <span className="ib-sr">{relativeWords(iso, now)}</span>}
+    </span>
+  );
+}
+
+/** "web-app #880", "billing-svc · 3 open, 1 merged": the repository, then the number or what the row is. */
+const placeAndLead = (place: string, lead: string | null | undefined) => (lead ? `${place}${/^[#!]/.test(lead) ? ' ' : ' · '}${lead}` : place);
+
+/**
+ * A phone row's second line, every row's (opening a row there covers the list, so no row waits for it): what the
+ * caller puts first, then Medium, Low or Couldn't rank, then the repository and number, on one line cut with "…",
+ * and the age's words for a screen reader, last.
+ */
+function PhoneLine({ lead, quietRisk, riskFailure, where, age }: { lead: React.ReactNode; quietRisk: InboxPullRiskJudgment | null; riskFailure: string | null; where: string; age: string }) {
+  const parts = [lead, quietRisk && <RiskMark key="risk" judgment={quietRisk} />, riskFailure && <RiskMark key="failed" failed={riskFailure} />, where].filter(Boolean);
+  return (
+    <span className="ib-rvr-l2p" data-reviews-line2-phone="">
+      <span className="ib-pv" dir="auto">
+        {parts.map((part, i) => (
+          <span key={i} className="ib-rvr-l2p-part">
+            {i > 0 && <span aria-hidden="true"> · </span>}
+            {i > 0 && <span className="ib-sr">, </span>}
+            {part}
+          </span>
+        ))}
+      </span>
+      <span className="ib-sr">, {age}</span>
     </span>
   );
 }
@@ -177,8 +204,11 @@ export function ReviewRowItem({ row, links, place, selected, phone, now, judgmen
   const prState = focusPull?.state ?? landing?.state ?? 'open';
   const platform = stack?.platform ?? landing?.platform ?? 'github';
   const failing = rowChecksFailing(row);
-  // The mark's state in words: a stack's count, on the open row, is its second line's.
-  const markWords = line.kind === 'pr' ? prStateWords(prState, platform) : line.kind === 'stack' && !selected ? `A stack of ${layers} ${pullNounWord(platform)}s` : null;
+  // A phone: every row two lines (`PhoneLine`); a desktop: the open row's second line only.
+  const twoLine = phone;
+  const wide = selected && !twoLine;
+  // The mark's state in words: a stack's count, on the desktop's open row, is its second line's.
+  const markWords = line.kind === 'pr' ? prStateWords(prState, platform) : line.kind === 'stack' && !wide ? `A stack of ${layers} ${pullNounWord(platform)}s` : null;
   return (
     <button
       type="button"
@@ -214,7 +244,7 @@ export function ReviewRowItem({ row, links, place, selected, phone, now, judgmen
         <Title text={title} />
         <span className="ib-rvr-end">
           {high && <RiskMark judgment={judged} />}
-          {!selected && level && !high && <span className="ib-sr">, {quietRisk ? `${riskLevelWord[quietRisk.level]} risk` : COULD_NOT_RANK}</span>}
+          {!selected && !twoLine && level && !high && <span className="ib-sr">, {quietRisk ? `${riskLevelWord[quietRisk.level]} risk` : COULD_NOT_RANK}</span>}
           {failing && (
             <Tip content="Checks failing">
               <span className="ib-rvr-ck" data-reviews-checks="failure">
@@ -226,8 +256,8 @@ export function ReviewRowItem({ row, links, place, selected, phone, now, judgmen
           {line.agent && (
             <span className="ib-pr-magent ib-rvr-agent" data-reviews-agent={line.agent.host ?? ''} title={line.agent.name}>
               <HostMark host={line.agent.host} />
-              {/* The open row's second line names the agent: once. */}
-              {!selected && <span className="ib-sr">, {line.agent.name}</span>}
+              {/* The desktop's open row's second line names the agent: once. */}
+              {!wide && <span className="ib-sr">, {line.agent.name}</span>}
             </span>
           )}
           {/* Room for the stack's count, which `ReviewStack` draws as its own button on top. */}
@@ -237,17 +267,32 @@ export function ReviewRowItem({ row, links, place, selected, phone, now, judgmen
               <Icon name="chevD" size={12} />
             </span>
           )}
-          {/* Not open: the second line's words, for a screen reader only, before the age. */}
-          {!selected && (
+          {/* Not open, on a desktop: the second line's words, for a screen reader only, before the age. */}
+          {!selected && !twoLine && (
             <span className="ib-sr">
               {srList([line.status])}
               {line.lead && `, ${line.lead}`}, <span data-pulls-repo="">{place}</span>,{' '}
             </span>
           )}
-          <Age iso={row.updated_at} now={now} />
+          <Age iso={row.updated_at} now={now} spoken={!twoLine} />
         </span>
       </span>
-      {selected && (
+      {twoLine && (
+        <PhoneLine
+          lead={
+            line.status ? (
+              <span className="ib-pr-mstatus" data-tone={line.tone ?? undefined} data-reviews-status="">
+                <Named words={facesOnce(line.parts, [])} host={stack?.layers[0]!.host ?? null} />
+              </span>
+            ) : null
+          }
+          quietRisk={quietRisk}
+          riskFailure={riskFailure}
+          where={placeAndLead(place, line.lead)}
+          age={relativeWords(row.updated_at, now)}
+        />
+      )}
+      {wide && (
         <span className="ib-rvr-l2" data-reviews-line2="">
           {stack && (
             <span className="ib-lead">
@@ -301,6 +346,7 @@ function LayerRow({ layer, place, selected, phone, now, judgments, riskFailed, m
   const high = judged?.level === 'high';
   const quietRisk = judged && !high ? judged : null;
   const failing = live && layer.checks === 'failure';
+  const twoLine = phone;
   return (
     <button
       type="button"
@@ -325,7 +371,7 @@ function LayerRow({ layer, place, selected, phone, now, judgments, riskFailed, m
         <Title text={layer.title} />
         <span className="ib-rvr-end">
           {high && <RiskMark judgment={judged} />}
-          {!selected && (quietRisk || riskFailure) && <span className="ib-sr">, {quietRisk ? `${riskLevelWord[quietRisk.level]} risk` : COULD_NOT_RANK}</span>}
+          {!selected && !twoLine && (quietRisk || riskFailure) && <span className="ib-sr">, {quietRisk ? `${riskLevelWord[quietRisk.level]} risk` : COULD_NOT_RANK}</span>}
           {failing && (
             <Tip content="Checks failing">
               <span className="ib-rvr-ck" data-reviews-checks="failure">
@@ -334,15 +380,17 @@ function LayerRow({ layer, place, selected, phone, now, judgments, riskFailed, m
               </span>
             </Tip>
           )}
-          {!selected && (
+          {!selected && !twoLine && (
             <span className="ib-sr">
               , {inboxPullLabel(layer)}, <span data-pulls-repo="">{place}</span>,{' '}
             </span>
           )}
-          <Age iso={layer.updated_at} now={now} />
+          <Age iso={layer.updated_at} now={now} spoken={!twoLine} />
         </span>
       </span>
-      {selected && (
+      {/* A layer's state is said at its start: on its second line, for the eye only. */}
+      {twoLine && <PhoneLine lead={live ? null : <span aria-hidden="true">{STATE_WORD[layer.state]}</span>} quietRisk={quietRisk} riskFailure={riskFailure} where={placeAndLead(place, inboxPullLabel(layer))} age={relativeWords(layer.updated_at, now)} />}
+      {selected && !twoLine && (
         <span className="ib-rvr-l2" data-reviews-line2="">
           <span className="ib-lead">
             <AuthorLead pull={layer} />

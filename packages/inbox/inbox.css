@@ -10657,14 +10657,18 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   .ib-pr-foot { padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
   .pn-inbox .ib-pr-refresh { min-width: 44px; min-height: 44px; }
   .pn-inbox .ib-pr-foldbtn { height: 44px; padding: 0 12px; font-size: var(--ib-fs-13-5, 13.5px); }
-  /* Reviews' rows keep a finger's 44px; the line reads at the phone's sizes. */
-  .ib-prlist { --ib-rvr-h: 44px; --ib-rvr-pad: 16px; --ib-rvr-pitch: 45px; }
+  /* Reviews' rows on a phone: two lines each, 56px with the divider (7 + 22 + 1 + 18 + 7 + 1); the lines read at the
+     phone's sizes. The second line (`PhoneLine`) sits under the title, on one line cut with "…". */
+  .ib-prlist { --ib-rvr-h: 22px; --ib-rvr-pad: 16px; --ib-rvr-pitch: 56px; --ib-rvr-l1c: calc(7px + var(--ib-rvr-h) / 2); }
+  .ib-mrow.ib-prrow { padding-top: 7px; padding-bottom: 7px; }
+  .ib-lbody > .ib-group > .ib-mrow.ib-prrow { contain-intrinsic-size: auto none auto 56px; }
   .ib-rvr-gl { height: 36px; padding: 0 16px; font-size: var(--ib-fs-13, 13px); }
   .ib-prrow .ib-rvr-l1 { font-size: var(--ib-fs-15, 15px); gap: 10px; }
-  .ib-prrow .ib-rvr-l2 { font-size: var(--ib-fs-13-5, 13.5px); height: 20px; margin-top: -6px; padding-bottom: 10px; gap: 10px; }
-  .ib-rvr-l2 > .ib-pr-l3:first-child { margin-left: 25px; }
+  .ib-rvr-l2p { display: flex; align-items: center; height: 18px; min-width: 0; margin: 1px 0 0 25px; font-size: var(--ib-fs-13, 13px); line-height: 18px; color: var(--muted-foreground); }
+  .ib-rvr-l2p > .ib-pv { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ib-rvr-cnt { min-width: 44px; justify-content: center; }
-  .pn-inbox .ib-rvr-stkbtn { height: 44px; margin: 0 calc(var(--ib-rvr-pad) + var(--ib-rvr-age-w) + 8px) 0 0; }
+  /* The count: a finger's 44px from the row's top, its figure on the title's line. */
+  .pn-inbox .ib-rvr-stkbtn { height: 44px; margin: 0 calc(var(--ib-rvr-pad) + var(--ib-rvr-age-w) + 8px) 0 0; align-items: flex-start; padding-top: calc(var(--ib-rvr-l1c) - 6px); }
   .pn-inbox .ib-rvr-stkbtn::after { inset: 0 -4px; }
   /* Group labels stay at the top while their rows scroll under them, as the Inbox's own groups do on a phone; the
      list's ground behind them, so no row shows through. */

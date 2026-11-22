@@ -10,7 +10,9 @@
  *  - a layer's row opening the whole stack, not showing selected when its layer is open, out of Tab's reach, or
  *    missing from the right-click menu;
  *  - a screen reader hearing a closed row's agent twice, or its parts out of order;
- *  - a title's tooltip measured on the hidden full title or on rounding.
+ *  - a title's tooltip measured on the hidden full title or on rounding;
+ *  - a phone row without its second line (status words in their tone, Medium or Low, repository and number), the
+ *    desktop's open-row line drawn there too, or a phone row heard with a part twice or the age before the rest.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. No fetch: the list is drawn from props.
  */
@@ -129,7 +131,7 @@ afterEach(() => {
 const opened: string[] = [];
 const openedLayers: string[] = [];
 const hid: string[][] = [];
-function draw(selected: string | null, selectedLayer: string | null = null) {
+function draw(selected: string | null, selectedLayer: string | null = null, phone = false) {
   const node = (
     <ReviewsMenu className="ib-lbody" rows={ROWS} links={{}} phone={false} onTarget={() => {}} onHide={(pulls) => hid.push(pulls.map((p) => p.key))}>
       <ReviewsList
@@ -141,7 +143,7 @@ function draw(selected: string | null, selectedLayer: string | null = null) {
         projectNames={new Map()}
         selected={selected}
         selectedLayer={selectedLayer}
-        phone={false}
+        phone={phone}
         onOpen={(row) => opened.push(row.id)}
         onOpenLayer={(row, layer) => openedLayers.push(`${row.id} ${layer.key}`)}
         onNew={() => {}}
@@ -363,4 +365,30 @@ test.skipIf(!hasDom)("a title's tooltip measures only what is drawn, and never a
   expect(titleIsCut(split, by(() => 0.9))).toBe(false);
   // The head cut: the title is.
   expect(titleIsCut(split, by((el) => (el.classList.contains('ib-rvr-th') ? 30 : 0)))).toBe(true);
+});
+
+test.skipIf(!hasDom)("on a phone every row has two lines: status words in their tone, Medium, then repository and number; heard once, the age last", () => {
+  draw('thr_mid', null, true);
+  for (const el of document.querySelectorAll<HTMLElement>('[data-reviews-row]')) expect(el.querySelector('[data-reviews-line2-phone]')).not.toBeNull();
+  // The open row too: the phone's line, never the desktop's.
+  expect(document.querySelector('[data-reviews-line2]')).toBeNull();
+  const line = row('thr_mid').querySelector<HTMLElement>('[data-reviews-line2-phone]')!;
+  const parts = [...line.querySelectorAll('.ib-rvr-l2p-part')];
+  expect(parts[0]!.querySelector('[data-reviews-status]')!.getAttribute('data-tone')).toBe('warn');
+  expect(parts[0]!.textContent).toBe('Changes requested');
+  expect(parts[1]!.querySelector('[data-pull-risk="medium"]')).not.toBeNull();
+  expect(parts[2]!.lastChild!.textContent).toBe('ledger #41');
+  const said = spoken(row('thr_mid'));
+  expect(said.split('Claude Code')).toHaveLength(2);
+  expect(said.split('Changes requested')).toHaveLength(2);
+  expect(said.split('Medium')).toHaveLength(2);
+  const age = said.slice(said.lastIndexOf(', ') + 2);
+  expect(said.endsWith(age)).toBe(true);
+  expect(said.split(age)).toHaveLength(2);
+  expect(said.indexOf('Claude Code')).toBeLessThan(said.indexOf('Changes requested'));
+  expect(said.indexOf('Medium')).toBeLessThan(said.indexOf('ledger #41'));
+  // A stack: its count of open and merged in place of a number; a layer: its own number, its state for the eye.
+  expect(row('thr_all').querySelector('[data-reviews-line2-phone]')!.textContent).toContain('ledger · 120 open');
+  act(() => $('[data-reviews-stack-toggle="thr_all"]')!.click());
+  expect($(`[data-reviews-layer="${TALL[2]!.key}"] [data-reviews-line2-phone]`)!.textContent).toContain('ledger #502');
 });

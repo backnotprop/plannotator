@@ -939,29 +939,46 @@ test("compact rows (approval inbox-reviews-compact-list): one 30px line each, th
   await expect(layerRow.locator('[data-reviews-line2]')).toContainText('#413');
   await expect(stackRow).not.toHaveAttribute('aria-current', 'true');
   await expect(page.locator(`[data-pulls-stack="${STACK_ID}"]`)).toBeVisible();
-  // A phone: the list alone, its rows a finger's 44px; an unfolded stack's tree lines on their own rows.
+  // A phone: the list alone, every row two lines, about 56px: the title, then the status words, Medium or Low, the
+  // repository and number on one line cut with "…"; an unfolded stack's tree lines on their own rows.
   await page.goto(`${world.url}#reviews`);
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(list.locator('[data-reviews-row]').first()).toBeVisible();
-  const phoneRow = await list.locator('[data-reviews-row]').first().evaluate((el) => el.getBoundingClientRect().height);
-  expect(Math.round(phoneRow)).toBeGreaterThanOrEqual(44);
   if ((await unfold.getAttribute('aria-expanded')) !== 'true') await unfold.click();
+  const phoneRows = await list.locator('[data-reviews-row], [data-reviews-layer]').evaluateAll((els) =>
+    els.map((el) => {
+      const second = el.querySelector<HTMLElement>('[data-reviews-line2-phone] .ib-pv');
+      return { height: Math.round(el.getBoundingClientRect().height), second: second ? Math.round(second.getBoundingClientRect().height) : null, inRow: second ? second.getBoundingClientRect().right <= el.getBoundingClientRect().right : null };
+    }),
+  );
+  expect(phoneRows.length).toBeGreaterThan(6);
+  for (const row of phoneRows) {
+    expect(row.height).toBeGreaterThanOrEqual(54);
+    expect(row.height).toBeLessThanOrEqual(58);
+    expect(row.second).not.toBeNull();
+    expect(row.second!).toBeLessThanOrEqual(20);
+    expect(row.inRow).toBe(true);
+  }
+  // The teammate's PR: its status words in their colour, then the repository and number.
+  await expect(list.locator('[data-reviews-row][data-pulls-row="github.com/northwind/web-app#880"] [data-reviews-line2-phone]')).toContainText('web-app #880');
+  await expect(list.locator('[data-reviews-line2]')).toHaveCount(0);
   await expect(list.locator(`[data-reviews-stack="${STACK_ID}"] [data-reviews-layer]`)).toHaveCount(4);
   const trees = await list.locator(`[data-reviews-stack="${STACK_ID}"] [data-reviews-layer]`).evaluateAll((els) =>
     els.map((el) => {
       const row = el.getBoundingClientRect();
       const tree = el.querySelector('[data-reviews-tree]')!.getBoundingClientRect();
-      return { inside: tree.left >= row.left && tree.right <= row.left + 48 && tree.bottom > row.top && tree.bottom <= row.bottom, elbow: Math.abs(tree.bottom - (row.top + row.height / 2)) <= 1 };
+      const line = el.querySelector('.ib-rvr-l1')!.getBoundingClientRect();
+      return { inside: tree.left >= row.left && tree.right <= row.left + 48 && tree.bottom > row.top && tree.bottom <= row.bottom, elbow: Math.abs(tree.bottom - (line.top + line.height / 2)) <= 1 };
     }),
   );
   expect(trees).toEqual(trees.map(() => ({ inside: true, elbow: true })));
   await page.mouse.move(0, 0);
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   await page.waitForTimeout(400);
-  await proof('compact-04-phone-390-dark.png');
+  await proof('compact-05-phone-two-line-dark.png');
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
   await page.waitForTimeout(400);
-  await proof('compact-04-phone-390-light.png');
+  await proof('compact-05-phone-two-line-light.png');
   // A phone's group labels stay at the top while their rows scroll under them, on the list's own ground.
   await page.setViewportSize({ width: 390, height: 420 });
   const body = list.locator('.ib-lbody');
