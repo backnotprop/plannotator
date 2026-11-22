@@ -24,6 +24,7 @@
     "./review-core": "./review-core.ts",
     "./review-image": "./review-image.ts",
     "./repo-files": "./repo-files.ts",
+    "./review-file-filter": "./review-file-filter.ts",
     "./fuzzy-path": "./fuzzy-path.ts",
     "./repo-files-node": "./repo-files-node.ts",
     "./review-markdown-image": "./review-markdown-image.ts",
@@ -91,6 +92,7 @@
     "./url-to-markdown": "./url-to-markdown.ts",
     "./html-assets": "./html-assets.ts",
     "./html-assets-node": "./html-assets-node.ts",
+    "./byte-range": "./byte-range.ts",
     "./packed-app": "./packed-app.ts",
     "./guide": "./guide.ts",
     "./guide-prompt": "./guide-prompt.ts",
@@ -142,6 +144,7 @@
     "./ref-cards": "./ref-cards.ts",
     "./tool-state": "./tool-state.ts",
     "./ref-cards-node": "./ref-cards-node.ts",
+    "./linear-cards": "./linear-cards.ts",
     "./inbox-pull-close": "./inbox-pull-close.ts",
     "./inbox-pull-merge": "./inbox-pull-merge.ts",
     "./request-host": "./request-host.ts",
@@ -155,6 +158,7 @@
     "./inbox/snoozes": "./inbox/snoozes.ts",
     "./inbox/project-tags": "./inbox/project-tags.ts",
     "./inbox/agent-faces": "./inbox/agent-faces.ts",
+    "./inbox/own-secrets": "./inbox/own-secrets.ts",
     "./inbox/schema": "./inbox/schema.ts",
     "./inbox/network-paths": "./inbox/network-paths.ts",
     "./inbox/ask": "./inbox/ask.ts",
@@ -206,6 +210,7 @@
     "./inbox/qwen-sessions": "./inbox/qwen-sessions.ts",
     "./inbox/devices": "./inbox/devices.ts",
     "./inbox/agent-pairing": "./inbox/agent-pairing.ts",
+    "./inbox/agent-pictures": "./inbox/agent-pictures.ts",
     "./inbox/agent-relay-client": "./inbox/agent-relay-client.ts",
     "./inbox/attachments": "./inbox/attachments.ts",
     "./inbox/video": "./inbox/video.ts",
@@ -241,9 +246,11 @@
     "chokidar": "^5.0.0",
     "diff": "^8.0.4",
     "parse5": "^7.3.0",
+    "picomatch": "4.0.7",
     "turndown": "^7.2.4"
   },
   "devDependencies": {
+    "@types/picomatch": "^4.0.2",
     "fast-check": "4.10.2"
   }
 }

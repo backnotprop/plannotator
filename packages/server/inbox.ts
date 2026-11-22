@@ -428,6 +428,7 @@ import {
   type InboxNoteAgentId,
   type InboxStepsWire,
 } from "@plannotator/core/inbox-types";
+import { createInboxSessionLabels } from "./inbox-session-labels";
 
 /**
  * The hosts whose own connection polls the bridge and wakes its session with the reply: the waking hosts but Codex,
@@ -1362,6 +1363,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const withIcons = { ...wire, icons: agentIconFiles.list() };
     for (const listener of agentFaceListeners) listener(withIcons);
   });
+  const sessionLabelStore = createInboxSessionLabels(inboxDir(dataDir));
   /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
   const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
   /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: lets the save of a held switch (Shape, heldSwitch) reach the windows. */
@@ -4702,6 +4704,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       throw new InboxError("validation_error", 'type: "delivered" with the reply id, or "state" with busy.', { field: "type" });
     }
     live.steerDone(session);
+    live.tookItem(session);
     // An item the Inbox marked to go in by itself: whether it went into the running turn, or waited for the
     // turn to end (the session was seen idle after the mark: its own Ask question held the turn).
     const marked = store.message(body.id);
@@ -4817,7 +4820,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...(options.sessionsNow ? { now: options.sessionsNow } : {}),
     store,
     serverSession,
-    resolveRoot: async (path) => (await projectRoots.resolve(path)).root,
+    resolveRoot: async (path) => (await projectRoots.resolveNamed(path)).root,
     outdatedOf: (host, plugin, folder) => {
       if (host === "claude-code") {
         return claudeSessionOutdated({
@@ -4852,6 +4855,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           .filter((agent) => agent.session === session)
           .map((agent) => agent.launch_id),
       ]),
+    onLabel: (session, label, title) => sessionLabelStore.note(session, label, title),
   });
 
   // Shape (approval "shape-inbox-placement"): the boards' routes and event feed, mounted only while boards are on.
@@ -4974,7 +4978,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       .list()
       .flatMap((agent) => (agent.device_id && agentDoor.inScopeOf(threadId, agent.device_id) ? [agent.device_id] : []));
   };
-  const agentDoor = createInboxAgentDoor({ store, agents: cloudAgents, devices: () => phones?.agentDevices ?? null, mcp: mcpContext });
+  // `route`: the window routes a paired agent's `inbox rows`, `projects`, `icon` and `export-decisions` use, answered by
+  // this listener's own handler as the same commands on this computer are (inbox-agent-routes.ts).
+  const agentDoor = createInboxAgentDoor({ store, agents: cloudAgents, devices: () => phones?.agentDevices ?? null, mcp: mcpContext, route: (req) => handle(req, "local") });
   const cloudWake = createInboxCloudWake({
     store,
     agents: cloudAgents,
@@ -6076,8 +6082,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const snoozedMode = snoozedModeOf(url);
         // A linked machine's read lists every thread: its own window hides by its own records (inbox-pull-hidden.ts).
         const rows = perfPhase("rows", () => listModel(projectFilter, archivedMode, merged, snoozedMode, fromDeviceDoor.get(req)?.platform !== MACHINE_PLATFORM));
-        const labels = merged ? { ...machines.sessionNames().labels, ...live.labels() } : live.labels();
-        const titles = { ...(merged ? machines.sessionNames().titles : {}), ...live.titles() };
+        const liveNow = new Set(live.allLive().map((s) => s.session));
+        const remembered = (all: Record<string, string>) => {
+          const out: Record<string, string> = {};
+          for (const [session, text] of Object.entries(all)) if (!liveNow.has(session)) out[session] = text;
+          return out;
+        };
+        const labels = { ...remembered(sessionLabelStore.labels()), ...(merged ? machines.sessionNames().labels : {}), ...live.labels() };
+        const titles = { ...remembered(sessionLabelStore.titles()), ...(merged ? machines.sessionNames().titles : {}), ...live.titles() };
         // A linked machine's read carries this Inbox's agent faces and given names in its group: they live here
         // (inbox-linked-marks), and that machine's windows show them. This Inbox's own windows read them apart.
         const door = fromDeviceDoor.get(req);
@@ -7305,7 +7317,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const capable = await routeInboxCapabilities(capabilities, req, url, { local: via === "local" && !fromDeviceDoor.has(req), crossSite: () => crossSiteCardRead(req), serverSession });
       if (capable) return capable;
       // Search: a read route (and the recent searches the window writes on opening a result).
-      const searched = await search.handle(req, url);
+      const searched = await search.handle(req, url, {
+        linked: () => machines.machinesView().filter((machine) => !machine.self && machine.state !== "revoked").map((machine) => ({ id: machine.id, name: machine.name, online: machine.state === "online" })),
+        projectOwner: (projectId) => machines.projectOwner(projectId),
+        forward: (forwarded, target) => machines.route(forwarded, target, via),
+      });
       if (searched) return searched;
       // The composers' skill picker and the SKILL.md a Send pastes in (inbox-skills.ts): read routes.
       const skills = inboxSkillsRoute(req, url, { codeReview: codeReviewOn(), shape: shapeOn(), routines: scheduledCap.on() });
@@ -8112,7 +8128,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
       // #1813: an image a message's body shows, read from wherever it is on this
       // computer outside the home folder's hidden folders (packages/server/inbox-message-images.ts).
-      const image = await inboxMessageImageRoute(req, url, store);
+      const image = await inboxMessageImageRoute(req, url, store, imageCapture.shown);
       if (image) return image;
 
       // "Open in": an attachment in its own app, by id only (packages/server/inbox-open-in.ts).
