@@ -15,6 +15,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxInitiative, InboxListRow } from '@plannotator/core/inbox-types';
 import type { SidebarProps } from './components/Sidebar';
+import type { RowTags } from './threadTags';
 
 const hasDom = typeof document !== 'undefined';
 const { Sidebar } = (hasDom ? await import('./components/Sidebar') : {}) as typeof import('./components/Sidebar');
@@ -138,7 +139,7 @@ test.skipIf(!hasDom)("most recent follows the list: a new message moves its tag 
 test.skipIf(!hasDom)("a tag's activity is its newest thread, read through the window's tags of a row", () => {
   // A linked machine's row carries that machine's ids; the window reads it with the merged ones.
   const far = row('t9', ['far_rel'], '2026-11-09T09:00:00.000Z');
-  const merged = (r: InboxListRow) => (r.tags ?? []).map((id) => (id === 'far_rel' ? 'ini_r' : id));
+  const merged: RowTags = (r) => (r.tags ?? []).map((id) => (id === 'far_rel' ? 'ini_r' : id));
   expect(Object.fromEntries(tagActivity([...ROWS, far], merged))).toEqual({
     ini_a: '2026-11-01T09:00:00.000Z',
     ini_r: '2026-11-09T09:00:00.000Z',
