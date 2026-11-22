@@ -362,6 +362,7 @@ import { createInboxPullStates, createInboxReviewIndex, readInboxReviewLink } fr
 import { INBOX_PULL_ASKS, inboxPullRiskAutoOf, inboxPullRefOfKey, inboxPullUrlOfKey, isInboxPullAsk, type InboxPull, type InboxPullLink } from "@plannotator/core/inbox-types";
 import { inboxThreadPullsSummary, parseInboxThreadPullRef, type InboxThreadPull } from "@plannotator/core/inbox-types";
 import { readInboxReviewChanges } from "./inbox-review-changes";
+import { createInboxLocalWork } from "./inbox-local-work";
 import { createInboxBranchService } from "./inbox-branch-service";
 import { inboxFarBranchReviewRow } from "@plannotator/core/inbox-branch-reports";
 import { runtime as gitRuntime } from "./git";
@@ -1626,6 +1627,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   // Reviews (inbox-reviews.ts): every thread with a review card, derived from the store's messages on read.
   const reviewIndex = createInboxReviewIndex(store);
+  // Reviews' "On this computer" (inbox-local-work.ts): the projects newest activity first, and a branch with an open PR
+  // (or, with Branch reviews on, an agent's report) left to its own row.
+  const localWork = createInboxLocalWork({
+    runtime: gitRuntime,
+    projects: () => {
+      const seen = new Map<string, InboxProject>();
+      for (const row of store.listRows()) {
+        const project = row.project?.id ? store.project(store.canonicalProjectId(row.project.id)) : null;
+        if (project && !seen.has(project.id)) seen.set(project.id, project);
+      }
+      for (const project of store.listProjects().reverse()) if (!seen.has(project.id)) seen.set(project.id, project);
+      return [...seen.values()];
+    },
+    skip: (projectId, branch) => (lastReviewsRead?.listed.pulls ?? []).some((pull) => inboxPullIsOpen(pull) && pull.head === branch) || (branchReviewsOn() && branchService.reported(projectId, branch)),
+  });
   let lastReviewsRead: { projectsByRepo: Awaited<ReturnType<typeof pullProjects>>["projectsByRepo"]; wanted: Awaited<ReturnType<typeof pullProjects>>["wanted"]; listed: Awaited<ReturnType<typeof pulls.list>> } | null = null;
   // A review thread's PR that left the list: one read of its state, so a closed PR, or one merged long ago, is recorded.
   // A PR's owner as the lists use it. A thread archived before any review came is no one's to curate: its PR is
@@ -6527,6 +6543,29 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Branch reviews: a named branch's whole diff (the safety net's Start a review), not the checked-out one's.
         const branch = changes === "branch" && branchReviewsOn() ? url.searchParams.get("branch") : null;
         return json(await readInboxReviewChanges(project.root, changes, branch && inboxPullSafeBranch(branch) ? branch : null));
+      }
+      // Reviews' "On this computer" (inbox-local-work.ts): this computer's work in no PR, and a row's diff, read only.
+      // The window's own reads: never through the door, never a program without the window's same-origin mark.
+      if (path === "/api/inbox/reviews/local" || path === "/api/inbox/reviews/local/diff") {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (fromDeviceDoor.get(req) || req.headers.get("sec-fetch-site")?.trim().toLowerCase() !== "same-origin") {
+          return json({ error: "Only the Inbox window reads this computer's local work.", code: "window_only" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        if (path === "/api/inbox/reviews/local") return json({ serverSession, ...(await localWork.list()) });
+        const project = store.project(url.searchParams.get("project") ?? "");
+        const branch = url.searchParams.get("branch");
+        if (!project || (branch !== null && !inboxPullSafeBranch(branch))) return json({ error: "A project, and a branch or none.", code: "validation_error" }, 400);
+        try {
+          const answer = await localWork.diff(project, branch);
+          if (!answer) return json({ error: "This project's folder isn't a git repository on this computer.", code: "not_git" }, 404);
+          return json({ serverSession, ...answer });
+        } catch (cause) {
+          return json({ error: cause instanceof Error ? cause.message : "The diff could not be read.", code: "git_failed" }, 500);
+        }
       }
       // Branch reviews (inbox-branch-service.ts): the reported branches, the by-hand list of branches nobody reported,
       // and a reported branch's Rank. Refused before any git while Branch reviews (or Code review) is off.

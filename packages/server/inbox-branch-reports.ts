@@ -286,8 +286,9 @@ export async function readBranchDiff(runtime: ReviewGitRuntime, root: string, ba
  * The safety net: local branches with a commit in the last `INBOX_UNREPORTED_BRANCH_DAYS` days and commits not on the
  * default branch, newest first, at most `INBOX_UNREPORTED_BRANCHES_MAX` of them (counted after the ones with nothing of
  * their own are dropped; no more than `UNREPORTED_SCAN_MAX` are looked at), each with the worktree it is checked out in.
- * `skip`: branches reported or with an open PR. Read only, when the person opens the list. A read that fails or times
- * out throws (the list says it could not be read), never "nothing".
+ * `skip`: branches reported or with an open PR. `caps`: Reviews' "On this computer" looks at fewer (inbox-local-work.ts).
+ * Read only, when the person opens the list. A read that fails or times out throws (the list says it could not be read),
+ * never "nothing".
  */
 export async function readUnreportedBranches(
   runtime: ReviewGitRuntime,
@@ -295,6 +296,7 @@ export async function readUnreportedBranches(
   projectId: string,
   skip: (branch: string) => boolean,
   now: number = Date.now(),
+  caps: { scan: number; list: number } = { scan: UNREPORTED_SCAN_MAX, list: INBOX_UNREPORTED_BRANCHES_MAX },
 ): Promise<{ git: boolean; branches: InboxUnreportedBranch[] }> {
   const inside = await git(runtime, root, ["rev-parse", "--is-inside-work-tree"]).catch(() => null);
   if (inside?.stderr === OFFLINE_GIT_TOO_OLD) throw new Error(OFFLINE_GIT_TOO_OLD);
@@ -313,7 +315,7 @@ export async function readUnreportedBranches(
     if (!branch || !Number.isFinite(seconds) || seconds < since) continue;
     if (!inboxPullSafeBranch(branch) || inboxPullLongLived(branch) || branch === base || skip(branch)) continue;
     candidates.push({ branch, at: seconds });
-    if (candidates.length >= UNREPORTED_SCAN_MAX) break;
+    if (candidates.length >= caps.scan) break;
   }
   if (candidates.length === 0) return { git: true, branches: [] };
   const worktrees = await getWorktrees(offlineGit(runtime), root).catch(() => []);
@@ -325,7 +327,7 @@ export async function readUnreportedBranches(
     const count = Number(ahead.stdout.trim());
     if (!Number.isFinite(count) || count <= 0) continue;
     branches.push({ project_id: projectId, branch, base, ahead: count, last_commit_at: new Date(at * 1000).toISOString(), worktree: checkedOut.get(branch) ?? null });
-    if (branches.length >= INBOX_UNREPORTED_BRANCHES_MAX) break;
+    if (branches.length >= caps.list) break;
   }
   return { git: true, branches };
 }

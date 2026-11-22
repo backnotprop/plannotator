@@ -272,6 +272,10 @@ export function createInboxBranchService(options: InboxBranchServiceOptions) {
       await judge(report);
       return options.risk.branchPending(key, report.head, report.base);
     },
+    /** A branch an agent reported in this project (Reviews' "On this computer" leaves it to its thread's row). */
+    reported(projectId: string, branch: string): boolean {
+      return reports.get(store.canonicalProjectId(projectId), branch) !== null;
+    },
     /** The safety net, for one project: read only when the person asks. `openHeads`: the branches with an open PR. */
     async unreported(project: InboxProject, openHeads: ReadonlySet<string>): Promise<InboxUnreportedBranchesAnswer> {
       const id = store.canonicalProjectId(project.id);
