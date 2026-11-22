@@ -147,6 +147,11 @@ describe.if(INBOX_CARD_ACTION_ON)("the card tool", () => {
     expect((await card({ op: "move", card_id: id })).content[0]!.text).toStartWith("validation_error: column:");
     expect((await card({ op: "drop", card_id: id })).content[0]!.text).toStartWith("validation_error: reason:");
     expect((await card({ op: "move", card_id: id, column: "in_review" })).content[0]!.text).toStartWith("validation_error: you:");
+    // The relay's own key reaches every op (inbox-agent-door.ts fills `relay.<commandId>`),
+    // and only the relay's is tolerated: a caller's key on an op that takes none still is refused (#3575).
+    expect((await card({ op: "move", card_id: id, column: "in_progress", idempotency_key: "relay.cmd_1" })).isError).toBeUndefined();
+    expect((await card({ op: "list", idempotency_key: "relay.cmd_2" })).isError).toBeUndefined();
+    expect((await card({ op: "move", card_id: id, column: "in_progress", idempotency_key: "mine" })).content[0]!.text).toStartWith("validation_error: idempotency_key:");
 
     // A card of another project: refused, naming where it is; that project's path reaches it.
     const elsewhere = await card({ op: "say", card_id: id, say: "x", project_path: other });
