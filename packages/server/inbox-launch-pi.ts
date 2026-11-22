@@ -49,13 +49,14 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { childEnv } from "@plannotator/shared/child-env";
 import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
-import { readPiSessionClaims, type PiSessionClaim } from "@plannotator/shared/inbox/pi-session-claim";
+import { piSessionClaimFileOf, readPiSessionClaims, type PiSessionClaim } from "@plannotator/shared/inbox/pi-session-claim";
 import { agentVersionRun, createAgentEnvironmentFor } from "./inbox-agents";
+import { inboxCommandBeforeName, inboxProcessStartedAt } from "./inbox-rex-resume";
 import { launchChoiceArgs, parsePiChoices } from "@plannotator/core/inbox-launch-choice";
 import { LAUNCH_CHOICES_RUN_MS, launchChoiceCache } from "./inbox-launch-choice";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
@@ -192,7 +193,7 @@ export function piSessionProcesses(listing: string, session: string, exclude: It
     return false;
   };
   // Quoted (a terminal's `sh -c`) or not (Pi's own argv), and never a longer id that starts the same.
-  const names = (command: string) => new RegExp(`--session-id\\s+'?${session}(?![0-9a-f-])`, "i").test(command);
+  const names = (command: string) => new RegExp(`--session-id\\s+'?${session}(?![0-9a-f-])`, "i").test(inboxCommandBeforeName(command));
   const found = new Map<number, boolean>();
   for (const [pid, command] of rows) {
     if (!under(pid) && names(command)) found.set(pid, /--mode\s+rpc\b/.test(command));
@@ -408,7 +409,10 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     if (looked) return;
     looked = true;
     const text = list() ?? "";
-    for (const match of text.matchAll(/--session-id\s+'?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi)) elsewhere.add(match[1]!.toLowerCase());
+    // Each process's own session only: never an id inside a thread's name (`--name`, after it on the line).
+    for (const line of text.split("\n")) {
+      for (const match of inboxCommandBeforeName(line).matchAll(/--session-id\s+'?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi)) elsewhere.add(match[1]!.toLowerCase());
+    }
     for (const claim of readPiSessionClaims(ctx.dataDir)) elsewhere.add(claim.session.toLowerCase());
   };
   /** Whether a process of no hand-off of this Inbox's still runs `session` (checked again at most every `LISTING_MS`). */
@@ -711,6 +715,12 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     return parsePiChoices(help.stdout, models.exitCode === 0 && !models.timedOut ? models.stdout : null);
   });
 
+  /** The Pis that run `session` now by `listing` (argv or claim), not one this Inbox runs in the background. */
+  const piRexPids = (session: string, listing: string): number[] => {
+    const own = [...procs.values()].filter((p) => !p.exited).map((p) => p.proc.pid);
+    return piSessionProcesses(listing, session, own, readPiSessionClaims(ctx.dataDir)).flatMap((found) => (found.pid !== process.pid ? [found.pid] : []));
+  };
+
   return {
     agent: PI,
     name: PI_NAME,
@@ -746,6 +756,56 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
         return { ok: false as const, code: result.missing ? ("missing" as const) : ("failed" as const), text: result.text };
       }
       return { ok: true as const, session, ref: session };
+    },
+
+    /**
+     * Start in Rex: interactive Pi in the folder on the session id the Inbox picks now (or the same one again), with
+     * the Inbox tool on and this Inbox's data dir, as Open in Terminal runs it. The extension connects it at its
+     * start, as that id, and takes the root as its first turn: the message is never on the command line.
+     */
+    /** Start in Rex: a Pi lists as `pi` alone, so the claim its extension wrote (this Inbox's data dir) says which session it runs. */
+    runsSession(session: string, listing: string) {
+      return piRexPids(session, listing).length > 0;
+    },
+
+    /**
+     * The Pis Stop signals: one whose argv names the session, or one by its claim only while that claim is from this
+     * process's own life (written after it started). A pid another Pi reused, under a claim a Pi that died left, never.
+     */
+    async sessionPids(session: string, listing: string) {
+      const own = [...procs.values()].filter((p) => !p.exited).map((p) => p.proc.pid);
+      const byArgv = new Set(piSessionProcesses(listing, session, own, []).map((found) => found.pid));
+      const claims = readPiSessionClaims(ctx.dataDir);
+      const out: number[] = [];
+      for (const pid of piRexPids(session, listing)) {
+        if (byArgv.has(pid)) {
+          out.push(pid);
+          continue;
+        }
+        const claim = claims.find((c) => c.pid === pid && c.session.toLowerCase() === session.toLowerCase());
+        let written: number | null = null;
+        try {
+          written = claim ? statSync(piSessionClaimFileOf(ctx.dataDir, claim.session, claim.pid)).mtimeMs : null;
+        } catch {
+          written = null;
+        }
+        const started = written === null ? null : await inboxProcessStartedAt(pid);
+        if (written !== null && started !== null && started <= written + 1000) out.push(pid);
+      }
+      return out;
+    },
+
+    async rexCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean; fresh?: boolean }) {
+      const session = input.resume && launch.session ? launch.session : randomUUID();
+      const dataDir = dataDirArg();
+      const choice = launchChoiceArgs(PI, { model: launch.model, effort: launch.effort });
+      const env = ["PLANNOTATOR_INBOX_TOOL=1", ...(dataDir ? [`PLANNOTATOR_DATA_DIR=${dataDir}`] : [])];
+      // Named for its thread, as a background start is (`piArgv`): without it Pi names the session itself, and the list's
+      // row reads that name. A session started again keeps the name it has (the person may have renamed it), as Claude's.
+      // One that never took a turn (`fresh`) is named as a first start is.
+      const named = input.resume && !input.fresh ? [] : ["--name", input.name.trim() || "Inbox"];
+      const command = `cd ${shellQuote(launch.folder)} && exec env ${[...env, "pi", "--session-id", session, ...named, ...choice].map(shellQuote).join(" ")}`;
+      return { ok: true as const, session, ref: session, command };
     },
 
     /** What this Inbox's processes say: running (busy or idle), stopped once one ended, absent when none ran here. */

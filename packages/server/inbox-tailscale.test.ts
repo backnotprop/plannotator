@@ -128,7 +128,14 @@ describe("Inbox over your tailnet", () => {
     expect(ts.serve.get(inbox.port)).toBe(`http://127.0.0.1:${listener}`);
     expect(listener).not.toBe(inbox.port);
     expect(ts.calls.some((args) => args.includes("funnel"))).toBe(false);
-    expect(registryOf(dataDir).tailscale).toEqual({ url: `https://${MAGIC}:${inbox.port}/`, error: null, https_port: inbox.port, proxy_port: listener });
+    // `made`: the proxy ports this Inbox pointed its mapping on this port at (its own leftovers, inbox-tailscale.ts).
+    expect(registryOf(dataDir).tailscale).toEqual({
+      url: `https://${MAGIC}:${inbox.port}/`,
+      error: null,
+      https_port: inbox.port,
+      proxy_port: listener,
+      made: { https_port: inbox.port, proxy_ports: [listener] },
+    });
 
     // The owner, through serve: the window and its data.
     expect((await throughServe(inbox, "/")).status).toBe(200);

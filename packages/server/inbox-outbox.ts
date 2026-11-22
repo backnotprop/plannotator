@@ -42,7 +42,7 @@ import { join } from "node:path";
 import { JsonLines } from "@plannotator/shared/inbox/devices";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
-import { inboxTidyWords } from "@plannotator/core/inbox-types";
+import { inboxTidyWords, type InboxSentFromPlace } from "@plannotator/core/inbox-types";
 
 export const INBOX_OUTBOX_DIR = "outbox";
 /** The header a linked machine's Inbox sends with a write the person made in its window (`OutboxEntry.window`). */
@@ -101,6 +101,8 @@ export interface OutboxEntry {
    * `X-Plannotator-Window`: the other machine answers a permission prompt, or starts, stops or trusts an agent, only for one.
    */
   window?: true;
+  /** Where the person was when not at this Inbox's own window (inbox-sent-from.ts). Sent on as `X-Plannotator-Sent-From`. */
+  sent_from?: InboxSentFromPlace;
 }
 
 /** What one try got back: the owner's status and JSON body, or `null` when the machine could not be reached. */
@@ -165,7 +167,8 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  *   the attachment at once; the owner adds a file to its message once, so a
  *   second copy answers the same attachment); and a Combine, or a Tidy with the
  *   person's words, which asks an agent there to act on the person's threads
- *   (one held for days would archive threads nobody is looking at).
+ *   (one held for days would archive threads nobody is looking at); and Show in
+ *   Rex for an agent there (`rex/show`), which moves Rex's app at the click.
  * - `local` is never forwarded: `doorWriteKind` has no kind for it, so the
  *   forward answers 404. A phone reaches it at this Inbox's own door. Reuse
  *   (`uploads/reuse`) is useful only as its answer, the new upload's id: a held
@@ -192,6 +195,8 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   // Undo go to each machine that holds it (approval "inbox-thread-tags").
   "POST threads/:id/tags": "set",
   "POST initiatives/:id": "set",
+  // A project's tags live on the project's own machine, named by the tag's name, as a thread's do.
+  "POST projects/:id/tags": "set",
   // A tag's colour and "Show tag colors" carry the time the person chose, so a held one lands as of then.
   "POST tag-colours": "set",
   // A Board card lives on its project's machine (mark `cards`): a move, an edit, a link or a tag puts a state there,
@@ -220,6 +225,10 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST messages/:id/reask": "append",
   "POST messages/:id/handoff/undo": "set",
   "POST messages/:id/actions/(a-[0-9a-f]{8}(?:-\\d{1,3})?)": "set",
+  // A run starts, stops or opens a terminal now, and a secret's value is never written to the outbox: sent now from a
+  // press in a window there, or not at all (inbox-run-routes.ts).
+  "POST messages/:id/run": "now",
+  "POST messages/:id/secret": "now",
   "POST threads/:id/delete": "set",
   "POST annotations": "set",
   "POST annotations/:id/remove": "set",
@@ -246,6 +255,9 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST launch/:id/retry": "set",
   "POST launch/:id/trust": "set",
   "POST launch/:id/delete": "set",
+  // Show in Rex for an agent on another machine (inbox-rex-far.ts): a press that moves Rex's app now; held for later it
+  // would move it when nobody asked.
+  "POST rex/show": "now",
   "POST link-back": "set",
   "POST unlink": "set",
   // On this table so rule 8 knows it. The forward refuses it before this is read: an Update is never held to run days later.
@@ -389,7 +401,7 @@ export class InboxOutbox {
    * whatever state it is in, and queues nothing. The same key on another
    * route or machine is refused, as the door refuses it.
    */
-  submit(machine: string, route: string, body: Record<string, unknown>, thread: string | null = null, window = false): { entry: OutboxEntry; fresh: boolean } {
+  submit(machine: string, route: string, body: Record<string, unknown>, thread: string | null = null, window = false, sentFrom: InboxSentFromPlace | null = null): { entry: OutboxEntry; fresh: boolean } {
     if (!MACHINE_FILE.test(machine)) throw new InboxError("validation_error", "machine: an ibx_ id.", { field: "machine" });
     const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a write to another machine.", { field: "idempotency_key" });
@@ -422,6 +434,7 @@ export class InboxOutbox {
       dismissed: false,
       thread,
       ...(window ? { window: true as const } : {}),
+      ...(sentFrom ? { sent_from: sentFrom } : {}),
     });
     return { entry, fresh: true };
   }

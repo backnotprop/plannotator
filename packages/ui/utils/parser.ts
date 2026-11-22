@@ -26,6 +26,23 @@ import {
   type TagCloseIndex,
 } from '@plannotator/core/markdown-structure';
 import { skillReferenceExportBlock } from './skillReferences';
+import { FOOTNOTE_DEF_RE, FOOTNOTE_INDENTED_RE, footnoteKey, referencedDefinitionLabels } from './footnotes';
+
+/**
+ * Whether line `j` opens a block that spans lines on its own (a fence,
+ * display math with its close, a directive, a raw HTML block, a quote or a
+ * table run). A footnote's indented continuation stops before such a line,
+ * so the line is drawn exactly where it was before footnotes were drawn, and
+ * `findQuestionBlocks` (core), which knows nothing of footnotes, still sees
+ * every fence, directive and HTML block this parser sees.
+ */
+function opensMultiLineBlock(lines: string[], j: number, htmlCloseCache: Map<string, TagCloseIndex>): boolean {
+  const t = lines[j].trim();
+  if (t.startsWith('```') || t.startsWith('>') || t.startsWith('|') || DIRECTIVE_OPEN_RE.test(t)) return true;
+  const math = t.startsWith('$$') ? '$$' : t.startsWith('\\[') ? '\\[' : null;
+  if (math && scanDisplayMath(lines, j, math)) return true;
+  return htmlBlockEndAt(lines, j, htmlCloseCache) !== -1;
+}
 
 // The structural helpers moved to `@plannotator/core/markdown-structure` so
 // `findQuestionBlocks` (core) splits a document exactly as this parser does.
@@ -376,6 +393,57 @@ export const codeDocumentBlocks = (text: string, language: string | undefined): 
  * but for this demo, we want predictable text-anchoring.
  */
 export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownOptions): Block[] => {
+  const blocks = parseBlocks(markdown, options, null);
+  // GFM footnotes (utils/footnotes.ts): a `[^label]:` line is a note only when
+  // the document also cites `[^label]` outside code. Any other document (most
+  // of them, and every one written before footnotes were drawn) is the parse
+  // above, unchanged.
+  const notes = referencedDefinitionLabels(blocks);
+  if (!notes) return blocks;
+  return keepBlockIds(blocks, parseBlocks(markdown, options, notes));
+};
+
+/**
+ * Give the parse with notes the block ids the parse without them had. Ids
+ * are positional (`block-N`), and comments, ticked checkboxes and attached
+ * files' line labels are stored by them, so every block that is not a note
+ * keeps the id it had before footnotes were drawn: it starts on the same
+ * line as a block of the plain parse. A note that started a paragraph there
+ * takes that paragraph's id; a note that interrupts a paragraph or follows
+ * another note gets an id derived from the block before it
+ * (`block-4-fn1`, `block-4-fn2`), which takes no number from the count. A
+ * block the plain parse had inside a note's lines (an indented paragraph)
+ * leaves its number unused.
+ */
+function keepBlockIds(plain: Block[], withNotes: Block[]): Block[] {
+  // Blocks by start line, in order: display math closing mid-line
+  // (`$$x$$ more`) starts two blocks on one line, matched in turn.
+  const byLine = new Map<number, Block[]>();
+  for (const block of plain) {
+    const onLine = byLine.get(block.startLine);
+    if (onLine) onLine.push(block);
+    else byLine.set(block.startLine, [block]);
+  }
+  let prev: Block | null = null;
+  let derived = 0;
+  for (const block of withNotes) {
+    const same = byLine.get(block.startLine)?.shift();
+    if (same) {
+      block.id = same.id;
+      block.order = same.order;
+      prev = same;
+      derived = 0;
+    } else {
+      derived++;
+      block.id = `${prev ? prev.id : 'block'}-fn${derived}`;
+      block.order = prev ? prev.order : 0;
+    }
+  }
+  return withNotes;
+}
+
+/** The block splitter. `notes`: the footnote labels (`footnoteKey`) that are notes in this document, or null for none. */
+const parseBlocks = (markdown: string, options: ParseMarkdownOptions | undefined, notes: ReadonlySet<string> | null): Block[] => {
   const { content: rawContent, contentStartLine } =
     options?.frontmatter === false
       ? { content: markdown, contentStartLine: 1 }
@@ -400,7 +468,25 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
   let lastLineWasBlank = false;
   let bufferBlankRun = 0;
 
+  // An open footnote definition (`notes` only): its lines as written.
+  let note: { label: string; startLine: number; lines: string[] } | null = null;
+  const closeNote = () => {
+    if (!note) return;
+    blocks.push({
+      id: `block-${currentId++}`,
+      type: 'paragraph',
+      content: note.lines.map((l) => l.trimEnd()).join('\n'),
+      footnoteLabel: note.label,
+      order: currentId,
+      startLine: note.startLine,
+    });
+    note = null;
+  };
+
+  // Every block start below flushes first, which also ends an open note: the
+  // one rule for where a note's lazy text stops is this loop's own.
   const flush = () => {
+    closeNote();
     if (buffer.length > 0) {
       const content = buffer.join('\n');
       blocks.push({
@@ -422,6 +508,26 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
     const currentLineNum = i + contentStartLine;
     const prevLineWasBlank = lastLineWasBlank;
     lastLineWasBlank = false;
+
+    // An open footnote holds lines indented four spaces (or a tab), and after
+    // a blank line only those: blank lines followed by one stay in the note
+    // (a second paragraph, a list); a blank line followed by anything else
+    // ends it. A line that opens a multi-line block never joins a note.
+    if (note) {
+      if (trimmed === '') {
+        let k = i + 1;
+        while (k < lines.length && lines[k].trim() === '') k++;
+        if (k < lines.length && FOOTNOTE_INDENTED_RE.test(lines[k]) && !opensMultiLineBlock(lines, k, htmlCloseCache)) {
+          note.lines.push(...lines.slice(i, k));
+          i = k - 1;
+          continue;
+        }
+        closeNote();
+      } else if (FOOTNOTE_INDENTED_RE.test(line) && !opensMultiLineBlock(lines, i, htmlCloseCache)) {
+        note.lines.push(line);
+        continue;
+      }
+    }
 
     // Headings: one to six `#` followed by a space or the end of the line
     // (CommonMark ATX). `#123 fixed`, `#hashtag` and `#!/bin/sh` are text,
@@ -688,6 +794,7 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
     // Tight (no blank line): 1+ whitespace, joined with \n (same paragraph).
     // Loose (after blank line): 2+ spaces, joined with \n\n (new paragraph within the item).
     if (
+      !note &&
       buffer.length === 0 &&
       blocks.length > 0 &&
       blocks[blocks.length - 1].type === 'list-item' &&
@@ -696,6 +803,29 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
       const sep = prevLineWasBlank ? '\n\n' : '\n';
       blocks[blocks.length - 1].content += sep + trimmed;
       continue;
+    }
+
+    // GFM footnote definition (`[^label]: …`) of a note this document cites:
+    // one block holding the definition as written, with its lazy lines (any
+    // line the loop would add to a paragraph) and its indented lines (above).
+    // Like a heading, it may interrupt a paragraph.
+    const footnoteDef = notes && (line.startsWith('[^') || line.startsWith(' ')) ? FOOTNOTE_DEF_RE.exec(line) : null;
+    if (footnoteDef && notes!.has(footnoteKey(footnoteDef[1]))) {
+      flush();
+      note = { label: footnoteDef[1], startLine: currentLineNum, lines: [line] };
+      continue;
+    }
+    // Any other line the loop would add to a paragraph is the note's lazy
+    // text, except a `[^x]:` line nobody cites: that ends the note and stays
+    // an ordinary paragraph where it is written (its text never moves to the
+    // notes list). It was part of the note's paragraph before, so it has no
+    // id of its own there: `keepBlockIds` derives one (`block-k-fn2`).
+    if (note) {
+      if (!FOOTNOTE_DEF_RE.test(line)) {
+        note.lines.push(line);
+        continue;
+      }
+      closeNote();
     }
 
     // Accumulate paragraph text
@@ -946,7 +1076,7 @@ export const elementContextExportBlock = (ann: any, opts: ElementContextExportOp
  *  labeled with the semantic hover label plus a short excerpt so the agent
  *  reading the feedback sees every referenced element. Emits nothing for
  *  single-target annotations, keeping their output byte-identical. */
-const additionalTargetsExportBlock = (ann: any): string => {
+export const additionalTargetsExportBlock = (ann: any): string => {
   const targets = ann?.htmlAdditionalTargets;
   if (!Array.isArray(targets) || targets.length === 0) return '';
   // Leading blank line: the preceding comment line is a `> blockquote`, and

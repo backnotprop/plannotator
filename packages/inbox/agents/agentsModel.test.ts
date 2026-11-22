@@ -122,6 +122,15 @@ test('the hover card says where and when from what the window has, and leaves ou
   expect(bare.sub).toBe('Claude Code');
   expect(bare.state).toBe('Working');
   expect(bare.rows).toEqual([['Thread', 'Docs pass']]);
+  const sized = agentFacts({ agent: agent('ses_e', { model: 'claude-opus-5-5', effort: 'high', context: 63 }), machine: null, name: 'Claude Code', thread: null }, null, now);
+  expect(sized.rows.slice(-2)).toEqual([['Model', 'Opus 5.5 · high'], ['Context', '63% used']]);
+  expect(agentFacts({ agent: agent('ses_e', { model: 'claude-sonnet-4-5-20250929' }), machine: null, name: 'x', thread: null }, null, now).rows.at(-1)).toEqual(['Model', 'Sonnet 4.5']);
+  expect(agentFacts({ agent: agent('ses_e', { model: 'us.anthropic.claude-opus-4-1-v1:0', effort: 'max' }), machine: null, name: 'x', thread: null }, null, now).rows.at(-1)).toEqual(['Model', 'us.anthropic.claude-opus-4-1-v1:0 · max']);
+  expect(agentFacts({ agent: agent('ses_e', { model: 'claude-opus-5-5', effort: 'high', live: false, state: 'ended' }), machine: null, name: 'x', thread: null }, null, now).rows.some(([k]) => k === 'Model')).toBe(false);
+  const full = agentFacts({ agent: agent('ses_c', { context: 63 }), machine: null, name: 'Claude Code', thread: null }, null, now);
+  expect(full.rows.at(-1)).toEqual(['Context', '63% used']);
+  const gone = agentFacts({ agent: agent('ses_d', { context: 63, live: false, state: 'ended' }), machine: null, name: 'Claude Code', thread: null }, null, now);
+  expect(gone.rows.some(([k]) => k === 'Context')).toBe(false);
   // An asleep machine says so, in place of the agent's state.
   expect(agentFacts({ agent: agent('ses_c'), machine: MAC, name: 'x', thread: null }, view(MAC, 'MacBook', { state: 'offline' }), now).state).toStartWith('MacBook asleep since ');
 });
@@ -211,4 +220,14 @@ test("a launched agent's filter has its launch's thread before it writes; an age
   // A link from before: the agent ended and is not listed.
   const ended = agentListFilter('ses_x', [group([])], flat, rows);
   expect(ids(filterAgentRows(listOf(rows), ended, null))).toEqual(['t_other']);
+});
+
+// The owner's truth rules (2026-11-18), with "Agent status" off as with it on (the card reads no setting): a resting
+// agent of a host that reports turns still says "Idle" in words (no idle mark is ever drawn), and one whose host
+// reports nothing says so, never "Idle".
+test('the hover card: "Idle" in words for a host that reports turns; "Doesn\'t say when it\'s working" for one that does not', () => {
+  const now = new Date('2026-11-18T12:00:00.000Z');
+  const resting = agentFacts({ agent: agent('ses_cc', { state: 'idle' }), machine: null, name: 'Claude Code', thread: null }, null, now);
+  const quiet = agentFacts({ agent: agent('ses_codex', { state: 'idle', host: 'codex', turns_unknown: true }), machine: null, name: 'Codex', thread: null }, null, now);
+  expect([resting.state, quiet.state]).toEqual(['Idle', "Doesn't say when it's working"]);
 });

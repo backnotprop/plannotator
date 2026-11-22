@@ -20,7 +20,7 @@ export interface ReplyStart {
   /** The list's row: chosen like any agent's, drawn as New message's start row. */
   row: RecipientRow;
   /** The reply route's `to` when it is chosen. */
-  to: { launch: { agent: string; project_id: string; model?: string; effort?: string } };
+  to: { launch: { agent: string; project_id: string; model?: string; effort?: string; primary_agent?: string } };
 }
 
 /**
@@ -41,6 +41,6 @@ export function replyStartOf(block: InboxComposeLaunch | null | undefined, threa
   const label = `New ${agent.name} session`;
   return {
     row: { session: `${START_PREFIX}${agent.agent}`, host: agent.agent, label, short: label, state: 'live', start: { project: project.name, asleep } },
-    to: { launch: { agent: agent.agent, project_id: project.id, ...(last?.model ? { model: last.model } : {}), ...(last?.effort ? { effort: last.effort } : {}) } },
+    to: { launch: { agent: agent.agent, project_id: project.id, ...(last?.model ? { model: last.model } : {}), ...(last?.effort ? { effort: last.effort } : {}), ...(last?.primary_agent ? { primary_agent: last.primary_agent } : {}) } },
   };
 }

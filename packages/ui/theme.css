@@ -31,6 +31,7 @@
 @import "./themes/cursor-hc.css";
 @import "./themes/cursor-midnight.css";
 @import "./themes/colorblind.css";
+@import "./themes/tritanopia.css";
 @import "./themes/everforest.css";
 @import "./themes/everforest-hard.css";
 @import "./themes/everforest-soft.css";
@@ -39,6 +40,7 @@
 @import "./themes/github.css";
 @import "./themes/one-dark-pro.css";
 @import "./themes/night-owl.css";
+@import "./themes/nightfox.css";
 @import "./themes/ayu-dark.css";
 @import "./themes/poimandres.css";
 @import "./themes/material.css";
@@ -648,6 +650,7 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-accent-text: var(--accent-text);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-success: var(--success);
@@ -668,9 +671,9 @@
   --color-surface-0: var(--surface-0);
   --color-surface-1: var(--surface-1);
   --color-surface-2: var(--surface-2);
-  /* Comment-annotation indicator color. Defaults to each theme's --accent
-   * (see :root below); a theme whose accent is a low-contrast neutral (e.g.
-   * "simple") overrides --annotation-comment directly. */
+  /* Comment-annotation indicator color. Defaults to each theme's
+   * --accent-text (see :root below), which is --accent unless the theme sets
+   * its own; "simple" also overrides --annotation-comment directly. */
   --color-annotation-comment: var(--annotation-comment);
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
@@ -718,9 +721,14 @@
     --sidebar-accent-foreground: var(--foreground);
     --sidebar-border: var(--border);
     --sidebar-ring: var(--ring);
-    /* Comment-annotation color follows the theme's accent unless the theme
-     * overrides it (neutral themes whose accent is an illegible gray). */
-    --annotation-comment: var(--accent);
+    /* Accent used as text on the page (`text-accent-text`): the accent itself
+     * unless a theme sets a separate one, where its accent is a pale fill that
+     * text drawn in it would vanish against (Simple, Neutral, Quantum Rose
+     * light). */
+    --accent-text: var(--accent);
+    /* Comment-annotation color follows the theme's accent text unless the
+     * theme overrides it (neutral themes whose accent is an illegible gray). */
+    --annotation-comment: var(--accent-text);
     /* Sensible amber default so a "warning" color utility exists even for
      * themes that don't define --warning. Matches the plannotator theme;
      * per-theme files override these. */
@@ -937,6 +945,20 @@ body:has([data-pn-document-scroll="true"]) > #root {
 /* The navigator reuses information-dense desktop browser content, but its
  * interactive rows become physical controls on touch. Scope both the 44px
  * target and the TOC's legible type lift to the compact stage only. */
+.pn-hit-target {
+  position: relative;
+}
+
+.pn-hit-target::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, 24px);
+  height: max(100%, 24px);
+  transform: translate(-50%, -50%);
+}
+
 [data-pn-plan-navigator="true"] button {
   min-block-size: var(--pn-touch-target);
   touch-action: manipulation;

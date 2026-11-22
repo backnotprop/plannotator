@@ -8,6 +8,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { inboxRowArchived, type InboxListGroupId, type InboxListRow } from '@plannotator/core/inbox-types';
 import { canMarkUnread, offersRowMarkRead } from './markRead';
+import { offersRowReask, reaskReaches } from './markAllRead';
 import { priorityAction } from './priority';
 
 export type PickPress = 'toggle' | 'range';
@@ -45,7 +46,7 @@ export function boxState(ids: readonly string[], picked: ReadonlySet<string>): B
 }
 
 /** What the bar and a picked row's menu do to the picked rows. */
-export type BulkAction = 'archive' | 'snooze' | 'read' | 'unread' | 'star' | 'unstar' | 'priority-add' | 'priority-remove';
+export type BulkAction = 'archive' | 'snooze' | 'read' | 'reask' | 'unread' | 'star' | 'unstar' | 'priority-add' | 'priority-remove' | 'hide-pulls';
 
 /** What a row can take: the menus' own rules (rowMenu.ts), and its machine's (machines.ts). */
 export interface PickRules {
@@ -67,9 +68,12 @@ export function bulkTargets(rows: readonly InboxListRow[], action: BulkAction, r
       case 'snooze':
         return !archived && rules.snoozes(row);
       case 'read':
-        return offersRowMarkRead(row, rules.drawn(row));
+        return rules.drawn(row) !== 'archived' && offersRowMarkRead(row, rules.drawn(row));
+      case 'reask':
+        // Re-ask all on the picks (reaskAll.ts): a row with a question open, drawn in a group of open questions.
+        return offersRowReask(row, rules.drawn(row));
       case 'unread':
-        return canMarkUnread(row);
+        return rules.drawn(row) !== 'archived' && canMarkUnread(row);
       case 'star':
         return rules.starred(row) === false;
       case 'unstar':
@@ -77,8 +81,20 @@ export function bulkTargets(rows: readonly InboxListRow[], action: BulkAction, r
       case 'priority-add':
       case 'priority-remove':
         return rules.prioritizes(row) && priorityAction(row) === action;
+      case 'hide-pulls':
+        // Rows with open PRs not hidden (`hide_pulls`, this Inbox's own rows only): Hide takes those PRs.
+        return row.resolved_at === null && (row.hide_pulls?.length ?? 0) > 0;
     }
   });
+}
+
+/**
+ * Re-ask on the picks: only when every picked thread of this Inbox has a question open for the person (the band's
+ * Re-ask all). A linked machine's picked row is not part of it (`reaskReaches`): it neither offers nor blocks it.
+ */
+export function offersPicksReask(rows: readonly InboxListRow[], rules: PickRules): boolean {
+  const own = rows.filter(reaskReaches);
+  return own.length > 0 && bulkTargets(own, 'reask', rules).length === own.length;
 }
 
 export interface RowPicks {

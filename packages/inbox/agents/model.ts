@@ -60,7 +60,7 @@ export function agentThread(agent: InboxAgent, machine: string | null, self: str
 }
 
 /** An agent's sessions: the one it runs as and those its conversation had before, but for the ones in `others` (listed as agents of their own). */
-function agentSessions(agent: InboxAgent, others?: ReadonlySet<string>): string[] {
+export function agentSessions(agent: InboxAgent, others?: ReadonlySet<string>): string[] {
   return [agent.session, ...(agent.continues ?? []).filter((old) => !others?.has(old))];
 }
 
@@ -109,6 +109,14 @@ function sectionGroups(groups: readonly InboxAgentsGroup[] | null, machines: Mac
   const self = machines.self;
   if (machines.all.length === 0) return [{ group: groups?.find((g) => !g.machine || g.machine === self), machine: null, view: null }];
   return machines.all.map((view) => ({ group: groups?.find((g) => (g.machine ?? self) === view.id), machine: view.id, view }));
+}
+
+/**
+ * Every agent the list names, the ended ones too, per group the section draws (`sectionGroups`): the list's Agents
+ * view (agentsView/model.ts) groups threads under them. `machine` null: no machine linked.
+ */
+export function namedAgents(groups: readonly InboxAgentsGroup[] | null, machines: MachinesModel): { machine: string | null; view: MachineView | null; known: boolean; agents: readonly InboxAgent[] }[] {
+  return sectionGroups(groups, machines).map(({ group, machine, view }) => ({ machine, view, known: group !== undefined, agents: group?.agents ?? [] }));
 }
 
 /** `entry` is the older session of `later`'s conversation and opens the same thread: one row, `later`'s. */
@@ -178,6 +186,29 @@ export function filterAgentRows(sections: readonly InboxListSection[], filter: A
   return sections.map((section) => ({ ...section, threads: section.threads.filter((row) => agentRowOf(row, filter, self)) }));
 }
 
+/** What a Rex pane blocked on the person waits for (OSC 7501's `kind`), after "waiting on you in Rex". */
+export const REX_WAITING_WORDS: Record<'permission' | 'question' | 'auth' | 'other', string> = {
+  permission: ': a permission prompt',
+  question: ': a question',
+  auth: ': a sign-in',
+  other: '',
+};
+
+/** Its Rex pane's word, where the Inbox had none of its own (the server folded it into `state`); null otherwise. */
+function rexStateWords(agent: InboxAgent): string | null {
+  const rex = agent.rex_status;
+  if (agent.state === 'waiting' && agent.waiting === 0 && rex?.state === 'blocked') return `Waiting on you in Rex${REX_WAITING_WORDS[rex.kind ?? 'other']}`;
+  if (agent.state === 'idle' && rex?.state === 'done') return 'Done';
+  if (agent.state === 'idle' && rex?.state === 'error') return 'Stopped on an error';
+  return null;
+}
+
+/**
+ * A live agent whose host reports nothing about its turns (`turns_unknown`: Codex, Qwen Code, T3 Code, Antigravity, an
+ * MCP-only agent): the card says so instead of "Idle", which the Inbox cannot know.
+ */
+export const TURNS_UNKNOWN_WORDS = "Doesn't say when it's working";
+
 /** What an agent's hover card says, line by line; a fact the window does not have is left out. */
 export interface AgentFacts {
   title: string;
@@ -187,12 +218,20 @@ export interface AgentFacts {
   rows: [string, string][];
 }
 
+export function modelName(id: string): string {
+  const parts = /^claude-(opus|sonnet|haiku|fable)-(\d+)(?:-(\d))?(?:-\d{8})?$/.exec(id);
+  if (!parts) return id;
+  const family = parts[1]!.charAt(0).toUpperCase() + parts[1]!.slice(1);
+  return `${family} ${parts[2]}${parts[3] ? `.${parts[3]}` : ''}`;
+}
+
 export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: Date = new Date()): AgentFacts {
   const { agent } = entry;
   const sub = [agentHostName(agent.host), agent.project?.name, machine?.name].filter(Boolean).join(' · ');
   const away = machine && isAway(machine) ? awayLine(machine, now) : null;
   const state =
     away ??
+    rexStateWords(agent) ??
     (agent.state === 'waiting'
       ? agent.waiting > 1
         ? `${agent.waiting} threads waiting on you`
@@ -200,14 +239,25 @@ export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: 
       : agent.state === 'working'
         ? 'Working'
         : agent.state === 'idle'
-          ? 'Idle'
+          ? agent.turns_unknown
+            ? TURNS_UNKNOWN_WORDS
+            : 'Idle'
           : 'Ended');
   const rows: [string, string][] = [];
   if (agent.started_at) rows.push(['Started', agent.launch ? `From the Inbox, ${whenTime(agent.started_at, now)}` : whenTime(agent.started_at, now)]);
   else if (agent.launch) rows.push(['Started', 'From the Inbox']);
   if (agent.last_seen_at) rows.push(['Last heard', whenTime(agent.last_seen_at, now)]);
+  if (agent.live && agent.model) rows.push(['Model', agent.effort ? `${modelName(agent.model)} · ${agent.effort}` : modelName(agent.model)]);
+  if (agent.live && typeof agent.context === 'number') rows.push(['Context', `${agent.context}% used`]);
+  // Where it lives (a Rex pane, as Rex named it at the last read): a row of its own.
+  if (agent.place?.line) rows.push(['Where', agent.place.line]);
   if (entry.thread?.subject && entry.thread.subject !== entry.name) rows.push(['Thread', entry.thread.subject]);
   return { title: entry.name, sub, state, rows };
+}
+
+/** What a session's line says it is doing: nothing for a live agent whose host reports no turns (never "idle"). */
+export function agentSessionState(agent: InboxAgent): InboxAgent['state'] | null {
+  return agent.turns_unknown && agent.state === 'idle' ? null : agent.state;
 }
 
 /**
@@ -268,7 +318,7 @@ export function threadSessions(
       if (!same.sessions.includes(p.session)) same.sessions.push(p.session);
       continue;
     }
-    out.push({ session: p.session, sessions: [p.session], host: p.host, machine: group?.machine ?? null, agentId: agent?.id ?? null, name, state: agent ? agent.state : group ? 'ended' : null });
+    out.push({ session: p.session, sessions: [p.session], host: p.host, machine: group?.machine ?? null, agentId: agent?.id ?? null, name, state: agent ? agentSessionState(agent) : group ? 'ended' : null });
   }
   return out;
 }

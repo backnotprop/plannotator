@@ -111,24 +111,33 @@ describe("the agent door", () => {
     expect((await w.door(phoneToken, "read_thread", {})).code).toBe("device_not_an_agent");
   });
 
-  test("it cannot set its identity or name a folder; a path is refused and uploaded bytes are attached", async () => {
+  test("a routine is the person's switch, not the door's: with Routines off it is no action, as for a local agent (inbox-agent-door-parity.test.ts: on)", async () => {
+    const w = await world();
+    const { pairing } = await w.pair();
+    const answer = await w.door(pairing.token, "routine", { op: "create", name: "Dependency check", prompt: "Check.", schedule: null });
+    expect(answer.error).toStartWith("tool_not_allowed: routine is not an Inbox action.");
+  });
+
+  test("it cannot set its identity; a folder, a file path and a picture path are a local agent's; uploaded bytes are attached", async () => {
     const w = await world();
     const { agent, pairing } = await w.pair("claude-routine", "Fixer");
     for (const [field, code] of [
       ["agent_session", "identity_forced"],
       ["agent_name", "identity_forced"],
       ["agent_host", "identity_forced"],
-      ["project_path", "path_refused"],
       ["_meta", "validation_error"],
     ] as const) {
-      expect((await w.door(pairing.token, "send_message", { body: "Hi", [field]: field === "project_path" ? "/" : "ses-pi" })).error).toStartWith(`${code}:`);
+      expect((await w.door(pairing.token, "send_message", { body: "Hi", [field]: "ses-pi" })).error).toStartWith(`${code}:`);
     }
-    expect((await w.door(pairing.token, "submit_guide", { guide: { title: "T", sections: [] }, walkthrough: true })).error).toStartWith("path_refused:");
-    expect((await w.door(pairing.token, "read_thread", { project_path: w.project })).error).toStartWith("path_refused:");
+    // A folder on the person's computer, as a local agent names it.
+    expect((await w.door(pairing.token, "read_thread", { project_path: w.project })).error).toBeNull();
+    const pathSent = await w.door(pairing.token, "send_message", { project_path: w.project, body: "See this.", attachments: [join(w.project, "secret.png")] });
+    expect(pathSent.error).toBeNull();
+    const withPath = (await w.thread(pathSent.result!.structuredContent!.thread_id as string)).messages[0]!;
+    expect(withPath.attachments!.map((a) => a.name)).toEqual(["secret.png"]);
+    // The local agent's refusals and no other: a file that is not there.
+    expect((await w.door(pairing.token, "send_message", { body: "See this.", attachments: [join(w.project, "gone.txt")] })).error).toStartWith("validation_error:");
     const before = filesUnder(join(w.dataDir, "inbox")).filter((file) => /blobs|upload/.test(file.path)).length;
-    expect((await w.door(pairing.token, "send_message", { body: "See this.", attachments: [join(w.project, "secret.png")] })).error).toStartWith("attachment_path_refused:");
-    expect((await w.door(pairing.token, "send_message", { body: "See this.", attachments: ["../../../etc/hosts"] })).error).toStartWith("attachment_path_refused:");
-    expect((await w.door(pairing.token, "send_message", { body: "See ![it](secret.png)" })).error).toStartWith("image_path_refused:");
     expect((await w.door(pairing.token, "send_message", { body: "Big.", attachments: [{ name: "big.bin", data: Buffer.alloc(INBOX_AGENT_ATTACHMENTS_MAX_BYTES + 1).toString("base64") }] })).error).toStartWith("attachments_too_large:");
     expect(filesUnder(join(w.dataDir, "inbox")).filter((file) => /blobs|upload/.test(file.path)).length).toBe(before);
 

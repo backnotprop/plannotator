@@ -18,6 +18,10 @@ export interface FakeCodexLaunchState {
   version?: string;
   /** `codex login status` and `account/read`: signed in with ChatGPT (the default), an API key, or not at all. */
   login?: "chatgpt" | "apikey" | "none";
+  /** Whether the selected provider requires an OpenAI account. */
+  requiresOpenaiAuth?: boolean;
+  /** Reject the account read while leaving the CLI status available. */
+  failAccountRead?: boolean;
   /** `account/read`'s plan. */
   plan?: string;
   /** `account/rateLimits/read`'s `rateLimits`, or "fail". */
@@ -151,8 +155,9 @@ function handle(msg) {
       return reply({ data: models.map((m, i) => ({ id: m.id, model: m.id, displayName: m.id, hidden: !!m.hidden, isDefault: i === 0, supportedReasoningEfforts: m.efforts.map((e) => ({ reasoningEffort: e, description: e })), defaultReasoningEffort: m.efforts[0] })), nextCursor: null });
     }
     case "account/read": {
+      if (now.failAccountRead) return fail("account unavailable");
       const login = now.login || "chatgpt";
-      return reply({ account: login === "none" ? null : login === "apikey" ? { type: "apiKey" } : { type: "chatgpt", email: "someone@example.com", planType: now.plan || "plus" }, requiresOpenaiAuth: true });
+      return reply({ account: login === "none" ? null : login === "apikey" ? { type: "apiKey" } : { type: "chatgpt", email: "someone@example.com", planType: now.plan || "plus" }, requiresOpenaiAuth: now.requiresOpenaiAuth ?? true });
     }
     case "account/rateLimits/read": {
       if (now.rateLimits === "fail" || (now.login || "chatgpt") !== "chatgpt") return fail("chatgpt authentication required to read rate limits");
@@ -195,6 +200,8 @@ export function installFakeCodexLaunch(root: string, state: FakeCodexLaunchState
     existsSync(file("calls.jsonl"))
       ? readFileSync(file("calls.jsonl"), "utf8")
           .split("\n")
+          // A line is whole only once its newline is written: the last piece is "" or a line still being appended.
+          .slice(0, -1)
           .filter(Boolean)
           .map((line) => JSON.parse(line) as FakeCodexLaunchCall)
       : [];

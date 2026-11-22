@@ -46,6 +46,7 @@ import { inboxSkillFilter } from '../skills';
 import { builtinSkillIcon } from './BuiltinSkillIcon';
 import { hashtagMenuLeft, useHashtagPicker, useInitiativeTags } from '../hashtags';
 import { useReplyMentions } from '../replyMentions';
+import { FieldLead } from './FieldLead';
 
 /** The chip class a tag gets in the composer's highlight layer (inbox.css: colour, background and box-shadow only). */
 export const TAG_TOKEN_CLASS = 'ib-tg-tok';
@@ -116,6 +117,11 @@ export interface InboxComposerFieldProps {
    * approval "inbox-drag-threads"): a dragged row, the row menu's Mention in reply, a pasted thread link. Absent: none.
    */
   mentionThread?: string;
+  /**
+   * Drawn at the start of the field's first line, the words flowing after it (`FieldLead`): the reply box's recipient
+   * chip in a thread with several agents. Absent: the field as ever.
+   */
+  lead?: React.ReactNode;
 }
 
 const NO_PEOPLE: readonly MentionPerson[] = [];
@@ -139,6 +145,7 @@ export function InboxComposerField({
   skillFilter = OUTSIDE_A_REVIEW,
   commands,
   mentionThread,
+  lead,
 }: InboxComposerFieldProps) {
   const innerRef = useRef<HTMLTextAreaElement | null>(null);
   const attach = useCallback(
@@ -184,6 +191,9 @@ export function InboxComposerField({
     onCommand: runCommand,
     // Plannotator's built-ins are one group at the top of the list (the owner, 2026-11-09), whatever was typed.
     hostRowsFirst: true,
+    // A list opens when the person types, not when they delete (the owner, 2026-11-17): Backspace held back over a
+    // `/name` or `@name` in the words never pops a list; one open for the name being typed stays through a typo's fix.
+    quietOnDelete: true,
   });
   const [announce, setAnnounce] = useState('');
   const options = tags?.options;
@@ -206,7 +216,7 @@ export function InboxComposerField({
         : undefined,
     [options, people, onTagsChange],
   );
-  const mention = useMentionAutocomplete({ text: value, setText, textareaRef: innerRef, source });
+  const mention = useMentionAutocomplete({ text: value, setText, textareaRef: innerRef, source, quietOnDelete: true });
   // `#` names an initiative (approval "board-hashtags"): the skill list's menu, the skill list's keys.
   const initiativeTags = useInitiativeTags();
   const hash = useHashtagPicker({ text: value, setText, fieldRef: innerRef, tags: initiativeTags, bareEscapeDismisses: escapeClosesMenu });
@@ -303,6 +313,7 @@ export function InboxComposerField({
           {(boundary) => <TagPicker id={tagListboxId} menu={tagMenu} options={options} onSelect={select} field={textarea} boundary={boundary} />}
         </FloatingSkillMenu>
       ) : null}
+      {lead ? <FieldLead value={value}>{lead}</FieldLead> : null}
       <ComposerTokenTextarea
         textareaRef={attach}
         value={value}
@@ -310,8 +321,8 @@ export function InboxComposerField({
           // The browser's undo and redo bring back the thread mentions the words had (threadMentions.ts).
           const kind = (event.nativeEvent as InputEvent).inputType;
           setText(event.target.value, event.target.selectionEnd, kind === 'historyUndo' || kind === 'historyRedo');
-          skills.onSelect();
-          mention.onSelect();
+          skills.onEdit(kind);
+          mention.onEdit(kind);
           hash.onSelect();
         }}
         onKeyDown={(event) => {

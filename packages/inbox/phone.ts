@@ -305,3 +305,25 @@ export function trackKeyboard(): () => void {
     delete root.dataset.ibKeyboard;
   };
 }
+
+/**
+ * A phone under 360 px wide (an iPhone SE, a small Android): a document's labelled toolstrip ran under its Contents
+ * button there (the 2026-11-19 phone audit), so the strip draws its tools as icons.
+ */
+export const NARROW_PHONE_QUERY = '(max-width: 359px)';
+
+function subscribeNarrow(onChange: () => void): () => void {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {};
+  const mql = window.matchMedia(NARROW_PHONE_QUERY);
+  mql.addEventListener('change', onChange);
+  return () => mql.removeEventListener('change', onChange);
+}
+
+function isNarrowPhone(): boolean {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(NARROW_PHONE_QUERY).matches;
+}
+
+/** Whether the window is under 360 px wide now, and again whenever that changes. */
+export function useNarrowPhone(): boolean {
+  return useSyncExternalStore(subscribeNarrow, isNarrowPhone, () => false);
+}

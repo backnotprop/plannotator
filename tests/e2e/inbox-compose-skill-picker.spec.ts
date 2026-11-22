@@ -50,7 +50,7 @@ const extraShots = process.env.SKILL_PICKER_SHOTS_DIR ? resolve(process.env.SKIL
 const shotPrefix = process.env.SKILL_PICKER_SHOTS_PREFIX ?? '';
 
 const SKILLS = [
-  'agents', 'anatomy', 'animate', 'break-ui', 'changelog-draft', 'design-artifact',
+  'agents', 'anatomy', 'animate', 'break-ui', 'changelog-draft', 'deploy-preview', 'design-artifact',
   'effect', 'emil-design-eng', 'foundry', 'html-plan', 'loop', 'write-better',
 ];
 
@@ -63,6 +63,7 @@ interface World {
   files: string[];
   /** The agent's message, opened in the window. */
   thread: string;
+  threadId: string;
 }
 
 let world: World;
@@ -140,7 +141,7 @@ test.beforeAll(async () => {
     writeFileSync(file, `# ${name}\n\nA file to attach.\n`);
     return file;
   });
-  world = { root, dataDir, url, agent, stopPolling: liveSession(dataDir, project), files, thread: String(sent.url) };
+  world = { root, dataDir, url, agent, stopPolling: liveSession(dataDir, project), files, thread: String(sent.url), threadId: String(sent.thread_id) };
 });
 
 test.afterAll(async () => {
@@ -258,7 +259,7 @@ for (const size of [
       await expectPickerAtCaret(page, { firstLine: true, minRows: 6 });
       // A query filters in place and the picker stays at the caret.
       await page.keyboard.type('an');
-      await expect(page.locator('dialog[data-compose] [data-skill-item]').first()).toHaveAttribute('data-skill-item', /an/);
+      await expect(page.locator('dialog[data-compose] [data-skill-item]:not([data-skill-item-host])').first()).toHaveAttribute('data-skill-item', /an/);
       await expectEscapeClosesPickerFirst(page);
     } finally {
       await context.close();
@@ -409,6 +410,93 @@ test('the comment card on picked words: "/" lists the skills on top, a pick writ
     expect(far.x + far.width).toBeLessThanOrEqual(1440 + 1);
     expect(far.y + far.height).toBeLessThanOrEqual(900 + 1);
     await expect(field).toHaveValue('Tighten this /agents ');
+  } finally {
+    await context.close();
+  }
+});
+
+/**
+ * The reply box's undo after a pick (QA of main after 0.28.67): type `alpha beta gamma`, select all, Backspace,
+ * type `Run /dep`, pick `deploy-preview`, ⌘Z three times, and the box read `Run /deploy-preview alpha beta gamma`.
+ * The pick wrote the words outside the browser's undo stack; it is the browser's own edit now
+ * (ui's utils/undoableEdit.ts). ⌘Z takes back the pick alone, then the typing (Chrome may split it while the list is
+ * open) and the deletion, then the first words, and stops at an empty box; ⌘⇧Z puts the pick back after its undo.
+ * No step ever shows deleted words beside the picked ones.
+ */
+test('the reply box: undo after a skill pick steps back through the pick, the typing and the deletion, and redo forward', async ({ browser }: { browser: Browser }) => {
+  const UNDO = process.platform === 'darwin' ? 'Meta+z' : 'Control+z';
+  const REDO = process.platform === 'darwin' ? 'Meta+Shift+z' : 'Control+Shift+z';
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
+  const page = await context.newPage();
+  try {
+    await page.goto(world.thread);
+    const pane = page.locator('section.ib-pane');
+    await pane.getByRole('button', { name: 'Reply', exact: true }).last().click();
+    const field = pane.locator('.ib-rbox').getByRole('textbox');
+    await expect(field).toBeFocused();
+    await page.keyboard.type('alpha beta gamma');
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.press('Backspace');
+    await expect(field).toHaveValue('');
+    await page.keyboard.type('Run /dep');
+    const row = page.locator('[data-skill-item="deploy-preview"]');
+    await expect(row).toBeVisible();
+    await row.click();
+    await expect(field).toHaveValue('Run /deploy-preview ');
+    await expect(field).toBeFocused();
+
+    const FIRST = 'alpha beta gamma';
+    /** A state the box really had: the first words (or part of them), empty, the typing, the pick. */
+    // Chrome may end the typing run while the list is open, so part of the typing can be its own step (`Run /de`).
+    const real = (words: string) => FIRST.startsWith(words) || 'Run /dep'.startsWith(words) || words === 'Run /deploy-preview ';
+    const press = async (key: string) => {
+      await page.keyboard.press(key);
+      await page.waitForTimeout(60);
+      return field.inputValue();
+    };
+    // The pick alone: undo takes it back, redo puts it back.
+    expect(await press(UNDO)).toBe('Run /dep');
+    expect(await press(REDO)).toBe('Run /deploy-preview ');
+
+    // Undo until the first words are back, then twice more: an empty box, and nothing further.
+    const back: string[] = [];
+    for (let i = 0; i < 12 && !back.includes(FIRST); i++) back.push(await press(UNDO));
+    back.push(await press(UNDO), await press(UNDO));
+    expect(back[0], `undo after the pick: ${JSON.stringify(back)}`).toBe('Run /dep');
+    expect(back.every(real), `every undo is a state the box had: ${JSON.stringify(back)}`).toBe(true);
+    expect(back, 'the first words come back').toContain(FIRST);
+    expect(back.slice(-2), 'undo stops at an empty box').toEqual(['', '']);
+
+    // Redo from there: the first words first, and never a state the box did not have. (How far Chrome's redo goes
+    // past the deletion is the browser's: in CI it stopped at the empty box, before any pick.)
+    const forward: string[] = [];
+    for (let i = 0; i < 6; i++) forward.push(await press(REDO));
+    expect(forward[0]).toBe(FIRST);
+    expect(forward.every(real), `every redo is a state the box had: ${JSON.stringify(forward)}`).toBe(true);
+  } finally {
+    await context.close();
+  }
+});
+
+test('a plain thread: "/" lists picture-it, and a pick sent carries its instructions once', async ({ browser }: { browser: Browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
+  const page = await context.newPage();
+  try {
+    await page.goto(world.thread);
+    const pane = page.locator('section.ib-pane');
+    await pane.getByRole('button', { name: 'Reply', exact: true }).last().click();
+    const field = pane.locator('.ib-rbox').getByRole('textbox');
+    await expect(field).toBeFocused();
+    await page.keyboard.type('Draw the export for me /');
+    const row = page.locator('[data-skill-item="picture-it"]');
+    await expect(row).toBeVisible();
+    await row.click();
+    await expect(field).toHaveValue('Draw the export for me /picture-it ');
+    await pane.locator('.ib-rbox [data-reply-send]').click();
+    const reply = (await world.agent.nextReply(world.threadId)) as { body: string };
+    expect(reply.body.startsWith('Draw the export for me /picture-it')).toBe(true);
+    expect(reply.body.split('--- BEGIN SKILL INSTRUCTIONS: picture-it ---')).toHaveLength(2);
+    expect(reply.body).toContain('--- END SKILL INSTRUCTIONS: picture-it ---');
   } finally {
     await context.close();
   }

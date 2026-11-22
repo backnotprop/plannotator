@@ -6,8 +6,12 @@
  *    changed file picked in All files;
  *  - the review app's reads (`/api/repo-files`, `/api/repo-file`) not reaching the Inbox's routes for this PR, or
  *    anything else (its live stream) being fetched through them;
- *  - the choice not remembered as the review app remembers it.
- * The review app's real tree (guide/PullRepoParts.tsx) draws All files; the diff reader and the file view are stubs.
+ *  - the choice not remembered as the review app remembers it;
+ *  - a phone's Files sheet opened in All files leaving focus outside the tree;
+ *  - Changes out of the reader's order, a file the tree cannot place missing, a row not revealing its file, a viewed
+ *    file not dimmed.
+ * The review app's real trees (guide/PullRepoParts.tsx, guide/PullChangesTree.tsx) draw the rail; the diff reader and
+ * the file view are stubs.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -19,13 +23,20 @@ import { pullRepoFetch } from './RailScope';
 
 const hasDom = typeof document !== 'undefined';
 const reveals: (string | null)[] = [];
+let readerPatch = '';
+let readerViewed: { onToggle: (path: string) => void } | undefined;
 if (hasDom) {
   // By a path in a variable: the window's strict typecheck must not follow it into review-editor.
   const seam: string = '../guide/PullRepoParts.tsx';
   const real = (await import(seam)) as Record<string, unknown>;
+  const changes: string = '../guide/PullChangesTree.tsx';
+  const { PullChangesTree } = (await import(changes)) as Record<string, unknown>;
   mock.module('#guide-reader', () => ({
-    default: (props: { reveal?: { path: string } | null }) => {
+    PullChangesTree,
+    default: (props: { reveal?: { path: string } | null; snapshot?: { review: { rawPatch: string } }; viewed?: { onToggle: (path: string) => void } }) => {
       reveals.push(props.reveal?.path ?? null);
+      readerPatch = props.snapshot?.review.rawPatch ?? '';
+      readerViewed = props.viewed;
       return <div className="w-full" data-stub-reader="" />;
     },
     PullAllFiles: real.PullAllFiles,
@@ -84,6 +95,8 @@ let savedFetch: typeof fetch;
 let reads: string[] = [];
 /** The head the diff door names (`head_sha`); null: none. */
 let diffHead: string | null = HEAD;
+const ONE_FILE = 'diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-a\n+b\n';
+let patchNow = ONE_FILE;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -91,14 +104,14 @@ beforeEach(() => {
   reads = [];
   reveals.length = 0;
   diffHead = HEAD;
+  patchNow = ONE_FILE;
   kept.clear();
   setStorageBackend({ getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => void kept.set(k, v), removeItem: (k) => void kept.delete(k) });
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input), 'http://127.0.0.1');
     reads.push(`${url.pathname}${url.search}`);
     if (url.pathname.endsWith('/pulls/diff')) {
-      const patch = 'diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-a\n+b\n';
-      return Response.json({ serverSession: 's', key: pr.key, scope: 'layer', base: 'main', head: pr.head, patch, ...(diffHead ? { head_sha: diffHead } : {}) });
+      return Response.json({ serverSession: 's', scope: 'layer', base: 'main', head: pr.head, patch: patchNow, key: url.searchParams.get('key') ?? pr.key, ...(diffHead ? { head_sha: diffHead } : {}) });
     }
     if (url.pathname.endsWith('/pulls/repo-files')) {
       return Response.json({ available: true, revision: { kind: 'commit', label: url.searchParams.get('snapshot')!.slice(0, 7) }, total: 3, live: false, paths: ['README.md', 'src/app.ts', 'src/other.ts'] });
@@ -144,6 +157,11 @@ const el = (selector: string) => {
   if (!found) throw new Error(`${selector} did not render`);
   return found;
 };
+const repoRow = (path: string) => {
+  const found = document.querySelector<HTMLElement>('[data-repo-file-tree]')?.shadowRoot?.querySelector<HTMLElement>(`[data-item-path="${path}"]`);
+  if (!found) throw new Error(`${path} has no row`);
+  return found;
+};
 const listed = () => reads.filter((read) => read.includes('/pulls/repo-files'));
 
 test.skipIf(!hasDom)('Changes | All files: the repository at the head read, a file opened in place of the diff, and back', async () => {
@@ -165,29 +183,83 @@ test.skipIf(!hasDom)('Changes | All files: the repository at the head read, a fi
   expect(storage.getItem(TREE_SCOPE_COOKIE)).toBe('all');
 
   // A file the PR does not change opens in place of the diff, at that head.
-  await act(async () => el('[data-repo-file="README.md"]').click());
+  await act(async () => repoRow('README.md').click());
   await settle();
   expect(el('[data-pull-repo-file]').getAttribute('data-pull-repo-file')).toBe('README.md');
   expect(el('[data-pull-repo-file]').getAttribute('data-sha')).toBe(HEAD);
   expect(el('.ib-gbody').hasAttribute('data-repo-open')).toBe(true);
 
   // A changed file picked in All files: the diff again, on it.
-  await act(async () => el('[data-repo-folder="src"]').click());
-  await settle();
-  await act(async () => el('[data-repo-file="src/app.ts"] button').click());
+  await act(async () => repoRow('src/app.ts').click());
   await settle();
   expect(!!document.querySelector('[data-pull-repo-file]')).toBe(false);
   expect(el('.ib-gbody').hasAttribute('data-repo-open')).toBe(false);
   expect(reveals.at(-1)).toBe('src/app.ts');
 
   // Changes: the PR's own files again, and the diff.
-  await act(async () => el('[data-repo-file="README.md"]').click());
+  await act(async () => repoRow('README.md').click());
   await settle();
   await act(async () => el('[data-tree-scope="changes"]').click());
   await settle();
   expect(!!document.querySelector('[data-review-files]')).toBe(true);
   expect(!!document.querySelector('[data-pull-repo-file]')).toBe(false);
   expect(storage.getItem(TREE_SCOPE_COOKIE)).toBeNull();
+});
+
+test.skipIf(!hasDom)("a phone's Files sheet opened in All files: focus goes into the tree, rows at touch height", async () => {
+  const savedMatchMedia = window.matchMedia;
+  window.matchMedia = ((query: string) => ({
+    matches: query.includes('max-width: 767px') || query.includes('pointer: coarse'),
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+  try {
+    storage.setItem(TREE_SCOPE_COOKIE, 'all');
+    mount(pr);
+    await settle();
+    await act(async () => el('[data-pull-review-files-button]').click());
+    await settle();
+    expect(el('[data-repo-file-tree]').shadowRoot?.activeElement?.getAttribute('data-item-path') ?? null).not.toBeNull();
+    expect(el('[data-repo-file-tree]').style.getPropertyValue('--trees-item-height')).toBe('44px');
+  } finally {
+    window.matchMedia = savedMatchMedia;
+  }
+});
+
+test.skipIf(!hasDom)("a phone's Files sheet: tapping All files keeps focus on the All files switch at the head of the All files list, not the page", async () => {
+  const savedMatchMedia = window.matchMedia;
+  window.matchMedia = ((query: string) => ({
+    matches: query.includes('max-width: 767px') || query.includes('pointer: coarse'),
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+  try {
+    mount(pr);
+    await settle();
+    await act(async () => el('[data-pull-review-files-button]').click());
+    await settle();
+    await act(async () => {
+      el('[data-tree-scope="all"]').focus();
+      el('[data-tree-scope="all"]').click();
+    });
+    await settle();
+    expect(document.activeElement === document.body).toBe(false);
+    expect(document.activeElement?.getAttribute('data-tree-scope')).toBe('all');
+    expect(document.activeElement?.getAttribute('aria-pressed')).toBe('true');
+    expect(el('[data-pull-all-files]').contains(document.activeElement)).toBe(true);
+  } finally {
+    window.matchMedia = savedMatchMedia;
+  }
 });
 
 test.skipIf(!hasDom)('no head commit known: no switch, the file count as before', async () => {
@@ -219,4 +291,31 @@ test.skipIf(!hasDom)("the review app's reads go to this PR's routes; nothing els
     `/api/inbox/pulls/repo-files?key=${encodeURIComponent('github.com/n/b#7')}&snapshot=abc&dir=src`,
     `/api/inbox/pulls/repo-file?key=${encodeURIComponent('github.com/n/b#7')}&snapshot=abc&path=src%2Fa.ts`,
   ]);
+});
+
+test.skipIf(!hasDom)("Changes: the review app's tree in the reader's order, a loose file included; a row reveals its file; a viewed file dims", async () => {
+  const change = (path: string, add: number, del: number) =>
+    `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1,${del} +1,${add} @@\n${'-old\n'.repeat(del)}${'+new\n'.repeat(add)}`;
+  patchNow = [change('src/zeta.ts', 3, 1), change('README.md', 1, 1), change('docs', 0, 2), change('src/alpha.ts', 2, 0), change('docs/index.md', 4, 0)].join('');
+  mount({ ...pr, key: 'github.com/northwind/billing-svc#413', number: 413, url: 'https://github.com/northwind/billing-svc/pull/413' });
+  await settle();
+  const rows = () => [...(document.querySelector('[data-review-files] [data-changes-tree]')?.shadowRoot?.querySelectorAll<HTMLElement>('[data-type="item"][data-item-type="file"]') ?? [])];
+  const row = (path: string) => rows().find((r) => r.getAttribute('title') === path)!;
+  const readerOrder = [...readerPatch.matchAll(/^diff --git a\/(\S+) /gm)].map((m) => m[1]);
+  expect(rows().map((r) => r.getAttribute('title'))).toEqual(readerOrder);
+  expect([...readerOrder].sort()).toEqual(['README.md', 'docs', 'docs/index.md', 'src/alpha.ts', 'src/zeta.ts']);
+  expect([...row('src/zeta.ts').querySelectorAll('[data-item-section="trail"] > span')].map((cell) => cell.textContent)).toEqual(['+3', '−1']);
+
+  await act(async () => row('docs').click());
+  await settle();
+  expect(reveals.at(-1)).toBe('docs');
+  await act(async () => row('src/alpha.ts').click());
+  await settle();
+  expect(reveals.at(-1)).toBe('src/alpha.ts');
+
+  await act(async () => readerViewed!.onToggle('README.md'));
+  await settle();
+  expect(row('README.md').dataset.itemMuted).toBe('true');
+  expect(row('src/zeta.ts').dataset.itemMuted).toBeUndefined();
+  expect(el('.ib-prp-fileshead').textContent).toContain('1 viewed');
 });
