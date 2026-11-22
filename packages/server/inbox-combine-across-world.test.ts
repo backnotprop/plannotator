@@ -3,19 +3,23 @@
  * "inbox-combine-across-computers"; docs/agent-guides/inbox-messages.md, "Combine…"). A is the window's computer, B
  * the other; an agent on each (an MCP client) wrote one thread on its own computer.
  *
- * What regresses: B's agents missing from "Who writes it" when asked through A's forward; a Combine with a thread on
+ * What regresses: B's agents missing from "Who writes it" when asked through A's forward, or a running agent of B that
+ * wrote in no pick missing with picks on two computers (`all=1`), or refused as the writer; a Combine with a thread on
  * the other computer refused; the other computer's picked thread not archived there once the new thread arrives, or
- * not brought back by Undo; the writer on B (asked from A's window) unable to read or archive A's thread; B asleep when
- * the thread arrives losing B's archive instead of holding it until B is back.
+ * not brought back by Undo; the writer on B (asked from A's window) unable to read or archive A's thread, or A's files
+ * not copied to B's new thread; B combining a thread A's waiting Combine holds; B asleep when the thread arrives losing
+ * B's archive instead of holding it until B is back, or that held archive listed as the person's waiting write; an Undo
+ * while B sleeps said done before it lands there.
  *
  * Starts Inboxes: CI runs it.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
+import { INBOX_BRIDGE_POLL_PATH } from "@plannotator/shared/inbox/connection";
 import { startInboxServer } from "./inbox";
 import { waitFor } from "../../tests/helpers/inbox-world";
 
@@ -57,7 +61,7 @@ describe("Combine across two linked computers", () => {
   const send = async (client: Client, args: Json) => ((await client.callTool({ name: "send_message", arguments: args })) as { structuredContent: { thread_id: string } }).structuredContent.thread_id;
   const ask = (q: string) => [q, "", ":::question", q, "", "- [ ] Yes", "- [ ] No", ":::"].join("\n");
 
-  test("both ways: the agents of both computers are offered, the chosen one's computer combines, archives the other's thread there, and Undo brings both back; the other asleep, its archive waits for it", async () => {
+  test("both ways: the agents of both computers are offered, the chosen one's computer combines, archives the other's thread there, copies its files, holds it busy, and Undo brings both back; the other asleep, its archive and its Undo wait for it", async () => {
     const dataA = scratch("plannotator-combine-across-a-");
     const dataB = scratch("plannotator-combine-across-b-");
     const a = await start(dataA);
@@ -102,17 +106,30 @@ describe("Combine across two linked computers", () => {
       expect((await press(a.port, `/api/inbox/combine/${one.id}/undo`, { idempotency_key: "world-1-undo" })).body.combine.state).toBe("undone");
       await waitFor("both back after Undo", () => !archivedOn(a, a1) && !archivedOn(b, b1), 30_000);
 
-      // 2. The writer on B, pressed in A's window: B reads and archives A's thread.
-      const a2 = await threadOn(onA, projectA, "ses_a", "Ledger export");
+      // 2. The writer on B is a running agent there that wrote in no pick, pressed in A's window: offered with `all=1`,
+      // it reads and archives A's thread, and A's file is copied to its new thread.
+      await fetch(`${at(b.port)}${INBOX_BRIDGE_POLL_PATH}`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${b.token}` }, body: JSON.stringify({ session: "ses_b_idle", host: "claude-code", project_path: projectB, waitMs: 0 }) });
+      writeFileSync(join(projectA, "ledger-notes.md"), "# Ledger\n\nExport nightly.\n");
+      const a2 = await send(onA, { project_path: projectA, agent_session: "ses_a", subject: "Ledger export", body: ask("Ledger export: ship it?"), attachments: [join(projectA, "ledger-notes.md")] });
       const b2 = await threadOn(onB, projectB, "ses_b", "Refund totals");
-      const there = await press(a.port, `/api/inbox/m/${bId}/combine`, { thread_ids: [a2, b2], session: "ses_b", idempotency_key: "world-2" });
+      expect(((await get(a.port, `/api/inbox/m/${bId}/combine?threads=${b2}`)).agents as Json[]).map((x) => x.session)).toEqual(["ses_b"]);
+      expect(((await get(a.port, `/api/inbox/m/${bId}/combine?threads=${b2}&all=1`)).agents as Json[]).map((x) => [x.session, x.threads])).toEqual([
+        ["ses_b", 1],
+        ["ses_b_idle", 0],
+      ]);
+      const there = await press(a.port, `/api/inbox/m/${bId}/combine`, { thread_ids: [a2, b2], session: "ses_b_idle", idempotency_key: "world-2" });
       expect(there.status).toBe(200);
       const two = there.body.combine as Json;
       expect(two.threads.map((t: Json) => t.id)).toEqual([a2, b2]);
-      // The wake went to B's agent, in B's own picked thread.
-      expect(b.store.pendingReplies("ses_b").some((m) => m.tidy?.id === two.id && m.tidy?.wake === true && m.thread_id === b2)).toBe(true);
-      await send(onB, { project_path: projectB, agent_session: "ses_b", subject: "Exports and refunds", body: "One thread.", idempotency_key: two.id });
+      // The wake went to B's chosen agent, in B's own picked thread.
+      expect(b.store.pendingReplies("ses_b_idle").some((m) => m.tidy?.id === two.id && m.tidy?.wake === true && m.thread_id === b2)).toBe(true);
+      // While it waits, A's thread is busy on A too: A's own Combine of it is refused in A's words.
+      const a2b = await threadOn(onA, projectA, "ses_a", "Ledger import");
+      const busy = await press(a.port, "/api/inbox/combine", { thread_ids: [a2, a2b], session: "ses_a", idempotency_key: "world-busy" });
+      expect([busy.status, busy.body.code, busy.body.error]).toEqual([409, "already_combining", "Ledger export is already being combined."]);
+      const made2 = await send(onB, { project_path: projectB, agent_session: "ses_b_idle", subject: "Exports and refunds", body: "One thread.", idempotency_key: two.id });
       await waitFor("A's thread archived by B, and B's own", () => archivedOn(a, a2) && archivedOn(b, b2), 30_000);
+      await waitFor("A's file copied to B's new thread", () => (b.store.message(made2)?.attachments ?? []).some((f) => f.name === "ledger-notes.md"), 30_000);
       const undoThere = await press(a.port, `/api/inbox/m/${bId}/combine/${two.id}/undo`, { idempotency_key: "world-2-undo" });
       expect(undoThere.status).toBe(200);
       await waitFor("both back after Undo from A's window", () => !archivedOn(a, a2) && !archivedOn(b, b2), 30_000);
@@ -127,14 +144,28 @@ describe("Combine across two linked computers", () => {
       await waitFor("B offline on A", async () => (await bOnA())?.state === "offline", 30_000);
       await send(onA, { project_path: projectA, agent_session: "ses_a", subject: "Webhooks, combined", body: "x", idempotency_key: three.id });
       await waitFor("A's thread archived", () => archivedOn(a, a3), 15_000);
-      await waitFor("B's archive held on A", async () => ((await get(a.port, "/api/inbox/outbox")).waiting as Json[]).some((e) => e.machine === bId), 15_000);
+      const threeOnA = async () => ((await get(a.port, "/api/inbox/combine")).combines as Json[]).find((c) => c.id === three.id)!;
+      await waitFor("B's archive held on A", async () => ((await threeOnA()).waiting_on ?? []).includes(bId), 15_000);
+      // This Inbox's own write: never listed as the person's waiting write.
+      expect(((await get(a.port, "/api/inbox/outbox")).waiting as Json[]).filter((e) => e.machine === bId)).toEqual([]);
       b = await start(dataB);
       await waitFor("B's thread archived once B is back", () => archivedOn(b, b3), 60_000);
+      await waitFor("nothing waits on B any more", async () => (await threeOnA()).waiting_on === undefined, 30_000);
+
+      // 4. Undo while B sleeps: done on A at once, said to wait for B until it lands there.
+      b.stop();
+      await waitFor("B offline on A again", async () => (await bOnA())?.state === "offline", 30_000);
+      const undone = (await press(a.port, `/api/inbox/combine/${three.id}/undo`, { idempotency_key: "world-3-undo" })).body.combine as Json;
+      expect([undone.state, undone.waiting_on]).toEqual(["undone", [bId]]);
+      expect(archivedOn(a, a3)).toBe(false);
+      b = await start(dataB);
+      await waitFor("B's thread back once B is back", () => !archivedOn(b, b3), 60_000);
+      await waitFor("the Undo no longer waits", async () => (await threeOnA()).waiting_on === undefined, 30_000);
     } finally {
       await onA?.close().catch(() => {});
       await onB?.close().catch(() => {});
       a.stop();
       b.stop();
     }
-  }, 240_000);
+  }, 360_000);
 });

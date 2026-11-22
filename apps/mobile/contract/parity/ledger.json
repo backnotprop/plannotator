@@ -21749,6 +21749,34 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-door-post-combine-hold",
+      "title": "door:POST combine/hold",
+      "surface": [
+        "door:POST combine/hold"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-combine-hold",
+      "title": "window:/api/inbox/combine/hold",
+      "surface": [
+        "window:/api/inbox/combine/hold"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }
