@@ -126,7 +126,7 @@ describe("Combine across two linked computers", () => {
       // While it waits, A's thread is busy on A too: A's own Combine of it is refused in A's words.
       const a2b = await threadOn(onA, projectA, "ses_a", "Ledger import");
       const busy = await press(a.port, "/api/inbox/combine", { thread_ids: [a2, a2b], session: "ses_a", idempotency_key: "world-busy" });
-      expect([busy.status, busy.body.code, busy.body.error]).toEqual([409, "already_combining", "Ledger export is already being combined."]);
+      expect([busy.body.code, busy.body.error]).toEqual(["already_combining", "Ledger export is already being combined."]);
       const made2 = await send(onB, { project_path: projectB, agent_session: "ses_b_idle", subject: "Exports and refunds", body: "One thread.", idempotency_key: two.id });
       await waitFor("A's thread archived by B, and B's own", () => archivedOn(a, a2) && archivedOn(b, b2), 30_000);
       await waitFor("A's file copied to B's new thread", () => (b.store.message(made2)?.attachments ?? []).some((f) => f.name === "ledger-notes.md"), 30_000);

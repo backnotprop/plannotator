@@ -5801,7 +5801,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         fetchFile: (args) => linked.fetchFile(args),
       }));
     },
-    liveSessions: () => live.allLive(),
+    // Every running agent here: the ones with a connection (New message's), and the ones reached at their next MCP call.
+    liveSessions: () => [...live.allLive(), ...live.mcpAgents().map((agent) => ({ session: agent.session, host: agent.host, root: store.project(agent.project_id ?? "")?.root ?? null }))],
     nameOf: (machine) => machines?.nameOf(machine) ?? "another computer",
     doorMachine: (req) => {
       const door = fromDeviceDoor.get(req);
