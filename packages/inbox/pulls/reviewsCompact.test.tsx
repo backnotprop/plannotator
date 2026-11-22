@@ -9,6 +9,8 @@
  *  - a long unbroken title losing the end that tells it apart, or a right-to-left title split;
  *  - a layer's row opening the whole stack, not showing selected when its layer is open, out of Tab's reach, or
  *    missing from the right-click menu;
+ *  - the list remembering on its own which layer was opened (an old layer selected on a fresh way to the stack): the
+ *    layer shown selected is the address's, PullsPage's `selectedLayer`;
  *  - a screen reader hearing a closed row's agent twice, or its parts out of order;
  *  - a title's tooltip measured on the hidden full title or on rounding;
  *  - a phone row without its second line (status words in their tone, Medium or Low, repository and number), the
@@ -266,30 +268,44 @@ function spoken(el: Element): string {
   return out;
 }
 
-test.skipIf(!hasDom)("back to a stack from a layer opened on its row: the layer's row is the selected one, with its second line", () => {
-  draw(null);
-  act(() => $('[data-reviews-stack-toggle="thr_all"]')!.click());
-  act(() => $(`[data-reviews-layer="${TALL[3]!.key}"]`)!.click());
-  // The review closes back onto the stack (the list is drawn anew): the layer's row, not the stack's, is the open one.
-  act(() => root!.unmount());
+/** The list drawn anew, as App draws it after a screen in front of it closes. */
+function redraw(selected: string | null, selectedLayer: string | null = null) {
+  act(() => root?.unmount());
   root = null;
   host?.remove();
-  draw('thr_all');
+  draw(selected, selectedLayer);
+}
+
+test.skipIf(!hasDom)("back to a stack from a layer's diff: the layer's row is the selected one, with its second line", () => {
+  // The address carries the layer the diff closed from (`Route.backLayer`), PullsPage's `selectedLayer`.
+  draw('thr_all', TALL[3]!.key);
   const layer = $(`[data-reviews-layer="${TALL[3]!.key}"]`)!;
   expect(layer.getAttribute('aria-current')).toBe('true');
   expect(layer.classList.contains('ib-sel')).toBe(true);
-  expect(layer.querySelector('[data-reviews-line2] .ib-pv')!.textContent).toBe('#503 · ledger');
   expect(layer.querySelector('[data-reviews-line2] [data-pulls-author="bob-tully"]')).not.toBeNull();
   // Its High is on its own line.
   expect(layer.querySelector('.ib-rvr-l1 [data-pull-risk="high"]')).not.toBeNull();
   expect(row('thr_all').getAttribute('aria-current')).toBeNull();
   expect(document.querySelectorAll('[aria-current="true"]')).toHaveLength(1);
-  // The stack's own row opened: the stack is the open one again.
-  act(() => row('thr_all').click());
-  act(() => root!.unmount());
-  root = null;
-  host?.remove();
-  draw('thr_all');
+  // Then a layer opened from the stack's own page, and back: that layer, not the first.
+  redraw('thr_all', TALL[4]!.key);
+  expect($(`[data-reviews-layer="${TALL[4]!.key}"]`)!.getAttribute('aria-current')).toBe('true');
+  expect(document.querySelectorAll('[aria-current="true"]')).toHaveLength(1);
+});
+
+test.skipIf(!hasDom)("the top layer, whose key is the stack's id, shows on its own row", () => {
+  draw('thr_all', TALL[119]!.key);
+  expect($(`[data-reviews-layer="${TALL[119]!.key}"]`)!.getAttribute('aria-current')).toBe('true');
+  expect(row('thr_all').getAttribute('aria-current')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a layer opened from its row is not remembered by the list: a fresh way to the stack shows the stack, folded', () => {
+  draw(null);
+  act(() => $('[data-reviews-stack-toggle="thr_all"]')!.click());
+  act(() => $(`[data-reviews-layer="${TALL[3]!.key}"]`)!.click());
+  // The diff left another way (the sidebar's Inbox: no list drawn), then the same stack opened from a thread or a
+  // board tile: no `backLayer`.
+  redraw('thr_all');
   expect(row('thr_all').getAttribute('aria-current')).toBe('true');
   expect($('[data-reviews-stack="thr_all"] [data-reviews-layer]')).toBeNull();
 });

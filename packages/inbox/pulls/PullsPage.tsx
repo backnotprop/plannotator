@@ -60,6 +60,7 @@ import {
 } from './model';
 import { PullFilterControl, PullScopeLine, useFilterTrigger } from './PullFilter';
 import { ReviewsList, ReviewsMenu, reviewLinksOf } from './ReviewsList';
+import { selectedLayerOf } from './selectedLayer';
 import { reviewRowLaunchpad, reviewRowProjects, reviewRowsIn } from './reviewsModel';
 import { forgeName } from './labels';
 import { answeredClis } from './notices';
@@ -105,6 +106,8 @@ export interface PullsPageProps {
   state: PullsState;
   /** The stack open beside the list (its id, or any layer's key), or null. */
   stackId: string | null;
+  /** The layer of that stack the list shows selected: the one open, or the one whose diff closed back to it (`Route.backLayer`). */
+  layerId?: string | null;
   project: string | null;
   /** The list's view (`&view=`): All, Mine, To review or Others. */
   filter: PullFilter;
@@ -304,8 +307,7 @@ export function PullsPage(given: PullsPageProps) {
             autoRuns={risk.answer?.auto_runs}
             projectNames={props.projectNames}
             selected={props.threadId ?? open?.stack.id ?? null}
-            // A stack opened by a layer's own key (a stack's id is its top layer's): that layer's row.
-            selectedLayer={!props.threadId && open && props.stackId !== open.stack.id ? props.stackId : null}
+            selectedLayer={selectedLayerOf(open?.stack.id ?? null, props)}
             phone={phone}
             onOpen={(row) => {
               // One open PR opens its launchpad, reviewed or not; else a review its thread, a listed stack its page.

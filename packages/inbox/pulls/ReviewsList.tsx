@@ -4,7 +4,7 @@
  * land, then the folded Waiting on others and Open, not reviewed. A row is a review thread (the same thread the Inbox
  * lists, never a copy) or a listed PR nobody has reviewed. The fold state is remembered. No new keyboard shortcuts.
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
 import { inboxPullIsOpen, inboxPullRepoKey, inboxReviewGroups, type InboxPull, type InboxPullHidden, type InboxRepoHidden, type InboxPullsAnswer, type InboxReviewRow, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
@@ -78,12 +78,6 @@ export function menuTargets(rows: readonly InboxReviewRow[], links: InboxPullsAn
   }
   return targets;
 }
-
-/**
- * The layer a person last opened from the list, while the page is open: back from its review, its row (not its
- * stack's) shows selected, its stack unfolded. Forgotten once the list shows nothing open, or the stack's own row opens.
- */
-let openedLayer: { stack: string; key: string } | null = null;
 
 /** "Hide pull request", "Hide merge request", "Hide 3 pull requests". */
 export function hideWords(pulls: readonly Pick<InboxPull, 'platform'>[]): string {
@@ -312,7 +306,10 @@ export function ReviewsList({
   projectNames: ReadonlyMap<string, string>;
   /** The open thread's id, or the open stack's. */
   selected: string | null;
-  /** The layer of the open stack that was opened by its own key (not the stack's): its row shows selected. */
+  /**
+   * The layer of the open stack whose row shows selected (PullsPage's, from the address): the one whose diff closed
+   * back to the stack, or the stack opened by that layer's own key. Nothing is remembered here.
+   */
   selectedLayer?: string | null;
   phone: boolean;
   /** The project the list is filtered to: Branch reviews' "Branches nobody reported" is one project's. */
@@ -353,16 +350,11 @@ export function ReviewsList({
   // A row opened from a folded group keeps its group open.
   const waitingOpen = unfolded('waiting') || groups.waiting.some(isOpenRow);
   const listedOpen = unfolded('not_reviewed') || groups.not_reviewed.some(isOpenRow);
-  // Nothing open in the list: a layer opened from it earlier is forgotten.
-  useEffect(() => {
-    if (selected === null) openedLayer = null;
-  }, [selected]);
-  /** The layer of this row's stack that is open on its own: by its key, or the one opened from its row and come back to. */
+  /** The layer of this row's stack that shows selected on its own row (`selectedLayer`), when this row is the open one. */
   const openLayerOf = (row: InboxReviewRow): string | null => {
     const stack = row.stacks[0];
-    if (!stack || stack.layers.length < 2 || !isOpenRow(row)) return null;
-    const key = selectedLayer ?? (openedLayer?.stack === stack.id ? openedLayer.key : null);
-    return key && stack.layers.some((layer) => layer.key === key) ? key : null;
+    if (!stack || stack.layers.length < 2 || !isOpenRow(row) || !selectedLayer) return null;
+    return stack.layers.some((layer) => layer.key === selectedLayer) ? selectedLayer : null;
   };
   // A stack's fold, by hand; one whose layer is open starts unfolded, as a folded group keeps an open row shown.
   const [stackFolds, setStackFolds] = useState<ReadonlyMap<string, boolean>>(() => new Map());
@@ -426,19 +418,11 @@ export function ReviewsList({
           key={row.id}
           {...props}
           selected={props.selected && openLayer === null}
-          onOpen={() => {
-            openedLayer = null;
-            onOpen(row);
-          }}
           open={unfolded}
           onToggle={() => toggleStack(row)}
           openLayer={openLayer}
           menuItem={menuRow}
-          onOpenLayer={(layer) => {
-            openedLayer = { stack: stack.id, key: layer.key };
-            if (onOpenLayer) onOpenLayer(row, layer);
-            else onOpen(row);
-          }}
+          onOpenLayer={(layer) => (onOpenLayer ? onOpenLayer(row, layer) : onOpen(row))}
         />
       );
     }
