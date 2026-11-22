@@ -10195,7 +10195,7 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 /* Reviews' rows, compact (ReviewRow.tsx, approval "inbox-reviews-compact-list"): one 30px line under plain group
    labels; the open row grows a second line. The age has a fixed column; a stack's count is its own button over the
    row's end, in the room the row keeps for it. A phone keeps 44px rows. */
-.ib-prlist { --ib-rvr-h: 30px; --ib-rvr-pad: 12px; --ib-rvr-age-w: calc(var(--ib-fs-12-5, 12.5px) * 2.9); }
+.ib-prlist { --ib-rvr-h: 30px; --ib-rvr-pad: 12px; --ib-rvr-age-w: calc(var(--ib-fs-12-5, 12.5px) * 2.9); --ib-rvr-l1c: calc(var(--ib-rvr-h) / 2); --ib-rvr-pitch: var(--ib-rvr-h); }
 .ib-prlist .ib-group + .ib-group { margin-top: 6px; }
 .ib-rvr-gl { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 600; color: var(--foreground); }
 .ib-rvr-gl .ib-n { font-weight: 500; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
@@ -10238,7 +10238,8 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-rvr-layers { grid-row: 2; grid-column: 1; }
 .ib-prrow.ib-rvr-child { padding-left: calc(var(--ib-rvr-pad) + 24px); }
 /* The tree line from the stack to a layer: on the layer's own row (positioned on a phone as on a desktop). */
-.ib-rvr-tree { position: absolute; left: calc(var(--ib-rvr-pad) + 7px); top: calc(var(--ib-rvr-h) / 2 - 26px); width: 10px; height: 26px; border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); border-bottom-left-radius: 5px; pointer-events: none; }
+/* From the line's middle (--ib-rvr-l1c) up to 4px short of the row above's (one row apart, --ib-rvr-pitch). */
+.ib-rvr-tree { position: absolute; left: calc(var(--ib-rvr-pad) + 7px); top: calc(var(--ib-rvr-l1c) - var(--ib-rvr-pitch) + 4px); width: 10px; height: calc(var(--ib-rvr-pitch) - 4px); border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); border-bottom-left-radius: 5px; pointer-events: none; }
 /* The open row's second line: what the old third line said, under the title. */
 .ib-prrow .ib-rvr-l2 { display: flex; align-items: center; gap: 9px; min-width: 0; height: 18px; margin-top: -3px; padding-bottom: 7px; box-sizing: content-box; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-rvr-l2 > .ib-lead { flex: none; display: inline-flex; justify-content: center; width: 15px; }
@@ -10657,7 +10658,7 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   .pn-inbox .ib-pr-refresh { min-width: 44px; min-height: 44px; }
   .pn-inbox .ib-pr-foldbtn { height: 44px; padding: 0 12px; font-size: var(--ib-fs-13-5, 13.5px); }
   /* Reviews' rows keep a finger's 44px; the line reads at the phone's sizes. */
-  .ib-prlist { --ib-rvr-h: 44px; --ib-rvr-pad: 16px; }
+  .ib-prlist { --ib-rvr-h: 44px; --ib-rvr-pad: 16px; --ib-rvr-pitch: 45px; }
   .ib-rvr-gl { height: 36px; padding: 0 16px; font-size: var(--ib-fs-13, 13px); }
   .ib-prrow .ib-rvr-l1 { font-size: var(--ib-fs-15, 15px); gap: 10px; }
   .ib-prrow .ib-rvr-l2 { font-size: var(--ib-fs-13-5, 13.5px); height: 20px; margin-top: -6px; padding-bottom: 10px; gap: 10px; }
