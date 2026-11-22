@@ -118,6 +118,14 @@ describe("diff path parsing", () => {
     });
   });
 
+  test("reads git's tab-terminated, C-quoted file markers for a non-ASCII name with a space", () => {
+    expect(parseDiffFilePathLines([
+      '--- "a/caf\\303\\251 notes.md"\t',
+      '+++ "b/caf\\303\\251 notes.md"\t',
+      "@@ -1 +1 @@",
+    ])).toEqual({ oldPath: "café notes.md", newPath: "café notes.md" });
+  });
+
   test("preserves dev null paths with tab metadata", () => {
     expect(parsePatchPathToken("/dev/null\t", "a")).toBe("/dev/null");
   });
