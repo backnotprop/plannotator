@@ -895,7 +895,20 @@ test("compact rows (approval inbox-reviews-compact-list): one 30px line each, th
   }
   const open = rows.find((row) => row.open)!;
   console.log(`compact rows: closed ${rows.find((row) => !row.open)!.height}px, open ${open.height}px, ${Math.floor(800 / 30)} closed rows per 800px`);
-  const proof = (name: string) => page.screenshot({ path: join(proofDir, name) });
+  // No focus ring in a picture: a ring left by the keyboard steps reads like a highlight, which selection never is.
+  const proof = async (name: string) => {
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.screenshot({ path: join(proofDir, name) });
+  };
+  /** How far each layer's tree line starts below the middle of the line above it (4px between closed rows). */
+  const treeReach = () =>
+    list.locator(`[data-reviews-stack="${STACK_ID}"]`).evaluate((block) => {
+      const rows = [block.querySelector('[data-reviews-row]')!, ...block.querySelectorAll('[data-reviews-layer]')];
+      return rows.slice(1).map((row, i) => {
+        const above = rows[i]!.querySelector('.ib-rvr-l1')!.getBoundingClientRect();
+        return Math.round(row.querySelector('[data-reviews-tree]')!.getBoundingClientRect().top - (above.top + above.height / 2));
+      });
+    });
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   await page.waitForTimeout(400);
   await proof('compact-01-selected-dark.png');
@@ -924,6 +937,11 @@ test("compact rows (approval inbox-reviews-compact-list): one 30px line each, th
   await expect(list.locator('[data-reviews-layer="github.com/northwind/billing-svc#411"]')).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(list.locator(`[data-reviews-layer="${LAYER_412}"]`)).toBeFocused();
+  // The keyboard's ring is there while it is the keyboard's (inside the row, on its fill).
+  expect(await list.locator(`[data-reviews-layer="${LAYER_412}"]`).evaluate((el) => el.matches(':focus-visible') && getComputedStyle(el, '::before').boxShadow.includes('inset'))).toBe(true);
+  // Closed rows: each layer's line reaches the mark above it, and the layers sit right under the stack's row.
+  expect(await treeReach()).toEqual([4, 4, 4, 4]);
+  expect(await list.locator(`[data-reviews-stack="${STACK_ID}"]`).evaluate((block) => Math.round(block.querySelector('[data-reviews-layer]')!.getBoundingClientRect().top - block.querySelector('[data-reviews-row]')!.getBoundingClientRect().bottom))).toBe(0);
   await page.mouse.move(0, 0);
   await page.waitForTimeout(400);
   await proof('compact-03-stack-unfolded-dark.png');
@@ -938,6 +956,21 @@ test("compact rows (approval inbox-reviews-compact-list): one 30px line each, th
   await expect(layerRow).toHaveAttribute('aria-current', 'true');
   await expect(layerRow.locator('[data-reviews-line2]')).toContainText('#413');
   await expect(stackRow).not.toHaveAttribute('aria-current', 'true');
+  // The open layer has its second line: the line of the layer above it still reaches its mark.
+  expect(await treeReach()).toEqual([4, 4, 4, 4]);
+  // Then a layer opened from the stack's own page (Open the diff: the lowest open one, #412), and back: that layer's
+  // row, not the one opened from the list before.
+  await page.locator(`[data-pulls-stack="${STACK_ID}"]`).getByRole('button', { name: 'Open the diff', exact: true }).click();
+  await expect(review).toHaveAttribute('data-pull-review', LAYER_412);
+  await review.getByRole('button', { name: 'Reviews' }).first().click();
+  await expect(list.locator(`[data-reviews-layer="${LAYER_412}"]`)).toHaveAttribute('aria-current', 'true');
+  await expect(layerRow).not.toHaveAttribute('aria-current', 'true');
+  expect(await treeReach()).toEqual([4, 4, 4, 4]);
+  // The stack's own row open and unfolded: its first layer's line reaches its mark, past its second line.
+  await stackRow.click();
+  await expect(stackRow).toHaveAttribute('aria-current', 'true');
+  if ((await unfold.getAttribute('aria-expanded')) !== 'true') await unfold.click();
+  expect(await treeReach()).toEqual([4, 4, 4, 4]);
   await expect(page.locator(`[data-pulls-stack="${STACK_ID}"]`)).toBeVisible();
   // A phone: the list alone, every row two lines, about 56px: the title, then the status words, Medium or Low, the
   // repository and number on one line cut with "…"; an unfolded stack's tree lines on their own rows.
