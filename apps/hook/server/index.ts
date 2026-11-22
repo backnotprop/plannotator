@@ -1543,6 +1543,7 @@ if (args[0] === "sessions") {
       console.error("  GitHub: https://github.com/owner/repo/pull/123");
       console.error("  GitLab: https://gitlab.com/group/project/-/merge_requests/42");
       console.error("  Bitbucket Cloud: https://bitbucket.org/workspace/repo/pull-requests/7");
+      console.error("  Forgejo / Gitea: https://codeberg.org/owner/repo/pulls/5");
       process.exit(1);
     }
 
