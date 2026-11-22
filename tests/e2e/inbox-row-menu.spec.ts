@@ -8,11 +8,15 @@
  *    thread ID its id, each with a toast;
  *  - the keyboard: Shift+F10 on a focused row opens it, Escape and Tab put
  *    focus back on the row;
- *  - Mark read and Archive from the menu, with the row's own toasts.
+ *  - Mark read and Archive from the menu, with the row's own toasts;
+ *  - Mention in reply only while a reply holds words not sent yet (the owner,
+ *    2026-11-22): none with no thread open or with the open thread's box
+ *    empty, there once words are typed, and it puts the row in that reply.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  * Screenshots at 1440, light and dark, land in /tmp/row-menu-shots/ (or
- * PLANNOTATOR_ROW_MENU_SHOTS).
+ * PLANNOTATOR_ROW_MENU_SHOTS); Mention in reply's three states in
+ * .local/proof/inbox-mention-menu/ (under PLANNOTATOR_E2E_PROOF_DIR).
  */
 
 import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
@@ -26,6 +30,7 @@ import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const shots = resolve(process.env.PLANNOTATOR_ROW_MENU_SHOTS ?? '/tmp/row-menu-shots');
+const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'inbox-mention-menu');
 
 const ASK = ['One call for the docs.', '', ':::question', 'Which search index?', '', '- [ ] Pagefind', '- [ ] Orama', ':::'].join('\n');
 
@@ -35,7 +40,7 @@ interface World {
   context: BrowserContext;
   page: Page;
   errors: string[];
-  threads: { search: string; news: string; release: string };
+  threads: { search: string; news: string; release: string; cache: string };
 }
 
 let world: World;
@@ -70,13 +75,14 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const search = await agent.send({ project_path: docs, subject: 'Docs search', thread: 'search', body: ASK });
   const news = await agent.send({ project_path: billing, subject: 'Nightly is green', thread: 'news', body: 'The nightly build is green.' });
   const release = await agent.send({ project_path: billing, subject: 'Release notes drafted', thread: 'release', body: 'The 0.29 notes are drafted.' });
+  const cache = await agent.send({ project_path: billing, subject: 'Cache warmup plan', thread: 'cache', body: 'The cache warms up from the nightly snapshot. Anything to add?' });
   world = {
     url,
     agent,
     context,
     page,
     errors,
-    threads: { search: search.thread_id as string, news: news.thread_id as string, release: release.thread_id as string },
+    threads: { search: search.thread_id as string, news: news.thread_id as string, release: release.thread_id as string, cache: cache.thread_id as string },
   };
 });
 
@@ -208,6 +214,57 @@ test('Archive from the menu shows the row archived in place with the Archived to
   await expect(menu(page)).toBeVisible();
   await page.locator('[data-row-action="copy-link"]').hover();
   await shot(page, '06-menu-hover-dark.png');
+  await page.keyboard.press('Escape');
+  expect(world.errors).toEqual([]);
+});
+
+test('Mention in reply shows only while a reply holds words not sent yet, and puts the row in that reply', async () => {
+  const { page, threads } = world;
+  mkdirSync(proofDir, { recursive: true });
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.goto(world.url);
+  const mention = page.locator('[data-row-action="mention"]');
+  // No thread open: no item.
+  await rowButton(page, threads.search).click({ button: 'right' });
+  await expect(menu(page)).toBeVisible();
+  await expect(menu(page).getByRole('menuitem', { name: 'Copy link' })).toBeVisible();
+  await expect(mention).toHaveCount(0);
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: join(proofDir, '01-no-thread-open.png') });
+  await page.keyboard.press('Escape');
+  await expect(menu(page)).toHaveCount(0);
+
+  // A thread open with its reply box open and empty: no item.
+  await rowButton(page, threads.cache).click();
+  await expect(page.locator(`section.ib-pane[data-thread-id="${threads.cache}"]`)).toBeVisible();
+  await page.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
+  const field = page.locator('.ib-rbox textarea').first();
+  await expect(field).toBeVisible();
+  await rowButton(page, threads.search).click({ button: 'right' });
+  await expect(menu(page)).toBeVisible();
+  await expect(menu(page).getByRole('menuitem', { name: 'Copy link' })).toBeVisible();
+  await expect(mention).toHaveCount(0);
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: join(proofDir, '02-thread-open-empty-box.png') });
+  await page.keyboard.press('Escape');
+  await expect(menu(page)).toHaveCount(0);
+
+  // Words typed and not sent: the item is there (the reply is the one on screen, so no name under it).
+  await field.click();
+  await page.keyboard.type('Compare with ');
+  await rowButton(page, threads.search).click({ button: 'right' });
+  await expect(mention).toBeVisible();
+  await expect(mention).toHaveText('Mention in reply');
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: join(proofDir, '03-thread-open-unsent-words.png') });
+  await mention.click();
+  await expect(page.locator(`.ib-rbox [data-skill-ref-token="ib-mention:${threads.search}"]`)).toHaveCount(1);
+  await expect(field).toHaveValue(/^Compare with \S/);
+  // On the open thread's own row there is nothing to mention.
+  await rowButton(page, threads.cache).click({ button: 'right' });
+  await expect(menu(page)).toBeVisible();
+  await expect(menu(page).getByRole('menuitem', { name: 'Copy link' })).toBeVisible();
+  await expect(mention).toHaveCount(0);
   await page.keyboard.press('Escape');
   expect(world.errors).toEqual([]);
 });

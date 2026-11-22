@@ -385,28 +385,44 @@ function buildFilterRepo(root: string): string {
   return repo;
 }
 
-/** Scroll All changes until `path`'s header sits at the top of the list. */
-const bringToTop = (page: Page, path: string) =>
-  page.evaluate(async (target) => {
-    const frame = () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
-    const first = document.querySelector('diffs-container');
-    let scroller = first?.parentElement ?? null;
-    while (scroller && !(scroller.scrollHeight > scroller.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(scroller).overflowY))) scroller = scroller.parentElement;
-    if (!scroller) return false;
-    for (let i = 0; i < 60; i++) {
+/**
+ * Scroll All changes until `path`'s header sits at the top of the list.
+ *
+ * One scroll step per evaluate, each bounded: a step waits two frames for the
+ * list to draw what the scroll brought in, but never more than 250 ms, and the
+ * evaluate itself gets 5 s. The whole walk gets 20 s. One evaluate that awaited
+ * frames in a loop once never returned when the page drew no frame, and the
+ * test spent its 240 s there with no word of why (CI, main, ef530d029).
+ */
+async function bringToTop(page: Page, path: string): Promise<void> {
+  const deadline = Date.now() + 20_000;
+  const seen: Record<string, number> = {};
+  while (Date.now() < deadline) {
+    const step = page.evaluate(async (target) => {
+      const first = document.querySelector('diffs-container');
+      let scroller = first?.parentElement ?? null;
+      while (scroller && !(scroller.scrollHeight > scroller.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(scroller).overflowY))) scroller = scroller.parentElement;
+      if (!scroller) return 'no scroller yet';
       const item = document.querySelector(`diffs-container span[title="${CSS.escape(target)}"]`)?.closest('diffs-container');
-      if (!item) {
+      if (item) {
+        const delta = item.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+        if (Math.abs(delta) < 2) return 'at top';
+        scroller.scrollTop += delta;
+      } else {
         scroller.scrollTop += 600;
-        await frame();
-        continue;
       }
-      const delta = item.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
-      if (Math.abs(delta) < 2) return true;
-      scroller.scrollTop += delta;
-      await frame();
-    }
-    return false;
-  }, path);
+      const framed = await Promise.race([
+        new Promise<boolean>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(true)))),
+        new Promise<boolean>((done) => setTimeout(() => done(false), 250)),
+      ]);
+      return framed ? 'scrolled' : 'scrolled, no frame in 250 ms';
+    }, path).catch((error: Error) => `evaluate failed: ${error.message.split('\n')[0]}`);
+    const result = await Promise.race([step, new Promise<string>((done) => setTimeout(() => done('page did not answer in 5 s'), 5_000))]);
+    if (result === 'at top') return;
+    seen[result] = (seen[result] ?? 0) + 1;
+  }
+  throw new Error(`${path} never reached the top of the list in 20 s: ${JSON.stringify(seen)}`);
+}
 
 test('File filter: narrowing or clearing the list marks nothing Viewed; only scrolling by hand does', async ({ browser }) => {
   await withReview(
@@ -418,7 +434,7 @@ test('File filter: narrowing or clearing the list marks nothing Viewed; only scr
       await expect.poll(async () => (await mainHeaders(page, FILTER_FILES)).length).toBeGreaterThan(0);
 
       // The reader is on b/one.ts, a file the filter keeps.
-      expect(await bringToTop(page, 'b/one.ts')).toBe(true);
+      await bringToTop(page, 'b/one.ts');
       await page.waitForTimeout(1_500);
       const before = await viewed();
 
