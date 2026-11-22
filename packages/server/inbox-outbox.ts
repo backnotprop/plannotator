@@ -103,6 +103,11 @@ export interface OutboxEntry {
   window?: true;
   /** Where the person was when not at this Inbox's own window (inbox-sent-from.ts). Sent on as `X-Plannotator-Sent-From`. */
   sent_from?: InboxSentFromPlace;
+  /**
+   * This Inbox made it itself, not a press of the person's (a Combine's archive on that machine, its Undo, its busy
+   * mark; inbox-combine-far.ts): never listed as waiting, never a notice. Its maker reads how it ended by its key.
+   */
+  auto?: true;
 }
 
 /** What one try got back: the owner's status and JSON body, or `null` when the machine could not be reached. */
@@ -249,6 +254,9 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST combine": "now",
   "POST combine/(cmb_[^/]+)/cancel": "set",
   "POST combine/(cmb_[^/]+)/undo": "set",
+  // A Combine on a linked computer marks this Inbox's picked threads busy while it waits, and lets go: a state per
+  // Combine and thread (inbox-combine-across.ts), sent by that Inbox itself, never the person.
+  "POST combine/hold": "set",
   // A launched agent's buttons from another machine (remote launch). Stop, Trust folder and Delete put a state; Try
   // again is refused while a start runs and does nothing for a launch that is not failed or stopped.
   "POST launch/:id/stop": "set",
@@ -386,7 +394,7 @@ export class InboxOutbox {
 
   /** Every entry the person has not been told about yet, or not dismissed: refusals and losses (rules 3, 4). */
   notices(): OutboxEntry[] {
-    return [...this.entries.values()].filter((e) => e.notice !== null && !e.dismissed).sort((a, b) => (a.notice!.at < b.notice!.at ? -1 : 1));
+    return [...this.entries.values()].filter((e) => e.notice !== null && !e.dismissed && !e.auto).sort((a, b) => (a.notice!.at < b.notice!.at ? -1 : 1));
   }
 
   dismiss(key: string): OutboxEntry | null {
@@ -401,7 +409,7 @@ export class InboxOutbox {
    * whatever state it is in, and queues nothing. The same key on another
    * route or machine is refused, as the door refuses it.
    */
-  submit(machine: string, route: string, body: Record<string, unknown>, thread: string | null = null, window = false, sentFrom: InboxSentFromPlace | null = null): { entry: OutboxEntry; fresh: boolean } {
+  submit(machine: string, route: string, body: Record<string, unknown>, thread: string | null = null, window = false, sentFrom: InboxSentFromPlace | null = null, auto = false): { entry: OutboxEntry; fresh: boolean } {
     if (!MACHINE_FILE.test(machine)) throw new InboxError("validation_error", "machine: an ibx_ id.", { field: "machine" });
     const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a write to another machine.", { field: "idempotency_key" });
@@ -435,6 +443,7 @@ export class InboxOutbox {
       thread,
       ...(window ? { window: true as const } : {}),
       ...(sentFrom ? { sent_from: sentFrom } : {}),
+      ...(auto ? { auto: true as const } : {}),
     });
     return { entry, fresh: true };
   }

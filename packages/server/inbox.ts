@@ -154,6 +154,7 @@ import { DecisionDataAborted, decisionDataCsv, decisionDataSummary, readDecision
 import { createInboxSearchRoutes } from "./inbox-search";
 import { createInboxCombine } from "./inbox-combine";
 import { createInboxCombineFar, type InboxCombineFar } from "./inbox-combine-far";
+import { combineArchiveSkip } from "./inbox-combine-guard";
 import { inboxSkillsBlockFor, inboxSkillsRoute } from "./inbox-skills";
 import { assertTestHome } from "./test-home-guard";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
@@ -5363,7 +5364,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   // A reply sent to a new session in place of the one that ended (packages/server/inbox-reply-launch.ts).
   const replyLaunch = createInboxReplyLaunch({ store, launch, live, resolveProject });
+  // A Combine's files copied from a linked computer wait as uploads until its new thread is here (inbox-combine-across.ts).
+  let combineUploads: () => string[] = () => [];
   const compose = createInboxCompose({
+    keepUploads: () => combineUploads(),
     store,
     serverSession,
     live,
@@ -5792,9 +5796,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         readThread: (ask) => linked.readThread(ask),
         rowOf: (threadId) => linked.rows().find((row) => row.thread_id === threadId) ?? null,
         hold: (machine, route, body, thread, waitMs) => linked.holdWrite(machine, route, body, thread, waitMs),
+        heldWrite: (key) => linked.heldWrite(key),
+        cancelHeld: (key) => linked.cancelHeld(key),
+        fetchFile: (args) => linked.fetchFile(args),
       }));
     },
+    liveSessions: () => live.allLive(),
+    nameOf: (machine) => machines?.nameOf(machine) ?? "another computer",
+    doorMachine: (req) => {
+      const door = fromDeviceDoor.get(req);
+      return door?.platform === MACHINE_PLATFORM ? (machines?.machineOfDevice(door.device_id)?.machine ?? null) : null;
+    },
   });
+  combineUploads = () => combine.uploads();
 
   /** The optional debug log (inbox-debug-log.ts): null, the default, changes nothing and writes nothing. */
   const debugLog = (options.debug ?? resolveInboxDebug(loadConfig(), process.env)) ? createInboxDebugLog(join(dataDir, "inbox")) : null;
@@ -8114,6 +8128,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             if (body.resolved !== undefined && typeof body.resolved !== "boolean") {
               throw new InboxError("validation_error", "resolved: must be a boolean.");
             }
+            // A linked computer's Combine archive that lands late (inbox-combine-guard.ts): skipped, not refused, when
+            // the thread moved on since that Combine read it.
+            const skipped = combineArchiveSkip(store, messageId, body);
+            if (skipped) return json({ skipped });
             // The person's Archive (the window, a phone, a linked machine's forward): it ends a snooze.
             const thread = store.resolveThread(messageId, body.resolved !== false, "person");
             // Unarchived: a Mark read's set-aside note an archive held back is due again.

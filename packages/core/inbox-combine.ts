@@ -33,9 +33,17 @@ export interface InboxCombineRecord {
   /** The new thread, once it arrived. */
   thread?: { id: string; subject: string };
   settled_at?: string;
+  /**
+   * Picks on two computers (approval "inbox-combine-across-computers"): the linked machines (`ibx_` ids) where this
+   * Combine's archive (done) or its Undo (undone) still waits to land, that machine asleep. Absent when none.
+   */
+  waiting_on?: string[];
 }
 
-/** One agent the person can ask to combine picked threads: a running session that wrote in at least one of them. */
+/**
+ * One agent the person can ask to combine picked threads: a running session that wrote in at least one of them (with
+ * picks on two computers, `all=1`, any running session, `threads` 0 for one that wrote in none).
+ */
 export interface InboxCombineAgent {
   session: string;
   host: string | null;
