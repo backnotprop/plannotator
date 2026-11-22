@@ -230,10 +230,16 @@ function restoreLinks(
 // closer so nested fences (e.g., 4-backtick outer wrapping a 3-backtick
 // example) are matched atomically — the inner closer has fewer backticks
 // than \1 and is correctly skipped by the lazy content scanner.
+//
+// The opener and closer follow the rules of `codeFenceCloseIndex`, the
+// parser (`@plannotator/core/markdown-structure`) that renders each chunk,
+// or a chunk would hold half a fence and draw wrong: the opener may be
+// indented (a fence under a list item) and the closer may carry more
+// backticks than the opener, plus trailing text.
 const FENCE_SENTINEL_PREFIX = "__PLDIFFFENCE";
 const FENCE_SENTINEL_SUFFIX = "PLDIFFFENCE__";
 const FENCE_SENTINEL_PATTERN = /__PLDIFFFENCE\d+PLDIFFFENCE__/g;
-const FENCE_BLOCK_PATTERN = /^(`{3,})[^\n]*\n[\s\S]*?^\1[ \t]*$/gm;
+const FENCE_BLOCK_PATTERN = /^[ \t]*(`{3,})[^\n]*\n[\s\S]*?^[ \t]*\1`*[^\n]*$/gm;
 
 function fenceSentinelFor(id: number): string {
   return `${FENCE_SENTINEL_PREFIX}${id}${FENCE_SENTINEL_SUFFIX}`;
