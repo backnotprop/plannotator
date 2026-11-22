@@ -353,7 +353,7 @@ body::after{background:
 .cap{box-shadow:var(--shadow)}
 .cap::after{display:none}
 .cap.dlg{border-radius:12px}
-.twm,.shf-thumb img.ph{display:none}
+.twm,.shf-thumb img.ph,html:not(.light) .shf-thumb img.ph{display:none}
 .nm{white-space:pre}
 .nmp{font-weight:400}
 .fanh,.fanf{z-index:1;left:calc(0px - var(--m));width:calc(100% + 2*var(--m));background:var(--ground)}
