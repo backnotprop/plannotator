@@ -997,7 +997,7 @@ test('compact rows: one row with every mark at once in the narrowest list, and a
       const like = body.rows.find((row) => (row.stacks as { id: string }[])[0]?.id === STACK_ID) as { stacks: { layers: Record<string, unknown>[] }[] } | undefined;
       if (!like) return route.fulfill({ response, json: body });
       const base = like.stacks[0]!.layers[0]!;
-      const old = new Date(Date.now() - 330 * DAY).toISOString();
+      const old = new Date(Date.now() - 350 * DAY).toISOString();
       const layers = Array.from({ length: 120 }, (_, i) => ({
         ...base,
         key: keys[i],
