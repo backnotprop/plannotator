@@ -2,9 +2,23 @@ import { useImperativeHandle, useMemo, useRef } from 'react';
 import type { DiffFile } from '@plannotator/core/diff-files';
 import { useCompactTouchLayout } from '@plannotator/ui/hooks/useIsMobile';
 import { ChangesTreeView, type ChangesTreeHandle } from '@plannotator/review-editor/components/ChangesTreeView';
+import { RISK_BARS_PARTS } from '@plannotator/review-editor/components/treeRows';
 import { buildFileTree, getVisualFileOrder } from '@plannotator/review-editor/utils/buildFileTree';
-import { useRiskLead } from './riskLead';
-import type { PullChangesTreeProps } from './pullRepoTypes';
+import type { PullChangesTreeProps, PullTreeRisk } from './pullRepoTypes';
+
+type RowPart = (typeof RISK_BARS_PARTS)['high'];
+
+/**
+ * The trees' risk bars (approval "review-risk-bars"): review-editor's `RISK_BARS_PARTS` before each named file's icon,
+ * as the tree's `fileLead`; undefined (no lead at all) with no risk to show. Also All files' (PullRepoParts.tsx).
+ */
+export function useRiskLead(risk: PullTreeRisk | null | undefined): ((path: string) => RowPart | null) | undefined {
+  return useMemo(() => {
+    if (!risk || risk.files.size === 0) return undefined;
+    const part = RISK_BARS_PARTS[risk.level];
+    return (path: string) => (risk.files.has(path) ? part : null);
+  }, [risk]);
+}
 
 const NO_PATHS: ReadonlySet<string> = new Set();
 

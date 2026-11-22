@@ -14,7 +14,7 @@ import { RepoListingPlaceholder } from '@plannotator/review-editor/components/Fi
 import { RepoFileView } from '@plannotator/review-editor/components/RepoFileView';
 import { useRepoFiles } from '@plannotator/review-editor/hooks/useRepoFiles';
 import { pullRepoFetch } from '../pulls/RailScope';
-import { useRiskLead } from './riskLead';
+import { useRiskLead } from './PullChangesTree';
 import type { PullAllFilesProps, PullRepoFileProps } from './pullRepoTypes';
 
 const NO_COMMENTS: CodeAnnotation[] = [];
