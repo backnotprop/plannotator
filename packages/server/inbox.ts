@@ -7317,7 +7317,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const capable = await routeInboxCapabilities(capabilities, req, url, { local: via === "local" && !fromDeviceDoor.has(req), crossSite: () => crossSiteCardRead(req), serverSession });
       if (capable) return capable;
       // Search: a read route (and the recent searches the window writes on opening a result).
-      const searched = await search.handle(req, url);
+      const searched = await search.handle(req, url, {
+        linked: () => machines.machinesView().filter((machine) => !machine.self && machine.state !== "revoked").map((machine) => ({ id: machine.id, name: machine.name, online: machine.state === "online" })),
+        projectOwner: (projectId) => machines.projectOwner(projectId),
+        forward: (forwarded, target) => machines.route(forwarded, target, via),
+      });
       if (searched) return searched;
       // The composers' skill picker and the SKILL.md a Send pastes in (inbox-skills.ts): read routes.
       const skills = inboxSkillsRoute(req, url, { codeReview: codeReviewOn(), shape: shapeOn(), routines: scheduledCap.on() });
