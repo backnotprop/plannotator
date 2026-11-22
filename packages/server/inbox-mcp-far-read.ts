@@ -1,23 +1,30 @@
 /**
  * read_thread of a thread on a linked machine (inbox-far-read.ts): the same read, options and text as a local one,
- * with a first line that says which computer it is on. Only for an id this Inbox's store does not hold, and only for
- * an agent on this computer: a paired cloud agent reads this Inbox's own threads, as before.
+ * with a first line that says which computer it is on. Only for an id this Inbox's store does not hold. A paired cloud
+ * agent reads them too (the person's computer asks for it), and its fetch_file of their files comes in pieces the same
+ * way (`filePieceOnMachine`).
  */
 
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { FAR_READ_WORDS, farAnswerCleaned, farThreadReadText, machineNameWords, type FarReadAnswer, type FarReadAsk } from "./inbox-far-read";
 import { ok, okComplete, type ToolResult } from "./inbox-mcp-result";
+import type { FarFilePiece } from "./inbox-machine-agent-piece";
 
 export interface InboxFarReadMcpContext {
   store: InboxStore;
   baseUrl: () => string;
-  /** Through the agent door: a paired cloud agent, which reads this Inbox's threads only. */
+  /** Through the agent door: a paired cloud agent. */
   cloudAgent?: { homeRoot: string };
   /**
    * A thread a linked machine holds, read there (inbox-machine-agent-read.ts). Null: no linked machine holds it.
    * Throws when it is there and cannot be read now. Absent: no machines here.
    */
   readOnMachine?: (ask: FarReadAsk) => Promise<{ machine: string; name: string; answer: FarReadAnswer } | null>;
+  /**
+   * One piece of a file of a message a linked machine holds, for a paired cloud agent's fetch_file (the pieces
+   * protocol, inbox-machine-agent-piece.ts). Null: no machine is linked. Absent: no machines here.
+   */
+  filePieceOnMachine?: (args: { message_id: string; file: string }, offset: number) => Promise<FarFilePiece | null>;
   /** The name of the linked machine whose list names this thread id, or null. Absent: no machines here. */
   farThreadMachine?: (threadId: string) => string | null;
 }
@@ -34,7 +41,7 @@ function farCandidate(store: InboxStore, input: FarReadAsk): boolean {
 
 /** The far read, or null when it is not one (the caller reads here, and says "No thread …" as before). */
 export async function farThreadRead(context: InboxFarReadMcpContext, input: FarReadAsk): Promise<ToolResult | null> {
-  if (!context.readOnMachine || context.cloudAgent || !farCandidate(context.store, input)) return null;
+  if (!context.readOnMachine || !farCandidate(context.store, input)) return null;
   const far = await context.readOnMachine(input);
   if (!far) return null;
   const { machine } = far;

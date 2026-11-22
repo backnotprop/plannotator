@@ -375,6 +375,8 @@ import { inboxRequestSentFrom } from "./inbox-sent-from";
 import { doorHealth } from "./inbox-door-version";
 import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
 import { agentFileDoorAnswer, agentReadDoorAnswer } from "./inbox-far-read";
+import { agentSearchDoorAnswer, agentThreadsDoorAnswer } from "./inbox-far-find";
+import { farRemoteOf } from "./inbox-machine-agent-find";
 import { archivedAskOf, farRowTags, mergeArchived } from "./inbox-archived-merged";
 import { createShowArchived, type InboxShowArchived } from "./inbox-show-archived";
 import { mergePullBoards } from "./inbox-machine-pulls";
@@ -1865,7 +1867,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A thread only a linked machine holds goes through the window's own forward (inbox-machines.ts).
     snoozeOnMachine: async (threadId, until) => (machines ? machines.snoozeThread(threadId, until) : null),
     readOnMachine: async (ask) => (machines ? machines.readThread(ask) : null),
+    filePieceOnMachine: async (args, offset) => (machines ? machines.filePiece(args, offset) : null),
     farThreadMachine: (threadId) => machines?.farThreadMachine(threadId) ?? null,
+    // search and read_thread's list ask the linked machines too, naming a project by its git remote (inbox-mcp-far-find.ts).
+    findOnMachines: () => machines?.agentFind ?? null,
+    projectRemoteKey: (root, waitMs) => farRemoteOf(repos, root, waitMs),
     snoozeMade: () => markSnoozeUsed(),
     ...(options.mcpNow ? { now: options.mcpNow } : {}),
   };
@@ -8346,6 +8352,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       machines: () => machines ?? null,
       // A linked machine's agents read this Inbox's threads and their files (inbox-far-read.ts).
       agentRead: { read: (url) => agentReadDoorAnswer(mcpContext, url), file: (url) => agentFileDoorAnswer(store, url) },
+      // ...and search and list them (inbox-far-find.ts): a project named by its git remote (unknown while git has not said).
+      agentFind: {
+        search: (url) => agentSearchDoorAnswer({ store, searchIndex: search.index, remoteOf: (root, waitMs) => farRemoteOf(repos, root, waitMs) }, url),
+        threads: (url) => agentThreadsDoorAnswer({ store, remoteOf: (root, waitMs) => farRemoteOf(repos, root, waitMs) }, url),
+      },
       machineUpdate: {
         read: () => updates.machineRead(),
         start: () => updates.machineStart(),

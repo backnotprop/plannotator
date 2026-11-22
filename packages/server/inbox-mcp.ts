@@ -59,6 +59,7 @@ import type { InboxSearchIndex } from "@plannotator/shared/inbox/search";
 import { isInsideFolder, type InboxProjectRoot } from "./inbox-project-root";
 import { registerInboxSnoozeTool, type InboxSnoozeMcpContext } from "./inbox-mcp-snooze";
 import { farReplyRefusal, farThreadRead, type InboxFarReadMcpContext } from "./inbox-mcp-far-read";
+import { farThreadsFor, mergedThreadRows, type InboxFarFindMcpContext } from "./inbox-mcp-far-find";
 import { notePullFoundLater, pullsToLookUp, quietHint, type InboxKnownPulls } from "./inbox-mcp-hints";
 import { registerInboxScheduledTool, type InboxScheduledMcpContext } from "./inbox-mcp-scheduled";
 import type { ProjectHostOf } from "./inbox-thread-pulls";
@@ -269,7 +270,7 @@ export const SEND_ROUTING_FIELDS = {
   agent_host: z.string().optional().describe("Your agent host, e.g. claude-code, codex, cursor."),
 };
 
-export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMcpContext, InboxBranchMcpContext, InboxFarReadMcpContext {
+export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMcpContext, InboxBranchMcpContext, InboxFarReadMcpContext, InboxFarFindMcpContext {
   store: InboxStore;
   /** The Inbox's base URL, `http://localhost:<port>/`. */
   baseUrl: () => string;
@@ -680,7 +681,7 @@ async function projectsInside(context: InboxMcpContext, path: string, own: Inbox
 }
 
 /** The list rows of `projectIds` (every project when null), of one session's threads when given. */
-function listScopedRows(store: InboxStore, projectIds: ReadonlySet<string> | null, session: string | null) {
+export function listScopedRows(store: InboxStore, projectIds: ReadonlySet<string> | null, session: string | null) {
   if (projectIds === null) return store.listRows({ session });
   if (projectIds.size === 1) return store.listRows({ projectId: [...projectIds][0]!, session });
   return store.listRows({ session }).filter((row) => projectIds.has(row.project.id));
@@ -1197,8 +1198,10 @@ function personFacts(store: InboxStore, threadId: string, caller: string | null)
 }
 
 /** One row of read_thread's list as a line of text: every field the structured row holds. */
-export function threadRowText(row: InboxAgentThreadRow & { tagged_you?: true; project?: string }): string {
+export function threadRowText(row: Omit<InboxAgentThreadRow, "unread"> & { unread?: boolean; tagged_you?: true; project?: string; machine?: { name: string } }): string {
   const parts = [`- ${row.thread_id}`];
+  // A thread on a linked computer (inbox-mcp-far-find.ts).
+  if (row.machine) parts.push(`on ${row.machine.name}`);
   if (row.project) parts.push(`in ${row.project}`);
   if (row.subject) parts.push(JSON.stringify(row.subject));
   if (row.thread_name) parts.push(`name ${JSON.stringify(row.thread_name)}`);
@@ -1209,6 +1212,7 @@ export function threadRowText(row: InboxAgentThreadRow & { tagged_you?: true; pr
   }
   parts.push(`last ${row.last_author} ${shortTime(row.last_at)}`);
   if (row.last_person_message_id && row.last_person_at) parts.push(`person's last ${row.last_person_message_id} ${shortTime(row.last_person_at)}`);
+  // A linked computer's row has none: read there with no session, it would not say what this agent has read.
   if (row.unread) parts.push("unread: the person wrote something you have not read");
   // The person tagged the reader in this thread (approval "inbox-tag-agents"), in any project.
   if (row.tagged_you) parts.push("the person tagged you here");
@@ -1537,26 +1541,35 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         // A thread an agent wrote in after its archive line still takes a reply: listed like an open one.
         if (!input.include_resolved) threads = threads.filter((t) => t.resolved_at === null || t.agent_after_archive === true);
         const limit = input.limit ?? 20;
-        const total = threads.length;
+        // Every agent's threads on the linked machines too (inbox-mcp-far-find.ts): never "me", since a session here
+        // never sent in a thread there, and never for a connection's own list (peek). None linked: null.
+        const farList =
+          askedBy === "anyone" && !peek
+            ? await farThreadsFor(context, { limit, include_resolved: input.include_resolved === true, all: found?.every === true, projectPath: input.project_path, projects: found?.projects ?? (project ? [project] : []) })
+            : null;
+        const total = threads.length + (farList?.total ?? 0);
         // One short row per thread: the window's row is the person's view (and its `ack` shows a 👍 before it settles).
-        const rows = threads.slice(0, limit).map((row) => {
+        const local = threads.slice(0, limit).map((row) => {
           const steps = rowSteps(context, row.thread_id, session);
           return { ...agentThreadRow(store, row, session), ...(found?.every ? { project: row.project.name } : {}), ...(tagged.has(row.thread_id) ? { tagged_you: true as const } : {}), ...(steps ? { steps } : {}) };
         });
         // The session saw these subjects (the check INBOX_REPLY_TO_CHECK asks for), unless a connection read them for it.
-        if (!peek) for (const row of rows) noteSessionRead(store, session, row.thread_id, clock());
+        if (!peek) for (const row of local) noteSessionRead(store, session, row.thread_id, clock());
+        const rows = farList ? mergedThreadRows(local, (row) => owed.has(row.thread_id), farList.rows.map(({ project: where, ...row }) => (found?.every || where.toLowerCase() !== (project?.name ?? "").toLowerCase() ? { ...row, project: where } : row)), limit) : local;
         const head = `${total} thread${total === 1 ? "" : "s"}${project ? ` in ${project.name}` : ""}${total > limit ? `, showing ${limit}` : ""}.`;
+        const farLines = farList?.lines.length ? `\n${farList.lines.join("\n")}` : "";
         // A folder that holds projects (a plain folder over a repo) lists nothing itself: name the projects below it, so the agent can ask for them.
         const inside = total === 0 ? await projectsInside(context, input.project_path, project, input.include_resolved === true) : [];
         const insideLine =
           inside.length > 0
             ? `Projects inside this folder: ${inside.map((p) => `${p.name} (${p.root}), ${p.threads} thread${p.threads === 1 ? "" : "s"}`).join("; ")}. Pass its project_path to list ${inside.length === 1 ? "them" : "one"}.`
             : "";
-        return okComplete(rows.length > 0 ? `${head}\n${rows.map(threadRowText).join("\n")}` : insideLine ? `${head}\n${insideLine}` : head, {
+        return okComplete(`${rows.length > 0 ? `${head}\n${rows.map(threadRowText).join("\n")}` : insideLine ? `${head}\n${insideLine}` : head}${farLines}`, {
           project: project ? { id: project.id, name: project.name, root: project.root } : null,
           threads: rows,
           total,
           ...(inside.length > 0 ? { projects_inside: inside } : {}),
+          ...(farList?.lines.length ? { not_listed: farList.lines } : {}),
         });
       }),
   );

@@ -200,17 +200,17 @@ describe("read_thread of a thread on a linked machine", () => {
     expect(mini.store.pendingReplies("ses_builder").map((m) => m.id)).toEqual(waiting);
   });
 
-  test("a paired cloud agent's read of a far id stays this Inbox's own: no linked machine is asked", async () => {
+  test("a paired cloud agent reads a far thread too, its files listed with the same command", async () => {
     const studio = machine("Studio");
     const mini = machine("Mini");
-    const id = await thread(mini);
-    let asked = 0;
-    const link = linkTo(mini, { rows: [id], request: async () => (asked++, Response.json({}, { status: 500 })) });
-    readerTools(studio, [link], {});
+    const id = await thread(mini, ["notes.md"]);
+    const link = linkTo(mini, { rows: [id] });
+    readerTools(studio, [link], { [link.id]: "Mini" });
+    const local = (await studio.tools().read_thread!.handler({ thread_id: id }, {})).content[0]!.text;
     studio.context.cloudAgent = { homeRoot: studio.root };
     const read = await studio.tools().read_thread!.handler({ thread_id: id }, {});
-    expect(read.content[0]!.text).toBe(`thread_not_found: No thread ${id}.`);
-    expect(asked).toBe(0);
+    expect(read.content[0]!.text).toBe(local);
+    expect(read.content[0]!.text).toContain("plannotator inbox call fetch_file '");
   });
 
   test("takes exactly what a local read takes: a stop notice's id, a fractional cursor, a message the thread lacks", async () => {
@@ -440,10 +440,11 @@ describe("a far thread's files", () => {
 
 describe("the door routes", () => {
   test("only a linked machine's token reaches them: never a phone, and never through the window routes", () => {
-    for (const name of ["GET agent-read", "GET agent-file"]) {
+    for (const name of ["GET agent-read", "GET agent-file", "GET agent-search", "GET agent-threads"]) {
       expect(doorRouteTable().find((row) => row.name === name)).toMatchObject({ grant: "machine" });
     }
-    expect(doorRouteOf("GET", "agent-read", false)).toBeNull();
-    expect(doorRouteOf("GET", "agent-file", false)).toBeNull();
+    // Not window routes for any token, a machine's included: only the door's own answer serves them (a phone's
+    // token gets 404 there: inbox-door-version.test.ts, "a linked machine's own routes").
+    for (const route of ["agent-read", "agent-file", "agent-search", "agent-threads"]) expect([route, doorRouteOf("GET", route, true)]).toEqual([route, null]);
   });
 });

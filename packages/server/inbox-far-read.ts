@@ -164,13 +164,13 @@ export function agentReadDoorAnswer(host: AgentReadHost, url: URL): Response {
 }
 
 /** A file handle's bytes as a stream, closed at the end or when the reader goes. */
-function handleStream(opened: { handle: { read: (b: Buffer, o: number, l: number, p: number) => Promise<{ bytesRead: number }>; close: () => Promise<void> }; size: number }): ReadableStream<Uint8Array> {
-  let at = 0;
+function handleStream(opened: { handle: { read: (b: Buffer, o: number, l: number, p: number) => Promise<{ bytesRead: number }>; close: () => Promise<void> }; size: number }, from = 0, end = opened.size): ReadableStream<Uint8Array> {
+  let at = from;
   const close = () => void opened.handle.close().catch(() => {});
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
-        const length = Math.min(1024 * 1024, opened.size - at);
+        const length = Math.min(1024 * 1024, end - at);
         if (length <= 0) {
           close();
           controller.close();
@@ -190,15 +190,44 @@ function handleStream(opened: { handle: { read: (b: Buffer, o: number, l: number
   });
 }
 
-/** `GET agent-file` on B: one file read_thread lists, its bytes, with its name and SHA-256. */
+/** The most `length` a piece read (`offset=`) takes: the agent door's piece. */
+export const AGENT_FILE_PIECE_MAX_BYTES = 1024 * 1024;
+/** The header that says where a piece read starts: a door that does not send it reads the whole file (an older one). */
+export const AGENT_FILE_OFFSET_HEADER = "X-Plannotator-File-Offset";
+
+/** A piece read's `offset` and `length` from the query, or null for the whole file. Throws for one that does not read. */
+function pieceAsk(url: URL, size: number, name: string): { offset: number; length: number } | null {
+  const offset = url.searchParams.get("offset");
+  if (offset === null) return null;
+  const at = Number(offset);
+  if (!Number.isInteger(at) || at < 0) throw new InboxError("validation_error", "offset: where the piece starts, in bytes from 0.");
+  if (at > size) throw new InboxError("validation_error", `offset: ${name} has ${size} bytes.`);
+  const asked = Number(url.searchParams.get("length") ?? AGENT_FILE_PIECE_MAX_BYTES);
+  if (!Number.isInteger(asked) || asked < 1) throw new InboxError("validation_error", "length: a whole number of bytes, at least 1.");
+  return { offset: at, length: Math.min(asked, AGENT_FILE_PIECE_MAX_BYTES, size - at) };
+}
+
+/**
+ * `GET agent-file` on B: one file read_thread lists, its bytes, with its name and SHA-256 (the whole file's). With
+ * `offset` (and `length`, at most 1 MiB): only that piece, said in `X-Plannotator-File-Offset`, so the person's
+ * computer serves a cloud agent's pieces without reading the whole file each time.
+ */
 export async function agentFileDoorAnswer(store: InboxStore, url: URL): Promise<Response> {
   try {
     const args = { message_id: url.searchParams.get("message_id") ?? "", file: url.searchParams.get("file") ?? "" };
     const opened = await openInboxAgentFile(store, null, args, "an agent on another computer");
-    return new Response(handleStream(opened), {
+    let piece: { offset: number; length: number } | null;
+    try {
+      piece = pieceAsk(url, opened.size, opened.name);
+    } catch (error) {
+      await opened.handle.close().catch(() => {});
+      throw error;
+    }
+    return new Response(piece ? handleStream(opened, piece.offset, piece.offset + piece.length) : handleStream(opened), {
       headers: {
         "Content-Type": opened.contentType,
-        "Content-Length": String(opened.size),
+        "Content-Length": String(piece ? piece.length : opened.size),
+        ...(piece ? { [AGENT_FILE_OFFSET_HEADER]: String(piece.offset) } : {}),
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
         [AGENT_FILE_NAME_HEADER]: fetchedNameHeader(opened.name),
@@ -228,13 +257,13 @@ const ESCAPES = /\x1b\[[0-?]*[ -/]*[@-~]|\x9b[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]
 /** Control characters but a line break and a tab. */
 const CONTROLS = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g;
 /** On one line: no control character, line break or line separator at all. */
-const oneLine = (text: string): string => text.replace(ESCAPES, "").replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ").trim();
+export const oneLine = (text: string): string => text.replace(ESCAPES, "").replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ").trim();
 
 /** The thread's own words (a message's body, its first words), printed as a local read prints them. */
 const CONTENT_KEYS = new Set(["body", "words"]);
 
 /** Every far string but the thread's own words with no terminal escape and no control character but a line break or tab. */
-function cleanStrings(value: unknown, key = ""): unknown {
+export function cleanStrings(value: unknown, key = ""): unknown {
   if (typeof value === "string") return CONTENT_KEYS.has(key) ? value : value.replace(ESCAPES, "").replace(CONTROLS, "");
   if (Array.isArray(value)) return value.map((item) => cleanStrings(item));
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, cleanStrings(v, k)]));
