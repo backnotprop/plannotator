@@ -28,8 +28,8 @@ import { antigravityConversationOfCall, checkInboxSubject, INBOX_ANTIGRAVITY_HOS
 import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_CHANGE_RULE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SHOWING_RULE, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_MOVED_TO_FIELD_DESCRIPTION, INBOX_MOVED_TO_RULE, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
 import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { inboxMcpInstructions, inboxMcpTierOf, type InboxMcpClient, type InboxMcpReminder } from "./inbox-mcp-instructions";
-import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
-import { inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
+import { bodyShowsLocalImages, captureInboxInlineImages, INBOX_INLINE_IMAGES_MAX, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
+import { inboxMessageImageRefsInOrder, inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
 import { inboxInlineMediaKind } from "@plannotator/core/inbox-inline-media";
 import { MEDIA_NOT_SHOWN_MAX, mediaNotShown, mediaNotShownText, type MediaNotShown } from "./inbox-media-not-shown";
 import { questionsWithoutPictureChoices } from "./inbox-picture-choices";
@@ -40,11 +40,12 @@ import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly 
 import { QUESTION_OPENERS_WITH_TEXT_MAX, questionOpenersWithText, questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxSendResult, InboxStore } from "@plannotator/shared/inbox/store";
-import { inboxViewingLine } from "@plannotator/shared/inbox/uploads";
-import type { InboxAttachment, InboxListRow, InboxLiveSiteRef } from "@plannotator/core/inbox-types";
+import type { InboxAttachment, InboxListRow, InboxLiveSiteRef, InboxMessageWire } from "@plannotator/core/inbox-types";
+import { inboxAgentFilesOf } from "./inbox-agent-files";
 import { registerInboxGuideTools } from "./inbox-guides";
+import { inboxSendUploadPictures, type InboxSendUpload } from "./inbox-cloud-pictures";
 import { lastContactOf, noteSessionRead, staleThreadOf, staleThreadText } from "./inbox-session-reads";
-import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, clip, shortTime, sizeText, windowedThread, windowedThreadText } from "./inbox-mcp-read";
+import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, clip, inboxFullReadLines, shortTime, sizeText, windowedThread, windowedThreadText } from "./inbox-mcp-read";
 import { registerInboxSearchTool } from "./inbox-mcp-search";
 import { registerInboxCardTool } from "./inbox-mcp-cards";
 export { INBOX_BOARD_OFF_TEXT } from "./inbox-mcp-cards";
@@ -57,6 +58,8 @@ export { fail, guarded, ok, okComplete, PROJECT_PATH_DESCRIPTION, type ToolResul
 import type { InboxSearchIndex } from "@plannotator/shared/inbox/search";
 import { isInsideFolder, type InboxProjectRoot } from "./inbox-project-root";
 import { registerInboxSnoozeTool, type InboxSnoozeMcpContext } from "./inbox-mcp-snooze";
+import { farReplyRefusal, farThreadRead, type InboxFarReadMcpContext } from "./inbox-mcp-far-read";
+import { farThreadsFor, mergedThreadRows, type InboxFarFindMcpContext } from "./inbox-mcp-far-find";
 import { notePullFoundLater, pullsToLookUp, quietHint, type InboxKnownPulls } from "./inbox-mcp-hints";
 import { registerInboxScheduledTool, type InboxScheduledMcpContext } from "./inbox-mcp-scheduled";
 import type { ProjectHostOf } from "./inbox-thread-pulls";
@@ -270,7 +273,7 @@ export const SEND_ROUTING_FIELDS = {
   agent_host: z.string().optional().describe("Your agent host, e.g. claude-code, codex, cursor."),
 };
 
-export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMcpContext, InboxBranchMcpContext {
+export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMcpContext, InboxBranchMcpContext, InboxFarReadMcpContext, InboxFarFindMcpContext {
   store: InboxStore;
   /** The Inbox's base URL, `http://localhost:<port>/`. */
   baseUrl: () => string;
@@ -307,6 +310,11 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMc
    * project for a path.
    */
   findProjects?: (path: string) => Promise<{ projects: InboxProject[]; unresolved: boolean; every?: boolean }>;
+  /**
+   * A cloud agent's call (inbox-agent-door.ts): the files it attached as bytes in this send. A picture the body names
+   * by one of their names shows that file (inbox-cloud-pictures.ts); every other picture is read as for any agent.
+   */
+  inlineImageFiles?: readonly InboxSendUpload[];
   /**
    * Whether the Inbox itself knows the sender's session is woken by the
    * person's reply, whatever its own connection said: a Claude Code, Pi or
@@ -622,6 +630,8 @@ export async function sendProject(
   refuseBadSubject(input.subject);
   if (input.reply_to) {
     const parent = context.store.message(ownMessageId(context.store, input.reply_to));
+    const far = parent ? null : (context.farThreadMachine?.(input.reply_to) ?? null);
+    if (far) throw new InboxError("thread_on_other_machine", farReplyRefusal(input.reply_to, far));
     if (!parent) throw new InboxError("message_not_found", `No message ${input.reply_to}.`);
     return context.store.project(parent.project_id)!;
   }
@@ -674,7 +684,7 @@ async function projectsInside(context: InboxMcpContext, path: string, own: Inbox
 }
 
 /** The list rows of `projectIds` (every project when null), of one session's threads when given. */
-function listScopedRows(store: InboxStore, projectIds: ReadonlySet<string> | null, session: string | null) {
+export function listScopedRows(store: InboxStore, projectIds: ReadonlySet<string> | null, session: string | null) {
   if (projectIds === null) return store.listRows({ session });
   if (projectIds.size === 1) return store.listRows({ projectId: [...projectIds][0]!, session });
   return store.listRows({ session }).filter((row) => projectIds.has(row.project.id));
@@ -886,11 +896,14 @@ export async function sendAgentMessage(
   // Where relative paths start: the folder the agent works in, when its connection says (a cd away from its project).
   const working = !!input.working_folder && isAbsolute(input.working_folder);
   const here = working ? input.working_folder : input.project_path;
+  // Pictures sent as bytes in this send (a cloud agent's, inbox-cloud-pictures.ts): each shows in the body, not again below it.
+  const uploaded = context.inlineImageFiles?.length ? inboxSendUploadPictures(input.body, context.inlineImageFiles, input.attachments) : null;
+  const attachmentInput = uploaded ? uploaded.attachments : input.attachments;
+  const base = here && isAbsolute(here) ? here : project.root;
   let attachments: InboxAttachment[] | undefined;
-  if (input.attachments && input.attachments.length > 0) {
+  if (attachmentInput && attachmentInput.length > 0) {
     if (!context.recordAttachments) throw new InboxError("validation_error", "attachments: not taken by this Inbox.");
-    const base = here && isAbsolute(here) ? here : project.root;
-    attachments = await context.recordAttachments(input.attachments, project, base);
+    attachments = await context.recordAttachments(attachmentInput, project, base);
   }
   // The question blocks inside attached Markdown files (issue #2828): answerable in the window like the body's.
   const attachmentQuestions = attachments && attachments.length > 0 ? await readInboxAttachmentQuestions(store.dir, attachments) : [];
@@ -909,6 +922,8 @@ export async function sendAgentMessage(
   // The images the body shows, copied now under the message-image route's rules (inline-images.ts):
   // files of the thread, with a sent version. One that cannot be read is captured on a later read.
   // Asynchronous and yielding; the blobs stay staged until the store accepts the message.
+  // Pictures sent as bytes go first, so each is taken now: their bytes are not on disk for a later read to find.
+  const fromBytes = uploaded && uploaded.pictures.size > 0 ? [...uploaded.pictures.keys()] : null;
   const captured = bodyShowsLocalImages(input.body)
     ? await captureInboxInlineImages(store.dir, {
         body: input.body,
@@ -917,8 +932,25 @@ export async function sendAgentMessage(
         anywhere: true,
         sentAt: new Date().toISOString(),
         stage: true,
+        ...(uploaded && fromBytes
+          ? {
+              files: uploaded.pictures,
+              refs: [...fromBytes, ...inboxMessageImageRefsInOrder(input.body).filter((ref) => !uploaded.pictures.has(ref))],
+              max: Math.max(INBOX_INLINE_IMAGES_MAX, fromBytes.length),
+            }
+          : {}),
       })
     : null;
+  // A picture sent as bytes that could not be shown is attached below the message instead, so its file is kept.
+  const notShownUploads = uploaded ? [...new Set((captured?.failures ?? []).flatMap((failure) => uploaded.pictures.get(failure.ref)?.id ?? []))] : [];
+  if (notShownUploads.length > 0) {
+    try {
+      attachments = [...(attachments ?? []), ...(await context.recordAttachments!(notShownUploads, project, base))];
+    } catch (error) {
+      await captured?.discard();
+      throw error;
+    }
+  }
   let result: ReturnType<InboxStore["sendMessage"]>;
   try {
     result = store.sendMessage({
@@ -1169,8 +1201,10 @@ function personFacts(store: InboxStore, threadId: string, caller: string | null)
 }
 
 /** One row of read_thread's list as a line of text: every field the structured row holds. */
-export function threadRowText(row: InboxAgentThreadRow & { tagged_you?: true; project?: string }): string {
+export function threadRowText(row: Omit<InboxAgentThreadRow, "unread"> & { unread?: boolean; tagged_you?: true; project?: string; machine?: { name: string } }): string {
   const parts = [`- ${row.thread_id}`];
+  // A thread on a linked computer (inbox-mcp-far-find.ts).
+  if (row.machine) parts.push(`on ${row.machine.name}`);
   if (row.project) parts.push(`in ${row.project}`);
   if (row.subject) parts.push(JSON.stringify(row.subject));
   if (row.thread_name) parts.push(`name ${JSON.stringify(row.thread_name)}`);
@@ -1181,6 +1215,7 @@ export function threadRowText(row: InboxAgentThreadRow & { tagged_you?: true; pr
   }
   parts.push(`last ${row.last_author} ${shortTime(row.last_at)}`);
   if (row.last_person_message_id && row.last_person_at) parts.push(`person's last ${row.last_person_message_id} ${shortTime(row.last_person_at)}`);
+  // A linked computer's row has none: read there with no session, it would not say what this agent has read.
   if (row.unread) parts.push("unread: the person wrote something you have not read");
   // The person tagged the reader in this thread (approval "inbox-tag-agents"), in any project.
   if (row.tagged_you) parts.push("the person tagged you here");
@@ -1420,6 +1455,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           after: ownMessageId(store, asked.after),
           ...(asked.expand ? { expand: asked.expand.map((id) => ownMessageId(store, id)) } : {}),
         };
+        // A thread only a linked machine holds: read there, the same read (inbox-mcp-far-read.ts).
+        const far = await farThreadRead(context, input);
+        if (far) return far;
         const threadId = threadOf(store, input);
         if (threadId) {
           const naming = namingHint(store, threadId, input.agent_session?.trim() || null);
@@ -1443,8 +1481,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             // The full records, as before the window (tests, scripts, a jq over the result).
             const records = store.agentThread(threadId, reader)!;
             store.recordAgentRead(records.messages.map((m) => m.id), reader);
-            // What was on screen reads the same here as in the transcript: the line, not its parts.
-            const thread = { ...records, messages: records.messages.map((m) => (m.viewing ? { ...m, viewing: inboxViewingLine(m) } : m)) };
+            // What was on screen, and where the person wrote it, read the same here as in the transcript: the line, not its parts.
+            const thread = { ...records, messages: records.messages.map(inboxFullReadLines) };
             const replies = thread.messages.filter((m) => m.author.kind === "person").length;
             return ok(
               `Thread ${threadId}${thread.subject ? ` (${thread.subject})` : ""}: ${thread.messages.length} message${thread.messages.length === 1 ? "" : "s"}, ${replies} from the person${thread.resolved_at ? ", resolved" : ""}.${naming?.line ?? ""}`,
@@ -1452,7 +1490,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             );
           }
           // Built first, so a refused read (a bad expand, before or after) marks nothing read.
-          const { result, order, shown, readThrough } = windowedThread(store, threadId, { ...input, caller: input.agent_session?.trim() || null, names: context.sessionName }, url);
+          // Through the agent door each file is listed with its path here and the command that fetches its bytes.
+          const filesOf = context.cloudAgent ? (message: InboxMessageWire) => inboxAgentFilesOf(store.dir, message) : undefined;
+          const { result, order, shown, readThrough } = windowedThread(store, threadId, { ...input, caller: input.agent_session?.trim() || null, names: context.sessionName, filesOf }, url);
           if (!guest) {
             store.markAgentChecked(threadId, readThrough, undefined, reader);
             store.settleReadPast(threadId, reader, shown);
@@ -1504,26 +1544,35 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         // A thread an agent wrote in after its archive line still takes a reply: listed like an open one.
         if (!input.include_resolved) threads = threads.filter((t) => t.resolved_at === null || t.agent_after_archive === true);
         const limit = input.limit ?? 20;
-        const total = threads.length;
+        // Every agent's threads on the linked machines too (inbox-mcp-far-find.ts): never "me", since a session here
+        // never sent in a thread there, and never for a connection's own list (peek). None linked: null.
+        const farList =
+          askedBy === "anyone" && !peek
+            ? await farThreadsFor(context, { limit, include_resolved: input.include_resolved === true, all: found?.every === true, projectPath: input.project_path, projects: found?.projects ?? (project ? [project] : []) })
+            : null;
+        const total = threads.length + (farList?.total ?? 0);
         // One short row per thread: the window's row is the person's view (and its `ack` shows a 👍 before it settles).
-        const rows = threads.slice(0, limit).map((row) => {
+        const local = threads.slice(0, limit).map((row) => {
           const steps = rowSteps(context, row.thread_id, session);
           return { ...agentThreadRow(store, row, session), ...(found?.every ? { project: row.project.name } : {}), ...(tagged.has(row.thread_id) ? { tagged_you: true as const } : {}), ...(steps ? { steps } : {}) };
         });
         // The session saw these subjects (the check INBOX_REPLY_TO_CHECK asks for), unless a connection read them for it.
-        if (!peek) for (const row of rows) noteSessionRead(store, session, row.thread_id, clock());
+        if (!peek) for (const row of local) noteSessionRead(store, session, row.thread_id, clock());
+        const rows = farList ? mergedThreadRows(local, (row) => owed.has(row.thread_id), farList.rows.map(({ project: where, ...row }) => (found?.every || where.toLowerCase() !== (project?.name ?? "").toLowerCase() ? { ...row, project: where } : row)), limit) : local;
         const head = `${total} thread${total === 1 ? "" : "s"}${project ? ` in ${project.name}` : ""}${total > limit ? `, showing ${limit}` : ""}.`;
+        const farLines = farList?.lines.length ? `\n${farList.lines.join("\n")}` : "";
         // A folder that holds projects (a plain folder over a repo) lists nothing itself: name the projects below it, so the agent can ask for them.
         const inside = total === 0 ? await projectsInside(context, input.project_path, project, input.include_resolved === true) : [];
         const insideLine =
           inside.length > 0
             ? `Projects inside this folder: ${inside.map((p) => `${p.name} (${p.root}), ${p.threads} thread${p.threads === 1 ? "" : "s"}`).join("; ")}. Pass its project_path to list ${inside.length === 1 ? "them" : "one"}.`
             : "";
-        return okComplete(rows.length > 0 ? `${head}\n${rows.map(threadRowText).join("\n")}` : insideLine ? `${head}\n${insideLine}` : head, {
+        return okComplete(`${rows.length > 0 ? `${head}\n${rows.map(threadRowText).join("\n")}` : insideLine ? `${head}\n${insideLine}` : head}${farLines}`, {
           project: project ? { id: project.id, name: project.name, root: project.root } : null,
           threads: rows,
           total,
           ...(inside.length > 0 ? { projects_inside: inside } : {}),
+          ...(farList?.lines.length ? { not_listed: farList.lines } : {}),
         });
       }),
   );

@@ -30,7 +30,7 @@
  */
 
 import { INBOX_ROWS_ASK_BLOCK } from "@plannotator/core/inbox-types";
-import { INBOX_DECISION_ASK_BLOCK, INBOX_HOST_NAMES, inboxAgentName, inboxBoardRequestBlock, isInboxNote, type InboxMessageWire, type InboxMovedTo, type InboxQuestion } from "@plannotator/core/inbox-types";
+import { INBOX_DECISION_ASK_BLOCK, INBOX_HOST_NAMES, inboxAgentName, inboxBoardRequestBlock, inboxSentFromLine, isInboxNote, type InboxMessageWire, type InboxMovedTo, type InboxQuestion } from "@plannotator/core/inbox-types";
 import { inboxAnswersSectionEnd } from "@plannotator/core/inbox-questions";
 import { QUESTION_ANSWERS_HEADING, type QuestionAnswer } from "@plannotator/core/question-block";
 import { inboxAckReaction } from "@plannotator/shared/inbox/connection";
@@ -40,6 +40,8 @@ import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { INBOX_TIDY_WITHDRAWN_HOST } from "@plannotator/shared/inbox/tidy";
 import { inboxViewingLine } from "@plannotator/shared/inbox/uploads";
 import { reviewAnchorBlock, reviewAnchorPlace } from "@plannotator/core/review-threads";
+import type { AgentFile } from "./inbox-agent-files";
+import { inboxMessageForReader, type InboxSentFromReader } from "./inbox-sent-from-reader";
 
 /** Messages read_thread shows in full by default: the newest six. */
 export const INBOX_THREAD_WINDOW = 6;
@@ -131,6 +133,8 @@ export interface AgentMessage {
   body_bytes?: number;
   questions?: AgentQuestion[];
   attachments?: { name: string; kind: string; size: number; path: string }[];
+  /** In place of `attachments` for a cloud agent (`ThreadReadInput.filesOf`): each file with its path and the command that fetches it. */
+  files?: AgentFile[];
   /** The person's reaction (approval "inbox-reaction-tray"): always `reaction`, 👍 Looks good included. */
   ack?: { label: string; at: string; reaction: { emoji: string; label?: string } };
   guide?: { title: string };
@@ -153,6 +157,8 @@ export interface AgentMessage {
   board_cards?: { id: string; title: string }[];
   /** `inboxViewingLine`, on a reply sent from full screen's floating box. `body` stays the person's words. */
   viewing?: string;
+  /** `inboxSentFromLine`, on a message the person wrote away from this computer. `body` stays the person's words. */
+  sent_from?: string;
   review_comment?: string;
 }
 
@@ -203,6 +209,7 @@ export interface AgentMessageLine {
   tagged?: AgentTagged[];
   board_request?: true;
   viewing?: string;
+  sent_from?: string;
   review_comment?: string;
 }
 
@@ -215,6 +222,10 @@ export interface ThreadReadInput {
   /** The reader's session: a message addressed to it says `you`. */
   caller?: string | null;
   names?: SessionNameOf;
+  /** Through the agent door: a message's files with their paths here and the command that fetches each to the agent's machine. */
+  filesOf?: (message: InboxMessageWire) => AgentFile[];
+  /** A far read's reader (inbox-sent-from-reader.ts): where the person wrote each message, as its computer sees it. */
+  farReader?: InboxSentFromReader;
 }
 
 export interface ThreadWindowResult {
@@ -461,7 +472,7 @@ function addressee(message: InboxMessageWire, caller: string | null, names?: Ses
   return { host: message.to.host, session: message.to.session, ...(name ? { name } : {}), you };
 }
 
-export function agentMessage(message: InboxMessageWire, form: AgentMessageForm = "window", caller: string | null = null, names?: SessionNameOf): AgentMessage {
+export function agentMessage(message: InboxMessageWire, form: AgentMessageForm = "window", caller: string | null = null, names?: SessionNameOf, filesOf?: ThreadReadInput["filesOf"]): AgentMessage {
   const source = form === "earlier" ? withoutAnswersSection(message) : message.body;
   const total = byteLength(message.body);
   const over = form !== "whole" && byteLength(source) > INBOX_BODY_CUT_BYTES;
@@ -477,7 +488,7 @@ export function agentMessage(message: InboxMessageWire, form: AgentMessageForm =
     body,
     ...(body !== message.body ? { body_bytes: total } : {}),
     ...(message.questions?.length ? { questions: agentQuestions(message.questions) } : {}),
-    ...(message.attachments?.length ? { attachments: message.attachments.map((a) => ({ name: a.name, kind: a.kind, size: a.size, path: a.path })) } : {}),
+    ...(filesOf ? filesField(filesOf(message)) : message.attachments?.length ? { attachments: message.attachments.map((a) => ({ name: a.name, kind: a.kind, size: a.size, path: a.path })) } : {}),
     ...(ack ? { ack: { label: ack.label, at: ack.at, reaction: agentReaction(ack.reaction) } } : {}),
     ...(message.guide ? { guide: { title: message.guide.title } } : {}),
     ...(message.to ? { to: addressee(message, caller, names) } : {}),
@@ -486,9 +497,21 @@ export function agentMessage(message: InboxMessageWire, form: AgentMessageForm =
     ...(message.decision_ask === true ? { decision_ask: true as const } : {}),
     ...(message.rows_ask === true ? { rows_ask: true as const } : {}),
     ...(inboxViewingLine(message) ? { viewing: inboxViewingLine(message) } : {}),
+    ...(inboxSentFromLine(message) ? { sent_from: inboxSentFromLine(message) } : {}),
     ...(message.review_anchor ? { review_comment: reviewCommentText(message) } : {}),
   };
 }
+
+/** A record in read_thread's `format: "full"`: what was on screen and where the person wrote it, as their lines, not their parts. */
+export function inboxFullReadLines<M extends { viewing?: unknown; sent_from?: unknown }>(message: M): Omit<M, "viewing" | "sent_from"> & { viewing?: string; sent_from?: string } {
+  // Nothing to word: the record as it was, so a read of an older reply is unchanged.
+  if (!message.viewing && !message.sent_from) return message as Omit<M, "viewing" | "sent_from">;
+  const { viewing, sent_from, ...rest } = message;
+  const from = sent_from ? inboxSentFromLine(message) : "";
+  return { ...rest, ...(viewing ? { viewing: inboxViewingLine(message as { viewing?: never }) } : {}), ...(from ? { sent_from: from } : {}) };
+}
+
+const filesField = (files: AgentFile[]) => (files.length > 0 ? { files } : {});
 
 function reviewCommentText(message: InboxMessageWire): string {
   const resolved = message.review_resolved ? " The person resolved it." : "";
@@ -526,6 +549,7 @@ export function agentMessageLine(message: InboxMessageWire, caller: string | nul
     ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller, names) } : {}),
     ...(message.board_request === true ? { board_request: true as const } : {}),
     ...(inboxViewingLine(message) ? { viewing: inboxViewingLine(message) } : {}),
+    ...(inboxSentFromLine(message) ? { sent_from: inboxSentFromLine(message) } : {}),
     ...(message.review_anchor ? { review_comment: reviewCommentLine(message) } : {}),
   };
 }
@@ -558,7 +582,9 @@ export function windowedThread(
   const withdrawn = thread.messages.some((m) => m.tidy)
     ? new Set(store.tidyNotes().filter((m) => m.tidy?.wake && m.to && m.delivery?.host === INBOX_TIDY_WITHDRAWN_HOST).map((m) => `${m.tidy!.id}|${m.to!.session}`))
     : null;
-  const listed = withdrawn && withdrawn.size > 0 ? thread.messages.filter((m) => !(m.tidy && m.to && withdrawn.has(`${m.tidy.id}|${m.to.session}`))) : thread.messages;
+  const kept = withdrawn && withdrawn.size > 0 ? thread.messages.filter((m) => !(m.tidy && m.to && withdrawn.has(`${m.tidy.id}|${m.to.session}`))) : thread.messages;
+  const { farReader } = input;
+  const listed = farReader ? kept.map((m) => inboxMessageForReader(m, farReader)) : kept;
   const all = listed.map((message) => {
     // A Tidy note reads as one line here: its session had the whole list in its wake.
     if (message.tidy) return { ...message, body: `Tidy: the person asked ${INBOX_HOST_NAMES[message.to?.host ?? ""] ?? "the agent"} to tidy its threads; this one was listed.` };
@@ -621,7 +647,7 @@ export function windowedThread(
       .map((card) => ({ id: card.id, title: card.title }));
   const messages = all
     .filter((m) => full.has(m.id))
-    .map((m) => agentMessage(m, formOf(m.id), caller, input.names))
+    .map((m) => agentMessage(m, formOf(m.id), caller, input.names, input.filesOf))
     .map((m) => (m.board_request ? { ...m, board_cards: linkedCards() } : m));
   const earlier = inRange.filter((m) => !full.has(m.id)).map((m) => agentMessageLine(m, caller, input.names));
   const leftOut = all.filter((m) => !shown.has(m.id));
@@ -736,6 +762,7 @@ export function messageLineText(line: AgentMessageLine, context: TranscriptConte
   if (tagged) parts.push(tagged);
   parts.push(`"${line.words}" (${sizeText(line.bytes)})`);
   if (line.viewing) parts.push(line.viewing);
+  if (line.sent_from) parts.push(line.sent_from);
   if (line.review_comment) parts.push(line.review_comment);
   if (line.questions?.length) parts.push(line.questions.map((q) => questionWords(q, true)).join("; "));
   if (line.attachments?.length) parts.push(`files: ${line.attachments.join(", ")}`);
@@ -770,8 +797,10 @@ export function messageText(message: AgentMessage, context: TranscriptContext): 
   if (tagged) head.push(tagged);
   const lines = [`[${head.join(" · ")}]`, message.body.trimEnd()];
   if (message.viewing) lines.push(message.viewing);
+  if (message.sent_from) lines.push(message.sent_from);
   if (message.review_comment) lines.push(message.review_comment);
   if (message.questions?.length) lines.push(`Questions: ${message.questions.map((q) => questionWords(q)).join("; ")}`);
+  if (message.files?.length) lines.push(`Files: ${message.files.map((f) => `${f.name} (${f.kind}, ${sizeText(f.size)}): ${f.path} (to your machine: ${f.fetch})`).join("; ")}`);
   if (message.attachments?.length) {
     lines.push(`Files: ${message.attachments.map((a) => `${a.name} (${a.kind}, ${sizeText(a.size)}): ${a.path}`).join("; ")}`);
   }

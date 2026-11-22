@@ -7,6 +7,7 @@ import { getSingularPatch, processFile } from '@pierre/diffs';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/types';
 import type { DiffTokenEventBaseProps } from '@pierre/diffs';
 import { usePierreTheme } from '../hooks/usePierreTheme';
+import { usePierreSelectedLines } from '../hooks/usePierreSelectedLines';
 import { useFileContents } from '../hooks/useFileContents';
 import { useWorkerPoolThemeSync } from '../workerPool';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
@@ -121,6 +122,9 @@ const PierreDiffContent = React.memo(({
   onTokenEnter,
   onTokenLeave,
 }: PierreDiffContentProps) => {
+  // Not `pendingSelection || undefined`: that leaves Pierre's last range, and
+  // the gutter "+" with it, in place after Add, Cancel or Escape.
+  const selectedLines = usePierreSelectedLines(pendingSelection);
   return (
     <FileDiff
       key={filePath}
@@ -163,7 +167,7 @@ const PierreDiffContent = React.memo(({
         onTokenLeave,
       }}
       lineAnnotations={mergedAnnotations}
-      selectedLines={pendingSelection || undefined}
+      selectedLines={selectedLines}
       renderAnnotation={renderAnnotation}
     />
   );

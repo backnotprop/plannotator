@@ -66,6 +66,7 @@ import {
   type InboxLaunchError,
   type InboxLaunchRecord,
   type InboxReplyViewing,
+  type InboxSentFrom,
   type InboxAuthor,
   type InboxDecision,
   type InboxGuideRef,
@@ -380,6 +381,8 @@ export interface InboxReplyInput {
    * `{ attachment_id, time?, page?, as_sent? }`. Context only, so anything off about it drops it and never refuses the Send.
    */
   viewing?: unknown;
+  /** Where the person wrote it, as the server told it from the request (`InboxMessage.sent_from`); absent from this computer. */
+  sent_from?: InboxSentFrom | null;
   /**
    * The person chose another live session to take this reply, because the
    * session that asked has ended (the window's choice at Send). Absent: the
@@ -458,6 +461,15 @@ export interface InboxReaskInput {
    * for but the server found it not live; nothing is written.
    */
   to?: InboxAddressee | null;
+  /** Where the person pressed it, as the server told it from the request (`InboxMessage.sent_from`); absent from this computer. */
+  sent_from?: InboxSentFrom | null;
+  /**
+   * Re-ask all (reask-all.ts): the person's picks not sent stay as they are
+   * (still picked, still unsent, nothing marked sent) and are not in the note:
+   * from the list the person cannot see them, and a Send is the person's.
+   * Absent: the thread's own Re-ask, whose picks go with its note.
+   */
+  leave_picks?: boolean;
 }
 
 export interface InboxReplyResult {
@@ -735,6 +747,8 @@ export interface InboxDeliveryPresence {
   askerLive(session: string): boolean;
   /** Whether a reply to this session starts it again (a launched thread's own session): it has not ended. Absent: never. */
   launchResumes?(threadId: string, session: string): boolean;
+  /** Runs one list read with the launched sessions' pending replies found in one pass over the messages, dropped when it ends. Absent: none. */
+  onePass?<T>(read: () => T): T;
   /**
    * Whether an item may not have reached its session though it was handed on
    * (a Codex `codex queue` call that ran out of time): the row says it is
@@ -2076,10 +2090,33 @@ export class InboxStore {
    * can carry status that goes stale, and a plain reply repeated it every
    * time, so a plain reply takes the thread's short name, or null with none
    * (the connection then says `a reply`).
-   * Everything else keeps the thread's subject (`plainReplyFor` says why).
+   * A thread the person started that has a name takes its name as it stands
+   * now, the row's title, on everything it delivers, its first message and
+   * every first sight included, as a mail's subject goes with it: its
+   * subject is only the body's first words. The name is the person's
+   * (`named_by.kind` "person": typed in compose, or filled in by the Inbox
+   * for them), compose's suggestion left as it was ("auto", or the name a
+   * review or PR thread started with; the agent may still name the thread,
+   * `threadNamers`), or the agent's that named it ("agent"). A routine's
+   * thread keeps the routine's subject, and a thread an agent started its
+   * subject. Everything else keeps the thread's subject (`plainReplyFor`
+   * says why).
    */
   agentTitle(message: InboxMessage, session: string | null): string | null {
-    return this.plainReplyFor(message, session) ? this.threadShortName(message.thread_id) : this.threadSubject(message.thread_id);
+    if (this.plainReplyFor(message, session)) return this.threadShortName(message.thread_id);
+    if (this.titledByName(message.thread_id)) return this.threadShortName(message.thread_id) ?? this.threadSubject(message.thread_id);
+    return this.threadSubject(message.thread_id);
+  }
+
+  /**
+   * A thread the person started that has a name (theirs, compose's suggestion, or the agent's that named it), and not
+   * a routine's (its lines carry the routine's own subject): `agentTitle` titles it by that name.
+   */
+  private titledByName(threadId: string): boolean {
+    const root = this.messages.get(threadId);
+    if (!root?.started_by_person || root.scheduled_run || !root.thread_name?.trim()) return false;
+    const kind = root.named_by?.kind;
+    return kind === "person" || kind === "auto" || kind === "agent";
   }
 
   /**
@@ -2811,6 +2848,11 @@ export class InboxStore {
    * (`session`: the threads it started, joined or replied in).
    */
   listRows(filter: { projectId?: string | null; session?: string | null } = {}): InboxListRow[] {
+    const presence = this.deliveryPresence;
+    return presence?.onePass ? presence.onePass(() => this.listRowsRead(filter)) : this.listRowsRead(filter);
+  }
+
+  private listRowsRead(filter: { projectId?: string | null; session?: string | null }): InboxListRow[] {
     if (filter.projectId || filter.session) return this.buildRows(filter);
     // Every thread: the last answer while nothing it read changed (`rowsMemo`). A copy of the list, the same rows.
     const memo = this.rowsMemo;
@@ -5252,6 +5294,7 @@ export class InboxStore {
         : {}),
       ...(verdict ? { review_verdict: verdict } : {}),
       ...(viewing ? { viewing } : {}),
+      ...(input.sent_from ? { sent_from: input.sent_from } : {}),
       ...(reviewCommentsOf.length > 0 ? { review_comments_of: reviewCommentsOf } : {}),
       ...(quoted ? { quote: quoted.quote } : {}),
       ...(input.review_anchor ? { review_anchor: input.review_anchor } : {}),
@@ -5447,7 +5490,8 @@ export class InboxStore {
       .filter((m) => !this.closedByArchive(m))
       // Open action items are asked again too (owner, #2059); one the person marked inside its Undo window is not open.
       .flatMap((m) => this.questionRecords(m.id));
-    const picked = records.filter((r) => inboxQuestionState(r, false) === "picked" && r.answer !== null);
+    // Re-ask all leaves the picks as they are: none goes, none is marked sent.
+    const picked = input.leave_picks ? [] : records.filter((r) => inboxQuestionState(r, false) === "picked" && r.answer !== null);
     const open = records.filter((r) => inboxQuestionState(r, false) === "open");
     if (open.length === 0) throw new InboxError("nothing_to_reask", "No open question or action item is left to ask again.");
 
@@ -5479,6 +5523,7 @@ export class InboxStore {
       idempotency_key: key,
       reask: open.map((r) => r.id),
       ...(to ? { to: { host: to.host, session: to.session } } : {}),
+      ...(input.sent_from ? { sent_from: input.sent_from } : {}),
     };
     try {
       for (const record of answered) this.appendQuestion(record, at);
@@ -7365,7 +7410,16 @@ export class InboxStore {
    * message it wrote, and writes nothing. Whether the session is live is the
    * server's check: `to` null means it is not, and only a replay answers.
    */
-  sendNewMessage(threadId: string, input: { body: unknown; to: InboxAddressee | null; idempotency_key: unknown }): { message: InboxMessage; replayed: boolean } {
+  sendNewMessage(
+    threadId: string,
+    input: {
+      body: unknown;
+      to: InboxAddressee | null;
+      idempotency_key: unknown;
+      /** Where the person wrote it (`InboxMessage.sent_from`); absent from this computer. */
+      sent_from?: InboxSentFrom | null;
+    },
+  ): { message: InboxMessage; replayed: boolean } {
     const key = typeof input.idempotency_key === "string" ? input.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
     const root = this.messages.get(threadId);
@@ -7392,6 +7446,7 @@ export class InboxStore {
       resolved_at: null,
       idempotency_key: key,
       to: { host: input.to.host, session: input.to.session },
+      ...(input.sent_from ? { sent_from: input.sent_from } : {}),
     };
     this.appendMessage(message, at);
     this.endSnooze(threadId);
@@ -7498,6 +7553,8 @@ export class InboxStore {
     review_live?: InboxReviewLive;
     review_anchor?: InboxReviewAnchor;
     review_batch?: InboxReviewBatch;
+    /** Where the person wrote it (`InboxMessage.sent_from`); absent from this computer. */
+    sent_from?: InboxSentFrom | null;
   }): { message: InboxMessage; replayed: boolean } {
     const key = typeof input.idempotency_key === "string" ? input.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
@@ -7542,6 +7599,7 @@ export class InboxStore {
       ...(input.review_live ? { review_live: input.review_live } : {}),
       ...(input.review_anchor ? { review_anchor: input.review_anchor } : {}),
       ...(input.review_batch ? { review_batch: input.review_batch } : {}),
+      ...(input.sent_from ? { sent_from: input.sent_from } : {}),
       ...(threadName ? { thread_name: threadName, named_by: { kind: auto ? ("auto" as const) : ("person" as const), at } } : {}),
       ...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
     };

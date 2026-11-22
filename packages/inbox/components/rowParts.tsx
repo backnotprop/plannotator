@@ -370,7 +370,7 @@ export function RowWithAction({
       className="ib-rw"
       data-row={row.thread_id}
       // Archived, waiting for the list to settle without it (approval "inbox-list-view", R7): faded in place.
-      data-archived={inboxRowArchived(row) && !onUnarchive ? '' : undefined}
+      data-archived={inboxRowArchived(row) && drawn !== 'archived' ? '' : undefined}
       data-menu={menu ? '' : undefined}
       onPointerEnter={(event) => {
         if (!actionTip && opensTips(event)) setActionTip(true);

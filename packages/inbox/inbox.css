@@ -6705,7 +6705,8 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-art-f-code { background: color-mix(in oklch, var(--muted) 45%, var(--card)); }
 .ib-art-code { position: absolute; inset: 0; padding: 12px; overflow: hidden; white-space: pre; font-family: var(--font-mono, ui-monospace), ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--ib-fs-9, 9px); line-height: 1.45; color: var(--foreground); }
 .ib-art-f-diagram { background: color-mix(in oklch, var(--muted) 35%, var(--card)); }
-.ib-art-svg { position: absolute; inset: 10px 10px 26px; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+/* contain: paint: nothing a diagram draws leaves this box (in WebKit a label pinned to the window would otherwise cover the app). */
+.ib-art-svg { position: absolute; inset: 10px 10px 26px; display: flex; align-items: center; justify-content: center; pointer-events: none; contain: paint; }
 .ib-art-svg:not([data-drawn]) { display: none; }
 .ib-art-svg > svg { width: 100%; height: 100%; max-width: 100%; max-height: 100%; }
 .ib-art-f-page { background: color-mix(in oklch, var(--muted) 55%, var(--card)); }
@@ -9473,6 +9474,51 @@ dialog.ib-pqi .ib-listcol.ib-pqi-list { position: relative; inset: auto; visibil
    follows the phone's keyboard (--ib-vvh, phone.ts). The layer lets the page take the clicks around the window. */
 .ib-ask-layer { position: fixed; top: 0; left: 0; right: 0; height: var(--ib-vvh, 100dvh); z-index: 41; pointer-events: none; isolation: isolate; }
 .ib-ask-layer [data-chat-window] { pointer-events: auto; border-color: var(--ib-float-line-s, var(--border)); }
+/* The minimized side chat (ask/SideChatCorner.tsx; the owner, 2026-11-20, the 28 px circle): a circle in the window's
+   bottom-right corner on the ground, the pane beside it cut inward around it (scoop.ts). The pocket's radius is the
+   circle's and a 5 px ring (19 px), tangent to the window's edges. The button is a 44 px box at the corner whose hit
+   area is clipped (inline clip-path) to the pocket and the ground strips along the window's edges: never the pane. */
+.ib-sc { --ib-sc-d: 28px; --ib-sc-r: 19px; position: absolute; right: 0; bottom: 0; width: 0; height: 0; }
+.pn-inbox .ib-sc-btn { position: absolute; right: 0; bottom: 0; margin: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; pointer-events: auto; cursor: pointer; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; outline: none; }
+/* Its menu's trigger (parts/SideCircleMenu.tsx: right-click, long press, Close) draws no box: the button keeps its place. */
+.ib-sc-trig { display: contents; }
+/* The circle: the panes' own material (the card, their hairline and a soft shadow), centred on the pocket. */
+.ib-sc-dot {
+  position: absolute; width: var(--ib-sc-d); height: var(--ib-sc-d);
+  right: calc(var(--ib-sc-r) - var(--ib-sc-d) / 2); bottom: calc(var(--ib-sc-r) - var(--ib-sc-d) / 2);
+  border-radius: 50%; display: grid; place-items: center; background: var(--card);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 55%, transparent), 0 1px 2px color-mix(in oklch, var(--ib-shadow-ink) 8%, transparent), 0 4px 10px -4px color-mix(in oklch, var(--ib-shadow-ink) 18%, transparent);
+  transition: background-color 140ms ease-out, box-shadow 140ms ease-out, transform 140ms ease-out;
+}
+:root:not(.light) .ib-sc-dot { background: color-mix(in oklch, var(--card) 92%, var(--foreground)); box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 6%, transparent), inset 0 1px 0 color-mix(in oklch, var(--foreground) 6%, transparent), 0 4px 12px -4px color-mix(in oklch, var(--ib-shadow-ink) 70%, transparent); }
+/* Hover: a step lighter or deeper, never a move. */
+.ib-sc-btn:hover .ib-sc-dot { background: color-mix(in oklch, var(--muted) 45%, var(--card)); }
+:root:not(.light) .ib-sc-btn:hover .ib-sc-dot { background: color-mix(in oklch, var(--card) 84%, var(--foreground)); }
+.ib-sc-btn:active .ib-sc-dot { transform: scale(0.96); }
+/* Focus: the Inbox's 2 px ring, 2 px off the circle, inside the pocket. */
+.ib-sc-btn:focus-visible .ib-sc-dot { box-shadow: 0 0 0 2px var(--ib-ground, var(--background)), 0 0 0 4px var(--ring); }
+/* A new answer: the accent dot on the circle's shoulder, cut out of the circle by its own colour. */
+.ib-sc-new {
+  position: absolute; width: calc(var(--ib-sc-d) * 0.28); height: calc(var(--ib-sc-d) * 0.28);
+  right: calc(var(--ib-sc-r) - var(--ib-sc-d) * 0.395); bottom: calc(var(--ib-sc-r) + var(--ib-sc-d) * 0.115);
+  border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 2px var(--card); pointer-events: none;
+}
+:root:not(.light) .ib-sc-new { box-shadow: 0 0 0 2px color-mix(in oklch, var(--card) 92%, var(--foreground)); }
+/* Still answering: a short arc runs round the circle's rim. Reduced motion: it holds still. */
+.ib-sc-work {
+  position: absolute; width: calc(var(--ib-sc-d) + 6px); height: calc(var(--ib-sc-d) + 6px);
+  right: calc(var(--ib-sc-r) - var(--ib-sc-d) / 2 - 3px); bottom: calc(var(--ib-sc-r) - var(--ib-sc-d) / 2 - 3px);
+  rotate: -90deg; animation: ib-sc-turn 1.4s linear infinite; pointer-events: none;
+}
+.ib-sc-work circle { fill: none; stroke: color-mix(in oklch, var(--primary) 70%, transparent); stroke-width: 1.75; stroke-linecap: round; }
+@keyframes ib-sc-turn { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ib-sc-work { animation: none; } }
+/* The window on its way into the circle: a copy of it, under the circle. */
+.ib-sc-fly { position: fixed; inset: 0; pointer-events: none; z-index: -1; }
+/* Behind the cut pane (z-index -1 in the shell's stacking context): its hairline and shadows along the cut. */
+.ib-sc-edge { position: fixed; pointer-events: none; z-index: -1; }
+.ib-sc-edge > .ib-sc-shade, .ib-sc-edge > .ib-sc-rim { position: absolute; inset: 0; }
+.ib-sc-edge > .ib-sc-shade > i { position: absolute; background: #000; }
 .pn-inbox .ib-ask-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 28px; padding: 0 6px; border: none; border-radius: 8px; background: var(--muted); color: var(--foreground); cursor: pointer; }
 .pn-inbox .ib-ask-chip:hover, .pn-inbox .ib-ask-chip[data-popup-open] { background: color-mix(in oklch, var(--muted) 70%, var(--foreground) 8%); }
 .pn-inbox .ib-ask-chip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }

@@ -248,6 +248,37 @@ async function openThenArrive(props: Omit<PaneProps, 'thread'>, ...arrivals: Inb
 }
 
 const rerender = (props: PaneProps) => act(() => root!.render(pane(props)));
+
+/** Counts seen on sight's own looks at the page from now: the dialog check and an arrival's article. */
+function countLooks(): () => number {
+  let n = 0;
+  // The document itself (happy-dom's document is not an instance of the global Document) and every element.
+  for (const proto of [document, Element.prototype]) {
+    const real = (proto as unknown as ParentNode).querySelector;
+    stub(proto, 'querySelector', {
+      writable: true,
+      value(this: ParentNode, selector: string) {
+        if (selector === 'dialog[open]' || selector.startsWith('[data-message-article=')) n++;
+        return real.call(this, selector);
+      },
+    });
+  }
+  return () => n;
+}
+
+/** Counts the pill's sweeps of the thread from now: a query for every new message in it. */
+function countSweeps(): () => number {
+  let n = 0;
+  const real = Element.prototype.querySelectorAll;
+  stub(Element.prototype, 'querySelectorAll', {
+    writable: true,
+    value(this: Element, selector: string) {
+      if (selector.includes('[data-arrival]') || selector.includes('[data-new]')) n++;
+      return real.call(this, selector);
+    },
+  });
+  return () => n;
+}
 const fireObservers = () => act(() => observers.forEach((o) => o.fire()));
 
 describe.skipIf(!hasDom)('seen on sight in the thread pane', () => {
@@ -578,6 +609,59 @@ describe.skipIf(!hasDom)('seen on sight in the thread pane', () => {
     boxes = { msg_A2: { top: 2000, height: 200 } };
     act(() => void body.dispatchEvent(new Event('scroll')));
     expect(pill.textContent).toBe('1 new');
+  });
+
+  // The work this guards: a visible window behind another one looked for a dialog and measured each unseen arrival
+  // four times a second, though nothing can be seen until it comes to the front.
+  test('behind another window the recheck reads nothing of the page; back in front, the dwell starts again from zero', async () => {
+    boxes = { msg_A2: { top: 400, height: 200 } };
+    const seen: number[] = [];
+    await openThenArrive({ onSeen: (through) => seen.push(through) }, A2);
+    await wait(SEEN_DWELL_MS / 2);
+    focused = false;
+    act(() => void window.dispatchEvent(new Event('blur')));
+    const looks = countLooks();
+    await wait(RECHECK_MS * 12);
+    expect(looks()).toBe(0);
+    expect(seen).toEqual([]);
+    // Hidden as well: still nothing.
+    visibility = 'hidden';
+    act(() => void document.dispatchEvent(new Event('visibilitychange')));
+    await wait(RECHECK_MS * 12);
+    expect(looks()).toBe(0);
+    visibility = 'visible';
+    act(() => void document.dispatchEvent(new Event('visibilitychange')));
+    focused = true;
+    act(() => void window.dispatchEvent(new Event('focus')));
+    // The half second before the blur does not count: a full second from the return.
+    await wait(SEEN_DWELL_MS / 2 + 150);
+    expect(seen).toEqual([]);
+    expect(looks()).toBeGreaterThan(0);
+    await wait(SEEN_DWELL_MS / 2);
+    expect(seen).toEqual([6]);
+  });
+
+  // The work this guards: every scroll step ran two queries over the whole thread for the pill, new messages or not.
+  test('a scroll with nothing new reads no message of the thread; with an arrival below, the pill counts it as before', async () => {
+    boxes = { msg_A1: { top: 0, height: 300 }, msg_P1: { top: 300, height: 200 } };
+    const el = await openThenArrive({ onSeen: () => {} });
+    const body = el.querySelector('.ib-pbody')!;
+    const pillOff = () => el.querySelector('[data-new-pill]')?.hasAttribute('data-off') ?? true;
+    const sweeps = countSweeps();
+    for (let step = 0; step < 10; step++) act(() => void body.dispatchEvent(new Event('scroll')));
+    expect(sweeps()).toBe(0);
+    expect(pillOff()).toBe(true);
+    // An arrival lands below the view: counted, and scrolling about keeps the count, still with no sweep.
+    boxes.msg_A2 = { top: 2000, height: 200 };
+    rerender({ thread: thread(A2), onSeen: () => {} });
+    await wait(0);
+    for (let step = 0; step < 10; step++) act(() => void body.dispatchEvent(new Event('scroll')));
+    expect(el.querySelector('[data-new-pill]')!.textContent).toBe('1 new');
+    expect(sweeps()).toBe(0);
+    // Scrolled past it: passed, as before.
+    boxes = { msg_A1: { top: -2000, height: 300 }, msg_P1: { top: -1700, height: 200 }, msg_A2: { top: 300, height: 200 } };
+    act(() => void body.dispatchEvent(new Event('scroll')));
+    expect(pillOff()).toBe(true);
   });
 
   test("an arrival's first lines are measured where it sits, not where its entrance draws it", () => {

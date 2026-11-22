@@ -186,6 +186,18 @@ public struct DoorClient: Sendable {
     try await post(Door.postMessageReply(message: message), body, as: ReplyResult.self)
   }
 
+  /// A write whose body is a file's own bytes (a drawing): its idempotency key rides the query.
+  public func sendBytes(path: String, query: [URLQueryItem], body: Data, type: String) async throws -> DoorAnswerBytes {
+    let call = DoorCall(
+      method: .post, path: path, query: query,
+      headers: [AppIdentity.headerName: app.headerValue, "Accept": "application/json", "Content-Type": type].merging(token.map { ["Authorization": "Bearer \($0)"] } ?? [:]) { $1 },
+      body: body)
+    let answer: DoorAnswerBytes
+    do { answer = try await transport.send(call) } catch let failure as DoorFailure { throw failure } catch { throw DoorFailure.unreachable((error as NSError).localizedDescription, mayHaveArrived: DoorFailure.mayHaveArrived(error)) }
+    guard (200..<300).contains(answer.status) else { throw DoorFailure.from(status: answer.status, headers: answer.headers, body: answer.body) }
+    return answer
+  }
+
   /// A write whose body was kept in the outbox: sent again exactly as it was first made.
   public func resend(method: DoorMethod, path: String, body: Data) async throws -> DoorAnswerBytes {
     let call = DoorCall(
