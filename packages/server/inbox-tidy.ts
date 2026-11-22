@@ -18,10 +18,10 @@
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { inboxId, inboxTidyWords, isInboxId, type InboxSteps, type InboxTidyCombine, type InboxTidyPlan, type InboxTidyReach, type InboxTidyRun } from "@plannotator/core/inbox-types";
+import { inboxId, inboxTidyWords, isInboxId, type InboxSteps, type InboxTidyAgent, type InboxTidyCombine, type InboxTidyPlan, type InboxTidyReach, type InboxTidyRun } from "@plannotator/core/inbox-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
-import { inboxTidyBody, inboxTidyPlan, inboxTidyRun, inboxTidyWakeThread, type InboxTidySurface } from "@plannotator/shared/inbox/tidy";
+import { inboxTidyBody, inboxTidyPlan, inboxTidyRun, inboxTidyWakeThread, type InboxTidyPlanAgent, type InboxTidySurface } from "@plannotator/shared/inbox/tidy";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { INBOX_WAKE_ONLY_LIVE_MS } from "./inbox-sessions";
 
@@ -44,6 +44,8 @@ export interface InboxTidyDeps {
   combineSuggestions?: () => InboxTidyCombine[];
   /** Whether repositories are still being read, so `combineSuggestions` may be short of a pair. */
   combineLoading?: () => boolean;
+  /** A session's title, as Combine's (the sidebar's Agents name). */
+  titleOf?: (session: string) => string | null;
 }
 
 /** The person's Tidy instructions on disk (Recent, and each run's "You added"), outside the event log. */
@@ -134,6 +136,13 @@ export function createInboxTidy(deps: InboxTidyDeps) {
   const planFor = (projectId: string | null, surface: InboxTidySurface, reachOf: (session: string) => InboxTidyReach | null, threadIds: ReadonlySet<string> | null = null) =>
     inboxTidyPlan(store, { projectId, surface, now: now(), reachOf, boardOn: deps.boardOn(), stepsStale: deps.stepsStale?.() ?? null, threadIds });
 
+  /** What names an agent in the picker beside its host (`inboxCombineAgentLabel`). */
+  const labelParts = (agent: InboxTidyPlanAgent): Pick<InboxTidyAgent, "title" | "thread" | "project"> => {
+    const title = deps.titleOf?.(agent.session);
+    const first = agent.items[0];
+    return { ...(title ? { title } : {}), ...(first ? { thread: first.subject, ...(first.project.name ? { project: first.project.name } : {}) } : {}) };
+  };
+
   const plan = (projectId: string | null, surface: InboxTidySurface, threadIds: ReadonlySet<string> | null = null): InboxTidyPlan => {
     const reachOf = reachFor();
     const found = planFor(projectId, surface, reachOf, threadIds);
@@ -152,6 +161,7 @@ export function createInboxTidy(deps: InboxTidyDeps) {
         session: agent.session,
         host: agent.host,
         name: agent.name,
+        ...labelParts(agent),
         reach: agent.reach,
         items: agent.items.map((item) => ({ thread_id: item.thread_id, subject: item.subject, project: item.project, reasons: item.reasons })),
       })),

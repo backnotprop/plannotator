@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import type { InboxTidyCombine, InboxTidyRun, InboxTidyRunAgent } from '@plannotator/core/inbox-types';
-import { inboxTidyWords } from '@plannotator/core/inbox-types';
+import { inboxCombineAgentLabel, inboxTidyWords } from '@plannotator/core/inbox-types';
 import { formatCount } from '../format';
 import { HostMark, Icon } from '../icons';
 import { shortProjectNames } from '../projectLabels';
@@ -113,7 +113,7 @@ function TidyPicker({ tidy, onDone, below }: { tidy: TidyController; onDone: () 
               <label className="ib-tidy-ag" data-tidy-agent={agent.session}>
                 <input type="checkbox" checked={!off.has(agentKey(agent))} onChange={(event) => tick([agentKey(agent)], event.target.checked)} />
                 <HostMark host={agent.host} agent={agent.session} />
-                <span className="ib-tidy-nm">{agent.machineName ? `${agent.name} · ${agent.machineName}` : agent.name}</span>
+                <span className="ib-tidy-nm">{inboxCombineAgentLabel(agent, agents)}{agent.machineName ? ` · ${agent.machineName}` : ''}</span>
                 <em>{formatCount(agent.items.length)}</em>
               </label>
             </li>

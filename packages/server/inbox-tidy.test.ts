@@ -149,6 +149,8 @@ describe("Tidy: who gets asked", () => {
     const scoped = await plan(server, `?project=${await projectOf(server, "billing")}`);
     expect(scoped.agents.map((a) => a.session)).toEqual(["ses-a"]);
     expect(scoped.agents[0]!.items.map((i) => i.thread_id)).toEqual([inBilling.thread_id]);
+    // What the picker names it by beside its host (inboxCombineAgentLabel): its project, its first thread.
+    expect(scoped.agents[0]).toMatchObject({ project: "billing", thread: "Ledger" });
   });
 
   test("the Board's Tidy asks only the agents owning cards in view, with their stale cards", async () => {

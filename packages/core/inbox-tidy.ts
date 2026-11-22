@@ -150,6 +150,11 @@ export interface InboxTidyAgent {
   host: string | null;
   /** How the person sees it ("Claude Code"). */
   name: string;
+  /** Its session's title, when the window knows one (the sidebar's Agents name). */
+  title?: string;
+  /** Its first item's subject and project: its name where it has no title, as Combine names an agent. */
+  thread?: string;
+  project?: string;
   reach: InboxTidyReach;
   items: InboxTidyItem[];
 }
