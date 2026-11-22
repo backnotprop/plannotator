@@ -354,14 +354,16 @@ test('File header: hover shows Open in on the left of its actions, and nothing i
 });
 
 /**
- * Release QA on 0.29.2: a file filter remounts the list, and putting the
- * reader back on their file scrolled a shorter list to its end by itself;
- * Viewed as you scroll then marked the last file, which nobody had read.
- * Four long files, then two short ones under b/ and a shorter one after them.
+ * Release QA on 0.29.2: a file filter remounts the list and puts the reader
+ * back on their file; on a shorter list that restore lands at the end by
+ * itself, and Viewed as you scroll marked the last file, which nobody had
+ * read. Four long files, then b/zero.ts and two short files (b/one.ts,
+ * b/two.ts), then a long c/last.ts so the full list never ends at b/.
  */
 const LONG = ['a/long1.ts', 'a/long2.ts', 'a/long3.ts', 'a/long4.ts'];
-const SHORT = ['b/one.ts', 'b/two.ts'];
+const FILTERED = ['b/zero.ts', 'b/one.ts', 'b/two.ts'];
 const LAST = 'c/last.ts';
+const FILTER_FILES = [...LONG, ...FILTERED, LAST];
 function buildFilterRepo(root: string): string {
   const repo = join(root, 'repo');
   mkdirSync(repo);
@@ -374,45 +376,77 @@ function buildFilterRepo(root: string): string {
   git(repo, ['commit', '-q', '-m', 'initial']);
   git(repo, ['checkout', '-q', '-b', 'feature/short-files']);
   for (const path of LONG) write(repo, path, lines(path, 60, 'new'));
-  for (const path of SHORT) write(repo, path, lines(path, 14, 'new'));
-  write(repo, LAST, lines(LAST, 4, 'new'));
+  write(repo, 'b/zero.ts', lines('b/zero.ts', 18, 'new'));
+  write(repo, 'b/one.ts', lines('b/one.ts', 6, 'new'));
+  write(repo, 'b/two.ts', lines('b/two.ts', 6, 'new'));
+  write(repo, LAST, lines(LAST, 40, 'new'));
   git(repo, ['add', '-A']);
   git(repo, ['commit', '-q', '-m', 'files']);
   return repo;
 }
 
+/** Scroll All changes until `path`'s header sits at the top of the list. */
+const bringToTop = (page: Page, path: string) =>
+  page.evaluate(async (target) => {
+    const frame = () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+    const first = document.querySelector('diffs-container');
+    let scroller = first?.parentElement ?? null;
+    while (scroller && !(scroller.scrollHeight > scroller.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(scroller).overflowY))) scroller = scroller.parentElement;
+    if (!scroller) return false;
+    for (let i = 0; i < 60; i++) {
+      const item = document.querySelector(`diffs-container span[title="${CSS.escape(target)}"]`)?.closest('diffs-container');
+      if (!item) {
+        scroller.scrollTop += 600;
+        await frame();
+        continue;
+      }
+      const delta = item.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+      if (Math.abs(delta) < 2) return true;
+      scroller.scrollTop += delta;
+      await frame();
+    }
+    return false;
+  }, path);
+
 test('File filter: narrowing or clearing the list marks nothing Viewed; only scrolling by hand does', async ({ browser }) => {
   await withReview(
     browser,
     async (page) => {
-      const all = [...LONG, ...SHORT, LAST];
       const viewedCount = page.locator('[data-panel-viewed-controls]');
+      const viewed = async () => Number(((await viewedCount.textContent()) ?? '').split('/')[0]);
       await openAllChanges(page);
-      await expect.poll(async () => (await mainHeaders(page, all)).length).toBeGreaterThan(0);
-      await expect(viewedCount).toHaveText('0/7');
+      await expect.poll(async () => (await mainHeaders(page, FILTER_FILES)).length).toBeGreaterThan(0);
 
+      // The reader is on b/one.ts, a file the filter keeps.
+      expect(await bringToTop(page, 'b/one.ts')).toBe(true);
+      await page.waitForTimeout(1_500);
+      const before = await viewed();
+
+      // Narrowing to b/: the restore puts b/one.ts back, clamped at the end
+      // of the short list. Nobody scrolled; nothing becomes Viewed.
       await page.getByRole('button', { name: 'Filter files', exact: true }).click();
       const include = page.getByLabel('Include');
       await include.fill('b/**');
-      await expect.poll(async () => (await mainHeaders(page, all)).map((h) => h.path)).toEqual(SHORT);
+      await expect.poll(async () => (await mainHeaders(page, FILTER_FILES)).map((h) => h.path)).toEqual(FILTERED);
       await page.waitForTimeout(1_500);
-      await expect(viewedCount).toHaveText('0/7');
+      expect(await viewed()).toBe(before);
 
-      // The two short files almost fit, so the list moves only a little: the
-      // reader's own wheel to its end does mark the last file there.
-      const first = (await mainHeaders(page, all))[0]!;
-      await page.mouse.move(first.nameX, first.nameY + 120);
-      await page.mouse.wheel(0, 600);
-      await expect(viewedCount).toHaveText('1/7', { timeout: 5_000 });
+      // The reader's own wheel, up and back to the end, marks the last file there.
+      const top = (await mainHeaders(page, FILTER_FILES))[0]!;
+      await page.mouse.move(top.nameX, Math.max(top.nameY, 120) + 60);
+      await page.mouse.wheel(0, -900);
+      await page.waitForTimeout(400);
+      await page.mouse.wheel(0, 900);
+      await expect.poll(viewed, { timeout: 5_000 }).toBe(before + 1);
 
       // Emptying the field as a person does: the full list comes back with
-      // b/two.ts, the file being read, still in view, and nothing newly Viewed.
+      // b/two.ts, the file being read, in view, and nothing newly Viewed.
       await include.press('ControlOrMeta+a');
       await include.press('Backspace');
-      await expect.poll(async () => (await mainHeaders(page, all)).map((h) => h.path)).toContain(LAST);
+      await expect.poll(async () => (await mainHeaders(page, FILTER_FILES)).map((h) => h.path)).toContain(LAST);
       await page.waitForTimeout(1_500);
-      await expect(viewedCount).toHaveText('1/7');
-      const two = (await mainHeaders(page, all)).find((h) => h.path === 'b/two.ts');
+      expect(await viewed()).toBe(before + 1);
+      const two = (await mainHeaders(page, FILTER_FILES)).find((h) => h.path === 'b/two.ts');
       expect(two, 'b/two.ts is drawn').toBeTruthy();
       expect(two!.top).toBeGreaterThanOrEqual(0);
       expect(two!.top).toBeLessThan(page.viewportSize()!.height - 40);

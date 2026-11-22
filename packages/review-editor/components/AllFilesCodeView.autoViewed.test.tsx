@@ -199,6 +199,11 @@ async function scrollTo(position: number) {
   });
 }
 
+/** The reader's own wheel (window capture sees it wherever it lands). */
+async function wheel() {
+  await act(async () => { document.body.dispatchEvent(new Event('wheel', { bubbles: true })); });
+}
+
 afterEach(async () => {
   if (root) await act(async () => root?.unmount());
   root = null;
@@ -355,11 +360,49 @@ describe.if(hasDom)('AllFilesCodeView auto-view emission', () => {
     viewerState.scrollHeight = 600;
     viewerState.scrollTop = 100;
     await render({ files: [FILES[1]!, FILES[2]!], onFileScrolledPast });
+    // A wheel between the restore's scrollTo and its scroll event cannot hand
+    // that scroll to the reader.
+    await wheel();
     await scrollTo(100);
     expect(passed).toEqual([]);
 
     // The reader's own wheel at the bottom does count.
-    await act(async () => { document.body.dispatchEvent(new Event('wheel', { bubbles: true })); });
+    await wheel();
+    await scrollTo(100);
+    expect(passed).toEqual(['c.ts']);
+  });
+
+  test('after the restore window, a scroll with no input counts as the reader\'s', async () => {
+    // A native scrollbar drag can send no press event, and Enter in Go to File
+    // or a search field is a key in a text field: once the restore's own
+    // scroll is over, every scroll counts as it always did.
+    const passed: string[] = [];
+    const onFileScrolledPast = (path: string) => passed.push(path);
+    await render({ onFileScrolledPast });
+    await scrollTo(1000);
+    passed.length = 0;
+    viewerState.tops = { 'b.ts': 0, 'c.ts': 300 };
+    viewerState.scrollHeight = 600;
+    viewerState.scrollTop = 100;
+    await render({ files: [FILES[1]!, FILES[2]!], onFileScrolledPast });
+    await scrollTo(100); // the restore's own scroll
+    expect(passed).toEqual([]);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 400)); });
+    await scrollTo(100);
+    expect(passed).toEqual(['c.ts']);
+  });
+
+  test('a restore whose scroll never fires an event still ends its window', async () => {
+    const passed: string[] = [];
+    const onFileScrolledPast = (path: string) => passed.push(path);
+    await render({ onFileScrolledPast });
+    await scrollTo(1000);
+    passed.length = 0;
+    viewerState.tops = { 'b.ts': 0, 'c.ts': 300 };
+    viewerState.scrollHeight = 600;
+    viewerState.scrollTop = 100;
+    await render({ files: [FILES[1]!, FILES[2]!], onFileScrolledPast });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 400)); });
     await scrollTo(100);
     expect(passed).toEqual(['c.ts']);
   });

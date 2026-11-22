@@ -773,16 +773,6 @@ function markdownPreviewFileDiff(full: FileDiffMetadata): FileDiffMetadata {
  */
 const SCROLLED_PAST_EPSILON_PX = 8;
 
-/** The reader's own input that can move the list (scrollbar and tree clicks are pointer presses). */
-const READER_INPUT_EVENTS = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
-
-/** Typing into a field (the file filter, a comment) is not moving the list. */
-function isTextEntryTarget(event: Event): boolean {
-  const target = event.composedPath()[0] ?? event.target;
-  if (!(target instanceof HTMLElement)) return false;
-  return target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
-}
-
 /** The one VirtualizedFileDiff method the image-header sizing needs. */
 type HeaderMetricsTarget = { setMetrics(metrics?: Partial<VirtualFileMetrics>, force?: boolean): void };
 const isHeaderMetricsTarget = (value: unknown): value is HeaderMetricsTarget =>
@@ -1125,31 +1115,6 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // file the reviewer merely arrived at, without touching anything, which is
   // the one thing auto-mark-viewed must never do.
   const hasScrolledRef = useRef(false);
-  // Auto-mark-viewed counts only the READER's scrolling. A remount (a file
-  // filter, a diff switch, a sort change) puts the reader back on their file,
-  // and that restore, clamped when the list got shorter, fires scroll events
-  // nobody made: on a short list it lands at the bottom and would mark the last
-  // file. From the restore until the reader next uses the wheel, a key, a touch
-  // or the pointer, scrolls belong to the view.
-  const viewScrollRef = useRef(false);
-  // Whether the reader has scrolled this file set (see viewScrollRef). Gates
-  // the at-bottom signal and new pass candidates.
-  const readerScrolledRef = useRef(false);
-  // Listened for only where auto-view is wired: a read-only or portable host
-  // gets no window key listener from this view.
-  const tracksReaderInput = onFileScrolledPast != null && !readOnly;
-  useEffect(() => {
-    if (!tracksReaderInput) return;
-    const readerMoved = (event: Event) => {
-      if (!viewScrollRef.current) return;
-      if (event.type === 'keydown' && isTextEntryTarget(event)) return;
-      viewScrollRef.current = false;
-    };
-    for (const type of READER_INPUT_EVENTS) window.addEventListener(type, readerMoved, { capture: true, passive: true });
-    return () => {
-      for (const type of READER_INPUT_EVENTS) window.removeEventListener(type, readerMoved, { capture: true });
-    };
-  }, [tracksReaderInput]);
 
   // The file CodeView last reported a selection / line-click in. The toolbar is
   // keyed off this file's path + patch, but the value is sourced from the
@@ -1656,12 +1621,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const previousVisible = visibleFileRef.current;
     const offset = restoredContentKeyRef.current === contentKey ? -visibleOffsetRef.current : 0;
     restoredContentKeyRef.current = contentKey;
-    viewScrollRef.current = false;
-    readerScrolledRef.current = false;
     if (previousVisible) {
       const restoreId = filePathToItemId.get(previousVisible);
       if (restoreId != null) {
-        viewScrollRef.current = tracksReaderInput;
         requestAnimationFrame(() => {
           restoringRef.current = true;
           try {
@@ -3514,9 +3476,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // Auto-mark-viewed (Rule 1): the file the reader just left becomes a
       // PASS CANDIDATE. It is not marked yet — the geometry still has to say
       // it genuinely scrolled out above.
-      // Only the reader's own scroll leaves a file; a restore jumping over it does not.
       const previousItemId = visibleItemIdRef.current;
-      if (previousItemId != null && previousItemId !== bestId && readerScrolledRef.current) {
+      if (previousItemId != null && previousItemId !== bestId) {
         passCandidateItemRef.current = previousItemId;
       }
       visibleItemIdRef.current = bestId;
@@ -3550,10 +3511,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // The last file can never scroll out above, so reaching the end of the
     // diff is its completion signal. Re-fires on every at-bottom tick; the
     // owner's dwell floor decides whether it actually marks. Gated on a real
-    // scroll by the reader having happened, because a diff shorter than the
-    // viewport is at-bottom from the mount seed onwards, and a restore onto a
-    // shorter list lands there by itself.
-    if (atBottom && readerScrolledRef.current && path != null && onFileScrolledPast
+    // scroll having happened, because a diff shorter than the viewport is
+    // at-bottom from the mount seed onwards.
+    if (atBottom && hasScrolledRef.current && path != null && onFileScrolledPast
         && !isCollapsed(bestId)) {
       onFileScrolledPast(path);
     }
@@ -3581,7 +3541,6 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     }
     scheduleWarmUp(WARM_UP_REST_MS);
     hasScrolledRef.current = true;
-    if (!viewScrollRef.current) readerScrolledRef.current = true;
     onScrollPositionChange?.(position);
     if (scrollReportRafRef.current != null) return;
     scrollReportRafRef.current = requestAnimationFrame(() => {
