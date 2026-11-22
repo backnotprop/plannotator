@@ -67,7 +67,7 @@ import { TaterSpriteRunning } from '@plannotator/ui/components/TaterSpriteRunnin
 import { TaterSpritePullup } from '@plannotator/ui/components/TaterSpritePullup';
 import { useSharing } from '@plannotator/ui/hooks/useSharing';
 import { shareableDocumentMarkdown } from '@plannotator/ui/utils/sharing';
-import { getCallbackConfig, CallbackAction, executeCallback } from '@plannotator/ui/utils/callback';
+import { getCallbackConfig, CallbackAction, executeCallback, type ReturnLink } from '@plannotator/ui/utils/callback';
 import { useAgents } from '@plannotator/ui/hooks/useAgents';
 import { useActiveSection } from '@plannotator/ui/hooks/useActiveSection';
 import { tocHeadings } from '@plannotator/ui/utils/annotationHelpers';
@@ -5940,6 +5940,9 @@ const App: React.FC = () => {
   // If a user adds code comments and hits the callback button, those comments are silently dropped.
   // Fix: either disable callbacks when codeAnnotations exist, or include annotationsOutput in the payload.
   const callbackConfig = React.useMemo(() => getCallbackConfig(), []);
+  // The bot's answer may name where the link came from: the done screen shows
+  // it as a link the person clicks (never an automatic move; see callback.ts).
+  const [callbackReturnLink, setCallbackReturnLink] = useState<ReturnLink | null>(null);
 
   const callCallback = React.useCallback(async (action: CallbackAction) => {
     if (!callbackConfig || isSubmitting) return;
@@ -5954,6 +5957,7 @@ const App: React.FC = () => {
       if (result) {
         if (result.type === 'success') {
           toast.success(result.message);
+          setCallbackReturnLink(result.returnLink ?? null);
           setSubmitted(action === CallbackAction.Approve ? 'approved' : 'denied');
         } else {
           toast.error(result.message);
@@ -8492,6 +8496,9 @@ const App: React.FC = () => {
           }
           agentLabel={agentName}
           footer={starAskFooter}
+          links={callbackReturnLink && (submitted === 'approved' || submitted === 'denied')
+            ? [{ ...callbackReturnLink, sameTab: true }]
+            : undefined}
         />
 
         <LookAndFeelAnnouncementDialog

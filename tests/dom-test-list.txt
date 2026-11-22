@@ -478,6 +478,7 @@ packages/editor/planDiffAutoExit.test.tsx
 packages/editor/App.archiveReadOnly.test.tsx
 packages/editor/App.codeDocument.test.tsx
 packages/editor/App.refCards.test.tsx
+packages/editor/App.callbackReturnLink.test.tsx
 packages/editor/App.htmlChrome.test.tsx
 packages/editor/App.sidebarTabsAgentTerminal.test.tsx
 packages/editor/App.htmlLinkDraft.test.tsx
