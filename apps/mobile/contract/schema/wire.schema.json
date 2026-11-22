@@ -4154,6 +4154,48 @@
         "viewing": {
           "$ref": "#/$defs/InboxReplyViewing"
         },
+        "sent_from": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "$ref": "#/$defs/InboxSentFromPlace"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "machine"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "via": {
+                  "type": "string",
+                  "enum": [
+                    "cloudflare",
+                    "phone",
+                    "tailnet"
+                  ],
+                  "x-open": true
+                }
+              },
+              "required": [
+                "kind",
+                "name"
+              ],
+              "additionalProperties": true
+            }
+          ]
+        },
         "launch": {
           "$ref": "#/$defs/InboxLaunchRecord"
         },
@@ -6078,6 +6120,16 @@
       ],
       "x-open": true,
       "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxSentFromPlace": {
+      "type": "string",
+      "enum": [
+        "cloudflare",
+        "phone",
+        "tailnet"
+      ],
+      "x-open": true,
+      "x-source": "packages/core/inbox-sent-from.ts"
     },
     "InboxSentRecipient": {
       "type": "object",

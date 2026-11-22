@@ -511,6 +511,9 @@
       "at",
       "session"
     ],
+    "InboxMessageWireSentFrom": [
+      "kind"
+    ],
     "InboxMessageWireThreadNaming": [
       "status"
     ],

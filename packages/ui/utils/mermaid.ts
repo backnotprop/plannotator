@@ -120,6 +120,62 @@ export const MERMAID_CONFIG: MermaidConfig = {
 };
 
 /**
+ * With `configurePlannotatorUI({ diagramRemoteLoads: false })`
+ * (`utils/diagramRemoteLoadsPolicy`): what Mermaid's label pass also drops,
+ * so nothing in a label is fetched while Mermaid measures it in the live
+ * page. Media and the attributes that only ever name a picture go here; a
+ * label's `<img>` / svg `<image>` keep a `data:` picture through the
+ * attribute hook `diagram-render` installs (MERMAID_NO_REMOTE_LABEL_MARK),
+ * which also drops every other reference and every style declaration that
+ * fetches.
+ */
+export const MERMAID_NO_REMOTE_LABEL_TAGS = ['picture', 'source', 'track', 'audio', 'video'];
+export const MERMAID_NO_REMOTE_LABEL_ATTRS = ['srcset', 'imagesrcset', 'poster', 'background', 'lowsrc', 'dynsrc'];
+
+/**
+ * When the hook cannot reach Mermaid's own DOMPurify (a host bundle with two
+ * copies of it), the label pass falls back to dropping every picture,
+ * reference and style in a label instead (coloured spans lose their colour).
+ */
+export const MERMAID_NO_REMOTE_LABEL_FALLBACK_TAGS = ['img', 'image', 'svg'];
+export const MERMAID_NO_REMOTE_LABEL_FALLBACK_ATTRS = ['src', 'href', 'xlink:href', 'style'];
+
+/** The key in the label pass's DOMPurify config that the no-remote attribute hook acts on. */
+export const MERMAID_NO_REMOTE_LABEL_MARK = 'PLANNOTATOR_DIAGRAM_LABEL_NO_REMOTE';
+
+/**
+ * Config keys a diagram's directive or front matter may not set when
+ * diagrams load nothing from another host: Mermaid writes their values into
+ * its stylesheet while it draws, before any sanitizer, so `url(` there loads.
+ * Every other string key was tried with CSS that loads, in a directive, and
+ * none loaded. Mermaid applies `secure` at every level of a directive, so
+ * `themeVariables.fontFamily` set by a diagram is ignored too (the page's
+ * font applies).
+ */
+export const MERMAID_NO_REMOTE_SECURE_KEYS = ['themeCSS', 'fontFamily', 'altFontFamily'];
+
+/**
+ * `config` as it is for the policy: unchanged (the same object) when diagrams
+ * may load from other hosts; otherwise with the label pass and `secure`
+ * extended (see the constants above). `labelHook: false` is the fallback for
+ * a runtime the attribute hook does not reach.
+ */
+export function mermaidConfigForRemoteLoads(config: MermaidConfig, remoteLoads: boolean, labelHook = true): MermaidConfig {
+  if (remoteLoads) return config;
+  const label = (config.dompurifyConfig ?? {}) as { FORBID_TAGS?: string[]; FORBID_ATTR?: string[] };
+  return {
+    ...config,
+    dompurifyConfig: {
+      ...label,
+      FORBID_TAGS: [...(label.FORBID_TAGS ?? []), ...MERMAID_NO_REMOTE_LABEL_TAGS, ...(labelHook ? [] : MERMAID_NO_REMOTE_LABEL_FALLBACK_TAGS)],
+      FORBID_ATTR: [...(label.FORBID_ATTR ?? []), ...MERMAID_NO_REMOTE_LABEL_ATTRS, ...(labelHook ? [] : MERMAID_NO_REMOTE_LABEL_FALLBACK_ATTRS)],
+      [MERMAID_NO_REMOTE_LABEL_MARK]: true,
+    } as MermaidConfig['dompurifyConfig'],
+    secure: [...(config.secure ?? []), ...MERMAID_NO_REMOTE_SECURE_KEYS],
+  };
+}
+
+/**
  * Who filled the slot. The eager value doubles as a build marker: the literal
  * only reaches a bundle when `./mermaid-eager` is evaluated in it, which is
  * how `tests/entry-assets.test.ts` proves on the built HTML that Plannotator's

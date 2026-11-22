@@ -30,6 +30,7 @@ import type { InboxReviewSource } from "./inbox-reviews";
 import type { InboxTidyMark } from "./inbox-tidy";
 import type { InboxLaunchChoices } from "./inbox-launch-choice";
 import type { InboxRowSnooze } from "./inbox-snooze";
+import type { InboxSentFrom } from "./inbox-sent-from";
 import { INBOX_CODEX_QUEUE_MIN_VERSION } from "./inbox-codex";
 import { INBOX_QWEN_WAKE_MIN_VERSION } from "./inbox-qwen";
 import { INBOX_T3_HOST, isT3ThreadId, type InboxT3Status, type InboxT3WaitReason } from "./inbox-t3";
@@ -55,6 +56,8 @@ export * from "./inbox-tag-colours";
 export * from "./inbox-surface-bridge";
 // Tidy (the list header's and the Board's ⋮ menu), the same way.
 export * from "./inbox-tidy";
+// Where the person wrote a message (another device, the phone app, a linked computer), the same way.
+export * from "./inbox-sent-from";
 export * from "./inbox-combine";
 // Pull requests (code review in the Inbox, phase 2), the same way.
 export * from "./inbox-pulls";
@@ -820,6 +823,11 @@ export interface InboxMessage {
   rows_ask?: true;
   /** On a person's reply sent from full screen's floating box: the file on screen. Rendered for the agent at read time; the body never holds it. */
   viewing?: InboxReplyViewing;
+  /**
+   * On a person's message written away from this computer (another device, the phone app, a linked computer), as the
+   * server told it from the request (inbox-sent-from.ts). Rendered for the agent at read time; absent from this computer.
+   */
+  sent_from?: InboxSentFrom;
   /**
    * On the root of a thread the person started by launching an agent (To:
    * "New Claude Code session"), or on a person's reply sent to a new session in
@@ -3495,9 +3503,11 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * `combine` (approval "inbox-multi-select"): a linked machine's window asks this Inbox's sessions to tidy or combine
  * this Inbox's threads, through its door. `pulls-looked` (approval "inbox-pr-dashboard"): the PR page's look at a PR
  * it lists is kept there ("Changed since you looked"). `project-tags`: its projects take tags from a linked machine's
- * window (`projects/:id/tags`, by the tag's name), kept there.
+ * window (`projects/:id/tags`, by the tag's name), kept there. `agent-read`: a linked machine's agents read this
+ * Inbox's threads and fetch their files through its door (`agent-read`, `agent-file`; inbox-far-read.ts in the server).
+ * `agent-search`: they search and list this Inbox's threads too (`agent-search`, `agent-threads`; inbox-far-find.ts).
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**

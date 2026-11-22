@@ -69,7 +69,8 @@
  * node outlines.
  */
 import type { Mermaid, MermaidConfig } from 'mermaid';
-import { MERMAID_CONFIG } from './mermaid';
+import { MERMAID_CONFIG, mermaidConfigForRemoteLoads } from './mermaid';
+import { getDiagramRemoteLoads } from './diagramRemoteLoadsPolicy';
 import { readThemeTokenValues } from './themeTokens';
 import {
   compositeOver,
@@ -857,6 +858,20 @@ export type MermaidThemeApplyResult = 'unchanged' | 'dynamic' | 'static';
 let appliedRuntime: Pick<Mermaid, 'initialize'> | null = null;
 let appliedKey: string | null = null;
 let appliedKind: 'dynamic' | 'static' | null = null;
+/** The remote-loads policy the runtime was last initialized for (`'remote'`: as before; see `utils/diagramRemoteLoadsPolicy`). */
+let appliedLoads: RemoteLoadsMode = 'remote';
+
+/**
+ * How the runtime is initialized for `configurePlannotatorUI({ diagramRemoteLoads })`:
+ * `'remote'` as before (the default); `'local'` with the no-remote label pass
+ * and secure keys (`mermaidConfigForRemoteLoads`); `'local-fallback'` the same
+ * for a runtime the label hook does not reach.
+ */
+export type RemoteLoadsMode = 'remote' | 'local' | 'local-fallback';
+
+function configFor(config: MermaidConfig, loads: RemoteLoadsMode): MermaidConfig {
+  return mermaidConfigForRemoteLoads(config, loads === 'remote', loads !== 'local-fallback');
+}
 
 /**
  * Initialize `mermaid` for the `(palette, mode)` named by `key`, once per key
@@ -869,20 +884,25 @@ export function applyMermaidTheme(
   mermaid: Pick<Mermaid, 'initialize'>,
   key: string,
   root?: Element | null,
+  loads: RemoteLoadsMode = getDiagramRemoteLoads() ? 'remote' : 'local',
 ): MermaidThemeApplyResult {
-  if (appliedRuntime === mermaid && appliedKey === key) return 'unchanged';
+  if (appliedRuntime === mermaid && appliedKey === key && appliedLoads === loads) return 'unchanged';
   const spec = buildMermaidThemeVariables(readThemeTokens(root), modeFromKey(key), {
     shadowAmount: shadowAmountFromKey(key),
   });
   const sameRuntime = appliedRuntime === mermaid;
+  // A runtime fresh from its loader carries MERMAID_CONFIG for remote loads;
+  // any other policy, or a change of it, re-initializes even the static config.
+  const loadsChanged = sameRuntime ? appliedLoads !== loads : loads !== 'remote';
   appliedRuntime = mermaid;
   appliedKey = key;
+  appliedLoads = loads;
   if (!spec) {
-    if (sameRuntime && appliedKind === 'dynamic') mermaid.initialize(MERMAID_CONFIG);
+    if ((sameRuntime && appliedKind === 'dynamic') || loadsChanged) mermaid.initialize(configFor(MERMAID_CONFIG, loads));
     appliedKind = 'static';
     return 'static';
   }
-  mermaid.initialize(buildMermaidConfig(spec));
+  mermaid.initialize(configFor(buildMermaidConfig(spec), loads));
   appliedKind = 'dynamic';
   return 'dynamic';
 }
@@ -892,4 +912,5 @@ export function __resetMermaidThemeForTests(): void {
   appliedRuntime = null;
   appliedKey = null;
   appliedKind = null;
+  appliedLoads = 'remote';
 }
