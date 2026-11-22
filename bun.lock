@@ -165,6 +165,7 @@
         "chokidar": "^5.0.0",
         "diff": "^8.0.4",
         "parse5": "^7.3.0",
+        "picomatch": "4.0.7",
         "turndown": "^7.2.4",
       },
       "devDependencies": {
@@ -173,6 +174,7 @@
         "@earendil-works/pi-coding-agent": ">=0.79.1",
         "@earendil-works/pi-tui": ">=0.79.1",
         "@plannotator/sem-jiff": "0.2.0",
+        "@types/picomatch": "^4.0.2",
         "glimpseui": "^0.8.0",
       },
       "peerDependencies": {
@@ -435,9 +437,11 @@
         "chokidar": "^5.0.0",
         "diff": "^8.0.4",
         "parse5": "^7.3.0",
+        "picomatch": "4.0.7",
         "turndown": "^7.2.4",
       },
       "devDependencies": {
+        "@types/picomatch": "^4.0.2",
         "fast-check": "4.10.2",
       },
     },
@@ -1595,6 +1599,8 @@
     "@types/node": ["@types/node@26.6.5", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg=="],
 
     "@types/normalize-package-data": ["@types/normalize-package-data@2.4.4", "", {}, "sha512-37i+OaWTh9qeK4LSHPsyRC7NahnGotNuZvjLSgcPzblpHB3rrCJxAOgI5gCdKm7coonsaX1Of0ILiTcnZjbfxA=="],
+
+    "@types/picomatch": ["@types/picomatch@4.0.3", "", {}, "sha512-iG0T6+nYJ9FAPmx9SsUlnwcq1ZVRuCXcVEvWnntoPlrOpwtSTKNDC9uVAxTsC3PUvJ+99n4RpAcNgBbHX3JSnQ=="],
 
     "@types/react": ["@types/react@19.3.0", "", { "dependencies": { "csstype": "^3.2.2" } }, "sha512-N0rFCuH9YoxG9/m61l9MfpJKfmLOVU0em7ipIz6TRgSSkvReLB9vL85GB+yr8Bs5leqpvg96JSwF4ZS1s4viQg=="],
 

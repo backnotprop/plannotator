@@ -120,7 +120,10 @@ import {
   claudeTranscriptPaths,
   conversationResumed,
   discoverInboxTools,
+  engineAtLeast,
   engineHasSessionAppend,
+  effortLevelOf,
+  SESSION_USAGE_MIN_ENGINE,
   inboxFirstPromptContext,
   inboxRegistryPathOf,
   inboxT3Agent,
@@ -224,6 +227,20 @@ function readEngineVersion($: Engine): Promise<string | null> {
     }
   })()
   return engineVersion
+}
+
+async function readModel($: Engine): Promise<string | null> {
+  const model = await $.session.model()
+  return typeof model === 'string' && model ? model : null
+}
+
+let mainEffort: string | null = null
+
+async function readContextPercent($: Engine): Promise<number | null> {
+  if (!engineAtLeast(await readEngineVersion($), SESSION_USAGE_MIN_ENGINE)) return null
+  const usage = await $.session.usage()
+  const percent = usage?.context?.percent
+  return typeof percent === 'number' && Number.isFinite(percent) ? Math.min(100, Math.max(0, Math.round(percent))) : null
 }
 
 /** Every closure over `$` the logic uses. `debugPath` set: lines go to that file. */
@@ -682,6 +699,9 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
       root: async () => String(await $.session.root()),
       label: async () => (await title.read().catch(() => null)) ?? sessionNameOf($, String(sessionId)),
       title: () => title.generatedTitle() ?? '',
+      model: () => readModel($),
+      effort: () => mainEffort,
+      contextPercent: () => readContextPercent($),
       firstStart: (startedAt) => sessionFirstStartOf($, String(sessionId), startedAt),
       continues: async () => [...new Set([...(await forkedFrom.read()), ...(await continuedIn.read())])],
       place: () => placeOf($),
@@ -1518,7 +1538,10 @@ export function register(on: On) {
   })
 
   on('turn.step', async function* ($: Engine, e: any, next: Next) {
-    if (!e.agentId) await plainReminderAgain($)
+    if (!e.agentId) {
+      mainEffort = effortLevelOf(e.effort)
+      await plainReminderAgain($)
+    }
     const instance = allowed ? mod : null
     // A model request of this loop: whatever it waited on in the terminal was answered (terminal-prompts.ts).
     if (instance && !instance.isDisposed) instance.onLoopStep(typeof e.agentId === 'string' ? e.agentId : undefined)
