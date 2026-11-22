@@ -396,7 +396,7 @@ test.skipIf(!hasDom)('a closed row is heard once, in order: state, title, risk, 
   expect(one.indexOf('Changes requested')).toBeLessThan(one.indexOf('#41'));
 });
 
-test.skipIf(!hasDom)("a title's tooltip measures only what is drawn, and never a cut under a pixel", () => {
+test.skipIf(!hasDom)("a title's tooltip measures only what is drawn, and never a cut of half a pixel or less", () => {
   draw(null);
   const split = row(ROWS[3]!.id).querySelector('.ib-rvr-t')!;
   const plain = row('thr_mid').querySelector('.ib-rvr-t')!;
@@ -406,10 +406,13 @@ test.skipIf(!hasDom)("a title's tooltip measures only what is drawn, and never a
   for (const part of parts) expect(part.closest('.ib-sr')).toBeNull();
   expect(titleParts(plain)).toEqual([plain as HTMLElement]);
   const by = (over: (el: HTMLElement) => number) => (el: HTMLElement) => ({ text: 100 + over(el), box: 100 });
-  expect(titleIsCut(plain, by(() => 0.6))).toBe(false);
-  expect(titleIsCut(plain, by(() => 1))).toBe(false);
+  expect(titleIsCut(plain, by(() => 0.25))).toBe(false);
+  expect(titleIsCut(plain, by(() => 0.5))).toBe(false);
+  // Over by less than a pixel, the line already draws its "…": the tooltip shows.
+  expect(titleIsCut(plain, by(() => 0.75))).toBe(true);
   expect(titleIsCut(plain, by(() => 1.5))).toBe(true);
-  expect(titleIsCut(split, by(() => 0.9))).toBe(false);
+  expect(titleIsCut(split, by(() => 0.4))).toBe(false);
+  expect(titleIsCut(split, by(() => 0.9))).toBe(true);
   // The head cut: the title is.
   expect(titleIsCut(split, by((el) => (el.classList.contains('ib-rvr-th') ? 30 : 0)))).toBe(true);
 });
