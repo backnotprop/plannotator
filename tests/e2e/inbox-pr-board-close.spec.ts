@@ -256,7 +256,9 @@ test('desktop: one PR picked, then an own one; Close, its toast, the Undo line t
     presses = [];
     await lines.first().locator('[data-pr-closed-undo]').focus();
     await page.keyboard.press('Enter');
+    // The line goes at the press; the three reopens follow one at a time, and the toast says when all went.
     await expect(lines).toHaveCount(0);
+    await expect(toast).toContainText('Reopened 3');
     expect(presses.map((p) => p.split(' ')[0])).toEqual(['reopen', 'reopen', 'reopen']);
     expect(presses.map((p) => p.split(' ')[1]).sort()).toEqual([key('web-app', 2041), key('web-app', 2047), key('web-app', 2050)].sort());
   } finally {
