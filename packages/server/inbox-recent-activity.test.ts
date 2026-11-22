@@ -192,10 +192,11 @@ describe("agents never read it", () => {
     const door = async (tool: string, args: Record<string, unknown>) => (await w.door(pairing.token, tool, args)).result!;
     const reads: [string, DoorResult][] = [
       ["mcp read_thread", await local("read_thread", { thread_id: id })],
-      ["mcp list", await local("read_thread", { project_path: w.project })],
+      // The list: every agent's threads there, not only this session's own (`asked_by`).
+      ["mcp list", await local("read_thread", { project_path: w.project, asked_by: "anyone" })],
       ["mcp search", await local("search", { query: "zebra", project_path: w.project })],
       ["door read_thread", await door("read_thread", { thread_id: id })],
-      ["door list", await door("read_thread", {})],
+      ["door list", await door("read_thread", { asked_by: "anyone" })],
       ["door search", await door("search", { query: "zebra" })],
     ];
     for (const [what, result] of reads) {
