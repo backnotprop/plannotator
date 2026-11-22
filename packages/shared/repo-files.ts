@@ -23,6 +23,7 @@ import {
   type ReviewGitRuntime,
 } from "./review-core";
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
+import { compileReviewFileFilter } from "./review-file-filter";
 import { fuzzySearchPaths, type FuzzyPathMatch } from "./fuzzy-path";
 
 export type { RepoFileListing, RepoRevisionInfo } from "./review-core";
@@ -314,6 +315,7 @@ export interface RepoFilesRequestInput {
   /** On-disk changes for a live listing; omitted where nothing is live. */
   loadOnDisk?: (listing: RepoFileListing) => Promise<Record<string, RepoOnDiskChange> | null>;
   lazyThreshold?: number;
+  signal?: AbortSignal;
 }
 
 const STALE_BODY = { error: "Diff snapshot is stale; refresh first", reason: "stale" };
@@ -331,6 +333,29 @@ function onDiskOnce(
   return pending;
 }
 
+// Keep the last completed filter per listing so folder expansions reuse it.
+const filteredListings = new WeakMap<RepoFileListing, { key: string; paths: string[] }>();
+
+async function filterListing(listing: RepoFileListing, include: string, exclude: string, signal?: AbortSignal): Promise<string[] | null> {
+  const key = JSON.stringify([include, exclude]);
+  const cached = filteredListings.get(listing);
+  if (cached?.key === key) return cached.paths;
+  const matches = compileReviewFileFilter({ include, exclude });
+  if (!matches) return listing.paths;
+  const result: string[] = [];
+  for (let start = 0; start < listing.paths.length; start += 4096) {
+    if (signal?.aborted) return null;
+    const end = Math.min(start + 4096, listing.paths.length);
+    for (let index = start; index < end; index++) {
+      const path = listing.paths[index];
+      if (matches(path)) result.push(path);
+    }
+    if (end < listing.paths.length) await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  filteredListings.set(listing, { key, paths: result });
+  return result;
+}
+
 /** `GET /api/repo-files?snapshot=<id>[&dir=<folder>]`. */
 export async function handleRepoFilesRequest(input: RepoFilesRequestInput): Promise<HandlerResult> {
   const snapshot = input.params.get("snapshot");
@@ -338,7 +363,7 @@ export async function handleRepoFilesRequest(input: RepoFilesRequestInput): Prom
   if (input.unavailable) {
     return { status: 200, body: { available: false, ...input.unavailable } satisfies RepoFilesResponse };
   }
-  if (!input.isCurrentSnapshot(snapshot)) return { status: 409, body: STALE_BODY };
+  if (input.signal?.aborted || !input.isCurrentSnapshot(snapshot)) return { status: 409, body: STALE_BODY };
   const dir = input.params.get("dir") ?? "";
   if (dir && !isSafeRepoRequestPath(dir)) return { status: 400, body: { error: "Invalid folder", reason: "bad-request" } };
 
@@ -350,12 +375,13 @@ export async function handleRepoFilesRequest(input: RepoFilesRequestInput): Prom
     };
   }
   // The snapshot can move while the listing loads.
-  if (!input.isCurrentSnapshot(snapshot)) return { status: 409, body: STALE_BODY };
+  if (input.signal?.aborted || !input.isCurrentSnapshot(snapshot)) return { status: 409, body: STALE_BODY };
 
   const threshold = input.lazyThreshold ?? REPO_FILES_LAZY_THRESHOLD;
   // What changed on disk since the snapshot: once per listing (a live change
   // lists again, so a new listing object), and only with the root request.
   const onDisk = listing.live && input.loadOnDisk && dir === "" ? await onDiskOnce(listing, input.loadOnDisk) : null;
+  if (input.signal?.aborted) return { status: 409, body: STALE_BODY };
   const base = {
     available: true as const,
     revision: listing.revision,
@@ -365,9 +391,20 @@ export async function handleRepoFilesRequest(input: RepoFilesRequestInput): Prom
     ...(onDisk && Object.keys(onDisk).length > 0 ? { onDisk } : {}),
   };
   if (listing.paths.length > threshold) {
+    const include = input.params.get("include") ?? "";
+    const exclude = input.params.get("exclude") ?? "";
+    if (include.length + exclude.length > 4096) {
+      return { status: 400, body: { error: "File filter is too long", reason: "bad-request" } };
+    }
+    let paths = listing.paths;
+    if (include || exclude) {
+      const matching = await filterListing(listing, include, exclude, input.signal);
+      if (!matching || input.signal?.aborted || !input.isCurrentSnapshot(snapshot)) return { status: 409, body: STALE_BODY };
+      paths = matching;
+    }
     return {
       status: 200,
-      body: { ...base, lazy: true, dir, entries: repoDirEntries(listing.paths, dir) } satisfies RepoFilesResponse,
+      body: { ...base, lazy: true, dir, entries: repoDirEntries(paths, dir) } satisfies RepoFilesResponse,
     };
   }
   return { status: 200, body: { ...base, paths: listing.paths } satisfies RepoFilesResponse };
