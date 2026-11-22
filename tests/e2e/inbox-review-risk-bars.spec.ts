@@ -315,10 +315,16 @@ async function expectNoOverlap(review: Locator, ref: LineRef, opts: { long: bool
   const cdp = await context.newCDPSession(page);
   const { file } = ref;
   try {
-    await review.locator(lineSelector(ref)).first().scrollIntoViewIfNeeded();
-    const g = await lineGeometry(review, ref);
-    const mark = await markOf(cdp, ref);
-    expect(mark, `${JSON.stringify(ref)} has a mark`).toBeTruthy();
+    // The diff may draw a file's lines again as it comes into view: take the line once it holds still.
+    let g!: Awaited<ReturnType<typeof lineGeometry>>;
+    let mark: Box | undefined;
+    await expect(async () => {
+      await review.locator(`[data-guide-file-shell="${file}"]`).scrollIntoViewIfNeeded();
+      await review.locator(lineSelector(ref)).first().scrollIntoViewIfNeeded({ timeout: 2000 });
+      g = await lineGeometry(review, ref);
+      mark = await markOf(cdp, ref);
+      expect(mark, `${JSON.stringify(ref)} has a mark`).toBeTruthy();
+    }).toPass({ timeout: 15_000 });
     expect(Math.abs(mark!.x + mark!.width - g.visibleRight)).toBeLessThanOrEqual(1.5);
     expect(Math.abs(mark!.y - g.line.y)).toBeLessThanOrEqual(1);
     expect(Math.abs(mark!.height - g.lineHeight)).toBeLessThanOrEqual(1);
