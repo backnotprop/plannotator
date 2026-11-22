@@ -26,7 +26,7 @@
  * Pure: reads nothing but its arguments.
  */
 import { contrastRatio, parseCssColor, toHex } from './cssColor';
-import { safeLabelColor } from './pele-labels';
+import { mermaidDirectives, safeLabelColor } from './pele-labels';
 import { PELE_LINE_MIN, PELE_SERIES_COUNT, PELE_TEXT_MIN, type PeleThemeVariables } from './peleTheme';
 
 // ------------------------------------------------------------------ reading
@@ -34,10 +34,8 @@ import { PELE_LINE_MIN, PELE_SERIES_COUNT, PELE_TEXT_MIN, type PeleThemeVariable
 /** Mermaid's JSON-ish directive object (single quotes, bare keys, trailing commas) as JSON; strings are set aside first, so nothing inside one is touched. */
 function parseLooseObject(text: string): unknown {
   const strings: string[] = [];
-  const held = text.replace(/'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"/gu, (_m, single: string | undefined, double: string | undefined) => {
-    strings.push(single !== undefined ? JSON.stringify(single.replace(/\\'/gu, "'")) : `"${double ?? ''}"`);
-    return `\u0000${strings.length - 1}\u0000`;
-  });
+  const held = holdStrings(text, strings);
+  if (held === null) return null;
   const json = held
     .replace(/([{,]\s*)([A-Za-z_$][\w$-]*)\s*:/gu, '$1"$2":')
     .replace(/,\s*([}\]])/gu, '$1')
@@ -47,6 +45,29 @@ function parseLooseObject(text: string): unknown {
   } catch {
     return null;
   }
+}
+
+/**
+ * The text with each quoted string replaced by `\u0000<n>\u0000` and the string, as JSON, put in `strings`; null when a
+ * quote is never closed. One pass: a pattern for this rescans to the end from every unclosed quote.
+ */
+function holdStrings(text: string, strings: string[]): string | null {
+  let out = '';
+  for (let i = 0; i < text.length; i += 1) {
+    const quote = text[i];
+    if (quote !== "'" && quote !== '"') {
+      out += quote;
+      continue;
+    }
+    let j = i + 1;
+    while (j < text.length && text[j] !== quote) j += text[j] === '\\' ? 2 : 1;
+    if (j >= text.length) return null;
+    const inner = text.slice(i + 1, j);
+    strings.push(quote === "'" ? JSON.stringify(inner.replace(/\\'/gu, "'")) : `"${inner}"`);
+    out += `\u0000${strings.length - 1}\u0000`;
+    i = j;
+  }
+  return out;
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -61,13 +82,17 @@ function frontMatterConfig(source: string): Record<string, unknown> | null {
   for (i += 1; i < lines.length && (lines[i] ?? '').trim() !== '---'; i += 1) block.push(lines[i] ?? '');
   const root: Record<string, unknown> = {};
   const stack: { indent: number; map: Record<string, unknown> }[] = [{ indent: -1, map: root }];
-  for (const line of block) {
-    const m = /^(\s*)([\w$-]+)\s*:\s*(.*?)\s*$/u.exec(line.replace(/\s+#.*$/u, ''));
+  for (const full of block) {
+    // A comment starts at ` #`; the value is trimmed by hand. Every pattern here has one way to match, so a long
+    // run of spaces on a line costs one pass.
+    const hash = full.search(/\s#/u);
+    const line = hash === -1 ? full : full.slice(0, hash);
+    const m = /^(\s*)([\w$-]+)\s*:(.*)$/u.exec(line);
     if (m === null) continue;
     const indent = (m[1] ?? '').length;
     while (stack.length > 1 && indent <= (stack[stack.length - 1]?.indent ?? -1)) stack.pop();
     const parent = stack[stack.length - 1]?.map ?? root;
-    const raw = m[3] ?? '';
+    const raw = (m[3] ?? '').trim();
     if (raw === '') {
       const child: Record<string, unknown> = {};
       parent[m[2] as string] = child;
@@ -82,8 +107,8 @@ function frontMatterConfig(source: string): Record<string, unknown> | null {
 /** Every `%%{init: …}%%` (or `initialize`) object of a source, in order. */
 function initDirectives(source: string): Record<string, unknown>[] {
   const out: Record<string, unknown>[] = [];
-  for (const match of source.matchAll(/%%\{([\s\S]*?)\}%%/gu)) {
-    const body = /^\s*(?:init|initialize)\s*:\s*([\s\S]*)$/u.exec(match[1] ?? '')?.[1];
+  for (const directive of mermaidDirectives(source)) {
+    const body = /^\s*(?:init|initialize)\s*:([\s\S]*)$/u.exec(directive.body)?.[1];
     if (body === undefined) continue;
     const parsed = parseLooseObject(body);
     if (isObject(parsed)) out.push(parsed);

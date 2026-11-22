@@ -57,6 +57,7 @@ import { applyMermaidTheme, mermaidThemeKey, type MermaidThemeMode, type RemoteL
 import { loadPeleRuntime, PELE_IN_BUILD, PELE_OUTPUT_LIMIT, PELE_SOURCE_LIMIT, peleFonts, peleSvgId, renderPeleSource } from './pele';
 import { finishPeleLabels, needsPeleLabels, pageMathTypesetter, peleLabelMeasurer, preparePeleLabels, restorePeleLabelMessage, type PreparedPeleLabels } from './pele-labels';
 import { peleAuthorColors } from './peleAuthorTheme';
+import { clampPeleStyles } from './peleStyleClamp';
 import { applyPeleThemeVariables, peleShadowCss, readPeleThemeVariables } from './peleTheme';
 
 export type { DiagramKind } from '@plannotator/core/diagram-anchor';
@@ -1129,21 +1130,23 @@ async function renderPele(renderId: string, source: string, theme: DiagramTheme,
   if (!supported) {
     return { ok: false, message: 'Pele does not draw this diagram type.', line: null, runtimeUnavailable: false, unsupported: true };
   }
-  // Math and styled text in labels (`pele-labels.ts`): the source Pele draws, then its svg finished.
-  const fonts = peleFonts();
+  // Math and styled text in labels (`pele-labels.ts`): the source Pele draws, then its svg finished. Inside the
+  // try: a step that throws is this fence's error (so 'pele-where-safe' falls back), never a rejected render.
   let labels: PreparedPeleLabels | null = null;
-  if (needsPeleLabels(source)) {
-    const typesetter = hasMermaidMath(source) ? await pageMathTypesetter(fonts.sans) : null;
-    labels = preparePeleLabels(source, typesetter);
-  }
   try {
+    const fonts = peleFonts();
+    if (needsPeleLabels(source)) {
+      const typesetter = hasMermaidMath(source) ? await pageMathTypesetter(fonts.sans) : null;
+      labels = preparePeleLabels(source, typesetter);
+    }
     const prepared = labels;
     let measurer: TextMeasurer | undefined;
     const result = await renderPeleSource(runtime, prepared?.text ?? source, renderId, fonts, prepared === null ? undefined : (base) => (measurer = peleLabelMeasurer(base, prepared)));
-    if (result.svg.length > PELE_OUTPUT_LIMIT) {
+    const markup = result.svg.length > PELE_OUTPUT_LIMIT || prepared === null ? result.svg : finishPeleLabels(result.svg, prepared, measurer ?? peleLabelMeasurer(undefined, prepared));
+    // Again after the formulas are in: their MathML is not part of what Pele measured.
+    if (markup.length > PELE_OUTPUT_LIMIT) {
       return { ok: false, message: `Rendered diagram exceeds the ${PELE_OUTPUT_LIMIT.toLocaleString()} character limit.`, line: null, runtimeUnavailable: false };
     }
-    const markup = prepared === null ? result.svg : finishPeleLabels(result.svg, prepared, measurer ?? peleLabelMeasurer(undefined, prepared));
     const svgNode = sanitizeFor(markup, options);
     if (svgNode === REFUSED) return REFUSED_RESULT;
     if (svgNode === null) {
@@ -1151,6 +1154,8 @@ async function renderPele(renderId: string, source: string, theme: DiagramTheme,
     }
     svgNode.id = peleSvgId(renderId);
     scrubFetchingStyles(svgNode);
+    // An author's sizes (`stroke-dasharray:0.0001`, `stroke-width:9999px`) held to sane ranges (`peleStyleClamp.ts`).
+    clampPeleStyles(svgNode);
     const personColors = readPeleThemeVariables(theme.mode);
     // The colours an author spells out, over the person's palette; never a theme name, never a panel (`peleAuthorTheme.ts`).
     const author = peleAuthorColors(source, personColors);

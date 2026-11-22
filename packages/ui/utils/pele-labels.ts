@@ -51,13 +51,62 @@ const FA_ICON = /\bfa[bklrs]?:fa-[\w-]+/gu;
 /**
  * A colour an author may give a run: a name, a hex value, or `rgb()`/`rgba()`
  * and `hsl()`/`hsla()` with numbers only. Nothing that can carry `url(`,
- * `var(`, `expression(` or a `;`.
+ * `var(`, `expression(` or a `;`. Each separator has one way to match
+ * (a comma with optional spaces, or spaces), so a long run of spaces cannot
+ * make it backtrack.
  */
-export const SAFE_LABEL_COLOR = /^(?:#[0-9a-f]{3,8}|[a-z]{3,20}|rgba?\(\s*[\d.]+%?(?:\s*[,\s]\s*[\d.]+%?){2}(?:\s*[,/]\s*[\d.]+%?)?\s*\)|hsla?\(\s*[\d.]+(?:deg)?(?:\s*[,\s]\s*[\d.]+%){2}(?:\s*[,/]\s*[\d.]+%?)?\s*\))$/iu;
+export const SAFE_LABEL_COLOR = /^(?:#[0-9a-f]{3,8}|[a-z]{3,20}|rgba?\(\s*[\d.]+%?(?:(?:\s*,\s*|\s+)[\d.]+%?){2}(?:\s*[,/]\s*[\d.]+%?)?\s*\)|hsla?\(\s*[\d.]+(?:deg)?(?:(?:\s*,\s*|\s+)[\d.]+%){2}(?:\s*[,/]\s*[\d.]+%?)?\s*\))$/iu;
+
+/** No colour this pattern accepts needs more; longer values are refused before the pattern runs. */
+const SAFE_LABEL_COLOR_MAX = 64;
 
 export function safeLabelColor(value: string | null | undefined): string | null {
   const color = (value ?? '').trim();
-  return color !== '' && SAFE_LABEL_COLOR.test(color) && !/^(?:inherit|initial|unset|revert|currentcolor)$/iu.test(color) ? color : null;
+  if (color === '' || color.length > SAFE_LABEL_COLOR_MAX) return null;
+  return SAFE_LABEL_COLOR.test(color) && !/^(?:inherit|initial|unset|revert|currentcolor)$/iu.test(color) ? color : null;
+}
+
+/**
+ * Every `%%{…}%%` directive of a source, in order: what `/%%\{([\s\S]*?)\}%%/g`
+ * finds, by `indexOf`, so an unclosed `%%{` costs one scan, not one per `%%{`.
+ */
+export function mermaidDirectives(source: string): { start: number; end: number; body: string }[] {
+  const out: { start: number; end: number; body: string }[] = [];
+  for (let from = 0; ; ) {
+    const open = source.indexOf('%%{', from);
+    if (open === -1) break;
+    const close = source.indexOf('}%%', open + 3);
+    if (close === -1) break;
+    out.push({ start: open, end: close + 3, body: source.slice(open + 3, close) });
+    from = close + 3;
+  }
+  return out;
+}
+
+/** The diagram type word, after front matter, `%%{…}%%` directives (one line or several) and `%%` comments. */
+export function mermaidDiagramType(source: string): string {
+  const skipSpace = (i: number): number => {
+    while (i < source.length && /\s/u.test(source[i] ?? '')) i += 1;
+    return i;
+  };
+  let i = skipSpace(0);
+  if (source.startsWith('---', i)) {
+    const close = source.indexOf('---', i + 3);
+    if (close !== -1) i = close + 3;
+  }
+  for (;;) {
+    i = skipSpace(i);
+    if (source.startsWith('%%{', i)) {
+      const close = source.indexOf('}%%', i + 3);
+      if (close === -1) return '';
+      i = close + 3;
+    } else if (source.startsWith('%%', i)) {
+      const newline = source.indexOf('\n', i);
+      if (newline === -1) return '';
+      i = newline + 1;
+    } else break;
+  }
+  return /^\w+/u.exec(source.slice(i, i + 64))?.[0] ?? '';
 }
 
 // ---------------------------------------------------------------- the codes
@@ -113,11 +162,27 @@ export class PeleLabelCodes {
   }
 }
 
-/** The first block the source does not touch; null when it touches all three. */
+/**
+ * The characters an entity in the source stands for: Pele decodes Mermaid's
+ * `#57600;` (and an HTML `&#xE100;`) into a label, so an entity can write a
+ * placeholder the source never typed. Read as decimal or hex, with or
+ * without `&`, whichever way Pele reads it.
+ */
+function entityChars(source: string): string {
+  let out = '';
+  for (const match of source.matchAll(/#(?:x([0-9a-f]{1,6})|(\d{1,7}));/giu)) {
+    const code = match[1] !== undefined ? Number.parseInt(match[1], 16) : Number(match[2]);
+    if (code <= 0xffff) out += String.fromCharCode(code);
+  }
+  return out;
+}
+
+/** The first block neither the source nor an entity in it touches; null when they touch all three. */
 function codesFor(source: string): PeleLabelCodes | null {
+  const decoded = entityChars(source);
   for (const base of BLOCK_BASES) {
     const codes = new PeleLabelCodes(base);
-    if (!codes.has(source)) return codes;
+    if (!codes.has(source) && !codes.has(decoded)) return codes;
   }
   return null;
 }
@@ -168,9 +233,18 @@ export interface MathTypesetter {
   measure(htmls: readonly string[]): readonly { w: number; h: number }[];
 }
 
+/**
+ * Macro expansions one formula may use (KaTeX's own default is 1000). Real
+ * label formulas use a few dozen; a nested `\def` reaches hundreds of
+ * kilobytes of MathML well under 1000.
+ */
+export const PELE_MATH_MAX_EXPAND = 200;
+/** MathML one diagram's formulas may add in all; a formula past it stays its TeX text. */
+export const PELE_MATH_TOTAL_LIMIT = 250_000;
+
 /** The options Mermaid typesets its labels with, under the math slot's security pin (`trust: false`, no throw). */
 export function typesetPeleMath(renderer: MathRenderer, tex: string): string {
-  const html = renderer.renderToString(tex, { displayMode: true, output: 'mathml', throwOnError: false, trust: false, strict: 'ignore' });
+  const html = renderer.renderToString(tex, { displayMode: true, output: 'mathml', throwOnError: false, trust: false, strict: 'ignore', maxExpand: PELE_MATH_MAX_EXPAND });
   // Mermaid's own clean-up, then the display wrapper (its margins are the page's, not the label's).
   // KaTeX's stylesheet makes `.katex` `position: relative`, which WebKit paints at the svg's origin
   // inside a transformed foreignObject: the wrapper keeps its font, not its position.
@@ -241,7 +315,7 @@ export function estimateMathSize(html: string): { w: number; h: number } {
 
 /** The diagram types where Pele draws some labels on one line only, and which lines those are. */
 function oneLineContexts(source: string): (line: string, state: { depth: number }) => boolean {
-  const type = /^\s*(?:---[\s\S]*?---\s*)?(?:%%[^\n]*\n\s*)*(\w+)/u.exec(source)?.[1] ?? '';
+  const type = mermaidDiagramType(source);
   if (/^classDiagram/u.test(type)) {
     // A member: inside a class's braces, or `Name : member` (a relation has an arrow).
     return (line, state) => {
@@ -300,8 +374,12 @@ export function preparePeleLabels(source: string, typesetter: MathTypesetter | n
   const codes = codesFor(source);
   if (codes === null) return null;
 
-  // Formulas, line by line so a line's context (one line only, or not) is known.
+  // Formulas, line by line so a line's context (one line only, or not) is known. `slots[j]` is
+  // the formula the source's `j`-th `$$…$$` became, or -1 where it stays its TeX text (KaTeX
+  // threw, for one, or the diagram's MathML budget is spent).
   const found: { tex: string; html: string; fit: boolean }[] = [];
+  const slots: number[] = [];
+  let budget = PELE_MATH_TOTAL_LIMIT;
   const lines = source.split('\n');
   const oneLine = oneLineContexts(source);
   const state = { depth: 0 };
@@ -319,9 +397,21 @@ export function preparePeleLabels(source: string, typesetter: MathTypesetter | n
       const fit = lineFits[index];
       if (fit === null || fit === undefined) return;
       for (const match of line.matchAll(MATH_PATTERN)) {
-        if (found.length >= MAX_ITEMS) break;
+        if (slots.length >= MAX_ITEMS) break;
         const tex = match[1] ?? '';
-        found.push({ tex, html: typesetter.typeset(tex), fit });
+        let html: string | null = null;
+        try {
+          html = typesetter.typeset(tex);
+        } catch {
+          // `throwOnError: false` covers parse errors only: a formula too deep for KaTeX throws a RangeError.
+        }
+        if (html === null || html.length > budget) {
+          slots.push(-1);
+          continue;
+        }
+        budget -= html.length;
+        slots.push(found.length);
+        found.push({ tex, html, fit });
       }
     });
   }
@@ -334,10 +424,10 @@ export function preparePeleLabels(source: string, typesetter: MathTypesetter | n
     let text = line;
     if (maths.length > 0) {
       text = text.replace(MATH_PATTERN, (whole: string, _tex: string, offset: number, all: string) => {
-        const i = next;
+        const i = slots[next] ?? -1;
+        next += 1;
         const m = maths[i];
         if (m === undefined) return whole;
-        next += 1;
         const id = codes.math(i);
         const before = all.slice(0, offset).split(/<br\s*\/?>|["`[(|:{]/iu).pop() ?? '';
         const after = all.slice(offset + whole.length).split(/<br\s*\/?>|["`\])|}]/iu)[0] ?? '';
