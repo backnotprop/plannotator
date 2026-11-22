@@ -14,6 +14,7 @@ import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control.ts";
 import { createPiRefCards, handleRefCards, type RefRunner } from "./ref-cards.ts";
 import { createRequestHostGuard } from "./request-host-guard.ts";
+import { createNetworkKeyGuard } from "./network-key-guard.ts";
 import { isSameOriginRequest, refuseCrossOriginWrite } from "./request-origin-guard.ts";
 import {
 	type ArchivedPlan,
@@ -370,9 +371,12 @@ export async function startPlanReviewServer(options: {
 
 	const app = openPackedApp(options.htmlContent, { page: (html) => customThemesPage(html) });
 	const requestHostGuard = createRequestHostGuard();
+	const networkKeyGuard = createNetworkKeyGuard();
 	const server = createServer(async (req, res) => {
 		// Host allowlist first, before any route (request-host-guard.ts).
 		if (requestHostGuard.refuse(req, res)) return;
+		// Then, over SSH, this machine's key from any other computer (network-key-guard.ts).
+		if (networkKeyGuard.refuse(req, res)) return;
 		// Then no write from another site, before any route (request-origin-guard.ts).
 		if (refuseCrossOriginWrite(req, res)) return;
 		const url = requestUrl(req);
@@ -819,6 +823,7 @@ export async function startPlanReviewServer(options: {
 	});
 
 	requestHostGuard.attach(server);
+	networkKeyGuard.attach(server);
 	const { port, portSource } = await listenOnPort(server);
 	boundPort = port;
 	// Remote sessions serve the app page compressed (#1617); start gzip (what

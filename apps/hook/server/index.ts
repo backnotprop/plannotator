@@ -195,6 +195,7 @@ import { buildReviewOutput, supportsReviewApprovalNotes } from "./review-output"
 import { registerSession, unregisterSession, listSessions, listInProcessSessions, type SessionInfo } from "@plannotator/server/sessions";
 import { enableAutoUpdateNotice, isManagedBinary, scheduleAutoUpdateCheck } from "@plannotator/server/auto-update";
 import { openBrowser, openBrowserDetached } from "@plannotator/server/browser";
+import { withAdvertisedNetworkKey } from "@plannotator/server/remote";
 import { inlineHtmlLocalAssets } from "@plannotator/server/html-assets";
 import { installAgentTerminalRuntime } from "@plannotator/server/agent-terminal-runtime";
 import { installCallFlowRuntime } from "@plannotator/shared/call-flow";
@@ -1402,7 +1403,9 @@ if (args[0] === "sessions") {
     }
     // false when nothing opened (PLANNOTATOR_BROWSER=none says why on its own
     // line, a failed launch is left to the URL): never claim a tab that isn't there.
-    const opened = await openBrowser(session.url);
+    // The registry never holds the network key; a session another computer
+    // opens directly gets it back here (packages/server/remote.ts).
+    const opened = await openBrowser(withAdvertisedNetworkKey(session.url));
     console.error(opened
       ? `Opened ${session.mode} session in browser: ${session.url}`
       : `${session.mode} session: ${session.url}`);

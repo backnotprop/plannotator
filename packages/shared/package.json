@@ -148,6 +148,7 @@
     "./inbox-pull-close": "./inbox-pull-close.ts",
     "./inbox-pull-merge": "./inbox-pull-merge.ts",
     "./request-host": "./request-host.ts",
+    "./network-key": "./network-key.ts",
     "./local-image": "./local-image.ts",
     "./browser-intent": "./browser-intent.ts",
     "./host-control": "./host-control.ts",

@@ -32,6 +32,7 @@ import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control.ts";
 import { createPiRefCards, handleRefCards, type RefRunner } from "./ref-cards.ts";
 import { createRequestHostGuard } from "./request-host-guard.ts";
+import { createNetworkKeyGuard } from "./network-key-guard.ts";
 import { refuseCrossOriginWrite } from "./request-origin-guard.ts";
 import { createReviewDraftSession, localGitDraftTargetKey, localReviewDraftKeys, prDraftTargetKey, type ReviewDraftKeys } from "../generated/review-draft.ts";
 import { agentSwitchConfigToSave, agentToolSaveFailed, cookieHostConfigWrite, loadConfig, saveConfig, detectGitUser, getServerConfig, parsePackageChangesConfig, parseReviewAnalysisConfig, resolveAIEnabled, resolvePackageLookup, resolveSharingEnabled, resolveClaudeSandbox, resolveCursorSandbox, resolveFeedbackHistory, resolveGuideHistory, resolveGuideShareUrl, resolveGitRemoteCheck, resolveReviewProgress } from "../generated/config.ts";
@@ -2205,9 +2206,12 @@ export async function startReviewServer(options: {
 
 	const app = openPackedApp(options.htmlContent, { page: (html) => customThemesPage(html) });
 	const requestHostGuard = createRequestHostGuard();
+	const networkKeyGuard = createNetworkKeyGuard();
 	const server = createServer(async (req, res) => {
 		// Host allowlist first, before any route (request-host-guard.ts).
 		if (requestHostGuard.refuse(req, res)) return;
+		// Then, over SSH, this machine's key from any other computer (network-key-guard.ts).
+		if (networkKeyGuard.refuse(req, res)) return;
 		// Then no write from another site, before any route (request-origin-guard.ts).
 		if (refuseCrossOriginWrite(req, res)) return;
 		const url = requestUrl(req);
@@ -4275,6 +4279,7 @@ export async function startReviewServer(options: {
 	});
 
 	requestHostGuard.attach(server);
+	networkKeyGuard.attach(server);
 	const { port, portSource } = await listenOnPort(server);
 	boundPort = port;
 	// Remote sessions serve the app page compressed (#1617); start gzip (what

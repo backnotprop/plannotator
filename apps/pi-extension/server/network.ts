@@ -9,7 +9,9 @@ import type { Server } from "node:http";
 import os from "node:os";
 import { delimiter, join } from "node:path";
 import { loadConfig, resolveLocalUrlHostname, resolveUseGlimpse } from "../generated/config.ts";
-import { resolveAdvertisedSessionUrl } from "../generated/advertised-url.ts";
+import { isLocalOnlyAdvertisedUrl, resolveAdvertisedSessionUrl } from "../generated/advertised-url.ts";
+import { getPlannotatorDataDir } from "../generated/data-dir.ts";
+import { anotherComputerUrl, loadNetworkKey, withNetworkKey } from "../generated/network-key.ts";
 import { parsePortSelection } from "../generated/port-range.ts";
 import { browserNoneReason, isNoOpBrowserSentinel, resolveBrowserIntent } from "../generated/browser-intent.ts";
 
@@ -173,9 +175,21 @@ export function getLocalUrlHostname(): string | undefined {
 	return resolveLocalUrlHostname(loadConfig());
 }
 
-/** Compose the display-only URL advertised for a bound server port. */
+/**
+ * Compose the display-only URL advertised for a bound server port. Mirrors
+ * packages/server/remote.ts: over SSH alone, a URL another computer opens
+ * directly carries the network key; a localhost URL never does.
+ */
 export function buildAdvertisedUrl(port: number): string {
-	return resolveAdvertisedSessionUrl(port, isRemoteSession());
+	const url = resolveAdvertisedSessionUrl(port, isRemoteSession());
+	if (!isSshDetectedRemote() || isLocalOnlyAdvertisedUrl(url)) return url;
+	return withNetworkKey(url, loadNetworkKey(getPlannotatorDataDir()));
+}
+
+/** The ready-made "from another computer" link, or null (mirrors packages/server/remote.ts). */
+export function buildAnotherComputerUrl(port: number, advertisedUrl: string): string | null {
+	if (!isSshDetectedRemote() || !isLocalOnlyAdvertisedUrl(advertisedUrl)) return null;
+	return anotherComputerUrl(port, process.env.SSH_CONNECTION, loadNetworkKey(getPlannotatorDataDir()));
 }
 
 const MAX_RETRIES = 5;

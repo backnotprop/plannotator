@@ -34,6 +34,7 @@ import { getPlannotatorDataDir as semDiffOpinionDataDir } from "@plannotator/sha
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl, getLocalUrlHostname } from "./remote";
 import { isSshTunnelRequest, notePeer } from "./this-machine";
 import { createRequestHostGuard } from "./request-host-guard";
+import { createNetworkKeyGuard } from "./network-key-guard";
 import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { refuseCrossOriginWrite } from "./request-origin-guard";
 import type { Origin } from "@plannotator/shared/agents";
@@ -2241,6 +2242,7 @@ export async function startReviewServer(
   });
 
   const requestHostGuard = createRequestHostGuard();
+  const networkKeyGuard = createNetworkKeyGuard();
   const server = await startBunServerOnAvailablePort((port) =>
     Bun.serve(withPlannotatorServerHeader({
         hostname: getServerHostname(),
@@ -2256,6 +2258,9 @@ export async function startReviewServer(
           // Host allowlist first, before any route (request-host-guard.ts).
           const hostRefusal = requestHostGuard.check(req);
           if (hostRefusal) return hostRefusal;
+          // Then, over SSH, this machine's key from any other computer (network-key-guard.ts).
+          const keyRefusal = networkKeyGuard.check(req);
+          if (keyRefusal) return keyRefusal;
           // Published over the tailnet: only this computer's owner gets past here (single player; session-tailnet.ts).
           if (options.tailnetPublished === true) {
             const notOwner = refuseTailnetPeer(req);

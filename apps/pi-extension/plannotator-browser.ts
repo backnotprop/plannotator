@@ -28,7 +28,7 @@ import { BROWSER_SESSION_STOPPED } from "./browser-session-error.ts";
 import type { SessionBridge } from "./generated/ai/session-bridge.ts";
 import type { HostControl } from "./generated/host-control.ts";
 import type { AnnotateBundleFile } from "./generated/annotate-bundle.ts";
-import { openBrowser, isRemoteSession } from "./server/network.ts";
+import { buildAnotherComputerUrl, openBrowser, isRemoteSession } from "./server/network.ts";
 import { detectProjectName } from "./server/project.ts";
 import { parsePRUrl, checkPRAuth, fetchPR } from "./server/pr.ts";
 import { reviewRuntimeWithEnv } from "./server/vcs.ts";
@@ -287,6 +287,20 @@ async function openBrowserForServer(serverUrl: string, ctx: ExtensionContext, an
 		ctx.ui.notify(`Plannotator session ready: ${serverUrl}${suffix}`, "info");
 	} else if (failedLocally) {
 		ctx.ui.notify(`Could not open a browser automatically. Open ${serverUrl} to review.`, "info");
+	}
+	// Over SSH: the keyed link for a browser on another computer
+	// (packages/shared/network-key.ts), on the person's screen only, never in
+	// the agent's turn.
+	const another = anotherComputerUrlFor(serverUrl);
+	if (another) ctx.ui.notify(`From another computer: ${another}`, "info");
+}
+
+function anotherComputerUrlFor(serverUrl: string): string | null {
+	try {
+		const port = Number(new URL(serverUrl).port);
+		return port ? buildAnotherComputerUrl(port, serverUrl) : null;
+	} catch {
+		return null;
 	}
 }
 

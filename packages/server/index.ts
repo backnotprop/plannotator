@@ -21,6 +21,7 @@ import { isAbsolute, resolve } from "path";
 import { statSync } from "node:fs";
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl, getLocalUrlHostname } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
+import { createNetworkKeyGuard } from "./network-key-guard";
 import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { isSameOriginRequest, refuseCrossOriginWrite } from "./request-origin-guard";
 import { openEditorDiff } from "./ide";
@@ -447,6 +448,7 @@ export async function startPlannotatorServer(
     }, { status: 409 });
 
   const requestHostGuard = createRequestHostGuard();
+  const networkKeyGuard = createNetworkKeyGuard();
   const server = await startBunServerOnAvailablePort((port) =>
     Bun.serve(withPlannotatorServerHeader({
         hostname: getServerHostname(),
@@ -461,6 +463,9 @@ export async function startPlannotatorServer(
           // Host allowlist first, before any route (request-host-guard.ts).
           const hostRefusal = requestHostGuard.check(req);
           if (hostRefusal) return hostRefusal;
+          // Then, over SSH, this machine's key from any other computer (network-key-guard.ts).
+          const keyRefusal = networkKeyGuard.check(req);
+          if (keyRefusal) return keyRefusal;
           // Then no write from another site, before any route (request-origin-guard.ts).
           const originRefusal = refuseCrossOriginWrite(req);
           if (originRefusal) return originRefusal;

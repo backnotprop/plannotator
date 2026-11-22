@@ -10,7 +10,9 @@
 
 import { parsePortSelection } from "@plannotator/shared/port-range";
 import { loadConfig, resolveLocalUrlHostname } from "@plannotator/shared/config";
-import { resolveAdvertisedSessionUrl } from "@plannotator/shared/advertised-url";
+import { isLocalOnlyAdvertisedUrl, resolveAdvertisedSessionUrl } from "@plannotator/shared/advertised-url";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { anotherComputerUrl, loadNetworkKey, withNetworkKey } from "@plannotator/shared/network-key";
 
 const DEFAULT_REMOTE_PORT = 19432;
 const LOOPBACK_HOST = "127.0.0.1";
@@ -215,7 +217,30 @@ export function getLocalUrlHostname(): string | undefined {
   return resolveLocalUrlHostname(loadConfig());
 }
 
-/** Compose the display-only URL advertised for a bound server port. */
+/**
+ * Compose the display-only URL advertised for a bound server port. In a
+ * remote session SSH alone turned on, a URL another computer opens directly
+ * (a urlHost, a public URL) carries this machine's network key
+ * (packages/shared/network-key.ts); a localhost URL never needs it (it only
+ * reaches this machine, or a tunnel, which arrives over loopback).
+ */
 export function buildAdvertisedUrl(port: number): string {
-  return resolveAdvertisedSessionUrl(port, isRemoteSession());
+  return withAdvertisedNetworkKey(resolveAdvertisedSessionUrl(port, isRemoteSession()));
+}
+
+/** `url` with the network key when an advertised URL would carry it (see buildAdvertisedUrl). */
+export function withAdvertisedNetworkKey(url: string): string {
+  if (!isSshDetectedRemote() || isLocalOnlyAdvertisedUrl(url)) return url;
+  return withNetworkKey(url, loadNetworkKey(getPlannotatorDataDir()));
+}
+
+/**
+ * The ready-made link for a browser on another computer, with the key: only
+ * in a remote session SSH alone turned on, only when the advertised URL is a
+ * localhost one (otherwise that URL is the link), and only when the SSH
+ * connection's own address is known and still this machine's. Else null.
+ */
+export function buildAnotherComputerUrl(port: number, advertisedUrl: string): string | null {
+  if (!isSshDetectedRemote() || !isLocalOnlyAdvertisedUrl(advertisedUrl)) return null;
+  return anotherComputerUrl(port, process.env.SSH_CONNECTION, loadNetworkKey(getPlannotatorDataDir()));
 }

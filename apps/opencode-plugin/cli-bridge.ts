@@ -11,6 +11,7 @@ import {
 } from "@plannotator/ai/session-bridge-pull";
 import { runPullSessionBridgeClient } from "@plannotator/ai/session-bridge-pull-client";
 import { isSshDetectedRemote } from "@plannotator/server/remote";
+import { withoutNetworkKey } from "@plannotator/shared/network-key";
 import { inboxOpenedText, openInboxInBrowser } from "@plannotator/shared/inbox/agent-link";
 import { INBOX_COMMAND_BRIEFING } from "@plannotator/shared/inbox/connection";
 import { annotateTargetWords, parseAnnotateArgs, type ParsedAnnotateArgs } from "@plannotator/shared/annotate-args";
@@ -479,7 +480,8 @@ function logReadyFile(
         ...(target !== undefined ? { target } : {}),
       });
       loggedUrls.add(metadata.url);
-      log(client, "info", `[Plannotator] Open ${readyLabel}: ${metadata.url}`);
+      // The log never holds the network key; the toast (the person's screen) keeps the link whole.
+      log(client, "info", `[Plannotator] Open ${readyLabel}: ${withoutNetworkKey(metadata.url)}`);
       toastPlannotatorUrl(client, `Open ${readyLabel}: ${metadata.url}`, toastedUrls);
     } catch {
       // Ignore partial lines while the child process is writing.

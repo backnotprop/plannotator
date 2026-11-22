@@ -22,6 +22,7 @@ import {
   existsSync,
 } from "fs";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { withoutNetworkKey } from "@plannotator/shared/network-key";
 
 export interface SessionInfo {
   pid: number;
@@ -73,7 +74,10 @@ function isAlive(pid: number): boolean {
  */
 export function registerSession(info: SessionInfo): void {
   try {
-    writeAtomic(sessionPath(info.pid), JSON.stringify(info, null, 2));
+    // Never the network key (packages/shared/network-key.ts): another account
+    // on this machine may read the registry. `plannotator sessions --open`
+    // adds it back for the person (sessionOpenUrl).
+    writeAtomic(sessionPath(info.pid), JSON.stringify({ ...info, url: withoutNetworkKey(info.url) }, null, 2));
   } catch {
     // Session discovery is unavailable; the session itself is unaffected.
   }
