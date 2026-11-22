@@ -200,6 +200,75 @@ describe("parsePRUrl — Forgejo / Gitea", () => {
   });
 });
 
+/**
+ * Every host's URL forms, real shapes, with what each parses to. The rows for
+ * GitHub, GitLab and Bitbucket are what parsePRUrl answered before Forgejo was
+ * added: a Forgejo change that alters any of them fails here. Ambiguous rows
+ * pin how one host name reads under each platform's path shape.
+ */
+describe("parsePRUrl — every host's URL forms", () => {
+  const gh = (host: string, owner: string, repo: string, number: number) => ({ platform: "github", host, owner, repo, number });
+  const gl = (host: string, projectPath: string, iid: number) => ({ platform: "gitlab", host, projectPath, iid });
+  const bb = (workspace: string, repo: string, number: number) => ({ platform: "bitbucket", host: "bitbucket.org", workspace, repo, number });
+  const fj = (host: string, owner: string, repo: string, number: number, scheme?: "http") => ({ platform: "forgejo", host, owner, repo, number, ...(scheme ? { scheme } : {}) });
+
+  test.each([
+    // GitHub and GitHub Enterprise
+    ["https://github.com/acme/widgets/pull/12", gh("github.com", "acme", "widgets", 12)],
+    ["https://github.com/acme/widgets/pull/12/files", gh("github.com", "acme", "widgets", 12)],
+    ["https://github.com/acme/widgets/pull/12/commits/0a1b2c3", gh("github.com", "acme", "widgets", 12)],
+    ["https://github.com/acme/widgets/pull/12#discussion_r99", gh("github.com", "acme", "widgets", 12)],
+    ["https://github.com/acme/widgets/pull/12?diff=split", gh("github.com", "acme", "widgets", 12)],
+    ["https://www.github.com/acme/widgets/pull/12", gh("www.github.com", "acme", "widgets", 12)],
+    ["http://github.com/acme/widgets/pull/12", gh("github.com", "acme", "widgets", 12)],
+    ["https://ghe.acme.corp/acme/widgets/pull/12", gh("ghe.acme.corp", "acme", "widgets", 12)],
+    ["https://ghe.acme.corp:8443/acme/widgets/pull/12", gh("ghe.acme.corp:8443", "acme", "widgets", 12)],
+    // GitLab and self-hosted GitLab
+    ["https://gitlab.com/acme/widgets/-/merge_requests/42", gl("gitlab.com", "acme/widgets", 42)],
+    ["https://gitlab.com/acme/sub/widgets/-/merge_requests/42/diffs", gl("gitlab.com", "acme/sub/widgets", 42)],
+    ["https://gitlab.acme.corp/acme/widgets/-/merge_requests/42", gl("gitlab.acme.corp", "acme/widgets", 42)],
+    ["http://gitlab.lan:8080/acme/widgets/-/merge_requests/42", gl("gitlab.lan:8080", "acme/widgets", 42)],
+    // Bitbucket Cloud
+    ["https://bitbucket.org/acme/widgets/pull-requests/7", bb("acme", "widgets", 7)],
+    ["https://bitbucket.org/acme/widgets/pull-requests/7/diff", bb("acme", "widgets", 7)],
+    ["https://www.bitbucket.org/acme/widgets/pull-requests/7/overview", bb("acme", "widgets", 7)],
+    // Forgejo / Gitea: Codeberg, a self-hosted instance, a LAN one over http
+    ["https://codeberg.org/acme/widgets/pulls/3", fj("codeberg.org", "acme", "widgets", 3)],
+    ["https://codeberg.org/acme/widgets/pulls/3/files", fj("codeberg.org", "acme", "widgets", 3)],
+    ["https://git.acme.corp/acme/widgets/pulls/3", fj("git.acme.corp", "acme", "widgets", 3)],
+    ["http://forgejo.lan:3000/acme/widgets/pulls/3", fj("forgejo.lan:3000", "acme", "widgets", 3, "http")],
+    // One self-hosted name under each shape: GitLab's, GitHub Enterprise's, Forgejo's.
+    ["https://git.acme.corp/acme/widgets/-/merge_requests/3", gl("git.acme.corp", "acme/widgets", 3)],
+    ["https://git.acme.corp/acme/widgets/pull/3", gh("git.acme.corp", "acme", "widgets", 3)],
+    // A merge-request path wins over anything after it, as before.
+    ["https://git.acme.corp/acme/widgets/-/merge_requests/3/pulls/4", gl("git.acme.corp", "acme/widgets", 3)],
+  ])("%s", (url, expected) => {
+    expect(parsePRUrl(url)).toEqual(expected as ReturnType<typeof parsePRUrl>);
+  });
+
+  test("what was no PR before stays none, on the other platforms' own hosts too", () => {
+    for (const url of [
+      // `/pulls/N` on GitHub, GitLab and Bitbucket is no Forgejo instance.
+      "https://github.com/acme/widgets/pulls/12",
+      "https://www.github.com/acme/widgets/pulls/12",
+      "https://GitHub.com/acme/widgets/pulls/12",
+      "https://github.com:443/acme/widgets/pulls/12",
+      "https://gitlab.com/acme/widgets/pulls/12",
+      "https://bitbucket.org/acme/widgets/pulls/12",
+      // List pages, issues, Bitbucket Data Center, no scheme.
+      "https://github.com/acme/widgets/pulls",
+      "https://github.com/acme/widgets/issues/12",
+      "https://gitlab.com/acme/widgets/-/issues/42",
+      "https://bitbucket.org/acme/widgets/src/main/",
+      "https://git.acme.corp/projects/P/repos/widgets/pull-requests/7",
+      "github.com/acme/widgets/pull/12",
+      "",
+    ]) {
+      expect(parsePRUrl(url)).toBeNull();
+    }
+  });
+});
+
 describe("Forgejo helpers", () => {
   test("label, number, repo and CLI for a Forgejo PR", () => {
     const fj = parsePRUrl("https://forgejo.example.com/acme/widgets/pulls/5")!;

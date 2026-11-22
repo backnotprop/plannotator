@@ -794,6 +794,9 @@ export function encodeApiFilePath(filePath: string): string {
 
 // --- URL Parsing ---
 
+/** The public hosts of the other platforms: never a Forgejo instance. */
+const NOT_FORGEJO_HOSTS = new Set(["github.com", "gitlab.com", "bitbucket.org"]);
+
 /**
  * Parse a PR/MR URL into its components. Auto-detects platform.
  *
@@ -804,6 +807,7 @@ export function encodeApiFilePath(filePath: string): string {
  * - Self-hosted GitLab: https://gitlab.mycompany.com/group/project/-/merge_requests/42
  *
  * - Bitbucket Cloud: https://bitbucket.org/workspace/repo/pull-requests/7[/diff|/overview]
+ * - Forgejo / Gitea, any host but the three above: https://codeberg.org/owner/repo/pulls/5
  *
  * GitLab is checked first because `/-/merge_requests/` is unambiguous,
  * while `/pull/` could theoretically appear on any host. Bitbucket is matched
@@ -857,11 +861,14 @@ export function parsePRUrl(url: string): PRRef | null {
 
   // Forgejo / Gitea: {scheme}://{host}[:{port}]/{owner}/{repo}/pulls/{number}[/...]
   // `/pulls/` (plural) cannot collide with GitHub's `/pull/`. `@`, `?` and `#`
-  // are excluded from the host so credentials in a URL never parse.
+  // are excluded from the host so credentials in a URL never parse. Read last,
+  // so every URL another platform reads parses exactly as it did before; and
+  // never on github.com, gitlab.com or bitbucket.org, where such a path is no
+  // Forgejo PR and stays unparsed, as it always was.
   const fjMatch = url.match(
     /^(https?):\/\/([^/@?#]+)\/([^/?#]+)\/([^/?#]+)\/pulls\/(\d+)(?:[/?#]|$)/,
   );
-  if (fjMatch) {
+  if (fjMatch && !NOT_FORGEJO_HOSTS.has(fjMatch[2].toLowerCase().replace(/:\d*$/, "").replace(/^www\./, ""))) {
     const ref: ForgejoPRRef = {
       platform: "forgejo",
       host: fjMatch[2],
