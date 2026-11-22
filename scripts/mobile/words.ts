@@ -18,6 +18,8 @@ import { INBOX_STOPPED_REPLY_TEXT, TURN_ENDED_TEXT, autoAfterText, reaskRowLine,
 import { INBOX_TURN_FAILED_WORDS } from '../../packages/core/inbox-run-line';
 import { INBOX_SNOOZED_BAND } from '../../packages/core/inbox-snooze';
 import { INBOX_ACK_LABEL, INBOX_AGENT_LABELS, INBOX_PRIORITY_GROUP, INBOX_SECTIONS } from '../../packages/core/inbox-types';
+import { ATTACHMENT_FEEDBACK_HEADING, SENT_VERSION_SUFFIX } from '../../packages/inbox/attachments';
+import { MARKUP_ONLY_TEXT } from '../../packages/inbox/markup';
 import { OUT, cli, jsonText, type Output } from './lib';
 
 /** One word: its text (`{part}` where a part goes), its parts, and where it comes from. */
@@ -55,6 +57,11 @@ export function buildWords(): Record<string, Word> {
   words['delivery.reask_queued'] = template(`${DELIVERY} reaskRowLine(name, null, true)`, ['name'], (n) => reaskRowLine(n!, null, true));
   words['delivery.reask_saved'] = template(`${DELIVERY} reaskRowLine(name, null, false)`, ['name'], (n) => reaskRowLine(n!, null, false));
   words['run.turn_failed'] = fixed(INBOX_TURN_FAILED_WORDS, 'packages/core/inbox-run-line.ts INBOX_TURN_FAILED_WORDS');
+  // The text a Send carries for comments on attached files (the phone writes it itself; vectors/feedback.json holds the rest of it).
+  words['feedback.files_title'] = fixed(ATTACHMENT_FEEDBACK_HEADING.title, 'packages/inbox/attachments.ts ATTACHMENT_FEEDBACK_HEADING title');
+  words['feedback.files_intro'] = fixed(ATTACHMENT_FEEDBACK_HEADING.intro, 'packages/inbox/attachments.ts ATTACHMENT_FEEDBACK_HEADING intro');
+  words['feedback.sent_yours'] = fixed(SENT_VERSION_SUFFIX.yours, 'packages/inbox/attachments.ts SENT_VERSION_SUFFIX yours');
+  words['markup.only'] = fixed(MARKUP_ONLY_TEXT, 'packages/inbox/markup.ts MARKUP_ONLY_TEXT');
   return words;
 }
 

@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { dirname } from "node:path";
 import { loadConfig, saveConfig } from "@plannotator/shared/config";
 import { storedCfAccess, type CfAccessStored } from "@plannotator/shared/inbox/cf-access";
-import { runCfSetup, runCfTeardown, type CfApi, type CfSetupStep, type CfTeardownIds, type CfTeardownStep } from "@plannotator/shared/inbox/cf-access-api";
+import { normalizeCfSetupHostname, runCfSetup, runCfTeardown, type CfApi, type CfSetupInput, type CfSetupStep, type CfTeardownIds, type CfTeardownStep } from "@plannotator/shared/inbox/cf-access-api";
 import { runOutsideChecks, type EdgeFetch } from "./cf-access-checks";
 import { tunnelTokenPath } from "./cf-tunnel";
 
@@ -19,14 +19,6 @@ export interface CfFlowDeps {
   edgeFetch?: EdgeFetch;
   checkTimeoutMs?: number;
   connectTimeoutMs?: number;
-}
-
-export interface CfSetupRequest {
-  email: string;
-  port: number;
-  zone?: string;
-  hostname?: string;
-  account?: string;
 }
 
 export type CfFlowResult =
@@ -46,7 +38,7 @@ function leftoverOf(ids: CfTeardownIds): string[] {
 
 export async function runCfAccessSetupFlow(
   deps: CfFlowDeps,
-  input: CfSetupRequest,
+  input: CfSetupInput,
   onStep: (step: CfFlowStep, state: "running" | "done", detail?: string) => void = () => {},
   onSetupStep: (step: CfSetupStep, detail?: string) => void = () => {},
 ): Promise<CfFlowResult> {
@@ -77,9 +69,12 @@ export async function runCfAccessSetupFlow(
   onStep(current, "running");
   let result;
   try {
+    const host = normalizeCfSetupHostname(input.hostname ?? "");
+    const reusingHost = host !== "" && typeof before?.host === "string" && normalizeCfSetupHostname(before.host) === host;
+    const previousSessionHost = reusingHost && typeof before.sessionHost === "string" ? normalizeCfSetupHostname(before.sessionHost) : "";
     result = await runCfSetup(
       deps.api,
-      input,
+      { ...input, sessionHostname: input.sessionHostname ?? (previousSessionHost || undefined) },
       (step, detail) => {
         onSetupStep(step, detail);
         const next = NEXT_AFTER[step];
