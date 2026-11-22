@@ -47,9 +47,11 @@ export function buildFileStatusBlocks(
   files: readonly DiffFile[],
   sections: SinceBaseSections,
   stagedFiles: ReadonlySet<string>,
+  visiblePaths?: ReadonlySet<string>,
 ): FileStatusBlock[] {
   const grouped = new Map<FileStatusGroup, { file: DiffFile; index: number }[]>();
   files.forEach((file, index) => {
+    if (visiblePaths && !visiblePaths.has(file.path)) return;
     const status = fileStatusGroup(file, sections, stagedFiles);
     const bucket = grouped.get(status);
     if (bucket) bucket.push({ file, index });

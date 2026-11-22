@@ -117,19 +117,21 @@ interface DiagramRenderer {
 
 /** Elements that never belong in a rendered diagram. DOMPurify's profiles
  * already drop every one of them; the sweep below is the belt that does not
- * depend on which profile a later config edit turns on. */
-const FORBIDDEN_ELEMENTS = 'script, iframe, object, embed, link, meta';
+ * depend on which profile a later config edit turns on. The MathML ones:
+ * `mglyph` loads an image, `maction` is a link or status action, and
+ * `annotation-xml` can hold html; a KaTeX label needs none of them. */
+const FORBIDDEN_ELEMENTS = 'script, iframe, object, embed, link, meta, mglyph, maction, annotation-xml';
 
 /**
  * The belt over the engine's output (see the header). DOMPurify parses the
- * string under the svg, svg-filter and html profiles and hands back a
+ * string under the svg, svg-filter, html and MathML profiles and hands back a
  * detached fragment, so nothing executes and no markup reaches the app DOM.
  * `foreignobject` and its html children are added back the way Mermaid's
  * own pass adds them (the same ADD_TAGS, ADD_ATTR and
  * HTML_INTEGRATION_POINTS entries); without them every html label in the
  * diagram would be dropped. The walk afterwards closes what DOMPurify leaves
- * open for an svg: an `<a href>` around a node, and a `data:` reference on
- * an `<image>`.
+ * open for an svg: an `<a href>` around a node, a `data:` reference on
+ * an `<image>`, and any link or source on a MathML element.
  *
  * Returns the sanitized svg root, or null when the string carries no svg or
  * there is no document to parse it with.
@@ -143,7 +145,7 @@ export function sanitizeDiagramSvg(svg: string): SVGSVGElement | null {
 
 /**
  * Step one of the sanitizer: DOMPurify parses the markup under the svg,
- * svg-filter and html profiles and hands back a detached fragment; the svg
+ * svg-filter, html and MathML profiles and hands back a detached fragment; the svg
  * root is adopted into the page's document so the node the canvas mounts
  * belongs to it. Null when the markup carries no svg root, when there is no
  * document, or when the fragment cannot be adopted.
@@ -162,7 +164,11 @@ export function parseDiagramSvg(svg: string): SVGSVGElement | null {
 function parseDiagramSvgDetached(svg: string): SVGSVGElement | null {
   if (typeof document === 'undefined') return null;
   const fragment = DOMPurify.sanitize(svg, {
-    USE_PROFILES: { svg: true, svgFilters: true, html: true },
+    // `mathMl`: a `$$...$$` label is KaTeX MathML inside the html label;
+    // without the profile DOMPurify drops the `<math>` with its content and
+    // the node draws empty. `mglyph` is MathML's image element: forbidden.
+    USE_PROFILES: { svg: true, svgFilters: true, html: true, mathMl: true },
+    FORBID_TAGS: ['mglyph'],
     ADD_TAGS: ['foreignobject'],
     ADD_ATTR: ['dominant-baseline'],
     HTML_INTEGRATION_POINTS: { foreignobject: true },
@@ -256,11 +262,16 @@ export function scrubDiagramSvg(root: SVGSVGElement): void {
   scrubAttributes(root);
 }
 
+const MATHML_NS = 'http://www.w3.org/1998/Math/MathML';
+
 function scrubAttributes(el: Element): void {
+  // A math label (KaTeX MathML) carries no link and loads nothing; an `href`
+  // on a MathML element is a link in Firefox, so a MathML element keeps none.
+  const isMath = el.namespaceURI === MATHML_NS;
   for (const attribute of Array.from(el.attributes)) {
     const name = attribute.name.toLowerCase();
     const value = attribute.value.trim().toLowerCase();
-    if (name.startsWith('on')) {
+    if (name.startsWith('on') || (isMath && (name === 'href' || name === 'xlink:href' || name === 'src'))) {
       el.removeAttribute(attribute.name);
       continue;
     }

@@ -2486,12 +2486,12 @@ diffs-container {
   color: var(--muted-foreground);
 }
 
-.review-sidebar [data-review-panel-list] {
-  padding-bottom: 4px;
-}
-
 .review-sidebar [data-review-sticky-tools] {
   padding-bottom: 0;
+}
+
+.review-sidebar [data-review-file-filter] [data-review-sticky-tools] {
+  padding-block: 12px;
 }
 
 .review-sidebar [data-panel-controls-row] {

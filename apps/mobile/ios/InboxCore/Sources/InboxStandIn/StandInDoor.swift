@@ -17,6 +17,8 @@ public actor StandInDoor {
     public var minAppContract = 1
     /// False: an Inbox from before the handshake, whose `health` has no `door`.
     public var answersDoor = true
+    /// The thread's files are listed without the comments that wait, as an Inbox from before that field does.
+    public var omitsComments = false
     /// Route names left out of `health.door.routes`, as an older Inbox would.
     public var withoutRoutes: Set<String> = []
     public var version = "0.29.3"
@@ -29,6 +31,8 @@ public actor StandInDoor {
     public var proxyRefusesArchive: Set<String> = []
     /// True: the Authorization header never reaches the door, as when something in between strips it.
     public var stripsToken = false
+    /// A code every drawing is refused with (`413 markup_too_large`, or the relay's `413 relay_upload_unavailable`).
+    public var refusesMarkups: String?
     public init() {}
   }
 
@@ -83,6 +87,8 @@ public actor StandInDoor {
   }
   public func setOptions(_ change: @Sendable (inout Options) -> Void) { change(&options) }
   public func clearCalls() { calls = [] }
+  /// The thread is gone from the computer (deleted there): every read of it is `404 thread_not_found`.
+  public func removeThread(_ id: ThreadID) { threads.removeAll { $0.threadId == id } }
   public func thread(_ id: ThreadID) -> InboxThread? { threads.first { $0.threadId == id } }
   /// Change a thread as the computer's own side would (an archive, a Mark read that set a question aside).
   public func change(_ id: ThreadID, _ edit: @Sendable (inout InboxThread) -> Void) {
@@ -134,6 +140,7 @@ public actor StandInDoor {
       revoked.insert(device)
       return json(200, ["device": .object(["id": .string(device.rawValue), "revoked_at": .string(StandInData.iso(Date()))])])
     }
+    if route == "POST markups" { return keepDrawing(call) }
     return post(call, route: route)
   }
 
@@ -445,7 +452,21 @@ public actor StandInDoor {
           marks.append((m, q))
         }
       }
-      if planned.isEmpty, marks.isEmpty, words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      var feedback = ""
+      if case .string(let text)? = fields["feedback"] { feedback = text.trimmingCharacters(in: .whitespacesAndNewlines) }
+      // `planSentAnnotations`: each comment named is in this thread and still waits.
+      var carried: [String] = []
+      if let listed = fields["annotation_ids"], listed != .null {
+        guard case .array(let ids) = listed else { return refuse(422, "validation_error", "annotation_ids: must be a list.", field: "annotation_ids") }
+        for (index, value) in ids.enumerated() {
+          let field = "annotation_ids[\(index)]"
+          guard case .string(let id) = value, let record = state.annotations[id], record.threadId == asked.threadId else { return refuse(404, "annotation_not_found", "\(field): no such annotation in this thread.", field: field) }
+          if carried.contains(id) { return refuse(422, "validation_error", "\(field): listed twice.", field: field) }
+          if record.removedAt != nil || record.sentReplyId != nil { return refuse(409, "annotation_closed", "\(field): already sent or removed.", field: field) }
+          carried.append(id)
+        }
+      }
+      if planned.isEmpty, marks.isEmpty, feedback.isEmpty, words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
         if case .object(let first)? = entries.first, case .string(let key)? = first["key"] { return refuse(409, "question_already_sent", "The answer to \(key) was already sent.", key: key) }
         return refuse(422, "validation_error", "words: write a reply or send at least one answer.", field: "words")
       }
@@ -476,9 +497,10 @@ public actor StandInDoor {
       let now = StandInData.iso(Date())
       let written = InboxMessageWire(
         seq: seq, id: replyID, projectId: asked.projectId, threadId: asked.threadId, replyTo: message.rawValue, author: InboxAuthor(kind: .person),
-        body: words.isEmpty && !answered.isEmpty ? "Answered: \(answered.joined(separator: "; "))" : words, createdAt: now,
+        body: [words.isEmpty && !answered.isEmpty ? "Answered: \(answered.joined(separator: "; "))" : words, feedback].filter { !$0.isEmpty }.joined(separator: "\n\n"), createdAt: now,
         delivery: InboxDelivery(state: "queued", host: asked.author.host ?? "", session: asked.author.session ?? "", at: now))
       threads[at.thread].messages.append(written)
+      for id in carried { state.annotations[id]?.sentReplyId = replyID.rawValue }
       unread.remove(asked.threadId)
       let wire = (try? JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(written))) ?? .null
       let result = ReplyResult(
