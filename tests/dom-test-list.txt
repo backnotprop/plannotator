@@ -356,6 +356,7 @@ packages/editor/hooks/useQuestionAnswers.test.tsx
 packages/ui/components/diagram/DiagramViewer.test.tsx
 packages/ui/utils/diagramAnchor.test.ts
 packages/ui/utils/diagramAnchorGraphviz.test.ts
+packages/ui/utils/diagramMathLabels.test.ts
 packages/ui/hooks/useAnnotationHighlighter.diagramSkip.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.blankSelection.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.reselectOverlap.test.tsx

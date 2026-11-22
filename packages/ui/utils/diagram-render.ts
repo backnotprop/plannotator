@@ -910,7 +910,24 @@ async function renderMermaidOnce(runtime: Mermaid, renderId: string, source: str
     return { ok: false, message: 'The diagram could not be rendered.', line: null, runtimeUnavailable: false };
   }
   widenEdgeHitAreas(svgNode);
+  keepMathLabelsInPlace(svgNode);
   return { ok: true, svgNode, findTarget: MERMAID_FINDER.findTarget };
+}
+
+/**
+ * A `$$...$$` label is KaTeX's MathML in a `<span class="katex">` inside the
+ * label's `<foreignObject>`, and KaTeX's stylesheet makes that span
+ * `position: relative`. WebKit (Safari) paints positioned html inside a
+ * `<foreignObject>` without the svg's placement: the formula showed at the
+ * diagram's top-left corner and its node stayed empty. Mermaid asks KaTeX for
+ * MathML only, so nothing inside the span is positioned against it, and
+ * `static` draws the same in every other browser. Runs after the scrub, which
+ * keeps a `static` position anyway (`keepContainedDeclarations`).
+ */
+function keepMathLabelsInPlace(svg: SVGSVGElement): void {
+  for (const wrapper of Array.from(svg.querySelectorAll('.katex'))) {
+    (wrapper as HTMLElement).style?.setProperty('position', 'static');
+  }
 }
 
 const mermaidRenderer: DiagramRenderer = {
