@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { formatStars, ossStarsLink, readOssStars } from './src/lib/oss-stars';
+import { formatStars, ossStarsLink, readOssStars, snapshotRefusal } from './src/lib/oss-stars';
 
 const here = import.meta.dir;
 
@@ -24,6 +24,7 @@ describe('the star count beside "Open source" on the Spaces page', () => {
     expect(link.count).toBe('20.4k');
     expect(link.label).toContain('20,436 stars');
     expect(link.label).toContain('2 Nov 2026');
+    expect(link.label).toContain('new tab');
     expect(link.title).toContain('20,436');
   });
 
@@ -44,8 +45,23 @@ describe('the star count beside "Open source" on the Spaces page', () => {
     ];
     for (const raw of bad) {
       expect(readOssStars(raw)).toBeNull();
-      expect(ossStarsLink(readOssStars(raw))).toEqual({ count: null, label: null, title: null });
+      const link = ossStarsLink(readOssStars(raw));
+      expect(link.count).toBeNull();
+      expect(link.title).toBeNull();
+      expect(link.label).toContain('new tab');
+      expect(link.label).not.toMatch(/\d/);
     }
+  });
+
+  test('a refresh refuses an empty organisation or a sharp drop, unless forced', () => {
+    const committed = { total: 20000, repoCount: 27, fetchedAt: '2026-11-22' };
+    expect(snapshotRefusal({ total: 20436, orgRepos: { plannotator: 26 } }, committed)).toBeNull();
+    expect(snapshotRefusal({ total: 16000, orgRepos: { plannotator: 26 } }, committed)).toBeNull();
+    expect(snapshotRefusal({ total: 15999, orgRepos: { plannotator: 26 } }, committed)).toContain('--force');
+    expect(snapshotRefusal({ total: 15999, orgRepos: { plannotator: 26 } }, committed, true)).toBeNull();
+    expect(snapshotRefusal({ total: 100, orgRepos: { plannotator: 26 } }, null)).toBeNull();
+    expect(snapshotRefusal({ total: 14366, orgRepos: { plannotator: 0 } }, committed)).toContain('plannotator');
+    expect(snapshotRefusal({ total: 14366, orgRepos: { plannotator: 0 } }, null, true)).not.toBeNull();
   });
 
   test('the committed snapshot is one the page can read', () => {

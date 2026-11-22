@@ -11,10 +11,14 @@
 //
 // The set: the repositories in REPOS, plus every public repository of each
 // organisation in ORGS that is not a fork.
+//
+// It writes nothing, and exits non-zero, when an organisation lists no
+// repositories or the total falls more than 20% below the committed one
+// (snapshotRefusal); `--force` lets a real drop through.
 
-import { writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readOssStars } from '../src/lib/oss-stars';
+import { readOssStars, snapshotRefusal } from '../src/lib/oss-stars';
 
 const REPOS = ['backnotprop/plannotator'];
 const ORGS = ['plannotator'];
@@ -43,6 +47,8 @@ async function get<T>(url: string): Promise<{ body: T; next: string | null }> {
 }
 
 const stars = new Map<string, number>();
+const orgRepos: Record<string, number> = {};
+const file = join(import.meta.dir, '../src/data/oss-stars.json');
 
 for (const name of REPOS) {
   const { body } = await get<Repo>(`${API}/repos/${name}`);
@@ -51,11 +57,13 @@ for (const name of REPOS) {
 
 for (const org of ORGS) {
   let url: string | null = `${API}/orgs/${org}/repos?type=public&per_page=100`;
+  orgRepos[org] = 0;
   while (url) {
     const page: { body: Repo[]; next: string | null } = await get<Repo[]>(url);
     for (const repo of page.body) {
       if (repo.fork || repo.private) continue;
       stars.set(repo.full_name.toLowerCase(), repo.stargazers_count);
+      orgRepos[org] += 1;
     }
     url = page.next;
   }
@@ -70,7 +78,16 @@ const snapshot = {
   top: ranked.slice(0, TOP).map(([repo, n]) => ({ repo, stars: n })),
 };
 
+const previous = existsSync(file) ? readOssStars(readFileSync(file, 'utf8')) : null;
+const refusal = snapshotRefusal({ total: snapshot.total, orgRepos }, previous, process.argv.includes('--force'));
+if (refusal) {
+  console.error(refusal);
+  process.exit(1);
+}
 const text = `${JSON.stringify(snapshot, null, 2)}\n`;
-if (!readOssStars(text)) throw new Error('The snapshot would not be readable by the page; not written.');
-writeFileSync(join(import.meta.dir, '../src/data/oss-stars.json'), text);
+if (!readOssStars(text)) {
+  console.error('The snapshot would not be readable by the page; nothing written.');
+  process.exit(1);
+}
+writeFileSync(file, text);
 console.log(`${snapshot.total} stars across ${snapshot.repoCount} repositories (${snapshot.fetchedAt}).`);

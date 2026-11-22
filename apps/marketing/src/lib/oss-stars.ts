@@ -62,9 +62,36 @@ export function snapshotDay(day: string): string {
   return `${d} ${MONTHS[m - 1]} ${y}`;
 }
 
-/** What the link shows and says. With no snapshot: the words alone. */
+/**
+ * What the link shows and says. The label is the link's one accessible name;
+ * the tooltip goes on the hidden count, so a screen reader says the number once.
+ * With no snapshot: the words alone, no count.
+ */
 export function ossStarsLink(stars: OssStars | null) {
-  if (!stars) return { count: null, label: null, title: null };
+  const newTab = 'Opens in a new tab';
+  if (!stars) return { count: null, label: `Open source. ${newTab}`, title: null };
   const said = `${exactStars(stars.total)} stars on GitHub as of ${snapshotDay(stars.fetchedAt)}`;
-  return { count: formatStars(stars.total), label: `Open source: ${said}`, title: said };
+  return { count: formatStars(stars.total), label: `Open source: ${said}. ${newTab}`, title: said };
+}
+
+/** A total this far below the committed one is more likely a broken read than real. */
+export const MAX_DROP = 0.2;
+
+/**
+ * Why a fresh snapshot must not replace the committed one, or null when it may.
+ * An organisation that lists no repositories, or a total more than MAX_DROP
+ * below the committed snapshot's (when that one is readable), is refused;
+ * `force` lets the drop through, never an empty organisation.
+ */
+export function snapshotRefusal(
+  next: { total: number; orgRepos: Record<string, number> },
+  previous: OssStars | null,
+  force = false,
+): string | null {
+  const empty = Object.entries(next.orgRepos).filter(([, n]) => n === 0).map(([org]) => org);
+  if (empty.length) return `GitHub listed no public repositories for ${empty.join(', ')}; nothing written.`;
+  if (!force && previous && next.total < previous.total * (1 - MAX_DROP)) {
+    return `The new total ${exactStars(next.total)} is more than ${MAX_DROP * 100}% below the committed ${exactStars(previous.total)}; nothing written. Run again with --force if it is right.`;
+  }
+  return null;
 }
