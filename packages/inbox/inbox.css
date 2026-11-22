@@ -8659,7 +8659,7 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 .ib-fcomp .ib-fcomp-files { padding: 4px 2px 2px; max-height: min(136px, 22vh); overflow-y: auto; overscroll-behavior: contain; }
 .ib-fcomp[data-drop-over] { border-style: dashed; border-color: var(--primary); }
 /* A comment's own files (commentFiles.tsx): the reply's paperclip after the pencil, the reply's tiles over the field. */
-.ib-fcomp .ib-ccard > .ib-tipwrap:has(> .ib-cclip) { grid-area: clip; }
+.ib-fcomp .ib-ccard > :is(.ib-cclip, .ib-tipwrap:has(> .ib-cclip)) { grid-area: clip; }
 .ib-fcomp .ib-ccard > .ib-cfiles { grid-area: files; padding: 8px 2px 0; max-height: min(136px, 22vh); overflow-y: auto; overscroll-behavior: contain; }
 /* Beside the thread: the tiles take their own line over the row, the paperclip the row's 34 px (44 on a phone). */
 .ib-imgcompose .ib-ccard { position: relative; }
