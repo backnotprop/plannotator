@@ -116,10 +116,22 @@ const alias = ${JSON.stringify(!!options.realKatex)} ? Object.fromEntries(Object
 await build({ ...options, alias, plugins, absWorkingDir: ${JSON.stringify(EXTENSION)}, entryPoints: [${JSON.stringify(entry)}], outfile: ${JSON.stringify(out)}, logLevel: 'silent' });
 `);
     execFileSync('bun', [build], { cwd: EXTENSION, stdio: 'pipe' });
-    return readFileSync(out, 'utf8');
+    return asciiOnly(readFileSync(out, 'utf8'));
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
+}
+
+/**
+ * The bundle with every non-ASCII code unit written as `\uXXXX`, so the page reads the same
+ * whatever charset a browser decodes it with (WebKit read the fulfilled page as windows-1252
+ * even with `charset=utf-8`, and Pele's raw `[ -‍﻿]` became a range out of
+ * order). esbuild leaves them raw only inside regex literals, where the escape means the same
+ * character; after a backslash it would not, so that throws instead.
+ */
+function asciiOnly(code: string): string {
+  if (/\\[^\x00-\x7f]/.test(code)) throw new Error('the diagram bundle escapes a non-ASCII character; asciiOnly cannot rewrite it safely');
+  return code.replace(/[^\x00-\x7f]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
 }
 
 /** KaTeX's own stylesheet, as the apps load it (packages/ui/theme.css imports it). Its font URLs resolve to nothing on the test page. */
