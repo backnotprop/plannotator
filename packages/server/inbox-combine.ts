@@ -301,6 +301,8 @@ export function createInboxCombine(deps: InboxCombineDeps) {
         throw error;
       }
     })();
+    // Written: the holds there last as long as it may wait (a start that stopped before this lets go there soon).
+    across.confirm(record);
     // Every pick's files: this computer's attached as they are, the other computer's copied in while it is surely on;
     // all of them on the new thread once it is here.
     void across.copyFiles(record, threadIds.map((t) => there.get(t) ?? localFiles(t))).catch(() => {});
@@ -328,7 +330,7 @@ export function createInboxCombine(deps: InboxCombineDeps) {
       ...(words ? { words } : {}),
       at: new Date(now()).toISOString(),
       state: "asked",
-      ...(there.size > 0 ? { far: Object.fromEntries([...there.values()].map((t) => [t.id, { machine: t.machine, seen: t.seen, questions: t.questions, ...(t.reopened ? { reopened: true as const } : {}) }])) } : {}),
+      ...(there.size > 0 ? { far: Object.fromEntries([...there.values()].map((t) => [t.id, { machine: t.machine, seen: t.seen, questions: t.questions, ...(t.cursor !== undefined ? { cursor: t.cursor } : {}), ...(t.reopened ? { reopened: true as const } : {}) }])) } : {}),
     };
     combines.push(record);
     save();

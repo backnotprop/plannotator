@@ -53,7 +53,7 @@ export interface FarReadAsk {
 /** B's answer: the windowed read (`url` empty, the reader's Inbox puts its own), or the full records. */
 export type FarReadAnswer =
   | { thread_id: string; result: ThreadWindowResult; order: string[]; lines: string[]; steps?: unknown[]; pulls?: unknown[] }
-  | { thread_id: string; full: Record<string, unknown> & { messages: unknown[] } };
+  | { thread_id: string; full: Record<string, unknown> & { messages: unknown[] }; cursor?: number };
 
 /**
  * The ask as a door query: only what read_thread takes. A bound keeps its type: a number goes as `#<number>`, a string
@@ -153,7 +153,8 @@ export function agentReadDoorAnswer(host: AgentReadHost, url: URL, reader = ""):
       if (!records) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
       // Each record's view and place as their lines, as a local full read gives them, the place from the reader's side.
       const full = { ...records, messages: records.messages.map((m) => inboxFullReadLines(inboxMessageForReader(m, farReader))) };
-      return Response.json({ thread_id: threadId, full } satisfies FarReadAnswer, { headers: { "Cache-Control": "no-store" } });
+      // With the store's cursor as it was read: a Combine's archive there is skipped after an Unarchive since (inbox-combine-guard.ts).
+      return Response.json({ thread_id: threadId, full, cursor: store.cursor() } satisfies FarReadAnswer, { headers: { "Cache-Control": "no-store" } });
     }
     const filesOf = (message: Parameters<typeof inboxAgentFilesOf>[1]) => inboxAgentFilesOf(store.dir, message);
     const { result, order } = windowedThread(store, threadId, { ...ask, caller: null, names: host.sessionName, filesOf, farReader }, "");

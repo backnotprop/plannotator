@@ -49,6 +49,8 @@ export interface InboxCombineFarThread {
   seen: string;
   /** Every question the read saw (`<message>/<key>`): its open ones are in the wake; one closed then was not open to carry. */
   questions: string[];
+  /** That computer's store cursor when it was read: an Unarchive there after it skips the archive (inbox-combine-guard.ts). */
+  cursor?: number;
   /** Its attached files and the pictures its messages show, in thread order. */
   files: InboxCombineFarFile[];
 }
@@ -57,12 +59,17 @@ export interface InboxCombineFarThread {
 export interface InboxCombineFar {
   /** A thread this store does not hold, read on the linked machine that does. Throws, with why and `machine`, when it cannot be. */
   thread: (threadId: string) => Promise<InboxCombineFarThread>;
-  /** A write of this Inbox's own on that machine, held in the outbox under the body's key; how it stands after `waitMs`. */
-  write: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number) => Promise<OutboxEntry | null>;
+  /**
+   * A write of this Inbox's own on that machine, held in the outbox under the body's key; how it stands after `waitMs`.
+   * `own`: the write it undoes, sent only once that one may have landed (`follows`); when it stops being worth sending (`send_by`).
+   */
+  write: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number, own?: { follows?: string; send_by?: string }) => Promise<OutboxEntry | null>;
   /** How a held write stands, by its key (null: never held). */
   entry: (key: string) => OutboxEntry | null;
-  /** Take back a held write that never left. */
+  /** Take back a held write that never left, or one past its `send_by` with no request on its way. */
   cancel: (key: string) => OutboxEntry | null;
+  /** Whether the thread is open there as that machine's list last said (not listed: false); null while no list of it is held. */
+  openThere: (machine: string, threadId: string) => boolean | null;
   /** One file of a far message, streamed, after the far fetch's refusals (a dotenv name, past 100 MB). */
   fetchFile: (args: { message_id: string; file: string }) => Promise<Response>;
   /** Whether that machine can be reached now (its files are copied only then). */
@@ -75,8 +82,10 @@ export interface InboxCombineFarDeps {
   /** A linked machine's row for the thread, as its list last said (null: not listed, an archived one). */
   rowOf: (threadId: string) => (Pick<InboxListRow, "resolved_at" | "back_from_archive"> & { machine?: string }) | null;
   /** A write held in the outbox for that machine (inbox-machines.ts `holdWrite`); null when it is not linked. */
-  hold: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number) => Promise<OutboxEntry | null> | null;
+  hold: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number, own?: { follows?: string; send_by?: string }) => Promise<OutboxEntry | null> | null;
   heldWrite: (key: string) => OutboxEntry | null;
+  /** That machine's rows as its list last said (inbox-machines.ts `listedRows`), or null while none is held. */
+  listedRows: (machine: string) => readonly Pick<InboxListRow, "thread_id" | "resolved_at" | "back_from_archive">[] | null;
   cancelHeld: (key: string) => OutboxEntry | null;
   fetchFile: (args: { message_id: string; file: string }) => Promise<Response>;
   online: (machine: string) => boolean;
@@ -89,6 +98,7 @@ type FarMessage = { id?: unknown; author?: { kind?: unknown }; tidy?: unknown; a
 export function farCombineThread(id: string, machine: string, answer: FarReadAnswer, row: Pick<InboxListRow, "resolved_at" | "back_from_archive"> | null): InboxCombineFarThread {
   if (!("full" in answer) || answer.thread_id !== id) throw new InboxError("machine_answer_unreadable", FAR_READ_REFUSALS.notHere(id), { machine });
   const full = answer.full as { subject?: unknown; project?: { name?: unknown }; resolved_at?: unknown; messages: FarMessage[] };
+  const cursor = (answer as { cursor?: unknown }).cursor;
   const all = full.messages.filter((m): m is FarMessage => !!m && typeof m === "object");
   const messages = all.filter((m) => !m.tidy);
   const open: InboxCombineFarThread["open"] = [];
@@ -120,6 +130,7 @@ export function farCombineThread(id: string, machine: string, answer: FarReadAns
     reopened: !archived && resolved,
     seen: last.id as string,
     questions,
+    ...(typeof cursor === "number" && Number.isInteger(cursor) && cursor >= 0 ? { cursor } : {}),
     files,
   };
 }
@@ -140,9 +151,15 @@ export function createInboxCombineFar(deps: InboxCombineFarDeps): InboxCombineFa
       if (!read) throw new InboxError("thread_not_found", `No thread ${threadId} on this machine.`, { field: "thread_ids" });
       return farCombineThread(threadId, read.machine, read.answer, deps.rowOf(threadId));
     },
-    write: async (machine, route, body, thread, waitMs) => (await deps.hold(machine, route, body, thread, waitMs)) ?? null,
+    write: async (machine, route, body, thread, waitMs, own) => (await deps.hold(machine, route, body, thread, waitMs, own)) ?? null,
     entry: deps.heldWrite,
     cancel: deps.cancelHeld,
+    openThere: (machine, threadId) => {
+      const rows = deps.listedRows(machine);
+      if (!rows) return null;
+      const row = rows.find((r) => r.thread_id === threadId);
+      return !!row && !inboxRowArchived(row);
+    },
     fetchFile: deps.fetchFile,
     online: deps.online,
   };

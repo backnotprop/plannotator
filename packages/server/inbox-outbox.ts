@@ -63,7 +63,8 @@ export const OUTBOX_MAX_BODY_BYTES = 256 * 1024;
  * (it may have been applied). `delivered`: the owner answered 2xx.
  * `refused`: the owner answered 4xx. `parked`: repeated 5xx, given up.
  * `dropped`: the link went (Unlink, or the other machine removed this one).
- * `cancelled`: the person cancelled it before it ever left (a launch held for a machine that is asleep).
+ * `cancelled`: the person cancelled it before it ever left (a launch held for a machine that is asleep); or one of
+ * this Inbox's own past its `send_by` (it may have left: `left` says), or behind one that surely did not land (`follows`).
  */
 export type OutboxState = "queued" | "sending" | "delivered" | "refused" | "parked" | "dropped" | "cancelled";
 
@@ -110,6 +111,24 @@ export interface OutboxEntry {
    * mark; inbox-combine-far.ts): never listed as waiting, never a notice. Its maker reads how it ended by its key.
    */
   auto?: true;
+  /**
+   * This Inbox's own write that undoes another (a Combine's Undo of its archive there), queued right behind it: sent
+   * only once that one may have been applied there; one that surely was not (refused, skipped there, taken back before
+   * it left) takes this one with it, `cancelled`, never sent.
+   */
+  follows?: string;
+  /**
+   * This Inbox's own write that is only worth sending until then (a Combine's archive there: its day): past it, it is
+   * never sent again, even one that left once, and ends `cancelled` (`cancel` then takes it back too, unless a request
+   * is on its way right now). So nothing of it lands after its maker said it did not.
+   */
+  send_by?: string;
+}
+
+/** Whether a settled entry may have been applied there: delivered (and not skipped there by its guard), given up after 5xx, or taken back after it left. */
+export function outboxMayHaveApplied(entry: OutboxEntry): boolean {
+  if (entry.state === "delivered") return typeof (entry.answer as { skipped?: unknown } | null)?.skipped !== "string";
+  return entry.state === "parked" || ((entry.state === "dropped" || entry.state === "cancelled") && entry.left);
 }
 
 /** What one try got back: the owner's status and JSON body, or `null` when the machine could not be reached. */
@@ -332,6 +351,8 @@ export class InboxOutbox {
   private readonly again = new Set<string>();
   private readonly listeners = new Set<(change: OutboxChange) => void>();
   private readonly waiters = new Map<string, Set<() => void>>();
+  /** The keys whose request is on its way now. */
+  private readonly inFlight = new Set<string>();
   /** The folder is made with the first held write: an Inbox that never links keeps none. */
   private dirMade = false;
 
@@ -411,7 +432,16 @@ export class InboxOutbox {
    * whatever state it is in, and queues nothing. The same key on another
    * route or machine is refused, as the door refuses it.
    */
-  submit(machine: string, route: string, body: Record<string, unknown>, thread: string | null = null, window = false, sentFrom: InboxSentFromPlace | null = null, auto = false): { entry: OutboxEntry; fresh: boolean } {
+  submit(
+    machine: string,
+    route: string,
+    body: Record<string, unknown>,
+    thread: string | null = null,
+    window = false,
+    sentFrom: InboxSentFromPlace | null = null,
+    auto = false,
+    own: { follows?: string; send_by?: string } = {},
+  ): { entry: OutboxEntry; fresh: boolean } {
     if (!MACHINE_FILE.test(machine)) throw new InboxError("validation_error", "machine: an ibx_ id.", { field: "machine" });
     const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a write to another machine.", { field: "idempotency_key" });
@@ -446,6 +476,8 @@ export class InboxOutbox {
       ...(window ? { window: true as const } : {}),
       ...(sentFrom ? { sent_from: sentFrom } : {}),
       ...(auto ? { auto: true as const } : {}),
+      ...(auto && own.follows ? { follows: own.follows } : {}),
+      ...(auto && own.send_by ? { send_by: own.send_by } : {}),
     });
     return { entry, fresh: true };
   }
@@ -456,8 +488,15 @@ export class InboxOutbox {
    */
   cancel(key: string): OutboxEntry | null {
     const entry = this.entries.get(key);
-    if (!entry || entry.state !== "queued" || entry.left) return entry ?? null;
+    if (!entry) return null;
+    // Past its `send_by`, one that left is taken back too, once no request of it is on its way: none leaves again.
+    const expired = !!entry.send_by && pending(entry) && this.pastSendBy(entry) && !this.inFlight.has(key);
+    if (!expired && (entry.state !== "queued" || entry.left)) return entry;
     return this.save({ ...entry, state: "cancelled", settled_at: this.now().toISOString() });
+  }
+
+  private pastSendBy(entry: OutboxEntry): boolean {
+    return !!entry.send_by && this.now().getTime() >= Date.parse(entry.send_by);
   }
 
   /** Resolves when the entry settles, or after `ms`, whichever is first. */
@@ -547,13 +586,22 @@ export class InboxOutbox {
     for (;;) {
       const head = this.list(machine, "pending").find((e) => !(ownFailed && e.auto));
       if (!head) return ownFailed ? "server_error" : "empty";
+      // This Inbox's own: one past its day is never sent again; one behind a write that surely did not land goes with it.
+      const before = head.follows ? this.entries.get(head.follows) : undefined;
+      if (this.pastSendBy(head) || (!head.left && before && !pending(before) && !outboxMayHaveApplied(before))) {
+        this.save({ ...head, state: "cancelled", settled_at: this.now().toISOString() });
+        continue;
+      }
       // Rule 10: on disk as having left before a byte goes out.
       const leaving = head.left ? head : this.save({ ...head, state: "sending", left: true });
       let answer: OutboxAnswer;
+      this.inFlight.add(leaving.key);
       try {
         answer = await send(leaving);
       } catch {
         answer = null;
+      } finally {
+        this.inFlight.delete(leaving.key);
       }
       const current = this.entries.get(leaving.key);
       // Dropped while in flight (Unlink): its notice already says it may have landed.

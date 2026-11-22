@@ -7,7 +7,10 @@
  * large or surplus one failing the Combine; a held archive landing on a thread that moved on, or on one with an open
  * question the Combine never read; a held archive waiting past its day; both computers combining one thread at once;
  * Undo that sends an archive and its undo when the archive never left, or says nothing waits while its undo does; this
- * Inbox's own writes showing as the person's notices.
+ * Inbox's own writes showing as the person's notices; a pressed Undo dropped because its archive was still on its way
+ * (or sent behind one that was skipped there); an archive that left once landing after its day; a quiet line still
+ * naming a thread archived there by hand; a late archive landing over the person's own Unarchive there; a hold whose
+ * Combine was never written keeping the thread busy there for a day.
  */
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
@@ -224,4 +227,119 @@ test("a write of this Inbox's own that keeps failing never holds the person's wr
   expect([studio.outbox.get("own-1")!.state, studio.outbox.get("own-2")!.state]).toEqual(["sending", "queued"]);
   await studio.outbox.drain(mini.id, async (entry) => (sent.push(entry.key), { status: 200, body: {} }));
   expect(sent).toEqual(["own-1", "person-1", "own-1", "own-2"]);
+});
+
+test("an Undo pressed while the archive was on its way to a computer that then dropped goes right behind it, even 30 hours later", async () => {
+  const { studio, mini, s1, m1 } = world();
+  const record = (await start(studio, [s1.id, m1.id], "ses_studio", "k-undo-late")).combine as InboxCombineRecord;
+  // The archive reached Mini and was applied, but its answer never came back: here it is still on its way.
+  mini.dropAnswers = true;
+  await arrive(studio, "ses_studio", record.id);
+  expect(archived(mini, m1.id)).toBe(true);
+  expect(studio.outbox.get(`${record.id}-archive-${m1.id}`)!.state).toBe("sending");
+  mini.awake = false;
+  mini.dropAnswers = false;
+  const undone = (await route(studio, "POST", `/api/inbox/combine/${record.id}/undo`, {})).body.combine as InboxCombineRecord;
+  expect([undone.state, undone.waiting_on]).toEqual(["undone", [mini.id]]);
+  // Mini comes back 30 hours later: the archive is past its day, the Undo is not.
+  studio.clock.now += 30 * 60 * 60_000;
+  studio.combine.check();
+  mini.awake = true;
+  await drain(studio, mini);
+  expect(archived(mini, m1.id)).toBe(false);
+  expect(mini.applied).toEqual([`archive ${m1.id}`, `undo ${m1.id}`]);
+  expect(studio.outbox.get(`${record.id}-undo-${m1.id}`)!.state).toBe("delivered");
+});
+
+test("an Undo queued behind an archive that is then skipped there is never sent: the person's own archive there stays", async () => {
+  const { studio, mini, s1, m1 } = world();
+  const record = (await start(studio, [s1.id, m1.id], "ses_studio", "k-undo-skip")).combine as InboxCombineRecord;
+  mini.awake = false;
+  await arrive(studio, "ses_studio", record.id);
+  // A try that never reached Mini: the archive has left, so it cannot be taken back.
+  await drain(studio, mini);
+  expect(studio.outbox.get(`${record.id}-archive-${m1.id}`)).toMatchObject({ state: "sending", left: true });
+  await route(studio, "POST", `/api/inbox/combine/${record.id}/undo`, {});
+  // On Mini meanwhile: the agent writes in it, and the person archives it.
+  mini.store.sendMessage({ project_id: mini.project, author: agent("ses_mini"), reply_to: m1.id, body: "Done here." });
+  mini.store.resolveThread(m1.id, true, "person");
+  mini.awake = true;
+  await drain(studio, mini);
+  expect(mini.applied).toEqual([`skip ${m1.id}`]);
+  expect(archived(mini, m1.id)).toBe(true);
+  expect(studio.outbox.get(`${record.id}-undo-${m1.id}`)!.state).toBe("cancelled");
+  expect((await combined(studio, record.id)).waiting_on).toBeUndefined();
+});
+
+test("an archive that left once but did not land within its day is never sent again, and the new thread says it stayed open there", async () => {
+  const { studio, mini, s1, m1 } = world();
+  const record = (await start(studio, [s1.id, m1.id], "ses_studio", "k-left-late")).combine as InboxCombineRecord;
+  mini.awake = false;
+  const made = await arrive(studio, "ses_studio", record.id);
+  await drain(studio, mini);
+  expect(studio.outbox.get(`${record.id}-archive-${m1.id}`)!.left).toBe(true);
+  studio.clock.now += 25 * 60 * 60_000;
+  studio.combine.check();
+  expect(studio.outbox.get(`${record.id}-archive-${m1.id}`)!.state).toBe("cancelled");
+  expect(studio.store.message(made.id)!.combine_left).toEqual({ open: [{ machine: "Mini", subject: "Retry worker backoff" }] });
+  mini.awake = true;
+  await drain(studio, mini);
+  expect([mini.applied, archived(mini, m1.id)]).toEqual([[], false]);
+});
+
+test("the quiet line stops naming a thread once it is archived on the other computer by hand", async () => {
+  const { studio, mini, s1, m1 } = world();
+  const record = (await start(studio, [s1.id, m1.id], "ses_studio", "k-stale-line")).combine as InboxCombineRecord;
+  mini.awake = false;
+  const made = await arrive(studio, "ses_studio", record.id);
+  mini.store.sendMessage({ project_id: mini.project, author: agent("ses_mini"), reply_to: m1.id, body: "One more." });
+  mini.awake = true;
+  await drain(studio, mini);
+  studio.combine.check();
+  expect(studio.store.message(made.id)!.combine_left).toEqual({ open: [{ machine: "Mini", subject: "Retry worker backoff" }] });
+  mini.store.resolveThread(m1.id, true, "person");
+  studio.combine.check();
+  expect(studio.store.message(made.id)!.combine_left).toBeUndefined();
+});
+
+test("a late archive never lands over the person's own Unarchive there; an Unarchive from before the Combine read it does not hold it back", async () => {
+  const { studio, mini, s1, m1 } = world();
+  const record = (await start(studio, [s1.id, m1.id], "ses_studio", "k-unarchived")).combine as InboxCombineRecord;
+  mini.awake = false;
+  await arrive(studio, "ses_studio", record.id);
+  // On Mini meanwhile, by hand: archived, then brought back.
+  mini.store.resolveThread(m1.id, true, "person");
+  mini.store.resolveThread(m1.id, false, "person");
+  mini.awake = true;
+  await drain(studio, mini);
+  expect(studio.outbox.get(`${record.id}-archive-${m1.id}`)).toMatchObject({ state: "delivered", answer: { skipped: "unarchived" } });
+  expect(archived(mini, m1.id)).toBe(false);
+
+  // Unarchived before the read: the Combine saw it open, and archives it.
+  const m2 = mini.store.sendMessage({ project_id: mini.project, author: agent("ses_mini"), subject: "Queue depth", body: "x" }).message;
+  mini.store.resolveThread(m2.id, true, "person");
+  mini.store.resolveThread(m2.id, false, "person");
+  const s2 = studio.store.sendMessage({ project_id: studio.project, author: agent("ses_studio"), subject: "Ledger", body: "x" }).message;
+  const second = (await start(studio, [s2.id, m2.id], "ses_studio", "k-unarchived-2")).combine as InboxCombineRecord;
+  await arrive(studio, "ses_studio", second.id);
+  expect(archived(mini, m2.id)).toBe(true);
+});
+
+test("a hold whose Combine was never written lets go within minutes; one whose Combine is written holds while it waits", async () => {
+  const { studio, mini, s1, m1 } = world();
+  const m2 = mini.store.sendMessage({ project_id: mini.project, author: agent("ses_mini"), subject: "Queue depth", body: "x" }).message;
+  // Studio stopped right after Mini took the hold, before its Combine was written: only the hold ever came.
+  await route(mini, "POST", "/api/inbox/combine/hold", { idempotency_key: "h-1", combine: "cmb_01M80000000000000000000009", threads: [m1.id], hold: true }, studio.id);
+  expect(await start(mini, [m1.id, m2.id], "ses_mini", "k-lease-1")).toMatchObject({ code: "already_combining" });
+  mini.clock.now += 3 * 60_000;
+  const minis = (await start(mini, [m1.id, m2.id], "ses_mini", "k-lease-2")).combine as InboxCombineRecord;
+  expect(minis.state).toBe("asked");
+  await route(mini, "POST", `/api/inbox/combine/${minis.id}/cancel`, {});
+
+  // A Combine written on Studio: its hold on Mini lasts well past those minutes.
+  const record = (await start(studio, [s1.id, m1.id], "ses_studio", "k-lease-3")).combine as InboxCombineRecord;
+  expect(record.state).toBe("asked");
+  await tick();
+  mini.clock.now += 60 * 60_000;
+  expect(await start(mini, [m1.id, m2.id], "ses_mini", "k-lease-4")).toMatchObject({ code: "already_combining" });
 });

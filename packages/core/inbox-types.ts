@@ -514,7 +514,6 @@ export interface InboxReplyViewing {
   as_sent?: true;
 }
 
-/** A message or reply. A thread is its root message's id. */
 /**
  * What a Combine left where it was (approval "inbox-combine-across-computers", the owner: "One quiet line on the
  * combined thread naming what stayed or was left out"): each picked thread on a linked computer that stayed open there
@@ -535,6 +534,7 @@ export function inboxCombineLeftLine(left: InboxCombineLeft): string {
   return parts.join(" · ");
 }
 
+/** A message or reply. A thread is its root message's id. */
 export interface InboxMessage {
   id: string;
   project_id: string;

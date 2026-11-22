@@ -164,11 +164,12 @@ test("a thread archived on the other computer before stays archived and is not s
   expect(record.threads.map((t) => [t.id, t.archived ?? false])).toEqual([[s1.id, false], [m1.id, false], [m2.id, true]]);
   studio.store.sendMessage({ project_id: studio.project, author: agent("ses_studio"), subject: "Combined", body: "x", idempotency_key: record.id });
   await tick();
-  expect(mini.applied).toEqual([`undo ${m1.id}`, `archive ${m1.id}`]);
+  // One write there, under one guard: brought back and archived again, so its archive line comes after what was written.
+  expect(mini.applied).toEqual([`archive ${m1.id}`]);
   expect(mini.store.listRow(m1.id)!.back_from_archive).toBe(false);
   expect(mini.store.message(m2.id)!.resolved_at).toBe(m2At);
   await route(studio, "POST", `/api/inbox/combine/${record.id}/undo`, {});
-  expect(mini.applied.slice(2)).toEqual([`undo ${m1.id}`]);
+  expect(mini.applied.slice(1)).toEqual([`undo ${m1.id}`]);
   expect(mini.store.message(m2.id)!.resolved_at).toBe(m2At);
 });
 

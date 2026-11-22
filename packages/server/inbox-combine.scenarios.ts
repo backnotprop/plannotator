@@ -12,7 +12,7 @@ import type { InboxAuthor, InboxTidyReach } from "@plannotator/core/inbox-types"
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxCombine } from "./inbox-combine";
 import { createInboxCombineFar } from "./inbox-combine-far";
-import { combineArchiveSkip } from "./inbox-combine-guard";
+import { combineArchiveAgain, combineArchiveSkip } from "./inbox-combine-guard";
 import { agentFileDoorAnswer, agentReadDoorAnswer } from "./inbox-far-read";
 import { createMachineAgentRead } from "./inbox-machine-agent-read";
 import { InboxOutbox } from "./inbox-outbox";
@@ -39,6 +39,8 @@ export interface Computer {
   outbox: InboxOutbox;
   clock: { now: number };
   awake: boolean;
+  /** Its door applies a write but the answer never comes back (the link dropped mid-send). */
+  dropAnswers?: boolean;
   live: Map<string, InboxTidyReach>;
   project: string;
   /** What its door applied, in order: `<archive|undo|skip> <thread>`. */
@@ -93,21 +95,27 @@ function linkTo(there: Computer): PeerLink {
 export const drain = (here: Computer, there: Computer) =>
   here.outbox.drain(there.id, async (entry) => {
     if (!there.awake) return null;
-    if (entry.route === "combine/hold") {
-      const res = await route(there, "POST", "/api/inbox/combine/hold", entry.body, here.id);
-      return { status: res.status, body: res.body };
-    }
-    const id = decodeURIComponent(/^messages\/([^/]+)\/resolve$/.exec(entry.route)![1]!);
-    const skipped = combineArchiveSkip(there.store, id, entry.body);
-    if (skipped) {
-      there.applied.push(`skip ${id}`);
-      return { status: 200, body: { skipped } };
-    }
-    const resolved = entry.body.resolved !== false;
-    there.store.resolveThread(id, resolved, "person");
-    there.applied.push(`${resolved ? "archive" : "undo"} ${id}`);
-    return { status: 200, body: {} };
+    const answer = await applyThere(here, there, entry.route, entry.body);
+    return there.dropAnswers ? null : answer;
   });
+
+async function applyThere(here: Computer, there: Computer, path: string, body: Record<string, unknown>) {
+  if (path === "combine/hold") {
+    const res = await route(there, "POST", "/api/inbox/combine/hold", body, here.id);
+    return { status: res.status, body: res.body };
+  }
+  const id = decodeURIComponent(/^messages\/([^/]+)\/resolve$/.exec(path)![1]!);
+  const skipped = combineArchiveSkip(there.store, id, body);
+  if (skipped) {
+    there.applied.push(`skip ${id}`);
+    return { status: 200, body: { skipped } };
+  }
+  combineArchiveAgain(there.store, id, body);
+  const resolved = body.resolved !== false;
+  there.store.resolveThread(id, resolved, "person");
+  there.applied.push(`${resolved ? "archive" : "undo"} ${id}`);
+  return { status: 200, body: {} };
+}
 
 export function engine(c: Computer, options: { far?: boolean; editRead?: (answer: any) => any; fetchFile?: (args: { message_id: string; file: string }, real: () => Promise<Response>) => Promise<Response>; filesMaxBytes?: number } = {}) {
   const read = () => createMachineAgentRead({ peers: () => [linkTo(c.other!)], nameOf: () => c.other!.name });
@@ -136,12 +144,14 @@ export function engine(c: Computer, options: { far?: boolean; editRead?: (answer
               return row ? { ...row, machine: c.other!.id } : null;
             },
             // As the machines module holds a write: in the outbox, this Inbox's own, sent now while that machine is awake.
-            hold: async (machine, route, body, thread, waitMs) => {
-              const { entry } = c.outbox.submit(machine, route, body, thread, false, null, true);
+            hold: async (machine, route, body, thread, waitMs, own) => {
+              const { entry } = c.outbox.submit(machine, route, body, thread, false, null, true, own);
               if (c.other!.awake) await drain(c, c.other!);
               return c.outbox.waitSettled(entry.key, c.other!.awake ? waitMs : 0);
             },
             heldWrite: (key) => c.outbox.get(key),
+            // Its list as held here: the other computer's rows as they are now.
+            listedRows: () => c.other!.store.listRows(),
             cancelHeld: (key) => c.outbox.cancel(key),
             fetchFile: (args) => (options.fetchFile ? options.fetchFile(args, () => read().fetchFile(args)) : read().fetchFile(args)),
             online: () => c.other!.awake,

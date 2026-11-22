@@ -5,14 +5,17 @@
  * What regresses: copies that fill the disk (a stopped Combine still copying, a stopped or long-failed one's copies kept
  * from the upload sweep for good, no cap on their total); files silently missing after a restart (the copy not picked up
  * again, or the attach never run once the thread had arrived); a file attached twice when the attach is replayed; this
- * computer's picks' files left behind in their archived threads; a file left out without a word on the new thread.
+ * computer's picks' files left behind in their archived threads, or going dead once those are deleted; a file left out
+ * without a word on the new thread, also one never tried while the other computer was away, and one whose bytes are
+ * not the ones named.
  */
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxCombineRecord } from "@plannotator/core/inbox-types";
-import { recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
+import { openInboxAttachmentVersion, readInboxAttachmentSent, recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
+import { inboxUploadAttachments, receiveInboxUpload, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { agent, cleanUp, engine, roots, route, tick, world, type Computer } from "./inbox-combine.scenarios";
 
 afterEach(cleanUp);
@@ -164,4 +167,75 @@ test("an Inbox restarted after the thread came but before its copies were attach
   studio.combine.check();
   await settle();
   expect(studio.store.message(made.id)!.attachments!.map((a) => a.name)).toEqual(["part-0.md", "part-1.md"]);
+});
+
+/** A tiny PNG, as a picture a message shows. */
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+
+test("this computer's files and pictures on the new thread are its own copies: they still open once the old thread is deleted", async () => {
+  const { studio, m1 } = world();
+  const here = await withFiles(studio, 1, "local", "ses_studio");
+  // A picture the agent's reply shows, captured as a file of that message.
+  const upload = await receiveInboxUpload(studio.store.dir, "shot.png", new Blob([PNG]).stream(), { at: new Date().toISOString() });
+  const [captured] = await inboxUploadAttachments(studio.store.dir, [upload.upload_id], new Date().toISOString());
+  removeInboxUploads(studio.store.dir, [upload.upload_id]);
+  studio.store.sendMessage({ project_id: studio.project, author: agent("ses_studio"), reply_to: here.id, body: "![shot](shot.png)", inline_images: [{ ...captured!, ref: "shot.png" }] } as never);
+  const record = await start(studio, [here.id, m1.id], "k-own-copies");
+  const made = studio.store.sendMessage({ project_id: studio.project, author: agent("ses_studio"), subject: "Combined", body: "Where it stands.", idempotency_key: record.id }).message;
+  await until(() => (studio.store.message(made.id)!.attachments ?? []).length === 2);
+  await until(() => studio.store.message(here.id)!.resolved_at !== null);
+  studio.store.deleteThread(here.id);
+  const on = studio.store.message(made.id)!.attachments!;
+  expect(on.map((a) => a.name)).toEqual(["local-0.md", "shot.png"]);
+  for (const file of on) {
+    expect(existsSync(file.path)).toBe(true);
+    expect(readInboxAttachmentSent(studio.store.dir, file)).not.toBeNull();
+    const current = await openInboxAttachmentVersion(studio.store.dir, file, "current");
+    expect(current.ok).toBe(true);
+    if (current.ok) await current.handle.close();
+  }
+  expect(readFileSync(on[0]!.path, "utf8")).toBe(`${"local-0.md".padEnd(29, ".")}\n`);
+});
+
+test("a copy whose bytes are not the ones the other computer named is left out and named, never attached", async () => {
+  const { studio, mini, s1 } = world();
+  const m = await withFiles(mini, 1);
+  studio.combine.close();
+  studio.combine = engine(studio, {
+    fetchFile: async (_args, real) => {
+      const answer = await real();
+      await answer.arrayBuffer();
+      return new Response("other bytes on the way\n", { headers: answer.headers });
+    },
+  });
+  const record = await start(studio, [s1.id, m.id], "k-sha");
+  await until(() => keptFiles(studio).every((f) => f.upload || f.missed));
+  const made = studio.store.sendMessage({ project_id: studio.project, author: agent("ses_studio"), subject: "Combined", body: "Where it stands.", idempotency_key: record.id }).message;
+  await until(() => studio.store.message(made.id)!.combine_left !== undefined);
+  expect(studio.store.message(made.id)!.combine_left).toEqual({ files: ["part-0.md"] });
+  expect(studio.store.message(made.id)!.attachments ?? []).toEqual([]);
+});
+
+test("files the other computer was away for until their time ran out are named as not copied", async () => {
+  const { studio, mini, s1 } = world();
+  const m = await withFiles(mini, 3);
+  studio.combine.close();
+  // Mini goes away just after the first file came.
+  studio.combine = engine(studio, {
+    fetchFile: async (_args, real) => {
+      const answer = await real();
+      mini.awake = false;
+      return answer;
+    },
+  });
+  const record = await start(studio, [s1.id, m.id], "k-never");
+  await until(() => keptFiles(studio).some((f) => f.upload));
+  const made = studio.store.sendMessage({ project_id: studio.project, author: agent("ses_studio"), subject: "Combined", body: "Where it stands.", idempotency_key: record.id }).message;
+  await until(() => (studio.store.message(made.id)!.attachments ?? []).length === 1);
+  await settle();
+  expect(studio.store.message(made.id)!.combine_left?.files).toBeUndefined();
+  studio.clock.now += 25 * 60 * 60_000;
+  studio.combine.check();
+  await settle();
+  expect(studio.store.message(made.id)!.combine_left?.files).toEqual(["part-1.md", "part-2.md"]);
 });

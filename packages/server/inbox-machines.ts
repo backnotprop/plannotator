@@ -1379,21 +1379,23 @@ export function createInboxMachines(context: InboxMachinesContext) {
      * A write this Inbox makes itself on a linked machine's thread (a Combine's archive there, and its Undo;
      * inbox-combine-far.ts): held in the outbox as the window's writes are, so one queue and one key per write, sent
      * now while that machine is online and when it is back otherwise. Waits up to `waitMs` for its answer. Null when
-     * that machine is not linked.
+     * that machine is not linked. `own`: the write it undoes (`follows`), and when it stops being worth sending (`send_by`).
      */
-    holdWrite: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number): Promise<OutboxEntry | null> | null => {
+    holdWrite: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number, own: { follows?: string; send_by?: string } = {}): Promise<OutboxEntry | null> | null => {
       const peer = peers.get(machine);
       if (!peer) return null;
       // Marked as this Inbox's own (`auto`): the window never lists it as the person's waiting write.
-      const { entry } = outbox.submit(machine, route, body, thread, false, null, true);
+      const { entry } = outbox.submit(machine, route, body, thread, false, null, true, own);
       if (peer.state === "online") peer.flush();
       else peer.poke();
       return outbox.waitSettled(entry.key, peer.state === "online" ? waitMs : 0);
     },
     /** A held write of this Inbox's own, by its key: how it stands (null: never held). */
     heldWrite: (key: string): OutboxEntry | null => outbox.get(key),
-    /** Take back a held write of this Inbox's own that never left (rule 10: one that left stays). */
+    /** Take back a held write of this Inbox's own that never left (rule 10: one that left stays), or one past its `send_by`. */
     cancelHeld: (key: string): OutboxEntry | null => outbox.cancel(key),
+    /** A linked machine's rows as its list last said, or null while this Inbox holds no list of it. */
+    listedRows: (machine: string): readonly InboxListRow[] | null => peers.get(machine)?.list?.rows ?? null,
     readThread: agentRead.readThread,
     /** A linked machine's file of a thread its agents read, streamed (a Combine copies the other computer's files in). */
     fetchFile: agentRead.fetchFile,
