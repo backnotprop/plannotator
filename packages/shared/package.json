@@ -159,6 +159,7 @@
     "./inbox/project-tags": "./inbox/project-tags.ts",
     "./inbox/agent-faces": "./inbox/agent-faces.ts",
     "./inbox/own-secrets": "./inbox/own-secrets.ts",
+    "./inbox/saved-file": "./inbox/saved-file.ts",
     "./inbox/schema": "./inbox/schema.ts",
     "./inbox/network-paths": "./inbox/network-paths.ts",
     "./inbox/ask": "./inbox/ask.ts",

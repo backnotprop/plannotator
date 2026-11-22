@@ -21581,6 +21581,48 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-door-get-agent-file",
+      "title": "door:GET agent-file",
+      "surface": [
+        "door:GET agent-file"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-agent-read",
+      "title": "door:GET agent-read",
+      "surface": [
+        "door:GET agent-read"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-control-machines-fetch-file",
+      "title": "window:/api/inbox/control/machines/fetch-file",
+      "surface": [
+        "window:/api/inbox/control/machines/fetch-file"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }
