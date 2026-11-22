@@ -1921,7 +1921,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   /**
    * When the person last did something in each thread (approval "inbox-recent-activity-filter", shared's acted.ts):
-   * what the log holds (`store.personActedAt`) and what acted.json holds (an open, a film, a draft). `withActed` puts
+   * what the log holds (`store.personActedAt`) and what acted.json holds (an open, a film, a draft, an Ask AI question). `withActed` puts
    * it on the rows the window and the phone read as `acted_at`, never on `store.listRow`, which agents read through.
    */
   const acted = createInboxActed(store.dir);
@@ -5457,6 +5457,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     onChange: (threadId) => {
       for (const listener of askListeners) listener(threadId);
     },
+    // A question the person asked is their doing in the thread ("Recent activity", acted.ts).
+    onAsked: (threadId) => acted.note(threadId),
     token,
     hostOf: (session) => live.askHostOf(session),
     ...(options.askTimes ? { times: options.askTimes } : {}),

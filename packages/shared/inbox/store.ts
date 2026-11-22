@@ -122,7 +122,7 @@ import { inboxClaimDirs } from "./claims";
 import { createInboxHandover, type InboxHandover } from "./handover";
 import { inboxTakeBackRefusal, type InboxHolder } from "./take-back";
 import { inboxWakeQuote } from "./wake-quote";
-import { laterActed, personActOfAnnotation, personActOfMessage, personActOfQuestion } from "./acted";
+import { laterActed, personActOfAnnotation, personActOfMessage, personActOfMessageLine, personActOfQuestion } from "./acted";
 import { inboxReplyQuoteExcerpt, inboxReplyQuoteLead, inboxReplyQuoteTime, type InboxReplyQuote, type InboxReplyQuoteWhose } from "@plannotator/core/inbox-reply-quote";
 import { whenTime } from "@plannotator/core/inbox-format";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
@@ -1020,7 +1020,7 @@ export class InboxStore {
   private readonly firstSessionIds = new Map<string, string>();
   /**
    * Per thread, when the person last did something there that the log holds (acted.ts: a message of theirs, a pick, an
-   * action item's mark, a comment), kept as each line is applied: the list row's `acted_at` reads it. A re-read builds it again.
+   * action item's mark, a comment, a 👍, a review's ticks), kept as each line is applied: the list row's `acted_at` reads it. A re-read builds it again.
    */
   private readonly personActs = new Map<string, string>();
   /** Per thread, how many message lines were applied to it: `threadVersion`. */
@@ -1130,6 +1130,8 @@ export class InboxStore {
         if (agentNamesHere(prev, record)) this.indexName(record.project_id, record.thread_name!, record.id);
         const first = !this.messageSeq.has(record.id);
         this.placeMessage(record, line.seq, first);
+        // The person's 👍 and review ticks are later lines of a message (acted.ts): "Recent activity".
+        this.notePersonAct(record.thread_id, personActOfMessageLine(prev, record, line.at));
         if (first) {
           const named = firstLineName(record);
           if (named) this.indexThreadName(record.project_id, named, record.id);

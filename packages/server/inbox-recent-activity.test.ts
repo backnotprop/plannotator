@@ -3,8 +3,10 @@
  * data dir, loopback): each list row's `acted_at`, when the person last did something in the thread (shared's
  * inbox/acted.ts). Counts: a reply, an open the person chose (`POST /seen { opened: true }`), a reply draft saved, a
  * film played (`POST /threads/:id/acted`). Never: an agent's message, a look the person did not choose, tidying (star,
- * Priority, snooze, tag, mark read and unread, archive). Kept across a restart, in `inbox/acted.json`, never in the
- * event log or on the store's row agents read.
+ * Priority, snooze, tag, mark read and unread, archive). Also counts: a 👍 Looks good from the window or the phone's
+ * door, and a question asked in the thread's Ask AI. Kept across a restart, in `inbox/acted.json`, never in the event
+ * log, and never in anything an agent reads: read_thread (a thread and the list) and search, through `/mcp` and
+ * through a paired cloud agent's door.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
@@ -13,6 +15,8 @@ import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { InboxListRow, InboxListSection } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
+import { INBOX_ASK_POLL_FIELD, INBOX_BRIDGE_POLL_PATH } from "@plannotator/shared/inbox/connection";
+import { doorCleanups, doorWorld, type DoorResult } from "../../tests/helpers/inbox-agent-door-world";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -25,14 +29,14 @@ afterEach(async () => {
 });
 
 async function start(dataDir: string) {
-  const server = await startInboxServer({ dataDir, binaryPath: null, setAsideDelayMs: 60_000 });
+  const server = await startInboxServer({ dataDir, binaryPath: null, setAsideDelayMs: 60_000, phones: true, askTimes: { connectWaitMs: 0 } });
   servers.push(server);
   const client = new Client({ name: "inbox-recent-activity-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
   clients.push(client);
   const send = async (body: string, session: string) =>
     (
-      (await client.callTool({ name: "send_message", arguments: { project_path: project(dataDir), agent_session: session, agent_name: "Claude Code", body } })) as {
+      (await client.callTool({ name: "send_message", arguments: { project_path: project(dataDir), agent_session: session, agent_host: "claude-code", agent_name: "Claude Code", body } })) as {
         structuredContent: { thread_id: string; message_id: string };
       }
     ).structuredContent;
@@ -85,8 +89,48 @@ describe("the row's acted_at", () => {
     const at = await actedOf(server, replied.thread_id);
     await send("Done: retries now wait 24 hours.", "ses_r");
     expect(await actedOf(server, replied.thread_id)).toBe(at);
-    // Agents never read it: the store's own row (what the MCP lists and reads) has no such field.
+    // The store's own row (what the agents' reads are built from) has no such field.
     expect(server.store.listRow(replied.thread_id)).not.toHaveProperty("acted_at");
+  });
+
+  test("a 👍 from the window and from the phone's door, and an Ask AI question, each set it; the agent's next message does not", async () => {
+    const { server, send, dataDir } = await setup();
+    const fromWindow = await send("Merged. CI is green.", "ses_w");
+    const fromPhone = await send("Deployed to staging.", "ses_p");
+    const asked = await send("The retry change is in.", "ses_a");
+    const left = await send("Nightly e2e: all green.", "ses_n");
+    const before = Date.now();
+    await ok(post(server, `/api/inbox/messages/${fromWindow.message_id}/ack`, {}));
+    // The phone: paired through the window's offer, then its bearer token at the device door.
+    const offer = (await (await fetch(url(server, "/api/inbox/pairing"), { method: "POST", body: "{}" })).json()) as { offer: { code: string } };
+    const paired = await fetch(url(server, "/api/inbox/device/pair"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: offer.offer.code, name: "iPhone", platform: "ios" }) });
+    expect(paired.status).toBe(201);
+    const { token } = (await paired.json()) as { token: string };
+    await ok(fetch(url(server, `/api/inbox/device/messages/${fromPhone.message_id}/ack`), { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ idempotency_key: "ack-phone" }) }));
+    // Ask AI: the thread's agent's connection says it answers live, then the window's page asks (`Sec-Fetch-Site`).
+    await ok(
+      fetch(url(server, INBOX_BRIDGE_POLL_PATH), {
+        method: "POST",
+        headers: { Authorization: `Bearer ${server.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ session: "ses_a", host: "claude-code", project_path: project(dataDir), waitMs: 0, [INBOX_ASK_POLL_FIELD]: true }),
+      }),
+    );
+    await ok(
+      fetch(url(server, `/api/inbox/threads/${asked.thread_id}/ask`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Sec-Fetch-Site": "same-origin", Origin: url(server, "") },
+        body: JSON.stringify({ serverSession: server.serverSession, turn_id: "turn-0001", question: "Why 24 hours?" }),
+      }),
+    );
+    for (const id of [fromWindow.thread_id, fromPhone.thread_id, asked.thread_id]) {
+      const at = await actedOf(server, id);
+      expect(at, id).not.toBeNull();
+      expect(Date.parse(at!)).toBeGreaterThanOrEqual(before - 1000);
+    }
+    expect(await actedOf(server, left.thread_id)).toBeNull();
+    const at = await actedOf(server, fromWindow.thread_id);
+    await send("Thanks, closing this out.", "ses_w");
+    expect(await actedOf(server, fromWindow.thread_id)).toBe(at);
   });
 
   test("tidying never sets it: star, Priority, snooze, tag, mark read and unread, archive", async () => {
@@ -127,5 +171,38 @@ describe("the row's acted_at", () => {
     expect((await post(server, "/api/inbox/threads/prj_01ARZ3NDEKTSV4RRFFQ69G5FAV/acted", {})).status).toBe(422);
     expect((await fetch(url(server, "/api/inbox/threads/msg_01ARZ3NDEKTSV4RRFFQ69G5FAV/acted"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: "another" }) })).status).toBe(409);
     expect(existsSync(join(server.store.dir, "acted.json"))).toBe(false);
+  });
+});
+
+describe("agents never read it", () => {
+  const cleanups = doorCleanups();
+  afterEach(() => cleanups.run());
+
+  test("read_thread (a thread and the list) and search carry no acted_at, through /mcp and a paired agent's door", async () => {
+    const w = await doorWorld(cleanups);
+    const id = w.local.thread_id;
+    // The person opens the thread and replies: the window's list carries the time...
+    expect((await w.call(`/api/inbox/threads/${id}/seen`, { opened: true })).status).toBe(200);
+    expect((await w.call(`/api/inbox/messages/${w.local.message_id}/reply`, { idempotency_key: "r1", words: "The zebra launch goes Friday." })).status).toBe(200);
+    const listed = (await w.call("/api/inbox/threads?archived=include")).json as { sections: InboxListSection[] };
+    expect(listed.sections.flatMap((s) => s.threads).find((row) => row.thread_id === id)?.acted_at).toBeTruthy();
+    // ...and nothing an agent reads does.
+    const local = (name: string, args: Record<string, unknown>) => w.mcp.callTool({ name, arguments: { agent_session: "ses-pi", agent_host: "pi", ...args } }) as Promise<DoorResult>;
+    const { pairing } = await w.pair();
+    const door = async (tool: string, args: Record<string, unknown>) => (await w.door(pairing.token, tool, args)).result!;
+    const reads: [string, DoorResult][] = [
+      ["mcp read_thread", await local("read_thread", { thread_id: id })],
+      ["mcp list", await local("read_thread", { project_path: w.project })],
+      ["mcp search", await local("search", { query: "zebra", project_path: w.project })],
+      ["door read_thread", await door("read_thread", { thread_id: id })],
+      ["door list", await door("read_thread", {})],
+      ["door search", await door("search", { query: "zebra" })],
+    ];
+    for (const [what, result] of reads) {
+      expect(result.isError, what).toBeFalsy();
+      const text = JSON.stringify(result);
+      expect(text, what).toContain(id);
+      expect(text, what).not.toContain("acted_at");
+    }
   });
 });

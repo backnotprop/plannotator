@@ -4,8 +4,10 @@
  *
  * - The person opened a thread: the opening look (`POST /seen`) says `opened` when the person chose the thread, so
  *   opening adds no request. Chosen: the route moved to that thread within `CHOSEN_MS` of the person's own click, tap
- *   or key in this window (a row, search, a star, a link in a message, the keyboard). Not chosen: a thread shown on
- *   load, or because an agent or a launch link opened it (no gesture here).
+ *   or key in this window (a row, search, a star, a link in a message, the keyboard), or of their click on a
+ *   notification about it (notify.ts calls `gestured`). Not chosen: a thread shown on load, or because an agent or a
+ *   launch link opened it (no gesture here). The browser's user activation is not read: it lasts about 5 s, long
+ *   enough for an agent's open after an unrelated click to pass as the person's.
  * - The person played a film or a recording in the open thread (a `play` with a gesture just before it): one
  *   `POST /threads/:id/acted`, at most once per thread per `PLAY_EVERY_MS`, and the window's own note
  *   (`noteActedHere`) until the list reads it back.
@@ -34,8 +36,7 @@ const routeThread = (): string | null => (readRoute() as { thread?: string | nul
 
 /** The person's own gesture in this window just now. */
 function byPerson(now: number): boolean {
-  const active = typeof navigator !== 'undefined' && (navigator as { userActivation?: { isActive?: boolean } }).userActivation?.isActive === true;
-  return active || now - gestureAt <= CHOSEN_MS;
+  return now - gestureAt <= CHOSEN_MS;
 }
 
 /** Each route change: a thread the person moved to is chosen. */
@@ -44,7 +45,7 @@ export function routeChanged(now = Date.now(), thread = routeThread()): void {
   shownThread = thread;
 }
 
-/** The person clicked, tapped or pressed a key in this window. */
+/** The person clicked, tapped or pressed a key in this window, or clicked one of its notifications. */
 export function gestured(now = Date.now()): void {
   gestureAt = now;
 }

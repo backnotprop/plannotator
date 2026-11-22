@@ -104,6 +104,42 @@ describe("the store's record of what the person did in a thread", () => {
   });
 });
 
+describe("a 👍 and a review's ticks: later lines of an agent's message", () => {
+  test("a 👍 Looks good counts at its press, through its settling and a reload; the agent's next message moves nothing", () => {
+    const { store, dir, clock, project } = setup();
+    const sent = store.sendMessage({ project_id: project.id, author: AGENT, body: "Retries now wait 24 hours." }).message;
+    expect(store.personActedAt(sent.thread_id)).toBeNull();
+    clock.now = START + 60_000;
+    store.ackMessage(sent.id, true);
+    expect(store.personActedAt(sent.thread_id)).toBe(at(START + 60_000));
+    // The Undo window passes: the ack settles and its note goes to the agent, at a later time that is not a new act.
+    clock.now = START + 120_000;
+    expect(store.settleAcks(10_000)).toHaveLength(1);
+    expect(store.personActedAt(sent.thread_id)).toBe(at(START + 60_000));
+    clock.now = START + 180_000;
+    store.sendMessage({ project_id: project.id, author: AGENT, body: "Thanks.", reply_to: sent.id });
+    expect(store.personActedAt(sent.thread_id)).toBe(at(START + 60_000));
+    expect(InboxStore.open(dir, { now: () => new Date(clock.now) }).personActedAt(sent.thread_id)).toBe(at(START + 60_000));
+  });
+
+  test("ticking a guided review's section or a review's file Viewed counts when it changes; the same ticks again do not", () => {
+    const { store, dir, clock, project } = setup();
+    const guide = { sha256: "a".repeat(64), input_sha256: "b".repeat(64), bytes: 10, title: "Refund retries", sections: 2, files: 2, additions: 4, deletions: 1, review: true as const };
+    const sent = store.sendMessage({ project_id: project.id, author: AGENT, body: "Please review.", guide }).message;
+    expect(store.personActedAt(sent.thread_id)).toBeNull();
+    clock.now = START + 60_000;
+    store.saveGuideReviewed(sent.id, [true, false]);
+    expect(store.personActedAt(sent.thread_id)).toBe(at(START + 60_000));
+    clock.now = START + 120_000;
+    store.saveGuideReviewed(sent.id, [true, false]);
+    expect(store.personActedAt(sent.thread_id)).toBe(at(START + 60_000));
+    clock.now = START + 180_000;
+    store.saveGuideViewed(sent.id, ["src/refunds.ts"], ["src/refunds.ts", "src/retry.ts"]);
+    expect(store.personActedAt(sent.thread_id)).toBe(at(START + 180_000));
+    expect(InboxStore.open(dir, { now: () => new Date(clock.now) }).personActedAt(sent.thread_id)).toBe(at(START + 180_000));
+  });
+});
+
 describe("which records are the person's doing", () => {
   const message = (extra: Partial<InboxMessage>): InboxMessage =>
     ({ id: "msg_01ARZ3NDEKTSV4RRFFQ69G5FAV", project_id: "prj_x", thread_id: "msg_01ARZ3NDEKTSV4RRFFQ69G5FAV", reply_to: null, author: { kind: "person" }, subject: null, body: "Yes", created_at: at(START), resolved_at: null, idempotency_key: null, ...extra }) as InboxMessage;

@@ -6,8 +6,8 @@
  * newest first by the act (or by `last_at` instead), the Snoozed band reordered, a group dropped; a row that moves
  * under the person before the list settles, or one that stays put after it does; the List view still sorting by
  * `last_at` with the filter on, or keeping the filter's order once it is off; the pick lost on reload, or still
- * counted once off; a thread counted as opened without the person's gesture (shown on load, opened by an agent), or
- * not counted with one; a film played without a gesture written, or one written on every play.
+ * counted once off; a thread counted as opened without the person's gesture (shown on load, opened by an agent, or
+ * opened while the browser's user activation lingers after an unrelated click), or not counted with one; a film played without a gesture written, or one written on every play.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
@@ -119,6 +119,23 @@ describe("what this window tells the server", () => {
     // A gesture long before the route moved is not this open.
     routeChanged(NOW + 9000, 'msg_later');
     expect(personOpened('msg_later', NOW + 9100)).toBe(false);
+  });
+
+  test("the browser's user activation alone (about 5 s after any click) never makes an open the person's", () => {
+    const before = Object.getOwnPropertyDescriptor(navigator, 'userActivation');
+    Object.defineProperty(navigator, 'userActivation', { configurable: true, value: { isActive: true, hasBeenActive: true } });
+    try {
+      // An unrelated click, then an agent opens a thread 3 s later while the activation still holds.
+      gestured(NOW);
+      routeChanged(NOW + 3000, 'msg_agent_after_click');
+      expect(personOpened('msg_agent_after_click', NOW + 3100)).toBe(false);
+      const posted: string[] = [];
+      mediaPlayed(NOW + 3000, async (id) => void posted.push(id), 'msg_autoplay');
+      expect(posted).toEqual([]);
+    } finally {
+      if (before) Object.defineProperty(navigator, 'userActivation', before);
+      else delete (navigator as { userActivation?: unknown }).userActivation;
+    }
   });
 
   test('a film the person played writes once per thread for a while; a play with no gesture writes nothing', () => {

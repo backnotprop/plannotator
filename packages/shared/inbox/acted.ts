@@ -5,10 +5,12 @@
  * - The store's own records of the person (`personActOf*`, read by `InboxStore.personActedAt` as each line is
  *   applied, never a pass over the store): a message of theirs (a reply, answers sent, Done / Can't do it's report, a
  *   Re-ask, a review verdict, a new thread), a pick, an action item's Done / Can't do it / Skip, and a comment (an
- *   annotation saved, changed or removed). Not the Inbox's own notes (Mark read's set-aside note, an Undo's reopened
- *   note, a 👍's note, Tidy's), and not a routine's run: none of those is the person doing something in the thread.
+ *   annotation saved, changed or removed), a 👍 Looks good (or a tray reaction) on an agent's message (its `ack.at`,
+ *   from the window or the phone), and a guided review's reviewed ticks or a review's Viewed files changing (the
+ *   line's time). Not the Inbox's own notes (Mark read's set-aside note, an Undo's reopened note, the note that carries
+ *   a 👍 to the agent, Tidy's), and not a routine's run: none of those is the person doing something in the thread.
  * - `inbox/acted.json`, what the log does not hold: the person opening the thread (the window's opening look says
- *   `opened`), a film played in it, and a reply or comment draft saved.
+ *   `opened`), a film played in it, a reply or comment draft saved, and a question asked in its Ask AI.
  *
  *   inbox/acted.json   { v: 1, threads: { <thread id>: <ISO time> } }, 0600, written whole (temp, then rename)
  *
@@ -40,6 +42,17 @@ export function laterActed(a: string | null | undefined, b: string | null | unde
 export function personActOfMessage(message: InboxMessage): string | null {
   if (message.author.kind !== "person" || isInboxNote(message) || message.scheduled_run) return null;
   return message.created_at;
+}
+
+/**
+ * A message's later line, the person's doing on it: their 👍 (`ack.at`: only the person's press sets an ack), and a
+ * guided review's reviewed ticks or a review's Viewed files changed since `before` (only the person ticks them; the
+ * line's `at`). Null for any other line.
+ */
+export function personActOfMessageLine(before: InboxMessage | undefined, after: InboxMessage, at: string): string | null {
+  const same = (a: unknown, b: unknown) => JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
+  const ticked = before !== undefined && (!same(before.guide_reviewed, after.guide_reviewed) || !same(before.guide_viewed, after.guide_viewed));
+  return laterActed(after.ack?.at ?? null, ticked ? at : null);
 }
 
 /** A question record: the person's pick, or their Done / Can't do it / Skip on an action item; null when neither. */
