@@ -264,9 +264,20 @@ async function lineGeometry(review: Locator, ref: LineRef) {
   const el = review.locator(lineSelector(ref)).first();
   return el.evaluate((node) => {
     const rect = (r: DOMRect) => ({ x: r.x, y: r.y, width: r.width, height: r.height });
-    const range = document.createRange();
-    range.selectNodeContents(node);
-    const text = [...range.getClientRects()].filter((r) => r.width > 0).map(rect);
+    // The code's ink: each character that draws something (a space at a wrap hangs past the line's edge, unseen).
+    const text: ReturnType<typeof rect>[] = [];
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+      const value = t.nodeValue ?? '';
+      for (let i = 0; i < value.length; i++) {
+        if (/\s/.test(value[i]!)) continue;
+        const range = document.createRange();
+        range.setStart(t, i);
+        range.setEnd(t, i + 1);
+        const r = range.getBoundingClientRect();
+        if (r.width > 0) text.push(rect(r));
+      }
+    }
     const code = node.closest('[data-code]') as HTMLElement;
     const codeRect = code.getBoundingClientRect();
     const wrap = node.closest('pre')?.getAttribute('data-overflow') === 'wrap';
