@@ -28,6 +28,7 @@ import { VoiceMicButton, VoiceStatusLine } from '../components/VoiceMic';
 import { Icon } from '../icons';
 import { landInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook } from '../replyDraft';
 import { tookOverReply, wordsMessage } from '../sendTargets';
+import { useFloatingReplyWords } from '../threadMentions';
 import { inboxThreadShortcuts } from '../shortcuts';
 import { useShortcutAria } from '../shortcuts/hint';
 import { INBOX_REPLY_SKILL_AUDIENCE, inboxSkillFilter, inboxSkillsBlock, withSkillsBlock } from '../skills';
@@ -234,6 +235,8 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
   /** The key of a Send that failed, kept for its retry only while the words and files are the same ones. */
   const sendKey = useRef<{ key: string; content: string } | null>(null);
   const hasSomething = text.trim() !== '' || files.draftFiles().length > 0;
+  // Its words not sent yet: the row menu's Mention in reply goes to this draft (approval "inbox-drag-threads").
+  useFloatingReplyWords(threadId, text.trim() !== '');
   const send = async () => {
     if (sending || voice.busy) return;
     if (!here) {

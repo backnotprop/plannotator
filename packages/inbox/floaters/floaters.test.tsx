@@ -29,8 +29,17 @@ const mods = (hasDom
       ...(await import('./model')),
       ...(await import('../ask/AskChat')),
       ...(await import('../ask/AskChatMenu')),
+      ...(await import('../components/MentionMenuItem')),
+      ...(await import('../data/threadMentionRefs')),
+      ...(await import('@base-ui/react/menu')),
     }
-  : {}) as typeof import('./useReplyFloaters') & typeof import('./model') & typeof import('../ask/AskChat') & typeof import('../ask/AskChatMenu');
+  : {}) as typeof import('./useReplyFloaters') &
+  typeof import('./model') &
+  typeof import('../ask/AskChat') &
+  typeof import('../ask/AskChatMenu') &
+  typeof import('../components/MentionMenuItem') &
+  typeof import('../data/threadMentionRefs') &
+  typeof import('@base-ui/react/menu');
 
 const PROJECT = { id: 'prj_1', name: 'billing' };
 const T0 = '2026-11-07T10:00:00.000Z';
@@ -495,6 +504,46 @@ test('emptying the words to rewrite them keeps the window open; Escape does not 
   act(() => document.querySelector<HTMLElement>('[data-rf-box="thr_a"] [aria-label="Minimize"]')!.click());
   await until(() => floating().length === 0, 'the float entry to go');
   expect(box('thr_a')).toBeNull();
+});
+
+test("a draft's open window with words is the reply a row menu's Mention in reply goes to; emptied or closed, no item", async () => {
+  if (!hasDom) return;
+  window.location.hash = '';
+  await openFloating('thr_a', 'Key the retry on invoice_id alone');
+  const menuHost = document.createElement('div');
+  document.body.appendChild(menuHost);
+  const menuRoot = createRoot(menuHost);
+  const other = { thread_id: 'thr_other', thread_name: 'Rate limit for the public API', subject: null, resolved_at: null, project: PROJECT } as never;
+  const rowMenu = () => {
+    act(() =>
+      menuRoot.render(
+        <mods.Menu.Root open>
+          <mods.Menu.Portal>
+            <mods.Menu.Positioner>
+              <mods.Menu.Popup>
+                <mods.MentionMenuItem rows={[other]} phone={false} />
+              </mods.Menu.Popup>
+            </mods.Menu.Positioner>
+          </mods.Menu.Portal>
+        </mods.Menu.Root>,
+      ),
+    );
+    return document.querySelector<HTMLElement>('[data-row-action="mention"]');
+  };
+  mods.noteMentionRefs([{ id: 'thr_a', title: 'Subject thr_a', project: PROJECT.name }]);
+  const item = rowMenu();
+  expect(item?.textContent).toBe('Mention in replySubject thr_a');
+  // Emptied to rewrite: no words, no item; words again, it is back.
+  typeInto(field('thr_a')!, ' ');
+  expect(rowMenu()).toBeNull();
+  typeInto(field('thr_a')!, 'Key it on the invoice and the attempt');
+  expect(rowMenu()).not.toBeNull();
+  // Minimized (the window closed): no item.
+  act(() => document.querySelector<HTMLElement>('[data-rf-box="thr_a"] [aria-label="Minimize"]')!.click());
+  await until(() => box('thr_a') === null, 'the window to close');
+  expect(rowMenu()).toBeNull();
+  act(() => menuRoot.unmount());
+  menuHost.remove();
 });
 
 test('Undo after Discard brings back the words and the files; a refused Undo says so', async () => {

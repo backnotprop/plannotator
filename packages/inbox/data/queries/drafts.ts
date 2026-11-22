@@ -20,6 +20,13 @@ export function heldReplyDrafts(client: QueryClient): InboxReplyDraftRow[] {
   return client.getQueryData<DraftsModel>(inboxKeys.drafts())?.replies ?? NO_REPLIES;
 }
 
+/** Whether this thread's saved reply draft holds words, as the drafts list says; null: the list is not read yet. */
+export function replyDraftHasWords(client: QueryClient, threadId: string): boolean | null {
+  const held = client.getQueryData<DraftsModel>(inboxKeys.drafts());
+  if (!held) return null;
+  return (held.replies ?? NO_REPLIES).some((row) => row.thread_id === threadId && (row.reply_preview ?? '').trim() !== '');
+}
+
 export function useDrafts(): { drafts: DraftView[] | null; replies: InboxReplyDraftRow[] } {
   const { data } = useQuery<DraftsModel>({ queryKey: inboxKeys.drafts(), queryFn: skipToken, gcTime: Infinity, notifyOnChangeProps: ['data'] });
   return { drafts: data?.drafts ?? null, replies: data?.replies ?? NO_REPLIES };
