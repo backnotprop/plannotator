@@ -29,8 +29,21 @@ const mods = (hasDom
       ...(await import('./model')),
       ...(await import('../ask/AskChat')),
       ...(await import('../ask/AskChatMenu')),
+      ...(await import('../components/MentionMenuItem')),
+      ...(await import('../data/threadMentionRefs')),
+      ...(await import('@base-ui/react/menu')),
+      ...(await import('../components/Thread')),
+      ...(await import('../app/route')),
     }
-  : {}) as typeof import('./useReplyFloaters') & typeof import('./model') & typeof import('../ask/AskChat') & typeof import('../ask/AskChatMenu');
+  : {}) as typeof import('./useReplyFloaters') &
+  typeof import('./model') &
+  typeof import('../ask/AskChat') &
+  typeof import('../ask/AskChatMenu') &
+  typeof import('../components/MentionMenuItem') &
+  typeof import('../data/threadMentionRefs') &
+  typeof import('@base-ui/react/menu') &
+  typeof import('../components/Thread') &
+  typeof import('../app/route');
 
 const PROJECT = { id: 'prj_1', name: 'billing' };
 const T0 = '2026-11-07T10:00:00.000Z';
@@ -139,6 +152,7 @@ beforeEach(() => {
       const found = fake.threads.get(decodeURIComponent(m[1]!));
       return found ? json({ serverSession: 's', cursor: 1, thread: found }) : new Response('{}', { status: 404 });
     }
+    if (path.includes('/attachments')) return json({ serverSession: 's', attachments: [], annotations: [] });
     if (path.includes('/sessions')) return json({ serverSession: 's', home: '/h', project: PROJECT, sessions: [] });
     // The drafts list holds every reply draft, so a menu that read it would list them.
     if (path.endsWith('/drafts')) return json({ serverSession: 's', drafts: [], replies: [...fake.drafts.keys()].map((id) => row(id)) });
@@ -495,6 +509,118 @@ test('emptying the words to rewrite them keeps the window open; Escape does not 
   act(() => document.querySelector<HTMLElement>('[data-rf-box="thr_a"] [aria-label="Minimize"]')!.click());
   await until(() => floating().length === 0, 'the float entry to go');
   expect(box('thr_a')).toBeNull();
+});
+
+/** A list row's menu (right-click), drawn beside the corner: its Mention in reply item, or null. */
+function mentionMenu() {
+  const menuHost = document.createElement('div');
+  document.body.appendChild(menuHost);
+  const menuRoot = createRoot(menuHost);
+  const other = { thread_id: 'thr_other', thread_name: 'Rate limit for the public API', subject: null, resolved_at: null, project: PROJECT } as never;
+  return {
+    item: () => {
+      act(() =>
+        menuRoot.render(
+          <mods.Menu.Root open>
+            <mods.Menu.Portal>
+              <mods.Menu.Positioner>
+                <mods.Menu.Popup>
+                  <mods.MentionMenuItem rows={[other]} phone={false} />
+                </mods.Menu.Popup>
+              </mods.Menu.Positioner>
+            </mods.Menu.Portal>
+          </mods.Menu.Root>,
+        ),
+      );
+      return document.querySelector<HTMLElement>('[data-row-action="mention"]');
+    },
+    done: () => {
+      act(() => menuRoot.unmount());
+      menuHost.remove();
+    },
+  };
+}
+
+test("a draft's open window with words is the reply a row menu's Mention in reply goes to; emptied, sending or closed, no item", async () => {
+  if (!hasDom) return;
+  window.location.hash = '';
+  await openFloating('thr_a', 'Key the retry on invoice_id alone');
+  const menu = mentionMenu();
+  mods.noteMentionRefs([{ id: 'thr_a', title: 'Subject thr_a', project: PROJECT.name }]);
+  expect(menu.item()?.textContent).toBe('Mention in replySubject thr_a');
+  // Emptied to rewrite: no words, no item; words again, it is back.
+  typeInto(field('thr_a')!, ' ');
+  expect(menu.item()?.textContent ?? null).toBeNull();
+  typeInto(field('thr_a')!, 'Key it on the invoice and the attempt');
+  expect(menu.item()?.textContent ?? null).not.toBeNull();
+  // A Send on its way: the reply is sent, so no item.
+  let release = () => {};
+  fake.holdReply = new Promise<void>((done) => (release = done));
+  await until(() => document.querySelector('[data-rf-box="thr_a"] [data-rf-peek]') !== null, 'the thread read');
+  act(() => document.querySelector<HTMLElement>('[data-rf-box="thr_a"] [data-rf-send]')!.click());
+  await until(() => fake.posts.some((p) => p.path.endsWith('/reply')), 'the reply on its way');
+  expect(menu.item()?.textContent ?? null).toBeNull();
+  release();
+  fake.holdReply = null;
+  await until(() => box('thr_a') === null, 'the window to close once sent');
+  expect(menu.item()?.textContent ?? null).toBeNull();
+  menu.done();
+});
+
+test("a draft's window minimized: no item", async () => {
+  if (!hasDom) return;
+  window.location.hash = '';
+  await openFloating('thr_a', 'Key the retry on invoice_id alone');
+  const menu = mentionMenu();
+  expect(menu.item()?.textContent ?? null).not.toBeNull();
+  act(() => document.querySelector<HTMLElement>('[data-rf-box="thr_a"] [aria-label="Minimize"]')!.click());
+  await until(() => box('thr_a') === null, 'the window to close');
+  expect(menu.item()?.textContent ?? null).toBeNull();
+  menu.done();
+});
+
+test("the item pressed for a floating draft: its thread opens in the pane, the window closes, and the mention lands after the draft's words", async () => {
+  if (!hasDom) return;
+  window.location.hash = '';
+  // An open thread (not archived), as the list's pane would show it.
+  const open = thread('thr_a');
+  fake.threads.set('thr_a', { ...open, thread_name: null, resolved_at: null, messages: open.messages.map((m) => ({ ...m, resolved_at: null, reply_to: null })) } as InboxThread);
+  fake.drafts.set('thr_a', draft('thr_a', 'Key the retry on invoice_id alone'));
+  mods.floatThread('thr_a', Date.now() - 10_000);
+  let setPane: (id: string | null) => void = () => {};
+  /** App's half: the thread the address names, open in the pane beside the corner. */
+  function WithPane() {
+    const [pane, setPaneState] = useState<string | null>(null);
+    setPane = setPaneState;
+    const open = pane ? fake.threads.get(pane) : undefined;
+    return (
+      <>
+        <Harness start={null} rows={[row('thr_a')]} ask={fakeAsk()} />
+        {open && <mods.ThreadPane thread={open} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} />}
+      </>
+    );
+  }
+  await act(async () => root!.render(<WithPane />));
+  await until(() => card('thr_a') !== null, 'the corner');
+  act(() => card('thr_a')!.click());
+  await until(() => field('thr_a')?.value === 'Key the retry on invoice_id alone', 'the words in the window');
+  const menu = mentionMenu();
+  const item = menu.item()!;
+  await act(async () => {
+    item.click();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  // The press went to the draft's thread (the address); App opens it in the pane.
+  const to = mods.readRoute().thread;
+  expect(to).toBe('thr_a');
+  act(() => {
+    setThreadId(to);
+    setPane(to);
+  });
+  await until(() => box('thr_a') === null, 'the window to close (the thread has the draft now)');
+  const paneField = () => document.querySelector<HTMLTextAreaElement>('.ib-rbox textarea');
+  await until(() => paneField()?.value === 'Key the retry on invoice_id alone Rate limit for the public API ', "the mention after the draft's words");
+  menu.done();
 });
 
 test('Undo after Discard brings back the words and the files; a refused Undo says so', async () => {

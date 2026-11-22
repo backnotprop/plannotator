@@ -26,7 +26,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
-import { writeInboxAsk, type InboxAskConversation } from '../../packages/shared/inbox/ask';
+import { readInboxAsk, writeInboxAsk, type InboxAskConversation } from '../../packages/shared/inbox/ask';
 import { scratchProject } from '../../scripts/inbox-sim';
 import { startScriptedAskAgent, type ScriptedAskAgent } from '../helpers/inbox-ask-agent';
 import { aiSession, postAsk, readAsk, runQuery, type AskAnswer } from '../helpers/inbox-ask-window';
@@ -450,6 +450,17 @@ test('minimized, a chat is a circle in the window corner: a 44 px target that op
   await expect.poll(async () => ((await (await fetch(new URL(`/api/inbox/threads/${corner}`, url))).json()) as { thread: { messages: unknown[] } }).thread.messages.length).toBe(2);
   await expect(circle).toBeVisible();
   await shot(page, '7-corner-circle-light', 'light');
+
+  // A right-click on the circle: its menu, one item, and no chat; Close takes the circle and the cut away, the chat stays.
+  await circle.click({ button: 'right' });
+  const circleMenu = page.locator('[data-side-circle-menu]');
+  await expect(circleMenu).toBeVisible();
+  await expect(circleMenu.getByRole('menuitem')).toHaveText(['Close']);
+  await expect(frame()).toHaveCount(0);
+  await circleMenu.getByRole('menuitem', { name: 'Close' }).click();
+  await expect(circle).toHaveCount(0);
+  await expect(page.locator('section.ib-pane[data-side-scoop]')).toHaveCount(0);
+  expect(readInboxAsk(join(world.dataDir, 'inbox'), corner)?.turns.length).toBe(1);
 });
 
 test('no page error, and the agent got the surface from the thread', async () => {

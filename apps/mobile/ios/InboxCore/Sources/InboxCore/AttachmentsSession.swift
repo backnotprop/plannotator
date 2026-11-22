@@ -63,13 +63,44 @@ extension InboxSession {
     }
   }
 
-  /// Ask the computer how each of a thread's files stands now (changed since sent, missing).
-  public func readAttachments(_ thread: ThreadID) async {
+  /// Ask the computer how each of a thread's files stands now (changed since sent, missing), and which comments
+  /// on them wait for a Send. Returns the ids of the comments it listed, when it listed them.
+  @discardableResult
+  public func readAttachments(_ thread: ThreadID) async -> Set<String>? {
+    if case .listed(let ids) = await readComments(thread) { return ids }
+    return nil
+  }
+
+  /// What a read of a thread's files said about its comments.
+  enum CommentsRead {
+    /// The comments it listed.
+    case listed(Set<String>)
+    /// It answered, with no list to read: an older Inbox, or comments this app cannot read. Asking again changes
+    /// nothing.
+    case unlisted
+    /// No answer: worth asking again.
+    case failed
+  }
+
+  func readComments(_ thread: ThreadID) async -> CommentsRead {
     if client == nil { _ = await connect() }
-    guard let client, offers(DoorRoutes.getThreadAttachments) else { return }
-    if let read = try? await client.get(Door.getThreadAttachments(thread: thread), as: DoorThreadAttachmentsAnswer.self) {
+    guard let client else { return .failed }
+    guard offers(DoorRoutes.getThreadAttachments) else { return .unlisted }
+    // What the computer answers about a comment from here on is newer than this list.
+    let started = commentBook.landSeq
+    guard let answer = try? await client.call(Door.getThreadAttachments(thread: thread)) else { return .failed }
+    if let read = try? JSONDecoder().decode(DoorThreadAttachmentsAnswer.self, from: answer.body) {
       files.states[thread] = read.attachments + (read.inlineImages ?? [])
+      // The comments that wait for a Send, the window's among them (an older Inbox's door lists none).
+      guard let waiting = read.annotations else { return .unlisted }
+      takeComments(thread, from: waiting, started: started)
+      return .listed(Set(waiting.map(\.id)))
+    } else if case .object(var fields)? = try? JSONDecoder().decode(JSONValue.self, from: answer.body) {
+      // A comment this app cannot read never hides the files: they are read without the comments.
+      fields["annotations"] = nil
+      if let read = try? JSONDecoder().decode(DoorThreadAttachmentsAnswer.self, from: JSONEncoder().encode(JSONValue.object(fields))) { files.states[thread] = read.attachments + (read.inlineImages ?? []) }
     }
+    return .unlisted
   }
 
   /// The route a file's bytes come from, and whether it takes a Range. A picture comes whole (its ETag is its
@@ -149,6 +180,15 @@ extension InboxSession {
     return kept
   }
 
+  /// What a file opens as: the version asked for, else the one the file opens with; but a file whose sent version
+  /// this phone does not keep, which the computer has not spoken of since the app started, opens as this phone last
+  /// read it (`lastKept`). `keptCopy` says so: that copy is neither the sent version nor known to be the file as it
+  /// is now, so the viewer says only that the computer is away, and offers no other version.
+  public func opening(_ item: AttachmentItem, asked: AttachmentVersion?) -> (item: AttachmentItem, version: AttachmentVersion, keptCopy: Bool) {
+    if asked != .sent, item.changedSinceSent == nil, availability(item, version: .sent) == .notKept, let kept = lastKept(item) { return (kept, .current, true) }
+    return (item, asked ?? item.opens, false)
+  }
+
   /// The viewer of a file opened with `openAttachment` closed: room can be made with it again. `version`: the one
   /// opened, when the file is open in two; else the one opened last (a refreshed item may open another version now).
   public func attachmentClosed(_ item: AttachmentItem, version: AttachmentVersion? = nil) {
@@ -158,7 +198,7 @@ extension InboxSession {
     files.open[item.id] = opened.isEmpty ? nil : opened
   }
 
-  private func fetchAttachment(_ item: AttachmentItem, version: AttachmentVersion, progress: @Sendable @escaping (Int64, Int64?) -> Void) async throws -> URL {
+  func fetchAttachment(_ item: AttachmentItem, version: AttachmentVersion, progress: @Sendable @escaping (Int64, Int64?) -> Void) async throws -> URL {
     // Opened: it goes last when room is made.
     if let key = keptKey(item, version: version), let kept = bytes?.file(key) { return kept }
     if version == .current, let unavailable = item.unavailable { throw AttachmentError.unavailable(unavailable.message) }

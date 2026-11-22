@@ -98,7 +98,7 @@ public struct TextRows: Sendable {
         to = from + piece
         var at = to
         while at > from + piece / 2, !breaks.contains(bytes[at - 1]) { at -= 1 }
-        if at > from + piece / 2 { to = at } else { while to > from + 1, bytes[to] & 0xC0 == 0x80 { to -= 1 } }
+        if at > from + piece / 2 { to = at } else { to = wholeCharacters(bytes, from, to, end) }
       }
       var shown = to
       // A paragraph cut at a line break: the break is where the rows part.
@@ -107,6 +107,41 @@ public struct TextRows: Sendable {
       first = false
       from = to
     } while from < end
+  }
+
+  /// Where to cut a run with no break in it, at most at `to`: between two characters as a person reads them, so a
+  /// letter keeps its accents and an emoji its parts (a family, a flag, a skin tone). A single character longer
+  /// than the piece is cut between its scalars: nothing else can be done with it.
+  static func wholeCharacters(_ bytes: [UInt8], _ from: Int, _ to: Int, _ end: Int) -> Int {
+    // Read a little past the cut, to see where the character that straddles it ends.
+    var window = min(end, to + 64)
+    while window < end, bytes[window] & 0xC0 == 0x80 { window += 1 }
+    var cut = from
+    for character in String(decoding: bytes[from..<window], as: UTF8.self) {
+      let next = cut + character.utf8.count
+      if next > to { break }
+      cut = next
+    }
+    if cut > from { return cut }
+    var scalar = to
+    while scalar > from + 1, bytes[scalar] & 0xC0 == 0x80 { scalar -= 1 }
+    return scalar
+  }
+
+  /// The file's own line a row starts on, from 1 (in plain text a row is a paragraph, which may start anywhere).
+  public func sourceLine(of row: Row) -> Int { 1 + bytes[0..<Int(row.start)].reduce(0) { $0 + ($1 == 0x0A ? 1 : 0) } }
+
+  /// The words of a run of code lines as the file has them, joined by line breaks: what a comment on those lines
+  /// quotes. A long line's pieces are one line again.
+  public func source(lines range: ClosedRange<Int>) -> String {
+    guard let first = row(ofLine: range.lowerBound) else { return "" }
+    var out: [String] = []
+    var index = first
+    while index < rows.count, rows[index].line <= range.upperBound {
+      if rows[index].first { out.append(text(rows[index])) } else { out[out.count - 1] += text(rows[index]) }
+      index += 1
+    }
+    return out.joined(separator: "\n")
   }
 
   init(rows: [Row], lines: Int, bytes: [UInt8]) {
@@ -193,29 +228,74 @@ public struct DocumentRows: Sendable {
     self.rows = rows
   }
 
-  /// A long block's words in parts of at most `blockCap` bytes, each ending at a line break where one is near.
+  /// A long block's words in parts of at most `blockCap` bytes. Each part is drawn as Markdown on its own, so a
+  /// part ends where no inline Markdown is open: at a blank line, else at a line break, else at a space, each
+  /// outside code, a link and emphasis (`safeCut`). Where a part has no such place it is cut between two whole
+  /// characters, and only then can a mark be parted from its close.
   static func parts(_ content: String) -> [String] {
     let bytes = Array(content.utf8)
     var parts: [String] = []
     var from = 0
     while from < bytes.count {
       var to = min(bytes.count, from + blockCap)
-      if to < bytes.count {
-        var at = to
-        while at > from + blockCap / 2, bytes[at - 1] != 0x0A { at -= 1 }
-        if at > from + blockCap / 2 {
-          to = at
-        } else {
-          at = to
-          while at > from + blockCap / 2, bytes[at - 1] != 0x20 { at -= 1 }
-          if at > from + blockCap / 2 { to = at } else { while to > from + 1, bytes[to] & 0xC0 == 0x80 { to -= 1 } }
-        }
-      }
+      if to < bytes.count { to = safeCut(bytes, from, to) ?? TextRows.wholeCharacters(bytes, from, to, bytes.count) }
       var end = to
       while end > from, bytes[end - 1] == 0x0A { end -= 1 }
       if end > from { parts.append(String(decoding: bytes[from..<end], as: UTF8.self)) }
       from = to
     }
     return parts
+  }
+
+  /// The best place to end a part of `bytes[from...]` at or before `limit`, in its second half: after the last
+  /// blank line, else the last line break, else the last space, where nothing inline is open. Read from the part's
+  /// start (itself such a place): a code span by its backticks, a link by its brackets, emphasis by its marks.
+  static func safeCut(_ bytes: [UInt8], _ from: Int, _ limit: Int) -> Int? {
+    let floor = from + (limit - from) / 2
+    var blank: Int?
+    var line: Int?
+    var space: Int?
+    var code = false
+    var depth = 0
+    var address = false
+    var marks: [UInt8: Int] = [:]
+    var index = from
+    while index < limit {
+      let byte = bytes[index]
+      if byte == 0x5C, !code {
+        // An escaped mark is a letter.
+        index += 2
+        continue
+      }
+      if byte == 0x60 {
+        code.toggle()
+      } else if !code {
+        switch byte {
+        case 0x5B: depth += 1
+        case 0x5D where depth > 0:
+          // `](`: the link goes on into its address, to the `)`.
+          if index + 1 < bytes.count, bytes[index + 1] == 0x28 { address = true } else { depth -= 1 }
+        case 0x29 where address:
+          address = false
+          depth -= 1
+        case 0x2A, 0x5F, 0x7E:
+          // A mark between two letters of a word (snake_case, 2*3) opens nothing.
+          let before = index > from ? bytes[index - 1] : 0x20
+          let after = index + 1 < bytes.count ? bytes[index + 1] : 0x20
+          func letter(_ value: UInt8) -> Bool { (0x30...0x39).contains(value) || (0x41...0x5A).contains(value) || (0x61...0x7A).contains(value) || value >= 0x80 }
+          if !(letter(before) && letter(after)) && !(before == 0x20 && after == 0x20) { marks[byte, default: 0] += 1 }
+        default: break
+        }
+      }
+      index += 1
+      let open = code || depth > 0 || marks.values.contains { $0 % 2 != 0 }
+      guard !open, index > floor else { continue }
+      if byte == 0x0A {
+        if index >= 2, bytes[index - 2] == 0x0A { blank = index } else { line = index }
+      } else if byte == 0x20 {
+        space = index
+      }
+    }
+    return blank ?? line ?? space
   }
 }

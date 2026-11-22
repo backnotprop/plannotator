@@ -530,6 +530,40 @@ test.skipIf(!hasDom)('G3 (q-5e334740): Tab on a highlighted folder fills it in a
 });
 
 // Any folder but a system or hidden one (approval "inbox-launch-any-folder"): the drives this computer has mounted.
+for (const linked of [false, true]) {
+  test.skipIf(!hasDom)(`WSL system shortcuts (${linked ? 'linked machine' : 'this computer'}): hidden in both pickers; drive letters, mounted projects and typed paths still work`, async () => {
+    const block = linked ? MINI_BLOCK : { ...HERE };
+    const previous = { projects: block.projects, drives: block.drives };
+    const tree = TREES[linked ? MINI : 'self']!;
+    try {
+      block.projects = [...block.projects, { id: 'prj_wsl', name: 'mounted-app', root: '/mnt/c/work', exists: true }];
+      block.drives = [{ path: '/mnt/c', name: 'c' }, { path: '/mnt/wslg', name: 'wslg', shortcut: false }, { path: '/mnt/data', name: 'data' }];
+      tree['/mnt/c/work'] = ['src'];
+      if (linked) await twoMachinesMenu();
+      else {
+        here = block;
+        await open();
+        await startAndOpenMenu();
+      }
+      expect(all('[data-compose-folder-drive]').map((row) => row.getAttribute('data-compose-folder-drive'))).toEqual(['/mnt/c', '/mnt/data']);
+      const project = inDialog('[data-compose-folder-option="prj_wsl"]')!;
+      expect(project.getAttribute('aria-disabled')).toBeNull();
+      act(() => project.click());
+      expect(inDialog('[data-compose-folder]')!.getAttribute('data-compose-folder')).toBe('prj_wsl');
+      act(() => inDialog('[data-compose-folder]')!.click());
+      act(() => inDialog(`[data-compose-folder-other="${linked ? MINI : 'self'}"]`)!.click());
+      expect(all('[data-home-folders-place]').map((row) => row.getAttribute('data-home-folders-place'))).toEqual(['home', '/mnt/c', '/mnt/data']);
+      type(pathField(), '/mnt/c/work/');
+      await until(() => inDialog('[data-home-folder-start="/mnt/c/work"]') !== null, 'the mounted folder');
+      expect(folderReads().some((read) => read.machine === (linked ? MINI : 'self') && read.at === '/mnt/c/work')).toBe(true);
+    } finally {
+      block.projects = previous.projects;
+      block.drives = previous.drives;
+      delete tree['/mnt/c/work'];
+    }
+  });
+}
+
 test.skipIf(!hasDom)('drives: a row each after "Another folder…", opening the browser at the drive; an unplugged project says so; a slow drive says it and offers Try again', async () => {
   here = {
     ...HERE,

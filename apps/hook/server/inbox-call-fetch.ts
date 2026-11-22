@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, open, unlink, type FileHandle } from "node:fs/promises";
+import { mkdir, mkdtemp, unlink, type FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { extname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { INBOX_AGENT_FETCH_FILE } from "@plannotator/shared/inbox/agent-pairing";
+import { FETCHED_FILE_WORDS, newSavedFile as newFile, savedFileName, savedNameIsDotenv } from "@plannotator/shared/inbox/saved-file";
 
 type Refusal = { ok: false; code: string; message: string };
 /** One call through the pairing: the result's structured content, or why not. */
@@ -33,42 +34,7 @@ function pieceOf(value: Record<string, unknown> | undefined): Piece | null {
   return { ...piece, content_type: typeof piece.content_type === "string" ? piece.content_type : "application/octet-stream" } as Piece;
 }
 
-/** The longest name saved, in bytes: under every file system's 255, with room for `-2`. */
-const SAVED_NAME_MAX_BYTES = 200;
-
-/** Cut to at most `max` UTF-8 bytes, never inside a character. */
-function cutBytes(text: string, max: number): string {
-  let out = "";
-  for (const char of text) {
-    if (Buffer.byteLength(out + char) > max) break;
-    out += char;
-  }
-  return out;
-}
-
-/** The file's name as a plain name in the folder: never a path out of it, never a control character, never too long. */
-export function savedFileName(name: string): string {
-  const plain = name.replace(/[\\/\x00-\x1f\x7f]/g, "_").trim();
-  if (plain === "" || /^\.+$/.test(plain)) return "file";
-  if (Buffer.byteLength(plain) <= SAVED_NAME_MAX_BYTES) return plain;
-  const ext = extname(plain);
-  const keep = Buffer.byteLength(ext) <= 20 ? ext : "";
-  return `${cutBytes(plain.slice(0, plain.length - keep.length), SAVED_NAME_MAX_BYTES - Buffer.byteLength(keep))}${keep}`;
-}
-
-/** A new file in `dir` named `name`, or `name-2`, `name-3`… when that one is taken: an earlier fetch is never overwritten. */
-async function newFile(dir: string, name: string): Promise<{ path: string; handle: FileHandle }> {
-  const ext = extname(name);
-  const stem = name.slice(0, name.length - ext.length);
-  for (let n = 1; ; n++) {
-    const path = join(dir, n === 1 ? name : `${stem}-${n}${ext}`);
-    try {
-      return { path, handle: await open(path, "wx", 0o600) };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST" || n >= 1000) throw error;
-    }
-  }
-}
+export { savedFileName };
 
 /**
  * `plannotator inbox call fetch_file` for a paired agent: asks for the file's
@@ -99,6 +65,8 @@ export async function fetchPairedFile(args: Record<string, unknown>, cwd: string
         return await fail({ ok: false, code: "fetch_broken", message: "The Inbox's answer was not the next piece of this file. Nothing was saved; fetch it again." });
       }
       if (!first) {
+        // Never saved under a dotenv name, whatever the Inbox named it (as the command saves a linked machine's file).
+        if (savedNameIsDotenv(piece.name)) return await fail({ ok: false, code: "attachment_refused", message: FETCHED_FILE_WORDS.dotenv(piece.name) });
         first = piece;
         const dir = typeof folder === "string" ? resolve(cwd, folder) : await mkdtemp(join(tmpdir(), "plannotator-file-"));
         await mkdir(dir, { recursive: true });

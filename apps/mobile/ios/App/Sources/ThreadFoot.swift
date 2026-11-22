@@ -18,6 +18,8 @@ struct Composer: View {
   /// Go to a card.
   let go: (String) -> Void
   let jump: () -> Void
+  /// Open the list of comments on files that wait for this Send.
+  var comments: () -> Void = {}
 
   /// The fade over the reply field, at the top of the foot: what scrolls under it fades into it. It grows with the
   /// text (14 points at the default size, up to 24), so a line cut at the foot fades out rather than being sliced.
@@ -73,6 +75,15 @@ struct Composer: View {
         .foregroundStyle(Token.mutedForeground)
         // In line with the page's words and icons above it (the page's margin is 20, the foot's 12).
         .padding(.horizontal, Space.close)
+    }
+    // Comments the person sent while their drawing could not reach the computer: they go by themselves once it can.
+    let needNetwork = session.commentsNeedingNetwork(id).count
+    if needNetwork > 0 {
+      Label(PhoneWords.commentsNeedNetwork(needNetwork), systemImage: "wifi")
+        .font(TextRole.meta)
+        .foregroundStyle(Token.mutedForeground)
+        .padding(.horizontal, Space.close)
+        .accessibilityIdentifier("thread-needs-network")
     }
     // Under the guard only the guard speaks: the refusal behind it names keys.
     if let notice = session.notices[id], !guarded {
@@ -155,10 +166,39 @@ struct Composer: View {
       .glassEffect(.regular, in: .rect(cornerRadius: Radius.foot))
   }
 
+  /// The comments on files that ride this Send: one line across the top of the reply field; a touch lists them.
+  private func commentStrip(_ count: Int) -> some View {
+    Button(action: comments) {
+      HStack(alignment: .firstTextBaseline, spacing: Space.close) {
+        Image(systemName: "text.bubble").foregroundStyle(Token.mutedForeground)
+        Text(CountWords.comments(count).replacing(#/(\d) /#) { "\($0.1)\u{00A0}" }).foregroundStyle(Token.foreground)
+        Spacer(minLength: Space.close)
+        Image(systemName: "chevron.up").font(TextRole.glyph).foregroundStyle(Token.mutedForeground)
+      }
+      .font(TextRole.link)
+      .padding(.horizontal, Space.card)
+      .padding(.vertical, Space.close)
+      .frame(minHeight: Space.touch)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(PressStyle(gives: false))
+    .barSized()
+    .accessibilityLabel(CountWords.comments(count))
+    .accessibilityIdentifier("thread-comments")
+  }
+
   private func box(jumps: Bool) -> some View {
-    VStack(spacing: 0) {
+    // What the Send carries and what waits for the computer's network; the strip stays while any comment waits, so
+    // the list says why one does not go.
+    let riding = session.commentsCounted(id).count
+    let waiting = !session.comments(id).isEmpty
+    return VStack(spacing: 0) {
       if jumps, waits != nil {
         jumpStrip
+        Hairline().padding(.horizontal, Space.card)
+      }
+      if waiting {
+        commentStrip(riding)
         Hairline().padding(.horizontal, Space.card)
       }
       HStack(alignment: .bottom, spacing: 0) {
@@ -215,10 +255,12 @@ struct Composer: View {
 /// (to the bar's limit, which the foot sets with `barSized()`); what answers a touch is never under 44 points.
 struct SendDisc: View {
   let ready: Bool
+  /// The arrow sends; a tick keeps a comment for the next Send.
+  var symbol = "arrow.up"
   @ScaledMetric(relativeTo: .body) private var disc: CGFloat = Size.sendDisc
 
   var body: some View {
-    Image(systemName: "arrow.up")
+    Image(systemName: symbol)
       .font(TextRole.secondary.weight(.bold))
       .foregroundStyle(ready ? Token.primaryForeground : Token.mutedForeground)
       .frame(width: disc, height: disc)

@@ -133,7 +133,8 @@ function noSourcePane(): Plugin {
 
 /** The proof the sharing is complete. The engine must not carry a second
  * copy of a stateful ui module: the config store and its settings, cookie
- * storage, the theme registry, the identity and math slots, or any
+ * storage, the theme registry, the identity and math slots, the diagram
+ * remote-loads switch, or any
  * repository module that defines a React context (its consumers would read
  * an empty copy, not the page's provider). The engine's own context
  * (anchorClaims) is provided and read inside the engine only. React and the
@@ -148,6 +149,7 @@ function guardBundle(): Plugin {
     'utils/generateIdentity.ts',
     'utils/math.ts',
     'components/ThemeProvider.tsx',
+    'utils/diagramRemoteLoadsPolicy.ts',
   ].map((entry) => normalizePath(path.join(uiRoot, entry)));
   return {
     name: 'pn-diagram-guard',

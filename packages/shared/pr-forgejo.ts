@@ -20,6 +20,8 @@
  * Runtime-agnostic: `fetch` only. Vendored to Pi.
  */
 
+import { join } from "path";
+import { getPlannotatorDataDir } from "./data-dir";
 import { getForgejoOrigin } from "./pr-types";
 import type {
   ForgejoPRRef,
@@ -46,14 +48,45 @@ export class ForgejoApiError extends Error {
 }
 
 function missingTokenMessage(origin: string): string {
+  // The config file this process reads: PLANNOTATOR_DATA_DIR moves it from ~/.plannotator.
+  const configPath = join(getPlannotatorDataDir(), "config.json");
   return (
     `${origin} needs an access token for this. Create one on the instance (Settings, Applications) with the scopes ` +
-    `${FORGEJO_TOKEN_SCOPES.join(", ")}, then add it under forgejoTokens in ~/.plannotator/config.json ` +
+    `${FORGEJO_TOKEN_SCOPES.join(", ")}, then add it under forgejoTokens in ${configPath} ` +
     `(\`{ "forgejoTokens": { "${origin}": "<token>" } }\`), or set PLANNOTATOR_FORGEJO_TOKEN and PLANNOTATOR_FORGEJO_URL=${origin}.`
   );
 }
 
 // --- HTTP ---
+
+/**
+ * Limits on every Forgejo request, after the house pattern (url-to-markdown.ts:
+ * 30 s, 10 MB): one deadline per request, redirects and body included, and a
+ * byte cap on each body. The diff and raw files get a larger cap than API JSON.
+ * Exported so tests can lower them (and restore them); nothing else changes them.
+ */
+export const FORGEJO_LIMITS = {
+  timeoutMs: 30_000,
+  jsonMaxBytes: 10 * 1024 * 1024,
+  diffMaxBytes: 50 * 1024 * 1024,
+};
+
+/** How much of a refusal's body is read for Forgejo's own message; the rest is dropped, not an error. */
+const ERROR_BODY_MAX_BYTES = 64 * 1024;
+
+const TIMEOUT_MESSAGE = "The Forgejo server took too long to answer.";
+
+function sizeWords(bytes: number): string {
+  const mb = 1024 * 1024;
+  return bytes >= mb ? `${Math.round(bytes / mb)} MB` : `${bytes} bytes`;
+}
+
+/** A body over its cap. `size` is what was declared or read before the read stopped. */
+class ForgejoTooLargeError extends ForgejoApiError {
+  constructor(readonly size: number, max: number) {
+    super(`The Forgejo server sent more than ${sizeWords(max)}.`, 413);
+  }
+}
 
 interface FjContext {
   fetch: typeof fetch;
@@ -90,23 +123,29 @@ function webUrl(ref: ForgejoPRRef): string {
   return `${getForgejoOrigin(ref)}/${ref.owner}/${ref.repo}/pulls/${ref.number}`;
 }
 
-/** Forgejo's own error text from a JSON `{ message, url }` body, capped, without a trailing period (callers add their own). */
-async function errorDetail(res: Response): Promise<string> {
-  const clean = (message: string) => message.trim().slice(0, 300).replace(/[.\s]+$/, "");
-  try {
-    const text = await res.text();
-    try {
-      const parsed = JSON.parse(text) as { message?: unknown };
-      if (typeof parsed.message === "string" && parsed.message) return clean(parsed.message);
-    } catch { /* not JSON */ }
-    return clean(text);
-  } catch {
-    return "";
-  }
+/** A finished response: its status, headers and the body, read within its cap and the request's deadline. */
+interface FjResponse {
+  status: number;
+  ok: boolean;
+  headers: Headers;
+  bytes(): Uint8Array;
+  text(): string;
+  json<T>(): T;
 }
 
-async function failure(res: Response, what: string, ctx: FjContext): Promise<ForgejoApiError> {
-  const detail = await errorDetail(res);
+/** Forgejo's own error text from a JSON `{ message, url }` body, capped, without a trailing period (callers add their own). */
+function errorDetail(res: FjResponse): string {
+  const clean = (message: string) => message.trim().slice(0, 300).replace(/[.\s]+$/, "");
+  const text = res.text();
+  try {
+    const parsed = JSON.parse(text) as { message?: unknown };
+    if (typeof parsed.message === "string" && parsed.message) return clean(parsed.message);
+  } catch { /* not JSON */ }
+  return clean(text);
+}
+
+function failure(res: FjResponse, what: string, ctx: FjContext): ForgejoApiError {
+  const detail = errorDetail(res);
   if (res.status === 401) {
     return new ForgejoApiError(
       ctx.token
@@ -147,74 +186,177 @@ async function failure(res: Response, what: string, ctx: FjContext): Promise<For
 }
 
 /**
+ * Read a body, stopping (and cancelling it) once it passes `maxBytes`. Over
+ * the cap it is an error, or with `truncate` just the first `maxBytes`.
+ */
+async function readBody(
+  res: Response,
+  maxBytes: number,
+  truncate: boolean,
+  race: <T>(p: Promise<T>) => Promise<T>,
+): Promise<Uint8Array> {
+  const reader = res.body?.getReader();
+  if (!reader) {
+    const bytes = new Uint8Array(await race(res.arrayBuffer()));
+    if (bytes.byteLength <= maxBytes) return bytes;
+    if (truncate) return bytes.slice(0, maxBytes);
+    throw new ForgejoTooLargeError(bytes.byteLength, maxBytes);
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await race(reader.read());
+      if (done) break;
+      total += value.byteLength;
+      chunks.push(value);
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => {});
+        if (!truncate) throw new ForgejoTooLargeError(total, maxBytes);
+        break;
+      }
+    }
+  } catch (err) {
+    await reader.cancel().catch(() => {});
+    throw err;
+  }
+  const kept = Math.min(total, maxBytes);
+  const bytes = new Uint8Array(kept);
+  let offset = 0;
+  for (const chunk of chunks) {
+    if (offset >= kept) break;
+    const part = chunk.subarray(0, kept - offset);
+    bytes.set(part, offset);
+    offset += part.byteLength;
+  }
+  return bytes;
+}
+
+/**
  * One request to the API. `pathOrUrl` is API-relative ("/repos/…") or an
- * absolute URL on the API origin (a pagination `next` link). Redirects are
- * followed by hand and only within the API origin, so the token never leaves it.
+ * absolute URL on the API origin. Redirects are followed by hand and only
+ * within the API origin, so the token never leaves it; a 303 continues as a
+ * GET without the body. The whole request, redirects and body included, has
+ * one deadline (`FORGEJO_LIMITS.timeoutMs`), and a successful body is capped
+ * at `maxBytes` (API JSON's cap unless the caller names a larger one).
  */
 async function request(
   ctx: FjContext,
   pathOrUrl: string,
-  init: { method?: string; body?: unknown; accept?: string } = {},
-): Promise<Response> {
+  init: { method?: string; body?: unknown; accept?: string; maxBytes?: number } = {},
+): Promise<FjResponse> {
   let url = pathOrUrl.startsWith("/") ? `${ctx.apiBase}${pathOrUrl}` : pathOrUrl;
   if (new URL(url).origin !== ctx.apiOrigin) {
     throw new ForgejoApiError(`Refusing to send a Forgejo request to ${new URL(url).origin}`, 400);
   }
+  const maxBytes = init.maxBytes ?? FORGEJO_LIMITS.jsonMaxBytes;
   const headers: Record<string, string> = { Accept: init.accept ?? "application/json" };
   if (ctx.token) headers.Authorization = `token ${ctx.token}`;
-  if (init.body !== undefined) headers["Content-Type"] = "application/json";
-  for (let hop = 0; hop < 5; hop++) {
-    const res = await ctx.fetch(url, {
-      method: init.method ?? "GET",
-      headers,
-      body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
-      redirect: "manual",
-    });
-    if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
-      const next = new URL(res.headers.get("location")!, url);
-      if (next.origin !== ctx.apiOrigin) {
-        throw new ForgejoApiError(`Forgejo redirected off the API origin (${next.origin})`, res.status);
+  let method = init.method ?? "GET";
+  let body = init.body !== undefined ? JSON.stringify(init.body) : undefined;
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+
+  const controller = new AbortController();
+  const timedOut = new Promise<never>((_, reject) => {
+    controller.signal.addEventListener("abort", () => reject(new ForgejoApiError(TIMEOUT_MESSAGE, 504)), { once: true });
+  });
+  timedOut.catch(() => {});
+  const timer = setTimeout(() => controller.abort(), FORGEJO_LIMITS.timeoutMs);
+  const race = <T>(p: Promise<T>): Promise<T> => Promise.race([p, timedOut]);
+  try {
+    for (let hop = 0; hop < 5; hop++) {
+      const res = await race(ctx.fetch(url, { method, headers, body, redirect: "manual", signal: controller.signal }));
+      const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+      if (location) {
+        await res.body?.cancel().catch(() => {});
+        const next = new URL(location, url);
+        if (next.origin !== ctx.apiOrigin) {
+          // The same host on the other scheme (an http link to an https-only server): say which link to use.
+          const scheme = next.protocol.replace(/:$/, "");
+          if (next.host === new URL(ctx.apiOrigin).host && (scheme === "https" || scheme === "http")) {
+            throw new ForgejoApiError(
+              `Forgejo redirected off the API origin (${next.origin}): this server answers on ${scheme}. Use the PR's ${scheme}:// link (${next.origin}/…) instead.`,
+              res.status,
+            );
+          }
+          throw new ForgejoApiError(`Forgejo redirected off the API origin (${next.origin})`, res.status);
+        }
+        if (res.status === 303 && method !== "GET" && method !== "HEAD") {
+          method = "GET";
+          body = undefined;
+          delete headers["Content-Type"];
+        }
+        url = next.toString();
+        continue;
       }
-      url = next.toString();
-      continue;
+      if (res.ok) {
+        const declared = Number(res.headers.get("content-length"));
+        if (Number.isFinite(declared) && declared > maxBytes) {
+          await res.body?.cancel().catch(() => {});
+          throw new ForgejoTooLargeError(declared, maxBytes);
+        }
+      }
+      const bytes = await readBody(res, res.ok ? maxBytes : ERROR_BODY_MAX_BYTES, !res.ok, race);
+      let decoded: string | undefined;
+      const text = () => (decoded ??= new TextDecoder().decode(bytes));
+      return {
+        status: res.status,
+        ok: res.ok,
+        headers: res.headers,
+        bytes: () => bytes,
+        text,
+        json: <T>() => JSON.parse(text()) as T,
+      };
     }
-    return res;
+    throw new ForgejoApiError("Too many Forgejo redirects", 508);
+  } catch (err) {
+    if (controller.signal.aborted && !(err instanceof ForgejoApiError)) throw new ForgejoApiError(TIMEOUT_MESSAGE, 504);
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-  throw new ForgejoApiError("Too many Forgejo redirects", 508);
 }
 
 async function json<T>(ctx: FjContext, path: string, what: string): Promise<T> {
   const res = await request(ctx, path);
-  if (!res.ok) throw await failure(res, what, ctx);
-  return (await res.json()) as T;
+  if (!res.ok) throw failure(res, what, ctx);
+  return res.json<T>();
 }
 
-/** The `rel="next"` URL of a `Link` header, or undefined. */
-function nextLink(res: Response): string | undefined {
+/** True when a `Link` header offers a next page, wherever its URL points (only its presence is read). */
+function hasNextLink(res: FjResponse): boolean {
   const link = res.headers.get("link");
-  if (!link) return undefined;
-  for (const part of link.split(",")) {
-    const match = /<([^>]+)>\s*;\s*rel="next"/.exec(part);
-    if (match) return match[1];
-  }
-  return undefined;
+  return !!link && link.split(",").some((part) => /;\s*rel="next"/.test(part));
 }
+
+/** Items asked for per page; an instance may clamp it to its own maximum. */
+const PAGE_LIMIT = 50;
 
 /**
- * Every item of a list endpoint, following the `Link: rel="next"` header (an
- * instance clamps `limit` to its own maximum, so the page size is never
- * assumed). Same API origin only, capped at `maxPages`.
+ * Every item of a list endpoint, paged by number (`limit` and `page`) on the
+ * API origin the review was opened on, never on a URL the instance names: an
+ * instance whose ROOT_URL differs from that origin (a proxy, a LAN name)
+ * writes its `Link` URLs on its own address, and following them would stop or
+ * leave the origin. The pages end at an empty page, at `X-Total-Count` items,
+ * or when there is no total and the `Link` header offers no next page (a lone
+ * page has neither). Capped at `maxPages`.
  */
 async function paginate<T>(ctx: FjContext, path: string, what: string, maxPages = 20): Promise<T[]> {
   const out: T[] = [];
-  let next: string | undefined = path + (path.includes("?") ? "&" : "?") + "limit=50";
-  for (let page = 0; next && page < maxPages; page++) {
-    const res = await request(ctx, next);
-    if (!res.ok) throw await failure(res, what, ctx);
-    const body = (await res.json()) as unknown;
-    if (Array.isArray(body)) out.push(...(body as T[]));
-    next = nextLink(res);
-    if (next && new URL(next, ctx.apiBase).origin !== ctx.apiOrigin) next = undefined;
+  const sep = path.includes("?") ? "&" : "?";
+  for (let page = 1; page <= maxPages; page++) {
+    const res = await request(ctx, `${path}${sep}limit=${PAGE_LIMIT}&page=${page}`);
+    if (!res.ok) throw failure(res, what, ctx);
+    const body = res.json<unknown>();
+    const items = Array.isArray(body) ? (body as T[]) : [];
+    if (items.length === 0) break;
+    out.push(...items);
+    const total = Number(res.headers.get("x-total-count"));
+    if (res.headers.get("x-total-count") !== null && Number.isFinite(total)) {
+      if (out.length >= total) break;
+    } else if (!hasNextLink(res)) {
+      break;
+    }
   }
   return out;
 }
@@ -287,17 +429,55 @@ interface FjReviewComment {
 }
 
 interface FjStatus {
+  id?: number;
   context?: string;
   status?: string;
   target_url?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/**
+ * The newest status of each context. `/commits/{sha}/statuses` is the whole
+ * history (a context that failed, then passed, is in it twice, and every
+ * earlier `pending` too); a check is only its latest entry, by id, then time.
+ * Exported for tests.
+ */
+export function latestForgejoStatuses(history: FjStatus[]): FjStatus[] {
+  const newer = (a: FjStatus, b: FjStatus) =>
+    (a.id ?? 0) !== (b.id ?? 0) ? (a.id ?? 0) > (b.id ?? 0) : (a.updated_at ?? a.created_at ?? "") > (b.updated_at ?? b.created_at ?? "");
+  const latest = new Map<string, FjStatus>();
+  for (const status of history) {
+    const key = status.context ?? "";
+    const seen = latest.get(key);
+    if (!seen || newer(status, seen)) latest.set(key, status);
+  }
+  return [...latest.values()];
 }
 
 function userName(u: FjUser | undefined | null): string {
   return u?.login || u?.username || "";
 }
 
-function avatarOf(u: FjUser | undefined | null): string | undefined {
-  return typeof u?.avatar_url === "string" && u.avatar_url ? u.avatar_url : undefined;
+/**
+ * A URL Forgejo hands back (a check's `target_url`, a comment's `html_url`, an
+ * avatar) as the UI may link it: a relative one (Forgejo Actions writes
+ * `/owner/repo/actions/runs/…`) resolved on the instance's origin, an absolute
+ * one kept as given, anything but http(s) dropped (""). Without an origin a
+ * relative URL is dropped too.
+ */
+function linkOn(origin: string | null, value: string | undefined | null): string {
+  if (typeof value !== "string" || !value.trim()) return "";
+  try {
+    const url = origin ? new URL(value, `${origin}/`) : new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : "";
+  } catch {
+    return "";
+  }
+}
+
+function avatarOf(u: FjUser | undefined | null, origin: string | null): string | undefined {
+  return linkOn(origin, u?.avatar_url) || undefined;
 }
 
 // --- Auth ---
@@ -312,7 +492,7 @@ export async function checkFjAuth(runtime: PRRuntime, ref: ForgejoPRRef): Promis
   const ctx = context(runtime, ref);
   if (!ctx.token) return;
   const res = await request(ctx, repoPath(ref));
-  if (!res.ok) throw await failure(res, "read the repository", ctx);
+  if (!res.ok) throw failure(res, "read the repository", ctx);
 }
 
 export async function getFjUser(runtime: PRRuntime, ref: ForgejoPRRef): Promise<string | null> {
@@ -341,15 +521,15 @@ export async function fetchFjPR(
   const prPath = `${repoPath(ref)}/pulls/${ref.number}`;
   const [pr, diffRes] = await Promise.all([
     json<FjPullRequest>(ctx, prPath, "fetch PR metadata"),
-    request(ctx, `${prPath}.diff`, { accept: "text/plain" }),
+    request(ctx, `${prPath}.diff`, { accept: "text/plain", maxBytes: FORGEJO_LIMITS.diffMaxBytes }),
   ]);
   const headSha = pr.head?.sha;
   const baseSha = pr.base?.sha;
   if (!headSha || !baseSha) {
     throw new Error("PR has no head or base commit — its source branch may have been deleted.");
   }
-  if (!diffRes.ok) throw await failure(diffRes, "fetch the PR diff", ctx);
-  const rawPatch = await diffRes.text();
+  if (!diffRes.ok) throw failure(diffRes, "fetch the PR diff", ctx);
+  const rawPatch = diffRes.text();
 
   let patchIncomplete = false;
   if (typeof pr.changed_files === "number") {
@@ -425,6 +605,8 @@ const CHECK_CONCLUSION: Record<string, string> = {
 export function mapForgejoThreads(
   raw: FjReviewComment[],
   staleReviews: ReadonlySet<number> = new Set(),
+  /** The instance origin relative links resolve on; without it a relative link is dropped. */
+  origin: string | null = null,
 ): PRReviewThread[] {
   const threads = new Map<string, PRReviewThread & { createdAt: string }>();
   const sorted = [...raw].sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? "") || a.id - b.id);
@@ -438,10 +620,10 @@ export function mapForgejoThreads(
     const comment = {
       id: String(c.id),
       author: userName(c.user),
-      ...(avatarOf(c.user) ? { avatarUrl: avatarOf(c.user) } : {}),
+      ...(avatarOf(c.user, origin) ? { avatarUrl: avatarOf(c.user, origin) } : {}),
       body: c.body ?? "",
       createdAt: c.created_at ?? "",
-      url: c.html_url ?? "",
+      url: linkOn(origin, c.html_url),
       ...(c.diff_hunk ? { diffHunk: c.diff_hunk } : {}),
     };
     const existing = threads.get(key);
@@ -484,6 +666,9 @@ async function fetchReviewComments(ctx: FjContext, prPath: string, reviews: FjRe
   return out;
 }
 
+/** Pages of status history read: the newest per context is kept, so the whole history is read, up to this. */
+const FJ_STATUS_MAX_PAGES = 10;
+
 export async function fetchFjPRContext(runtime: PRRuntime, ref: ForgejoPRRef): Promise<PRContext> {
   const ctx = context(runtime, ref);
   const prPath = `${repoPath(ref)}/pulls/${ref.number}`;
@@ -492,7 +677,7 @@ export async function fetchFjPRContext(runtime: PRRuntime, ref: ForgejoPRRef): P
     paginate<FjIssueComment>(ctx, `${repoPath(ref)}/issues/${ref.number}/comments`, "fetch PR comments").catch(() => []),
     paginate<FjReview>(ctx, `${prPath}/reviews`, "fetch PR reviews").catch(() => []),
     pr.head?.sha
-      ? paginate<FjStatus>(ctx, `${repoPath(ref)}/commits/${encodeURIComponent(pr.head.sha)}/statuses`, "fetch PR statuses", 2).catch(() => [])
+      ? paginate<FjStatus>(ctx, `${repoPath(ref)}/commits/${encodeURIComponent(pr.head.sha)}/statuses`, "fetch PR statuses", FJ_STATUS_MAX_PAGES).catch(() => [])
       : Promise.resolve([] as FjStatus[]),
   ]);
   const reviewComments = await fetchReviewComments(ctx, prPath, reviews).catch(() => []);
@@ -503,7 +688,7 @@ export async function fetchFjPRContext(runtime: PRRuntime, ref: ForgejoPRRef): P
   for (const r of [...reviews].sort((a, b) => (a.submitted_at ?? "").localeCompare(b.submitted_at ?? ""))) {
     const state = reviewState(r);
     if (!state) continue;
-    const avatarUrl = avatarOf(r.user);
+    const avatarUrl = avatarOf(r.user, ctx.origin);
     mappedReviews.push({
       id: String(r.id),
       author: userName(r.user),
@@ -511,7 +696,7 @@ export async function fetchFjPRContext(runtime: PRRuntime, ref: ForgejoPRRef): P
       state,
       body: r.body ?? "",
       submittedAt: r.submitted_at ?? "",
-      ...(r.html_url ? { url: r.html_url } : {}),
+      ...(linkOn(ctx.origin, r.html_url) ? { url: linkOn(ctx.origin, r.html_url) } : {}),
     });
     // A comment-only review does not change a person's standing; a dismissed one clears it.
     if (state === "APPROVED" || state === "CHANGES_REQUESTED") latestDecision.set(userName(r.user), state);
@@ -521,7 +706,7 @@ export async function fetchFjPRContext(runtime: PRRuntime, ref: ForgejoPRRef): P
   const reviewDecision = decisions.includes("CHANGES_REQUESTED") ? "CHANGES_REQUESTED" : decisions.includes("APPROVED") ? "APPROVED" : "";
 
   const requestedReviewers: NonNullable<PRContext["requestedReviewers"]> = [
-    ...(pr.requested_reviewers ?? []).map((u) => ({ login: userName(u), ...(avatarOf(u) ? { avatarUrl: avatarOf(u) } : {}) })),
+    ...(pr.requested_reviewers ?? []).map((u) => ({ login: userName(u), ...(avatarOf(u, ctx.origin) ? { avatarUrl: avatarOf(u, ctx.origin) } : {}) })),
     ...(pr.requested_reviewers_teams ?? []).filter((t) => t.name).map((t) => ({ login: t.name as string, isTeam: true })),
   ].filter((r) => r.login);
 
@@ -536,14 +721,14 @@ export async function fetchFjPRContext(runtime: PRRuntime, ref: ForgejoPRRef): P
     comments: issueComments.map((c) => ({
       id: String(c.id),
       author: userName(c.user),
-      ...(avatarOf(c.user) ? { avatarUrl: avatarOf(c.user) } : {}),
+      ...(avatarOf(c.user, ctx.origin) ? { avatarUrl: avatarOf(c.user, ctx.origin) } : {}),
       body: c.body ?? "",
       createdAt: c.created_at ?? "",
-      url: c.html_url ?? "",
+      url: linkOn(ctx.origin, c.html_url),
     })),
     reviews: mappedReviews,
-    reviewThreads: mapForgejoThreads(reviewComments, staleReviews),
-    checks: statuses.map((s) => {
+    reviewThreads: mapForgejoThreads(reviewComments, staleReviews, ctx.origin),
+    checks: latestForgejoStatuses(statuses).map((s) => {
       const state = (s.status ?? "").toLowerCase();
       const complete = state !== "pending";
       return {
@@ -551,7 +736,7 @@ export async function fetchFjPRContext(runtime: PRRuntime, ref: ForgejoPRRef): P
         status: complete ? "COMPLETED" : "IN_PROGRESS",
         conclusion: complete ? (CHECK_CONCLUSION[state] ?? state.toUpperCase()) : null,
         workflowName: "",
-        detailsUrl: s.target_url ?? "",
+        detailsUrl: linkOn(ctx.origin, s.target_url),
       };
     }),
     linkedIssues: [],
@@ -603,40 +788,12 @@ export async function fetchFjFileContent(
 ): Promise<string | null> {
   try {
     const ctx = context(runtime, ref);
-    const res = await request(ctx, rawFilePath(ref, sha, filePath), { accept: "*/*" });
+    const res = await request(ctx, rawFilePath(ref, sha, filePath), { accept: "*/*", maxBytes: FORGEJO_LIMITS.diffMaxBytes });
     if (!res.ok) return null;
-    return await res.text();
+    return res.text();
   } catch {
     return null;
   }
-}
-
-/** Read a body but stop, and cancel it, once it passes `maxBytes`. */
-async function readCapped(res: Response, maxBytes: number): Promise<{ bytes: Uint8Array } | { tooLarge: number }> {
-  const reader = res.body?.getReader();
-  if (!reader) {
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    return bytes.byteLength > maxBytes ? { tooLarge: bytes.byteLength } : { bytes };
-  }
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel();
-      return { tooLarge: total };
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return { bytes };
 }
 
 /** One file at one commit as raw bytes (image preview). A declared size over the cap is never downloaded. */
@@ -648,16 +805,16 @@ export async function fetchFjFileBytes(
   maxBytes: number,
 ): Promise<PRFileBytesResult> {
   const ctx = context(runtime, ref);
-  const res = await request(ctx, rawFilePath(ref, sha, filePath), { accept: "*/*" });
-  if (res.status === 404) return { kind: "missing" };
-  if (!res.ok) throw await failure(res, "read file contents", ctx);
-  const declared = Number(res.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > maxBytes) {
-    await res.body?.cancel();
-    return { kind: "too-large", size: declared };
+  let res: FjResponse;
+  try {
+    res = await request(ctx, rawFilePath(ref, sha, filePath), { accept: "*/*", maxBytes });
+  } catch (err) {
+    if (err instanceof ForgejoTooLargeError) return { kind: "too-large", size: err.size };
+    throw err;
   }
-  const read = await readCapped(res, maxBytes);
-  return "tooLarge" in read ? { kind: "too-large", size: read.tooLarge } : { kind: "ok", bytes: read.bytes };
+  if (res.status === 404) return { kind: "missing" };
+  if (!res.ok) throw failure(res, "read file contents", ctx);
+  return { kind: "ok", bytes: res.bytes() };
 }
 
 // --- Submit Review ---
@@ -729,7 +886,7 @@ export async function submitFjPRReview(
   });
   if (!res.ok) {
     const what = action === "approve" ? "approve the PR" : action === "request_changes" ? "request changes on the PR" : "post the review";
-    throw await failure(res, what, ctx);
+    throw failure(res, what, ctx);
   }
   return { status: "complete" };
 }
@@ -741,7 +898,7 @@ export async function fetchFjPRList(runtime: PRRuntime, ref: ForgejoPRRef): Prom
     const ctx = context(runtime, ref);
     const res = await request(ctx, `${repoPath(ref)}/pulls?state=all&sort=recentupdate&limit=30`);
     if (!res.ok) return [];
-    const list = (await res.json()) as FjPullRequest[];
+    const list = res.json<FjPullRequest[]>();
     return (Array.isArray(list) ? list : []).map((pr) => ({
       id: String(pr.number),
       number: pr.number,
