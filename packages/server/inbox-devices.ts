@@ -605,7 +605,7 @@ export interface InboxDevicesContext {
   /** A linked machine's agents' reads of this Inbox's threads and their files (inbox-far-read.ts). */
   agentRead?: { read: (url: URL) => Response; file: (url: URL) => Promise<Response> };
   /** A linked machine's agents' search and thread list of this Inbox's threads (inbox-far-find.ts). */
-  agentFind?: { search: (url: URL) => Promise<Response>; threads: (url: URL) => Response };
+  agentFind?: { search: (url: URL) => Promise<Response>; threads: (url: URL) => Response | Promise<Response> };
   /** A linked machine's Update (inbox-updates.ts). */
   machineUpdate?: { read: () => unknown; start: () => Promise<{ outcome: string }> };
   /** Tests: the door's look-again clock (`INBOX_DOOR_REPUBLISH`). Default: unref'd timers. */
@@ -1157,7 +1157,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
     "GET agent-file": async (_req, url, device) => (context.agentRead ? await context.agentRead.file(url) : routeNotFound(device)),
     // Its agent's search and thread list here: reads only, as a guest's.
     "GET agent-search": async (_req, url, device) => (context.agentFind ? await context.agentFind.search(url) : routeNotFound(device)),
-    "GET agent-threads": async (_req, url, device) => context.agentFind?.threads(url) ?? routeNotFound(device),
+    "GET agent-threads": async (_req, url, device) => (context.agentFind ? await context.agentFind.threads(url) : routeNotFound(device)),
     "POST link-back": async (req, _url, device) => context.machines?.()?.linkBack(device.id, await context.readBody(req)) ?? routeNotFound(device),
     "POST unlink": async (_req, _url, device) => context.machines?.()?.unlinkedBy(device.id) ?? routeNotFound(device),
     // The body is never read, so a machine cannot name a version or a place to download from.

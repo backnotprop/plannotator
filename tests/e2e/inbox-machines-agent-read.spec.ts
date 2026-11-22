@@ -16,7 +16,7 @@
  *  4b. Studio's agent finds MacBook's thread with search and with read_thread's list, in its own project (the same
  *      folder name there), each far row marked with MacBook; then read by its id.
  *  4c. "This project" by git remote: a project in another folder on MacBook with the same origin is found from
- *      Studio's; one with the same folder name and another origin is not.
+ *      Studio's, on the first ask with both repo caches cold; one with the same folder name and another origin is not.
  *  5. MacBook stopped: Studio's agent is told at once that it cannot be reached, with its name; search and the list
  *     answer with Studio's own rows and one line naming MacBook.
  *
@@ -263,11 +263,14 @@ test('4c. this project on the other computer is the one with the same git remote
   agents.push(agent);
   const sameId = (await agent.send({ project_path: same, subject: 'Ledger migration', body: 'Migration of the ledger tables.' })).thread_id as string;
   const otherId = (await agent.send({ project_path: other, subject: 'Other ledger migration', body: 'Migration of another ledger.' })).thread_id as string;
-  // Studio's project needs no thread of its own: its folder's remote names it.
-  await expect.poll(() => {
-    const found = call(studio, 'search', { query: 'migration' }, { cwd: mine });
-    return (found.json?.results as { thread_id: string }[] | undefined)?.map((r) => r.thread_id) ?? [];
-  }, { timeout: 15_000 }).toEqual([sameId]);
+  // Studio's project needs no thread of its own: its folder's remote names it. The first answer counts: both repo
+  // caches are cold for these new folders, and an early answer must never take the other repository by its name.
+  const found = call(studio, 'search', { query: 'migration' }, { cwd: mine });
+  expect(found.status, found.err).toBe(0);
+  expect((found.json!.results as { thread_id: string }[]).map((r) => r.thread_id)).toEqual([sameId]);
+  const listed = call(studio, 'read_thread', { asked_by: 'anyone' }, { cwd: mine });
+  expect(listed.status, listed.err).toBe(0);
+  expect((listed.json!.threads as { thread_id: string; machine?: unknown }[]).filter((t) => t.machine).map((t) => t.thread_id)).toEqual([sameId]);
   const every = call(studio, 'search', { query: 'migration', all_projects: true }, { cwd: mine });
   expect((every.json!.results as { thread_id: string }[]).map((r) => r.thread_id).sort()).toEqual([sameId, otherId].sort());
 });

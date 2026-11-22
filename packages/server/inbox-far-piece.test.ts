@@ -176,6 +176,56 @@ describe("a paired cloud agent fetches a linked machine's file", () => {
     expect(existsSync(w.saveIn) ? readdirSync(w.saveIn) : []).toEqual([]);
   });
 
+  test("a hostile piece: the right offset header with the whole file, or another offset echoed, is never handed on", async () => {
+    const whole = await world(async (route, search, door) => {
+      if (route !== "agent-file") return door(route, search);
+      const asked = new URLSearchParams(search.slice(1));
+      const params = new URLSearchParams(asked);
+      params.delete("offset");
+      params.delete("length");
+      const answer = await door(route, `?${params}`);
+      const headers = new Headers(answer.headers);
+      headers.set(AGENT_FILE_OFFSET_HEADER, asked.get("offset") ?? "0");
+      return new Response(answer.body, { status: answer.status, headers });
+    });
+    const sent = await whole.call(INBOX_AGENT_FETCH_FILE, { message_id: whole.message.id, file: "dump.bin" });
+    expect(sent.isError).toBe(true);
+    expect(sent.content[0]!.text).toBe(`machine_answer_unreadable: ${FAR_READ_REFUSALS.fileUnreadable("Mini")}`);
+    expect(existsSync(whole.saveIn) ? readdirSync(whole.saveIn) : []).toEqual([]);
+
+    const elsewhere = await world(async (route, search, door) => {
+      if (route !== "agent-file") return door(route, search);
+      const answer = await door(route, search);
+      const headers = new Headers(answer.headers);
+      headers.set(AGENT_FILE_OFFSET_HEADER, String(Number(headers.get(AGENT_FILE_OFFSET_HEADER)) + 7));
+      return new Response(answer.body, { status: answer.status, headers });
+    });
+    const moved = await elsewhere.call(INBOX_AGENT_FETCH_FILE, { message_id: elsewhere.message.id, file: "dump.bin", offset: INBOX_AGENT_FETCH_PIECE_BYTES });
+    expect(moved.isError).toBe(true);
+    expect(moved.content[0]!.text).toBe(`machine_needs_update: ${FAR_READ_REFUSALS.older("Mini")}`);
+  });
+
+  test("one cloud agent's far pieces are read a few at a time, the rest waiting their turn", async () => {
+    let going = 0;
+    let most = 0;
+    const w = await world(async (route, search, door) => {
+      if (route !== "agent-file") return door(route, search);
+      going++;
+      most = Math.max(most, going);
+      await Bun.sleep(30);
+      try {
+        return await door(route, search);
+      } finally {
+        going--;
+      }
+    });
+    const offsets = [0, 1, 2, 0, 1, 2].map((n) => n * INBOX_AGENT_FETCH_PIECE_BYTES);
+    const results = await Promise.all(offsets.map((offset) => w.call(INBOX_AGENT_FETCH_FILE, { message_id: w.message.id, file: "dump.bin", offset })));
+    expect(results.every((r) => !r.isError)).toBe(true);
+    expect(results.map((r) => r.structuredContent!.offset)).toEqual(offsets);
+    expect(most).toBe(2);
+  });
+
   test("a dotenv name is never saved, from a far piece or any piece the Inbox names", async () => {
     const w = await world(async (route, search, door) => {
       const answer = await door(route, search);

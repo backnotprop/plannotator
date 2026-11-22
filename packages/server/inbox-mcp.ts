@@ -1199,7 +1199,7 @@ function personFacts(store: InboxStore, threadId: string, caller: string | null)
 }
 
 /** One row of read_thread's list as a line of text: every field the structured row holds. */
-export function threadRowText(row: InboxAgentThreadRow & { tagged_you?: true; project?: string; machine?: { name: string } }): string {
+export function threadRowText(row: Omit<InboxAgentThreadRow, "unread"> & { unread?: boolean; tagged_you?: true; project?: string; machine?: { name: string } }): string {
   const parts = [`- ${row.thread_id}`];
   // A thread on a linked computer (inbox-mcp-far-find.ts).
   if (row.machine) parts.push(`on ${row.machine.name}`);
@@ -1213,6 +1213,7 @@ export function threadRowText(row: InboxAgentThreadRow & { tagged_you?: true; pr
   }
   parts.push(`last ${row.last_author} ${shortTime(row.last_at)}`);
   if (row.last_person_message_id && row.last_person_at) parts.push(`person's last ${row.last_person_message_id} ${shortTime(row.last_person_at)}`);
+  // A linked computer's row has none: read there with no session, it would not say what this agent has read.
   if (row.unread) parts.push("unread: the person wrote something you have not read");
   // The person tagged the reader in this thread (approval "inbox-tag-agents"), in any project.
   if (row.tagged_you) parts.push("the person tagged you here");

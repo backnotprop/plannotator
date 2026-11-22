@@ -28,9 +28,8 @@ import {
   savedNameIsDotenv,
 } from "@plannotator/shared/inbox/saved-file";
 import { InboxError } from "@plannotator/shared/inbox/schema";
-import { AGENT_FILE_NAME_HEADER, AGENT_FILE_ROUTE, AGENT_FILE_SHA_HEADER, AGENT_READ_ROUTE, farReadQuery, machineNameWords, type FarReadAnswer, type FarReadAsk } from "./inbox-far-read";
+import { AGENT_FILE_NAME_HEADER, AGENT_FILE_PIECE_MAX_BYTES, AGENT_FILE_ROUTE, AGENT_FILE_SHA_HEADER, AGENT_READ_ROUTE, farReadQuery, machineNameWords, type FarReadAnswer, type FarReadAsk } from "./inbox-far-read";
 import { readCapped, type PeerLink } from "./inbox-peer-link";
-import { AGENT_FILE_PIECE_MAX_BYTES } from "./inbox-far-read";
 import { farPieceOf, FAR_PIECE_WAIT_MS, type FarFilePiece } from "./inbox-machine-agent-piece";
 
 /** How long one machine may take to answer a read (and a file's first bytes). */

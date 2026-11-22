@@ -443,9 +443,8 @@ describe("the door routes", () => {
     for (const name of ["GET agent-read", "GET agent-file", "GET agent-search", "GET agent-threads"]) {
       expect(doorRouteTable().find((row) => row.name === name)).toMatchObject({ grant: "machine" });
     }
-    expect(doorRouteOf("GET", "agent-read", false)).toBeNull();
-    expect(doorRouteOf("GET", "agent-file", false)).toBeNull();
-    expect(doorRouteOf("GET", "agent-search", false)).toBeNull();
-    expect(doorRouteOf("GET", "agent-threads", false)).toBeNull();
+    // Not window routes for any token, a machine's included: only the door's own answer serves them (a phone's
+    // token gets 404 there: inbox-door-version.test.ts, "a linked machine's own routes").
+    for (const route of ["agent-read", "agent-file", "agent-search", "agent-threads"]) expect([route, doorRouteOf("GET", route, true)]).toEqual([route, null]);
   });
 });

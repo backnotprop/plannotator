@@ -14,6 +14,30 @@ import { AGENT_FILE_NAME_HEADER, AGENT_FILE_OFFSET_HEADER, AGENT_FILE_PIECE_MAX_
 /** How long one piece may take, headers and bytes: 1 MiB over the tailnet. */
 export const FAR_PIECE_WAIT_MS = 20_000;
 
+/** At most this many far pieces are read at once for one cloud agent (each up to 1 MiB in memory); the rest wait their turn. */
+export const FAR_PIECES_AT_ONCE = 2;
+
+/** Turns per caller: `run` waits while `max` of that caller's runs are going, then runs. */
+export function createTurns(max = FAR_PIECES_AT_ONCE) {
+  const going = new Map<string, number>();
+  const queued = new Map<string, (() => void)[]>();
+  return async <T>(caller: string, run: () => Promise<T>): Promise<T> => {
+    // A finished run hands its turn straight to the next one waiting, so the count never overshoots.
+    if ((going.get(caller) ?? 0) >= max) await new Promise<void>((resolve) => queued.set(caller, [...(queued.get(caller) ?? []), resolve]));
+    else going.set(caller, (going.get(caller) ?? 0) + 1);
+    try {
+      return await run();
+    } finally {
+      const waiting = queued.get(caller);
+      const next = waiting?.shift();
+      if (waiting && waiting.length === 0) queued.delete(caller);
+      if (next) next();
+      else if ((going.get(caller) ?? 1) <= 1) going.delete(caller);
+      else going.set(caller, going.get(caller)! - 1);
+    }
+  };
+}
+
 /** One piece, as the agent door's fetch_file answers it. */
 export interface FarFilePiece {
   name: string;

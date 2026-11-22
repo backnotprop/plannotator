@@ -108,6 +108,7 @@ export function registerInboxSearchTool(server: McpServer, context: InboxMcpCont
           ? Promise.resolve(null)
           : farSearchFor(context, { q, limit, all: input.all_projects === true, projectPath: input.project_path, projects: found?.projects ?? [] });
         let total = 0;
+        // This computer's rows in the order it always gave them (project by project), and each with its rank.
         const ranked: { row: InboxAgentSearchRow; score: number }[] = [];
         if (projectIds === null || projectIds.length > 0) {
           if (!index.ready()) {
@@ -124,14 +125,15 @@ export function registerInboxSearchTool(server: McpServer, context: InboxMcpCont
             });
           }
         }
-        // One order across every machine: the index's rank (match, then newest), this computer's first on a tie.
         const away = await far;
-        if (away) {
-          total += away.total;
+        if (away) total += away.total;
+        // With far rows, one order across every machine: the index's rank (match, then newest), this computer's first
+        // on a tie. Without any, this computer's rows exactly as before.
+        if (away && away.rows.length > 0) {
           // A far row names its project whenever it is not this one's name (the same repository in another folder there).
           for (const { score, project, ...row } of away.rows) ranked.push({ row: projectIds === null || project.toLowerCase() !== scope.toLowerCase() ? { ...row, project } : row, score });
+          ranked.sort((a, b) => b.score - a.score);
         }
-        ranked.sort((a, b) => b.score - a.score);
         const results = ranked.slice(0, limit).map(({ row }) => row);
         const lines = away?.lines.length ? `\n${away.lines.join("\n")}` : "";
         const head =
