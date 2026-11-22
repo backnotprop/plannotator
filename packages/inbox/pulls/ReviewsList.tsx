@@ -4,7 +4,7 @@
  * land, then the folded Waiting on others and Open, not reviewed. A row is a review thread (the same thread the Inbox
  * lists, never a copy) or a listed PR nobody has reviewed. The fold state is remembered. No new keyboard shortcuts.
  */
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
 import { inboxPullIsOpen, inboxPullRepoKey, inboxReviewGroups, type InboxPull, type InboxPullHidden, type InboxRepoHidden, type InboxPullsAnswer, type InboxReviewRow, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
@@ -16,7 +16,7 @@ import { repoLabels, repoName } from './labels';
 import { pullsEmptyWords, pullsNotices } from './notices';
 import { readReviewFolds, reviewRowProject, reviewRowTitle, saveReviewFolds, type ReviewFolds } from './reviewsModel';
 import { riskOrder, type RiskFailures, type RiskFilterValue, type RiskJudgments } from './risk';
-import { ReviewRowItem, ReviewStack } from './ReviewRow';
+import { layerItem, ReviewRowItem, ReviewStack } from './ReviewRow';
 import { UnreportedBranches } from './UnreportedBranches';
 import type { InboxPullRiskAutoRun, InboxUnreportedBranch } from '@plannotator/core/inbox-types';
 import { useContextMenuTrigger } from '../components/useContextMenuTrigger';
@@ -59,6 +59,31 @@ export function rowPulls(row: InboxReviewRow): InboxPull[] {
 export function reviewLinksOf(model: InboxPullsAnswer, answer: InboxReviewsAnswer): InboxPullsAnswer['links'] {
   return { ...model.links, ...Object.fromEntries(answer.rows.flatMap((row) => (row.link ? row.pull_keys.map((key) => [key, row.link!] as const) : []))) };
 }
+
+/** What a right-click finds: a row about open PRs, or an open layer of an unfolded stack; what its title and Hide name. */
+interface MenuTarget {
+  title: string;
+  pulls: InboxPull[];
+}
+
+/** The menu's targets by id (`data-reviews-item`): each row about open PRs, and each open layer of a stack (`layerItem`). */
+export function menuTargets(rows: readonly InboxReviewRow[], links: InboxPullsAnswer['links']): Map<string, MenuTarget> {
+  const targets = new Map<string, MenuTarget>();
+  for (const row of rows) {
+    const pulls = rowPulls(row);
+    if (pulls.length > 0) targets.set(row.id, { title: reviewRowTitle(row, (s) => stackTitle(s, links)), pulls });
+    const stack = row.stacks[0];
+    if (!stack || stack.layers.length < 2) continue;
+    for (const layer of stack.layers) if (inboxPullIsOpen(layer)) targets.set(layerItem(layer.key), { title: layer.title, pulls: [layer] });
+  }
+  return targets;
+}
+
+/**
+ * The layer a person last opened from the list, while the page is open: back from its review, its row (not its
+ * stack's) shows selected, its stack unfolded. Forgotten once the list shows nothing open, or the stack's own row opens.
+ */
+let openedLayer: { stack: string; key: string } | null = null;
 
 /** "Hide pull request", "Hide merge request", "Hide 3 pull requests". */
 export function hideWords(pulls: readonly Pick<InboxPull, 'platform'>[]): string {
@@ -163,7 +188,8 @@ function HiddenFold({
 
 /**
  * Reviews' rows' right-click menu (and the menu key, Shift+F10; a long press on a phone): Hide, on a row about open
- * PRs. The list's body is its trigger (`className`, `.ib-lbody`), so the bands stay its direct children.
+ * PRs or an open layer's row (that one PR). The list's body is its trigger (`className`, `.ib-lbody`), so the bands
+ * stay its direct children.
  */
 export function ReviewsMenu({
   rows,
@@ -186,19 +212,19 @@ export function ReviewsMenu({
   children: React.ReactNode;
 }) {
   const body = useRef<HTMLDivElement>(null);
-  const hideable = new Map(rows.filter((row) => rowPulls(row).length > 0).map((row) => [row.id, row] as const));
-  const buttonFor = (id: string) => body.current?.querySelector<HTMLElement>(`[data-reviews-row="${CSS.escape(id)}"]`) ?? null;
+  const hideable = menuTargets(rows, links);
+  const buttonFor = (id: string) => body.current?.querySelector<HTMLElement>(`[data-reviews-item="${CSS.escape(id)}"]`) ?? null;
   const menu = useContextMenuTrigger({
     itemOf: (target) => {
-      const button = target instanceof Element ? target.closest<HTMLElement>('[data-reviews-row]') : null;
-      return button && hideable.has(button.getAttribute('data-reviews-row') ?? '') ? button : null;
+      const button = target instanceof Element ? target.closest<HTMLElement>('[data-reviews-item]') : null;
+      return button && hideable.has(button.getAttribute('data-reviews-item') ?? '') ? button : null;
     },
-    idOf: (button) => button.getAttribute('data-reviews-row'),
+    idOf: (button) => button.getAttribute('data-reviews-item'),
     has: (id) => hideable.has(id),
     buttonFor,
     // A hidden row: the row now in its place, else the list's heading.
     slotOf: () => ({
-      order: [...(body.current?.querySelectorAll<HTMLElement>('[data-reviews-row]') ?? [])].map((b) => b.getAttribute('data-reviews-row')!),
+      order: [...(body.current?.querySelectorAll<HTMLElement>('[data-reviews-item]') ?? [])].map((b) => b.getAttribute('data-reviews-item')!),
       fallback: () => body.current?.closest('.ib-listcol')?.querySelector<HTMLElement>('[data-pulls-heading]') ?? null,
     }),
     stateOf: (id) => (hideable.has(id) ? 'shown' : ''),
@@ -209,8 +235,9 @@ export function ReviewsMenu({
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => setPortal(body.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
   const target = menu.targetId ? (hideable.get(menu.targetId) ?? null) : null;
-  const targetPulls = target ? rowPulls(target) : [];
-  const title = target ? reviewRowTitle(target, (s) => stackTitle(s, links)) : 'Review';
+  const targetId = target ? menu.targetId! : null;
+  const targetPulls = target?.pulls ?? [];
+  const title = target?.title ?? 'Review';
   return (
     <ContextMenu.Root {...menu.root}>
       <ContextMenu.Trigger ref={body} className={className} aria-busy={busy ? true : undefined} {...menu.trigger}>
@@ -219,7 +246,7 @@ export function ReviewsMenu({
       <ContextMenu.Portal container={portal ?? undefined}>
         {phone && <ContextMenu.Backdrop className="ib-pm-scrim" />}
         <ContextMenu.Positioner className="ib-pm-pos" data-phone={phone ? '' : undefined}>
-          <ContextMenu.Popup className="ib-pm" aria-label={title} data-reviews-menu={target?.id} {...menu.popup}>
+          <ContextMenu.Popup className="ib-pm" aria-label={title} data-reviews-menu={targetId ?? undefined} {...menu.popup}>
             {target && onHide && (
               <>
                 <div className="ib-pm-title" dir="auto" aria-hidden="true">
@@ -229,7 +256,7 @@ export function ReviewsMenu({
                   className="ib-pmi"
                   label={hideWords(targetPulls)}
                   onClick={() => {
-                    menu.follow(target.id);
+                    menu.follow(targetId!);
                     onHide(targetPulls);
                   }}
                   data-reviews-hide=""
@@ -259,9 +286,11 @@ export function ReviewsList({
   autoRuns,
   projectNames,
   selected,
+  selectedLayer = null,
   phone,
   project = null,
   onOpen,
+  onOpenLayer,
   onNew,
   onReviewBranch,
   menuRow = null,
@@ -283,10 +312,14 @@ export function ReviewsList({
   projectNames: ReadonlyMap<string, string>;
   /** The open thread's id, or the open stack's. */
   selected: string | null;
+  /** The layer of the open stack that was opened by its own key (not the stack's): its row shows selected. */
+  selectedLayer?: string | null;
   phone: boolean;
   /** The project the list is filtered to: Branch reviews' "Branches nobody reported" is one project's. */
   project?: string | null;
   onOpen: (row: InboxReviewRow) => void;
+  /** A layer's row of an unfolded stack: that layer. Absent: the row's own `onOpen`. */
+  onOpenLayer?: (row: InboxReviewRow, layer: InboxPull) => void;
   onNew: () => void;
   /** Branch reviews' safety net: New review with that branch. Absent: no safety net. */
   onReviewBranch?: (branch: InboxUnreportedBranch, opener: HTMLElement) => void;
@@ -320,13 +353,24 @@ export function ReviewsList({
   // A row opened from a folded group keeps its group open.
   const waitingOpen = unfolded('waiting') || groups.waiting.some(isOpenRow);
   const listedOpen = unfolded('not_reviewed') || groups.not_reviewed.some(isOpenRow);
-  const [unfoldedStacks, setUnfoldedStacks] = useState<ReadonlySet<string>>(() => new Set());
-  const toggleStack = (id: string) =>
-    setUnfoldedStacks((was) => {
-      const next = new Set(was);
-      if (!next.delete(id)) next.add(id);
-      return next;
-    });
+  // Nothing open in the list: a layer opened from it earlier is forgotten.
+  useEffect(() => {
+    if (selected === null) openedLayer = null;
+  }, [selected]);
+  /** The layer of this row's stack that is open on its own: by its key, or the one opened from its row and come back to. */
+  const openLayerOf = (row: InboxReviewRow): string | null => {
+    const stack = row.stacks[0];
+    if (!stack || stack.layers.length < 2 || !isOpenRow(row)) return null;
+    const key = selectedLayer ?? (openedLayer?.stack === stack.id ? openedLayer.key : null);
+    return key && stack.layers.some((layer) => layer.key === key) ? key : null;
+  };
+  // A stack's fold, by hand; one whose layer is open starts unfolded, as a folded group keeps an open row shown.
+  const [stackFolds, setStackFolds] = useState<ReadonlyMap<string, boolean>>(() => new Map());
+  const stackUnfolded = (row: InboxReviewRow) => stackFolds.get(row.id) ?? openLayerOf(row) !== null;
+  const toggleStack = (row: InboxReviewRow) => {
+    const open = stackUnfolded(row);
+    setStackFolds((was) => new Map(was).set(row.id, !open));
+  };
   // Those High could not place, behind one quiet line; one opened from there keeps them shown.
   const [notRankedFolded, setNotRankedOpen] = useState(false);
   const notRankedOpen = notRankedFolded || notRanked.some(isOpenRow);
@@ -371,8 +415,33 @@ export function ReviewsList({
   const links = reviewLinksOf(model, answer);
   const draw = (row: InboxReviewRow) => {
     const props = { row, links, place: placeOf(row), selected: isOpenRow(row), phone, now, judgments, riskFailed, autoRuns, menu: menuRow === row.id, onOpen: () => onOpen(row) };
-    // A stack of several PRs unfolds its layers under its row; the choice lasts while the page is open.
-    if ((row.stacks[0]?.layers.length ?? 0) > 1) return <ReviewStack key={row.id} {...props} open={unfoldedStacks.has(row.id)} onToggle={() => toggleStack(row.id)} />;
+    // A stack of several PRs unfolds its layers under its row; the choice lasts while the list is shown.
+    const stack = row.stacks[0];
+    if (stack && stack.layers.length > 1) {
+      const unfolded = stackUnfolded(row);
+      // An open layer shown on its own row takes the selection from the stack's row.
+      const openLayer = unfolded ? openLayerOf(row) : null;
+      return (
+        <ReviewStack
+          key={row.id}
+          {...props}
+          selected={props.selected && openLayer === null}
+          onOpen={() => {
+            openedLayer = null;
+            onOpen(row);
+          }}
+          open={unfolded}
+          onToggle={() => toggleStack(row)}
+          openLayer={openLayer}
+          menuItem={menuRow}
+          onOpenLayer={(layer) => {
+            openedLayer = { stack: stack.id, key: layer.key };
+            if (onOpenLayer) onOpenLayer(row, layer);
+            else onOpen(row);
+          }}
+        />
+      );
+    }
     return <ReviewRowItem key={row.id} {...props} />;
   };
   // Under a project filter, that project's hidden PRs and repositories only, as the rest of the page (its count follows).

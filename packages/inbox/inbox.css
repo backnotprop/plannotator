@@ -10201,17 +10201,23 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-rvr-gl .ib-n { font-weight: 500; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .ib-nrow.ib-prrow { display: block; gap: 0; padding: 0 var(--ib-rvr-pad); border-bottom: 0; }
 .ib-nrow.ib-prrow::before { inset: 1px 0; }
-.ib-mrow.ib-prrow { display: block; width: 100%; min-height: 0; padding: 0 var(--ib-rvr-pad); text-align: left; border-bottom: 1px solid var(--ib-hair); }
+.ib-mrow.ib-prrow { position: relative; display: block; width: 100%; min-height: 0; padding: 0 var(--ib-rvr-pad); text-align: left; border-bottom: 1px solid var(--ib-hair); }
 .ib-mrow.ib-prrow.ib-sel { background: var(--ib-sel); }
 .ib-lbody > .ib-group > .ib-mrow.ib-prrow { contain-intrinsic-size: auto none auto 45px; }
 .ib-prrow .ib-rvr-l1 { display: flex; align-items: center; gap: 9px; height: var(--ib-rvr-h); min-width: 0; font-size: var(--ib-fs-13-5, 13.5px); }
 .ib-rvr-mark { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 15px; color: var(--muted-foreground); }
 .ib-prrow .ib-rvr-t { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 18px; color: var(--foreground); unicode-bidi: plaintext; text-align: start; }
 .ib-prrow.ib-u .ib-rvr-t { font-weight: 600; }
-/* A long unbroken title: the head gives way, the tail that tells rows apart stays. */
-.ib-prrow .ib-rvr-t[data-reviews-title-split] { display: flex; }
+/* A long unbroken title: the head gives way, the tail that tells rows apart stays. Too narrow for the kept end
+   (under 11em), the line cuts plainly at its end, so the kept end is never clipped without "…". */
+.ib-prrow .ib-rvr-t[data-reviews-title-split] { display: block; flex: 1 1 0%; container-type: inline-size; }
+.ib-rvr-tin { display: flex; min-width: 0; }
 .ib-rvr-th { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ib-rvr-tt { flex: none; white-space: nowrap; }
+.ib-rvr-tt { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@container (max-width: 11em) {
+  .ib-rvr-tin { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ib-rvr-tin > :is(.ib-rvr-th, .ib-rvr-tt) { display: inline; }
+}
 .ib-rvr-end { flex: none; display: flex; align-items: center; gap: 8px; margin-left: auto; padding-left: 4px; }
 .ib-rvr-ck { display: inline-flex; }
 .ib-pr-magent.ib-rvr-agent { display: inline-flex; margin: 0; }
@@ -10224,12 +10230,15 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-rvr-stk > .ib-prrow { grid-area: 1 / 1; }
 .pn-inbox .ib-rvr-stkbtn { position: relative; z-index: 1; grid-area: 1 / 1; justify-self: end; align-self: start; height: 22px; margin: calc((var(--ib-rvr-h) - 22px) / 2) calc(var(--ib-rvr-pad) + var(--ib-rvr-age-w) + 8px) 0 0; border-radius: 6px; font-family: inherit; line-height: 1; cursor: pointer; }
 .pn-inbox .ib-rvr-stkbtn:hover { color: var(--foreground); background: color-mix(in oklch, var(--muted) 70%, transparent); }
+/* Its hit area: the row's full height and a little to each side, drawn as it was. */
+.pn-inbox .ib-rvr-stkbtn::after { content: ""; position: absolute; inset: calc((22px - var(--ib-rvr-h)) / 2) -4px; }
 .pn-inbox .ib-rvr-stkbtn:focus-visible { outline: 2px solid var(--ring); outline-offset: -1px; }
 .ib-rvr-stk:has(> .ib-rvr-stkbtn:hover) > .ib-nrow.ib-prrow:not(.ib-sel)::before { background: var(--ib-hover) !important; }
 .ib-rvr-stk:has(> .ib-rvr-stkbtn:hover) > .ib-nrow.ib-prrow.ib-sel::before { background: var(--ib-sel-hover) !important; }
 .ib-rvr-layers { grid-row: 2; grid-column: 1; }
 .ib-prrow.ib-rvr-child { padding-left: calc(var(--ib-rvr-pad) + 24px); }
-.ib-prrow.ib-rvr-child::after { content: ""; position: absolute; left: calc(var(--ib-rvr-pad) + 7px); top: calc(var(--ib-rvr-h) / 2 - 26px); width: 10px; height: 26px; border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); border-bottom-left-radius: 5px; pointer-events: none; }
+/* The tree line from the stack to a layer: on the layer's own row (positioned on a phone as on a desktop). */
+.ib-rvr-tree { position: absolute; left: calc(var(--ib-rvr-pad) + 7px); top: calc(var(--ib-rvr-h) / 2 - 26px); width: 10px; height: 26px; border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); border-bottom-left-radius: 5px; pointer-events: none; }
 /* The open row's second line: what the old third line said, under the title. */
 .ib-prrow .ib-rvr-l2 { display: flex; align-items: center; gap: 9px; min-width: 0; height: 18px; margin-top: -3px; padding-bottom: 7px; box-sizing: content-box; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-rvr-l2 > .ib-lead { flex: none; display: inline-flex; justify-content: center; width: 15px; }
@@ -10655,6 +10664,11 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   .ib-rvr-l2 > .ib-pr-l3:first-child { margin-left: 25px; }
   .ib-rvr-cnt { min-width: 44px; justify-content: center; }
   .pn-inbox .ib-rvr-stkbtn { height: 44px; margin: 0 calc(var(--ib-rvr-pad) + var(--ib-rvr-age-w) + 8px) 0 0; }
+  .pn-inbox .ib-rvr-stkbtn::after { inset: 0 -4px; }
+  /* Group labels stay at the top while their rows scroll under them, as the Inbox's own groups do on a phone; the
+     list's ground behind them, so no row shows through. */
+  .ib-rvr-gl, .pn-inbox .ib-prlist .ib-lbody .ib-pr-foldbtn { position: sticky; top: 0; z-index: 2; background: var(--card); }
+  .pn-inbox .ib-prlist .ib-lbody .ib-pr-foldbtn { border-radius: 0; }
 }
 @media (forced-colors: active) {
   .ib-pr-pill, .pn-inbox .ib-pr-chip { border: 1px solid CanvasText; }

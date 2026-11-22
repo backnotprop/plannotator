@@ -4,11 +4,15 @@
  * title (bold when unread), and at the end the High pill, a red mark when checks fail, the agent's mark, a stack's
  * count and the age in a fixed column. The open row grows a second line with what the old third line said: the
  * author's picture, the number, the repository, the agent and why the row is where it is (its tone's colour), and a
- * Medium, Low or "Couldn't rank" mark. A stack unfolds its layers under it. A phone keeps 44px rows.
+ * Medium, Low or "Couldn't rank" mark. A stack unfolds its layers under it, each a row of its own that opens that
+ * layer. A phone keeps 44px rows.
+ *
+ * A screen reader hears a closed row once, in this order: its mark's state, the title, the risk, failing checks, the
+ * agent, the status words, the number and repository, the age.
  */
-import type { InboxPullLink, InboxPullRiskAutoRun, InboxPullStack, InboxReviewRow } from '@plannotator/core/inbox-types';
+import type { InboxPull, InboxPullLink, InboxPullRiskAutoRun, InboxPullStack, InboxReviewRow } from '@plannotator/core/inbox-types';
 import { formatCount } from '@plannotator/core/inbox-format';
-import { isTextCut } from '@plannotator/ui/utils/textCut';
+import { inboxPullLabel } from '@plannotator/core/inbox-types';
 import { HostMark, Icon } from '../icons';
 import { RefMarkIcon } from '../board/RefMark';
 import { Tip } from '../components/Tip';
@@ -19,6 +23,7 @@ import { initials } from './labels';
 import { chainMarks } from './topology';
 import { reviewRowLanding, reviewRowLine, reviewRowTitle } from './reviewsModel';
 import { reviewAge, rowChecksFailing, titleTail } from './reviewRowParts';
+import { titleIsCut } from './titleCut';
 import { riskLevelWord, rowRisk, rowRiskFailure, type RiskFailures, type RiskJudgments } from './risk';
 import { COULD_NOT_RANK, RiskMark } from './RiskMark';
 import { Named, usePicture } from './Face';
@@ -30,10 +35,9 @@ import { pullAvatarUrl } from './pullUrls';
  * Inbox's own route (`GET /api/inbox/pulls/avatar`): the window's CSP never loads a remote image. The initials show
  * while it loads and stay when it cannot; a deleted account is a grey person. On the open row's second line.
  */
-function AuthorLead({ stack }: { stack: InboxPullStack }) {
-  const bottom = stack.layers[0]!;
-  const author = bottom.author;
-  const src = author ? pullAvatarUrl(bottom.host, author) : null;
+function AuthorLead({ pull }: { pull: InboxPull }) {
+  const author = pull.author;
+  const src = author ? pullAvatarUrl(pull.host, author) : null;
   // The same picture state as every face (`Face.tsx`), so a picture that failed in one is never asked again here.
   const { shown, failed, state, onLoad, onError } = usePicture(src);
   if (!author || !src) {
@@ -89,7 +93,10 @@ function Chain({ stack }: { stack: InboxPullStack }) {
   );
 }
 
-/** A title on one line: cut at its end, or, a long unbroken run, in its middle so the end that tells rows apart stays. */
+/**
+ * A title on one line: cut at its end, or, a long unbroken run, in its middle so the end that tells rows apart stays.
+ * A split title's pieces sit in one line (`.ib-rvr-tin`) that, too narrow for the kept end, cuts plainly at its end.
+ */
 function Title({ text }: { text: string }) {
   const split = titleTail(text);
   if (!split) {
@@ -101,11 +108,9 @@ function Title({ text }: { text: string }) {
   }
   return (
     <span className="ib-rvr-t" dir="ltr" data-reviews-title-split="">
-      <span className="ib-rvr-th" aria-hidden="true">
-        {split.head}
-      </span>
-      <span className="ib-rvr-tt" aria-hidden="true">
-        {split.tail}
+      <span className="ib-rvr-tin" aria-hidden="true">
+        <span className="ib-rvr-th">{split.head}</span>
+        <span className="ib-rvr-tt">{split.tail}</span>
       </span>
       <span className="ib-sr">{text}</span>
     </span>
@@ -125,10 +130,19 @@ function Age({ iso, now }: { iso: string; now: number }) {
 /** The row's full title as its tooltip, only while the line cuts it: read on the pointer's arrival, never per frame. */
 function titleWhenCut(event: React.PointerEvent<HTMLElement>, title: string) {
   const row = event.currentTarget;
-  const cut = isTextCut(row.querySelector('.ib-rvr-t'), '.ib-rvr-th');
-  if (cut) row.title = title;
+  if (titleIsCut(row.querySelector('.ib-rvr-t'))) row.title = title;
   else row.removeAttribute('title');
 }
+
+const STATE_WORD: Record<InboxPull['state'], string> = { open: 'Open', draft: 'Draft', merged: 'Merged', closed: 'Closed' };
+
+/** What a PR's mark says by its colour and shape, in words: "Open pull request", "Merged merge request". */
+function prStateWords(state: InboxPull['state'], platform: InboxPull['platform']): string {
+  return `${STATE_WORD[state]} ${pullNounWord(platform)}`;
+}
+
+/** A screen reader's words, each after a comma, for what has none. */
+const srList = (words: readonly (string | null | undefined | false)[]) => words.filter(Boolean).map((w) => `, ${w}`).join('');
 
 export interface ReviewRowProps {
   row: InboxReviewRow;
@@ -159,8 +173,12 @@ export function ReviewRowItem({ row, links, place, selected, phone, now, judgmen
   // What the open row's second line says of the risk; High stays on the line itself.
   const quietRisk = judged && !high ? judged : null;
   const level = judged?.level ?? (riskFailure ? 'failed' : undefined);
-  const prState = focusPull?.state ?? reviewRowLanding(row)?.state ?? 'open';
+  const landing = reviewRowLanding(row);
+  const prState = focusPull?.state ?? landing?.state ?? 'open';
+  const platform = stack?.platform ?? landing?.platform ?? 'github';
   const failing = rowChecksFailing(row);
+  // The mark's state in words: a stack's count, on the open row, is its second line's.
+  const markWords = line.kind === 'pr' ? prStateWords(prState, platform) : line.kind === 'stack' && !selected ? `A stack of ${layers} ${pullNounWord(platform)}s` : null;
   return (
     <button
       type="button"
@@ -169,6 +187,7 @@ export function ReviewRowItem({ row, links, place, selected, phone, now, judgmen
       onPointerEnter={(event) => titleWhenCut(event, title)}
       aria-current={selected ? 'true' : undefined}
       data-reviews-row={row.id}
+      data-reviews-item={row.id}
       data-reviews-kind={row.reviewed ? 'reviewed' : 'listed'}
       // The thread's row, for the window's J and K and its way back; a listed PR is no thread.
       data-row={row.reviewed ? (row.thread_id ?? undefined) : undefined}
@@ -191,6 +210,7 @@ export function ReviewRowItem({ row, links, place, selected, phone, now, judgmen
             <Icon name={line.mark ?? 'laptop'} size={15} />
           )}
         </span>
+        {markWords && <span className="ib-sr">{markWords}, </span>}
         <Title text={title} />
         <span className="ib-rvr-end">
           {high && <RiskMark judgment={judged} />}
@@ -206,7 +226,8 @@ export function ReviewRowItem({ row, links, place, selected, phone, now, judgmen
           {line.agent && (
             <span className="ib-pr-magent ib-rvr-agent" data-reviews-agent={line.agent.host ?? ''} title={line.agent.name}>
               <HostMark host={line.agent.host} />
-              <span className="ib-sr">{line.agent.name}</span>
+              {/* The open row's second line names the agent: once. */}
+              {!selected && <span className="ib-sr">, {line.agent.name}</span>}
             </span>
           )}
           {/* Room for the stack's count, which `ReviewStack` draws as its own button on top. */}
@@ -216,14 +237,21 @@ export function ReviewRowItem({ row, links, place, selected, phone, now, judgmen
               <Icon name="chevD" size={12} />
             </span>
           )}
+          {/* Not open: the second line's words, for a screen reader only, before the age. */}
+          {!selected && (
+            <span className="ib-sr">
+              {srList([line.status])}
+              {line.lead && `, ${line.lead}`}, <span data-pulls-repo="">{place}</span>,{' '}
+            </span>
+          )}
           <Age iso={row.updated_at} now={now} />
         </span>
       </span>
-      {selected ? (
+      {selected && (
         <span className="ib-rvr-l2" data-reviews-line2="">
           {stack && (
             <span className="ib-lead">
-              <AuthorLead stack={stack} />
+              <AuthorLead pull={stack.layers[0]!} />
             </span>
           )}
           <span className="ib-pr-l3">
@@ -253,23 +281,95 @@ export function ReviewRowItem({ row, links, place, selected, phone, now, judgmen
           {quietRisk && <RiskMark judgment={quietRisk} />}
           {riskFailure && <RiskMark failed={riskFailure} />}
         </span>
-      ) : (
-        // Not open: the second line's words for a screen reader only, so nothing is lost to it.
-        <span className="ib-sr">
-          {line.lead && `, ${line.lead}`}, <span data-pulls-repo="">{place}</span>
-          {[line.agent?.name, line.status].filter(Boolean).map((words) => `, ${words}`)}
+      )}
+    </button>
+  );
+}
+
+/** "#412", "#412 merged": a layer's number, and its state unless open. */
+const layerLead = (layer: InboxPull) => `${inboxPullLabel(layer)}${layer.state === 'open' ? '' : ` ${layer.state}`}`;
+
+/**
+ * One layer of an unfolded stack: its own row, indented under the stack's with a tree line. It opens that layer, is
+ * reached by Tab after the stack's count, shows its own risk and failing checks, and opens like any row: selected, its
+ * second line (the author, the number and repository, Medium or Low).
+ */
+function LayerRow({ layer, place, selected, phone, now, judgments, riskFailed, menu, onOpen }: { layer: InboxPull; place: string; selected: boolean; phone: boolean; now: number; judgments: RiskJudgments; riskFailed: RiskFailures; menu: boolean; onOpen: () => void }) {
+  const live = layer.state === 'open' || layer.state === 'draft';
+  const judged = live ? (judgments[layer.key] ?? null) : null;
+  const riskFailure = live && !judged ? (riskFailed[layer.key] ?? null) : null;
+  const high = judged?.level === 'high';
+  const quietRisk = judged && !high ? judged : null;
+  const failing = live && layer.checks === 'failure';
+  return (
+    <button
+      type="button"
+      className={`${phone ? 'ib-mrow' : 'ib-nrow'} ib-prrow ib-rvr-child${selected ? ' ib-sel' : ''}`}
+      onClick={onOpen}
+      onPointerEnter={(event) => titleWhenCut(event, layer.title)}
+      aria-current={selected ? 'true' : undefined}
+      data-reviews-layer={layer.key}
+      data-reviews-item={layerItem(layer.key)}
+      data-pulls-risk={judged?.level ?? (riskFailure ? 'failed' : undefined)}
+      data-menu={menu ? '' : undefined}
+    >
+      {/* The tree line from the stack down to this layer: an element of the row, so it is always drawn on it. */}
+      <span className="ib-rvr-tree" aria-hidden="true" data-reviews-tree="" />
+      <span className="ib-rvr-l1">
+        <span className="ib-rvr-mark" aria-hidden="true">
+          <span className="ib-bc-mark" data-card-mark={layer.state} data-card-mark-kind="pr">
+            <RefMarkIcon kind="pr" state={layer.state} size={14} />
+          </span>
+        </span>
+        <span className="ib-sr">{prStateWords(layer.state, layer.platform)}, </span>
+        <Title text={layer.title} />
+        <span className="ib-rvr-end">
+          {high && <RiskMark judgment={judged} />}
+          {!selected && (quietRisk || riskFailure) && <span className="ib-sr">, {quietRisk ? `${riskLevelWord[quietRisk.level]} risk` : COULD_NOT_RANK}</span>}
+          {failing && (
+            <Tip content="Checks failing">
+              <span className="ib-rvr-ck" data-reviews-checks="failure">
+                <ChecksMark checks="failure" />
+                <span className="ib-sr">, checks failing</span>
+              </span>
+            </Tip>
+          )}
+          {!selected && (
+            <span className="ib-sr">
+              , {inboxPullLabel(layer)}, <span data-pulls-repo="">{place}</span>,{' '}
+            </span>
+          )}
+          <Age iso={layer.updated_at} now={now} />
+        </span>
+      </span>
+      {selected && (
+        <span className="ib-rvr-l2" data-reviews-line2="">
+          <span className="ib-lead">
+            <AuthorLead pull={layer} />
+          </span>
+          <span className="ib-pr-l3">
+            <span className="ib-pv" dir="auto">
+              {layerLead(layer)} · <span data-pulls-repo="">{place}</span>
+            </span>
+          </span>
+          {quietRisk && <RiskMark judgment={quietRisk} />}
+          {riskFailure && <RiskMark failed={riskFailure} />}
         </span>
       )}
     </button>
   );
 }
 
+/** The right-click menu's id for a layer's row (a row's is its own id): never a row's, though a stack's id is its top layer's key. */
+export const layerItem = (key: string) => `layer:${key}`;
+
 /**
  * A stack: its row, its count as a button over the row's end (a sibling, never a button in a button), and its layers
- * under it while unfolded, indented. A layer's row opens the stack, as the stack's row does.
+ * under it while unfolded, indented. Tab goes from the row to the count, then down the layers. A layer's row opens
+ * that layer.
  */
-export function ReviewStack(props: ReviewRowProps & { open: boolean; onToggle: () => void }) {
-  const { row, open, onToggle, phone, now, onOpen } = props;
+export function ReviewStack(props: ReviewRowProps & { open: boolean; onToggle: () => void; openLayer: string | null; onOpenLayer: (layer: InboxPull) => void; menuItem: string | null }) {
+  const { row, open, onToggle, phone, now, place, judgments, riskFailed, openLayer, onOpenLayer, menuItem } = props;
   const stack = row.stacks[0]!;
   const n = stack.layers.length;
   const noun = pullNounWord(stack.platform);
@@ -291,25 +391,18 @@ export function ReviewStack(props: ReviewRowProps & { open: boolean; onToggle: (
         <div className="ib-rvr-layers" role="group" aria-label={`The stack's ${noun}s`}>
           {/* From the base up, as the chain and the stack's page order them: the first to land first. */}
           {stack.layers.map((layer) => (
-            <button key={layer.key} type="button" tabIndex={-1} className={`${phone ? 'ib-mrow' : 'ib-nrow'} ib-prrow ib-rvr-child`} onClick={onOpen} data-reviews-layer={layer.key}>
-              <span className="ib-rvr-l1">
-                <span className="ib-rvr-mark" aria-hidden="true">
-                  <span className="ib-bc-mark" data-card-mark={layer.state} data-card-mark-kind="pr">
-                    <RefMarkIcon kind="pr" state={layer.state} size={14} />
-                  </span>
-                </span>
-                <Title text={layer.title} />
-                <span className="ib-rvr-end">
-                  {layer.state !== 'merged' && layer.state !== 'closed' && layer.checks === 'failure' && (
-                    <span className="ib-rvr-ck" data-reviews-checks="failure">
-                      <ChecksMark checks="failure" />
-                      <span className="ib-sr">, checks failing</span>
-                    </span>
-                  )}
-                  <Age iso={layer.updated_at} now={now} />
-                </span>
-              </span>
-            </button>
+            <LayerRow
+              key={layer.key}
+              layer={layer}
+              place={place}
+              selected={openLayer === layer.key}
+              phone={phone}
+              now={now}
+              judgments={judgments}
+              riskFailed={riskFailed}
+              menu={menuItem === layerItem(layer.key)}
+              onOpen={() => onOpenLayer(layer)}
+            />
           ))}
         </div>
       )}

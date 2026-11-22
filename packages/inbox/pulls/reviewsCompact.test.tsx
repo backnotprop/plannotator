@@ -6,7 +6,11 @@
  *  - an unread review's title not bold, or a listed PR's bold;
  *  - one row with everything at once (High, failing checks, the agent, a three-digit stack count, an old age) losing
  *    any of it, or the count's button nested in the row's;
- *  - a long unbroken title losing the end that tells it apart, or a right-to-left title split.
+ *  - a long unbroken title losing the end that tells it apart, or a right-to-left title split;
+ *  - a layer's row opening the whole stack, not showing selected when its layer is open, out of Tab's reach, or
+ *    missing from the right-click menu;
+ *  - a screen reader hearing a closed row's agent twice, or its parts out of order;
+ *  - a title's tooltip measured on the hidden full title or on rounding.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. No fetch: the list is drawn from props.
  */
@@ -17,7 +21,8 @@ import { inboxPullStacks, type InboxPull, type InboxPullsAnswer, type InboxRevie
 import type { RiskJudgments } from './risk';
 
 const hasDom = typeof document !== 'undefined';
-const { ReviewsList } = (hasDom ? await import('./ReviewsList') : {}) as typeof import('./ReviewsList');
+const { ReviewsList, ReviewsMenu, menuTargets } = (hasDom ? await import('./ReviewsList') : {}) as typeof import('./ReviewsList');
+const { titleIsCut, titleParts } = (hasDom ? await import('./titleCut') : {}) as typeof import('./titleCut');
 
 const DAY = 86_400_000;
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
@@ -122,11 +127,26 @@ afterEach(() => {
 });
 
 const opened: string[] = [];
-function draw(selected: string | null) {
+const openedLayers: string[] = [];
+const hid: string[][] = [];
+function draw(selected: string | null, selectedLayer: string | null = null) {
   const node = (
-    <div className="ib-lbody">
-      <ReviewsList answer={ANSWER} model={MODEL} rows={ROWS} filter="all" judgments={JUDGMENTS} projectNames={new Map()} selected={selected} phone={false} onOpen={(row) => opened.push(row.id)} onNew={() => {}} />
-    </div>
+    <ReviewsMenu className="ib-lbody" rows={ROWS} links={{}} phone={false} onTarget={() => {}} onHide={(pulls) => hid.push(pulls.map((p) => p.key))}>
+      <ReviewsList
+        answer={ANSWER}
+        model={MODEL}
+        rows={ROWS}
+        filter="all"
+        judgments={JUDGMENTS}
+        projectNames={new Map()}
+        selected={selected}
+        selectedLayer={selectedLayer}
+        phone={false}
+        onOpen={(row) => opened.push(row.id)}
+        onOpenLayer={(row, layer) => openedLayers.push(`${row.id} ${layer.key}`)}
+        onNew={() => {}}
+      />
+    </ReviewsMenu>
   );
   if (root) return act(() => root!.render(node));
   host = document.createElement('div');
@@ -198,12 +218,14 @@ test.skipIf(!hasDom)('everything at once on one line: High, failing checks, the 
   expect(toggle.closest('[data-reviews-row]')).toBeNull();
   expect(row('thr_all').querySelector('button')).toBeNull();
   opened.length = 0;
+  openedLayers.length = 0;
   act(() => toggle.click());
-  // Unfolding opens nothing; the layers are listed from the base up, and a layer's row opens the stack's review.
+  // Unfolding opens nothing; the layers are listed from the base up, and a layer's row opens that layer, not the stack.
   expect(opened).toEqual([]);
   expect([...document.querySelectorAll('[data-reviews-stack="thr_all"] [data-reviews-layer]')].map((l) => l.getAttribute('data-reviews-layer'))).toEqual(TALL.map((p) => p.key));
   act(() => $(`[data-reviews-layer="${TALL[9]!.key}"]`)!.click());
-  expect(opened).toEqual(['thr_all']);
+  expect(opened).toEqual([]);
+  expect(openedLayers).toEqual([`thr_all ${TALL[9]!.key}`]);
   // The layer whose checks fail says so on its own row.
   expect($(`[data-reviews-layer="${TALL[7]!.key}"] [data-reviews-checks="failure"]`)).not.toBeNull();
   expect($(`[data-reviews-layer="${TALL[6]!.key}"] [data-reviews-checks]`)).toBeNull();
@@ -230,4 +252,115 @@ test.skipIf(!hasDom)("a deleted account's PR, open: a grey person leads its seco
   expect(ghost.getAttribute('aria-label')).toBe('A deleted account');
   expect(ghost.querySelector('svg')).not.toBeNull();
   expect(ghost.querySelector('img')).toBeNull();
+});
+
+/** What a screen reader hears from an element: its text, without what is hidden from it. */
+function spoken(el: Element): string {
+  let out = '';
+  for (const node of el.childNodes) {
+    if (node.nodeType === 3) out += node.textContent;
+    else if (node instanceof Element && node.getAttribute('aria-hidden') !== 'true') out += node.getAttribute('aria-label') ?? spoken(node);
+  }
+  return out;
+}
+
+test.skipIf(!hasDom)("back to a stack from a layer opened on its row: the layer's row is the selected one, with its second line", () => {
+  draw(null);
+  act(() => $('[data-reviews-stack-toggle="thr_all"]')!.click());
+  act(() => $(`[data-reviews-layer="${TALL[3]!.key}"]`)!.click());
+  // The review closes back onto the stack (the list is drawn anew): the layer's row, not the stack's, is the open one.
+  act(() => root!.unmount());
+  root = null;
+  host?.remove();
+  draw('thr_all');
+  const layer = $(`[data-reviews-layer="${TALL[3]!.key}"]`)!;
+  expect(layer.getAttribute('aria-current')).toBe('true');
+  expect(layer.classList.contains('ib-sel')).toBe(true);
+  expect(layer.querySelector('[data-reviews-line2] .ib-pv')!.textContent).toBe('#503 · ledger');
+  expect(layer.querySelector('[data-reviews-line2] [data-pulls-author="bob-tully"]')).not.toBeNull();
+  // Its High is on its own line.
+  expect(layer.querySelector('.ib-rvr-l1 [data-pull-risk="high"]')).not.toBeNull();
+  expect(row('thr_all').getAttribute('aria-current')).toBeNull();
+  expect(document.querySelectorAll('[aria-current="true"]')).toHaveLength(1);
+  // The stack's own row opened: the stack is the open one again.
+  act(() => row('thr_all').click());
+  act(() => root!.unmount());
+  root = null;
+  host?.remove();
+  draw('thr_all');
+  expect(row('thr_all').getAttribute('aria-current')).toBe('true');
+  expect($('[data-reviews-stack="thr_all"] [data-reviews-layer]')).toBeNull();
+});
+
+test.skipIf(!hasDom)("a stack opened by a layer's key unfolds onto that layer's row", () => {
+  draw('thr_all', TALL[5]!.key);
+  expect($(`[data-reviews-layer="${TALL[5]!.key}"]`)!.getAttribute('aria-current')).toBe('true');
+  expect(row('thr_all').getAttribute('aria-current')).toBeNull();
+  // Folded by hand, the stack's row shows the selection again.
+  act(() => $('[data-reviews-stack-toggle="thr_all"]')!.click());
+  expect($('[data-reviews-stack="thr_all"] [data-reviews-layer]')).toBeNull();
+  expect(row('thr_all').getAttribute('aria-current')).toBe('true');
+});
+
+test.skipIf(!hasDom)("Tab reaches a stack's row, then its count, then each of its layers", () => {
+  draw(null);
+  act(() => $('[data-reviews-stack-toggle="thr_all"]')!.click());
+  const stack = $('[data-reviews-stack="thr_all"]')!;
+  const tabbable = [...stack.querySelectorAll<HTMLElement>('button, [tabindex]')].filter((el) => el.tabIndex >= 0 && !el.hasAttribute('disabled'));
+  expect(tabbable[0]).toBe(row('thr_all'));
+  expect(tabbable[1]).toBe($('[data-reviews-stack-toggle="thr_all"]')!);
+  expect(tabbable.slice(2).map((el) => el.getAttribute('data-reviews-layer'))).toEqual(TALL.map((p) => p.key));
+  // Siblings, never one button in another.
+  for (const el of tabbable) expect(el.parentElement!.closest('button')).toBeNull();
+});
+
+test.skipIf(!hasDom)("right-click on a layer's row offers Hide for that one PR", async () => {
+  draw(null);
+  act(() => $('[data-reviews-stack-toggle="thr_all"]')!.click());
+  const layer = $(`[data-reviews-layer="${TALL[4]!.key}"]`)!;
+  expect(menuTargets(ROWS, {}).get(layer.getAttribute('data-reviews-item')!)!.pulls.map((p) => p.key)).toEqual([TALL[4]!.key]);
+  hid.length = 0;
+  await act(async () => {
+    layer.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 200, clientY: 200 }));
+  });
+  expect($('[data-reviews-hide]')!.textContent).toBe('Hide pull request');
+  await act(async () => $('[data-reviews-hide]')!.click());
+  expect(hid).toEqual([[TALL[4]!.key]]);
+});
+
+test.skipIf(!hasDom)('a closed row is heard once, in order: state, title, risk, checks, agent, status, number and repository, age', () => {
+  draw(null);
+  const said = spoken(row('thr_all'));
+  const title = row('thr_all').querySelector('.ib-rvr-t')!.textContent!;
+  const age = row('thr_all').querySelector('.ib-rvr-age .ib-sr')!.textContent!;
+  expect(said.split('Claude Code')).toHaveLength(2);
+  expect(said.split(title)).toHaveLength(2);
+  expect(said.split(age)).toHaveLength(2);
+  const order = ['A stack of 120 pull requests', title, 'High risk', 'checks failing', 'Claude Code', 'ledger', age].map((part) => said.indexOf(part));
+  expect(order.every((at) => at >= 0)).toBe(true);
+  expect([...order].sort((a, b) => a - b)).toEqual(order);
+  // One open PR: its state leads.
+  const one = spoken(row('thr_mid'));
+  expect(one.startsWith('Open pull request, ')).toBe(true);
+  expect(one.split('Claude Code')).toHaveLength(2);
+  expect(one.indexOf('Claude Code')).toBeLessThan(one.indexOf('Changes requested'));
+  expect(one.indexOf('Changes requested')).toBeLessThan(one.indexOf('#41'));
+});
+
+test.skipIf(!hasDom)("a title's tooltip measures only what is drawn, and never a cut under a pixel", () => {
+  draw(null);
+  const split = row(ROWS[3]!.id).querySelector('.ib-rvr-t')!;
+  const plain = row('thr_mid').querySelector('.ib-rvr-t')!;
+  // The full title kept for a screen reader is never measured.
+  const parts = titleParts(split);
+  expect(parts.length).toBe(3);
+  for (const part of parts) expect(part.closest('.ib-sr')).toBeNull();
+  expect(titleParts(plain)).toEqual([plain as HTMLElement]);
+  const by = (over: (el: HTMLElement) => number) => (el: HTMLElement) => ({ text: 100 + over(el), box: 100 });
+  expect(titleIsCut(plain, by(() => 0.6))).toBe(false);
+  expect(titleIsCut(plain, by(() => 1))).toBe(false);
+  expect(titleIsCut(plain, by(() => 1.5))).toBe(true);
+  expect(titleIsCut(split, by(() => 0.9))).toBe(false);
+  // The head cut: the title is.
+  expect(titleIsCut(split, by((el) => (el.classList.contains('ib-rvr-th') ? 30 : 0)))).toBe(true);
 });

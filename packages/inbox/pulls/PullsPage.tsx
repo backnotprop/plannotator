@@ -304,6 +304,8 @@ export function PullsPage(given: PullsPageProps) {
             autoRuns={risk.answer?.auto_runs}
             projectNames={props.projectNames}
             selected={props.threadId ?? open?.stack.id ?? null}
+            // A stack opened by a layer's own key (a stack's id is its top layer's): that layer's row.
+            selectedLayer={!props.threadId && open && props.stackId !== open.stack.id ? props.stackId : null}
             phone={phone}
             onOpen={(row) => {
               // One open PR opens its launchpad, reviewed or not; else a review its thread, a listed stack its page.
@@ -312,6 +314,8 @@ export function PullsPage(given: PullsPageProps) {
               else if (row.reviewed && row.thread_id) props.onOpenThread(row.thread_id);
               else props.onOpenStack(row.stacks[0]?.id ?? null);
             }}
+            // A layer's row opens that layer's diff, as the stack's page and the board open one.
+            onOpenLayer={(row, layer) => props.onReview(row.stacks[0]!.id, layer.key, 'layer')}
             onNew={props.onNew}
             menuRow={menuRow}
             onShowAgain={(hidden) => void showWithToast([hidden.key], [hiddenLabel(hidden)], props.onToast)}
