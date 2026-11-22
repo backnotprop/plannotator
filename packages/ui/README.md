@@ -43,6 +43,7 @@ configurePlannotatorUI({
   touchSelectionToolbar,       // true: on a touch screen the selection toolbar goes below the selection (clear of iOS's edit menu), inside the screen, with 44px buttons (default false)
   refCardTransport,            // (href, ref, signal) => card data for an issue / PR / MR link; with one, useRefHoverCards(rootRef) draws hover cards (default: none, no card, no request). refCardRouteTransport(route) builds one over a server route
   refCardBitbucket,            // true: Bitbucket Cloud pull request links get a hover card too (default: false, plain links); only for a host whose transport reads them
+  refCardAction,               // (ref, result) => { label, open } | null: the host's own link on a ref card, left of "Open on GitHub", asked each time a card draws (default: none, the forge's link alone). The Inbox's "Open in Reviews"
   deferOffscreenCodeHighlight, // true: a code fence off screen stays plain until it comes near (highlighted before it shows), the rest in idle time (default false)
   codeHighlightWorker,         // { html(code, lang, theme) }: with deferOffscreenCodeHighlight, a waiting fence's markup made off the main thread (default: none)
   loadSettingsFromBackend,     // true: re-hydrate settings from your (synchronous) storageBackend after install, applied last

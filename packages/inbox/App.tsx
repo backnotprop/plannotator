@@ -226,7 +226,7 @@ import { BoardPage } from './board/BoardPage';
 import { useBoardWrites } from './board/boardWrites';
 import { PullsPage, ReviewsOff } from './pulls/PullsPage';
 import { PullReview } from './pulls/PullReview';
-import { usePulls, useRowsAfterStore } from './pulls/usePulls';
+import { usePulls, useRefCardReviews, useRowsAfterStore } from './pulls/usePulls';
 import { SheetPage, type SheetView } from './prs/SheetPage';
 import { tileOpens } from './prs/sheetModel';
 import { StackPage } from './prs/StackPage';
@@ -2540,7 +2540,6 @@ function Inbox() {
     if (fresh.length > 0) setShown((current) => (current ? addOwnThreads(fresh.reduce(replaceHeldRow, current), groups, written) : current));
   };
 
-
   const rowOf = (threadId: string): InboxListRow | undefined =>
     (latestRef.current ? listGroups(latestRef.current) : []).flatMap((section) => section.threads).find((row) => row.thread_id === threadId);
 
@@ -4181,6 +4180,7 @@ function Inbox() {
   const reviewPulls = useMemo(() => reviewBoxPulls(pulls.reviews, new Map((projects ?? []).map((p) => [p.id, p.name]))), [pulls.reviews, projects]);
   // The thread's PR list: where each open PR's "Open review thread" goes, read from Reviews' own list as its launchpad is.
   const pullReviewOf = useMemo(() => (pullsShown ? pullReviewLinks(pulls.model, pulls.reviews) : null), [pullsShown, pulls.model, pulls.reviews]);
+  useRefCardReviews(pullsShown ? pulls.model : null);
   // A review arrived, a verdict went: the rows and the sidebar's count follow the store, a moment after it changed.
   const pullsReloadRows = pulls.reloadRows;
   useRowsAfterStore(pullsShown, pullsReloadRows, shown, thread?.messages.length);

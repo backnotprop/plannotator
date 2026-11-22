@@ -6,6 +6,9 @@ import { onHiddenWritten, pullsShown, reviewsShown, settleHidden, useHiddenChang
 import { REVIEWS_AFTER_STORE_MAX_MS, REVIEWS_AFTER_STORE_MS } from '../app/boot';
 import { useKeptState } from '../data/keptState';
 
+/** The list's PRs on a ref card: "Open in Reviews" (refCardReviews.ts). */
+export { useRefCardReviews } from './refCardReviews';
+
 /** The window got its focus back: the list is read again, at most this often. */
 export const PULLS_FOCUS_MS = 20_000;
 /** While the page stays open, the list is read again this often (the server answers from its cache in between). */

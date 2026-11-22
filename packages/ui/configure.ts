@@ -27,6 +27,7 @@ import { setClickAWord } from './utils/clickAWordPolicy';
 import { setDiagramRemoteLoads } from './utils/diagramRemoteLoadsPolicy';
 import { setCrossRepoRefsWithoutRepo, setDigitHexIssueRefs, type CrossRepoRefsWithoutRepo } from './components/InlineMarkdown';
 import { setRefCardBitbucket, setRefCardTransport, type RefCardTransport } from './utils/refCard';
+import { setRefCardAction, type RefCardAction } from './utils/refCardAction';
 
 // One-stop type barrel: every seam contract a host implements is importable
 // from this module, next to configurePlannotatorUI itself.
@@ -55,6 +56,7 @@ export type {
   AlertIconRenderer,
   FenceThemeResolver,
   RefCardTransport,
+  RefCardAction,
   CodeHighlightWorker,
 };
 
@@ -226,6 +228,12 @@ export interface PlannotatorUIConfig {
    */
   refCardBitbucket?: boolean;
   /**
+   * The host's own link on a ref card, left of "Open on GitHub" (`utils/refCardAction`): `(ref, result) => { label,
+   * open } | null`, asked each time a card draws. Default: none, only the forge's link. The Inbox gives "Open in
+   * Reviews" for a pull request its Reviews lists.
+   */
+  refCardAction?: RefCardAction | null;
+  /**
    * Highlight a code fence only when it comes near the screen (a screen
    * above or below it), and the rest in idle time, nearest first
    * (`utils/codeHighlight`). A fence on screen is still highlighted before
@@ -297,6 +305,7 @@ export function configurePlannotatorUI(config: PlannotatorUIConfig): void {
   if (config.diagramRemoteLoads !== undefined) setDiagramRemoteLoads(config.diagramRemoteLoads);
   if (config.refCardTransport) setRefCardTransport(config.refCardTransport);
   if (config.refCardBitbucket !== undefined) setRefCardBitbucket(config.refCardBitbucket);
+  if (config.refCardAction !== undefined) setRefCardAction(config.refCardAction);
   if (config.deferOffscreenCodeHighlight !== undefined) setDeferOffscreenCodeHighlight(config.deferOffscreenCodeHighlight);
   if (config.codeHighlightWorker) setCodeHighlightWorker(config.codeHighlightWorker);
   // Re-hydrate AFTER storageBackend is installed (load-bearing order — gated last).

@@ -13,14 +13,19 @@
  *   installed a transport (`utils/refCard`), and asks for data only once a
  *   hover or keyboard focus has rested on a link for `REF_CARD_DELAY_MS`.
  *
- * Behaviour: open on hover after the delay, or on keyboard focus (Enter on
- * the link still follows it). Tab from the focused link moves into the card;
+ * Behaviour: open on hover after the delay, or on keyboard focus. A click on
+ * the link (Enter or Space on it too) opens its card at once and pins it
+ * instead of following the link; a click with a modifier or the middle button
+ * still follows it. Tab from the focused link moves into the card;
  * Shift+Tab from its first control goes back. A press inside the card pins it
- * (it then stays when the pointer leaves, and scrolls); Escape, Close or a
- * press outside close it, focus back on the link when it was in the card.
- * One card at a time. On a touch screen a tap on the link shows the card as a
- * sheet from the bottom edge instead of following it; the sheet's "Open on
- * GitHub" follows it. No keyboard shortcut of its own.
+ * too (it then stays when the pointer leaves, and scrolls); Escape, Close, a
+ * press outside or a second click on the link close it, focus back on the
+ * link when it was in the card or the card came from a click. A ref link in
+ * the card's description opens that ref's card in its place. One card at a
+ * time. On a touch screen a tap on the link shows the card as a sheet from the
+ * bottom edge instead of following it; the sheet's "Open on GitHub" follows
+ * it. A host may add its own link beside "Open on GitHub"
+ * (`utils/refCardAction`). No keyboard shortcut of its own.
  *
  * Untrusted text: the body and the comment come from anyone who can write on
  * the repo. They render through `RenderedMarkdown` (DOMPurify on HTML
@@ -28,7 +33,7 @@
  * inside them does nothing until the person confirms it in the card.
  */
 
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   forgeRefLabel,
@@ -41,7 +46,8 @@ import {
 } from '@plannotator/core/forge-ref-card';
 import { FORGE_SPECS } from '@plannotator/core/forge-refs';
 import { cardProblem, refUnsupportedLine } from '@plannotator/core/problem-words';
-import { loadRefCard, refCardTarget } from '../utils/refCard';
+import { loadRefCard, peekRefCard, refCardTarget } from '../utils/refCard';
+import { refCardActionFor, type RefCardActionLink } from '../utils/refCardAction';
 import { ProblemNotice } from './ProblemNotice';
 import { providedRefCardLabel, providedRefCardView } from '../utils/refCardProviders';
 import { RenderedMarkdown } from './RenderedMarkdown';
@@ -59,6 +65,15 @@ const GAP = 6;
 const BODY_MAX = 216;
 /** The same once pinned: the person asked for it, so more of the description shows. */
 const BODY_MAX_PINNED = 340;
+/** A click on a link whose card has no answer yet (plan review, annotate, code review): how long before the loading card shows, so a quick "no card" follows the link with nothing drawn. */
+const CLICK_LOADING_MS = 120;
+/** The same: a "no card" answer this soon after the click follows the link (the browser still takes it as the click's); a later one shows the card's quiet failure, whose Open on GitHub is the link. */
+const CLICK_FOLLOW_MS = 1000;
+
+/** Inside a card the controller drew: a ref link in its description opens that ref's card in its place. */
+const OpenRefContext = createContext<((href: string, target: ForgeRef) => void) | null>(null);
+
+const modified = (e: MouseEvent | KeyboardEvent) => e.metaKey || e.ctrlKey || e.shiftKey || e.altKey;
 
 // --- words ---
 
@@ -288,6 +303,9 @@ function ConfirmUrl({ url }: { url: string }) {
 function SafeMarkdown({ markdown }: { markdown: string }) {
   const [confirm, setConfirm] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const openRefHere = useContext(OpenRefContext);
+  const openRef = useRef(openRefHere);
+  openRef.current = openRefHere;
   // Every render (React's own links), and on every later DOM change (raw HTML lands after this).
   useLayoutEffect(() => {
     if (bodyRef.current) neutralizeLinks(bodyRef.current);
@@ -302,7 +320,16 @@ function SafeMarkdown({ markdown }: { markdown: string }) {
       e.stopPropagation();
       if (e.type === 'mousedown') return;
       const href = a.getAttribute('data-ref-card-href') ?? linkHref(a) ?? '';
-      setConfirm(/^https?:\/\//i.test(href) ? href : null);
+      const https = /^https?:\/\//i.test(href);
+      // A plain click or Enter on an issue / PR link opens its card here; anything else, or any other link, asks first.
+      const plain = (e.type === 'click' && (e as MouseEvent).button === 0) || e.type === 'keydown';
+      const ref = plain && https && openRef.current && !modified(e as MouseEvent | KeyboardEvent) ? refCardTarget(href) : null;
+      if (ref) {
+        setConfirm(null);
+        openRef.current?.(href, ref);
+        return;
+      }
+      setConfirm(https ? href : null);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Enter') ask(e);
@@ -366,9 +393,11 @@ export interface RefCardViewProps {
    * together, so the description never shrinks to a line, and the footer (Open on GitHub) stays.
    */
   tight?: boolean;
+  /** The host's own link, left of "Open on GitHub" (`utils/refCardAction`). */
+  action?: RefCardActionLink | null;
 }
 
-export function RefCardView({ target, href, result, pinned, onClose, sheet, tight }: RefCardViewProps) {
+export function RefCardView({ target, href, result, pinned, onClose, sheet, tight, action }: RefCardViewProps) {
   // A provider's own card (utils/refCardProviders.ts).
   const Provided = providedRefCardView(target);
   if (Provided) return <Provided target={target} href={href} result={result} pinned={pinned} onClose={onClose} sheet={sheet} tight={tight} />;
@@ -379,15 +408,26 @@ export function RefCardView({ target, href, result, pinned, onClose, sheet, tigh
     <div className="flex flex-none items-center gap-2 border-t border-border px-3.5 py-2 text-[11.5px] text-muted-foreground" data-ref-card-foot="">
       <span className="min-w-0 flex-1 truncate">{extra}</span>
       {onClose && (pinned || sheet) ? (
-        <button type="button" onClick={onClose} className={`${btn} rounded-md hover:bg-muted hover:text-foreground`} data-ref-card-close="">
+        <button type="button" onClick={onClose} className={`${btn} flex-none rounded-md hover:bg-muted hover:text-foreground`} data-ref-card-close="">
           Close
+        </button>
+      ) : null}
+      {action ? (
+        <button
+          type="button"
+          onClick={action.open}
+          // Short of room the comment count goes first, then these words end in "…": never a second row.
+          className={`${btn} inline-flex min-w-0 items-center rounded-md bg-muted/60 font-medium text-foreground hover:bg-muted`}
+          data-ref-card-action=""
+        >
+          <span className="min-w-0 truncate">{action.label}</span>
         </button>
       ) : null}
       <a
         href={result?.ok ? result.data.url : href}
         target="_blank"
         rel="noopener noreferrer"
-        className={`${btn} inline-flex items-center gap-1 rounded-md bg-primary/10 font-medium text-primary hover:bg-primary/15`}
+        className={`${btn} inline-flex flex-none items-center gap-1 whitespace-nowrap rounded-md bg-primary/10 font-medium text-primary hover:bg-primary/15`}
         data-ref-card-open=""
       >
         Open on {forge} <span aria-hidden="true">↗</span>
@@ -574,7 +614,8 @@ interface OpenCard {
   anchor: HTMLAnchorElement;
   href: string;
   target: ForgeRef;
-  via: 'hover' | 'focus' | 'tap';
+  /** `click`: a click, Enter or Space on the link (or a ref link in a card's description); `tap`: the sheet. */
+  via: 'hover' | 'focus' | 'tap' | 'click';
   pinned: boolean;
   result: ForgeRefCardResult | null | undefined;
 }
@@ -639,12 +680,15 @@ interface Pos {
  * Hover cards for the issue / PR / MR links inside `rootRef`. Render what it
  * returns anywhere in the tree (it portals). Nothing happens without a transport.
  *
- * `onlyWithData` (default false): the card opens only once its data arrived
- * and only when the forge answered (`ok`), with no loading state and no
- * failure card; a hover that leaves first shows nothing. A tap on a touch
- * screen follows the link as it always did (no sheet). For hosts where a
- * person without gh / glab must see links exactly as before (plan review,
- * annotate and code review).
+ * `onlyWithData` (default false): a hover opens the card only once its data
+ * arrived and only when the forge answered (`ok`), with no loading state and
+ * no failure card; a hover that leaves first shows nothing. A click or tap on
+ * a link whose card is known to have no data follows the link as it always
+ * did; one whose answer has not come yet shows the loading card after
+ * `CLICK_LOADING_MS`, and a "no card" answer within `CLICK_FOLLOW_MS` follows
+ * the link (later, the card's quiet failure, with its Open on GitHub). For
+ * hosts where a person without gh / glab must see links work as before (plan
+ * review, annotate and code review).
  */
 export function useRefHoverCards(
   rootRef: React.RefObject<HTMLElement | null>,
@@ -662,6 +706,12 @@ export function useRefHoverCards(
   const openTimer = useRef<number | null>(null);
   const closeTimer = useRef<number | null>(null);
   const lastPointer = useRef('mouse');
+  /** Each open, pin and close: an answer for an older one is dropped. */
+  const seq = useRef(0);
+  /** The link being followed on purpose (`follow`): its click is the browser's. */
+  const following = useRef<HTMLAnchorElement | null>(null);
+  /** A ref in the description replaced the card while the focus was in it: the focus goes back into the new one. */
+  const refocus = useRef(false);
 
   const clearTimers = () => {
     if (openTimer.current !== null) window.clearTimeout(openTimer.current);
@@ -671,17 +721,19 @@ export function useRefHoverCards(
 
   const close = useCallback((restoreFocus = false) => {
     clearTimers();
+    seq.current++;
     const was = current.current;
     if (!was) return;
     const focusWasInside = !!cardRef.current?.contains(document.activeElement);
     setCard(null);
-    if (restoreFocus && (focusWasInside || was.via === 'tap')) was.anchor.focus({ preventScroll: true });
+    if (restoreFocus && (focusWasInside || was.via === 'tap' || was.via === 'click')) was.anchor.focus({ preventScroll: true });
   }, []);
+  // One function for the hook's life (`close` never changes), so `closeOther` can tell this card from another's.
   const closeSelf = useRef(() => close());
-  closeSelf.current = () => close();
 
   const open = useCallback((anchor: HTMLAnchorElement, target: ForgeRef, via: OpenCard['via']) => {
     clearTimers();
+    seq.current++;
     if (dataOnly.current) {
       // Nothing on screen until the forge answered; then only if the hover or focus is still on the link.
       wanted.current = anchor;
@@ -701,9 +753,91 @@ export function useRefHoverCards(
     const href = anchor.href;
     setCard({ anchor, href, target, via, pinned: via === 'tap', result: undefined });
     void loadRefCard(href, target).then((result) => {
-      setCard((c) => (c && c.anchor === anchor ? { ...c, result } : c));
+      setCard((c) => (c && c.anchor === anchor && c.href === href ? { ...c, result } : c));
     });
   }, []);
+
+  /** Follows the link as the click would have, once (the click handler lets this one through). */
+  const follow = useCallback((anchor: HTMLAnchorElement) => {
+    following.current = anchor;
+    try {
+      anchor.click();
+    } finally {
+      following.current = null;
+    }
+  }, []);
+
+  /**
+   * A click's card: pinned at once, anchored to `anchor`, for `href` (the link's own, or a ref in the card's
+   * description: `inCard`, which replaces the card and never follows anything).
+   */
+  const pin = useCallback(
+    (anchor: HTMLAnchorElement, href: string, target: ForgeRef, via: OpenCard['via'], inCard: boolean) => {
+      clearTimers();
+      wanted.current = null;
+      const mine = ++seq.current;
+      const show = (result: ForgeRefCardResult | null | undefined) => {
+        if (closeOther && closeOther !== closeSelf.current) closeOther();
+        closeOther = closeSelf.current;
+        setCard({ anchor, href, target, via, pinned: true, result });
+      };
+      const known = peekRefCard(target);
+      if (known !== undefined) return show(known);
+      const started = Date.now();
+      if (!dataOnly.current || inCard) show(undefined);
+      else
+        openTimer.current = window.setTimeout(() => {
+          openTimer.current = null;
+          if (seq.current === mine) show(undefined);
+        }, CLICK_LOADING_MS);
+      void loadRefCard(href, target).then((result) => {
+        if (seq.current !== mine) return;
+        if (openTimer.current !== null) window.clearTimeout(openTimer.current);
+        openTimer.current = null;
+        if (dataOnly.current && !inCard && !result?.ok && Date.now() - started <= CLICK_FOLLOW_MS && anchor.isConnected) {
+          close();
+          follow(anchor);
+          return;
+        }
+        show(result);
+      });
+    },
+    [close, follow],
+  );
+
+  /** A plain click, Enter or Space on a ref link in the region. True: it is the card's (the caller stops the link). */
+  const activate = useCallback(
+    (anchor: HTMLAnchorElement, target: ForgeRef, tap: boolean): boolean => {
+      const c = current.current;
+      if (c && c.anchor === anchor) {
+        // Its card is open: a hover's or focus's is pinned; a pinned one closes.
+        if (c.pinned) close(true);
+        else {
+          clearTimers();
+          setCard({ ...c, pinned: true, via: c.via === 'hover' ? 'click' : c.via });
+        }
+        return true;
+      }
+      // Known to have no card (plan review, annotate, code review): the link does what it always did.
+      if (dataOnly.current) {
+        const known = peekRefCard(target);
+        if (known !== undefined && !known?.ok) return false;
+      }
+      pin(anchor, anchor.href, target, tap ? 'tap' : 'click', false);
+      return true;
+    },
+    [close, pin],
+  );
+
+  const openInCard = useCallback(
+    (href: string, target: ForgeRef) => {
+      const c = current.current;
+      if (!c) return;
+      refocus.current = !!cardRef.current?.contains(document.activeElement);
+      pin(c.anchor, href, target, c.via === 'hover' ? 'click' : c.via, true);
+    },
+    [pin],
+  );
 
   const scheduleClose = useCallback(() => {
     if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
@@ -762,6 +896,16 @@ export function useRefHoverCards(
       if (c?.anchor === a && c.via === 'focus' && !c.pinned && !(next instanceof Node && cardRef.current?.contains(next))) close();
     };
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === ' ' && !modified(e) && !e.defaultPrevented) {
+        // Space on a ref link opens its card as a click does (Enter clicks the link itself).
+        const a = linkOf(e.target);
+        const target = a === e.target ? targetOf(a) : null;
+        if (a && target && activate(a, target, false)) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        return;
+      }
       const c = current.current;
       if (!c || e.target !== c.anchor || e.key !== 'Tab' || e.shiftKey) return;
       const first = firstControl(cardRef.current);
@@ -771,15 +915,16 @@ export function useRefHoverCards(
       first.focus();
     };
     const onClick = (e: MouseEvent) => {
-      // onlyWithData: a tap follows the link as it always did.
-      if (dataOnly.current) return;
-      if (lastPointer.current !== 'touch' && !touchOnly()) return;
       const a = linkOf(e.target);
+      // A modified or middle click opens the link as a link (a new tab, a window); so does `follow`.
+      if (!a || following.current === a || e.defaultPrevented || e.button !== 0 || modified(e)) return;
       const target = targetOf(a);
-      if (!a || !target) return;
+      if (!target) return;
+      // `detail` 0: Enter on the link (the keyboard), never the sheet.
+      const tap = e.detail !== 0 && (lastPointer.current === 'touch' || touchOnly());
+      if (!activate(a, target, tap)) return;
       e.preventDefault();
       e.stopPropagation();
-      open(a, target, 'tap');
     };
     root.addEventListener('pointerdown', onPointerDown, true);
     root.addEventListener('pointerover', onOver);
@@ -798,7 +943,7 @@ export function useRefHoverCards(
       root.removeEventListener('click', onClick, true);
       clearTimers();
     };
-  }, [rootRef, delayMs, open, close, scheduleClose]);
+  }, [rootRef, delayMs, open, close, scheduleClose, activate]);
 
   const reposition = useCallback(() => {
     const c = current.current;
@@ -850,11 +995,23 @@ export function useRefHoverCards(
   useLayoutEffect(() => {
     if (!card) setPos(null);
     else reposition();
-  }, [card?.anchor, card?.result, card?.pinned, reposition]);
+  }, [card?.anchor, card?.href, card?.result, card?.pinned, reposition]);
+
+  // A ref in the description replaced the card with the focus in it: the focus stays in the card (until its answer drew).
+  useLayoutEffect(() => {
+    if (!refocus.current) return;
+    if (!card) {
+      refocus.current = false;
+      return;
+    }
+    if (!cardRef.current?.contains(document.activeElement)) firstControl(cardRef.current)?.focus({ preventScroll: true });
+    if (card.result !== undefined) refocus.current = false;
+  }, [card]);
 
   if (!card || typeof document === 'undefined') return null;
   const container = tooltipContainerOf(card.anchor) ?? document.body;
   const sheet = card.via === 'tap';
+  const action = refCardActionFor(card.target, card.result);
   const provided = providedRefCardLabel(card.target);
   const label = card.result?.ok
     ? `${provided ?? `${refKindName(card.result.data)} ${forgeRefLabel(card.result.data)}`}: ${card.result.data.title}`
@@ -897,7 +1054,26 @@ export function useRefHoverCards(
       }
     >
       {sheet ? <div aria-hidden="true" className="mx-auto mt-2 h-1 w-9 flex-none rounded-full bg-muted-foreground/30" /> : null}
-      <RefCardView target={card.target} href={card.href} result={card.result} pinned={card.pinned} sheet={sheet} tight={!sheet && !!pos?.tight} onClose={() => close(true)} />
+      <OpenRefContext.Provider value={openInCard}>
+        <RefCardView
+          target={card.target}
+          href={card.href}
+          result={card.result}
+          pinned={card.pinned}
+          sheet={sheet}
+          tight={!sheet && !!pos?.tight}
+          onClose={() => close(true)}
+          action={
+            action && {
+              label: action.label,
+              open: () => {
+                close();
+                action.open();
+              },
+            }
+          }
+        />
+      </OpenRefContext.Provider>
     </div>
   );
   return createPortal(
