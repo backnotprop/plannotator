@@ -23,8 +23,7 @@ import { RiskMark } from './RiskMark';
 import { Named, usePicture } from './Face';
 import { facesOnce } from './words';
 import { pullAvatarUrl } from './pullUrls';
-import { UnreportedBranches } from './UnreportedBranches';
-import type { InboxPullRiskAutoRun, InboxUnreportedBranch } from '@plannotator/core/inbox-types';
+import type { InboxPullRiskAutoRun } from '@plannotator/core/inbox-types';
 import { useContextMenuTrigger } from '../components/useContextMenuTrigger';
 import { focusWhenGone, hiddenInProject, hiddenLabel, hiddenRepo, itemsBy, repoChangeKey } from './hiddenPulls';
 
@@ -444,7 +443,7 @@ export function ReviewsList({
   project = null,
   onOpen,
   onNew,
-  onReviewBranch,
+  localGroup = null,
   menuRow = null,
   onShowAgain,
   onShowRepo,
@@ -465,12 +464,12 @@ export function ReviewsList({
   /** The open thread's id, or the open stack's. */
   selected: string | null;
   phone: boolean;
-  /** The project the list is filtered to: Branch reviews' "Branches nobody reported" is one project's. */
+  /** The project the list is filtered to. */
   project?: string | null;
   onOpen: (row: InboxReviewRow) => void;
   onNew: () => void;
-  /** Branch reviews' safety net: New review with that branch. Absent: no safety net. */
-  onReviewBranch?: (branch: InboxUnreportedBranch, opener: HTMLElement) => void;
+  /** "On this computer" (OnThisComputer.tsx), at the list's foot whatever it holds. */
+  localGroup?: React.ReactNode;
   /** The row whose menu (ReviewsMenu) is open: its muted background. */
   menuRow?: string | null;
   /** The Hidden fold's Show again. Absent: no fold. */
@@ -504,8 +503,6 @@ export function ReviewsList({
   // Those High could not place, behind one quiet line; one opened from there keeps them shown.
   const [notRankedFolded, setNotRankedOpen] = useState(false);
   const notRankedOpen = notRankedFolded || notRanked.some(isOpenRow);
-  // Branch reviews' safety net: one project's, while Branch reviews is on, never read until opened.
-  const unreported = answer.branch_reviews && project && onReviewBranch ? <UnreportedBranches key={project} projectId={project} now={now} onStart={onReviewBranch} /> : null;
   const notices = pullsNotices(model, filter);
   const notice =
     notices.length > 0 ? (
@@ -608,7 +605,7 @@ export function ReviewsList({
             New review
           </button>
         </div>
-        {unreported}
+        {localGroup}
         {hiddenFold}
       </div>
     );
@@ -623,7 +620,7 @@ export function ReviewsList({
       <FoldedGroup label="Open, not reviewed" name="not_reviewed" rows={groups.not_reviewed} open={listedOpen} onToggle={() => toggle('not_reviewed')} draw={draw} />
       {notJudgedLine}
       {notRankedLine}
-      {unreported}
+      {localGroup}
       {hiddenFold}
     </>
   );

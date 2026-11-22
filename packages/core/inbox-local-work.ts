@@ -44,7 +44,7 @@ export function inboxLocalWorkLabel(work: Pick<InboxLocalWork, "kind" | "branch"
   return work.branch ? `Uncommitted on ${work.branch}` : "Uncommitted changes";
 }
 
-/** The row's key, also its address part (`&local=<project>&branch=<name>`; no branch: uncommitted). */
+/** The row's key: `<project id>:<branch>`, or `<project id>:` for its uncommitted changes (git allows no `:` in a branch). */
 export function inboxLocalWorkKey(work: Pick<InboxLocalWork, "project_id" | "kind" | "branch">): string {
-  return work.kind === "branch" ? `${work.project_id}\u0000${work.branch ?? ""}` : `${work.project_id}\u0000`;
+  return `${work.project_id}:${work.kind === "branch" ? (work.branch ?? "") : ""}`;
 }

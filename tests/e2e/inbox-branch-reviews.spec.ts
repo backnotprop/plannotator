@@ -6,12 +6,13 @@
  * and the system's own folders, so no agent CLI (and no stub of one) can be found, the risk dialog's included.
  *
  * What is proved, in order:
- *  1. Off: send_message refuses `branch`, and Reviews has no safety net.
+ *  1. Off: send_message refuses `branch`, and the branches route refuses.
  *  2. On: an agent's report is one review thread, listed in Reviews as a local branch, On you; the thread says what
  *     it is and offers the person's own "Ask for a guided review".
  *  3. The same head again sends nothing; a new head goes into the same thread.
  *  4. The ask is a reply in that thread carrying /review-curate.
- *  5. The project's "Branches nobody reported" is read only when opened, and Start a review opens New review.
+ *  5. Reviews' "On this computer" leaves the reported branch to its row and lists the other; that branch's diff opens
+ *     beside the list and its Review with an agent opens New review.
  *  6. The risk rules dialog shows the branch switch with what is sent where.
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/branch-reviews, light and dark at 1440.
@@ -143,13 +144,10 @@ test.afterAll(async () => {
 
 const report = (body: string) => world.claude.send({ project_path: world.project, subject: 'retry-jitter', body, branch: { name: 'retry-jitter', summary: 'Jitter on payout retries' } } as never);
 
-test('off: the field is refused and Reviews has no safety net', async () => {
+test('off: the field is refused and the branches route refuses', async () => {
   await expect(report('retry-jitter is ready for review.')).rejects.toThrow();
   const refused = await world.page.request.get(`${world.url}api/inbox/reviews/branches`);
   expect(refused.status()).toBe(409);
-  await world.page.goto(`${world.url}#reviews`);
-  await expect(world.page.locator('[data-pulls-heading]')).toBeVisible();
-  await expect(world.page.locator('[data-reviews-unreported]')).toHaveCount(0);
 });
 
 test('on: a report is one review thread, a local branch On you, with the person\'s own ask', async () => {
@@ -193,22 +191,23 @@ test('the ask is a reply in the same thread, asking for /review-curate', async (
   expect(String(reply.body)).toContain('/review-curate');
 });
 
-test('the safety net is read when opened, and Start a review opens New review', async () => {
+test('"On this computer" leaves the reported branch to its row; another branch\'s diff offers New review', async () => {
   const { page } = world;
   const projects = (await (await page.request.get(`${world.url}api/inbox/projects`)).json()) as { projects?: { id: string; root: string }[] };
   const id = projects.projects?.find((p) => p.root === world.project)?.id;
   expect(id).toBeTruthy();
-  await page.goto(`${world.url}#reviews&project=${id}`);
-  const fold = page.locator(`[data-reviews-unreported="${id}"]`);
-  await expect(fold).toBeVisible();
-  await expect(fold.locator('[data-reviews-unreported-branch]')).toHaveCount(0);
-  await fold.locator('[data-reviews-unreported-toggle]').click();
-  const idea = fold.locator('[data-reviews-unreported-branch="old-idea"]');
+  await page.goto(`${world.url}#reviews`);
+  const group = page.locator('[data-reviews-local]');
+  await expect(group).toBeVisible();
+  await group.locator('[data-reviews-local-toggle]').click();
+  const idea = group.locator(`[data-local-row="${id}:old-idea"]`);
   await expect(idea).toBeVisible();
   // The reported branch is the report's row, never listed here.
-  await expect(fold.locator('[data-reviews-unreported-branch="retry-jitter"]')).toHaveCount(0);
-  await shot(page, '3-unreported');
-  await idea.locator('[data-reviews-unreported-start]').click();
+  await expect(group.locator(`[data-local-row="${id}:retry-jitter"]`)).toHaveCount(0);
+  await shot(page, '3-on-this-computer');
+  await idea.click();
+  await expect(page.locator('[data-local-diff="branch"]')).toBeVisible();
+  await page.locator('[data-local-review]').click();
   await expect(page.locator('[data-review-box]')).toBeVisible();
   await page.keyboard.press('Escape');
 });

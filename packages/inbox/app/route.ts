@@ -2,6 +2,7 @@
 
 import { tourStepOf } from '../tour/model';
 import { systemRouteOf } from '../system/route';
+import { localRouteOf, type LocalOpen } from '../pulls/localRoute';
 import { withoutClickSignal } from '../history';
 import { parseFileView } from '../fileView';
 import { parseSettingsHash, type SettingsSection } from '../settingsRoute';
@@ -68,6 +69,8 @@ export interface Route {
   system?: string | null;
   sheet?: string | null;
   full?: boolean;
+  /** Reviews' "On this computer" (pulls/localRoute.ts): the row whose diff is open beside the list (`&local=prj_…&branch=…`). */
+  local?: LocalOpen | null;
   /**
    * Shape (approval "shape-inbox-placement"): the board open in its thread's pane (`#thread=…&shape=shp_…`), or
    * over the grid for a board with no thread (`#shapes&shape=shp_…`). The grid alone is `#shapes`.
@@ -205,6 +208,7 @@ export function routeOf(fullHash: string): Route {
       scope: layer ? viewScopeOf(params) : 'layer',
       new: params.has('new'),
       ...systemRouteOf(params),
+      ...localRouteOf(params),
     };
   }
   if (params.has('board'))

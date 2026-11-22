@@ -1,6 +1,6 @@
 /**
  * New review's change summary ("3 files +42 -7"): the size of a project's local changes, read with the same git diffs
- * `plannotator review` shows, so the box and the review agree. Read only. A named `branch` (Branch reviews' safety net)
+ * `plannotator review` shows, so the box and the review agree. Read only. A named `branch` (Reviews' "On this computer")
  * is that branch's whole diff from its merge base with the default branch, checked out or not.
  */
 

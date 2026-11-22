@@ -238,7 +238,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // The Board card this thread is for (Create thread), kept on its draft so a draft sent later still links it.
   const card = request.card ?? request.draft?.card ?? null;
   // The pull requests this thread is for (Launch an agent), kept on its draft: To offers only their projects' agents.
-  const [reviewKind, setReviewKind] = useState<ReviewKind>(box?.pick ? 'pr' : box?.branch ? 'local' : typed.kind);
+  const [reviewKind, setReviewKind] = useState<ReviewKind>(box?.pick ? 'pr' : box?.branch || box?.project ? 'local' : typed.kind);
   // A pull request link: what the picker's search holds while it looks like one, or the one chosen from it.
   const [reviewLink, setReviewLink] = useState(() => (box ? typed.link : ''));
   const [linkChosen, setLinkChosen] = useState(() => !!box && !!typed.link);
@@ -468,7 +468,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const [toFilled, setToFilled] = useState(false);
   useEffect(() => {
     if (!box || !model || chosen || startPick) return;
-    const to = reviewDefaultTo(composeTargets(projects), launch, box.branch?.projectId ?? current?.id ?? null, lastSent, linkScratch && launch?.scratch ? SCRATCH_PICK : undefined);
+    const to = reviewDefaultTo(composeTargets(projects), launch, box.branch?.projectId ?? box.project ?? current?.id ?? null, lastSent, linkScratch && launch?.scratch ? SCRATCH_PICK : undefined);
     if (!to) return;
     setToFilled(true);
     if ('session' in to) setChosen(to.session);

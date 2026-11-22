@@ -18,6 +18,8 @@ export interface ReviewBoxRequest {
   pick?: ReviewBoxPull | null;
   /** Branch reviews' safety net: a local branch nobody reported, reviewed whole against its base, in its project. */
   branch?: ReviewBoxBranch | null;
+  /** Reviews' "On this computer": a project's uncommitted changes, reviewed in that project. */
+  project?: string | null;
   ask?: 'picture_it';
 }
 
