@@ -15,6 +15,9 @@ import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { FileTree } from './FileTree';
+import { markFirstCodePainted } from '../utils/firstCodePaint';
+import { useReviewFileFilter } from '../hooks/useReviewFileFilter';
+import { compileReviewFileFilter } from '@plannotator/shared/review-file-filter';
 import type { DiffFile } from '../types';
 import type { RepoFiles, RepoFilesState } from '../hooks/useRepoFiles';
 import { key, searchInput, typeInSearch } from './treeKeys.testing';
@@ -134,6 +137,119 @@ describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
     expect(el.querySelector('[data-repo-file-tree]')).toBeNull();
     await act(async () => all.click());
     expect(onScope).toHaveBeenCalledWith('all');
+  });
+
+  test('the filtered Changes tree keeps original selection indexes and full progress', async () => {
+    const onSelectFile = mock((_index: number) => {});
+    const shown = changed[1].path;
+    markFirstCodePainted();
+    const el = await mount(
+      <Tree
+        treeScope="changes"
+        header={{ view: 'tree', showCommits: false, onSelectView: () => {} }}
+        visiblePaths={new Set([shown])}
+        onSelectFile={onSelectFile}
+      />,
+    );
+    await settle();
+    const tree = el.querySelector<HTMLElement>('[data-changes-tree]')!.shadowRoot!;
+    expect(tree.querySelector('[data-item-path$="fileKindTree.ts"]')).toBeNull();
+    const row = tree.querySelector<HTMLElement>('[data-item-path$="explorerTree.ts"]')!;
+    await act(async () => row.click());
+    expect(onSelectFile).toHaveBeenCalledWith(1);
+    expect(el.querySelector('[data-review-progress-caption]')?.textContent).toContain('0 of 3 viewed');
+  });
+
+  test('the filtered All files tree adds matching deleted paths and keeps the original selection index', async () => {
+    const onSelectFile = mock((_index: number) => {});
+    const filteredPath = changed[2].path;
+    const el = await mount(
+      <Tree
+        visiblePaths={new Set([filteredPath])}
+        repoFiles={repo(ready({ paths: ['packages/shared/review-core.ts'] }))}
+        onSelectFile={onSelectFile}
+      />,
+    );
+    await settle();
+    expect(visibleRows(el)).toContain(`changed:${filteredPath}`);
+    expect(repoRow(el, changed[0].path)).toBeNull();
+    await act(async () => repoRow(el, filteredPath).click());
+    expect(onSelectFile).toHaveBeenCalledWith(2);
+  });
+
+  test('filter controls follow the search between Changes, All files, and diff search', async () => {
+    function Harness({ treeScope, isSearchOpen = false, empty = false }: {
+      treeScope: 'changes' | 'all';
+      isSearchOpen?: boolean;
+      empty?: boolean;
+    }) {
+      const { input } = useReviewFileFilter();
+      return (
+        <Tree
+          header={{ view: 'tree', showCommits: false, onSelectView: () => {}, fileFilterInput: input }}
+          treeScope={treeScope}
+          isSearchOpen={isSearchOpen}
+          visiblePaths={empty ? new Set() : undefined}
+          onSearchChange={() => {}}
+        />
+      );
+    }
+
+    markFirstCodePainted();
+    const el = await mount(<Harness treeScope="changes" />);
+    const toggle = () => el.querySelector<HTMLButtonElement>('button[aria-label^="Filter files"]')!;
+    expect(toggle().closest('[data-changes-tree]')).not.toBeNull();
+    expect(el.querySelector('[data-review-panel-header]')?.contains(toggle())).toBe(false);
+    await act(async () => toggle().click());
+    const exclude = el.querySelector('[name="exclude"]');
+    await act(async () => root?.render(<Harness treeScope="changes" empty />));
+    expect(el.querySelector('[name="exclude"]')).toBe(exclude);
+    expect(el.querySelector('[data-changes-tree] [role="status"]')?.textContent).toBe('No files match');
+
+    await act(async () => root?.render(<Harness treeScope="all" />));
+    expect(toggle().closest('[data-repo-file-tree]')).not.toBeNull();
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+
+    await act(async () => root?.render(<Harness treeScope="all" isSearchOpen />));
+    expect(toggle().parentElement?.querySelector('[data-panel-search-field]')).not.toBeNull();
+    expect(el.querySelectorAll('input[name="exclude"]')).toHaveLength(1);
+  });
+
+  test('an active filter says how many files it keeps with the boxes closed, and Clear brings every file back', async () => {
+    function Harness() {
+      const { applied, input } = useReviewFileFilter();
+      const matches = compileReviewFileFilter(applied);
+      return (
+        <Tree
+          header={{ view: 'tree', showCommits: false, onSelectView: () => {}, fileFilterInput: input, fileFilterActive: !!matches }}
+          treeScope="changes"
+          visiblePaths={matches ? new Set(changed.filter((f) => matches(f.path)).map((f) => f.path)) : undefined}
+        />
+      );
+    }
+
+    markFirstCodePainted();
+    const el = await mount(<Harness />);
+    const toggle = () => el.querySelector<HTMLButtonElement>('button[aria-label^="Filter files"]')!;
+    const summary = () => el.querySelector('[data-review-file-filter-summary]');
+    expect(summary()).toBeNull();
+    await act(async () => toggle().click());
+    const field = el.querySelector<HTMLInputElement>('input[name="include"]')!;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    act(() => {
+      setValue.call(field, 'explorerTree.ts');
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { await Bun.sleep(150); });
+    await act(async () => toggle().click());
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    expect(el.querySelector('input[name="include"]')).toBeNull();
+    expect(summary()?.textContent).toContain('1 of 3 files');
+
+    await act(async () => summary()!.querySelector('button')!.click());
+    await settle();
+    expect(summary()).toBeNull();
+    expect(toggle().getAttribute('aria-label')).toBe('Filter files');
   });
 
   test('no header without a model (a host that draws its own)', async () => {

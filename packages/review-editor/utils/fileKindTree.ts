@@ -44,9 +44,10 @@ export function remapBlockTree(nodes: FileTreeNode[], kind: string, indexes: num
 
 /** The kind blocks, or null when the change holds a single kind (the tree is
  *  then today's tree, unchanged). */
-export function buildFileKindBlocks(files: readonly DiffFile[], generated?: ReadonlySet<string>): FileKindBlock[] | null {
+export function buildFileKindBlocks(files: readonly DiffFile[], generated?: ReadonlySet<string>, visible?: ReadonlySet<string>): FileKindBlock[] | null {
   const indexed = files.map((file, index) => ({ file, index }));
-  const groups = groupByFileKind(indexed, (item) => item.file.path, generated);
+  const shown = visible ? indexed.filter(({ file }) => visible.has(file.path)) : indexed;
+  const groups = groupByFileKind(shown, (item) => item.file.path, generated);
   if (groups.length < 2) return null;
   return groups.map(({ kind, items }) => ({
     kind,

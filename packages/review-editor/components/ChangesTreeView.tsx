@@ -31,6 +31,7 @@ export type ChangesTreePick = { via: 'focus' };
 
 interface ChangesTreeViewProps extends FileRowState {
   touch?: boolean;
+  searchAccessory?: React.ReactNode;
   tree: FileTreeNode[];
   groups: ChangesTreeGroup[] | null;
   initiallyFoldedGroups?: ReadonlySet<string>;
@@ -356,8 +357,10 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
   return (
     <PierreFileTree
       model={model}
+      header={props.searchAccessory}
       className="review-file-tree"
       data-changes-tree=""
+      data-review-tree-filter={props.searchAccessory ? '' : undefined}
       data-tree-grouping={props.grouping ?? 'none'}
       style={{ height: '100%' }}
       renderContextMenu={(item, context) => {

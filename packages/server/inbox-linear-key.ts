@@ -1,10 +1,12 @@
-import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { InboxLinearKeyState } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { LINEAR_KEY_FILE, linearApiKey, readLinearApiKey, savedLinearApiKey } from "@plannotator/shared/linear-cards";
 
-export const LINEAR_KEY_FILE = join("inbox", "linear-key");
+// The key's file and how it is read are shared with every server (packages/shared/linear-cards.ts).
+export { LINEAR_KEY_FILE, readLinearApiKey } from "@plannotator/shared/linear-cards";
 
 export interface LinearKey {
   apiKey(): string | null;
@@ -23,14 +25,8 @@ export function createLinearKey(options: {
   const { json } = options;
   const keyPath = join(options.dataDir, LINEAR_KEY_FILE);
   const env = options.env ?? process.env;
-  const savedKey = (): string | null => {
-    try {
-      return readFileSync(keyPath, "utf8").trim() || null;
-    } catch {
-      return null;
-    }
-  };
-  const envKey = (): string | null => env.LINEAR_API_KEY?.trim() || null;
+  const savedKey = () => savedLinearApiKey(options.dataDir);
+  const envKey = () => linearApiKey(env);
   const writeKey = (key: string) => {
     mkdirSync(join(options.dataDir, "inbox"), { recursive: true, mode: 0o700 });
     const temp = `${keyPath}.${process.pid}.tmp`;
@@ -44,7 +40,7 @@ export function createLinearKey(options: {
     return { source: envKey() ? "env" : null, last4: null };
   };
   return {
-    apiKey: () => savedKey() ?? envKey(),
+    apiKey: () => readLinearApiKey(options.dataDir, env),
     state,
     async route(req, path, via) {
       if (path !== "/api/inbox/linear/key") return null;

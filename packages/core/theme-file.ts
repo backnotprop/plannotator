@@ -118,12 +118,12 @@ export const THEME_FONT_STYLES = ['italic', 'bold', 'underline', 'strikethrough'
 export const CUSTOM_THEME_LIMIT = 32;
 
 /**
- * The 55 built-in palettes (`packages/ui/utils/themeRegistry.ts`'s ids; its test
+ * The 56 built-in palettes (`packages/ui/utils/themeRegistry.ts`'s ids; its test
  * keeps the two lists equal). A custom theme can never take one of these ids.
  */
 export const BUILT_IN_THEME_IDS: readonly string[] = [
   'plannotator', 'plannotator-graphite', 'plannotator-modern', 'simple', 'claude-plus', 'adwaita', 'andromeeda',
-  'aurora-x', 'ayu-dark', 'caffeine', 'catppuccin', 'cursor-hc', 'cursor', 'colorblind', 'dark-plus', 'doom-64',
+  'aurora-x', 'ayu-dark', 'caffeine', 'catppuccin', 'cursor-hc', 'cursor', 'colorblind', 'tritanopia', 'dark-plus', 'doom-64',
   'dracula', 'everforest', 'everforest-hard', 'everforest-soft', 'github', 'gruvbox', 'houston', 'kanagawa-dragon',
   'kanagawa-lotus', 'kanagawa-wave', 'laserwave', 'material', 'cursor-midnight', 'min', 'monokai-pro', 'night-owl',
   'nord', 'one-dark-pro', 'one-light', 'paulmillr', 'plastic', 'poimandres', 'quantum-rose', 'red', 'rose-pine',
