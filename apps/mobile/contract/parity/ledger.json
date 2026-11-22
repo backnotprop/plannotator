@@ -21623,6 +21623,104 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-enum-inboxmessagewire-sent-from-via-cloudflare",
+      "title": "enum:InboxMessageWire.sent_from.via.cloudflare",
+      "surface": [
+        "enum:InboxMessageWire.sent_from.via.cloudflare"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxmessagewire-sent-from-via-phone",
+      "title": "enum:InboxMessageWire.sent_from.via.phone",
+      "surface": [
+        "enum:InboxMessageWire.sent_from.via.phone"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxmessagewire-sent-from-via-tailnet",
+      "title": "enum:InboxMessageWire.sent_from.via.tailnet",
+      "surface": [
+        "enum:InboxMessageWire.sent_from.via.tailnet"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxsentfromplace-cloudflare",
+      "title": "enum:InboxSentFromPlace.cloudflare",
+      "surface": [
+        "enum:InboxSentFromPlace.cloudflare"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxsentfromplace-phone",
+      "title": "enum:InboxSentFromPlace.phone",
+      "surface": [
+        "enum:InboxSentFromPlace.phone"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxsentfromplace-tailnet",
+      "title": "enum:InboxSentFromPlace.tailnet",
+      "surface": [
+        "enum:InboxSentFromPlace.tailnet"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-sent-from",
+      "title": "field:InboxMessageWire.sent_from",
+      "surface": [
+        "field:InboxMessageWire.sent_from"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }
