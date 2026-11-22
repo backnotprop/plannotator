@@ -396,8 +396,8 @@ export function buildRgArgs(
 // ---------------------------------------------------------------------------
 
 interface RgMatchData {
-  path: { text: string };
-  lines: { text: string };
+  path: { text?: string; bytes?: string };
+  lines: { text?: string; bytes?: string };
   line_number: number;
   submatches: Array<{ start: number; end: number }>;
 }
@@ -436,6 +436,8 @@ export function parseRgJsonOutput(
     if (parsed.type !== "match") continue;
 
     const d = parsed.data;
+    // A non-UTF-8 file name arrives as `bytes`; a lossy path could not be opened.
+    if (typeof d.path.text !== "string") continue;
     const filePath = d.path.text.startsWith("./")
       ? d.path.text.slice(2)
       : d.path.text;
@@ -443,7 +445,10 @@ export function parseRgJsonOutput(
     // after the repository-wide cap, so ranking can still prefer that file.
     const target = filePath === originFilePath ? originLocations : locations;
     if (target.length >= PARSE_CAP) continue;
-    const snippet = d.lines.text.trimEnd();
+    // A non-UTF-8 line arrives as base64 `bytes`; decode lossily for display.
+    const snippet = (
+      d.lines.text ?? Buffer.from(d.lines.bytes ?? "", "base64").toString("utf8")
+    ).trimEnd();
     const column = d.submatches?.[0]?.start ?? 0;
     const kind = classifyMatch(snippet, symbol, language);
 
