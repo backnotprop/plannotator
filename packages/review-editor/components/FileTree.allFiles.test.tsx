@@ -280,6 +280,14 @@ describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
     expect(repoRow(el, 'packages/').querySelector('[data-item-section="trail"]')?.textContent).toBe('+14');
   });
 
+  test('a staged changed file carries the Staged mark in All files too (#3683)', async () => {
+    const staged = 'packages/review-editor/utils/fileKindTree.ts';
+    const el = await mount(<Tree stagedFiles={new Set([staged])} />);
+    await settle();
+    expect(repoRow(el, staged).querySelector('[data-item-section="trail"] [title="Staged"]')).not.toBeNull();
+    expect(repoRow(el, 'packages/review-editor/utils/explorerTree.ts').querySelector('[title="Staged"]')).toBeNull();
+  });
+
   test('folders open and close; a changed row selects its diff, an unchanged one opens the file', async () => {
     const onSelectFile = mock((_index: number) => {});
     const onOpenRepoFile = mock((_path: string, _options: { pin: boolean }) => {});

@@ -13,6 +13,8 @@ interface SectionEntry {
 export interface FileRowState {
   viewedFiles: ReadonlySet<string>;
   showViewedControls: boolean;
+  /** The effective staged set (`useGitAdd`'s `stagedFiles`); absent: rows draw no Staged mark. */
+  stagedFiles?: ReadonlySet<string>;
   getSectionEntry?: (path: string) => SectionEntry | undefined;
   annotationCounts: ReadonlyMap<string, number>;
   markdownPreviewedPaths?: ReadonlySet<string>;
@@ -31,6 +33,8 @@ export const ROW_ICONS = `<svg xmlns="http://www.w3.org/2000/svg" style="display
 const icon = (name: string, size: number) => ({ name, width: size, height: size, viewBox: '0 0 24 24' });
 const EYE_ICON = icon('pn-eye', 12);
 const THREAD_ICON = icon('pn-thread', 12);
+/** A mark, not a button (staging is done from the file's header or the A key); drawn as All files draws its on-disk dot. */
+const STAGED_PART: FileTreeRowPart = { text: '\u25cf', title: 'Staged', label: 'Staged', color: 'var(--primary)' };
 
 export const GROUP_ICONS: Record<string, FileTreeRowPart> = {
   code: { icon: icon('pn-kind-code', 14) },
@@ -90,7 +94,11 @@ export function fileRowParts(file: DiffFile, p: FileRowState, mark: FileTreeRowP
   return {
     muted: p.showViewedControls && p.viewedFiles.has(file.path),
     title: file.oldPath ? `${file.oldPath} → ${file.path}` : file.path,
-    trail: [...(mark ? [mark] : []), ...countParts(file.additions, file.deletions)],
+    trail: [
+      ...(mark ? [mark] : []),
+      ...(p.stagedFiles?.has(file.path) ? [STAGED_PART] : []),
+      ...countParts(file.additions, file.deletions),
+    ],
   };
 }
 
