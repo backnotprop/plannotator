@@ -714,6 +714,8 @@ export interface InboxDeliveryPresence {
   askerLive(session: string): boolean;
   /** Whether a reply to this session starts it again (a launched thread's own session): it has not ended. Absent: never. */
   launchResumes?(threadId: string, session: string): boolean;
+  /** Runs one list read with the launched sessions' pending replies found in one pass over the messages, dropped when it ends. Absent: none. */
+  onePass?<T>(read: () => T): T;
   /**
    * Whether an item may not have reached its session though it was handed on
    * (a Codex `codex queue` call that ran out of time): the row says it is
@@ -2046,10 +2048,33 @@ export class InboxStore {
    * can carry status that goes stale, and a plain reply repeated it every
    * time, so a plain reply takes the thread's short name, or null with none
    * (the connection then says `a reply`).
-   * Everything else keeps the thread's subject (`plainReplyFor` says why).
+   * A thread the person started that has a name takes its name as it stands
+   * now, the row's title, on everything it delivers, its first message and
+   * every first sight included, as a mail's subject goes with it: its
+   * subject is only the body's first words. The name is the person's
+   * (`named_by.kind` "person": typed in compose, or filled in by the Inbox
+   * for them), compose's suggestion left as it was ("auto", or the name a
+   * review or PR thread started with; the agent may still name the thread,
+   * `threadNamers`), or the agent's that named it ("agent"). A routine's
+   * thread keeps the routine's subject, and a thread an agent started its
+   * subject. Everything else keeps the thread's subject (`plainReplyFor`
+   * says why).
    */
   agentTitle(message: InboxMessage, session: string | null): string | null {
-    return this.plainReplyFor(message, session) ? this.threadShortName(message.thread_id) : this.threadSubject(message.thread_id);
+    if (this.plainReplyFor(message, session)) return this.threadShortName(message.thread_id);
+    if (this.titledByName(message.thread_id)) return this.threadShortName(message.thread_id) ?? this.threadSubject(message.thread_id);
+    return this.threadSubject(message.thread_id);
+  }
+
+  /**
+   * A thread the person started that has a name (theirs, compose's suggestion, or the agent's that named it), and not
+   * a routine's (its lines carry the routine's own subject): `agentTitle` titles it by that name.
+   */
+  private titledByName(threadId: string): boolean {
+    const root = this.messages.get(threadId);
+    if (!root?.started_by_person || root.scheduled_run || !root.thread_name?.trim()) return false;
+    const kind = root.named_by?.kind;
+    return kind === "person" || kind === "auto" || kind === "agent";
   }
 
   /**
@@ -2781,6 +2806,11 @@ export class InboxStore {
    * (`session`: the threads it started, joined or replied in).
    */
   listRows(filter: { projectId?: string | null; session?: string | null } = {}): InboxListRow[] {
+    const presence = this.deliveryPresence;
+    return presence?.onePass ? presence.onePass(() => this.listRowsRead(filter)) : this.listRowsRead(filter);
+  }
+
+  private listRowsRead(filter: { projectId?: string | null; session?: string | null }): InboxListRow[] {
     if (filter.projectId || filter.session) return this.buildRows(filter);
     // Every thread: the last answer while nothing it read changed (`rowsMemo`). A copy of the list, the same rows.
     const memo = this.rowsMemo;

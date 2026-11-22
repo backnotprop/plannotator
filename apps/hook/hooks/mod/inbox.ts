@@ -65,6 +65,10 @@ import {
   INBOX_CONTINUES_POLL_FIELD,
   INBOX_PLACE_POLL_FIELD,
   INBOX_TITLE_POLL_FIELD,
+  INBOX_MODEL_POLL_FIELD,
+  INBOX_EFFORT_POLL_FIELD,
+  INBOX_EFFORT_LEVELS,
+  INBOX_CONTEXT_POLL_FIELD,
   INBOX_FIRST_STARTED_POLL_FIELD,
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
@@ -114,16 +118,26 @@ import type { TurnTracker } from './turns'
  */
 export const SESSION_APPEND_MIN_ENGINE = '2.1.301'
 
-/** Whether an engine version (`$.session.version()`'s `base`, else `version`) is at least SESSION_APPEND_MIN_ENGINE. */
-export function engineHasSessionAppend(version: string | null | undefined): boolean {
+export const SESSION_USAGE_MIN_ENGINE = '2.1.322'
+
+export function engineAtLeast(version: string | null | undefined, min: string): boolean {
   const parts = /^(\d+)\.(\d+)\.(\d+)/.exec(typeof version === 'string' ? version.trim() : '')
   if (!parts) return false
-  const min = SESSION_APPEND_MIN_ENGINE.split('.').map(Number)
+  const want = min.split('.').map(Number)
   const have = parts.slice(1, 4).map(Number)
   for (let i = 0; i < 3; i++) {
-    if (have[i]! !== min[i]!) return have[i]! > min[i]!
+    if (have[i]! !== want[i]!) return have[i]! > want[i]!
   }
   return true
+}
+
+/** Whether an engine version (`$.session.version()`'s `base`, else `version`) is at least SESSION_APPEND_MIN_ENGINE. */
+export function engineHasSessionAppend(version: string | null | undefined): boolean {
+  return engineAtLeast(version, SESSION_APPEND_MIN_ENGINE)
+}
+
+export function effortLevelOf(value: unknown): string | null {
+  return typeof value === 'string' && (INBOX_EFFORT_LEVELS as readonly string[]).includes(value) ? value : null
 }
 
 /** plugin.json's `version` (the plugin this process loaded); null when unreadable. */
@@ -1135,6 +1149,9 @@ export interface InboxLinkOptions {
   label?: () => string | Promise<string>
   /** Set by the host, never by the model. */
   title?: () => string | Promise<string>
+  model?: () => Promise<string | null>
+  effort?: () => string | null
+  contextPercent?: () => Promise<number | null>
   /**
    * The session's first start, given this link's (`STORE_INBOX_SESSION_STARTS`): earlier when an earlier link of the
    * same session kept one (a module reload makes a new link). Sent as INBOX_FIRST_STARTED_POLL_FIELD, so the Agents
@@ -1756,6 +1773,9 @@ export class InboxLink {
     const label = await this.labelNow()
     const title = this.options.title ? await Promise.resolve().then(this.options.title).catch(() => '') : null
     const continues = this.options.continues ? await this.options.continues().catch(() => [] as readonly string[]) : []
+    const model = this.options.model ? await this.options.model().catch(() => null) : null
+    const effort = this.options.effort ? this.options.effort() : null
+    const context = this.options.contextPercent ? await this.options.contextPercent().catch(() => null) : null
     const place = this.options.place ? await this.options.place().catch(() => null) : null
     if (this.startedAt && !this.firstStartedAt && this.options.firstStart) {
       const started = this.startedAt
@@ -1771,6 +1791,9 @@ export class InboxLink {
       // The session's title (additive): the To picker's name for it; empty clears it.
       ...(label === null ? {} : { label }),
       ...(title === null ? {} : { [INBOX_TITLE_POLL_FIELD]: title }),
+      ...(model === null ? {} : { [INBOX_MODEL_POLL_FIELD]: model }),
+      ...(effort === null ? {} : { [INBOX_EFFORT_POLL_FIELD]: effort }),
+      ...(context === null ? {} : { [INBOX_CONTEXT_POLL_FIELD]: context }),
       ...(this.startedAt ? { started_at: this.startedAt } : {}),
       ...(this.firstStartedAt ? { [INBOX_FIRST_STARTED_POLL_FIELD]: this.firstStartedAt } : {}),
       ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),

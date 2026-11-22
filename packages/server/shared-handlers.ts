@@ -25,6 +25,7 @@ import { crossOriginRefusalBody } from "@plannotator/shared/request-origin";
 import { isSameOriginRequest } from "./request-origin-guard";
 import { checkServerSession, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 import { localImageContentType, localImageResponseHeaders } from "@plannotator/shared/local-image";
+import { annotateMediaAnswer } from "@plannotator/shared/html-assets-node";
 import { starAskRoute, starAskService, type StarAskSurface } from "@plannotator/shared/star-ask";
 
 function normalizeDraftGeneration(value: unknown): number | undefined {
@@ -86,6 +87,20 @@ export async function handleImage(req: Request): Promise<Response> {
   } catch {
     return text("Failed to read file", 500);
   }
+}
+
+/**
+ * `/api/annotate-media`: a local Markdown `<video>` beside or below a document
+ * this session served (`servedDocuments`), annotate and plan servers. The
+ * decision is `annotateMediaAnswer` (Pi serves the same answer); another
+ * site's request is refused before any file is looked at.
+ */
+export function handleAnnotateMedia(req: Request, url: URL, servedDocuments: ReadonlySet<string>): Response {
+  if (!isSameOriginRequest(req)) return new Response("Access denied", { status: 403 });
+  const answer = annotateMediaAnswer(url.searchParams.get("path"), url.searchParams.get("base"), servedDocuments, req.headers.get("range"));
+  if (!("headers" in answer)) return new Response("Video unavailable", { status: answer.status });
+  if (!("path" in answer)) return new Response(null, { status: answer.status, headers: answer.headers });
+  return new Response(Bun.file(answer.path).slice(answer.start, answer.end + 1), { status: answer.status, headers: answer.headers });
 }
 
 /** Upload image to temp dir, return path. Used by all 3 servers. */
