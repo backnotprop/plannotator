@@ -735,12 +735,13 @@ export function InboxList(props: InboxListProps) {
   // The starred threads as pills above the list, or (off, the default) the sidebar's Starred section (starredPills.ts).
   const [starredAbove, setStarredAbove] = useStarredAbove(props.rememberLook !== false);
   const showArchived = useShowArchived();
+  const [archivedRows, setArchivedRows] = useState<readonly InboxListRow[]>([]);
   // Settings → Rows' "Project" off: every row drawn as one project's list draws it (no project, its columns).
   const noProject = props.filtered || look.hideProject;
   // Another project on a phone: the list starts at its top. The list itself stays mounted (its Quiet fold and,
   // across a resize past the phone width, its scroll are kept).
   const bodyRef = useRef<HTMLDivElement>(null);
-  const pick = useListPicks({ sections: props.sections, isOpen: (id) => (asList && id !== 'snoozed') || ((!asAgents || id === 'snoozed') && groups.state(id).open), drawn: asAgents ? agentRows : null, body: bodyRef, bulk: props.bulk, phone: props.phone === true, narrow: props.narrow === true, scope: props.scope ?? null, machines: props.machines, pinned: props.pinned, snoozes: props.onSnooze !== undefined, snoozesOf: props.snoozesOf, sectionOf: (id) => props.sections.find((section) => section.threads.some((r) => r.thread_id === id))?.id ?? null });
+  const pick = useListPicks({ sections: props.sections, isOpen: (id) => (asList && id !== 'snoozed') || ((!asAgents || id === 'snoozed') && groups.state(id).open), drawn: asAgents ? agentRows : null, body: bodyRef, bulk: props.bulk, phone: props.phone === true, narrow: props.narrow === true, scope: props.scope ?? null, machines: props.machines, pinned: props.pinned, snoozes: props.onSnooze !== undefined, snoozesOf: props.snoozesOf, sectionOf: (id) => props.sections.find((section) => section.threads.some((r) => r.thread_id === id))?.id ?? null, archived: archivedRows });
   // ↑ ↓ Home End move focus between the rows (listKeys.ts), only while a row or the Quiet band has it.
   const listKey = (move: ListMove) => ({
     when: (event: KeyboardEvent) => {
@@ -1008,9 +1009,8 @@ export function InboxList(props: InboxListProps) {
       statusMark={look.statusMark}
       noAgents={look.hideAgents}
       noPulls={look.hidePulls}
-      // An Archived group's row is not picked (no box), though the list is picking.
-      picking={pick.on && drawn !== 'archived'}
-      picked={pick.on && drawn !== 'archived' && pick.has(row.thread_id)}
+      picking={pick.on}
+      picked={pick.on && pick.has(row.thread_id)}
       onPick={pick.onRowBox}
     />
   );
@@ -1237,7 +1237,7 @@ export function InboxList(props: InboxListProps) {
               </div>
             );
           })}
-          {props.archived && showArchived && <ArchivedGroup host={props.archived} renderRow={renderRow} phone={props.phone === true} onSearch={props.onSearch} />}
+          {props.archived && showArchived && <ArchivedGroup host={props.archived} renderRow={renderRow} onRows={setArchivedRows} phone={props.phone === true} onSearch={props.onSearch} />}
           </LazyRowTips.Provider>
         </ThreadRowMenu>
       {pick.sheet}

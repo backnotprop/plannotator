@@ -157,6 +157,26 @@ test("a thread that came back from the archive is combined like an open one, and
   expect(store.message(made.id)!.resolved_at).toBeNull();
 });
 
+test("an archived thread is combined with an open one; it stays archived throughout, and Undo brings back only the open one", async () => {
+  const { store, send, route, a1, a2 } = setup();
+  store.resolveThread(a2.id, true, "person");
+  const archivedAt = store.message(a2.id)!.resolved_at;
+  const plan = (await route("GET", `/api/inbox/combine?threads=${a1.id},${a2.id}`)) as unknown as InboxCombinePlan;
+  expect(plan.agents!.map((a) => a.session)).toEqual(["ses_a"]);
+
+  const record = (await route("POST", "/api/inbox/combine", { thread_ids: [a1.id, a2.id], session: "ses_a", idempotency_key: "k-archived" })).combine as InboxCombineRecord;
+  expect(record.state).toBe("asked");
+  expect(store.listRow(a2.id)!.section).toBe("quiet");
+  send("ses_a", "Retry policy", "One thread.", { idempotency_key: record.id });
+  await Promise.resolve();
+  expect([store.message(a1.id)!.resolved_at !== null, store.message(a2.id)!.resolved_at]).toEqual([true, archivedAt]);
+
+  const undone = (await route("POST", `/api/inbox/combine/${record.id}/undo`, {})).combine as InboxCombineRecord;
+  expect(undone.state).toBe("undone");
+  expect(store.message(a1.id)!.resolved_at).toBeNull();
+  expect(store.message(a2.id)!.resolved_at).toBe(archivedAt);
+});
+
 test("the session ends, or ends its turn without the thread: the Combine fails, nothing is archived, and a wake not delivered is withdrawn", async () => {
   const first = setup();
   const record = await first.start();
