@@ -32,7 +32,7 @@ Plannotator also detects `SSH_TTY` and `SSH_CONNECTION` environment variables fo
 
 When remote mode is on only because of SSH (`PLANNOTATOR_REMOTE` unset), the server listens and advertises exactly as above, and a request that reaches it over loopback (your own `ssh -L` tunnel or editor port forward, or a browser on that machine) gets what a local session gives: Ask this session, link hover cards, the annotate agent terminal, and documents outside the project. A request from any other address gets what remote mode gives. Open in, opening a browser and live app annotation stay off over SSH. `PLANNOTATOR_REMOTE=1` keeps remote mode whole for every request.
 
-A browser on another computer also needs this machine's key. The first time, open the `From another computer:` link Plannotator prints in your terminal, or the URL it prints when `PLANNOTATOR_URL_HOST` or `PLANNOTATOR_PUBLIC_URL` is set. The browser then keeps the key in a cookie, so reloads, new tabs and later sessions work at the plain address. Tunnels and port forwards from your own computer need no key. `PLANNOTATOR_REMOTE=1` does not use the key.
+A browser on another computer also needs this machine's key. The first time, open the `From another computer:` link Plannotator prints in your terminal, or the URL it prints when `PLANNOTATOR_URL_HOST` or `PLANNOTATOR_PUBLIC_URL` is set. When your agent started the review, run `plannotator sessions` on that machine: it lists the same link under each session. The browser then keeps the key in a cookie, so reloads, new tabs and later sessions work at the plain address. Tunnels and port forwards from your own computer need no key. `PLANNOTATOR_REMOTE=1` does not use the key.
 
 ## WSL2
 

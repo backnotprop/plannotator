@@ -5,17 +5,20 @@
  * Pi mirror (apps/pi-extension/server/network-key.test.ts), so both runtimes
  * answer the same scenarios.
  *
- * A test on one machine plays "another computer" through the runtime's own
- * copy of `setThisMachineForTests` (loopback stops counting as this machine);
- * every request goes over loopback with node:http, so headers are exactly the
- * ones under test. Remote mode would bind the fixed 19432: each server gets a
- * free port through PLANNOTATOR_PORT. Every test runs under a temp
+ * Every server is bound to 127.0.0.1 (the runtime's loopback bind seam:
+ * remote mode would otherwise listen on every interface), and a test plays
+ * "another computer" by naming the peer every request is judged as coming
+ * from, through the runtime's own copy of `setThisMachineForTests`. Every
+ * request goes over loopback with node:http, so headers are exactly the ones
+ * under test. Remote mode would bind the fixed 19432: each server gets a free
+ * port through PLANNOTATOR_PORT. Every test runs under a temp
  * PLANNOTATOR_DATA_DIR; nothing is decided, written or launched.
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
+import { connect } from "node:net";
 import { join } from "node:path";
 import { createTestEnvironment } from "../../tests/helpers/environment";
 import { closeServer, occupyConsecutivePorts } from "../../tests/helpers/ports";
@@ -34,7 +37,9 @@ export type StartNetworkKeyScenarioServer = (
 
 /** The runtime's own copy of the rule's test seams (Pi vendors packages/shared). */
 export interface NetworkKeySeams {
-  setThisMachineForTests(rule: { addresses?: readonly string[]; loopback?: boolean } | null): void;
+  setThisMachineForTests(rule: { addresses?: readonly string[]; loopback?: boolean; peer?: string } | null): void;
+  /** The runtime's own `setLoopbackBindForTests`: bind 127.0.0.1 even in remote mode. */
+  setLoopbackBindForTests(on: boolean): void;
   resetNetworkKeysForTests(): void;
   networkKeyCookieName(key: string): string;
 }
@@ -68,6 +73,36 @@ function send(port: number, method: string, path: string, headers: Record<string
     );
     req.on("error", reject);
     req.end(body);
+  });
+}
+
+/**
+ * A request written byte for byte, for request targets node:http's client
+ * would tidy up (it collapses a leading `//`).
+ */
+function sendRaw(port: number, target: string, headers: Record<string, string> = {}): Promise<Answer> {
+  return new Promise((resolve, reject) => {
+    const socket = connect(port, "127.0.0.1", () => {
+      const lines = [`GET ${target} HTTP/1.1`, `Host: 127.0.0.1:${port}`, "Connection: close"];
+      for (const [name, value] of Object.entries(headers)) lines.push(`${name}: ${value}`);
+      socket.write(`${lines.join("\r\n")}\r\n\r\n`);
+    });
+    let raw = "";
+    socket.setEncoding("latin1");
+    socket.on("data", (chunk) => {
+      raw += chunk;
+    });
+    socket.on("error", reject);
+    socket.on("end", () => {
+      const split = raw.indexOf("\r\n\r\n");
+      const head = (split === -1 ? raw : raw.slice(0, split)).split("\r\n");
+      const answerHeaders: Record<string, string> = {};
+      for (const line of head.slice(1)) {
+        const colon = line.indexOf(":");
+        if (colon > 0) answerHeaders[line.slice(0, colon).trim().toLowerCase()] = line.slice(colon + 1).trim();
+      }
+      resolve({ status: Number(head[0]?.split(" ")[1] ?? 0), headers: answerHeaders, text: split === -1 ? "" : raw.slice(split + 4) });
+    });
   });
 }
 
@@ -140,6 +175,7 @@ export function defineNetworkKeyScenarios(
   afterEach(async () => {
     for (const server of servers.splice(0)) await server.stop();
     seams.setThisMachineForTests(null);
+    seams.setLoopbackBindForTests(false);
     seams.resetNetworkKeysForTests();
     environment.restore();
   });
@@ -147,6 +183,7 @@ export function defineNetworkKeyScenarios(
   async function isolate(mode: "ssh" | "remote" | "local" = "ssh"): Promise<void> {
     environment.reset();
     seams.resetNetworkKeysForTests();
+    seams.setLoopbackBindForTests(true);
     const dir = environment.makeTempDir();
     dataDir = join(dir, "data");
     process.env.PLANNOTATOR_DATA_DIR = dataDir;
@@ -173,8 +210,8 @@ export function defineNetworkKeyScenarios(
     return { server, port };
   }
 
-  /** From here on, requests come from another computer. */
-  const fromAnotherComputer = () => seams.setThisMachineForTests({ addresses: [], loopback: false });
+  /** From here on, requests come from another computer (a TEST-NET address that is none of this machine's). */
+  const fromAnotherComputer = () => seams.setThisMachineForTests({ addresses: ["10.0.0.1"], peer: "203.0.113.7" });
   const key = () => readFileSync(join(dataDir, "network-key"), "utf8").trim();
   const cookieOf = () => `${seams.networkKeyCookieName(key())}=${key()}`;
 
@@ -259,6 +296,49 @@ export function defineNetworkKeyScenarios(
         expect(server.url).toBe(`http://devbox.example:${port}/?key=${key()}`);
       });
 
+      test("a key or cookie with a non-ASCII character of the key's length is refused, and the server keeps answering", async () => {
+        await isolate();
+        const { port } = await open(kind);
+        fromAnotherComputer();
+        // 43 characters, 44 bytes: comparing it must not throw.
+        const sameLength = `${"A".repeat(42)}é`;
+        expect((await send(port, "GET", `/?key=${encodeURIComponent(sameLength)}`, PAGE)).status).toBe(401);
+        expect((await send(port, "GET", `${FIRST_READ[kind]}?key=${encodeURIComponent(sameLength)}`)).status).toBe(401);
+        // A cookie carrying a raw latin1 byte (what a header may hold on the wire).
+        const rawByte = `${seams.networkKeyCookieName(key())}=${"A".repeat(42)}\xe9`;
+        const refused = await send(port, "GET", FIRST_READ[kind], { cookie: rawByte });
+        expect(refused.status).toBe(401);
+        expect(refused.text).not.toContain(" at ");
+        expect((await send(port, "GET", "/", { ...PAGE, cookie: rawByte })).status).toBe(401);
+        // Still up, still the same rule.
+        expect((await send(port, "GET", FIRST_READ[kind], { cookie: cookieOf() })).status).toBe(200);
+      });
+
+      test("a request target that reads as protocol-relative never reaches the app without the key", async () => {
+        await isolate();
+        const { port } = await open(kind);
+        fromAnotherComputer();
+        for (const target of ["//x/api/html-assets/t", "//x/api/html-assets/0000000000000000/x.css"]) {
+          const answer = await sendRaw(port, target, PAGE);
+          expect(answer.status).not.toBe(0);
+          expect(answer.text).not.toContain("network-key-scenario-app");
+        }
+      });
+
+      test("the keyed link's redirect always stays on this address", async () => {
+        await isolate();
+        const { port } = await open(kind);
+        fromAnotherComputer();
+        for (const target of [`/.//evil.example/?key=${key()}`, `//evil.example/?key=${key()}`, `/%2F/evil.example/?key=${key()}`]) {
+          const landing = await sendRaw(port, target, PAGE);
+          expect(landing.status).toBe(303);
+          const location = String(landing.headers.location);
+          expect(location.startsWith("/")).toBe(true);
+          expect(location[1] === "/" || location[1] === "\\").toBe(false);
+          expect(location).not.toContain("key=");
+        }
+      });
+
       test("PLANNOTATOR_REMOTE=1 and local mode are unchanged: no key is asked for or advertised", async () => {
         for (const mode of ["remote", "local"] as const) {
           await isolate(mode);
@@ -271,6 +351,7 @@ export function defineNetworkKeyScenarios(
           expect((await send(port, "GET", FIRST_READ[kind])).status).toBe(200);
           for (const s of servers.splice(0)) await s.stop();
           seams.setThisMachineForTests(null);
+          seams.setLoopbackBindForTests(false);
           environment.restore();
         }
       });

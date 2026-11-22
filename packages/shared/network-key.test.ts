@@ -4,7 +4,7 @@
  * against real servers in packages/server/network-key.scenarios.ts.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -18,6 +18,8 @@ import {
 	networkKeyVerdict,
 	readCookie,
 	resetNetworkKeysForTests,
+	matchesNetworkKey,
+	setNetworkKeyWaitForTests,
 	setThisMachineForTests,
 	sshServerAddress,
 	withNetworkKey,
@@ -29,16 +31,22 @@ const KEY = "A".repeat(43);
 
 afterEach(() => {
 	setThisMachineForTests(null);
+	setNetworkKeyWaitForTests(null);
 	resetNetworkKeysForTests();
 });
 
-const other = (over: Partial<NetworkKeyRequest> = {}): NetworkKeyRequest => ({
-	method: "GET",
-	url: "/api/plan",
-	peer: "192.168.1.50",
-	cookie: null,
-	...over,
-});
+/** A request from another computer; `url` is a path and query, split as a router would. */
+const other = ({ url = "/api/plan", ...over }: Partial<NetworkKeyRequest> & { url?: string } = {}): NetworkKeyRequest => {
+	const q = url.indexOf("?");
+	return {
+		method: "GET",
+		pathname: q === -1 ? url : url.slice(0, q),
+		search: q === -1 ? "" : url.slice(q),
+		peer: "192.168.1.50",
+		cookie: null,
+		...over,
+	};
+};
 
 describe("loadNetworkKey", () => {
 	test("creates one key per data dir, private to its owner, and keeps it across processes", () => {
@@ -60,6 +68,50 @@ describe("loadNetworkKey", () => {
 		expect(key).toMatch(/^[A-Za-z0-9_-]{43}$/);
 		resetNetworkKeysForTests();
 		expect(loadNetworkKey(dir)).toBe(key);
+	});
+});
+
+describe("loadNetworkKey when two sessions start at once", () => {
+	const OTHER = "Z".repeat(43);
+
+	test("a key file another process created but has not written yet is waited for, never overwritten", () => {
+		const dir = mkdtempSync(join(tmpdir(), "plannotator-network-key-"));
+		const file = join(dir, NETWORK_KEY_FILE);
+		writeFileSync(file, "", { mode: 0o600 });
+		let waits = 0;
+		setNetworkKeyWaitForTests(() => {
+			// The other process finishes its write while this one waits.
+			if (++waits === 2) writeFileSync(file, `${OTHER}\n`);
+		});
+		expect(loadNetworkKey(dir)).toBe(OTHER);
+		expect(readFileSync(file, "utf8").trim()).toBe(OTHER);
+	});
+
+	test("an empty file still being written is left alone; one abandoned long ago is replaced", () => {
+		const dir = mkdtempSync(join(tmpdir(), "plannotator-network-key-"));
+		const file = join(dir, NETWORK_KEY_FILE);
+		writeFileSync(file, "");
+		setNetworkKeyWaitForTests(() => {});
+		const mine = loadNetworkKey(dir);
+		expect(mine).toMatch(/^[A-Za-z0-9_-]{43}$/);
+		expect(readFileSync(file, "utf8")).toBe("");
+		resetNetworkKeysForTests();
+		const old = new Date(Date.now() - 60_000);
+		utimesSync(file, old, old);
+		const replaced = loadNetworkKey(dir);
+		expect(readFileSync(file, "utf8").trim()).toBe(replaced);
+		// No temp file is left beside it.
+		expect(readdirSync(dir)).toEqual([NETWORK_KEY_FILE]);
+	});
+
+	test("a valid key is never overwritten, and an existing key file is made private", () => {
+		const dir = mkdtempSync(join(tmpdir(), "plannotator-network-key-"));
+		const file = join(dir, NETWORK_KEY_FILE);
+		writeFileSync(file, `${OTHER}\n`, { mode: 0o644 });
+		if (process.platform !== "win32") chmodSync(file, 0o644);
+		expect(loadNetworkKey(dir)).toBe(OTHER);
+		expect(readFileSync(file, "utf8").trim()).toBe(OTHER);
+		if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
 	});
 });
 
@@ -134,6 +186,29 @@ describe("networkKeyVerdict", () => {
 	test("the annotated-HTML frame's token paths pass (its sandbox sends no SameSite cookie)", () => {
 		expect(networkKeyVerdict(other({ url: "/api/html-assets/0123456789abcdef/style.css" }), KEY)).toEqual({ kind: "pass" });
 		expect(networkKeyVerdict(other({ url: "/api/html-assetsX" }), KEY).kind).toBe("refuse");
+	});
+
+	test("a presented value of the key's length but not its bytes never throws (non-ASCII, lone surrogates, raw latin1)", () => {
+		for (const value of [`${"A".repeat(42)}é`, `${"A".repeat(42)}\ud800`, `${"A".repeat(42)}\xe9`, `${"A".repeat(41)}😀`]) {
+			expect(value.length === KEY.length || value.length === KEY.length + 1).toBe(true);
+			expect(() => matchesNetworkKey(value, KEY)).not.toThrow();
+			expect(matchesNetworkKey(value, KEY)).toBe(false);
+			expect(networkKeyVerdict(other({ url: `/?key=${value}`, secFetchDest: "document" }), KEY)).toEqual({ kind: "refuse", page: true });
+			expect(networkKeyVerdict(other({ cookie: `${networkKeyCookieName(KEY)}=${value}` }), KEY)).toEqual({ kind: "refuse", page: false });
+		}
+		expect(matchesNetworkKey(KEY, KEY)).toBe(true);
+	});
+
+	test("the path is the router's, never parsed again: a protocol-relative-looking path gets no exemption", () => {
+		expect(networkKeyVerdict(other({ url: "//x/api/html-assets/t" }), KEY).kind).toBe("refuse");
+		expect(networkKeyVerdict(other({ url: "//x/api/html-assets/t", secFetchDest: "document" }), KEY)).toEqual({ kind: "refuse", page: true });
+	});
+
+	test("the redirect after a keyed link always stays on this origin", () => {
+		for (const path of ["//evil.example/", "///evil.example/", "/\\evil.example/", "\\/evil.example/"]) {
+			const verdict = networkKeyVerdict(other({ url: `${path}?key=${KEY}&a=1`, secFetchDest: "document" }), KEY);
+			expect(verdict.kind === "keep" && verdict.location).toBe("/evil.example/?a=1");
+		}
 	});
 
 	test("the cookie's name never holds the key, and the refusals never do", () => {

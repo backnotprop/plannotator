@@ -162,7 +162,15 @@ export function getServerPort(): {
 }
 
 export function getServerHostname(): string {
+	if (loopbackBindForTests) return LOOPBACK_HOST;
 	return isRemoteSession() ? "0.0.0.0" : LOOPBACK_HOST;
+}
+
+let loopbackBindForTests = false;
+
+/** Tests only: bind loopback even in a remote session (mirrors packages/server/remote.ts). */
+export function setLoopbackBindForTests(on: boolean): void {
+	loopbackBindForTests = on;
 }
 
 /**

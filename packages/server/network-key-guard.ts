@@ -30,11 +30,18 @@ export function createNetworkKeyGuard(): NetworkKeyGuard {
   const key = loadNetworkKey(getPlannotatorDataDir());
   return {
     check(req) {
-      const url = new URL(req.url);
+      // Parsed once, as the router parses it (packages/shared/network-key.ts).
+      let url: URL;
+      try {
+        url = new URL(req.url);
+      } catch {
+        return refusal(false);
+      }
       const verdict = networkKeyVerdict(
         {
           method: req.method,
-          url: `${url.pathname}${url.search}`,
+          pathname: url.pathname,
+          search: url.search,
           peer: peerOf(req),
           cookie: req.headers.get("cookie"),
           secFetchDest: req.headers.get("sec-fetch-dest"),
@@ -50,11 +57,15 @@ export function createNetworkKeyGuard(): NetworkKeyGuard {
           headers: { Location: verdict.location, "Set-Cookie": verdict.setCookie, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" },
         });
       }
-      const headers = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "X-Plannotator-Error": NETWORK_KEY_REQUIRED_CODE };
-      if (verdict.page) {
-        return new Response(NETWORK_KEY_REFUSAL_HTML, { status: 401, headers: { ...headers, "Content-Type": "text/html; charset=utf-8" } });
-      }
-      return Response.json(networkKeyRefusalBody(), { status: 401, headers });
+      return refusal(verdict.page);
     },
   };
+}
+
+function refusal(page: boolean): Response {
+  const headers = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "X-Plannotator-Error": NETWORK_KEY_REQUIRED_CODE };
+  if (page) {
+    return new Response(NETWORK_KEY_REFUSAL_HTML, { status: 401, headers: { ...headers, "Content-Type": "text/html; charset=utf-8" } });
+  }
+  return Response.json(networkKeyRefusalBody(), { status: 401, headers });
 }

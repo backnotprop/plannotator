@@ -12,7 +12,7 @@ import { parsePortSelection } from "@plannotator/shared/port-range";
 import { loadConfig, resolveLocalUrlHostname } from "@plannotator/shared/config";
 import { isLocalOnlyAdvertisedUrl, resolveAdvertisedSessionUrl } from "@plannotator/shared/advertised-url";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
-import { anotherComputerUrl, loadNetworkKey, withNetworkKey } from "@plannotator/shared/network-key";
+import { anotherComputerBaseUrl, anotherComputerUrl, loadNetworkKey, withNetworkKey, withoutNetworkKey } from "@plannotator/shared/network-key";
 
 const DEFAULT_REMOTE_PORT = 19432;
 const LOOPBACK_HOST = "127.0.0.1";
@@ -204,7 +204,19 @@ export async function startBunServerOnAvailablePort<TServer>(
  * forwards reach loopback.
  */
 export function getServerHostname(): string {
+  if (loopbackBindForTests) return LOOPBACK_HOST;
   return isRemoteSession() ? "0.0.0.0" : LOOPBACK_HOST;
+}
+
+let loopbackBindForTests = false;
+
+/**
+ * Tests only: bind loopback even in a remote session, so a test of remote
+ * behaviour never listens on every interface (it plays another computer
+ * through the network key's peer seam instead). `false` restores the rule.
+ */
+export function setLoopbackBindForTests(on: boolean): void {
+  loopbackBindForTests = on;
 }
 
 /**
@@ -243,4 +255,17 @@ export function withAdvertisedNetworkKey(url: string): string {
 export function buildAnotherComputerUrl(port: number, advertisedUrl: string): string | null {
   if (!isSshDetectedRemote() || !isLocalOnlyAdvertisedUrl(advertisedUrl)) return null;
   return anotherComputerUrl(port, process.env.SSH_CONNECTION, loadNetworkKey(getPlannotatorDataDir()));
+}
+
+/**
+ * For the session registry, so `plannotator sessions` can give the person the
+ * link (packages/shared/network-key.ts): where another computer opens this
+ * session, never with the key. Undefined unless the session asks another
+ * computer for the key (a remote session SSH alone turned on); "" when the
+ * address is not known.
+ */
+export function anotherComputerRegistryUrl(port: number, advertisedUrl: string): string | undefined {
+  if (!isSshDetectedRemote()) return undefined;
+  if (!isLocalOnlyAdvertisedUrl(advertisedUrl)) return withoutNetworkKey(advertisedUrl);
+  return anotherComputerBaseUrl(port, process.env.SSH_CONNECTION) ?? "";
 }

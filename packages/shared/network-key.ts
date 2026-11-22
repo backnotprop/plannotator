@@ -24,7 +24,7 @@
  */
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, linkSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { join } from "node:path";
 
@@ -48,44 +48,165 @@ const CAPABILITY_PATH_PREFIX = "/api/html-assets/";
 
 const keys = new Map<string, string>();
 
+/** How long a reader waits for an empty key file another process is still writing. */
+const EMPTY_FILE_WAIT_MS = 500;
+const EMPTY_FILE_POLL_MS = 25;
+/** An empty key file older than this was abandoned (its writer died): it may be replaced. */
+const EMPTY_FILE_ABANDONED_MS = 2_000;
+
+/** Tests only: how loadNetworkKey waits (see setNetworkKeyWaitForTests). */
+let waitForTests: ((ms: number) => void) | null = null;
+
+function sleepSync(ms: number): void {
+	if (waitForTests) return waitForTests(ms);
+	try {
+		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+	} catch {}
+}
+
+type KeyFileState =
+	| { kind: "valid"; key: string }
+	| { kind: "missing" }
+	/** Empty: another process may be between creating it and writing the key. */
+	| { kind: "empty"; ageMs: number }
+	/** Holds something that is not a key. */
+	| { kind: "invalid" };
+
+function readKeyFile(file: string): KeyFileState {
+	let text: string;
+	try {
+		text = readFileSync(file, "utf8");
+	} catch (error) {
+		return (error as NodeJS.ErrnoException)?.code === "ENOENT" ? { kind: "missing" } : { kind: "invalid" };
+	}
+	const value = text.trim();
+	if (KEY_RE.test(value)) return { kind: "valid", key: value };
+	if (value) return { kind: "invalid" };
+	let ageMs = Number.POSITIVE_INFINITY;
+	try {
+		ageMs = Date.now() - statSync(file).mtimeMs;
+	} catch {}
+	return { kind: "empty", ageMs };
+}
+
+/** Keep an existing key file private to its owner (an older or hand-made one may be 0644). */
+function tightenMode(file: string): void {
+	if (process.platform === "win32") return;
+	try {
+		if (statSync(file).mode & 0o077) chmodSync(file, 0o600);
+	} catch {}
+}
+
+/** A temp file next to `file` holding `key` (0600), or null. */
+function writeTemp(file: string, key: string): string | null {
+	const temp = `${file}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+	try {
+		writeFileSync(temp, `${key}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+		return temp;
+	} catch {
+		return null;
+	}
+}
+
+function removeQuietly(file: string): void {
+	try {
+		unlinkSync(file);
+	} catch {}
+}
+
 /**
- * This data directory's key, created on first use (0600). Never throws: an
- * unwritable data directory gets a key for this process only.
+ * Publish `key` as the key file only if there is none yet. The file appears
+ * whole (a hard link of a finished temp file), so another process never sees
+ * it empty. "created", "exists" (another process got there first), or
+ * "failed" (nothing written).
+ */
+function publishIfAbsent(file: string, key: string): "created" | "exists" | "failed" {
+	const temp = writeTemp(file, key);
+	if (temp) {
+		try {
+			linkSync(temp, file);
+			return "created";
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException)?.code === "EEXIST") return "exists";
+			// A filesystem without hard links: the exclusive create below.
+		} finally {
+			removeQuietly(temp);
+		}
+	}
+	try {
+		writeFileSync(file, `${key}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+		return "created";
+	} catch (error) {
+		return (error as NodeJS.ErrnoException)?.code === "EEXIST" ? "exists" : "failed";
+	}
+}
+
+/** Replace a key file that holds no key (never a valid one), atomically. */
+function replaceInvalid(file: string, key: string): void {
+	const temp = writeTemp(file, key);
+	if (!temp) return;
+	try {
+		renameSync(temp, file);
+	} catch {
+		removeQuietly(temp);
+	}
+}
+
+/**
+ * This data directory's key, created on first use (0600). Two sessions
+ * starting at once agree on one key: the file is created whole, a reader that
+ * finds it empty (an older writer between create and write) waits for it, and
+ * a valid key is never overwritten. Never throws: an unwritable data directory
+ * gets a key for this process only.
  */
 export function loadNetworkKey(dataDir: string): string {
 	const cached = keys.get(dataDir);
 	if (cached) return cached;
 	const file = join(dataDir, NETWORK_KEY_FILE);
-	const read = (): string | null => {
-		try {
-			const value = readFileSync(file, "utf8").trim();
-			return KEY_RE.test(value) ? value : null;
-		} catch {
-			return null;
-		}
-	};
-	let key = read();
-	if (!key) {
-		const fresh = randomBytes(32).toString("base64url");
-		try {
-			mkdirSync(dataDir, { recursive: true });
-			// `wx`: two sessions starting at once keep the first one's key.
-			writeFileSync(file, `${fresh}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
-			key = fresh;
-		} catch (error) {
-			key = read();
-			if (!key && (error as NodeJS.ErrnoException)?.code === "EEXIST") {
-				// A file that is not a key: replace it.
-				try {
-					writeFileSync(file, `${fresh}\n`, { encoding: "utf8", mode: 0o600 });
-					chmodSync(file, 0o600);
-				} catch {}
-			}
-			key ??= read() ?? fresh;
-		}
-	}
+	const key = resolveKey(dataDir, file);
 	keys.set(dataDir, key);
 	return key;
+}
+
+function resolveKey(dataDir: string, file: string): string {
+	const fresh = randomBytes(32).toString("base64url");
+	let state = readKeyFile(file);
+	if (state.kind === "missing") {
+		try {
+			mkdirSync(dataDir, { recursive: true });
+		} catch {}
+		const published = publishIfAbsent(file, fresh);
+		if (published === "created") return fresh;
+		if (published === "failed") return fresh;
+		state = readKeyFile(file);
+	}
+	for (let waited = 0; state.kind === "empty" && state.ageMs < EMPTY_FILE_ABANDONED_MS && waited < EMPTY_FILE_WAIT_MS; waited += EMPTY_FILE_POLL_MS) {
+		sleepSync(EMPTY_FILE_POLL_MS);
+		state = readKeyFile(file);
+	}
+	if (state.kind === "valid") {
+		tightenMode(file);
+		return state.key;
+	}
+	// Still empty but fresh: another writer may yet fill it; leave it alone.
+	if (state.kind === "empty" && state.ageMs < EMPTY_FILE_ABANDONED_MS) return fresh;
+	if (state.kind === "missing") return publishIfAbsent(file, fresh) === "exists" ? (validKey(file) ?? fresh) : fresh;
+	// Abandoned empty, or not a key: replace it, then use whatever is there now.
+	replaceInvalid(file, fresh);
+	return validKey(file) ?? fresh;
+}
+
+function validKey(file: string): string | null {
+	const state = readKeyFile(file);
+	return state.kind === "valid" ? state.key : null;
+}
+
+/**
+ * Tests only: replace loadNetworkKey's wait while it watches an empty key file
+ * (so a test can play the other process finishing its write). `null` restores it.
+ */
+export function setNetworkKeyWaitForTests(wait: ((ms: number) => void) | null): void {
+	waitForTests = wait;
 }
 
 /** Forget cached keys (tests). */
@@ -113,10 +234,20 @@ export function readCookie(header: string | null | undefined, name: string): str
 	return null;
 }
 
-/** Constant-time comparison of a presented value with the key. */
+/**
+ * Constant-time comparison of a presented value with the key. Compares bytes,
+ * not characters (a same-length value with a non-ASCII character is longer in
+ * bytes, and timingSafeEqual throws on unequal lengths). Never throws.
+ */
 export function matchesNetworkKey(presented: string | null | undefined, key: string): boolean {
-	if (typeof presented !== "string" || presented.length !== key.length) return false;
-	return timingSafeEqual(Buffer.from(presented), Buffer.from(key));
+	if (typeof presented !== "string" || !presented) return false;
+	try {
+		const a = Buffer.from(presented, "utf8");
+		const b = Buffer.from(key, "utf8");
+		return a.length === b.length && timingSafeEqual(a, b);
+	} catch {
+		return false;
+	}
 }
 
 /** The `Set-Cookie` value that keeps the key for this host. */
@@ -138,8 +269,8 @@ function isLoopbackAddress(a: string): boolean {
 	return a === "::1" || a === "0:0:0:0:0:0:0:1" || /^127(?:\.\d{1,3}){3}$/.test(a);
 }
 
-/** Tests only: what counts as this machine (see setThisMachineForTests). */
-let testRule: { addresses: readonly string[] | null; loopback: boolean } | null = null;
+/** Tests only: what counts as this machine, and who every request comes from (see setThisMachineForTests). */
+let testRule: { addresses: readonly string[] | null; loopback: boolean; peer: string | null } | null = null;
 let ownAddressesCache: { at: number; set: Set<string> } | null = null;
 const OWN_ADDRESSES_TTL_MS = 5_000;
 
@@ -160,12 +291,13 @@ export function ownInterfaceAddresses(): Set<string> {
 
 /**
  * Tests only, so a test on one machine can play another computer:
- * `addresses` replaces this machine's interface addresses, and
- * `loopback: false` stops loopback peers counting as this machine. `null`
- * restores the real rule.
+ * `addresses` replaces this machine's interface addresses, `loopback: false`
+ * stops loopback peers counting as this machine, and `peer` is the TCP peer
+ * every request is judged as coming from (servers stay bound to loopback).
+ * `null` restores the real rule.
  */
-export function setThisMachineForTests(rule: { addresses?: readonly string[]; loopback?: boolean } | null): void {
-	testRule = rule ? { addresses: rule.addresses ?? null, loopback: rule.loopback ?? true } : null;
+export function setThisMachineForTests(rule: { addresses?: readonly string[]; loopback?: boolean; peer?: string } | null): void {
+	testRule = rule ? { addresses: rule.addresses ?? null, loopback: rule.loopback ?? true, peer: rule.peer ?? null } : null;
 	ownAddressesCache = null;
 }
 
@@ -179,8 +311,14 @@ export function isThisMachinePeer(address: string | null | undefined): boolean {
 
 export interface NetworkKeyRequest {
 	method: string;
-	/** The request's path and query (`/api/plan?x=1`), or a full URL. */
-	url: string;
+	/**
+	 * The request's path, exactly as the server's router reads it (already
+	 * parsed: never parsed again here, so a target like `//x/api/…` cannot be
+	 * read one way here and another way by the router).
+	 */
+	pathname: string;
+	/** The request's query string (`?x=1`, or empty). */
+	search: string;
 	/** The TCP peer address, when known. */
 	peer: string | null | undefined;
 	cookie: string | null | undefined;
@@ -197,25 +335,37 @@ export type NetworkKeyVerdict =
 	/** No key: `page` for a page load (HTML), else JSON (or plain text for an upgrade). */
 	| { kind: "refuse"; page: boolean };
 
-/** Whether a request may be answered, for a session whose guard is on. */
+/** Whether a request may be answered, for a session whose guard is on. Never throws: anything unexpected is refused. */
 export function networkKeyVerdict(req: NetworkKeyRequest, key: string): NetworkKeyVerdict {
-	if (isThisMachinePeer(req.peer)) return { kind: "pass" };
-	let url: URL;
 	try {
-		url = new URL(req.url, "http://session.invalid");
+		return verdictOf(req, key);
 	} catch {
 		return { kind: "refuse", page: false };
 	}
-	if (url.pathname.startsWith(CAPABILITY_PATH_PREFIX)) return { kind: "pass" };
+}
+
+function verdictOf(req: NetworkKeyRequest, key: string): NetworkKeyVerdict {
+	if (isThisMachinePeer(testRule?.peer ?? req.peer)) return { kind: "pass" };
+	if (req.pathname.startsWith(CAPABILITY_PATH_PREFIX)) return { kind: "pass" };
 	if (matchesNetworkKey(readCookie(req.cookie, networkKeyCookieName(key)), key)) return { kind: "pass" };
 	const page = isPageLoad(req);
-	if (url.searchParams.getAll(NETWORK_KEY_PARAM).some((value) => matchesNetworkKey(value, key))) {
+	const params = new URLSearchParams(req.search);
+	if (params.getAll(NETWORK_KEY_PARAM).some((value) => matchesNetworkKey(value, key))) {
 		if (!page) return { kind: "pass" };
-		url.searchParams.delete(NETWORK_KEY_PARAM);
-		const location = `${url.pathname}${url.search}`;
-		return { kind: "keep", location, setCookie: networkKeySetCookie(key) };
+		params.delete(NETWORK_KEY_PARAM);
+		const query = params.toString();
+		return { kind: "keep", location: `${sameOriginPath(req.pathname)}${query ? `?${query}` : ""}`, setCookie: networkKeySetCookie(key) };
 	}
 	return { kind: "refuse", page };
+}
+
+/**
+ * A path that stays on this origin as a `Location`: exactly one leading `/`
+ * (a path like `//evil.example/` or `/\evil.example/` would send the browser
+ * to another host).
+ */
+function sameOriginPath(pathname: string): string {
+	return `/${pathname.replace(/^[/\\]+/, "")}`;
 }
 
 function isPageLoad(req: NetworkKeyRequest): boolean {
@@ -235,7 +385,8 @@ export const NETWORK_KEY_REFUSAL_HTML = [
 	"<style>body{font:15px/1.5 system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 1.5rem;color:#222}h1{font-size:1.15rem;margin:0 0 .75rem}p{margin:.25rem 0;color:#555}@media (prefers-color-scheme:dark){body{background:#111;color:#eee}p{color:#aaa}}</style>",
 	"</head><body>",
 	"<h1>This review needs its link</h1>",
-	"<p>Open the “From another computer” link Plannotator printed</p>",
+	"<p>On that machine, run: <code>plannotator sessions</code></p>",
+	"<p>Then open its “From another computer” link</p>",
 	"<p>Or open it through a forwarded port</p>",
 	"</body></html>",
 	"",
@@ -246,7 +397,7 @@ export function networkKeyRefusalBody(): { ok: false; code: string; error: strin
 	return {
 		ok: false,
 		code: NETWORK_KEY_REQUIRED_CODE,
-		error: "This review needs its link. Open the link Plannotator printed, or a forwarded port.",
+		error: "This review needs its link. On that machine, run: plannotator sessions",
 	};
 }
 
@@ -296,10 +447,16 @@ export function sshServerAddress(sshConnection: string | undefined): string | nu
 	return address;
 }
 
-/** The ready-made link for a browser on another computer, or null when the address is not known. */
-export function anotherComputerUrl(port: number, sshConnection: string | undefined, key: string): string | null {
+/** Where a browser on another computer opens this port (no key), or null when the address is not known. */
+export function anotherComputerBaseUrl(port: number, sshConnection: string | undefined): string | null {
 	const address = sshServerAddress(sshConnection);
 	if (!address) return null;
 	const host = address.includes(":") ? `[${address}]` : address;
-	return withNetworkKey(`http://${host}:${port}/`, key);
+	return `http://${host}:${port}/`;
+}
+
+/** The ready-made link for a browser on another computer, or null when the address is not known. */
+export function anotherComputerUrl(port: number, sshConnection: string | undefined, key: string): string | null {
+	const base = anotherComputerBaseUrl(port, sshConnection);
+	return base ? withNetworkKey(base, key) : null;
 }

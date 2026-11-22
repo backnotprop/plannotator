@@ -13,7 +13,7 @@ import { defineNetworkKeyScenarios } from "./network-key.scenarios";
 import { startPlannotatorServer } from "./index";
 import { startAnnotateServer } from "./annotate";
 import { startReviewServer } from "./review";
-import { buildAnotherComputerUrl } from "./remote";
+import { buildAnotherComputerUrl, setLoopbackBindForTests } from "./remote";
 import { handleServerReady } from "./shared-handlers";
 import { registerSession, unregisterSession } from "./sessions";
 
@@ -26,7 +26,7 @@ defineNetworkKeyScenarios(
     if (kind === "plan") return startPlannotatorServer({ plan: "# Plan\n\nSteps", origin: "claude-code", htmlContent });
     return startAnnotateServer({ markdown: "# Notes\n", filePath: docPath, htmlContent, mode: "annotate" });
   },
-  { setThisMachineForTests, resetNetworkKeysForTests, networkKeyCookieName },
+  { setThisMachineForTests, setLoopbackBindForTests, resetNetworkKeysForTests, networkKeyCookieName },
 );
 
 describe("bun: where the keyed link goes", () => {
@@ -124,5 +124,28 @@ describe("bun: where the keyed link goes", () => {
     } finally {
       unregisterSession();
     }
+  });
+
+  test("the registry says where another computer opens a session that asks for the key, never the key itself", () => {
+    const entry = (url: string) => {
+      registerSession({ pid: process.pid, port: 19432, url, mode: "plan", project: "p", startedAt: new Date().toISOString(), label: "x" });
+      try {
+        return readFileSync(join(dataDir, "sessions", `${process.pid}.json`), "utf8");
+      } finally {
+        unregisterSession();
+      }
+    };
+    isolate();
+    // The default localhost URL: the SSH connection's own address.
+    let body = entry("http://localhost:19432");
+    expect(JSON.parse(body).anotherComputerUrl).toBe("http://10.0.0.1:19432/");
+    expect(body).not.toContain("key=");
+    // The address is not this machine's any more: known to ask for the key, address unknown.
+    setThisMachineForTests({ addresses: ["10.0.0.7"] });
+    expect(JSON.parse(entry("http://localhost:19432")).anotherComputerUrl).toBe("");
+    // Outside an SSH-only session nothing is added.
+    environment.restore();
+    isolate(false);
+    expect(JSON.parse(entry("http://devbox:19432")).anotherComputerUrl).toBeUndefined();
   });
 });

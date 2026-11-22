@@ -5,6 +5,7 @@
  */
 import { networkKeyCookieName, resetNetworkKeysForTests, setThisMachineForTests } from "../generated/network-key.ts";
 import { defineNetworkKeyScenarios } from "../../../packages/server/network-key.scenarios.ts";
+import { setLoopbackBindForTests } from "./network.ts";
 import { startAnnotateServer } from "./serverAnnotate.ts";
 import { startPlanReviewServer } from "./serverPlan.ts";
 import { startReviewServer } from "./serverReview.ts";
@@ -18,7 +19,7 @@ defineNetworkKeyScenarios(
 		if (kind === "plan") return startPlanReviewServer({ plan: "# Plan\n\nSteps", htmlContent, origin: "pi" });
 		return startAnnotateServer({ markdown: "# Notes\n", filePath: docPath, htmlContent, mode: "annotate" });
 	},
-	{ setThisMachineForTests, resetNetworkKeysForTests, networkKeyCookieName },
+	{ setThisMachineForTests, setLoopbackBindForTests, resetNetworkKeysForTests, networkKeyCookieName },
 	// Bun's node:http emulation relays no upgrade bytes: network-key-guard.test.ts covers upgrades.
 	{ upgrades: false },
 );

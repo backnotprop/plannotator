@@ -3,7 +3,7 @@
  * binary's, marked as in OpenCode, and drops one whose server has stopped.
  */
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { registerInProcessSession } from "@plannotator/server/sessions";
@@ -53,4 +53,20 @@ test("an OpenCode server is listed while it runs and dropped once it stops", asy
   }
   expect(sessions("--json").stdout.toString().trim()).toBe("[]");
   expect(readdirSync(join(dataDir, "sessions", "opencode"))).toEqual([]);
+}, 30_000);
+
+test("over SSH, piped output never carries this machine's network key (only a person's terminal gets the link)", () => {
+  dataDir = mkdtempSync(join(tmpdir(), "plannotator-sessions-cli-"));
+  process.env.PLANNOTATOR_DATA_DIR = dataDir;
+  const key = "K".repeat(43);
+  writeFileSync(join(dataDir, "network-key"), `${key}\n`, { mode: 0o600 });
+  mkdirSync(join(dataDir, "sessions"), { recursive: true });
+  const entry = { pid: process.pid, port: 19432, url: "http://localhost:19432", mode: "plan", project: "p", startedAt: new Date().toISOString(), label: "x", anotherComputerUrl: "http://10.0.0.1:19432/" };
+  writeFileSync(join(dataDir, "sessions", `${process.pid}.json`), JSON.stringify(entry));
+  const table = sessions();
+  expect(table.stderr.toString()).toContain("http://localhost:19432");
+  expect(`${table.stdout}${table.stderr}`).not.toContain(key);
+  const json = sessions("--json");
+  expect(JSON.parse(json.stdout.toString())).toMatchObject([{ index: 1, port: 19432 }]);
+  expect(`${json.stdout}${json.stderr}`).not.toContain(key);
 }, 30_000);

@@ -146,7 +146,7 @@ import { allowIgnoredLine } from "@plannotator/shared/inbox/tailnet-refusal";
 import { planReviewEnvFor, scrubModSessionEnv } from "./mod-session-env";
 import { resolveAnnotateTarget } from "./annotate-resolution";
 import { annotateDecisionTarget, reviewDecisionTarget, takeHostReviewId, targetText } from "./decision-target";
-import { formatSessionsJson, formatSessionsTable } from "./sessions-output";
+import { formatSessionsJson, formatSessionsTable, isPersonAtTerminal } from "./sessions-output";
 import {
   annotateContextLine,
   annotateHostResult,
@@ -196,6 +196,7 @@ import { registerSession, unregisterSession, listSessions, listInProcessSessions
 import { enableAutoUpdateNotice, isManagedBinary, scheduleAutoUpdateCheck } from "@plannotator/server/auto-update";
 import { openBrowser, openBrowserDetached } from "@plannotator/server/browser";
 import { withAdvertisedNetworkKey } from "@plannotator/server/remote";
+import { loadNetworkKey } from "@plannotator/shared/network-key";
 import { inlineHtmlLocalAssets } from "@plannotator/server/html-assets";
 import { installAgentTerminalRuntime } from "@plannotator/server/agent-terminal-runtime";
 import { installCallFlowRuntime } from "@plannotator/shared/call-flow";
@@ -1418,8 +1419,14 @@ if (args[0] === "sessions") {
   }
 
   // List sessions as a table (stderr, as before): mode, pn- id, project,
-  // url, age and the FULL target, so same-named files are told apart.
-  console.error(formatSessionsTable(sessions));
+  // url, age and the FULL target, so same-named files are told apart. Over
+  // SSH, a person at a terminal also gets each session's link for another
+  // computer, with the key (sessions-output.ts); a pipe or an agent never does.
+  const networkKey = sessions.some((s) => s.anotherComputerUrl !== undefined)
+    && isPersonAtTerminal(process.stdout.isTTY, process.stderr.isTTY, process.env)
+    ? loadNetworkKey(getPlannotatorDataDir())
+    : undefined;
+  console.error(formatSessionsTable(sessions, Date.now(), networkKey));
   process.exit(0);
 
 } else if (args[0] === "setup-goal") {

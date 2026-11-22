@@ -73,9 +73,11 @@ test("over SSH, an upgrade from another computer needs the key; this machine's d
 	const key = loadNetworkKey(dataDir);
 
 	await upgrade(port, { "x-case": "this-machine" });
-	setThisMachineForTests({ addresses: [], loopback: false });
+	setThisMachineForTests({ addresses: ["10.0.0.1"], peer: "203.0.113.7" });
 	await upgrade(port, { "x-case": "no-key" });
 	await upgrade(port, { "x-case": "wrong", cookie: `${networkKeyCookieName(key)}=${"A".repeat(43)}` });
+	// The key's length in characters, not in bytes (a raw latin1 byte): refused, never thrown.
+	await upgrade(port, { "x-case": "non-ascii", cookie: `${networkKeyCookieName(key)}=${"A".repeat(42)}\xe9` });
 	await upgrade(port, { "x-case": "cookie", cookie: `${networkKeyCookieName(key)}=${key}` });
 	expect(reached).toEqual(["this-machine", "cookie"]);
 });
@@ -96,7 +98,29 @@ test("PLANNOTATOR_REMOTE=1 leaves upgrades alone", async () => {
 		socket.end("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n");
 	});
 	await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
-	setThisMachineForTests({ addresses: [], loopback: false });
+	setThisMachineForTests({ addresses: ["10.0.0.1"], peer: "203.0.113.7" });
 	await upgrade((server.address() as AddressInfo).port);
 	expect(reached).toEqual(["reached"]);
+});
+
+test("a refused upgrade never throws where node:http emits it (a throw there takes the process down)", () => {
+	delete process.env.PLANNOTATOR_REMOTE;
+	process.env.SSH_CONNECTION = "10.0.0.2 51000 10.0.0.1 22";
+	const dataDir = mkdtempSync(join(tmpdir(), "plannotator-pi-network-key-"));
+	process.env.PLANNOTATOR_DATA_DIR = dataDir;
+	const guard = createNetworkKeyGuard();
+	const plain = createServer();
+	guard.attach(plain);
+	const reached: string[] = [];
+	plain.on("upgrade", () => reached.push("reached"));
+	setThisMachineForTests({ addresses: ["10.0.0.1"], peer: "203.0.113.7" });
+	const key = loadNetworkKey(dataDir);
+	for (const value of [`${"A".repeat(42)}\xe9`, `${"A".repeat(42)}é`, `${"A".repeat(41)}😀`]) {
+		const written: string[] = [];
+		const socket = { end: (chunk: string) => written.push(chunk), destroy: () => {} };
+		const req = { method: "GET", url: "/api/agent-terminal/ws", headers: { cookie: `${networkKeyCookieName(key)}=${value}`, upgrade: "websocket" }, socket: { remoteAddress: "203.0.113.7" } };
+		expect(() => plain.emit("upgrade", req, socket, Buffer.alloc(0))).not.toThrow();
+		expect(written.join("")).toStartWith("HTTP/1.1 401 ");
+	}
+	expect(reached).toEqual([]);
 });

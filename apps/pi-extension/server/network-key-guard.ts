@@ -18,6 +18,7 @@ import {
 	networkKeyVerdict,
 	type NetworkKeyVerdict,
 } from "../generated/network-key.ts";
+import { requestUrl } from "./helpers.ts";
 import { isSshDetectedRemote } from "./network.ts";
 
 export interface PiNetworkKeyGuard {
@@ -36,11 +37,19 @@ function header(req: IncomingMessage, name: string): string | undefined {
 export function createNetworkKeyGuard(): PiNetworkKeyGuard {
 	if (!isSshDetectedRemote()) return { refuse: () => false, attach: () => {} };
 	const key = loadNetworkKey(getPlannotatorDataDir());
-	const verdictOf = (req: IncomingMessage, upgrade: boolean): NetworkKeyVerdict =>
-		networkKeyVerdict(
+	const verdictOf = (req: IncomingMessage, upgrade: boolean): NetworkKeyVerdict => {
+		// Parsed once, exactly as the routes parse it (helpers.ts requestUrl).
+		let url: URL;
+		try {
+			url = requestUrl(req);
+		} catch {
+			return { kind: "refuse", page: false };
+		}
+		return networkKeyVerdict(
 			{
 				method: req.method ?? "GET",
-				url: req.url ?? "/",
+				pathname: url.pathname,
+				search: url.search,
 				peer: req.socket?.remoteAddress,
 				cookie: header(req, "cookie"),
 				secFetchDest: header(req, "sec-fetch-dest"),
@@ -49,6 +58,7 @@ export function createNetworkKeyGuard(): PiNetworkKeyGuard {
 			},
 			key,
 		);
+	};
 	return {
 		attach(server) {
 			// node:http hands an upgrade to EVERY `upgrade` listener, so intercept
