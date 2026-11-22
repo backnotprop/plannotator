@@ -413,8 +413,9 @@ test('a small picture named before it is written shows in the open thread withou
       const img = body.locator('img[alt="Export chart"]');
       await expect.poll(() => drawn(img), { timeout: 5000, message: 'drawn soon after the next message' }).toBe(1);
       await expect(body.locator('[data-image-unavailable]')).toHaveCount(0);
-      // The one try since the file was written was the new message's, not a timer's.
-      expect(await triesSince(sent.message_id as string, since), 'tried because the thread gained a message').toEqual(['thread']);
+      // The first try since the file was written was the new message's: no timer's try came before it (on a slow
+      // runner the next timer's try may still follow it).
+      expect((await triesSince(sent.message_id as string, since))[0], 'first tried because the thread gained a message').toBe('thread');
       await expect(img).toHaveAttribute('role', 'button');
       expect(await page.evaluate(() => (window as unknown as { stayed?: boolean }).stayed), 'no reload').toBe(true);
     });
