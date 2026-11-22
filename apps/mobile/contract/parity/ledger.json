@@ -14144,7 +14144,31 @@
     {
       "id": "foundation-102",
       "title": "Phone app: New message to an agent, live sessions, compose (sessions, messages, `messages/:id/to`), skill catalog",
-      "surface": [],
+      "surface": [
+        "field:DoorComposeAnswer.message",
+        "field:DoorComposeAnswer.project",
+        "field:DoorComposeAnswer.replayed",
+        "field:DoorComposeAnswer.thread_id",
+        "field:DoorComposeBody.body",
+        "field:DoorComposeBody.idempotency_key",
+        "field:DoorComposeBody.to",
+        "field:DoorComposeBody.uploads",
+        "field:DoorSessionsAnswer.machine",
+        "field:DoorSessionsAnswer.projects",
+        "field:DoorSessionsAnswer.serverSession",
+        "field:InboxComposeProject.project",
+        "field:InboxComposeProject.sessions",
+        "field:InboxComposeSession.busy",
+        "field:InboxComposeSession.host",
+        "field:InboxComposeSession.idle_since",
+        "field:InboxComposeSession.label",
+        "field:InboxComposeSession.last_seen_at",
+        "field:InboxComposeSession.last_thread",
+        "field:InboxComposeSession.place",
+        "field:InboxComposeSession.root",
+        "field:InboxComposeSession.session",
+        "field:InboxComposeSession.started_at"
+      ],
       "flows": [],
       "mobile": "v1",
       "why": "native compose sheet",
@@ -14168,7 +14192,9 @@
     {
       "id": "foundation-104",
       "title": "Phone app: upload files",
-      "surface": [],
+      "surface": [
+        "field:DoorUploadAnswer.upload"
+      ],
       "flows": [],
       "mobile": "v1",
       "why": "photo picker, files, camera",

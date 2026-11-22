@@ -100,8 +100,9 @@ struct Readable<Value: Decodable>: Decodable {
 public struct HeldWrite: Codable, Hashable, Sendable, Identifiable {
   /// `state`: a thread action (ThreadAct): archive, read, star, snooze, priority and their reverses.
   /// `annotation`: a comment on a file, saved or changed; `annotationRemove`: one removed; `markup`: a drawing on a
-  /// picture, kept on the computer before the comment that names it (FileCommentsSession.swift).
-  public enum Kind: String, Codable, Sendable { case pick, reply, seen, action, state, annotation, annotationRemove, markup }
+  /// picture, kept on the computer before the comment that names it (FileCommentsSession.swift). `compose`: a new
+  /// message (`POST messages`), its `thread` a stand-in name until the computer makes the thread (Compose.swift).
+  public enum Kind: String, Codable, Sendable { case pick, reply, seen, action, state, annotation, annotationRemove, markup, compose }
 
   /// The idempotency key.
   public var id: String
@@ -134,4 +135,8 @@ public struct HeldWrite: Codable, Hashable, Sendable, Identifiable {
   public var subject: String?
   /// True once this write was sent and no definite answer came back: the computer may have it.
   public var mayHaveArrived: Bool?
+  /// A reply's or a new message's files: handed back to the draft with the words if the computer refuses it.
+  public var files: [DraftFile]?
+  /// The quote a reply carries: handed back with its words.
+  public var quote: DraftQuote?
 }

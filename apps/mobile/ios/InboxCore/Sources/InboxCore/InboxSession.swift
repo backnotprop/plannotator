@@ -227,6 +227,7 @@ public final class InboxSession {
   /// The computer answers: send what waited, then read what it has now.
   private func resume() async {
     await flush()
+    await uploadWaitingFiles()
     await readList()
     for id in threads.keys { await readThread(id) }
     listen()
@@ -347,7 +348,7 @@ public final class InboxSession {
   }
 
   /// What a refusal says about the pairing itself.
-  private func note(_ failure: DoorFailure) {
+  func note(_ failure: DoorFailure) {
     switch failure {
     case .appNeedsUpdate: standing = .appNeedsUpdate
     // Only a door that says the device is revoked, or that it does not know the token, has removed this phone.
@@ -583,6 +584,9 @@ public final class InboxSession {
         returned[thread] = [returned[thread], words].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n\n")
       }
       keepGivenBack()
+      returnToDraft(write)
+    case .compose:
+      composeGivenBack(write, notice)
     case .seen:
       break
     case .state:
@@ -845,7 +849,7 @@ public final class InboxSession {
         settle(write.id)
       }
       // Show what the computer has now, beside the refusal.
-      if write.kind != .seen, write.kind != .state { await readThread(ThreadID(write.thread)) }
+      if write.kind != .seen, write.kind != .state, write.kind != .compose { await readThread(ThreadID(write.thread)) }
       // A refused Send that carried comments: the computer's list of them is read again (the window may have sent or
       // removed some), and a comment it does not have is held back from the next Send.
       if write.kind == .reply, case .refused(_, let error) = failure { await rereadAfterRefusedSend(write, notice: .refused(error.error, code: error.code)) }
@@ -885,6 +889,7 @@ public final class InboxSession {
       copy.saveThread(model)
     case .reply:
       commentsSent(write)
+      releaseBytes(write.files ?? [])
       if let result = try? JSONDecoder().decode(ReplyResult.self, from: answer.body), let read = result.threadRead { take(read) }
     case .seen:
       break
@@ -896,6 +901,8 @@ public final class InboxSession {
       commentRemoved(write)
     case .markup:
       drawingKept(write, answer)
+    case .compose:
+      composeSent(write, answer)
     }
   }
 
@@ -915,7 +922,7 @@ public final class InboxSession {
         }
         body.questions = questions
         held[index].body = encode(body)
-      case .seen, .action, .state, .annotation, .annotationRemove, .markup:
+      case .seen, .action, .state, .annotation, .annotationRemove, .markup, .compose:
         break
       }
     }
@@ -1136,7 +1143,9 @@ public final class InboxSession {
   /// Send: every saved pick in the thread, one reply per agent session, the words riding the last.
   /// False when there was nothing to send or nowhere to send it.
   @discardableResult
-  public func send(thread id: ThreadID, words: String, pastGuard: Bool = false, clearDraft: String? = nil) async -> Bool {
+  /// `files`: what the reply box holds, each on the computer already (`DraftFiles.uploads`). `quote`: the message the
+  /// words quote. Both ride the reply that carries the words.
+  public func send(thread id: ThreadID, words: String, pastGuard: Bool = false, clearDraft: String? = nil, files: [DraftFile] = [], quote: DraftQuote? = nil) async -> Bool {
     // A pick of theirs was replaced before it went: nothing is sent until the person chooses.
     if !(stale[id] ?? []).isEmpty, !pastGuard {
       stopped.insert(id)
@@ -1146,18 +1155,21 @@ public final class InboxSession {
     stopped.remove(id)
     guard let model = thread(id), !sending.contains(id), !SendPlan.needsComputer(model.thread), offers(DoorRoutes.postMessageReply) || skew == nil else { return false }
     let text = words.trimmingCharacters(in: .whitespacesAndNewlines)
+    // A file not on the computer yet holds the Send (the window's "Wait for the files to finish uploading.").
+    guard let uploads = DraftFiles.uploads(files) else { return false }
+    let carried = DraftFiles.carried(files)
     let targets = SendPlan.targets(in: model.thread)
     // Comments whose drawing cannot reach the computer now (away from its network): no Send carries them, and none
     // waits for them. They stay in the list, marked, and each goes by itself once its drawing is there.
     let owing = commentsToOwe(id)
-    guard !targets.isEmpty, !text.isEmpty || !commentsToSend(id).isEmpty || !owing.isEmpty || targets.contains(where: { !$0.questions.isEmpty || !$0.actions.isEmpty }) else { return false }
+    guard !targets.isEmpty, !text.isEmpty || !uploads.isEmpty || !commentsToSend(id).isEmpty || !owing.isEmpty || targets.contains(where: { !$0.questions.isEmpty || !$0.actions.isEmpty }) else { return false }
     sending.insert(id)
     defer { sending.remove(id) }
     // The comments on files that wait: they ride the last reply, with the words (the window's `routeSendAnnotations`).
     // The words are in the outbox before anything is awaited: the texts the comments' lines are read from come after.
     let riding = commentsToSend(id)
     let needsTexts = needsFeedbackTexts(id, for: riding)
-    guard !text.isEmpty || !riding.isEmpty || !owing.isEmpty || targets.contains(where: { !$0.questions.isEmpty || !$0.actions.isEmpty }) else { return false }
+    guard !text.isEmpty || !uploads.isEmpty || !riding.isEmpty || !owing.isEmpty || targets.contains(where: { !$0.questions.isEmpty || !$0.actions.isEmpty }) else { return false }
     notices[id] = nil
     returned[id] = nil
     keepGivenBack()
@@ -1169,11 +1181,11 @@ public final class InboxSession {
       keepComments()
     }
     // Only such comments: nothing is sent now, and nothing waits in the outbox.
-    if text.isEmpty, riding.isEmpty, !targets.contains(where: { !$0.questions.isEmpty || !$0.actions.isEmpty }) { return true }
+    if text.isEmpty, uploads.isEmpty, riding.isEmpty, !targets.contains(where: { !$0.questions.isEmpty || !$0.actions.isEmpty }) { return true }
     // A reply with neither an answer nor words is never made: the Inbox refuses one ("write a reply or send at
     // least one answer"). So with no words, the agent that wrote last and asked nothing gets no reply.
     var carrier: String?
-    let carrying = targets.enumerated().filter { index, target in !target.questions.isEmpty || !target.actions.isEmpty || (index == targets.count - 1 && (!text.isEmpty || !riding.isEmpty)) }.map(\.element)
+    let carrying = targets.enumerated().filter { index, target in !target.questions.isEmpty || !target.actions.isEmpty || (index == targets.count - 1 && (!text.isEmpty || !uploads.isEmpty || !riding.isEmpty)) }.map(\.element)
     for (index, target) in carrying.enumerated() {
       let last = index == carrying.count - 1
       let key = UUID().uuidString
@@ -1182,15 +1194,26 @@ public final class InboxSession {
       var body = DoorReplyBody(idempotencyKey: key, words: words, questions: target.questions, actions: target.actions.isEmpty ? nil : target.actions, withThread: last ? true : nil)
       // The computer's draft these words came from goes when they are sent (the door forwards `clear_draft`).
       if !words.isEmpty, let clearDraft { body.clearDraft = clearDraft }
+      // The files and the quote ride the reply that carries the words (the last one).
+      let carries = target.message == targets.last?.message
+      if carries, !uploads.isEmpty { body.uploads = uploads }
+      if carries, let quote, let quoted = model.thread.messages.first(where: { $0.id == quote.of }) {
+        body.quote = DoorReplyBodyQuote(of: quote.of.rawValue, words: quote.words, time: TimeWords().when(quoted.createdAt))
+      }
       if last, !riding.isEmpty {
         body.feedback = feedback(riding, thread: id)
         body.annotationIds = riding.map(\.id)
         carrier = key
       }
       enqueue(kind: .reply, thread: id, message: target.message, request: Door.postMessageReply(message: target.message), body: encode(body), key: key, words: words.isEmpty ? nil : words)
+      if carries, !carried.isEmpty || body.quote != nil, let index = held.firstIndex(where: { $0.id == key }) {
+        held[index].files = carried.isEmpty ? nil : carried
+        held[index].quote = body.quote == nil ? nil : quote
+        copy.saveOutbox(held)
+      }
     }
-    // The words are in the outbox now: the thread's draft on the phone is spent.
-    if !text.isEmpty { forgetDraft(id) }
+    // The words and files are in the outbox now: what they spent of the thread's draft on the phone goes.
+    if !text.isEmpty || !carried.isEmpty { forgetDraft(id, words: text, files: carried) }
     // The texts the comments' lines are read from, fetched now when the phone does not keep them (as the window
     // reads them at Send), for a short while at most; the feedback is then written again with them. A comment whose
     // text did not come goes with its quote and no line.
@@ -1206,9 +1229,11 @@ public final class InboxSession {
   }
 
   /// Whether Send has anything to carry for this thread.
-  public func canSend(thread id: ThreadID, words: String) -> Bool {
+  public func canSend(thread id: ThreadID, words: String, files: [DraftFile] = []) -> Bool {
     guard standing == .ok, let model = thread(id), offers(DoorRoutes.postMessageReply) || skew == nil, !SendPlan.needsComputer(model.thread) else { return false }
-    return (SendPlan.hasSomethingToSend(thread: model.thread, words: words) || !commentsToSend(id).isEmpty || !commentsToOwe(id).isEmpty) && !SendPlan.targets(in: model.thread).isEmpty
+    // A file still on its way holds the Send; one on the computer is something to send.
+    guard let uploads = DraftFiles.uploads(files) else { return false }
+    return (SendPlan.hasSomethingToSend(thread: model.thread, words: words) || !uploads.isEmpty || !commentsToSend(id).isEmpty || !commentsToOwe(id).isEmpty) && !SendPlan.targets(in: model.thread).isEmpty
   }
 
   public func canAnswer() -> Bool { standing == .ok && (skew == nil || offers(DoorRoutes.postMessagePicks)) }

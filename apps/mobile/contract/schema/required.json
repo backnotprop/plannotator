@@ -32,6 +32,25 @@
     "DoorAnnotationRemoveBody": [
       "idempotency_key"
     ],
+    "DoorComposeAnswer": [
+      "message",
+      "project",
+      "replayed",
+      "thread_id"
+    ],
+    "DoorComposeAnswerProject": [
+      "id",
+      "name",
+      "root"
+    ],
+    "DoorComposeBody": [
+      "body",
+      "idempotency_key",
+      "to"
+    ],
+    "DoorComposeBodyTo": [
+      "session"
+    ],
     "DoorError": [
       "code",
       "error"
@@ -149,6 +168,10 @@
     "DoorSeenBody": [
       "idempotency_key"
     ],
+    "DoorSessionsAnswer": [
+      "projects",
+      "serverSession"
+    ],
     "DoorSnoozeAnswer": [
       "snoozed"
     ],
@@ -163,6 +186,9 @@
     "DoorThreadDraftAnswer": [
       "draft",
       "serverSession"
+    ],
+    "DoorUploadAnswer": [
+      "upload"
     ],
     "InboxAck": [
       "at",
@@ -288,6 +314,29 @@
       "at",
       "name",
       "state"
+    ],
+    "InboxComposeProject": [
+      "project",
+      "sessions"
+    ],
+    "InboxComposeProjectProject": [
+      "id",
+      "name",
+      "root"
+    ],
+    "InboxComposeSession": [
+      "busy",
+      "host",
+      "idle_since",
+      "last_seen_at",
+      "last_thread",
+      "session",
+      "started_at"
+    ],
+    "InboxComposeSessionLastThread": [
+      "at",
+      "id",
+      "subject"
     ],
     "InboxDelivery": [
       "at",

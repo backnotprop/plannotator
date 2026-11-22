@@ -9,11 +9,32 @@ public struct LocalDraft: Codable, Hashable, Sendable {
   public var editedAt: Date
   /// The computer's draft these words started from (its `updated_at`), when they did.
   public var base: String?
+  /// Files attached to the reply, kept on the phone with the words (DraftFiles.swift).
+  public var files: [DraftFile]?
+  /// The message the reply quotes.
+  public var quote: DraftQuote?
 
-  public init(words: String, editedAt: Date, base: String? = nil) {
+  public init(words: String, editedAt: Date, base: String? = nil, files: [DraftFile]? = nil, quote: DraftQuote? = nil) {
     self.words = words
     self.editedAt = editedAt
     self.base = base
+    self.files = files
+    self.quote = quote
+  }
+
+  /// Nothing the person made is in it: it is not kept.
+  public var isEmpty: Bool { words.isEmpty && (files ?? []).isEmpty && quote == nil }
+}
+
+/// The message a reply quotes (the window's `quote`, approval "inbox-reply-quote"): the whole message, or the words
+/// selected in it.
+public struct DraftQuote: Codable, Hashable, Sendable {
+  public var of: MessageID
+  public var words: String?
+
+  public init(of: MessageID, words: String? = nil) {
+    self.of = of
+    self.words = words
   }
 }
 
@@ -72,6 +93,17 @@ public enum DraftSync {
 
 struct DraftBook {
   var local: [ThreadID: LocalDraft] = [:]
+  /// The new message being written (Compose.swift).
+  var compose: ComposeDraft?
+  /// The live agent sessions as last read, for New message's To.
+  var sessions: SessionsRead = .unread
+  /// Files on their way to the computer now, and files the way in use cannot carry (the relay takes no uploads).
+  var uploading: Set<String> = []
+  var needsNetwork: Set<String> = []
+  /// New messages the computer wrote, by Send key, until the Send that made them reads it.
+  var sent: [String: ThreadID] = [:]
+  /// Attached files' bytes when the phone keeps no copy (the demo).
+  var memory: [String: Data] = [:]
   /// The computer's draft as last read, per thread (nil entry: read, and there was none).
   var computer: [ThreadID: InboxReplyDraft?] = [:]
   /// The computer's draft the open reply box started from.
@@ -84,12 +116,15 @@ private struct KeptDrafts: Codable {
 }
 
 extension LocalCopy {
-  func saveDrafts(local: [ThreadID: LocalDraft], computer: [ThreadID: InboxReplyDraft?]) {
+  func saveDrafts(local: [ThreadID: LocalDraft], computer: [ThreadID: InboxReplyDraft?], compose: ComposeDraft? = nil) {
     let kept = KeptDrafts(
       local: Dictionary(uniqueKeysWithValues: local.map { ($0.key.rawValue, $0.value) }),
       computer: Dictionary(uniqueKeysWithValues: computer.compactMap { key, value in value.map { (key.rawValue, $0) } }))
     if let data = try? JSONEncoder().encode(kept) { write(data, to: "drafts.json") }
+    if let data = try? JSONEncoder().encode(compose) { write(data, to: "compose.json") }
   }
+
+  func composeDraft() -> ComposeDraft? { read("compose.json").flatMap { try? JSONDecoder().decode(ComposeDraft?.self, from: $0) } ?? nil }
 
   func drafts() -> (local: [ThreadID: LocalDraft], computer: [ThreadID: InboxReplyDraft]) {
     guard let data = read("drafts.json"), let kept = try? JSONDecoder().decode(KeptDrafts.self, from: data) else { return ([:], [:]) }
@@ -114,9 +149,11 @@ extension InboxSession {
     let kept = copy.drafts()
     draftBook.local = kept.local
     draftBook.computer = kept.computer.mapValues { Optional($0) }
+    draftBook.compose = copy.composeDraft()
+    if let sessions = copy.keptSessions() { draftBook.sessions = .kept(sessions) }
   }
 
-  private func keepDrafts() { copy.saveDrafts(local: draftBook.local, computer: draftBook.computer) }
+  func keepDrafts() { copy.saveDrafts(local: draftBook.local, computer: draftBook.computer, compose: draftBook.compose) }
 
   /// The words kept on the phone for a thread.
   public func draft(_ thread: ThreadID) -> LocalDraft? { draftBook.local[thread] }
@@ -124,22 +161,51 @@ extension InboxSession {
   /// The computer's reply draft for a thread as last read (the window's), if it has one.
   public func computerDraft(_ thread: ThreadID) -> InboxReplyDraft? { draftBook.computer[thread] ?? nil }
 
-  /// Keep what the person typed, at once. Empty words remove the draft.
+  /// Keep what the person typed, at once, with the files and quote already in the draft. A draft left with no
+  /// words, no file and no quote is not kept.
   public func keepDraft(_ thread: ThreadID, words: String, now: Date = Date()) {
-    if words.isEmpty {
-      draftBook.local[thread] = nil
-    } else {
-      draftBook.local[thread] = LocalDraft(words: words, editedAt: now, base: draftBook.base[thread])
-    }
+    if let kept = draftBook.local[thread], kept.words == words { return }
+    if words.isEmpty, draftBook.local[thread] == nil { return }
+    changeDraft(thread, now: now) { $0.words = words }
+  }
+
+  /// Change a thread's draft on the phone and keep it at once.
+  func changeDraft(_ thread: ThreadID, now: Date? = nil, _ change: (inout LocalDraft) -> Void) {
+    var draft = draftBook.local[thread] ?? LocalDraft(words: "", editedAt: now ?? clock.now())
+    change(&draft)
+    if let now { draft.editedAt = now }
+    draft.base = draftBook.base[thread]
+    if draft.files?.isEmpty == true { draft.files = nil }
+    draftBook.local[thread] = draft.isEmpty ? nil : draft
     keepDrafts()
   }
 
-  /// The words are sent (or put in the outbox): the thread's draft on the phone is spent.
-  func forgetDraft(_ thread: ThreadID) {
-    guard draftBook.local[thread] != nil || draftBook.base[thread] != nil else { return }
-    draftBook.local[thread] = nil
+  /// Quote a message in the thread's reply (nil takes the quote away).
+  public func setQuote(_ thread: ThreadID, _ quote: DraftQuote?) { changeDraft(thread) { $0.quote = quote } }
+
+  /// What a Send carried is spent: the words, the quote and the files it took. Words typed after them stay.
+  func forgetDraft(_ thread: ThreadID, words sent: String, files: [DraftFile]) {
+    guard var draft = draftBook.local[thread] else {
+      draftBook.base[thread] = nil
+      return
+    }
+    if draft.words.trimmingCharacters(in: .whitespacesAndNewlines) == sent { draft.words = "" }
+    if !sent.isEmpty { draft.quote = nil }
+    let gone = Set(files.map(\.id))
+    draft.files = draft.files?.filter { !gone.contains($0.id) }
     draftBook.base[thread] = nil
-    keepDrafts()
+    changeDraft(thread) { $0 = draft }
+  }
+
+  /// A Send the computer refused: its files and quote go back into the draft (its words go back through `returned`).
+  func returnToDraft(_ write: HeldWrite) {
+    guard (write.files ?? []).isEmpty == false || write.quote != nil else { return }
+    changeDraft(ThreadID(write.thread)) { draft in
+      let have = Set((draft.files ?? []).map(\.id))
+      // A refused Send may name an upload the computer no longer keeps: each file goes up again before the next Send.
+      draft.files = (write.files ?? []).filter { !have.contains($0.id) }.map(\.again) + (draft.files ?? [])
+      if draft.quote == nil { draft.quote = write.quote }
+    }
   }
 
   /// Read the computer's draft for a thread (`GET threads/:id/draft`) when it answers; the last one read otherwise.
