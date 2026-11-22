@@ -1,75 +1,99 @@
-// An author's colours under Pele (`peleAuthorTheme.ts`). What regresses: a
-// diagram that names a theme or theme variables is drawn in the person's
-// palette instead, a value that could fetch or reach a variable gets into the
-// drawing, a diagram that gives nothing loses the person's palette, or the
-// base theme's derived colours drift from Mermaid's.
+// An author's colours under Pele (`peleAuthorTheme.ts`): only the colours a
+// source spells out. What regresses: a theme name (forest, dark) recolours a
+// diagram away from the person's theme, a typed colour is lost, an author's
+// line or text colour vanishes on the person's page, text in a filled shape
+// stops reading on that fill, a background panel is painted, or a value that
+// could fetch or reach a variable gets into the drawing.
 import { describe, expect, test } from 'bun:test';
-import { parseCssColor } from './cssColor';
-import { deriveBaseColors, MERMAID_THEMES, peleAuthorThemeVariables, readPeleAuthorTheme } from './peleAuthorTheme';
+import { contrastRatio, parseCssColor } from './cssColor';
+import { peleAuthorColors, readPeleAuthorColors } from './peleAuthorTheme';
+import { PELE_LINE_MIN, PELE_TEXT_MIN } from './peleTheme';
 
-const person = { '--pele-bg': '#101010', '--pele-fg': '#eeeeee', '--pele-muted': '#aaaaaa', '--pele-surface': '#202020', '--pele-font': 'Inter' } as const;
+const light = { '--pele-bg': '#ffffff', '--pele-fg': '#1f2328', '--pele-muted': '#59636e', '--pele-line': '#59636e', '--pele-surface': '#f6f8fa', '--pele-surface-alt': '#eaeef2', '--pele-border': '#d1d9e0', '--pele-font': 'Inter' } as const;
+const dark = { '--pele-bg': '#161b22', '--pele-fg': '#e6edf3', '--pele-muted': '#9198a1', '--pele-line': '#9198a1', '--pele-surface': '#21262d', '--pele-surface-alt': '#2d333b', '--pele-border': '#3d444d', '--pele-font': 'Inter' } as const;
+const contrast = (a: string | undefined, b: string | undefined): number => contrastRatio(parseCssColor(a)!, parseCssColor(b)!);
+const BASE = '---\nconfig:\n  theme: base\n  themeVariables:\n    primaryColor: "#ffd6e8"\n    lineColor: "#7a1f4f"\n    primaryTextColor: "#3d0a24"\n---\nflowchart LR\n  A[Charlie Dunn] --> B[Ada Novak]';
 
-describe("reading the author's theme", () => {
-  test('an init directive in any of the forms Mermaid reads, and front matter config', () => {
-    expect(readPeleAuthorTheme("%%{init: {'theme': 'forest'}}%%\nflowchart LR\n  A --> B")).toEqual({ theme: 'forest', themeVariables: {} });
-    expect(readPeleAuthorTheme('%%{ initialize: { "theme": "base", "themeVariables": { "primaryColor": "#ff00aa", } } }%%\nflowchart LR\n  A')).toEqual({
-      theme: 'base',
-      themeVariables: { primaryColor: '#ff00aa' },
-    });
-    expect(readPeleAuthorTheme("%%{init: {theme: 'dark', themeVariables: {lineColor: 'rgb(1, 2, 3)'}}}%%\nflowchart LR\n  A")).toEqual({ theme: 'dark', themeVariables: { lineColor: 'rgb(1, 2, 3)' } });
-    const front = '---\ntitle: Release\nconfig:\n  theme: neutral\n  themeVariables:\n    primaryColor: "#ffcc00"\n    lineColor: navy\n---\nflowchart LR\n  A --> B';
-    expect(readPeleAuthorTheme(front)).toEqual({ theme: 'neutral', themeVariables: { primaryColor: '#ffcc00', lineColor: 'navy' } });
-  });
-
-  test('a source that gives no theme gives nothing, and an unknown theme name is no theme', () => {
-    expect(readPeleAuthorTheme('flowchart LR\n  A --> B')).toBeNull();
-    expect(readPeleAuthorTheme("%%{init: {'flowchart': {'curve': 'basis'}}}%%\nflowchart LR\n  A")).toBeNull();
-    expect(readPeleAuthorTheme("%%{init: {'theme': 'midnight'}}%%\nflowchart LR\n  A")).toBeNull();
-  });
-
-  test('only safe colours: nothing that can fetch, reach a variable or end a declaration; themeCSS is not read', () => {
-    const source =
-      "%%{init: {'theme': 'base', 'themeCSS': '.node rect { fill: url(https://x) }', 'themeVariables': {'primaryColor': 'url(https://x/y.png)', 'lineColor': 'var(--secret)', 'background': 'red; background-image: url(x)', 'mainBkg': '#00ff00', 'fontFamily': 'Comic Sans'}}}%%\nflowchart LR\n  A";
-    expect(readPeleAuthorTheme(source)).toEqual({ theme: 'base', themeVariables: { mainBkg: '#00ff00' } });
+describe('a theme name is ignored', () => {
+  test('forest, dark, neutral, default and base alone change nothing: the person\'s theme, as with no directive', () => {
+    for (const name of ['forest', 'dark', 'neutral', 'default', 'base', 'midnight']) {
+      expect(peleAuthorColors(`%%{init: {'theme': '${name}'}}%%\nflowchart LR\n  A --> B`, light)).toBeNull();
+      expect(peleAuthorColors(`---\nconfig:\n  theme: ${name}\n---\nflowchart LR\n  A --> B`, dark)).toBeNull();
+    }
+    expect(peleAuthorColors('flowchart LR\n  A --> B', light)).toBeNull();
   });
 });
 
-describe("Pele's colours from the author's theme", () => {
-  test("a named theme is Mermaid's colours for it, the person's font kept", () => {
-    const vars = peleAuthorThemeVariables("%%{init: {'theme': 'forest'}}%%\nflowchart LR\n  A", person)!;
-    expect(vars['--pele-surface']).toBe(MERMAID_THEMES.forest.mainBkg);
-    expect(vars['--pele-border']).toBe(MERMAID_THEMES.forest.nodeBorder);
-    expect(vars['--pele-line']).toBe(MERMAID_THEMES.forest.lineColor);
-    expect(vars['--pele-series-3']).toBe(MERMAID_THEMES.forest.cScale2);
-    expect(vars['--pele-font']).toBe('Inter');
+describe('the colours an author spells out', () => {
+  test('are applied over the person\'s palette, with or without theme: base, from a directive or front matter', () => {
+    const viaBase = peleAuthorColors(BASE, light)!;
+    expect(viaBase.vars['--pele-surface']).toBe('#ffd6e8');
+    expect(viaBase.vars['--pele-line']).toBe('#7a1f4f');
+    expect(viaBase.vars['--pele-fg']).toBe('#3d0a24');
+    expect(viaBase.vars['--pele-surface-alt']).toBe(light['--pele-surface-alt']);
+    expect(viaBase.vars['--pele-font']).toBe('Inter');
+    const viaForest = peleAuthorColors("%%{init: {'theme': 'forest', 'themeVariables': {'primaryColor': '#ffd6e8'}}}%%\nflowchart LR\n  A", light)!;
+    expect(viaForest.vars['--pele-surface']).toBe('#ffd6e8');
+    // Nothing from forest itself: everything not typed is the person's.
+    expect(viaForest.vars['--pele-line']).toBe(light['--pele-line']);
+    expect(viaForest.vars['--pele-border']).toBe(light['--pele-border']);
   });
 
-  test('theme variables with no theme go over the person\'s palette, each replacing its own', () => {
-    const vars = peleAuthorThemeVariables("%%{init: {'themeVariables': {'primaryColor': '#ffcc00'}}}%%\nflowchart LR\n  A", person)!;
-    expect(vars['--pele-surface']).toBe('#ffcc00');
-    expect(vars['--pele-bg']).toBe(person['--pele-bg']);
-    expect(vars['--pele-fg']).toBe(person['--pele-fg']);
-    expect(vars['--pele-muted']).toBe(person['--pele-muted']);
+  test("an author background is never painted: the ground stays the person's", () => {
+    const colors = peleAuthorColors("%%{init: {'themeVariables': {'background': '#000000', 'primaryColor': '#ffd6e8'}}}%%\nflowchart LR\n  A", light)!;
+    expect(colors.vars['--pele-bg']).toBe(light['--pele-bg']);
+    expect(peleAuthorColors("%%{init: {'themeVariables': {'background': '#000000'}}}%%\nflowchart LR\n  A", light)).toBeNull();
   });
 
-  test('a source that gives nothing keeps the person\'s palette', () => {
-    expect(peleAuthorThemeVariables('flowchart LR\n  A --> B', person)).toBeNull();
+  test('values that are not safe colours are ignored, and so are themeCSS and unknown keys', () => {
+    const source =
+      "%%{init: {'theme': 'base', 'themeCSS': '.node rect { fill: url(https://x) }', 'themeVariables': {'primaryColor': 'url(https://x/y.png)', 'lineColor': 'var(--secret)', 'primaryTextColor': 'red; background-image: url(x)', 'mainBkg': '#00ff00', 'fontFamily': 'Comic Sans', 'noSuchKey': '#123456'}}}%%\nflowchart LR\n  A";
+    expect(readPeleAuthorColors(source)).toEqual({ mainBkg: '#00ff00', noSuchKey: '#123456' });
+    const colors = peleAuthorColors(source, light)!;
+    expect(colors.vars['--pele-surface']).toBe('#00ff00');
+    expect(colors.vars['--pele-line']).toBe(light['--pele-line']);
+    expect(colors.vars['--pele-fg']).toBe(light['--pele-fg']);
+    expect(Object.values(colors.vars).join(' ')).not.toMatch(/url\(|var\(|;|123456/u);
+  });
+});
+
+describe('readability on the person\'s page', () => {
+  test('a line colour that does not read on the page gives way to the person\'s line; one that reads is kept', () => {
+    const onDark = peleAuthorColors(BASE, dark)!;
+    expect(contrast('#7a1f4f', dark['--pele-bg'])).toBeLessThan(PELE_LINE_MIN);
+    expect(onDark.vars['--pele-line']).toBe(dark['--pele-line']);
+    expect(onDark.fellBack).toContain('line');
+    const onLight = peleAuthorColors(BASE, light)!;
+    expect(onLight.vars['--pele-line']).toBe('#7a1f4f');
+    expect(onLight.fellBack).not.toContain('line');
   });
 
-  test('a muted colour the theme makes unreadable on its own fills is moved toward the text until it reads', () => {
-    const vars = peleAuthorThemeVariables("%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#222222', 'background': '#222222', 'primaryTextColor': '#ffffff', 'titleColor': '#2a2a2a', 'tertiaryColor': '#222222'}}}%%\nflowchart LR\n  A", person)!;
-    expect(vars['--pele-muted']).not.toBe('#2a2a2a');
+  test('text drawn on the page gives way, but text in the author-filled node keeps the author\'s colour where it reads', () => {
+    const colors = peleAuthorColors(BASE, dark)!;
+    // #3d0a24 on the dark page does not read: edge and message labels take the person's text colour.
+    expect(colors.vars['--pele-fg']).toBe(dark['--pele-fg']);
+    expect(colors.fellBack).toContain('text');
+    // On the pink node it does.
+    expect(colors.rules).toContainEqual({ selector: 'g.pele-node text', property: 'fill', value: '#3d0a24' });
   });
 
-  test("under base, the colours an author does not give follow the one they give, as Mermaid's base theme derives them", () => {
-    const pink = deriveBaseColors({ primaryColor: '#ff00aa' });
-    expect(pink.mainBkg).toBe('#ff00aa');
-    expect(pink.nodeBorder).not.toBe(MERMAID_THEMES.base.nodeBorder);
-    // With nothing given, the base theme itself (khroma rounds its HSL steps; within one step per channel).
-    const derived = deriveBaseColors({});
-    for (const [key, value] of Object.entries(MERMAID_THEMES.base)) {
-      const [a, b] = [parseCssColor(value)!, parseCssColor(derived[key as keyof typeof derived])!];
-      expect(Math.max(Math.abs(a.r - b.r), Math.abs(a.g - b.g), Math.abs(a.b - b.b)), key).toBeLessThanOrEqual(2 / 255);
-    }
+  test('with no author text colour, text in an author-filled node is the better of the person\'s text and ground colours', () => {
+    const colors = peleAuthorColors("%%{init: {'themeVariables': {'primaryColor': '#ffd6e8'}}}%%\nflowchart LR\n  A", dark)!;
+    const rule = colors.rules.find((r) => r.selector === 'g.pele-node text');
+    // The person's light text would not read on pink; their dark ground does.
+    expect(rule?.value).toBe(dark['--pele-bg']);
+    expect(contrast(rule?.value, '#ffd6e8')).toBeGreaterThanOrEqual(PELE_TEXT_MIN);
+  });
+
+  test("lifelines (drawn on the page in the border colour) give way; node outlines keep the author's border", () => {
+    const colors = peleAuthorColors("%%{init: {'themeVariables': {'primaryBorderColor': '#20262e'}}}%%\nsequenceDiagram\n  A->>B: hi", dark)!;
+    expect(colors.vars['--pele-border']).toBe('#20262e');
+    expect(colors.rules).toContainEqual({ selector: '.pele-lifelines', property: 'stroke', value: dark['--pele-border'] });
+  });
+
+  test('with no palette on the page, the typed colours apply as given', () => {
+    const colors = peleAuthorColors(BASE, null)!;
+    expect(colors.vars['--pele-line']).toBe('#7a1f4f');
+    expect(colors.fellBack).toEqual([]);
   });
 });

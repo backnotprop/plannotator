@@ -156,7 +156,7 @@ export const DIAGRAM_FEATURES = {
   mathLabels: { mermaid: true, pele: true },
   /** Styled label text: colour, underline, strike, code, bold, italic, line breaks (`pele-labels.ts`). Pictures and icons in a label draw under neither. */
   htmlLabels: { mermaid: true, pele: true },
-  /** An author's theme and theme variables (`%%{init}%%`, front matter `config:`). Pele: their colours (`peleAuthorTheme.ts`); `themeCSS` is not honoured. */
+  /** An author's theme settings (`%%{init}%%`, front matter `config:`). Pele: only the colours they spell out (`themeVariables`), never a theme name or `themeCSS` (`peleAuthorTheme.ts`). */
   initThemeDirectives: { mermaid: true, pele: true },
   /** The Diagram Shadow setting: Mermaid's neo look, and one scoped rule on Pele's nodes (`peleTheme.peleShadowCss`). */
   shadowSetting: { mermaid: true, pele: true },

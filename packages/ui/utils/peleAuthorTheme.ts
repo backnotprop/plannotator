@@ -1,62 +1,33 @@
 /**
- * An author's colours under Pele: a diagram whose source names a Mermaid
- * theme or theme variables (`%%{init: {"theme": …, "themeVariables": {…}}}%%`,
- * or front matter `config:`) is drawn in those colours; with neither, the
- * person's Plannotator theme applies as before (`peleTheme.ts`).
+ * An author's colours under Pele: only the colours a diagram's source spells
+ * out (`themeVariables` in a `%%{init: …}%%` directive or front matter
+ * `config:`, with or without `theme: base`). A theme NAME (forest, dark,
+ * neutral, default, base or any other) is ignored: the diagram draws in the
+ * person's Plannotator theme exactly as if no directive were there. The
+ * owner's decision (2026-11-21): follow the colours an author typed, never a
+ * whole foreign palette.
  *
- * The same adapter shape as `peleTheme.ts`: Mermaid's colour names in, Pele's
- * colour variables out (`--pele-bg`, `-fg`, `-muted`, `-line`, `-surface`,
- * `-surface-alt`, `-border`, `-accent`, `-critical`, `-series-1..8`).
- *   - A theme name (default, dark, forest, neutral, base) starts from that
- *     theme's colours as Mermaid computes them (`MERMAID_THEMES`, checked
- *     against Mermaid itself in `peleAuthorTheme.dom.test.ts`).
- *   - Theme variables: under `base` (Mermaid's theme for custom colours) the
- *     colours an author does not give are derived from the ones they give as
- *     Mermaid's base theme derives them; under another theme, or with no
- *     theme (over the person's palette), each given colour replaces its own.
- *   - Every value must be a colour by the strict pattern labels use
- *     (`safeLabelColor`): nothing that can carry `url(`, `var(` or `;`.
- *     Unknown keys are ignored, and so is `themeCSS` (arbitrary CSS).
- * Pure; `readPeleAuthorTheme` reads nothing but the source.
+ * Each typed colour replaces its own over the person's palette (the adapter
+ * shape of `peleTheme.ts`: Mermaid's names in, `--pele-*` variables out).
+ * Every value must be a colour by the strict pattern labels use
+ * (`safeLabelColor`); unknown keys, `themeCSS` and `background` are ignored:
+ * no panel is ever painted behind a diagram.
+ *
+ * Readability (`PELE_TEXT_MIN` 4.6:1 for text, `PELE_LINE_MIN` 3.1:1 for
+ * lines, the floors the person's own palette is held to):
+ *   - drawn on the person's page (edge lines and arrowheads, sequence
+ *     lifelines, and text outside a filled shape such as edge and message
+ *     labels): an author colour that does not reach the floor against the
+ *     person's page ground gives way to the person's colour for that element;
+ *   - text inside a filled shape (a node, a sequence actor, a note): the
+ *     author's text colour when they give one and it reaches the floor on
+ *     that fill, else whichever of the person's text and ground colours reads
+ *     better on it.
+ * Pure: reads nothing but its arguments.
  */
-import { parseCssColor, toHex, type RgbColor } from './cssColor';
-import { ensureContrast } from './mermaidTheme';
+import { contrastRatio, parseCssColor, toHex } from './cssColor';
 import { safeLabelColor } from './pele-labels';
-import { PELE_SERIES_COUNT, PELE_TEXT_MIN, type PeleThemeVariables } from './peleTheme';
-
-export const MERMAID_THEME_NAMES = ['default', 'dark', 'forest', 'neutral', 'base'] as const;
-export type MermaidThemeName = (typeof MERMAID_THEME_NAMES)[number];
-
-/** The Mermaid colours Pele draws with. */
-const KEYS = [
-  'background',
-  'primaryTextColor',
-  'titleColor',
-  'lineColor',
-  'mainBkg',
-  'clusterBkg',
-  'nodeBorder',
-  'taskBkgColor',
-  'critBkgColor',
-  ...Array.from({ length: PELE_SERIES_COUNT }, (_, i) => `cScale${i}`),
-] as const;
-type Key = (typeof KEYS)[number];
-type Colors = Record<Key, string>;
-
-/** Mermaid 12.2's named themes, as its own theme classes compute them (hex). */
-export const MERMAID_THEMES: Readonly<Record<MermaidThemeName, Readonly<Colors>>> = {
-  default: { background: '#ffffff', primaryTextColor: '#131300', titleColor: '#333333', lineColor: '#333333', mainBkg: '#ececff', clusterBkg: '#ffffde', nodeBorder: '#9370db', taskBkgColor: '#8a90dd', critBkgColor: '#ff0000', cScale0: '#8686ff', cScale1: '#ffff78', cScale2: '#d7ff86', cScale3: '#c286ff', cScale4: '#ff86ff', cScale5: '#ff86c2', cScale6: '#ff8686', cScale7: '#ffc286' },
-  dark: { background: '#333333', primaryTextColor: '#e0dfdf', titleColor: '#f9fffe', lineColor: '#d3d3d3', mainBkg: '#1f2020', clusterBkg: '#474949', nodeBorder: '#cccccc', taskBkgColor: '#595c5c', critBkgColor: '#e83737', cScale0: '#1f2020', cScale1: '#0b0000', cScale2: '#4d1037', cScale3: '#3f5258', cScale4: '#4f2f1b', cScale5: '#6e0a0a', cScale6: '#3b0048', cScale7: '#995a01' },
-  forest: { background: '#ffffff', primaryTextColor: '#321b67', titleColor: '#333333', lineColor: '#000000', mainBkg: '#cde498', clusterBkg: '#cdffb2', nodeBorder: '#13540c', taskBkgColor: '#487e3a', critBkgColor: '#ff0000', cScale0: '#b9d970', cScale1: '#acff7f', cScale2: '#cde498', cScale3: '#84d970', cScale4: '#70d990', cScale5: '#70d9c5', cScale6: '#70b9d9', cScale7: '#7084d9' },
-  neutral: { background: '#ffffff', primaryTextColor: '#111111', titleColor: '#333333', lineColor: '#666666', mainBkg: '#eeeeee', clusterBkg: '#fcfcfc', nodeBorder: '#999999', taskBkgColor: '#707070', critBkgColor: '#dd4422', cScale0: '#555555', cScale1: '#f4f4f4', cScale2: '#555555', cScale3: '#bbbbbb', cScale4: '#777777', cScale5: '#999999', cScale6: '#dddddd', cScale7: '#ffffff' },
-  base: { background: '#f4f4f4', primaryTextColor: '#333333', titleColor: '#090600', lineColor: '#0b0b0b', mainBkg: '#fff4dd', clusterBkg: '#f6f9ff', nodeBorder: '#eeddbb', taskBkgColor: '#fff4dd', critBkgColor: '#ff0000', cScale0: '#ffcb5d', cScale1: '#cb5dff', cScale2: '#77a3ff', cScale3: '#e3ff5d', cScale4: '#92ff5d', cScale5: '#5dff7a', cScale6: '#5dffcb', cScale7: '#5de3ff' },
-};
-
-/** What a source asks for: a theme name, theme variables, or both. */
-export interface AuthorTheme {
-  readonly theme?: MermaidThemeName;
-  readonly themeVariables: Readonly<Record<string, string>>;
-}
+import { PELE_LINE_MIN, PELE_SERIES_COUNT, PELE_TEXT_MIN, type PeleThemeVariables } from './peleTheme';
 
 // ------------------------------------------------------------------ reading
 
@@ -120,179 +91,113 @@ function initDirectives(source: string): Record<string, unknown>[] {
   return out;
 }
 
-/** The theme a source asks for, or null when it asks for none. Values that are not safe colours are dropped here. */
-export function readPeleAuthorTheme(source: string): AuthorTheme | null {
+/** The colours a source spells out (`themeVariables`), safe ones only; null when it gives none. A theme name is not read. */
+export function readPeleAuthorColors(source: string): Readonly<Record<string, string>> | null {
   const configs = [frontMatterConfig(source), ...initDirectives(source)].filter(isObject);
-  let theme: MermaidThemeName | undefined;
-  const variables: Record<string, string> = {};
+  const colors: Record<string, string> = {};
   for (const config of configs) {
-    const name = typeof config['theme'] === 'string' ? config['theme'].trim().toLowerCase() : undefined;
-    if (name !== undefined && (MERMAID_THEME_NAMES as readonly string[]).includes(name)) theme = name as MermaidThemeName;
     const given = config['themeVariables'];
     if (!isObject(given)) continue;
     for (const [key, value] of Object.entries(given)) {
-      if (key === 'darkMode' && typeof value === 'boolean') variables[key] = String(value);
       const color = typeof value === 'string' ? safeLabelColor(value) : null;
-      if (color !== null) variables[key] = color;
+      if (color !== null) colors[key] = color;
     }
   }
-  if (theme === undefined && Object.keys(variables).length === 0) return null;
-  return { ...(theme === undefined ? {} : { theme }), themeVariables: variables };
-}
-
-// ---------------------------------------------------------- Mermaid's base
-
-interface Hsl {
-  h: number;
-  s: number;
-  l: number;
-}
-
-function toHsl({ r, g, b }: RgbColor): Hsl {
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  const l = (max + min) / 2;
-  if (max === min) return { h: 0, s: 0, l: l * 100 };
-  const d = max - min;
-  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-  const h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
-  return { h: h * 60, s: s * 100, l: l * 100 };
-}
-
-function fromHsl({ h, s, l }: Hsl): RgbColor {
-  const hue = (((h % 360) + 360) % 360) / 360;
-  const sat = Math.min(100, Math.max(0, s)) / 100;
-  const lig = Math.min(100, Math.max(0, l)) / 100;
-  if (sat === 0) return { r: lig, g: lig, b: lig, a: 1 };
-  const q = lig < 0.5 ? lig * (1 + sat) : lig + sat - lig * sat;
-  const p = 2 * lig - q;
-  const channel = (t0: number): number => {
-    const t = t0 < 0 ? t0 + 1 : t0 > 1 ? t0 - 1 : t0;
-    if (t < 1 / 6) return p + (q - p) * 6 * t;
-    if (t < 1 / 2) return q;
-    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-    return p;
-  };
-  return { r: channel(hue + 1 / 3), g: channel(hue), b: channel(hue - 1 / 3), a: 1 };
-}
-
-/** khroma's `adjust`: add to the hue, saturation and lightness channels, clamped. */
-function adjust(color: string, by: Partial<Hsl>): string {
-  const rgb = parseCssColor(color);
-  if (rgb === undefined) return color;
-  const hsl = toHsl(rgb);
-  return toHex(fromHsl({ h: hsl.h + (by.h ?? 0), s: Math.min(100, Math.max(0, hsl.s + (by.s ?? 0))), l: Math.min(100, Math.max(0, hsl.l + (by.l ?? 0))) }));
-}
-
-function invert(color: string): string {
-  const rgb = parseCssColor(color);
-  return rgb === undefined ? color : toHex({ r: 1 - rgb.r, g: 1 - rgb.g, b: 1 - rgb.b });
-}
-
-/**
- * The colours Pele draws with, as Mermaid's base theme derives them from the
- * variables an author gives (`theme-base.js`, `updateColors`), for the keys
- * Pele reads; a given variable always wins.
- */
-export function deriveBaseColors(given: Readonly<Record<string, string>>): Colors {
-  const v = (key: string): string | undefined => given[key];
-  const dark = v('darkMode') === 'true';
-  const background = v('background') ?? '#f4f4f4';
-  const primary = v('primaryColor') ?? '#fff4dd';
-  const primaryText = v('primaryTextColor') ?? (dark ? '#eee' : '#333');
-  const secondary = v('secondaryColor') ?? adjust(primary, { h: -120 });
-  const tertiary = v('tertiaryColor') ?? adjust(primary, { h: 180, l: 5 });
-  const border = v('primaryBorderColor') ?? (dark ? adjust(primary, { s: -40, l: 10 }) : adjust(primary, { s: -40, l: -10 }));
-  const hues = [0, 0, 0, 30, 60, 90, 120, 150];
-  const scale = hues.map((h, i) => {
-    const own = v(`cScale${i}`);
-    if (own !== undefined) return own;
-    const base = i === 0 ? primary : i === 1 ? secondary : i === 2 ? tertiary : adjust(primary, { h });
-    return adjust(base, { l: dark ? -75 : -25 });
-  });
-  const colors: Record<string, string> = {
-    background,
-    primaryTextColor: primaryText,
-    titleColor: v('titleColor') ?? v('tertiaryTextColor') ?? invert(tertiary),
-    lineColor: v('lineColor') ?? invert(background),
-    mainBkg: v('mainBkg') ?? primary,
-    clusterBkg: v('clusterBkg') ?? tertiary,
-    nodeBorder: v('nodeBorder') ?? border,
-    taskBkgColor: v('taskBkgColor') ?? primary,
-    critBkgColor: v('critBkgColor') ?? 'red',
-  };
-  scale.forEach((color, i) => (colors[`cScale${i}`] = color));
-  return colors as Colors;
-}
-
-/** A given variable over a named theme's colours: each replaces its own, with Mermaid's aliases (a node's fill is `primaryColor` unless `mainBkg` is given). */
-function overlay(start: Readonly<Record<string, string>>, given: Readonly<Record<string, string>>): Record<string, string> {
-  const out: Record<string, string> = { ...start };
-  const alias: Readonly<Record<string, readonly string[]>> = {
-    primaryColor: ['mainBkg', 'cScale0'],
-    primaryBorderColor: ['nodeBorder'],
-    tertiaryColor: ['clusterBkg'],
-    tertiaryTextColor: ['titleColor'],
-    textColor: ['primaryTextColor'],
-  };
-  for (const [key, targets] of Object.entries(alias)) {
-    const value = given[key];
-    if (value !== undefined) for (const target of targets) if (given[target] === undefined) out[target] = value;
-  }
-  for (const key of KEYS) if (given[key] !== undefined) out[key] = given[key] as string;
-  return out;
+  return Object.keys(colors).length === 0 ? null : colors;
 }
 
 // --------------------------------------------------------------- to Pele
 
-/** Mermaid colours to Pele's variables (the adapter shape of `peleTheme.ts`). Muted text is moved toward the text colour only as far as it must to read. */
-function toPele(colors: Readonly<Record<string, string>>): Record<`--pele-${string}`, string> {
-  const out: Record<`--pele-${string}`, string> = {};
-  const put = (name: `--pele-${string}`, key: string): void => {
-    const value = colors[key];
-    if (value !== undefined) out[name] = hexOr(value);
-  };
-  put('--pele-bg', 'background');
-  put('--pele-fg', 'primaryTextColor');
-  put('--pele-line', 'lineColor');
-  put('--pele-surface', 'mainBkg');
-  put('--pele-surface-alt', 'clusterBkg');
-  put('--pele-border', 'nodeBorder');
-  put('--pele-accent', 'taskBkgColor');
-  put('--pele-critical', 'critBkgColor');
-  for (let i = 0; i < PELE_SERIES_COUNT; i += 1) put(`--pele-series-${i + 1}`, `cScale${i}`);
-  const muted = parseCssColor(colors['titleColor']);
-  const fg = parseCssColor(out['--pele-fg']);
-  const grounds = ['--pele-bg', '--pele-surface', '--pele-surface-alt'].map((name) => parseCssColor(out[name as `--pele-${string}`])).filter((c): c is RgbColor => c !== undefined);
-  if (muted !== undefined && fg !== undefined) {
-    out['--pele-muted'] = toHex(grounds.reduce((current, ground) => ensureContrast(current, ground, PELE_TEXT_MIN, [fg]), muted));
-  } else if (out['--pele-fg'] !== undefined) {
-    out['--pele-muted'] = out['--pele-fg'];
-  }
-  return out;
-}
+/** Mermaid's names for the colours Pele draws with; the first given wins. `background` is deliberately absent. */
+const MAP: ReadonlyArray<readonly [`--pele-${string}`, readonly string[]]> = [
+  ['--pele-fg', ['primaryTextColor', 'textColor']],
+  ['--pele-muted', ['titleColor', 'tertiaryTextColor']],
+  ['--pele-line', ['lineColor']],
+  ['--pele-surface', ['mainBkg', 'primaryColor']],
+  ['--pele-surface-alt', ['clusterBkg', 'tertiaryColor']],
+  ['--pele-border', ['nodeBorder', 'primaryBorderColor']],
+  ['--pele-accent', ['taskBkgColor']],
+  ['--pele-critical', ['critBkgColor']],
+  ...Array.from({ length: PELE_SERIES_COUNT }, (_, i) => [`--pele-series-${i + 1}`, i === 0 ? ['cScale0', 'primaryColor'] : [`cScale${i}`]] as const),
+];
 
-/** A colour as hex when it parses, else as given (a CSS name the parser does not list; it already passed the safe pattern). */
+/** A colour as hex when it parses opaque, else as given (a name the parser does not list; it already passed the safe pattern). */
 function hexOr(value: string): string {
   const parsed = parseCssColor(value);
   return parsed === undefined || parsed.a < 1 ? value : toHex(parsed);
 }
 
+/** One rule `diagram-render.ts` scopes under the svg's id. Selectors are fixed here; values are checked colours. */
+export interface PeleColorRule {
+  readonly selector: 'g.pele-node text' | 'g.pele-note text' | '.pele-lifelines';
+  readonly property: 'fill' | 'stroke';
+  readonly value: string;
+}
+
+export interface PeleAuthorColors {
+  /** The person's variables with the author's typed colours over them (and any page fallback applied). */
+  readonly vars: PeleThemeVariables;
+  /** Per-element colours the variables alone cannot express. */
+  readonly rules: readonly PeleColorRule[];
+  /** What gave way to the person's colour, for tests and debugging (`'line'`, `'text'`, `'muted'`, `'lifelines'`). */
+  readonly fellBack: readonly string[];
+}
+
+const reads = (ink: string | undefined, ground: string | undefined, min: number): boolean => {
+  const a = parseCssColor(ink);
+  const b = parseCssColor(ground);
+  return a === undefined || b === undefined || contrastRatio(a, b) >= min;
+};
+
+/** Text on `fill`: the author's own text colour when it reads there, else the better of the person's text and ground colours. */
+function inkOn(fill: string | undefined, authorInk: string | undefined, person: PeleThemeVariables): string | undefined {
+  if (authorInk !== undefined && reads(authorInk, fill, PELE_TEXT_MIN)) return authorInk;
+  const ground = parseCssColor(fill);
+  const options = [person['--pele-fg'], person['--pele-bg']].filter((c): c is string => c !== undefined);
+  if (ground === undefined || options.length === 0) return authorInk ?? person['--pele-fg'];
+  return options.reduce((best, c) => (contrastRatio(parseCssColor(c) ?? ground, ground) > contrastRatio(parseCssColor(best) ?? ground, ground) ? c : best));
+}
+
 /**
- * Pele's variables for a source's own theme, or null when it gives none.
- * `person` is the person's Plannotator theme (`readPeleThemeVariables`):
- * theme variables with no theme name go over it, as they go over the site's
- * theme under Mermaid. The person's font always stays.
+ * Pele's colours for a source's typed colours over the person's palette, or
+ * null when the source spells out none (a theme name alone is none).
  */
-export function peleAuthorThemeVariables(source: string, person: PeleThemeVariables | null): PeleThemeVariables | null {
-  const author = readPeleAuthorTheme(source);
-  if (author === null) return null;
-  const font = person?.['--pele-font'];
-  const keep: Record<`--pele-${string}`, string> = font === undefined ? {} : { '--pele-font': font };
-  if (author.theme === 'base') return { ...toPele(deriveBaseColors(author.themeVariables)), ...keep };
-  if (author.theme !== undefined) return { ...toPele(overlay(MERMAID_THEMES[author.theme], author.themeVariables)), ...keep };
-  // Variables alone: each given colour replaces its own over the person's palette.
-  const given = toPele(overlay({}, author.themeVariables));
-  if (author.themeVariables['titleColor'] === undefined && author.themeVariables['tertiaryTextColor'] === undefined) delete given['--pele-muted'];
-  return { ...(person ?? {}), ...given };
+export function peleAuthorColors(source: string, personOrNull: PeleThemeVariables | null): PeleAuthorColors | null {
+  const given = readPeleAuthorColors(source);
+  if (given === null) return null;
+  // With no palette on the page (a host without theme tokens), the author's colours apply with nothing to give way to.
+  const person: PeleThemeVariables = personOrNull ?? {};
+  const author: Record<`--pele-${string}`, string> = {};
+  for (const [name, keys] of MAP) {
+    const key = keys.find((k) => given[k] !== undefined);
+    if (key !== undefined) author[name] = hexOr(given[key] as string);
+  }
+  if (Object.keys(author).length === 0) return null;
+  const page = person['--pele-bg'];
+  const vars: Record<`--pele-${string}`, string> = { ...person, ...author };
+  const rules: PeleColorRule[] = [];
+  const fellBack: string[] = [];
+  // Drawn on the page: give way where the author's colour does not read on the person's ground.
+  const giveWay = (name: `--pele-${string}`, min: number, label: string): void => {
+    const own = person[name];
+    if (author[name] !== undefined && own !== undefined && !reads(author[name], page, min)) {
+      vars[name] = own;
+      fellBack.push(label);
+    }
+  };
+  giveWay('--pele-line', PELE_LINE_MIN, 'line');
+  giveWay('--pele-fg', PELE_TEXT_MIN, 'text');
+  giveWay('--pele-muted', PELE_TEXT_MIN, 'muted');
+  // Lifelines are drawn on the page in the border colour; node outlines keep the author's.
+  if (author['--pele-border'] !== undefined && person['--pele-border'] !== undefined && !reads(author['--pele-border'], page, PELE_LINE_MIN)) {
+    rules.push({ selector: '.pele-lifelines', property: 'stroke', value: person['--pele-border'] });
+    fellBack.push('lifelines');
+  }
+  // Text inside a filled shape reads on that fill.
+  for (const [selector, fill] of [['g.pele-node text', '--pele-surface'], ['g.pele-note text', '--pele-surface-alt']] as const) {
+    if (author[fill] === undefined && author['--pele-fg'] === undefined) continue;
+    const ink = inkOn(vars[fill], author['--pele-fg'], person);
+    if (ink !== undefined && ink !== vars['--pele-fg']) rules.push({ selector, property: 'fill', value: ink });
+  }
+  return { vars, rules, fellBack };
 }

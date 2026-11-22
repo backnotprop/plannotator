@@ -55,7 +55,7 @@ import { hasMermaidMath } from './mermaid-math-slot';
 import { applyMermaidTheme, mermaidThemeKey, type MermaidThemeMode } from './mermaidTheme';
 import { loadPeleRuntime, PELE_IN_BUILD, PELE_OUTPUT_LIMIT, PELE_SOURCE_LIMIT, peleFonts, peleSvgId, renderPeleSource } from './pele';
 import { finishPeleLabels, needsPeleLabels, pageMathTypesetter, peleLabelMeasurer, preparePeleLabels, restorePeleLabelMessage, type PreparedPeleLabels } from './pele-labels';
-import { peleAuthorThemeVariables } from './peleAuthorTheme';
+import { peleAuthorColors } from './peleAuthorTheme';
 import { applyPeleThemeVariables, peleShadowCss, readPeleThemeVariables } from './peleTheme';
 
 export type { DiagramKind } from '@plannotator/core/diagram-anchor';
@@ -963,15 +963,14 @@ async function renderPele(renderId: string, source: string, theme: DiagramTheme,
     }
     svgNode.id = peleSvgId(renderId);
     scrubFetchingStyles(svgNode);
-    // The person's palette, or the author's own colours when the source gives them (`peleAuthorTheme.ts`).
     const personColors = readPeleThemeVariables(theme.mode);
-    const authorColors = peleAuthorThemeVariables(source, personColors);
-    applyPeleThemeVariables(svgNode, authorColors ?? personColors);
-    // An author's theme brings its own ground: a light theme's lines would vanish on a dark page, so draw on it.
-    const authorGround = authorColors?.['--pele-bg'];
-    if (authorGround !== undefined && authorGround !== personColors?.['--pele-bg']) {
-      svgNode.style.backgroundColor = 'var(--pele-bg)';
-      svgNode.style.borderRadius = '6px';
+    // The colours an author spells out, over the person's palette; never a theme name, never a panel (`peleAuthorTheme.ts`).
+    const author = peleAuthorColors(source, personColors);
+    applyPeleThemeVariables(svgNode, author?.vars ?? personColors);
+    if (author !== null && author.rules.length > 0) {
+      const sheet = svgNode.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'style');
+      sheet.textContent = scopeDiagramCss(author.rules.map((r) => `#${svgNode.id} ${r.selector}{${r.property}:${r.value}}`).join(' '), svgNode.id);
+      if (sheet.textContent !== '') svgNode.prepend(sheet);
     }
     // The Diagram Shadow setting: one rule scoped under this svg (built here, after the sanitizer, from numbers only).
     const shadow = peleShadowCss(svgNode, theme.mode, theme.shadowAmount);

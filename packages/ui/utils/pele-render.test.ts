@@ -114,16 +114,15 @@ describe.if(hasDom)('Pele render integration', () => {
     expect(off.svgNode.querySelector('style')).toBeNull();
   });
 
-  test("a source that gives its own theme is drawn in the author's colours; one that gives none is not", async () => {
-    const own = await renderDiagram('mermaid', 'author', "%%{init: {'theme': 'forest', 'themeVariables': {'lineColor': '#123456'}}}%%\nflowchart LR\n  A --> B", theme);
+  test("only the colours an author spells out reach the drawing: a theme name changes nothing, and no panel is painted", async () => {
+    const named = await renderDiagram('mermaid', 'named', "%%{init: {'theme': 'forest'}}%%\nflowchart LR\n  A --> B", theme);
     const plain = await renderDiagram('mermaid', 'plain', 'flowchart LR\n  A --> B', theme);
-    if (own.ok === false || plain.ok === false) throw new Error('render failed');
-    expect(own.svgNode.style.getPropertyValue('--pele-surface')).toBe('#cde498');
-    expect(own.svgNode.style.getPropertyValue('--pele-line')).toBe('#123456');
-    expect(plain.svgNode.style.getPropertyValue('--pele-surface')).toBe('');
-    // The author's theme brings its own ground, so its lines read on any page; the person's palette does not paint one.
-    expect(own.svgNode.style.backgroundColor).toBe('var(--pele-bg)');
-    expect(own.svgNode.style.getPropertyValue('--pele-bg')).toBe('#ffffff');
-    expect(plain.svgNode.style.backgroundColor).toBe('');
+    const typed = await renderDiagram('mermaid', 'typed', "%%{init: {'theme': 'forest', 'themeVariables': {'primaryColor': '#ffd6e8', 'background': '#000000'}}}%%\nflowchart LR\n  A --> B", theme);
+    if (named.ok === false || plain.ok === false || typed.ok === false) throw new Error('render failed');
+    const vars = (svg: SVGSVGElement): string => Array.from(svg.style).filter((n) => n.startsWith('--pele-')).map((n) => `${n}:${svg.style.getPropertyValue(n)}`).join(';');
+    expect(vars(named.svgNode)).toBe(vars(plain.svgNode));
+    expect(typed.svgNode.style.getPropertyValue('--pele-surface')).toBe('#ffd6e8');
+    expect(typed.svgNode.style.getPropertyValue('--pele-bg')).toBe(plain.svgNode.style.getPropertyValue('--pele-bg'));
+    expect(typed.svgNode.style.backgroundColor).toBe('');
   });
 });
