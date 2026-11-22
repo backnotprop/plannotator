@@ -472,7 +472,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       }
     };
     let result = await ask(patch);
-    // A high judgment's places are checked against the diff it read, held only for that.
+    // A judgment's places are checked against the diff it read, held only for that.
     let judgment = "text" in result ? parseRiskAnswer(result.text, { rules: current.rules, patch }) : null;
     // The whole diff is held only for its run.
     patch = null;

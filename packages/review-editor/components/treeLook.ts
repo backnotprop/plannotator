@@ -58,6 +58,19 @@ const unsafeCSS = `
       visibility: hidden;
     }
   }
+  /* The risk bars (treeRows RISK_BARS_PARTS): the lane after the icon takes no room (its width and the gap before it
+     cancel out), and the mark is drawn over the indent just left of the icon, so a marked row lines up with the rest. */
+  [data-item-section="lead"]:has(> [data-item-part-id="risk"]) {
+    width: 0;
+    margin-inline-start: calc(-1 * var(--trees-item-row-gap));
+    overflow: visible;
+  }
+  [data-item-part-id="risk"] {
+    display: grid;
+    place-items: center;
+    transform: translateX(calc(-1 * (var(--trees-icon-width) + 8px)));
+    cursor: inherit;
+  }
   [data-item-muted="true"] > :is([data-item-section="content"], [data-item-section="icon"], [data-item-section="trail"], [data-item-section="git"]) {
     opacity: 0.5;
   }

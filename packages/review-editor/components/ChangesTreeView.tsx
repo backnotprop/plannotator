@@ -302,7 +302,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
 
   useEffect(() => {
     model.refreshRows();
-  }, [model, viewedFiles, props.stagedFiles, annotationCounts, markdownPreviewedPaths, showViewedControls, props.threadCount]);
+  }, [model, viewedFiles, props.stagedFiles, annotationCounts, markdownPreviewedPaths, showViewedControls, props.threadCount, props.fileLead]);
 
   const openFocused = useCallback(() => {
     const focused = model.getFocusedPath();

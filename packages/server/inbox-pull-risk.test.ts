@@ -1429,7 +1429,7 @@ describe("finding the agent", () => {
   });
 });
 
-describe("a high judgment's places (context notes)", () => {
+describe("a high or medium judgment's places (context notes, risk bars)", () => {
   const PATCH = "diff --git a/src/billing.ts b/src/billing.ts\n--- a/src/billing.ts\n+++ b/src/billing.ts\n@@ -10,3 +10,5 @@\n context\n-old line\n+new one\n+new two\n+new three\n context\n";
   const RULES = "- Anything in billing.\n- Auth changes.";
   const check = { rules: RULES, patch: PATCH };
@@ -1441,8 +1441,9 @@ describe("a high judgment's places (context notes)", () => {
     expect(parseRiskAnswer(answer("high", [{ ...place, side: "old", lines: [11, 11] }]), check)?.where).toHaveLength(1);
   });
 
-  test("only a high judgment keeps places; low and medium keep their verdict without them", () => {
-    expect(parseRiskAnswer(answer("medium", [place]), check)).toEqual({ level: "medium", why: "It changes billing." });
+  test("a high or medium judgment keeps its places (the risk bars); a low one keeps its verdict without them", () => {
+    expect(parseRiskAnswer(answer("medium", [place]), check)).toEqual({ level: "medium", why: "It changes billing.", where: [{ file: "src/billing.ts", side: "new", lines: [11, 13], rule: "Anything in billing.", why: "Charges now retry." }] });
+    expect(parseRiskAnswer(answer("medium", [{ ...place, lines: [40, 41] }]), check)).toEqual({ level: "medium", why: "It changes billing." });
     expect(parseRiskAnswer(answer("low", [place]), check)).toEqual({ level: "low", why: "It changes billing." });
   });
 
@@ -1489,6 +1490,24 @@ describe("a high judgment's places (context notes)", () => {
     await settled();
     expect(restarted.runs).toEqual([]);
     expect(restarted.risk.answer().judgments["github.com/n/b#7"]?.where).toEqual([{ file: "src/billing.ts", side: "new", lines: [11, 13], rule: "Anything in billing.", why: "Charges now retry." }]);
+  });
+
+  test("a medium judgment stored before medium named places reads back as it was, with no places and no new run", async () => {
+    setRules(RULES);
+    const first = engine({ patch: PATCH, answer: async () => ({ text: answer("medium", [place]) }) });
+    first.risk.assess([pull(7)]);
+    await settled();
+    expect(first.risk.answer().judgments["github.com/n/b#7"]?.where).toHaveLength(1);
+    // The file as an older version wrote it: a medium judgment with no `where`.
+    const file = join(dataDir, "inbox", INBOX_PULL_RISK_FILE);
+    const stored = JSON.parse(readFileSync(file, "utf8")) as { v: number; judgments: Record<string, Record<string, unknown>> };
+    delete stored.judgments["github.com/n/b#7"]!.where;
+    writeFileSync(file, JSON.stringify(stored));
+    const restarted = engine({ patch: PATCH });
+    restarted.risk.assess([pull(7)]);
+    await settled();
+    expect(restarted.runs).toEqual([]);
+    expect(restarted.risk.answer().judgments["github.com/n/b#7"]).toEqual({ level: "medium", why: "It changes billing." });
   });
 
   test("a judgment made from a diff the PR page can't draw keeps no places, so no count promises places it can't show", async () => {

@@ -3,11 +3,12 @@ import type { DiffFile } from '@plannotator/core/diff-files';
 import { useCompactTouchLayout } from '@plannotator/ui/hooks/useIsMobile';
 import { ChangesTreeView, type ChangesTreeHandle } from '@plannotator/review-editor/components/ChangesTreeView';
 import { buildFileTree, getVisualFileOrder } from '@plannotator/review-editor/utils/buildFileTree';
+import { useRiskLead } from './riskLead';
 import type { PullChangesTreeProps } from './pullRepoTypes';
 
 const NO_PATHS: ReadonlySet<string> = new Set();
 
-export function PullChangesTree({ files, viewed, showViewed, comments, threadCount, activePath, head, onSelect, handleRef }: PullChangesTreeProps) {
+export function PullChangesTree({ files, viewed, showViewed, comments, threadCount, activePath, head, onSelect, handleRef, risk }: PullChangesTreeProps) {
   const list = files as DiffFile[];
   const { tree, extra } = useMemo(() => {
     const built = buildFileTree(list);
@@ -19,6 +20,7 @@ export function PullChangesTree({ files, viewed, showViewed, comments, threadCou
     for (const comment of comments) map.set(comment.filePath, (map.get(comment.filePath) ?? 0) + 1);
     return map;
   }, [comments]);
+  const fileLead = useRiskLead(risk);
   const touch = useCompactTouchLayout();
   const inner = useRef<ChangesTreeHandle>(null);
   useImperativeHandle(handleRef, () => ({ focus: () => inner.current?.focus() }), []);
@@ -39,6 +41,7 @@ export function PullChangesTree({ files, viewed, showViewed, comments, threadCou
         showViewedControls={showViewed}
         annotationCounts={counts}
         threadCount={threadCount}
+        fileLead={fileLead}
         onSelectFile={(index, how) => {
           const file = list[index];
           if (file) onSelect(file.path, how);

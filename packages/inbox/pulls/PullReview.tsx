@@ -80,6 +80,8 @@ import { layerVerdictLink, nextLayer, stackVerdictLink } from './topology';
 import { RiskMark } from './RiskMark';
 import { ContextNotesProvider, useContextNotes } from '../contextNotes/ContextNotes';
 import { placesWord, riskNotes, takeRiskPlaces } from '../contextNotes/model';
+import { riskBarsOf } from './riskBars';
+import { riskBarsLineNotes } from './RiskBarsMark';
 import { usePullRisk } from './usePullRisk';
 import { Named } from './Face';
 import { person, wordsText, type Words } from './words';
@@ -754,6 +756,18 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
     () => (scope === 'layer' && judged && layer && diff?.head_sha && diff.head_sha === layer.head_sha ? riskNotes(judged, files) : []),
     [scope, judged, layer?.head_sha, diff?.head_sha, files], // eslint-disable-line react-hooks/exhaustive-deps
   );
+  // The risk bars (approval "review-risk-bars"): a High or Medium judgment's places, on the same diff at the same head,
+  // marked once on each named file's tree row and once in the diff at each named range (riskBars.ts).
+  const riskBars = useMemo(
+    () => (scope === 'layer' && judged && layer && diff?.head_sha && diff.head_sha === layer.head_sha ? riskBarsOf(judged, files) : null),
+    [scope, judged, layer?.head_sha, diff?.head_sha, files], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const treeRiskKey = riskBars ? `${riskBars.level}\u0000${[...riskBars.files].join('\u0000')}` : '';
+  const treeRisk = useMemo(() => (riskBars ? { level: riskBars.level, files: riskBars.files } : null), [treeRiskKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const shownLineNotes = useMemo(() => {
+    const marks = riskBarsLineNotes(riskBars, layerKey);
+    return marks.length > 0 ? [...marks, ...(lineNotes ?? [])] : lineNotes;
+  }, [riskBars, lineNotes, layerKey]);
   const places = useContextNotes(placeNotes, {});
   const placeAt = useRef(-1);
   const goToPlace = (index: number) => {
@@ -920,6 +934,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
             onSelect={pickFile}
             onOpen={openRepoFile}
             handleRef={allFilesTree}
+            risk={treeRisk}
           />
         </PanePart>
       ) : (
@@ -934,6 +949,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
             head={filesHead}
             onSelect={pickFile}
             handleRef={changesTree}
+            risk={treeRisk}
           />
         </PanePart>
       )}
@@ -1166,7 +1182,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
                     viewed={{ files: viewedSet, onToggle: toggleViewed }}
                     fileOpenIn={fileOpenIn}
                     fileContents={fileContents}
-                    lineNotes={lineNotes}
+                    lineNotes={shownLineNotes}
                     wholeFileNotes={wholeFileNotes}
                     {...(places.anchors.length > 0 ? { contextNotes: places.anchors, renderContextNote: places.renderContextNote } : {})}
                   />

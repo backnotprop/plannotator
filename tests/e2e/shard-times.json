@@ -186,6 +186,7 @@
   "inbox-review-comments-phone.spec.ts": 34,
   "inbox-review-jumps.spec.ts": 18,
   "inbox-review-plus-button.spec.ts": 14,
+  "inbox-review-risk-bars.spec.ts": 40,
   "inbox-review-selection-bar.spec.ts": 39,
   "inbox-root-scroll.spec.ts": 12,
   "inbox-routine-editor.spec.ts": 14,

@@ -19,6 +19,11 @@ export interface FileRowState {
   annotationCounts: ReadonlyMap<string, number>;
   markdownPreviewedPaths?: ReadonlySet<string>;
   threadCount?: (path: string) => number;
+  /**
+   * A host's mark before a file's icon (the Inbox's PR page: the risk bars, `RISK_BARS_PARTS`). Its `label` is added to
+   * the row's title, the row's only description a screen reader reads. Absent: no lead, as before.
+   */
+  fileLead?: (path: string) => FileTreeRowPart | null;
 }
 
 export const ROW_ICONS = `<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
@@ -27,6 +32,8 @@ export const ROW_ICONS = `<svg xmlns="http://www.w3.org/2000/svg" style="display
 <symbol id="pn-kind-test" viewBox="0 0 24 24"><path d="M9 3h6M10 3v6l-5.5 9.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3M7.5 15h9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
 <symbol id="pn-kind-generated" viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9zM4 7.5l8 4.5 8-4.5M12 12v9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
 <symbol id="pn-kind-docs" viewBox="0 0 24 24"><path d="M7 3h7l5 5v13H7zM14 3v5h5M10 13h6M10 17h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="pn-risk-high" viewBox="0 0 8 8"><rect x="0" y="5" width="2" height="3" rx=".5" fill="currentColor"/><rect x="3" y="2.5" width="2" height="5.5" rx=".5" fill="currentColor"/><rect x="6" y="0" width="2" height="8" rx=".5" fill="currentColor"/></symbol>
+<symbol id="pn-risk-medium" viewBox="0 0 8 8"><rect x="0" y="5" width="2" height="3" rx=".5" fill="currentColor"/><rect x="3" y="2.5" width="2" height="5.5" rx=".5" fill="currentColor"/><rect x="6" y="0" width="2" height="8" rx=".5" fill="currentColor" fill-opacity=".28"/></symbol>
 <symbol id="pn-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
 </svg>`;
 
@@ -40,6 +47,17 @@ const THREAD_ICON = icon('pn-thread', 12);
  * `aria-label` on this role-less span would never be read.
  */
 const STAGED_PART: FileTreeRowPart = { text: '\u25cf', title: 'Staged', color: 'var(--primary)' };
+
+/**
+ * The risk bars before a file's icon (approval "review-risk-bars"): three small bars, all filled for High, two for
+ * Medium, in an orange-red from the theme. A mark, not a button (`disabled`, so the lane draws no button); its
+ * `label` goes into the row's title. Laid out over the indent left of the icon (`treeLook`), so no row moves.
+ */
+const RISK_TONE = 'color-mix(in oklch, var(--destructive) 60%, var(--warning))';
+export const RISK_BARS_PARTS: Record<'high' | 'medium', FileTreeRowPart> = {
+  high: { id: 'risk', disabled: true, icon: { name: 'pn-risk-high', width: 8, height: 8, viewBox: '0 0 8 8' }, title: 'High risk', label: 'High risk', color: RISK_TONE },
+  medium: { id: 'risk', disabled: true, icon: { name: 'pn-risk-medium', width: 8, height: 8, viewBox: '0 0 8 8' }, title: 'Medium risk', label: 'Medium risk', color: RISK_TONE },
+};
 
 export const GROUP_ICONS: Record<string, FileTreeRowPart> = {
   code: { icon: icon('pn-kind-code', 14) },
@@ -96,9 +114,12 @@ export function notePart(path: string, p: FileRowState): FileTreeRowPart | null 
 }
 
 export function fileRowParts(file: DiffFile, p: FileRowState, mark: FileTreeRowPart | null = notePart(file.path, p)): FileTreeRowParts {
+  const lead = p.fileLead?.(file.path) ?? null;
+  const title = file.oldPath ? `${file.oldPath} → ${file.path}` : file.path;
   return {
     muted: p.showViewedControls && p.viewedFiles.has(file.path),
-    title: file.oldPath ? `${file.oldPath} → ${file.path}` : file.path,
+    title: lead?.label ? `${title} · ${lead.label}` : title,
+    ...(lead ? { lead: [lead] } : {}),
     trail: [
       ...(mark ? [mark] : []),
       ...(p.stagedFiles?.has(file.path) ? [STAGED_PART] : []),
