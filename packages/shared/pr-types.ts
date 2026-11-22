@@ -796,6 +796,31 @@ export function encodeApiFilePath(filePath: string): string {
 
 /** The public hosts of the other platforms: never a Forgejo instance. */
 const NOT_FORGEJO_HOSTS = new Set(["github.com", "gitlab.com", "bitbucket.org"]);
+/** A Forgejo host as a URL may write it: a DNS name or IPv4 address, or a bracketed IPv6 literal, then an optional port. */
+const FORGEJO_HOST = /^(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?$/;
+/** A Forgejo owner or repository name. */
+const FORGEJO_NAME = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * True when `host` is one the API origin is built from exactly as written:
+ * only name characters (never a backslash, which a URL parser reads as `/`),
+ * no trailing dot, the same host after the URL parser reads it (so no
+ * shorthand IP form and no default port it would drop), and none of the other
+ * platforms' public hosts.
+ */
+function isForgejoHost(scheme: string, host: string): boolean {
+  if (!FORGEJO_HOST.test(host)) return false;
+  const name = host.toLowerCase().replace(/:\d+$/, "");
+  if (name.endsWith(".")) return false;
+  try {
+    if (new URL(`${scheme}://${host}`).host !== host.toLowerCase()) return false;
+  } catch {
+    return false;
+  }
+  return !NOT_FORGEJO_HOSTS.has(name.replace(/\.+$/, "").replace(/^www\./, ""));
+}
+
+const isForgejoName = (name: string) => FORGEJO_NAME.test(name) && name !== "." && name !== "..";
 
 /**
  * Parse a PR/MR URL into its components. Auto-detects platform.
@@ -860,15 +885,16 @@ export function parsePRUrl(url: string): PRRef | null {
   }
 
   // Forgejo / Gitea: {scheme}://{host}[:{port}]/{owner}/{repo}/pulls/{number}[/...]
-  // `/pulls/` (plural) cannot collide with GitHub's `/pull/`. `@`, `?` and `#`
-  // are excluded from the host so credentials in a URL never parse. Read last,
-  // so every URL another platform reads parses exactly as it did before; and
-  // never on github.com, gitlab.com or bitbucket.org, where such a path is no
-  // Forgejo PR and stays unparsed, as it always was.
+  // `/pulls/` (plural) cannot collide with GitHub's `/pull/`. Read last, so
+  // every URL another platform reads parses exactly as it did before. The host
+  // and names are checked strictly (isForgejoHost, isForgejoName) because the
+  // API URL and a checkout folder are built from them: no credentials, no
+  // backslash, no `..`, and never github.com, gitlab.com or bitbucket.org,
+  // where such a path is no Forgejo PR and stays unparsed, as it always was.
   const fjMatch = url.match(
-    /^(https?):\/\/([^/@?#]+)\/([^/?#]+)\/([^/?#]+)\/pulls\/(\d+)(?:[/?#]|$)/,
+    /^(https?):\/\/([^/?#]+)\/([^/?#]+)\/([^/?#]+)\/pulls\/(\d+)(?:[/?#]|$)/,
   );
-  if (fjMatch && !NOT_FORGEJO_HOSTS.has(fjMatch[2].toLowerCase().replace(/:\d*$/, "").replace(/^www\./, ""))) {
+  if (fjMatch && isForgejoHost(fjMatch[1], fjMatch[2]) && isForgejoName(fjMatch[3]) && isForgejoName(fjMatch[4])) {
     const ref: ForgejoPRRef = {
       platform: "forgejo",
       host: fjMatch[2],

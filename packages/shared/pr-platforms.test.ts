@@ -206,6 +206,57 @@ describe("parsePRUrl — Forgejo / Gitea", () => {
  * added: a Forgejo change that alters any of them fails here. Ambiguous rows
  * pin how one host name reads under each platform's path shape.
  */
+describe("parsePRUrl — a Forgejo host and names the API URL and checkout folder are built from", () => {
+  test.each([
+    ["https://codeberg.org/acme/widgets/pulls/1", { host: "codeberg.org" }],
+    ["http://codeberg.org/acme/widgets/pulls/1", { host: "codeberg.org", scheme: "http" }],
+    ["https://git.example.com:3000/acme/widgets/pulls/1", { host: "git.example.com:3000" }],
+    ["http://git.example.com:3000/acme/widgets/pulls/1", { host: "git.example.com:3000", scheme: "http" }],
+    ["http://192.168.1.5:3000/acme/widgets/pulls/1", { host: "192.168.1.5:3000", scheme: "http" }],
+    ["https://192.168.1.5:3000/acme/widgets/pulls/1", { host: "192.168.1.5:3000" }],
+    ["http://[::1]:3000/acme/widgets/pulls/1", { host: "[::1]:3000", scheme: "http" }],
+    ["https://[::1]:3000/acme/widgets/pulls/1", { host: "[::1]:3000" }],
+    ["https://localhost/acme/widgets/pulls/1", { host: "localhost" }],
+    ["https://codeberg.org/a.b_c-d/w.e_b-1/pulls/1", { owner: "a.b_c-d", repo: "w.e_b-1" }],
+  ])("%s still parses", (url, expected) => {
+    expect(parsePRUrl(url)).toMatchObject({ platform: "forgejo", number: 1, ...expected });
+  });
+
+  test("a backslash, a trailing dot, an IP shorthand, a default port or a `..` name is no Forgejo PR", () => {
+    for (const url of [
+      // A backslash is read as `/` by the URL parser: the request would go to another path.
+      "http://169.254.169.254\\latest\\meta-data/a/b/pulls/1",
+      "https://good.com\\evil\\x/o/r/pulls/1",
+      "https://github.com\\x/o/r/pulls/1",
+      // The other platforms' hosts, however written.
+      "https://github.com./o/r/pulls/1",
+      "https://GITHUB.COM/o/r/pulls/1",
+      "https://www.gitlab.com./o/r/pulls/1",
+      "https://bitbucket.org:8443/o/r/pulls/1",
+      "https://codeberg.org./acme/widgets/pulls/1",
+      // A host the URL parser would rewrite: the origin would not be the one written.
+      "http://0x7f.1/acme/widgets/pulls/1",
+      "http://2130706433/acme/widgets/pulls/1",
+      "https://codeberg.org:443/acme/widgets/pulls/1",
+      "http://codeberg.org:80/acme/widgets/pulls/1",
+      "https://codeberg.org:99999/acme/widgets/pulls/1",
+      "https://[::1/acme/widgets/pulls/1",
+      "https://user@codeberg.org/acme/widgets/pulls/1",
+      "https://code%62erg.org/acme/widgets/pulls/1",
+      // Names that climb out of the repository path or the checkout folder.
+      "https://h/../../pulls/1",
+      "https://h/acme/../pulls/1",
+      "https://h/./widgets/pulls/1",
+      "https://h/acme/%2e%2e/pulls/1",
+      "https://h/ac\\me/widgets/pulls/1",
+      "https://h/acme/wid%2Fgets/pulls/1",
+      "https://h/acme/wid gets/pulls/1",
+    ]) {
+      expect([url, parsePRUrl(url)]).toEqual([url, null]);
+    }
+  });
+});
+
 describe("parsePRUrl — every host's URL forms", () => {
   const gh = (host: string, owner: string, repo: string, number: number) => ({ platform: "github", host, owner, repo, number });
   const gl = (host: string, projectPath: string, iid: number) => ({ platform: "gitlab", host, projectPath, iid });
