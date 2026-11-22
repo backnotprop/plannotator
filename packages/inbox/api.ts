@@ -974,7 +974,7 @@ const attachmentUrl = (attachmentId: string, rest = '', query?: string) => inbox
 const projectUrl = (projectId: string, rest = '') => inboxUrl(`/projects/${encodeURIComponent(projectId)}${rest}`, undefined, machineOf(projectId));
 /** The merged list names each row's and project's machine: their routes go there from now on (inboxUrl.ts). */
 function learnMachines(model: ListModel): void {
-  setSelfMachine(model.self);
+  setSelfMachine(model.self, model.machines);
   // Starred rows too: another machine's archived star is in no section here.
   const rows = [...model.sections.flatMap((section) => section.threads), ...(model.snoozed ?? []), ...(model.pins ?? [])];
   // This Inbox's own rows and projects first, every id in them (a row's delivery and message ids too): a linked

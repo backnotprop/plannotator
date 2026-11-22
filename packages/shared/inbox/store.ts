@@ -456,6 +456,13 @@ export interface InboxReaskInput {
    * for but the server found it not live; nothing is written.
    */
   to?: InboxAddressee | null;
+  /**
+   * Re-ask all (reask-all.ts): the person's picks not sent stay as they are
+   * (still picked, still unsent, nothing marked sent) and are not in the note:
+   * from the list the person cannot see them, and a Send is the person's.
+   * Absent: the thread's own Re-ask, whose picks go with its note.
+   */
+  leave_picks?: boolean;
 }
 
 export interface InboxReplyResult {
@@ -5438,7 +5445,8 @@ export class InboxStore {
       .filter((m) => !this.closedByArchive(m))
       // Open action items are asked again too (owner, #2059); one the person marked inside its Undo window is not open.
       .flatMap((m) => this.questionRecords(m.id));
-    const picked = records.filter((r) => inboxQuestionState(r, false) === "picked" && r.answer !== null);
+    // Re-ask all leaves the picks as they are: none goes, none is marked sent.
+    const picked = input.leave_picks ? [] : records.filter((r) => inboxQuestionState(r, false) === "picked" && r.answer !== null);
     const open = records.filter((r) => inboxQuestionState(r, false) === "open");
     if (open.length === 0) throw new InboxError("nothing_to_reask", "No open question or action item is left to ask again.");
 

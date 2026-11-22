@@ -3,6 +3,8 @@
   "surface": {
     "door": [
       "GET accounts",
+      "GET agent-file",
+      "GET agent-read",
       "GET attachments/:id/audio",
       "GET attachments/:id/download",
       "GET attachments/:id/image",
@@ -183,6 +185,7 @@
       "/api/inbox/control/cloudflare-access",
       "/api/inbox/control/connect",
       "/api/inbox/control/machines",
+      "/api/inbox/control/machines/fetch-file",
       "/api/inbox/control/machines/link",
       "/api/inbox/control/machines/offer",
       "/api/inbox/control/machines/unlink",
@@ -357,6 +360,7 @@
       "/api/inbox/threads/:id/priority",
       "/api/inbox/threads/:id/pulls",
       "/api/inbox/threads/:id/read",
+      "/api/inbox/threads/:id/reask",
       "/api/inbox/threads/:id/seen",
       "/api/inbox/threads/:id/sessions",
       "/api/inbox/threads/:id/snooze",

@@ -66,7 +66,7 @@ export interface ThreadRowMenuProps {
   picks?: MenuPicks;
   /**
    * The group bands' menu (markAllRead.ts): a right-click, a held finger or the menu key on a band opens Mark all as
-   * read and Archive all for that band's threads, each where it has something to take. A band with neither, or none
+   * read, Archive all and (on a band of open questions) Re-ask all for that band's threads, each where it has something to take. A band with neither, or none
    * of this (absent): the browser's own menu, and its click is the band's toggle as ever.
    */
   bands?: BandMenu;
@@ -88,6 +88,7 @@ export interface BandMenu {
 const BAND_LABELS: Record<BandMenuAction, { label: string; icon: IconName }> = {
   read: { label: 'Mark all as read', icon: 'checkCircle' },
   archive: { label: 'Archive all', icon: 'archive' },
+  reask: { label: 'Re-ask all', icon: 'refresh' },
 };
 
 /** A band's id in the menu (a thread's is its own `msg_…` id). */

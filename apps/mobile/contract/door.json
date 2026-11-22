@@ -1987,6 +1987,38 @@
       "relay": true
     },
     {
+      "name": "GET agent-read",
+      "method": "GET",
+      "path": "agent-read",
+      "params": [],
+      "call": "getAgentRead",
+      "window": null,
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "GET agent-file",
+      "method": "GET",
+      "path": "agent-file",
+      "params": [],
+      "call": "getAgentFile",
+      "window": null,
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "POST link-back",
       "method": "POST",
       "path": "link-back",
