@@ -11,6 +11,7 @@ import { useLayoutEffect, useState } from 'react';
 import { formatCount } from '../format';
 import { Tip } from '../components/Tip';
 import { markDecisionPill } from '../pageMarks';
+import { pollWhileShown } from '../data/shownPoll';
 
 /** The way in shows from two decisions (in the thread) up. */
 export const DECIDE_ENTRY_MIN = 2;
@@ -44,13 +45,13 @@ function usePillBottom(): number | null {
       const next = box && box.height > 0 && box.top < window.innerHeight ? Math.round(window.innerHeight - box.top) + 10 : null;
       setBottom((current) => (current === next ? current : next));
     };
-    read();
     // The foot comes and goes (the thread loads, a file opens) and grows (the reply box): a cheap read
-    // a few times a second rather than an observer per element that may not exist yet.
-    const timer = setInterval(read, 300);
+    // a few times a second rather than an observer per element that may not exist yet. Not while the tab is
+    // hidden: read once the moment it shows (data/shownPoll.ts).
+    const stop = pollWhileShown(read, 300);
     window.addEventListener('resize', read);
     return () => {
-      clearInterval(timer);
+      stop();
       window.removeEventListener('resize', read);
     };
   }, []);
