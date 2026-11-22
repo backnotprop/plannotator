@@ -271,11 +271,11 @@ export function createCombineAcross(deps: CombineAcrossDeps) {
   // ── Files ──
   const filesMax = deps.filesMaxBytes ?? FILES_MAX_BYTES;
   /** The Combine may still use its files: it waits, or its thread is here (they go on it). Stopped, failed or undone: no more is copied. */
-  const using = (record: AcrossRecord) => record.state === "asked" || record.state === "done";
+  const inUse = (record: AcrossRecord) => record.state === "asked" || record.state === "done";
   const reached = (file: CombineFile) => !!(file.upload || file.missed || file.attached);
   /** Something left to do: a file not reached while the Combine may still use it, or a copy its thread has not got yet. */
   const unfinished = (record: AcrossRecord) =>
-    using(record) && now() - Date.parse(record.settled_at ?? record.at) <= FILES_KEPT_MS && (record.files ?? []).some((f) => !reached(f) || (record.state === "done" && f.upload && !f.attached && !f.missed));
+    inUse(record) && now() - Date.parse(record.settled_at ?? record.at) <= FILES_KEPT_MS && (record.files ?? []).some((f) => !reached(f) || (record.state === "done" && f.upload && !f.attached && !f.missed));
 
   /** The files not reached yet, one at a time, while the Combine may use them and that computer is on; past the total, left out. */
   const copy = async (record: AcrossRecord) => {
@@ -284,7 +284,7 @@ export function createCombineAcross(deps: CombineAcrossDeps) {
     if (!far || !machine || !record.files) return;
     for (const file of record.files) {
       // Stopped, failed or undone meanwhile; or that computer went: the rest waits for the next check (a restart too).
-      if (!using(record) || !far.online(machine)) return;
+      if (!inUse(record) || !far.online(machine)) return;
       if (reached(file)) continue;
       const room = filesMax - record.files.reduce((sum, f) => sum + (f.upload || f.attached ? (f.size ?? 0) : 0), 0);
       if ((file.size ?? 0) > INBOX_UPLOAD_MAX_BYTES) file.missed = "file_too_large";
