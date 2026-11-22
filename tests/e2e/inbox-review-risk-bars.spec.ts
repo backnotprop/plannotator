@@ -345,8 +345,14 @@ async function expectNoOverlap(review: Locator, ref: LineRef, opts: { long: bool
       return;
     }
     expect(textRight()).toBeGreaterThan(mark!.x); // it does reach the edge, the case this proves
-    await scrollColumns(review, file, 'end');
+    // The line's own column to its end (split columns scroll together: the other one would hold this one back).
+    await review.locator(lineSelector(ref)).first().evaluate((node) => {
+      const code = node.closest('[data-code]') as HTMLElement;
+      code.scrollLeft = code.scrollWidth;
+    });
+    await page.waitForTimeout(150);
     const end = await lineGeometry(review, ref);
+    expect(end.scroll.left + end.scroll.client, 'the column is at its end').toBeGreaterThanOrEqual(end.scroll.width - 1);
     const endMark = (await markOf(cdp, ref))!;
     // The protocol's box is on whole pixels, the text's on fractions: within 1px is "where the mark begins" (its bars
     // start 6px further in).
