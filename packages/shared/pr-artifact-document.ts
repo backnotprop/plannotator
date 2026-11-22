@@ -209,15 +209,15 @@ function gitlabUploadApiUrl(
 
 function isProviderArtifactUrl(url: URL, metadata: PRMetadata): boolean {
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return false;
-  // Bitbucket artifact documents are not supported yet: no URL is a provider artifact.
-  if (metadata.platform === 'bitbucket') return false;
+  // Bitbucket and Forgejo artifact documents are not supported yet: no URL is a provider artifact.
+  if (metadata.platform === 'bitbucket' || metadata.platform === 'forgejo') return false;
   return metadata.platform === 'github'
     ? isGitHubArtifactHost(url, metadata)
     : isGitLabArtifactHost(url, metadata);
 }
 
 function providerContentUrl(url: URL, metadata: PRMetadata): URL {
-  if (metadata.platform === 'bitbucket') return url;
+  if (metadata.platform === 'bitbucket' || metadata.platform === 'forgejo') return url;
   if (metadata.platform === 'github') {
     const metadataOrigin = providerOrigin(metadata);
     if (isSameOrigin(url, metadataOrigin)) {
@@ -337,7 +337,7 @@ async function providerAuthHeaders(runtime: PRRuntime, metadata: PRMetadata): Pr
 
   const promise = (async (): Promise<Record<string, string>> => {
     try {
-      if (metadata.platform === 'bitbucket') return {};
+      if (metadata.platform === 'bitbucket' || metadata.platform === 'forgejo') return {};
       const command = metadata.platform === 'github' ? 'gh' : 'glab';
       const args = metadata.platform === 'github'
         ? ['auth', 'token', '--hostname', metadata.host]

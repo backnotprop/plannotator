@@ -722,3 +722,18 @@ html:not(.light) .spw{--f:#070b14;--p:#151b24;--k:#dadee5;--s:#8e929a;--l:rgba(2
 [data-job="pr"] .say{text-wrap:pretty}
 @media (max-width:1180px){[data-job="pr"] .say{text-wrap:balance}}
 /* r4:end */
+
+/* fan6:start */
+.shf-icon svg.shf-i24{stroke-width:2.4}
+@media (min-width:1181px){.shf-card[data-card="review"] .shf-line{padding-right:0}}
+@media (max-width:760px){.shf-card[data-card="review"] .shf-thumb{aspect-ratio:240 / 156}}
+.fan-pen{display:none}
+@media (min-width:1181px){.fanbox .fan-pen{display:block;position:absolute;left:50%;top:calc(20px + var(--fh,360px));overflow:visible;pointer-events:none;transition:opacity 240ms cubic-bezier(.2,.7,.2,1)}}
+.fan-pen path{fill:none;stroke:var(--pencil);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+html:not(.light) .fan-pen path{stroke-width:2.8}
+@media (hover:hover) and (min-width:1181px){.shf-fan:has(.shf-card[data-source]:hover,.shf-card[data-card="review"]:hover)+.fan-pen{opacity:0}}
+@media (prefers-reduced-motion:reduce){.fanbox .fan-pen{transition:none}}
+/* fan6:end */
+/* phone6:start */
+@media (max-width:1180px){.copy .act{margin-top:24px}.art{grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))}}
+/* phone6:end */
