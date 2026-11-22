@@ -357,11 +357,11 @@ test('File header: hover shows Open in on the left of its actions, and nothing i
  * Release QA on 0.29.2: a file filter remounts the list and puts the reader
  * back on their file; on a shorter list that restore lands at the end by
  * itself, and Viewed as you scroll marked the last file, which nobody had
- * read. Four long files, then b/zero.ts and two short files (b/one.ts,
+ * read. Four long files, then b/head.ts and two short files (b/one.ts,
  * b/two.ts), then a long c/last.ts so the full list never ends at b/.
  */
 const LONG = ['a/long1.ts', 'a/long2.ts', 'a/long3.ts', 'a/long4.ts'];
-const FILTERED = ['b/zero.ts', 'b/one.ts', 'b/two.ts'];
+const FILTERED = ['b/head.ts', 'b/one.ts', 'b/two.ts'];
 const LAST = 'c/last.ts';
 const FILTER_FILES = [...LONG, ...FILTERED, LAST];
 function buildFilterRepo(root: string): string {
@@ -376,7 +376,7 @@ function buildFilterRepo(root: string): string {
   git(repo, ['commit', '-q', '-m', 'initial']);
   git(repo, ['checkout', '-q', '-b', 'feature/short-files']);
   for (const path of LONG) write(repo, path, lines(path, 60, 'new'));
-  write(repo, 'b/zero.ts', lines('b/zero.ts', 18, 'new'));
+  write(repo, 'b/head.ts', lines('b/head.ts', 18, 'new'));
   write(repo, 'b/one.ts', lines('b/one.ts', 6, 'new'));
   write(repo, 'b/two.ts', lines('b/two.ts', 6, 'new'));
   write(repo, LAST, lines(LAST, 40, 'new'));
