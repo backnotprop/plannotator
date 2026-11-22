@@ -567,14 +567,14 @@ function Reader({
   // The window's wrap for a code span, for the viewer's own inline parser.
   const codeSpan = useContext(CodeSpanContext);
   // Hover cards for the links in the guide's prose (issue, PR, MR and Linear issue links), as a message body has
-  // them, over the window's own transport. The region adds no box (`display: contents`), so the layout is unchanged.
+  // them, over the window's own transport. The region is the guide's own root: a wrapper element would come between
+  // `.ib-gbody` and that root, and the PR page's `.ib-gbody > .w-full` rules would stop matching.
   const proseRef = useRef<HTMLDivElement>(null);
   const refCard = useRefHoverCards(proseRef);
 
   return (
     <GuideHostProvider value={host}>
       <GuideCodeSpanContext.Provider value={codeSpan}>
-      <div ref={proseRef} style={{ display: 'contents' }} data-guide-ref-cards="">
       <GuideView
         guide={guide}
         reviewed={ticks}
@@ -590,8 +590,8 @@ function Reader({
         threadHeading={threadHeading}
         // Every file's box as tall as its diff, in the readers built on this one (a thread's guided review, the review, the PR page).
         fitFileHeights
+        rootRef={proseRef}
       />
-      </div>
       {refCard}
       </GuideCodeSpanContext.Provider>
       {globalAnchor && globalDraftKey && (
