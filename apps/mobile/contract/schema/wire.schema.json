@@ -2116,6 +2116,38 @@
       "x-open": true,
       "x-source": "packages/core/inbox-cloud.ts"
     },
+    "InboxCombineLeft": {
+      "type": "object",
+      "properties": {
+        "open": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "machine": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "machine",
+              "subject"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
     "InboxDelivery": {
       "type": "object",
       "properties": {
@@ -3873,6 +3905,9 @@
           "items": {
             "$ref": "#/$defs/InboxInlineImage"
           }
+        },
+        "combine_left": {
+          "$ref": "#/$defs/InboxCombineLeft"
         },
         "live_sites": {
           "type": "array",
