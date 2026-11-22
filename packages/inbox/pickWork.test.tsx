@@ -311,3 +311,13 @@ test.skipIf(!hasDom)('a row in a Combine still waiting says “Combining…”, 
   expect(rowEl('b')).toBe(before);
   expect(rowEl('b').textContent).not.toContain('Combining…');
 });
+
+test.skipIf(!hasDom)('Combine… with a thread archived before: Undo is said to bring back only the others', async () => {
+  answers = (url) => (url.includes('/combine') ? { serverSession: 's', agents: [{ session: 'ses_a', host: 'claude-code', name: 'Claude Code', title: 'Billing work', threads: 2 }], combines: [] } : {});
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+  act(() => root!.render(<div className="pn-inbox"><CombineDialog rows={[row('a'), row('b'), row('c', { resolved_at: AGO })]} onClose={() => {}} onStarted={() => {}} /></div>));
+  await settle();
+  expect(document.querySelector('.ib-cmb-what')?.textContent).toEndWith('Undo brings back the 2 not already archived.');
+});

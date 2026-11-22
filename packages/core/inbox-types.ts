@@ -3672,6 +3672,9 @@ export interface InboxAgent {
   started_at: string | null;
   /** When this Inbox last heard from it (a poll, a state change, an Inbox tool call, its latest message); null when never. */
   last_seen_at: string | null;
+  model?: string;
+  effort?: string;
+  context?: number;
   /** Where it lives (`InboxAgentPlace`): a Rex pane Rex confirmed for this read. Absent when none. Additive. */
   place?: InboxAgentPlace;
   /**
@@ -3859,7 +3862,7 @@ export interface InboxComposeLaunch {
    * The drives mounted besides the machine's own disk (approval "inbox-launch-any-folder"): the folder menu's drive
    * rows and the folder browser's places. `network`: a network drive. Absent from an older Inbox (home only there).
    */
-  drives?: { path: string; name: string; network?: true }[];
+  drives?: { path: string; name: string; network?: true; shortcut?: false }[];
   /** macOS: this machine's own window may offer "Choose in Finder…". Absent elsewhere and from an older Inbox. */
   finder?: true;
 }

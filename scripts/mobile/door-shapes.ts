@@ -9,7 +9,7 @@
  * Types only: nothing imports this file at run time.
  */
 import type { InboxDevicePublic } from '../../packages/shared/inbox/devices';
-import type { InboxAttachmentState } from '../../packages/core/inbox-attachments';
+import type { InboxAnnotationRecord, InboxAttachmentState } from '../../packages/core/inbox-attachments';
 import type { InboxRowSnooze } from '../../packages/core/inbox-snooze';
 import type { InboxListRow, InboxMessageWire, InboxQuestion, InboxRecordKind, InboxReplyDraft } from '../../packages/core/inbox-types';
 import type { QuestionAnswer } from '../../packages/core/question-block';
@@ -204,4 +204,33 @@ export interface DoorThreadAttachmentsAnswer {
   serverSession: string;
   attachments: InboxAttachmentState[];
   inline_images?: InboxAttachmentState[];
+  /** The person's comments that wait for a Send (on files, on messages' words, on guided reviews). */
+  annotations?: InboxAnnotationRecord[];
+}
+
+/** `POST annotations` (packages/server/inbox-attachments.ts): a comment on a file's version, new or edited (the same annotation id). */
+export interface DoorAnnotationBody {
+  idempotency_key: string;
+  attachment_id: string;
+  /** `current`, or the sent version's sha256. */
+  version: string;
+  /** Plannotator's annotation, as the viewer made it. */
+  annotation: Record<string, unknown>;
+}
+
+/** `POST annotations` answers. */
+export interface DoorAnnotationAnswer {
+  annotation: InboxAnnotationRecord;
+}
+
+/** `POST annotations/:id/remove`. */
+export interface DoorAnnotationRemoveBody {
+  idempotency_key: string;
+}
+
+/** `POST markups` answers (packages/shared/inbox/markups.ts): where the drawing is kept, and the name a comment shows it by. */
+export interface DoorMarkupAnswer {
+  path: string;
+  name: string;
+  url?: string;
 }

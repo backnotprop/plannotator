@@ -15,7 +15,8 @@ struct PlannotatorInboxApp: App {
         // A pairing link from outside the app is shown, never redeemed, until the person says Pair.
         .onOpenURL { url in model.offer(link: url.absoluteString) }
         .onChange(of: phase) { _, now in
-          // Back to the front: read again.
+          // Back to the front: read again. Out of it, nothing looks for a better way to the computer.
+          model.session?.setInFront(now == .active)
           if now == .active, model.booted, let session = model.session { Task { await session.refresh() } }
         }
     }

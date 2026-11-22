@@ -81,6 +81,7 @@ packages/inbox/codeAttachment.test.tsx
 packages/inbox/copyFile.test.tsx
 packages/inbox/fileViewClean.test.tsx
 packages/inbox/documentContents.test.tsx
+packages/inbox/contentsDots.test.tsx
 packages/inbox/links.test.tsx
 packages/inbox/replyFileLinks.test.tsx
 packages/inbox/replyFeedback.test.tsx
@@ -101,6 +102,7 @@ packages/inbox/reask.test.tsx
 packages/inbox/openQuestions.test.tsx
 packages/inbox/threadPulls/ThreadPulls.test.tsx
 packages/inbox/threadSteps.test.tsx
+packages/inbox/panePollsPause.test.tsx
 packages/inbox/decisionMode.test.tsx
 packages/inbox/decisionCardContract.test.tsx
 packages/inbox/threadFolding.test.tsx
@@ -114,6 +116,7 @@ packages/inbox/composeLaunchPulls.test.tsx
 packages/inbox/choiceLabels.test.tsx
 packages/inbox/pasteTarget.test.ts
 packages/inbox/seenOnSight.test.tsx
+packages/inbox/thread/newBelowWatch.test.ts
 packages/inbox/panes/twoSlots.test.tsx
 packages/inbox/panes/usePaneOpens.test.tsx
 packages/inbox/panes/shownReads.test.tsx
@@ -255,6 +258,7 @@ packages/inbox/openStaysPut.test.tsx
 packages/inbox/clickToRefresh.test.tsx
 packages/inbox/ask/askWindow.test.tsx
 packages/inbox/ask/askReadsOnce.test.tsx
+packages/inbox/ask/askSameAnswer.test.tsx
 packages/inbox/floaters/floaters.test.tsx
 packages/inbox/ask/side.test.tsx
 packages/inbox/ask/sideCommand.test.tsx
@@ -304,6 +308,7 @@ packages/inbox/promptsSettings.test.tsx
 packages/inbox/connectNextStep.test.tsx
 packages/inbox/settingsSections.test.tsx
 packages/inbox/searchPalette.test.tsx
+packages/inbox/searchPaletteMachines.test.tsx
 packages/inbox/searchShortcut.test.tsx
 packages/inbox/openIn.test.tsx
 packages/inbox/openInCheck.test.tsx
@@ -340,6 +345,7 @@ packages/ui/hooks/usePinpoint.question.test.tsx
 packages/ui/utils/blockTargeting.blocks.test.tsx
 packages/ui/components/blocks/BlockquoteBlock.test.tsx
 packages/ui/components/RenderedMarkdown.hostSeams.test.tsx
+packages/ui/components/blocks/HtmlBlock.media.test.tsx
 packages/ui/components/plan-diff/PlanCleanDiffView.codeDocument.test.tsx
 packages/ui/components/plan-diff/PlanCleanDiffView.seams.test.tsx
 packages/ui/components/AnnotationPanel.questions.test.tsx
@@ -472,6 +478,7 @@ packages/editor/planDiffAutoExit.test.tsx
 packages/editor/App.archiveReadOnly.test.tsx
 packages/editor/App.codeDocument.test.tsx
 packages/editor/App.refCards.test.tsx
+packages/editor/App.callbackReturnLink.test.tsx
 packages/editor/App.htmlChrome.test.tsx
 packages/editor/App.sidebarTabsAgentTerminal.test.tsx
 packages/editor/App.htmlLinkDraft.test.tsx
@@ -679,6 +686,7 @@ packages/inbox/pulls/prPaneFocus.test.tsx
 packages/inbox/pulls/pullDetails.test.tsx
 packages/inbox/prs/checksTurn.test.tsx
 packages/inbox/guideGlobalComment.test.tsx
+packages/inbox/guideRefCards.test.tsx
 packages/inbox/guideChapterDiagram.test.tsx
 packages/inbox/guideOverviewMermaid.test.tsx
 packages/inbox/guideExpandContext.test.tsx
@@ -883,3 +891,4 @@ packages/inbox/launchChoiceStates.test.tsx
 packages/ui/components/html-embed/HtmlEmbedBlock.annotate.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.inline.test.tsx
 packages/ui/components/html-viewer/bridgeStructuralAnchor.test.ts
+packages/ui/utils/diagramLabelScrub.test.ts

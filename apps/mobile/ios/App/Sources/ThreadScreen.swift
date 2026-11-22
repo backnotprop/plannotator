@@ -68,6 +68,10 @@ struct ThreadScreen: View {
   @State private var pageWidth: CGFloat = 0
   /// The file open over the thread.
   @State private var opened: FileOpen?
+  /// The list of comments on files that wait for the Send.
+  @State private var commentsOpen = false
+  /// The toast after a comment is removed from the list, with Undo.
+  @State private var commentToasts = CommentToast()
 
   private var model: ThreadModel? { session.thread(id) }
   private var title: String {
@@ -130,8 +134,17 @@ struct ThreadScreen: View {
     }
     // A file opens over the thread, full screen; closed, the thread is where it was.
     .environment(\.openFile) { item in opened = FileOpen(thread: id, file: item.id) }
-    .fullScreenCover(item: $opened) { open in FileCover(session: session, thread: open.thread, start: open.file) }
+    .fullScreenCover(item: $opened) { open in FileCover(session: session, thread: open.thread, start: open.file, seek: open.seek, edits: open.edits) }
+    // A comment in the list opens its file, at the comment.
+    .sheet(isPresented: $commentsOpen) {
+      CommentsSheet(session: session, thread: id, toasts: commentToasts) { comment in
+        opened = FileOpen(thread: id, file: comment.attachment, seek: comment)
+      } edit: { comment in
+        opened = FileOpen(thread: id, file: comment.attachment, seek: comment, edits: true)
+      }
+    }
     .toastHost(actions, lift: foot)
+    .commentToast(commentToasts, lift: foot)
     // Mark unread closes the thread: left open, its next look would read it again.
     .onChange(of: actions.closes) { _, _ in dismiss() }
     .task {
@@ -142,7 +155,7 @@ struct ThreadScreen: View {
   }
 
   /// The agent the thread's lines name: the last one to write in it.
-  private func agentName(_ thread: InboxThread) -> String {
+  static func agentName(_ thread: InboxThread) -> String {
     thread.messages.last { $0.author.kind == .agent }.map { Names.agent($0.author) } ?? PhoneWords.anAgent
   }
 
@@ -203,7 +216,9 @@ struct ThreadScreen: View {
           // A reply that waits for the computer is the person's own message already, said to be waiting.
           ForEach(held) { write in
             Divider().overlay(Token.border).padding(.vertical, Space.card)
-            HeldReply(words: write.words ?? "", to: MessageView.addressee(of: write.message.map { MessageID($0) }, in: thread), computer: session.computer.name)
+            // A reply that is only comments on files says how many it carries; under its words, a line for each.
+            let lines = HeldReply.lines(session.heldCommentList(write), files: session.attachments(thread.threadId))
+            HeldReply(words: (write.words ?? "").isEmpty && lines.isEmpty ? CountWords.comments(session.heldComments(write)) : write.words ?? "", to: MessageView.addressee(of: write.message.map { MessageID($0) }, in: thread), computer: session.computer.name, comments: lines)
           }
         }
         .padding(.top, Space.step)
@@ -357,11 +372,11 @@ struct ThreadScreen: View {
     .safeAreaInset(edge: .top, spacing: 0) {
       // The scroll view keeps what is on screen in place under the taller top: nothing is covered when a line
       // comes (a thread rests with its newest message's name row under the title bar, which says the same).
-      if let row { ThreadLines(row: row, agent: agentName(thread), actions: actions) }
+      if let row { ThreadLines(row: row, agent: Self.agentName(thread), actions: actions) }
     }
     .safeAreaInset(edge: .bottom, spacing: 0) {
       if let row, ListRules.archived(row) {
-        ArchivedFoot(row: row, agent: agentName(thread), actions: actions)
+        ArchivedFoot(row: row, agent: Self.agentName(thread), actions: actions)
           .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { foot = $0 }
       } else {
       Composer(session: session, id: id, thread: thread, words: $words, drafts: drafts, focused: $composing, items: items, inCard: keyboard && !composing) { card in
@@ -377,6 +392,8 @@ struct ThreadScreen: View {
         let next = jumped.flatMap { open.firstIndex(of: $0) }.map { open[($0 + 1) % open.count] } ?? open[0]
         jumped = next
         withAnimation { show(next, proxy) }
+      } comments: {
+        commentsOpen = true
       }
       .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { foot = $0 }
       }
@@ -779,7 +796,7 @@ struct MessageView: View {
       }
       // The files the message carries, under its words (flow check thread-08).
       let files = session.attachments(of: message, in: thread.threadId)
-      if !files.isEmpty { FileTiles(session: session, items: files).blockEdge("\(message.id.rawValue)/files") }
+      if !files.isEmpty { FileTiles(session: session, items: files, thread: thread.threadId).blockEdge("\(message.id.rawValue)/files") }
       if showsDelivery, let line = deliveryLine {
         Text(line).font(TextRole.meta).foregroundStyle(Token.mutedForeground)
       }
@@ -805,6 +822,18 @@ struct HeldReply: View {
   let words: String
   let to: String?
   let computer: String
+  /// One line for each comment on a file it carries: the file's name, then what the comment is on.
+  var comments: [(file: String, on: String)] = []
+
+  /// The lines for the comments, as the list of comments says them: the file, then the line or the quote.
+  static func lines(_ comments: [FileComment], files: [AttachmentItem]) -> [(file: String, on: String)] {
+    comments.map { comment in
+      let file = files.first { $0.id == comment.attachment }
+      let on = comment.codeRange.map { range in "\(range.lineStart == range.lineEnd ? "\(range.lineStart)" : "\(range.lineStart)–\(range.lineEnd)")  \(comment.quote)" }
+        ?? (comment.blockId == "image" ? "" : CommentFoot.label(comment, page: file?.kind == .html))
+      return (file?.name ?? "", on)
+    }
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: Space.step) {
@@ -814,7 +843,21 @@ struct HeldReply: View {
       }
       .accessibilityElement(children: .combine)
       .accessibilityAddTraits(.isHeader)
-      Text(words).font(TextRole.body).foregroundStyle(Token.foreground.opacity(0.75)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+      if !words.isEmpty {
+        Text(words).font(TextRole.body).foregroundStyle(Token.foreground.opacity(0.75)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+      }
+      ForEach(Array(comments.enumerated()), id: \.offset) { _, line in
+        HStack(alignment: .firstTextBaseline, spacing: Space.close) {
+          Image(systemName: "text.bubble").font(TextRole.meta).foregroundStyle(Token.mutedForeground).accessibilityHidden(true)
+          (Text(line.file).foregroundStyle(Token.foreground.opacity(0.75)) + Text(line.on.isEmpty ? "" : "  \(line.on)").foregroundStyle(Token.mutedForeground))
+            .font(TextRole.secondary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("held-comment")
+      }
       Label(PhoneWords.willSendWhenBack(computer), systemImage: "clock").font(TextRole.meta).foregroundStyle(Token.mutedForeground)
     }
   }
