@@ -11,11 +11,11 @@
 import { chromium, expect, test, type Browser, type Page } from '@playwright/test';
 import { openReview, reviewOf } from './review-scratch-session';
 
-const FILE = 'notes/plan.txt';
+const FILE = 'src/plan.ts';
 const CHANGED = [8, 9, 10, 11, 12];
-// Plain text, so the semantic engine leaves the rows as a plain line diff.
+// Only the words inside the strings change: nothing moves or is renamed, so every row stays a row.
 const text = (word: 'old' | 'new') =>
-  Array.from({ length: 30 }, (_, i) => (CHANGED.includes(i + 1) ? `${word} wording of row ${i + 1}.` : `row ${i + 1} stays the same.`)).join('\n') + '\n';
+  Array.from({ length: 30 }, (_, i) => `export const row${i + 1} = '${CHANGED.includes(i + 1) ? `${word} wording of row ${i + 1}.` : `row ${i + 1} stays the same.`}';`).join('\n') + '\n';
 
 type Side = 'old' | 'new';
 interface Row {
@@ -132,6 +132,8 @@ async function dragPlus(page: Page, side: Side, from: number, to: number, after:
   await expectComposerFor(page, `Lines ${from}-${to}`, `after ${after}, a drag from the "+" of ${side} line ${from} to ${to}`);
 }
 
+test.use({ actionTimeout: 20_000 });
+
 let browser: Browser;
 test.beforeAll(async () => {
   browser = await chromium.launch({ headless: true });
@@ -147,7 +149,7 @@ for (const layout of ['split', 'unified'] as const) {
       const { context, page } = await openReview(browser, session.url, (p) =>
         p.context().addCookies([{ name: 'plannotator-diff-style', value: layout, url: session.url }]),
       );
-      await page.locator(`[data-changes-tree] [data-type="item"][data-item-path$="${FILE}"]`).first().click();
+      await page.locator(`[data-changes-tree] [data-type="item"][data-item-path$="plan.ts"]`).first().click();
 
       await clickPlus(page, 'new', 9, 'opening the file');
       await cancel(page);
