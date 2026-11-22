@@ -101,6 +101,7 @@ packages/inbox/reask.test.tsx
 packages/inbox/openQuestions.test.tsx
 packages/inbox/threadPulls/ThreadPulls.test.tsx
 packages/inbox/threadSteps.test.tsx
+packages/inbox/panePollsPause.test.tsx
 packages/inbox/decisionMode.test.tsx
 packages/inbox/decisionCardContract.test.tsx
 packages/inbox/threadFolding.test.tsx
@@ -114,6 +115,7 @@ packages/inbox/composeLaunchPulls.test.tsx
 packages/inbox/choiceLabels.test.tsx
 packages/inbox/pasteTarget.test.ts
 packages/inbox/seenOnSight.test.tsx
+packages/inbox/thread/newBelowWatch.test.ts
 packages/inbox/panes/twoSlots.test.tsx
 packages/inbox/panes/usePaneOpens.test.tsx
 packages/inbox/panes/shownReads.test.tsx
@@ -255,6 +257,7 @@ packages/inbox/openStaysPut.test.tsx
 packages/inbox/clickToRefresh.test.tsx
 packages/inbox/ask/askWindow.test.tsx
 packages/inbox/ask/askReadsOnce.test.tsx
+packages/inbox/ask/askSameAnswer.test.tsx
 packages/inbox/floaters/floaters.test.tsx
 packages/inbox/ask/side.test.tsx
 packages/inbox/ask/sideCommand.test.tsx
