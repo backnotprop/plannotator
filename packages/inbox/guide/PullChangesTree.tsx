@@ -5,17 +5,19 @@ import { ChangesTreeView, type ChangesTreeHandle } from '@plannotator/review-edi
 import { RISK_BARS_PARTS } from '@plannotator/review-editor/components/treeRows';
 import { buildFileTree, getVisualFileOrder } from '@plannotator/review-editor/utils/buildFileTree';
 import type { PullChangesTreeProps, PullTreeRisk } from './pullRepoTypes';
+import { RISK_TONE } from '../pulls/riskBarsTone';
 
 type RowPart = (typeof RISK_BARS_PARTS)['high'];
 
 /**
- * The trees' risk bars (approval "review-risk-bars"): review-editor's `RISK_BARS_PARTS` before each named file's icon,
- * as the tree's `fileLead`; undefined (no lead at all) with no risk to show. Also All files' (PullRepoParts.tsx).
+ * The trees' risk bars (approval "review-risk-bars"): review-editor's `RISK_BARS_PARTS` in the risk tone, before each
+ * named file's icon, as the tree's `fileLead`; undefined (no lead at all) with no risk to show. Also All files'
+ * (PullRepoParts.tsx).
  */
 export function useRiskLead(risk: PullTreeRisk | null | undefined): ((path: string) => RowPart | null) | undefined {
   return useMemo(() => {
     if (!risk || risk.files.size === 0) return undefined;
-    const part = RISK_BARS_PARTS[risk.level];
+    const part = { ...RISK_BARS_PARTS[risk.level], color: RISK_TONE };
     return (path: string) => (risk.files.has(path) ? part : null);
   }, [risk]);
 }

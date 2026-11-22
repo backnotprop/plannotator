@@ -7,7 +7,7 @@
  * and 2x; High fills all three, Medium two with the third faint (the shape still reads "2 of 3"). Tone: review-editor's
  * `riskBarsTone.ts`, an orange-red from the theme.
  */
-import { RISK_TONE, RISK_TONE_FAINT } from '@plannotator/review-editor/components/riskBarsTone';
+import { RISK_TONE, RISK_TONE_FAINT } from './riskBarsTone';
 import type { GuideLineMark } from '../guide/types';
 import { riskBarsWord, type RiskBars, type RiskBarsLevel } from './riskBars';
 

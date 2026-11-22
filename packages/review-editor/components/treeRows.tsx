@@ -4,7 +4,6 @@ import type { FileTreeRowPart, FileTreeRowParts, GitStatusEntry } from '@pierre/
 import type { DiffFile } from '../types';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { useReviewStateOptional } from '../dock/ReviewStateContext';
-import { RISK_TONE } from './riskBarsTone';
 
 interface SectionEntry {
   group: 'committed' | 'changes' | 'untracked';
@@ -51,14 +50,15 @@ const STAGED_PART: FileTreeRowPart = { text: '\u25cf', title: 'Staged', color: '
 
 /**
  * The risk bars before a file's icon (approval "review-risk-bars"): three bars 2px wide, 2px apart, 6, 9 and 12px
- * tall, all filled for High, two for Medium (the third faint), in an orange-red from the theme. A mark, not a button
- * (`disabled`, so the lane draws no button); its `label` goes into the row's title. Laid out over the indent left of
- * the icon (`treeLook`), so no row moves. The diff's mark (the Inbox's riskBarsMarks.ts) draws the same bars.
+ * tall, all filled for High, two for Medium (the third faint), in `currentColor`: the host gives the part its `color`
+ * (the Inbox's orange-red, `useRiskLead`). A mark, not a button (`disabled`, so the lane draws no button); its `label`
+ * goes into the row's title. Laid out over the indent left of the icon (`treeLook`), so no row moves. The diff's mark
+ * (the Inbox's riskBarsMarks.ts) draws the same bars.
  */
 const RISK_ICON = { width: 10, height: 12, viewBox: '0 0 10 12' };
 export const RISK_BARS_PARTS: Record<'high' | 'medium', FileTreeRowPart> = {
-  high: { id: 'risk', disabled: true, icon: { name: 'pn-risk-high', ...RISK_ICON }, title: 'High risk', label: 'High risk', color: RISK_TONE },
-  medium: { id: 'risk', disabled: true, icon: { name: 'pn-risk-medium', ...RISK_ICON }, title: 'Medium risk', label: 'Medium risk', color: RISK_TONE },
+  high: { id: 'risk', disabled: true, icon: { name: 'pn-risk-high', ...RISK_ICON }, title: 'High risk', label: 'High risk' },
+  medium: { id: 'risk', disabled: true, icon: { name: 'pn-risk-medium', ...RISK_ICON }, title: 'Medium risk', label: 'Medium risk' },
 };
 
 /**
