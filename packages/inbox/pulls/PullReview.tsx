@@ -81,7 +81,7 @@ import { RiskMark } from './RiskMark';
 import { ContextNotesProvider, useContextNotes } from '../contextNotes/ContextNotes';
 import { placesWord, riskNotes, takeRiskPlaces } from '../contextNotes/model';
 import { riskBarsOf } from './riskBars';
-import { riskBarsLineNotes } from './RiskBarsMark';
+import { riskBarsLineMarks } from './riskBarsMarks';
 import { usePullRisk } from './usePullRisk';
 import { Named } from './Face';
 import { person, wordsText, type Words } from './words';
@@ -764,10 +764,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
   );
   const treeRiskKey = riskBars ? `${riskBars.level}\u0000${[...riskBars.files].join('\u0000')}` : '';
   const treeRisk = useMemo(() => (riskBars ? { level: riskBars.level, files: riskBars.files } : null), [treeRiskKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  const shownLineNotes = useMemo(() => {
-    const marks = riskBarsLineNotes(riskBars, layerKey);
-    return marks.length > 0 ? [...marks, ...(lineNotes ?? [])] : lineNotes;
-  }, [riskBars, lineNotes, layerKey]);
+  const riskLineMarks = useMemo(() => riskBarsLineMarks(riskBars), [riskBars]);
   const places = useContextNotes(placeNotes, {});
   const placeAt = useRef(-1);
   const goToPlace = (index: number) => {
@@ -1182,7 +1179,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
                     viewed={{ files: viewedSet, onToggle: toggleViewed }}
                     fileOpenIn={fileOpenIn}
                     fileContents={fileContents}
-                    lineNotes={shownLineNotes}
+                    lineNotes={lineNotes}
+                    {...(riskLineMarks.length > 0 ? { lineMarks: riskLineMarks } : {})}
                     wholeFileNotes={wholeFileNotes}
                     {...(places.anchors.length > 0 ? { contextNotes: places.anchors, renderContextNote: places.renderContextNote } : {})}
                   />

@@ -12122,15 +12122,6 @@ button.ib-lp-line:focus-visible { outline: 2px solid var(--ring); outline-offset
    session's two), at the buttons' usual gap: nothing pushes it to the bar's far end (the owner, 2026-11-08: "I want
    them next to the button"). */
 
-/* ── Risk bars (approval "review-risk-bars") ─────────────────────────────────────────────────────────────────────────
-   A High or Medium judgment's places, marked in the diff at the right edge of each named range's first line: a host line
-   note of no height under that line (`riskBarsLineNotes`), its mark drawn up into the line, so no row moves. Three small
-   bars in an orange-red from the theme (the tree's mark is review-editor's RISK_BARS_PARTS, the same tone). */
-.ib-riskbars-row { position: relative; height: 0; contain: inline-size; }
-.ib-riskbars-row > .ib-riskbars { position: absolute; right: 10px; bottom: 0; height: var(--diffs-line-height, 1lh); }
-.ib-riskbars { display: inline-flex; align-items: center; color: color-mix(in oklch, var(--destructive) 60%, var(--warning)); }
-.ib-riskbars > svg { display: block; fill: currentColor; }
-
 /* ── Context notes (approval "inbox-context-notes", take Line) ──────────────────────────────────────────────────────
    An agent's words on lines of the diff, drawn through review-editor's `contextNotes` seam (`.context-note-slot`):
    one row (Show me's Pebble, the writer in words, the first words), opened in place. Shape's paper with a breath of the

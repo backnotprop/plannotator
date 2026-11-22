@@ -6,7 +6,7 @@ import type { DiffFile } from '../types';
 import type { RepoFilesState } from '../hooks/useRepoFiles';
 import { initialRepoExpansion } from '../utils/repoTree';
 import { prefetchRepoFile } from '../hooks/useRepoFileText';
-import { TreeRowMenu, ancestorsOf, countParts, fileRowParts, folderLineCounts, gitStatusFor, notePart, type FileRowState } from './treeRows';
+import { TreeRowMenu, ancestorsOf, countParts, fileRowParts, folderLineCounts, gitStatusFor, leadAtRoot, notePart, type FileRowState } from './treeRows';
 import { treeLook } from './treeLook';
 import { useTreeSearchKeys } from './treeSearchKeys';
 
@@ -271,6 +271,9 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
     },
   }), [model, gitStatus, ensureLoaded]);
 
+  // A marked changed file at the repository's root: the tree makes room for its mark (treeLook).
+  const leadRoom = useMemo(() => leadAtRoot(files.flatMap((file) => (file.path.includes('/') ? [] : [file.path])), props.fileLead), [files, props.fileLead]);
+
   return (
     <PierreFileTree
       model={model}
@@ -278,6 +281,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
       className="review-file-tree"
       data-repo-file-tree=""
       data-review-tree-filter={props.searchAccessory ? '' : undefined}
+      data-lead-room={leadRoom ? '' : undefined}
       aria-label="All files"
       style={{ height: '100%' }}
       renderContextMenu={(item, context) =>

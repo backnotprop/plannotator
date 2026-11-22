@@ -94,6 +94,8 @@ export interface GuideReaderProps {
    * comments: nothing counts, sends or posts them. Absent: none, as before.
    */
   lineNotes?: readonly GuideLineNote[];
+  /** The host's marks at the right edge of lines (the PR page: the risk bars), never over code. Absent: none. */
+  lineMarks?: readonly GuideLineMark[];
   /**
    * What the host draws itself about whole files, in each file's header under its path (the PR page: other people's
    * folded comments on a whole file), so it stays with the header. Never comments, as `lineNotes`; something that
@@ -118,6 +120,17 @@ export interface GuideLineNote {
   /** Changes whenever what `render` draws changes; the same key leaves the line as it is. */
   key: string;
   render: () => ReactNode;
+}
+
+/** A mark at the right edge of a line (review-editor's `HostLineMark`, as the window's strict typecheck sees it). */
+export interface GuideLineMark {
+  filePath: string;
+  side: 'old' | 'new';
+  line: number;
+  /** What a screen reader says for it. */
+  label: string;
+  /** Its look: CSS background declarations for its box (review-editor's `LINE_MARK_WIDTH` × one line). */
+  paint: string;
 }
 
 /** One thing the host draws about a whole file (review-editor's `HostFileNote`, as the window's strict typecheck sees it). */

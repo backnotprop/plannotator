@@ -68,4 +68,14 @@ describe.skipIf(!hasDom)('the risk bars in the Changes tree', () => {
     expect(marked(el)).toEqual([]);
     expect(rowsOf(el).some((row) => row.querySelector('[data-item-section="lead"]'))).toBe(false);
   });
+
+  test('a marked file at the root makes the tree room for its mark; one inside a folder, or none, does not', async () => {
+    const roomy = (el: HTMLElement) => el.querySelector<HTMLElement>('[data-changes-tree]')!.hasAttribute('data-lead-room');
+    const el = await draw(tree({ level: 'high', files: new Set(['README.md']) }));
+    expect(roomy(el)).toBe(true);
+    await draw(tree({ level: 'high', files: new Set(['src/billing.ts']) }));
+    expect(roomy(el)).toBe(false);
+    await draw(tree(null));
+    expect(roomy(el)).toBe(false);
+  });
 });

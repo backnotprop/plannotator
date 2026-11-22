@@ -4,11 +4,9 @@
  * range the diff does not draw marked on lines that hold other code.
  */
 import { describe, expect, test } from 'bun:test';
-import type { ReactElement } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
 import type { InboxPullRiskJudgment, InboxPullRiskPlace } from '@plannotator/core/inbox-types';
 import { riskBarsOf } from './riskBars';
-import { RiskBarsMark, riskBarsLineNotes } from './RiskBarsMark';
+import { riskBarsLineMarks, riskBarsPaint } from './riskBarsMarks';
 
 const file = (path: string, body: string[]) => ({ path, patch: `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -10,3 +10,${body.length} @@\n${body.join('\n')}\n` });
 // New lines 10 context, 11–13 added, 14 context; old lines 10, 11 (removed), 12.
@@ -52,21 +50,17 @@ describe('riskBarsOf', () => {
 });
 
 describe('the diff’s marks', () => {
-  test('one line note per range, under its first line on its side, saying the level', () => {
+  test('one mark per range, on its first line on its side, saying the level; none with no bars', () => {
     const bars = riskBarsOf(judged('high', [place('src/billing.ts', [12, 13]), place('src/billing.ts', [11, 11], 'old')]), FILES);
-    const notes = riskBarsLineNotes(bars, 'github.com/n/b#7');
-    expect(notes.map(({ filePath, line, side }) => `${filePath} ${side} ${line}`)).toEqual(['src/billing.ts new 12', 'src/billing.ts old 11']);
-    expect(new Set(notes.map((note) => note.id)).size).toBe(2);
-    const drawn = renderToStaticMarkup(notes[0]!.render() as ReactElement);
-    expect(drawn.match(/role="img"/g)).toHaveLength(1);
-    expect(drawn).toContain('aria-label="High risk"');
-    expect(drawn).toContain('title="High risk"');
-    expect(riskBarsLineNotes(null, 'k')).toEqual([]);
+    const marks = riskBarsLineMarks(bars);
+    expect(marks.map(({ filePath, line, side, label }) => `${filePath} ${side} ${line} ${label}`)).toEqual(['src/billing.ts new 12 High risk', 'src/billing.ts old 11 High risk']);
+    expect(riskBarsLineMarks(null)).toEqual([]);
   });
 
-  test('High fills three bars; Medium two', () => {
-    const filled = (level: 'high' | 'medium') => (renderToStaticMarkup(<RiskBarsMark level={level} />).match(/<rect(?![^>]*opacity="0.28")/g) ?? []).length;
-    expect(filled('high')).toBe(3);
-    expect(filled('medium')).toBe(2);
+  test('High fills three bars; Medium two, its third faint', () => {
+    const images = (level: 'high' | 'medium') => /background-image: ([^;]*);/.exec(riskBarsPaint(level))![1]!.split(/,\s*(?=linear-gradient)/);
+    const faint = (image: string) => image.includes('30%, transparent');
+    expect(images('high').map(faint)).toEqual([false, false, false]);
+    expect(images('medium').map(faint)).toEqual([false, false, true]);
   });
 });

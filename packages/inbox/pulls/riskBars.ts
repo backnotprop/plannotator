@@ -14,7 +14,6 @@ export type RiskBarsLevel = 'high' | 'medium';
 
 /** One mark in the diff: a named range, drawn at its first line. */
 export interface RiskBarsRange {
-  id: string;
   file: string;
   side: 'old' | 'new';
   line: number;
@@ -50,7 +49,7 @@ export function riskBarsOf(judgment: InboxPullRiskJudgment | null | undefined, f
     const key = `${place.file}\u0000${place.side}\u0000${start}`;
     if (seen.has(key) || !isLineRangeInPatch(patch, start, end, place.side)) continue;
     seen.add(key);
-    ranges.push({ id: `risk:${ranges.length}`, file: place.file, side: place.side, line: start });
+    ranges.push({ file: place.file, side: place.side, line: start });
   }
   return named.size > 0 ? { level: judgment.level, files: named, ranges } : null;
 }

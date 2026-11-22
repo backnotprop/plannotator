@@ -99,6 +99,7 @@ import {
   type HostFileNote,
   type HostLineNote,
 } from './hostLineNotes';
+import { hostLineMarksCss, NO_HOST_LINE_MARKS, type HostLineMark } from './hostLineMarks';
 import { applyFileLanguageFixes } from '../utils/highlightLanguage';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import type { ReviewSearchMatch } from '../utils/reviewSearch';
@@ -230,6 +231,9 @@ export interface AllFilesCodeViewProps {
   /** What the host draws itself about a whole file (hostLineNotes.ts): in the file's header, under its path, above its
    *  first lines and the person's own file comments; read-only, never annotations. Absent: none, as before. */
   hostFileNotes?: readonly HostFileNote[];
+  /** The host's marks at the right edge of lines (hostLineMarks.ts), drawn by the lines themselves, never over code.
+   *  Only a view of one file draws them (their CSS is the view's). Absent: none, as before. */
+  hostLineMarks?: readonly HostLineMark[];
   selectedAnnotationId: string | null;
   scrollTargetAnnotation: AnnotationScrollTarget | null;
   lineTarget?: AllFilesLineTarget | null;
@@ -901,6 +905,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   annotations,
   hostLineNotes = NO_HOST_LINE_NOTES,
   hostFileNotes = NO_HOST_FILE_NOTES,
+  hostLineMarks = NO_HOST_LINE_MARKS,
   selectedAnnotationId,
   scrollTargetAnnotation,
   lineTarget,
@@ -4361,10 +4366,14 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const getMinimapViewer = useCallback(() => viewerRef.current?.getInstance(), []);
   const getMinimapScroller = useCallback(() => scrollRef.current, []);
 
+  // The host's line marks: CSS inside each file's shadow root, so only a view of one file can say which file's lines.
+  const onlyPath = files.length === 1 ? files[0]!.path : null;
+  const lineMarksCss = useMemo(() => (onlyPath ? hostLineMarksCss(hostLineMarks.filter((mark) => mark.filePath === onlyPath)) : ''), [hostLineMarks, onlyPath]);
+
   const options = useMemo<CodeViewOptions<DiffAnnotationMetadata>>(
     () => ({
       themeType: pierreTheme.type,
-      unsafeCSS: `${scrollsWithPage ? `${pierreTheme.css}${SCROLLS_WITH_PAGE_CSS}${flushFiles ? FLUSH_FILES_CSS : STUCK_HEADER_LINE_CSS}` : pierreTheme.css}${powerUpActive ? powerUpCss(powerUpMotion, diffIndicators ?? 'bars') : ''}`,
+      unsafeCSS: `${scrollsWithPage ? `${pierreTheme.css}${SCROLLS_WITH_PAGE_CSS}${flushFiles ? FLUSH_FILES_CSS : STUCK_HEADER_LINE_CSS}` : pierreTheme.css}${powerUpActive ? powerUpCss(powerUpMotion, diffIndicators ?? 'bars') : ''}${lineMarksCss}`,
       ...(pierreTheme.syntaxTheme && { theme: pierreTheme.syntaxTheme }),
       diffStyle,
       overflow: diffOverflow,
@@ -4439,6 +4448,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       pierreTheme.syntaxTheme,
       powerUpActive,
       powerUpMotion,
+      lineMarksCss,
       diffStyle,
       diffOverflow,
       diffIndicators,
