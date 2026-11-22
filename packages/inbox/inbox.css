@@ -10195,23 +10195,29 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 /* Reviews' rows, compact (ReviewRow.tsx, approval "inbox-reviews-compact-list"): one 30px line under plain group
    labels; the open row grows a second line. The age has a fixed column; a stack's count is its own button over the
    row's end, in the room the row keeps for it. A phone keeps 44px rows. */
-.ib-prlist { --ib-rvr-h: 30px; --ib-rvr-pad: 12px; --ib-rvr-age-w: calc(var(--ib-fs-12-5, 12.5px) * 2.9); }
+.ib-prlist { --ib-rvr-h: 30px; --ib-rvr-pad: 12px; --ib-rvr-age-w: calc(var(--ib-fs-12-5, 12.5px) * 2.9); --ib-rvr-l1c: calc(var(--ib-rvr-h) / 2); --ib-rvr-pitch: var(--ib-rvr-h); }
 .ib-prlist .ib-group + .ib-group { margin-top: 6px; }
 .ib-rvr-gl { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 600; color: var(--foreground); }
 .ib-rvr-gl .ib-n { font-weight: 500; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .ib-nrow.ib-prrow { display: block; gap: 0; padding: 0 var(--ib-rvr-pad); border-bottom: 0; }
 .ib-nrow.ib-prrow::before { inset: 1px 0; }
-.ib-mrow.ib-prrow { display: block; width: 100%; min-height: 0; padding: 0 var(--ib-rvr-pad); text-align: left; border-bottom: 1px solid var(--ib-hair); }
+.ib-mrow.ib-prrow { position: relative; display: block; width: 100%; min-height: 0; padding: 0 var(--ib-rvr-pad); text-align: left; border-bottom: 1px solid var(--ib-hair); }
 .ib-mrow.ib-prrow.ib-sel { background: var(--ib-sel); }
 .ib-lbody > .ib-group > .ib-mrow.ib-prrow { contain-intrinsic-size: auto none auto 45px; }
 .ib-prrow .ib-rvr-l1 { display: flex; align-items: center; gap: 9px; height: var(--ib-rvr-h); min-width: 0; font-size: var(--ib-fs-13-5, 13.5px); }
 .ib-rvr-mark { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 15px; color: var(--muted-foreground); }
 .ib-prrow .ib-rvr-t { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 18px; color: var(--foreground); unicode-bidi: plaintext; text-align: start; }
 .ib-prrow.ib-u .ib-rvr-t { font-weight: 600; }
-/* A long unbroken title: the head gives way, the tail that tells rows apart stays. */
-.ib-prrow .ib-rvr-t[data-reviews-title-split] { display: flex; }
+/* A long unbroken title: the head gives way, the tail that tells rows apart stays. Too narrow for the kept end
+   (under 11em), the line cuts plainly at its end, so the kept end is never clipped without "…". */
+.ib-prrow .ib-rvr-t[data-reviews-title-split] { display: block; flex: 1 1 0%; container-type: inline-size; }
+.ib-rvr-tin { display: flex; min-width: 0; }
 .ib-rvr-th { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ib-rvr-tt { flex: none; white-space: nowrap; }
+.ib-rvr-tt { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@container (max-width: 11em) {
+  .ib-rvr-tin { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ib-rvr-tin > :is(.ib-rvr-th, .ib-rvr-tt) { display: inline; }
+}
 .ib-rvr-end { flex: none; display: flex; align-items: center; gap: 8px; margin-left: auto; padding-left: 4px; }
 .ib-rvr-ck { display: inline-flex; }
 .ib-pr-magent.ib-rvr-agent { display: inline-flex; margin: 0; }
@@ -10224,12 +10230,22 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-rvr-stk > .ib-prrow { grid-area: 1 / 1; }
 .pn-inbox .ib-rvr-stkbtn { position: relative; z-index: 1; grid-area: 1 / 1; justify-self: end; align-self: start; height: 22px; margin: calc((var(--ib-rvr-h) - 22px) / 2) calc(var(--ib-rvr-pad) + var(--ib-rvr-age-w) + 8px) 0 0; border-radius: 6px; font-family: inherit; line-height: 1; cursor: pointer; }
 .pn-inbox .ib-rvr-stkbtn:hover { color: var(--foreground); background: color-mix(in oklch, var(--muted) 70%, transparent); }
+/* Its hit area: the row's full height and a little to each side, drawn as it was. */
+.pn-inbox .ib-rvr-stkbtn::after { content: ""; position: absolute; inset: calc((22px - var(--ib-rvr-h)) / 2) -4px; }
 .pn-inbox .ib-rvr-stkbtn:focus-visible { outline: 2px solid var(--ring); outline-offset: -1px; }
 .ib-rvr-stk:has(> .ib-rvr-stkbtn:hover) > .ib-nrow.ib-prrow:not(.ib-sel)::before { background: var(--ib-hover) !important; }
 .ib-rvr-stk:has(> .ib-rvr-stkbtn:hover) > .ib-nrow.ib-prrow.ib-sel::before { background: var(--ib-sel-hover) !important; }
 .ib-rvr-layers { grid-row: 2; grid-column: 1; }
 .ib-prrow.ib-rvr-child { padding-left: calc(var(--ib-rvr-pad) + 24px); }
-.ib-prrow.ib-rvr-child::after { content: ""; position: absolute; left: calc(var(--ib-rvr-pad) + 7px); top: calc(var(--ib-rvr-h) / 2 - 26px); width: 10px; height: 26px; border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); border-bottom-left-radius: 5px; pointer-events: none; }
+/* The tree line from the stack to a layer: on the layer's own row (positioned on a phone as on a desktop). */
+/* From the line's middle (--ib-rvr-l1c) up to 4px short of the row above's (one row apart, --ib-rvr-pitch). */
+/* --ib-rvr-above: how much taller the row above is than one row (a desktop's open row, its second line). */
+.ib-rvr-tree { position: absolute; left: calc(var(--ib-rvr-pad) + 7px); top: calc(var(--ib-rvr-l1c) - var(--ib-rvr-pitch) - var(--ib-rvr-above, 0px) + 4px); width: 10px; height: calc(var(--ib-rvr-pitch) + var(--ib-rvr-above, 0px) - 4px); border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); border-bottom-left-radius: 5px; pointer-events: none; }
+/* A desktop's open row above a layer: the line reaches up past its second line (18 + 7 - 3px) to its mark, as between
+   closed rows. The open stack's row is drawn over its layers, so the line passes behind its author's picture. */
+.ib-rvr-stk > .ib-nrow.ib-prrow.ib-sel { z-index: 1; }
+.ib-rvr-stk > .ib-nrow.ib-sel ~ .ib-rvr-layers > .ib-nrow.ib-rvr-child:first-child,
+.ib-nrow.ib-rvr-child.ib-sel + .ib-nrow.ib-rvr-child { --ib-rvr-above: 22px; }
 /* The open row's second line: what the old third line said, under the title. */
 .ib-prrow .ib-rvr-l2 { display: flex; align-items: center; gap: 9px; min-width: 0; height: 18px; margin-top: -3px; padding-bottom: 7px; box-sizing: content-box; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-rvr-l2 > .ib-lead { flex: none; display: inline-flex; justify-content: center; width: 15px; }
@@ -10647,14 +10663,33 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   .ib-pr-foot { padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
   .pn-inbox .ib-pr-refresh { min-width: 44px; min-height: 44px; }
   .pn-inbox .ib-pr-foldbtn { height: 44px; padding: 0 12px; font-size: var(--ib-fs-13-5, 13.5px); }
-  /* Reviews' rows keep a finger's 44px; the line reads at the phone's sizes. */
-  .ib-prlist { --ib-rvr-h: 44px; --ib-rvr-pad: 16px; }
+  /* Reviews' rows on a phone: two lines each, 56px with the divider (7 + 22 + 1 + 18 + 7 + 1); the lines read at the
+     phone's sizes. The second line (`PhoneLine`) sits under the title, on one line cut with "…". */
+  .ib-prlist { --ib-rvr-h: 22px; --ib-rvr-pad: 16px; --ib-rvr-pitch: 56px; --ib-rvr-l1c: calc(7px + var(--ib-rvr-h) / 2); }
+  .ib-mrow.ib-prrow { padding-top: 7px; padding-bottom: 7px; }
+  .ib-lbody > .ib-group > .ib-mrow.ib-prrow { contain-intrinsic-size: auto none auto 56px; }
   .ib-rvr-gl { height: 36px; padding: 0 16px; font-size: var(--ib-fs-13, 13px); }
   .ib-prrow .ib-rvr-l1 { font-size: var(--ib-fs-15, 15px); gap: 10px; }
-  .ib-prrow .ib-rvr-l2 { font-size: var(--ib-fs-13-5, 13.5px); height: 20px; margin-top: -6px; padding-bottom: 10px; gap: 10px; }
-  .ib-rvr-l2 > .ib-pr-l3:first-child { margin-left: 25px; }
+  .ib-rvr-l2p { display: flex; align-items: center; height: 18px; min-width: 0; margin: 1px 0 0 25px; font-size: var(--ib-fs-13, 13px); line-height: 18px; color: var(--muted-foreground); }
+  .ib-rvr-l2p > .ib-pv { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ib-rvr-cnt { min-width: 44px; justify-content: center; }
-  .pn-inbox .ib-rvr-stkbtn { height: 44px; margin: 0 calc(var(--ib-rvr-pad) + var(--ib-rvr-age-w) + 8px) 0 0; }
+  /* The count: a finger's 44px from the row's top, its figure on the title's line. */
+  .pn-inbox .ib-rvr-stkbtn { height: 44px; margin: 0 calc(var(--ib-rvr-pad) + var(--ib-rvr-age-w) + 8px) 0 0; align-items: flex-start; padding-top: calc(var(--ib-rvr-l1c) - 6px); }
+  .pn-inbox .ib-rvr-stkbtn::after { inset: 0 -4px; }
+  /* Group labels stay at the top while their rows scroll under them, as the Inbox's own groups do on a phone; the
+     list's ground behind them, so no row shows through. */
+  .ib-rvr-gl, .pn-inbox .ib-prlist .ib-lbody .ib-pr-foldbtn { position: sticky; top: 0; z-index: 2; background: var(--card); }
+  .pn-inbox .ib-prlist .ib-lbody .ib-pr-foldbtn { border-radius: 0; }
+  /* Focus moved by Tab or Shift+Tab never lands under a stuck label (the fold's 44px, the tallest). */
+  .pn-inbox .ib-prlist .ib-lbody { scroll-padding-top: 44px; }
+  /* An unfolded stack is one block: no divider between its row and its layers or between its layers, one after the
+     last. A layer's row is a little tighter, 49px (4 + 22 + 1 + 18 + 4, over a finger's 44), and its tree line one
+     trunk from the stack's mark down: the first reaches the stack's mark (52px up: the stack's row is 55px without
+     its divider), each next one runs on from the elbow above it. */
+  .ib-rvr-stk[data-open] > .ib-mrow.ib-prrow, .ib-rvr-layers > .ib-mrow.ib-prrow:not(:last-child) { border-bottom-width: 0; }
+  .ib-rvr-layers > .ib-mrow.ib-prrow { padding-top: 4px; padding-bottom: 4px; --ib-rvr-l1c: calc(4px + var(--ib-rvr-h) / 2); --ib-rvr-pitch: 49px; }
+  .ib-rvr-layers > .ib-mrow.ib-prrow:first-child { --ib-rvr-pitch: 52px; }
+  .ib-rvr-layers > .ib-mrow.ib-prrow:not(:first-child) { --ib-rvr-above: 10px; }
 }
 @media (forced-colors: active) {
   .ib-pr-pill, .pn-inbox .ib-pr-chip { border: 1px solid CanvasText; }

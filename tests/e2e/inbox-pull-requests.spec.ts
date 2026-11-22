@@ -895,7 +895,20 @@ test("compact rows (approval inbox-reviews-compact-list): one 30px line each, th
   }
   const open = rows.find((row) => row.open)!;
   console.log(`compact rows: closed ${rows.find((row) => !row.open)!.height}px, open ${open.height}px, ${Math.floor(800 / 30)} closed rows per 800px`);
-  const proof = (name: string) => page.screenshot({ path: join(proofDir, name) });
+  // No focus ring in a picture: a ring left by the keyboard steps reads like a highlight, which selection never is.
+  const proof = async (name: string) => {
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.screenshot({ path: join(proofDir, name) });
+  };
+  /** How far each layer's tree line starts below the middle of the line above it (4px between closed rows). */
+  const treeReach = () =>
+    list.locator(`[data-reviews-stack="${STACK_ID}"]`).evaluate((block) => {
+      const rows = [block.querySelector('[data-reviews-row]')!, ...block.querySelectorAll('[data-reviews-layer]')];
+      return rows.slice(1).map((row, i) => {
+        const above = rows[i]!.querySelector('.ib-rvr-l1')!.getBoundingClientRect();
+        return Math.round(row.querySelector('[data-reviews-tree]')!.getBoundingClientRect().top - (above.top + above.height / 2));
+      });
+    });
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   await page.waitForTimeout(400);
   await proof('compact-01-selected-dark.png');
@@ -904,22 +917,218 @@ test("compact rows (approval inbox-reviews-compact-list): one 30px line each, th
   await proof('compact-02-selected-light.png');
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   const unfold = list.locator(`[data-reviews-stack-toggle="${STACK_ID}"]`);
-  await unfold.click();
+  const stackRow = list.locator(`[data-reviews-row][data-pulls-row="${STACK_ID}"]`);
+  // The count's hit area: the row's full 30px and a little to each side, though it draws 22px tall.
+  const hit = await unfold.evaluate((button) => {
+    const box = button.getBoundingClientRect();
+    const at = (x: number, y: number) => document.elementFromPoint(x, y)?.closest('[data-reviews-stack-toggle]') === button;
+    const cx = box.left + box.width / 2;
+    const cy = box.top + box.height / 2;
+    return { drawn: box.height, top: at(cx, cy - 12), bottom: at(cx, cy + 11.5), left: at(box.left - 2, cy), right: at(box.right + 2, cy) };
+  });
+  expect(hit).toEqual({ drawn: 22, top: true, bottom: true, left: true, right: true });
+  // The keyboard: the stack's row, its count, then its layers once unfolded.
+  await stackRow.focus();
+  await page.keyboard.press('Tab');
+  await expect(unfold).toBeFocused();
+  await page.keyboard.press('Enter');
   await expect(list.locator(`[data-reviews-stack="${STACK_ID}"] [data-reviews-layer]`)).toHaveCount(4);
+  await page.keyboard.press('Tab');
+  await expect(list.locator('[data-reviews-layer="github.com/northwind/billing-svc#411"]')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(list.locator(`[data-reviews-layer="${LAYER_412}"]`)).toBeFocused();
+  // The keyboard's ring is there while it is the keyboard's (inside the row, on its fill).
+  expect(await list.locator(`[data-reviews-layer="${LAYER_412}"]`).evaluate((el) => el.matches(':focus-visible') && getComputedStyle(el, '::before').boxShadow.includes('inset'))).toBe(true);
+  // Closed rows: each layer's line reaches the mark above it, and the layers sit right under the stack's row.
+  expect(await treeReach()).toEqual([4, 4, 4, 4]);
+  expect(await list.locator(`[data-reviews-stack="${STACK_ID}"]`).evaluate((block) => Math.round(block.querySelector('[data-reviews-layer]')!.getBoundingClientRect().top - block.querySelector('[data-reviews-row]')!.getBoundingClientRect().bottom))).toBe(0);
   await page.mouse.move(0, 0);
   await page.waitForTimeout(400);
   await proof('compact-03-stack-unfolded-dark.png');
-  // A phone: the list alone, its rows a finger's 44px.
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+  // A layer's row opens that layer's diff; back from it, that layer's row is the open one, its stack's page beside.
+  await list.locator(`[data-reviews-layer="${LAYER_413}"]`).click();
+  const review = page.locator('[data-pull-review]');
+  await expect(review).toBeVisible();
+  await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toContain(`layer=${LAYER_413}`);
+  await review.getByRole('button', { name: 'Reviews' }).first().click();
+  const layerRow = list.locator(`[data-reviews-layer="${LAYER_413}"]`);
+  await expect(layerRow).toHaveAttribute('aria-current', 'true');
+  await expect(layerRow.locator('[data-reviews-line2]')).toContainText('#413');
+  await expect(stackRow).not.toHaveAttribute('aria-current', 'true');
+  // The open layer has its second line: the line of the layer above it still reaches its mark.
+  expect(await treeReach()).toEqual([4, 4, 4, 4]);
+  // Then a layer opened from the stack's own page (Open the diff: the lowest open one, #412), and back: that layer's
+  // row, not the one opened from the list before.
+  await page.locator(`[data-pulls-stack="${STACK_ID}"]`).getByRole('button', { name: 'Open the diff', exact: true }).click();
+  await expect(review).toHaveAttribute('data-pull-review', LAYER_412);
+  await review.getByRole('button', { name: 'Reviews' }).first().click();
+  await expect(list.locator(`[data-reviews-layer="${LAYER_412}"]`)).toHaveAttribute('aria-current', 'true');
+  await expect(layerRow).not.toHaveAttribute('aria-current', 'true');
+  expect(await treeReach()).toEqual([4, 4, 4, 4]);
+  // The stack's own row open and unfolded: its first layer's line reaches its mark, past its second line.
+  await stackRow.click();
+  await expect(stackRow).toHaveAttribute('aria-current', 'true');
+  if ((await unfold.getAttribute('aria-expanded')) !== 'true') await unfold.click();
+  expect(await treeReach()).toEqual([4, 4, 4, 4]);
+  await expect(page.locator(`[data-pulls-stack="${STACK_ID}"]`)).toBeVisible();
+  // A phone: the list alone, every row two lines, about 56px: the title, then the status words, Medium or Low, the
+  // repository and number on one line cut with "…"; an unfolded stack's tree lines on their own rows.
   await page.goto(`${world.url}#reviews`);
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(list.locator('[data-reviews-row]').first()).toBeVisible();
-  const phoneRow = await list.locator('[data-reviews-row]').first().evaluate((el) => el.getBoundingClientRect().height);
-  expect(Math.round(phoneRow)).toBeGreaterThanOrEqual(44);
+  if ((await unfold.getAttribute('aria-expanded')) !== 'true') await unfold.click();
+  const phoneRows = await list.locator('[data-reviews-row], [data-reviews-layer]').evaluateAll((els) =>
+    els.map((el) => {
+      const second = el.querySelector<HTMLElement>('[data-reviews-line2-phone] .ib-pv');
+      return { layer: el.hasAttribute('data-reviews-layer'), height: Math.round(el.getBoundingClientRect().height), second: second ? Math.round(second.getBoundingClientRect().height) : null, inRow: second ? second.getBoundingClientRect().right <= el.getBoundingClientRect().right : null };
+    }),
+  );
+  expect(phoneRows.length).toBeGreaterThan(6);
+  for (const row of phoneRows) {
+    // A stack's layers a little tighter, still over a finger's 44px.
+    expect(row.height).toBeGreaterThanOrEqual(row.layer ? 48 : 54);
+    expect(row.height).toBeLessThanOrEqual(row.layer ? 51 : 58);
+    expect(row.second).not.toBeNull();
+    expect(row.second!).toBeLessThanOrEqual(20);
+    expect(row.inRow).toBe(true);
+  }
+  // The teammate's PR: its status words in their colour, then the repository and number.
+  await expect(list.locator('[data-reviews-row][data-pulls-row="github.com/northwind/web-app#880"] [data-reviews-line2-phone]')).toContainText('web-app #880');
+  await expect(list.locator('[data-reviews-line2]')).toHaveCount(0);
+  await expect(list.locator(`[data-reviews-stack="${STACK_ID}"] [data-reviews-layer]`)).toHaveCount(4);
+  const trees = await list.locator(`[data-reviews-stack="${STACK_ID}"] [data-reviews-layer]`).evaluateAll((els) =>
+    els.map((el) => {
+      const row = el.getBoundingClientRect();
+      const tree = el.querySelector('[data-reviews-tree]')!.getBoundingClientRect();
+      const line = el.querySelector('.ib-rvr-l1')!.getBoundingClientRect();
+      return { inside: tree.left >= row.left && tree.right <= row.left + 48 && tree.bottom > row.top && tree.bottom <= row.bottom, elbow: Math.abs(tree.bottom - (line.top + line.height / 2)) <= 1 };
+    }),
+  );
+  expect(trees).toEqual(trees.map(() => ({ inside: true, elbow: true })));
+  // The unfolded stack is one block: no divider inside it, one after its last layer, no gap between its rows, and one
+  // tree line from the stack's mark down (each piece runs on from the one above it).
+  const block = await list.locator(`[data-reviews-stack="${STACK_ID}"]`).evaluate((stack) => {
+    const rows = [stack.querySelector('[data-reviews-row]')!, ...stack.querySelectorAll('[data-reviews-layer]')];
+    const trees = rows.slice(1).map((row) => row.querySelector('[data-reviews-tree]')!.getBoundingClientRect());
+    const mark = rows[0]!.querySelector('.ib-rvr-mark')!.getBoundingClientRect();
+    return {
+      dividers: rows.map((row) => getComputedStyle(row).borderBottomWidth),
+      gaps: rows.slice(1).map((row, i) => Math.round(row.getBoundingClientRect().top - rows[i]!.getBoundingClientRect().bottom)),
+      fromMark: trees[0]!.top >= mark.top && trees[0]!.top <= mark.bottom,
+      runsOn: trees.slice(1).every((tree, i) => tree.top <= trees[i]!.bottom - 4),
+    };
+  });
+  expect(block).toEqual({ dividers: ['0px', '0px', '0px', '0px', '1px'], gaps: [0, 0, 0, 0], fromMark: true, runsOn: true });
+  await page.mouse.move(0, 0);
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   await page.waitForTimeout(400);
-  await proof('compact-04-phone-390-dark.png');
+  await proof('compact-07-phone-stack-block-dark.png');
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+  await page.waitForTimeout(400);
+  await proof('compact-07-phone-stack-block-light.png');
+  // A phone's group labels stay at the top while their rows scroll under them, on the list's own ground.
+  await page.setViewportSize({ width: 390, height: 420 });
+  const body = list.locator('.ib-lbody');
+  const fold = list.locator('[data-reviews-fold="not_reviewed"]');
+  await fold.evaluate((el) => {
+    const scroller = el.closest('.ib-lbody')!;
+    scroller.scrollTop += el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + 60;
+  });
+  await page.waitForTimeout(100);
+  const stuck = await fold.evaluate((el) => {
+    const scroller = el.closest('.ib-lbody')!;
+    const ground = getComputedStyle(el.closest('.pn-inbox')!).backgroundColor;
+    return { gap: Math.round(el.getBoundingClientRect().top - scroller.getBoundingClientRect().top), scrolled: scroller.scrollTop > 0, background: getComputedStyle(el).backgroundColor === ground };
+  });
+  expect(stuck).toEqual({ gap: 0, scrolled: true, background: true });
+  // Shift+Tab onto a row partly under the stuck label scrolls it out from under it.
+  await body.evaluate((scroller) => {
+    const label = scroller.querySelector('[data-reviews-fold="not_reviewed"]')!.getBoundingClientRect();
+    const items = [...scroller.querySelectorAll<HTMLElement>('[data-pulls-group="not_reviewed"] [data-reviews-item]')];
+    items.find((el) => el.getBoundingClientRect().top >= label.bottom + 40)!.focus({ preventScroll: true });
+  });
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Shift+Tab');
+  const clear = await body.evaluate((scroller) => {
+    const label = scroller.querySelector('[data-reviews-fold="not_reviewed"]')!.getBoundingClientRect();
+    const focused = document.activeElement!;
+    return { inList: scroller.contains(focused) && focused !== scroller.querySelector('[data-reviews-fold="not_reviewed"]'), below: focused.getBoundingClientRect().top >= label.bottom - 1 };
+  });
+  expect(clear).toEqual({ inList: true, below: true });
+  await body.evaluate((el) => (el.scrollTop = 0));
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
   if ((await unfold.getAttribute('aria-expanded')) === 'true') await unfold.click();
+});
+
+test('compact rows: one row with every mark at once in the narrowest list, and a title tooltip only while the title is cut', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark', reducedMotion: 'reduce' });
+  const page = await context.newPage();
+  const DAY = 86_400_000;
+  const long = 'Retry the charge: fix/billing-retry-jitter-on-charge-timeouts-and-dunning';
+  const keys = Array.from({ length: 120 }, (_, i) => `github.com/northwind/billing-svc#${9000 + i}`);
+  try {
+    // One more row, made from the stack's own: High, failing checks, the agent, 120 layers, 11 months old.
+    await page.route((url) => url.pathname === '/api/inbox/reviews', async (route) => {
+      const response = await route.fetch();
+      const body = (await response.json()) as { rows: Record<string, unknown>[] };
+      const like = body.rows.find((row) => (row.stacks as { id: string }[])[0]?.id === STACK_ID) as { stacks: { layers: Record<string, unknown>[] }[] } | undefined;
+      if (!like) return route.fulfill({ response, json: body });
+      const base = like.stacks[0]!.layers[0]!;
+      const old = new Date(Date.now() - 350 * DAY).toISOString();
+      const layers = Array.from({ length: 120 }, (_, i) => ({
+        ...base,
+        key: keys[i],
+        number: 9000 + i,
+        url: `https://github.com/northwind/billing-svc/pull/${9000 + i}`,
+        title: long,
+        state: 'open',
+        base: i === 0 ? 'main' : `every/${8999 + i}`,
+        head: `every/${9000 + i}`,
+        checks: i === 7 ? 'failure' : 'success',
+        updated_at: old,
+        merged_at: null,
+      }));
+      const stack = { ...like.stacks[0], id: keys[keys.length - 1], layers, parents: {}, base: 'main', open_base: 'main' };
+      const review = { thread_id: 'thr_every_mark', project_id: null, subject: null, first_review_id: 'msg_every', latest_review_id: 'msg_every', round: 1, title: long, files: 1, additions: 1, deletions: 1, agent: { host: 'claude-code', session: null, name: 'Claude Code' }, source: null, verdict: null, answered: null, reviewed_at: old, updated_at: old };
+      body.rows.unshift({ id: 'thr_every_mark', reviewed: true, move: 'on_you', reason: 'review_ready', thread_id: 'thr_every_mark', review, stacks: [stack], pull_keys: keys, link: null, pull_reason: null, landed: [], updated_at: old });
+      await route.fulfill({ response, json: body });
+    });
+    await page.route((url) => url.pathname === '/api/inbox/pulls/risk', async (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      const response = await route.fetch();
+      const body = (await response.json()) as { judgments?: Record<string, unknown> };
+      await route.fulfill({ response, json: { ...body, judgments: { ...body.judgments, [keys[3]!]: { head: 'h', base: 'main', rules: 'r', level: 'high', why: 'It changes how charges retry.' } } } });
+    });
+    await page.goto(`${world.url}#reviews`);
+    const row = page.locator('[data-reviews-row="thr_every_mark"]');
+    await expect(row).toBeVisible();
+    const line = row.locator('.ib-rvr-l1');
+    await expect(line.locator('[data-pull-risk="high"]')).toBeVisible();
+    await expect(line.locator('[data-reviews-checks="failure"]')).toBeVisible();
+    await expect(line.locator('[data-reviews-agent="claude-code"]')).toBeVisible();
+    await expect(line.locator('.ib-rvr-age [aria-hidden]')).toHaveText('11mo');
+    await expect(page.locator('[data-reviews-stack-toggle="thr_every_mark"]')).toHaveText('120');
+    // The narrowest list (380px): still one 30px line, every mark inside the row, the title cut with "…" only.
+    const fit = await row.evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      const marks = [...el.querySelectorAll('.ib-rvr-end > *')].map((m) => m.getBoundingClientRect()).filter((r) => r.width > 1);
+      return { column: Math.round(el.closest('.ib-listcol')!.getBoundingClientRect().width), height: Math.round(box.height), inside: marks.every((r) => r.left >= box.left && r.right <= box.right) };
+    });
+    expect(fit).toEqual({ column: 380, height: 30, inside: true });
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: join(proofDir, 'compact-06-every-mark-dark.png') });
+    // The tooltip: the full title only while the line cuts it.
+    await row.hover();
+    await expect(row).toHaveAttribute('title', long);
+    const short = page.locator('[data-reviews-row][data-pulls-row="github.com/northwind/web-app#880"]');
+    await short.hover();
+    await expect(short).not.toHaveAttribute('title', /./);
+  } finally {
+    await context.close();
+  }
 });
 
 test('the stack view with the Board off: layers from main up, Lands next, its review thread, no Board UI, no merge button', async () => {

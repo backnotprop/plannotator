@@ -632,7 +632,7 @@ test.skipIf(!hasDom)("the open row's second line leads with the author's picture
   // The agent: its mark on the third line, named for a reader, and what it is doing.
   const agent = stackRow.querySelector('.ib-pv [data-pulls-row-agent]')!;
   expect(agent.getAttribute('data-pulls-row-agent')).toBe('claude-code');
-  expect(agent.getAttribute('aria-label')).toBe('Claude Code');
+  expect(agent.querySelector('.ib-sr')!.textContent).toBe('Claude Code, ');
   expect(stackRow.querySelector('[data-reviews-status]')!.textContent).toBe('Curating…');
   expect(agent.querySelector('svg, img')).not.toBeNull();
   // The picture failed: the initials stay, no broken image.

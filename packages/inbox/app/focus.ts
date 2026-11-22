@@ -20,8 +20,11 @@ import { hashOf, writeRoute } from './writeRoute';
  * a new entry, so the browser's Back reopens what was just closed.
  */
 export function closeTo(route: Route): void {
-  if (!((isPhone() || leavesCoveringPane(route)) && backTo(hashOf(route)))) writeRoute(route);
+  if (!((isPhone() || leavesCoveringPane(route)) && backTo(backHashOf(route)))) writeRoute(route);
 }
+
+/** The entry a close goes back to: the layer a diff closed from (`backLayer`) is only the list's selection, not a screen. */
+export const backHashOf = (route: Route): string => hashOf({ ...route, backLayer: null });
 
 /**
  * Which panes cover their list now (a window too narrow for both, stack.ts),

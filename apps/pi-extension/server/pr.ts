@@ -5,6 +5,7 @@
 
 import { spawn } from "node:child_process";
 import { refRunnerKill } from "../generated/ref-cards.ts";
+import { loadConfig, resolveForgejoToken } from "../generated/config.ts";
 
 import {
 	type PRMetadata,
@@ -111,6 +112,8 @@ const prRuntime: PRRuntime = {
 		if (!active.runCommandWithInput) return Promise.reject(new Error(`${cmd}: this runtime takes no input`));
 		return active.runCommandWithInput(cmd, args, input, options);
 	},
+	// The Forgejo token configured for exactly this origin; artifact fetches send it to that origin only.
+	forgejoToken: (origin) => resolveForgejoToken(loadConfig(), origin),
 };
 
 /**
