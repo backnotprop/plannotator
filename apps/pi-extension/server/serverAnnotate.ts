@@ -59,6 +59,7 @@ import {
 	handleCustomThemesScript,
 	customThemesPage,
 	handleFavicon,
+	handleAnnotateMediaRequest,
 	handleImageRequest,
 	handleStarAskRequest,
 	handleReferenceSkillsRequest,
@@ -860,6 +861,8 @@ export async function startAnnotateServer(options: {
 	const bundleSourceSavePaths = bundleFiles ? resolveBundleSourceSavePaths(bundlePaths) : null;
 	const openedSourceFilePaths = new Set<string>();
 	if (initialSingleFileSourcePath) openedSourceFilePaths.add(initialSingleFileSourcePath);
+	const servedMediaDocuments = new Set<string>();
+	if (initialSingleFileSourcePath) servedMediaDocuments.add(initialSingleFileSourcePath);
 	const getPrimarySource = () => {
 		const mode = options.mode || "annotate";
 		if (mode === "annotate-last") {
@@ -1234,6 +1237,8 @@ export async function startAnnotateServer(options: {
 			if (!(await handleStarAskRequest(req, res, url, "annotate", isRemoteSession()))) handleApiNotFound(res, url.pathname);
 		} else if (url.pathname === "/api/image") {
 			handleImageRequest(res, url);
+		} else if (url.pathname === "/api/annotate-media" && req.method === "GET") {
+			handleAnnotateMediaRequest(req, res, url, servedMediaDocuments);
 		} else if (htmlAssets.handle(req, res, url)) {
 			return;
 		} else if (url.pathname === "/api/upload" && req.method === "POST") {
@@ -1325,6 +1330,7 @@ export async function startAnnotateServer(options: {
 				sourceSaveFolderPath: options.mode === "annotate-folder" ? options.folderPath : undefined,
 				sourceSaveBundlePaths: bundleSourceSavePaths ?? undefined,
 				onSourceDocumentServed: (path) => openedSourceFilePaths.add(path),
+				onDocumentServed: (path) => servedMediaDocuments.add(path),
 				rootPaths: getReferenceRootPaths(),
 				anyPath: isThisMachineRequest(req),
 				annotateHistory:

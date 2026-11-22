@@ -37,6 +37,8 @@ import { claimAutoUpdateNotice, describeAutoUpdateNotice, parseAutoUpdateNotice,
 import { storage } from '@plannotator/ui/utils/storage';
 import { RefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { refCardRouteTransport, setRefCardTransport } from '@plannotator/ui/utils/refCard';
+import { registerRefCardProvider } from '@plannotator/ui/utils/refCardProviders';
+import { linearLinkCardProvider } from '@plannotator/ui/utils/linearLinkCards';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { useStarAskDoneScreen } from '@plannotator/ui/components/StarAskDoneScreen';
 import {
@@ -55,7 +57,8 @@ import { repoLabel } from '@plannotator/ui/utils/repoLabel';
 import { loadDiffFont } from '@plannotator/ui/utils/diffFonts';
 import { monoFontStack, normalizeCssFontSize } from '@plannotator/ui/utils/cssFontFamily';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
-import { adoptServerSession, noteServerSessionMismatch, withServerSession, withServerSessionQuery } from '@plannotator/ui/utils/serverSession';
+import { adoptServerSession, currentServerSession, noteServerSessionMismatch, withServerSession, withServerSessionQuery } from '@plannotator/ui/utils/serverSession';
+import { aiChatStorageKey } from '@plannotator/ui/utils/aiChatPersistence';
 import { assertSendOk, throwUnreachable } from '@plannotator/ui/utils/sendFailure';
 import { dismissSendFailureToast, sendSettled, sendStarted, showSendFailureToast } from '@plannotator/ui/components/SendFailureToast';
 import { ServerSessionReplacedBanner } from '@plannotator/ui/components/ServerSessionReplacedBanner';
@@ -901,6 +904,9 @@ const ReviewApp: React.FC = () => {
   const [sessionTitle, setSessionTitle] = useState<string | null>(null);
   /** The region the issue / PR / MR hover cards listen on (the whole app). */
   const refCardRootRef = useRef<HTMLDivElement>(null);
+  // Linear issue links get Linear's card too (ui linearLinkCards; the server reads them with the Linear API key,
+  // and without one the link stays plain). Nothing is asked until the transport below is installed.
+  useEffect(() => registerRefCardProvider(linearLinkCardProvider), []);
 
   // Settings → General → "Hide the repository owner": the tab title and the
   // header's repository label; the header's hover keeps the full owner/repo.
@@ -1539,6 +1545,7 @@ const ReviewApp: React.FC = () => {
   }, [guideOpen, guideHintActive]);
   const agentTool = useAgentToolSetting();
   const aiChat = useAIChat({
+    storageKey: isLoading ? null : aiChatStorageKey(currentServerSession(), 'review'),
     patch: diffData?.rawPatch ?? '',
     diffType,
     base: committedBase,

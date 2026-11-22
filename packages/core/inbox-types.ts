@@ -3861,7 +3861,7 @@ export interface InboxComposeLaunch {
    * The drives mounted besides the machine's own disk (approval "inbox-launch-any-folder"): the folder menu's drive
    * rows and the folder browser's places. `network`: a network drive. Absent from an older Inbox (home only there).
    */
-  drives?: { path: string; name: string; network?: true }[];
+  drives?: { path: string; name: string; network?: true; shortcut?: false }[];
   /** macOS: this machine's own window may offer "Choose in Finder…". Absent elsewhere and from an older Inbox. */
   finder?: true;
 }

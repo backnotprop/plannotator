@@ -1268,8 +1268,11 @@ export interface InboxReplyCommand {
    * The title a wake shows, as the Inbox decided it (`InboxStore.agentTitle`):
    * on a plain reply the thread's short name, or null when it has none, which
    * every connection words `a reply`; on everything in a thread the person
-   * started and named, that name; on everything else the thread's subject.
-   * An older Inbox always sends the subject here.
+   * started that has a name (theirs, compose's suggestion, or the one an
+   * agent gave it; not a routine's), that name as it stands now; on
+   * everything else the thread's subject. An older Inbox always sends the
+   * subject here, and a less old one the subject on the first message and
+   * first sights of a thread whose name is a suggestion or an agent's.
    */
   subject: string | null
   /** The reply or message, markdown, verbatim. */
@@ -1297,7 +1300,8 @@ export interface InboxReplyCommand {
    */
   continues_thread?: boolean
   /**
-   * In a thread the person started that has no name yet, on a command handed
+   * In a thread the person started that has no name yet, or only compose's
+   * suggestion (which is then the wake's `subject`), on a command handed
    * to a session that may name it (`InboxStore.canNameThread`: the session it
    * is addressed to): the wake adds INBOX_NAME_THREAD_LINE. Absent once a name
    * is set (by the person in compose, or by an agent) and on every other
