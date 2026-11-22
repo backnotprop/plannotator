@@ -263,6 +263,7 @@ packages/inbox/floaters/floaters.test.tsx
 packages/inbox/ask/side.test.tsx
 packages/inbox/ask/sideCommand.test.tsx
 packages/inbox/ask/sideCorner.test.tsx
+packages/inbox/ask/sideCircleClose.test.tsx
 packages/inbox/pullToRefresh.test.tsx
 packages/inbox/rowSwipeList.test.tsx
 packages/inbox/threadReadRetry.test.tsx
@@ -891,3 +892,6 @@ packages/inbox/launchChoiceStates.test.tsx
 packages/ui/components/html-embed/HtmlEmbedBlock.annotate.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.inline.test.tsx
 packages/ui/components/html-viewer/bridgeStructuralAnchor.test.ts
+packages/inbox/reaskAllList.test.tsx
+packages/ui/utils/diagramLabelScrub.test.ts
+packages/ui/utils/diagramRemoteLoads.test.ts

@@ -21525,6 +21525,104 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-field-inboxagent-context",
+      "title": "field:InboxAgent.context",
+      "surface": [
+        "field:InboxAgent.context"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagent-effort",
+      "title": "field:InboxAgent.effort",
+      "surface": [
+        "field:InboxAgent.effort"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagent-model",
+      "title": "field:InboxAgent.model",
+      "surface": [
+        "field:InboxAgent.model"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-threads-id-reask",
+      "title": "window:/api/inbox/threads/:id/reask",
+      "surface": [
+        "window:/api/inbox/threads/:id/reask"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-agent-file",
+      "title": "door:GET agent-file",
+      "surface": [
+        "door:GET agent-file"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-agent-read",
+      "title": "door:GET agent-read",
+      "surface": [
+        "door:GET agent-read"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-control-machines-fetch-file",
+      "title": "window:/api/inbox/control/machines/fetch-file",
+      "surface": [
+        "window:/api/inbox/control/machines/fetch-file"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

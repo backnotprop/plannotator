@@ -225,8 +225,9 @@ export interface InboxImageCapture {
  * image, changed while read, too many pixels) is tried again only after
  * INBOX_IMAGE_CAPTURE_RETRY_MS; one refused before any read (not on disk yet,
  * hidden) after INBOX_IMAGE_CAPTURE_MISS_WAITS_MS, or as soon as the image
- * route serves it. A thread whose every gap waits is settled until the first
- * wait ends. Records are marked `captured: "on_open"`. After `stop`, nothing
+ * route serves it or its thread changes (a new message: the window keeps a
+ * picture that failed as it is and never asks the route again). A thread
+ * whose every gap waits is settled until the first wait ends. Records are marked `captured: "on_open"`. After `stop`, nothing
  * is written.
  */
 export function createInboxImageCapture(
@@ -263,6 +264,11 @@ export function createInboxImageCapture(
    * it (`shownAt`: a capture that began before then and found nothing waits for nothing).
    */
   const attempts = new Map<string, Map<string, Attempt>>();
+  /**
+   * Per thread, its version (`store.threadVersion`) when its misses were last tried, counting that pass's own lines:
+   * a thread changed since (a new message, often the one whose agent just wrote the file) tries them again at once.
+   */
+  const triedAt = new Map<string, string>();
   let running: Promise<void> | null = null;
   let stopped = false;
 
@@ -282,7 +288,12 @@ export function createInboxImageCapture(
     const misses = (before?.misses ?? 0) + 1;
     remember(messageId, ref, { due: clock() + (missWaits[Math.min(misses, missWaits.length) - 1] ?? 0), misses });
   };
-  const dueAt = (messageId: string, ref: string) => attempts.get(messageId)?.get(ref)?.due ?? -Infinity;
+  /** When `ref` may be read again; a miss (not on disk yet) at once when its thread `changed` since it was tried. */
+  const dueAt = (messageId: string, ref: string, changed: boolean) => {
+    const attempt = attempts.get(messageId)?.get(ref);
+    if (!attempt) return -Infinity;
+    return changed && attempt.misses > 0 ? -Infinity : attempt.due;
+  };
   const settle = (threadId: string, version: string, until: number) => {
     settled.delete(threadId);
     settled.set(threadId, { version, until });
@@ -293,17 +304,22 @@ export function createInboxImageCapture(
     const version = store.threadVersion(threadId);
     const gaps = syncSection("image-capture:gaps", () => store.imageCaptureGaps(threadId, inboxMessageImageRefsInOrder));
     const start = clock();
+    const last = triedAt.get(threadId);
+    const changed = last !== undefined && last !== version;
     // Every gap waiting (or none): nothing is read until the first wait ends, or the thread changes.
     let firstDue = Infinity;
-    for (const { message, refs } of gaps) for (const ref of refs) firstDue = Math.min(firstDue, dueAt(message.id, ref));
+    for (const { message, refs } of gaps) for (const ref of refs) firstDue = Math.min(firstDue, dueAt(message.id, ref, changed));
     if (gaps.length === 0 || firstDue > start) {
       settle(threadId, version, gaps.length === 0 ? Infinity : firstDue);
       return;
     }
+    // The version this pass tries the misses against: its own lines move it on; any other line during it does not.
+    let ours = version;
+    let raced = false;
     for (const { message, refs } of gaps) {
       if (stopped) return;
       const now = clock();
-      const due = refs.filter((ref) => dueAt(message.id, ref) <= now).slice(0, MESSAGE_BATCH);
+      const due = refs.filter((ref) => dueAt(message.id, ref, changed) <= now).slice(0, MESSAGE_BATCH);
       if (due.length === 0) continue;
       const began = now;
       await yieldToLoop();
@@ -332,7 +348,9 @@ export function createInboxImageCapture(
           await captured.discard();
           continue;
         }
+        if (store.threadVersion(threadId) !== ours) raced = true;
         syncSection("image-capture:write", () => store.addCapturedImages(message.id, captured.images, inboxMessageImageRefsInOrder(latest.body)));
+        ours = store.threadVersion(threadId);
         await captured.commit();
         budget.bytes += captured.bytes;
         if (budget.bytes >= passBytes) {
@@ -343,6 +361,11 @@ export function createInboxImageCapture(
         // Left for a later read.
       }
     }
+    // A line not this pass's (a message that came meanwhile): the next read tries the misses again.
+    if (store.threadVersion(threadId) !== ours) raced = true;
+    triedAt.delete(threadId);
+    triedAt.set(threadId, raced ? version : ours);
+    while (triedAt.size > maxMessages) triedAt.delete(triedAt.keys().next().value!);
   };
 
   const run = async () => {

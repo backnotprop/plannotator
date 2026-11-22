@@ -378,6 +378,16 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     },
   },
   {
+    id: 'nightfox',
+    name: 'Nightfox',
+    builtIn: true,
+    modeSupport: 'dark-only',
+    colors: {
+      dark: { primary: '#719cd6', secondary: '#29394f', accent: '#63cdcf', background: '#192330', foreground: '#cdcecf' },
+      light: { primary: '#719cd6', secondary: '#29394f', accent: '#63cdcf', background: '#192330', foreground: '#cdcecf' },
+    },
+  },
+  {
     id: 'nord',
     name: 'Nord',
     builtIn: true,
