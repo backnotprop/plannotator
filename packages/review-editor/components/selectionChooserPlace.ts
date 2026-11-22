@@ -61,8 +61,11 @@ function shownAround(start: Element): Pick<ReadLines, 'shownTop' | 'shownBottom'
   let shownBottom = Infinity;
   let roof = -Infinity;
   for (let el: Element | null = start; el && el !== document.body && el !== document.documentElement; ) {
-    const overflow = getComputedStyle(el).overflowY;
-    if (/auto|scroll|hidden|clip/.test(overflow)) {
+    const style = getComputedStyle(el);
+    const overflow = style.overflowY;
+    // An element drawn as `display: contents` has no box, so it clips nothing and its rect is all zeros: Split with
+    // Wrap long lines on draws each column's `[data-code]` that way, and counting it hid the bar under the lines (#3718).
+    if (style.display !== 'contents' && /auto|scroll|hidden|clip/.test(overflow)) {
       const rect = el.getBoundingClientRect();
       shownTop = Math.max(shownTop, rect.top);
       shownBottom = Math.min(shownBottom, rect.bottom);
