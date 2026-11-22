@@ -674,10 +674,13 @@ describe("where the person wrote it, read by an agent on the linked computer (in
   const SESSION = "ses-far-reader";
   test("the computer that forwarded it is the reader's own: no line; the thread's own window names that computer", async () => {
     setEnv("PLANNOTATOR_TEST_SANDBOX", process.env.PLANNOTATOR_TEST_SANDBOX ?? "1");
+    // Two names, so a line naming the wrong computer cannot pass for the right one. Each Inbox takes its name when it first offers or links.
+    setEnv("PLANNOTATOR_MACHINE_NAME", "MacBook");
     const peer = await world({ phones: false });
-    const w = await world({ phones: false });
     const bearer = (inbox: InboxServer) => ({ Authorization: `Bearer ${inbox.token}`, "Content-Type": "application/json" });
     const offer = (await (await fetch(`http://127.0.0.1:${peer.inbox.port}/api/inbox/control/machines/offer`, { method: "POST", headers: bearer(peer.inbox), body: "{}" })).json()) as Json;
+    setEnv("PLANNOTATOR_MACHINE_NAME", "Studio");
+    const w = await world({ phones: false });
     const linked = await fetch(`http://127.0.0.1:${w.inbox.port}/api/inbox/control/machines/link`, {
       method: "POST",
       headers: bearer(w.inbox),
@@ -704,7 +707,7 @@ describe("where the person wrote it, read by an agent on the linked computer (in
     const there = await call(peer, "local", { path: `/api/inbox/messages/${id}/reply`, body: { idempotency_key: "00000000-0000-4000-8000-000000000409", words: "Large (there).", questions: [] } });
     expect(there.status).toBe(200);
     replies.there = ((await there.json()) as Json).reply.id as string;
-    expect((peer.inbox.store.message(replies.local)!.sent_from as Json).kind).toBe("machine");
+    expect(peer.inbox.store.message(replies.local)!.sent_from).toEqual({ kind: "machine", name: "Studio" });
 
     const client = new Client({ name: "inbox-far-reader-test", version: "1.0.0" });
     await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${w.inbox.port}/mcp`)));
@@ -712,11 +715,12 @@ describe("where the person wrote it, read by an agent on the linked computer (in
       const read = (await client.callTool({ name: "read_thread", arguments: { thread_id: id } })) as { isError?: boolean; content: { text: string }[]; structuredContent: Json };
       expect(read.isError).toBeFalsy();
       const shownAs = read.structuredContent.machine.name as string;
+      expect(shownAs).toBe("MacBook");
       const lines = Object.fromEntries((read.structuredContent.thread.messages as Json[]).map((m) => [m.id, m.sent_from ?? null]));
       expect(lines[replies.local]).toBeNull();
       expect(lines[replies.owner]).toBe(inboxSentFromLine({ sent_from: { kind: "tailnet" } }));
       expect(lines[replies.there]).toBe(inboxSentFromLine({ sent_from: { kind: "machine", name: shownAs } }));
-      expect(read.content[0]!.text).not.toContain(inboxSentFromLine({ sent_from: peer.inbox.store.message(replies.local)!.sent_from }));
+      expect(read.content[0]!.text).not.toContain(inboxSentFromLine({ sent_from: { kind: "machine", name: "Studio" } }));
     } finally {
       await client.close().catch(() => {});
     }
