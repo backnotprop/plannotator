@@ -22,6 +22,9 @@
  *
  * `buildDiagramUiBundle({ splitPurify: true })` gives Mermaid its own copy of
  * DOMPurify, as a host bundle that does not dedupe it would.
+ * `buildDiagramUiBundle({ realKatex: true })` keeps the real KaTeX (the webview
+ * options stub it out) so a `$$...$$` label is typeset as in the apps
+ * (diagram-math-labels.spec.ts, with `katexCss()` on the page).
  */
 import type { Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
@@ -33,7 +36,7 @@ import { dirname, join, resolve } from 'node:path';
 const EXTENSION = resolve(__dirname, '../../apps/vscode-extension');
 const UI = resolve(__dirname, '../../packages/ui');
 
-export function buildDiagramUiBundle(options: { splitPurify?: boolean } = {}): string {
+export function buildDiagramUiBundle(options: { splitPurify?: boolean; realKatex?: boolean } = {}): string {
   const work = mkdtempSync(join(tmpdir(), 'pn-diagram-scrub-'));
   try {
     const entry = join(work, 'entry.ts');
@@ -108,13 +111,20 @@ const { entryPoints: _e, outdir: _o, ...options } = webview;
 // splitPurify: Mermaid's own import of dompurify resolves to a second copy.
 const split = ${JSON.stringify(options.splitPurify ? purifyCopy : '')};
 const plugins = [...(options.plugins ?? []), ...(split ? [{ name: 'split-purify', setup(b) { b.onResolve({ filter: /^dompurify$/ }, (a) => (/[\\/\\\\]mermaid[\\/\\\\]dist[\\/\\\\]/.test(a.importer) ? { path: split } : undefined)); } }] : [])];
-await build({ ...options, plugins, absWorkingDir: ${JSON.stringify(EXTENSION)}, entryPoints: [${JSON.stringify(entry)}], outfile: ${JSON.stringify(out)}, logLevel: 'silent' });
+// realKatex: Mermaid's math labels get the real KaTeX, not the webview's stub.
+const alias = ${JSON.stringify(!!options.realKatex)} ? Object.fromEntries(Object.entries(options.alias ?? {}).filter(([name]) => name !== 'katex')) : options.alias;
+await build({ ...options, alias, plugins, absWorkingDir: ${JSON.stringify(EXTENSION)}, entryPoints: [${JSON.stringify(entry)}], outfile: ${JSON.stringify(out)}, logLevel: 'silent' });
 `);
     execFileSync('bun', [build], { cwd: EXTENSION, stdio: 'pipe' });
     return readFileSync(out, 'utf8');
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
+}
+
+/** KaTeX's own stylesheet, as the apps load it (packages/ui/theme.css imports it). Its font URLs resolve to nothing on the test page. */
+export function katexCss(): string {
+  return readFileSync(createRequire(join(UI, 'package.json')).resolve('katex/dist/katex.min.css'), 'utf8');
 }
 
 /** The utilities an app's stylesheet carries (Tailwind's own output for these class names). */
@@ -152,8 +162,9 @@ export const NAVIGATING_LABELS = [
  * `origin` (e.g. `http://app.test`): the page is served from that origin
  * (fulfilled here, nothing leaves the machine) instead of about:blank, so a
  * protocol-relative `//host/…` resolves and is requested as in an app.
+ * `css`: more stylesheet text for the page (KaTeX's, `katexCss()`).
  */
-export async function openDiagramPage(page: Page, bundle: string, options: { tile?: boolean; csp?: string; origin?: string } = {}) {
+export async function openDiagramPage(page: Page, bundle: string, options: { tile?: boolean; csp?: string; origin?: string; css?: string } = {}) {
   const errors: string[] = [];
   const requests: string[] = [];
   const navigations: string[] = [];
@@ -170,7 +181,7 @@ export async function openDiagramPage(page: Page, bundle: string, options: { til
   const box = options.tile
     ? `<div class="ib-art-prev" id="box" style="width:240px;margin:20px 0 0 20px"><span class="ib-art-svg" id="host" data-drawn></span></div>`
     : `<div id="box" style="position:relative;width:700px;height:450px;overflow:hidden"><div id="host" style="position:absolute;inset:0"></div></div>`;
-  html = `<!DOCTYPE html><html><head>${options.csp ? `<meta http-equiv="Content-Security-Policy" content="${options.csp}">` : ''}<style>body{margin:0}${APP_UTILITIES}${options.tile ? artifactTileCss() : ''}</style></head><body>
+  html = `<!DOCTYPE html><html><head>${options.csp ? `<meta http-equiv="Content-Security-Policy" content="${options.csp}">` : ''}<style>body{margin:0}${APP_UTILITIES}${options.tile ? artifactTileCss() : ''}</style>${options.css ? `<style>${options.css}</style>` : ''}</head><body>
 <div style="height:60px"><button id="app-button">Approve</button></div>
 ${box}
 <div style="height:300px;padding:20px 0 0 300px"><button id="app-below">Send</button></div>

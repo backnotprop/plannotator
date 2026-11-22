@@ -142,6 +142,11 @@ export const SLICE_RULES: SliceRule[] = [
     specs: ['vscode-guides-*.spec.ts'],
   },
   {
+    name: 'diagram engine (Mermaid, its math labels, the label sanitizer)',
+    paths: ['packages/ui/utils/diagram-render.ts', 'packages/ui/utils/mermaid*.ts', 'packages/ui/utils/math*.ts'],
+    specs: ['diagram-*.spec.ts', 'vscode-guides-sanitize.spec.ts'],
+  },
+  {
     name: 'packed pages and the build',
     paths: ['build/**', 'packages/shared/packed-app.ts', 'apps/hook/vite.config.ts'],
     specs: ['packed-page-*.spec.ts', 'plan-lazy-chunk-failure.spec.ts'],
