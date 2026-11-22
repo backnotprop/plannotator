@@ -36,6 +36,7 @@ import { rowMenuActions } from '../../packages/inbox/rowMenu';
 import { rowSwipeActions } from '../../packages/inbox/rowSwipe';
 import { ROOT, cli, jsonText, readRepoText, type Output } from './lib';
 import { ACTS_FIXTURE, ACTS_ROWS, actVectors } from './vectors-actions';
+import { FEEDBACK_FIXTURE, feedbackVectors } from './vectors-feedback';
 import { DOCUMENTS_FIXTURE, FILES_FIXTURE, documentVectors, fileVectors } from './vectors-files';
 import { buildWords } from './words';
 
@@ -49,6 +50,7 @@ export const FIXTURES = {
   acts: 'apps/mobile/contract/fixtures/acts.json',
   files: 'apps/mobile/contract/fixtures/files.json',
   documents: 'apps/mobile/contract/fixtures/documents.json',
+  feedback: 'apps/mobile/contract/fixtures/feedback.json',
   relay: 'packages/core/fixtures/inbox-relay-vectors.json',
 } as const;
 
@@ -64,6 +66,7 @@ export const VECTORS = {
   acts: 'apps/mobile/contract/vectors/acts.json',
   files: 'apps/mobile/contract/vectors/files.json',
   documents: 'apps/mobile/contract/vectors/documents.json',
+  feedback: 'apps/mobile/contract/vectors/feedback.json',
 } as const;
 
 const TIME_SCRIPT = 'scripts/mobile/vectors-time.ts';
@@ -353,6 +356,10 @@ export async function generateVectors(): Promise<Output[]> {
     {
       path: VECTORS.documents,
       text: jsonText(documentVectors(about('The blocks the window splits each Markdown file into (parseMarkdownToBlocks), with the number each list item shows (computeListIndices).', DOCUMENTS_FIXTURE))),
+    },
+    {
+      path: VECTORS.feedback,
+      text: jsonText(feedbackVectors(about('The text a Send carries for comments on attached files (attachmentFeedback), and the comments the window makes on code lines and on a picture (codeCommentAnnotation, imageCommentAnnotation, codeHash).', FEEDBACK_FIXTURE))),
     },
   ];
 }

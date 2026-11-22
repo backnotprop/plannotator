@@ -20,6 +20,18 @@
       "id",
       "name"
     ],
+    "DoorAnnotationAnswer": [
+      "annotation"
+    ],
+    "DoorAnnotationBody": [
+      "annotation",
+      "attachment_id",
+      "idempotency_key",
+      "version"
+    ],
+    "DoorAnnotationRemoveBody": [
+      "idempotency_key"
+    ],
     "DoorError": [
       "code",
       "error"
@@ -35,6 +47,10 @@
       "thread",
       "through_seq",
       "wrote"
+    ],
+    "DoorMarkupAnswer": [
+      "name",
+      "path"
     ],
     "DoorPairAnswer": [
       "addresses",
@@ -216,6 +232,20 @@
       "ended_today",
       "total"
     ],
+    "InboxAnnotationRecord": [
+      "annotation",
+      "attachment_id",
+      "created_at",
+      "id",
+      "message_id",
+      "path",
+      "project_id",
+      "removed_at",
+      "sent_reply_id",
+      "thread_id",
+      "updated_at",
+      "version"
+    ],
     "InboxAttachment": [
       "id",
       "kind",
@@ -333,6 +363,13 @@
       "session",
       "started_at"
     ],
+    "InboxGuideCommentTarget": [
+      "file",
+      "line_end",
+      "line_start",
+      "side",
+      "title"
+    ],
     "InboxGuideRef": [
       "additions",
       "bytes",
@@ -436,11 +473,19 @@
       "label",
       "threads"
     ],
+    "InboxLiveCommentTarget": [
+      "page_url",
+      "site_id",
+      "url"
+    ],
     "InboxLiveSiteRef": [
       "id",
       "opened_at",
       "opened_by",
       "url"
+    ],
+    "InboxMessageCommentTarget": [
+      "at"
     ],
     "InboxMessageWire": [
       "author",
