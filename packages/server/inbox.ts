@@ -174,6 +174,7 @@ import { INBOX_DB_FILE, inboxReturnHoldFromEnv, returnFromSqlite } from "@planno
 import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly, inboxTidyStepsOnlyWakes } from "@plannotator/shared/inbox/tidy";
 import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "@plannotator/shared/inbox/list";
 import { archiveProject, markProjectRead, unarchiveProject, unmarkProjectRead } from "@plannotator/shared/inbox/project-batch";
+import { messageReaskInput, reaskAllReachable, reaskThreadAll } from "@plannotator/shared/inbox/reask-all";
 import {
   INBOX_ASK_BRIDGE_PREFIX,
   INBOX_ASK_WAITS_FIELD,
@@ -7627,6 +7628,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ thread: row });
       }
 
+      // Re-ask all (a group's menu in the list; shared/inbox/reask-all.ts): the thread's Re-ask to each session with a
+      // question open that can still be woken, each delivered and woken as the thread's own Re-ask note. `batch_id`: the
+      // press's key, so a retry answers the notes it wrote. A session past waking is counted (`unreached`), never written to.
+      const reaskAllMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/reask$/.exec(path);
+      if (reaskAllMatch) {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const threadId = reaskAllMatch[1]!;
+        const wakes = {
+          gone: (session: string) => t3Wake.gone(session) || cloudWake.status(session) === "dead",
+          askerLive: (session: string) => live.askerLive(session),
+          resumes: (thread: string, session: string) => launch.resumes(thread, session),
+        };
+        return json(reaskThreadAll(store, threadId, typeof body.batch_id === "string" ? body.batch_id : "", (message) => reaskAllReachable(message, threadId, wakes)));
+      }
+
       // Mark unread: the latest agent message is new again (New, bold); nothing is sent, and a Mark read stands (store.markUnread).
       const unreadMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/mark-unread$/.exec(path);
       if (unreadMatch) {
@@ -8046,10 +8064,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             // (checked as a reply's is; null: not live, 409, nothing written).
             const asked = body.to === undefined ? undefined : store.message(messageId);
             const to = body.to === undefined || !asked ? undefined : live.replyTarget(asked.thread_id, body.to);
-            const result = store.sendReask(messageId, {
-              idempotency_key: body.idempotency_key as string,
-              ...(to === undefined ? {} : { to }),
-            });
+            // The key and `to` only: Re-ask all's left picks are never taken from a body.
+            const result = store.sendReask(messageId, messageReaskInput(body, to));
             return json({
               message_id: messageId,
               questions: store.questionsOf(messageId),

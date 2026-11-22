@@ -8,7 +8,7 @@ import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmS
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
-import { doorRouteNames, doorWriteRoutes } from "./inbox-devices";
+import { doorRouteNames, doorRouteOf, doorWriteRoutes } from "./inbox-devices";
 import { outboxView, startsAgentThere } from "./inbox-machines";
 import { classifyAnswer, DOOR_WRITES, doorRefusesBare, doorWriteKind, forwardsNow, InboxOutbox, OUTBOX_KEEP_SETTLED_MS, OUTBOX_MAX_SERVER_ERRORS, replyIsStale, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
 
@@ -407,6 +407,15 @@ describe("rule 11: late words are refused by what the person saw", () => {
     const thread = [message("m1", "agent"), message("m2", "agent"), message("r1", "person")];
     expect(replyIsStale(thread, 5, (id) => seq[id] ?? null)).toBe(false);
     expect(replyIsStale(thread, 4, (id) => seq[id] ?? null)).toBe(true);
+  });
+});
+
+describe("Re-ask all is this Inbox's own: the door does not take it", () => {
+  test("a phone or a linked machine asking POST threads/:id/reask finds no route; the per-message Re-ask is still there", () => {
+    for (const machine of [false, true]) {
+      expect(doorRouteOf("POST", "threads/msg_01K7000000000000000000ABCD/reask", machine)).toBeNull();
+      expect(doorRouteOf("POST", "messages/msg_01K7000000000000000000ABCD/reask", machine)?.windowPath).toBe("/api/inbox/messages/msg_01K7000000000000000000ABCD/reask");
+    }
   });
 });
 
