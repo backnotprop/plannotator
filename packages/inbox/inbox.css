@@ -8633,9 +8633,9 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 .ib-fcomp-field { grid-area: field; min-width: 0; padding: 6px 0 0; }
 .ib-fcomp-field .ib-rtext, .ib-fcomp-field .ib-rmirror { min-height: 36px; max-height: min(160px, 24vh); padding: 6px; }
 .ib-fcomp .ib-fcomp-field :is(textarea, .ib-rtext):focus { outline: none; box-shadow: none; border-color: transparent; }
-.pn-inbox .ib-fcomp :is(.ib-fcomp-bin, .ib-fcomp-clip) { flex: none; width: 30px; height: 30px; padding: 0; border: 0; background: none; color: var(--muted-foreground); }
+.pn-inbox .ib-fcomp :is(.ib-fcomp-bin, .ib-fcomp-clip, .ib-cclip) { flex: none; width: 30px; height: 30px; padding: 0; border: 0; background: none; color: var(--muted-foreground); }
 .pn-inbox .ib-fcomp .ib-fcomp-bin:disabled { opacity: 0.35; cursor: default; }
-.pn-inbox .ib-fcomp :is(.ib-fcomp-min, .ib-fcomp-bin, .ib-cbtn, .ib-fcomp-clip, .ib-vmic):hover:not(:disabled) { color: var(--foreground); background: none; }
+.pn-inbox .ib-fcomp :is(.ib-fcomp-min, .ib-fcomp-bin, .ib-cbtn, .ib-fcomp-clip, .ib-cclip, .ib-vmic):hover:not(:disabled) { color: var(--foreground); background: none; }
 /* Send: the reply box's round pill (T6), first in the reply's row. */
 .pn-inbox .ib-fcomp-send { flex: none; height: 30px; margin: 0 4px 0 0; padding: 0 15px; border: 0; border-radius: 15px; background: var(--primary); color: var(--primary-foreground); font-size: var(--ib-fs-13, 13px); font-weight: 600; }
 .pn-inbox .ib-fcomp-send:hover:not(:disabled) { background: color-mix(in oklch, var(--primary) 88%, black); }
@@ -8653,8 +8653,8 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
   .pn-inbox .ib-fcomp.ib-phone .ib-fcomp-tab .ib-ic { display: none; }
 }
 /* The reply's paperclip (the reply box's AttachFilesButton), first in the toolbar, the card's 30 px button. */
-.pn-inbox .ib-fcomp .ib-fcomp-clip { width: 30px; padding: 0; margin-left: -2px; cursor: pointer; }
-.pn-inbox .ib-fcomp .ib-fcomp-clip:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
+.pn-inbox .ib-fcomp :is(.ib-fcomp-clip, .ib-cclip) { width: 30px; padding: 0; margin-left: -2px; cursor: pointer; }
+.pn-inbox .ib-fcomp :is(.ib-fcomp-clip, .ib-cclip):has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
 /* The reply box's file tiles and its drop target, in the card. */
 .ib-fcomp .ib-fcomp-files { padding: 4px 2px 2px; max-height: min(136px, 22vh); overflow-y: auto; overscroll-behavior: contain; }
 .ib-fcomp[data-drop-over] { border-style: dashed; border-color: var(--primary); }
@@ -8764,7 +8764,7 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 .pn-inbox .ib-fcomp.ib-phone .ib-fcomp-tab:not(.ib-on) { height: 44px; margin-bottom: 0; }
 .pn-inbox .ib-fcomp.ib-phone .ib-fcomp-tab.ib-on { border-radius: 12px 12px 0 0; }
 .pn-inbox .ib-fcomp.ib-phone .ib-fcomp-top { padding-top: 4px; }
-.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-min, .ib-fcomp-clip, .ib-fcomp-bin) { width: 44px; height: 44px; }
+.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-min, .ib-fcomp-clip, .ib-cclip, .ib-fcomp-bin) { width: 44px; height: 44px; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-fcomp.ib-phone .ib-fcomp-field .ib-rtext, .ib-fcomp.ib-phone .ib-fcomp-field .ib-rmirror { min-height: 44px; font-size: var(--ib-fs-16-in, 16px); }
   .pn-inbox .ib-fcomp.ib-phone .ib-ccard .ib-ta { min-height: 44px; font-size: var(--ib-fs-16-in, 16px); }
@@ -8822,7 +8822,7 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
    reach over the field's first pixels, so it is painted over the field (its textarea is positioned). */
 .ib-fcomp.ib-phone .ib-fcomp-top { position: relative; z-index: 1; }
 .pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-send, .ib-ccard .ib-btn, .ib-fcomp-link, button.ib-fcomp-chip, .ib-fcomp-q, .ib-dtlink) { position: relative; }
-.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-min, .ib-fcomp-clip, .ib-fcomp-send, .ib-ccard .ib-btn, .ib-vmic, .ib-fcomp-link, button.ib-fcomp-chip, .ib-fcomp-q, .ib-dtlink)::after { content: ''; position: absolute; inset: auto; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
+.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-min, .ib-fcomp-clip, .ib-cclip, .ib-fcomp-send, .ib-ccard .ib-btn, .ib-vmic, .ib-fcomp-link, button.ib-fcomp-chip, .ib-fcomp-q, .ib-dtlink)::after { content: ''; position: absolute; inset: auto; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
 .ib-fcomp-pillwrap.ib-phone { left: calc(12px + env(safe-area-inset-left)); bottom: calc(14px + env(safe-area-inset-bottom)); transform: none; }
 .ib-fcomp-pillwrap.ib-phone[data-fcomp-pill-above] { bottom: calc(14px + 52px + 8px + env(safe-area-inset-bottom)); }
 .pn-inbox .ib-fcomp-pillwrap.ib-phone .ib-fcomp-pill { height: 52px; min-width: 52px; justify-content: center; border-radius: 14px; padding: 0 14px; gap: 7px; font-size: var(--ib-fs-14, 14px); }

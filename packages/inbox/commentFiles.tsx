@@ -128,7 +128,7 @@ export function useCommentFiles({ initial, phone = false, inCard = false, focus 
   const own = useFileDrop((list) => files.add(list), on && !inCard);
   // In full screen's card the drop is the card's: it hands it here.
   const add = useCallback((list: FileList) => void files.add(list), [files.add]);
-  const clip = on ? <AttachFilesButton className="ib-fvb ib-fcomp-clip ib-cclip" iconSize={phone ? 18 : 15} phone={phone} inputData="data-comment-attach" onFiles={attach} /> : null;
+  const clip = on ? <AttachFilesButton className="ib-fvb ib-cclip" iconSize={phone ? 18 : 15} phone={phone} inputData="data-comment-attach" onFiles={attach} /> : null;
   const tiles =
     files.files.length > 0 ? (
       <div className="ib-rfiles ib-cfiles" data-comment-files="">
