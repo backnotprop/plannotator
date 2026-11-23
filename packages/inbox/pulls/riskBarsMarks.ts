@@ -5,8 +5,8 @@
  * `RISK_BARS_PARTS`: the same three bars.
  *
  * The bars: 2px wide, 2px apart, 6, 9 and 12px tall, standing on one baseline, whole pixels so they stay sharp at 1x
- * and 2x; High fills all three, Medium two with the third faint (the shape still reads "2 of 3"). Tone: review-editor's
- * `riskBarsTone.ts`, an orange-red from the theme.
+ * and 2x; High fills all three, Medium two with the third faint (the shape still reads "2 of 3"). Tone: the Inbox's
+ * `riskBarsTone.ts` (beside this file), an orange-red from the theme.
  */
 import { RISK_TONE, RISK_TONE_FAINT } from './riskBarsTone';
 import type { GuideLineMark } from '../guide/types';
