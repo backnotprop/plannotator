@@ -922,6 +922,7 @@ export interface InboxMessage {
    * same. Absent everywhere else.
    */
   thread_naming?: InboxThreadNaming;
+  supersede_skipped?: InboxSupersedeSkip[];
   /**
    * On an agent's message: the person's 👍 Looks good (design record
    * "inbox-acknowledge", approved 2026-10-15, amended 2026-10-16). The thread
@@ -1731,6 +1732,15 @@ export interface InboxQuestionSetAside {
  * card still says what replaced it. `closed`: the thread is archived, or the
  * person's Mark read closed the question (`set_aside_at`).
  */
+export type InboxSupersedeSkipState = "answered" | "skipped" | "replaced" | "dropped" | "closed" | "marked" | "no_open_question";
+
+export interface InboxSupersedeSkip {
+  ref: string;
+  id: string;
+  was: InboxSupersedeSkipState;
+  new_question: string | null;
+}
+
 export type InboxQuestionState = "open" | "picked" | "sent" | "closed" | "superseded";
 
 /**

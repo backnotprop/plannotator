@@ -1,14 +1,7 @@
 import { inboxQuestionState } from "@plannotator/core/inbox-questions";
-import type { InboxQuestionRecord } from "@plannotator/core/inbox-types";
+import type { InboxQuestionRecord, InboxSupersedeSkip, InboxSupersedeSkipState } from "@plannotator/core/inbox-types";
 
-export type InboxSupersedeSkipState = "answered" | "skipped" | "replaced" | "dropped" | "closed" | "marked" | "no_open_question";
-
-export interface InboxSupersedeSkip {
-  ref: string;
-  id: string;
-  was: InboxSupersedeSkipState;
-  new_question: string | null;
-}
+export type { InboxSupersedeSkip, InboxSupersedeSkipState };
 
 export function inboxSupersedeSkipState(record: InboxQuestionRecord, resolved: boolean, personMarked: boolean): InboxSupersedeSkipState {
   if (personMarked) return "marked";

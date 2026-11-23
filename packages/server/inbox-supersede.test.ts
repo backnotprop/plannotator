@@ -153,6 +153,12 @@ describe("send_message supersedes earlier questions", () => {
       expect(skipLine).toBeGreaterThan(0);
       expect(refLine).toBeGreaterThan(skipLine);
       expect(lines.at(-1)).toBe(sent.hint ?? lines[refLine]);
+      const retry = await w.call("send_message", { ...args, reply_to: first.message_id, idempotency_key: `k${i}` });
+      const replayed = structured<{ replayed: boolean; message_id: string; skipped: unknown }>(retry);
+      expect(replayed.replayed).toBe(true);
+      expect(replayed.message_id).toBe(sent.message_id);
+      expect(replayed.skipped).toEqual(sent.skipped);
+      expect((retry as { content: { text: string }[] }).content[0]!.text.split("\n")).toContain(lines[skipLine]!);
     }
     const old = (await w.thread(first.thread_id)).messages[0]!.questions![1]!;
     expect(old.state).toBe("sent");

@@ -4360,6 +4360,7 @@ export class InboxStore {
           replayed: true,
           ...(message.thread_naming ? { naming: message.thread_naming } : {}),
           ...(markedDone.length > 0 ? { done: markedDone } : {}),
+          ...(message.supersede_skipped ? { skipped: message.supersede_skipped } : {}),
         };
       }
     }
@@ -4448,6 +4449,7 @@ export class InboxStore {
       ...(input.scheduled_change ? { scheduled_change: input.scheduled_change } : {}),
       ...(replyThread !== null ? { reply_thread: replyThread } : {}),
       ...(naming ? { thread_naming: naming } : {}),
+      ...(skipped.length > 0 ? { supersede_skipped: skipped } : {}),
     };
     this.appendMessage(message, at);
     for (const question of parsed) {
