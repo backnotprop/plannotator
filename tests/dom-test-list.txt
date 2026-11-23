@@ -191,6 +191,7 @@ packages/inbox/runTrustHowto.test.tsx
 packages/inbox/runLineClone.test.tsx
 packages/inbox/sessionLabelPicker.test.tsx
 packages/inbox/sessionLabels.test.tsx
+packages/inbox/scriptPosts.test.tsx
 packages/inbox/listHeaderCompose.test.tsx
 packages/inbox/tidyMenu.test.tsx
 packages/inbox/listLook.test.tsx

@@ -2833,6 +2833,8 @@ export class InboxStore {
         at: deliveredAt,
         host: author?.host ?? null,
         name: author?.name ?? null,
+        // A script's post (no session, host or name): the window names it "Script" (packages/inbox/scriptAuthor.ts).
+        ...(inboxSessionlessSend(author === first ? root : repliedTo!) ? { script: true as const } : {}),
         ...(decision.state === "delivered" && sent?.read_by ? { read_by: sent.read_by } : {}),
         ...(decision.reason === "ended" && askingAuthor ? { asking: { host: askingAuthor.host ?? null, name: askingAuthor.name ?? null } } : {}),
         ...waitWire(decision),
@@ -2844,7 +2846,7 @@ export class InboxStore {
     const target = lastReal;
     const ack = target.ack;
     if (target.author.kind !== "agent" || !ack || ack.not_sent) return null;
-    const base = { kind: "ack" as const, message_id: target.id, host: target.author.host ?? null, name: target.author.name ?? null, send_now: false };
+    const base = { kind: "ack" as const, message_id: target.id, host: target.author.host ?? null, name: target.author.name ?? null, send_now: false, ...(inboxSessionlessSend(target) ? { script: true as const } : {}) };
     const deliveredAt = this.ackDeliveredAt(ack);
     const note = ack.note_id ? this.messages.get(ack.note_id) : undefined;
     if (deliveredAt) {

@@ -21,6 +21,8 @@ import { deliveryText } from "@plannotator/core/inbox-delivery-line";
 import { INBOX_HOST_NAMES, inboxAgentName, type InboxAuthor } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { sendTargetsOf } from "../inbox/sendTargets";
+import { rowDeliveryLine } from "../inbox/rowDelivery";
+import { agentAuthor } from "./inbox-mcp-read";
 import { createInboxLiveSessions, INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 
 const roots: string[] = [];
@@ -181,5 +183,41 @@ describe("a script's post does not steal the thread", () => {
     expect(sent.to).toBeUndefined();
     expect(w.live.pendingOf("ses-ops")).toEqual([]);
     expect(w.line(root.thread_id)).toBe("Saved for An agent. It sees it when it next reads this thread.");
+  });
+});
+
+describe("a script's post reads \"Script\" in the window, and only there", () => {
+  test("a reply to a script's post: the row's delivery marks it, so the row's line names Script; an agent's read_thread still names it An agent", async () => {
+    const w = world();
+    const root = w.script("Spend check: $412 of $450 this month.");
+    w.reply(root.thread_id, "Thanks.");
+    const delivery = w.row(root.thread_id).delivery!;
+    expect(delivery.script).toBe(true);
+    expect(rowDeliveryLine(delivery, () => "7:00 AM")).toBe("Saved for Script. It sees it when it next reads this thread.");
+    // What an agent reads is unchanged.
+    expect(agentAuthor(root.author)).toEqual({ kind: "agent", name: "An agent" });
+  });
+
+  test("a reply to an agent with a session but no host or name (a stdio shim's ses_ agent): not a script, the row's line reads as before", async () => {
+    const w = world();
+    const root = w.script("Which queue should I drain first?", undefined, "ses_shim1");
+    w.reply(root.thread_id, "The billing queue.");
+    const delivery = w.row(root.thread_id).delivery!;
+    expect(delivery.script).toBeUndefined();
+    expect(rowDeliveryLine(delivery, () => "7:00 AM")).toBe("Saved for An agent. It sees it when it next reads this thread.");
+  });
+
+  test("a reply to a Claude Code session's message in a thread a script started: the row's line names Claude Code, not Script", async () => {
+    const w = world();
+    await w.poll("ses-ops");
+    const root = w.script("Disk at 91% on node 3.");
+    const answer = w.tool("ses-ops", "I can clear the snapshots.", root.id);
+    const sent = w.reply(root.thread_id, "Go ahead.");
+    expect(sent.reply_to).toBe(answer.id);
+    const delivery = w.row(root.thread_id).delivery!;
+    expect(delivery.script).toBeUndefined();
+    const line = rowDeliveryLine(delivery, () => "7:00 AM");
+    expect(line).toContain("Claude Code");
+    expect(line).not.toContain("Script");
   });
 });

@@ -307,6 +307,11 @@ export interface InboxRowDelivery {
   /** It went to another session of the asker's own host ("Claude Code (another session)"). */
   another_session?: boolean;
   /**
+   * It answers a script's post (`inboxSessionlessSend`): the window names its recipient "Script", as the thread's
+   * line does. Absent otherwise and from an older Inbox. Additive.
+   */
+  script?: true;
+  /**
    * `reason: "ended"`: the agent of the session that asked and has ended
    * (`inboxAskingMessage`), which the line names ("Saved for <it>. The
    * session that asked has ended…"). Absent otherwise.

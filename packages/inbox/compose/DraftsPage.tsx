@@ -1,6 +1,7 @@
 import type { InboxReplyDraftRow } from '@plannotator/core/inbox-types';
 import type { DraftView } from '../api';
-import { agentName, shortTime, whenTime } from '../format';
+import { shortTime, whenTime } from '../format';
+import { rowAuthorName } from '../scriptAuthor';
 import { AuthorMark, HostMark, Icon } from '../icons';
 import { DraftLabel, rowUnsent, unsentWords } from '../components/DraftLabel';
 import { Tip } from '../components/Tip';
@@ -69,7 +70,7 @@ export function DraftsPage({
                     </span>
                     <span className="ib-draft-t">
                       <span className="ib-draft-to" dir="auto">
-                        Reply to <b>{agentName(row.author)}</b> in <bdi>{row.project.name}</bdi>
+                        Reply to <b>{rowAuthorName(row.author)}</b> in <bdi>{row.project.name}</bdi>
                       </span>
                       <span className="ib-draft-s" dir="auto">
                         {subject}

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { inboxApi, type ArchivedModel } from '../api';
-import { agentName, dayWords, formatCount, plural } from '../format';
+import { dayWords, formatCount, plural } from '../format';
+import { rowAuthorName } from '../scriptAuthor';
 import { AuthorMark, Icon } from '../icons';
 import { Tip } from './Tip';
 
@@ -60,7 +61,7 @@ function ArchivedRow({ row, busy, onUnarchive }: { row: InboxListRow; busy: bool
           </Tip>
         </span>
         <span className="ib-d">
-          {agentName(row.author)} · Archived {row.resolved_at ? dayWords(row.resolved_at) : ''} · {plural(row.message_count, 'message')}
+          {rowAuthorName(row.author)} · Archived {row.resolved_at ? dayWords(row.resolved_at) : ''} · {plural(row.message_count, 'message')}
         </span>
       </span>
       <span className="ib-r">
