@@ -8,6 +8,7 @@ packages/ui/markdownEditorFidelity.test.tsx
 packages/ui/annotationDraftPersistence.test.tsx
 packages/ui/codeAnnotationDraftPersistence.test.tsx
 packages/ui/utils/richClipboard.test.ts
+packages/ui/utils/fontDetect.dom.test.ts
 packages/ui/components/Viewer.richCopy.test.tsx
 packages/ui/components/Viewer.questionTextComments.test.tsx
 packages/ui/components/html-viewer/htmlRichCopy.test.tsx
