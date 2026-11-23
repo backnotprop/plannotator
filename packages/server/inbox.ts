@@ -1926,7 +1926,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * what the log holds (`store.personActedAt`) and what acted.json holds (an open, a film, a draft, an Ask AI question). `withActed` puts
    * it on the rows the window and the phone read as `acted_at`, never on `store.listRow`, which agents read through.
    */
-  const acted = createInboxActed(store.dir);
+  // A thread this store held and deleted leaves the file at its next write (acted.ts `sweep`); a linked machine's stays.
+  const acted = createInboxActed(store.dir, { held: (id) => store.message(id)?.thread_id === id });
+  store.onDeletion(() => acted.sweep());
   const withActed = (row: InboxListRow): InboxListRow => {
     const at = laterActed(laterActed(row.acted_at, store.personActedAt(row.thread_id)), acted.at(row.thread_id));
     return at ? { ...row, acted_at: at } : row;

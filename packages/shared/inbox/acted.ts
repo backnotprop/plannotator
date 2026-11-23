@@ -10,12 +10,16 @@
  *   line's time). Not the Inbox's own notes (Mark read's set-aside note, an Undo's reopened note, the note that carries
  *   a 👍 to the agent, Tidy's), and not a routine's run: none of those is the person doing something in the thread.
  * - `inbox/acted.json`, what the log does not hold: the person opening the thread (the window's opening look says
- *   `opened`), a film played in it, a reply or comment draft saved, and a question asked in its Ask AI.
+ *   `opened`), a film played in it, a reply or comment draft saved, a reply draft deleted, and a question asked in
+ *   its Ask AI.
  *
  *   inbox/acted.json   { v: 1, threads: { <thread id>: <ISO time> } }, 0600, written whole (temp, then rename)
  *
  * Written at most once per `INBOX_ACTED_FLUSH_MS` (a draft saved as the person types is one write, not one per save),
- * keeping the newest `INBOX_ACTED_MAX` threads. The person's private view state, like pins: outside the event log (no
+ * keeping the newest `INBOX_ACTED_MAX` threads, none older than the filter reaches (`INBOX_RECENT_ACTIVITY_DAYS`) and
+ * none of a thread this store held and no longer does (deleted; `sweep`). A file from a newer Plannotator is never
+ * written over (the notes hold in memory); one that does not read is moved aside first (`acted.json.unreadable-<time>`),
+ * as pins.json is. The person's private view state, like pins: outside the event log (no
  * line, no seq, no event), never on anything an agent reads, and nothing else reads it: no section, unread, count,
  * delivery or order of the list moves for it. A thread id this store does not hold is kept (a linked machine's
  * thread opened in this window): the merged list reads it for that machine's rows.
@@ -23,7 +27,7 @@
 
 import { chmodSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { isInboxId, isInboxNote, type InboxAnnotationRecord, type InboxMessage, type InboxQuestionRecord } from "@plannotator/core/inbox-types";
+import { INBOX_RECENT_ACTIVITY_DAYS, isInboxId, isInboxNote, type InboxAnnotationRecord, type InboxMessage, type InboxQuestionRecord } from "@plannotator/core/inbox-types";
 
 export const INBOX_ACTED_FILE = "acted.json";
 /** The threads the file keeps, newest first: far more than the list's last 30 days ever show. */
@@ -82,8 +86,32 @@ export function readInboxActed(inboxDirPath: string): Map<string, string> {
   return out;
 }
 
-function writeInboxActed(inboxDirPath: string, threads: ReadonlyMap<string, string>): void {
+/** What acted.json holds before a write (pins.ts `inboxPinsFileState`'s rule): a newer version's or a bad file reads as none. */
+export function inboxActedFileState(inboxDirPath: string): "missing" | "ok" | "bad" | "newer" {
+  let raw: string;
+  try {
+    raw = readFileSync(join(inboxDirPath, INBOX_ACTED_FILE), "utf8");
+  } catch (e) {
+    return (e as NodeJS.ErrnoException)?.code === "ENOENT" ? "missing" : "bad";
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return "bad";
+  }
+  const file = value as { v?: unknown; threads?: unknown } | null;
+  if (!file || typeof file !== "object" || Array.isArray(file)) return "bad";
+  if (typeof file.v === "number" && file.v > 1) return "newer";
+  return file.v === 1 && !!file.threads && typeof file.threads === "object" ? "ok" : "bad";
+}
+
+/** Write the file whole; a newer version's file stays as it is (false), a bad one is moved aside first. */
+function writeInboxActed(inboxDirPath: string, threads: ReadonlyMap<string, string>): boolean {
   const file = join(inboxDirPath, INBOX_ACTED_FILE);
+  const state = inboxActedFileState(inboxDirPath);
+  if (state === "newer") return false;
+  if (state === "bad") renameSync(file, `${file}.unreadable-${new Date().toISOString().replace(/[:.]/g, "-")}`);
   const temp = `${file}.${process.pid}.tmp`;
   writeFileSync(temp, `${JSON.stringify({ v: 1, threads: Object.fromEntries(threads) })}\n`, { mode: 0o600 });
   try {
@@ -92,6 +120,7 @@ function writeInboxActed(inboxDirPath: string, threads: ReadonlyMap<string, stri
     // Windows: the mode is a no-op.
   }
   renameSync(temp, file);
+  return true;
 }
 
 export interface InboxActed {
@@ -101,26 +130,54 @@ export interface InboxActed {
   at(threadId: string): string | null;
   /** Write now what waits, if anything does (a server going away). */
   flush(): void;
+  /** A deletion happened: the times of threads this store held and no longer does go at the next write. */
+  sweep(): void;
 }
 
-export function createInboxActed(inboxDirPath: string, options: { now?: () => Date; flushMs?: number } = {}): InboxActed {
+const DAY_MS = 86_400_000;
+
+/**
+ * `held`: this store holds the thread (server: `store.thread(id) !== null`). A thread it never held (a linked
+ * machine's, opened in this window) is kept until it ages out: only a thread seen held and then gone is a deletion.
+ */
+export function createInboxActed(inboxDirPath: string, options: { now?: () => Date; flushMs?: number; held?: (threadId: string) => boolean } = {}): InboxActed {
   const now = options.now ?? (() => new Date());
   const flushMs = options.flushMs ?? INBOX_ACTED_FLUSH_MS;
+  const held = options.held ?? (() => false);
   let threads: Map<string, string> | null = null;
+  /** The ids in `threads` this store held when last looked at: `sweep` drops those it no longer holds. */
+  const own = new Set<string>();
   let timer: ReturnType<typeof setTimeout> | null = null;
-  const loaded = () => (threads ??= readInboxActed(inboxDirPath));
+  const loaded = () => {
+    if (threads) return threads;
+    threads = readInboxActed(inboxDirPath);
+    for (const id of threads.keys()) if (held(id)) own.add(id);
+    return threads;
+  };
+  // Read at once: a deletion before the first note must know which of the file's threads this store held.
+  loaded();
+  /** What the file keeps: no deleted thread's time, none past the filter's reach, the newest `INBOX_ACTED_MAX`. */
+  const pruned = (all: Map<string, string>): Map<string, string> => {
+    const reach = now().getTime() - INBOX_RECENT_ACTIVITY_DAYS * DAY_MS;
+    const kept = [...all].filter(([id, at]) => Date.parse(at) >= reach && !(own.has(id) && !held(id)));
+    for (const id of own) if (!held(id)) own.delete(id);
+    kept.sort((a, b) => Date.parse(b[1]) - Date.parse(a[1]));
+    return new Map(kept.slice(0, INBOX_ACTED_MAX));
+  };
+  const later = () => {
+    if (timer) return;
+    timer = setTimeout(flush, flushMs);
+    (timer as { unref?: () => void }).unref?.();
+  };
   // Nothing waits (no note since the last write): nothing to write.
   const flush = () => {
     if (!timer) return;
     clearTimeout(timer);
     timer = null;
-    const all = loaded();
-    if (all.size > INBOX_ACTED_MAX) {
-      const kept = [...all].sort((a, b) => Date.parse(b[1]) - Date.parse(a[1])).slice(0, INBOX_ACTED_MAX);
-      threads = new Map(kept);
-    }
+    threads = pruned(loaded());
+    for (const id of own) if (!threads.has(id)) own.delete(id);
     try {
-      writeInboxActed(inboxDirPath, threads!);
+      writeInboxActed(inboxDirPath, threads);
     } catch {
       // A disk that refuses the write: the notes hold in memory until the next one.
     }
@@ -129,14 +186,17 @@ export function createInboxActed(inboxDirPath: string, options: { now?: () => Da
     note(threadId, at = now().toISOString()) {
       if (!isInboxId("msg", threadId)) return;
       const all = loaded();
+      if (held(threadId)) own.add(threadId);
       const next = laterActed(all.get(threadId), at)!;
       if (next === all.get(threadId)) return;
       all.set(threadId, next);
-      if (timer) return;
-      timer = setTimeout(flush, flushMs);
-      (timer as { unref?: () => void }).unref?.();
+      later();
     },
     at: (threadId) => loaded().get(threadId) ?? null,
     flush,
+    sweep() {
+      loaded();
+      if ([...own].some((id) => !held(id))) later();
+    },
   };
 }

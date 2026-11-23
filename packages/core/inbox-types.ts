@@ -1866,6 +1866,9 @@ export const INBOX_SECTIONS: readonly { readonly id: InboxSectionId; readonly la
   { id: "quiet", label: "Quiet" },
 ];
 
+/** How far back the list filter's "Recent activity" reaches (`acted_at`), and how long acted.json keeps a time. */
+export const INBOX_RECENT_ACTIVITY_DAYS = 30;
+
 /**
  * One row of the list: a thread (owner ruling 2026-10-07, "a row is a
  * thread"), with its project as a label and a filter, placed in its section.

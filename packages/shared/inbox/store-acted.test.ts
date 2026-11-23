@@ -6,10 +6,11 @@
  * written per save instead of once; the file growing without bound.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxAuthor, InboxMessage, InboxQuestionRecord } from "@plannotator/core/inbox-types";
+import { INBOX_RECENT_ACTIVITY_DAYS } from "@plannotator/core/inbox-types";
 import { INBOX_ACTED_FILE, INBOX_ACTED_MAX, createInboxActed, personActOfMessage, personActOfQuestion, readInboxActed } from "./acted";
 import { InboxStore } from "./store";
 
@@ -37,6 +38,7 @@ function setup() {
 }
 
 const at = (ms: number) => new Date(ms).toISOString();
+const DAY = 86_400_000;
 
 describe("the store's record of what the person did in a thread", () => {
   test("an agent's message alone sets nothing; each kind of the person's doing sets the time it happened", () => {
@@ -169,10 +171,12 @@ describe("acted.json: what the log does not hold", () => {
     roots.push(dir);
     return dir;
   };
+  /** The server's clock: a day after START, whatever day the test runs. */
+  const clockAt = () => new Date(START + DAY);
 
   test("notes wait for one write; an older time never replaces a newer one; a restart reads them back", () => {
     const dir = dirOf();
-    const acted = createInboxActed(dir, { flushMs: 60_000 });
+    const acted = createInboxActed(dir, { flushMs: 60_000, now: clockAt });
     acted.note(T1, at(START + 10));
     acted.note(T1, at(START + 30));
     acted.note(T1, at(START + 20));
@@ -182,14 +186,14 @@ describe("acted.json: what the log does not hold", () => {
     expect(existsSync(join(dir, INBOX_ACTED_FILE))).toBe(false);
     acted.flush();
     expect(readInboxActed(dir)).toEqual(new Map([[T1, at(START + 30)], [T2, at(START)]]));
-    expect(createInboxActed(dir).at(T1)).toBe(at(START + 30));
+    expect(createInboxActed(dir, { now: clockAt }).at(T1)).toBe(at(START + 30));
   });
 
   test("no note, no write; a value that is not a thread id is dropped; the file keeps the newest threads only", () => {
     const dir = dirOf();
     createInboxActed(dir).flush();
     expect(existsSync(join(dir, INBOX_ACTED_FILE))).toBe(false);
-    const acted = createInboxActed(dir, { flushMs: 60_000 });
+    const acted = createInboxActed(dir, { flushMs: 60_000, now: clockAt });
     acted.note("../etc", at(START));
     expect(acted.at("../etc")).toBeNull();
     const ids = Array.from({ length: INBOX_ACTED_MAX + 5 }, (_, i) => `msg_${String(i).padStart(26, "0")}`);
@@ -201,13 +205,54 @@ describe("acted.json: what the log does not hold", () => {
     expect(kept.has(ids.at(-1)!)).toBe(true);
   });
 
-  test("a file that does not read is none, and the next note writes a good one", () => {
+  test("a file that does not read is none; the next write moves it aside, kept as it was, and writes a good one", () => {
     const dir = dirOf();
     writeFileSync(join(dir, INBOX_ACTED_FILE), "{nope");
-    const acted = createInboxActed(dir, { flushMs: 60_000 });
+    const acted = createInboxActed(dir, { flushMs: 60_000, now: clockAt });
     expect(acted.at(T1)).toBeNull();
     acted.note(T1, at(START));
     acted.flush();
     expect(JSON.parse(readFileSync(join(dir, INBOX_ACTED_FILE), "utf8"))).toEqual({ v: 1, threads: { [T1]: at(START) } });
+    const aside = readdirSync(dir).filter((name) => name.startsWith(`${INBOX_ACTED_FILE}.unreadable-`));
+    expect(aside).toHaveLength(1);
+    expect(readFileSync(join(dir, aside[0]!), "utf8")).toBe("{nope");
+  });
+
+  test("a newer Plannotator's file is never written over: the notes hold in memory, and the file stays byte for byte", () => {
+    const dir = dirOf();
+    const newer = `${JSON.stringify({ v: 2, threads: { [T2]: { at: at(START), kind: "open" } } })}\n`;
+    writeFileSync(join(dir, INBOX_ACTED_FILE), newer);
+    const acted = createInboxActed(dir, { flushMs: 60_000, now: clockAt });
+    acted.note(T1, at(START));
+    acted.flush();
+    expect(readFileSync(join(dir, INBOX_ACTED_FILE), "utf8")).toBe(newer);
+    expect(readdirSync(dir).filter((name) => name.includes(".unreadable-"))).toEqual([]);
+    expect(acted.at(T1)).toBe(at(START));
+  });
+
+  test("each write drops what the filter no longer reaches (past 30 days) and the threads this store deleted; a linked machine's thread stays", () => {
+    const dir = dirOf();
+    const OLD = "msg_01ARZ3NDEKTSV4RRFFQ69G5FAX";
+    const LINKED = "msg_01ARZ3NDEKTSV4RRFFQ69G5FAY";
+    const now = START + 40 * DAY;
+    const held = new Set([T1, T2, OLD]);
+    const acted = createInboxActed(dir, { flushMs: 60_000, now: () => new Date(now), held: (id) => held.has(id) });
+    acted.note(T1, at(now - 2 * DAY));
+    acted.note(T2, at(now - DAY));
+    acted.note(OLD, at(now - (INBOX_RECENT_ACTIVITY_DAYS + 1) * DAY));
+    acted.note(LINKED, at(now - 3 * DAY));
+    acted.flush();
+    expect(readInboxActed(dir)).toEqual(new Map([[T2, at(now - DAY)], [T1, at(now - 2 * DAY)], [LINKED, at(now - 3 * DAY)]]));
+    // T2 is deleted here: the deletion's sweep writes the file without it, with no other note.
+    held.delete(T2);
+    acted.sweep();
+    acted.flush();
+    expect([...readInboxActed(dir).keys()]).toEqual([T1, LINKED]);
+    // A restart knows which of the file's threads it holds: a deletion after it sweeps them too.
+    const again = createInboxActed(dir, { flushMs: 60_000, now: () => new Date(now), held: (id) => held.has(id) });
+    held.delete(T1);
+    again.sweep();
+    again.flush();
+    expect([...readInboxActed(dir).keys()]).toEqual([LINKED]);
   });
 });
