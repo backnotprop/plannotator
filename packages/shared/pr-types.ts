@@ -567,8 +567,9 @@ const PLATFORM_CAPABILITIES: Record<Platform, PRPlatformCapabilities> = {
     // File-level comments fold into the body until the review post supports them.
     fileLevelComments: false,
     viewedSync: false,
-    // Attachments and raw files are not loaded for Forgejo yet.
-    artifacts: false,
+    // Attachments and raw files load from the instance's own origin, with the
+    // configured token when there is one (see pr-artifact-document.ts).
+    artifacts: true,
     // REQUEST_CHANGES needs a body; COMMENT needs a body or an inline comment.
     reviewBodyRequired: true,
     agentCliAccess: false,
