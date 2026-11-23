@@ -48,15 +48,10 @@ html:not(.light) .sg .ws-pill.on{background:var(--sv)}
 .sg .ws-form-card.ws-submitted .ws-success{display:block}
 .sg .ws-ok{display:inline-flex;align-items:center;height:50px;padding:0 13px;background:var(--green);color:var(--mk-ink);font:500 15px/1 var(--mono);letter-spacing:.02em;white-space:nowrap}
 .sg .ws-success-title{margin:28px 0 0;font-weight:500;font-size:32px;line-height:1.1;letter-spacing:-.035em;overflow-wrap:anywhere}
-.sg .ws-success-title em{font-style:normal}
 .sg .ws-success p{margin:14px 0 0;font-size:16px;line-height:1.5;color:var(--soft);overflow-wrap:anywhere}
 .sg .ws-success p strong{font-weight:600;color:var(--ink)}
-.sg .ws-receipt{margin-top:24px;box-shadow:inset 0 1px 0 var(--p-line)}
-.sg .ws-r{display:flex;justify-content:space-between;gap:16px;padding:11px 0;box-shadow:inset 0 -1px 0 var(--p-line);font-size:14px;line-height:20px}
-.sg .ws-r-k{color:var(--soft)}
-.sg .ws-r-v{font-family:var(--mono);font-size:13px;color:var(--ink);text-align:right;overflow-wrap:anywhere}
-/* Hidden from the old form: the name, the receipt rows, and the success line that names a plan. The success line shows only when the contributor box was ticked, when the old script has replaced its words. Class sg-all on the dialog shows everything the old form shows. */
-.sg:not(.sg-all) #ok-contrib-note,.sg:not(.sg-all) .sg-nm,.sg:not(.sg-all) .ws-receipt,.sg:not(.sg-all) .ws-r:nth-child(1),.sg:not(.sg-all) .ws-r:nth-child(4){display:none}
+/* The contributor line shows only when that box was ticked, when the form script has written its words. */
+.sg #ok-contrib-note{display:none}
 .sg .ws-contrib-note{margin:-10px 0 0 34px;font-size:13px;line-height:19px;color:var(--soft)}
 .sg .ws-form-card:has(#contributor-toggle.on) #ok-contrib-note{display:block}
 .sg .ws-accent{color:var(--ink);font-weight:500}
