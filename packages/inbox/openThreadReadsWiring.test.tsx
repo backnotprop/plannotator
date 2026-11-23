@@ -5,8 +5,8 @@
  * its repo is known (the scratch projects have no git `origin`, so the test's
  * fetch adds one to the thread read): the case where another thread's record
  * skips the thread read. Failures to catch: a record that cannot change the
- * open thread's files reading them again; a thread deleted elsewhere (no record says so) left on screen because the
- * list read that no longer has it does not read it; and the open thread's
+ * open thread's files reading them again; a thread deleted elsewhere (no record says so) not read again by the list
+ * read that no longer has it (it stays on screen: only one deleted in this window goes); and the open thread's
  * own record (an agent's message in it) not drawn in place from the record,
  * or read the whole thread again (data/apply/stream.ts).
  *
@@ -215,7 +215,7 @@ test("another thread's record reads nothing of the open thread; its own record (
   expect(filesReads(world.waiting)).toBe(files);
 }, 15000);
 
-test('a thread deleted elsewhere: the next record of another thread reads it once the list lacks it, and the pane says it is gone', async () => {
+test('a thread deleted elsewhere: the next record of another thread reads it once the list lacks it, and the thread stays on screen', async () => {
   if (!hasDom) return;
   const el = openAt(world.waiting);
   await until(() => pane(el, world.waiting) !== null && sendRecord !== null, 'the open thread');
@@ -225,5 +225,8 @@ test('a thread deleted elsewhere: the next record of another thread reads it onc
   expect((await loopback(`/api/inbox/threads/${world.waiting}/delete`, 'POST', '{}')).status).toBe(200);
   await agentWrites(world.stopped);
   await until(() => threadReads(world.waiting) > thread, 'the read of the thread the list no longer has');
-  await until(() => el.querySelector('[data-thread-wait]')?.getAttribute('data-thread-wait') === 'missing', 'the missing line');
+  // What is open stays open (paneReads.ts): only a thread deleted in this window leaves the screen.
+  await wait(300);
+  expect(pane(el, world.waiting)).not.toBeNull();
+  expect(el.querySelector('[data-thread-wait="missing"]')).toBeNull();
 }, 15000);

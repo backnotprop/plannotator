@@ -4,7 +4,7 @@
  * away"), proved in a real browser against the compiled binary under a temp data dir, with a fake `gh` first on PATH
  * (every name invented, nothing reaches a forge).
  *
- * The person opens their own pull request's diff and starts a comment on the whole review. The fake forge merges the
+ * The person opens their own pull request's diff and starts a comment on a changed line. The fake forge merges the
  * PR (the person's searches now list it as merged, out of every open stack) and the window reads the list again:
  * the diff, the file rail and the half-written comment are all still there, and the header's state mark says merged
  * (the mark the PR gets everywhere in the Inbox). Before, the page turned into "This pull request is no longer in the
@@ -172,12 +172,13 @@ test('a merged PR’s diff stays open with the comment being written, and its he
   await expect(review.locator('[data-pull-review-title] .ib-refmark')).toHaveAttribute('data-ref-state', 'open');
   const rail = await review.locator('.ib-rrail').innerText();
 
-  // A comment on the whole review, half written and not saved.
-  await page.locator('.ib-vcomments').click();
-  const panel = page.locator('.ib-gpanel');
-  await panel.locator('[data-annotation-panel] .ml-auto button').first().click();
+  // A comment on a changed line, half written and not saved (a click on the line's number opens its composer).
+  const line = review.locator(`[data-guide-file-shell="${FILE}"] [data-line-type="change-addition"][data-column-number]`).first();
+  await line.click({ position: { x: 4, y: 4 } });
+  const composer = page.getByPlaceholder('Leave feedback...');
+  await expect(composer).toBeFocused();
   const words = 'Cap the tries at five, and say why in';
-  await panel.locator('textarea').fill(words);
+  await composer.fill(words);
   await shot('before-merge', 1440, 900, 'light');
 
   // The forge merges it; the window reads the list again (focus, past its 20 s).
@@ -192,7 +193,7 @@ test('a merged PR’s diff stays open with the comment being written, and its he
   await expect(page.getByText('This pull request is no longer in the list.')).toHaveCount(0);
   await expect(review.locator(`[data-guide-file-shell="${FILE}"]`)).toBeVisible();
   expect(await review.locator('.ib-rrail').innerText()).toBe(rail);
-  await expect(panel.locator('textarea')).toHaveValue(words);
+  await expect(composer).toHaveValue(words);
 
   await shot('merged', 1440, 900, 'light');
   await shot('merged', 1440, 900, 'dark');
