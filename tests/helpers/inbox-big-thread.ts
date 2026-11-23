@@ -36,8 +36,8 @@ const questionBlock = (round: number, n: number, replaces?: string) =>
 
 const html = (round: number) => ["```html", `<section><h2>Round ${round}</h2>`, ...Array.from({ length: 40 }, (_, i) => `<p class="row">Row ${i}: the queue drained in order.</p>`), "</section>", "```"].join("\n");
 
-export function seedBigThread(store: InboxStore, rounds = 247): { threadId: string; ids: string[]; skillReplies: string[]; reaskNotes: string[] } {
-  const project = store.ensureProject({ name: "api", root: "/work/api" });
+export function seedBigThread(store: InboxStore, rounds = 247, root = "/work/api"): { threadId: string; ids: string[]; skillReplies: string[]; reaskNotes: string[] } {
+  const project = store.ensureProject({ name: "api", root });
   const ids: string[] = [];
   const skillReplies: string[] = [];
   const reaskNotes: string[] = [];
