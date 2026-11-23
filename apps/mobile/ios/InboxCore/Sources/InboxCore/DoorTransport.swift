@@ -38,10 +38,14 @@ public protocol DoorTransport: Sendable {
   func send(_ call: DoorCall) async throws -> DoorAnswerBytes
   /// The event stream's bytes, or nil when this way has none.
   func events(_ call: DoorCall) async throws -> AsyncThrowingStream<Data, Error>?
+  /// False for a way that carries no files (the relay, contract `relay_upload_unavailable`): a file's bytes never
+  /// cross it only to be refused at the computer; the file waits for the computer's own network.
+  var carriesFiles: Bool { get }
 }
 
 extension DoorTransport {
   public func events(_ call: DoorCall) async throws -> AsyncThrowingStream<Data, Error>? { nil }
+  public var carriesFiles: Bool { true }
 }
 
 /// HTTPS to one address. The Wi-Fi listener's certificate is self-signed: the leaf's SHA-256 must equal the

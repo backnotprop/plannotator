@@ -15,7 +15,7 @@ import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, inbo
 import { isQuestionAnswerEmpty, type QuestionAnswer } from '@plannotator/core/question-block';
 import { StartedBy } from './StartedBy';
 import { earlierRunsLabel, RunDivider, runFolds, ScheduledFoot } from '../scheduled/thread';
-import { useRefRepo } from '../links';
+import { useMessageRefRepos } from '../messageRefRepo';
 import { InboxApiError, InboxHeldError, inboxApi, type OutboxView, type TagMode, type ThreadModel } from '../api';
 import { outboxLine } from '../machines';
 import { ThreadSessions } from './ThreadSessions';
@@ -167,7 +167,7 @@ import { fetchSkillCatalog, getCachedSkillCatalog } from '@plannotator/ui/utils/
 import { type ActionMark } from './ActionChecklist';
 import { Tip } from './Tip';
 import { ReplyQuoteLine, SentQuoteLine } from './ReplyQuote';
-import { arrowQuotesWhole, quoteToSend, selectedWordsIn } from '../replyQuote';
+import { arrowReply, quoteToSend, selectedWordsIn } from '../replyQuote';
 import { useReplyQuote } from '../useReplyQuote';
 import { useTileArrows } from '../useTileArrows';
 import type { ThreadPaneProps } from '../thread/paneProps';
@@ -829,8 +829,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     return true;
   }, []);
 
-  // Replaced-question cards link `#123` refs into the project's repo, as message bodies do.
-  const threadRefRepo = useRefRepo(thread.project.repo ?? null);
+  // Each message's `#123` refs, its cards' and the Links view's link into the repo messageRefRepo.ts picks for it.
+  const refRepos = useMessageRefRepos(thread, row);
   /** A jump to a question inside an attached file (issue #2828): opens the file on its card; false for any other question. Set below, once the file opener is. */
   const fileJumpRef = useRef<(target: { messageId: string; key: string }) => boolean>(() => false);
   /** The card the open file brings into view (its record key), once per ask. */
@@ -1393,7 +1393,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** The button shows once the thread's files have loaded and something is there (or the view is open, from a link). */
   // The thread's web links (threadLinks.ts). With none, nothing here changes: the same button, the same view.
   const refHost = useDefaultRefHost();
-  const linkList = useMemo(() => threadLinks(thread.messages, thread.project.repo, refHost), [thread.messages, thread.project.repo, refHost]);
+  const linkList = useMemo(() => threadLinks(thread.messages, refRepos.repoOf, refHost), [thread.messages, refRepos, refHost]);
   /** Links and no artifacts: the button opens on them, its count theirs. */
   const linksOnly = linkList.count > 0 && files !== null && artifactList.length === 0;
   const linksOn = artifactsOn && linkList.count > 0 && (linksRoute || linksOnly);
@@ -3982,18 +3982,16 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /**
    * The Reply arrow on a message: the pill aims at that message's agent, and the words stay. On an older message the
    * box quotes it; with words selected in the message, those words (approval "inbox-reply-quote"). With nothing
-   * selected, on a message no agent wrote after (`arrowQuotesWhole`), it is a plain Reply, as before (a quote there is dropped).
+   * selected, on a message no agent wrote after (`arrowReply`), it is a plain Reply, as before (a quote there is dropped).
    */
   const replyToMessage = (message: InboxMessageWire) => {
     const pressed = quoteWordsAtPress.current;
     quoteWordsAtPress.current = null;
     const article = bodyRef.current?.querySelector(`[data-message-article="${CSS.escape(message.id)}"] .ib-msg`) ?? null;
     const words = (pressed?.id === message.id ? pressed.words : null) ?? selectedWordsIn(article);
-    if (words) setQuote({ of: message.id, words });
-    else if (arrowQuotesWhole(thread.messages, message.id)) setQuote({ of: message.id });
-    else if (quoteRef.current) setQuote(null);
+    const { quote: arrowQuote, aim: session } = arrowReply(thread.messages, message, words, !!quoteRef.current);
+    if (arrowQuote !== undefined) setQuote(arrowQuote);
     if (words) window.getSelection()?.removeAllRanges();
-    const session = message.author.kind === 'agent' ? (message.author.session ?? null) : null;
     if (!pillActive || !session) {
       openBox();
       return;
@@ -5196,10 +5194,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     files: message.author.kind === 'person' ? allFiles : null,
                     personMessageIds: message.author.kind === 'person' ? personMessageIds : null,
                     root: thread.project.root,
-                    repo: thread.project.repo ?? null,
+                    repo: refRepos.repoOf(message.id),
                     codeReview,
                     notes: codeReview && isAgent && hasReview ? reviewOfNote.has(message.id) : null,
-                    refRepo: threadRefRepo,
+                    refRepo: refRepos.refRepoOf(message.id),
                     name,
                     comments: (isAgent || !isInboxNote(message)) && liveMessage(message) ? (messageComments.get(message.id) ?? NO_ANNOTATIONS) : null,
                     openComment: commentsList?.at ?? null,
