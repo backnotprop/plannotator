@@ -141,6 +141,7 @@ import { useLatchedTrue } from '@plannotator/ui/hooks/useLatchedTrue';
 import { buildDefaultPrompt, draftAnnotationsToSend, useAIChat } from '@plannotator/ui/hooks/useAIChat';
 import { askScopeFromContext as askScopeFromContextFor } from './askScope';
 import { getPlanMaxWidth, getUIPreferences, type UIPreferences } from '@plannotator/ui/utils/uiPreferences';
+import { goalSetupMaxWidth } from './goalSetupWidth';
 import { getEditorMode, saveEditorMode } from '@plannotator/ui/utils/editorMode';
 import { getInputMethod, refreshInputMethodStamp, saveInputMethod } from '@plannotator/ui/utils/inputMethod';
 import { getHtmlChromeState, mergeHtmlChromeState, saveHtmlChromeState, shouldRestoreHtmlChrome } from '@plannotator/ui/utils/htmlChrome';
@@ -7885,7 +7886,7 @@ const App: React.FC = () => {
                   <GoalSetupSurface
                     ref={goalSetupSurfaceRef}
                     bundle={goalSetupBundle}
-                    maxWidth={planMaxWidth}
+                    maxWidth={goalSetupMaxWidth(uiPrefs.planWidth)}
                     onActionStateChange={setGoalSetupAction}
                     onSubmitted={() => setSubmitted('approved')}
                   />

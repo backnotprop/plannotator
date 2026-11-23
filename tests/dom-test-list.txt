@@ -595,8 +595,8 @@ packages/ui/components/Settings.annotateParity.test.tsx
 packages/ui/components/Settings.compactDisplay.test.tsx
 packages/ui/components/Settings.customFont.test.tsx
 packages/ui/components/Settings.documentTextSize.test.tsx
-packages/ui/components/Settings.planWidth.test.tsx
 packages/ui/components/Settings.documentSourceLineNumbers.test.tsx
+packages/ui/components/Settings.planWidth.test.tsx
 packages/ui/components/Settings.repoOwner.test.tsx
 packages/ui/components/Settings.experimental.test.tsx
 packages/ui/components/Settings.reviewDefaults.test.tsx
