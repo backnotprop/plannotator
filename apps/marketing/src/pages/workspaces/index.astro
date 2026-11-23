@@ -17,7 +17,7 @@ import '../../styles/spaces/header.css';
     <script is:inline>document.documentElement.classList.add("pfc");</script>
     <!-- Light or dark before paint. The site's plannotator-theme cookie wins when it says light or dark;
          with no cookie (or "system") this page follows the system setting. Base.astro only ever adds
-         .light in the cases this also does. The switch in the top bar is in scripts/spaces/page.js. -->
+         .light in the cases this also does. The switch in the top bar is in scripts/spaces/theme-switch.js. -->
     <script is:inline>(function(){var m=document.cookie.match(/(?:^|; )plannotator-theme=([^;]*)/),t=m?decodeURIComponent(m[1]):"";if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.classList.toggle("light",t==="light")})();</script>
     <!-- The two handwriting subsets carry the first-screen notes; fetch them with the CSS, not after layout. -->
     <link rel="preload" href="/fonts/spaces-hand/SpacesHandOne.woff2" as="font" type="font/woff2" crossorigin />

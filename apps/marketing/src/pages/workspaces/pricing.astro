@@ -39,7 +39,9 @@ const STARS = [
 
 const said = (amount: string, per: string | null) => (per === null ? amount : `${amount} ${per}`);
 ---
-<Base title={PRICING_TITLE} description={LEDE}>
+<Base title={PRICING_TITLE} description={LEDE} noindex>
+  {/* noindex while the page is reached only by its address. Remove it, and the sitemap
+      exclusion in astro.config.mjs, when Pricing joins the header. */}
   <Fragment slot="head">
     <!-- Light or dark before paint, as on /workspaces/: the plannotator-theme cookie wins when it says
          light or dark; otherwise the page follows the system setting. -->
