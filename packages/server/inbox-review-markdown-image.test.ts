@@ -139,7 +139,7 @@ describe("a guided review's Markdown picture", () => {
   test("a document the diff does not change, or one that is no Markdown file, reads nothing", async () => {
     expect([(await read("img/chart.png", "new", { doc: "docs/other.md" })).status, reasonOf((await read("img/chart.png", "new", { doc: "docs/other.md" })).body)]).toEqual([404, "not-in-diff"]);
     expect((await read("img/chart.png", "new", { doc: "notes.txt" })).status).toBe(404);
-    expect((await read("img/chart.png", "new", { doc: "../README.md" })).status).toBe(404);
+    expect((await read("img/chart.png", "new", { doc: "../outside.md" })).status).toBe(404);
   });
 
   test("another message's snapshot is stale", async () => {
