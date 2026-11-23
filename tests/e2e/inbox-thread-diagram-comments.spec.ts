@@ -467,7 +467,8 @@ test('on a phone, full screen: a pinch zooms about the fingers, one or two finge
       await page.waitForTimeout(80);
       await page.touchscreen.tap(at.x, at.y);
     };
-    /** The spot of the canvas nearest `near` with no part of the diagram and no control under it (double tap zooms from empty space; a part opens its composer). */
+    /** The spot of the canvas nearest `near` with no part of the diagram and no control under it (double tap zooms from empty space; a part opens its composer).
+     * A gap inside the drawing counts: zoomed in, Pele's wide layout of this diagram covers the whole canvas. */
     const emptyNear = async (near: Point): Promise<Point> => {
       const found = await page.evaluate(
         ({ near, box }) => {
@@ -478,7 +479,7 @@ test('on a phone, full screen: a pinch zooms about the fingers, one or two finge
           for (let x = box.x + 30; x < box.x + box.width - 30; x += 10) {
             for (let y = box.y + 30; y < box.y + box.height - 80; y += 10) {
               const stack = document.elementsFromPoint(x, y);
-              if (stack.some((el) => (layer.contains(el) && el !== root) || el.closest('button, [data-diagram-control]'))) continue;
+              if (stack.some((el) => (layer.contains(el) && el !== root && el !== layer) || el.closest('button, [data-diagram-control]'))) continue;
               const distance = Math.hypot(x - near.x, y - near.y);
               if (distance < bestDistance) {
                 bestDistance = distance;
