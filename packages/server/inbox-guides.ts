@@ -434,6 +434,30 @@ export function guidePatchOf(store: InboxStore, sha256: string): string | null {
 }
 
 /**
+ * The commit a guide records it was written at (its source's `headSha`, or a commit guide's `commitSha`), where its
+ * image previews read a pure rename (inbox-review-image.ts); null when it records none. A snapshot never changes, so
+ * the answer is kept per guide.
+ */
+const guideRevisions = new Map<string, string | null>();
+
+export function guideRevisionOf(store: InboxStore, sha256: string): string | null {
+  const kept = guideRevisions.get(sha256);
+  if (kept !== undefined) return kept;
+  let revision: string | null = null;
+  try {
+    const parsed = parseGuideSnapshotJson(readFileSync(inboxBlobPath(store.dir, sha256), "utf8"));
+    if (!parsed.ok) return null;
+    revision = parsed.value.source.headSha ?? parsed.value.source.commitSha ?? null;
+  } catch {
+    // Gone from the store, or a passing read error: not remembered.
+    return null;
+  }
+  guideRevisions.set(sha256, revision);
+  while (guideRevisions.size > 8) guideRevisions.delete(guideRevisions.keys().next().value!);
+  return revision;
+}
+
+/**
  * One changed file's whole text for a guided review's expand arrows
  * (`GET /api/inbox/messages/:id/guide/file`). The guide keeps the diff as sent
  * and the working tree moves on, so each side is taken only when it is the very
