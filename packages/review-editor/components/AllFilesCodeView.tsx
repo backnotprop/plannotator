@@ -99,6 +99,7 @@ import {
   type HostFileNote,
   type HostLineNote,
 } from './hostLineNotes';
+import { dropHostLineMarks, HOST_LINE_MARKS_CSS, keepHostLineMarks, NO_HOST_LINE_MARKS, type HostLineMark, type OnHostLineMark } from './hostLineMarks';
 import { applyFileLanguageFixes } from '../utils/highlightLanguage';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import type { ReviewSearchMatch } from '../utils/reviewSearch';
@@ -230,6 +231,11 @@ export interface AllFilesCodeViewProps {
   /** What the host draws itself about a whole file (hostLineNotes.ts): in the file's header, under its path, above its
    *  first lines and the person's own file comments; read-only, never annotations. Absent: none, as before. */
   hostFileNotes?: readonly HostFileNote[];
+  /** The host's marks at the right edge of lines (hostLineMarks.ts): a button at each marked line's end, never over
+   *  code. Only a view of one file draws them. Absent: none, as before. */
+  hostLineMarks?: readonly HostLineMark[];
+  /** Hears the marks: hover, keyboard focus, a press (hostLineMarks.ts). */
+  onHostLineMark?: OnHostLineMark;
   selectedAnnotationId: string | null;
   scrollTargetAnnotation: AnnotationScrollTarget | null;
   lineTarget?: AllFilesLineTarget | null;
@@ -901,6 +907,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   annotations,
   hostLineNotes = NO_HOST_LINE_NOTES,
   hostFileNotes = NO_HOST_FILE_NOTES,
+  hostLineMarks = NO_HOST_LINE_MARKS,
+  onHostLineMark,
   selectedAnnotationId,
   scrollTargetAnnotation,
   lineTarget,
@@ -2763,6 +2771,18 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     for (const itemId of itemNodeRef.current.keys()) if (!semDiffsRef.current.has(itemId)) prefetchWholeFile(itemId);
   }, [semanticEnabled, prefetchWholeFile]);
 
+  // The host's line marks (hostLineMarks.ts): this view's file's, kept on its lines each time the file draws, and
+  // again on every drawn file when they change.
+  const onlyPath = files.length === 1 ? files[0]!.path : null;
+  const lineMarks = useMemo(() => (onlyPath ? hostLineMarks.filter((mark) => mark.filePath === onlyPath) : NO_HOST_LINE_MARKS), [hostLineMarks, onlyPath]);
+  const lineMarksRef = useRef(lineMarks);
+  lineMarksRef.current = lineMarks;
+  const onHostLineMarkRef = useRef(onHostLineMark);
+  onHostLineMarkRef.current = onHostLineMark;
+  useEffect(() => {
+    for (const node of itemNodeRef.current.values()) if (node.shadowRoot) keepHostLineMarks(node.shadowRoot, lineMarks, onHostLineMarkRef.current);
+  }, [lineMarks, onHostLineMark]);
+
   const handlePostRender = useStableCallback(
     (
       node: HTMLElement,
@@ -2774,6 +2794,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       if (!hasFirstCodePainted()) requestAnimationFrame(() => setTimeout(markFirstCodePainted, 0));
       if (phase === 'unmount') {
         clearItemSearchHighlights(node);
+        if (node.shadowRoot) dropHostLineMarks(node.shadowRoot);
         nodeToItemIdRef.current.delete(node);
         if (itemNodeRef.current.get(context.id) === node) itemNodeRef.current.delete(context.id);
         return;
@@ -2795,6 +2816,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       if (heldSelectionIdRef.current === context.id && context.fileDiff.isPartial !== true) setWholeAfterHold((n) => n + 1);
       if (flushesFiles) syncTrailingRow(node, context);
       if (powerUpStreamRef.current) keepPowerUpInStep(node);
+      if (node.shadowRoot) keepHostLineMarks(node.shadowRoot, lineMarksRef.current, onHostLineMarkRef.current);
       prefetchWholeFile(context.id);
       const itemId = context.id;
       requestAnimationFrame(() => applyItemHighlights(node, itemId));
@@ -4362,10 +4384,13 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const getMinimapViewer = useCallback(() => viewerRef.current?.getInstance(), []);
   const getMinimapScroller = useCallback(() => scrollRef.current, []);
 
+  // The host's line marks: buttons inside each file's shadow root, so only a view of one file can say which file's lines.
+  const lineMarksCss = lineMarks.length > 0 ? HOST_LINE_MARKS_CSS : '';
+
   const options = useMemo<CodeViewOptions<DiffAnnotationMetadata>>(
     () => ({
       themeType: pierreTheme.type,
-      unsafeCSS: `${scrollsWithPage ? `${pierreTheme.css}${SCROLLS_WITH_PAGE_CSS}${flushFiles ? FLUSH_FILES_CSS : STUCK_HEADER_LINE_CSS}` : pierreTheme.css}${powerUpActive ? powerUpCss(powerUpMotion, diffIndicators ?? 'bars') : ''}`,
+      unsafeCSS: `${scrollsWithPage ? `${pierreTheme.css}${SCROLLS_WITH_PAGE_CSS}${flushFiles ? FLUSH_FILES_CSS : STUCK_HEADER_LINE_CSS}` : pierreTheme.css}${powerUpActive ? powerUpCss(powerUpMotion, diffIndicators ?? 'bars') : ''}${lineMarksCss}`,
       ...(pierreTheme.syntaxTheme && { theme: pierreTheme.syntaxTheme }),
       diffStyle,
       overflow: diffOverflow,
@@ -4440,6 +4465,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       pierreTheme.syntaxTheme,
       powerUpActive,
       powerUpMotion,
+      lineMarksCss,
       diffStyle,
       diffOverflow,
       diffIndicators,

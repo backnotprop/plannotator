@@ -17,37 +17,14 @@ import { pullsEmptyWords, pullsNotices } from './notices';
 import { readReviewFolds, reviewRowProject, reviewRowTitle, saveReviewFolds, type ReviewFolds } from './reviewsModel';
 import { riskOrder, type RiskFailures, type RiskFilterValue, type RiskJudgments } from './risk';
 import { layerItem, ReviewRowItem, ReviewStack } from './ReviewRow';
-import { UnreportedBranches } from './UnreportedBranches';
-import type { InboxPullRiskAutoRun, InboxUnreportedBranch } from '@plannotator/core/inbox-types';
+import { ReviewGroup, type ReviewGroupFold } from './ReviewGroup';
+import type { InboxPullRiskAutoRun } from '@plannotator/core/inbox-types';
 import { useContextMenuTrigger } from '../components/useContextMenuTrigger';
 import { focusWhenGone, hiddenInProject, hiddenLabel, hiddenRepo, itemsBy, repoChangeKey } from './hiddenPulls';
 
 const NO_ROWS: readonly InboxReviewRow[] = [];
 const NO_JUDGMENTS: RiskJudgments = {};
 const NO_FAILURES: RiskFailures = {};
-
-/**
- * A group of the list: a plain one-line label and its count, no band. A folded group's label is a button with its
- * chevron, and its rows show only while it is open. Every group (and a new one) is this one shape.
- */
-function ReviewGroup({ label, name, rows, fold, draw }: { label: string; name: string; rows: readonly InboxReviewRow[]; fold?: { open: boolean; onToggle: () => void }; draw: (row: InboxReviewRow) => React.ReactNode }) {
-  if (rows.length === 0) return null;
-  return (
-    <div className={`ib-group ib-rvr-grp${fold ? ' ib-pr-fold' : ''}`} role="group" aria-label={label} data-pulls-group={name}>
-      {fold ? (
-        <button type="button" className="ib-pr-foldbtn" onClick={fold.onToggle} aria-expanded={fold.open} data-reviews-fold={name}>
-          <Icon name={fold.open ? 'chevD' : 'chevR'} size={14} />
-          {label} <span className="ib-n">{formatCount(rows.length)}</span>
-        </button>
-      ) : (
-        <div className="ib-rvr-gl">
-          {label} <span className="ib-n">{formatCount(rows.length)}</span>
-        </div>
-      )}
-      {(!fold || fold.open) && rows.map(draw)}
-    </div>
-  );
-}
 
 /** The open PRs a row is about (never a merged or closed layer of its stack): what its menu's Hide hides. */
 export function rowPulls(row: InboxReviewRow): InboxPull[] {
@@ -286,7 +263,7 @@ export function ReviewsList({
   onOpen,
   onOpenLayer,
   onNew,
-  onReviewBranch,
+  localGroup = null,
   menuRow = null,
   onShowAgain,
   onShowRepo,
@@ -312,14 +289,17 @@ export function ReviewsList({
    */
   selectedLayer?: string | null;
   phone: boolean;
-  /** The project the list is filtered to: Branch reviews' "Branches nobody reported" is one project's. */
+  /** The project the list is filtered to. */
   project?: string | null;
   onOpen: (row: InboxReviewRow) => void;
   /** A layer's row of an unfolded stack: that layer. Absent: the row's own `onOpen`. */
   onOpenLayer?: (row: InboxReviewRow, layer: InboxPull) => void;
   onNew: () => void;
-  /** Branch reviews' safety net: New review with that branch. Absent: no safety net. */
-  onReviewBranch?: (branch: InboxUnreportedBranch, opener: HTMLElement) => void;
+  /**
+   * "On this computer" (OnThisComputer.tsx), at the list's foot whatever it holds, given its saved fold (`folds.local`).
+   * Not under a risk filter: local work has no risk to match.
+   */
+  localGroup?: ((fold: ReviewGroupFold) => React.ReactNode) | null;
   /** The row whose menu (ReviewsMenu) is open: its muted background. */
   menuRow?: string | null;
   /** The Hidden fold's Show again. Absent: no fold. */
@@ -346,6 +326,7 @@ export function ReviewsList({
     setFolds(next);
     saveReviewFolds(next);
   };
+  const local = localGroup && risk === 'all' ? localGroup({ open: folds.local, onToggle: () => toggle('local') }) : null;
   const isOpenRow = (row: InboxReviewRow) => selected !== null && (row.thread_id === selected || row.id === selected || row.stacks.some((stack) => stack.id === selected || stack.layers.some((l) => l.key === selected)));
   // A row opened from a folded group keeps its group open.
   const waitingOpen = unfolded('waiting') || groups.waiting.some(isOpenRow);
@@ -366,8 +347,6 @@ export function ReviewsList({
   // Those High could not place, behind one quiet line; one opened from there keeps them shown.
   const [notRankedFolded, setNotRankedOpen] = useState(false);
   const notRankedOpen = notRankedFolded || notRanked.some(isOpenRow);
-  // Branch reviews' safety net: one project's, while Branch reviews is on, never read until opened.
-  const unreported = answer.branch_reviews && project && onReviewBranch ? <UnreportedBranches key={project} projectId={project} now={now} onStart={onReviewBranch} /> : null;
   const notices = pullsNotices(model, filter);
   const notice =
     notices.length > 0 ? (
@@ -490,7 +469,7 @@ export function ReviewsList({
             New review
           </button>
         </div>
-        {unreported}
+        {local}
         {hiddenFold}
       </div>
     );
@@ -498,14 +477,18 @@ export function ReviewsList({
   return (
     <>
       {notice}
-      <ReviewGroup label="On you" name="on_you" rows={groups.on_you} draw={draw} />
-      <ReviewGroup label="With your agents" name="agents" rows={groups.agents} draw={draw} />
-      <ReviewGroup label="Ready to land" name="ready" rows={groups.ready} draw={draw} />
-      <ReviewGroup label="Waiting on others" name="waiting" rows={groups.waiting} fold={{ open: waitingOpen, onToggle: () => toggle('waiting') }} draw={draw} />
-      <ReviewGroup label="Open, not reviewed" name="not_reviewed" rows={groups.not_reviewed} fold={{ open: listedOpen, onToggle: () => toggle('not_reviewed') }} draw={draw} />
+      <ReviewGroup label="On you" name="on_you" count={groups.on_you.length}>{groups.on_you.map(draw)}</ReviewGroup>
+      <ReviewGroup label="With your agents" name="agents" count={groups.agents.length}>{groups.agents.map(draw)}</ReviewGroup>
+      <ReviewGroup label="Ready to land" name="ready" count={groups.ready.length}>{groups.ready.map(draw)}</ReviewGroup>
+      <ReviewGroup label="Waiting on others" name="waiting" count={groups.waiting.length} fold={{ open: waitingOpen, onToggle: () => toggle('waiting') }}>
+        {groups.waiting.map(draw)}
+      </ReviewGroup>
+      <ReviewGroup label="Open, not reviewed" name="not_reviewed" count={groups.not_reviewed.length} fold={{ open: listedOpen, onToggle: () => toggle('not_reviewed') }}>
+        {groups.not_reviewed.map(draw)}
+      </ReviewGroup>
       {notJudgedLine}
       {notRankedLine}
-      {unreported}
+      {local}
       {hiddenFold}
     </>
   );

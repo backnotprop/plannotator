@@ -135,8 +135,8 @@ function NoteByForReaders({ note }: { note: ContextNote }) {
   );
 }
 
-/** Risk's own mark (the owner, option A · Gauge): 12 px, in the row's muted colour. */
-function RiskGauge() {
+/** Risk's own mark (the owner, option A · Gauge): 12 px, in the row's muted colour (the risk bars' card has it too). */
+export function RiskGauge() {
   return (
     <svg className="ib-ctxn-risk-mark" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M2.5 11.5a5.5 5.5 0 1 1 11 0" />

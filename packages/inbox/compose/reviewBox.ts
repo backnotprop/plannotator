@@ -18,6 +18,8 @@ export interface ReviewBoxRequest {
   pick?: ReviewBoxPull | null;
   /** Branch reviews' safety net: a local branch nobody reported, reviewed whole against its base, in its project. */
   branch?: ReviewBoxBranch | null;
+  /** Reviews' "On this computer": a project's uncommitted changes, reviewed in that project. */
+  project?: string | null;
   ask?: 'picture_it';
 }
 
@@ -187,3 +189,13 @@ export function reviewToWithChanges(targets: readonly { session: string; project
 
 /** The change summary, once read. */
 export type ReviewSummary = InboxReviewChangesAnswer | null;
+
+/**
+ * The branch and base a local review's words name: the summary's once read. With none (not read yet, or a branch diff
+ * that could not be read or is past its cap), the branch the box was opened for, in its own project, so the words
+ * never name the checked-out branch in its place.
+ */
+export function reviewWorkOf(summary: ReviewSummary, box: ReviewBoxRequest | null | undefined, changes: InboxReviewChanges, projectId: string | null | undefined): { branch: string | null; base: string | null } {
+  if (summary) return { branch: summary.branch, base: summary.base };
+  return { branch: changes === 'branch' && box?.branch && box.branch.projectId === projectId ? box.branch.name : null, base: null };
+}
