@@ -675,7 +675,7 @@ export function RefCardView({ target, href, result, pinned, onClose, sheet, tigh
           ) : null}
         </div>
       </div>
-      {footer(commentForms(d.comments, pinned && !sheet))}
+      {footer(commentForms(d.comments, !!pinned && !sheet))}
     </div>
   );
 }
