@@ -65,7 +65,7 @@ export interface InboxLocalRefsOptions {
 }
 
 /** A worktree folder of a repository: where it is and what git says is checked out in it. */
-type Tree = { path: string; real: string; branch: string | null };
+type Tree = { path: string; real: string; branch: string | null; head: string };
 
 export function createInboxLocalRefs(options: InboxLocalRefsOptions) {
   const { runtime } = options;
@@ -88,9 +88,10 @@ export function createInboxLocalRefs(options: InboxLocalRefsOptions) {
     const listed = await getWorktrees(git, top);
     const trees: Tree[] = [];
     for (const tree of listed) {
-      if (!tree.path || !(await isFolder(tree.path))) continue;
+      // A bare repository's own entry (`git clone --bare` with worktrees off it): no working folder to review.
+      if (!tree.path || tree.bare || !(await isFolder(tree.path))) continue;
       const real = await realOr(tree.path);
-      if (real) trees.push({ path: tree.path, real, branch: tree.branch ?? null });
+      if (real) trees.push({ path: tree.path, real, branch: tree.branch ?? null, head: tree.head });
     }
     return trees;
   };
@@ -153,13 +154,34 @@ export function createInboxLocalRefs(options: InboxLocalRefsOptions) {
     return rows;
   };
 
-  /** A project's repository, its default branch's ref and its worktree folders but its own. Null: no repository here. */
+  /**
+   * Past the cap, the newest folders by their checked-out commit's time (one `git log` for them all), so the cap
+   * drops the oldest, never those git happens to list last.
+   */
+  const newestTrees = async (git: ReviewGitRuntime, top: string, trees: Tree[]): Promise<Tree[]> => {
+    const heads = [...new Set(trees.map((tree) => tree.head).filter((head) => /^[0-9a-f]{40,64}$/.test(head)))];
+    const read = heads.length ? await git.runGit(["log", "--no-walk=unsorted", "--format=%H %ct", "--end-of-options", ...heads], { cwd: top }) : null;
+    const times = new Map<string, number>();
+    for (const line of read?.exitCode === 0 ? read.stdout.split("\n") : []) {
+      const [sha = "", seconds = ""] = line.trim().split(" ");
+      if (sha) times.set(sha, Number(seconds) || 0);
+    }
+    return [...trees].sort((a, b) => (times.get(b.head) ?? 0) - (times.get(a.head) ?? 0)).slice(0, LOCAL_REFS_FOLDERS_MAX);
+  };
+
+  /**
+   * A project's repository, its default branch's ref and its worktree folders but its own: at most
+   * `LOCAL_REFS_FOLDERS_MAX`, the newest. A branch checked out in one of them is offered as that folder (`inFolders`);
+   * one checked out in a folder past the cap stays a branch. Null: no repository here.
+   */
   const placeOf = async (git: ReviewGitRuntime, project: InboxProject) => {
     const repo = await repoOf(git, project.root);
     if (!repo) return null;
     const own = (await realOr(repo.top)) ?? repo.top;
-    const trees = (await treesOf(git, repo.top)).filter((tree) => tree.real !== own);
-    return { top: repo.top, defaultRef: await readDefaultBranch(git, repo.top), trees };
+    const all = (await treesOf(git, repo.top)).filter((tree) => tree.real !== own);
+    const trees = all.length > LOCAL_REFS_FOLDERS_MAX ? await newestTrees(git, repo.top, all) : all;
+    const inFolders = new Set(trees.flatMap((tree) => (tree.branch ? [tree.branch] : [])));
+    return { top: repo.top, defaultRef: await readDefaultBranch(git, repo.top), trees, inFolders };
   };
 
   /**
@@ -194,12 +216,11 @@ export function createInboxLocalRefs(options: InboxLocalRefsOptions) {
             const listed = await git.runGit(["for-each-ref", "--format=%(refname)", "refs/heads/"], { cwd: place.top });
             if (listed.exitCode !== 0) return;
             const base = branchBaseName(place.defaultRef);
-            const inFolders = new Set(place.trees.flatMap((tree) => (tree.branch ? [tree.branch] : [])));
             const branches = listed.stdout.split("\n").filter((ref) => {
               const branch = ref.startsWith("refs/heads/") ? ref.slice("refs/heads/".length) : "";
-              return branch && branch !== base && !inFolders.has(branch) && inboxPullSafeBranch(branch);
+              return branch && branch !== base && !place.inFolders.has(branch) && inboxPullSafeBranch(branch);
             }).length;
-            found.set(project.id, { project_id: project.id, folders: Math.min(place.trees.length, LOCAL_REFS_FOLDERS_MAX), branches: Math.min(branches, LOCAL_REFS_BRANCHES_MAX) });
+            found.set(project.id, { project_id: project.id, folders: place.trees.length, branches: Math.min(branches, LOCAL_REFS_BRANCHES_MAX) });
           }),
         );
         return {
@@ -216,13 +237,11 @@ export function createInboxLocalRefs(options: InboxLocalRefsOptions) {
         const git = localWorkGit(runtime);
         const place = await placeOf(git, project);
         if (!place) return null;
-        const trees = place.trees.slice(0, LOCAL_REFS_FOLDERS_MAX);
-        const folders: InboxLocalWork[] = new Array(trees.length);
-        await inTurn(trees.map((tree, i) => async () => void (folders[i] = (await folderRow(git, tree.path, tree.path, project.id, place.defaultRef)).row)));
+        const folders: InboxLocalWork[] = new Array(place.trees.length);
+        await inTurn(place.trees.map((tree, i) => async () => void (folders[i] = (await folderRow(git, tree.path, tree.path, project.id, place.defaultRef)).row)));
         folders.sort((a, b) => b.at.localeCompare(a.at));
         // A branch checked out in a listed folder is offered once, as the folder.
-        const leave = new Set(place.trees.flatMap((tree) => (tree.branch ? [tree.branch] : [])));
-        const branches = await branchesOf(git, place.top, project.id, place.defaultRef, leave);
+        const branches = await branchesOf(git, place.top, project.id, place.defaultRef, place.inFolders);
         return { project_id: project.id, base: branchBaseName(place.defaultRef), folders, branches };
       });
     },
@@ -287,8 +306,25 @@ export function createInboxLocalRefs(options: InboxLocalRefsOptions) {
     if (!place) return null;
     const defaultRef = await readDefaultBranch(git, place.top);
     const { row, sha } = await folderRow(git, place.top, keep.folder, project?.id ?? "", defaultRef);
-    if (project && row.branch && sha && options.skip(project.id, row.branch, sha)) return null;
+    // Picked through "Another folder…" (no project), yet a known project's repository: the window shows it once.
+    const under = project ?? (await projectOfRepo(git, place.top));
+    if (!project && under) row.in_project = under.id;
+    if (under && row.branch && sha && options.skip(under.id, row.branch, sha)) return null;
     return row;
+  }
+
+  /** The known project whose repository `top` is part of (its folder or one of its worktrees), or null. */
+  async function projectOfRepo(git: ReviewGitRuntime, top: string): Promise<InboxProject | null> {
+    const common = async (root: string) => {
+      const repo = await repoOf(git, root).catch(() => null);
+      return repo ? ((await realOr(repo.common)) ?? repo.common) : null;
+    };
+    const mine = await common(top);
+    if (!mine) return null;
+    for (const project of options.projects().slice(0, LOCAL_WORK_PROJECTS_MAX)) {
+      if ((await once(`common:${project.id}`, () => common(project.root))) === mine) return project;
+    }
+    return null;
   }
 }
 

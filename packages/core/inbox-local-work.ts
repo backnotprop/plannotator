@@ -36,6 +36,8 @@ export interface InboxLocalWork {
   head?: string | null;
   /** A folder row: it has uncommitted changes. */
   uncommitted?: boolean;
+  /** A folder kept with no project ("Another folder…") that is a known project's repository (its folder or a worktree): that project. */
+  in_project?: string;
 }
 
 /** `GET /api/inbox/reviews/local`. */
@@ -148,4 +150,31 @@ export function inboxLocalKeepOf(key: string): { project: string; branch: string
 /** Nothing beyond the default branch: no commit of its own and (a folder) no uncommitted change. */
 export function inboxLocalSameAsBase(work: Pick<InboxLocalWork, "kind" | "ahead" | "uncommitted">): boolean {
   return work.kind !== "uncommitted" && work.ahead === 0 && !work.uncommitted;
+}
+
+/**
+ * One row for one piece of work: rows a kept folder repeats (its branch's row, its project's uncommitted row, or the
+ * same folder kept twice, once through "Another folder…") give way to one. The open row stays; else a folder row, one
+ * with its project first. Rows with no folder among them stay as the list has them.
+ */
+export function inboxLocalOneRowEach(rows: readonly InboxLocalWork[], openKey: string | null): InboxLocalWork[] {
+  const sameWork = (row: InboxLocalWork) => {
+    const project = row.project_id || row.in_project || "";
+    if (!project) return null;
+    if (row.branch) return `${project}\u0000branch\u0000${row.branch}`;
+    return row.kind === "folder" && row.head ? `${project}\u0000head\u0000${row.head}` : null;
+  };
+  const groups = new Map<string, InboxLocalWork[]>();
+  for (const row of rows) {
+    const work = sameWork(row);
+    if (work) groups.set(work, [...(groups.get(work) ?? []), row]);
+  }
+  const drop = new Set<InboxLocalWork>();
+  for (const group of groups.values()) {
+    const folders = group.filter((row) => row.kind === "folder");
+    if (group.length < 2 || folders.length === 0) continue;
+    const keep = group.find((row) => inboxLocalWorkKey(row) === openKey) ?? folders.find((row) => row.project_id) ?? folders[0]!;
+    for (const row of group) if (row !== keep) drop.add(row);
+  }
+  return drop.size ? rows.filter((row) => !drop.has(row)) : [...rows];
 }
