@@ -175,3 +175,51 @@ test("raw .md URL: still takes priority over content negotiation", async () => {
   expect(result.source).toBe("fetch-raw");
   expect(result.markdown).toBe("# Raw markdown file");
 });
+
+// A local URL the person asked for may redirect within its own origin (a
+// directory's trailing-slash 301, a renamed file), but never to another local
+// origin; a public URL may never redirect to a local one.
+test("local URL: follows a same-origin redirect, refuses one to another local origin", async () => {
+  const other = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("<p>Other</p>", { headers: { "content-type": "text/html" } }) });
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(req) {
+      const { pathname } = new URL(req.url);
+      if (pathname === "/docs") return new Response(null, { status: 301, headers: { location: "/docs/" } });
+      if (pathname === "/docs/") return new Response("<h1>Docs</h1><p>Hello</p>", { headers: { "content-type": "text/html" } });
+      if (pathname === "/notes.md") return new Response(null, { status: 302, headers: { location: "/notes-v2.md" } });
+      if (pathname === "/notes-v2.md") return new Response("# Notes\n", { headers: { "content-type": "text/plain" } });
+      if (pathname === "/elsewhere") return new Response(null, { status: 302, headers: { location: `http://127.0.0.1:${other.port}/` } });
+      return new Response("not found", { status: 404 });
+    },
+  });
+  try {
+    const base = `http://127.0.0.1:${server.port}`;
+
+    const docs = await urlToMarkdown(`${base}/docs`, { useJina: false });
+    expect(docs.source).toBe("fetch+turndown");
+    expect(docs.markdown).toContain("Hello");
+
+    const notes = await urlToMarkdown(`${base}/notes.md`, { useJina: false });
+    expect(notes.source).toBe("fetch-raw");
+    expect(notes.markdown).toBe("# Notes\n");
+
+    await expect(urlToMarkdown(`${base}/elsewhere`, { useJina: false })).rejects.toThrow("Redirect to private/local URL blocked");
+  } finally {
+    server.stop(true);
+    other.stop(true);
+  }
+});
+
+test("public URL: a redirect to a local host is still refused", async () => {
+  globalThis.fetch = mock((url: string | URL | Request) => {
+    fetchCalls.push({ url: String(url), headers: {} });
+    return Promise.resolve(new Response(null, { status: 302, headers: { location: "http://127.0.0.1/admin" } }));
+  }) as typeof fetch;
+
+  await expect(urlToMarkdown("https://example.com/page", { useJina: false })).rejects.toThrow(
+    "Redirect to private/local URL blocked: http://127.0.0.1/admin",
+  );
+  expect(fetchCalls.some((call) => call.url.startsWith("http://127.0.0.1"))).toBe(false);
+});

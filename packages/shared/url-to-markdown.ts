@@ -46,6 +46,21 @@ const PRIVATE_IPV4 = /^(10\.\d{1,3}|192\.168|172\.(1[6-9]|2\d|3[01])|169\.254)\.
 // Bracketed IPv6 private/reserved prefixes (matches WHATWG URL hostname getter output).
 // fc00::/7 covers fc00:: through fdff::, so match [fc or [fd prefix.
 const PRIVATE_IPV6 = /^\[(::1|::ffff:|fe80:|fc[0-9a-f]{2}:|fd[0-9a-f]{2}:)/i;
+/**
+ * A redirect hop is refused when it reaches a local/private host the request
+ * did not start on: a public URL may never redirect to a local one, and a local
+ * URL the person asked for may only redirect within its own origin (a
+ * directory's trailing-slash 301, a renamed file).
+ */
+function isBlockedRedirect(requestedUrl: string, nextUrl: string): boolean {
+  if (!isLocalUrl(nextUrl)) return false;
+  try {
+    return !(isLocalUrl(requestedUrl) && new URL(nextUrl).origin === new URL(requestedUrl).origin);
+  } catch {
+    return true;
+  }
+}
+
 function isLocalUrl(url: string): boolean {
   try {
     const { hostname } = new URL(url);
@@ -172,7 +187,7 @@ async function fetchRawText(url: string): Promise<string | null> {
       const location = res.headers.get("location");
       if (!location) break;
       currentUrl = new URL(location, currentUrl).href;
-      if (isLocalUrl(currentUrl)) {
+      if (isBlockedRedirect(url, currentUrl)) {
         throw new Error(`Redirect to private/local URL blocked: ${currentUrl}`);
       }
       res.body?.cancel();
@@ -229,7 +244,7 @@ async function fetchViaContentNegotiation(url: string): Promise<string | null> {
       const location = res.headers.get("location");
       if (!location) break;
       currentUrl = new URL(location, currentUrl).href;
-      if (isLocalUrl(currentUrl)) {
+      if (isBlockedRedirect(url, currentUrl)) {
         res.body?.cancel();
         return null;
       }
@@ -313,7 +328,7 @@ async function fetchViaTurndown(url: string): Promise<string> {
       if (!location) break;
 
       currentUrl = new URL(location, currentUrl).href;
-      if (isLocalUrl(currentUrl)) {
+      if (isBlockedRedirect(url, currentUrl)) {
         throw new Error(`Redirect to private/local URL blocked: ${currentUrl}`);
       }
       res.body?.cancel();
