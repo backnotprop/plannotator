@@ -150,7 +150,7 @@ export const QUESTIONS: readonly PricingQuestion[] = [
   },
   {
     question: 'What about clients and partners?',
-    answer: 'People you invite from outside the team are free and do not count as members. Free holds up to 3 guests. Paid plans have no limit.',
+    answer: 'People you invite from outside the team are free and do not count as members. Free holds up to 3 guests. Paid plans have no guest limit.',
   },
   {
     question: `What happens at ${TEAM_MEMBERS + 1} members?`,
