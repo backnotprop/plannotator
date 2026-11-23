@@ -2,7 +2,8 @@
  * The code review app's keys on a review in the Inbox (approval 2026-11-23: "Yes, the same keys as code review",
  * "Yes, the review's keys win while a review is open"), by real key presses against the compiled binary, in the scratch
  * world of inbox-review-comments-phone-world.ts: a teammate's pull request and an agent's guided review of the same two
- * files (a 120-line file, then a 40-line one, each one change).
+ * files (a 120-line file and a 40-line one, each one change; the PR's page lists them as its tree does, the guided review
+ * as its chapters do, so the walk reads the order off the page).
  *
  * What is proved, on a PR's page and on a guided review: Home, J and K move between files and never between threads;
  * N and Shift+N go to the next and previous change, across files, and open nothing; X folds the file on screen and Z
@@ -13,7 +14,7 @@
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { expect, test, type Page } from './inbox-test';
-import { LONG_FILE, openPull, openReview, SHORT_FILE, startWorld, stopWorld, windowAt, type PhoneWorld } from './inbox-review-comments-phone-world';
+import { openPull, openReview, startWorld, stopWorld, windowAt, type PhoneWorld } from './inbox-review-comments-phone-world';
 
 const repo = resolve(__dirname, '../..');
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'review-parity');
@@ -44,6 +45,17 @@ const changeIn = (page: Page, path: string) => page.locator(`[data-guide-file-sh
 const newMessage = (page: Page) => page.getByRole('dialog', { name: /New message/ });
 const arrowOf = (page: Page, path: string) => page.locator(`[data-guide-file-shell="${path}"] [data-file-header-path] > div > button`).first();
 
+/** The review's files in the order drawn. */
+const filesOf = (page: Page) =>
+  page.locator('[data-guide-file-shell]').evaluateAll((shells) => shells.map((shell) => (shell as HTMLElement).dataset.guideFileShell ?? ''));
+/** Whether a file has been brought to the top of the view, or as near as the scroller goes (it is at its end). */
+const atTop = (page: Page, path: string) =>
+  page.locator(`[data-guide-file-shell="${path}"]`).evaluate((shell) => {
+    const scroller = (shell.closest('.ib-gbody') as HTMLElement | null) ?? document.documentElement;
+    const top = shell.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+    return (top < 200 && top > -40) || (top > 0 && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2);
+  });
+
 /** Keys from the page itself, as after a click on nothing in particular. */
 async function fromThePage(page: Page): Promise<void> {
   await expect(page.locator('[data-review-keys]')).toHaveCount(1);
@@ -54,25 +66,27 @@ async function walk(page: Page, picture?: string): Promise<void> {
   const route = () => page.evaluate(() => location.hash);
   const at = await route();
   await fromThePage(page);
-  expect(await placeOf(page, LONG_FILE)).toBeGreaterThan(600);
+  const [FIRST, SECOND] = await filesOf(page);
+  expect(SECOND).toBeTruthy();
+  expect(await placeOf(page, SECOND!)).toBeGreaterThan(600);
 
   // Home: the first file at the top of the view. J: the next file there; K back. The route (the thread, the PR) stays.
   await page.keyboard.press('Home');
-  await expect.poll(() => placeOf(page, SHORT_FILE)).toBeLessThan(60);
+  await expect.poll(() => placeOf(page, FIRST!)).toBeLessThan(60);
   await page.keyboard.press('j');
-  await expect.poll(() => placeOf(page, LONG_FILE)).toBeLessThan(200);
-  await expect(page.locator(`[data-guide-file-shell="${LONG_FILE}"]`)).toBeInViewport();
+  await expect.poll(() => atTop(page, SECOND!)).toBe(true);
+  await expect(page.locator(`[data-guide-file-shell="${SECOND}"]`)).toBeInViewport();
   await page.keyboard.press('k');
-  await expect.poll(() => placeOf(page, SHORT_FILE)).toBeLessThan(60);
+  await expect.poll(() => placeOf(page, FIRST!)).toBeLessThan(60);
   expect(await route()).toBe(at);
 
   // N: on to the next change until it is the other file's (the first press from the top of the page can land on the
   // first file's own change, as in the review app); Shift+N back to the first file's. Nothing opens.
   await expect(async () => {
     await page.keyboard.press('n');
-    await expect(changeIn(page, LONG_FILE)).toBeInViewport({ timeout: 2_000 });
+    await expect(changeIn(page, SECOND!)).toBeInViewport({ timeout: 2_000 });
   }).toPass({ timeout: 20_000 });
-  expect(await placeOf(page, LONG_FILE)).toBeLessThan(600);
+  expect(await placeOf(page, SECOND!)).toBeLessThan(600);
   expect(await route()).toBe(at);
   await expect(newMessage(page)).toHaveCount(0);
   if (picture) {
@@ -82,14 +96,14 @@ async function walk(page: Page, picture?: string): Promise<void> {
   }
   await page.keyboard.press('Shift+N');
   // The first file's change starts at its top: back there, its top is on screen again.
-  await expect.poll(() => placeOf(page, SHORT_FILE), { timeout: 10_000 }).toBeGreaterThan(-200);
-  expect(await placeOf(page, SHORT_FILE)).toBeLessThan(700);
+  await expect.poll(() => placeOf(page, FIRST!), { timeout: 10_000 }).toBeGreaterThan(-200);
+  expect(await placeOf(page, FIRST!)).toBeLessThan(700);
 
   // X folds the file on screen, Z opens it again (and undoes nothing).
   await page.keyboard.press('x');
-  await expect(arrowOf(page, SHORT_FILE)).toHaveAttribute('title', 'Expand diff');
+  await expect(arrowOf(page, FIRST!)).toHaveAttribute('title', 'Expand diff');
   await page.keyboard.press('z');
-  await expect(arrowOf(page, SHORT_FILE)).toHaveAttribute('title', 'Collapse diff');
+  await expect(arrowOf(page, FIRST!)).toHaveAttribute('title', 'Collapse diff');
 
   // C: no file comments in the Inbox's review yet, so nothing, and never New message.
   await page.keyboard.press('c');

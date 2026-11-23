@@ -18,14 +18,15 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { listRegistryShortcuts, resolveShortcutBindings, useShortcutScope } from '@plannotator/ui/shortcuts';
-import { reviewSettingsShortcutRegistry } from '@plannotator/review-editor/shortcuts';
-import { REVIEW_KEY_ACTIONS, ReviewKeys } from './ReviewKeys';
-import { activeFile, changeStarts, fileStep, reopenTarget, stepOrigin } from './reviewWalk';
 import { bareKeyAllowed, inboxAppShortcuts, inboxThreadShortcuts } from '../shortcuts';
 import { openReviewKeys } from '../shortcuts/review';
-import { ShortcutMap } from '../components/ShortcutMap';
 
 const hasDom = typeof document !== 'undefined';
+// review-editor reads `window` as it loads: only under happy-dom (the plain unit lane loads this file too).
+const { reviewSettingsShortcutRegistry } = (hasDom ? await import('@plannotator/review-editor/shortcuts') : {}) as typeof import('@plannotator/review-editor/shortcuts');
+const { REVIEW_KEY_ACTIONS, ReviewKeys } = (hasDom ? await import('./ReviewKeys') : {}) as typeof import('./ReviewKeys');
+const { activeFile, changeStarts, fileStep, reopenTarget, stepOrigin } = (hasDom ? await import('./reviewWalk') : {}) as typeof import('./reviewWalk');
+const { ShortcutMap } = (hasDom ? await import('../components/ShortcutMap') : {}) as typeof import('../components/ShortcutMap');
 const VIEW = 400;
 const FILES = [
   { path: 'src/a.ts', top: 0, change: 100 },
