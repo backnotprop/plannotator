@@ -555,6 +555,7 @@ test('a High PR: once on each named file in the tree, once on each named range i
   await page.mouse.move(4, 450);
   await expect(riskCard()).toHaveCount(0);
   // Keyboard focus: the card opens; Escape closes it and the review stays.
+  await shellTop(review, 'src/charges/client.ts');
   await barsOf(review, client).focus();
   await expect(riskCard()).toContainText('Charges stop being idempotent.');
   await page.keyboard.press('Escape');
