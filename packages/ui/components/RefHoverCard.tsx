@@ -436,7 +436,7 @@ function commentForms(comments: number, pinned: boolean): { key: string; node: R
  * The footer's words, whole: the first of `forms` (longest first) that fits the room the buttons leave, else the
  * last. Never cut. Each form is measured in a clipped zero-size box, so the measuring adds no room to the footer.
  */
-function FootWords({ forms }: { forms: { key: string; node: React.ReactNode }[] }) {
+function FootWords({ forms, line }: { forms: { key: string; node: React.ReactNode }[]; line?: boolean }) {
   const boxRef = useRef<HTMLSpanElement | null>(null);
   const measureRef = useRef<HTMLSpanElement | null>(null);
   const [pick, setPick] = useState(0);
@@ -459,7 +459,11 @@ function FootWords({ forms }: { forms: { key: string; node: React.ReactNode }[] 
   }, [keys]);
   const shown = forms[Math.min(pick, forms.length - 1)];
   return (
-    <span ref={boxRef} className="relative min-w-0 flex-1 overflow-hidden whitespace-nowrap" data-ref-card-count="" data-ref-card-count-form={shown?.key}>
+    <span
+      ref={boxRef}
+      // `line`: a line of its own (the sheet), as wide as the footer; else the room beside the buttons.
+      className={`relative overflow-hidden whitespace-nowrap ${line ? 'block w-full' : 'min-w-0 flex-1'}`}
+      data-ref-card-count="" data-ref-card-count-form={shown?.key}>
       {shown?.node}
       <span aria-hidden="true" className="pointer-events-none invisible absolute left-0 top-0 h-0 w-0 overflow-hidden">
         <span ref={measureRef} className="flex w-max flex-col">
@@ -474,19 +478,68 @@ function FootWords({ forms }: { forms: { key: string; node: React.ReactNode }[] 
   );
 }
 
+/**
+ * The sheet's button row, right-aligned. Short of room (a narrow phone with a long forge name), Close shows as its
+ * icon (×), named "Close" for a screen reader, until the row has room for the word again.
+ */
+function SheetRow({ children }: { children: (closeIcon: boolean) => React.ReactNode }) {
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  const [closeIcon, setCloseIcon] = useState(false);
+  /** The row's width with the word: the room it needs before the word comes back. */
+  const needed = useRef(0);
+  const icon = useRef(false);
+  icon.current = closeIcon;
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    if (!row) return;
+    const fit = () => {
+      if (!icon.current) {
+        if (row.scrollWidth > row.clientWidth + 0.5) {
+          needed.current = row.scrollWidth;
+          setCloseIcon(true);
+        }
+      } else if (row.clientWidth >= needed.current) setCloseIcon(false);
+    };
+    fit();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(fit);
+    observer.observe(row);
+    for (const child of Array.from(row.children)) observer.observe(child);
+    return () => observer.disconnect();
+  });
+  return (
+    <div ref={rowRef} className="flex items-center justify-end gap-2 max-[379px]:gap-1" data-ref-card-row="">
+      {children(closeIcon)}
+    </div>
+  );
+}
+
 export function RefCardView({ target, href, result, pinned, onClose, sheet, tight, action }: RefCardViewProps) {
   // A provider's own card (utils/refCardProviders.ts).
   const Provided = providedRefCardView(target);
   if (Provided) return <Provided target={target} href={href} result={result} pinned={pinned} onClose={onClose} sheet={sheet} tight={tight} />;
   const repoName = `${target.owner}/${target.repo}`;
   const forge = forgeName(target.platform);
-  const btn = sheet ? 'min-h-11 px-3' : 'h-7 px-2.5';
-  const footer = (words?: { key: string; node: React.ReactNode }[]) => (
-    <div className="flex flex-none items-center gap-2 border-t border-border px-3.5 py-2 text-[11.5px] text-muted-foreground" data-ref-card-foot="">
-      {words ? <FootWords forms={words} /> : <span className="min-w-0 flex-1" />}
+  // A narrow phone: less padding, never a shorter word.
+  const btn = sheet ? 'min-h-11 px-3 max-[379px]:px-2' : 'h-7 px-2.5';
+  const buttons = (closeIcon: boolean) => (
+    <>
       {onClose && (pinned || sheet) ? (
-        <button type="button" onClick={onClose} className={`${btn} flex-none rounded-md hover:bg-muted hover:text-foreground`} data-ref-card-close="">
-          Close
+        <button
+          type="button"
+          onClick={onClose}
+          className={`${btn} relative inline-flex flex-none items-center justify-center whitespace-nowrap rounded-md hover:bg-muted hover:text-foreground`}
+          data-ref-card-close=""
+          data-ref-card-close-icon={closeIcon ? '' : undefined}
+        >
+          {closeIcon ? (
+            <>
+              <span aria-hidden="true" className="text-[15px] leading-none">×</span>
+              <span className="sr-only">Close</span>
+            </>
+          ) : (
+            'Close'
+          )}
         </button>
       ) : null}
       {action ? (
@@ -509,8 +562,21 @@ export function RefCardView({ target, href, result, pinned, onClose, sheet, tigh
       >
         Open on {forge} <span aria-hidden="true">↗</span>
       </a>
-    </div>
+    </>
   );
+  // The sheet: the comment count on its own line, the buttons in one row under it. Elsewhere: one row.
+  const footer = (words?: { key: string; node: React.ReactNode }[]) =>
+    sheet ? (
+      <div className="flex flex-none flex-col gap-1.5 border-t border-border px-3.5 py-2 text-[11.5px] text-muted-foreground max-[379px]:px-3" data-ref-card-foot="">
+        {words ? <FootWords forms={words} line /> : null}
+        <SheetRow>{buttons}</SheetRow>
+      </div>
+    ) : (
+      <div className="flex flex-none items-center gap-2 border-t border-border px-3.5 py-2 text-[11.5px] text-muted-foreground" data-ref-card-foot="">
+        {words ? <FootWords forms={words} /> : <span className="min-w-0 flex-1" />}
+        {buttons(false)}
+      </div>
+    );
 
   if (result === undefined) {
     return (

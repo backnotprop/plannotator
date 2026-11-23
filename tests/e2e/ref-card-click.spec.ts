@@ -9,7 +9,7 @@
  * row; a second click and Escape close it, Escape giving the focus back to the link; Cmd/Ctrl-click still opens
  * GitHub in a new tab; Open in Reviews opens the PR's page in Reviews in the same window; an issue's card has only
  * GitHub's link; dark; on a phone a tap shows the sheet with both links in one row, which still fits with a long forge
- * name and at 320 px, no button and no comment count cut short (the count drops to its icon and number first); with Code review off the card has only GitHub's link.
+ * name and at 320 px, no button and no comment count cut short (on the sheet the count is a line of its own above the row; beside the desktop row it drops to its icon and number first); with Code review off the card has only GitHub's link.
  *
  * Proof (PLANNOTATOR_E2E_PROOF_DIR/ref-card-click, `.local/proof` in CI): 01-inbox-pinned-reviews-on.png,
  * 02-inbox-pinned-reviews-off.png, 03-inbox-pinned-dark.png, 04-inbox-issue.png, 06-phone-tap.png (390 px), 07-phone-320.png (05 is plan
@@ -273,7 +273,8 @@ async function newContext(browser: Browser, options: Parameters<Browser['newCont
 
 /**
  * The footer holds its buttons in one row, inside the card: nothing past its edge, no second row, no button cut
- * short of its words, and the comment count's words whole (not clipped). Returns the count's form (FootWords).
+ * short of its words, and the comment count's words whole (not clipped). On the phone's sheet the count is a line of
+ * its own above the row. Returns the count's form (FootWords).
  */
 async function footFits(page: Page, at: string): Promise<string | null> {
   const foot = card(page).locator('[data-ref-card-foot]');
@@ -292,13 +293,15 @@ async function footFits(page: Page, at: string): Promise<string | null> {
         overflow: el.scrollWidth - el.clientWidth,
         buttonsWhole: controls.every((b) => b.scrollWidth <= b.clientWidth),
         countWhole: !count || count.scrollWidth <= count.clientWidth,
+      // The sheet: the count's line above the buttons (none of them beside it); elsewhere beside them.
+      countAbove: !count || !el.closest('[data-ref-card-sheet]') || buttons.every((b) => count.getBoundingClientRect().bottom <= b.top + 0.5),
         form: count?.getAttribute('data-ref-card-count-form') ?? null,
         // Named in a failure: the room and what took it.
-        sizes: `foot ${Math.round(el.clientWidth)}; count ${count ? `${count.clientWidth}/${count.scrollWidth}` : 'none'}; ${controls.map((b) => `${b.textContent?.trim()} ${b.clientWidth}/${b.scrollWidth}`).join('; ')}`,
+        sizes: `${el.querySelector('[data-ref-card-close-icon]') ? 'Close as ×; ' : ''}foot ${Math.round(el.clientWidth)}; count ${count ? `${count.clientWidth}/${count.scrollWidth}` : 'none'}; ${controls.map((b) => `${b.textContent?.trim()} ${b.clientWidth}/${b.scrollWidth}`).join('; ')}`,
       };
     });
     const { form: shown, sizes, ...rest } = fit;
-    expect(rest, `${at}: ${sizes}`).toEqual({ inside: true, oneRow: true, overflow: 0, buttonsWhole: true, countWhole: true });
+    expect(rest, `${at}: ${sizes}`).toEqual({ inside: true, oneRow: true, overflow: 0, buttonsWhole: true, countWhole: true, countAbove: true });
     form = shown;
     seen = sizes;
   }).toPass({ timeout: 3_000 });
@@ -426,11 +429,13 @@ test('a phone: a tap shows the sheet with both links in one row, which fits with
     expect(page.url()).toBe(before);
     expect(popups).toEqual([]);
     expect((await sheet.locator('[data-ref-card-action]').boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    // On its own line the count has the sheet's width: its words in full.
     await page.setViewportSize({ width: 390, height: 844 });
-    await footFits(page, '390 px');
+    expect(await footFits(page, '390 px')).toBe('full');
     await proof(page, '06-phone-tap');
     await page.setViewportSize({ width: 320, height: 640 });
-    await footFits(page, '320 px');
+    expect(await footFits(page, '320 px')).toBe('full');
+    await expect(sheet.locator('[data-ref-card-close]')).toHaveAccessibleName('Close');
     await proof(page, '07-phone-320');
     await page.setViewportSize({ width: 390, height: 844 });
     // The longest forge name ("Open on Bitbucket"), then the narrowest phone: still one row, inside the sheet.
