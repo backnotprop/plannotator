@@ -7,6 +7,7 @@ import { describe, expect, test } from "bun:test";
 import type { DiffSide, FileBytesRead } from "./review-core";
 import {
   handleReviewMarkdownImageRequest,
+  isReviewMarkdownPath,
   markdownImageRefs,
   resolveMarkdownImagePath,
   type ReviewMarkdownImageRequest,
@@ -300,5 +301,16 @@ describe("handleReviewMarkdownImageRequest", () => {
       "new:docs/guide.md": { kind: "missing" },
     });
     expect([missing.response.status, missing.reason]).toEqual([404, "missing"]);
+  });
+
+  test("LaTeX .tex documents are accepted and \\includegraphics respects % comments", () => {
+    expect(isReviewMarkdownPath("paper/main.tex")).toBe(true);
+    expect(isReviewMarkdownPath("paper/appendix.ltx")).toBe(true);
+    const refs = markdownImageRefs([
+      "\\includegraphics[width=\\linewidth]{figures/arch.png}",
+      "% \\includegraphics{figures/commented.png}",
+      "50\\% done \\includegraphics{figures/res.jpg}",
+    ].join("\n"));
+    expect([...refs].sort()).toEqual(["figures/arch.png", "figures/res.jpg"]);
   });
 });

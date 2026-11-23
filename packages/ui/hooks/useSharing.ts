@@ -181,7 +181,7 @@ export function useSharing(
             setMarkdown('');
           } else {
             setMarkdown(payload.p);
-            setRenderAs?.(payload.r === 'asciidoc' ? 'asciidoc' : 'markdown');
+            setRenderAs?.(payload.r === 'latex' ? 'latex' : payload.r === 'asciidoc' ? 'asciidoc' : 'markdown');
             setRawHtml?.('');
             setShareHtml?.('');
           }
@@ -229,7 +229,7 @@ export function useSharing(
           setMarkdown('');
         } else {
           setMarkdown(payload.p);
-          setRenderAs?.(payload.r === 'asciidoc' ? 'asciidoc' : 'markdown');
+          setRenderAs?.(payload.r === 'latex' ? 'latex' : payload.r === 'asciidoc' ? 'asciidoc' : 'markdown');
           setRawHtml?.('');
           setShareHtml?.('');
         }

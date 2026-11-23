@@ -11,6 +11,7 @@
  *   .conf .properties .csv .tsv .log .xml .env.example
  * - Diagram sources: .mmd .mermaid (Mermaid) and .dot .gv (Graphviz)
  * - AsciiDoc: .adoc .asciidoc
+ * - LaTeX: .tex .ltx
  *
  * Diagram sources are a THIRD FAMILY, not markdown: they are plain UTF-8 text
  * (so they resolve, size-cap and version-history exactly like a `.txt`), but
@@ -74,11 +75,11 @@
 
 /** Built-in plain-text extension pattern (no leading anchor, no trailing `$`). */
 const BUILTIN_TEXT_PATTERN =
-	String.raw`(?:\.(?:mdx?|txt|adoc|asciidoc|mmd|mermaid|dot|gv|ya?ml|jsonc?|json5|toml|ini|cfg|conf|properties|csv|tsv|log|xml)|\.env\.example)`;
+	String.raw`(?:\.(?:mdx?|txt|adoc|asciidoc|tex|ltx|mmd|mermaid|dot|gv|ya?ml|jsonc?|json5|toml|ini|cfg|conf|properties|csv|tsv|log|xml)|\.env\.example)`;
 
 /** Built-in plain-text + raw-HTML extension pattern. */
 const BUILTIN_DOC_PATTERN =
-	String.raw`(?:\.(?:mdx?|txt|adoc|asciidoc|mmd|mermaid|dot|gv|html?|ya?ml|jsonc?|json5|toml|ini|cfg|conf|properties|csv|tsv|log|xml)|\.env\.example)`;
+	String.raw`(?:\.(?:mdx?|txt|adoc|asciidoc|tex|ltx|mmd|mermaid|dot|gv|html?|ya?ml|jsonc?|json5|toml|ini|cfg|conf|properties|csv|tsv|log|xml)|\.env\.example)`;
 
 /** Which diagram engine a diagram-source extension belongs to. */
 export type DiagramRenderKind = "mermaid" | "graphviz";
@@ -125,9 +126,10 @@ export function annotateDiagramRenderKind(options: {
 }
 
 /** A text source that does not render through the markdown parser. */
-export type DocumentRenderKind = DiagramRenderKind | "asciidoc" | "code";
+export type DocumentRenderKind = DiagramRenderKind | "asciidoc" | "latex" | "code";
 
 const ASCIIDOC_FILE_RE = /\.(?:adoc|asciidoc)$/i;
+const LATEX_FILE_RE = /\.(?:tex|ltx)$/i;
 
 /** Config and data files shown as their own text: one code block, never markdown. */
 const CODE_DOCUMENT_RE = /(?:\.(?:ya?ml|jsonc?|json5|toml|ini|cfg|conf|properties|csv|tsv|log|xml)|\.env\.example)$/i;
@@ -187,12 +189,13 @@ export function documentRenderKindForPath(input: string): DocumentRenderKind | n
 	if (diagram !== null) return diagram;
 	const trimmed = input.trim();
 	if (ASCIIDOC_FILE_RE.test(trimmed)) return "asciidoc";
+	if (LATEX_FILE_RE.test(trimmed)) return "latex";
 	return CODE_DOCUMENT_RE.test(trimmed) || isSecretEnvPath(trimmed) ? "code" : null;
 }
 
-/** True when `value` is a diagram kind, `"asciidoc"` or `"code"`. */
+/** True when `value` is a diagram kind, `"asciidoc"`, `"latex"` or `"code"`. */
 export function isDocumentRenderKind(value: unknown): value is DocumentRenderKind {
-	return isDiagramRenderKind(value) || value === "asciidoc" || value === "code";
+	return isDiagramRenderKind(value) || value === "asciidoc" || value === "latex" || value === "code";
 }
 
 /**
@@ -344,7 +347,7 @@ export function isExtraMarkdownPath(input: string, extra: readonly string[] = []
  * keep in sync with the patterns above.
  */
 export const ANNOTATABLE_EXTENSIONS_HINT =
-	".md, .mdx, .txt, .adoc, .asciidoc, .html, .htm, .mmd, .mermaid, .dot, .gv, .yaml, .yml, .json, .jsonc, .json5, .toml, .ini, .cfg, .conf, .properties, .csv, .tsv, .log, .xml, .env.example";
+	".md, .mdx, .txt, .adoc, .asciidoc, .tex, .ltx, .html, .htm, .mmd, .mermaid, .dot, .gv, .yaml, .yml, .json, .jsonc, .json5, .toml, .ini, .cfg, .conf, .properties, .csv, .tsv, .log, .xml, .env.example";
 
 /** The accepted-set hint with any configured extra extensions appended. */
 export function buildAnnotatableExtensionsHint(extra: readonly string[] = []): string {

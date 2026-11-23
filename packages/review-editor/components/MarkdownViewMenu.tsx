@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
-import type { MarkdownFileView } from '../utils/markdownPreview';
+import { isLatexPreviewPath, type MarkdownFileView } from '../utils/markdownPreview';
 
 /**
  * One control per Markdown file: a header button naming the view the file is
@@ -60,11 +60,12 @@ export const MarkdownViewMenu: React.FC<MarkdownViewMenuProps> = ({
   const [open, setOpen] = useState(false);
   const rendered = view !== 'source';
   const name = filePath.slice(filePath.lastIndexOf('/') + 1);
+  const isLatex = isLatexPreviewPath(filePath);
   const title = disabledReason
     ? disabledReason
     : rendered
     ? `Showing ${LABEL[view]}. Select text to comment. P: next view`
-    : 'Show this Markdown file as Source, Changes or Read. P: next view';
+    : `Show this ${isLatex ? 'LaTeX' : 'Markdown'} file as Source, Changes or Read. P: next view`;
 
   const trigger = touch ? (
     // Drawn 36 px; the ::after box makes the hit area 44 px (4 px past each

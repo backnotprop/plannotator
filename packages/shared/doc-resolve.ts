@@ -151,7 +151,7 @@ export function isDocPathAllowed(candidate: string, roots: string[], anyPath = f
 // viewer renders (Markdown, MDX, HTML, AsciiDoc, diagram sources) and the
 // user's own markdown extensions. Never plain text, data or config formats,
 // and never a code file: those keep the roots for every reader.
-const ANY_PATH_DOCUMENT_RE = /\.(?:mdx?|html?|adoc|asciidoc|mmd|mermaid|dot|gv)$/i;
+const ANY_PATH_DOCUMENT_RE = /\.(?:mdx?|html?|adoc|asciidoc|tex|ltx|mmd|mermaid|dot|gv)$/i;
 
 /** Whether `path` is a document type a reader on this machine may open anywhere (#2291). */
 export function isAnyPathDocument(path: string): boolean {

@@ -10,6 +10,7 @@ import { PlanCleanDiffView, type PlanDiffSide } from '@plannotator/ui/components
 import { useAnnotationHighlighter, type AnnotationRestoreReport } from '@plannotator/ui/hooks/useAnnotationHighlighter';
 import { computePlanDiff } from '@plannotator/ui/utils/planDiffEngine';
 import { computeListIndices, groupBlocks, parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
+import { parseLatexToBlocks } from '@plannotator/ui/utils/latexParser';
 import { buildHeadingSlugMap } from '@plannotator/ui/utils/slugify';
 import type { DiffFileStatus } from '../types';
 import { useReviewStateOptional } from '../dock/ReviewStateContext';
@@ -21,6 +22,7 @@ import {
   MARKDOWN_PREVIEW_SIZE_LIMIT,
   REMOTE_IMAGE_HELD_TITLE,
   isExternalImageSource,
+  isLatexPreviewPath,
   isRemoteImageSource,
   markdownPreviewImageUrl,
   markdownPreviewSides,
@@ -153,6 +155,8 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
   }, [onViewChange, controller, filePath]);
 
   const sourcePath = markdownPreviewSourcePath(filePath, oldPath, status);
+  const isLatex = sourcePath !== null && isLatexPreviewPath(sourcePath);
+  const parseBlocks = isLatex ? parseLatexToBlocks : undefined;
   const sides = useMemo(() => {
     if (sourcePath === null || !fileContents || fileContents.forPath !== filePath) return null;
     return markdownPreviewSides(patch, fileContents.old, fileContents.new, status);
@@ -175,8 +179,8 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
   const tooLarge = bytes > MARKDOWN_PREVIEW_SIZE_LIMIT && !acceptedLarge;
 
   const diffBlocks = useMemo(
-    () => (ready && effectiveView === 'diff' && !tooLarge ? computePlanDiff(ready.old ?? '', ready.new ?? '').blocks : null),
-    [ready, effectiveView, tooLarge],
+    () => (ready && effectiveView === 'diff' && !tooLarge ? computePlanDiff(ready.old ?? '', ready.new ?? '', parseBlocks ? { parseBlocks } : undefined).blocks : null),
+    [ready, effectiveView, tooLarge, parseBlocks],
   );
 
   // --- Links and images -----------------------------------------------------
@@ -388,8 +392,8 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
   // --- Rendering ------------------------------------------------------------
 
   const wholeBlocks = useMemo(
-    () => (ready && effectiveView === 'whole' && !tooLarge ? parseMarkdownToBlocks(wholeText) : null),
-    [ready, effectiveView, tooLarge, wholeText],
+    () => (ready && effectiveView === 'whole' && !tooLarge ? (parseBlocks ?? parseMarkdownToBlocks)(wholeText) : null),
+    [ready, effectiveView, tooLarge, wholeText, parseBlocks],
   );
   const wholeGroups = useMemo(() => (wholeBlocks ? groupBlocks(wholeBlocks) : []), [wholeBlocks]);
   const headingSlugs = useMemo(() => (wholeBlocks ? buildHeadingSlugMap(wholeBlocks) : null), [wholeBlocks]);
@@ -404,7 +408,7 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
         className="mx-auto max-w-3xl rounded-md border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground"
       >
         {loading
-          ? 'Loading the full Markdown file…'
+          ? `Loading the full ${isLatex ? 'LaTeX' : 'Markdown'} file…`
           : isStale
             ? 'This file changed after the diff was captured. Refresh the diff to preview it.'
             : 'The full file content is unavailable for this review. Switch back to Source to review the available changes.'}
@@ -440,6 +444,7 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
         lineGutter
         foldUnchanged
         unchangedClassName="opacity-80"
+        parseBlocks={parseBlocks}
       />
     );
   } else {
@@ -546,7 +551,7 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
             onAskAI={state?.onAskAIForMarkdownPreview}
             askAIContext={{
               kind: 'selection',
-              label: `${docPath} (rendered Markdown)`,
+              label: `${docPath} (rendered ${isLatex ? 'LaTeX' : 'Markdown'})`,
               text: hook.commentPopover.selectedText ?? hook.commentPopover.contextText,
             }}
           />,

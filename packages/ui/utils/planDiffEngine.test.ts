@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { computePlanDiff, computeInlineDiff } from "./planDiffEngine";
+import { computePlanDiff, computeInlineDiff, foldUnchangedPlanDiff } from "./planDiffEngine";
 import type { InlineDiffToken } from "./planDiffEngine";
 import { parseMarkdownToBlocks } from "./parser";
+import { parseLatexToBlocks } from "./latexParser";
 
 describe("computePlanDiff — block-level behavior", () => {
   test("pure unchanged produces a single unchanged block, no stats", () => {
@@ -646,5 +647,39 @@ describe("computePlanDiff — reference-link definition edits (PR #1168)", () =>
       .join("");
     expect(removedText).toContain("old");
     expect(addedText).toContain("new");
+  });
+
+  test("computePlanDiff and foldUnchangedPlanDiff support parseLatexToBlocks and keep inline math atomic", () => {
+    const oldTex = [
+      "\\section{Introduction}",
+      "Intro paragraph.",
+      "\\section{Background}",
+      "Background paragraph.",
+      "\\section{Method}",
+      "We minimize $L(\\theta) = x + y$ here.",
+    ].join("\n");
+    const newTex = [
+      "\\section{Introduction}",
+      "Intro paragraph.",
+      "\\section{Background}",
+      "Background paragraph.",
+      "\\section{Method}",
+      "We minimize $L(\\theta) = x + z$ here.",
+    ].join("\n");
+
+    const { blocks } = computePlanDiff(oldTex, newTex, { parseBlocks: parseLatexToBlocks });
+    const modified = blocks.find((b) => b.type === "modified");
+    expect(modified).toBeDefined();
+    expect(modified!.inlineTokens).toBeDefined();
+    expect(modified!.inlineTokens!.some((t) => t.type === "removed" && t.value === "$L(\\theta) = x + y$")).toBe(true);
+    expect(modified!.inlineTokens!.some((t) => t.type === "added" && t.value === "$L(\\theta) = x + z$")).toBe(true);
+
+    const segments = foldUnchangedPlanDiff(blocks, { parseBlocks: parseLatexToBlocks });
+    const fold = segments.find((s) => s.kind === "fold");
+    expect(fold).toBeDefined();
+    if (fold && fold.kind === "fold") {
+      expect(fold.headings).toContain("Introduction");
+      expect(fold.headings).toContain("Background");
+    }
   });
 });

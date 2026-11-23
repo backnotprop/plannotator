@@ -20,7 +20,7 @@
 import { normalizeMarkdownExtensions } from "@plannotator/core/annotatable";
 
 /** Built-in extensions the renderer treats as openable local documents. */
-const BUILTIN_LINKED_DOC_REGEX = /\.(mdx?|txt|adoc|asciidoc|html?)$/i;
+const BUILTIN_LINKED_DOC_REGEX = /\.(mdx?|txt|adoc|asciidoc|tex|ltx|html?)$/i;
 
 let extraExtensions: string[] = [];
 
