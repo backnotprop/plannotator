@@ -13,6 +13,8 @@
  *  4. A folder with nothing beyond main opening anything but "Same as main.".
  *  5. "Another folder…" not opening New message's folder opener, or the folder it picks not opening as a review.
  *  6. On a phone (390), the picker not a full-screen sheet with its own head (A8); dark (A9).
+ *  7. With no row, the heading and its + not drawn alone (B1): a clean checkout with no way to open a branch.
+ *  Also shot: the picker's "Another folder…" (B2) and the folder opener it opens (B3).
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/reviews-open-any-branch, named after the approved pictures. HOME is a scratch
  * folder, and the sandbox env keeps the binary off the person's agents. Build the binary first (see inbox.spec.ts),
@@ -261,7 +263,7 @@ test.describe('desktop at 1440', () => {
     await expect(picker(page).locator('.ib-cp-cap')).toHaveText(['Folders 3', 'Branches 6']);
     // Typing finds a branch or folder by name, the match in bold.
     await picker(page).locator('[data-local-picker-filter]').fill('log');
-    await expect(picker(page).locator('[data-local-pick] .ib-lp-op')).toHaveText(['fix/login-redirect-loop', 'chore/logging-levels', 'bob/changelog-2-4']);
+    await expect(picker(page).locator('[data-local-pick] .ib-lp-op')).toHaveText(['fix/login-redirect-loop', 'fix/export-dialog-focus', 'chore/logging-levels', 'bob/changelog-2-4']);
     await expect(pick(page, ':chore/logging-levels').locator('.ib-lp-op b')).toHaveText('log');
     await page.keyboard.press('Escape');
     await expect(picker(page)).toHaveCount(0);
@@ -317,11 +319,17 @@ test.describe('desktop at 1440', () => {
   test('"Another folder…" opens New message\'s folder opener; the folder it picks opens as a review', async () => {
     const { page } = world;
     await plus(page).click();
+    await expect(picker(page).locator('[data-local-pick-other]')).toBeVisible();
+    await page.mouse.move(1300, 880);
+    await page.screenshot({ path: join(proofDir, 'B2-another-folder-light.png') });
+    await expect(picker(page).locator('[data-local-pick-other]')).toHaveText('Another folder…');
     await picker(page).locator('[data-local-pick-other]').click();
     await expect(picker(page)).toHaveAttribute('data-local-picker', 'folder');
     const field = page.locator('[data-home-folders-path]');
     await expect(field).toBeFocused();
     await field.fill('~/code/');
+    await expect(page.locator('[data-home-folder-option="notes-app"]')).toBeVisible();
+    await page.screenshot({ path: join(proofDir, 'B3-another-folder-opener-light.png') });
     await page.locator('[data-home-folder-option="notes-app"]').click();
     await page.locator('[data-home-folder-start="~/code/notes-app"]').click();
     await expect(picker(page)).toHaveCount(0);
@@ -329,6 +337,34 @@ test.describe('desktop at 1440', () => {
     await expect(pane.locator('[data-guide-file-shell="src/tags.ts"]')).toBeVisible({ timeout: 30_000 });
     await expect(pane.locator('[data-local-title]')).toHaveText('ada/tags');
     await expect(group(page).locator('[data-local-row$="/notes-app"]')).toContainText('ada/tags');
+  });
+});
+
+test.describe('no row at 1440', () => {
+  test('B1: with no row, the heading and its + alone; the + still opens the picker', async () => {
+    const context = await world.browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, colorScheme: 'light', reducedMotion: 'reduce' });
+    try {
+      const page = await context.newPage();
+      // A clean checkout: the list's read answers no row (this world has rows, so the read is answered here); the
+      // picker's own reads go to the Inbox.
+      await page.route(/\/api\/inbox\/reviews\/local(\?.*)?$/, (route) => route.fulfill({ json: { serverSession: 'e2e', unread: 0, items: [] } }));
+      await page.goto(`${world.url}#reviews`);
+      await expect(plus(page)).toBeVisible();
+      await page.mouse.move(1300, 880);
+      await page.screenshot({ path: join(proofDir, 'B1-empty-group-plus-light.png') });
+      const fold = group(page).locator('[data-reviews-fold="local"]');
+      await expect(fold).toHaveText('On this computer');
+      await expect(group(page).locator('[data-local-row], [data-local-none], [data-local-unread]')).toHaveCount(0);
+      // One line: the heading's height, open or folded.
+      const folded = (await group(page).boundingBox())!.height;
+      expect(folded).toBeLessThan(48);
+      await fold.click();
+      expect((await group(page).boundingBox())!.height).toBe(folded);
+      await plus(page).click();
+      await expect(picker(page).locator(`[data-local-pick-project="${world.harborId}"]`)).toBeVisible();
+    } finally {
+      await context.close();
+    }
   });
 });
 

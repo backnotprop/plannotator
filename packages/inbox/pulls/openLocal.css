@@ -3,7 +3,8 @@
    `.ib-cp-picker`), floating over the pane beside the list; on a phone the picker's full-screen sheet. */
 .ib-pr-foldhead { position: relative; display: flex; align-items: center; }
 .ib-pr-foldhead > .ib-pr-foldbtn { flex: 1 1 auto; min-width: 0; padding-right: 36px; }
-.pn-inbox .ib-iconbtn.ib-lp-plus { position: absolute; top: 2px; right: 4px; width: 24px; height: 24px; border-radius: 6px; color: var(--muted-foreground); }
+/* Over the fold button, which a phone's list makes sticky with its own z-index (inbox.css). */
+.pn-inbox .ib-iconbtn.ib-lp-plus { position: absolute; z-index: 3; top: 2px; right: 4px; width: 24px; height: 24px; border-radius: 6px; color: var(--muted-foreground); }
 .pn-inbox .ib-iconbtn.ib-lp-plus:hover, .pn-inbox .ib-iconbtn.ib-lp-plus[aria-expanded="true"] { background: var(--muted); color: var(--foreground); }
 .pn-inbox .ib-iconbtn.ib-lp-plus:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 

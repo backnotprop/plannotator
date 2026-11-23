@@ -122,9 +122,18 @@ export function OnThisComputer({ project, projectNames, openKey, phone, readAgai
     </p>
   );
   if (items.length === 0) {
-    // One project, read, with nothing here: Branch reviews' words for it. Otherwise no group.
+    // One project, read, with nothing here: Branch reviews' words for it.
     const nothing = project && answer && !unread ? (answer.not_git?.includes(project) ? "This project's folder isn't a git repository on this computer." : answer.quiet?.includes(project) ? `No other branch had a commit in the last ${INBOX_UNREPORTED_BRANCH_DAYS} days.` : null) : null;
-    if (!nothing && !unread) return null;
+    if (!nothing && !unread) {
+      // Read, with no row: the heading and its + alone (nothing under it), so a clean checkout can still open a
+      // branch or folder. No project known, nothing the + could list: no group.
+      if (!answer || projectNames.size === 0) return null;
+      return (
+        <ReviewGroup label="On this computer" name="local" count={0} empty fold={fold} tool={plus}>
+          {null}
+        </ReviewGroup>
+      );
+    }
     return (
       <ReviewGroup label="On this computer" name="local" count={0} empty fold={fold} tool={plus}>
         {unreadNote || (
