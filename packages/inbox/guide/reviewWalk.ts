@@ -41,9 +41,14 @@ export function fileShells(root: ParentNode): HTMLElement[] {
   return [...root.querySelectorAll<HTMLElement>(FILE_SHELL)].filter((shell) => !shell.closest('[hidden]'));
 }
 
-/** The file the steps count from: the last whose top has reached the top of the view; -1 above the first. */
-export function stepOrigin(files: readonly Span[], viewTop: number): number {
-  let origin = -1;
+/**
+ * The file the steps count from: the last whose top has reached the top of the view; -1 above the first. With the
+ * view at its start (`atStart`) the first file counts as reached once it is in view: what is drawn above it (a guided
+ * review's chapter title and overview) keeps it from ever reaching the top, and J must go on to the next.
+ */
+export function stepOrigin(files: readonly Span[], view: Span, atStart = false): number {
+  const viewTop = view.top;
+  let origin = atStart && files[0] && files[0].top < view.bottom ? 0 : -1;
   for (const [i, file] of files.entries()) {
     if (file.top > viewTop + AT_TOP) break;
     origin = i;

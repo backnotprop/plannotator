@@ -183,8 +183,8 @@ export function ReviewKeys() {
   const toFile = (step: FileStep) =>
     take((root) => {
       seek.current++;
-      const { shells, view } = layoutOf(root);
-      const target = fileStep(step, stepOrigin(spans(shells), view.top), shells.length);
+      const { shells, view, scroller } = layoutOf(root);
+      const target = fileStep(step, stepOrigin(spans(shells), view, scroller.scrollTop <= 1), shells.length);
       if (target !== null) reach(shells[target]!);
     });
 

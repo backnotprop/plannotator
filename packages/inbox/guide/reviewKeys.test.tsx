@@ -289,8 +289,13 @@ describe.skipIf(!hasDom)('the review’s keys in the Inbox', () => {
 
   test('where a step goes: the file being read, the ends, and the collapsed file Z opens', () => {
     const files = [{ top: -600, bottom: -100 }, { top: -100, bottom: 400 }, { top: 400, bottom: 900 }];
-    expect(stepOrigin(files, 0)).toBe(1);
-    expect(stepOrigin([{ top: 200, bottom: 300 }], 0)).toBe(-1);
+    expect(stepOrigin(files, { top: 0, bottom: VIEW })).toBe(1);
+    expect(stepOrigin([{ top: 200, bottom: 300 }], { top: 0, bottom: VIEW })).toBe(-1);
+    // At the start of the view, a first file held below the top by what is drawn above it (a chapter's title) counts
+    // as reached, so J goes on to the next; out of view, or scrolled, it does not.
+    expect(stepOrigin([{ top: 60, bottom: 300 }, { top: 300, bottom: 800 }], { top: 0, bottom: VIEW }, true)).toBe(0);
+    expect(stepOrigin([{ top: 500, bottom: 900 }], { top: 0, bottom: VIEW }, true)).toBe(-1);
+    expect(stepOrigin([{ top: 60, bottom: 300 }], { top: 0, bottom: VIEW }, false)).toBe(-1);
     expect(activeFile(files, { top: 0, bottom: VIEW })).toBe(1);
     expect(fileStep('next', -1, 3)).toBe(0);
     expect(fileStep('next', 2, 3)).toBe(2);
