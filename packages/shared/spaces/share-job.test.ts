@@ -268,7 +268,7 @@ describe("over the limit", () => {
 });
 
 describe("going down", () => {
-  test("a run cut by the server going down is left as a run not finished, never as stopped by the person", async () => {
+  test("a run cut by the server going down is left as a run not finished, never as stopped by the person, and never reads as Spaces not reached", async () => {
     const s = setup({ jobs: { sleep: (_ms, signal) => new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true })) } });
     s.spaces.failNext(/assets\//, 429, "rate_limited");
     s.jobs.share(s.world.plan, {});
@@ -278,7 +278,8 @@ describe("going down", () => {
     s.jobs.close();
     await running;
     expect(s.record().job).toMatchObject({ ended: null });
-    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "failed" });
+    // Spaces answered (a 429): the panel says the share stopped ("Sharing stopped"), not "Couldn't reach Spaces.".
+    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "stopped" });
   });
 });
 

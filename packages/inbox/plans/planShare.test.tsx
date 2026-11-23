@@ -1,8 +1,13 @@
 /**
  * Share this space on the plan page: every state of the panel as approved (`.product/approved/share-this-space/`,
- * FLOW.md), and the button. What regresses if these fail:
- * - a state shows more than 20 words, or a button it should not have (Details
- *   on the Update panel, Keep on a kept space, Stop sharing on a space nobody kept);
+ * FLOW.md, and its layout "B1 · Three lines", approval "inbox-share-panel-b1"), and the button. What regresses if
+ * these fail:
+ * - a state is not the three parts (a status line, at most two lines, one row of actions with one main button at
+ *   most), or a second row of buttons, an address field or "Make it yours" comes back;
+ * - a state shows more than 20 words, or a button it should not have (Keep on a kept space, Stop sharing on a space
+ *   nobody kept), or its main button is the wrong one (over the limit: Open in Spaces, Try again beside it);
+ * - the one mark that opens the space is missing or opens something else;
+ * - on a phone the panel is not the Inbox's own bottom sheet;
  * - the version switch shows for a plan with one version, or cannot be changed from the keyboard;
  * - a press sends the wrong thing (Share without its mode, Share as new onto the old space, Sign in that shares);
  * - the button reads the wrong word, or stops following an upload that is still going;
@@ -53,62 +58,78 @@ function panel(s: SpaceShareStatus, view: View = 'main') {
   root = createRoot(host);
   const draw = () => act(() => root!.render(<SharePanel status={s} view={view} onView={(v) => views.push(v)} mode={mode} onMode={(m) => ((mode = m), draw())} actions={actions} />));
   draw();
-  /** The words on screen, without the link, the buttons and a closed tip. */
+  /** The words on screen, without the buttons and a closed tip. */
   const words = () => {
     const copy = host.cloneNode(true) as HTMLElement;
-    for (const node of copy.querySelectorAll('.ib-shr-b, input, [role="tooltip"]:not([data-open])')) node.remove();
+    for (const node of copy.querySelectorAll('.ib-shr-b, [role="tooltip"]:not([data-open])')) node.remove();
     for (const node of copy.querySelectorAll('h2, h3, p, dt, dd, button, span.ib-shr-atext, span.ib-shr-count, span.ib-shr-who')) node.append(' ');
     return copy.textContent!.replace(/\s+/g, ' ').trim();
   };
-  /** The panel's buttons, by what each does. */
+  /** The panel's buttons, by what each does, in the order drawn. */
   const buttons = () => [...host.querySelectorAll<HTMLElement>('.ib-shr-b')].map((b) => b.dataset.shareAct);
+  /** The main button (the filled one), by what it does; null when the state has none. */
+  const primary = () => [...host.querySelectorAll<HTMLElement>('.ib-shr-pri, .ib-shr-danger')].map((b) => b.dataset.shareAct);
   const press = (name: string) => act(() => host.querySelector<HTMLElement>(`[data-share-act="${name}"]`)!.click());
-  return { host, sent, views, words, buttons, press, mode: () => mode };
+  return { host, sent, views, words, buttons, primary, press, mode: () => mode };
 }
 
 /**
- * Each state: the buttons it has (by what they do), whether it has the version switch, the info mark and Details.
- * Its words are the approved ones in `SHARE_WORDS`; here only their number is held to the approved limit.
+ * Each state: the buttons in its one row of actions (by what they do, in order), its main button, and whether it has
+ * the version switch, the info mark, Details, the person's name and the mark that opens the space. Its words are the
+ * approved ones in `SHARE_WORDS`; here only their number is held to the approved limit.
  */
-const STATES: [string, SpaceShareStatus, View, string[], { switch?: boolean; info?: boolean; details?: boolean; who?: boolean }][] = [
-  ['first share, not signed in', status(), 'main', ['share'], { switch: true, details: true }],
-  ['first share, signed in', status({ signed_in: true, who: 'Maya Chen', access: 'private' }), 'main', ['share'], { switch: true, details: true, who: true }],
-  ['first share, one version', status({ versions: 1 }), 'main', ['share'], { details: true }],
-  ['first share, one version, signed in', status({ versions: 1, signed_in: true, who: 'Maya Chen', access: 'private' }), 'main', ['share'], { details: true, who: true }],
-  ['uploading', status({ phase: 'sharing', progress: { done: 12, total: 40 }, link: LINK }), 'main', ['copy', 'open', 'stop'], {}],
+type Has = { primary?: string; switch?: boolean; info?: boolean; details?: boolean; who?: boolean; open?: boolean };
+const STATES: [string, SpaceShareStatus, View, string[], Has][] = [
+  ['first share, not signed in', status(), 'main', ['share'], { primary: 'share', switch: true, details: true }],
+  ['first share, signed in', status({ signed_in: true, who: 'Ada Novak', access: 'private' }), 'main', ['share'], { primary: 'share', switch: true, details: true, who: true }],
+  ['first share, one version', status({ versions: 1 }), 'main', ['share'], { primary: 'share', details: true }],
+  ['first share, one version, signed in', status({ versions: 1, signed_in: true, who: 'Ada Novak', access: 'private' }), 'main', ['share'], { primary: 'share', details: true, who: true }],
+  ['uploading', status({ phase: 'sharing', progress: { done: 12, total: 40 }, link: LINK }), 'main', ['stop', 'copy'], {}],
   ['uploading, before the link', status({ phase: 'sharing', progress: { done: 0, total: 40 } }), 'main', ['stop'], {}],
-  ['uploading, waiting', status({ phase: 'sharing', progress: { done: 120, total: 200 }, waiting: 8, link: LINK }), 'main', ['copy', 'open', 'stop'], {}],
-  ['too many new spaces in a minute', status({ phase: 'sharing', progress: { done: 0, total: 9 }, waiting: 40 }), 'main', ['sign-in'], {}],
-  ['shared, not signed in', shared(), 'main', ['copy', 'open', 'keep'], { info: true, details: true }],
-  ['shared, then kept', shared({ kept: true, access: 'comment', signed_in: true, who: 'Maya Chen' }), 'main', ['copy', 'open', 'invite'], { details: true }],
-  ['shared, made signed in', shared({ kept: true, access: 'private', signed_in: true, who: 'Maya Chen' }), 'main', ['copy', 'open', 'invite'], { details: true }],
+  ['uploading, waiting', status({ phase: 'sharing', progress: { done: 120, total: 200 }, waiting: 8, link: LINK }), 'main', ['stop', 'copy'], {}],
+  ['too many new spaces in a minute', status({ phase: 'sharing', progress: { done: 0, total: 9 }, waiting: 40 }), 'main', ['sign-in'], { primary: 'sign-in' }],
+  ['shared, not signed in', shared(), 'main', ['keep', 'copy'], { primary: 'copy', info: true, details: true, open: true }],
+  ['shared, then kept', shared({ kept: true, access: 'comment', signed_in: true, who: 'Ada Novak' }), 'main', ['invite', 'copy'], { primary: 'copy', details: true, open: true }],
+  ['shared, made signed in', shared({ kept: true, access: 'private', signed_in: true, who: 'Ada Novak' }), 'main', ['invite', 'copy'], { primary: 'copy', details: true, open: true }],
   ['keep this space', shared({ keep: 'waiting' }), 'main', ['keep-cancel', 'keep-again'], {}],
   ['keep, from a remote window', shared({ keep: 'remote' }), 'main', ['keep-close'], {}],
-  ['update, not signed in', shared({ changes: 2 }), 'main', ['copy', 'open', 'update'], {}],
-  ['update, signed in', shared({ changes: 1, kept: true, access: 'comment', signed_in: true }), 'main', ['copy', 'open', 'invite', 'update'], {}],
-  ['update stopped for a page', shared({ stopped_pages: [{ title: 'Rollout checklist' }] }), 'main', ['copy', 'open', 'open-page'], {}],
-  ['someone else kept it', status({ phase: 'refused', link: LINK, shared_once: true }), 'main', ['open-space', 'share-new'], {}],
-  ['over the limit', status({ phase: 'over_limit', progress: { done: 3, total: 9 } }), 'main', ['sign-in'], {}],
-  ['did not finish', status({ phase: 'failed', progress: { done: 3, total: 9 }, link: LINK }), 'main', ['copy', 'open', 'try-again'], {}],
-  ['nothing went up', status({ phase: 'failed', progress: { done: 0, total: 9 } }), 'main', ['try-again'], {}],
-  ['started signed in, the sign-in gone', status({ phase: 'failed', needs_keep: true, access: 'private', progress: { done: 0, total: 9 } }), 'main', ['keep'], {}],
-  ['the space is gone', status({ phase: 'gone', shared_once: true }), 'main', ['share-new'], {}],
-  ['waiting for Keep, with changes', shared({ needs_keep: true, access: 'comment', changes: 2 }), 'main', ['copy', 'open', 'keep', 'update'], {}],
-  ['waiting for Keep, nothing new', shared({ needs_keep: true, access: 'comment' }), 'main', ['copy', 'open', 'keep'], { details: true }],
-  ['the person\'s own space, signed out here', shared({ needs_keep: true, own: true, access: 'private', changes: 1 }), 'main', ['copy', 'open', 'keep', 'update'], {}],
-  ['over the limit, the person\'s own space', status({ phase: 'over_limit', limit_own: true, link: LINK, access: 'private', progress: { done: 3, total: 9 } }), 'main', ['copy', 'open', 'try-again'], {}],
-  ['stopped', status({ phase: 'stopped', progress: { done: 3, total: 9 }, link: LINK }), 'main', ['copy', 'open', 'try-again'], {}],
-  ['stop sharing', shared({ kept: true, signed_in: true }), 'stop', ['cancel', 'delete'], {}],
+  ['update, not signed in', shared({ changes: 2 }), 'main', ['copy', 'update'], { primary: 'update', details: true, open: true }],
+  ['update, signed in', shared({ changes: 1, kept: true, access: 'comment', signed_in: true }), 'main', ['copy', 'update'], { primary: 'update', details: true, open: true }],
+  ['update stopped for a page', shared({ stopped_pages: [{ title: 'Rollout checklist' }] }), 'main', ['copy'], { primary: 'copy', details: true, open: true }],
+  ['someone else kept it', status({ phase: 'refused', link: LINK, shared_once: true }), 'main', ['open-space', 'share-new'], { primary: 'share-new' }],
+  ['over the limit', status({ phase: 'over_limit', progress: { done: 3, total: 9 } }), 'main', ['sign-in'], { primary: 'sign-in' }],
+  ['did not finish', status({ phase: 'failed', progress: { done: 3, total: 9 }, link: LINK }), 'main', ['copy', 'try-again'], { primary: 'try-again', open: true }],
+  ['nothing went up', status({ phase: 'failed', progress: { done: 0, total: 9 } }), 'main', ['try-again'], { primary: 'try-again' }],
+  ['started signed in, the sign-in gone', status({ phase: 'failed', needs_keep: true, access: 'private', progress: { done: 0, total: 9 } }), 'main', ['keep'], { primary: 'keep' }],
+  ['the space is gone', status({ phase: 'gone', shared_once: true }), 'main', ['share-new'], { primary: 'share-new' }],
+  ['waiting for Keep, with changes', shared({ needs_keep: true, access: 'comment', changes: 2 }), 'main', ['copy', 'keep'], { primary: 'keep', details: true, open: true }],
+  ['waiting for Keep, nothing new', shared({ needs_keep: true, access: 'comment' }), 'main', ['keep', 'copy'], { primary: 'copy', details: true, open: true }],
+  ['the person\'s own space, signed out here', shared({ needs_keep: true, own: true, access: 'private', changes: 1 }), 'main', ['copy', 'keep'], { primary: 'keep', details: true, open: true }],
+  ['over the limit, the person\'s own space', status({ phase: 'over_limit', limit_own: true, link: LINK, access: 'private', progress: { done: 3, total: 9 } }), 'main', ['try-again', 'open-space'], { primary: 'open-space' }],
+  ['over the limit, the person\'s own space, no link yet', status({ phase: 'over_limit', limit_own: true, access: 'private', progress: { done: 0, total: 9 } }), 'main', ['try-again'], { primary: 'try-again' }],
+  ['stopped', status({ phase: 'stopped', progress: { done: 3, total: 9 }, link: LINK }), 'main', ['copy', 'try-again'], { primary: 'try-again', open: true }],
+  ['stop sharing', shared({ kept: true, signed_in: true }), 'stop', ['cancel', 'delete'], { primary: 'delete' }],
   ['details', shared(), 'details', [], {}],
   ['details, signed in', shared({ kept: true, signed_in: true }), 'details', ['stop-sharing'], {}],
 ];
 
 describe.if(hasDom)('the panel, state by state', () => {
   for (const [name, s, view, buttons, has] of STATES) {
-    test(`${name}: its buttons and parts, and at most 20 words`, () => {
+    test(`${name}: its buttons and parts, one row of actions with one main button at most, and at most 20 words`, () => {
       const p = panel(s, view);
       expect(p.buttons()).toEqual(buttons);
-      expect({ switch: !!p.host.querySelector('[role="radiogroup"]'), info: !!p.host.querySelector('[data-share-info]'), details: !!p.host.querySelector('[data-share-act="details"]'), who: !!p.host.querySelector('[data-share-who]') }).toEqual({ switch: !!has.switch, info: !!has.info, details: !!has.details, who: !!has.who });
+      expect(p.primary()).toEqual(has.primary ? [has.primary] : []);
+      expect({ switch: !!p.host.querySelector('[role="radiogroup"]'), info: !!p.host.querySelector('[data-share-info]'), details: !!p.host.querySelector('[data-share-act="details"]'), who: !!p.host.querySelector('[data-share-who]'), open: !!p.host.querySelector('[data-share-status] [data-share-act="open"]') }).toEqual({ switch: !!has.switch, info: !!has.info, details: !!has.details, who: !!has.who, open: !!has.open });
+      // B1: every button is in the one row of actions (never a second row, never a button on a line), the status line
+      // comes first, and the address is never drawn: no field, and no text that is the link.
+      const rows = p.host.querySelectorAll('[data-share-actions]');
+      expect(rows.length).toBeLessThanOrEqual(1);
+      if (buttons.length > 0) expect(rows.length).toBe(1);
+      for (const b of p.host.querySelectorAll('.ib-shr-b')) expect(b.closest('[data-share-actions]')).toBe(rows[0]!);
+      if (view !== 'details') expect(p.host.firstElementChild!.hasAttribute('data-share-status')).toBe(true);
+      expect(p.host.querySelector('input')).toBeNull();
+      expect(p.host.textContent).not.toContain('spaces.example');
+      expect(p.host.textContent).not.toContain('Make it yours');
       const words = p.words().split(' ').filter(Boolean);
       expect(words.length).toBeGreaterThan(0);
       expect(words.length).toBeLessThanOrEqual(20);
@@ -164,30 +185,53 @@ describe.if(hasDom)('the panel, state by state', () => {
     expect(lineOf(status({ signed_in: true, access: 'private' })).mark).toBe('lock');
   });
 
-  test('waiting for Keep: Update is shown with its count and waits; the gone state has no link to copy', () => {
+  test('waiting for Keep with changes: the count is the status line and Keep is the main button, which keeps (it sends what waits); nothing goes up without it', () => {
     const waits = panel(shared({ needs_keep: true, access: 'comment', changes: 2 }));
-    expect(waits.host.querySelector<HTMLButtonElement>('[data-share-act="update"]')!.disabled).toBe(true);
-    expect(waits.host.querySelector<HTMLButtonElement>('[data-share-act="keep"]')!.disabled).toBe(false);
-    expect(panel(shared({ changes: 2 })).host.querySelector<HTMLButtonElement>('[data-share-act="update"]')!.disabled).toBe(false);
+    expect(waits.host.querySelector('[data-share-status] h2')!.textContent).toBe('2 changes here');
+    expect(waits.host.querySelector('[data-share-act="update"]')).toBeNull();
+    waits.press('keep');
+    expect(waits.sent).toEqual([['keep']]);
+    const update = panel(shared({ changes: 2 }));
+    expect(update.host.querySelector('[data-share-status] h2')!.textContent).toBe('2 changes here');
+    expect(update.host.querySelector<HTMLButtonElement>('[data-share-act="update"]')!.disabled).toBe(false);
     const gone = panel(status({ phase: 'gone', shared_once: true }));
-    expect(gone.host.querySelector('input')).toBeNull();
+    expect(gone.host.querySelector('[data-share-act="open"], [data-share-act="copy"]')).toBeNull();
     gone.press('share-new');
     expect(gone.sent).toEqual([['share', { mode: 'all', fresh: true }]]);
   });
 
-  test('the person\'s own space, signed out here: only the access line and Keep, never beside a "make it yours" row; someone else\'s by now keeps that row', () => {
-    const marks = (s: SpaceShareStatus) => [...panel(s).host.querySelectorAll<HTMLElement>('.ib-shr-arow')].map((row) => `${row.dataset.shareRowMark}${row.querySelector('[data-share-act="keep"]') ? '+keep' : ''}`);
-    expect(marks(shared({ needs_keep: true, own: true, access: 'private' }))).toEqual(['lock+keep']);
-    expect(marks(shared({ needs_keep: true, own: true, access: 'comment', changes: 1 }))).toEqual(['globe+keep', 'doc']);
-    expect(marks(shared({ needs_keep: true, access: 'comment', changes: 1 }))).toEqual(['globe', 'user+keep', 'doc']);
-    // With a stopped page the access line gives way to the page's row, so Keep has its own row again: never no Keep.
-    expect(marks(shared({ needs_keep: true, own: true, access: 'private', stopped_pages: [{ title: 'Rollout' }] }))).toEqual(['excl', 'user+keep']);
+  test('the person\'s own space, signed out here: Keep is always offered, in the row of actions, with or without a stopped page; no line holds a button', () => {
+    for (const s of [shared({ needs_keep: true, own: true, access: 'private' }), shared({ needs_keep: true, own: true, access: 'comment', changes: 1 }), shared({ needs_keep: true, access: 'comment', changes: 1 }), shared({ needs_keep: true, own: true, access: 'private', stopped_pages: [{ title: 'Rollout' }] })]) {
+      const p = panel(s);
+      expect(p.host.querySelector('[data-share-actions] [data-share-act="keep"]')).not.toBeNull();
+      expect(p.host.querySelector('.ib-shr-arow .ib-shr-b')).toBeNull();
+    }
+    // A stopped page takes the access line's place, and names the page.
+    const stopped = panel(shared({ needs_keep: true, own: true, access: 'private', stopped_pages: [{ title: 'Rollout' }] }));
+    expect([...stopped.host.querySelectorAll<HTMLElement>('.ib-shr-arow')].map((row) => [row.dataset.shareRowMark, row.textContent])).toEqual([['excl', 'Rollout changed']]);
     // Over the limit of the person's own space: Try again, never Sign in.
     const over = panel(status({ phase: 'over_limit', limit_own: true, link: LINK }));
     expect(over.host.querySelector('[data-share-act="sign-in"]')).toBeNull();
     over.press('try-again');
     expect(over.sent).toEqual([['share', {}]]);
     expect(panel(status({ phase: 'over_limit' })).host.querySelector('[data-share-act="sign-in"]')).not.toBeNull();
+  });
+
+  test('over the limit of the person\'s own space: Open in Spaces is the main button and opens the space in a new tab; Try again is beside it; with no link to open, Try again is the main one', () => {
+    const over = panel(status({ phase: 'over_limit', limit_own: true, link: LINK }));
+    const open = over.host.querySelector<HTMLAnchorElement>('[data-share-actions] [data-share-act="open-space"]')!;
+    expect([open.getAttribute('href'), open.target, open.rel, open.textContent]).toEqual([LINK, '_blank', 'noopener noreferrer', 'Open in Spaces']);
+    expect(over.primary()).toEqual(['open-space']);
+    expect(over.buttons()).toEqual(['try-again', 'open-space']);
+    // One way to open the space: the button, not also the mark.
+    expect(over.host.querySelector('[data-share-act="open"]')).toBeNull();
+    for (const link of [null, 'javascript:alert(1)']) {
+      const none = panel(status({ phase: 'over_limit', limit_own: true, link }));
+      expect([none.buttons(), none.primary()]).toEqual([['try-again'], ['try-again']]);
+      expect(none.host.querySelector('a')).toBeNull();
+    }
+    // Over 100 MB without sign-in keeps Sign in alone, even with a link.
+    expect(panel(status({ phase: 'over_limit', link: LINK })).buttons()).toEqual(['sign-in']);
   });
 
   test('Keep waits while a claim is going', () => {
@@ -245,23 +289,36 @@ describe.if(hasDom)('what a press sends', () => {
     expect([p.sent, p.views]).toEqual([[['remove']], ['main', 'main']]);
   });
 
-  test('the link opens in a new tab and is only ever http(s)', () => {
-    const p = panel(shared());
-    const open = p.host.querySelector<HTMLAnchorElement>('[data-share-act="open"]')!;
-    expect([open.getAttribute('href'), open.target, open.rel]).toEqual([LINK, '_blank', 'noopener noreferrer']);
-    expect(p.host.querySelector<HTMLInputElement>('input')!.value).toBe(LINK);
-    // A stopped page opens at its own address there.
-    // A stopped page opens the space itself: never an address built here.
-    const stopped = panel(shared({ stopped_pages: [{ title: 'Rollout checklist' }] }));
-    expect(stopped.host.querySelector<HTMLAnchorElement>('[data-share-act="open-page"]')!.getAttribute('href')).toBe(LINK);
+  test('the one mark at the end of the status line opens the space in a new tab, and only an http(s) link is ever drawn', () => {
+    for (const s of [shared(), shared({ kept: true, access: 'comment' }), shared({ changes: 2 }), shared({ stopped_pages: [{ title: 'Rollout checklist' }] }), status({ phase: 'failed', link: LINK })]) {
+      const open = panel(s).host.querySelector<HTMLAnchorElement>('[data-share-status] [data-share-act="open"]')!;
+      expect([open.getAttribute('href'), open.target, open.rel, open.getAttribute('aria-label')]).toEqual([LINK, '_blank', 'noopener noreferrer', 'Open in Spaces']);
+    }
+    // Invite leads to the same address.
+    expect(panel(shared({ kept: true, access: 'comment' })).host.querySelector<HTMLAnchorElement>('[data-share-act="invite"]')!.getAttribute('href')).toBe(LINK);
     const odd = panel(shared({ link: 'javascript:alert(1)' }));
     expect(odd.host.querySelector('a')).toBeNull();
-    expect(odd.host.querySelector('input')).toBeNull();
+    expect(odd.host.querySelector('[data-share-act="copy"]')).toBeNull();
+  });
+
+  test('Copy link puts the link on the clipboard and reads Copied for a moment', async () => {
+    const copied: string[] = [];
+    const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => void copied.push(text) } });
+    try {
+      const p = panel(shared());
+      await act(async () => p.host.querySelector<HTMLElement>('[data-share-act="copy"]')!.click());
+      expect(copied).toEqual([LINK]);
+      expect(p.host.querySelector('[data-share-act="copy"]')!.textContent).toBe('Copied');
+    } finally {
+      if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard);
+      else delete (navigator as { clipboard?: unknown }).clipboard;
+    }
   });
 });
 
 describe.if(hasDom)('the button', () => {
-  function mount(answers: SpaceShareStatus[]) {
+  function mount(answers: SpaceShareStatus[], phone = false) {
     const calls: string[] = [];
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       calls.push(`${init?.method ?? 'GET'} ${String(input)}`);
@@ -272,7 +329,7 @@ describe.if(hasDom)('the button', () => {
     host.className = 'pn-inbox';
     document.body.append(host);
     root = createRoot(host);
-    act(() => root!.render(<PlanShare id="pln_01HZZZZZZZZZZZZZZZZZZZZZZ0" phone={false} />));
+    act(() => root!.render(<PlanShare id="pln_01HZZZZZZZZZZZZZZZZZZZZZZ0" phone={phone} />));
     const button = () => host.querySelector<HTMLElement>('[data-plan-share]')!;
     return { host, calls, button };
   }
@@ -316,5 +373,22 @@ describe.if(hasDom)('the button', () => {
     expect(m.button().getAttribute('aria-expanded')).toBe('true');
     await act(async () => panelEl.querySelector<HTMLElement>('[data-share-act="share"]')!.click());
     expect(m.calls[m.calls.length - 1]).toBe('POST /api/plans/pln_01HZZZZZZZZZZZZZZZZZZZZZZ0/share');
+  });
+
+  test('on a phone the panel is the Inbox\'s own bottom sheet, named Share, and Escape closes it back to the button', async () => {
+    const m = mount([shared()], true);
+    await tick();
+    await act(async () => m.button().click());
+    await tick(20);
+    const sheet = document.querySelector<HTMLElement>('[data-sheet][data-plan-share-sheet]')!;
+    expect(sheet).not.toBeNull();
+    expect([sheet.getAttribute('role'), sheet.getAttribute('aria-label'), m.button().getAttribute('aria-expanded')]).toEqual(['dialog', 'Share', 'true']);
+    expect(sheet.querySelector('[data-plan-share-panel][data-phone] [data-share-actions] [data-share-act="copy"]')).not.toBeNull();
+    // Not the old sheet: no popover positioner, no second scrim of its own.
+    expect(document.querySelector('.ib-shr-pos, [data-plan-share-scrim]')).toBeNull();
+    await act(async () => void window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(m.button().getAttribute('aria-expanded')).toBe('false');
+    await tick(400);
+    expect(document.querySelector('[data-plan-share-sheet]')).toBeNull();
   });
 });

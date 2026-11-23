@@ -1,17 +1,19 @@
 /**
  * Share this space (approval "share-this-space", `.product/approved/share-this-space/`): the Share button at the
- * right end of a plan page's top bar and the small panel under it (a sheet from the bottom on a phone). The upload
+ * right end of a plan page's top bar and the small panel under it (the Inbox's own bottom sheet on a phone). The upload
  * runs in the Inbox (packages/shared/spaces/share-job.ts); this reads where it stands (`GET /api/plans/:id/share`,
  * again every `SHARE_POLL_MS` while something is going) and asks for the next thing. Drawn only while the Inbox says
  * Share this space is on (`usePlanShareOn`); off, nothing here is drawn or read.
  *
  * Every word on it is in `SHARE_WORDS`, as approved: labels are nouns or verbs, no sentence explains another, and no
  * state shows more than about 20 words. No keyboard shortcut is added: the panel is Base UI's Popover (Escape and a
- * press outside close it, focus goes back to the button), the switch is a radio group, the rest are buttons and links.
+ * press outside close it, focus goes back to the button), on a phone the Inbox's `BottomSheet` (Escape, the scrim or a
+ * drag down close it); the switch is a radio group, the rest are buttons and links.
  */
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Popover } from '@base-ui/react/popover';
 import { spaceShareButton, type SpaceShareDetails, type SpaceShareMode, type SpaceShareStatus } from '@plannotator/core/space-share';
+import { BottomSheet } from '../components/BottomSheet';
 import { Icon, type IconName } from '../icons';
 import { plansApi } from './client';
 
@@ -33,7 +35,6 @@ export const SHARE_WORDS = {
   copy: 'Copy link',
   copied: 'Copied',
   stop: 'Stop',
-  makeYours: 'Make it yours',
   keep: 'Keep this space',
   idle: 'Removed after 30 idle days unless kept.',
   keepWaiting: 'Waiting for your browser…',
@@ -58,7 +59,6 @@ export const SHARE_WORDS = {
   deletes: 'Deletes the copy in Spaces for good.',
   del: 'Delete',
   notShared: 'Not shared',
-  link: 'Link',
   back: 'Back',
 } as const;
 
@@ -86,15 +86,33 @@ function Mark({ name }: { name: keyof typeof EXTRA_MARKS | IconName }) {
 const Spinner = () => <span className="ib-shr-spin" aria-hidden="true" />;
 
 // ─────────────────────────────── The panel's parts ───────────────────────────────
+//
+// Every state has the same three parts (approval "inbox-share-panel-b1", B1): the status line (what is true now, with
+// a count, a person or the one mark that opens the space at its end), at most two lines about the space (who can open
+// it), and one row of actions (Details at its left; at its right one main button and at most one more). The address is
+// never shown: Copy link is a button, and the status line's mark opens the space.
 
-function Head({ title, right, id }: { title: ReactNode; right?: ReactNode; id?: string }) {
+function Status({ title, warn, right }: { title: ReactNode; warn?: boolean; right?: ReactNode }) {
   return (
-    <div className="ib-shr-head">
-      <h2 className="ib-shr-title" id={id}>
-        {title}
-      </h2>
+    <div className="ib-shr-head" data-share-status="">
+      {warn && (
+        <span className="ib-shr-warn">
+          <Mark name="excl" />
+        </span>
+      )}
+      <h2 className="ib-shr-title">{title}</h2>
+      <span className="ib-shr-sp" />
       {right}
     </div>
+  );
+}
+
+/** The one mark that opens the space, at the end of the status line. */
+function OpenMark({ link }: { link: string }) {
+  return (
+    <a className="ib-shr-open" href={link} target="_blank" rel="noopener noreferrer" aria-label={SHARE_WORDS.openInSpaces} title={SHARE_WORDS.openInSpaces} data-share-act="open">
+      <Mark name="external" />
+    </a>
   );
 }
 
@@ -106,15 +124,16 @@ function Btn({ children, kind, onClick, name, disabled }: { children: ReactNode;
   );
 }
 
-function LinkBtn({ href, children, name, icon }: { href: string; children?: ReactNode; name: string; icon?: boolean }) {
+function LinkBtn({ href, children, name, primary }: { href: string; children: ReactNode; name: string; primary?: boolean }) {
   return (
-    <a className={`ib-shr-b${icon ? ' ib-shr-icb' : ''}`} href={href} target="_blank" rel="noopener noreferrer" data-share-act={name} {...(icon ? { 'aria-label': SHARE_WORDS.openInSpaces, title: SHARE_WORDS.openInSpaces } : {})}>
-      {icon ? <Mark name="external" /> : children}
+    <a className={`ib-shr-b${primary ? ' ib-shr-pri' : ''}`} href={href} target="_blank" rel="noopener noreferrer" data-share-act={name}>
+      {children}
     </a>
   );
 }
 
-function LinkRow({ link, primary }: { link: string; primary: boolean }) {
+/** Copy link: the link itself is never drawn; "Copied" for a moment once it is on the clipboard. */
+function CopyBtn({ link, primary }: { link: string; primary?: boolean }) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
@@ -129,19 +148,15 @@ function LinkRow({ link, primary }: { link: string; primary: boolean }) {
     );
   };
   return (
-    <div className="ib-shr-linkrow" data-share-link="">
-      <input className="ib-shr-field" readOnly value={link} aria-label={SHARE_WORDS.link} onFocus={(e) => e.currentTarget.select()} />
-      <button type="button" className={`ib-shr-b${primary ? ' ib-shr-pri' : ''}`} onClick={copy} data-share-act="copy">
-        <span aria-live="polite">{copied ? SHARE_WORDS.copied : SHARE_WORDS.copy}</span>
-      </button>
-      <LinkBtn href={link} name="open" icon />
-    </div>
+    <button type="button" className={`ib-shr-b${primary ? ' ib-shr-pri' : ''}`} onClick={copy} data-share-act="copy">
+      <span aria-live="polite">{copied ? SHARE_WORDS.copied : SHARE_WORDS.copy}</span>
+    </button>
   );
 }
 
-function Row({ mark, children, right, warn, oneLine }: { mark: Parameters<typeof Mark>[0]['name']; children: ReactNode; right?: ReactNode; warn?: boolean; oneLine?: boolean }) {
+function Row({ mark, children, right, warn, quiet, oneLine }: { mark: Parameters<typeof Mark>[0]['name']; children: ReactNode; right?: ReactNode; warn?: boolean; quiet?: boolean; oneLine?: boolean }) {
   return (
-    <div className={`ib-shr-arow${warn ? ' ib-shr-warnrow' : ''}${oneLine ? ' ib-shr-oneline' : ''}`} data-share-row-mark={mark}>
+    <div className={`ib-shr-arow${warn ? ' ib-shr-warnrow' : ''}${quiet ? ' ib-shr-quietrow' : ''}${oneLine ? ' ib-shr-oneline' : ''}`} data-share-row-mark={mark}>
       <span className="ib-shr-disc">
         <Mark name={mark} />
       </span>
@@ -151,20 +166,22 @@ function Row({ mark, children, right, warn, oneLine }: { mark: Parameters<typeof
   );
 }
 
-function Msg({ mark, children, tone, first }: { mark: Parameters<typeof Mark>[0]['name'] | 'spin'; children: ReactNode; tone?: 'quiet' | 'warn'; first?: boolean }) {
+function Msg({ mark, children, tone }: { mark: Parameters<typeof Mark>[0]['name'] | 'spin'; children: ReactNode; tone?: 'quiet' | 'warn' }) {
   return (
-    <p className={`ib-shr-msg${tone ? ` ib-shr-${tone}` : ''}${first ? ' ib-shr-first' : ''}`} role="status">
+    <p className={`ib-shr-msg${tone ? ` ib-shr-${tone}` : ''}`} role="status">
       <span className="ib-shr-msgico">{mark === 'spin' ? <Spinner /> : <Mark name={mark} />}</span>
       <span>{children}</span>
     </p>
   );
 }
 
-function Foot({ left, children }: { left?: ReactNode; children?: ReactNode }) {
+/** The one row of actions: what is at its left (Details), then the buttons at its right, the main one last. */
+function Actions({ left, children }: { left?: ReactNode; children?: ReactNode }) {
   return (
-    <div className="ib-shr-foot">
-      <span>{left}</span>
-      <span className="ib-shr-fr">{children}</span>
+    <div className="ib-shr-foot" data-share-actions="">
+      {left}
+      <span className="ib-shr-sp" />
+      {children}
     </div>
   );
 }
@@ -285,11 +302,11 @@ function DetailsView({ details, onBack, onStopSharing }: { details: SpaceShareDe
         </>
       )}
       {onStopSharing && (
-        <Foot>
+        <Actions>
           <Btn kind="dangerq" onClick={onStopSharing} name="stop-sharing">
             {SHARE_WORDS.stopSharing}
           </Btn>
-        </Foot>
+        </Actions>
       )}
     </>
   );
@@ -326,11 +343,11 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
   if (view === 'stop') {
     return (
       <>
-        <Head title={SHARE_WORDS.stopSharing} />
+        <Status title={SHARE_WORDS.stopSharing} />
         <Msg mark="excl" tone="warn">
           {deleteFailed ? SHARE_WORDS.failed : SHARE_WORDS.deletes}
         </Msg>
-        <Foot>
+        <Actions>
           <Btn onClick={() => onView('main')} name="cancel">
             {SHARE_WORDS.cancel}
           </Btn>
@@ -344,7 +361,7 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
           >
             {SHARE_WORDS.del}
           </Btn>
-        </Foot>
+        </Actions>
       </>
     );
   }
@@ -355,46 +372,43 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
   if (status.keep === 'waiting') {
     return (
       <>
-        <Head title={SHARE_WORDS.keep} />
+        <Status title={SHARE_WORDS.keep} />
         <Msg mark="spin">{SHARE_WORDS.keepWaiting}</Msg>
         <Msg mark="info" tone="quiet">
           {SHARE_WORDS.keepFirst}
         </Msg>
-        <Foot>
+        <Actions>
           <Btn onClick={actions.keepCancel} name="keep-cancel">
             {SHARE_WORDS.cancel}
           </Btn>
           <Btn onClick={actions.keep} name="keep-again">
             {SHARE_WORDS.openAgain}
           </Btn>
-        </Foot>
+        </Actions>
       </>
     );
   }
   if (status.keep === 'remote') {
     return (
       <>
-        <Head title={SHARE_WORDS.keep} />
+        <Status title={SHARE_WORDS.keep} />
         <Msg mark="info">{SHARE_WORDS.keepRemote}</Msg>
-        <Foot>
+        <Actions>
           <Btn onClick={actions.keepCancel} name="keep-close">
             {SHARE_WORDS.close}
           </Btn>
-        </Foot>
+        </Actions>
       </>
     );
   }
 
   // The access line says what is true of the space: private only when it was made signed in; a space kept after
   // it was shared still lets holders of its link read and comment.
-  const invite = status.kept && status.phase !== 'none' && link ? <LinkBtn href={link} name="invite">{SHARE_WORDS.invite}</LinkBtn> : undefined;
-  const access = (right?: ReactNode, own?: ReactNode) =>
+  const access = (right?: ReactNode) =>
     status.access === 'private' ? (
-      <Row mark="lock" right={own ?? invite}>
-        {SHARE_WORDS.onlyYou}
-      </Row>
+      <Row mark="lock">{SHARE_WORDS.onlyYou}</Row>
     ) : status.access === 'comment' ? (
-      <Row mark="globe" right={own ?? invite} oneLine={!own}>
+      <Row mark="globe" oneLine>
         {SHARE_WORDS.anyoneComment}
       </Row>
     ) : (
@@ -407,12 +421,13 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
       {SHARE_WORDS.details}
     </button>
   );
+  const openMark = link ? <OpenMark link={link} /> : undefined;
 
   switch (status.phase) {
     case 'none':
       return (
         <>
-          <Head
+          <Status
             title={SHARE_WORDS.share}
             right={
               status.signed_in && status.who ? (
@@ -424,11 +439,11 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
           />
           {status.versions > 1 && <VersionSwitch mode={mode} onMode={onMode} />}
           {access()}
-          <Foot left={detailsLink}>
+          <Actions left={detailsLink}>
             <Btn kind="pri" onClick={() => actions.share({ mode })} name="share">
               {SHARE_WORDS.share}
             </Btn>
-          </Foot>
+          </Actions>
         </>
       );
     case 'sharing': {
@@ -437,81 +452,74 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
       if (status.waiting !== null && !link && progress.done === 0) {
         return (
           <>
-            <Msg mark="excl" tone="warn" first>
-              {busyWords(status.waiting)}
-            </Msg>
-            <Foot>
+            <Status warn title={busyWords(status.waiting)} />
+            <Actions>
               <Btn kind="pri" onClick={actions.keep} name="sign-in">
                 {SHARE_WORDS.signIn}
               </Btn>
-            </Foot>
+            </Actions>
           </>
         );
       }
       const title = status.waiting !== null ? SHARE_WORDS.waiting : SHARE_WORDS.sharing;
       return (
         <>
-          <Head title={title} right={<span className="ib-shr-count" data-share-count="">{`${progress.done} of ${progress.total}`}</span>} />
+          <Status title={title} right={<span className="ib-shr-count" data-share-count="">{`${progress.done} of ${progress.total}`}</span>} />
           <div className="ib-shr-prog" role="progressbar" aria-label={title} aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.done} aria-valuetext={`${progress.done} of ${progress.total}`}>
             <i style={{ width: `${progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0}%` }} />
           </div>
-          {link && <LinkRow link={link} primary={false} />}
-          <Foot>
+          <Actions>
             <Btn onClick={actions.stop} name="stop">
               {SHARE_WORDS.stop}
             </Btn>
-          </Foot>
+            {link && <CopyBtn link={link} />}
+          </Actions>
         </>
       );
     }
     case 'shared': {
       const stopped = status.stopped_pages.length > 0;
       const update = status.changes > 0;
-      // Waiting for Keep (a write was not allowed, or the sign-in is gone): Keep is offered, and Update waits for it.
+      // Waiting for Keep (a write was not allowed, or the sign-in is gone): Keep is offered, and the changes wait for
+      // it (a Keep sends what waits), so with changes Keep is the main button where Update would be.
       const waits = status.needs_keep === true;
-      const offerKeep = waits || (!stopped && !update && !status.kept);
-      // The person's own space, signed out here: only signing in again is asked, on the access line itself.
-      const keepButton = (
-        <Btn onClick={actions.keep} name="keep" disabled={status.busy === true}>
+      const keepButton = (primary: boolean) => (
+        <Btn kind={primary ? 'pri' : undefined} onClick={actions.keep} name="keep" disabled={status.busy === true}>
           {SHARE_WORDS.keep}
         </Btn>
       );
-      const ownWaits = waits && status.own === true;
+      // Beside the main button: Keep for a space nobody kept, Invite for a kept one; Copy link when the main one is
+      // something else.
+      let other: ReactNode = null;
+      let main: ReactNode = null;
+      if (waits && update) {
+        other = link && <CopyBtn link={link} />;
+        main = keepButton(true);
+      } else if (update) {
+        other = link && <CopyBtn link={link} />;
+        main = (
+          <Btn kind="pri" onClick={() => actions.share({})} name="update">
+            {SHARE_WORDS.update}
+          </Btn>
+        );
+      } else {
+        other = waits || (!stopped && !status.kept) ? keepButton(!link) : status.kept && link ? <LinkBtn href={link} name="invite">{SHARE_WORDS.invite}</LinkBtn> : null;
+        main = link && <CopyBtn link={link} primary />;
+      }
       return (
         <>
-          {link && <LinkRow link={link} primary={!stopped && !update && !waits} />}
+          <Status title={update ? changesWords(status.changes) : SHARE_WORDS.shared} right={openMark} />
           {stopped
             ? status.stopped_pages.map((page) => (
-                <Row key={page.title} mark="excl" warn right={link ? <LinkBtn href={link} name="open-page">{SHARE_WORDS.openInSpaces}</LinkBtn> : undefined}>
+                <Row key={page.title} mark="excl" warn>
                   {page.title} changed
                 </Row>
               ))
-            : access(!update && !waits ? <InfoMark /> : undefined, ownWaits ? keepButton : undefined)}
-          {offerKeep && !(ownWaits && !stopped) && (
-            <Row
-              mark="user"
-              right={
-                <Btn onClick={actions.keep} name="keep" disabled={status.busy === true}>
-                  {SHARE_WORDS.keep}
-                </Btn>
-              }
-            >
-              {SHARE_WORDS.makeYours}
-            </Row>
-          )}
-          {update && (
-            <Row
-              mark="doc"
-              right={
-                <Btn kind="pri" onClick={() => actions.share({})} name="update" disabled={waits}>
-                  {SHARE_WORDS.update}
-                </Btn>
-              }
-            >
-              {changesWords(status.changes)}
-            </Row>
-          )}
-          {!stopped && !update && <Foot left={detailsLink} />}
+            : access(!update && !waits ? <InfoMark /> : undefined)}
+          <Actions left={detailsLink}>
+            {other}
+            {main}
+          </Actions>
         </>
       );
     }
@@ -519,70 +527,66 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
       // The space is no longer there for this computer: one line, and the one way on.
       return (
         <>
-          <Msg mark="excl" tone="warn" first>
-            {SHARE_WORDS.gone}
-          </Msg>
-          <Foot>
+          <Status warn title={SHARE_WORDS.gone} />
+          <Actions>
             <Btn kind="pri" onClick={() => actions.share({ mode: status.mode, fresh: true })} name="share-new">
               {SHARE_WORDS.shareAsNew}
             </Btn>
-          </Foot>
+          </Actions>
         </>
       );
     case 'refused':
       return (
         <>
-          <Head title={SHARE_WORDS.keptByOther} />
-          <Msg mark="info" tone="quiet">
+          <Status title={SHARE_WORDS.keptByOther} />
+          <Row mark="info" quiet>
             {SHARE_WORDS.stillComment}
-          </Msg>
-          <Foot>
+          </Row>
+          <Actions>
             {link && <LinkBtn href={link} name="open-space">{SHARE_WORDS.openInSpaces}</LinkBtn>}
             <Btn kind="pri" onClick={() => actions.share({ mode: status.mode, fresh: true })} name="share-new">
               {SHARE_WORDS.shareAsNew}
             </Btn>
-          </Foot>
+          </Actions>
         </>
       );
     case 'over_limit':
-      // The person's own space: no sign-in can help. Try again sends once more (room may have been made in the
-      // space) and comes back here when it is still over; nothing tries by itself.
+      // The person's own space: no sign-in can help. Room is made in the space, so Open in Spaces is the main button;
+      // Try again sends once more and comes back here when it is still over; nothing tries by itself.
       if (status.limit_own) {
         return (
           <>
-            <Msg mark="excl" tone="warn" first>
-              {SHARE_WORDS.overLimitOwn}
-            </Msg>
-            {link && <LinkRow link={link} primary={false} />}
-            <Foot>
-              <Btn kind="pri" onClick={() => actions.share({})} name="try-again">
+            <Status warn title={SHARE_WORDS.overLimitOwn} />
+            <Actions>
+              <Btn kind={link ? undefined : 'pri'} onClick={() => actions.share({})} name="try-again">
                 {SHARE_WORDS.tryAgain}
               </Btn>
-            </Foot>
+              {link && (
+                <LinkBtn href={link} name="open-space" primary>
+                  {SHARE_WORDS.openInSpaces}
+                </LinkBtn>
+              )}
+            </Actions>
           </>
         );
       }
       return (
         <>
-          <Msg mark="excl" tone="warn" first>
-            {SHARE_WORDS.overLimit}
-          </Msg>
-          <Foot>
+          <Status warn title={SHARE_WORDS.overLimit} />
+          <Actions>
             <Btn kind="pri" onClick={actions.keep} name="sign-in">
               {SHARE_WORDS.signIn}
             </Btn>
-          </Foot>
+          </Actions>
         </>
       );
     case 'failed':
     case 'stopped':
       return (
         <>
-          <Msg mark="excl" tone="warn" first>
-            {status.phase === 'failed' ? SHARE_WORDS.failed : SHARE_WORDS.stopped}
-          </Msg>
-          {link && <LinkRow link={link} primary={false} />}
-          <Foot>
+          <Status warn title={status.phase === 'failed' ? SHARE_WORDS.failed : SHARE_WORDS.stopped} right={openMark} />
+          <Actions>
+            {link && <CopyBtn link={link} />}
             {/* Started signed in and the sign-in is gone: signing in again is the way on, never a share without it. */}
             {status.needs_keep ? (
               <Btn kind="pri" onClick={actions.keep} name="keep" disabled={status.busy === true}>
@@ -593,7 +597,7 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
                 {SHARE_WORDS.tryAgain}
               </Btn>
             )}
-          </Foot>
+          </Actions>
         </>
       );
   }
@@ -664,25 +668,50 @@ export function PlanShare({ id, phone, fresh = 0 }: PlanShareProps) {
   const button = spaceShareButton(status);
   const mark = BUTTON_MARK[button.state];
   const note = BUTTON_NOTE[button.state];
+  const close = useCallback(() => {
+    setOpen(false);
+    setView('main');
+  }, []);
+  const content = status && <SharePanel status={status} view={view} onView={setView} mode={mode} onMode={setMode} actions={actions} />;
+  const face = (
+    <>
+      {mark === 'spin' ? <Spinner /> : <Mark name={mark} />}
+      <span>{button.label}</span>
+    </>
+  );
+  const label = note ? `${button.label}: ${note}` : undefined;
+
+  // A phone: the same panel in the Inbox's own bottom sheet (a card off the edges, a grab handle, 44 px targets).
+  if (phone) {
+    return (
+      <>
+        <button ref={trigger} type="button" className="ib-shr-btn" data-plan-share="" data-state={button.state} data-phone="" aria-label={label} aria-haspopup="dialog" aria-expanded={open} onClick={() => (open ? close() : setOpen(true))}>
+          {face}
+        </button>
+        <BottomSheet open={open} onClose={close} title={SHARE_WORDS.share} host={portal} attrs={{ 'data-plan-share-sheet': '' }}>
+          <div className="ib-shr" data-plan-share-panel="" data-phone="">
+            {content}
+          </div>
+        </BottomSheet>
+      </>
+    );
+  }
   return (
     <Popover.Root
       open={open}
-      modal={phone}
       onOpenChange={(next) => {
         setOpen(next);
         if (!next) setView('main');
       }}
     >
-      <Popover.Trigger ref={trigger} className="ib-shr-btn" data-plan-share="" data-state={button.state} data-phone={phone ? '' : undefined} aria-label={note ? `${button.label}: ${note}` : undefined}>
-        {mark === 'spin' ? <Spinner /> : <Mark name={mark} />}
-        <span>{button.label}</span>
+      <Popover.Trigger ref={trigger} className="ib-shr-btn" data-plan-share="" data-state={button.state} aria-label={label}>
+        {face}
       </Popover.Trigger>
       <Popover.Portal container={portal ?? undefined}>
-        {phone && <Popover.Backdrop className="ib-oq-scrim" data-plan-share-scrim="" />}
-        <Popover.Positioner className="ib-oq-pos ib-shr-pos" side="bottom" align="end" sideOffset={6} collisionPadding={8} data-phone={phone ? '' : undefined}>
-          {/* Focus goes to the panel itself: a link field focused on open would scroll and select its text. */}
-          <Popover.Popup ref={popup} tabIndex={-1} initialFocus={popup} className="ib-shr" aria-label={SHARE_WORDS.share} data-plan-share-panel="" data-phone={phone ? '' : undefined}>
-            {status && <SharePanel status={status} view={view} onView={setView} mode={mode} onMode={setMode} actions={actions} />}
+        <Popover.Positioner className="ib-oq-pos ib-shr-pos" side="bottom" align="end" sideOffset={6} collisionPadding={8}>
+          {/* Focus goes to the panel itself, not to its first button. */}
+          <Popover.Popup ref={popup} tabIndex={-1} initialFocus={popup} className="ib-shr" aria-label={SHARE_WORDS.share} data-plan-share-panel="">
+            {content}
           </Popover.Popup>
         </Popover.Positioner>
       </Popover.Portal>
