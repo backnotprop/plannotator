@@ -68,6 +68,11 @@ export function createInboxReplyLaunch(options: {
       const from = door?.from ?? null;
       const asked = (body.to as { launch: unknown }).launch;
       const value = asked && typeof asked === "object" ? (asked as Record<string, unknown>) : {};
+      // The Resume row: only the ended session this reply answers, as the agent it is.
+      const author = answered.author.kind === "agent" ? answered.author : null;
+      if (value.resume !== undefined && (!author || value.resume !== author.session || value.agent !== author.host)) {
+        throw new InboxError("validation_error", "to.launch.resume: only the session this reply answers. Nothing was sent.", { field: "to.launch.resume" });
+      }
       // Only the agent, the project and the machine's model, effort and OpenCode agent: a reply never trusts a folder or makes one.
       const to = {
         launch: {
@@ -76,6 +81,7 @@ export function createInboxReplyLaunch(options: {
           ...(value.model !== undefined ? { model: value.model } : {}),
           ...(value.effort !== undefined ? { effort: value.effort } : {}),
           ...(value.primary_agent !== undefined ? { primary_agent: value.primary_agent } : {}),
+          ...(value.resume !== undefined ? { resume: value.resume } : {}),
         },
       };
       const target = options.launch.target(to);

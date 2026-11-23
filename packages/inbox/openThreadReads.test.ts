@@ -140,6 +140,9 @@ describe('records the cache applied to the open thread: no read of it, its files
     const launched = settledOpen({ loaded: { thread_id: OPEN, project: { repo: null, repo_known: true }, messages: [{ launch: { id: 'lch_1' } }] } });
     expect(applied([[later, false]], launched)).toBe('thread');
     expect(readFor([message(OTHER)], launched)).toBe('thread');
+    // A reply that started (or resumed) the session carries the launch, not the root: its line moves the same way.
+    const replyLaunched = settledOpen({ loaded: { thread_id: OPEN, project: { repo: null, repo_known: true }, messages: [{}, { launch: { id: 'lch_2' } }] } });
+    expect(applied([[later, false]], replyLaunched)).toBe('thread');
   });
 });
 

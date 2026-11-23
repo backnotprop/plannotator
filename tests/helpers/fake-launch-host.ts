@@ -3,7 +3,8 @@
  * a test connects, works and idles by hand. `start` makes a session that is not connected; the test works and idles it
  * (`poll`), and asks its permission questions (`ask`). `rexCommand` (Start in Rex) names a session it makes the same
  * way, run by nothing: the test connects it by hand, as a Rex tab's agent would. `faults` says what goes wrong. Registered through
- * `createInboxLaunch`'s `hosts` option, or `startInboxServer`'s `launchHosts`.
+ * `createInboxLaunch`'s `hosts` option, or `startInboxServer`'s `launchHosts`. `adopts`: it resumes a session it never
+ * started (a reply's Resume row), as OpenCode's host does.
  */
 import type { InboxLaunchAgent, InboxMessage } from "@plannotator/core/inbox-types";
 import type { LaunchHost, LaunchLive, LaunchTrustOffer } from "../../packages/server/inbox-launch-host";
@@ -12,7 +13,7 @@ import { createLaunchQuestions } from "../../packages/server/inbox-launch-permis
 /** Not an agent the product knows (`InboxLaunchAgent` is Claude Code's alone until the next agent widens it). */
 export const FAKE = "fake-agent" as InboxLaunchAgent;
 
-export function fakeLaunchHost() {
+export function fakeLaunchHost(options: { adopts?: boolean } = {}) {
   const calls: string[] = [];
   /** What the test makes go wrong. `trusted`: the folders it does not trust are the ones `trusted` says no to. */
   const faults: { resumeThrows: boolean; gate: Promise<void> | null; untrusted: boolean; resumeUntrusted: boolean; offer: LaunchTrustOffer | null; trusted: (folder: string) => boolean } = {
@@ -52,10 +53,13 @@ export function fakeLaunchHost() {
       return session ? { status: session.live?.busy ? "busy" : "idle", state: session.state, waitingFor: null } : "absent";
     },
     live: (session) => sessions.get(session)?.live ?? null,
+    ...(options.adopts ? { adopts: (session: string) => session.startsWith("ses-") } : {}),
     async resume(launch) {
       calls.push(`resume ${launch.session_ref}`);
       if (faults.resumeThrows) throw new Error("the host broke");
       if (faults.resumeUntrusted) return { exitCode: 1, text: "", failure: { code: "untrusted", text: "The folder isn't trusted yet." } };
+      // A session it never started (adopted): known from now on, by its own id.
+      if (!byRef(launch.session_ref!)) sessions.set(launch.session_ref!, { ref: launch.session_ref!, live: null, state: "running" });
       byRef(launch.session_ref!)!.state = "running";
       return { exitCode: 0, text: "", failure: null };
     },
