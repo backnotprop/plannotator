@@ -76,7 +76,7 @@ export const INBOX_RECORD_VERSION = 1 as const;
 
 // ─────────────────────────────── Ids ───────────────────────────────
 
-// The id clock lives in ./ulid (Shape uses it too, without the Inbox types).
+// The id clock lives in ./ulid.
 export { ulid } from "./ulid";
 import { ulid } from "./ulid";
 

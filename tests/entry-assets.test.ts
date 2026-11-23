@@ -232,7 +232,6 @@ describe('review entry assets', () => {
     // The surface's reader (one section per screen) and its diagram engine wait the same way.
     expect(read('packages/inbox/surface/SurfaceGuide.tsx')).toContain("lazy(() => import('#surface-guide-reader'))");
     expect(read('packages/inbox/surface/SurfaceDocument.tsx')).toContain("lazy(() => import('./SurfaceDiagram'))");
-    expect(read('packages/inbox/lazyParts.tsx')).toContain("lazyPart(() => import('#shape-board'))");
     // The posting dialog waits for the review's ending, and nothing else imports it.
     expect(read('packages/inbox/lazyParts.tsx')).toContain("lazyPart(() => import('#platform-post'))");
     const post = /^import\s+(?!type\b)[^;]*from\s+['"](?:#platform-post|[^'"]*guide\/PlatformPost(?:\.tsx)?)['"]/m;

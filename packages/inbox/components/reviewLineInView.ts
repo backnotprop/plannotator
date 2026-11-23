@@ -1,7 +1,7 @@
 /**
- * A link that opens the review at a line (a Shape board's place in code, a part of a picture)
- * brings that line into view: its file opens, its lines are painted, and the review scrolls so the first painted line
- * sits in the upper part of the room the corner card leaves (approval "review-show-me", q-db7db55f: a link shows the code).
+ * A link that opens the review at a line (a context note's lines) brings that line into view: its file opens, its
+ * lines are painted, and the review scrolls so the first painted line sits in the upper part of the room the corner
+ * card leaves (approval "review-show-me", q-db7db55f: a link shows the code).
  *
  * The diff draws late (the reader is a lazy chunk, Pierre paints the rows in its shadow root, and the file boxes
  * above settle their heights), so this waits for the painted row to hold still, then scrolls the review's body.

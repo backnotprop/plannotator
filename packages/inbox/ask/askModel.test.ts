@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxAskChat, InboxAskConversationWire } from '../api';
-import { ASK_RECENT_MAX, askChatGroups, askChatTime, askMessages, askRowState, askStopped, askUnanswered, askUnseen } from './askModel';
+import { ASK_RECENT_MAX, askChatGroups, askChatTime, askMessages, askRowState, askShownQuestion, askStopped, askUnanswered, askUnseen } from './askModel';
 
 const NOW = Date.parse('2026-11-02T12:00:00Z');
 const ago = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString();
@@ -116,5 +116,43 @@ describe('the transcript', () => {
     expect(askUnseen(conversation(turns, ago(10)))).toBe(ago(2));
     expect(askUnseen(conversation(turns, ago(2)))).toBeNull();
     expect(askUnseen(conversation([turn('three')]))).toBeNull();
+  });
+});
+
+// An older Inbox's Show me, as its conversation file keeps it: the agent's long request in `question`, the person's
+// ask in `show_me`, and fields this Inbox no longer reads (`again_shape`, `shape`). Nothing asks one now; the old
+// turns read as the person asked them, never as the request the agent got.
+describe('an older Show me in the transcript', () => {
+  const request = 'The reviewer pressed Show me on lines of the review. Run plannotator review draw …';
+  const show_me = { review: 'msg_1', file: 'src/jobs/retry-worker.ts', lines: [16, 18] as [number, number], round: 1, words: 'after the third failure?' };
+  const old = (id: string, extra: Record<string, unknown>) => turn(id, { question: request, kind: 'show_me', ...extra } as never);
+
+  test("reads as the person asked it: the file's name and lines, a line, the whole review, a board's part", () => {
+    expect(askShownQuestion({ question: request, kind: 'show_me', show_me })).toBe('Show me on retry-worker.ts lines 16–18: after the third failure?');
+    expect(askShownQuestion({ question: request, kind: 'show_me', show_me: { ...show_me, lines: [7, 7], words: undefined } })).toBe('Show me on retry-worker.ts line 7');
+    expect(askShownQuestion({ question: request, kind: 'show_me', show_me: { review: 'msg_1', file: null, lines: null, round: 1 } })).toBe('Show me on the whole review');
+    const part = { board: 'shp_01ABC', name: 'The retry loop' } as never;
+    expect(askShownQuestion({ question: request, kind: 'show_me', show_me: { review: null, file: null, lines: null, round: 1, words: ' why? ', part } })).toBe('Show me on The retry loop: why?');
+    // A plain question, and a stored Show me with its target lost: the words as they were sent.
+    expect(askShownQuestion({ question: 'Why five attempts?' })).toBe('Why five attempts?');
+    expect(askShownQuestion({ question: request, kind: 'show_me' })).toBe(request);
+  });
+
+  test('a conversation of old Show me turns, with fields no longer read, draws them beside plain questions', () => {
+    const turns = [
+      old('one', { show_me, answer: 'I drew the retry loop.', answered_at: ago(5), again_shape: 'shp_01ABC', shape: { id: 'shp_01ABC' } }),
+      turn('two', { answer: 'Five, then it gives up.' }),
+      old('three', { show_me: { review: 'msg_1', file: null, lines: null, round: 2 }, failure: 'gone' }),
+    ];
+    const messages = askMessages(conversation(turns), null);
+    expect(messages.map((m) => [m.role, m.parts[0]!.text])).toEqual([
+      ['user', 'Show me on retry-worker.ts lines 16–18: after the third failure?'],
+      ['assistant', 'I drew the retry loop.'],
+      ['user', 'q two'],
+      ['assistant', 'Five, then it gives up.'],
+      ['user', 'Show me on the whole review'],
+    ]);
+    expect(JSON.stringify(messages)).not.toContain('plannotator review draw');
+    expect(askUnanswered(turns[2]!, null)).toBe(true);
   });
 });
