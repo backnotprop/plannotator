@@ -109,18 +109,33 @@ struct CameraPicker: UIViewControllerRepresentable {
 struct DraftTiles: View {
   let session: InboxSession
   let place: DraftPlace
+  /// The widest a tile is in the reply box (the window's 280 px chip).
+  static let boxWidth: CGFloat = 280
+  @ScaledMetric(relativeTo: .body) private var scrollHeight: CGFloat = 190
 
   var body: some View {
     let files = session.files(place)
     if !files.isEmpty {
-      ScrollView(.horizontal) {
-        HStack(spacing: Space.close) {
-          ForEach(files) { file in DraftTile(session: session, file: file, place: place) }
+      // One tile a row, as the window's reply box and New message show them at a phone's width (a chip that wraps,
+      // at most 280 px wide, in the box; the whole width in New message): every tile's state reads in full, a refused
+      // file's reason with it. Past three tiles the column scrolls, so the words keep their room.
+      let column = VStack(alignment: .leading, spacing: Space.close) {
+        ForEach(files) { file in
+          DraftTile(session: session, file: file, place: place)
+            .frame(maxWidth: place == .compose ? .infinity : Self.boxWidth, alignment: .leading)
         }
-        .padding(.horizontal, Space.step)
-        .padding(.vertical, Space.close)
       }
-      .scrollIndicators(.hidden)
+      .padding(.horizontal, Space.step)
+      .padding(.vertical, Space.close)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      Group {
+        if files.count > 3 {
+          ScrollView(.vertical) { column }.frame(height: scrollHeight).scrollIndicators(.automatic)
+        } else {
+          column
+        }
+      }
+      .accessibilityElement(children: .contain)
       .accessibilityIdentifier("draft-files")
     }
   }
@@ -163,11 +178,14 @@ struct DraftTile: View {
       .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: Space.hair) {
         Text(file.name).font(TextRole.secondary).foregroundStyle(Token.foreground).lineLimit(1).truncationMode(.middle)
-        Text(line.words).font(TextRole.caption).foregroundStyle(line.trouble ? Role.stop.ink : Token.mutedForeground).lineLimit(2)
+        Text(line.words).font(TextRole.caption).foregroundStyle(line.trouble ? Role.stop.ink : Token.mutedForeground)
           .fixedSize(horizontal: false, vertical: true)
       }
-      .frame(width: 180, alignment: .leading)
-      .accessibilityElement(children: .combine)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      // VoiceOver reads the name, then how it stands: a refused file's reason in full.
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel("\(file.name), \(line.words)")
+      .accessibilityIdentifier("draft-file-state")
       Button {
         withAnimation(Motion.fade.animation(still: false)) { session.removeFile(file.id, from: place) }
       } label: {

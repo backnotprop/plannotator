@@ -153,7 +153,8 @@ struct InboxScreen: View {
         }
         // A new message made while the computer was away: the person's own, waiting, as a held reply is drawn.
         ForEach(session.heldNewMessages()) { new in
-          HeldReply(words: new.words, to: new.to.map(SessionPicker.name), computer: session.computer.name)
+          // The away banner above says when it goes; the row does not say it again.
+          HeldReply(words: new.words, to: new.to.map(SessionPicker.name), computer: session.computer.name, saysWhen: session.reach != .away)
             .listRowBackground(Token.background)
             .listRowSeparator(.hidden)
             .listRowInsets(EdgeInsets(top: Space.close, leading: Self.edge, bottom: Space.close, trailing: Self.edge))

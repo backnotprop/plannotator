@@ -877,6 +877,9 @@ struct HeldReply: View {
   let computer: String
   /// One line for each comment on a file it carries: the file's name, then what the comment is on.
   var comments: [(file: String, on: String)] = []
+  /// The "Will send when … is back." line. Off where the away banner right above already says it (a new message
+  /// waiting in the list).
+  var saysWhen = true
 
   /// The lines for the comments, as the list of comments says them: the file, then the line or the quote.
   static func lines(_ comments: [FileComment], files: [AttachmentItem]) -> [(file: String, on: String)] {
@@ -911,7 +914,7 @@ struct HeldReply: View {
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("held-comment")
       }
-      Label(PhoneWords.willSendWhenBack(computer), systemImage: "clock").font(TextRole.meta).foregroundStyle(Token.mutedForeground)
+      if saysWhen { Label(PhoneWords.willSendWhenBack(computer), systemImage: "clock").font(TextRole.meta).foregroundStyle(Token.mutedForeground) }
     }
   }
 }

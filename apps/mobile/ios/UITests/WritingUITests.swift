@@ -32,6 +32,12 @@ final class WritingUITests: XCTestCase {
     app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", words)).firstMatch
   }
 
+  /// A draft file's name and state, as VoiceOver reads them ("<name>, <state>").
+  @MainActor
+  private func fileState(_ app: XCUIApplication, _ name: String) -> XCUIElement {
+    app.descendants(matching: .any).matching(identifier: "draft-file-state").matching(NSPredicate(format: "label BEGINSWITH %@", "\(name), ")).firstMatch
+  }
+
   /// Words typed in a reply are still there after leaving the thread, and after the app went to the background.
   @MainActor
   func testTheReplysWordsStayAfterLeavingTheThreadAndTheApp() {
@@ -75,13 +81,19 @@ final class WritingUITests: XCTestCase {
   @MainActor
   func testAReplyCarriesItsQuoteAndFiles() {
     let app = launch(stage: "writing")
-    XCTAssertTrue(text(app, "error-dashboard.png").waitForExistence(timeout: 20))
-    XCTAssertTrue(text(app, "Not attached: .env files often hold secrets.").exists)
+    XCTAssertTrue(fileState(app, "error-dashboard.png").waitForExistence(timeout: 20))
+    // The refused file says why in full, on screen with no sideways scroll, and VoiceOver reads the name and the reason.
+    let refused = fileState(app, ".env")
+    XCTAssertTrue(refused.exists)
+    XCTAssertEqual(refused.label, ".env, Not attached: .env files often hold secrets.")
+    XCTAssertTrue(refused.isHittable)
+    XCTAssertTrue(app.windows.firstMatch.frame.contains(refused.frame), "the refused tile is cut at the screen's edge")
+    XCTAssertTrue(app.buttons["Remove .env"].isHittable)
     XCTAssertTrue(app.buttons["Remove quote"].exists)
     XCTAssertTrue(app.buttons["Attach files"].exists)
-    shot("03-reply-files")
+    shot("03-reply-files-r2")
     app.buttons["Remove .env"].tap()
-    XCTAssertFalse(text(app, ".env files").waitForExistence(timeout: 2))
+    XCTAssertFalse(fileState(app, ".env").waitForExistence(timeout: 2))
     app.buttons["Send"].tap()
     // The reply is in the thread, with the picture as its file; the box is empty again.
     XCTAssertTrue(app.buttons["file/error-dashboard.png"].waitForExistence(timeout: 10))
@@ -139,11 +151,11 @@ final class WritingUITests: XCTestCase {
   func testClosingNewMessageKeepsIt() {
     let app = launch(stage: "compose", open: nil)
     app.buttons["New message"].tap()
-    XCTAssertTrue(text(app, "export-p99.png").waitForExistence(timeout: 10))
-    shot("10-compose-file")
+    XCTAssertTrue(fileState(app, "export-p99.png").waitForExistence(timeout: 10))
+    shot("10-compose-file-r2")
     app.buttons["Cancel"].tap()
     app.buttons["New message"].tap()
-    XCTAssertTrue(text(app, "export-p99.png").waitForExistence(timeout: 10))
+    XCTAssertTrue(fileState(app, "export-p99.png").waitForExistence(timeout: 10))
     XCTAssertEqual(app.textFields["compose-words"].value as? String, "Add a retry budget to the export job, and tell me what it costs at peak.")
   }
 
@@ -155,8 +167,13 @@ final class WritingUITests: XCTestCase {
     XCTAssertTrue(app.textFields["compose-words"].waitForExistence(timeout: 10))
     // The picture went up before the computer went away: the message can wait on the phone.
     app.buttons["compose-send"].tap()
-    XCTAssertTrue(app.otherElements["held-new-message"].waitForExistence(timeout: 10) || text(app, "Will send when Work Mac is back.").waitForExistence(timeout: 5))
-    shot("11-compose-held")
+    XCTAssertTrue(text(app, "Add a retry budget to the export job").waitForExistence(timeout: 10))
+    // "Will send when … is back." is said once: by the away banner, not again by the waiting row under it.
+    XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", "Can't reach Work Mac", "Will send when Work Mac is back.")).firstMatch.waitForExistence(timeout: 5))
+    let row = app.descendants(matching: .any).matching(identifier: "held-new-message")
+    XCTAssertTrue(row.matching(NSPredicate(format: "label CONTAINS %@", "Add a retry budget")).firstMatch.exists)
+    XCTAssertFalse(row.matching(NSPredicate(format: "label CONTAINS %@", "Will send when")).firstMatch.exists, "the waiting row says it again")
+    shot("11-compose-held-r2")
   }
 
   /// On the relay a file waits for the computer's network, and Send says to wait for it.
@@ -164,10 +181,11 @@ final class WritingUITests: XCTestCase {
   func testOnTheRelayAFileWaitsForTheNetwork() {
     let app = launch(stage: "relayfiles,compose", open: nil)
     app.buttons["New message"].tap()
-    XCTAssertTrue(text(app, "Needs your computer's network").waitForExistence(timeout: 10))
+    XCTAssertTrue(fileState(app, "export-p99.png").waitForExistence(timeout: 10))
+    XCTAssertEqual(fileState(app, "export-p99.png").label, "export-p99.png, Needs your computer's network")
     app.buttons["compose-send"].tap()
     XCTAssertTrue(text(app, "Wait for the files to finish uploading.").waitForExistence(timeout: 5))
-    shot("12-compose-needs-network")
+    shot("12-compose-needs-network-r2")
   }
 
   /// No agent running: the picker says so.
