@@ -412,25 +412,42 @@ function patchFilesOf(store: InboxStore, sha256: string): DiffFile[] {
 }
 
 /**
- * A guide's patch as the agent sent it (its image previews), read once per guide; null when it cannot be read. Only a
- * patch is kept: a read that failed (a passing file error) is tried again on the next request, never remembered.
+ * A guide's patch as the agent sent it (its image previews), and the commit it pins: its commit for a guide of one
+ * commit, else the head it was made at (`source.headSha`), else null (a producer that records none). Read once per
+ * guide; null when it cannot be read. Only a read that worked is kept: a failed one (a passing file error) is tried
+ * again on the next request, never remembered.
  */
-const guidePatches = new Map<string, string>();
+export interface GuideReviewRead {
+  patch: string;
+  revision: string | null;
+}
 
-export function guidePatchOf(store: InboxStore, sha256: string): string | null {
-  const kept = guidePatches.get(sha256);
+const guideReviews = new Map<string, GuideReviewRead>();
+
+export function guideReviewOf(store: InboxStore, sha256: string): GuideReviewRead | null {
+  const kept = guideReviews.get(sha256);
   if (kept !== undefined) return kept;
-  let patch: string | null = null;
+  let read: GuideReviewRead | null = null;
   try {
     const parsed = parseGuideSnapshotJson(readFileSync(inboxBlobPath(store.dir, sha256), "utf8"));
-    if (parsed.ok) patch = parsed.value.review.rawPatch;
+    if (parsed.ok) {
+      const { source } = parsed.value;
+      const pinned = (source.kind === "commit" ? source.commitSha : undefined) ?? source.headSha;
+      // Only an object id: anything else is no revision (never a ref or an expression git would resolve).
+      read = { patch: parsed.value.review.rawPatch, revision: pinned && /^[0-9a-f]{7,64}$/i.test(pinned) ? pinned : null };
+    }
   } catch {
     // Gone from the store, or a passing read error.
   }
-  if (patch === null) return null;
-  guidePatches.set(sha256, patch);
-  while (guidePatches.size > 8) guidePatches.delete(guidePatches.keys().next().value!);
-  return patch;
+  if (read === null) return null;
+  guideReviews.set(sha256, read);
+  while (guideReviews.size > 8) guideReviews.delete(guideReviews.keys().next().value!);
+  return read;
+}
+
+/** A guide's patch as the agent sent it (`guideReviewOf`), or null. */
+export function guidePatchOf(store: InboxStore, sha256: string): string | null {
+  return guideReviewOf(store, sha256)?.patch ?? null;
 }
 
 /**

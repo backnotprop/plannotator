@@ -12,7 +12,8 @@
  *    a guided review's patch (`snapshot` the message id). The document and a
  *    picture the patch changes are the blobs its `index` line names (as the
  *    image previews read them); a picture the patch does not change is read as
- *    committed at the project's HEAD, a git object, never the working tree.
+ *    committed at the commit the guide pins (the project's HEAD for a guide
+ *    that records none), a git object, never the working tree.
  *
  * Every decision is the shared handler's (packages/shared/review-markdown-image.ts),
  * as in code review's `/api/review-markdown-image`: `doc` must be a Markdown file

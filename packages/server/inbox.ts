@@ -214,7 +214,7 @@ import { isAddressInUseError } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
 import { markPlannotatorResponse, withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT, inboxMcpInitializeClient, resolveInboxMcpReminder, type InboxMcpClient, type InboxMcpContext } from "./inbox-mcp";
-import { guidePatchOf, guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewSnapshot } from "./inbox-guides";
+import { guideReviewOf, guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewSnapshot } from "./inbox-guides";
 import { guideReviewImage, pullReviewImage, reviewImageHttp } from "./inbox-review-image";
 import { guideReviewMarkdownImage, pullReviewMarkdownImage } from "./inbox-review-markdown-image";
 import { createInboxRepoCache } from "./inbox-repos";
@@ -7983,7 +7983,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 return projectRoot && roots.includes(projectRoot) ? pulls.fileBytes(pullKey, "layer", side, filePath, oldPath, roots, maxBytes) : ({ kind: "missing" } as const);
               }
             : undefined;
-        const asked = { patch: guidePatchOf(store, sha256), messageId: message.id, root: projectRoot, params: url.searchParams, ...(forge ? { forge } : {}), ifNoneMatch: req.headers.get("if-none-match"), signal: req.signal };
+        const review = guideReviewOf(store, sha256);
+        const asked = { patch: review?.patch ?? null, revision: review?.revision ?? null, messageId: message.id, root: projectRoot, params: url.searchParams, ...(forge ? { forge } : {}), ifNoneMatch: req.headers.get("if-none-match"), signal: req.signal };
         return reviewImageHttp(await (guideImage[2] === "review-image" ? guideReviewImage(asked) : guideReviewMarkdownImage(asked)));
       }
 

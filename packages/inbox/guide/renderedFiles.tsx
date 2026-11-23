@@ -32,7 +32,6 @@ interface Rendered {
   controller: MarkdownPreviewController;
   read: ReadFile;
   images: GuideReaderImages | undefined;
-  holdRemoteImages: boolean;
   filePaths: ReadonlySet<string>;
   openFile: (path: string) => void;
 }
@@ -106,7 +105,9 @@ function MarkdownCard({ file, onHeightChange }: { file: DiffFile; onHeightChange
       onHeightChange={onHeightChange}
       view={renderedViewOf(controller.viewOf(file.path))}
       onViewChange={(view) => controller.show(file.path, fileViewOfRendered(view))}
-      holdRemoteImages={rendered.holdRemoteImages}
+      // The window loads only its own pictures (a PR's or a local guide's): a web picture is code review's quiet
+      // placeholder, with nothing offering to load it.
+      neverLoadRemoteImages
       diagramEngine={null}
     />
   );
@@ -125,6 +126,8 @@ function MarkdownViewControl({ file, iconOnly, touch }: { file: DiffFile; iconOn
       iconOnly={iconOnly}
       touch={touch}
       disabledReason={controller.lockReason(file.path)}
+      // Selecting rendered text does not comment here and P is not bound: neither is offered.
+      withoutCommentAndKeyHints
     />
   );
 }
@@ -139,12 +142,10 @@ export function useRenderedFiles(options: {
   read: ReadFile | undefined;
   images: GuideReaderImages | undefined;
   enabled: boolean;
-  /** As code review: hold a document's web pictures behind a placeholder in a pull request's files. */
-  holdRemoteImages: boolean;
   compact: boolean;
   openFile: (path: string) => void;
 }): { markdownPreview: RenderedFiles | undefined; rendered: Rendered | null } {
-  const { files, read, images, enabled, holdRemoteImages, compact, openFile } = options;
+  const { files, read, images, enabled, compact, openFile } = options;
   const controller = useMarkdownPreview({ files, supported: enabled && !!read });
   const filePaths = useMemo(() => new Set(files.map((file) => file.path)), [files]);
   const base = useMemo<RenderedFiles | undefined>(
@@ -170,8 +171,8 @@ export function useRenderedFiles(options: {
   );
   const markdownPreview = useSvgViews(base, { files, enabled: enabled && !!images, snapshotId: images?.snapshotId, compact, ...(images ? { fetchImpl: images.fetchImpl } : {}) });
   const rendered = useMemo<Rendered | null>(
-    () => (controller && read ? { controller, read, images, holdRemoteImages, filePaths, openFile } : null),
-    [controller, read, images, holdRemoteImages, filePaths, openFile],
+    () => (controller && read ? { controller, read, images, filePaths, openFile } : null),
+    [controller, read, images, filePaths, openFile],
   );
   return { markdownPreview, rendered };
 }

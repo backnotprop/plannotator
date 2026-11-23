@@ -609,14 +609,12 @@ function Reader({
   const drawChapterDiagram = useMemo(() => withChapterMermaid(renderChapterDiagram), [renderChapterDiagram]);
   // Code review's rendered files (renderedFiles.tsx): a changed Markdown file's Source / Changes / Read, read through the
   // host's whole-file reader, and a changed SVG's Image / Source where the host names its images. Never on a walkthrough
-  // of code as it is. A pull request's document holds its web pictures, as code review holds them in a PR review.
-  const source = snapshot.source;
+  // of code as it is.
   const { markdownPreview, rendered } = useRenderedFiles({
     files,
     read: fetchFileContent,
     images: readerImages,
     enabled: !asItIs,
-    holdRemoteImages: source?.kind === 'pr' || !!source?.pr,
     compact: phone,
     openFile: openLinkedFile,
   });

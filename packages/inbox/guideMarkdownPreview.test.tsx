@@ -8,8 +8,9 @@
  * The failures this catches: no menu or card with the wiring in place; a card
  * whose texts are not the host's reader's (or an added file's not its patch's);
  * a picture asked of code review's `/api/review-markdown-image` (the Inbox does
- * not serve it) or under another snapshot than the message; a pull request's
- * web picture loaded instead of held; an SVG drawn as source only; a host that
+ * not serve it) or under another snapshot than the message; a document's
+ * web picture loaded, or offered to load (the window allows only its own pictures); a
+ * view menu promising select-to-comment or the P key; an SVG drawn as source only; a host that
  * reads no whole files and names no images drawing any of it.
  * (A real browser: tests/e2e/inbox-review-markdown.spec.ts.)
  *
@@ -213,21 +214,36 @@ test.skipIf(!hasDom)("a changed SVG: code review's picture with its Image / Sour
   expect(asked.filter((url) => url.startsWith('/api/review-'))).toEqual([]);
 });
 
-test.skipIf(!hasDom)("a pull request's document: its web pictures are held, never loaded", async () => {
+// The window loads only its own pictures: a web picture is code review's quiet placeholder, in a PR's guide or a local
+// one, with no notice or button offering to load it (that would load nothing).
+for (const [name, source] of [
+  ['a pull request', { kind: 'pr', pr: { url: 'https://github.com/northwind/ledger/pull/7', number: 7, title: 'Docs', platform: 'github' } }],
+  ['a local guide', { kind: 'local' }],
+] as const) {
+  test.skipIf(!hasDom)(`${name}'s document: its web pictures are placeholders, never loaded, with nothing offering to load them`, async () => {
+    setStartingView('changes');
+    snapshot = snapshotOf(PATCH.replace('+![chart](img/chart.png)\n', '+![web](https://example.com/track.png)\n'), source);
+    globalThis.fetch = ((original) => (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path.includes('/guide/file') && path.includes('README.md')) return Response.json({ serverSession: 's', oldContent: README_OLD, newContent: README_NEW.replace('![chart](img/chart.png)', '![web](https://example.com/track.png)') });
+      return original(input, init);
+    }) as typeof fetch)(globalThis.fetch);
+    await draw(pane());
+    const readme = inShell<HTMLElement>('README.md', '[data-markdown-preview]')[0]!;
+    expect(readme.querySelectorAll('[data-image-unavailable]').length).toBe(1);
+    expect(readme.querySelector('img[src^="https:"]')).toBeNull();
+    expect(readme.querySelector('[data-markdown-preview-remote-images]')).toBeNull();
+    await act(async () => readme.querySelector<HTMLElement>('[data-image-unavailable]')!.click());
+    await settle(5);
+    expect(readme.querySelector('img[src^="https:"]')).toBeNull();
+  });
+}
+
+test.skipIf(!hasDom)("the view menu promises no select-to-comment and no P key: neither works in the Inbox", async () => {
   setStartingView('changes');
-  snapshot = snapshotOf(
-    PATCH.replace('+![chart](img/chart.png)\n', '+![web](https://example.com/track.png)\n'),
-    { kind: 'pr', pr: { url: 'https://github.com/northwind/ledger/pull/7', number: 7, title: 'Docs', platform: 'github' } },
-  );
-  globalThis.fetch = ((original) => (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = String(input);
-    if (path.includes('/guide/file') && path.includes('README.md')) return Response.json({ serverSession: 's', oldContent: README_OLD, newContent: README_NEW.replace('![chart](img/chart.png)', '![web](https://example.com/track.png)') });
-    return original(input, init);
-  }) as typeof fetch)(globalThis.fetch);
   await draw(pane());
-  const readme = inShell<HTMLElement>('README.md', '[data-markdown-preview]')[0]!;
-  expect(readme.querySelector('[data-markdown-preview-remote-images]')).not.toBeNull();
-  expect(readme.querySelector('img[src^="https:"]')).toBeNull();
+  const menu = inShell<HTMLElement>('README.md', '[data-markdown-view-menu]')[0]!;
+  expect(menu.getAttribute('title')).not.toMatch(/select text|P:/i);
 });
 
 test.skipIf(!hasDom)('a host that reads no whole files and names no images: the source diff, no menu, nothing read', async () => {

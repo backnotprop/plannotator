@@ -20,6 +20,7 @@ import { fileViewOfRendered, renderedViewOf, type MarkdownPreviewView } from '..
 import {
   MARKDOWN_PREVIEW_SIZE_LIMIT,
   REMOTE_IMAGE_HELD_TITLE,
+  REMOTE_IMAGE_NOT_LOADED_TITLE,
   isExternalImageSource,
   isRemoteImageSource,
   markdownPreviewImageUrl,
@@ -76,6 +77,13 @@ export interface MarkdownFilePreviewProps {
    * off otherwise.
    */
   holdRemoteImages?: boolean;
+  /**
+   * A host whose page never loads a remote image (the Plannotator Inbox,
+   * whose window allows only its own pictures): every remote image is the
+   * quiet placeholder, with no notice, no button and no click to load it.
+   * Wins over `holdRemoteImages`. Absent: as above.
+   */
+  neverLoadRemoteImages?: boolean;
   /** Where the diagram engine is served; default: review state's advert.
    *  `null` keeps diagram fences as code. */
   diagramEngine?: DiagramEngineUrls | null;
@@ -140,6 +148,7 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
   view: viewProp,
   onViewChange,
   holdRemoteImages,
+  neverLoadRemoteImages = false,
   diagramEngine: diagramEngineProp,
 }) => {
   const state = useReviewStateOptional();
@@ -203,10 +212,12 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
 
   const snapshot = imageSnapshotId ?? state?.snapshotId;
   const canLoadImages = imagesAvailable || state?.imagePreviewAvailable === true;
-  const holdRemote = holdRemoteImages ?? !!state?.prMetadata;
+  const holdRemote = !neverLoadRemoteImages && (holdRemoteImages ?? !!state?.prMetadata);
   const [remoteImagesLoaded, setRemoteImagesLoaded] = useState(false);
   const holdingRemote = holdRemote && !remoteImagesLoaded;
   const makeImageResolver = useCallback((side: PlanDiffSide): ImageResolver => (src) => {
+    // Its own title: the held count, the notice and click-to-load only see held ones.
+    if (neverLoadRemoteImages && isRemoteImageSource(src)) return { kind: 'unavailable', title: REMOTE_IMAGE_NOT_LOADED_TITLE };
     if (holdRemote && isRemoteImageSource(src)) {
       return holdingRemote
         ? { kind: 'unavailable', title: REMOTE_IMAGE_HELD_TITLE }
@@ -219,7 +230,7 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
     // it reads the file's references.
     const url = markdownPreviewImageUrl({ doc: filePath, side, src, snapshot });
     return { kind: 'src', src: imageUrl ? imageUrl(url) : url };
-  }, [canLoadImages, filePath, snapshot, holdRemote, holdingRemote, imageUrl]);
+  }, [canLoadImages, filePath, snapshot, neverLoadRemoteImages, holdRemote, holdingRemote, imageUrl]);
   const resolveOldImage = useMemo(() => makeImageResolver('old'), [makeImageResolver]);
   const resolveNewImage = useMemo(() => makeImageResolver('new'), [makeImageResolver]);
 

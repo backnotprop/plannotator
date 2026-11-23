@@ -108,6 +108,22 @@ describe("a guided review's Markdown picture", () => {
     expect(bytesOf(logo.body).equals(png("logo"))).toBe(true);
   });
 
+  test("a picture the patch does not change, for a guide that pins its commit: read there, not at the project's HEAD now", async () => {
+    const pinned = git("rev-parse", "HEAD").trim();
+    writeFileSync(join(repo, "img/logo.png"), png("logo, later"));
+    git("commit", "-q", "-m", "later logo", "--", "img/logo.png");
+    try {
+      const at = (revision?: string) =>
+        guideReviewMarkdownImage({ patch, messageId: MESSAGE, root: repo, ...(revision ? { revision } : {}), params: ask("/img/logo.png", "new", MESSAGE) });
+      expect(bytesOf((await at(pinned)).body).equals(png("logo"))).toBe(true);
+      // A guide that records none: the project's HEAD.
+      expect(bytesOf((await at()).body).equals(png("logo, later"))).toBe(true);
+    } finally {
+      writeFileSync(join(repo, "img/logo.png"), png("logo"));
+      git("commit", "-q", "-m", "logo back", "--", "img/logo.png");
+    }
+  });
+
   test("never the working tree for a picture the patch does not change", async () => {
     const draft = await read("img/draft.png");
     expect([draft.status, reasonOf(draft.body)]).toEqual([404, "missing"]);

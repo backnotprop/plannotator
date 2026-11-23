@@ -141,6 +141,8 @@ export interface GuideImageOptions {
   messageId: string;
   /** The project's folder on this computer, or null. */
   root: string | null;
+  /** The commit the guide pins (`guideReviewOf`), or null when it records none. */
+  revision?: string | null;
   params: URLSearchParams;
   /** A guide of a pull request with Code review on: that PR's own side read (`InboxPulls.fileBytes`), else absent. */
   forge?: (side: DiffSide, filePath: string, oldPath: string | undefined, maxBytes: number) => Promise<FileBytesRead>;
@@ -152,8 +154,8 @@ export interface GuideImageOptions {
  * A guided review's patch and its reader. The guide keeps the diff as sent while the working tree moves on, so a side
  * of a file the patch changes is only ever the blob its `index` line names (a file whose patch names none, a pure
  * rename or a patch rebuilt without them, reads from `forge` alone). `unchanged`: how a path the patch does not change
- * is read (a Markdown file's picture): `"head"`, as committed at the project's HEAD, a git object (never the working
- * tree, never the forge); absent, it is missing.
+ * is read (a Markdown file's picture): `"head"`, as committed at the guide's own revision (`revision`), a git object
+ * (never the working tree, never the forge); absent, it is missing.
  */
 export function guideImageSource(options: GuideImageOptions, unchanged?: "head"): ImageSource {
   const { patch, root } = options;
@@ -168,7 +170,10 @@ export function guideImageSource(options: GuideImageOptions, unchanged?: "head")
         const file = files.find((f) => f.path === filePath);
         if (!file && unchanged === "head") {
           validateFilePath(filePath);
-          return root ? readGitObjectBytes(gitRuntime, `HEAD:${filePath}`, maxBytes, root) : { kind: "missing" };
+          // A guide that records no revision (a producer that names none) is read at the project's HEAD now: the best
+          // there is, though the project may have moved on since the guide was made.
+          const at = options.revision ?? "HEAD";
+          return root ? readGitObjectBytes(gitRuntime, `${at}:${filePath}`, maxBytes, root) : { kind: "missing" };
         }
         const ids = file ? indexIds(file.patch) : null;
         const id = ids?.[side] ?? null;
