@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { PanelEmptyState } from './PanelEmptyState';
-import { getPlatformLabel, type Platform, type PRContext, type PRComment, type PRReview, type PRReviewThread } from '@plannotator/shared/pr-types';
+import { getPlatformLabel, type Platform, type PRContext, type PRComment, type PRMetadata, type PRReview, type PRReviewThread } from '@plannotator/shared/pr-types';
 import { MarkdownBody } from './MarkdownBody';
 import { CopyButton } from './CopyButton';
 import { DiffHunkPreview } from './DiffHunkPreview';
@@ -479,6 +479,7 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
                   onAnnotate={handleAnnotate}
                   authenticatedImages={authenticatedImages}
                   platform={prMetadata?.platform}
+                  forgejoPR={prMetadata}
                 />
               );
             }
@@ -530,7 +531,7 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
 
                 {!isCollapsed && entry.data.body && (
                   <div className="mt-2 review-comment-markdown">
-                    <MarkdownBody prMedia authenticatedImages={authenticatedImages} markdown={entry.data.body} textClassName="text-[13px]" />
+                    <MarkdownBody prMedia authenticatedImages={authenticatedImages} forgejoPR={prMetadata} markdown={entry.data.body} textClassName="text-[13px]" />
                   </div>
                 )}
 
@@ -575,7 +576,7 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
 // Subcomponents
 // ---------------------------------------------------------------------------
 
-function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollapse, onAnnotate, authenticatedImages, platform }: {
+function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollapse, onAnnotate, authenticatedImages, platform, forgejoPR }: {
   thread: PRReviewThread;
   isSelected: boolean;
   isCollapsed: boolean;
@@ -586,6 +587,8 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
   authenticatedImages: boolean;
   /** The PR's platform: it names the comment link's forge. */
   platform?: Platform;
+  /** A Forgejo PR: its own uploads load through the proxy. */
+  forgejoPR: PRMetadata | null;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const first = thread.comments[0];
@@ -674,7 +677,7 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
           {first.body && (
             <div className={`relative mt-2 ${isDimmed && !isExpanded ? 'max-h-16 overflow-hidden' : ''}`}>
               <div className={`leading-relaxed review-comment-markdown ${isDimmed && !isExpanded ? 'text-muted-foreground' : 'text-foreground/85'}`}>
-                <MarkdownBody prMedia authenticatedImages={authenticatedImages} markdown={first.body} textClassName="text-[13px]" />
+                <MarkdownBody prMedia authenticatedImages={authenticatedImages} forgejoPR={forgejoPR} markdown={first.body} textClassName="text-[13px]" />
               </div>
               {isDimmed && !isExpanded && (
                 <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-card to-transparent pointer-events-none" />
@@ -706,7 +709,7 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
                     <span className="text-xs text-muted-foreground">{formatRelativeTime(reply.createdAt)}</span>
                   </div>
                   <div className="pl-6 leading-relaxed review-comment-markdown text-foreground/85">
-                    <MarkdownBody prMedia authenticatedImages={authenticatedImages} markdown={reply.body} textClassName="text-[13px]" />
+                    <MarkdownBody prMedia authenticatedImages={authenticatedImages} forgejoPR={forgejoPR} markdown={reply.body} textClassName="text-[13px]" />
                   </div>
                 </div>
               ))}
