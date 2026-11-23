@@ -12,7 +12,11 @@
  *   words or Approve;
  * - a computer loses Edit and the version from the pinned reading line, or the menu at its end (Copy file, Download,
  *   Full screen), or the bar's Global comment;
- * - Share shows while its switch is off.
+ * - Share shows while its switch is off;
+ * - the phone's bar opens on the plan's name and fades to the project (it must open on the project, cut);
+ * - the phone's menu is drawn outside the Inbox's root (its icons and lines lose their rules), or Copy file gives no
+ *   sign it copied;
+ * - a computer's narrow card loses its way to Contents (its own button: the computer's menu has no Contents).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -25,7 +29,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NO_ACTOR } from '@plannotator/core/plans';
 import { createPlanStore, type PlanStore } from '../../shared/plans/store';
 import { handlePlanRoute } from '../../shared/plans/routes';
-import { planMenuItems, type PlanDocActs, type PlanMenuEntry } from './PlanChrome';
+import { PLAN_COPIED_MS, planMenuItems, titleAway, type PlanDocActs, type PlanMenuEntry } from './PlanChrome';
 
 const hasDom = typeof document !== 'undefined';
 const { PlansRoute } = (hasDom ? await import('./PlansPage') : {}) as typeof import('./PlansPage');
@@ -166,12 +170,20 @@ test.skipIf(!hasDom)('a phone: the bar holds the project at rest and takes the p
   const id = plan('Rate limiting for public endpoints', 'trailhead-api', [DOC], { approvedOn: 1 });
   placeTitle(260);
   window.location.hash = `#plans=${id}`;
+  // Whether the bar ever showed the plan's name while the page opened (the name must not flash in, then fade out).
+  let flashed = false;
+  const watch = new MutationObserver(() => void (flashed ||= document.querySelector('[data-plan-bartitle][data-away]') !== null));
+  watch.observe(document.body, { subtree: true, childList: true, attributes: true });
   const host = draw(true);
   await settle();
+  watch.disconnect();
+  expect(flashed).toBe(false);
   const page = host.querySelector('[data-plan-page]')!;
   const bar = host.querySelector('[data-plan-bartitle]')!;
   expect(page.getAttribute('data-plan-header')).toBe('project');
   expect(bar.hasAttribute('data-away')).toBe(false);
+  // The cross-fade is on only once the first measurement is in.
+  expect(bar.hasAttribute('data-settled')).toBe(true);
   expect(text(bar.querySelector('[data-plan-bartitle-rest]'))).toBe('trailhead-api');
   // The title block is out of reach at rest (inert), so the name is read once: in the document.
   expect(bar.querySelector('[data-plan-titleblock]')!.hasAttribute('inert')).toBe(true);
@@ -256,9 +268,17 @@ test.skipIf(!hasDom)('a phone’s menu holds what the file-name row and the chip
     expect(text(document.querySelector('[data-plan-menu-row="files"] .ib-plan-menu-end'))).toBe('2');
     expect(document.querySelector('[data-plan-menu-row="download"]')!.getAttribute('href')).toBe(`/api/plans/${id}/versions/1`);
     expect(document.querySelector('[data-plan-menu]')!.getAttribute('aria-label')).toBe('Page actions');
+    // Drawn inside the Inbox's root, where its icons' and lines' rules apply.
+    expect(document.querySelector('[data-plan-menu]')!.closest('.pn-inbox')).toBe(host);
 
+    // Copy file: the row says it copied, as the Viewer's own Copy does, then the menu closes.
     await pick('copy');
     expect(copied).toEqual([DOC]);
+    expect(text(document.querySelector('[data-plan-menu-row="copy"]'))).toBe('Copied!');
+    expect(document.querySelector('[data-plan-menu-row="copy"]')!.hasAttribute('data-copied')).toBe(true);
+    await act(async () => await new Promise((r) => setTimeout(r, PLAN_COPIED_MS + 50)));
+    await settle();
+    expect(host.querySelector('nav [data-plan-more]')!.getAttribute('aria-expanded')).toBe('false');
 
     await openMenu(host);
     await pick('global');
@@ -339,6 +359,27 @@ test.skipIf(!hasDom)('a computer: Edit and the version stay on the pinned readin
   expect(text(dock.querySelector('[data-plan-send-button]'))).toBe('Send');
   // The top bar is unchanged: Spaces / the project / the plan.
   expect(host.querySelector('[data-plan-bartitle]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a computer whose card has no room for the Contents rail keeps its own Contents button, which opens the sheet', async () => {
+  const id = plan('Rate limiting for public endpoints', 'trailhead-api', [DOC]);
+  window.location.hash = `#plans=${id}`;
+  const host = draw(false);
+  // The rail is not drawn here (no layout): the button turns to the sheet once the rail's wait is over.
+  await act(async () => await new Promise((r) => setTimeout(r, 2600)));
+  await settle();
+  const open = host.querySelector<HTMLButtonElement>('[data-plan-annotate] [data-contents-open]');
+  expect(open).not.toBeNull();
+  await act(async () => open!.click());
+  await settle();
+  expect(document.querySelector('[data-contents="sheet"]')).not.toBeNull();
+});
+
+test.skipIf(!hasDom)('the title is not known while the document has no block yet', () => {
+  const scroll = document.createElement('div');
+  expect(titleAway(scroll, 'A plan')).toBeNull();
+  scroll.innerHTML = '<h2 data-block-id="b1">Context</h2>';
+  expect(titleAway(scroll, 'A plan')).toBe(true);
 });
 
 test('the menu’s rows: a phone’s groups in their order, a computer’s three; a row with nothing behind it is left out', () => {

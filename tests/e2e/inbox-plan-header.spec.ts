@@ -9,7 +9,8 @@
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-plan-header.spec.ts`.
  * PNGs land in .local/proof/plan-header/: phone-<light|dark>, phone-scrolled-<scheme>, phone-menu-<scheme>,
- * phone-320-light, phone-long-name-light, desktop-<scheme>, desktop-menu-<scheme>, desktop-scrolled-light.
+ * phone-<390|375|320>-light, phone-long-name-light, desktop-<scheme>, desktop-menu-<scheme>, desktop-copied-light,
+ * desktop-scrolled-light, desktop-narrow-light, desktop-narrow-contents-light.
  */
 
 import { expect, test, type Browser, type Page } from './inbox-test';
@@ -60,6 +61,13 @@ test.afterAll(async () => {
 
 /** Focus off whatever the last step pressed, so a picture shows the page at rest. */
 const blur = (page: Page) => page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+
+/** The phone's bottom bar is one row: its seven controls (five tools, the comments, Send) share a top within 2 px. */
+async function dockOneRow(page: Page) {
+  const tops = await page.locator('[data-plan-dock]').evaluate((dock) => [...dock.querySelectorAll('.ib-toolstrip button, [data-annotations-sheet], [data-plan-send-button]')].map((el) => el.getBoundingClientRect().top));
+  expect(tops.length).toBe(7);
+  expect(Math.max(...tops) - Math.min(...tops)).toBeLessThanOrEqual(2);
+}
 
 async function phonePage(browser: Browser, url: string, scheme: 'light' | 'dark', width = 393) {
   const context = await browser.newContext({ viewport: { width, height: 852 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: scheme });
@@ -135,6 +143,13 @@ test('the document’s title is the header: a phone’s bar, state line, bottom 
       await expect(sheet).toBeVisible();
       await expect(sheet.locator('[data-plan-menu-row]')).toHaveText(['Edit', 'Global comment', 'Files2', 'Contents', 'Copy file', 'Download', 'Close']);
       await page.waitForTimeout(400);
+      // Drawn inside the Inbox's root: its icons are strokes (not filled blobs) and its group lines have a colour.
+      const glyph = await sheet.locator('[data-plan-menu-row="edit"] svg').evaluate((el) => ({ fill: getComputedStyle(el).fill, stroke: getComputedStyle(el).stroke }));
+      expect(glyph.fill).toBe('none');
+      expect(glyph.stroke).not.toBe('none');
+      const lineColour = await sheet.locator('.ib-sheet-line').first().evaluate((el) => getComputedStyle(el).backgroundColor);
+      expect(lineColour).not.toBe('rgba(0, 0, 0, 0)');
+      expect(lineColour).not.toBe('transparent');
       await page.screenshot({ path: join(proofDir, `phone-menu-${scheme}.png`) });
       await sheet.locator('[data-plan-menu-row="files"]').click();
       await expect(page.locator('[data-plan-sidebar="compact"]')).toContainText('Load test notes');
@@ -145,14 +160,35 @@ test('the document’s title is the header: a phone’s bar, state line, bottom 
     }
   }
 
+  // 390, 375 and 320 px: the bottom bar stays one row, each target still 44 px; the bar opens on the project, cut.
+  for (const width of [390, 375] as const) {
+    const { context, page, errors } = await phonePage(browser, planUrl, 'light', width);
+    try {
+      await expect(page.locator('[data-plan-kicker]')).toBeVisible();
+      await dockOneRow(page);
+      await blur(page);
+      await page.screenshot({ path: join(proofDir, `phone-${width}-light.png`) });
+      expect(errors).toEqual([]);
+    } finally {
+      await context.close();
+    }
+  }
   // 320 px and a long name: nothing runs off the screen; the name is cut at its end.
   {
     const { context, page, errors } = await phonePage(browser, planUrl, 'light', 320);
     try {
       await expect(page.locator('[data-plan-kicker]')).toBeVisible();
+      // The plan's name is not in the bar at rest (it never fades in and out as the page opens).
+      await expect(page.locator('[data-plan-titleblock]')).toHaveCSS('opacity', '0');
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
       const dock = page.locator('[data-plan-dock]');
       expect(await dock.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+      await dockOneRow(page);
+      // A tool drawn narrower keeps a 44 px wide hit area: a press 21 px left of the first tool's middle is that tool.
+      const first = dock.locator('.ib-toolstrip button').first();
+      const box = (await first.boundingBox())!;
+      expect(box.height).toBeGreaterThanOrEqual(44);
+      expect(await first.evaluate((el, x) => el.contains(document.elementFromPoint(x, el.getBoundingClientRect().top + 22)), box.x + box.width / 2 - 21)).toBe(true);
       await blur(page);
       await page.screenshot({ path: join(proofDir, 'phone-320-light.png') });
       await page.goto(`${url}#plans=${long.plan.id}`);
@@ -188,6 +224,15 @@ test('the document’s title is the header: a phone’s bar, state line, bottom 
       await page.screenshot({ path: join(proofDir, `desktop-menu-${scheme}.png`) });
       await page.keyboard.press('Escape');
       if (scheme === 'light') {
+        // Copy file says it copied, as the Viewer's own Copy does, then the menu closes.
+        await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(url).origin });
+        await reading.locator('[data-plan-more]').click();
+        await page.locator('[data-plan-menu] [data-plan-menu-row="copy"]').click();
+        await expect(page.locator('[data-plan-menu] [data-plan-menu-row="copy"]')).toHaveText('Copied!');
+        await page.screenshot({ path: join(proofDir, 'desktop-copied-light.png') });
+        await expect(page.locator('[data-plan-menu]')).toHaveCount(0);
+      }
+      if (scheme === 'light') {
         // Pinned: Edit and the version never scroll away.
         const before = (await reading.boundingBox())!;
         await page.locator('[data-plan-annotate] .ib-docscroll').evaluate((el) => el.scrollTo(0, 500));
@@ -196,6 +241,33 @@ test('the document’s title is the header: a phone’s bar, state line, bottom 
         await blur(page);
         await page.screenshot({ path: join(proofDir, 'desktop-scrolled-light.png') });
       }
+      expect(errors).toEqual([]);
+    } finally {
+      await context.close();
+    }
+  }
+
+  // A narrow computer window (no room for the Contents rail beside the document): Contents is still one press away
+  // (its own button over the document), and the Send line stays beside Send.
+  {
+    const context = await browser.newContext({ viewport: { width: 820, height: 900 }, colorScheme: 'light' });
+    try {
+      const page = await context.newPage();
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      await page.goto(planUrl);
+      await expect(page.locator('[data-plan-reading] [data-plan-edit]')).toBeVisible();
+      const line = page.locator('[data-plan-dock] [data-plan-send-line="shown"]');
+      await expect(line).toBeVisible();
+      expect(await line.evaluate((el) => el.getBoundingClientRect().width)).toBeGreaterThan(40);
+      const contents = page.locator('[data-plan-annotate] [data-contents-open]');
+      await expect(contents).toBeVisible({ timeout: 10_000 });
+      await blur(page);
+      await page.screenshot({ path: join(proofDir, 'desktop-narrow-light.png') });
+      await contents.click();
+      await expect(page.locator('[data-contents="sheet"]')).toBeVisible();
+      await page.waitForTimeout(300);
+      await page.screenshot({ path: join(proofDir, 'desktop-narrow-contents-light.png') });
       expect(errors).toEqual([]);
     } finally {
       await context.close();

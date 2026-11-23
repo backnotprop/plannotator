@@ -209,7 +209,7 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions, fresh
   // name once the document's title is out of view), Share and the page's menu, which holds Files and the document's
   // actions; the document hands those up (`acts`) and says whether its state line is above its title (`bar.a3`).
   const acts = useRef<PlanDocActs | null>(null);
-  const [bar, setBar] = useState<PlanBarState>({ a3: false, shown: null, away: true });
+  const [bar, setBar] = useState<PlanBarState>({ a3: false, shown: null, away: null });
   const chrome = useMemo(() => ({ acts, setBar }), []);
   const [filesSheet, setFilesSheet] = useState(false);
   const fileCount = read.documents.filter((d) => !d.archived_at).length + artifacts.length;
@@ -454,7 +454,7 @@ function DocLoaded({
   useEffect(() => {
     chrome?.setBar((b) => (b.a3 === a3 && b.shown === shown ? b : { ...b, a3, shown }));
   }, [chrome, a3, shown]);
-  useEffect(() => () => chrome?.setBar(() => ({ a3: false, shown: null, away: true })), [chrome]);
+  useEffect(() => () => chrome?.setBar(() => ({ a3: false, shown: null, away: null })), [chrome]);
   const onTitleAway = useCallback((away: boolean) => chrome?.setBar((b) => (b.away === away ? b : { ...b, away })), [chrome]);
   const kicker = a3 ? <PlanKicker start={editing.startNoEdit} approved={editing.approved} shown={shown} count={versions.length} versionsOpen={place.open} onVersions={place.setOpen} /> : null;
   const annotateChrome = { full, onFull: setFull, handle: paneHandle, kicker, onContents, onTitleAway: a3 ? onTitleAway : null };

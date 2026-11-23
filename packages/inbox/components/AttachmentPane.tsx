@@ -2665,7 +2665,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               scrollViewport={scrollViewport}
               onShow={showContents}
               phone={phone}
-              opener={hosted && contentsButton === 'sheet' ? hosted.onContents : undefined}
+              opener={hosted && phone && contentsButton === 'sheet' ? hosted.onContents : undefined}
             />
           )}
           {isImage && (

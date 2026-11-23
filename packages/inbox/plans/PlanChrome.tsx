@@ -32,11 +32,14 @@ export interface PlanDocActs {
   full: (() => void) | null;
 }
 
-/** The phone's bar: the A3 state line is in the document (`a3`), the version on screen, and whether the title is out of view. */
+/**
+ * The phone's bar: the A3 state line is in the document (`a3`), the version on screen, and whether the title is out
+ * of view (null until the document is there to measure: the bar shows neither name nor project moving meanwhile).
+ */
 export interface PlanBarState {
   a3: boolean;
   shown: number | null;
-  away: boolean;
+  away: boolean | null;
 }
 
 interface PlanChrome {
@@ -57,6 +60,8 @@ export interface PlanMenuItem {
   href?: { href: string; name: string };
   /** `at`: the menu's button, where a box it opens is anchored and where focus goes back. */
   act?: (at: HTMLElement | null) => void;
+  /** A copy (Copy file): the row says "Copied!" with a check, as the Viewer's own Copy does, then the menu closes. */
+  copies?: () => Promise<boolean>;
 }
 export type PlanMenuEntry = PlanMenuItem | '-';
 
@@ -72,7 +77,7 @@ export function planMenuItems(o: { phone: boolean; acts: PlanDocActs | null; fil
   const global: PlanMenuItem | null = pane ? { key: 'global', icon: 'globe', label: 'Global comment', act: (at) => void (at && pane.current?.globalComment(at)) } : null;
   const files: PlanMenuItem | null = o.files ? { key: 'files', icon: 'folder', label: 'Files', end: String(o.files.count), act: o.files.open } : null;
   const contents: PlanMenuItem | null = acts?.contents ? { key: 'contents', icon: 'contents', label: 'Contents', act: acts.contents } : null;
-  const copy: PlanMenuItem | null = pane ? { key: 'copy', icon: 'copy', label: 'Copy file', act: () => void pane.current?.copy() } : null;
+  const copy: PlanMenuItem | null = pane ? { key: 'copy', icon: 'copy', label: 'Copy file', copies: () => pane.current?.copy() ?? Promise.resolve(false) } : null;
   const download: PlanMenuItem | null = acts?.download ? { key: 'download', icon: 'download', label: 'Download', href: acts.download } : null;
   const full: PlanMenuItem | null = acts?.full ? { key: 'full', icon: 'frame', label: 'Full screen', act: acts.full } : null;
   const close: PlanMenuItem = { key: 'close', icon: 'x', label: 'Close', act: o.close };
@@ -87,9 +92,29 @@ export function planMenuItems(o: { phone: boolean; acts: PlanDocActs | null; fil
   return out;
 }
 
+/** How long a copy's row says "Copied!" before the menu closes. */
+export const PLAN_COPIED_MS = 1000;
+
 /** "Page actions" (the frame's name for the page's group): a phone's bottom sheet, a computer's menu. */
 export function PlanMenu({ phone, items }: { phone: boolean; items: () => PlanMenuEntry[] }) {
   const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(copiedTimer.current), []);
+  const copy = (row: PlanMenuItem) =>
+    void row.copies?.().then((ok) => {
+      if (!ok) return setOpen(false);
+      setCopied(row.key);
+      clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => {
+        setCopied(null);
+        setOpen(false);
+      }, PLAN_COPIED_MS);
+    });
+  const iconOf = (row: PlanMenuItem): IconName => (copied === row.key ? 'check' : row.icon);
+  const labelOf = (row: PlanMenuItem) => (copied === row.key ? 'Copied!' : row.label);
+  // The sheet is drawn inside the Inbox's own root, so its rules (icons, lines) and tokens apply to it.
+  const [host, setHost] = useState<HTMLElement | null>(null);
   const button = useRef<HTMLButtonElement | null>(null);
   const shown = items();
   if (!shown.some((row) => row !== '-')) return null;
@@ -109,9 +134,9 @@ export function PlanMenu({ phone, items }: { phone: boolean; items: () => PlanMe
                 <span className="flex-1">{row.label}</span>
               </DropdownMenuItem>
             ) : (
-              <DropdownMenuItem key={row.key} className="text-xs" onClick={() => row.act?.(button.current)} data-plan-menu-row={row.key}>
-                <Icon name={row.icon} size={15} className="ib-glyph" />
-                <span className="flex-1">{row.label}</span>
+              <DropdownMenuItem key={row.key} className="text-xs" closeOnClick={!row.copies} onClick={() => (row.copies ? copy(row) : row.act?.(button.current))} data-plan-menu-row={row.key} data-copied={copied === row.key ? '' : undefined}>
+                <Icon name={iconOf(row)} size={15} className="ib-glyph" />
+                <span className="flex-1">{labelOf(row)}</span>
               </DropdownMenuItem>
             ),
           )}
@@ -126,20 +151,25 @@ export function PlanMenu({ phone, items }: { phone: boolean; items: () => PlanMe
   };
   return (
     <>
-      <button ref={button} type="button" className="ib-iconbtn ib-plan-more" aria-label="Page actions" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)} data-plan-more="">
+      <button ref={button} type="button" className="ib-iconbtn ib-plan-more" aria-label="Page actions" aria-haspopup="dialog" aria-expanded={open} onClick={() => {
+          setHost(button.current?.closest<HTMLElement>('.pn-inbox') ?? null);
+          setOpen(true);
+        }}
+        data-plan-more=""
+      >
         <Icon name="dots" size={18} />
       </button>
-      <BottomSheet open={open} onClose={() => setOpen(false)} title="Page actions" host={null} attrs={{ 'data-plan-menu': '' }}>
+      <BottomSheet open={open} onClose={() => setOpen(false)} title="Page actions" host={host} attrs={{ 'data-plan-menu': '' }}>
         <div className="ib-sheet-list ib-plan-menu-list">
           {shown.map((row, i) => {
             if (row === '-') return <div key={`line-${i}`} className="ib-sheet-line" aria-hidden="true" />;
             const inner = (
               <>
                 <span className="ib-sheet-lead">
-                  <Icon name={row.icon} size={20} />
+                  <Icon name={iconOf(row)} size={20} />
                 </span>
                 <span className="ib-sheet-words">
-                  <span className="ib-sheet-t">{row.label}</span>
+                  <span className="ib-sheet-t">{labelOf(row)}</span>
                 </span>
                 {row.end && <span className="ib-sheet-end ib-plan-menu-end">{row.end}</span>}
               </>
@@ -149,7 +179,7 @@ export function PlanMenu({ phone, items }: { phone: boolean; items: () => PlanMe
                 {inner}
               </a>
             ) : (
-              <button key={row.key} type="button" className="ib-sheet-row" onClick={() => pick(row)} data-plan-menu-row={row.key}>
+              <button key={row.key} type="button" className="ib-sheet-row" onClick={() => (row.copies ? copy(row) : pick(row))} data-plan-menu-row={row.key} data-copied={copied === row.key ? '' : undefined}>
                 {inner}
               </button>
             );
@@ -188,12 +218,24 @@ export function PlanKicker({ start, approved, shown, count, versionsOpen, onVers
 
 /**
  * The phone's bar: the project while the document's title is on screen; once it is not, the plan's name over its
- * version and decision, one button that opens Versions (the two cross-fade; reduced motion: a cut).
+ * version and decision, one button that opens Versions (the two cross-fade; reduced motion: a cut). The first
+ * measurement is a cut too (`data-settled` comes after it), so the page never opens on a fade.
  */
-export function PlanBarTitle({ rest, name, away, shown, decision, versionsOpen, onVersions }: { rest: string; name: string; away: boolean; shown: number | null; decision: { words: string; tone: PlanDecisionTone } | null; versionsOpen: boolean; onVersions: (open: boolean) => void }) {
+export function PlanBarTitle({ rest, name, away, shown, decision, versionsOpen, onVersions }: { rest: string; name: string; away: boolean | null; shown: number | null; decision: { words: string; tone: PlanDecisionTone } | null; versionsOpen: boolean; onVersions: (open: boolean) => void }) {
   const spoken = [name, shown === null ? null : `Version ${shown}`, decision?.words ?? null, 'Versions'].filter(Boolean).join('. ');
+  const known = away !== null;
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    if (!known) {
+      setSettled(false);
+      return;
+    }
+    if (settled) return;
+    const frame = requestAnimationFrame(() => setSettled(true));
+    return () => cancelAnimationFrame(frame);
+  }, [known, settled]);
   return (
-    <div className="ib-plan-bartitle" data-away={away ? '' : undefined} data-plan-bartitle="">
+    <div className="ib-plan-bartitle" data-away={away ? '' : undefined} data-settled={settled ? '' : undefined} data-plan-bartitle="">
       <span className="ib-plan-bartitle-rest" aria-hidden={away ? true : undefined} data-plan-bartitle-rest="">
         {rest}
       </span>
@@ -220,11 +262,12 @@ const plain = (text: string | null | undefined) => (text ?? '').replace(/\s+/g, 
 /**
  * Whether the document's own title is out of view in `scroll` (the file pane's `.ib-docscroll`): true when its first
  * block is not a level-1 heading with the plan's name (the bar has the name from the start), or that heading has
- * scrolled above the scroll's top edge.
+ * scrolled above the scroll's top edge. Null while the document has no block yet (not known).
  */
-export function titleAway(scroll: HTMLElement, name: string): boolean {
+export function titleAway(scroll: HTMLElement, name: string): boolean | null {
   const first = scroll.querySelector<HTMLElement>('[data-block-id]');
-  if (!first || first.tagName !== 'H1' || plain(first.textContent) !== plain(name)) return true;
+  if (!first) return null;
+  if (first.tagName !== 'H1' || plain(first.textContent) !== plain(name)) return true;
   return first.getBoundingClientRect().bottom < scroll.getBoundingClientRect().top + 4;
 }
 
@@ -237,7 +280,8 @@ export function useTitleAway(root: HTMLElement | null, name: string, on: boolean
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         const scroll = root.querySelector<HTMLElement>('.ib-docscroll');
-        report(scroll ? titleAway(scroll, name) : true);
+        const away = scroll ? titleAway(scroll, name) : null;
+        if (away !== null) report(away);
       });
     };
     check();
