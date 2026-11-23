@@ -282,13 +282,25 @@ async function scrollColumns(review: Locator, file: string, to: 'start' | 'end')
  * would run under it, as the column's edge is; scrolled to the end, the line's last character sits clear of it; and a
  * line that ends before it (`short`) is clear of it as it is.
  */
+/**
+ * A file into view; one taller than the window by its top (the diff draws a file's lines as they come into view, so
+ * a tall file centred may not draw its first lines).
+ */
+async function shellTop(review: Locator, file: string) {
+  const shell = review.locator(`[data-guide-file-shell="${file}"]`);
+  await shell.scrollIntoViewIfNeeded();
+  await shell.evaluate((el) => {
+    if (el.getBoundingClientRect().height > window.innerHeight) el.scrollIntoView({ block: 'start', inline: 'nearest' });
+  });
+}
+
 async function expectNoOverlap(review: Locator, ref: LineRef, opts: { long: boolean }) {
   const { file } = ref;
   // The diff may draw a file's lines again as it comes into view: take the line once it holds still.
   let g!: Awaited<ReturnType<typeof lineGeometry>>;
   await expect(async () => {
     // Into view by the file (a line's own scroll would also move the column sideways), the column at its start.
-    await review.locator(`[data-guide-file-shell="${file}"]`).scrollIntoViewIfNeeded();
+    await shellTop(review, file);
     await expect(review.locator(lineSelector(ref)).first()).toBeInViewport({ timeout: 2000 });
     await scrollColumns(review, file, 'start');
     g = await lineGeometry(review, ref);
@@ -581,10 +593,13 @@ test('a High PR: once on each named file in the tree, once on each named range i
   const code = (await review.locator('[data-guide-file-shell="src/charges/client.ts"]').boundingBox())!;
   await page.mouse.move(code.x + 80, Math.min(code.y + code.height, page.viewportSize()!.height) - 40);
   await page.mouse.wheel(0, 4000);
-  await expect(barsOf(review, client)).not.toBeInViewport();
+  // Out of view (or no longer drawn: the diff may let a line far out of view go).
+  await expect
+    .poll(() => barsOf(review, client).evaluateAll((els) => els.every((el) => { const r = el.getBoundingClientRect(); return r.bottom <= 0 || r.top >= window.innerHeight; })))
+    .toBe(true);
   await expect(riskCard()).toHaveCount(0);
   await page.screenshot({ path: join(proofDir, '09-scrolled-away-no-card-dark.png') });
-  await barsOf(review, client).scrollIntoViewIfNeeded();
+  await shellTop(review, 'src/charges/client.ts');
   await expect(barsOf(review, client)).toBeInViewport();
   await page.waitForTimeout(700);
   await expect(riskCard()).toHaveCount(0);
