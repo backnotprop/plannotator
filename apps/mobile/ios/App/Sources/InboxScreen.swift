@@ -20,6 +20,8 @@ struct InboxScreen: View {
   @State private var loaded = Date()
   @Environment(\.openURL) private var openURL
   @Environment(\.accessibilityReduceMotion) private var still
+  /// New message is open.
+  @State private var composing = false
 
   init(session: InboxSession) {
     self.session = session
@@ -52,6 +54,15 @@ struct InboxScreen: View {
         }
     }
     .rowActionSheets(actions)
+    .sheet(isPresented: $composing) {
+      ComposeSheet(session: session) { outcome in
+        // The window's toast once the thread is written; a message that waits says so in the list.
+        if case .sent(_, let to) = outcome {
+          let agent = SessionPicker.name(to)
+          actions.tell(ToastWords(mark: .check, lead: PhoneWords.sentTo(agent), detail: PhoneWords.inProject(to.project), speech: PhoneWords.sentToSpeech(agent, to.project)))
+        }
+      }
+    }
     .onChange(of: model.opening, initial: true) { _, id in
       if let id {
         path = [.thread(id)]
@@ -76,6 +87,13 @@ struct InboxScreen: View {
       ToolbarItemGroup(placement: .bottomBar) { PickBar(actions: actions, view: view) }
     } else {
       ToolbarItem(placement: .topBarLeading) { ComputerMenu(session: session) }
+      if session.standing == .ok {
+        ToolbarItem(placement: .topBarTrailing) {
+          Button { composing = true } label: { Image(systemName: "square.and.pencil") }
+            .accessibilityLabel(PhoneWords.newMessage)
+            .accessibilityIdentifier("new-message")
+        }
+      }
     }
   }
 
@@ -132,6 +150,15 @@ struct InboxScreen: View {
             .listRowSeparator(.hidden)
             .listRowInsets(EdgeInsets(top: Space.tight, leading: 0, bottom: Space.tight, trailing: 0))
             .selectionDisabled()
+        }
+        // A new message made while the computer was away: the person's own, waiting, as a held reply is drawn.
+        ForEach(session.heldNewMessages()) { new in
+          HeldReply(words: new.words, to: new.to.map(SessionPicker.name), computer: session.computer.name)
+            .listRowBackground(Token.background)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: Space.close, leading: Self.edge, bottom: Space.close, trailing: Self.edge))
+            .selectionDisabled()
+            .accessibilityIdentifier("held-new-message")
         }
         ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
           let open = folds.isOpen(group.id)

@@ -313,7 +313,7 @@ public enum StandInData {
     else { section = .quiet }
     var preview: String?
     if let last {
-      if lastIsPerson { preview = "You: \(last.body)" }
+      if lastIsPerson { preview = "You: \(ReplyQuoteRules.withoutLead(last.body))" }
       else if let asking = (last.questions ?? []).first(where: { $0.state == .openValue || $0.state == .picked }) { preview = "Asked: \(asking.prompt)" }
       else { preview = firstLine(last.body) }
     }

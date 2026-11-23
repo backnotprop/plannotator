@@ -328,6 +328,31 @@ struct LaunchOptions {
         case "online":
           await door.setOffline(false)
           await session.refresh()
+        case "writing":
+          // A reply being written: words, a quote of the thread's first message, a picture on the computer and a file
+          // the Inbox refused.
+          await session.open(StandInData.retry)
+          if let first = session.thread(StandInData.retry)?.thread.messages.first { session.setQuote(StandInData.retry, DraftQuote(of: first.id)) }
+          session.keepDraft(StandInData.retry, words: "Hold the rollout until the error dashboards are green for an hour.")
+          await session.attach(StandInMedia.flameGraph(), name: "error-dashboard.png", type: "image/png", to: .thread(StandInData.retry))
+          await door.refuseUploads("upload_refused")
+          await session.attach(Data("TOKEN=example".utf8), name: ".env", type: "text/plain", to: .thread(StandInData.retry))
+          await door.refuseUploads(nil)
+        case "compose":
+          // New message to the first live session, with words and a picture.
+          await session.readSessions()
+          if let group = session.sessions.projects.first, let live = group.sessions.first {
+            session.changeCompose {
+              $0.to = ComposeTo(live, in: group)
+              $0.words = "Add a retry budget to the export job, and tell me what it costs at peak."
+            }
+          }
+          await session.attach(StandInMedia.flameGraph(), name: "export-p99.png", type: "image/png", to: .compose)
+        case "noagents":
+          await door.setLiveSessions([])
+        case "relayfiles":
+          // The phone reaches the computer through the relay only: files wait for its network.
+          await door.setOptions { $0.refusesMarkups = WireErrorCode.relayUploadUnavailable.rawValue }
         case "replaced":
           // The agent replaces the question the phone's held pick and Send answer.
           if let (asked, question) = retry() {

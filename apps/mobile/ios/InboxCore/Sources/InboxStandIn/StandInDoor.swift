@@ -506,17 +506,25 @@ public actor StandInDoor {
         body: [words.isEmpty && !answered.isEmpty ? "Answered: \(answered.joined(separator: "; "))" : words, feedback].filter { !$0.isEmpty }.joined(separator: "\n\n"), createdAt: now,
         delivery: InboxDelivery(state: "queued", host: asked.author.host ?? "", session: asked.author.session ?? "", at: now))
       var quoted = written
-      // The quote, as the Inbox keeps it on the reply (the lead it writes for the agent is the store's, not drawn here).
-      if case .object(let quote)? = fields["quote"], case .string(let of)? = quote["of"] {
+      // The quote, as the Inbox keeps it on the reply, and the lead it writes in front of the words for the agent.
+      if case .object(let quote)? = fields["quote"], case .string(let of)? = quote["of"],
+        let target = threads[at.thread].messages.first(where: { $0.id.rawValue == of }) {
         var words: String?
         if case .string(let picked)? = quote["words"] { words = picked }
+        var time: String?
+        if case .string(let said)? = quote["time"] { time = said }
         quoted.quote = InboxReplyQuote(of: of, words: words)
+        let whose: ReplyQuoteRules.Whose =
+          target.author.kind == .person ? .mine : target.author.session == asked.author.session ? .yours : .theirs(target.author.host ?? "")
+        let excerpt = words ?? String(target.body.split(whereSeparator: \.isWhitespace).joined(separator: " ").prefix(280))
+        let lead = ReplyQuoteRules.lead(whose: whose, id: of, time: time, text: excerpt, selected: words != nil)
+        quoted.body = "\(lead)\n\n\(quoted.body)"
       }
       threads[at.thread].messages.append(quoted)
       attach(taken.uploads, thread: asked.threadId, message: replyID)
       for id in carried { state.annotations[id]?.sentReplyId = replyID.rawValue }
       unread.remove(asked.threadId)
-      let wire = (try? JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(written))) ?? .null
+      let wire = (try? JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(quoted))) ?? .null
       let result = ReplyResult(
         reply: wire, questions: threads[at.thread].messages[at.message].questions ?? [], replayed: false,
         threadRead: fields["with_thread"] == .bool(true) ? model(threads[at.thread]) : nil)

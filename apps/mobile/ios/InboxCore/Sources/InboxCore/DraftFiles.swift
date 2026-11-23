@@ -36,7 +36,7 @@ public struct DraftFile: Codable, Hashable, Sendable, Identifiable {
     return copy
   }
 
-  var isPicture: Bool { type.hasPrefix("image/") }
+  public var isPicture: Bool { type.hasPrefix("image/") }
 }
 
 /// Where a draft's files belong: a thread's reply, or the new message being written.

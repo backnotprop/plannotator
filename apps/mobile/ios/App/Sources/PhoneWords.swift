@@ -462,3 +462,44 @@ enum PhoneWords {
   /// An alert in a document, by its kind (`> [!NOTE]`).
   static func alert(_ kind: String) -> String { kind.prefix(1).uppercased() + kind.dropFirst() }
 }
+
+// MARK: Writing: New message, attached files, the quote (all the window's own words, as cited)
+extension PhoneWords {
+  /// packages/inbox/components/InboxList.tsx:1108, the list's button.
+  static let newMessage = "New message"
+  /// packages/inbox/compose/ComposeDialog.tsx:1218.
+  static let toLabel = "To"
+  /// ComposeDialog.tsx:1265, the To button before an agent is chosen, and while the sessions are read.
+  static let chooseAnAgent = "Choose an agent"
+  static let lookingForAgents = "Looking for live agents…"
+  /// ComposeDialog.tsx:9, what Send says with no agent chosen.
+  static let chooseAgentToSend = "Choose an agent to send it."
+  /// packages/inbox/board/NewCardDialog.tsx:257.
+  static let noAgentRunning = "No agent is running"
+  /// ComposeDialog.tsx:1453, the field's placeholder.
+  static let composeHint = "Write an idea or a request. It starts a new thread."
+  /// ComposeDialog.tsx:788 and Thread.tsx:3014.
+  static let waitForFiles = "Wait for the files to finish uploading."
+  /// packages/inbox/compose/ComposeFiles.tsx:703, the paperclip.
+  static let attachFiles = "Attach files"
+  /// The system's own names for the three sources.
+  static let photoLibrary = "Photo Library"
+  static let takePhoto = "Take Photo"
+  static let chooseFiles = "Choose Files"
+  /// ComposeFiles.tsx:820 (the phone has no percentage to give) and :909.
+  static let uploading = "Uploading…"
+  static func removeFile(_ name: String) -> String { "Remove \(name)" }
+  /// The reply box's bin (packages/inbox, the reply foot's "Discard").
+  static let discard = "Discard"
+  /// packages/inbox/App.tsx:2329-2334, the toast after a new message is sent.
+  static func sentTo(_ agent: String) -> String { "Sent to \(agent)" }
+  static func inProject(_ project: String) -> String { "in \(project)" }
+  static func sentToSpeech(_ agent: String, _ project: String) -> String { "Sent to \(agent) in \(project). It takes it as its next turn." }
+  /// packages/inbox/replyQuote.ts REPLY_QUOTE_WORDS.
+  static let removeQuote = "Remove quote"
+  /// The sent reply's quote line: a touch goes to the quoted message (the window's REPLY_QUOTE_WORDS.goTo).
+  static let goToMessage = "Go to the message"
+  static func replyingTo(_ who: String, time: String, words: Bool) -> String {
+    "Replying to \(words ? "words in " : "")\(who == you ? "your message" : "\(who)'s message")\(time.isEmpty ? "" : " from \(time)")"
+  }
+}

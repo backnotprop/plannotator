@@ -184,13 +184,13 @@ extension InboxSession {
   public func setQuote(_ thread: ThreadID, _ quote: DraftQuote?) { changeDraft(thread) { $0.quote = quote } }
 
   /// What a Send carried is spent: the words, the quote and the files it took. Words typed after them stay.
-  func forgetDraft(_ thread: ThreadID, words sent: String, files: [DraftFile]) {
+  func forgetDraft(_ thread: ThreadID, words sent: String, files: [DraftFile], quoted: Bool) {
     guard var draft = draftBook.local[thread] else {
       draftBook.base[thread] = nil
       return
     }
     if draft.words.trimmingCharacters(in: .whitespacesAndNewlines) == sent { draft.words = "" }
-    if !sent.isEmpty { draft.quote = nil }
+    if quoted { draft.quote = nil }
     let gone = Set(files.map(\.id))
     draft.files = draft.files?.filter { !gone.contains($0.id) }
     draftBook.base[thread] = nil

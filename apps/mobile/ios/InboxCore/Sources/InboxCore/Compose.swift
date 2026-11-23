@@ -151,7 +151,8 @@ extension InboxSession {
 
   /// Read the live agent sessions (`GET sessions`). While the computer does not answer, the ones last read stay.
   public func readSessions() async {
-    let kept = copy.keptSessions()
+    let projects = draftBook.sessions.projects
+    let kept = copy.keptSessions() ?? (projects.isEmpty ? nil : projects)
     if draftBook.sessions == .unread { draftBook.sessions = kept.map { .kept($0) } ?? .reading }
     if client == nil { _ = await connect() }
     guard let client else {

@@ -1213,7 +1213,7 @@ public final class InboxSession {
       }
     }
     // The words and files are in the outbox now: what they spent of the thread's draft on the phone goes.
-    if !text.isEmpty || !carried.isEmpty { forgetDraft(id, words: text, files: carried) }
+    if !text.isEmpty || !carried.isEmpty || quote != nil { forgetDraft(id, words: text, files: carried, quoted: quote != nil) }
     // The texts the comments' lines are read from, fetched now when the phone does not keep them (as the window
     // reads them at Send), for a short while at most; the feedback is then written again with them. A comment whose
     // text did not come goes with its quote and no line.
