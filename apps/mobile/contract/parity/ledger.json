@@ -9437,8 +9437,7 @@
       "surface": [
         "field:InboxLaunchClone.branch",
         "field:InboxReviewSource.branch",
-        "window:/api/inbox/reviews/branches/rank",
-        "window:/api/inbox/reviews/branches/unreported"
+        "window:/api/inbox/reviews/branches/rank"
       ],
       "flows": [],
       "mobile": "v1",
@@ -17867,11 +17866,29 @@
       }
     },
     {
+      "id": "window-only-messages",
+      "title": "Window endpoints under messages with no door route",
+      "surface": [
+        "window:/api/inbox/messages/:id/guide/review-image",
+        "window:/api/inbox/messages/:id/guide/review-markdown-image"
+      ],
+      "flows": [],
+      "mobile": "later",
+      "why": "L-nodoor: the phone reaches these only once a door route is added for them (messages).",
+      "reason": "L-nodoor",
+      "source": "seed: no SCOPE row names it",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "window-only-pulls",
       "title": "Window endpoints under pulls with no door route",
       "surface": [
         "window:/api/inbox/pulls/repo-file",
-        "window:/api/inbox/pulls/repo-files"
+        "window:/api/inbox/pulls/repo-files",
+        "window:/api/inbox/pulls/review-image",
+        "window:/api/inbox/pulls/review-markdown-image"
       ],
       "flows": [],
       "mobile": "later",
@@ -21550,6 +21567,118 @@
       }
     },
     {
+      "id": "undecided-field-inboxmessagewire-moved-to",
+      "title": "field:InboxMessageWire.moved_to",
+      "surface": [
+        "field:InboxMessageWire.moved_to"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmovedto-subject",
+      "title": "field:InboxMovedTo.subject",
+      "surface": [
+        "field:InboxMovedTo.subject"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmovedto-thread-id",
+      "title": "field:InboxMovedTo.thread_id",
+      "surface": [
+        "field:InboxMovedTo.thread_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmovedto-name",
+      "title": "field:InboxMovedTo.name",
+      "surface": [
+        "field:InboxMovedTo.name"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmovedto-open",
+      "title": "field:InboxMovedTo.open",
+      "surface": [
+        "field:InboxMovedTo.open"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-moved-note",
+      "title": "field:InboxMessageWire.moved_note",
+      "surface": [
+        "field:InboxMessageWire.moved_note"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmovednote-questions",
+      "title": "field:InboxMovedNote.questions",
+      "surface": [
+        "field:InboxMovedNote.questions"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmovednote-thread-id",
+      "title": "field:InboxMovedNote.thread_id",
+      "surface": [
+        "field:InboxMovedNote.thread_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "files-101-annotate",
       "title": "Pen under an `html` block: comment on an element of the live page in place (the element boxed, the comment box beside it, a numbered marker, \"HTML · <element>\" in the list of comments)",
       "surface": [
@@ -21854,6 +21983,132 @@
       "mobile": "undecided",
       "why": "",
       "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-threads-id-acted",
+      "title": "window:/api/inbox/threads/:id/acted",
+      "surface": [
+        "window:/api/inbox/threads/:id/acted"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlistrow-acted-at",
+      "title": "field:InboxListRow.acted_at",
+      "surface": [
+        "field:InboxListRow.acted_at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxquestion-scenarios",
+      "title": "field:InboxQuestion.scenarios",
+      "surface": [
+        "field:InboxQuestion.scenarios"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxquestionscenarios-columns",
+      "title": "field:InboxQuestionScenarios.columns",
+      "surface": [
+        "field:InboxQuestionScenarios.columns"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxquestionscenarios-rows",
+      "title": "field:InboxQuestionScenarios.rows",
+      "surface": [
+        "field:InboxQuestionScenarios.rows"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-reviews-local",
+      "title": "window:/api/inbox/reviews/local",
+      "surface": [
+        "window:/api/inbox/reviews/local"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-reviews-local-diff",
+      "title": "window:/api/inbox/reviews/local/diff",
+      "surface": [
+        "window:/api/inbox/reviews/local/diff"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-messages-id-guide-package-changes",
+      "title": "window:/api/inbox/messages/:id/guide/package-changes",
+      "surface": [
+        "window:/api/inbox/messages/:id/guide/package-changes"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-pulls-package-changes",
+      "title": "window:/api/inbox/pulls/package-changes",
+      "surface": [
+        "window:/api/inbox/pulls/package-changes"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
       "ios": {
         "state": "not-started"
       }

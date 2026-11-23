@@ -3,6 +3,7 @@ import { Icon, type IconName } from '../icons';
 import { hintText, ShortcutHint, useShortcutAria } from '../shortcuts/hint';
 import { shortcutPrefs } from '../shortcuts/prefs';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
+import { liveReviewKeys, useLiveReviewKeys } from '../shortcuts/review';
 import { useTouchPhone } from '../phone';
 import { Tip } from './Tip';
 import { useTouchPress } from './touchPress';
@@ -59,8 +60,8 @@ export function toastSpeech(toast: Pick<InboxToastModel, 'lead' | 'detail' | 'on
   const sentence = (text: string) => (/[.!?…”"]$/.test(text) ? text : `${text}.`);
   const said = toast.speech ? sentence(toast.speech) : toast.detail ? `${sentence(toast.lead)} ${sentence(toast.detail)}` : sentence(toast.lead);
   if (!toast.onUndo) return said;
-  // With single keys off Z does nothing, so it is not offered.
-  return `${said} ${phone || !singleKeys ? 'Undo is available.' : `Press ${hintText({ scope: inboxThreadShortcuts, action: 'undo' })} to undo.`}`;
+  // With single keys off Z does nothing, so it is not offered; nor while a review on screen has Z (re-expand).
+  return `${said} ${phone || !singleKeys || liveReviewKeys() ? 'Undo is available.' : `Press ${hintText({ scope: inboxThreadShortcuts, action: 'undo' })} to undo.`}`;
 }
 
 /**
@@ -120,6 +121,9 @@ function cutWithin(el: Element): boolean {
 function ToastBody({ toast, phone, onDismiss }: { toast: InboxToastModel; phone: boolean; onDismiss?: () => void }) {
   // Reply is a phone's foot's on a touch phone; a narrow desktop window (the phone layout, a mouse and keys) keeps it.
   const touchPhone = useTouchPhone();
+  // A review on screen has Z (re-expand a file) while its keys act: the Undo button offers no key then, as a phone's
+  // does not. While they stand down (Details, a menu, a repository file over the diff) Z is the Inbox's Undo again.
+  const reviewKeys = useLiveReviewKeys();
   const reply = !(phone && touchPhone) && toast.onReply;
   const undoKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'undo' });
   const undoPress = useTouchPress(toast.onUndo);
@@ -166,10 +170,10 @@ function ToastBody({ toast, phone, onDismiss }: { toast: InboxToastModel; phone:
             </button>
           )}
           {toast.onUndo && (
-            <button type="button" className="ib-tundo" {...undoPress} data-toast-undo="" aria-keyshortcuts={toast.noKey || (phone && touchPhone) ? undefined : undoKeys}>
+            <button type="button" className="ib-tundo" {...undoPress} data-toast-undo="" aria-keyshortcuts={toast.noKey || reviewKeys || (phone && touchPhone) ? undefined : undoKeys}>
               Undo
               {/* A narrow desktop window (the phone layout, a mouse and keys) keeps Z, as it keeps Reply. */}
-              {!toast.noKey && !(phone && touchPhone) && <ShortcutHint scope={inboxThreadShortcuts} action="undo" className="" touchOnly />}
+              {!toast.noKey && !reviewKeys && !(phone && touchPhone) && <ShortcutHint scope={inboxThreadShortcuts} action="undo" className="" touchOnly />}
             </button>
           )}
           {onDismiss && (

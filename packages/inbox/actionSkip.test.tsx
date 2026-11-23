@@ -102,7 +102,7 @@ const rerender = (node: React.ReactNode) => act(() => root!.render(node));
 const settle = () => act(async () => void (await new Promise((resolve) => setTimeout(resolve, 0))));
 const click = (el: Element) => act(() => (el as HTMLElement).click());
 const rowOf = (el: HTMLElement, index: number) => el.querySelector<HTMLElement>(`[data-action-card="${PARSED[index]!.key}"]`)!;
-const chipOf = (row: HTMLElement) => row.querySelector('[data-action-toggle] .ib-badge')?.textContent ?? null;
+const chipOf = (row: HTMLElement) => row.querySelector('[data-action-line] .ib-badge')?.textContent ?? null;
 
 test.skipIf(!hasDom)('Skip sits after Done and Can\'t do it…; one click marks it with no words, and the next open item opens', async () => {
   const marks: { key: string; mark: unknown }[] = [];

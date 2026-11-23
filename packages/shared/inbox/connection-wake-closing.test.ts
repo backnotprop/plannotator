@@ -9,6 +9,7 @@
 import { expect, test } from "bun:test";
 import {
   INBOX_MESSAGE_INSTRUCTION,
+  INBOX_MOVED_WAKE_INSTRUCTION,
   INBOX_NEW_THREAD_INSTRUCTION,
   INBOX_REASK_INSTRUCTION,
   INBOX_STEPS_START_WAKE_LINE,
@@ -290,4 +291,16 @@ test("a reply that answers questions in a thread with no checklist: one line on 
   // Never on a 👍 or a Tidy, whatever the command says.
   expect(wake({ ack_of: "msg_01ASKED", steps_start: true })).not.toContain(INBOX_STEPS_START_WAKE_LINE);
   expect(wake({ tidy: true, steps_start: true })).not.toContain(INBOX_STEPS_START_WAKE_LINE);
+});
+
+// The note that a session's questions moved to another thread (resolve_message's moved_to): a notice, never the
+// reply wrapper, whose "answer in the same thread" would pull the agent back into the archived thread.
+const MOVED_BODY =
+  'Your questions in "Retry policy" (msg_01THREAD) were moved to another thread by Claude Code: "Morning brief" (msg_01BRIEF). Don\'t wait on them here. The person answers there, and Claude Code gets the answer.';
+
+test("the moved note's wake: the first line, the notice line, the note, its thread; no reply instruction and no closing line", () => {
+  const text = wake({ moved: true, body: MOVED_BODY, subject: "Retry policy", context: context({ open_questions: 1 }), steps: { done: 1, total: 3 }, steps_start: true });
+  expect(text.split("\n")).toEqual(["Plannotator Inbox: Retry policy (msg_01REPLY)", INBOX_MOVED_WAKE_INSTRUCTION, "", MOVED_BODY, "", "[thread msg_01THREAD]"]);
+  expect(text).not.toContain("send_message");
+  expect(text).not.toContain("reply_to");
 });

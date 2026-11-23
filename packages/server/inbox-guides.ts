@@ -61,6 +61,7 @@ import { questionOpenersWithTextText } from "@plannotator/shared/inbox/question-
 import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-check";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { inboxSupersedeSkipsText, type InboxSupersedeSkip } from "@plannotator/shared/inbox/supersede-skips";
 import { readGuideInstructions } from "@plannotator/shared/guide-instructions-store";
 import { readDiffSideBytes, readGitObjectBytes } from "@plannotator/shared/review-core";
 import { runtime as gitRuntime } from "./git";
@@ -412,6 +413,46 @@ function patchFilesOf(store: InboxStore, sha256: string): DiffFile[] {
 }
 
 /**
+ * A guide's patch as the agent sent it (its image previews), and the commit it pins (where a pure rename's sides and a
+ * file the patch does not change are read, inbox-review-image.ts): its commit for a guide of one commit, else the
+ * head it was made at (`source.headSha`), else null (a producer that records none). Read once per
+ * guide; null when it cannot be read. Only a read that worked is kept: a failed one (a passing file error) is tried
+ * again on the next request, never remembered.
+ */
+export interface GuideReviewRead {
+  patch: string;
+  revision: string | null;
+}
+
+const guideReviews = new Map<string, GuideReviewRead>();
+
+export function guideReviewOf(store: InboxStore, sha256: string): GuideReviewRead | null {
+  const kept = guideReviews.get(sha256);
+  if (kept !== undefined) return kept;
+  let read: GuideReviewRead | null = null;
+  try {
+    const parsed = parseGuideSnapshotJson(readFileSync(inboxBlobPath(store.dir, sha256), "utf8"));
+    if (parsed.ok) {
+      const { source } = parsed.value;
+      const pinned = (source.kind === "commit" ? source.commitSha : undefined) ?? source.headSha;
+      // Only an object id: anything else is no revision (never a ref or an expression git would resolve).
+      read = { patch: parsed.value.review.rawPatch, revision: pinned && /^[0-9a-f]{7,64}$/i.test(pinned) ? pinned : null };
+    }
+  } catch {
+    // Gone from the store, or a passing read error.
+  }
+  if (read === null) return null;
+  guideReviews.set(sha256, read);
+  while (guideReviews.size > 8) guideReviews.delete(guideReviews.keys().next().value!);
+  return read;
+}
+
+/** A guide's patch as the agent sent it (`guideReviewOf`), or null. */
+export function guidePatchOf(store: InboxStore, sha256: string): string | null {
+  return guideReviewOf(store, sha256)?.patch ?? null;
+}
+
+/**
  * One changed file's whole text for a guided review's expand arrows
  * (`GET /api/inbox/messages/:id/guide/file`). The guide keeps the diff as sent
  * and the working tree moves on, so each side is taken only when it is the very
@@ -714,7 +755,7 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
         if (!sent.replayed) writeBlob(context.store.dir, described.ref.sha256, Buffer.from(described.text, "utf8"));
         const guide = context.store.message(String(sent.structured.message_id))?.guide ?? described.ref;
         return ok(
-          `${sent.replayed ? "Already sent" : "Sent"} the ${guide.review ? "review" : "guided review"} "${guide.title}" (${guide.sections} section${guide.sections === 1 ? "" : "s"}, ${guide.files} file${guide.files === 1 ? "" : "s"}) to the Plannotator Inbox (thread ${sent.structured.thread_id}, ${sent.structured.url}).${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host, await t3WokenOnlyWhileRunning(context, wakes, input), antigravityHandsOver(ctx, wakes, input))}${imagesNotShownText(sent.imagesNotShown)}${mediaNotShownText(sent.mediaNotShown)}${noStakesText(sent.noStakes)}${recommendedInLabelText(sent.recommendedInLabel)}${questionsToCheckText(String(sent.structured.message_id), sent.questionsToCheck)}${questionOpenersWithTextText(sent.questionOpenersWithText)}`,
+          `${sent.replayed ? "Already sent" : "Sent"} the ${guide.review ? "review" : "guided review"} "${guide.title}" (${guide.sections} section${guide.sections === 1 ? "" : "s"}, ${guide.files} file${guide.files === 1 ? "" : "s"}) to the Plannotator Inbox (thread ${sent.structured.thread_id}, ${sent.structured.url}).${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host, await t3WokenOnlyWhileRunning(context, wakes, input), antigravityHandsOver(ctx, wakes, input))}${imagesNotShownText(sent.imagesNotShown)}${mediaNotShownText(sent.mediaNotShown)}${noStakesText(sent.noStakes)}${recommendedInLabelText(sent.recommendedInLabel)}${questionsToCheckText(String(sent.structured.message_id), sent.questionsToCheck)}${questionOpenersWithTextText(sent.questionOpenersWithText)}${inboxSupersedeSkipsText(sent.structured.skipped as InboxSupersedeSkip[] | undefined)}`,
           { ...sent.structured, guide },
         );
       }),

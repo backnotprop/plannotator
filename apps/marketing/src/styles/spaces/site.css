@@ -45,3 +45,9 @@ html:not(.transitions-ready) body .pf-note,
 html:not(.transitions-ready) body .pf-item {
   transition-duration: 0.4s !important;
 }
+html:not(.transitions-ready) body .lk-p[data-state="closed"] {
+  transition-duration: 110ms, 110ms, 0s !important;
+}
+html:not(.transitions-ready) body .lk-p[data-state="open"] {
+  transition-duration: 150ms, 200ms, 0s !important;
+}

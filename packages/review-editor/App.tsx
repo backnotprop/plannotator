@@ -291,7 +291,8 @@ declare const __APP_VERSION__: string;
 // text, and on a touch screen the toolbar sits below the selection (clear of
 // iOS's edit menu), inside the screen, with thumb-sized buttons;
 // @plannotator/ui hosts keep both unchanged unless they opt in.
-configurePlannotatorUI({ richCopy: true, touchSelectionToolbar: true });
+// A click on a #12 or a pasted PR / issue URL in the text opens its card pinned (utils/refCardClick).
+configurePlannotatorUI({ richCopy: true, touchSelectionToolbar: true, refCardClick: true });
 
 function getReviewRecoveryStorage(): ReviewRecoveryStorage | null {
   try {

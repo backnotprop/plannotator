@@ -5232,6 +5232,7 @@ public struct InboxListRow: Codable, Hashable, Sendable {
   public var unsent: InboxRowUnsent?
   public var waitingSince: String?
   public var pinnedAt: String?
+  public var actedAt: String?
   public var tags: [String]?
   public var snoozed: InboxRowSnooze?
   public var priority: InboxRowPriority?
@@ -5270,9 +5271,9 @@ public struct InboxListRow: Codable, Hashable, Sendable {
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["project", "machine", "thread_name", "latest_preview", "section", "session_ended", "unread", "answered_not_sent", "unsent", "waiting_since", "pinned_at", "tags", "snoozed", "priority", "snooze_back", "steps_waiting", "pulls", "hide_pulls", "unseen", "sent", "participants", "last_agent_at", "last_agent", "guide", "guide_walkthrough", "addressee", "run", "combining", "read_at", "ack", "agent_after_archive", "back_from_archive", "reask_pending", "delivery", "waits", "thread_id", "project_id", "subject", "author", "created_at", "last_at", "last_author", "message_count", "resolved_at", "questions", "waiting_on_person"]
+  static let knownKeys: Set<String> = ["project", "machine", "thread_name", "latest_preview", "section", "session_ended", "unread", "answered_not_sent", "unsent", "waiting_since", "pinned_at", "acted_at", "tags", "snoozed", "priority", "snooze_back", "steps_waiting", "pulls", "hide_pulls", "unseen", "sent", "participants", "last_agent_at", "last_agent", "guide", "guide_walkthrough", "addressee", "run", "combining", "read_at", "ack", "agent_after_archive", "back_from_archive", "reask_pending", "delivery", "waits", "thread_id", "project_id", "subject", "author", "created_at", "last_at", "last_author", "message_count", "resolved_at", "questions", "waiting_on_person"]
 
-  public init(project: InboxListRowProject, machine: String? = nil, threadName: String? = nil, latestPreview: String? = nil, section: InboxSectionId, sessionEnded: Bool? = nil, unread: Bool, answeredNotSent: Bool, unsent: InboxRowUnsent? = nil, waitingSince: String? = nil, pinnedAt: String? = nil, tags: [String]? = nil, snoozed: InboxRowSnooze? = nil, priority: InboxRowPriority? = nil, snoozeBack: String? = nil, stepsWaiting: Bool? = nil, pulls: InboxThreadPullsSummary? = nil, hidePulls: [String]? = nil, unseen: Double, sent: InboxListRowSent? = nil, participants: [InboxParticipant]? = nil, lastAgentAt: String? = nil, lastAgent: InboxListRowLastAgent? = nil, guide: Bool, guideWalkthrough: Bool? = nil, addressee: InboxAddressee? = nil, run: InboxListRowRun? = nil, combining: Bool? = nil, readAt: String? = nil, ack: InboxListRowAck? = nil, agentAfterArchive: Bool? = nil, backFromArchive: Bool? = nil, reaskPending: Bool? = nil, delivery: InboxRowDelivery? = nil, waits: [InboxRowWait]? = nil, threadId: ThreadID, projectId: ProjectID, subject: String? = nil, author: InboxAuthor, createdAt: String, lastAt: String, lastAuthor: InboxListRowLastAuthor, messageCount: Int64, resolvedAt: String? = nil, questions: InboxQuestionSummary, waitingOnPerson: Bool, unknownFields: [String: JSONValue] = [:]) {
+  public init(project: InboxListRowProject, machine: String? = nil, threadName: String? = nil, latestPreview: String? = nil, section: InboxSectionId, sessionEnded: Bool? = nil, unread: Bool, answeredNotSent: Bool, unsent: InboxRowUnsent? = nil, waitingSince: String? = nil, pinnedAt: String? = nil, actedAt: String? = nil, tags: [String]? = nil, snoozed: InboxRowSnooze? = nil, priority: InboxRowPriority? = nil, snoozeBack: String? = nil, stepsWaiting: Bool? = nil, pulls: InboxThreadPullsSummary? = nil, hidePulls: [String]? = nil, unseen: Double, sent: InboxListRowSent? = nil, participants: [InboxParticipant]? = nil, lastAgentAt: String? = nil, lastAgent: InboxListRowLastAgent? = nil, guide: Bool, guideWalkthrough: Bool? = nil, addressee: InboxAddressee? = nil, run: InboxListRowRun? = nil, combining: Bool? = nil, readAt: String? = nil, ack: InboxListRowAck? = nil, agentAfterArchive: Bool? = nil, backFromArchive: Bool? = nil, reaskPending: Bool? = nil, delivery: InboxRowDelivery? = nil, waits: [InboxRowWait]? = nil, threadId: ThreadID, projectId: ProjectID, subject: String? = nil, author: InboxAuthor, createdAt: String, lastAt: String, lastAuthor: InboxListRowLastAuthor, messageCount: Int64, resolvedAt: String? = nil, questions: InboxQuestionSummary, waitingOnPerson: Bool, unknownFields: [String: JSONValue] = [:]) {
     self.project = project
     self.machine = machine
     self.threadName = threadName
@@ -5284,6 +5285,7 @@ public struct InboxListRow: Codable, Hashable, Sendable {
     self.unsent = unsent
     self.waitingSince = waitingSince
     self.pinnedAt = pinnedAt
+    self.actedAt = actedAt
     self.tags = tags
     self.snoozed = snoozed
     self.priority = priority
@@ -5335,6 +5337,7 @@ public struct InboxListRow: Codable, Hashable, Sendable {
     self.unsent = try c.decodeIfPresent(InboxRowUnsent.self, forKey: WireKey("unsent"))
     self.waitingSince = try c.decodeIfPresent(String.self, forKey: WireKey("waiting_since"))
     self.pinnedAt = try c.decodeIfPresent(String.self, forKey: WireKey("pinned_at"))
+    self.actedAt = try c.decodeIfPresent(String.self, forKey: WireKey("acted_at"))
     self.tags = try c.decodeIfPresent([String].self, forKey: WireKey("tags"))
     self.snoozed = try c.decodeIfPresent(InboxRowSnooze.self, forKey: WireKey("snoozed"))
     self.priority = try c.decodeIfPresent(InboxRowPriority.self, forKey: WireKey("priority"))
@@ -5386,6 +5389,7 @@ public struct InboxListRow: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.unsent, forKey: WireKey("unsent"))
     try c.encode(self.waitingSince, forKey: WireKey("waiting_since"))
     try c.encodeIfPresent(self.pinnedAt, forKey: WireKey("pinned_at"))
+    try c.encodeIfPresent(self.actedAt, forKey: WireKey("acted_at"))
     try c.encodeIfPresent(self.tags, forKey: WireKey("tags"))
     try c.encodeIfPresent(self.snoozed, forKey: WireKey("snoozed"))
     try c.encodeIfPresent(self.priority, forKey: WireKey("priority"))
@@ -5795,6 +5799,7 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
   public var body: String
   public var createdAt: String
   public var resolvedAt: String?
+  public var movedTo: InboxMovedTo?
   public var idempotencyKey: String?
   public var threadName: String?
   public var personSeenSeq: Int64?
@@ -5802,6 +5807,7 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
   public var personReadAt: String?
   public var personSeenBeforeRead: Double?
   public var setAside: [String]?
+  public var movedNote: InboxMovedNote?
   public var reopened: [String]?
   public var ackOf: String?
   public var ackReaction: InboxReaction?
@@ -5863,9 +5869,9 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["questions", "actions", "seq", "sent_annotations", "id", "project_id", "thread_id", "reply_to", "author", "subject", "body", "created_at", "resolved_at", "idempotency_key", "thread_name", "person_seen_seq", "person_read_seq", "person_read_at", "person_seen_before_read", "set_aside", "reopened", "ack_of", "ack_reaction", "reask", "tidy", "agent_checked_seq", "agent_checked_at", "agent_checked_by", "attachments", "inline_images", "combine_left", "live_sites", "picture_it", "delivery", "taken_back_at", "read_by_agent", "cloud_wake", "t3_wait", "deliver_now_at", "deliver_now_by", "wait_started_at", "sent_again_to", "turn_error", "launch_note", "guide", "guide_reviewed", "guide_viewed", "review_verdict", "review_comments_of", "quote", "to", "base_path", "from_project", "wakes", "supersedes", "done", "action_report", "subject_question", "started_by_person", "board_request", "decision_ask", "rows_ask", "viewing", "sent_from", "launch", "scheduled_run", "scheduled_change", "named_by", "reply_thread", "thread_naming", "ack", "tags", "handoff", "took_over", "review_live", "review_anchor", "review_batch", "review_resolved"]
+  static let knownKeys: Set<String> = ["questions", "actions", "seq", "sent_annotations", "id", "project_id", "thread_id", "reply_to", "author", "subject", "body", "created_at", "resolved_at", "moved_to", "idempotency_key", "thread_name", "person_seen_seq", "person_read_seq", "person_read_at", "person_seen_before_read", "set_aside", "moved_note", "reopened", "ack_of", "ack_reaction", "reask", "tidy", "agent_checked_seq", "agent_checked_at", "agent_checked_by", "attachments", "inline_images", "combine_left", "live_sites", "picture_it", "delivery", "taken_back_at", "read_by_agent", "cloud_wake", "t3_wait", "deliver_now_at", "deliver_now_by", "wait_started_at", "sent_again_to", "turn_error", "launch_note", "guide", "guide_reviewed", "guide_viewed", "review_verdict", "review_comments_of", "quote", "to", "base_path", "from_project", "wakes", "supersedes", "done", "action_report", "subject_question", "started_by_person", "board_request", "decision_ask", "rows_ask", "viewing", "sent_from", "launch", "scheduled_run", "scheduled_change", "named_by", "reply_thread", "thread_naming", "ack", "tags", "handoff", "took_over", "review_live", "review_anchor", "review_batch", "review_resolved"]
 
-  public init(questions: [InboxQuestion]? = nil, actions: [InboxQuestion]? = nil, seq: Int64? = nil, sentAnnotations: Double? = nil, id: MessageID, projectId: ProjectID, threadId: ThreadID, replyTo: String? = nil, author: InboxAuthor, subject: String? = nil, body: String, createdAt: String, resolvedAt: String? = nil, idempotencyKey: String? = nil, threadName: String? = nil, personSeenSeq: Int64? = nil, personReadSeq: Int64? = nil, personReadAt: String? = nil, personSeenBeforeRead: Double? = nil, setAside: [String]? = nil, reopened: [String]? = nil, ackOf: String? = nil, ackReaction: InboxReaction? = nil, reask: [String]? = nil, tidy: InboxTidyMark? = nil, agentCheckedSeq: Int64? = nil, agentCheckedAt: String? = nil, agentCheckedBy: String? = nil, attachments: [InboxAttachment]? = nil, inlineImages: [InboxInlineImage]? = nil, combineLeft: InboxCombineLeft? = nil, liveSites: [InboxLiveSiteRef]? = nil, pictureIt: InboxPictureItPage? = nil, delivery: InboxDelivery? = nil, takenBackAt: String? = nil, readByAgent: InboxMessageWireReadByAgent? = nil, cloudWake: InboxCloudWake? = nil, t3Wait: InboxMessageWireT3Wait? = nil, deliverNowAt: String? = nil, deliverNowBy: InboxMessageWireDeliverNowBy? = nil, waitStartedAt: String? = nil, sentAgainTo: String? = nil, turnError: Bool? = nil, launchNote: Bool? = nil, guide: InboxGuideRef? = nil, guideReviewed: [Bool]? = nil, guideViewed: [String]? = nil, reviewVerdict: InboxReviewVerdictRecord? = nil, reviewCommentsOf: [String]? = nil, quote: InboxReplyQuote? = nil, to: InboxAddressee? = nil, basePath: String? = nil, fromProject: InboxMessageWireFromProject? = nil, wakes: Bool? = nil, supersedes: [String]? = nil, done: [String]? = nil, actionReport: [String]? = nil, subjectQuestion: String? = nil, startedByPerson: Bool? = nil, boardRequest: Bool? = nil, decisionAsk: Bool? = nil, rowsAsk: Bool? = nil, viewing: InboxReplyViewing? = nil, sentFrom: InboxMessageWireSentFrom? = nil, launch: InboxLaunchRecord? = nil, scheduledRun: InboxScheduledRun? = nil, scheduledChange: InboxScheduledChange? = nil, namedBy: InboxMessageWireNamedBy? = nil, replyThread: String? = nil, threadNaming: InboxMessageWireThreadNaming? = nil, ack: InboxAck? = nil, tags: [InboxTag]? = nil, handoff: InboxHandoff? = nil, tookOver: Bool? = nil, reviewLive: InboxReviewLive? = nil, reviewAnchor: InboxReviewAnchor? = nil, reviewBatch: InboxReviewBatch? = nil, reviewResolved: InboxReviewResolved? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(questions: [InboxQuestion]? = nil, actions: [InboxQuestion]? = nil, seq: Int64? = nil, sentAnnotations: Double? = nil, id: MessageID, projectId: ProjectID, threadId: ThreadID, replyTo: String? = nil, author: InboxAuthor, subject: String? = nil, body: String, createdAt: String, resolvedAt: String? = nil, movedTo: InboxMovedTo? = nil, idempotencyKey: String? = nil, threadName: String? = nil, personSeenSeq: Int64? = nil, personReadSeq: Int64? = nil, personReadAt: String? = nil, personSeenBeforeRead: Double? = nil, setAside: [String]? = nil, movedNote: InboxMovedNote? = nil, reopened: [String]? = nil, ackOf: String? = nil, ackReaction: InboxReaction? = nil, reask: [String]? = nil, tidy: InboxTidyMark? = nil, agentCheckedSeq: Int64? = nil, agentCheckedAt: String? = nil, agentCheckedBy: String? = nil, attachments: [InboxAttachment]? = nil, inlineImages: [InboxInlineImage]? = nil, combineLeft: InboxCombineLeft? = nil, liveSites: [InboxLiveSiteRef]? = nil, pictureIt: InboxPictureItPage? = nil, delivery: InboxDelivery? = nil, takenBackAt: String? = nil, readByAgent: InboxMessageWireReadByAgent? = nil, cloudWake: InboxCloudWake? = nil, t3Wait: InboxMessageWireT3Wait? = nil, deliverNowAt: String? = nil, deliverNowBy: InboxMessageWireDeliverNowBy? = nil, waitStartedAt: String? = nil, sentAgainTo: String? = nil, turnError: Bool? = nil, launchNote: Bool? = nil, guide: InboxGuideRef? = nil, guideReviewed: [Bool]? = nil, guideViewed: [String]? = nil, reviewVerdict: InboxReviewVerdictRecord? = nil, reviewCommentsOf: [String]? = nil, quote: InboxReplyQuote? = nil, to: InboxAddressee? = nil, basePath: String? = nil, fromProject: InboxMessageWireFromProject? = nil, wakes: Bool? = nil, supersedes: [String]? = nil, done: [String]? = nil, actionReport: [String]? = nil, subjectQuestion: String? = nil, startedByPerson: Bool? = nil, boardRequest: Bool? = nil, decisionAsk: Bool? = nil, rowsAsk: Bool? = nil, viewing: InboxReplyViewing? = nil, sentFrom: InboxMessageWireSentFrom? = nil, launch: InboxLaunchRecord? = nil, scheduledRun: InboxScheduledRun? = nil, scheduledChange: InboxScheduledChange? = nil, namedBy: InboxMessageWireNamedBy? = nil, replyThread: String? = nil, threadNaming: InboxMessageWireThreadNaming? = nil, ack: InboxAck? = nil, tags: [InboxTag]? = nil, handoff: InboxHandoff? = nil, tookOver: Bool? = nil, reviewLive: InboxReviewLive? = nil, reviewAnchor: InboxReviewAnchor? = nil, reviewBatch: InboxReviewBatch? = nil, reviewResolved: InboxReviewResolved? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.questions = questions
     self.actions = actions
     self.seq = seq
@@ -5879,6 +5885,7 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
     self.body = body
     self.createdAt = createdAt
     self.resolvedAt = resolvedAt
+    self.movedTo = movedTo
     self.idempotencyKey = idempotencyKey
     self.threadName = threadName
     self.personSeenSeq = personSeenSeq
@@ -5886,6 +5893,7 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
     self.personReadAt = personReadAt
     self.personSeenBeforeRead = personSeenBeforeRead
     self.setAside = setAside
+    self.movedNote = movedNote
     self.reopened = reopened
     self.ackOf = ackOf
     self.ackReaction = ackReaction
@@ -5962,6 +5970,7 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
     self.body = try c.decode(String.self, forKey: WireKey("body"))
     self.createdAt = try c.decode(String.self, forKey: WireKey("created_at"))
     self.resolvedAt = try c.decodeIfPresent(String.self, forKey: WireKey("resolved_at"))
+    self.movedTo = try c.decodeIfPresent(InboxMovedTo.self, forKey: WireKey("moved_to"))
     self.idempotencyKey = try c.decodeIfPresent(String.self, forKey: WireKey("idempotency_key"))
     self.threadName = try c.decodeIfPresent(String.self, forKey: WireKey("thread_name"))
     self.personSeenSeq = try c.decodeIfPresent(Int64.self, forKey: WireKey("person_seen_seq"))
@@ -5969,6 +5978,7 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
     self.personReadAt = try c.decodeIfPresent(String.self, forKey: WireKey("person_read_at"))
     self.personSeenBeforeRead = try c.decodeIfPresent(Double.self, forKey: WireKey("person_seen_before_read"))
     self.setAside = try c.decodeIfPresent([String].self, forKey: WireKey("set_aside"))
+    self.movedNote = try c.decodeIfPresent(InboxMovedNote.self, forKey: WireKey("moved_note"))
     self.reopened = try c.decodeIfPresent([String].self, forKey: WireKey("reopened"))
     self.ackOf = try c.decodeIfPresent(String.self, forKey: WireKey("ack_of"))
     self.ackReaction = try c.decodeIfPresent(InboxReaction.self, forKey: WireKey("ack_reaction"))
@@ -6045,6 +6055,7 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
     try c.encode(self.body, forKey: WireKey("body"))
     try c.encode(self.createdAt, forKey: WireKey("created_at"))
     try c.encode(self.resolvedAt, forKey: WireKey("resolved_at"))
+    try c.encodeIfPresent(self.movedTo, forKey: WireKey("moved_to"))
     try c.encode(self.idempotencyKey, forKey: WireKey("idempotency_key"))
     try c.encodeIfPresent(self.threadName, forKey: WireKey("thread_name"))
     try c.encodeIfPresent(self.personSeenSeq, forKey: WireKey("person_seen_seq"))
@@ -6052,6 +6063,7 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.personReadAt, forKey: WireKey("person_read_at"))
     try c.encodeIfPresent(self.personSeenBeforeRead, forKey: WireKey("person_seen_before_read"))
     try c.encodeIfPresent(self.setAside, forKey: WireKey("set_aside"))
+    try c.encodeIfPresent(self.movedNote, forKey: WireKey("moved_note"))
     try c.encodeIfPresent(self.reopened, forKey: WireKey("reopened"))
     try c.encodeIfPresent(self.ackOf, forKey: WireKey("ack_of"))
     try c.encodeIfPresent(self.ackReaction, forKey: WireKey("ack_reaction"))
@@ -6467,6 +6479,74 @@ public enum InboxMessageWireThreadNamingStatus: Codable, Hashable, Sendable, Raw
 }
 
 /// From `packages/core/inbox-types.ts`.
+public struct InboxMovedNote: Codable, Hashable, Sendable {
+  public var threadId: ThreadID
+  public var questions: [String]
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["thread_id", "questions"]
+
+  public init(threadId: ThreadID, questions: [String], unknownFields: [String: JSONValue] = [:]) {
+    self.threadId = threadId
+    self.questions = questions
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.threadId = try c.decode(ThreadID.self, forKey: WireKey("thread_id"))
+    self.questions = try c.decode([String].self, forKey: WireKey("questions"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.threadId, forKey: WireKey("thread_id"))
+    try c.encode(self.questions, forKey: WireKey("questions"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+/// From `packages/core/inbox-types.ts`.
+public struct InboxMovedTo: Codable, Hashable, Sendable {
+  public var threadId: ThreadID
+  public var subject: String?
+  public var openValue: Bool?
+  public var name: String?
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["thread_id", "subject", "open", "name"]
+
+  public init(threadId: ThreadID, subject: String? = nil, openValue: Bool? = nil, name: String? = nil, unknownFields: [String: JSONValue] = [:]) {
+    self.threadId = threadId
+    self.subject = subject
+    self.openValue = openValue
+    self.name = name
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.threadId = try c.decode(ThreadID.self, forKey: WireKey("thread_id"))
+    self.subject = try c.decodeIfPresent(String.self, forKey: WireKey("subject"))
+    self.openValue = try c.decodeIfPresent(Bool.self, forKey: WireKey("open"))
+    self.name = try c.decodeIfPresent(String.self, forKey: WireKey("name"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.threadId, forKey: WireKey("thread_id"))
+    try c.encode(self.subject, forKey: WireKey("subject"))
+    try c.encodeIfPresent(self.openValue, forKey: WireKey("open"))
+    try c.encodeIfPresent(self.name, forKey: WireKey("name"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+/// From `packages/core/inbox-types.ts`.
 public struct InboxNotifyReach: Codable, Hashable, Sendable {
   public var enabled: Bool
   public var windows: Double
@@ -6714,12 +6794,13 @@ public struct InboxQuestion: Codable, Hashable, Sendable {
   public var why: String?
   public var reversible: InboxQuestionReversible?
   public var prototype: InboxQuestionPrototype?
+  public var scenarios: InboxQuestionScenarios?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["key", "position", "kind", "prompt", "context", "choices", "recommendation", "suggested_text", "stopped", "holds_up", "asked_by_agent_id", "orphaned", "state", "answer", "revision", "sent_revision", "picked_by", "picked_at", "sent_reply_id", "message_id", "superseded_by", "set_aside_at", "action", "action_result", "attachment", "stakes", "shows", "why", "reversible", "prototype"]
+  static let knownKeys: Set<String> = ["key", "position", "kind", "prompt", "context", "choices", "recommendation", "suggested_text", "stopped", "holds_up", "asked_by_agent_id", "orphaned", "state", "answer", "revision", "sent_revision", "picked_by", "picked_at", "sent_reply_id", "message_id", "superseded_by", "set_aside_at", "action", "action_result", "attachment", "stakes", "shows", "why", "reversible", "prototype", "scenarios"]
 
-  public init(key: String, position: Int64, kind: InboxQuestionKind, prompt: String, context: String? = nil, choices: [InboxQuestionChoice], recommendation: String? = nil, suggestedText: String? = nil, stopped: String? = nil, holdsUp: [String], askedByAgentId: String? = nil, orphaned: Bool, state: InboxQuestionState, answer: QuestionAnswer? = nil, revision: Int64, sentRevision: Int64, pickedBy: InboxPicker? = nil, pickedAt: String? = nil, sentReplyId: String? = nil, messageId: MessageID, supersededBy: InboxSupersededBy? = nil, setAsideAt: String? = nil, action: InboxActionFacts? = nil, actionResult: InboxActionResult? = nil, attachment: InboxQuestionAttachment? = nil, stakes: String? = nil, shows: InboxQuestionShows? = nil, why: String? = nil, reversible: InboxQuestionReversible? = nil, prototype: InboxQuestionPrototype? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(key: String, position: Int64, kind: InboxQuestionKind, prompt: String, context: String? = nil, choices: [InboxQuestionChoice], recommendation: String? = nil, suggestedText: String? = nil, stopped: String? = nil, holdsUp: [String], askedByAgentId: String? = nil, orphaned: Bool, state: InboxQuestionState, answer: QuestionAnswer? = nil, revision: Int64, sentRevision: Int64, pickedBy: InboxPicker? = nil, pickedAt: String? = nil, sentReplyId: String? = nil, messageId: MessageID, supersededBy: InboxSupersededBy? = nil, setAsideAt: String? = nil, action: InboxActionFacts? = nil, actionResult: InboxActionResult? = nil, attachment: InboxQuestionAttachment? = nil, stakes: String? = nil, shows: InboxQuestionShows? = nil, why: String? = nil, reversible: InboxQuestionReversible? = nil, prototype: InboxQuestionPrototype? = nil, scenarios: InboxQuestionScenarios? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.key = key
     self.position = position
     self.kind = kind
@@ -6750,6 +6831,7 @@ public struct InboxQuestion: Codable, Hashable, Sendable {
     self.why = why
     self.reversible = reversible
     self.prototype = prototype
+    self.scenarios = scenarios
     self.unknownFields = unknownFields
   }
 
@@ -6785,6 +6867,7 @@ public struct InboxQuestion: Codable, Hashable, Sendable {
     self.why = try c.decodeIfPresent(String.self, forKey: WireKey("why"))
     self.reversible = try c.decodeIfPresent(InboxQuestionReversible.self, forKey: WireKey("reversible"))
     self.prototype = try c.decodeIfPresent(InboxQuestionPrototype.self, forKey: WireKey("prototype"))
+    self.scenarios = try c.decodeIfPresent(InboxQuestionScenarios.self, forKey: WireKey("scenarios"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -6820,6 +6903,7 @@ public struct InboxQuestion: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.why, forKey: WireKey("why"))
     try c.encodeIfPresent(self.reversible, forKey: WireKey("reversible"))
     try c.encodeIfPresent(self.prototype, forKey: WireKey("prototype"))
+    try c.encodeIfPresent(self.scenarios, forKey: WireKey("scenarios"))
     try WireKey.write(unknownFields, to: &c)
   }
 }
@@ -7059,6 +7143,123 @@ public struct InboxQuestionReversible: Codable, Hashable, Sendable {
     var c = encoder.container(keyedBy: WireKey.self)
     try c.encode(self.value, forKey: WireKey("value"))
     try c.encode(self.why, forKey: WireKey("why"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+/// From `packages/core/inbox-types.ts`.
+public struct InboxQuestionScenarios: Codable, Hashable, Sendable {
+  public var columns: [InboxQuestionScenariosColumnsItem]
+  public var rows: [InboxQuestionScenariosRowsItem]
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["columns", "rows"]
+
+  public init(columns: [InboxQuestionScenariosColumnsItem], rows: [InboxQuestionScenariosRowsItem], unknownFields: [String: JSONValue] = [:]) {
+    self.columns = columns
+    self.rows = rows
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.columns = try c.decode([InboxQuestionScenariosColumnsItem].self, forKey: WireKey("columns"))
+    self.rows = try c.decode([InboxQuestionScenariosRowsItem].self, forKey: WireKey("rows"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.columns, forKey: WireKey("columns"))
+    try c.encode(self.rows, forKey: WireKey("rows"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+public struct InboxQuestionScenariosColumnsItem: Codable, Hashable, Sendable {
+  public var choice: String
+  public var header: String
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["choice", "header"]
+
+  public init(choice: String, header: String, unknownFields: [String: JSONValue] = [:]) {
+    self.choice = choice
+    self.header = header
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.choice = try c.decode(String.self, forKey: WireKey("choice"))
+    self.header = try c.decode(String.self, forKey: WireKey("header"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.choice, forKey: WireKey("choice"))
+    try c.encode(self.header, forKey: WireKey("header"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+public struct InboxQuestionScenariosRowsItem: Codable, Hashable, Sendable {
+  public var situation: String
+  public var cells: [InboxQuestionScenariosRowsItemCellsItem]
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["situation", "cells"]
+
+  public init(situation: String, cells: [InboxQuestionScenariosRowsItemCellsItem], unknownFields: [String: JSONValue] = [:]) {
+    self.situation = situation
+    self.cells = cells
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.situation = try c.decode(String.self, forKey: WireKey("situation"))
+    self.cells = try c.decode([InboxQuestionScenariosRowsItemCellsItem].self, forKey: WireKey("cells"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.situation, forKey: WireKey("situation"))
+    try c.encode(self.cells, forKey: WireKey("cells"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+public struct InboxQuestionScenariosRowsItemCellsItem: Codable, Hashable, Sendable {
+  public var verdict: String
+  public var detail: String?
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["verdict", "detail"]
+
+  public init(verdict: String, detail: String? = nil, unknownFields: [String: JSONValue] = [:]) {
+    self.verdict = verdict
+    self.detail = detail
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.verdict = try c.decode(String.self, forKey: WireKey("verdict"))
+    self.detail = try c.decodeIfPresent(String.self, forKey: WireKey("detail"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.verdict, forKey: WireKey("verdict"))
+    try c.encodeIfPresent(self.detail, forKey: WireKey("detail"))
     try WireKey.write(unknownFields, to: &c)
   }
 }
