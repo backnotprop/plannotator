@@ -451,10 +451,12 @@ test.describe('phone at 390', () => {
       const projects = (await (await page.request.get(`${world.url}api/inbox/projects`)).json()) as { projects?: { id: string; root: string }[] };
       const id = projects.projects?.find((p) => p.root === project.path)?.id ?? '';
       expect(id).toBeTruthy();
-      // The server keeps one answer 20 s: read the list again until the new branch is in the group.
+      // The server keeps one answer 20 s: load the page again until the new branch is in the group (a goto to the
+      // same address only moves its hash and reads nothing).
       const longRow = row(page, `${id}:${branch}`);
+      await page.goto(`${world.url}#reviews`);
       await expect(async () => {
-        await page.goto(`${world.url}#reviews`);
+        await page.reload();
         const toggle = group(page).locator('[data-reviews-fold="local"]');
         await expect(toggle).toBeVisible();
         if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
