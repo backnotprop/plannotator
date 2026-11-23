@@ -10,7 +10,10 @@
  * Inbox does not serve) or under another snapshot than the message; an added
  * image's before or a deleted image's after asked at all; no view menu on the
  * header, or a compare mode offered for an image with one side; a host that
- * passed no `images` reading anything. (A real browser: tests/e2e/inbox-review-images.spec.ts.)
+ * passed no `images` reading anything; Highlight differences reading a side's
+ * `blob:` URL with `fetch`, which the Inbox's `connect-src 'self'` refuses
+ * (the highlight never drew there), instead of the message's own route.
+ * (A real browser: tests/e2e/inbox-review-images.spec.ts.)
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -46,6 +49,8 @@ mock.module(resolve(import.meta.dir, '../review-editor/workerPool.tsx'), () => (
 const hasDom = typeof document !== 'undefined';
 const { ReviewPane } = (hasDom ? await import('./components/ReviewPane') : {}) as typeof import('./components/ReviewPane');
 const GuideReader = (hasDom ? (await import('#guide-reader')).default : null)!;
+const imageSettings = (hasDom ? await import('../review-editor/components/image-diff/imageDiffSettings') : null)!;
+const reviewImage = (hasDom ? await import('../review-editor/utils/reviewImage') : null)!;
 
 const PATCH = [
   'diff --git a/img/modified.png b/img/modified.png\nindex 1111111..2222222 100644\nBinary files a/img/modified.png and b/img/modified.png differ\n',
@@ -162,4 +167,54 @@ test.skipIf(!hasDom)('a host that passes no images: the binary notice, and nothi
   expect(host!.querySelector('[data-image-diff-preview]')).toBeNull();
   expect(everywhere('[data-image-view-menu]').length).toBe(0);
   expect(asked).toEqual([]);
+});
+
+test.skipIf(!hasDom)("Highlight differences: each side read again through the message's route, never fetched from its blob: URL, and drawn", async () => {
+  const requests: string[] = [];
+  const decoded: number[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    requests.push(url);
+    if (url.includes('review-image')) {
+      // Two different pictures, so the image is compared and not "contents unchanged".
+      const side = new URLSearchParams(url.slice(url.indexOf('?') + 1)).get('side');
+      return new Response(Uint8Array.from([...PNG, side === 'old' ? 1 : 2]), { headers: { 'content-type': 'image/png', 'x-image-width': '1', 'x-image-height': '1' } });
+    }
+    if (url.includes('/guide')) return Response.json({ message_id: MESSAGE, guide: message.guide, snapshot });
+    if (url.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
+    return Response.json({});
+  }) as typeof fetch;
+  // happy-dom has no worker, offscreen canvas or bitmap decoder: stand-ins that note which bytes were decoded.
+  const globals = globalThis as Record<string, unknown>;
+  const saved = { Worker: globals.Worker, OffscreenCanvas: globals.OffscreenCanvas, createImageBitmap: globals.createImageBitmap };
+  globals.OffscreenCanvas = class {};
+  globals.createImageBitmap = async (blob: Blob) => {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    decoded.push(bytes[bytes.length - 1]!);
+    return {};
+  };
+  globals.Worker = class {
+    onmessage: ((event: { data: unknown }) => void) | null = null;
+    postMessage(data: { id: number }) {
+      setTimeout(() => this.onmessage?.({ data: { id: data.id, mask: {}, changed: 1 } }), 0);
+    }
+  };
+  imageSettings.setImageDiffSettings({ differences: true });
+  // The first test's sides (one picture for both) are cached under this message: read them again.
+  reviewImage.resetReviewImageCache();
+  try {
+    await draw(<ReviewPane thread={thread} message={message} codeReview={false} onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />);
+    // Every request is a path on the window's own origin: no blob: URL (or any other origin) the page policy refuses.
+    expect(requests.filter((url) => !/^\/(?!\/)/.test(url))).toEqual([]);
+    const route = `/api/inbox/messages/${MESSAGE}/guide/review-image?`;
+    const modified = requests.filter((url) => url.startsWith(route) && new URLSearchParams(url.slice(route.length)).get('path') === 'img/modified.png');
+    // Each side once for the preview and once again for the highlight, both under the message's own snapshot.
+    expect(modified.map((url) => new URLSearchParams(url.slice(route.length)).get('side')).sort()).toEqual(['new', 'new', 'old', 'old']);
+    expect(modified.every((url) => new URLSearchParams(url.slice(route.length)).get('snapshot') === MESSAGE)).toBe(true);
+    expect(decoded.sort()).toEqual([1, 2]);
+    expect(previewOf('img/modified.png')!.textContent).toContain('100.0% of pixels differ');
+  } finally {
+    imageSettings.resetImageDiffSettingsForTests();
+    Object.assign(globals, saved);
+  }
 });

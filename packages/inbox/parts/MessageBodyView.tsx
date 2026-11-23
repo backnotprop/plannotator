@@ -18,6 +18,8 @@ export type MessageBodyData = {
   footers: readonly (string | null)[];
   replaced: readonly (readonly [Replacement | null, QuestionAnswer | null | undefined, InboxQuestion[]])[];
   readOnly: boolean;
+  /** The thread's questions moved to another thread (its root's `moved_to`). */
+  movedThread?: boolean;
   live: boolean;
   sentAnswers: readonly SentAnswerGroup[] | undefined;
   sentActions: readonly ActionRow[] | undefined;
@@ -66,6 +68,7 @@ export function drawMessageBody(d: MessageBodyData) {
         onOpenOptionSet={(key, image, choice) => acts.current.openOptionSet(id, key, image, choice)}
         onTryPrototype={isAgent ? (key) => acts.current.tryPrototype(id, key) : undefined}
         readOnly={d.readOnly}
+        movedThread={d.movedThread}
         answers={d.answers}
         onPick={(key, answer) => acts.current.pick(id, key, answer)}
         footerFor={(key) => d.footers[at(key)] ?? null}

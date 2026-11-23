@@ -11,13 +11,16 @@
  * `/api/inbox/messages/:id/guide/review-image`), never from code review's
  * `/api/review-image`, and an added picture's before or a deleted picture's
  * after is never asked. On a phone at 390 the preview fits the screen.
+ * Highlight differences draws its overlay under the Inbox's page policy
+ * (`connect-src 'self'`), which logs no refusal; and a picture a guide only
+ * renames (its patch names no blob) draws, not two "not found" tiles.
  *
  * PNGs land in <PLANNOTATOR_E2E_PROOF_DIR or .local/proof>/review-parity/.
  */
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { expect, test, type Page } from './inbox-test';
-import { ADDED, DELETED, MODIFIED, openPull, openReview, startWorld, stopWorld, windowAt, type ImagesWorld } from './inbox-review-images-world';
+import { ADDED, DELETED, MODIFIED, RENAMED, openPull, openReview, startWorld, stopWorld, windowAt, type ImagesWorld } from './inbox-review-images-world';
 
 const repo = resolve(__dirname, '../..');
 const parityDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'review-parity');
@@ -45,6 +48,15 @@ function watchReads(page: Page): { inbox: { path: string; side: string; status: 
     } else if (url.pathname === '/api/review-image') reads.review.push(url.href);
   });
   return reads;
+}
+
+/** What the page's policy (CSP) refused, as the console says it: Chromium's "violates the following Content Security Policy", WebKit's "Refused to connect". */
+function watchPolicy(page: Page): string[] {
+  const refused: string[] = [];
+  page.on('console', (message) => {
+    if (/Content Security Policy|Refused to (connect|load)/i.test(message.text())) refused.push(message.text());
+  });
+  return refused;
 }
 
 const shell = (page: Page, path: string) => page.locator(`[data-guide-file-shell="${path}"]`);
@@ -143,5 +155,50 @@ test("a guided review: the same previews, read from the message's own route", as
   expect(reads.inbox.every((read) => read.status === 200 || read.status === 304)).toBe(true);
   expect(new Set(reads.inbox.map((read) => `${read.path} ${read.side}`))).not.toContain(`${ADDED} old`);
   expect(new Set(reads.inbox.map((read) => `${read.path} ${read.side}`))).not.toContain(`${DELETED} new`);
+  await context.close();
+});
+
+test('Highlight differences on a modified picture: the difference is drawn, and the page policy refuses nothing', async ({ browser }) => {
+  const { context, page } = await windowAt(browser, 1280, 900, false);
+  const refused = watchPolicy(page);
+  const reads = watchReads(page);
+  await openPull(world, page);
+  await drawn(page, MODIFIED, 2);
+  await shell(page, MODIFIED).locator('[data-image-view-menu]').click();
+  await page.locator('[data-image-differences-option]').click();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-image-differences-option]')).toHaveCount(0);
+  const overlay = preview(page, MODIFIED).locator('canvas[data-image-differences]');
+  await expect(overlay).toBeVisible({ timeout: 20_000 });
+  await expect(preview(page, MODIFIED)).toContainText('of pixels differ');
+  // The overlay has the changed pixels on it, not an empty canvas.
+  await expect
+    .poll(() =>
+      overlay.evaluate((el) => {
+        const canvas = el as HTMLCanvasElement;
+        const data = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data;
+        let painted = 0;
+        for (let i = 3; i < data.length; i += 4) if (data[i]! > 0) painted += 1;
+        return painted;
+      }),
+    )
+    .toBeGreaterThan(0);
+  await shell(page, MODIFIED).screenshot({ path: join(parityDir, 'b2-08-differences-inbox-light.png') });
+  expect(refused).toEqual([]);
+  expect(reads.review).toEqual([]);
+  expect(reads.inbox.every((read) => read.status === 200 || read.status === 304)).toBe(true);
+  await context.close();
+});
+
+test("a guided review of a picture only renamed: drawn from the guide's commit, both sides read, its contents unchanged", async ({ browser }) => {
+  const { context, page } = await windowAt(browser, 1280, 900, false);
+  const reads = watchReads(page);
+  await openReview(world, page, world.renameThread, RENAMED);
+  await drawn(page, RENAMED, 1);
+  await expect(preview(page, RENAMED).locator('[data-image-unchanged]')).toHaveCount(1);
+  await shell(page, RENAMED).screenshot({ path: join(parityDir, 'b2-09-renamed-in-guide-light.png') });
+  const asked = reads.inbox.filter((read) => read.path === RENAMED);
+  expect([...new Set(asked.map((read) => read.side))].sort()).toEqual(['new', 'old']);
+  expect(asked.every((read) => read.status === 200 || read.status === 304)).toBe(true);
   await context.close();
 });
