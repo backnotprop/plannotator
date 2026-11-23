@@ -85,6 +85,8 @@ public enum Words {
   public static let markupOnly = "See the marked-up image."
   /// upload.too_large: packages/shared/inbox/uploads.ts receiveInboxUpload, INBOX_UPLOAD_MAX_BYTES
   public static let uploadTooLarge = "Not attached: a file is at most 100 MB."
+  /// upload.not_received: packages/shared/inbox/uploads.ts receiveInboxUpload, upload_refused body
+  public static let uploadNotReceived = "The file could not be received; try again."
   /// host.claude-code: packages/core/inbox-types.ts INBOX_HOST_NAMES claude-code
   public static let hostClaudeCode = "Claude Code"
   /// host.claude: packages/core/inbox-types.ts INBOX_HOST_NAMES claude

@@ -218,6 +218,11 @@
       "parts": [],
       "source": "packages/shared/inbox/uploads.ts receiveInboxUpload, INBOX_UPLOAD_MAX_BYTES"
     },
+    "upload.not_received": {
+      "text": "The file could not be received; try again.",
+      "parts": [],
+      "source": "packages/shared/inbox/uploads.ts receiveInboxUpload, upload_refused body"
+    },
     "host.claude-code": {
       "text": "Claude Code",
       "parts": [],

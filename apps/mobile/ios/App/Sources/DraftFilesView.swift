@@ -41,7 +41,13 @@ struct AttachButton: View {
       Task { for url in urls { await add(url) } }
     }
     .fullScreenCover(isPresented: $camera) {
-      CameraPicker { data in Task { await session.attach(data, name: name("photo", ext: "jpg"), type: "image/jpeg", to: place) } }
+      CameraPicker { data in
+        Task {
+          let named = name("photo", ext: "jpg")
+          guard let data else { return told(session.attachFailed(name: named, type: "image/jpeg", to: place)) }
+          told(await session.attach(data, name: named, type: "image/jpeg", to: place))
+        }
+      }
         .ignoresSafeArea()
     }
   }
@@ -50,17 +56,20 @@ struct AttachButton: View {
   /// copied, never held whole in memory. A HEIC picture goes as a JPEG: every agent reads that.
   private func add(_ item: PhotosPickerItem) async {
     let type = item.supportedContentTypes.first ?? .data
-    guard let picked = try? await item.loadTransferable(type: PickedFile.self) else { return }
-    defer { picked.discard() }
     let kind = type.conforms(to: .movie) ? "video" : "photo"
+    let mime = type.preferredMIMEType ?? "application/octet-stream"
+    guard let picked = try? await item.loadTransferable(type: PickedFile.self) else {
+      return told(session.attachFailed(name: name(kind, ext: type.preferredFilenameExtension ?? "bin"), type: mime, to: place))
+    }
+    defer { picked.discard() }
     let size = (try? picked.url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize.map(Int64.init) ?? 0
     if type.conforms(to: .image), !type.conforms(to: .jpeg), !type.conforms(to: .png), size <= DraftFiles.maxBytes,
       let data = try? Data(contentsOf: picked.url), let jpeg = UIImage(data: data)?.jpegData(compressionQuality: 0.9) {
-      await session.attach(jpeg, name: name("photo", ext: "jpg"), type: "image/jpeg", to: place)
+      told(await session.attach(jpeg, name: name("photo", ext: "jpg"), type: "image/jpeg", to: place))
       return
     }
     let ext = type.preferredFilenameExtension ?? "bin"
-    await session.attach(fileAt: picked.url, name: name(kind, ext: ext), type: type.preferredMIMEType ?? "application/octet-stream", to: place)
+    told(await session.attach(fileAt: picked.url, name: name(kind, ext: ext), type: mime, to: place))
   }
 
   /// A file from Files, under its own name: its size is read first, and it is copied rather than read into memory.
@@ -68,7 +77,15 @@ struct AttachButton: View {
     let scoped = url.startAccessingSecurityScopedResource()
     defer { if scoped { url.stopAccessingSecurityScopedResource() } }
     let type = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
-    await session.attach(fileAt: url, name: url.lastPathComponent, type: type, to: place)
+    told(await session.attach(fileAt: url, name: url.lastPathComponent, type: type, to: place))
+  }
+
+  /// A file refused on the phone as it was attached (too large, or not read) shows its tile already refused, so the
+  /// tile's own change never fires: VoiceOver hears it here, in the tile's words. One refused later by the computer
+  /// is heard from its tile.
+  private func told(_ file: DraftFile) {
+    guard let words = file.refused else { return }
+    AccessibilityNotification.Announcement("\(file.name), \(words)").post()
   }
 
   /// A picture or film from the phone has no name of its own: when it was added. Two added in the same second get
@@ -112,7 +129,8 @@ struct PickedFile: Transferable {
 
 /// The system's camera, for one photo.
 struct CameraPicker: UIViewControllerRepresentable {
-  let took: (Data) -> Void
+  /// The photo's bytes; nil when the camera handed over none the phone could read.
+  let took: (Data?) -> Void
   @Environment(\.dismiss) private var dismiss
 
   func makeUIViewController(context: Context) -> UIImagePickerController {
@@ -131,7 +149,7 @@ struct CameraPicker: UIViewControllerRepresentable {
     init(_ parent: CameraPicker) { self.parent = parent }
 
     func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
-      if let image = info[.originalImage] as? UIImage, let data = image.jpegData(compressionQuality: 0.9) { parent.took(data) }
+      parent.took((info[.originalImage] as? UIImage)?.jpegData(compressionQuality: 0.9))
       parent.dismiss()
     }
 

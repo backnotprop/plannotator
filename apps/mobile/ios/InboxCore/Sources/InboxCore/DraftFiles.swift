@@ -147,7 +147,7 @@ extension InboxSession {
   @discardableResult
   public func attach(_ data: Data, name: String, type: String, to place: DraftPlace) async -> DraftFile {
     let file = DraftFile(name: name.isEmpty ? "file" : name, size: Int64(data.count), type: type)
-    guard file.size <= DraftFiles.maxBytes else { return refuseTooLarge(file, in: place) }
+    guard file.size <= DraftFiles.maxBytes else { return refuse(file, Words.uploadTooLarge, in: place) }
     keepBytes(data, file.id)
     changeFiles(place) { $0.append(file) }
     await upload(file.id, in: place)
@@ -156,22 +156,32 @@ extension InboxSession {
 
   /// Attach a file the phone has on disk (Files, or a picture or film the library handed over as a file): its size
   /// is read first, and one larger than the Inbox takes is refused at once, in the Inbox's words, with none of it
-  /// read. Otherwise it is copied into the phone's copy (never held whole in memory) and goes up from there.
+  /// read. Otherwise it is copied into the phone's copy (never held whole in memory) and goes up from there. One the
+  /// phone could not read is never dropped in silence: its tile says so.
   @discardableResult
-  public func attach(fileAt url: URL, name: String, type: String, to place: DraftPlace) async -> DraftFile? {
-    guard let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize.map(Int64.init) else { return nil }
-    let file = DraftFile(name: name.isEmpty ? "file" : name, size: size, type: type)
-    guard size <= DraftFiles.maxBytes else { return refuseTooLarge(file, in: place) }
-    guard keepBytes(from: url, file.id) else { return nil }
+  public func attach(fileAt url: URL, name: String, type: String, to place: DraftPlace) async -> DraftFile {
+    let named = name.isEmpty ? "file" : name
+    guard let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize.map(Int64.init) else { return attachFailed(name: named, type: type, to: place) }
+    let file = DraftFile(name: named, size: size, type: type)
+    guard size <= DraftFiles.maxBytes else { return refuse(file, Words.uploadTooLarge, in: place) }
+    guard keepBytes(from: url, file.id) else { return attachFailed(name: named, type: type, to: place) }
     changeFiles(place) { $0.append(file) }
     await upload(file.id, in: place)
     return file
   }
 
-  /// A file larger than the Inbox takes: its tile says so in the Inbox's words, and nothing of it is kept or sent.
-  private func refuseTooLarge(_ file: DraftFile, in place: DraftPlace) -> DraftFile {
+  /// A file the person picked that the phone could not read (the library did not hand it over, or it could not be
+  /// copied): its tile says so in the Inbox's words for a file it could not receive, and the person attaches it again.
+  /// Nothing of it is kept, so there is nothing to send up again from the tile.
+  @discardableResult
+  public func attachFailed(name: String, type: String, to place: DraftPlace) -> DraftFile {
+    refuse(DraftFile(name: name.isEmpty ? "file" : name, size: 0, type: type), Words.uploadNotReceived, in: place)
+  }
+
+  /// A file refused on the phone: its tile says why, and nothing of it is kept or sent.
+  private func refuse(_ file: DraftFile, _ words: String, in place: DraftPlace) -> DraftFile {
     var refused = file
-    refused.refused = Words.uploadTooLarge
+    refused.refused = words
     changeFiles(place) { $0.append(refused) }
     return refused
   }

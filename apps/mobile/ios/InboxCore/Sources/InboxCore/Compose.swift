@@ -226,11 +226,12 @@ extension InboxSession {
   }
 
   /// The computer refused the new message: its words, agent and files come back to the draft, with why. Words
-  /// written since go after them.
+  /// written since go after them. Its files go up again only when the computer no longer has them.
   func composeGivenBack(_ write: HeldWrite, _ notice: Notice) {
     let now = draftBook.compose
     let words = [write.words ?? "", now?.words ?? ""].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: "\n\n")
-    let files = (write.files ?? []).map(\.again) + (now?.files ?? [])
+    let gone = Self.uploadsGone(notice)
+    let files = (write.files ?? []).map { gone ? $0.again : $0 } + (now?.files ?? [])
     keepCompose(ComposeDraft(words: words, to: now?.to ?? Self.composeTo(write), files: files, editedAt: clock.now(), notice: notice))
   }
 }

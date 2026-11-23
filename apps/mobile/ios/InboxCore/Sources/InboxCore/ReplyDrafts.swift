@@ -13,7 +13,8 @@ public struct LocalDraft: Codable, Hashable, Sendable {
   public var files: [DraftFile]?
   /// The message the reply quotes.
   public var quote: DraftQuote?
-  /// The agent session ↩ aimed the reply at (`SendPlan.targets(in:aim:)`).
+  /// The agent session ↩ aimed the reply at (`SendPlan.targets(in:aim:)`). Kept only while the draft holds a quote:
+  /// the quote line is what shows the person where the words go, so with no quote there is no aim.
   public var aim: String?
 
   public init(words: String, editedAt: Date, base: String? = nil, files: [DraftFile]? = nil, quote: DraftQuote? = nil, aim: String? = nil) {
@@ -26,7 +27,7 @@ public struct LocalDraft: Codable, Hashable, Sendable {
   }
 
   /// Nothing the person made is in it: it is not kept.
-  public var isEmpty: Bool { words.isEmpty && (files ?? []).isEmpty && quote == nil && aim == nil }
+  public var isEmpty: Bool { words.isEmpty && (files ?? []).isEmpty && quote == nil }
 }
 
 /// The message a reply quotes (the window's `quote`, approval "inbox-reply-quote"): the whole message, or the words
@@ -202,6 +203,8 @@ extension InboxSession {
     if let now { draft.editedAt = now }
     draft.base = draftBook.base[thread]
     if draft.files?.isEmpty == true { draft.files = nil }
+    // An aim lives only with the quote it came with: nothing on screen would say where the words go without it.
+    if draft.quote == nil { draft.aim = nil }
     draftBook.local[thread] = draft.isEmpty ? nil : draft
     if typing { keepDraftsSoon() } else { keepDrafts() }
   }
@@ -215,14 +218,15 @@ extension InboxSession {
     }
   }
 
-  /// ↩ on a message (the window's `arrowReply`): the quote it leaves, and the agent the reply is aimed at. `words`:
-  /// the words selected in that message, if any.
+  /// ↩ on a message (the window's `arrowReply`): the quote it leaves, and, when it leaves one, the agent the reply is
+  /// aimed at. A plain Reply (no quote left) aims at no one: the words go where a plain reply goes. `words`: the
+  /// words selected in that message, if any.
   public func replyArrow(_ thread: ThreadID, at message: MessageID, words: String? = nil) {
     guard let messages = self.thread(thread)?.thread.messages else { return }
     let arrow = ReplyQuoteRules.arrow(messages, at: message, words: words, quoted: draftBook.local[thread]?.quote != nil)
     changeDraft(thread) { draft in
       if let quote = arrow.quote { draft.quote = quote }
-      draft.aim = arrow.aim
+      draft.aim = draft.quote == nil ? nil : arrow.aim
     }
   }
 
@@ -242,9 +246,9 @@ extension InboxSession {
   }
 
   /// A Send that will not go (refused, or taken back): its files and quote go back into the draft (its words go back
-  /// through `returned`). `fresh`: the computer refused it, and may not keep the uploads it named, so each file goes
-  /// up again, under a new key, before the next Send.
-  func returnToDraft(_ write: HeldWrite, fresh: Bool = true) {
+  /// through `returned`). `fresh`: the computer no longer has the uploads it named (`upload_not_found`), so each file
+  /// goes up again, under a new key, before the next Send.
+  func returnToDraft(_ write: HeldWrite, fresh: Bool) {
     guard write.kind == .reply, (write.files ?? []).isEmpty == false || write.quote != nil else { return }
     changeDraft(ThreadID(write.thread)) { draft in
       let have = Set((draft.files ?? []).map(\.id))

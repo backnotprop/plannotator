@@ -544,6 +544,13 @@ public final class InboxSession {
     if quiet > 0 { quietSave = true } else { copy.saveOutbox(held) }
   }
 
+  /// The computer refused a Send because an upload it named is gone: its files must go up again. On any other
+  /// refusal the computer still keeps the uploads, and the next Send names them again.
+  static func uploadsGone(_ notice: Notice) -> Bool {
+    if case .refused(_, let code) = notice { return code == WireErrorCode.uploadNotFound.rawValue }
+    return false
+  }
+
   /// A write the computer will never take: say why where it was made, and never lose the person's words.
   private func giveBack(_ write: HeldWrite, _ notice: Notice) {
     let thread = ThreadID(write.thread)
@@ -586,7 +593,7 @@ public final class InboxSession {
         returned[thread] = [returned[thread], words].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n\n")
       }
       keepGivenBack()
-      returnToDraft(write)
+      returnToDraft(write, fresh: Self.uploadsGone(notice))
     case .compose:
       composeGivenBack(write, notice)
     case .seen:
@@ -657,7 +664,7 @@ public final class InboxSession {
   }
 
   /// Take one question (or action item) out of the Sends made after `write`; a Send left with no answer, no
-  /// action item and no words is not made at all.
+  /// action item, no words, no file and no comment is not made at all.
   private func dropFromLaterSends(after write: HeldWrite, message: String?, key: String) {
     guard let start = held.firstIndex(where: { $0.id == write.id }) else { return }
     var emptied: [String] = []
@@ -670,7 +677,11 @@ public final class InboxSession {
       guard (body.questions?.count ?? 0) + (body.actions?.count ?? 0) != before else { continue }
       if body.questions?.isEmpty == true { body.questions = nil }
       if body.actions?.isEmpty == true { body.actions = nil }
-      if body.questions == nil, body.actions == nil, (body.words ?? "").isEmpty { emptied.append(held[index].id) } else { held[index].body = encode(body) }
+      if body.questions == nil, body.actions == nil, (body.words ?? "").isEmpty, (body.uploads ?? []).isEmpty, (body.annotationIds ?? []).isEmpty {
+        emptied.append(held[index].id)
+      } else {
+        held[index].body = encode(body)
+      }
     }
     held.removeAll { emptied.contains($0.id) }
     copy.saveOutbox(held)
@@ -860,7 +871,8 @@ public final class InboxSession {
       }
       // Show what the computer has now, beside the refusal.
       if write.kind != .seen, write.kind != .state, write.kind != .compose { await readThread(ThreadID(write.thread)) }
-      // The files a refused Send handed back to the draft go up again at once, under new keys.
+      // The files a refused Send handed back to the draft go up again at once, under new keys, when the computer
+      // no longer has them (`upload_not_found`); otherwise it still keeps them, and they wait for the next Send.
       if write.kind == .reply, !(write.files ?? []).isEmpty { await uploadWaiting(.thread(ThreadID(write.thread))) }
       if write.kind == .compose, !(write.files ?? []).isEmpty { await uploadWaiting(.compose) }
       // A refused Send that carried comments: the computer's list of them is read again (the window may have sent or

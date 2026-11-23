@@ -21,6 +21,7 @@ import { INBOX_ACK_LABEL, INBOX_AGENT_LABELS, INBOX_HOST_NAMES, INBOX_PRIORITY_G
 import { ATTACHMENT_FEEDBACK_HEADING, SENT_VERSION_SUFFIX } from '../../packages/inbox/attachments';
 import { MARKUP_ONLY_TEXT } from '../../packages/inbox/markup';
 import { OUT, cli, jsonText, type Output } from './lib';
+import { readFileSync } from 'node:fs';
 
 /** One word: its text (`{part}` where a part goes), its parts, and where it comes from. */
 export type Word = { text: string; parts: string[]; source: string };
@@ -64,9 +65,20 @@ export function buildWords(): Record<string, Word> {
   words['markup.only'] = fixed(MARKUP_ONLY_TEXT, 'packages/inbox/markup.ts MARKUP_ONLY_TEXT');
   // The Inbox's refusal of a file past its limit (receiveInboxUpload), said by the phone before it reads any of it.
   words['upload.too_large'] = fixed(`Not attached: a file is at most ${Math.round(INBOX_UPLOAD_MAX_BYTES / (1024 * 1024))} MB.`, 'packages/shared/inbox/uploads.ts receiveInboxUpload, INBOX_UPLOAD_MAX_BYTES');
+  // The Inbox's refusal of a file it could not receive (receiveInboxUpload): the phone says it when it could not read
+  // a file the person picked. Not a constant in the product, so it is read from the source and fails here if it moves.
+  words['upload.not_received'] = fixed(uploadNotReceived(), 'packages/shared/inbox/uploads.ts receiveInboxUpload, upload_refused body');
   // The names a quoting reply's lead gives another agent's message (store.ts planQuote), by host.
   for (const [id, name] of Object.entries(INBOX_HOST_NAMES)) words[`host.${id}`] = fixed(name, `packages/core/inbox-types.ts INBOX_HOST_NAMES ${id}`);
   return words;
+}
+
+/** The words of `upload_refused` on the body, as packages/shared/inbox/uploads.ts writes them. */
+function uploadNotReceived(): string {
+  const source = readFileSync(new URL('../../packages/shared/inbox/uploads.ts', import.meta.url), 'utf8');
+  const found = /new InboxError\("upload_refused", "([^"]+)", \{ field: "body" \}\)/.exec(source);
+  if (!found) throw new Error('words.ts: the upload_refused body refusal moved in packages/shared/inbox/uploads.ts');
+  return found[1]!;
 }
 
 /** `section.stopped` → `sectionStopped`, `agent.claude-code` → `agentClaudeCode`. */

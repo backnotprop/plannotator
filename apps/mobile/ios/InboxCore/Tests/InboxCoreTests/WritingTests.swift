@@ -79,7 +79,7 @@ final class WritingTests: XCTestCase {
     XCTAssertEqual(written.quote?.of, quoted.rawValue)
   }
 
-  func testARefusedReplyGivesItsFilesAndQuoteBackToGoUpAgain() async throws {
+  func testARefusedReplyGivesItsFilesAndQuoteBack() async throws {
     let door = StandInDoor()
     let session = await pairedSession(door: door)
     await session.start()
@@ -94,7 +94,7 @@ final class WritingTests: XCTestCase {
     let back = try XCTUnwrap(session.draft(StandInData.docs))
     XCTAssertEqual(back.quote?.of, quoted)
     XCTAssertEqual(back.files?.map(\.id), files.map(\.id))
-    XCTAssertNotEqual(back.files?.first?.upload, files.first?.upload, "a refused Send's file goes up again: the computer may not keep that upload")
+    XCTAssertEqual(back.files?.first?.upload, files.first?.upload, "the computer still keeps that upload: the next Send names it again")
     XCTAssertNotNil(session.fileBytes(try XCTUnwrap(back.files?.first)), "its bytes are still on the phone")
   }
 

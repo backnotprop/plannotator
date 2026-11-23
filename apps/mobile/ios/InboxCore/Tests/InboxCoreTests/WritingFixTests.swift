@@ -85,18 +85,43 @@ final class WritingFixTests: XCTestCase {
     XCTAssertEqual(session.files(.thread(StandInData.docs)).map(\.name), ["shot.png"], "the file is back in the draft")
   }
 
-  func testARefusedReplysFilesGoUpAgainAtOnceUnderANewKey() async throws {
+  func testARefusedReplysFilesGoUpAgainOnlyWhenTheComputerNoLongerHasThem() async throws {
     let door = StandInDoor()
     let session = await pairedSession(door: door)
     await session.start()
     await session.open(StandInData.docs)
     await session.attach(picture(), name: "shot.png", type: "image/png", to: .thread(StandInData.docs))
     let first = try XCTUnwrap(session.files(.thread(StandInData.docs)).first?.upload)
+    // Refused for another reason: the computer still keeps the upload, so nothing goes up again.
     await door.setOptions { $0.proxyRefusesReplies = 403 }
+    _ = await session.send(thread: StandInData.docs, words: "Here it is", files: session.files(.thread(StandInData.docs)))
+    XCTAssertEqual(session.files(.thread(StandInData.docs)).first?.upload, first)
+    let once = await door.uploadCalls.count
+    XCTAssertEqual(once, 1, "no second upload")
+    // Refused because the upload is gone (swept, and swept again after going up once more): under a new key.
+    await door.setOptions { $0.proxyRefusesReplies = nil; $0.sweepsUploads = true }
+    await door.sweepUploads()
     _ = await session.send(thread: StandInData.docs, words: "Here it is", files: session.files(.thread(StandInData.docs)))
     let back = try XCTUnwrap(session.files(.thread(StandInData.docs)).first)
     XCTAssertNotNil(back.upload, "it went up again without the person asking")
     XCTAssertNotEqual(back.upload, first, "under a new key, so the computer answers a new upload, not the old one again")
+  }
+
+  func testANewMessageRefusedForAnEndedSessionKeepsItsUploads() async throws {
+    let door = StandInDoor()
+    let session = await pairedSession(door: door)
+    await session.start()
+    await session.readSessions()
+    let to = try to(session)
+    session.changeCompose { $0.words = "The plan"; $0.to = to }
+    await session.attach(picture(), name: "plan.png", type: "image/png", to: .compose)
+    let first = try XCTUnwrap(session.files(.compose).first?.upload)
+    await door.setLiveSessions([])
+    _ = await session.sendNew()
+    XCTAssertNotNil(session.composeDraft?.notice, "refused, and said")
+    XCTAssertEqual(session.files(.compose).first?.upload, first, "the computer keeps the upload: it is named again, not sent up again")
+    let calls = await door.uploadCalls.count
+    XCTAssertEqual(calls, 1)
   }
 
   // MARK: Nothing dropped on the way (M1)
@@ -128,6 +153,38 @@ final class WritingFixTests: XCTestCase {
     XCTAssertEqual(draft.files?.map(\.id), files.map(\.id), "its files are back in the draft")
     XCTAssertEqual(draft.quote?.of, quoted, "and its quote")
     XCTAssertNotNil(session.fileBytes(try XCTUnwrap(draft.files?.first)), "with their bytes")
+  }
+
+  func testASendOfFilesAndAPickThatWasAlreadySentGoesWithItsFiles() async throws {
+    let door = StandInDoor()
+    let session = await pairedSession(door: door)
+    await session.start()
+    await session.open(StandInData.retry)
+    let asked = try XCTUnwrap(session.thread(StandInData.retry)?.thread.messages.last { $0.author.kind == .agent })
+    let question = try XCTUnwrap(asked.questions?.first)
+    await session.pick(thread: StandInData.retry, message: asked.id, question: question, answer: QuestionAnswers.choice(question, selected: ["Everyone at once"], note: ""))
+    // The laptop sends that answer while the phone still shows the question open.
+    let other = DoorClient(transport: StandInTransport(door: door), token: session.computer.token, app: testApp)
+    _ = try await other.reply(asked.id, body: DoorReplyBody(idempotencyKey: "laptop-send", words: "", questions: [DoorQuestionPick(key: question.key, revision: 1)]))
+    await session.attach(picture(), name: "shot.png", type: "image/png", to: .thread(StandInData.retry))
+    let files = session.files(.thread(StandInData.retry))
+    XCTAssertNotNil(files.first?.upload)
+    // Away, the person changes the pick and sends it with the file and no words.
+    await door.setOffline(true)
+    await session.refresh()
+    let seen = try XCTUnwrap(session.thread(StandInData.retry)?.thread.messages.first { $0.id == asked.id }?.questions?.first)
+    await session.pick(thread: StandInData.retry, message: asked.id, question: seen, answer: QuestionAnswers.choice(question, selected: ["Staged, 10% first"], note: ""))
+    await session.send(thread: StandInData.retry, words: "", files: files)
+    XCTAssertTrue(session.files(.thread(StandInData.retry)).isEmpty, "the Send holds the file now")
+    // Back: the pick is refused (its answer was already sent); the Send behind it still carries the file.
+    await door.setOffline(false)
+    await session.refresh()
+
+    let replies = await door.posts("/reply").map(body)
+    let mine = try XCTUnwrap(replies.last)
+    XCTAssertEqual(mine["uploads"], .array([.string(try XCTUnwrap(files.first?.upload))]), "the file went, not dropped with the answer")
+    XCTAssertNil(mine["questions"]?.items.first, "without the answer the laptop already sent")
+    XCTAssertTrue(session.held.isEmpty)
   }
 
   // MARK: A second press (L5)
@@ -197,7 +254,43 @@ final class WritingFixTests: XCTestCase {
     // ↩ on the newest message: a plain Reply, so the quote goes.
     session.replyArrow(thread.threadId, at: MessageID("msg_TWOAGENTS1"))
     XCTAssertNil(session.draft(thread.threadId)?.quote)
-    XCTAssertEqual(session.draft(thread.threadId)?.aim, "ses_CODEX")
+    XCTAssertNil(session.draft(thread.threadId)?.aim, "with no quote on screen the reply is aimed at no one")
+    XCTAssertNil(session.draft(thread.threadId), "and nothing is kept")
+  }
+
+  func testAPlainReplyArrowAimsAtNoOneSoTheWordsGoToTheAgentWhoWroteLast() async throws {
+    let door = StandInDoor()
+    let thread = try await twoAgents(door)
+    await door.add(thread)
+    let session = await pairedSession(door: door)
+    await session.start()
+    await session.open(thread.threadId)
+    // The person starts typing, then ↩ on Codex's message, the newest: a plain Reply, nothing on screen names Codex.
+    session.keepDraft(thread.threadId, words: "Thanks.")
+    session.replyArrow(thread.threadId, at: MessageID("msg_TWOAGENTS1"))
+    XCTAssertNil(session.draft(thread.threadId)?.aim)
+    // Later Claude Code writes, and the person sends their words.
+    await door.agentWrites(thread: thread.threadId, body: "The export now runs nightly.")
+    await session.refresh()
+    await session.open(thread.threadId)
+    let newest = try XCTUnwrap(session.thread(thread.threadId)?.thread.messages.last)
+    XCTAssertEqual(newest.author.session, "ses_CLAUDE")
+    _ = await session.send(thread: thread.threadId, words: "Thanks.", quote: session.draft(thread.threadId)?.quote)
+    let replies = await door.posts("/reply")
+    XCTAssertEqual(replies.map(\.path), ["messages/\(newest.id.rawValue)/reply"], "to Claude Code, who wrote last, as a plain reply goes")
+  }
+
+  func testAnArrowOnThePersonsOwnMessageLeavesNoAim() async throws {
+    let door = StandInDoor()
+    let thread = try await twoAgents(door)
+    await door.add(thread)
+    let session = await pairedSession(door: door)
+    await session.start()
+    await session.open(thread.threadId)
+    session.replyArrow(thread.threadId, at: MessageID("msg_TWOAGENTS0"))
+    XCTAssertEqual(session.draft(thread.threadId)?.aim, "ses_CLAUDE", "a quote of Claude Code's message aims there")
+    session.setQuote(thread.threadId, nil)
+    XCTAssertNil(session.draft(thread.threadId), "the quote taken away takes the aim with it, and nothing is kept")
   }
 
   func testAQuoteWithFilesAndNoWordsStaysInTheDraft() async throws {
@@ -294,8 +387,7 @@ final class WritingFixTests: XCTestCase {
     let handle = try FileHandle(forWritingTo: big)
     try handle.truncate(atOffset: UInt64(DraftFiles.maxBytes + 1))
     try handle.close()
-    let attached = await session.attach(fileAt: big, name: "film.mov", type: "video/quicktime", to: .compose)
-    let file = try XCTUnwrap(attached)
+    let file = await session.attach(fileAt: big, name: "film.mov", type: "video/quicktime", to: .compose)
     XCTAssertEqual(session.fileState(file), .refused(Words.uploadTooLarge))
     XCTAssertEqual(file.size, DraftFiles.maxBytes + 1)
     XCTAssertNil(session.fileBytes(file), "none of it was kept")
@@ -305,10 +397,28 @@ final class WritingFixTests: XCTestCase {
     // One at the limit is copied, not read whole, and goes up from the copy.
     let small = FileManager.default.temporaryDirectory.appendingPathComponent("inbox-small-\(UUID().uuidString).txt")
     try Data("notes".utf8).write(to: small)
-    let copied = await session.attach(fileAt: small, name: "notes.txt", type: "text/plain", to: .compose)
-    let kept = try XCTUnwrap(copied)
+    let kept = await session.attach(fileAt: small, name: "notes.txt", type: "text/plain", to: .compose)
     XCTAssertEqual(session.fileBytes(kept), Data("notes".utf8))
     XCTAssertEqual(session.fileState(try XCTUnwrap(session.files(.compose).last)), .attached)
+  }
+
+  func testAFileThePhoneCouldNotReadShowsItsTileRefusedNeverNothing() async throws {
+    XCTAssertEqual(Words.uploadNotReceived, "The file could not be received; try again.", "the Inbox's own words for a file it could not receive")
+    let door = StandInDoor()
+    let session = await pairedSession(door: door, copy: LocalCopy(folder: folder()))
+    await session.start()
+    await session.open(StandInData.docs)
+    // A file whose size cannot be read (gone before it was read).
+    let gone = FileManager.default.temporaryDirectory.appendingPathComponent("inbox-gone-\(UUID().uuidString).pdf")
+    let unread = await session.attach(fileAt: gone, name: "report.pdf", type: "application/pdf", to: .thread(StandInData.docs))
+    XCTAssertEqual(session.fileState(unread), .refused(Words.uploadNotReceived))
+    // A file the library did not hand over.
+    let lost = session.attachFailed(name: "photo-20261122-101500.jpg", type: "image/jpeg", to: .thread(StandInData.docs))
+    XCTAssertEqual(session.fileState(lost), .refused(Words.uploadNotReceived))
+    XCTAssertEqual(session.files(.thread(StandInData.docs)).map(\.name), ["report.pdf", "photo-20261122-101500.jpg"], "each shows a tile")
+    let calls = await door.uploadCalls.isEmpty
+    XCTAssertTrue(calls, "nothing to send up")
+    XCTAssertFalse(DraftFiles.holdSend(session.files(.thread(StandInData.docs))), "a refused tile holds no Send up")
   }
 
   // MARK: A refusal for now (L3)
