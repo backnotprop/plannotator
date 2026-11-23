@@ -214,8 +214,9 @@ import { isAddressInUseError } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
 import { markPlannotatorResponse, withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT, inboxMcpInitializeClient, resolveInboxMcpReminder, type InboxMcpClient, type InboxMcpContext } from "./inbox-mcp";
-import { guidePatchOf, guidePullKey, guideRevisionOf, inboxGuideFileContents, inboxGuideRoute, readInboxReviewSnapshot } from "./inbox-guides";
+import { guideReviewOf, guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewSnapshot } from "./inbox-guides";
 import { guideReviewImage, pullReviewImage, reviewImageHttp } from "./inbox-review-image";
+import { guideReviewMarkdownImage, pullReviewMarkdownImage } from "./inbox-review-markdown-image";
 import { createInboxRepoCache } from "./inbox-repos";
 import { createGitlabHosts, unnamedForgeHost, type GitlabHosts } from "./inbox-gitlab-hosts";
 import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-refs";
@@ -845,7 +846,7 @@ const ERROR_STATUS: Record<string, number> = {
   question_revision_conflict: 409,
   question_already_sent: 409,
   // Replaced questions: answering one the agent superseded, or superseding
-  // an id that names no open question of the thread.
+  // an id that names no question of the thread.
   question_superseded: 422,
   invalid_supersedes: 422,
   // A pick on a question a Mark read closed: Move back first.
@@ -6382,7 +6383,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         pullHiddenChanged();
         return json({ serverSession, hidden: hiddenList(), hidden_repos: pullHidden.repos(), hid: hide.map((pull) => pull.key), rehid, threads_left: left, threads_back: back });
       }
-      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes" || path === "/api/inbox/pulls/review-image") {
+      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes" || path === "/api/inbox/pulls/review-image" || path === "/api/inbox/pulls/review-markdown-image") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
@@ -6452,12 +6453,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         // One side of a changed image, for the review app's own image preview on the PR page (inbox-review-image.ts):
         // only a file the diff at the head the window names changes, every check the shared handler's.
-        if (path === "/api/inbox/pulls/review-image") {
+        // And a picture a changed Markdown file shows, for code review's rendered view (inbox-review-markdown-image.ts).
+        if (path === "/api/inbox/pulls/review-image" || path === "/api/inbox/pulls/review-markdown-image") {
           const key = url.searchParams.get("key") ?? "";
           const scoped = pullDiffScopeOf(url.searchParams);
           if (!scoped) throw new InboxError("validation_error", "scope: layer, stack, range with from (a layer's key) or since with from (a commit).", { field: "scope" });
           if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
-          return reviewImageHttp(await pullReviewImage({ pulls, key, scope: scoped.scope, ...(scoped.from ? { from: scoped.from } : {}), params: url.searchParams, roots: () => pullRoots(key), ifNoneMatch: req.headers.get("if-none-match"), signal: req.signal }));
+          const asked = { pulls, key, scope: scoped.scope, ...(scoped.from ? { from: scoped.from } : {}), params: url.searchParams, roots: () => pullRoots(key), ifNoneMatch: req.headers.get("if-none-match"), signal: req.signal };
+          return reviewImageHttp(await (path === "/api/inbox/pulls/review-image" ? pullReviewImage(asked) : pullReviewMarkdownImage(asked)));
         }
         if (path === "/api/inbox/pulls/file") {
           const key = url.searchParams.get("key") ?? "";
@@ -8022,7 +8025,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
       // A guided review's image previews (inbox-review-image.ts): one side of a changed image, the blob the guide's patch
       // names, from the project's git or working tree; as for the arrows, only Code review may ask the forge.
-      const guideImage = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/guide\/review-image$/.exec(path);
+      // And a picture a changed Markdown file shows (inbox-review-markdown-image.ts), with the same readers.
+      const guideImage = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/guide\/(review-image|review-markdown-image)$/.exec(path);
       if (guideImage) {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
@@ -8042,7 +8046,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 return projectRoot && roots.includes(projectRoot) ? pulls.fileBytes(pullKey, "layer", side, filePath, oldPath, roots, maxBytes) : ({ kind: "missing" } as const);
               }
             : undefined;
-        return reviewImageHttp(await guideReviewImage({ patch: guidePatchOf(store, sha256), messageId: message.id, root: projectRoot, pinned: guideRevisionOf(store, sha256), params: url.searchParams, ...(forge ? { forge } : {}), ifNoneMatch: req.headers.get("if-none-match"), signal: req.signal }));
+        // One read of the guide: its patch, and the commit it pins (a pure rename's sides, an unchanged picture of a Markdown file).
+        const review = guideReviewOf(store, sha256);
+        const asked = { patch: review?.patch ?? null, revision: review?.revision ?? null, messageId: message.id, root: projectRoot, params: url.searchParams, ...(forge ? { forge } : {}), ifNoneMatch: req.headers.get("if-none-match"), signal: req.signal };
+        return reviewImageHttp(await (guideImage[2] === "review-image" ? guideReviewImage(asked) : guideReviewMarkdownImage(asked)));
       }
 
       // Guided reviews (step 5): the snapshot a message carries (packages/server/inbox-guides.ts).

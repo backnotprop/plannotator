@@ -237,7 +237,7 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
   });
 
   /** An added Markdown file, previewed whole, under the given review state. */
-  async function mountAdded(text: string, stateExtras: Record<string, unknown> = {}) {
+  async function mountAdded(text: string, stateExtras: Record<string, unknown> = {}, previewProps: Partial<React.ComponentProps<typeof MarkdownFilePreview>> = {}) {
     const patch = [
       'diff --git a/docs/guide.md b/docs/guide.md',
       'new file mode 100644',
@@ -259,6 +259,7 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
             patch={patch}
             contents={{ fileContents: { forPath: 'docs/guide.md', old: null, new: text }, loading: false, stale: false }}
             variant="single"
+            {...previewProps}
           />
         </ReviewStateProvider>,
       );
@@ -345,6 +346,26 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
     await settle(30);
     expect(imgSrcs(el)).toContain('https://tracker.example/p.png');
     expect(el.querySelector('[data-markdown-preview-remote-images]')).toBeNull();
+  });
+
+  test('a page that never loads remote images: each is the quiet placeholder, in a PR review or not, with nothing offering to load it', async () => {
+    for (const extras of [{ prMetadata: { url: 'https://github.com/o/r/pull/1' } }, {}]) {
+      const el = await mountAdded(REMOTE_DOC, extras, { neverLoadRemoteImages: true });
+      await settle(30);
+      expect(imgSrcs(el)).toEqual(['/api/review-markdown-image?doc=docs%2Fguide.md&side=new&src=img%2Fa.png&snapshot=snap-1']);
+      expect(el.querySelectorAll('[data-image-unavailable]').length).toBe(2);
+      expect(el.querySelector('[data-markdown-preview-remote-images]')).toBeNull();
+      expect(el.querySelector('[data-markdown-preview-load-remote]')).toBeNull();
+      // A click on a placeholder loads nothing.
+      const placeholder = el.querySelector('[data-image-unavailable]') as HTMLElement;
+      await act(async () => { placeholder.click(); await new Promise((r) => setTimeout(r, 30)); });
+      await settle(30);
+      expect(imgSrcs(el)).toEqual(['/api/review-markdown-image?doc=docs%2Fguide.md&side=new&src=img%2Fa.png&snapshot=snap-1']);
+      await act(async () => root!.unmount());
+      host!.remove();
+      root = null;
+      host = null;
+    }
   });
 
   test('an image source is sent to the route as written, never trimmed', async () => {
