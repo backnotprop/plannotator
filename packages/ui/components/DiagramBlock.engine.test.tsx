@@ -317,6 +317,49 @@ describe.if(hasDom)('diagram engine: a comment anchored under one engine restore
     }
   });
 
+  // What regresses: under the shipped switch, a comment saved on one of two
+  // edges between the same nodes shows "Unanchored", and a new click on
+  // either becomes a whole-diagram comment.
+  test('two flowchart edges between the same nodes: Mermaid-saved comments restore under Pele, and a click on either is an edge comment', async () => {
+    const block = fence('flowchart LR\n  A[Ask] -->|yes| B[Ship]\n  A -->|no| B');
+    const yes = stored(block, 'y1', { v: 1, family: 'flowchart', kind: 'edge', from: 'A', to: 'B', label: 'yes', sourceLine: [5, 5] }, 'yes');
+    const no = stored(block, 'n1', { v: 1, family: 'flowchart', kind: 'edge', from: 'A', to: 'B', label: 'no', sourceLine: [6, 6] }, 'no');
+    const reports: AnnotationRestoreReport[] = [];
+    await mount(<MermaidBlock block={block} annotations={[yes, no]} onRestoreReport={(r) => reports.push(r)} />);
+    await waitFor(() => expect(host!.querySelector('[data-diagram-badge="y1"]')).not.toBeNull());
+    expect(engineOf(drawn())).toBe('pele');
+    expect(host!.querySelector('[data-diagram-badge="n1"]')).not.toBeNull();
+    await waitFor(() => expect(reports.length).toBeGreaterThan(0));
+    expect(reports.at(-1)!.unanchored).toEqual([]);
+    await act(async () => root!.unmount());
+    root = null;
+
+    for (const label of ['yes', 'no']) {
+      const added: Annotation[] = [];
+      await mount(<MermaidBlock block={block} annotations={[]} onAddAnnotation={(a) => added.push(a)} />);
+      await waitFor(() => drawn());
+      const svg = drawn();
+      const edge = Array.from(svg.querySelectorAll('g.pele-edge[data-id]')).find((el) => PELE_FINDER.targetFromElement(svg, el, svg.id)?.label === label);
+      expect(edge).toBeDefined();
+      const line = edge!.querySelector('path:not(.pele-marker)')!;
+      await act(async () => {
+        pointer('pointerdown', line);
+        pointer('pointerup', line);
+      });
+      await waitFor(() => expect(host!.querySelector('[data-diagram-composer] textarea')).not.toBeNull());
+      const textarea = host!.querySelector<HTMLTextAreaElement>('[data-diagram-composer] textarea')!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, 'a note');
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      });
+      await waitFor(() => expect(added).toHaveLength(1));
+      expect(added[0]!.diagramAnchor).toMatchObject({ family: 'flowchart', kind: 'edge', from: 'A', to: 'B', label });
+      await act(async () => root!.unmount());
+      root = null;
+    }
+  });
+
   /** The `n`-th element matching `selector`, or the one whose text is `text`. */
   const nth = (selector: string, n = 0) => (svg: SVGSVGElement) => svg.querySelectorAll(selector)[n];
   const withText = (selector: string, text: string) => (svg: SVGSVGElement) =>

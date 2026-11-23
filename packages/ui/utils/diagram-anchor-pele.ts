@@ -28,7 +28,7 @@ import { diagramFamilyOf, MERMAID_FINDER, splitEdgeStem, type DiagramFinder } fr
 // (`PELE_IN_BUILD`) would still carry it.
 export const PELE_TARGET_SELECTOR =
   'g.pele-node[data-id], g.pele-cluster[data-id], g.pele-edge[data-id], g.pele-edge-label[data-id], ' +
-  'g.pele-note[data-id], path.pele-lifeline[data-id], g.pele-frame';
+  'g.pele-note[data-id], path.pele-lifeline[data-id], g.pele-frame, g.pele-cluster-title[data-id]';
 
 function isPele(svg: Element): boolean {
   return svg.classList.contains('pele');
@@ -96,6 +96,11 @@ function edgeLabelText(svg: Element, id: string): string {
   return textOf(byDataId(svg, 'g.pele-edge-label[data-id]', id)?.querySelector('text'));
 }
 
+/** A subgraph's title: in its own group, or in `g.pele-cluster-title`, the layer Pele draws above the edges when one crosses it. */
+function clusterTitle(svg: Element, own: string, id: string): string {
+  return own !== '' ? own : textOf(byDataId(svg, 'g.pele-cluster-title[data-id]', id));
+}
+
 function nodeIds(svg: Element): ReadonlySet<string> {
   return new Set(Array.from(svg.querySelectorAll('g.pele-node[data-id]'), (node) => node.getAttribute('data-id') ?? ''));
 }
@@ -103,23 +108,16 @@ function nodeIds(svg: Element): ReadonlySet<string> {
 // ---------------------------------------------------------------- flowchart
 
 function flowchartTarget(svg: Element, el: Element, id: string): DiagramTarget | null {
-  if (el.classList.contains('pele-node') || el.classList.contains('pele-cluster')) {
-    return { family: 'flowchart', kind: el.classList.contains('pele-cluster') ? 'cluster' : 'node', id, label: textOf(el) };
-  }
+  if (el.classList.contains('pele-cluster')) return { family: 'flowchart', kind: 'cluster', id, label: clusterTitle(svg, textOf(el), id) };
+  if (el.classList.contains('pele-node')) return { family: 'flowchart', kind: 'node', id, label: textOf(el) };
   if (!el.classList.contains('pele-edge')) return null;
   const stem = /^L_(.+)_\d+$/u.exec(id)?.[1];
   if (stem === undefined) return null;
   const ends = splitEdgeStem(stem, nodeIds(svg));
   if (ends === null) return null;
-  // The v1 anchor has no occurrence index. Repeated edges with the same ends
-  // therefore cannot be safely distinguished and are deliberately unaddressed.
-  const matches = Array.from(svg.querySelectorAll('g.pele-edge[data-id]')).filter((edge) => {
-    const edgeStem = /^L_(.+)_\d+$/u.exec(edge.getAttribute('data-id') ?? '')?.[1];
-    if (edgeStem === undefined) return false;
-    const candidateEnds = splitEdgeStem(edgeStem, nodeIds(svg));
-    return candidateEnds !== null && candidateEnds.from === ends.from && candidateEnds.to === ends.to;
-  });
-  if (matches.length !== 1) return null;
+  // Two edges with the same ends (`A -->|yes| B`, `A -->|no| B`) are told
+  // apart by their label, as Mermaid's restore tells them apart
+  // (`peleTargetFromElement`, `peleFindTarget`).
   const edgeLabel = byDataId(svg, '.pele-edge-label[data-id]', id);
   return { family: 'flowchart', kind: 'edge', ...ends, label: textOf(edgeLabel ?? el) };
 }
@@ -384,7 +382,7 @@ function stateTarget(svg: Element, el: Element, id: string): DiagramTarget | nul
   }
   if (cl.contains('pele-cluster')) {
     // Mermaid addresses a composite state as a node (its `state-{id}-{n}` group).
-    return { family: 'state', kind: 'node', id, label: textOf(el.querySelector(':scope > .pele-cluster-label')) };
+    return { family: 'state', kind: 'node', id, label: clusterTitle(svg, textOf(el.querySelector(':scope > .pele-cluster-label')), id) };
   }
   if (cl.contains('pele-note')) {
     const note = /^(.+)-\d+$/u.exec(id)?.[1];
@@ -443,6 +441,10 @@ function rawTarget(svg: Element, el: Element): DiagramTarget | null {
     const edge = byDataId(svg, 'g.pele-edge[data-id]', id);
     return edge === null ? null : rawTarget(svg, edge);
   }
+  if (el.classList.contains('pele-cluster-title')) {
+    const cluster = byDataId(svg, 'g.pele-cluster[data-id]', id);
+    return cluster === null ? null : rawTarget(svg, cluster);
+  }
   if (role === 'flowchart') return flowchartTarget(svg, el, id);
   if (role === null) return null;
   return edgeOrNodeTarget(svg, el, role, id);
@@ -456,15 +458,29 @@ function matchingParts(svg: Element, target: DiagramTarget): Element[] {
   });
 }
 
-/** Two relationships with the same ends (`User --> Order` twice) share one
+/** Two relationships or flowchart edges with the same ends (`User --> Order` twice) share one
  * identity; the label tells them apart. The part an element draws, or null
  * when nothing does: two parts with the same identity AND the same label
  * cannot be told apart after a reload, so neither is offered. */
 function peleTargetFromElement(svg: Element, el: Element): DiagramTarget | null {
   const target = rawTarget(svg, el);
-  if (target === null || target.kind !== 'edge' || peleRole(svg) === 'sequence' || peleRole(svg) === 'flowchart') return target;
+  if (target === null || target.kind !== 'edge' || peleRole(svg) === 'sequence') return target;
   const twins = matchingParts(svg, target).filter((part) => rawTarget(svg, part)?.label === target.label);
   return twins.length === 1 ? target : null;
+}
+
+/**
+ * The ONE element of `els` whose label is `label`: as written, else with
+ * every space taken out. Mermaid reads a `<br>` in a label as nothing and
+ * Pele as a space, so "Line1Line2" saved under Mermaid names the part Pele
+ * labels "Line1 Line2". Two that match the same way name neither.
+ */
+function oneLabelled(els: readonly Element[], labelOf: (el: Element) => string, label: string): Element | null {
+  const exact = els.filter((el) => labelOf(el) === label);
+  if (exact.length > 0) return exact.length === 1 ? (exact[0] ?? null) : null;
+  const squash = (text: string): string => text.replace(/\s+/gu, '');
+  const loose = els.filter((el) => squash(labelOf(el)) === squash(label));
+  return loose.length === 1 ? (loose[0] ?? null) : null;
 }
 
 function peleFindTarget(svg: Element, target: DiagramTarget): Element | null {
@@ -479,16 +495,14 @@ function peleFindTarget(svg: Element, target: DiagramTarget): Element | null {
   if (matches.length === 1) return matches[0] ?? null;
   if (matches.length > 1) {
     // The same ends twice: the ONE whose label is the stored label, else none.
-    const labelled = matches.filter((el) => rawTarget(svg, el)?.label === target.label);
-    return labelled.length === 1 ? (labelled[0] ?? null) : null;
+    return oneLabelled(matches, (el) => rawTarget(svg, el)?.label ?? '', target.label);
   }
   if (target.kind !== 'node' || target.label === '') return null;
   // The id is gone (renamed): the ONE node that still carries the label.
-  const byLabel = Array.from(svg.querySelectorAll('g.pele-node[data-id], g.pele-cluster[data-id], g.pele-note[data-id]')).filter((el) => {
-    const candidate = rawTarget(svg, el);
-    return candidate !== null && candidate.kind === 'node' && candidate.label === target.label;
-  });
-  return byLabel.length === 1 ? (byLabel[0] ?? null) : null;
+  const nodes = Array.from(svg.querySelectorAll('g.pele-node[data-id], g.pele-cluster[data-id], g.pele-note[data-id]')).filter(
+    (el) => rawTarget(svg, el)?.kind === 'node',
+  );
+  return oneLabelled(nodes, (el) => rawTarget(svg, el)?.label ?? '', target.label);
 }
 
 /** Pele 1.3.0's codec for flowchart, sequence, state, class, ER and
