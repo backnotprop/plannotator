@@ -1460,6 +1460,23 @@ describe("a high or medium judgment's places (context notes, risk bars)", () => 
     expect(parseRiskAnswer(answer("high", bad), check)).toEqual({ level: "high", why: "It changes billing." });
   });
 
+  test("lines count as the prompt says: both ends included, on their side, inside one hunk", () => {
+    // Hunk 1: old 10-12, new 10-14. Hunk 2: old 30-31, new 32-34.
+    const two = `${PATCH}@@ -30,2 +32,3 @@\n context\n+added\n context\n`;
+    const at = (side: string, lines: [number, number]) => parseRiskAnswer(answer("high", [{ ...place, side, lines }]), { rules: RULES, patch: two })?.where?.length ?? 0;
+    expect(at("new", [10, 14])).toBe(1);
+    expect(at("new", [10, 15])).toBe(0);
+    expect(at("old", [10, 12])).toBe(1);
+    expect(at("old", [10, 13])).toBe(0);
+    // The unchanged last line of hunk 1 is old 12 and new 14: either side names it.
+    expect(at("old", [12, 12])).toBe(1);
+    expect(at("new", [14, 14])).toBe(1);
+    // A place across the two hunks, or in the gap between them, is dropped.
+    expect(at("new", [12, 33])).toBe(0);
+    expect(at("new", [20, 20])).toBe(0);
+    expect(at("new", [32, 34])).toBe(1);
+  });
+
   test("a rule that is not one of the person's lines is left off; at most five places", () => {
     expect(parseRiskAnswer(answer("high", [{ ...place, rule: "Something I made up." }]), check)?.where?.[0]?.rule).toBeUndefined();
     expect(parseRiskAnswer(answer("high", Array.from({ length: 8 }, () => place)), check)?.where).toHaveLength(5);

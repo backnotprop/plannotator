@@ -25,7 +25,7 @@ Do not use tools. Answer with exactly one line of JSON and nothing else:
 {"risk":"low","why":"One short plain sentence, under 25 words, naming what in the diff decided it."}
 "risk" is low, medium or high. A high or medium answer adds "where": the one to five places in the diff that decided it, the most important first:
 {"risk":"high","why":"…","where":[{"file":"src/api/routes.ts","side":"old","lines":[5,5],"rule":"Anything that changes permissions.","why":"One short plain sentence: what these lines do that the rule describes."}]}
-"file" is the path as the diff names it. "side" is "new" for added or unchanged lines and "old" for removed lines. "lines" are the first and last line numbers, from the hunk headers. "rule" is the line of the rules they touch, copied word for word. A low answer has no "where".`;
+"file" is the path as the diff names it. "side" is "new" for added or unchanged lines and "old" for removed lines. "lines" are the first and last line numbers of the place, both included, on its side. A hunk header "@@ -a,b +c,d @@" numbers its first old line a and its first new line c; each line after it adds one on the sides it belongs to: a removed line on the old side only, an added line on the new side only, an unchanged line on both. A place stays inside one hunk. "rule" is the line of the rules they touch, copied word for word. A low answer has no "where".`;
 
 /** The message that carries the rules and the pull request. `fence` must not be guessable from the diff. */
 export function buildRiskPrompt(input: { rules: string; title: string; diff: string; fence: string }): string {
