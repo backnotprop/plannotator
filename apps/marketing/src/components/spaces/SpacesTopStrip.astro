@@ -1,0 +1,16 @@
+---
+// The Spaces top strip: the name, the open-source link with its star count, and
+// the light/dark switch (scripts/spaces/theme-switch.js). Shared by the Spaces pages.
+import { ossStarsLink, readOssStars } from '../../lib/oss-stars';
+
+// The star count beside "Open source" comes from the snapshot checked into
+// src/data/ (bun apps/marketing/scripts/oss-stars.ts refreshes it). Read as
+// text so a missing or broken file leaves the link without a count instead of
+// failing the build.
+const ossSnapshot = Object.values(
+  import.meta.glob<string>('../../data/oss-stars.json', { query: '?raw', import: 'default', eager: true }),
+)[0];
+const oss = ossStarsLink(readOssStars(ossSnapshot));
+---
+<header class="nav"><a class="act home" href="/" aria-label="Plannotator Spaces"><svg viewBox="0 0 64 64" width="24" height="24" aria-hidden="true"><defs><mask id="mc" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><rect width="64" height="64" fill="white"/><path d="M3 32 A29 8 0 0 0 61 32" transform="rotate(-20 32 32)" fill="none" stroke="black" stroke-width="10.5" stroke-linecap="round"/></mask><mask id="mb" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><rect width="64" height="64" fill="white"/><rect x="14" y="7" width="36" height="50" rx="10" fill="black"/></mask></defs><g mask="url(#mc)" fill="currentColor"><rect x="17" y="10" width="30" height="44" rx="7"/></g><g mask="url(#mb)"><path d="M3 32 A29 8 0 0 1 61 32" transform="rotate(-20 32 32)" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/></g><path d="M3 32 A29 8 0 0 0 61 32" transform="rotate(-20 32 32)" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/></svg><span class="nm"><span class="nmp">Plannotator</span> Spaces</span></a><nav class="lk" aria-label="Site"><a href="https://github.com/backnotprop/plannotator" target="_blank" rel="noopener" aria-label={oss.label}><span class="lk-w">Open source</span>{oss.count && <span class="lk-n" aria-hidden="true" title={oss.title ?? undefined}><svg class="lk-st" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M12 .587l3.668 7.568L24 9.306l-6 5.848 1.417 8.259L12 19.446l-7.417 3.967L6 15.154 0 9.306l8.332-1.151z"/></svg>{oss.count}</span>}</a></nav><button type="button" class="thm" aria-label="Switch to light theme"><svg class="thm-sun" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg><svg class="thm-moon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button></header>
+<script src="../../scripts/spaces/theme-switch.js"></script>
