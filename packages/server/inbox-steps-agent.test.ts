@@ -196,12 +196,12 @@ describe("on", () => {
     expect(w.server.store.stepsOf(w.thread, "ses_a")!.steps[2]!.status).toBe("done");
   });
 
-  test("a status written as in_progress, pending or completed is saved as doing, todo, done; blocked is refused", async () => {
+  test("a status written as in_progress, pending, completed or skipped is saved as doing, todo, done, dropped; blocked is refused", async () => {
     const w = await world();
     await w.setSteps(true);
-    const saved = await w.call("steps", { ...w.agent, thread_id: w.thread, steps: [{ step: "a", status: "completed" }, { step: "b", status: "In Progress" }, { step: "c", status: "pending" }] });
+    const saved = await w.call("steps", { ...w.agent, thread_id: w.thread, steps: [{ step: "a", status: "completed" }, { step: "b", status: "In Progress" }, { step: "c", status: "pending" }, { step: "d", status: "skipped" }] });
     expect(saved.isError).toBeFalsy();
-    expect(w.server.store.stepsOf(w.thread, "ses_a")!.steps.map((s) => s.status)).toEqual(["done", "doing", "todo"]);
+    expect(w.server.store.stepsOf(w.thread, "ses_a")!.steps.map((s) => s.status)).toEqual(["done", "doing", "todo", "dropped"]);
     const blocked = await w.call("steps", { ...w.agent, thread_id: w.thread, steps: [{ step: "a", status: "blocked" }] });
     expect(blocked.isError).toBe(true);
   });

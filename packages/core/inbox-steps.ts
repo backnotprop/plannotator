@@ -84,9 +84,10 @@ const INBOX_STEP_STATUS_ALIASES: Readonly<Record<string, InboxStepStatus>> = {
   pending: "todo",
   completed: "done",
   complete: "done",
+  skipped: "dropped",
 };
 
-/** A status as an agent may send it: trimmed, any case, or a common other word for one (`in_progress`, `pending`, `completed`). Anything else is refused by the caller. */
+/** A status as an agent may send it: trimmed, any case, or a common other word for one (`in_progress`, `pending`, `completed`, `skipped`). Anything else is refused by the caller. */
 export function inboxStepStatusOf(value: unknown): InboxStepStatus | null {
   if (typeof value !== "string") return null;
   const key = value.trim().toLowerCase();

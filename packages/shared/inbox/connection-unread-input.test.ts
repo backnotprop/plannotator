@@ -28,7 +28,7 @@ const errorOf = (input: unknown, among: InboxToolInfo[] = tools) => {
   const call = inboxToolCall(input, among, filled);
   return "error" in call ? call.error : null;
 };
-const UNREAD = "its input was not valid JSON";
+const UNREAD = "its input could not be read as fields";
 
 test("input that never arrived as fields says to check the quoting, with a call that reads, not that the action is wrong", () => {
   const broken = [

@@ -17,6 +17,7 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_THREAD_PULLS_MAX, parseInboxThreadPullRefs } from "@plannotator/core/inbox-types";
+import { inboxToolResultText } from "@plannotator/shared/inbox/connection";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxMcpServer, type InboxMcpContext } from "./inbox-mcp";
 import { createInboxPullLookups } from "./inbox-pull-lookups";
@@ -58,6 +59,15 @@ function world(options: { projectHost?: InboxMcpContext["projectHost"]; known?: 
   };
   return { store, project, send };
 }
+
+test("a #N only in a picture's alt text or caption, or in a URL, names no PR; the same #N in prose does, and the agent reads that line once", async () => {
+  const w = world({ known: knowing("github.com/acme/api#411") });
+  const quiet = await w.send("ses_a", { body: 'Before and after:\n\n![Header after #411](shots/after.png "the fix for #411")\n\nSee https://example.com/notes#411.', thread: "pictures" });
+  expect(quiet.lines).toHaveLength(1);
+  const named = await w.send("ses_a", { body: "This lands #411.", thread: "prose" });
+  expect(named.last).toBe(nudge("#411", "acme/api#411"));
+  expect(inboxToolResultText(named.result).text.split(named.last)).toHaveLength(2);
+});
 
 test("a PR's URL or a GitLab short ref in the agent's words is read; code, quotes, issues and unknown numbers are not", () => {
   expect(keys(`Opened ${PR} for this.`)).toEqual(["github.com/acme/api#12"]);

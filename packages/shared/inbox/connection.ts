@@ -942,7 +942,7 @@ export function inboxUnreadInputText(input: unknown, tools: readonly InboxToolIn
     const named = keys.slice(0, 3).map((key) => JSON.stringify(key.slice(0, 40))).join(', ')
     got = keys.length === 0 ? 'it arrived empty' : `it arrived as ${named}${keys.length > 3 ? ` and ${keys.length - 3} more` : ''}`
   }
-  return `Invalid plannotator_inbox call: its input was not valid JSON (${got}), so nothing was sent. Check the JSON quoting and call again: every field is its own key and every string value is in double quotes, e.g. {"action": "send_message", "body": "…", "supersedes": ["msg_…/q-…"]}. action is one of ${tools.map((tool) => tool.name).join(', ')}.`
+  return `Invalid plannotator_inbox call: its input could not be read as fields (${got}), so nothing was sent. Check the JSON quoting and call again: every field is its own key and every string value is in double quotes, e.g. {"action": "send_message", "body": "…", "supersedes": ["msg_…/q-…"]}. action is one of ${tools.map((tool) => tool.name).join(', ')}.`
 }
 
 /**
@@ -1205,8 +1205,9 @@ export const INBOX_TEXT_COMPLETE_META_KEY = 'ai.plannotator/text-complete'
 /**
  * An MCP `tools/call` result as the text the agent tool answers with: the
  * text, then any structured content as compact JSON (no indentation: it can
- * be most of the bytes the model reads), unless the Inbox marked the text
- * complete (INBOX_TEXT_COMPLETE_META_KEY).
+ * be most of the bytes the model reads; a `hint` the text already holds is
+ * left out), unless the Inbox marked the text complete
+ * (INBOX_TEXT_COMPLETE_META_KEY).
  */
 export function inboxToolResultText(result: unknown): { text: string; isError: boolean } {
   const value = result && typeof result === 'object' ? (result as { content?: unknown; structuredContent?: unknown; isError?: unknown; _meta?: unknown }) : {}
@@ -1218,7 +1219,10 @@ export function inboxToolResultText(result: unknown): { text: string; isError: b
     : ''
   const meta = value._meta && typeof value._meta === 'object' ? (value._meta as Record<string, unknown>) : {}
   const complete = meta[INBOX_TEXT_COMPLETE_META_KEY] === true
-  const structured = !complete && value.structuredContent && typeof value.structuredContent === 'object' ? `\n\n${JSON.stringify(value.structuredContent)}` : ''
+  const shown = value.structuredContent && typeof value.structuredContent === 'object' ? (value.structuredContent as Record<string, unknown>) : null
+  const { hint, ...rest } = shown ?? {}
+  const tail = typeof hint === 'string' && hint && text.includes(hint) ? rest : shown
+  const structured = !complete && tail ? `\n\n${JSON.stringify(tail)}` : ''
   return { text: `${text}${value.isError === true ? '' : structured}`.trim(), isError: value.isError === true }
 }
 

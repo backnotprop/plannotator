@@ -137,6 +137,11 @@ function ownWords(body: string): string {
     .join("\n");
 }
 
+/** The text with pictures (`![alt](path "caption")`) and URLs blanked, so a number inside one is never read as a PR; offsets keep. */
+function withoutPicturesAndUrls(text: string): string {
+  return text.replace(/!\[[^\]\n]*\]\([^)\n]*\)|\b[a-z][a-z0-9+.-]*:\/\/[^\s<>()]+/gi, (match) => " ".repeat(match.length));
+}
+
 /** The most distinct refs of each form one body is read for: a body listing thousands of numbers costs no more. */
 const BODY_REFS_MAX = 50;
 /** GitHub numbers are 32-bit: a larger one is never a PR, so it is never named or looked up. */
@@ -214,7 +219,7 @@ export function pullsNamedInBody(body: string, projectHost?: string | null, know
   for (const match of text.matchAll(BITBUCKET_PULL_URL)) if (seen++ < BODY_REFS_MAX) take(match.index ?? 0, match[0]); else break;
   if (known && text.includes("#")) {
     const considered = new Set<string>();
-    for (const { index, ref } of githubNumbersIn(text, known.repo)) {
+    for (const { index, ref } of githubNumbersIn(withoutPicturesAndUrls(text), known.repo)) {
       const pull = pullRefOf(ref);
       if (!considered.has(pull.key)) {
         if (considered.size >= BODY_REFS_MAX) break;
