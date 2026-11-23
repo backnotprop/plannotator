@@ -26,6 +26,7 @@ import { inboxApi, type InboxAskTurnWire, type InboxShowMeAsk } from '../api';
 import { onAskChange } from '../ask/askEvents';
 import { readAsk } from '../ask/askReads';
 import { askTurnNote } from '../ask/askModel';
+import { useKeptState } from '../data/keptState';
 import { errorText } from '../toastError';
 import { focusBoardTitle } from '../shape/boardFocus';
 import { boardParents, boardPressWaits, earlierLinesNow, reviewLines, showMeEnded, showMeSamePlace, waitingShowMe, type ReviewLines } from './showMeModel';
@@ -84,7 +85,7 @@ export function useShowMe({
   say,
 }: {
   threadId: string;
-  /** The review it is on; null: a board over its thread, with no review behind it. */
+  /** The review it is on; null: a board in its thread, with no review behind it. */
   reviewId: string | null;
   title: string;
   round: number;
@@ -105,7 +106,7 @@ export function useShowMe({
   say?: (text: string) => void;
 }) {
   const chat = useAIChat({ context: ASK_CONTEXT });
-  const [turns, setTurns] = useState<InboxAskTurnWire[]>([]);
+  const [turns, keepTurns, setTurns] = useKeptState<InboxAskTurnWire[]>([]);
   const [running, setRunning] = useState<string | null>(null);
   const [canAsk, setCanAsk] = useState(false);
   const [box, setBox] = useState<ShowMeState['box']>(null);
@@ -122,7 +123,8 @@ export function useShowMe({
     if (!enabled) return;
     readAsk(threadId).then(
       (model) => {
-        setTurns(model.conversation?.turns ?? []);
+        // The same turns keep the held list (each `deliveries` frame reads the Ask again): nothing draws for them.
+        keepTurns(model.conversation?.turns ?? []);
         setRunning(model.running);
         setCanAsk(model.can_ask);
         setAgentRead(model.agent?.name ?? null);

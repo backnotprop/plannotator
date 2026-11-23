@@ -13,32 +13,35 @@
  * woken). Plain text, linked to the field by `aria-describedby`; they never
  * block Send.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import type { MentionMenuState } from '@plannotator/ui/hooks/useMentionAutocomplete';
 import { inboxApi, type TaggableModel } from '../api';
 import type { RecipientConnection } from '../deliveryLine';
+import { useKeptState } from '../data/keptState';
+import { pollWhileShown } from '../data/shownPoll';
 
 /** How often an open reply box reads who can be tagged, so a session that started or stopped shows. */
 const TAGGABLE_REFRESH_MS = 10_000;
 
-/** Who the person can tag in this thread, read while `enabled` (the reply box or a comment is open). */
-export function useTaggable(threadId: string, enabled: boolean) {
-  const [model, setModel] = useState<TaggableModel | null>(null);
+/**
+ * Who the person can tag in this thread, read while `enabled` (the reply box or a comment is open), never while the tab
+ * is hidden or the pane `parked` (data/shownPoll.ts). The same answer keeps the held one.
+ */
+export function useTaggable(threadId: string, enabled: boolean, parked = false) {
+  const [model, keepModel] = useKeptState<TaggableModel | null>(null);
   const load = useCallback(async () => {
     try {
       const next = await inboxApi.taggable(threadId);
       // Only a well-formed answer: an older Inbox (or a stub) leaves nobody to tag.
-      setModel(next && Array.isArray(next.sessions) ? next : null);
+      keepModel(next && Array.isArray(next.sessions) ? next : null);
     } catch {
       // An older Inbox, or a failed read: nobody to tag; `@` stays text.
     }
   }, [threadId]);
   useEffect(() => {
-    if (!enabled) return;
-    void load();
-    const timer = setInterval(() => void load(), TAGGABLE_REFRESH_MS);
-    return () => clearInterval(timer);
-  }, [load, enabled]);
+    if (!enabled || parked) return;
+    return pollWhileShown(() => void load(), TAGGABLE_REFRESH_MS);
+  }, [load, enabled, parked]);
   return model;
 }
 
@@ -47,62 +50,78 @@ export function useTaggable(threadId: string, enabled: boolean) {
  * sessions route's `recipients`), read every few seconds while any of them
  * still waits: each line's "Queued", "Sending" and its own Send now.
  */
-export function useTagConnections(threadId: string, sessions: readonly string[], enabled: boolean) {
+export function useTagConnections(threadId: string, sessions: readonly string[], enabled: boolean, parked = false) {
   const key = sessions.join(',');
-  const [connections, setConnections] = useState<Record<string, RecipientConnection | null>>({});
+  const [connections, keepConnections] = useKeptState<Record<string, RecipientConnection | null>>({});
   const load = useCallback(async () => {
     if (!key) return;
     try {
       const model = await inboxApi.sessions(threadId, null, key.split(','));
-      setConnections(model.recipients ?? {});
+      keepConnections(model.recipients ?? {});
     } catch {
       // Unknown: the lines read "Queued … as its next turn".
     }
   }, [threadId, key]);
   useEffect(() => {
-    if (!enabled || !key) return;
-    void load();
-    const timer = setInterval(() => void load(), 3_000);
-    return () => clearInterval(timer);
-  }, [load, enabled, key]);
+    // Not while the tab is hidden or the pane parked; once the moment it shows again (data/shownPoll.ts).
+    if (!enabled || !key || parked) return;
+    return pollWhileShown(() => void load(), 3_000);
+  }, [load, enabled, key, parked]);
   return { connections, load };
 }
 import { mentionGroups } from '@plannotator/ui/components/MentionPicker';
 import { HostMark, Icon } from '../icons';
 import { TAG_READERS_GROUP, TAG_UPDATE_WORDS, tagHeadsUp, tagModeLine, type TagOption } from '../tags';
 import type { TagMode } from '../api';
+import { seenBox, type VerticalBox } from '../caretMenu';
+
+/** One whole row and the list's padding: the least list ever shown (a sliver of a row is never shown). */
+const TAG_LIST_LEAST = 56;
 
 /**
+ * Where the menu sits (#3427): ComposerField draws it in FloatingSkillMenu's box, laid over the part of the field the
+ * person sees and portaled out of the reply box's scroll region, so nothing cuts it and it hides while the field is out
+ * of sight. It hangs above that box (inbox.css), or below it when the list fits only there or there is more room
+ * there, and `--ib-tg-room` caps it to that room (`boundary`, the visual viewport under the thread's header) under
+ * inbox.css's own caps. Without `boundary` it keeps inbox.css's place.
+ *
  * An iPhone with the keyboard up (`data-ib-keyboard-pin`): the thread's foot is a short box that scrolls, and the
  * picker drawn above the field opened behind the header, cut off (approval "inbox-reply-recipient", "fix with it").
  * There it is placed on the screen instead: as wide as the field, above it up to the header, never past it; with no
- * room above the field, over the box from its row (Send's) up. Elsewhere it keeps its place in the page.
+ * room above the field, over the box from its row (Send's) up.
  */
-function useKeyboardSpot(): { ref: RefObject<HTMLDivElement | null>; style: CSSProperties | undefined } {
+function useMenuSpot(field: HTMLTextAreaElement | null, boundary?: () => VerticalBox | null) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [style, setStyle] = useState<CSSProperties | undefined>(undefined);
-  // Every commit (the field grows as the person types); the equality guard converges.
+  // Every commit (the field grows as the person types, the list filters); the equality guard converges.
   useLayoutEffect(() => {
     const menu = ref.current;
-    const foot = menu?.closest('.ib-pfoot');
-    const field = menu?.parentElement?.getBoundingClientRect();
-    if (!menu || !foot || !field || !document.documentElement.hasAttribute('data-ib-keyboard-pin')) {
-      setStyle((current) => (current === undefined ? current : undefined));
-      return;
+    const box = menu?.parentElement?.getBoundingClientRect();
+    const foot = field?.closest('.ib-pfoot');
+    const wrap = field?.closest('.ib-cfield')?.getBoundingClientRect();
+    let next: CSSProperties | undefined;
+    if (menu && foot && wrap && document.documentElement.hasAttribute('data-ib-keyboard-pin')) {
+      const headBottom = foot.closest('.ib-pane')?.querySelector('.ib-phead')?.getBoundingClientRect().bottom ?? 0;
+      // Room above the field: there. With the keyboard leaving ~257 px the field starts under the header, so the list
+      // covers the box instead, from just above the box's row (Send's) up to the header (as the recipient list does).
+      const above = Math.round(wrap.top - 10);
+      const row = foot.querySelector('[data-reply-row]')?.getBoundingClientRect();
+      const top = above - headBottom - 8 >= 120 || !row ? above : Math.round(row.top - 6);
+      const room = Math.max(88, top - headBottom - 8);
+      next = { position: 'fixed', top, left: Math.round(wrap.left), width: Math.round(wrap.width), right: 'auto', bottom: 'auto', margin: 0, transform: 'translateY(-100%)', maxHeight: room };
+    } else if (menu && box && boundary) {
+      const room = boundary() ?? seenBox(menu.ownerDocument.defaultView ?? window);
+      // Each side less the list's 6 px gap, 8 px from the room's edge and its border (FloatingSkillMenu's SIDE_CHROME).
+      const above = box.top - room.top - 16;
+      const below = room.bottom - box.bottom - 16;
+      // The list's own height, under the cap inbox.css gives it now.
+      const cap = parseFloat(getComputedStyle(menu).maxHeight);
+      const need = Math.min(menu.scrollHeight + 2, Number.isFinite(cap) ? cap : Infinity);
+      const down = need > above && (need <= below || below > above);
+      const space = Math.round(Math.max(TAG_LIST_LEAST, down ? below : above));
+      if (Number.isFinite(space)) next = { '--ib-tg-room': `${space}px`, ...(down ? { top: '100%', bottom: 'auto', margin: '6px 0 0' } : {}) } as CSSProperties;
     }
-    const headBottom = foot.closest('.ib-pane')?.querySelector('.ib-phead')?.getBoundingClientRect().bottom ?? 0;
-    // Room above the field: there. With the keyboard leaving ~257 px the field starts under the header, so the list
-    // covers the box instead, from just above the box's row (Send's) up to the header (as the recipient list does).
-    const above = Math.round(field.top - 10);
-    const row = foot.querySelector('[data-reply-row]')?.getBoundingClientRect();
-    const top = above - headBottom - 8 >= 120 || !row ? above : Math.round(row.top - 6);
-    const left = Math.round(field.left);
-    const room = Math.max(88, top - headBottom - 8);
-    setStyle((current) =>
-      current && current.top === top && current.left === left && current.maxHeight === room
-        ? current
-        : { position: 'fixed', top, left, width: Math.round(field.width), right: 'auto', bottom: 'auto', margin: 0, transform: 'translateY(-100%)', maxHeight: room },
-    );
+    setStyle((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next));
   });
   return { ref, style };
 }
@@ -112,14 +131,20 @@ export function TagPicker({
   menu,
   options,
   onSelect,
+  field = null,
+  boundary,
 }: {
   id: string;
   menu: MentionMenuState;
   options: readonly TagOption[];
   onSelect: (index: number) => void;
+  /** The field the menu belongs to (the keyboard-up placement reads its foot). */
+  field?: HTMLTextAreaElement | null;
+  /** The room the menu stays inside, in viewport coordinates (FloatingSkillMenu's). */
+  boundary?: () => VerticalBox | null;
 }) {
   const byId = new Map(options.map((o) => [o.id, o]));
-  const spot = useKeyboardSpot();
+  const spot = useMenuSpot(field, boundary);
   return (
     <div ref={spot.ref} className="ib-tg-menu" data-tag-picker="" id={id} role="listbox" aria-label="Tag an agent" style={spot.style}>
       {menu.items.length === 0 ? (
@@ -154,7 +179,9 @@ export function TagPicker({
                   >
                     <HostMark host={option?.host ?? null} big agent={person.id} />
                     <span className="ib-tg-ol">
-                      <span className="ib-tg-on">{person.label}</span>
+                      <span className="ib-tg-on" title={option?.full ?? undefined}>
+                        {option?.name ?? person.label}
+                      </span>
                       <span className="ib-tg-od">{blocked ? TAG_UPDATE_WORDS : person.detail}</span>
                     </span>
                     {option?.owner && <span className="ib-tg-badge">Owns this thread</span>}

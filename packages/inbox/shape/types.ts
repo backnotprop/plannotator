@@ -9,8 +9,8 @@ export interface ShapeBoardProps {
   onClose: () => void;
   /** A part's code, when the host shows it itself (code review's diff). False: the board's own viewer. */
   onCode?: (target: ShapeCodeTarget, el: HTMLElement, version?: ShapeVersion | null) => boolean;
-  /** The Thread tab (a board that hangs off a thread). */
-  renderThread?: (options: { flash: string | null }) => ReactNode;
+  /** A reference to a message of the board's thread opened (a board that hangs off a thread): the thread shows it. */
+  onMessage?: (messageId: string) => void;
   /** Where to start, and the view or panel changed (the standalone page keeps its address in step). */
   initialView?: ShapeViewId;
   initialPanel?: ShapePanelTab | null;

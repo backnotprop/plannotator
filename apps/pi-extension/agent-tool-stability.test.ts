@@ -91,7 +91,7 @@ function createPi(options: { activation: PiActivation; hasUI: boolean; ohMyPi?: 
 	const beforeAgentStartResults: unknown[] = [];
 	const entries: Array<{ type: string; customType: string; data: unknown }> = [];
 	const sentUserMessages: string[] = [];
-	const reviews: Array<{ decide: (result: PlanReviewDecision) => void }> = [];
+	const reviews: Array<{ decide: (result: PlanReviewDecision) => void; stopped: boolean }> = [];
 	let step = "load";
 
 	const ctx = {
@@ -129,13 +129,14 @@ function createPi(options: { activation: PiActivation; hasUI: boolean; ohMyPi?: 
 		const decision = new Promise<PlanReviewDecision>((res) => {
 			resolve = res;
 		});
-		reviews.push({ decide: (result) => resolve(result) });
+		const review = { decide: (result: PlanReviewDecision) => resolve(result), stopped: false };
+		reviews.push(review);
 		return {
 			url: "http://localhost:4100",
 			reviewId: `review-${reviews.length}`,
 			waitForDecision: () => decision,
 			onDecision: () => () => undefined,
-			stop: () => undefined,
+			stop: () => { review.stopped = true; },
 			updatePlan: () => null,
 		} as never;
 	};
@@ -220,6 +221,11 @@ function createPi(options: { activation: PiActivation; hasUI: boolean; ohMyPi?: 
 			load(state.activeTools);
 			await emit("session_start", { reason: "reload" });
 		},
+		async newOmpSession() {
+			step = "session_switch";
+			entries.length = 0;
+			await emit("session_switch", { reason: "new" });
+		},
 		/** One model request: before_agent_start, then the tool list Pi sends. */
 		async request(label: string) {
 			step = `request:${label}`;
@@ -296,6 +302,22 @@ async function runLifecycle(pi: Harness): Promise<void> {
 function toolFlips(pi: Harness) {
 	return pi.setLog.filter((call) => call.before !== call.after);
 }
+
+test("an Oh My Pi switch into a new session leaves the prior plan mode behind", async () => {
+	const pi = createPi({ activation: "0.99+", hasUI: true, ohMyPi: true });
+	await pi.start();
+	await pi.togglePlanMode("plan mode on");
+	expect(pi.state.activeTools).toContain("plannotator_submit_plan");
+	await pi.submit();
+
+	await pi.newOmpSession();
+	expect(pi.reviews[0]?.stopped).toBe(true);
+	await pi.request("first prompt in the fresh session");
+
+	expect(pi.state.activeTools).not.toContain("plannotator_submit_plan");
+	expect(pi.beforeAgentStartResults.filter(Boolean)).toEqual([]);
+	expect(pi.state.activeTools).toContain(TOOL);
+});
 
 describe("the plannotator tool stays put for the whole session", () => {
 	for (const activation of ["pre-0.99", "0.99+"] as const) {

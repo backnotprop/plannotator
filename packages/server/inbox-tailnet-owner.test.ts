@@ -19,15 +19,18 @@
  */
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { inboxId } from "@plannotator/core/inbox-types";
+import { inboxId, inboxSentFromLine } from "@plannotator/core/inbox-types";
+import { INBOX_BRIDGE_POLL_PATH, parseInboxBridgeCommands } from "@plannotator/shared/inbox/connection";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
+import { savedBytes, savedConfig } from "../../tests/helpers/saved-config";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createAgentEnvironmentFor } from "./inbox-agents";
 import { doorRouteNames } from "./inbox-devices";
-import { doorWriteKind } from "./inbox-outbox";
+import { DOOR_WRITES, doorWriteKind } from "./inbox-outbox";
 
 type Json = Record<string, any>;
 
@@ -36,6 +39,8 @@ const OWNER = "ramos@example.com";
 /** Another Tailscale account: config.json `inboxTailscaleAllow` names it, which only a tagged machine heeds. */
 const OTHER = "other@example.com";
 const KEY = "sk-phone-0123456789abcd";
+/** This computer's own tailnet address (`Self.TailscaleIPs`): serve's X-Forwarded-For for a browser here on the tailnet address. */
+const SELF_IP = "100.64.0.7";
 
 type Caller = "local" | "owner" | "other";
 
@@ -69,7 +74,7 @@ function fakeTailscale(options: { tagged?: boolean } = {}) {
     const ok = (stdout = "") => ({ status: 0, stdout, stderr: "" });
     if (args[0] === "status") {
       const tagged = options.tagged === true;
-      return ok(JSON.stringify({ Self: { DNSName: `${MAGIC}.`, UserID: 42, ...(tagged ? { Tags: ["tag:server"] } : {}) }, User: { "42": { ID: 42, LoginName: tagged ? "tagged-devices" : OWNER } } }));
+      return ok(JSON.stringify({ Self: { DNSName: `${MAGIC}.`, UserID: 42, TailscaleIPs: [SELF_IP], ...(tagged ? { Tags: ["tag:server"] } : {}) }, User: { "42": { ID: 42, LoginName: tagged ? "tagged-devices" : OWNER } } }));
     }
     if (args[1] === "status") {
       if (serve.size === 0) return ok("{}");
@@ -151,7 +156,7 @@ async function world(options: WorldOptions = {}) {
   servers.push(inbox);
   const project = inbox.store.ensureProject({ name: "web", root: join(root, "web") });
   const card = inbox.store.createCard({ project_id: project.id, by: { kind: "agent", host: "codex", session: "s", name: "Codex" }, title: "vite 8", prs: ["acme/widgets#12"], refs: [] }).card;
-  const config = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as Json;
+  const config = () => savedConfig(dataDir) as Json;
   return { inbox, dataDir, fake, ts, launches, opened, forgeCalls, card, config };
 }
 type World = Awaited<ReturnType<typeof world>>;
@@ -244,7 +249,7 @@ const BLOCKED: { name: string; call: (w: World) => Call; local: [number, string?
 describe("another Tailscale account: one refusal, on every route class", () => {
   test("a page, an API read and write, the event stream and /mcp: 403, a readable page for the browser, JSON for the rest; nothing changes", async () => {
     const w = await world();
-    const before = readFileSync(join(w.dataDir, "config.json"), "utf8");
+    const before = savedBytes(w.dataDir);
     const page = await call(w, "other", { path: "/" }, { Accept: "text/html" });
     expect(page.status).toBe(403);
     expect(page.headers.get("content-type")).toContain("text/html");
@@ -261,7 +266,7 @@ describe("another Tailscale account: one refusal, on every route class", () => {
       expect([request.path, answer.status, answer.headers.get("content-type")]).toEqual([request.path, 403, "application/json; charset=utf-8"]);
       expect([request.path, ((await answer.json()) as Json).code]).toEqual([request.path, "tailnet_identity_refused"]);
     }
-    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(before);
+    expect(savedBytes(w.dataDir)).toBe(before);
     // The owner over the tailnet and this computer: the same routes answer.
     for (const caller of CALLERS) {
       expect([caller, (await call(w, caller, { path: "/" }, { Accept: "text/html" })).status]).toEqual([caller, 200]);
@@ -573,6 +578,166 @@ describe("a launched agent's permission prompt over the tailnet", () => {
   });
 });
 
+describe("where the person wrote it reaches the agent (inbox-sent-from.ts)", () => {
+  const SESSION = "ses-where";
+  const WORDS = "send me the link to the preview you built";
+  const projectOf = (w: World) => {
+    const root = join(w.dataDir, "shop");
+    mkdirSync(root, { recursive: true });
+    return { root, project: w.inbox.store.ensureProject({ name: "shop", root }) };
+  };
+  const ask = (w: World, key: string) =>
+    w.inbox.store.sendMessage({ project_id: projectOf(w).project.id, author: { kind: "agent", host: "claude-code", session: SESSION, name: "Claude Code" }, body: "The preview is up.", idempotency_key: key }).message.id;
+  const poll = async (w: World) => {
+    const response = await fetch(`http://127.0.0.1:${w.inbox.port}${INBOX_BRIDGE_POLL_PATH}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${w.inbox.token}` },
+      body: JSON.stringify({ session: SESSION, host: "claude-code", waitMs: 0, project_path: projectOf(w).root, started_at: Date.now(), busy: false, tags: true }),
+    });
+    expect(response.status).toBe(200);
+    return parseInboxBridgeCommands(await response.text());
+  };
+
+  test("this computer's window records here and adds nothing; the owner over the tailnet gets the line in the delivered turn", async () => {
+    const w = await world();
+    await poll(w);
+    const TAILNET = inboxSentFromLine({ sent_from: { kind: "tailnet" } });
+    for (const [caller, key, expected] of [
+      ["local", "00000000-0000-4000-8000-000000000401", { kind: "here" }],
+      ["owner", "00000000-0000-4000-8000-000000000402", { kind: "tailnet" }],
+    ] as const) {
+      const id = ask(w, `where-${caller}`);
+      const response = await call(w, caller, { path: `/api/inbox/messages/${id}/reply`, body: { idempotency_key: key, words: WORDS, questions: [] } });
+      expect(response.status).toBe(200);
+      const { reply } = (await response.json()) as Json;
+      expect(w.inbox.store.message(reply.id)!.sent_from).toEqual(expected);
+      const command = (await poll(w)).find((c) => c.id === reply.id);
+      expect(command?.body).toBe(caller === "local" ? WORDS : `${WORDS}\n\n${TAILNET}`);
+    }
+  });
+
+  test("the owner's own browser at this computer's own tailnet address is this computer: here, and nothing is said", async () => {
+    const w = await world();
+    await poll(w);
+    const id = ask(w, "where-own-node");
+    const response = await call(w, "owner", { path: `/api/inbox/messages/${id}/reply`, body: { idempotency_key: "00000000-0000-4000-8000-000000000405", words: WORDS, questions: [] } }, { "X-Forwarded-For": SELF_IP });
+    expect(response.status).toBe(200);
+    const { reply } = (await response.json()) as Json;
+    expect(w.inbox.store.message(reply.id)!.sent_from).toEqual({ kind: "here" });
+    expect((await poll(w)).find((c) => c.id === reply.id)?.body).toBe(WORDS);
+  });
+
+  test("a New message in a thread over the tailnet carries the line to the agent", async () => {
+    const w = await world();
+    await poll(w);
+    const threadId = w.inbox.store.message(ask(w, "where-new-message"))!.thread_id;
+    const response = await call(w, "owner", { path: `/api/inbox/threads/${threadId}/message`, body: { idempotency_key: "00000000-0000-4000-8000-000000000406", session: SESSION, body: WORDS } });
+    expect(response.status).toBe(200);
+    const { message } = (await response.json()) as Json;
+    expect(w.inbox.store.message(message.id)!.sent_from).toEqual({ kind: "tailnet" });
+    const command = (await poll(w)).find((c) => c.id === message.id);
+    expect(command?.body).toBe(`${WORDS}\n\n${inboxSentFromLine({ sent_from: { kind: "tailnet" } })}`);
+  });
+
+  test("a reply forwarded by a linked computer says that computer, and where the person was when not at its window", async () => {
+    setEnv("PLANNOTATOR_TEST_SANDBOX", process.env.PLANNOTATOR_TEST_SANDBOX ?? "1");
+    const peer = await world({ phones: false });
+    const w = await world({ phones: false });
+    const bearer = (inbox: InboxServer) => ({ Authorization: `Bearer ${inbox.token}`, "Content-Type": "application/json" });
+    const offer = (await (await fetch(`http://127.0.0.1:${peer.inbox.port}/api/inbox/control/machines/offer`, { method: "POST", headers: bearer(peer.inbox), body: "{}" })).json()) as Json;
+    const linked = await fetch(`http://127.0.0.1:${w.inbox.port}/api/inbox/control/machines/link`, {
+      method: "POST",
+      headers: bearer(w.inbox),
+      body: JSON.stringify({ link: offer.link, address: `http://127.0.0.1:${peer.inbox.port}`, one_way: true }),
+    });
+    expect(linked.status).toBe(201);
+    const machine = ((await linked.json()) as Json).machine.id as string;
+    await waitOnline(w, machine);
+    for (const [caller, key] of [
+      ["local", "00000000-0000-4000-8000-000000000403"],
+      ["owner", "00000000-0000-4000-8000-000000000404"],
+    ] as const) {
+      const id = ask(peer, `far-${caller}`);
+      const response = await call(w, caller, { path: `/api/inbox/m/${machine}/messages/${id}/reply`, body: { seen_through_seq: Number.MAX_SAFE_INTEGER, idempotency_key: key, words: WORDS, questions: [] } });
+      expect(response.status).toBe(200);
+      const { reply } = (await response.json()) as Json;
+      const from = peer.inbox.store.message(reply.id)!.sent_from as Json;
+      expect(from.kind).toBe("machine");
+      expect(typeof from.name === "string" && from.name.length > 0).toBe(true);
+      expect(from.via).toBe(caller === "owner" ? "tailnet" : undefined);
+      expect(inboxSentFromLine({ sent_from: from })).toContain(from.name);
+    }
+  });
+});
+
+describe("where the person wrote it, read by an agent on the linked computer (inbox-sent-from-reader.ts)", () => {
+  const SESSION = "ses-far-reader";
+  test("the computer that forwarded it is the reader's own: no line; the thread's own window names that computer", async () => {
+    setEnv("PLANNOTATOR_TEST_SANDBOX", process.env.PLANNOTATOR_TEST_SANDBOX ?? "1");
+    // Two names, so a line naming the wrong computer cannot pass for the right one. Each Inbox takes its name when it first offers or links.
+    setEnv("PLANNOTATOR_MACHINE_NAME", "MacBook");
+    const peer = await world({ phones: false });
+    const bearer = (inbox: InboxServer) => ({ Authorization: `Bearer ${inbox.token}`, "Content-Type": "application/json" });
+    const offer = (await (await fetch(`http://127.0.0.1:${peer.inbox.port}/api/inbox/control/machines/offer`, { method: "POST", headers: bearer(peer.inbox), body: "{}" })).json()) as Json;
+    setEnv("PLANNOTATOR_MACHINE_NAME", "Studio");
+    const w = await world({ phones: false });
+    const linked = await fetch(`http://127.0.0.1:${w.inbox.port}/api/inbox/control/machines/link`, {
+      method: "POST",
+      headers: bearer(w.inbox),
+      body: JSON.stringify({ link: offer.link, address: `http://127.0.0.1:${peer.inbox.port}`, one_way: true }),
+    });
+    expect(linked.status).toBe(201);
+    const machine = ((await linked.json()) as Json).machine.id as string;
+    await waitOnline(w, machine);
+    const root = join(peer.dataDir, "shop");
+    mkdirSync(root, { recursive: true });
+    const project = peer.inbox.store.ensureProject({ name: "shop", root });
+    const id = peer.inbox.store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: SESSION, name: "Claude Code" }, body: "Which size?", idempotency_key: "far-reader" }).message.id;
+    // In this computer's window, and over its tailnet: forwarded to the thread's computer, which records where.
+    const replies: Record<string, string> = {};
+    for (const [caller, key] of [
+      ["local", "00000000-0000-4000-8000-000000000407"],
+      ["owner", "00000000-0000-4000-8000-000000000408"],
+    ] as const) {
+      const response = await call(w, caller, { path: `/api/inbox/m/${machine}/messages/${id}/reply`, body: { seen_through_seq: Number.MAX_SAFE_INTEGER, idempotency_key: key, words: `Large (${caller}).`, questions: [] } });
+      expect(response.status).toBe(200);
+      replies[caller] = ((await response.json()) as Json).reply.id as string;
+    }
+    // In the thread's computer's own window.
+    const there = await call(peer, "local", { path: `/api/inbox/messages/${id}/reply`, body: { idempotency_key: "00000000-0000-4000-8000-000000000409", words: "Large (there).", questions: [] } });
+    expect(there.status).toBe(200);
+    replies.there = ((await there.json()) as Json).reply.id as string;
+    expect(peer.inbox.store.message(replies.local)!.sent_from).toEqual({ kind: "machine", name: "Studio" });
+    expect(peer.inbox.store.message(replies.there)!.sent_from).toEqual({ kind: "here" });
+    // Written as the person with no record (a program's call to the store, as the Inbox's own notes are): no line anywhere.
+    replies.program = peer.inbox.store.sendReply(id, { words: "Large (program).", idempotency_key: "far-reader-program" }).reply.id;
+    // Re-ask all pressed over this computer's tailnet, forwarded there: each note says where.
+    const block = [":::question", "Which colour?", "", "- [ ] Red", "- [ ] Green", ":::"].join("\n");
+    const colour = peer.inbox.store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: SESSION, name: "Claude Code" }, body: block, idempotency_key: "far-reader-colour" }).message;
+    const reaskAll = await call(peer, "owner", { path: `/api/inbox/threads/${colour.thread_id}/reask`, body: { batch_id: "far-reader-batch" } });
+    expect(reaskAll.status).toBe(200);
+    const note = ((await reaskAll.json()) as Json).asked[0].reply_id as string;
+    expect(peer.inbox.store.message(note)!.sent_from).toEqual({ kind: "tailnet" });
+
+    const client = new Client({ name: "inbox-far-reader-test", version: "1.0.0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${w.inbox.port}/mcp`)));
+    try {
+      const read = (await client.callTool({ name: "read_thread", arguments: { thread_id: id } })) as { isError?: boolean; content: { text: string }[]; structuredContent: Json };
+      expect(read.isError).toBeFalsy();
+      const shownAs = read.structuredContent.machine.name as string;
+      expect(shownAs).toBe("MacBook");
+      const lines = Object.fromEntries((read.structuredContent.thread.messages as Json[]).map((m) => [m.id, m.sent_from ?? null]));
+      expect(lines[replies.local]).toBeNull();
+      expect(lines[replies.owner]).toBe(inboxSentFromLine({ sent_from: { kind: "tailnet" } }));
+      expect(lines[replies.there]).toBe(inboxSentFromLine({ sent_from: { kind: "machine", name: shownAs } }));
+      expect(lines[replies.program]).toBeNull();
+      expect(read.content[0]!.text).not.toContain(inboxSentFromLine({ sent_from: { kind: "machine", name: "Studio" } }));
+    } finally {
+      await client.close().catch(() => {});
+    }
+  });
+});
+
 describe("a tagged machine: the login its allowlist names has every route the owner has", () => {
   for (const row of OPENED) {
     test(row.name, async () => {
@@ -610,6 +775,7 @@ const PARITY: { name: string; call: (w: World) => Call; world?: WorldOptions; sh
   { name: "a project's picture: Set picture… (take it away)", call: (w) => ({ path: `/api/inbox/projects/${projectOf(w)}/picture`, body: { picture: null } }) },
   { name: "settings float_drafts", call: () => ({ path: "/api/inbox/settings", body: { float_drafts: { on: true } } }) },
   { name: "settings mark_read_warning", call: () => ({ path: "/api/inbox/settings", body: { mark_read_warning: { on: false } } }) },
+  { name: "settings split_view", call: () => ({ path: "/api/inbox/settings", body: { split_view: { on: true } } }) },
 ];
 
 describe("the owner over the tailnet gets what this computer gets", () => {
@@ -685,7 +851,7 @@ describe("another site never rides the owner's login", () => {
 
   test("every opened POST, each forged four ways: refused, and nothing happened", async () => {
     const w = await world();
-    const before = readFileSync(join(w.dataDir, "config.json"), "utf8");
+    const before = savedBytes(w.dataDir);
     for (const make of WRITES) {
       const request = make(w);
       for (const [name, headers, refused] of forged) {
@@ -693,7 +859,7 @@ describe("another site never rides the owner's login", () => {
       }
     }
     expect(w.launches).toEqual([]);
-    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(before);
+    expect(savedBytes(w.dataDir)).toBe(before);
     expect(existsSync(join(w.dataDir, "inbox", "voice-key"))).toBe(false);
     expect(w.forgeCalls).toEqual([]);
   });
@@ -743,13 +909,13 @@ describe("another site never rides the owner's login", () => {
 describe("the login header counts only on the tailnet listener", () => {
   test("forged on the window's own port: refused on every opened route, and nothing happened", async () => {
     const w = await world();
-    const before = readFileSync(join(w.dataDir, "config.json"), "utf8");
+    const before = savedBytes(w.dataDir);
     for (const row of OPENED) {
       const answer = await call(w, "local", row.call(w), { "Tailscale-User-Login": OWNER });
       expect([row.name, ...(await answerOf(answer))]).toEqual([row.name, ...REFUSED]);
     }
     expect(w.launches).toEqual([]);
-    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(before);
+    expect(savedBytes(w.dataDir)).toBe(before);
     expect(existsSync(join(w.dataDir, "inbox", "voice-key"))).toBe(false);
   });
 
@@ -787,11 +953,33 @@ describe("the login header counts only on the tailnet listener", () => {
 });
 
 describe("a linked machine gains none of it", () => {
-  test("no opened route is a door route or a forwardable write", () => {
-    const names = doorRouteNames().join("\n");
-    for (const word of ["agents", "settings", "cards", "voice"]) expect(names).not.toContain(` ${word}`);
-    // A linked machine's `update` is the one exception, and it is not on the allowlist: the forward refuses it (below), and only a machine's token reaches it.
-    expect(names.split("\n").filter((name) => name.includes("update"))).toEqual(["POST update"]);
+  test("no opened route is a door route or a forwardable write; this computer's gh runs for a linked machine on the PR board's routes only", () => {
+    const all = doorRouteNames();
+    const names = all.join("\n");
+    for (const word of ["agents", "settings", "voice"]) expect(names).not.toContain(` ${word}`);
+    // The Board's cards are door routes (mark `cards`, its own machine's store); their marks run this computer's gh and are not.
+    expect(names).not.toContain("cards/marks");
+    // A linked machine may run PR actions with this computer's GitHub sign-in (mark `pulls`, inbox-machines.md "The PR
+    // board"). These are every door route that runs this computer's gh / glab: the board's reads, a thread's PRs (read
+    // and stored here; gh only reads their state), and the three writes. A new PR route or `forge` write fails here until it is named.
+    // "Changed since you looked" (`POST pulls/looked`) is a record kept here, a `set`: it runs no gh.
+    expect(doorWriteKind("pulls/looked")).toBe("set");
+    // Start review thread's tie (`POST pulls/owner`) is a record kept here; gh only reads the list to find its PRs. Its
+    // kind is `forge` for the sending: never held, the window's mark only.
+    expect(doorWriteKind("pulls/owner")).toBe("forge");
+    expect(all.filter((name) => name.includes("pulls") && name !== "POST pulls/looked")).toEqual([
+      "GET pulls",
+      "GET pulls/(risk|details|diff|file|repo-files|repo-file|avatar|media|media/sizes)",
+      "POST pulls/(close|reopen|merge|owner)",
+      "GET threads/:id/pulls",
+      "POST threads/:id/pulls",
+    ]);
+    // The door routes that write with gh / glab: exactly these, each a `forge` write (never held, a window's press only).
+    expect(Object.entries(DOOR_WRITES).filter(([, kind]) => kind === "forge").map(([name]) => name).sort()).toEqual(["POST pulls/close", "POST pulls/merge", "POST pulls/owner", "POST pulls/reopen"]);
+    for (const verb of ["close", "merge", "reopen"]) expect(doorWriteKind(`pulls/${verb}`)).toBe("forge");
+    expect(doorWriteKind("threads/msg_1/pulls")).toBe("set");
+    // A linked machine's `update` (read it, start it) is the one exception, and it is not on the allowlist: the forward refuses it (below), and only a machine's token reaches it.
+    expect(names.split("\n").filter((name) => name.includes("update"))).toEqual(["GET update", "POST update"]);
     for (const route of ["update/check", "update/snooze", "agents", "agents/notes", "agents/seen", "settings", "cards/marks", "voice/key"]) {
       expect([route, doorWriteKind(route)]).toEqual([route, null]);
     }
@@ -800,7 +988,7 @@ describe("a linked machine gains none of it", () => {
   test("the owner over the tailnet, through the forward to a linked machine: refused there, nothing runs there", async () => {
     setEnv("PLANNOTATOR_TEST_SANDBOX", process.env.PLANNOTATOR_TEST_SANDBOX ?? "1");
     const peer = await world({ phones: false });
-    const peerConfig = readFileSync(join(peer.dataDir, "config.json"), "utf8");
+    const peerConfig = savedBytes(peer.dataDir);
     const w = await world({ phones: false });
     const bearer = (inbox: InboxServer) => ({ Authorization: `Bearer ${inbox.token}`, "Content-Type": "application/json" });
     const offer = (await (
@@ -827,7 +1015,7 @@ describe("a linked machine gains none of it", () => {
     expect(peer.launches).toEqual([]);
     expect(peer.fake.calls().filter((c) => c.args[0] === "mcp")).toEqual([]);
     expect(existsSync(join(peer.dataDir, "inbox", "voice-key"))).toBe(false);
-    expect(readFileSync(join(peer.dataDir, "config.json"), "utf8")).toBe(peerConfig);
+    expect(savedBytes(peer.dataDir)).toBe(peerConfig);
   });
 });
 

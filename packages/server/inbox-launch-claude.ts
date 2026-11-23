@@ -28,7 +28,7 @@
  * `claude` first on PATH (tests/helpers/fake-claude/).
  */
 
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { inboxLaunchFullPermissions } from "@plannotator/core/inbox-permission";
@@ -369,6 +369,38 @@ export function claudeTranscriptTurnError(path: string): LaunchTurnError | null 
   }
 }
 
+/** How long a launch folder's real path (or that it has none) is kept by `claudeFolderReals`. */
+export const CLAUDE_FOLDER_REAL_KEEP_MS = 60_000;
+/** The most folders `claudeFolderReals` keeps (the oldest dropped first). */
+const CLAUDE_FOLDER_REALS_MAX = 256;
+
+/**
+ * A launch folder's real path, or the folder as given when it has none (gone), each kept CLAUDE_FOLDER_REAL_KEEP_MS:
+ * the turn-error read looks for the transcript under both, and a folder may sit on a slow disk (a network home, an
+ * automount, a sleeping drive) where each lookup holds the Inbox (#2788). A folder's real path moves only when a
+ * link on its way is pointed elsewhere, and a session's transcript stays where it started.
+ */
+export function claudeFolderReals(options: { realpath?: (path: string) => string; now?: () => number } = {}): (folder: string) => string {
+  const realpath = options.realpath ?? realpathSync;
+  const now = options.now ?? Date.now;
+  const kept = new Map<string, { at: number; real: string }>();
+  return (folder) => {
+    const at = now();
+    const hit = kept.get(folder);
+    if (hit && at >= hit.at && at - hit.at < CLAUDE_FOLDER_REAL_KEEP_MS) return hit.real;
+    let real = folder;
+    try {
+      real = realpath(folder);
+    } catch {
+      // Gone: the path as given.
+    }
+    kept.delete(folder);
+    kept.set(folder, { at, real });
+    while (kept.size > CLAUDE_FOLDER_REALS_MAX) kept.delete(kept.keys().next().value!);
+    return real;
+  };
+}
+
 /**
  * Why `claude purge <folder>` may reach past that folder, or null when it may run. `plan` is the stdout of
  * `claude purge --dry-run <folder>` (null: before the dry run, the folder's own checks only).
@@ -549,6 +581,8 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
     return createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env });
   };
   const cli = createClaudeHost({ environment: ctx.environment, files: claudeFiles });
+  /** Launch folders' real paths, for the turn-error read (`claudeFolderReals`). */
+  const folderReal = claudeFolderReals();
   /**
    * A start or a restart runs with the person's login env: either may be the call that starts Claude's shared
    * supervisor, and a session gets the supervisor's env, not its caller's. Only the settings file reaches a
@@ -756,6 +790,39 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
       return result.ok ? { ok: true as const, session: result.session, ref: result.short } : { ok: false as const, code: result.missing ? ("missing" as const) : result.code, text: result.text };
     },
 
+    /**
+     * Start in Rex: interactive `claude` in the folder, as the session id the Inbox picks now (`--session-id`), or
+     * the same session again (`--resume`), with the same settings file and flags as `--bg` (so its permission
+     * prompts come to the Inbox's card as well as its own dialog in the tab). The plugin connects it at its start,
+     * as that id, and takes the root as its first turn: the message is never on the command line.
+     */
+    async rexCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean; fresh?: boolean }) {
+      const person = personSettings();
+      if (person && !person.ok) {
+        ctx.startLog(launch.id, person.text);
+        return { ok: false as const, code: "failed" as const, text: person.text };
+      }
+      const settingsPath = writeSettings(launch, input.login, person?.settings ?? null);
+      const session = input.resume && launch.session ? launch.session : randomUUID();
+      // The same session again: resumed, unless it never took a turn (`fresh`: no conversation to resume yet).
+      const resume = input.resume && !input.fresh;
+      const mode = modeOf(launch);
+      const args = [
+        resume ? "--resume" : "--session-id",
+        session,
+        // Named for its thread, as a background start is (`--bg --name`); a session started again keeps the name it has.
+        ...(resume ? [] : ["--name", input.name.replace(/^-+/, "").trim() || "Inbox"]),
+        "--settings",
+        settingsPath,
+        ...launchChoiceArgs(CLAUDE, { model: launch.model, effort: launch.effort }),
+        ...(launch.bypass_available === true ? ["--allow-dangerously-skip-permissions"] : []),
+        ...(mode ? ["--permission-mode", mode] : []),
+      ];
+      const command = `cd ${shellQuote(launch.folder)} && exec claude ${args.map(shellQuote).join(" ")}`;
+      ctx.startLog(launch.id, `rex: ${command}`);
+      return { ok: true as const, session, ref: session, command };
+    },
+
     /** `claude agents --json --all`: a session by its short id, or the one whose full id it prefixes. */
     async sessions() {
       const agents = await cli.agents();
@@ -775,12 +842,7 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
      */
     turnError(launch: InboxLaunchRecord, session: string): LaunchTurnError | null {
       const configDir = claudeConfigDir(claudeFiles());
-      let real = launch.folder;
-      try {
-        real = realpathSync(launch.folder);
-      } catch {
-        // Gone: the path as given.
-      }
+      const real = folderReal(launch.folder);
       for (const folder of new Set([launch.folder, real])) {
         const path = claudeTranscriptPath(configDir, folder, session);
         if (path && existsSync(path)) return claudeTranscriptTurnError(path);

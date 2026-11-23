@@ -43,6 +43,7 @@ import {
   type InboxLoadedPluginReport,
   type InboxWakeTarget,
 } from "@plannotator/shared/inbox/agent-link";
+import { isInboxTurnedOn } from "@plannotator/shared/inbox/turned-on";
 import { INBOX_REMINDER_TEXT, INBOX_REMINDER_TEXT_NO_WAKE, INBOX_TOOL_NAME, inboxAgentTool } from "@plannotator/shared/inbox/connection";
 import { createOpenCodeMessageId, isAskTurnActive } from "./opencode-session-bridge";
 import type { V2ContextLike } from "./v2-client";
@@ -233,7 +234,8 @@ export function dropInboxDuplicates(messages: unknown[]): number {
 export async function findInboxConnection(): Promise<InboxAgentConnection | null> {
   if (!resolveInboxTool(loadConfig(), process.env, "opencode")) return null;
   const dataDir = getPlannotatorDataDir();
-  if (!existsSync(inboxRegistryFileOf(dataDir))) return null;
+  // Only once the person turned the Inbox on here (turned-on.ts).
+  if (!existsSync(inboxRegistryFileOf(dataDir)) || !isInboxTurnedOn(dataDir)) return null;
   const tools = await discoverInboxTools(dataDir);
   return tools ? new InboxAgentConnection({ dataDir, host: OPENCODE_INBOX_HOST, agentName: OPENCODE_INBOX_AGENT_NAME, tools }) : null;
 }
@@ -365,6 +367,70 @@ export async function registerInboxOpenCode2(
 interface SessionState {
   running: boolean;
   lastEventAt: number;
+  /**
+   * What waits on the person in its terminal now, by request or form id (`permission.asked` until
+   * `permission.replied`, `question.asked` until `question.replied` / `rejected`, `form.created` until a later
+   * `form.*` event for the same id), cleared when the turn ends or the session is found not running.
+   * Absent: none. The kind only goes to the Inbox (blocked.ts).
+   */
+  prompts?: Map<string, "permission" | "question">;
+}
+
+/** The session's terminal prompts, as the Inbox hears them: a permission prompt first, then a question; null when none. */
+export function openCodeBlocked(state: Pick<SessionState, "prompts"> | undefined): "permission" | "question" | null {
+  const kinds = [...(state?.prompts?.values() ?? [])];
+  return kinds.includes("permission") ? "permission" : kinds.includes("question") ? "question" : null;
+}
+
+/**
+ * One event's word on a session's terminal prompts (OpenCode 2's stream): a permission asked or replied, a question
+ * asked, replied or rejected, a turn over. Returns whether it was such an event. Questions under both names OpenCode
+ * has used: `question.asked` / `replied` / `rejected` (the SDK's v2 types, 1.19.3: `id`, then `requestID`), and
+ * `form.created` and a later `form.*` event naming the same id. Whatever ends the turn ends them all too: the
+ * execution events here, and `endOpenCodePrompts` wherever the plugin learns the session is not running.
+ */
+export function noteOpenCodePrompt(state: SessionState, type: string, data: Record<string, unknown> | undefined): boolean {
+  const id = (key: string) => (typeof data?.[key] === "string" && data[key] ? (data[key] as string) : null);
+  if (type === "permission.asked") {
+    const request = id("id");
+    if (request) (state.prompts ??= new Map()).set(request, "permission");
+    return true;
+  }
+  if (type === "permission.replied") {
+    const request = id("requestID") ?? id("id");
+    if (request) state.prompts?.delete(request);
+    return true;
+  }
+  if (type === "question.asked") {
+    const request = id("id");
+    if (request) (state.prompts ??= new Map()).set(request, "question");
+    return true;
+  }
+  if (type === "question.replied" || type === "question.rejected") {
+    const request = id("requestID") ?? id("id");
+    if (request) state.prompts?.delete(request);
+    return true;
+  }
+  if (type === "form.created") {
+    const form = id("id") ?? id("formID");
+    if (form) (state.prompts ??= new Map()).set(form, "question");
+    return true;
+  }
+  if (type.startsWith("form.")) {
+    const form = id("id") ?? id("formID");
+    if (form && state.prompts?.get(form) === "question") state.prompts.delete(form);
+    return true;
+  }
+  if (type === "session.execution.succeeded" || type === "session.execution.failed" || type === "session.execution.interrupted") {
+    state.prompts?.clear();
+    return false;
+  }
+  return false;
+}
+
+/** The session is not running (its turn ended, a lost end event found out, the session went): nothing waits in it. */
+export function endOpenCodePrompts(state: Pick<SessionState, "prompts"> | undefined): void {
+  state?.prompts?.clear();
 }
 
 /**
@@ -475,12 +541,14 @@ class OpenCode2Wakes {
         state.lastEventAt = Date.now();
         if (!(await this.idleProbe(entry.sessionID))) return;
         state.running = false;
+        endOpenCodePrompts(state);
         this.startGrace(entry);
         return;
       }
       // The event stream ended: wait for idle, then read the session's context for the row.
       if (!(await this.idleProbe(entry.sessionID))) return;
       state.running = false;
+      endOpenCodePrompts(state);
       entry.settle(await this.steerInContext(entry));
     } finally {
       entry.checking = false;
@@ -550,6 +618,7 @@ class OpenCode2Wakes {
     if (typeof type !== "string" || !sessionID) return;
     const state = this.state(sessionID);
     state.lastEventAt = Date.now();
+    if (noteOpenCodePrompt(state, type, data)) return;
     switch (type) {
       case "session.created":
         if (this.launch.created) this.discover(sessionID);
@@ -584,6 +653,7 @@ class OpenCode2Wakes {
       case "session.deleted":
         // Its steer rows are given up (their watches stop); a deleted session gets no fallback.
         for (const entry of [...this.steering.values()]) if (entry.sessionID === sessionID) entry.settle("abandoned");
+        endOpenCodePrompts(this.states.get(sessionID));
         this.wakes.get(sessionID)?.dispose();
         this.wakes.delete(sessionID);
         this.titles.delete(sessionID);
@@ -623,6 +693,12 @@ class OpenCode2Wakes {
 
   private target(sessionID: string): InboxWakeTarget {
     return {
+      // A permission prompt or a question up in the session (the kind only); cleared when answered or the turn ends,
+      // and never said for a session the plugin does not think is running (a lost end event must not hold it).
+      blocked: () => {
+        const state = this.states.get(sessionID);
+        return state?.running ? openCodeBlocked(state) : null;
+      },
       isBusy: async () => {
         const state = this.state(sessionID);
         if (!this.eventsAvailable) return !(await this.idleProbe(sessionID));
@@ -632,6 +708,7 @@ class OpenCode2Wakes {
         state.lastEventAt = Date.now();
         if (!(await this.idleProbe(sessionID))) return true;
         state.running = false;
+        endOpenCodePrompts(state);
         return false;
       },
       deliver: async (text) => {

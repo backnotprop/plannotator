@@ -8,6 +8,7 @@ import { settingsHash } from '../settingsRoute';
 import { boardFilterHash } from '../board/model';
 import { writeShapeReviewAt } from '../shape/review';
 import { readRoute, type Route } from './route';
+import { viewScopeHash } from '../pulls/viewScope';
 
 /** The route's hash, `#thread=…` (empty for the list at rest). */
 export function hashOf(route: Route): string {
@@ -16,6 +17,8 @@ export function hashOf(route: Route): string {
   else if (route.page === 'whats-new') hash = new URLSearchParams({ 'whats-new': route.version ?? '' }).toString();
   else if (route.page === 'drafts') hash = 'drafts';
   else if (route.page === 'artifacts') hash = route.pinned ? 'artifacts=pinned' : 'artifacts';
+  else if (route.page === 'plans') hash = plansHash(route);
+  else if (route.page === 'scheduled') hash = route.scheduled ? `routine=${encodeURIComponent(route.scheduled)}${route.routineRuns ? '&runs' : ''}` : 'routines';
   else if (route.page === 'shapes') hash = route.shape ? `shapes&shape=${encodeURIComponent(route.shape)}` : 'shapes';
   else if (route.page === 'board')
     hash =
@@ -28,16 +31,17 @@ export function hashOf(route: Route): string {
       (route.project ? `&project=${encodeURIComponent(route.project)}` : '') +
       (route.view && route.view !== 'all' ? `&view=${route.view}` : '') +
       (route.stack ? `&stack=${encodeURIComponent(route.stack)}` : '') +
-      (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${route.scope === 'stack' ? '&scope=stack' : ''}` : '') +
+      (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${viewScopeHash(route.scope)}` : '') +
       systemHashOf(route) +
       (route.new ? '&new' : '');
   else if (route.page === 'prs')
     hash =
       'prs' +
+      (route.project ? `&project=${encodeURIComponent(route.project)}` : '') +
       (route.prsView === 'merged' ? '&state=merged' : '') +
       sheetLayoutHash(route.prsLayout) +
       (route.stack ? `&stack=${encodeURIComponent(route.stack)}` : '') +
-      (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${route.scope === 'stack' ? '&scope=stack' : ''}${route.prsFrom === 'sheet' ? '&from=sheet' : route.prsFrom === 'reviews' ? '&from=reviews' : ''}` : '');
+      (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${viewScopeHash(route.scope)}${route.prsFrom === 'sheet' ? '&from=sheet' : route.prsFrom === 'reviews' ? '&from=reviews' : ''}` : '');
   else if (route.page === 'tour') hash = `tour=${route.step ?? 1}`;
   else {
     const params = new URLSearchParams();
@@ -62,6 +66,12 @@ export function hashOf(route: Route): string {
       if (route.file.view) params.set('view', route.file.view);
       // A question's picture choices (optionSets.ts): a reload and Back keep stepping through them.
       if (route.file.set) params.set('set', route.file.set);
+    }
+    if (route.thread && route.ref && !route.file) {
+      params.set('ref', route.ref.path);
+      params.set('in', route.ref.messageId);
+      if (route.ref.line) params.set('line', String(route.ref.line));
+      if (route.ref.lineEnd) params.set('to', String(route.ref.lineEnd));
     }
     if (route.thread && route.guide) params.set('guide', route.guide);
     if (route.thread && route.guide) writeShapeReviewAt(params, route.guideAt);
@@ -109,4 +119,12 @@ export function writeRoute(route: Route, options: { replace?: boolean; fullMark?
   }
   // Its own hashchange: a Back still on its way does not land in it (history.ts settleLanding).
   whileWritingRoute(() => window.dispatchEvent(new HashChangeEvent('hashchange')));
+}
+
+function plansHash(route: Route): string {
+  if (!route.plan) return route.planNew ? 'plans&new' : route.project ? `plans&project=${encodeURIComponent(route.project)}` : route.planAll ? 'plans&all' : 'plans';
+  const base = `plans=${encodeURIComponent(route.plan)}${route.planFile ? `&file=${encodeURIComponent(route.planFile)}` : route.planDoc ? `&doc=${encodeURIComponent(route.planDoc)}` : ''}`;
+  if (route.planFile) return base;
+  if (route.planDiff) return `${base}&from=${route.planDiff.from}&to=${route.planDiff.to}`;
+  return route.planVersion ? `${base}&v=${route.planVersion}` : base;
 }

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { HtmlViewerProps } from './HtmlViewer';
-import { buildSrcdocInjection, injectIntoHead, injectPrintDefaults, injectSandboxShim, SELF_CONTAINED_CSP } from './srcdoc';
+import { NO_NETWORK_CSP_META, SELF_CONTAINED_CSP } from './srcdoc';
 
 const hasDom = typeof document !== 'undefined';
 const viewer = hasDom ? await import('./HtmlViewer') : null;
@@ -58,21 +58,26 @@ describe.if(hasDom)('HtmlViewer resourcePolicy', () => {
   test('policy changes replace the frame in both directions, while unchanged policies keep it', async () => {
     const { render } = mount();
     const original = await render();
+    const originalDocument = original.srcdoc;
     expect(await render()).toBe(original);
+    expect(original.srcdoc).toBe(originalDocument);
     const restricted = await render({ resourcePolicy: 'self-contained' });
     expect(restricted).not.toBe(original);
     expect(restricted.getAttribute('sandbox')).toBe('allow-scripts');
     const restored = await render();
     expect(restored).not.toBe(restricted);
-    expect(restored.srcdoc).toBe(original.srcdoc);
+    expect(restored.srcdoc).not.toContain('Content-Security-Policy');
     expect(restored.getAttribute('sandbox')).toBe('allow-scripts allow-modals');
   });
-  test('without the option the sandbox and srcdoc match the existing pipeline byte for byte', async () => {
-    const frame = await mount().render();
-    const expected = injectSandboxShim(injectIntoHead(injectPrintDefaults(rawHtml), buildSrcdocInjection({
-      tokens: {}, isLight: false, hostTheme: false, diffActive: false,
-    })));
-    expect(frame.srcdoc).toBe(expected);
+  test('the server marker still restricts connections when the host policy is off', async () => {
+    const { render } = mount();
+    const marked = rawHtml.replace('<head>', '<head><meta name="plannotator-network" content="none">');
+    const restricted = await render({ rawHtml: marked, resourcePolicy: 'self-contained' });
+    expect(restricted.srcdoc).toContain(SELF_CONTAINED_CSP);
+    expect(restricted.srcdoc).not.toContain(NO_NETWORK_CSP_META);
+    const frame = await render({ rawHtml: marked });
+    expect(frame.srcdoc.startsWith(`<!doctype html>${NO_NETWORK_CSP_META}`)).toBe(true);
+    expect(frame.srcdoc).not.toContain(SELF_CONTAINED_CSP);
     expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-modals');
   });
 });

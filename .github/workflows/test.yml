@@ -1,7 +1,16 @@
 name: Test
+# A manual preview is named for it, so deploy.yml never takes it for a passed
+# Test run (an empty name keeps GitHub's own: the PR title, the commit message).
+run-name: "${{ inputs.as_if_changed && format('Test preview: as if {0} changed', inputs.as_if_changed) || '' }}"
 
 on:
   workflow_dispatch:
+    inputs:
+      as_if_changed:
+        description: "Preview a PR's run: plan as if a PR changed only these paths (space-separated). Empty runs everything."
+        required: false
+        default: ""
+        type: string
   pull_request:
     branches:
       - main
@@ -12,16 +21,46 @@ on:
 permissions:
   contents: read
 
-# The fast tier: every PR push runs this workflow and Security. The heavy
-# suites (Windows, Release dry run, Inbox e2e / Pi / Claude Code / relay) run on
-# a PR only once it has the `ci:full` label; see windows.yml.
+# The fast tier. A manual run runs every job and every test (one given
+# as_if_changed plans as if a PR changed those paths). A push to main runs
+# every job and every test too, unless every commit since the last main
+# commit whose Test run passed (the commit deploy.yml diffs from) changes only
+# the marketing site and the docs (PUSH_LIGHT in scripts/ci-affected.ts): then
+# it plans that whole range as a PR would, so a site or docs push finishes in
+# minutes and Deploy follows. The range is never just the parent: a newer push
+# replaces a waiting run and a failed run's commits are tested again, so the
+# next run covers them. No earlier passed run, an API error, a base the pushed
+# commit does not contain, or any other path in the range runs everything:
+# main stays the backstop for what a PR's plan leaves out.
+#
+# On a PR the plan job (scripts/ci-affected.ts) reads the changed files and
+# picks what they can affect: the unit and DOM test files that reach them
+# (imports, file paths named in strings, Pi's vendored copies, and the
+# tree-scanning tests), the Checks steps and the jobs below whose inputs
+# changed. It writes what it chose and why to its log, its run summary and a
+# notice on the run (`gh run view <run id>`). On anything it cannot decide
+# (the lockfile, a manifest, a tsconfig, a bunfig, a test helper or setup, a
+# workflow, the picker itself, a deleted or renamed code file, an unknown kind
+# of file, an import it cannot resolve, its own failure) it runs everything,
+# on a PR and on a light push alike. A docs-only PR or push
+# (scripts/ci-docs-only.sh) runs no job here but the plan (and guides-show,
+# whose own gate builds on every push). A job that does not apply is skipped,
+# never left pending (a skipped job keeps the run's conclusion success, so
+# Deploy still starts);
+# every gated job reads its plan output as "run unless it says false", so a
+# failed plan runs it. scripts/ci-affected-map.test.ts guards the map. The
+# repo variable CI_AFFECTED=off makes every PR and every push run everything.
+#
+# The heavy suites (Windows, Release dry run, Inbox Pi / Claude Code / relay)
+# run on a PR when their own paths change; see windows.yml.
 #
 # One run per PR at a time: a new push cancels the PR's older run, which no one
 # will merge. Pushes to main share one group that never cancels a running run:
 # the running one finishes, at most one waits, and a newer push replaces the
 # waiting one. A merge train lands several PRs in a minute, and testing each of
 # their merge commits on main would fill every runner. deploy.yml diffs from the
-# last main commit whose Test passed, so a skipped commit deploys with the next.
+# last main commit whose Test passed, so a skipped commit deploys with the next,
+# and the plan of a push starts from that same commit, so it is tested with the next.
 concurrency:
   group: test-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && format('push-{0}', github.ref) || format('run-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -37,11 +76,65 @@ concurrency:
 # Bot, whoever pushed last): its freshly bumped packages run their install
 # scripts unreviewed. The push to main that merges one is reviewed code by then.
 jobs:
+  # What this change runs (scripts/ci-affected.ts). Never fails on a doubt: the
+  # picker answers "all" instead. It stays on ubuntu-24.04 like guides-show.
+  plan:
+    name: Plan (what this change runs)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # actions: read lists main's passed Test runs, the base of a push's plan
+    # (the same list deploy.yml reads). Read-only; the token reaches only the
+    # picker's step, and only on a push.
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      unit_lanes: ${{ steps.plan.outputs.unit_lanes }}
+      dom_lanes: ${{ steps.plan.outputs.dom_lanes }}
+      unit_tests: ${{ steps.plan.outputs.unit_tests }}
+      dom_tests: ${{ steps.plan.outputs.dom_tests }}
+      unit_shards: ${{ steps.plan.outputs.unit_shards }}
+      dom_shards: ${{ steps.plan.outputs.dom_shards }}
+      ui_smoke: ${{ steps.plan.outputs.ui_smoke }}
+      file_browser: ${{ steps.plan.outputs.file_browser }}
+      diff_renderer: ${{ steps.plan.outputs.diff_renderer }}
+      opencode: ${{ steps.plan.outputs.opencode }}
+      claude_code_mod: ${{ steps.plan.outputs.claude_code_mod }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          # The merge commit and both parents: HEAD^1..HEAD is the PR's change.
+          fetch-depth: 2
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      # Imports resolve through the workspace links, and the Pi tests reach
+      # packages/ through vendor.sh's copies, exactly as `bun test` sees them.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Generate Pi extension shared copies
+        run: bash apps/pi-extension/vendor.sh
+
+      - name: Pick the jobs and tests this change can affect
+        id: plan
+        env:
+          CI_AFFECTED: ${{ vars.CI_AFFECTED }}
+          CI_AFFECTED_AS_IF: ${{ inputs.as_if_changed }}
+          GH_TOKEN: ${{ github.event_name == 'push' && github.token || '' }}
+        run: bun run scripts/ci-affected.ts plan
+
   # Everything that is not a sharded test file: the checks that used to lead
-  # the single test job, and the two DOM steps that must run in processes of
-  # their own.
+  # the single test job, the tree-wide guards, and the two DOM steps that must
+  # run in processes of their own. Every PR and push but a docs-only one runs it.
   checks:
     name: Checks (types, packages, own-process DOM tests, lane guards)
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.outputs.mode != 'docs' }}
     runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type != 'Bot')) && vars.TEST_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 20
 
@@ -85,7 +178,10 @@ jobs:
       - name: Type check
         run: bun run typecheck
 
+      # The UI package smoke and the own-process DOM steps run when the plan
+      # says their inputs changed (or on anything it cannot decide).
       - name: Smoke-test published UI package
+        if: needs.plan.outputs.ui_smoke != 'false'
         # This packs the real tarball and installs it with a pinned pnpm CLI in
         # a temp consumer outside the monorepo. It prevents workspace protocols
         # from leaking into the manifest published to external consumers.
@@ -96,6 +192,7 @@ jobs:
       # generated asset matches the current bridge source runs here; in the
       # unit lanes it skips (no asset on a fresh checkout).
       - name: Check the generated bridge asset against its source
+        if: needs.plan.outputs.ui_smoke != 'false'
         run: bun test packages/ui/components/html-viewer/bridgeAsset.test.ts
 
       # The extension has its own tsconfig (Node libs, no DOM) and is not part
@@ -111,6 +208,7 @@ jobs:
       # the rest of the ui suite (heavy load intermittently starves the debounce
       # timer and the reconnect refetch is missed). See useFileBrowser.test.tsx.
       - name: Run file-browser DOM test (isolated)
+        if: needs.plan.outputs.file_browser != 'false'
         run: DOM_TESTS=1 bun test packages/ui/hooks/useFileBrowser.test.tsx
 
       # These render against the REAL @pierre/diffs, because the defects they
@@ -126,6 +224,7 @@ jobs:
       # removes the coupling outright, same reasoning as the isolated step
       # above. scripts/ci-test-lanes.test.ts keeps them out of the DOM list.
       - name: Run diff-renderer DOM tests (isolated, real @pierre/diffs)
+        if: needs.plan.outputs.diff_renderer != 'false'
         run: >-
           DOM_TESTS=1 bun test
           packages/review-editor/components/DiffViewer.fullContentSwap.test.tsx
@@ -143,28 +242,46 @@ jobs:
       # ran). This asserts that every DOM-gated test file in the repo is in the
       # list or in one of the own-process steps above, so it cannot drift again.
       # The lane guard holds the matrices below to scripts/ci-test-lane.ts, so
-      # no shard can be dropped without failing here.
-      - name: Guard the DOM test allowlist and the test lanes
-        run: bun test scripts/dom-test-allowlist.test.ts scripts/ci-test-lanes.test.ts
+      # no shard can be dropped without failing here. With them run the other
+      # tree-wide guards (CORE_GUARDS in scripts/ci-affected.ts): they protect
+      # people's machines and data and the CI map, so every PR runs them, and
+      # the unit lanes leave them out of a PR's affected set.
+      - name: Guard the tree (DOM allowlist, test lanes, CI map, real Inbox, browser, gh, agent CLIs, relay, AGENTS.md)
+        run: >-
+          bun test
+          tests/never-touch-the-real-inbox.test.ts
+          tests/no-browser-sentinel.test.ts
+          tests/gh-tripwire.test.ts
+          tests/agent-cli-stubs.test.ts
+          tests/e2e-relay-pin.test.ts
+          tests/agents-md-size.test.ts
+          scripts/dom-test-allowlist.test.ts
+          scripts/ci-test-lanes.test.ts
+          scripts/ci-affected-map.test.ts
 
   # The plain `bun test` sweep, split across jobs (scripts/ci-test-lane.ts).
-  # It took 20-23 min as one process; each lane now takes about 4-7 min.
-  # Few lanes on purpose: every job of a run asks for a runner at once, and
-  # the account has about 20 concurrent runners for every workflow and PR.
+  # Each full lane takes about 10-13 min. Few lanes on purpose: every job of a
+  # run asks for a runner at once, and the account has about 40 concurrent
+  # runners for every workflow and PR.
   # heavy-*: the files that drive real agent processes, one process each.
   # unit-k: Bun's own --shard=k/N over every other discovered file, so a new
   # test file always lands in some shard.
+  # On a PR or a light push the plan picks the lanes and their files (fewer lanes for a small
+  # set, none when no test file is affected). The fallback list below is every
+  # lane: a plan that failed runs them all.
   unit:
     name: Unit tests (${{ matrix.lane }})
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.outputs.unit_lanes != '[]' }}
     runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type != 'Bot')) && vars.TEST_RUNNER || 'ubuntu-24.04' }}
-    # A backstop, not a budget: lanes take about 4-7 min. Some tests run on
+    # A backstop, not a budget: full lanes take about 10-13 min. Some tests run on
     # fake timers, where bun's per-test timeout cannot fire, so a stuck await
     # would otherwise idle until GitHub's 6-hour default.
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        lane: [heavy-mod, heavy-agents, unit-1, unit-2, unit-3]
+        lane: ${{ fromJSON(needs.plan.outputs.unit_lanes || '["heavy-mod","heavy-agents","unit-1","unit-2","unit-3"]') }}
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -230,6 +347,8 @@ jobs:
       - name: Run tests
         env:
           LANE: ${{ matrix.lane }}
+          CI_AFFECTED_TESTS: ${{ needs.plan.outputs.unit_tests }}
+          CI_AFFECTED_SHARDS: ${{ needs.plan.outputs.unit_shards }}
         run: bun run scripts/ci-test-lane.ts "$LANE"
 
   # DOM-gated tests: tests/dom-test-list.txt with happy-dom globals, split
@@ -238,14 +357,16 @@ jobs:
   # differently across platforms; without it most of the list fails.
   dom:
     name: DOM tests (${{ matrix.lane }})
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.outputs.dom_lanes != '[]' }}
     runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type != 'Bot')) && vars.TEST_RUNNER || 'ubuntu-24.04' }}
-    # A backstop, not a budget: lanes take about 3-6 min. Some DOM tests run on
+    # A backstop, not a budget: full lanes take about 6-10 min. Some DOM tests run on
     # fake timers, where bun's per-test timeout cannot fire.
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        lane: [dom-1, dom-2, dom-3, dom-4]
+        lane: ${{ fromJSON(needs.plan.outputs.dom_lanes || '["dom-1","dom-2","dom-3","dom-4"]') }}
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -278,10 +399,16 @@ jobs:
       - name: Run DOM tests
         env:
           LANE: ${{ matrix.lane }}
+          CI_AFFECTED_TESTS: ${{ needs.plan.outputs.dom_tests }}
+          CI_AFFECTED_SHARDS: ${{ needs.plan.outputs.dom_shards }}
         run: bun run scripts/ci-test-lane.ts "$LANE"
 
+  # Runs when the plugin, T3 Code, anything bundled into the app pages or the
+  # binary (inbox-e2e.yml's path list) or one of its test files is affected.
   opencode-v2:
     name: OpenCode 2 installed package
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.outputs.opencode != 'false' }}
     runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type != 'Bot')) && vars.TEST_RUNNER || 'ubuntu-24.04' }}
     # The smoke's own budgets (health 120s, plugin activation 300s) are the real assertion;
     # this is only a backstop so a genuinely wedged runner cannot idle for hours.
@@ -378,6 +505,48 @@ jobs:
           path: .local/proof/
           if-no-files-found: ignore
 
+  # The mod's engine-harness tests (apps/hook/tests/): bun cannot load them,
+  # they import 'claude-code/testing'. `claude plugin test` runs every hook
+  # against mocks in the test file, so it needs no login, API key or model call.
+  # It runs for a minute or less, so it stays on ubuntu-24.04 like guides-show.
+  # On a PR it runs when apps/hook/hooks/, apps/hook/tests/ or its script change.
+  # Three engines: the oldest the mod supports (2.1.287, hooks modules), the
+  # pinned one, and one with tool.run and the guard's early-run rule (2.1.326+),
+  # since the mod hooks tool.run through `tool.*` so that older engines still
+  # load it (hooks/mod/early-run.ts).
+  claude-code-mod:
+    name: Claude Code mod (engine harness, ${{ matrix.claude-code }})
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.outputs.claude_code_mod != 'false' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        claude-code: ['2.1.287', '2.1.325', '2.1.327']
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Claude Code
+        # zizmor: ignore[adhoc-packages] The harness is part of the Claude Code
+        # CLI itself (2.1.287 or later). Owner: maintainers; reassess a locked
+        # fixture by 2027-08-11.
+        env:
+          CLAUDE_CODE_VERSION: ${{ matrix.claude-code }}
+        run: npm install --global "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
+
+      - name: Run the harness tests
+        env:
+          DISABLE_AUTOUPDATER: "1"
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+        run: |
+          export HOME="$(mktemp -d)"
+          export CLAUDE_CONFIG_DIR="$(mktemp -d)"
+          export PLANNOTATOR_DATA_DIR="$(mktemp -d)"
+          sh scripts/test-claude-code-mod.sh
+
   guides-show:
     name: guides.show viewer (budgets + pinned manifest)
     runs-on: ubuntu-24.04
@@ -406,7 +575,7 @@ jobs:
              && base=$(git rev-parse --verify --quiet 'HEAD^1') \
              && git rev-parse --verify --quiet 'HEAD^2' >/dev/null; then
             changed=$(git diff --name-only "$base" HEAD)
-            if grep -Eq '^(apps/guides-show/|packages/(guide-viewer|ui|review-editor|core)/)' <<< "$changed"; then
+            if grep -Eq '^(apps/guides-show/|build/|packages/(guide-viewer|ui|review-editor|core|shared)/)' <<< "$changed"; then
               run=true
             else
               run=false

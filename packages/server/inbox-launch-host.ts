@@ -126,6 +126,8 @@ export function writeLaunchNote(
       body: note.body,
       reply_to: latest,
       idempotency_key: note.key,
+      // The Inbox's own note: the sound never rings for it, except a failed turn's (`InboxMessage.launch_note`).
+      launch_note: true,
       // A failed turn's note: the window notifies for it (`InboxMessage.turn_error`).
       ...(note.turnError ? { turn_error: true } : {}),
     });
@@ -169,6 +171,10 @@ export interface LaunchLive {
   busy: boolean | null;
   busySince: number | null;
   polls: number;
+  /** When its current idle spell began (null while busy or not known): a new value is a turn that ended. */
+  idleSince?: number | null;
+  /** How many items it took as a turn: a new value is a turn that began, even one too short to be said busy. */
+  taken?: number;
 }
 
 /** One read of every session the host knows: a session's state by its `session_ref`, `absent` when not listed. */
@@ -249,17 +255,30 @@ export interface LaunchHost {
   readonly name: string;
   /** What of Plannotator's connects a session, in the line's words: "plugin" (the default), Pi's "extension". */
   readonly connector?: string;
-  /** The login-shell names it keeps from each read (the rest of the env is never held). */
+  /** The login-shell names it keeps from each read (the rest of the env is held only by a host with `loginRead`). */
   readonly shellNames: readonly string[];
   /** Login-shell names it learns only whether they are set: kept as "1", never their values (a sign-in token). */
   readonly shellFlags?: readonly string[];
+  /**
+   * Each login read's whole env, as read (a stand-in from a shell that did not answer included: the host tells them
+   * apart with `LOGIN_ENV_FALLBACKS`). OpenCode holds it in memory for its model-list reads, so they see what the
+   * session sees (a key exported in the shell rc) without running the shell again. Never written, never logged.
+   */
+  loginRead?(login: Readonly<LaunchEnv>): void;
   /**
    * Whether To may offer it. The engine caches it 30 s. `folders`: whether it can start in at least one of these
    * (already checked) folders, by their own settings where the host reads any (Claude Code's project plugin
    * scopes); not cached. None: the machine's own setup.
    */
   available(folders?: readonly string[]): Promise<LaunchAvailability>;
-  choices?(): Promise<Omit<InboxLaunchChoices, "last"> | null>;
+  /**
+   * Its model lists; OpenCode's may instead say why they could not be read (`unread`, lists empty). `defaultIn`: the
+   * folder picked in To (null: the home folder), for a host that names its default model for it (OpenCode: never by
+   * running anything there); absent, none.
+   */
+  choices?(options?: { defaultIn?: string | null }): Promise<Omit<InboxLaunchChoices, "last"> | null>;
+  /** What compose gets while `choices` takes longer than the offer's wait (OpenCode: `reading`). None: no lists. */
+  readonly choicesWhileReading?: Omit<InboxLaunchChoices, "last">;
   /** How a launch made now in `folder` starts; fixed on the record at Send. */
   startOf(folder: string): { full: boolean; ownMode: boolean; bypass: boolean };
   /** It starts in `folder` (and every scratch folder in it) without a trust prompt. */
@@ -273,6 +292,31 @@ export interface LaunchHost {
    * session (`settleLaunch`) and its own channel delivers it. It writes its own start.log entries.
    */
   start(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv }): Promise<{ ok: true; session: string; ref: string } | ({ ok: false } & LaunchStartFailure)>;
+  /**
+   * Start in Rex (Settings → Agents' "Start new agents in"): the agent's ordinary interactive command, for a Rex tab
+   * to run through the person's login shell. Only a host whose interactive session connects to the Inbox by itself
+   * at its start, as the session id given here (so the root, addressed to it, is its first turn through its own
+   * channel, as for `start`): never the person's message on the command line. `resume`: the same session again (a
+   * reply to one that ended). `fresh` with it: that session never took a turn (it never connected: stopped at a
+   * prompt in its tab), so there is nothing to resume: it starts on its own id as a first start does, named (Claude
+   * Code's `--session-id`, not `--resume`). It writes what the session needs (Claude Code's settings file), or makes the session
+   * first when only the agent's server can (OpenCode: a short server of its own, ended before the tab opens); the
+   * agent itself runs only in the tab. No member: this agent always starts in the background (Codex: a Codex in a tab
+   * never tells the Inbox between turns whether it runs, so its line could not say).
+   */
+  rexCommand?(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean; fresh?: boolean }): Promise<{ ok: true; session: string; ref: string; command: string } | ({ ok: false } & LaunchStartFailure)>;
+  /**
+   * Start in Rex: whether a process on this computer runs `session`, by `listing` (`ps -A -o pid=,ppid=,command=`),
+   * for an agent whose running process does not keep its argv (Pi sets `process.title`). No member: its argv names
+   * the session (inbox-rex-resume.ts reads it).
+   */
+  runsSession?(session: string, listing: string): boolean;
+  /**
+   * The processes in `listing` that run `session` (the same check as `runsSession`, as pids), for Stop of an agent in
+   * a Rex pane the Inbox did not open: only ones it is sure are that agent now (a signal goes to each). No member: its
+   * argv names the session (inbox-rex-resume.ts finds them).
+   */
+  sessionPids?(session: string, listing: string): number[] | Promise<number[]>;
   /** Every session it knows, read once (the engine caches it 10 s, and only while a line could change); null when it could not be read. */
   sessions(): Promise<LaunchSessions | null>;
   /** The session connected to the Inbox now; null when not. `polls` must rise whenever it shows new life (Stop waits for a higher count). */

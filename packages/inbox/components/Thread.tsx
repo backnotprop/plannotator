@@ -2,7 +2,7 @@ import { perfInteraction, perfKeystroke } from '../perfMarks';
 import { useThreadArmed } from '../threadArmed';
 import { postDecisions, threadHasQuestionCards } from '../decisionExport';
 import { ThreadPullsButton } from '../threadPulls/ThreadPulls';
-import { machineOf, selfMachineId } from '../inboxUrl';
+import { machineOf } from '../inboxUrl';
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
 import { AnnotationType, type Annotation } from '@plannotator/ui/types';
@@ -10,24 +10,28 @@ import type { InboxNoteBlock } from '@plannotator/core/inbox-context-notes';
 import { noteReviews } from '../contextNotes/model';
 import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { inboxLaunchedSession } from '@plannotator/core/inbox-run-line';
-import { LaunchChoiceMeta } from './LaunchChoiceMeta';
-import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxMessageWire, type InboxQuestion, type InboxReplyDraft, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
+import { ThreadTagLine } from './ThreadTagLine';
+import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, inboxLaunchInRex, inboxLaunchRexUnstoppable, inboxLaunchStops, inboxPersonAnsweredSince, inboxSessionlessSend, isInboxNote, isInboxT3WaitReason, type InboxAnnotationRecord, type InboxAttachmentState, type InboxDraftFile, type InboxInlineImage, type InboxMessageWire, type InboxQuestion, type InboxReplyDraft, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { isQuestionAnswerEmpty, type QuestionAnswer } from '@plannotator/core/question-block';
-import { inboxLaunchStops, inboxPersonAnsweredSince, isInboxNote, isInboxT3WaitReason, type InboxAnnotationRecord, type InboxAttachmentState, type InboxInlineImage } from '@plannotator/core/inbox-types';
+import { StartedBy } from './StartedBy';
+import { earlierRunsLabel, RunDivider, runFolds, ScheduledFoot } from '../scheduled/thread';
 import { useRefRepo } from '../links';
 import { InboxApiError, InboxHeldError, inboxApi, type OutboxView, type TagMode, type ThreadModel } from '../api';
-import { awayLine, outboxLine } from '../machines';
+import { outboxLine } from '../machines';
 import { ThreadSessions } from './ThreadSessions';
 import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
-import { annotationOf, attachmentFeedback, isFileComment, OWN_MESSAGE_COMMENT_ROW } from '../attachments';
+import { annotationOf, attachmentFeedback, attachmentImageUrl, isFileComment, OWN_MESSAGE_COMMENT_ROW, readableVersion } from '../attachments';
 import { withPictures } from '../commentPictureFiles';
 import { CommentPictures } from '../commentPictures';
 import { fileQuestionRecords, type FileQuestions } from '../fileQuestions';
+import { ThreadMeta } from '../parts/ThreadMeta';
 import { replyViewingOf } from '../replyViewing';
 import { AttachmentTiles, changedCount } from './AttachmentTiles';
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
+import type { PageStart } from './htmlPageFrame';
 import type { OpenInSurface } from './OpenIn';
+import { ReferencedFilePane } from './ReferencedFilePane';
 import { stepsOf } from '../stepping';
 import { choiceLetters, optionOf, optionSetAddress, optionSetId, optionSetOf, parseOptionSetId, openChoiceSetOf } from '../optionSets';
 import { PrototypeWindow, openingOption, type PrototypeOption } from './PrototypeWindow';
@@ -43,15 +47,15 @@ import { takeArrivalFocus } from '../threadStep';
 import { AnnotationsChip, AnnotationsList, type AnnotationsListProps, type CommentEdit, type CommentsListAt } from './AnnotationsChip';
 import { agentName, formatCount, fullTime, plural, shortAgentName, whenTime } from '../format';
 import { inboxRowSnoozed, inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
-import { foldSnippet, holdingsOf, isDelivered, isPersonLook, isPersonReply, lastNonNote, lookBoundary, newSinceLook, planFolds, snippetText } from '../folding';
+import { foldSnippet, holdingsOf, isDelivered, isPersonLook, isPersonReply, keptFirstWords, lastNonNote, lookBoundary, newSinceLook, planFolds, snippetText } from '../folding';
 import { highlightSearchHits } from '../search/highlight';
-import { AuthorMark, Icon } from '../icons';
+import { AuthorMark, HostMark, Icon } from '../icons';
 import { createCountStore, NewPill } from '../parts/NewPill';
 import { HoldingChips, SnippetText } from '../parts/FoldLine';
 import { atEnd, followBy, lookThrough, measureFirstLines, unseenArrivals, useSeenOnSight } from '../seenOnSight';
 import { GuideCard } from './GuideCard';
-import { ReviewCard, type ReviewOutcome } from './ReviewCard';
-import { reviewOpenPlan } from '../pulls/reviewsModel';
+import { ReviewCard } from './ReviewCard';
+import { ReviewViewNote, reviewOpenPlan } from '../pulls/reviewsModel';
 import { inboxThreadHadReview } from '@plannotator/core/inbox-review';
 import { ThreadMore, type CopyMenuHost, type ThreadMoreLaunch } from './CopyMenus';
 import { RunLine } from './RunLine';
@@ -61,14 +65,15 @@ import { PermissionCard } from './PermissionCard';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { threadLink } from '../rowMenu';
 import { ArmScope, createMessageArms } from '../messageArming';
+import { usePassedNew, useWatchNew } from '../thread/pillWatch';
 import { reportUnsentReply } from '../unsent';
 import { registerReloadFlush } from '../stalePage';
-import { clearLateVoiceMiss, LATE_VOICE_MISSED, noteLateVoiceMiss, useLateVoiceMiss } from '../lateVoice';
+import { clearLateVoiceMiss, LATE_VOICE_MISSED, useLateVoiceMiss } from '../lateVoice';
 import { replyBoxSetAside } from '../floaters/model';
-import { landInReplyDraft, landWordsInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook, type ReplyDraftFiles } from '../replyDraft';
+import { landInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook, type ReplyDraftFiles } from '../replyDraft';
 import { createTypedSaves, isTypedChange } from '../typedAnswers';
 import { conflictRevision, onPickConflict } from '../pickConflict';
-import { useReplyHasWords, useReplyTextStore, useReplyTextWhile } from '../replyText';
+import { useReplyHasWords, useReplyTextStore } from '../replyText';
 import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
 import { conflictText, DRAFT_OFFER_TEXT, DraftHead, DraftFootNote, DraftOffer, DraftStamp, unsentWords } from './DraftLabel';
 import { canMarkUnread, canToggleRead } from '../markRead';
@@ -85,7 +90,6 @@ import { SendToAnotherSession } from '../compose/SendToAnotherSession';
 import { COMPOSE_CLONE_EVENT, type ComposeCloneRequest } from '../compose/model';
 import { authorWithLabel, labelOf, useSessionLabels } from '../sessionLabels';
 import { givenName, useAgentNames } from '../agents/agentNames';
-import { attachmentImageUrl, readableVersion } from '../attachments';
 import { usePickSave } from '../data/actions/picks';
 import { sameThreadFiles, useThreadAttachments } from '../data/queries/files';
 import { MessageView } from '../parts/MessageView';
@@ -115,7 +119,7 @@ import {
   useEndedSessions, type RouteState
 } from './ReplyRoute';
 import { ReaskNote } from './ReaskNote';
-import { TidyNote } from './Tidy';
+import { CombineLeftNote, TidyNote } from './Tidy';
 import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } from '../reask';
 import { ChangedNotice, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
 import type { ComposerCommand } from './ComposerField';
@@ -123,12 +127,13 @@ import { VoiceMicButton, VoiceStatusLine } from './VoiceMic';
 import { ReplySummary } from './ReplySummary';
 import { ReplyRow } from './ReplyRow';
 import { sendFailure } from '../sendFailure';
-import { ReplyRecipient } from './ReplyRecipient';
-import { PhoneReplyRecipient } from './PhoneReplyRecipient';
-import { aimable, canTakeAlone, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, recipientRows, recipientState, sessionFolder, toggleRecipient, type RecipientPerson, type RecipientRow } from '../replyRecipients';
-import { useVoiceSession } from '../voice';
-import { spaced } from '../voiceField';
-import type { VoiceLate } from '../voiceSession';
+import { ReplyRecipientControl } from '../parts/ReplyRecipientControl';
+import { aimable, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, sessionFolder, toggleRecipient, type RecipientRow } from '../replyRecipients';
+import { replyRecipientList } from '../thread/recipientList';
+import { isStartRow, replyStartOf } from '../thread/replyStart';
+import { useReplyLaunchBlock } from '../data/replyLaunch';
+import { coverVoice, useThreadVoice } from '../thread/useThreadVoice';
+import { useLateVoice } from '../thread/useLateVoice';
 import type { FullScreenComposerValue } from './FullScreenComposer';
 import { ReplyAnswers, draftAnswerWords, ReplyActions, type ActionRow, type DraftAnswer } from './ReplyAnswers';
 import { actionSavesPending, actionSavesSettled } from '../actionSaves';
@@ -152,7 +157,6 @@ import {
 } from '../tags';
 import type { MentionSource } from '@plannotator/ui/utils/mentions';
 import { TAG_TOKEN_CLASS } from './ComposerField';
-import { HostMark } from '../icons';
 import { INBOX_REPLY_SKILL_AUDIENCE, annotationSkillTexts, inboxSkillFilter, inboxSkillsBlock, withSkillsBlock } from '../skills';
 import { fetchSkillCatalog, getCachedSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import { type ActionMark } from './ActionChecklist';
@@ -178,31 +182,36 @@ import { ShortcutHint, useShortcutAria, useShortcutHintShown, withShortcut } fro
 import { lastInput, traversedJustNow } from '../lastInput';
 import { bareKeyAllowed, inOverlay, keyboardFocused, keyTarget, modalOpen } from '../shortcuts/guards';
 import { INBOX_SHORTCUT_EXTRAS } from '../shortcuts/extras';
-import { useShortcutScope } from '@plannotator/ui/shortcuts';
+import { useShortcutScope } from '../panes/scope';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { StepsButton } from '../steps/StepsButton';
 import { stepsButtonSig, stepsWaitTarget } from '../steps/model';
 import { useThreadSteps } from '../steps/useThreadSteps';
 import { keepEqualByKey } from '../thread/keepEqual';
+import { useKeptScroll } from '../thread/keptScroll';
+import { sentActionsOf } from '../thread/sentActions';
+import { leftoverWords } from '../thread/leftover';
 import { replyWordsCount, withFreeName, withoutReplyWords } from '../shape/addToReply';
 import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, tookOverReply, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
-import { FOLD_STEP, isSuperseded, NO_ANNOTATIONS, NO_QUESTIONS, NO_IDS, NO_OUTBOX, NO_SENT_ANSWERS, NO_UPLOADS, askingSessionOf, commentTags, emptyAnswerFor, isOtherAgent, newBelow, otherSendSessions, reducedMotion, replyKeyOf, spanWords, stillHidden, type FoldState } from '../thread/helpers';
+import { FOLD_STEP, isSuperseded, NO_ANNOTATIONS, NO_QUESTIONS, NO_IDS, NO_OUTBOX, NO_SENT_ANSWERS, NO_UPLOADS, askingSessionOf, commentTags, emptyAnswerFor, isOtherAgent, newBelow, otherSendSessions, reducedMotion, replyKeyOf, reviewOutcomesOf, spanWords, stillHidden, type FoldState } from '../thread/helpers';
 import { NO_SKILLS_HINT_MS, REPLY_FILES_SUMMARY_FROM, SHOW_NEW_MESSAGE_BUTTON, SIDE_COMMAND_DESCRIPTION, SIDE_COMMAND_NAME, THREAD_GONE_TEXT, focusReplyFromBox } from '../thread/replyBox';
 import { AckPill } from '../parts/AckPill';
-import { HeadMark } from '../parts/HeadMark';
+import { ThreadBarTitle } from '../thread/ThreadBarTitle';
 import { SkipChip } from '../parts/SkipChip';
 import { namedTagOptions, useThreadSessions } from '../thread/useThreadSessions';
 import { measureOpenPlaces } from '../thread/openPlaces';
 import { takeMergedFiles as takeMergedFilesInto, takeTheirWords as takeTheirWordsInto } from '../thread/draftTakes';
 import { readFeedbackTexts } from '../data/queries/feedbackTexts';
 import { ReplyTextField } from '../parts/ReplyTextField';
+import { ReviewContextLine } from '../thread/ReviewContextLine';
+import { replyWordsWithMentions, useMentionBoxOpener } from '../threadMentions';
 import { labelledAuthorName } from '../parts/AuthorName';
 import { MessageBody } from '../parts/MessageBody/MessageBody';
 
 export { AckPill, MessageBody };
 export { routeSendAnnotations, sendTargetsOf, type SendTarget };
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, pullReview, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, onTakenBack, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, pullReview, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, onTakenBack, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, parked = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, board = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, namedFile = null, onOpenNamedFile, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, paired = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
   /**
    * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
    * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
@@ -218,7 +227,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   // Thread steps (approval "inbox-thread-steps"): the lists with steps, newest first; none while the switch is off.
-  const stepLists = useThreadSteps(thread.thread_id, threadSteps?.on ?? false, threadSteps?.subscribe ?? null);
+  const stepLists = useThreadSteps(thread.thread_id, threadSteps?.on ?? false, threadSteps?.subscribe ?? null, undefined, parked);
   // The person answered since a list (a reply or a 👍): that list no longer waits, by the row's rule (`steps_waiting`).
   const stepsAnswered = (since: string) => inboxPersonAnsweredSince(thread.messages, since);
   const root = thread.messages[0]!;
@@ -227,8 +236,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const cloudName = [...thread.messages].reverse().find((m) => m.cloud_wake)?.cloud_wake?.name ?? null;
   const addresseeName = (host: string) => (isInboxCloudHost(host) && cloudName ? cloudName : hostName(host));
   const asker = startedTo ? addresseeName(startedTo.host) : agentName(root.author);
-  // Launch: the person started this agent from New message (packages/server/inbox-launch.ts).
-  const launched = root.launch ?? null;
+  // Launch: the person started this agent from New message, or a reply started a new session (packages/server/inbox-launch.ts).
+  const launchedAt = [...thread.messages].reverse().find((m) => !!m.launch) ?? root;
+  const launched = launchedAt.launch ?? null;
   // Launch is on for this thread (a launched thread whose read carries a run line).
   const launchOn = !!launched && runLine !== undefined;
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -255,7 +265,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const attach = runLine?.attach_command ?? attachCommand;
   // Terminal is on the Inbox's computer: never from a phone or the tailnet, and only with a session or a refused folder.
   // Not for another machine's thread either (remote launch): its Terminal is on that machine; Copy attach command is the way in.
-  const openTerminal = launched && !phone && remote !== true && !machine && (launched.session_ref || runLine?.untrusted) ? () => void launchAct(() => inboxApi.launchOpen(launched.id)) : null;
+  const openTerminal = launched && !phone && remote !== true && !machine && !inboxLaunchInRex(launched) && (launched.session_ref || runLine?.untrusted) ? () => void launchAct(() => inboxApi.launchOpen(launched.id)) : null;
   const launchMenu: ThreadMoreLaunch | null =
     launched && runLine !== undefined && !launched.deleted_at
       ? {
@@ -264,7 +274,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             ? () => void copyTextToClipboard(attach).then((ok) => onToast?.(ok ? { icon: 'check', lead: 'Copied', detail: 'the attach command' } : { icon: 'warn', lead: 'Not copied' }))
             : null,
           // A resting agent (no line) still runs in the background: Stop is offered then too.
-          stop: inboxLaunchStops(!!launched.session_ref, runLine?.state ?? null) ? () => void launchAct(() => inboxApi.launchStop(launched.id, machine?.id ?? null)) : null,
+          stop: inboxLaunchStops(!!launched.session_ref, runLine?.state ?? null, inboxLaunchRexUnstoppable(launched)) ? () => void launchAct(() => inboxApi.launchStop(launched.id, machine?.id ?? null)) : null,
           // On a phone too (owner ruling 2026-11-11: one person, the same app on every device).
           remove: () => setConfirmDelete(true),
         }
@@ -513,11 +523,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const [errorDetails, setErrorDetails] = useState<{ for: string; text: string } | null>(null);
   /** The error line names a machine that needs an update (a Delete it refused): its Update follows the words. */
   const [errorUpdate, setErrorUpdate] = useState<{ for: string; machine: string } | null>(null);
-  const voice = useVoiceSession();
-  /** Words a take left in full screen's card brought back, waiting for the box (`changeReply` waits for a Send). */
-  const lateVoice = useRef<string[]>([]);
-  const [lateVoiceTick, setLateVoiceTick] = useState(0);
-  const paneMounted = useRef(true);
+  const voice = useThreadVoice(thread.thread_id, (outcome, takenIn) => onLateVoice(outcome, takenIn), parked);
   const lateMiss = useLateVoiceMiss(thread.thread_id);
   /** When a Send from full screen's composer last went: the card says "Sent to …" for a moment. */
   const [composerSentAt, setComposerSentAt] = useState<number | null>(null);
@@ -583,6 +589,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const nameChip = threadChipName(thread.thread_name, thread.subject ?? '(no subject)');
   // The bar's name: in Reviews, the review's title once it landed, the name its row and heading show (`ReviewView.name`).
   const barName = reviewView?.name ?? nameChip;
+  const heading = reviewView?.title ?? (thread.pull_keys?.length || thread.review_started ? thread.thread_name : null) ?? thread.subject ?? '(no subject)';
   // The agent sessions this thread involves (approval "inbox-tag-agents"): overlapping marks in the head.
   const participants = useMemo(() => threadParticipants(thread), [thread]);
   const lookRef = useRef<{ threadId: string; seq: number | null } | null>(null);
@@ -611,7 +618,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const [foldState, setFoldState] = useState<FoldState | null>(null);
   let fold = foldState;
   if (!fold || fold.threadId !== thread.thread_id) {
-    const plan = planFolds(thread.messages, fresh, boundary);
+    const plan = runFolds(planFolds(thread.messages, fresh, boundary), thread.messages);
     fold = { threadId: thread.thread_id, folded: plan.folded, hidden: plan.hidden, shown: plan.hidden.map(() => 0), stepped: NO_IDS };
     setFoldState(fold);
   }
@@ -622,7 +629,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const reviewPlanKey = `${thread.thread_id}:${inReviews ? 'reviews' : 'inbox'}`;
   if (reviewPlan.current?.key !== reviewPlanKey) {
     const wasReviews = reviewPlan.current?.key === `${thread.thread_id}:reviews`;
-    const folds = wasReviews ? planFolds(thread.messages, fresh, boundary) : fold;
+    const folds = wasReviews ? runFolds(planFolds(thread.messages, fresh, boundary), thread.messages) : fold;
     const plan = inReviews && reviewView ? reviewOpenPlan({ messages: thread.messages, firstReviewId: boundary === null ? null : reviewView.firstReviewId, latestReviewId: reviewView.latestReviewId, fresh, folds }) : null;
     reviewPlan.current = { key: reviewPlanKey, left: new Set(plan?.left ?? []) };
     if (plan || wasReviews) {
@@ -786,7 +793,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           <button type="button" className="ib-mfold-b ib-mfold-step" data-fold-head="" data-fold-step="" onClick={() => stepRun(run, false)} aria-label={`Show ${plural(n, 'earlier message')}`}>
             <span>
               <Icon name="arrowUp" size={14} />
-              {`Show ${formatCount(n)} earlier`}
+              {earlierRunsLabel(rest, thread.messages) ?? `Show ${formatCount(n)} earlier`}
               {n < total && <span className="ib-mfold-when"> · {formatCount(total)} hidden</span>}
             </span>
           </button>
@@ -999,11 +1006,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const reviewHappened = useMemo(() => inboxThreadHadReview(thread.messages), [thread.messages]);
   const skillFilter = useMemo(() => inboxSkillFilter(reviewHappened), [reviewHappened]);
   // Each review's outcome: the person's latest verdict reply on it.
-  const reviewOutcomes = useMemo(() => {
-    const out = new Map<string, ReviewOutcome>();
-    for (const m of thread.messages) if (m.author.kind === 'person' && m.review_verdict) out.set(m.review_verdict.of, { verdict: m.review_verdict, at: m.created_at });
-    return out;
-  }, [thread.messages]);
+  const reviewOutcomes = useMemo(() => reviewOutcomesOf(thread.messages), [thread.messages]);
 
   // The session that asked, and whether it is still there (only hosts whose
   // sessions poll the Inbox can be known to have ended). It is the session
@@ -1030,28 +1033,29 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const wordsAsking = askingSessionOf(thread, { skip: skipIds, carries: sendCarries });
   const askerToWatch = wordsAsking && askerCanEnd(wordsAsking) ? wordsAsking.session : null;
   // New message (record 5.x): the project's live sessions, and what the button opened.
-  const { model: live, load: loadLive } = useLiveSessions(thread.thread_id, askerToWatch);
+  const { model: live, load: loadLive } = useLiveSessions(thread.thread_id, askerToWatch, true, undefined, parked);
   // A launched agent that stopped is not "ended": a reply starts it again (`claude respawn`), so no route choice.
   const launchResumes = !!launched && !launched.deleted_at && runLine !== undefined && runLine?.state !== 'missing' && runLine?.state !== 'failed';
   // Only the launched session (the root's `to`, the one the server's sweep starts again): another agent in the thread that ended is gone.
-  const resumingSession = launchResumes ? inboxLaunchedSession(root) : null;
+  const resumingSession = launchResumes ? inboxLaunchedSession(launchedAt) : null;
   // Every other session this Send reaches is checked too (handoff "multi-agent-thread-model", failure 2): a pick
   // on an ended session's question, while the words go to a live one, opens the choice for that answer.
   const otherSessions = otherSendSessions(thread, { skip: skipIds, carries: sendCarries, records }, wordsAsking).filter((s) => s.session !== resumingSession);
-  const otherEnded = useEndedSessions(thread.thread_id, otherSessions.map((s) => s.session));
+  const otherEnded = useEndedSessions(thread.thread_id, otherSessions.map((s) => s.session), parked);
   const endedOthers = otherEnded.ended;
   const wordsEnded = !resolved && wordsAsking?.session !== resumingSession && askerHasEnded(wordsAsking, live);
   const endedOther = resolved || wordsEnded ? null : (otherSessions.filter((s) => endedOthers.has(s.session)).at(-1) ?? null);
   /** The session the ended note and the choice are about: the words', else another this Send answers that ended. */
   const asking = endedOther ?? wordsAsking;
   const askerEnded = wordsEnded || endedOther !== null;
+  const replyStart = replyStartOf(useReplyLaunchBlock(!resolved && askerEnded, machine), thread, asking, !!machine && machine.state !== 'online');
   /** Each session whose replies the choice sends on: every one of this Send's sessions that ended. */
   const endedSends = new Set([...(wordsEnded && wordsAsking ? [wordsAsking.session] : []), ...otherSessions.filter((s) => !resolved && endedOthers.has(s.session)).map((s) => s.session)]);
   // Tags (approval "inbox-tag-agents"): who the person can tag with `@`, read while the reply box is open. In a
   // thread with more than one agent, read with the box closed too: the recipient pill and the message heads name
   // agents by their folders (approval "inbox-reply-recipient"), and a head must not change when the box opens.
   const multiAgent = participants.length > 1 || activeHandoff(thread) !== null || tookOverReply(thread) !== null;
-  const taggable = useTaggable(thread.thread_id, (box.open || !!file || multiAgent) && !resolved);
+  const taggable = useTaggable(thread.thread_id, (box.open || !!file || multiAgent) && !resolved, parked);
   // Each session's label (issue #2450): an agent message's author reads it, as the list read it.
   const sessionLabels = useSessionLabels();
   const { sessions, sessionNames } = useThreadSessions(participants, agentContext, machine, sessionLabels);
@@ -1113,9 +1117,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     [tagOpts],
   );
   const anyOtherLive = asking !== null && othersLive(asking, live).length > 0;
-  // Who gets the reply (approval "inbox-reply-recipient", option E): a pill under the box, right, in a thread with
-  // more than one agent, or one whose only agent ended while another is live (it does the old route choice's job).
-  const pillActive = !resolved && (multiAgent || (askerEnded && anyOtherLive));
+  /** Another session can take an ended session's reply: a live one, or a new one (the start row). */
+  const anotherTakes = anyOtherLive || replyStart !== null;
+  // Who gets the reply (approval "inbox-reply-recipient"): in a thread with more than one agent, or one whose only
+  // agent ended while another can take it (it does the old route choice's job).
+  const pillActive = !resolved && (multiAgent || (askerEnded && anotherTakes));
   /** Whom the words go to unless the person aims them: the session of the message they answer (wordsMessage). */
   const rcptDefault = (() => {
     const words = wordsMessage(thread);
@@ -1129,27 +1135,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const rcptAsked = useRef(false);
   /** Sessions a Send was refused for as not live any more (the race): ended in the list from then on. */
   const [rcptGone, setRcptGone] = useState<ReadonlyMap<string, string | null>>(() => new Map());
-  const rcptAgents = useMemo((): RecipientRow[] => {
-    if (!pillActive) return [];
-    const people: RecipientPerson[] = [...participants];
-    const add = (host: string | null, session: string) => {
-      if (!people.some((p) => p.session === session)) people.push({ host, session });
-    };
-    const handed = activeHandoff(thread) ?? tookOverReply(thread);
-    if (handed?.to) add(handed.to.host, handed.to.session);
-    // The agent asked has ended: the live sessions take its place in the list (its project's, and writers from other folders).
-    if (askerEnded) for (const s of live?.sessions ?? []) add(s.host, s.session);
-    // One that ended as a Send went to it stays in the list, ended.
-    for (const [session, host] of rcptGone) add(host, session);
-    const ended = new Set([...(askerEnded && asking ? [asking.session] : []), ...rcptGone.keys()]);
-    return recipientRows(
-      people,
-      // A live session of the project's list that the `@` list has not read: the thread's folder (the list is its project's).
-      (session) =>
-        sessionFolder(session, thread, taggable) ?? (rcptGone.has(session) || live?.sessions.some((s) => s.session === session) ? thread.project.name : null),
-      (session) => recipientState(session, taggable, ended),
-    ).map((row) => ({ ...row, alone: canTakeAlone(row.state, row.session === rcptDefault || latestBy(thread, row.session) !== undefined) }));
-  }, [pillActive, participants, thread, askerEnded, asking, live, taggable, rcptGone, rcptDefault]);
+  const rcptAgents = useMemo(
+    (): RecipientRow[] => (pillActive ? replyRecipientList({ participants, thread, askerEnded, asking, live, taggable, gone: rcptGone, rcptDefault, start: replyStart, givenNameOf: (session) => givenName(agentNames, session) }) : []),
+    [pillActive, participants, thread, askerEnded, asking, live, taggable, rcptGone, rcptDefault, replyStart, agentNames],
+  );
   /** Whether a session can be the first recipient (a typed tag's, not in the list, is live). */
   const rcptAlone = (id: string) => rcptAgents.find((r) => r.session === id)?.alone !== false;
   /** The choice came back with a draft (not the person's own tap): one led by an agent that can't take it alone is not kept. */
@@ -1165,7 +1154,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const row = rcptAgents.find((r) => r.session === id);
     if (row) return [row];
     const option = tagOpts.find((o) => o.id === id);
-    return option ? [{ session: id, host: option.host, label: option.label, short: option.label, state: 'live' as const }] : [];
+    return option ? [{ session: id, host: option.host, label: option.name ?? option.label, short: option.name ?? option.label, state: 'live' as const }] : [];
   });
   const rcptNames = namesList(rcptChosen.map((r) => r.label));
   /** Whom the box's words go to, named: the pill's names where it shows, else as before (the field's name, full screen's card). */
@@ -1398,6 +1387,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** Bumped when the person opens a file, so focus moves into its pane. */
   const [paneFocus, setPaneFocus] = useState(0);
   const paneRef = useRef<AttachmentPaneHandle>(null);
+  /** An HTML page opened by a link that named a query or fragment (`mock.html?variant=2`): the page opens with it. */
+  const [pageStart, setPageStart] = useState<PageStart | null>(null);
   /**
    * The thread's artifacts (artifacts.ts): one list, read by the Artifacts view
    * (newest first) and by the viewer's stepping and its peek (thread order, the
@@ -1471,6 +1462,14 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   };
   /** A file the person's sent reply names (its feedback heading): beside the thread, at the version the comments were on. */
   const openFromReply = (attachment: InboxAttachmentState, version: 'current' | 'sent') => openFromMessage(attachment, null, undefined, null, version);
+  /** A comment made a file a message names one of its attachments (or it already was one): that attachment opens in its place. */
+  const openAttachedRef = async (id: string, focus: string | null) => {
+    await reloadFiles();
+    void onChanged();
+    onOpenFile({ id, version: 'current', focus, view: null }, { replace: true });
+  };
+  /** A file a message names, beside the thread; an open file with a comment not saved yet asks first. */
+  const openFileRef: MessageActs['openFileRef'] = (messageId, ref) => (paneRef.current && file ? paneRef.current.leave(ref.path.split('/').pop() ?? ref.path, () => onOpenNamedFile?.({ ...ref, messageId })) : onOpenNamedFile?.({ ...ref, messageId }));
   const openRecord = (record: InboxAnnotationRecord) => {
     // A comment on a guided review's diff: open that guide.
     if (record.guide) {
@@ -1485,9 +1484,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         stopHold();
         const inMessage = `[data-message-id="${CSS.escape(record.message_id)}"]`;
         const id = CSS.escape(record.id);
-        const mark = bodyRef.current?.querySelector<HTMLElement>(`${inMessage} [data-bind-id="${id}"], ${inMessage} [data-highlight-id="${id}"], ${inMessage} [data-diagram-badge="${id}"]`);
-        // A comment on a diagram part: the diagram is rung, and its own selection brings the part into view.
-        const onDiagram = annotationOf(record).diagramAnchor != null;
+        const mark = bodyRef.current?.querySelector<HTMLElement>(`${inMessage} [data-bind-id="${id}"], ${inMessage} [data-highlight-id="${id}"], ${inMessage} [data-diagram-badge="${id}"], ${inMessage} [data-html-embed-comments~="${id}"]`);
+        // A comment on a diagram part (or an element of a live html block): the diagram (block) is rung, and its own selection brings the part into view.
+        const onDiagram = annotationOf(record).diagramAnchor != null || annotationOf(record).htmlBlockAnchor != null;
         const target = mark?.closest<HTMLElement>('[data-diagram-block]') ?? mark ?? articleOf(record.message_id);
         if (!target) return;
         target.scrollIntoView?.({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' });
@@ -1602,33 +1601,22 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
 
   // The "↓ N new" pill while new messages the person has not seen are below
   // the view (its count: those messages, never everything new this visit).
-  // The subject shows in the header once the body's heading has scrolled away (a named thread's name always does).
   // `pill` here is only whether the pill shows; its count changes on most scroll steps past new messages, so it
   // lives in `pillCount`, which only the pill reads: a scroll redraws the pill, never every message of the thread.
-  const [chrome, setChrome] = useState({ subject: false, pill: false });
+  const [chrome, setChrome] = useState({ pill: false });
   const [pillCount] = useState(createCountStore);
-  /** The new messages the person has had on screen this visit (newBelow): the pill never counts them again. */
-  const passed = useRef<{ threadId: string; ids: Set<string> }>({ threadId: thread.thread_id, ids: new Set() });
-  const passedIds = useCallback((): Set<string> => {
-    if (passed.current.threadId !== thread.thread_id) passed.current = { threadId: thread.thread_id, ids: new Set() };
-    return passed.current.ids;
-  }, [thread.thread_id]);
+  /** The new messages the person has had on screen this visit (newBelow), and which can count (thread/pillWatch.ts). */
+  const { passedIds, watch: pillWatch } = usePassedNew(thread.thread_id);
   /** Whether what is on screen now counts as shown: the tab visible and nothing over the thread. */
   const showingRef = useRef(true);
   const updateChrome = useCallback(() => {
     const body = bodyRef.current;
     if (!body) return;
-    const box = body.getBoundingClientRect();
-    const subject = body.querySelector<HTMLElement>('.ib-subject');
     const shown = showingRef.current && (typeof document === 'undefined' || document.visibilityState !== 'hidden');
-    const count = newBelow(body, passedIds(), shown).length;
-    const next = {
-      subject: subject !== null && subject.getBoundingClientRect().bottom < box.top + 4,
-      pill: count > 0,
-    };
+    const count = newBelow(body, passedIds(), shown, pillWatch.current).length;
     pillCount.set(count);
-    setChrome((current) => (current.subject === next.subject && current.pill === next.pill ? current : next));
-  }, [passedIds, pillCount]);
+    setChrome((current) => (current.pill === count > 0 ? current : { pill: count > 0 }));
+  }, [passedIds, pillCount, pillWatch]);
 
   // ── Seen on sight (design record "inbox-new-in-open-thread", variant A) ──
   // An agent message that arrives while the thread is open counts as seen once
@@ -1640,6 +1628,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const arrivals = useMemo(() => (onSeen ? unseenArrivals(thread.messages, seenThrough) : []), [onSeen, thread.messages, seenThrough]);
   /** The arrivals still to be seen (and those seen whose look is not recorded yet): the pill counts these first. */
   const arrivalIds = useMemo(() => new Set(arrivals.map((m) => m.id)), [arrivals]);
+  useWatchNew(pillWatch, arrivalIds, showNew ? fresh : NO_IDS, arms.element);
   const candidates = arrivals.filter((m) => !sightedIds.has(m.id) && !fold.folded.has(m.id) && !hiddenNow.has(m.id)).map((m) => m.id);
   /** A file over the thread: full screen, or where it cannot sit beside it (a phone, a stacked window). */
   const fileCovers = file !== null && shownFull;
@@ -1662,15 +1651,16 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     [onSeen, thread.thread_id],
   );
   // On a phone the pill sits in the foot and covers none of the thread.
-  useSeenOnSight({ bodyRef, candidates, covered: covered || fileCovers || artifactsOn, pill: chrome.pill && !phone, onSeen: sawOne });
+  useSeenOnSight({ bodyRef, candidates, covered: covered || fileCovers || artifactsOn || !!board, pill: chrome.pill && !phone, onSeen: sawOne });
   // The thread on screen, for notifications: a question in it raises nothing while it is visible.
   const screenRef = useRef(onScreenChange);
   screenRef.current = onScreenChange;
-  const paneCovered = covered || fileCovers || artifactsOn;
+  // The board in the messages' place covers them as the Artifacts view does: none of the thread's keys act under it.
+  const paneCovered = covered || fileCovers || artifactsOn || !!board;
   showingRef.current = !paneCovered;
-  // The status and Cancel go under the cover with the box, and this pane stays mounted: the mic must not go on unseen.
+  // The status and Cancel go under the cover with the box (the pane stays mounted): a recording goes, nothing posted; a take being transcribed lands.
   useEffect(() => {
-    if (paneCovered) voice.session.covered();
+    if (paneCovered) coverVoice(voice.session);
   }, [paneCovered, voice.session]);
   useEffect(() => {
     screenRef.current?.({ threadId: thread.thread_id, covered: paneCovered });
@@ -1678,10 +1668,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   useEffect(() => () => screenRef.current?.(null), []);
 
   // The Artifacts view: opening it moves focus to its heading, leaving it returns focus to the Artifacts
-  // button (the messages keep the scroll they had). Only on a change in this pane, never on the first draw
-  // (a reload or a link lands where the window puts focus).
+  // button (the messages keep the scroll they had, as under the board: keptScroll.ts). Only on a change in this
+  // pane, never on the first draw (a reload or a link lands where the window puts focus).
+  useKeptScroll(bodyRef, artifactsOn || !!board);
   const artifactsWas = useRef(artifactsOn);
-  const threadScroll = useRef(0);
   useLayoutEffect(() => {
     if (artifactsWas.current === artifactsOn) return;
     artifactsWas.current = artifactsOn;
@@ -1689,20 +1679,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       (linksOn ? linksHeadingRef : artifactsHeadingRef).current?.focus({ preventScroll: true });
       return;
     }
-    if (bodyRef.current) bodyRef.current.scrollTop = threadScroll.current;
     const button = artifactsButtonRef.current;
     if (button) button.focus();
-    else bodyRef.current?.querySelector<HTMLElement>('.ib-subject')?.focus({ preventScroll: true });
-  }, [artifactsOn]);
-  // The thread's scroll, kept while the grid is shown over it.
-  useEffect(() => {
-    const body = bodyRef.current;
-    if (!body || artifactsOn) return;
-    const keep = () => {
-      threadScroll.current = body.scrollTop;
-    };
-    body.addEventListener('scroll', keep, { passive: true });
-    return () => body.removeEventListener('scroll', keep);
+    else sectionRef.current?.querySelector<HTMLElement>('.ib-subject')?.focus({ preventScroll: true });
   }, [artifactsOn]);
   // ── Your place in the thread, around a file (threadPlace.ts) ──
   // Beside a file the thread is a narrow column, under a full-screen file it is covered, and on a phone or a
@@ -2042,7 +2021,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const [openItemsRequest, setOpenItemsRequest] = useState(0);
   // H (approval "inbox-keyboard-keys-2026-11-07", item 3): opens the header ⋯ menu at Snooze's times; it never snoozes by itself.
   const [snoozeRequest, setSnoozeRequest] = useState(0);
-  const readKeysOn = !one && !artifactsOn;
+  const readKeysOn = !one && !artifactsOn && !board;
   const readKeyAllowed = (event: KeyboardEvent) => {
     if (!readKeysOn || !bareKeyAllowed(event)) return false;
     const origin = keyOrigin(event);
@@ -2112,7 +2091,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       reply: {
         when: (event) => {
           // Only where the Reply button is (or the box is already open): never where the foot shows something else.
-          if (!bareKeyAllowed(event) || !(box.open || sectionRef.current?.querySelector('[data-reply-button]'))) return false;
+          if (!bareKeyAllowed(event) || board || !(box.open || sectionRef.current?.querySelector('[data-reply-button]'))) return false;
           const origin = keyOrigin(event);
           return origin === 'thread' || origin === 'row' || origin === 'file';
         },
@@ -2120,7 +2099,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       },
       openNewest: {
         when: (event) => {
-          if (!bareKeyAllowed(event) || artifactsOn) return false;
+          if (!bareKeyAllowed(event) || artifactsOn || board) return false;
           const origin = keyOrigin(event);
           return origin === 'thread' || origin === 'row';
         },
@@ -2134,13 +2113,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           // Mod+Enter is no character, so a field is where it is most needed. A menu, dialog or popover layer keeps its
           // keys, a link keeps ⌘Enter (open in a tab), a held key sends once (and `send` ignores a second). Never while
           // something covers the thread (a file in full screen, a guide, Artifacts): its Send is not on screen.
-          if (event.defaultPrevented || event.repeat || event.isComposing || event.keyCode === 229 || paneCovered || modalOpen()) return false;
+          if (event.defaultPrevented || event.repeat || event.isComposing || event.keyCode === 229 || paneCovered) return false;
           // The open-items list is up (focus may not have reached its first row yet): its keys are the menu's.
           if (reaskRef.current?.getAttribute('aria-expanded') === 'true') return false;
           const target = keyTarget(event);
           if (target && (inOverlay(target) || target.closest('[role="menu"], [role="listbox"], iframe, a[href]'))) return false;
           const origin = keyOrigin(event);
-          if (origin !== 'thread' && origin !== 'row' && origin !== 'file') return false;
+          if ((origin !== 'thread' && origin !== 'row' && origin !== 'file') || modalOpen()) return false;
           const button = sendRef.current;
           if (button && button.isConnected && !button.disabled && button.getClientRects().length > 0) return true;
           // Typed or picked an instant ago: the Send is drawn once the save has landed. The key waits for it.
@@ -2214,7 +2193,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       fullScreen: {
         when: (event) => {
           // A phone or a stacked window shows files full screen only: there is nothing to switch.
-          if (!bareKeyAllowed(event) || artifactsOn || phone || fileStacked) return false;
+          if (!bareKeyAllowed(event) || artifactsOn || board || phone || fileStacked) return false;
           const origin = keyOrigin(event);
           return origin === 'thread' || origin === 'row' || origin === 'file';
         },
@@ -2706,7 +2685,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       setError(null);
     },
     // The same conditions that hide the box (the guard shows only while a replaced question waits).
-    !resolved && !artifactsOn && !(guard && staleQuestions.length > 0) && newMessage?.kind !== 'compose',
+    !resolved && !artifactsOn && !board && !(guard && staleQuestions.length > 0) && newMessage?.kind !== 'compose',
   );
   /** Acting on the panel: these replacements were seen, so Send goes as asked from now on. */
   const acknowledgeStale = () => {
@@ -2714,7 +2693,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     setStale([]);
     setGuard(false);
   };
-  // The action items whose Done or Can't do it waits in the draft (approval "inbox-action-items-in-reply"):
+  // The action items whose Done, Can't do it or Skip waits in the draft (approval "inbox-action-items-in-reply"):
   // listed in the reply box, counted beside Send ("Draft · 1 done"), carried by the Send.
   const draftActions: ActionRow[] = thread.messages.flatMap((m) =>
     m.author.kind !== 'agent'
@@ -2725,7 +2704,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           return [{ id: `${m.id}/${a.key}`, messageId: m.id, number: a.position + 1, prompt: a.prompt, outcome: mine.outcome, note: mine.note, seen: a.action_result?.by === 'agent' }];
         }),
   );
-  const draftCant = draftActions.filter((a) => a.outcome === 'cant' && !a.seen).length;
+  const [draftCant, draftSkipped] = (['cant', 'skip'] as const).map((o) => draftActions.filter((a) => a.outcome === o && !a.seen).length);
   /** Picks, annotations or action items wait for a Send. */
   const waiting = picksCount > 0 || records.length > 0 || draftActions.length > 0;
   /** The box is closed and its words are kept as a draft (Cancel or Escape kept them): Edit draft brings them back. */
@@ -2736,7 +2715,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** What a phone's Edit draft counts (approval "reply-bar-pairs"): the picks, comments and marked action items. */
   const draftCount = picksCount + records.length + draftActions.length;
   /** The same in words: "your reply, 1 pick, 1 comment". */
-  const draftWords = unsentWords({ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant, cant: draftCant }, false);
+  const draftWords = unsentWords({ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant - draftSkipped, cant: draftCant, skipped: draftSkipped }, false);
 
   // The answers this reply carries, as the cards show them now: a saved pick, or one being
   // saved. The box lists them live (ReplyAnswers); they never go into the words, where a
@@ -2770,21 +2749,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // listed under its words as "You did 1 action item" (approval "inbox-action-items-in-reply").
   // Each reply's rows stay the same array while they are equal: a message arriving redraws no reply's body.
   const heldSentActions = useRef<ReadonlyMap<string, ActionRow[]> | null>(null);
-  const sentActionsByReply = useMemo(() => {
-    const out = new Map<string, ActionRow[]>();
-    for (const m of thread.messages) {
-      for (const a of m.actions ?? []) {
-        const result = a.action_result;
-        const mine = inboxActionPersonMark(result);
-        if (!result || !mine || !a.sent_reply_id || a.revision === 0 || a.sent_revision !== a.revision) continue;
-        out.set(a.sent_reply_id, [
-          ...(out.get(a.sent_reply_id) ?? []),
-          { id: `${m.id}/${a.key}`, messageId: m.id, number: a.position + 1, prompt: a.prompt, outcome: mine.outcome, note: mine.note, seen: result.by === 'agent' },
-        ]);
-      }
-    }
-    return (heldSentActions.current = keepEqualByKey(heldSentActions.current, out));
-  }, [thread.messages]);
+  const sentActionsByReply = useMemo(() => (heldSentActions.current = keepEqualByKey(heldSentActions.current, sentActionsOf(thread.messages))), [thread.messages]);
 
   // The person's own sent replies are drawn in their words, with the answers they carried as a
   // short list read from the questions (sentReply.ts): never the agent-facing answers section.
@@ -2896,50 +2861,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     replyDraft.save(text, files);
   };
 
-  /** A take that outlived the card's field: its words go to this thread's reply. The pane gone with it, to its draft. */
-  const onLateVoice = useCallback((outcome: VoiceLate) => {
-    const threadId = threadRef.current.thread_id;
-    if ('failed' in outcome) {
-      noteLateVoiceMiss(threadId, outcome.retry && (() => {
-        clearLateVoiceMiss(threadId);
-        outcome.retry?.();
-      }));
-    } else if (paneMounted.current) {
-      lateVoice.current.push(outcome.text);
-      setLateVoiceTick((tick) => tick + 1);
-    } else void landWordsInReplyDraft(threadId, outcome.text);
-  }, []);
-  useEffect(() => {
-    // While a Send is on its way the box takes no words: these wait for it to end.
-    if (lateVoice.current.length === 0 || sending) return;
-    const waiting = lateVoice.current;
-    lateVoice.current = [];
-    if (!boxRef.current.open) {
-      // What this pane knows of the draft can be behind a save still on its way (Cancel's): the Inbox's copy decides.
-      for (const words of waiting) void landWordsInReplyDraft(thread.thread_id, words);
-      return;
-    }
-    let text = boxRef.current.text;
-    for (const words of waiting) text += spaced(text.at(-1), undefined, words);
-    // They go after the words, so someone typing keeps their place: the field holds them first, and React finds nothing to set.
-    const field = textRef.current;
-    if (field && document.activeElement === field) {
-      const { selectionStart, selectionEnd } = field;
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(field, text);
-      field.setSelectionRange(selectionStart, selectionEnd);
-    }
-    changeReply(text, true);
-    // changeReply reads this render's Send state.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lateVoiceTick, sending]);
-  useEffect(() => {
-    paneMounted.current = true;
-    return () => {
-      paneMounted.current = false;
-      for (const words of lateVoice.current) void landWordsInReplyDraft(threadRef.current.thread_id, words);
-      lateVoice.current = [];
-    };
-  }, []);
+  const onLateVoice = useLateVoice({ thread, threadRef, boxRef, textRef, boxOpen: box.open, sending, changeReply });
 
   /** The reply box opens behind full screen, without taking focus (full screen's composer writes into it). */
   const openBehind = () => {
@@ -2976,23 +2898,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     });
   }, []);
 
-  /**
-   * What the person added after a Send that went without its answer (comments, picks, files it did not
-   * carry): said plainly, since they are still to send. Null when nothing was added.
-   */
-  const leftoverText = (earlier: UnconfirmedSend): string | null => {
-    const comments = records.filter((r) => !earlier.comments.includes(r.id)).length;
-    const picks = picked.filter((q) => !earlier.picks.includes(`${q.message_id}/${q.key}`)).length;
-    const files = replyUploads.filter((id) => !earlier.uploads.includes(id)).length;
-    const parts = [
-      comments > 0 ? `${comments} comment${comments === 1 ? '' : 's'}` : null,
-      picks > 0 ? `${picks} pick${picks === 1 ? '' : 's'}` : null,
-      files > 0 ? `${files} file${files === 1 ? '' : 's'}` : null,
-    ].filter((part): part is string => part !== null);
-    if (parts.length === 0) return null;
-    const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`;
-    return `Your reply went. Not sent yet: ${list}. Press Send to send ${parts.length === 1 && !list.endsWith('s') ? 'it' : 'them'}.`;
-  };
+  /** What the person added after a Send that went without its answer, in words (thread/leftover.ts). */
+  const leftoverText = (earlier: UnconfirmedSend) => leftoverWords(earlier, { comments: records.map((r) => r.id), picks: picked.map((q) => `${q.message_id}/${q.key}`), uploads: replyUploads });
 
   /** The remembered unconfirmed Send turned out to have landed: finish it, and say what is still to send. */
   const finishLanded = (earlier: UnconfirmedSend) => {
@@ -3174,9 +3081,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         ? (route.rows.find((row) => row.live.session === route.selected && !row.ended)?.live ?? null)
         : null;
     const first = pillActive && !handingTo ? (rcptPicked?.[0] ?? rcptDefault) : null;
-    const aimed = first !== null && first !== rcptDefault ? first : null;
+    const aimed = first !== null && first !== rcptDefault && !isStartRow(first) ? first : null;
     const firstLive = first ? (live?.sessions.find((s) => s.session === first) ?? null) : null;
-    const aimedTo = firstLive ? { host: firstLive.host, session: firstLive.session } : undefined;
+    const aimedTo = firstLive ? { host: firstLive.host, session: firstLive.session } : isStartRow(first) ? replyStart?.to : undefined;
     const pillExtra = pillActive && !handingTo && rcptPicked ? rcptPicked.slice(1) : [];
     const to = chosen ? { host: chosen.host, session: chosen.session } : aimedTo;
     // live or not as this window last read it. One not live any more is the server's refusal (409), never another agent.
@@ -3341,7 +3248,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         const wordsPart = { target: { message: t.message, questions: [], skip: [], actions: [] }, key: `w:${wordsTo.session}`, own: tail.own, wordsTo };
         // Where the tail's own answers go: their asker, or (it ended) the live agent the pill names.
         const owner = t.message.author.kind === 'agent' ? (t.message.author.session ?? null) : null;
-        const answersTo = to && owner && sendEnded.has(owner) ? to.session : owner;
+        const answersTo = to && 'session' in to && owner && sendEnded.has(owner) ? to.session : owner;
         if ((t.questions.length > 0 || t.skip.length > 0 || t.actions.length > 0) && answersTo !== wordsTo.session) {
           tail.own = [];
           parts.push(wordsPart);
@@ -3403,7 +3310,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         const files = withPictures(last ? uploads : [], own);
         requests.push({ messageId: target.message.id, input: {
           idempotency_key: sendKeys.current.get(part.key) ?? newUuid(),
-          words: last ? words : '',
+          words: last ? replyWordsWithMentions(thread.thread_id, words) : '',
           questions: target.questions,
           ...(target.skip.length > 0 ? { skip: target.skip } : {}),
           ...(target.actions.length > 0 ? { actions: target.actions } : {}),
@@ -3416,15 +3323,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           // The message the words answer (approval "inbox-reply-quote") rides the reply that carries them.
           ...(last && sendQuote && words.trim() !== '' ? { quote: sendQuote } : {}),
           ...(tags.length > 0 ? { tags } : {}),
-          // The reply that carries the box's words: their draft goes with the Send (that draft, or one holding
-          // exactly these words when the `updated_at` they were saved as is not known here).
+          // The reply that carries the box's words: their draft goes with the Send (that draft, or one holding exactly these words when the `updated_at` they were saved as is not known here).
           ...(last && sendClears ? { clear_draft: draftSavedAs ?? '' } : {}),
-          // Only a message an ended session of this Send asked goes to the session picked;
-          // an answer to a live session's message still goes to that session.
-          // The words aimed with the pill at a session that never wrote here go to it alone.
+          // Only a message an ended session of this Send asked goes to the session picked; an answer to a live session's message still goes to that session. The words aimed with the pill at a session that never wrote here go to it alone.
           ...(part.wordsTo
             ? { to: part.wordsTo }
-            : to && target.message.author.kind === 'agent' && !!target.message.author.session && sendEnded.has(target.message.author.session)
+            : to && target.message.author.kind === 'agent' && !!target.message.author.session && sendEnded.has(target.message.author.session) && ('session' in to || target.message.author.session === asking?.session)
               ? { to }
               : {}),
         } });
@@ -3439,7 +3343,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       let sentRead: ThreadModel | null = null;
       for (const [index, request] of requests.entries()) {
         if (request.input.words) wordsKey = request.input.idempotency_key;
-        postingTo = request.input.to;
+        postingTo = request.input.to && 'session' in request.input.to ? request.input.to : undefined;
         const last = index === requests.length - 1;
         const answer = await sendReply.mutateAsync({ messageId: request.messageId, input: last && !machine ? { ...request.input, with_thread: true } : request.input });
         const written = answer.reply as InboxMessageWire | null;
@@ -3659,7 +3563,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const replySession = lastTo?.session ?? askedSession;
   // The run line speaks for the session the launch started. Words "your reply starts it again" and "your reply is
   // waiting" are not about a reply waiting on another session, or a root that moved: that reply's own line says.
-  const runSpeaks = !runLine || (runLine.state !== 'stopped' && runLine.state !== 'missing') || (replySession ?? root.to?.session ?? null) === inboxLaunchedSession(root);
+  const runSpeaks = !runLine || (runLine.state !== 'stopped' && runLine.state !== 'missing') || (replySession ?? root.to?.session ?? null) === inboxLaunchedSession(launchedAt);
   const shownRun = runSpeaks ? runLine : null;
   const replyWaiting = !!replySession && !last.delivery && !(lastTo === null && sent?.checked_at);
   // A 👍 the Inbox sent through to a waking session and that session has not taken yet (the person's reply
@@ -3670,7 +3574,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const waitingOnWake = replyWaiting || (!replySession && ackWaiting !== null);
   // How that session is connected now ("Queued", "Sending", Send now), and, for compose, whether it
   // stopped before it took it (after the asker grace). Read every few seconds while the reply waits.
-  const { model: pendingLive, load: loadPendingLive } = useLiveSessions(thread.thread_id, recipientSession, waitingOnWake, 3_000);
+  const { model: pendingLive, load: loadPendingLive } = useLiveSessions(thread.thread_id, recipientSession, waitingOnWake, 3_000, parked);
   const undelivered = !!lastTo && !last.delivery && pendingLive?.asker?.session === lastTo.session && pendingLive.asker.live === false;
   // Taken by that session's connection, which stopped while delivering it: that session never gets it, so it may move.
   const stuck = !!replySession && !last.delivery && pendingLive?.asker?.session === replySession && pendingLive.asker.stuck?.includes(last.id) === true;
@@ -3684,7 +3588,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const anotherCanTake = (pendingLive?.sessions ?? []).some((s) => s.session !== lastTo?.session && !lastTags.some((tag) => tag.session === s.session && tag.delivery && !tag.handed_away));
   const ownerHost = lastTo?.host ?? (repliedTo?.author.kind === 'agent' ? (repliedTo.author.host ?? null) : null);
   const waitingTags = lastTags.filter((t) => t.wakes && !t.delivery).map((t) => t.session);
-  const { connections: tagConnections, load: loadTagConnections } = useTagConnections(thread.thread_id, waitingTags, waitingTags.length > 0);
+  const { connections: tagConnections, load: loadTagConnections } = useTagConnections(thread.thread_id, waitingTags, waitingTags.length > 0, parked);
   const tagLines = lastTags.map((tag) => {
     const name = tagName(tag, ownerHost, replySession);
     const line = tagDeliveryLine(tag, name, tagConnections[tag.session], whenTime, last.id);
@@ -3721,7 +3625,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             wakes: (wakingSession !== null || (askedSession !== null && recipientConnection != null)) && !uncertainItem(recipientConnection, last.id),
             sendingNow: !!last.deliver_now_at,
             connection: recipientConnection,
-            askerEnded: wordsEnded && wordsAsking ? { name: wordsAsking.name } : null,
+            askerEnded: wordsEnded && wordsAsking && !(repliedTo && inboxSessionlessSend(repliedTo)) ? { name: wordsAsking.name } : null, // never for a reply to a script's post
             stuck,
             handed: handedItem(recipientConnection, last.id),
             ...waitInputs(recipientConnection, last.id, { ...last, into_turn: last.delivery?.into_turn ?? null }),
@@ -3758,7 +3662,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const { sendNowState, sendNow, sendNowError, tagSendNow, sendTagNow } = useSendNow(last.id, onChanged, loadPendingLive, loadTagConnections);
   const { takeBack, takeBackOf } = useThreadTakeBack({
     threadId: thread.thread_id,
-    only: thread.messages.length === 1,
+    messages: thread.messages,
     allowed: !sending && (!machine || (machine.marks ?? []).includes('take-back')),
     lastBlocked: (message) => message === last && (delivered?.state === 'delivered' || delivered?.state === 'undelivered' || handedItem(recipientConnection, last.id)),
     nameOf: (message) => (message.to ? toName(message, message.to) : recipientName(askedBy(message))),
@@ -3912,7 +3816,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const guideTarget = guideRequestTarget(thread);
   const guideSession = guideTarget && guideTargetCanEnd(guideTarget) ? guideTarget.to.session : null;
   const guideWatch = guideSession !== null && guideSession !== askerToWatch ? guideSession : null;
-  const { model: guideLive } = useLiveSessions(thread.thread_id, guideWatch, guideWatch !== null);
+  const { model: guideLive } = useLiveSessions(thread.thread_id, guideWatch, guideWatch !== null, undefined, parked);
   const guideLiveNow = guideSession === null ? null : guideSession === askerToWatch ? live : guideLive;
   const guideEnded = guideSession !== null && guideLiveNow?.asker?.session === guideSession && guideLiveNow.asker.live === false;
   const guideOffered = guideTarget !== null && !guideEnded;
@@ -3983,7 +3887,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const endedActions = showAskerNote ? (
     <EndedActions
       sendElsewhere={
-        anyOtherLive
+        anotherTakes
           ? () => {
               openBox();
               setRcptOpen(true);
@@ -4022,8 +3926,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       </button>
     </>
   );
-  // The card draws the words, so while it shows, this pane follows them key by key (as the field does).
-  const composerText = useReplyTextWhile(replyText, composerShown);
+  // The card reads the open box's words from `replyText` itself (`words`): a key re-renders the card, never this pane.
   const composer: FullScreenComposerValue | null =
     composerShown
       ? {
@@ -4031,7 +3934,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           phone,
           reply: {
             to: replyTo,
-            value: box.open ? (composerText ?? '') : (replyDraft.conflict ?? replyDraft.draft?.body ?? ''),
+            value: box.open ? '' : (replyDraft.conflict ?? replyDraft.draft?.body ?? ''),
+            words: box.open ? replyText : undefined, hasWords,
             onChange: (text) => changeReply(text, true),
             quote: quote && quotedMessage ? { message: quotedMessage, words: quote.words, onRemove: () => setQuote(null) } : null,
             onLateVoice,
@@ -4145,6 +4049,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     // An empty box with nothing saved has nothing to discard: it only closes, and says nothing that is not so.
     const had = replyText.get().trim() !== '' || replyFiles.files.length > 0 || replyDraft.draft !== null;
     replyDraft.discard();
+    voice.session.covered();
     forgetQuote();
     closeBox(true);
     if (had) announce('Draft discarded.');
@@ -4286,11 +4191,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     aimReply(next);
     announce(`This reply goes to ${namesList(next.map((id) => rcptAgents.find((r) => r.session === id)?.label ?? id))}.`);
   };
-  // The one place the reply's recipient control splits: a phone's is in the box's row with its sheet (approval
-  // "inbox-phone-composer-picker"), a computer's is the pill. Both show by the same rule (`pillActive`): a thread with
-  // one agent has no control at all.
-  const rcptPill = !pillActive ? null : phone ? (
-    <PhoneReplyRecipient
+  // The reply's recipient control: a phone's in the box's row, a computer's the field's lead (parts/ReplyRecipientControl).
+  const rcptPill = !pillActive ? null : (
+    <ReplyRecipientControl
+      phone={phone}
       rows={rcptAgents}
       chosen={rcptChosen}
       open={rcptOpen}
@@ -4302,8 +4206,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       labels={sessionLabels}
       folderOf={(session) => sessionFolder(session, thread, taggable) ?? thread.project.name}
     />
-  ) : (
-    <ReplyRecipient rows={rcptAgents} chosen={rcptChosen} open={rcptOpen} onOpen={setRcptOpen} onOnly={onlyRecipient} onToggle={toggleReplyRecipient} onTagAnother={tagAnother} />
   );
   const routeChoice = asking ? (
     <RouteChoice
@@ -4417,6 +4319,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     </div>
   );
 
+  // A thread mentioned from outside the box (approval "inbox-drag-threads"): a closed box opens and takes it.
+  useMentionBoxOpener(thread.thread_id, box.open, sending || replyDraft.loadedFor !== thread.thread_id, openBox, hasWords && !sending);
   // The warning toast's Reply: the reply box opens, once.
   useEffect(() => {
     if (replyRequest !== thread.thread_id) return;
@@ -4437,9 +4341,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [replyWords, sending]);
 
-  // A board's Add to reply: its words after the draft's, its picture beside them. Its toast's Undo works once and takes
-  // out exactly that press's words and file, in the box or, once Cancel or Esc closed it, in the saved draft; a Send,
-  // Discard or another thread ends it.
+  // A board's Add to reply: its words after the draft's, its picture beside them. Its toast's Undo works once and takes out exactly that press's words and file, in the box or, once Cancel or Esc closed it, in the saved draft; a Send, Discard or another thread ends it.
   const changeReplyLive = useRef(changeReply);
   changeReplyLive.current = changeReply;
   // `/side` in the reply box's "/" list, only where the thread can ask: the words go to the side chat, and the reply
@@ -4543,7 +4445,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const closedByRead = thread.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === 'closed' && q.set_aside_at));
 
   const openAttachment = file ? allFiles.find((a) => a.id === file.id) ?? null : null;
-  const fileOpen = openAttachment !== null;
+  const fileOpen = openAttachment !== null || (namedFile !== null && file === null);
   // The questions inside the open Markdown file (issue #2828): its cards answer like the body's, through the same
   // pick, draft and Send. A version changed since it was sent may ask otherwise: only the sent text takes answers then.
   const fileOwner = openAttachment ? thread.messages.find((m) => m.id === openAttachment.message_id) : undefined;
@@ -4574,7 +4476,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   };
   // A file beside the thread hides the list (App.tsx `fileOpen`, from the route, so before the
   // attachments load too): the way back to it leads the header, as on an iPad (approved 2026-10-12).
-  const backBesideFile = file !== null && !phone && !stacked && !fileStacked && onBackToList !== undefined;
+  const backBesideFile = (file !== null || namedFile !== null) && !phone && !stacked && !fileStacked && onBackToList !== undefined;
   // The thread's full screen: the control pressed goes away or hides (the list's edge, ‹ Inbox), so focus follows to
   // ‹ Inbox, or back to the thread, when it was on the one pressed or nowhere. A change only, never on the first draw. Leaving can stack the thread
   // (the window too narrow for the list beside it): the window measures that after this pane's effects, in the same
@@ -4665,12 +4567,14 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // top on a thread marked read, and Mark unread (`markUnreadInMenu`).
   const menuMarkRead = markReadOffered && readAt === null && markReadEnabled ? () => onMarkRead!(true) : undefined;
   const menuMoveBack = markReadOffered && readAt !== null ? () => onMarkRead!(false) : undefined;
-  // A thread's PRs: on this machine's own threads, for the person (a linked machine's have none).
-  const pullsOffered = !machine;
+  // A thread's PRs: read and changed on the thread's own machine, one that takes them (mark `pulls`).
+  const pullsOffered = !machine || (machine.marks ?? []).includes('pulls');
+  // A linked machine's thread: what its messages name is read, and attached when commented on, through its door.
+  const fileRefsHere = !machine || (machine.marks ?? []).includes('file-refs');
   const [addingPull, setAddingPull] = useState(false);
   // Export decisions › Post on a pull request › Add a pull request…: the PR the person adds next gets the post.
   const [postAfterAdd, setPostAfterAdd] = useState(false);
-  const decisionsPostable = pullsOffered && threadHasQuestionCards(thread);
+  const decisionsPostable = !machine && threadHasQuestionCards(thread);
   const postOn = (ref: string) => void postDecisions(thread.thread_id, ref, onToast);
   const snoozeProps = snoozeBlocked && !resolved ? { snoozed: false, onPick: () => {}, onUnsnooze: () => {}, blocked: snoozeBlocked } : onSnooze && onUnsnooze && !resolved ? { snoozed: !!row?.snoozed, onPick: onSnooze, onUnsnooze } : undefined;
 
@@ -4678,7 +4582,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // tighter padding, the Artifacts count, then the way back's label; the subject shows only with room to read.
   const headRef = useRef<HTMLDivElement>(null);
   const textSize = useInboxTextSize();
-  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, linkList.count, linksOn, one, !!shapeButton, markReadOffered, markUnreadOffered, readAt !== null, backLabel, textSize].join('|');
+  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, linkList.count, linksOn, one, !!shapeButton, !!board, markReadOffered, markUnreadOffered, readAt !== null, backLabel, textSize].join('|');
   const headFittedFor = useRef('');
   const fitHeadRef = useRef<(force?: boolean) => void>(() => {});
   fitHeadRef.current = (force = false) => {
@@ -4714,7 +4618,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     quoteWordsAtPress.current = { id: messageId, words: selectedWordsIn(article) };
   };
   const tryPrototype = (messageId: string, key: string) => setProto({ messageId, key });
-  const newest: MessageActs = { openFromReply, jumpTo, noteChips, openFromMessage, openOptionSet, pick, markAction, saveMessageComment, noteUnanchored, repaintHits, openListAt, onSide, toggleMessage, replyToMessage, quoteAtPress, setHeaderOpen, closeHeaderOnEscape, tryPrototype, takeBackOf };
+  const newest: MessageActs = { openFromReply, jumpTo, noteChips, openFromMessage, openOptionSet, pick, markAction, saveMessageComment, noteUnanchored, repaintHits, openListAt, onSide, toggleMessage, replyToMessage, quoteAtPress, setHeaderOpen, closeHeaderOnEscape, tryPrototype, takeBackOf, setPageStart, openFileRef };
   const acts = useRef(newest);
   acts.current = newest;
   const copyHost: CopyMenuHost = {
@@ -4847,28 +4751,14 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             )}
           </>
         )}
-        {/* The bar: the subject first, then icons with tooltips (approval "inbox-thread-artifacts"): Artifacts,
-            Expand / Fold all, ⋯ More (its read actions and Snooze lead it; Archive is in it), then the close. */}
+        {/* The bar: the subject first, then icons with tooltips (approval "inbox-thread-artifacts"): Shape's Pebble (left of
+            Artifacts, the owner 2026-11-16), Artifacts, Expand / Fold all, ⋯ More (read actions, Snooze, Archive), the close. */}
         {phone && artifactsOn ? null : (
           <>
-            {one && !artifactsOn && !barName ? (
-              <span className="ib-sp" />
-            ) : (
-              // The bar's title, as on main: the thread's name (the list's rule, `threadChipName`; in Reviews, `barName`), always; with no name,
-              // the subject once the body's heading has scrolled away, so its words never show twice; always over the
-              // Artifacts grid. The heading stays the body's h2 (what a screen reader reads). Its tooltip is the whole
-              // subject: always under a name (the owner, 2026-11-02), else only when the subject is cut. The box takes the
-              // bar's free room, so the tooltip hangs on the words inside it (`.ib-phsubj-t`, as wide as they are, cut
-              // with "…" at the box's edge): it opens under the title, not centred on the empty room after a short one.
-              <span className="ib-phsubj" dir="auto" data-header-subject="" data-header-name={barName ? '' : undefined} data-on={barName || chrome.subject || artifactsOn ? '' : undefined} aria-hidden="true">
-                <Tip content={thread.subject ?? '(no subject)'} cut={!barName}>
-                  <span className="ib-phsubj-t" data-header-title="">
-                    <HeadMark thread={thread} where="bar" />
-                    {barName ?? thread.subject ?? '(no subject)'}
-                  </span>
-                </Tip>
-              </span>
-            )}
+            {/* The thread's title, always in the bar and nowhere in the body (the owner, 2026-11-15): its name (the list's
+                rule, `threadChipName`; in Reviews, `barName`) with its heading after it, muted, else its heading; cut, a
+                tap opens it whole (thread/ThreadBarTitle.tsx). The pane's h2, the focus target when focus has nowhere else to go. */}
+            <ThreadBarTitle key={thread.thread_id} thread={thread} name={barName} heading={heading} />
             {/* The thread's PRs (approval "inbox-pr-binding"): left of Artifacts, at its icon's size; none, no button
                 (the ⋯ menu's Add a pull request shows it with its card open on the Add field). */}
             {!artifactsOn && pullsOffered && (
@@ -4885,6 +4775,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 review={pullReview}
               />
             )}
+            {shapeButton}
             {artifactsButton && (
               <Tip content={withShortcut(artifactsOn ? 'Back to the thread' : linksOnly ? 'Links' : 'Artifacts: every file, image and guided review in this thread', { scope: inboxThreadShortcuts, action: 'artifacts' })}>
                 <button
@@ -4904,7 +4795,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 </button>
               </Tip>
             )}
-            {!one && !artifactsOn && (
+            {!one && !artifactsOn && !board && (
               <Tip content={allOpen ? 'Fold the earlier messages' : 'Expand all messages'}>
                 <button
                   type="button"
@@ -4917,7 +4808,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 </button>
               </Tip>
             )}
-            {shapeButton}
             <ThreadMore
               {...copyHost}
               pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined}
@@ -4944,7 +4834,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               }
             />
 
-            {phone || stacked || backBesideFile || threadAlone ? null : (
+            {phone || backBesideFile || ((stacked || threadAlone) && !paired) ? null : (
               <>
                 <span className="ib-vsep" aria-hidden="true" />
                 <Tip content="Close">
@@ -4957,33 +4847,18 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           </>
         )}
       </div>
-      {/* The Artifacts view swaps the messages out (kept mounted, so folds, scroll and the reply box stay as left). */}
+      {/* The Artifacts view and the board swap the messages out (kept mounted, so folds, scroll and the reply box stay as left). */}
+      {board}
       <div
         className={`ib-pbody${one ? '' : ' ib-folding'}`}
         ref={bodyRef}
-        hidden={artifactsOn}
+        hidden={artifactsOn || !!board}
         // A named session wrote here (issue #2450): every head's name column is wider, so the rows still line up.
         data-session-labels={thread.messages.some((m) => m.author.kind === 'agent' && labelOf(sessionLabels, m.author.session)) ? '' : undefined}
       >
         {/* A focus target (the way back's fallback, a stacked thread), never a tab stop. */}
-        {reviewView && (
-          <div className="ib-rvctx" data-review-context="">
-            <Icon name={reviewView.kind === 'local' ? 'laptop' : 'pullRequest'} size={15} />
-            <span dir="auto">{reviewView.context}</span>
-            {reviewView.onOpenPull && (
-              <button type="button" className="ib-rvctx-link" onClick={reviewView.onOpenPull} data-review-open-pull="">
-                See the pull request
-              </button>
-            )}
-            {reviewView.pullUrl && (
-              <a className="ib-rvctx-link" href={reviewView.pullUrl} target="_blank" rel="noreferrer noopener" data-review-pull-link="">
-                See the pull request
-              </a>
-            )}
-          </div>
-        )}
-        <HeadMark thread={thread} where="body" />
-        <h2 className="ib-subject" dir="auto" tabIndex={-1}>{reviewView?.title ?? (thread.pull_keys?.length || thread.review_started ? thread.thread_name : null) ?? thread.subject ?? '(no subject)'}</h2>
+        {reviewView && <ReviewContextLine view={reviewView} thread={thread} onOpenGuide={onOpenGuide} />}
+        <ThreadTagLine threadId={thread.thread_id} phone={phone} />
         {reviewView?.fromThread && (
           <p className="ib-rvfrom" data-review-from="">
             Review from thread{' '}
@@ -4992,32 +4867,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             </button>
           </p>
         )}
-        {/* The bar's title is aria-hidden, so a screen reader hears the name here (a one-message thread has no meta line). */}
-        {nameChip && <span className="ib-sr" data-thread-name-sr="">Thread name: {nameChip}</span>}
-        {machine && (
-          // Another machine's thread: which machine, or since when it is away (its rows are greyed in the list).
-          <div className="ib-tmeta" data-thread-machine={machine.id} data-away={awayLine(machine) ? '' : undefined}>
-            <span>{awayLine(machine) ?? `On ${machine.name}`}</span>
-          </div>
-        )}
-        {cardChip ? <div className="ib-tmeta" data-thread-card-row="">{cardChip}</div> : null}
+        <ThreadMeta machine={machine} cardChip={cardChip} messages={thread.messages} />
         {notice}
-        {launched && (
-          <div className="ib-tmeta" data-started-by="" data-launched={launched.id}>
-            <span>
-              You started {hostName(launched.agent)} in <bdi>{thread.project.name}</bdi>
-              {/* Started from another linked machine's window (remote launch): which one. */}
-              {launched.from && launched.from.machine !== selfMachineId() && <> from {launched.from.name}</>}
-            </span>
-            {launched.full_permissions && (
-              <>
-                <span className="ib-tdot" aria-hidden="true" />
-                <span data-launch-full="">Full permissions</span>
-              </>
-            )}
-            <LaunchChoiceMeta launch={launched} />
-          </div>
-        )}
+        {launched && <StartedBy launched={launched} root={thread.messages[0]} project={thread.project.name} />}
         {confirmDelete && launched && (
           <div className="ib-cp-note ib-warn ib-run-confirm" role="alertdialog" aria-label={`Delete the ${hostName(launched.agent)} session`} data-launch-confirm="">
             <Icon name="warn" size={16} />
@@ -5240,7 +5092,14 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           }
           // A Tidy note: one quiet line in place of the message.
           if (message.tidy) {
-            before.push(<TidyNote key={message.id} agent={message.to ? toName(message, message.to) : 'the agent'} time={time} fullWhen={fullWhen} />);
+            before.push(<TidyNote key={message.id} run={message.tidy.id} agent={message.to ? toName(message, message.to) : 'the agent'} time={time} fullWhen={fullWhen} />);
+            return before;
+          }
+          if (message.scheduled_run) {
+            const tail = message === last && shownRun && !runInCard && (
+              <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} machine={machine?.id ?? null} machineName={machine?.name ?? null} onChanged={() => onRunChanged?.()} onChangeUrl={changeCloneUrl} />
+            );
+            before.push(<RunDivider key={message.id} message={message} messages={thread.messages} run={runLine} tail={tail} />);
             return before;
           }
           const open = one || !fold.folded.has(message.id);
@@ -5252,7 +5111,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 return pending.has(id) ? pending.get(id) !== null : q.state === 'picked';
               },
             });
-            const snippet = foldSnippet(message, thread.messages);
+            const snippet = foldSnippet(message, thread.messages, keptFirstWords);
             const label = `${nameSaid}, ${time}${isNew ? ', new' : ''}${holdings.length > 0 ? `. ${holdings.map((h) => h.say).join(', ')}` : ''}. ${snippetText(snippet)}`;
             before.push(
               <article
@@ -5372,7 +5231,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                           onOpenAs={phone || fileStacked ? undefined : openFromMessage}
                           openId={file && !full && !phone && !fileStacked ? file.id : null}
                           placement="header"
-                          openIn={openIn}
+                          openIn={openIn} pinOf={(a) => ({ threadId: thread.thread_id, key: openArtifactKey(artifactList, a.id) })}
                         />
                         <p className="ib-hatts-note">Also at the end of the message.</p>
                       </>
@@ -5416,6 +5275,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     openComment: commentsList?.at ?? null,
                     revealedComment,
                     side: !!onSide,
+                    farMachine: machine?.name ?? null,
+                    fileRefs: !!onOpenNamedFile && fileRefsHere,
                     acts,
                   }}
                   draw={drawMessageBody}
@@ -5430,11 +5291,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     onOpen={openFromMessage}
                     onOpenAs={phone || fileStacked ? undefined : openFromMessage}
                     openId={file && !full && !phone && !fileStacked ? file.id : null}
-                    openIn={openIn}
-                    newestId={newestFileId}
-                    newestKeycap={!file}
+                    openIn={openIn} pinOf={(a) => ({ threadId: thread.thread_id, key: openArtifactKey(artifactList, a.id) })}
+                    newestId={newestFileId} newestKeycap={!file}
                   />
                 )}
+                {isAgent && <CombineLeftNote left={message.combine_left} />}
                 {message.guide &&
                   (codeReview && message.guide.review ? (
                     <ReviewCard guide={message.guide} outcome={reviewOutcomes.get(message.id) ?? null} verdict={!thread.pull_theirs && !message.guide.walkthrough} onInReviews={onInReviews} onOpen={() => onOpenGuide(message.id)} />
@@ -5583,7 +5444,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           );
           return before;
         })}
-        {reviewView?.curating && <p className="ib-rvcurating" data-review-curating="">{reviewView.curating}</p>}
+        {reviewView && <ReviewViewNote view={reviewView} />}
         {/* Linked machines: what the person sent here that the thread's machine has not taken yet (HeldWrites.tsx). */}
         <HeldWrites entries={outbox} machine={machine} onDismiss={onDismissOutbox} />
         <SendingReply sends={sendsDrawn} held={outbox} machine={machine} />
@@ -5620,11 +5481,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           />
         </div>
       )}
-      <div className="ib-pfoot" hidden={artifactsOn} data-under={textUnder ? '' : undefined}>
+      <div className="ib-pfoot" hidden={artifactsOn || !!board} data-under={textUnder ? '' : undefined}>
         {/* One status region, always mounted, so a screen reader announces the note when it appears. */}
         <div role="status" id={noteId} data-asker-note="">
           {/* With the pill there, the open box's pill says who gets the reply (and that it ended): no note above it. */}
-          {showAskerNote && !(pillActive && box.open) && asking && <AskerEndedNote asking={asking} project={thread.project.name} anyLive={anyOtherLive} />}
+          {showAskerNote && !(pillActive && box.open) && asking && <AskerEndedNote asking={asking} project={thread.project.name} anyLive={anotherTakes} />}
         </div>
         {cameBack && (
           <div className="ib-acts ib-archnote" data-came-back="">
@@ -5735,6 +5596,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               <div className="ib-rscroll" data-reply-scroll="" ref={replyScrollRef}>
                 <ReplyTextField
                   replyText={replyText}
+                  mentionThread={thread.thread_id}
                   sendingWords={wordsAway === thread.thread_id}
                   textareaRef={textRef}
                   voice={voice}
@@ -5742,6 +5604,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   ariaLabel={`Reply to ${replyToNames}`}
                   ariaDescribedBy={[showAskerNote ? noteId : null, replyDraft.conflict !== null ? conflictId : null].filter(Boolean).join(' ') || undefined}
                   placeholder="Write a reply. Type / for a skill"
+                  lead={phone ? undefined : rcptPill}
                   destination="your reply"
                   skillFilter={skillFilter}
                   commands={replyCommands}
@@ -5847,7 +5710,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 }
                 chips={replyChips}
                 summary={<ReplySummary skip={replySkip} dropped={dropped.length} comments={takesAnnotations ? { props: commentsListProps, list: commentsList?.card ? null : commentsList, onList: setCommentsList } : null} />}
-                pill={rcptPill}
+                pill={phone ? rcptPill : null}
                 hint={noSkillsHint ? 'No skills are installed' : null}
                 discard={
                   // While the live-session choice is open it stands in for Send and the bin, as it did for Send's
@@ -6008,12 +5871,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               <div className="ib-footstatus" data-foot-status="">
                 <DraftFootNote
                   id={draftNoteId}
-                  unsent={{ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant, cant: draftCant }}
+                  unsent={{ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant - draftSkipped, cant: draftCant, skipped: draftSkipped }}
                   onComments={() => setCommentsList((open) => (open ? null : { at: null }))}
                   commentsOpen={commentsList !== null && !commentsList.card}
                 />
               </div>
             )}
+            <ScheduledFoot messages={thread.messages} machine={machine} />
             {/* What Send and Edit draft are described by, now that the skip lives in the open questions list and a
                 phone draws no status: the draft's words (a phone) and what this Send does with the unanswered questions. */}
             {(waiting || draftKept) && phone && (
@@ -6061,6 +5925,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     {openAttachment && (
       <AttachmentPane
         ref={paneRef}
+        pageStart={pageStart}
         attachment={openAttachment}
         pin={{ threadId: thread.thread_id, key: openArtifactKey(artifactList, openAttachment.id) }}
         attachments={allFiles}
@@ -6128,6 +5993,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         }}
         composer={composer}
       />
+    )}
+    {!openAttachment && file === null && namedFile && (
+      <ReferencedFilePane threadId={thread.thread_id} fileRef={namedFile} agent={asker} phone={phone} full={phone || fileStacked} onOpen={(ref) => onOpenNamedFile?.(ref)} onClose={() => onOpenNamedFile?.(null)} onAttached={openAttachedRef} />
     )}
     </>
     </ReuseContext.Provider>

@@ -11,12 +11,16 @@ import { parseTableContent } from '@plannotator/ui/components/blocks/TableBlock'
 import { sanitizeInlineHtml } from '@plannotator/ui/utils/sanitizeHtml';
 import { paintAuthorColors } from '@plannotator/ui/utils/authorColorContrast';
 import { renderInlineMarkdown as renderInline } from '../utils/renderInlineMarkdown';
-import { prImageSrc, prImageSrcset } from '../utils/prImage';
+import type { PRMetadata } from '@plannotator/shared/pr-types';
+import { forgejoImageHandling, prImageSrc, prImageSrcset } from '../utils/prImage';
+
+/** How an image's address is rewritten to load with the reviewer's credentials; none: as written. */
+type ImageSrc = ((src: string) => string) | undefined;
 import { PRMediaScope, PR_MEDIA_SKIP_ATTR } from './PRMediaScope';
 import { OpenInArtifactsButton } from './OpenInArtifactsButton';
 
-function renderInlineMarkdown(content: string, authenticatedImages: boolean) {
-  return renderInline(content, { resolveImageSrc: authenticatedImages ? prImageSrc : undefined });
+function renderInlineMarkdown(content: string, imageSrc: ImageSrc) {
+  return renderInline(content, { resolveImageSrc: imageSrc });
 }
 
 /**
@@ -25,16 +29,16 @@ function renderInlineMarkdown(content: string, authenticatedImages: boolean) {
  * through the proxy. The rewrite runs on an inert `<template>` first and the
  * sanitizer last, so what is inserted is exactly DOMPurify's output.
  */
-function sanitizePRHtml(content: string, authenticatedImages: boolean): string {
-  if (!authenticatedImages) return sanitizeInlineHtml(content);
+function sanitizePRHtml(content: string, imageSrc: ImageSrc): string {
+  if (!imageSrc) return sanitizeInlineHtml(content);
   const template = document.createElement('template');
   template.innerHTML = content;
   for (const image of template.content.querySelectorAll('img')) {
     const src = image.getAttribute('src');
-    if (src) image.setAttribute('src', prImageSrc(src));
+    if (src) image.setAttribute('src', imageSrc(src));
   }
   for (const element of template.content.querySelectorAll('img[srcset], picture source[srcset]')) {
-    element.setAttribute('srcset', prImageSrcset(element.getAttribute('srcset') ?? ''));
+    element.setAttribute('srcset', prImageSrcset(element.getAttribute('srcset') ?? '', imageSrc));
   }
   return sanitizeInlineHtml(template.innerHTML);
 }
@@ -64,11 +68,11 @@ function SafeHtml({ html, as: Tag = 'div' }: { html: string; as?: 'div' | 'span'
  * Render inline content — if it contains HTML tags, sanitize and render.
  * Otherwise use our markdown renderer.
  */
-function renderContent(content: string, authenticatedImages: boolean): React.ReactNode {
+function renderContent(content: string, imageSrc: ImageSrc): React.ReactNode {
   if (containsHtml(content)) {
-    return <SafeHtml html={sanitizePRHtml(content, authenticatedImages)} as="span" />;
+    return <SafeHtml html={sanitizePRHtml(content, imageSrc)} as="span" />;
   }
-  return renderInlineMarkdown(content, authenticatedImages);
+  return renderInlineMarkdown(content, imageSrc);
 }
 
 /** Video file links (GitHub can't inline-play these either, but we can). */
@@ -84,17 +88,21 @@ function parseLoneVideoLink(content: string): { url: string; label: string } | n
 }
 
 /** Render a simplified block-level markdown view (no annotation infrastructure). */
-export function MarkdownBody({ markdown, textClassName = 'text-xs', authenticatedImages = false, prMedia = false }: {
+export function MarkdownBody({ markdown, textClassName = 'text-xs', authenticatedImages = false, prMedia = false, forgejoPR = null }: {
   markdown: string;
   textClassName?: string;
   authenticatedImages?: boolean;
   prMedia?: boolean;
+  /** A Forgejo PR: its own uploads in this text load through the proxy. */
+  forgejoPR?: PRMetadata | null;
 }) {
-  const blocks = useMemo(() => parseMarkdownToBlocks(markdown), [markdown]);
+  const forgejo = useMemo(() => forgejoImageHandling(forgejoPR), [forgejoPR]);
+  const blocks = useMemo(() => parseMarkdownToBlocks(forgejo ? forgejo.prepare(markdown) : markdown), [markdown, forgejo]);
+  const imageSrc: ImageSrc = forgejo ? forgejo.src : authenticatedImages ? prImageSrc : undefined;
 
   const body = (
     <div className={`space-y-2.5 ${textClassName} text-foreground/90 leading-relaxed`}>
-      {renderBlocks(blocks, authenticatedImages)}
+      {renderBlocks(blocks, imageSrc)}
     </div>
   );
   return prMedia ? <PRMediaScope>{body}</PRMediaScope> : body;
@@ -111,7 +119,7 @@ function quoteBlocks(content: string, depth: number): Block[] | null {
 }
 
 /** `depth`: the number of quotes around these blocks. */
-function renderBlocks(blocks: Block[], authenticatedImages: boolean, depth = 0): React.ReactNode[] {
+function renderBlocks(blocks: Block[], imageSrc: ImageSrc, depth = 0): React.ReactNode[] {
   return blocks.map((block) => {
     switch (block.type) {
       case 'heading': {
@@ -123,13 +131,13 @@ function renderBlocks(blocks: Block[], authenticatedImages: boolean, depth = 0):
         };
         return (
           <Tag key={block.id} className={`${sizes[block.level ?? 1] ?? 'text-xs font-medium'} text-foreground`}>
-            {renderContent(block.content, authenticatedImages)}
+            {renderContent(block.content, imageSrc)}
           </Tag>
         );
       }
       case 'code':
         return (
-          <pre key={block.id} className="bg-muted/50 rounded-md p-2 text-[11px] font-mono overflow-x-auto whitespace-pre-wrap">
+          <pre key={block.id} className="bg-muted/50 rounded-md p-2 text-xs font-mono overflow-x-auto whitespace-pre-wrap">
             <code>{block.content}</code>
           </pre>
         );
@@ -137,14 +145,14 @@ function renderBlocks(blocks: Block[], authenticatedImages: boolean, depth = 0):
         return (
           <div key={block.id} className="flex gap-1.5" style={{ paddingLeft: (block.level ?? 0) * 12 }}>
             <span className="text-muted-foreground shrink-0">{block.checked !== undefined ? (block.checked ? '☑' : '☐') : '•'}</span>
-            <span>{renderContent(block.content, authenticatedImages)}</span>
+            <span>{renderContent(block.content, imageSrc)}</span>
           </div>
         );
       case 'blockquote': {
         const inner = block.alertKind ? null : quoteBlocks(block.content, depth);
         return (
           <blockquote key={block.id} className="border-l-2 border-border pl-2 text-muted-foreground italic">
-            {inner ? <div className="space-y-2.5">{renderBlocks(inner, authenticatedImages, depth + 1)}</div> : renderContent(block.content, authenticatedImages)}
+            {inner ? <div className="space-y-2.5">{renderBlocks(inner, imageSrc, depth + 1)}</div> : renderContent(block.content, imageSrc)}
           </blockquote>
         );
       }
@@ -160,7 +168,7 @@ function renderBlocks(blocks: Block[], authenticatedImages: boolean, depth = 0):
                 <tr className="border-b border-border">
                   {headers.map((header, i) => (
                     <th key={i} className="px-2 py-1 text-left font-semibold text-foreground/90 bg-muted/30">
-                      {renderContent(header, authenticatedImages)}
+                      {renderContent(header, imageSrc)}
                     </th>
                   ))}
                 </tr>
@@ -170,7 +178,7 @@ function renderBlocks(blocks: Block[], authenticatedImages: boolean, depth = 0):
                   <tr key={ri} className="border-b border-border/50">
                     {row.map((cell, ci) => (
                       <td key={ci} className="px-2 py-1 align-top">
-                        {renderContent(cell, authenticatedImages)}
+                        {renderContent(cell, imageSrc)}
                       </td>
                     ))}
                   </tr>
@@ -199,7 +207,7 @@ function renderBlocks(blocks: Block[], authenticatedImages: boolean, depth = 0):
                   target="_blank"
                   rel="noopener noreferrer"
                   {...{ [PR_MEDIA_SKIP_ATTR]: '' }}
-                  className="block min-w-0 truncate text-[11px] text-muted-foreground hover:text-foreground"
+                  className="block min-w-0 truncate text-xs text-muted-foreground hover:text-foreground"
                 >
                   {video.label}
                 </a>
@@ -210,9 +218,9 @@ function renderBlocks(blocks: Block[], authenticatedImages: boolean, depth = 0):
         }
         // If the entire paragraph is HTML, sanitize and render
         if (containsHtml(block.content)) {
-          return <SafeHtml key={block.id} html={sanitizePRHtml(block.content, authenticatedImages)} />;
+          return <SafeHtml key={block.id} html={sanitizePRHtml(block.content, imageSrc)} />;
         }
-        return <p key={block.id}>{renderInlineMarkdown(block.content, authenticatedImages)}</p>;
+        return <p key={block.id}>{renderInlineMarkdown(block.content, imageSrc)}</p>;
       }
     }
   });

@@ -974,7 +974,10 @@ export class InboxSearchIndex {
     this.flush();
     const q = query.q.trim();
     const terms = inboxSearchTerms(q);
-    const filtered = Boolean(query.project || query.status || query.from);
+    const tags = query.tags?.length ? new Set(query.tags) : null;
+    const filtered = Boolean(query.project || query.status || query.from || tags);
+    // The threads in any picked tag, read once per answer.
+    const tagged = tags ? new Set([...this.store.allThreadTags()].filter(([, ids]) => ids.some((id) => tags.has(id))).map(([thread]) => thread)) : null;
     const base = { q, terms, indexing: false, threads: this.threadCount() };
     // Every folder, each read as the project it shows under: a combined project's hits name the group.
     const labels = new Map(this.store.allProjects().map((project) => [project.id, { id: this.store.canonicalProjectId(project.id), name: project.name }]));
@@ -1016,13 +1019,14 @@ export class InboxSearchIndex {
           group = "files";
           break;
         case "project":
-          // A project has no section and no author: any Status or From hides it.
-          if (query.status || query.from) return null;
+          // A project has no section, no author and no tag: any Status, From or Tag hides it.
+          if (query.status || query.from || tags) return null;
           return { group: "projects", facts: null };
       }
       const facts = doc.threadId ? this.factsOf(doc.threadId) : null;
       if (doc.threadId && !facts) return null;
       if (!statusOk(facts, doc.threadId ?? null) || !fromOk(doc, facts)) return null;
+      if (tagged && !(doc.threadId && tagged.has(doc.threadId))) return null;
       return { group, facts };
     };
     const score = (tier: number, title: boolean, archived: boolean, current: boolean, at: number): number =>
@@ -1067,6 +1071,7 @@ export class InboxSearchIndex {
     }
     const totals = {} as Record<InboxSearchGroupId, number>;
     const answer: Partial<Record<InboxSearchGroupId, InboxSearchRow[]>> = {};
+    const scores: Partial<Record<InboxSearchGroupId, number[]>> = {};
     for (const id of INBOX_SEARCH_GROUPS) {
       const list = groups[id];
       totals[id] = list.length;
@@ -1075,13 +1080,17 @@ export class InboxSearchIndex {
       const limit = Math.min(INBOX_SEARCH_LIMIT_MAX, query.limit ?? (query.group ? INBOX_SEARCH_LIMIT_MAX : terms.length === 0 ? INBOX_SEARCH_BROWSE_LIMIT : INBOX_SEARCH_CAPS[id]));
       const offset = query.group ? Math.max(0, query.offset ?? 0) : 0;
       const rows: InboxSearchRow[] = [];
-      for (const { doc } of topOf(list, offset + limit).slice(offset, offset + limit)) {
+      const ranks: number[] = [];
+      for (const { doc, score } of topOf(list, offset + limit).slice(offset, offset + limit)) {
         const row = this.row(this.docs[doc]!, terms, labels);
-        if (row) rows.push(row);
+        if (!row) continue;
+        rows.push({ ...row, score });
+        ranks.push(score);
       }
       answer[id] = rows;
+      scores[id] = ranks;
     }
-    return { ...base, took_ms: this.now() - started, totals, groups: answer, recent: null };
+    return { ...base, took_ms: this.now() - started, totals, groups: answer, recent: null, ...(query.scores ? { scores } : {}) };
   }
 
   /** The threads the person looked at last (`person_seen_seq`), newest look first. */

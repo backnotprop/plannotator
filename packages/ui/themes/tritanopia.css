@@ -1,0 +1,67 @@
+.theme-tritanopia {
+  --background: #16181d;
+  --foreground: #eaedf2;
+  --card: #1c1f26;
+  --card-foreground: #eaedf2;
+  --popover: #22262e;
+  --popover-foreground: #eaedf2;
+  --primary: #3cc6d9;
+  --primary-foreground: #10131a;
+  --secondary: #2a2e37;
+  --secondary-foreground: #dfe3ea;
+  --muted: #232730;
+  --muted-foreground: #a7aeba;
+  --accent: #f0657d;
+  --accent-foreground: #16181d;
+  --destructive: #e0566f;
+  --destructive-foreground: #16181d;
+  --border: #343945;
+  --input: #232730;
+  --ring: #3cc6d9;
+  --success: #168fa1;
+  --success-foreground: #10131a;
+  --warning: #d9a839;
+  --warning-foreground: #16181d;
+
+  --font-sans: 'Inter Variable', 'Inter', system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', 'Geist Mono', 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #1d212a;
+  --focus-highlight: #3cc6d9;
+
+  --diffs-addition-color-override: #168fa1;
+  --diffs-deletion-color-override: #e0566f;
+}
+
+.theme-tritanopia.light {
+  --background: #f8f9fb;
+  --foreground: #22262e;
+  --card: #ffffff;
+  --card-foreground: #22262e;
+  --popover: #ffffff;
+  --popover-foreground: #22262e;
+  --primary: #0b7a8c;
+  --primary-foreground: #ffffff;
+  --secondary: #e7eaef;
+  --secondary-foreground: #333a45;
+  --muted: #eceef3;
+  --muted-foreground: #565e6b;
+  --accent: #b82944;
+  --accent-foreground: #ffffff;
+  --destructive: #c42b47;
+  --destructive-foreground: #ffffff;
+  --border: #d8dce3;
+  --input: #eceef3;
+  --ring: #0b7a8c;
+  --success: #0b7a8c;
+  --success-foreground: #ffffff;
+  --warning: #8f6400;
+  --warning-foreground: #ffffff;
+
+  --code-bg: #eef0f4;
+  --focus-highlight: #0b7a8c;
+
+  --diffs-addition-color-override: #0b7a8c;
+  --diffs-deletion-color-override: #c42b47;
+}

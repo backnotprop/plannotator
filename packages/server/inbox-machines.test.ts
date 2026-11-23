@@ -39,6 +39,7 @@ import { startInboxServer } from "./inbox";
 import { machineHeldWords } from "./inbox-machines";
 import { createInboxDevices, takeDownInboxTailnet, UNLINKED_REFUSAL_KEPT_MS } from "./inbox-devices";
 import { readTailnetDoorRecord, writeTailnetDoorRecord } from "./inbox-tailnet-door";
+import { savedConfig } from "../../tests/helpers/saved-config";
 import {
   createInboxWorld,
   destroyInboxWorld,
@@ -324,6 +325,117 @@ describe("linked machines, on three real Inboxes", () => {
       expect(download.status).toBe(200);
       expect(download.headers.get("content-security-policy")).toStartWith("sandbox");
       await download.arrayBuffer();
+
+      // An HTML page on B with a folder, opened from A in a tab of its own (the owner, 2026-11-16): made on A from B's
+      // existing door routes (`view`, `html-assets`), under exactly the headers B's own new tab gets.
+      const site = join(B.w.project, "site");
+      mkdirSync(site, { recursive: true });
+      writeFileSync(join(site, "pricing.html"), '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><h1>Pricing</h1></body></html>');
+      writeFileSync(join(site, "style.css"), "h1 { color: rebeccapurple }");
+      const pageSent = await agent.send("The pricing page.", { thread: "case-1", attachments: [join(site, "pricing.html")] });
+      const withPage = await getJson(A, `/api/inbox/m/${B.id}/threads/${pageSent.thread_id}`);
+      const htmlFile = (withPage.thread.messages as Json[]).find((m) => m.id === pageSent.message_id)!.attachments[0] as Json;
+      const farTab = await fetch(`${base(A)}/api/inbox/m/${B.id}/attachments/${htmlFile.id}/page`, { redirect: "manual", headers: { "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate" } });
+      const localTab = await fetch(`${base(B)}/api/inbox/attachments/${htmlFile.id}/page`, { redirect: "manual" });
+      expect([farTab.status, localTab.status]).toEqual([303, 303]);
+      const localAt = localTab.headers.get("location")!;
+      expect(localAt).toMatch(/^\/api\/html-assets\/[A-Za-z0-9_-]+\/pricing\.html$/);
+      // The same file under the same token, through the forward.
+      const farAt = farTab.headers.get("location")!;
+      expect(farAt).toBe(`/api/inbox/m/${B.id}${localAt.replace(/^\/api/, "")}`);
+      for (const name of ["cache-control", "referrer-policy"]) expect([name, farTab.headers.get(name)]).toEqual([name, localTab.headers.get(name)]);
+      // The page as the tab gets it: the same document headers as B's own (the sandbox, no network), on A's origin.
+      const farDoc = await fetch(`${base(A)}${farAt}`, { headers: { "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document" } });
+      const localDoc = await fetch(`${base(B)}${localAt}`);
+      expect(farDoc.status).toBe(200);
+      for (const name of ["content-type", "content-security-policy", "x-content-type-options", "cache-control", "access-control-allow-origin"]) {
+        expect([name, farDoc.headers.get(name)]).toEqual([name, localDoc.headers.get(name)]);
+      }
+      expect(farDoc.headers.get("content-security-policy")).toStartWith("sandbox allow-scripts allow-modals");
+      expect(farDoc.headers.get("content-security-policy")).not.toContain("allow-same-origin");
+      expect(await farDoc.text()).toContain("<h1>Pricing</h1>");
+      await localDoc.arrayBuffer();
+      // Its stylesheet, asked as the sandboxed page asks (an opaque origin: cross-site), loads through the forward.
+      const style = await fetch(new URL("style.css", `${base(A)}${farAt}`), { headers: { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "no-cors", "Sec-Fetch-Dest": "style" } });
+      expect(style.status).toBe(200);
+      expect(style.headers.get("content-type")).toContain("text/css");
+      expect(style.headers.get("content-security-policy")).toStartWith("sandbox");
+      expect(await style.text()).toContain("rebeccapurple");
+      // A font or module script asks in CORS mode with `Origin: null`: allowed, as on B.
+      const cors = await fetch(new URL("style.css", `${base(A)}${farAt}`), { headers: { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors", Origin: "null" } });
+      expect([cors.status, cors.headers.get("access-control-allow-origin")]).toEqual([200, "*"]);
+      await cors.arrayBuffer();
+      // Nothing else under the forward opens cross-site: B's threads, the page route, the view.
+      for (const route of [`threads/${pageSent.thread_id}`, `attachments/${htmlFile.id}/page`, `attachments/${htmlFile.id}/view`]) {
+        const refused = await fetch(`${base(A)}/api/inbox/m/${B.id}/${route}`, { headers: { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "no-cors" } });
+        expect([route, refused.status]).toEqual([route, 403]);
+        await refused.arrayBuffer();
+      }
+      // The sent version: the page itself, its folder named through the forward, under B's own sent-page headers.
+      const farSent = await fetch(`${base(A)}/api/inbox/m/${B.id}/attachments/${htmlFile.id}/page?version=sent`);
+      const localSent = await fetch(`${base(B)}/api/inbox/attachments/${htmlFile.id}/page?version=sent`);
+      expect([farSent.status, localSent.status]).toEqual([200, 200]);
+      for (const name of ["content-type", "content-security-policy", "x-content-type-options", "cache-control", "cross-origin-resource-policy", "referrer-policy"]) {
+        expect([name, farSent.headers.get(name)]).toEqual([name, localSent.headers.get(name)]);
+      }
+      const sentBody = await farSent.text();
+      expect(sentBody).toContain(`<base href="/api/inbox/m/${B.id}/html-assets/`);
+      expect(sentBody).not.toContain('"/api/html-assets/');
+      await localSent.arrayBuffer();
+      // The viewer in the thread: its page names its folder through the forward too.
+      const viewed = await getJson(A, `/api/inbox/m/${B.id}/attachments/${htmlFile.id}/view`);
+      expect(viewed.html).toContain(`<base href="/api/inbox/m/${B.id}/html-assets/`);
+      // A Markdown file on B (the owner, 2026-11-16: "Yes, for linked computers only"): its pictures and a document
+      // next to it open from A as B's own window shows them, through B's window routes on its door for a machine only.
+      const docs = join(B.w.project, "docs");
+      mkdirSync(docs, { recursive: true });
+      const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+      writeFileSync(join(docs, "shot.png"), png);
+      writeFileSync(join(docs, "plan.md"), "# Plan\n\n![shot](shot.png)\n\nSee [the notes](notes.md).\n");
+      writeFileSync(join(docs, "notes.md"), "# Notes\n\nNext to the plan.\n");
+      const mdSent = await agent.send("The plan.", { thread: "case-1", attachments: [join(docs, "plan.md")] });
+      const withMd = await getJson(A, `/api/inbox/m/${B.id}/threads/${mdSent.thread_id}`);
+      const mdFile = (withMd.thread.messages as Json[]).find((m) => m.id === mdSent.message_id)!.attachments[0] as Json;
+      const farShot = await fetch(`${base(A)}/api/inbox/m/${B.id}/attachments/${mdFile.id}/markdown-image?path=shot.png&version=current`, { headers: { "Sec-Fetch-Site": "same-origin" } });
+      const localShot = await fetch(`${base(B)}/api/inbox/attachments/${mdFile.id}/markdown-image?path=shot.png&version=current`);
+      expect([farShot.status, localShot.status]).toEqual([200, 200]);
+      for (const name of ["content-type", "content-security-policy", "x-content-type-options", "cross-origin-resource-policy", "etag", "cache-control"]) {
+        expect([name, farShot.headers.get(name)]).toEqual([name, localShot.headers.get(name)]);
+      }
+      expect(Buffer.from(await farShot.arrayBuffer()).equals(png)).toBe(true);
+      await localShot.arrayBuffer();
+      // Only what the file shows, inside its folder: B's own refusals come back.
+      for (const path of ["notes.md", "../site/style.css", join(docs, "shot.png").replace(/shot\.png$/, "other.png")]) {
+        const refused = await fetch(`${base(A)}/api/inbox/m/${B.id}/attachments/${mdFile.id}/markdown-image?path=${encodeURIComponent(path)}&version=current`, { headers: { "Sec-Fetch-Site": "same-origin" } });
+        expect([path, refused.status >= 400]).toEqual([path, true]);
+        await refused.arrayBuffer();
+      }
+      // The window's own read (same-origin); a bare call through the forward is refused, as for a file a message names.
+      const windowRead = async (path: string) => (await (await fetch(`${base(A)}${path}`, { headers: { "Sec-Fetch-Site": "same-origin" } })).json()) as Json;
+      const bare = await fetch(`${base(A)}/api/inbox/m/${B.id}/attachments/${mdFile.id}/linked-page?path=notes.md`);
+      expect([bare.status, ((await bare.json()) as Json).code]).toEqual([403, "window_only"]);
+      const linkedMd = await windowRead(`/api/inbox/m/${B.id}/attachments/${mdFile.id}/linked-page?path=notes.md`);
+      expect([linkedMd.name, linkedMd.html, linkedMd.url]).toEqual(["notes.md", null, null]);
+      expect(linkedMd.text).toContain("Next to the plan.");
+      // An HTML page's sibling page, in the viewer: its folder named through the forward, its new tab too.
+      writeFileSync(join(site, "faq.html"), '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><h1>FAQ</h1></body></html>');
+      const linkedHtml = await windowRead(`/api/inbox/m/${B.id}/attachments/${htmlFile.id}/linked-page?path=faq.html`);
+      expect(linkedHtml.html).toContain(`<base href="/api/inbox/m/${B.id}/html-assets/`);
+      expect(linkedHtml.url).toMatch(new RegExp(`^/api/inbox/m/${B.id}/html-assets/[A-Za-z0-9_-]+/faq\\.html$`));
+      const faqTab = await fetch(`${base(A)}${linkedHtml.url}`, { headers: { "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate" } });
+      expect([faqTab.status, faqTab.headers.get("content-security-policy")]).toEqual([200, "sandbox allow-scripts allow-modals; connect-src 'none'"]);
+      await faqTab.arrayBuffer();
+      // Not cross-site, and never a phone's: B's door answers them for a linked machine only.
+      for (const route of [`attachments/${mdFile.id}/markdown-image?path=shot.png`, `attachments/${mdFile.id}/linked-page?path=notes.md`]) {
+        const refused = await fetch(`${base(A)}/api/inbox/m/${B.id}/${route}`, { headers: { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "no-cors" } });
+        expect([route, refused.status]).toEqual([route, 403]);
+        await refused.arrayBuffer();
+      }
+      // B's door is unchanged: it still has no page route, for a linked machine as for a phone.
+      const tokenForB = linksFile(A).links.find((l: Json) => l.id === B.id).token as string;
+      const atDoor = await fetch(`${base(B)}/api/inbox/device/attachments/${htmlFile.id}/page`, { headers: { Authorization: `Bearer ${tokenForB}` } });
+      expect(atDoor.status).toBe(404);
+      expect(((await atDoor.json()) as Json).code).toBe("device_route_not_found");
 
       // A file sent to B from A's window: never held, streamed through by its route; A's page session is checked here, never sent on.
       const { serverSession } = await getJson(A, "/api/inbox/health");
@@ -743,7 +855,7 @@ describe("the tailnet door with Phones off, in process", () => {
       expect(tailscale.serve.get(8443)).toBe(theirs);
       expect(tailscale.doorCalls()).toEqual([]);
       // What the Inbox made is recorded: port, target, and that the mapping may exist.
-      expect(record()).toEqual({ v: 1, https_port: 8444, target: door, published: true });
+      expect(record()).toEqual({ v: 1, https_port: 8444, target: door, published: true, made: [door] });
 
       // Linking: the way back handed to the other machine carries the port.
       const linked = await fetch(`${base}/api/inbox/machines/link`, { method: "POST", body: JSON.stringify({ serverSession, link: offered.link.replace(/id=[^&]+/, `id=${OTHER}`), address: `http://127.0.0.1:${peer.port}` }) });
@@ -810,7 +922,8 @@ describe("the tailnet door with Phones off, in process", () => {
     try {
       expect(own.tailscale.doorCalls()).toEqual(["on"]);
       expect([...own.tailscale.serve.keys()]).toEqual([8443]);
-      expect(own.record()).toEqual({ v: 1, https_port: 8443, target: own.tailscale.serve.get(8443), published: true });
+      expect(own.record()).toEqual({ v: 1, https_port: 8443, target: own.tailscale.serve.get(8443), published: true, made: expect.arrayContaining([own.tailscale.serve.get(8443)]) });
+      expect((own.record().made as string[]).at(-1)).toBe(own.tailscale.serve.get(8443));
     } finally {
       inbox.stop();
     }
@@ -1393,7 +1506,7 @@ describe("an agent's snooze_thread of a linked machine's thread", () => {
     const was = process.env.PLANNOTATOR_DATA_DIR;
     const configDir = scratch("plannotator-snooze-agent-config-");
     process.env.PLANNOTATOR_DATA_DIR = configDir;
-    const mark = () => (existsSync(join(configDir, "config.json")) ? JSON.parse(readFileSync(join(configDir, "config.json"), "utf8")).inboxSnoozeIntro?.snoozedAt : undefined);
+    const mark = () => savedConfig(configDir).inboxSnoozeIntro?.snoozedAt;
     try {
       let answer = () => Response.json({ error: "A newer Plannotator wrote these.", code: "snoozes_newer" }, { status: 409 });
       await withDoor("plannotator-snooze-agent-refused-", "msg_01K00000000000000000000006", true, { snooze: () => answer() }, async (_inbox, client) => {
@@ -1949,6 +2062,69 @@ describe("a star or Priority on a linked machine's thread lives on that machine 
     }
   }, 120_000);
 
+  test("tag colours across two linked machines: one colour per tag and one switch on both, the same rule on each, a change on either reaching the other live", async () => {
+    const dataA = scratch("plannotator-tag-colours-a-");
+    const dataB = scratch("plannotator-tag-colours-b-");
+    const a = await start(dataA);
+    const b = await start(dataB);
+    try {
+      const offered = (await (await fetch(`${at(b.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      const linked = await fetch(`${at(a.port)}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: at(b.port), back: at(a.port) }) });
+      expect(linked.status).toBe(201);
+      const bId = (JSON.parse(readFileSync(join(dataA, "inbox", "machines.json"), "utf8")) as Json).links[0].id as string;
+      const colourOf = async (port: number, name: string) => ((await list(port)).tags as Json[]).find((tag) => (tag.name as string).toLowerCase() === name)?.look?.colour;
+      const shownOn = async (port: number) => ((await list(port)).tag_colours as Json).show;
+      // A's Release first, so its colour is the one both keep; B's own first tag takes Green, so its Release is Indigo.
+      const GREEN = "#14cc61";
+      const release = a.store.createInitiative({ name: "Release", by: { kind: "person" } });
+      b.store.createInitiative({ name: "Windows", by: { kind: "person" } });
+      const bRelease = b.store.createInitiative({ name: "release", by: { kind: "person" } });
+      expect(a.store.tagLook(release.id)?.colour).toBe(GREEN);
+      expect(b.store.tagLook(bRelease.id)?.colour).toBe("#b1b7fd");
+      await waitFor("B's tags on A", async () => (await colourOf(a.port, "windows")) === GREEN, 30_000);
+      expect(await colourOf(a.port, "release")).toBe(GREEN);
+      await waitFor("A's Release on B", async () => (await colourOf(b.port, "release")) === GREEN, 30_000);
+      expect(((((await (await fetch(`${at(a.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === bId)!.marks as string[])).toContain("tag-colours");
+
+      // Picked on A: A's copy, then B's by its id there (the window's write); both read the pick.
+      const picked = "2026-11-13T10:00:00.000Z";
+      expect((await post(a.port, "/api/inbox/tag-colours", { tag: release.id, colour: "#ff6a00", at: picked })).status).toBe(200);
+      expect((await forward(a.port, bId, "tag-colours", { tag: bRelease.id, colour: "#ff6a00", at: picked })).status).toBe(200);
+      expect(b.store.tagLook(bRelease.id)).toEqual({ colour: "#ff6a00", by: "person", at: picked });
+      await waitFor("the pick on B", async () => (await colourOf(b.port, "release")) === "#ff6a00", 30_000);
+      expect(await colourOf(a.port, "release")).toBe("#ff6a00");
+
+      // Picked later in B's own window only: the later pick wins on both.
+      expect((await post(b.port, "/api/inbox/tag-colours", { tag: bRelease.id, colour: "red", at: "2026-11-13T11:00:00.000Z" })).status).toBe(200);
+      await waitFor("B's later pick on A", async () => (await colourOf(a.port, "release")) === "red", 30_000);
+      expect(a.store.tagLook(release.id)?.colour).toBe("#ff6a00");
+      // A held write from before lands on B late (the outbox after a sleep): B keeps the later pick, so both stay red.
+      expect((await forward(a.port, bId, "tag-colours", { tag: bRelease.id, colour: "amber", at: "2026-11-13T10:30:00.000Z" })).status).toBe(200);
+      expect(b.store.tagLook(bRelease.id)?.colour).toBe("red");
+      expect(await colourOf(a.port, "release")).toBe("red");
+
+      // Show tag colors: on until set; off from A (here and on B); on again in B's window, later, wins on A too.
+      expect(await shownOn(a.port)).toBe(true);
+      expect((await post(a.port, "/api/inbox/tag-colours", { show: false, at: "2026-11-13T12:00:00.000Z" })).status).toBe(200);
+      expect((await forward(a.port, bId, "tag-colours", { show: false, at: "2026-11-13T12:00:00.000Z" })).status).toBe(200);
+      expect(await shownOn(b.port)).toBe(false);
+      expect(await shownOn(a.port)).toBe(false);
+      expect((await post(b.port, "/api/inbox/tag-colours", { show: true, at: "2026-11-13T13:00:00.000Z" })).status).toBe(200);
+      await waitFor("B's switch on A", async () => (await shownOn(a.port)) === true, 30_000);
+
+      // A pick from a machine whose clock runs far ahead is held to B's now plus a few minutes: B's next real pick wins on both.
+      expect((await forward(a.port, bId, "tag-colours", { tag: bRelease.id, colour: "green", at: "2099-01-01T00:00:00.000Z" })).status).toBe(200);
+      expect(Date.parse(b.store.tagLook(bRelease.id)!.at)).toBeLessThan(Date.now() + 10 * 60_000);
+      await waitFor("the fast clock's pick on A", async () => (await colourOf(a.port, "release")) === "green", 30_000);
+      expect((await post(b.port, "/api/inbox/tag-colours", { tag: bRelease.id, colour: "red", at: new Date().toISOString() })).status).toBe(200);
+      expect(b.store.tagLook(bRelease.id)?.colour).toBe("red");
+      await waitFor("B's real pick on A", async () => (await colourOf(a.port, "release")) === "red", 30_000);
+    } finally {
+      a.stop();
+      b.stop();
+    }
+  }, 120_000);
+
   test("an older machine (its list names no `tags` mark): its rows are in no tag here and its tags are not listed; one that names it joins by name", async () => {
     const thread = "msg_01K0000000000000000000000T";
     const farTag = { id: "ini_01K0000000000000000000000F", name: "release", created_at: "2026-11-12T09:00:00.000Z", created_by: { kind: "person" }, updated_at: "2026-11-12T09:00:00.000Z", deleted_at: null };
@@ -1984,6 +2160,147 @@ describe("a star or Priority on a linked machine's thread lives on that machine 
         } else {
           expect(row.tags).toBeUndefined();
           expect((model.tags as Json[]).map((tag) => [tag.id, tag.machines])).toEqual([[own.id, { [self]: own.id }]]);
+        }
+      } finally {
+        inbox.stop();
+        door.stop(true);
+      }
+    }
+  });
+
+  const startBoard = (dataDir: string) => startInboxServer({ dataDir, binaryPath: null, phones: false, tailscale: scriptedTailscale().run, board: true });
+  /** A window's merged Board: every card, each a linked machine's with its `machine`. */
+  const board = async (port: number) => (await (await fetch(`${at(port)}/api/inbox/cards?machines=1`)).json()) as Json;
+  const cardOn = async (port: number, id: string) => ((await board(port)).cards as Json[]).find((card) => card.id === id) ?? null;
+
+  test("one Board on both: an agent's card on B is on A's, A's on B's; moved, tagged and edited from A on B; B's own move reaches A live; B away, it waits and lands", async () => {
+    const dataA = scratch("plannotator-board-linked-a-");
+    const dataB = scratch("plannotator-board-linked-b-");
+    const a = await startBoard(dataA);
+    let b = await startBoard(dataB);
+    let client: Client | null = null;
+    const stream = new AbortController();
+    try {
+      const offered = (await (await fetch(`${at(b.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      const linked = await fetch(`${at(a.port)}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: at(b.port), back: at(a.port) }) });
+      expect(linked.status).toBe(201);
+      const bId = (JSON.parse(readFileSync(join(dataA, "inbox", "machines.json"), "utf8")) as Json).links[0].id as string;
+      const view = async () => (((await (await fetch(`${at(a.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === bId)!;
+      await waitFor("B's list on A", async () => typeof (await view()).list_cursor === "number");
+      expect((await view()).marks).toContain("cards");
+      const aId = (await list(a.port)).self as string;
+
+      // A card an agent on B makes, through B's own card tool (its words unchanged): B's store holds it.
+      client = new Client({ name: "inbox-machines-board", version: "1.0.0" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(`${at(b.port)}/mcp`)));
+      const project = scratch("plannotator-board-linked-project-");
+      // Its project, the way it always gets one: a message.
+      await client.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body: "Starting the refund webhook" } });
+      const made = (await client.callTool({ name: "card", arguments: { op: "create", title: "Refund webhook", column: "in_progress", project_path: project, agent_session: "ses_b", agent_host: "claude-code" } })) as { structuredContent: { card: { id: string } } };
+      const far = made.structuredContent.card.id;
+      // A's own card, from A's window.
+      const ownProject = a.store.ensureProject({ name: "app", root: scratch("plannotator-board-linked-own-") });
+      const mine = ((await (await post(a.port, "/api/inbox/cards", { project: ownProject.id, title: "Release notes", column: "todo", idempotency_key: "own-1" })).json()) as Json).card.id as string;
+      expect(a.store.card(far)).toBeNull();
+      expect(b.store.card(mine)).toBeNull();
+
+      // Both on A's Board, B's named as B's, each once; and both on B's, A's named as A's.
+      await waitFor("B's card on A's Board", async () => (await cardOn(a.port, far))?.machine === bId, 15_000);
+      const onA = (await board(a.port)).cards as Json[];
+      expect(onA.map((card) => card.id).sort()).toEqual([far, mine].sort());
+      expect(onA.find((card) => card.id === mine)!.machine).toBeUndefined();
+      expect(onA.find((card) => card.id === far)!.column).toBe("in_progress");
+      await waitFor("A's card on B's Board", async () => (await cardOn(b.port, mine))?.machine === aId, 15_000);
+      expect(((await board(b.port)).cards as Json[]).map((card) => card.id).sort()).toEqual([far, mine].sort());
+
+      // A's window opens B's card through the forward: B's history.
+      const opened = (await (await fetch(`${at(a.port)}/api/inbox/m/${bId}/cards/${far}`)).json()) as Json;
+      expect(opened.card.id).toBe(far);
+      expect((opened.history as Json[]).length).toBeGreaterThan(0);
+
+      // Moved, edited and tagged from A: each lands on B, and A's Board reads it back.
+      expect((await forward(a.port, bId, `cards/${far}`, { op: "move", column: "in_review" })).status).toBe(200);
+      expect(b.store.card(far)!.column).toBe("in_review");
+      expect((await cardOn(a.port, far))!.column).toBe("in_review");
+      expect((await forward(a.port, bId, `cards/${far}`, { op: "edit", notes: "Retry the 409." })).status).toBe(200);
+      expect(b.store.card(far)!.notes).toBe("Retry the 409.");
+      const release = a.store.createInitiative({ name: "Release", by: { kind: "person" } });
+      expect((await forward(a.port, bId, `cards/${far}`, { op: "initiative", name: "Release" })).status).toBe(200);
+      const bRelease = b.store.initiatives().find((tag) => tag.name === "Release" && tag.deleted_at === null)!;
+      expect(b.store.card(far)!.initiative).toBe(bRelease.id);
+      expect(a.store.initiatives().map((tag) => tag.id)).toEqual([release.id]);
+      // On A's Board the card is in A's Release: the one tag of that name, so the tag filter holds both machines' cards.
+      expect((await cardOn(a.port, far))!.initiative).toBe(release.id);
+
+      // B's own window moves it: A's window hears `event: cards`, and its Board follows with no write of A's.
+      const frames = await fetch(`${at(a.port)}/api/inbox/events?machines=1`, { signal: stream.signal });
+      const reader = frames.body!.getReader();
+      expect((await post(b.port, `/api/inbox/cards/${far}`, { op: "move", column: "done" })).status).toBe(200);
+      let heard = "";
+      const deadline = Date.now() + 15_000;
+      while (!heard.includes("event: cards") && Date.now() < deadline) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        heard += new TextDecoder().decode(value);
+      }
+      expect(heard).toContain("event: cards");
+      expect((await cardOn(a.port, far))!.column).toBe("done");
+      stream.abort();
+
+      // B away: a move waits (202, nothing on A) and lands on B when it is back.
+      await client.close();
+      client = null;
+      b.stop();
+      await waitFor("B offline on A", async () => (await view()).state === "offline", 30_000);
+      const held = await forward(a.port, bId, `cards/${far}`, { op: "move", column: "todo" });
+      expect(held.status).toBe(202);
+      expect(a.store.card(far)).toBeNull();
+      b = await startBoard(dataB);
+      await waitFor("the held move on B", () => b.store.card(far)?.column === "todo", 45_000);
+      await waitFor("the move on A's Board", async () => (await cardOn(a.port, far))?.column === "todo", 15_000);
+    } finally {
+      stream.abort();
+      await client?.close().catch(() => {});
+      a.stop();
+      b.stop();
+    }
+  }, 150_000);
+
+  test("an older machine (its list names no `cards` mark): its Board is never asked and none of its cards are listed; one that names it is", async () => {
+    const card = { id: "crd_01K0000000000000000000000C", project_id: "prj_01K0000000000000000000000C", title: "Far work", column: "todo", moved_at: "2026-11-12T09:00:00.000Z", heard_seq: 1, threads: [], prs: [], refs: [] };
+    for (const marks of [["star", "priority", "tags"], ["star", "priority", "tags", "cards"]]) {
+      const id = "ibx_01K0000000000000000000000C";
+      let asked = 0;
+      const door = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        idleTimeout: 0,
+        fetch(req) {
+          const route = new URL(req.url).pathname.replace("/api/inbox/device/", "");
+          if (route === "health") return Response.json({ ok: true, inbox_id: id, machine_links: 1, version: "0.28.62" });
+          if (route === "events") return new Response(new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode(`event: hello\ndata: {"cursor":0}\n\n`)) }), { headers: { "Content-Type": "text/event-stream" } });
+          if (route === "threads") return Response.json({ cursor: 0, sections: [], projects: [], pins: [], marks, tags: [] });
+          if (route === "cards") {
+            asked += 1;
+            return Response.json({ cursor: 0, cards: [card], threads: {}, initiatives: [], seen_seq: 0 });
+          }
+          return Response.json({ code: "device_route_not_found", error: "Not a phone route." }, { status: 404 });
+        },
+      });
+      const dataDir = scratch("plannotator-board-linked-older-");
+      mkdirSync(join(dataDir, "inbox"), { recursive: true });
+      writeFileSync(join(dataDir, "inbox", "machines.json"), JSON.stringify({ v: 1, self: { id: "ibx_01K00000000000000000000009" }, links: [{ id, name: "Mini", token: "tok_0", transport: { kind: "tailnet", url: at(door.port as number) }, device_id: null, linked_at: "2026-10-30T00:00:00Z" }] }), { mode: 0o600 });
+      const inbox = await startBoard(dataDir);
+      try {
+        const view = async () => (((await (await fetch(`${at(inbox.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === id);
+        await waitFor("that machine's list", async () => typeof (await view())?.list_cursor === "number");
+        const cards = ((await board(inbox.port)).cards as Json[]).map((c) => [c.id, c.machine]);
+        if (marks.includes("cards")) {
+          expect(cards).toEqual([[card.id, id]]);
+          expect(asked).toBe(1);
+        } else {
+          expect(cards).toEqual([]);
+          expect(asked).toBe(0);
         }
       } finally {
         inbox.stop();

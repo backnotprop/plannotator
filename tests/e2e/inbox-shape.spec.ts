@@ -9,9 +9,11 @@
  *  - Shape on, 3 or more boards: the sidebar's Shape row sits directly under
  *    Board (under Inbox when Board is off) with the changed count; the grid
  *    lists every board and Find narrows it;
- *  - the thread header's Pebble (a dot while it changed) opens the board over
- *    the thread, the board's Thread tab shows the thread's messages, and its
- *    × ("Close Shape"), Esc or Back closes it;
+ *  - the thread header's Pebble (a dot while it changed), left of Artifacts,
+ *    opens the board in the thread's own pane under the thread's header (not
+ *    over the window), its side panel is References only (no Thread or Ask tab,
+ *    no Chat), and its × ("Close Shape"), Esc or Back closes it, the × giving the focus back
+ *    to the Pebble;
  *  - a drawing's `#…` link never changes the window's hash, and an https link
  *    opens a new tab (never this one);
  *  - a change waits for the agent until `shape read --notes` takes it, then
@@ -83,7 +85,7 @@ async function shot(page: Page, name: string, scheme: 'light' | 'dark' | 'both' 
 
 const navOrder = (page: Page) => page.locator('.ib-side .ib-nav').evaluateAll((els) => els.map((el) => el.getAttribute('data-shape-nav') !== null ? 'Shape' : el.getAttribute('data-board-nav') !== null ? 'Board' : el.classList.contains('ib-nav-inbox') ? 'Inbox' : null).filter(Boolean));
 
-test('on with 4 boards: the row under Board, the grid, the Pebble, the board over the thread, links kept in, a change delivered', async ({ browser }) => {
+test('on with 4 boards: the row under Board, the grid, the Pebble, the board in the thread, links kept in, a change delivered', async ({ browser }) => {
   const w = await world({ shape: true, boards: 'many' });
   const { context, page, errors } = await open(browser, w);
   // The boards' changes ride the Inbox's one event stream: the window opens no second one (Chrome's six per host).
@@ -104,13 +106,34 @@ test('on with 4 boards: the row under Board, the grid, the Pebble, the board ove
   await expect(pebble.locator('.ib-shape-dot')).toBeVisible();
   await shot(page, 'thread-pebble');
 
-  // Opens over the thread; the hash names it.
+  // Shape's Pebble leads the header's views: nothing between it and Artifacts (when the thread has files).
+  expect(await pebble.evaluate((el) => {
+    const buttons = [...el.closest('.ib-phead')!.querySelectorAll('button')];
+    const artifacts = buttons.findIndex((b) => b.hasAttribute('data-artifacts-button'));
+    return artifacts < 0 || buttons.indexOf(el as HTMLButtonElement) === artifacts - 1;
+  })).toBe(true);
+
+  // Opens in the thread's own pane, under its header (the owner, 2026-11-16: "It should just fit within the thread
+  // view"); the hash names it.
   await pebble.click();
   const layer = page.locator(`[data-shape-layer="${w.boards.snooze}"]`);
   await expect(layer.getByRole('heading', { name: 'A one-time Snooze announcement' })).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`#thread=${w.threads.snooze}&shape=${w.boards.snooze}$`));
+  const pane = page.locator(`section.ib-pane[data-thread-id="${w.threads.snooze}"]`);
+  await expect(pane.locator(':scope > [data-shape-layer]')).toHaveCount(1);
+  await expect(pane.locator(':scope > .ib-phead')).toBeVisible();
+  await expect(pane.locator(':scope > .ib-pbody')).toBeHidden();
+  await expect(pebble).toHaveAttribute('aria-pressed', 'true');
+  const inside = await page.evaluate(([board, thread]) => {
+    const l = document.querySelector(`[data-shape-layer="${board}"]`)!.getBoundingClientRect();
+    const p = document.querySelector(`section.ib-pane[data-thread-id="${thread}"]`)!;
+    const b = p.getBoundingClientRect();
+    const h = p.querySelector(':scope > .ib-phead')!.getBoundingClientRect();
+    return l.width > 0 && l.left >= b.left && l.right <= b.right && l.top >= h.bottom - 1 && l.bottom <= b.bottom + 1;
+  }, [w.boards.snooze!, w.threads.snooze!]);
+  expect(inside).toBe(true);
   await page.waitForTimeout(2500);
-  await shot(page, 'board-over-thread');
+  await shot(page, 'board-in-thread');
   // Seen: the row's count drops by one.
   await expect(row.locator('.ib-n')).toHaveText('3');
 
@@ -123,12 +146,15 @@ test('on with 4 boards: the row under Board, the grid, the Pebble, the board ove
   expect(page.url()).toBe(before);
   expect(await page.evaluate(() => (window as unknown as { __opened: unknown[][] }).__opened)).toEqual([['https://example.com/notes', '_blank', 'noopener,noreferrer']]);
 
-  // The Thread tab: the thread's own message.
-  await layer.getByRole('button', { name: 'Chat' }).click();
-  await layer.getByRole('tab', { name: 'Thread' }).click();
-  await expect(layer.locator('[data-shape-message]')).toContainText('It shows once, ever, after 2 days of use.');
+  // The side panel is References only (the owner, 2026-11-16): no Thread or Ask tab, no Chat button.
+  await expect(layer.getByRole('toolbar').getByRole('button', { name: 'Chat' })).toHaveCount(0);
+  await layer.getByRole('toolbar').getByRole('button', { name: /References/ }).click();
+  const panel = layer.locator('.shp-sidep.open');
+  await expect(panel.locator('.shp-sidep-title')).toHaveText('References');
+  await expect(panel.getByRole('tab')).toHaveCount(0);
+  await expect(panel.locator('[data-shape-message], textarea')).toHaveCount(0);
   await page.waitForTimeout(400);
-  await shot(page, 'board-thread-tab', 'light');
+  await shot(page, 'board-references-panel', 'light');
   await layer.getByRole('button', { name: 'Close panel' }).click();
 
   // A change waits for the agent until its `shape read --notes` takes it: the board clears it with no reload.
@@ -140,10 +166,12 @@ test('on with 4 boards: the row under Board, the grid, the Pebble, the board ove
   expect(read.stdout).toContain('Make it Thursday');
   await expect(layer.locator('.shp-pill.waits')).toHaveCount(0);
 
-  // The board lies over the thread: its × closes it, and so do Esc and Back.
+  // Its × closes it, the focus back on the Pebble; so do Esc and Back.
   await layer.getByRole('button', { name: 'Close Shape' }).click();
   await expect(layer).toHaveCount(0);
   await expect(page).toHaveURL(new RegExp(`#thread=${w.threads.snooze}$`));
+  await expect(pebble).toBeFocused();
+  await expect(pane.locator(':scope > .ib-pbody')).toBeVisible();
   await pebble.click();
   await expect(layer).toBeVisible();
   await page.keyboard.press('Escape');
@@ -234,7 +262,7 @@ test('Shape off: no row, no Pebble, no ⌘K group, #shapes goes to the Inbox, ev
   await context.close();
 });
 
-test('phone: the Pebble in the thread header, the board over the thread, the grid', async ({ browser }) => {
+test('phone: the Pebble in the thread header, the board in the thread under its header, the grid', async ({ browser }) => {
   const w = await world({ shape: true, boards: 'many' });
   const { context, page, errors } = await open(browser, w, { ...phone });
   await page.goto(`${w.url}#thread=${w.threads.snooze}`);
@@ -243,8 +271,17 @@ test('phone: the Pebble in the thread header, the board over the thread, the gri
   await shot(page, 'phone-thread-pebble');
   await pebble.click();
   await expect(page.locator(`[data-shape-layer="${w.boards.snooze}"]`)).toBeVisible();
+  const pane = page.locator(`section.ib-pane[data-thread-id="${w.threads.snooze}"]`);
+  await expect(pane.locator(':scope > [data-shape-layer]')).toHaveCount(1);
+  // The board is a screen of its own, as Artifacts is on a phone: the header's way back is to the thread.
+  const back = pane.locator(':scope > .ib-phead [data-phone-back]');
+  await expect(back).toHaveText(/Thread/);
   await page.waitForTimeout(2500);
-  await shot(page, 'phone-board-over-thread');
+  await shot(page, 'phone-board-in-thread');
+  await back.click();
+  await expect(page.locator('[data-shape-layer]')).toHaveCount(0);
+  await expect(pane.locator(':scope > .ib-pbody')).toBeVisible();
+  await expect(back).not.toHaveText(/Thread/);
   await page.goto(`${w.url}#shapes`);
   await expect(page.locator('[data-shape-page] .shp-gcard')).toHaveCount(4);
   await page.waitForTimeout(800);

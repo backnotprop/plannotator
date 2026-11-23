@@ -29,9 +29,16 @@ export function useThreadSessions(
   return { sessions, sessionNames };
 }
 
+/**
+ * The tag options with the names the person gave: a picker row leads with that name, its token's label after it in
+ * the detail, so the person sees what the `@` token will say. The token itself keeps `label` (an agent never sees an
+ * Inbox name).
+ */
 export function namedTagOptions(options: readonly TagOption[], agentNames: ReturnType<typeof useAgentNames>): TagOption[] {
   return options.map((option) => {
     const given = givenName(agentNames, option.id);
-    return given ? { ...option, detail: option.detail ? `${given} · ${option.detail}` : given } : option;
+    if (!given) return option;
+    const detail = given === option.label ? option.detail : option.detail ? `${option.label} · ${option.detail}` : option.label;
+    return { ...option, name: given, detail };
   });
 }

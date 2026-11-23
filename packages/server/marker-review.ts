@@ -761,7 +761,7 @@ function piBuildArgv(prompt: string, model?: string, cwd?: string, opts?: Marker
     "--no-session",
     "--no-approve",
     // Full read-only (`--tools read,grep,find,ls`) would break these jobs:
-    // the review/guide/tour prompt tells the agent to inspect the diff itself
+    // the review/guide prompt tells the agent to inspect the diff itself
     // (git diff/log, gh pr view, etc. per buildAgentReviewUserMessage), which
     // needs Bash, not just file-read tools. `--exclude-tools edit,write`
     // instead removes only Pi's purpose-built mutation tools while keeping
@@ -1211,8 +1211,8 @@ breaks, and why it isn't already handled.
 
 ## Do NOT report
   - Formatting, naming, or style preferences (unless a repo guideline requires).
-  - "Consider adding tests" — unless the change adds non-trivial logic with no
-    test coverage at all.
+  - Missing tests, unless the change adds non-trivial logic with no test
+    coverage at all.
   - Hypothetical problems needing exotic conditions with no real code path.
   - Speculative refactors or "this could be cleaner" outside the change's scope.
 

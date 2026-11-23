@@ -29,8 +29,10 @@ import { connect, createServer } from "node:net";
 import { join, resolve } from "node:path";
 import { isInboxHealth, type InboxHealth } from "@plannotator/core/inbox-types";
 import { inboxDir } from "./schema";
+import { INBOX_OFF_LINE } from "./connection";
 import { processMatchesEntry, proveInboxProcess, readProcessInfo, type ProcessInfo } from "./process-proof";
 import { INBOX_DB_FILE, INBOX_RETURN_PARTIAL } from "./store-log/sqlite-return/names";
+import { directFetchInit } from "../loopback-proxy";
 
 export const INBOX_REGISTRY_FILE = "inbox.json";
 export const INBOX_START_LOCK = "start.lock";
@@ -72,7 +74,18 @@ export interface InboxRegistryEntry {
    * `relay_port` (additive): the prototype relay's mapping (inbox-tailscale.ts), `tailscale serve --https=<relay_port>`
    * pointed at the loopback listener on the same port number; recorded before it is made, taken down like the window's.
    */
-  tailscale?: { url: string | null; error: string | null; https_port?: number; proxy_port?: number; relay_port?: number };
+  /**
+   * `made` (additive): the proxy ports this Inbox pointed its mapping on `https_port` at, newest last (at most 3), kept
+   * through take-downs and failed publishes until the switch goes off (inbox-tailscale.ts): a mapping on that port to
+   * one of them, where a connect is refused now, is the Inbox's own and is re-pointed rather than refused.
+   */
+  tailscale?: { url: string | null; error: string | null; https_port?: number; proxy_port?: number; relay_port?: number; made?: { https_port: number; proxy_ports: number[] } };
+  cloudflare_access?: {
+    url: string | null;
+    error: string | null;
+    port?: number;
+    tunnel?: { state: string; pid: number | null; connections: number; restarts: number; error: string | null };
+  };
   /**
    * The runs of this data folder before this one (additive): their `serverSession`s, newest first, at most
    * `INBOX_SESSION_LINEAGE_MAX` (`inboxSessionLineage`). A window left open across a restart proves with it that
@@ -267,9 +280,9 @@ type HealthProbe =
 
 async function probeInboxHealth(port: number, timeoutMs: number): Promise<HealthProbe> {
   try {
-    const response = await fetch(`http://127.0.0.1:${port}/api/inbox/health`, {
+    const response = await fetch(`http://127.0.0.1:${port}/api/inbox/health`, directFetchInit({
       signal: AbortSignal.timeout(timeoutMs),
-    });
+    }));
     if (!response.ok) return { kind: "none" };
     const body: unknown = await response.json();
     return isInboxHealth(body) ? { kind: "health", health: body } : { kind: "none" };
@@ -360,7 +373,7 @@ export async function inboxOutOfReach(
   if (info && !processMatchesEntry(info, entry)) return null;
   let detail: string;
   try {
-    await fetch(`http://127.0.0.1:${entry.port}/api/inbox/health`, { signal: AbortSignal.timeout(2000) });
+    await fetch(`http://127.0.0.1:${entry.port}/api/inbox/health`, directFetchInit({ signal: AbortSignal.timeout(2000) }));
     return null;
   } catch (error) {
     detail = error instanceof Error ? error.message : String(error);
@@ -385,6 +398,8 @@ export class InboxUnreachableError extends Error {
 /** What a command says when the Inbox it needs could not be had (its `ensureRunning` threw). */
 export function inboxEnsureFailedWords(error: unknown): string {
   if (error instanceof InboxUnreachableError) return error.message;
+  // Not turned on here (turned-on.ts): the one line, as it is.
+  if (error instanceof Error && error.message === INBOX_OFF_LINE) return error.message;
   return `Plannotator Inbox is not running: ${error instanceof Error ? error.message : String(error)}`;
 }
 
@@ -639,12 +654,12 @@ export async function stopInbox(dataDir: string, options: StopInboxOptions = {})
   try {
     // `data_dir`: an Inbox refuses (409 not_ours) a stop for another data dir, so a copied record
     // never stops the original. An older Inbox ignores the body and stops, as before.
-    const response = await fetch(`http://127.0.0.1:${entry.port}/api/inbox/control/stop`, {
+    const response = await fetch(`http://127.0.0.1:${entry.port}/api/inbox/control/stop`, directFetchInit({
       method: "POST",
       headers: { Authorization: `Bearer ${entry.token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ data_dir: resolve(dataDir) }),
       signal: AbortSignal.timeout(2000),
-    });
+    }));
     if (response.status === 409) {
       const body = (await response.json().catch(() => null)) as { code?: unknown } | null;
       // Its refusal is the proof it is not this data dir's: nothing is signalled.

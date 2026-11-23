@@ -56,6 +56,11 @@ export interface InboxPullRiskAnswer {
   provider: string | null;
   /** The agent's model, or null for the agent's own default. */
   model: string | null;
+  /**
+   * Rank the branches agents report too (Branch reviews, config.json `inboxBranchReviews`): each report's whole diff,
+   * pushed or not, goes to this agent once. Off unless the person turned it on. Present only while Branch reviews is on.
+   */
+  branches?: boolean;
   agents: InboxPullRiskAgent[];
   /** By pull request key, only for its current head and the current rules. */
   judgments: Record<string, InboxPullRiskJudgment>;
@@ -68,7 +73,47 @@ export interface InboxPullRiskAnswer {
   pending: number;
   /** Why the agent's last run failed (not signed in, refused the diff, an answer that made no sense), or null. */
   last_failure: string | null;
+  auto?: InboxPullRiskAuto | null;
+  auto_runs?: Record<string, InboxPullRiskAutoRun>;
+  auto_would_start?: Record<InboxPullRiskAuto["level"], number>;
+  auto_waiting?: string[];
+  auto_dismissed?: string[];
+  auto_agent?: { agent: string; name: string } | null;
+  auto_agent_unavailable?: string;
 }
+
+export type InboxPullRiskAutoMake = "guide" | "picture_it";
+export const INBOX_PULL_RISK_AUTO_MAKES: readonly InboxPullRiskAutoMake[] = ["guide", "picture_it"];
+export const INBOX_PULL_RISK_AUTO_TRIES = 3;
+
+export interface InboxPullRiskAuto {
+  level: "high" | "medium";
+  make: InboxPullRiskAutoMake;
+  agent?: string;
+}
+
+export interface InboxPullRiskAutoRun {
+  at: string;
+  level: InboxPullRiskLevel;
+  made: InboxPullRiskAutoMake;
+  state: "queued" | "started" | "failed";
+  thread_id: string | null;
+  ranked?: string;
+  reason?: string;
+  started_at?: string;
+  done?: true;
+  tries?: number;
+  failed_at?: string;
+}
+
+export function inboxPullRiskAutoOf(value: unknown): InboxPullRiskAuto | null {
+  const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  if (!raw || (raw.level !== "high" && raw.level !== "medium") || !INBOX_PULL_RISK_AUTO_MAKES.includes(raw.make as InboxPullRiskAutoMake)) return null;
+  const agent = typeof raw.agent === "string" && raw.agent.trim() ? raw.agent.trim() : null;
+  return { level: raw.level, make: raw.make as InboxPullRiskAutoMake, ...(agent ? { agent } : {}) };
+}
+
+export const inboxPullRiskReaches = (level: InboxPullRiskLevel, auto: Pick<InboxPullRiskAuto, "level">): boolean => level === "high" || (level === "medium" && auto.level === "medium");
 
 /** `GET /api/inbox/pulls/risk/models`: what the chosen agent offers, and the pick to start on. */
 export interface InboxPullRiskModels {

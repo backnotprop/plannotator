@@ -26,7 +26,7 @@
  * machine and shows once it answers: one held while it is away shows when its list brings it.
  */
 import { useCallback, useSyncExternalStore } from 'react';
-import { readInboxAgentFaces, type InboxAgentFaceChange, type InboxAgentFaceEntry } from '@plannotator/core/inbox-types';
+import { isInboxAgentTile, readInboxAgentFaces, type InboxAgentFaceChange, type InboxAgentFaceEntry, type InboxAgentTile } from '@plannotator/core/inbox-types';
 import type { InboxAgent, InboxAgentsGroup } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 import { selfMachineId } from '../inboxUrl';
@@ -37,6 +37,7 @@ import { hearOwnIcons, ownFaceShows, ownIconsNow } from './ownIcons';
 import { pictureFromFile } from '../projectPictures';
 import { errorText } from '../toastError';
 import { setAgentNames } from './agentNames';
+import { usePictureWorld } from '../pictureWorld';
 
 /** This browser's faces from before the Inbox kept them: `{ [agent id]: face }`. */
 export const AGENT_FACES_KEY = 'plannotator-inbox-agent-faces';
@@ -108,19 +109,29 @@ function entries(withLegacy = true): Entries {
     const name = before?.name ?? change.sessions.map((session) => out[session]?.name).find(Boolean);
     delete out[key];
     for (const session of change.sessions) delete out[session];
-    if (change.face !== 'agent' || name) out[key] = { face: change.face, sessions: [...new Set([...(before?.sessions ?? []), ...change.sessions])], ...(name ? { name } : {}) };
+    if (change.face !== 'agent' || name) out[key] = { ...stored(change.face), sessions: [...new Set([...(before?.sessions ?? []), ...change.sessions])], ...(name ? { name } : {}) };
   }
   for (const [key, change] of pendingNames) {
     const before = out[key];
-    const face = before?.face ?? change.sessions.map((session) => out[session]?.face).find((found) => found && found !== 'agent') ?? 'agent';
+    const face = (before ? keptOf(before) : undefined) ?? change.sessions.map((session) => (out[session] ? keptOf(out[session]!) : undefined)).find((found) => found && found !== 'agent') ?? 'agent';
     delete out[key];
     for (const session of change.sessions) delete out[session];
-    if (face !== 'agent' || change.name) out[key] = { face, sessions: [...new Set([...(before?.sessions ?? []), ...change.sessions])], ...(change.name ? { name: change.name } : {}) };
+    if (face !== 'agent' || change.name) out[key] = { ...stored(face), sessions: [...new Set([...(before?.sessions ?? []), ...change.sessions])], ...(change.name ? { name: change.name } : {}) };
   }
   return out;
 }
 
 const chainOf = (agent: Pick<InboxAgent, 'id' | 'session' | 'continues'>) => [agent.id, agent.session, ...(agent.continues ?? [])];
+
+/**
+ * A kept face as the Inbox stores it: a tile choice (`project`, `mark`) rides beside `face: "agent"` in its own field,
+ * which a Plannotator from before tiles passes over, keeping the entry and its given name (core `InboxAgentTile`).
+ */
+function stored(face: AgentFace): { face: Exclude<AgentFace, InboxAgentTile>; tile?: InboxAgentTile } {
+  return isInboxAgentTile(face) ? { face: 'agent', tile: face } : { face };
+}
+/** The face an entry keeps, as this window holds it: its tile choice, else its face. */
+const keptOf = (entry: InboxAgentFaceEntry): AgentFace => entry.tile ?? entry.face;
 
 /** The groups of linked machines' agents (the merged list names this Inbox's own group too). */
 function linkedGroups(): InboxAgentsGroup[] {
@@ -140,8 +151,22 @@ function machineOfAgent(id: string): string | null {
   return linkedGroups().find((group) => group.agents.some((agent) => agent.id === id))?.machine ?? null;
 }
 
+/** Every id of an agent on a linked machine from before tiles (its group has no `face_tiles`): no tile is kept there. */
+let noTiles = new Set<string>();
+
+// `agentFaceChains` changes (the list's Agents view joins an unlisted agent's sessions by them).
+let chainsSeen = '';
+let chainsRev = 0;
+const chainsListeners = new Set<() => void>();
 function rebuild(): void {
   const next = new Map<string, Shown>();
+  const wasNoTiles = noTiles;
+  noTiles = new Set();
+  for (const group of linkedGroups()) {
+    if (group.face_tiles) continue;
+    for (const agent of group.agents) for (const id of chainOf(agent)) noTiles.add(id);
+    for (const [key, entry] of Object.entries(group.faces ?? {})) for (const id of [key, ...entry.sessions]) noTiles.add(id);
+  }
   const names = new Map<string, string>();
   const linked = linkedGroups().map(linkedFaces);
   // Every id of a linked machine's agents: only that machine's copy draws them.
@@ -151,9 +176,10 @@ function rebuild(): void {
   const fold = (key: string, entry: InboxAgentFaceEntry) => {
     if (entry.name) for (const id of [key, ...entry.sessions]) names.set(id, entry.name);
     // An entry kept only for its name, or an uploaded picture this Inbox does not keep: the agent's own mark.
-    if (entry.face === 'agent' || (entry.face.startsWith('own:') && !ownFaceShows(entry.face))) return;
-    next.set(key, entry.face);
-    for (const session of entry.sessions) next.set(session, entry.face);
+    const face = keptOf(entry);
+    if (face === 'agent' || (face.startsWith('own:') && !ownFaceShows(face))) return;
+    next.set(key, face);
+    for (const session of entry.sessions) next.set(session, face);
   };
   for (const [key, entry] of Object.entries(entries())) if (![key, ...entry.sessions].some((id) => theirs.has(id))) fold(key, entry);
   for (const faces of linked) for (const [key, entry] of Object.entries(faces)) fold(key, entry);
@@ -170,12 +196,30 @@ function rebuild(): void {
   setAgentNames(names);
   const was = resolved;
   resolved = next;
-  // Our faces' pictures load only when one is shown (an uploaded picture or a set icon needs none of them).
-  if ([...next.values()].some((face) => !face.startsWith('own:') && !face.startsWith('set:'))) void loadAgentFaceArt().catch(() => {});
+  // Our faces' pictures load only when one is shown (an uploaded picture, a set icon or a project's tile needs none of them).
+  if ([...next.values()].some((face) => !face.startsWith('own:') && !face.startsWith('set:') && face !== 'mark' && face !== 'project')) void loadAgentFaceArt().catch(() => {});
   const changed = new Set<string>();
   for (const [id, face] of next) if (was.get(id) !== face) changed.add(id);
   for (const id of was.keys()) if (!next.has(id)) changed.add(id);
+  for (const id of noTiles) if (!wasNoTiles.has(id)) changed.add(id);
+  for (const id of wasNoTiles) if (!noTiles.has(id)) changed.add(id);
   for (const id of changed) for (const listener of [...(listeners.get(id) ?? [])]) listener();
+  const chains = JSON.stringify([entries(), ...linkedGroups().map(linkedFaces)].map((kept) => Object.entries(kept).map(([key, entry]) => [key, entry.sessions])));
+  if (chains !== chainsSeen) {
+    chainsSeen = chains;
+    chainsRev += 1;
+    for (const listener of [...chainsListeners]) listener();
+  }
+}
+
+/** A number that moves whenever `agentFaceChains` would answer differently. */
+export function useAgentFaceChainsRev(): number {
+  const subscribe = useCallback((listener: () => void) => {
+    boot();
+    chainsListeners.add(listener);
+    return () => void chainsListeners.delete(listener);
+  }, []);
+  return useSyncExternalStore(subscribe, () => chainsRev, () => 0);
 }
 
 /** The paint copy: the server's faces with this page's changes on them, so a reload shows a choice even before it is saved. */
@@ -199,10 +243,31 @@ function hear(wire: unknown, force: boolean): boolean {
   return true;
 }
 
-/** The face kept for an agent, by any id it has (a session id, an `InboxAgent.id`); its own mark when none is. */
+/**
+ * The face kept for an agent, by any id it has (a session id, an `InboxAgent.id`); its own mark when none is. `mark`
+ * (its own mark picked under "From the project name") and `project` come back as kept: projectFace.tsx
+ * `shownAgentFace` says what an icon draws.
+ */
 export function agentFaceOf(id: string | null | undefined): AgentFace {
   boot();
   return (id && resolved.get(id)) || 'agent';
+}
+
+/**
+ * Every kept entry's chain by each of its ids: the entry's key and every session it was or is (this Inbox's entries,
+ * then each linked machine's). The list's Agents view (agentsView/model.ts) finds an agent the list no longer names,
+ * an ended one, through it, so its sessions stay one agent.
+ */
+export function agentFaceChains(): ReadonlyMap<string, { id: string; sessions: readonly string[] }> {
+  boot();
+  const out = new Map<string, { id: string; sessions: readonly string[] }>();
+  for (const kept of [entries(), ...linkedGroups().map(linkedFaces)]) {
+    for (const [key, entry] of Object.entries(kept)) {
+      const chain = { id: key, sessions: [key, ...entry.sessions] };
+      for (const id of chain.sessions) if (!out.has(id)) out.set(id, chain);
+    }
+  }
+  return out;
 }
 
 let sending: Promise<void> | null = null;
@@ -213,7 +278,7 @@ async function send(): Promise<void> {
     const [agent, change] = next;
     sentNow.add(change);
     try {
-      const answer = await inboxApi.saveAgentFace({ agent, sessions: change.sessions, face: change.face });
+      const answer = await inboxApi.saveAgentFace({ agent, sessions: change.sessions, ...stored(change.face) });
       if (pending.get(agent) === change) pending.delete(agent);
       if (!hear(answer, false)) rebuild();
     } catch {
@@ -243,7 +308,10 @@ export function keepAgentFace(agent: AgentFaceRef, face: AgentFace): void {
   const sessions = [...new Set(chainOf(ref).filter((id) => id !== ref.id))];
   const machine = machineOfAgent(ref.id);
   if (machine) {
-    saveLinked(machine, { agent: ref.id, sessions, face }).catch((cause) => refused?.(cause));
+    // Never a tile to a machine from before tiles: the window offers none there (`agentTakesTiles`), and the own mark
+    // is sent as `agent`, which it keeps.
+    const change = agentTakesTiles(ref.id) ? stored(face) : { face: stored(face).face };
+    saveLinked(machine, { agent: ref.id, sessions, ...change }).catch((cause) => refused?.(cause));
     return;
   }
   pending.delete(ref.id);
@@ -369,10 +437,28 @@ function subscribeTo(id: string, listener: () => void): () => void {
 const nothing = () => () => {};
 const plain = (): AgentFace => 'agent';
 
+/**
+ * Whether the machine an agent is on keeps a tile choice: this Inbox does, and a linked one that says so (its agents
+ * group's `face_tiles`). An Inbox from before tiles would keep neither a tile nor the own mark picked back.
+ */
+export function agentTakesTiles(id: string | null | undefined): boolean {
+  boot();
+  return !id || !noTiles.has(id);
+}
+
+/** `agentTakesTiles`, redrawn when that agent's machine is linked or updated. */
+export function useAgentTakesTiles(id: string | null | undefined): boolean {
+  const subscribe = useCallback((listener: () => void) => (id ? subscribeTo(id, listener) : nothing()), [id]);
+  return useSyncExternalStore(subscribe, () => agentTakesTiles(id), () => true);
+}
+
 /** The face kept for an agent, redrawn only when its own face changes; its own mark for no id. */
 export function useAgentFace(id: string | null | undefined): AgentFace {
-  const subscribe = useCallback((listener: () => void) => (id ? subscribeTo(id, listener) : nothing()), [id]);
-  return useSyncExternalStore(subscribe, () => agentFaceOf(id), plain);
+  // In a picture (pictureWorld.ts): the face it gives, never one the person kept.
+  const world = usePictureWorld();
+  const subscribe = useCallback((listener: () => void) => (id && !world ? subscribeTo(id, listener) : nothing()), [id, world]);
+  const kept = useSyncExternalStore(subscribe, () => (world ? 'agent' : agentFaceOf(id)), plain);
+  return world ? ((id ? world.faces.get(id) : undefined) ?? 'agent') : kept;
 }
 
 /**
@@ -404,6 +490,7 @@ export function resetAgentFaces(): void {
   sending = null;
   const was = resolved;
   resolved = new Map();
+  noTiles = new Set();
   for (const id of was.keys()) for (const listener of [...(listeners.get(id) ?? [])]) listener();
   setAgentNames(new Map());
 }

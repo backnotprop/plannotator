@@ -12,12 +12,15 @@ import type { StepsSubscribe } from '../steps/useThreadSteps';
 import type { Signal } from '../signal';
 import type { ShapeReplyPart } from '../shape/addToReply';
 import type { ThreadPullReview } from '../threadPulls/ThreadPulls';
+import type { OpenFileRef } from '../components/ReferencedFilePane';
 
 export interface ThreadPaneProps {
   inReviews?: boolean;
   reviewView?: ReviewView | null;
   onInReviews?: () => void;
   threadAlone?: boolean;
+  /** Beside another thread pane: its ✕ closes this pane, so it stays beside ‹ Inbox (full screen, a stacked window). */
+  paired?: boolean;
   fullSidebar?: boolean;
   onFull?: (on: boolean) => void;
   notice?: ReactNode;
@@ -52,6 +55,8 @@ export interface ThreadPaneProps {
   seenThrough?: number | null;
   onSeen?: (throughSeq: number) => void;
   covered?: boolean;
+  /** Kept off the page by a free layout (ThreadPanes): a recording in its reply box stops. */
+  parked?: boolean;
   onScreenChange?: (state: { threadId: string; covered: boolean } | null) => void;
   row?: InboxListRow | null;
   drawn?: InboxListGroupId | null;
@@ -69,6 +74,8 @@ export interface ThreadPaneProps {
   replyRequest?: string | null;
   onReplyOpened?: () => void;
   shapeButton?: ReactNode;
+  /** The thread's open board (ThreadShapeLayer): it takes the messages' and the reply's place under the header. */
+  board?: ReactNode;
   onSide?: (selected: string, source?: string) => void;
   onSideWords?: (words: string, taken?: () => void) => void;
   replyWords?: string | null;
@@ -83,6 +90,10 @@ export interface ThreadPaneProps {
   phone?: boolean;
   stacked?: boolean;
   fileStacked?: boolean;
+  /** A file a message names, open beside the thread, read only (the route's `ref=`; approval "inbox-file-refs-open-viewer"). */
+  namedFile?: OpenFileRef | null;
+  /** Open (or, with null, close) a file a message names beside the thread. Absent: references stay as before. */
+  onOpenNamedFile?: (ref: OpenFileRef | null) => void;
   remote?: boolean | null;
   onBackToList?: (fileName: string | null) => void;
   onToast?: (toast: Omit<InboxToastModel, 'id'>) => void;

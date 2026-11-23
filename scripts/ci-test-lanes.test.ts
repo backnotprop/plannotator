@@ -11,7 +11,10 @@
  *  - a heavy file that is gone, listed twice, or inside an ignored folder;
  *  - the DOM list naming a missing or repeated file, or a file the workflow
  *    runs in its own process (the real @pierre/diffs files must never share a
- *    process with the list, whose mocks are process-global).
+ *    process with the list, whose mocks are process-global);
+ *  - a PR's affected list (CI_AFFECTED_TESTS) dropping files between its
+ *    shards, a heavy lane running files it was not given, or an unset or
+ *    unreadable list running less than the full lane.
  */
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
@@ -20,6 +23,7 @@ import {
   DOM_SHARDS,
   HEAVY_LANES,
   UNIT_SHARDS,
+  affectedFromEnv,
   bunfigIgnorePatterns,
   domList,
   heavyFiles,
@@ -30,11 +34,9 @@ import {
 
 const workflow = readFileSync(join(repoRoot, '.github/workflows/test.yml'), 'utf8');
 
-/** Every `lane: [a, b, ...]` matrix entry in the workflow, in order. */
+/** Every lane of the workflow's matrices: the full list each falls back to (the plan picks fewer on a PR). */
 function matrixLanes(): string[] {
-  return [...workflow.matchAll(/^\s*lane:\s*\[([^\]]*)\]/gm)].flatMap((m) =>
-    m[1].split(',').map((lane) => lane.trim()).filter(Boolean),
-  );
+  return [...workflow.matchAll(/^\s*lane:\s*\$\{\{ fromJSON\(needs\.plan\.outputs\.\w+ \|\| '(\[[^']*\])'\) \}\}/gm)].flatMap((m) => JSON.parse(m[1]) as string[]);
 }
 
 describe('Test workflow lanes', () => {
@@ -98,6 +100,30 @@ describe('Test workflow lanes', () => {
       expect(run.args.slice(0, 3)).toEqual(['test', '--isolate', `--shard=${k}/${DOM_SHARDS}`]);
       expect(run.args.slice(3)).toEqual(domList());
     }
+  });
+
+  test("a PR's affected list: the shards split it with nothing dropped, heavy lanes run only the listed files", () => {
+    const heavy = HEAVY_LANES['heavy-mod']![0]!;
+    const files = ['a.test.ts', 'b.test.ts', heavy];
+    const affected = { files, shards: 2 };
+    const unit = [1, 2].map((k) => laneRuns(`unit-${k}`, affected));
+    for (const [run] of unit) {
+      expect(run!.args.slice(1, 2)).toEqual([expect.stringMatching(/^--shard=[12]\/2$/)]);
+      expect(run!.args.slice(2)).toEqual(['./a.test.ts', './b.test.ts']);
+    }
+    expect(laneRuns('unit-3', affected), 'a shard past the plan runs nothing').toEqual([]);
+    expect(laneRuns('heavy-mod', affected).map((r) => r.args)).toEqual([['test', `./${heavy}`]]);
+    expect(laneRuns('heavy-agents', affected)).toEqual([]);
+    const [dom] = laneRuns('dom-1', { files: ['c.test.tsx'], shards: 1 });
+    expect(dom).toEqual({ args: ['test', '--isolate', '--shard=1/1', './c.test.tsx'], env: { DOM_TESTS: '1' } });
+  });
+
+  test('an unset, empty or unreadable affected list runs the full lane', () => {
+    expect(affectedFromEnv({})).toBeNull();
+    expect(affectedFromEnv({ CI_AFFECTED_TESTS: '' })).toBeNull();
+    expect(affectedFromEnv({ CI_AFFECTED_TESTS: 'not json' })).toBeNull();
+    expect(affectedFromEnv({ CI_AFFECTED_TESTS: '{"a":1}' })).toBeNull();
+    expect(affectedFromEnv({ CI_AFFECTED_TESTS: '["x.test.ts"]', CI_AFFECTED_SHARDS: '1' })).toEqual({ files: ['x.test.ts'], shards: 1 });
   });
 
   test('an unknown lane is refused', () => {

@@ -43,7 +43,7 @@ describe('iframe isolation', () => {
     expect(iframeStart).toBeGreaterThan(0);
     const iframe = source.slice(iframeStart, source.indexOf('/>', iframeStart));
     // Both document paths keep a sandbox; the opt-in policy narrows it.
-    expect(iframe).toContain('src: servedUrl, sandbox: srcdocSandbox(sandbox, hostNavigates)');
+    expect(iframe).toContain('src: frameSrc, sandbox: srcdocSandbox(sandbox, hostNavigates)');
     expect(iframe).toContain('srcDoc: srcdoc, sandbox: resourcePolicy ? "allow-scripts" : srcdocSandbox(sandbox, hostNavigates)');
     // The helper now owns the default, including non-string host values.
     expect(source).toContain('const value = typeof sandbox === "string" ? sandbox : HTML_VIEWER_SANDBOX;');

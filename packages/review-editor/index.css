@@ -10,15 +10,20 @@
 @source "../ui/hooks/**/*.ts";
 /* The shared chat window has no host in this app, so its classes stay out of this stylesheet. */
 @source not "../ui/components/chat/**";
+@source not "../ui/components/frame/**";
 @source "./*.tsx";
 @source "./components/**/*.tsx";
 @source "../guide-viewer/**/*.tsx";
 @source "./dock/**/*.tsx";
+@source "./workspace/**/*.tsx";
 @source "./utils/**/*.tsx";
+@source "./live/**/*.tsx";
 
 @import "../ui/theme.css";
 @import "./comments.css";
+@import "./semantic-colors.css";
 @import "./components/callTree/callTree.css";
+@import "./live/live.css";
 
 /* =====================================================
    Code Review Specific Styles
@@ -27,7 +32,7 @@
 /* Shared panel header height — keeps file header, sidebar headers, and
    search bar vertically aligned across all three columns. */
 :root {
-  --panel-header-h: 33px;
+  --panel-header-h: 32px;
 
   /* Code-review-only readable-text bump. `text-xs` is the app's small/body
      tier; Tailwind's default leaves it at 12px, which reads cramped here.
@@ -165,17 +170,6 @@ diffs-container {
   background: oklch(from var(--foreground) l c h / 0.06);
 }
 
-.file-tree-item.staged {
-  background: oklch(from var(--success) l c h / 0.1);
-}
-
-.file-tree-item.staged:hover {
-  background: var(--muted);
-}
-
-.file-tree-item.staged.active {
-  background: oklch(from var(--primary) l c h / 0.3);
-}
 
 /* Semantic diff terminal view */
 .semantic-diff-panel {
@@ -192,7 +186,6 @@ diffs-container {
   max-width: 56rem;
   margin: 0 auto;
   padding: 1.5rem;
-  font-family: var(--diff-font-override, var(--font-mono));
   font-size: 0.8125rem;
   line-height: 1.55;
   font-variant-numeric: tabular-nums;
@@ -213,13 +206,19 @@ diffs-container {
 }
 
 .semantic-diff-path {
+  display: flex;
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
+  font-variant-numeric: normal;
 }
 
 .semantic-diff-path-dir {
+  min-width: 0;
+  flex-shrink: 1000;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
   color: var(--muted-foreground);
 }
 
@@ -243,12 +242,18 @@ diffs-container {
   color: var(--destructive);
 }
 
+.semantic-diff-unread {
+  margin-top: 0.25rem;
+  color: var(--warning);
+  cursor: help;
+}
+
 /* Entity row — grid-aligned, full-width, rounded hover target */
 .semantic-diff-row {
   display: grid;
-  grid-template-columns: 2ch 9ch minmax(0, 1fr) max-content;
-  column-gap: 1ch;
-  align-items: baseline;
+  grid-template-columns: 14px 9ch minmax(0, 1fr) max-content;
+  column-gap: 0.5rem;
+  align-items: center;
   width: 100%;
   min-height: 1.75rem;
   border: 0;
@@ -281,6 +286,14 @@ diffs-container {
   outline-offset: 2px;
 }
 
+.semantic-diff-row:has(> .semantic-diff-kind:empty) {
+  grid-template-columns: 14px minmax(0, 1fr) max-content;
+}
+
+.semantic-diff-kind:empty {
+  display: none;
+}
+
 @media (hover: hover) {
   .semantic-diff-row:hover,
   .semantic-diff-retry:hover {
@@ -288,12 +301,8 @@ diffs-container {
   }
 }
 
-/* Nudge the add/remove glyphs up slightly so they read at the weight of the
-   modified triangle; line-height pinned so the larger size doesn't grow rows. */
-.semantic-diff-symbol-added,
-.semantic-diff-symbol-deleted {
-  font-size: 1.15em;
-  line-height: 1;
+.semantic-diff-symbol {
+  color: var(--muted-foreground);
 }
 
 .semantic-diff-symbol-added {
@@ -304,11 +313,17 @@ diffs-container {
   color: var(--destructive);
 }
 
-.semantic-diff-symbol-modified,
-.semantic-diff-symbol-renamed,
 .semantic-diff-symbol-moved,
 .semantic-diff-symbol-reordered {
-  color: var(--primary);
+  color: var(--semantic-moved);
+}
+
+.semantic-diff-symbol-renamed {
+  color: var(--semantic-edited);
+}
+
+.semantic-diff-symbol-reformatted {
+  color: var(--semantic-reformatted);
 }
 
 .semantic-diff-kind,
@@ -317,6 +332,7 @@ diffs-container {
 }
 
 .semantic-diff-name {
+  font-family: var(--diff-font-override, var(--font-mono));
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -326,107 +342,12 @@ diffs-container {
 .semantic-diff-status {
   justify-self: end;
   white-space: nowrap;
+  font-size: 0.75rem;
 }
 
 .semantic-diff-summary {
   margin-top: 0.5rem;
   padding: 0 0.5rem;
-}
-
-/* "sem · N" pill in a diff file header. Fixed min-width (and a fixed-width
-   count, below) so 1- vs 2-digit counts — and files with no badge at all,
-   via the ghost — never skew the header button column across files. */
-.semantic-file-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.3125rem;
-  height: 1.5rem;
-  min-width: 4.125rem;
-  padding: 0 0.4375rem;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--muted-foreground);
-  font-family: var(--font-mono);
-  font-size: 0.6875rem;
-  line-height: 1;
-  cursor: pointer;
-  transition: color 120ms ease, background 120ms ease;
-}
-
-/* Disabled "sem 0" badge for files with no semantic changes — same footprint
-   and structure as the live badge so every header looks consistent, but
-   grayed out and inert (no popover, no hover affordance). */
-.semantic-file-badge-disabled {
-  cursor: default;
-  opacity: 0.45;
-}
-
-.semantic-file-badge-disabled .semantic-file-badge-count {
-  background: var(--muted);
-  color: var(--muted-foreground);
-}
-
-.semantic-file-badge:hover,
-.semantic-file-badge[data-popup-open] {
-  color: var(--foreground);
-  background: var(--muted);
-}
-
-.semantic-file-badge:focus-visible {
-  outline: 1px solid var(--ring);
-  outline-offset: 2px;
-}
-
-.semantic-file-badge-label {
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-.semantic-file-badge-count {
-  min-width: 1.5em;
-  padding: 0.0625rem 0.3125rem;
-  border-radius: calc(var(--radius-sm) - 2px);
-  background: oklch(from var(--primary) l c h / 0.14);
-  color: var(--primary);
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-}
-
-/* Hover popover — same terminal rows as the panel, shadcn surface */
-.semantic-diff-popover {
-  width: min(30rem, 90vw);
-  max-height: min(24rem, 70vh);
-  overflow: auto;
-  padding: 0.375rem;
-  background: var(--popover);
-  color: var(--popover-foreground);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  font-family: var(--diff-font-override, var(--font-mono));
-  font-size: 0.8125rem;
-  line-height: 1.55;
-  font-variant-numeric: tabular-nums;
-  outline: none;
-}
-
-.semantic-diff-popover-header {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.25rem 0.5rem 0.375rem;
-  margin-bottom: 0.25rem;
-  border-bottom: 1px solid var(--border);
-  color: var(--muted-foreground);
-}
-
-.semantic-diff-popover-path {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--foreground);
 }
 
 /* Call-flow Dock + file-header Lens */
@@ -1967,85 +1888,6 @@ diffs-container {
   100% { background: transparent; }
 }
 
-/* AI config bar — custom dropdown menus */
-.ai-config-menu {
-  position: absolute;
-  bottom: calc(100% + 4px);
-  left: 0;
-  min-width: 140px;
-  max-height: min(320px, 50vh);
-  display: flex;
-  flex-direction: column;
-  background: var(--popover);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 3px;
-  box-shadow: 0 4px 12px oklch(0 0 0 / 0.15);
-  z-index: 50;
-  animation: ai-menu-in 120ms ease-out;
-}
-
-.ai-config-menu-scroll {
-  overflow-y: auto;
-  flex: 1;
-  min-height: 0;
-}
-
-.ai-config-menu-search {
-  padding: 4px;
-  margin-bottom: 2px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-.ai-config-menu-search input {
-  width: 100%;
-  background: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: calc(var(--radius-sm) - 2px);
-  padding: 3px 6px;
-  font-size: 0.6875rem;
-  color: var(--foreground);
-  outline: none;
-}
-
-.ai-config-menu-search input::placeholder {
-  color: var(--muted-foreground);
-}
-
-.ai-config-menu-search input:focus {
-  border-color: var(--primary);
-}
-
-.ai-config-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.375rem 0.5rem;
-  border-radius: calc(var(--radius-sm) - 2px);
-  font-size: 0.6875rem;
-  color: var(--foreground);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  transition: background 100ms;
-  text-align: left;
-}
-
-.ai-config-menu-item:hover {
-  background: var(--muted);
-}
-
-.ai-config-menu-item-active {
-  color: var(--primary);
-}
-
-@keyframes ai-menu-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
 /* Custom diff font overrides — user-level, must come last to win over element styles.
    Variables are set on :root by App.tsx when the user picks a custom font/size. */
 .review-comment-markdown .inline-code,
@@ -2077,153 +1919,6 @@ diffs-container {
 :root[style*="--diff-font-size-override"] .suggestion-diff,
 :root[style*="--diff-font-size-override"] .ai-markdown code {
   font-size: var(--diff-font-size-override) !important;
-}
-
-/* =====================================================
-   Code Tour
-   ===================================================== */
-
-/* --- Dialog overlay + card entrance / exit --- */
-@keyframes tour-dialog-overlay-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes tour-dialog-overlay-out {
-  from { opacity: 1; }
-  to { opacity: 0; }
-}
-
-@keyframes tour-dialog-content-in {
-  from { opacity: 0; transform: scale(0.97); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-@keyframes tour-dialog-content-out {
-  from { opacity: 1; transform: scale(1); }
-  to   { opacity: 0; transform: scale(0.98); }
-}
-
-.tour-dialog-overlay {
-  animation: tour-dialog-overlay-in 150ms cubic-bezier(0.33, 1, 0.68, 1) both;
-}
-
-.tour-dialog-content {
-  animation: tour-dialog-content-in 250ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.tour-dialog-overlay-closing {
-  animation: tour-dialog-overlay-out 160ms cubic-bezier(0.33, 1, 0.68, 1) forwards;
-}
-
-.tour-dialog-content-closing {
-  animation: tour-dialog-content-out 180ms cubic-bezier(0.33, 1, 0.68, 1) forwards;
-  pointer-events: none;
-}
-
-/* --- Stop card reveal (applied by parent wrapper, staggered via animation-delay) --- */
-@keyframes tour-stop-reveal {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.tour-stop-reveal {
-  animation: tour-stop-reveal 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
-  will-change: transform, opacity;
-}
-
-/* --- Intro page exit: lifts up and fades out, then stops page reveals --- */
-@keyframes tour-intro-exit {
-  0%   { opacity: 1; transform: translateY(0) scale(1); }
-  30%  { opacity: 0.8; transform: translateY(-4px) scale(0.99); }
-  100% { opacity: 0; transform: translateY(-20px) scale(0.97); }
-}
-
-.tour-intro-exit {
-  animation: tour-intro-exit 320ms cubic-bezier(0.33, 1, 0.68, 1) forwards;
-  pointer-events: none;
-}
-
-/* --- Stops section label entrance (after intro exits) --- */
-@keyframes tour-section-enter {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-.tour-section-enter {
-  animation: tour-section-enter 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-/* --- Page slide transitions (stops ↔ checklist) --- */
-@keyframes tour-slide-out-left {
-  from { opacity: 1; transform: translateX(0); }
-  to   { opacity: 0; transform: translateX(-48px); }
-}
-
-@keyframes tour-slide-in-right {
-  from { opacity: 0; transform: translateX(48px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
-
-@keyframes tour-slide-out-right {
-  from { opacity: 1; transform: translateX(0); }
-  to   { opacity: 0; transform: translateX(48px); }
-}
-
-@keyframes tour-slide-in-left {
-  from { opacity: 0; transform: translateX(-48px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
-
-.tour-page-exit-fwd {
-  animation: tour-slide-out-left 220ms cubic-bezier(0.33, 1, 0.68, 1) forwards;
-  pointer-events: none;
-}
-
-.tour-page-enter-fwd {
-  animation: tour-slide-in-right 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.tour-page-exit-bwd {
-  animation: tour-slide-out-right 220ms cubic-bezier(0.33, 1, 0.68, 1) forwards;
-  pointer-events: none;
-}
-
-.tour-page-enter-bwd {
-  animation: tour-slide-in-left 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-/* --- Checkbox transition (ease for color changes — elegant, per the easing blueprint) --- */
-.tour-checkbox {
-  transition: background-color 150ms ease, border-color 150ms ease;
-}
-
-
-
-/* --- Reduced motion: disable all tour animations --- */
-@media (prefers-reduced-motion: reduce) {
-  .tour-dialog-overlay,
-  .tour-dialog-overlay-closing,
-  .tour-dialog-content,
-  .tour-dialog-content-closing,
-  .tour-stop-reveal,
-  .tour-intro-exit,
-  .tour-section-enter,
-  .tour-page-exit-fwd,
-  .tour-page-enter-fwd,
-  .tour-page-exit-bwd,
-  .tour-page-enter-bwd {
-    animation: none !important;
-  }
-  .tour-checkbox {
-    transition: none !important;
-  }
 }
 
 /* Popover animation */
@@ -2441,11 +2136,11 @@ diffs-container {
    (theme.css) and the Tailwind utilities in the rows.
    ===================================================== */
 .review-sidebar {
-  --sidebar-fill-faint: color-mix(in oklab, var(--foreground) 5%, transparent);
   --sidebar-fill: color-mix(in oklab, var(--foreground) 6%, transparent);
   --sidebar-fill-strong: color-mix(in oklab, var(--foreground) 9%, transparent);
   --sidebar-line: color-mix(in oklab, var(--foreground) 9%, transparent);
-  --sidebar-text-tertiary: color-mix(in oklab, var(--muted-foreground) 85%, var(--background));
+  --sidebar-text-tertiary: var(--muted-foreground);
+  --sidebar-row-fg: color-mix(in oklab, var(--foreground) 88%, var(--background));
   background: var(--background);
   border-right-color: color-mix(in oklab, var(--border) 50%, transparent);
 }
@@ -2460,23 +2155,39 @@ diffs-container {
 }
 /* Keep a row brought into view clear of the sticky block. */
 .review-sidebar :is(.file-tree-item, .review-folder-row, .panel-section-heading) {
-  scroll-margin-top: 64px;
+  scroll-margin-top: 36px;
 }
 
 /* File rows: 28 px, touching; the selected row a grey fill. A row with
    comments or a staged file keeps no tint (its badge and + say it). */
 .review-sidebar .file-tree-item {
-  min-height: 28px;
+  min-height: 24px;
+  height: 24px;
   padding-top: 0;
   padding-bottom: 0;
   padding-right: 8px;
   gap: 6px;
-  border-radius: 6px;
-  font-weight: 500;
+  border-radius: 4px;
+  font-weight: 400;
+  color: color-mix(in oklab, var(--foreground) 88%, var(--background));
+}
+.review-sidebar .file-tree-item.viewed {
   color: var(--muted-foreground);
 }
-.review-sidebar .file-tree-item.has-annotations,
-.review-sidebar .file-tree-item.staged {
+.review-sidebar .file-tree-item .stage-plus {
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.review-sidebar .file-tree-item:is(:hover, :focus-within, .active) .stage-plus,
+.review-sidebar .file-tree-item .stage-plus:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .review-sidebar .file-tree-item .stage-plus {
+    opacity: 1;
+  }
+}
+.review-sidebar .file-tree-item.has-annotations {
   background: transparent;
 }
 .review-sidebar .file-tree-item:hover {
@@ -2487,8 +2198,7 @@ diffs-container {
   background: color-mix(in oklab, var(--foreground) 3%, transparent);
 }
 .review-sidebar .file-tree-item.active,
-.review-sidebar .file-tree-item.active.has-annotations,
-.review-sidebar .file-tree-item.staged.active {
+.review-sidebar .file-tree-item.active.has-annotations {
   background: var(--sidebar-fill-strong);
   color: var(--foreground);
 }
@@ -2530,8 +2240,11 @@ diffs-container {
   position: absolute;
   inset: -4px;
 }
-.review-sidebar .file-tree-item [role="checkbox"] {
-  margin-right: 2px;
+.review-sidebar .file-tree-item .review-file-row-main > .w-4.h-4:not([role="checkbox"]) {
+  width: 10px;
+}
+.review-sidebar .file-tree-item .review-file-row-main > .stage-plus {
+  margin: 0 -3px;
 }
 
 /* The +/- number columns (CountColumns). The panel sets the widths from its
@@ -2546,7 +2259,7 @@ diffs-container {
   align-items: center;
   flex-shrink: 0;
   margin-left: auto;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -2557,7 +2270,7 @@ diffs-container {
   color: var(--sidebar-text-tertiary);
 }
 .review-kind-viewed {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
@@ -2566,7 +2279,7 @@ diffs-container {
    whose width the panel sets. 11 px so `ch` in the widths is the numbers' ch.
    Without numbers (a narrow panel) it takes their place. */
 .review-on-disk-dot {
-  font-size: 11px;
+  font-size: 12px;
   right: calc(8px + var(--count-del-w, 3ch) + 4px + var(--count-add-w, 3ch) + 6px);
 }
 .review-sidebar[data-compact-rows] .review-on-disk-dot {
@@ -2582,16 +2295,16 @@ diffs-container {
 .review-folder-row {
   width: 100%;
   min-width: 0;
-  height: 28px;
+  height: 24px;
   display: flex;
   align-items: center;
   gap: 6px;
   padding-right: 8px;
-  border-radius: 6px;
+  border-radius: 4px;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 400;
   text-align: left;
-  color: var(--sidebar-text-tertiary);
+  color: var(--muted-foreground);
   transition: background-color 120ms, color 120ms;
 }
 .review-folder-row:hover {
@@ -2609,12 +2322,12 @@ diffs-container {
 .panel-section-heading {
   width: 100%;
   min-width: 0;
-  height: 28px;
+  height: 24px;
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 0 8px;
-  border-radius: 6px;
+  border-radius: 4px;
   text-align: left;
   cursor: pointer;
   color: color-mix(in oklab, var(--foreground) 78%, var(--background));
@@ -2683,7 +2396,7 @@ diffs-container {
 
 /* Groups: 12 px between them. */
 .review-panel-group + .review-panel-group {
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2693,4 +2406,164 @@ diffs-container {
   .panel-heading-chevron {
     transition: none;
   }
+}
+
+.review-sidebar :is([data-review-panel-header], [data-review-views-nav], [data-panel-controls-row], [data-panel-search-field]) .font-mono {
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+
+.review-sidebar [data-go-to-file-button],
+.review-sidebar .panel-utility-button {
+  border-radius: 4px;
+}
+
+.review-sidebar :is([data-go-to-file-button], [data-panel-view], .panel-utility-button) svg {
+  width: 16px;
+  height: 16px;
+}
+
+.review-sidebar [data-panel-sentence] {
+  margin-top: 4px;
+  padding-inline: 0;
+  column-gap: 0;
+  line-height: 28px;
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+
+.review-sidebar [data-panel-sentence] button {
+  height: 28px;
+  min-height: 28px;
+  margin: 0;
+  padding-inline: 8px;
+  gap: 4px;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--foreground);
+  text-decoration-line: none;
+}
+
+.review-sidebar [data-panel-sentence] button[data-popup-open] {
+  background: var(--sidebar-fill-strong);
+}
+
+.review-sidebar [data-panel-sentence] button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.review-sidebar [data-nav-row] {
+  height: 28px;
+  padding-inline: 8px;
+  gap: 4px;
+  border-radius: 4px;
+  font-weight: 400;
+}
+
+.review-sidebar [data-nav-row]:not([aria-current]):not(:hover) {
+  color: var(--sidebar-row-fg);
+}
+
+.review-sidebar [data-nav-row] > :first-child {
+  width: 16px;
+  height: 16px;
+  color: var(--muted-foreground);
+}
+
+.review-sidebar [data-nav-count] {
+  margin-left: auto;
+  padding: 0;
+  background: none;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.review-sidebar [data-nav-count]:not(.text-warning) {
+  color: var(--muted-foreground);
+}
+
+.review-sidebar [data-review-sticky-tools] {
+  padding-bottom: 0;
+}
+
+.review-sidebar [data-review-file-filter] [data-review-sticky-tools] {
+  padding-block: 12px;
+}
+
+.review-sidebar [data-panel-controls-row] {
+  min-height: 28px;
+}
+
+.review-sidebar [data-tree-scope] {
+  height: 28px;
+  padding-left: 8px;
+  padding-right: 8px;
+  border-radius: 4px;
+  font-weight: 400;
+}
+
+.review-sidebar [data-tree-scope="all"] {
+  padding-right: 10px;
+}
+
+.review-sidebar [data-tree-scope="all"] [data-repo-listing-dot] {
+  top: 6px;
+  right: 3px;
+}
+
+.review-sidebar [data-tree-scope]:not([aria-pressed="true"]):not(:hover) {
+  color: var(--sidebar-row-fg);
+}
+
+.review-sidebar [data-panel-tools] {
+  margin-right: 4px;
+}
+
+.review-sidebar [data-panel-search-field] {
+  height: 28px !important;
+  margin-top: 4px;
+  padding-inline: 0;
+  border-bottom: 0;
+}
+
+.review-sidebar [data-panel-search-field] input {
+  height: 28px;
+  padding-left: 28px;
+  border-radius: 4px;
+  background: var(--sidebar-fill);
+  font-size: 13px;
+}
+
+.review-sidebar [data-panel-search-field] input + div {
+  right: 6px;
+}
+
+.review-sidebar [data-panel-search-field] .relative > svg:first-child {
+  width: 16px;
+  height: 16px;
+}
+
+html:has([data-pn-compact-touch-layout='true']) :is(.review-sidebar .file-tree-item, .review-sidebar .review-folder-row, .review-sidebar .panel-section-heading, .review-sidebar [data-nav-row]) {
+  min-height: var(--pn-touch-target);
+  height: var(--pn-touch-target);
+}
+html:has([data-pn-compact-touch-layout='true']) :is([data-panel-view], [data-tree-scope], [data-panel-sentence] button, [data-menu-version] a) {
+  min-block-size: var(--pn-touch-target);
+  touch-action: manipulation;
+}
+html:has([data-pn-compact-touch-layout='true']) :is([data-go-to-file-button], [data-tree-collapse-all-files]) {
+  min-block-size: var(--pn-touch-target);
+  min-inline-size: var(--pn-touch-target);
+}
+html:has([data-pn-compact-touch-layout='true']) [data-menu-version] a {
+  display: inline-flex;
+  align-items: center;
+}
+
+html:has([data-pn-compact-touch-layout='true']) [data-review-sidebar-tab] {
+  min-width: var(--pn-touch-target);
 }

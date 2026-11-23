@@ -65,6 +65,7 @@ import {
   type ReplyDraftStore,
 } from '@plannotator/core/inbox-reply-draft';
 import { httpReplyDraftStore } from './replyDraftHttp';
+import { clearReplyMentions, noteDraftMentions, replyMentionsSave } from './threadMentions';
 
 /** The files a reply draft keeps beside its words: each finished upload, a long paste with its place. */
 export type ReplyDraftFiles = readonly ReplyDraftFileRef[];
@@ -120,6 +121,12 @@ export interface ReplyDraftState {
 
 /** Saves waiting or in flight anywhere on the page, and words left unsaved by a conflict (the restart guard reads them). */
 let unsaved = 0;
+/** When a save last ended (landed or not): a drafts list asked for before then may not have it yet. */
+let lastSaveEnded = 0;
+/** When a reply draft save last ended on this page (0: none yet); the row menu's Mention in reply reads it. */
+export function replyDraftSaveEndedAt(): number {
+  return lastSaveEnded;
+}
 /**
  * Per thread, the words a refused save carried (both windows hold words), not
  * saved. Module-level, not the hook's: the thread pane unmounts when the thread
@@ -149,8 +156,17 @@ let landing = 0;
 /** Per thread: raised by each Discard here. A file still landing from before one joins no draft (it was thrown away). */
 const discards = new Map<string, number>();
 const discardsOf = (threadId: string) => discards.get(threadId) ?? 0;
+/** Another machine's thread keeps no draft here: dictated words for its closed box wait in this page for the box. */
+const heldVoice = new Map<string, string[]>();
+/** The dictated words waiting for this thread's box (`landWordsInReplyDraft` on another machine's thread), taken once. */
+export function takeHeldVoiceWords(threadId: string): string[] {
+  const words = heldVoice.get(threadId) ?? [];
+  heldVoice.delete(threadId);
+  if (words.length > 0) unsavedChanged();
+  return words;
+}
 export function replyDraftUnsaved(): boolean {
-  return unsaved > 0 || landing > 0 || conflictWords.size > 0 || offerWords.size > 0 || tooLongThreads.size > 0 || refusedThreads.size > 0 || carriesFiles();
+  return unsaved > 0 || landing > 0 || heldVoice.size > 0 || conflictWords.size > 0 || offerWords.size > 0 || tooLongThreads.size > 0 || refusedThreads.size > 0 || carriesFiles();
 }
 
 /**
@@ -214,6 +230,7 @@ export function replySendStarts(threadId: string): () => void {
 /** This window discarded the thread's draft: a file or words already landing there stop. */
 export function replyDraftDiscarded(threadId: string): void {
   discards.set(threadId, discardsOf(threadId) + 1);
+  heldVoice.delete(threadId);
 }
 
 /**
@@ -224,6 +241,11 @@ export function replyDraftDiscarded(threadId: string): void {
  * stay for the thread to offer again (lateVoice.ts).
  */
 export function landWordsInReplyDraft(threadId: string, words: string, store: ReplyDraftStore = httpReplyDraftStore): Promise<void> {
+  if (machineOf(threadId)) {
+    heldVoice.set(threadId, [...(heldVoice.get(threadId) ?? []), words]);
+    unsavedChanged();
+    return Promise.resolve();
+  }
   landing += 1;
   unsavedChanged();
   const discarded = discardsOf(threadId);
@@ -411,6 +433,8 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   };
   /** The server holds this draft for the thread now: its base and words, as this window knows them. */
   const adopt = (target: string, draft: InboxReplyDraft | null) => {
+    // The threads its words mention (approval "inbox-drag-threads"): the box paints them for these words.
+    noteDraftMentions(target, draft);
     bases.current.set(target, draft?.updated_at ?? null);
     synced.current.set(target, draftKey(draft));
     syncedWords.current.set(target, draft?.body ?? null);
@@ -565,7 +589,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
         let answer: { draft: InboxReplyDraft | null };
         sentWords.current.set(target, text);
         try {
-          answer = await storeRef.current.save(target, { body: text, base: baseOf(target), baseBody: baseBody ?? null, files: ops, ...aimOf(target), ...quoteOf(target) }, { keepalive: false });
+          answer = await storeRef.current.save(target, { body: text, base: baseOf(target), baseBody: baseBody ?? null, files: ops, ...aimOf(target), ...quoteOf(target), ...replyMentionsSave(target, text) }, { keepalive: false });
         } catch (cause) {
           if (codeOf(cause) === 'validation_error') {
             // Refused: not saved. For its size (the Inbox's own limit, a `body:` refusal) the line above the box
@@ -653,6 +677,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
         } else leave();
       } finally {
         unsaved -= 1;
+        lastSaveEnded = Date.now();
         unsavedChanged();
       }
     });
@@ -701,7 +726,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
       const ops = composeReplyDraftFileOps(carried.get(next.threadId) ?? NO_FILE_OPS, next.ops);
       // `base` may be a step behind a save still on its way; `base_body` names the words that save carries.
       void storeRef.current
-        .save(next.threadId, { body: next.text, base: baseOf(next.threadId), baseBody: lastWords.current, files: ops, ...aimOf(next.threadId), ...quoteOf(next.threadId) }, { keepalive: true })
+        .save(next.threadId, { body: next.text, base: baseOf(next.threadId), baseBody: lastWords.current, files: ops, ...aimOf(next.threadId), ...quoteOf(next.threadId), ...replyMentionsSave(next.threadId, next.text) }, { keepalive: true })
         .catch(() => {});
       sentWords.current.set(next.threadId, next.text);
       keptAlive.current = { threadId: next.threadId, text: next.text, ops, generation: generationOf(next.threadId) };
@@ -817,6 +842,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     held.current.set(target, []);
     // Dropped: a draft holding these words later is another window's, never this one's (`base_body`).
     sentWords.current.delete(target);
+    clearReplyMentions(target);
     learn(target, null);
     tooLongThreads.delete(target);
     refusedThreads.delete(target);
@@ -881,6 +907,8 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     held.current.set(target, []);
     // Sent: a draft holding these words later is another window's, never this one's (`base_body`).
     sentWords.current.delete(target);
+    // Its mentions went with it: none is left to paint in words typed next (another window's draft keeps its own).
+    clearReplyMentions(target);
     tooLongThreads.delete(target);
     refusedThreads.delete(target);
     unsavedChanged();

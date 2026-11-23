@@ -27,6 +27,8 @@ import * as ConfigIndex from '@plannotator/ui/config';
 import * as Identity from '@plannotator/ui/utils/identity';
 import * as MathSlot from '@plannotator/ui/utils/math';
 import * as CommentDraftScope from '@plannotator/ui/utils/commentDraftScope';
+import * as DiagramSvgAccept from '@plannotator/ui/components/diagramSvgAccept';
+import * as DiagramRemoteLoadsPolicy from '@plannotator/ui/utils/diagramRemoteLoadsPolicy';
 import {
   DIAGRAM_ENGINE_API_VERSION,
   DIAGRAM_ENGINE_HOST_KEY,
@@ -50,6 +52,8 @@ function sharedModules(): Record<DiagramEngineSharedModule, unknown> {
     'ui:utils/identity': Identity,
     'ui:utils/math': MathSlot,
     'ui:utils/commentDraftScope': CommentDraftScope,
+    'ui:components/diagramSvgAccept': DiagramSvgAccept,
+    'ui:utils/diagramRemoteLoadsPolicy': DiagramRemoteLoadsPolicy,
   };
 }
 

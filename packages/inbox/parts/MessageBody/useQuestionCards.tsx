@@ -26,12 +26,13 @@ export function useQuestionCards({
   renderReplacedCard,
   renderReplacesLine,
   renderActions,
+  renderRunBlock,
   onTryPrototype,
   blocks,
   noteAtLine,
   notesRef,
   refRepo,
-}: Pick<MessageBodyProps, 'message' | 'projectRoot' | 'readOnly' | 'footerFor' | 'answers' | 'renderReplacedCard' | 'renderReplacesLine' | 'renderActions' | 'onTryPrototype'> & {
+}: Pick<MessageBodyProps, 'message' | 'projectRoot' | 'readOnly' | 'footerFor' | 'answers' | 'renderReplacedCard' | 'renderReplacesLine' | 'renderActions' | 'renderRunBlock' | 'onTryPrototype'> & {
   blocks: Block[];
   noteAtLine: ReadonlyMap<number, InboxNoteBlock>;
   notesRef: { readonly current: MessageBodyProps['contextNotes'] };
@@ -60,6 +61,9 @@ export function useQuestionCards({
   // Action items: one checklist card per run of adjacent `:::action` blocks, in place of
   // the run's first block; the run's other blocks draw nothing (inbox.css hides their empty
   // wrapper). Prose between two blocks ends a run, so each stays where the agent put it.
+  // `:::run` and `:::secret` (parts/RunBlocks): the host's card in place of each block.
+  const runRef = useRef(renderRunBlock);
+  runRef.current = renderRunBlock;
   const actionsRef = useRef(renderActions);
   actionsRef.current = renderActions;
   const actionRuns = useMemo(() => {
@@ -95,6 +99,7 @@ export function useQuestionCards({
           </div>
         );
       }
+      if (block.directiveKind === 'run' || block.directiveKind === 'secret') return runRef.current?.(block);
       if (block.directiveKind !== 'action') return undefined;
       const run = actionRuns.get(block.id);
       if (!run) return undefined;

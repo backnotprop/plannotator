@@ -414,6 +414,9 @@ describe("parseInboxCardPr", () => {
     expect(parseInboxCardPr("owner/repo#0123")).toEqual({ ref: "owner/repo#123", url: "https://github.com/owner/repo/pull/123" });
     expect(parseInboxCardPr("https://gitlab.com/g/sub/p/-/merge_requests/12/diffs")).toEqual({ ref: "g/sub/p!12", url: "https://gitlab.com/g/sub/p/-/merge_requests/12" });
     expect(parseInboxCardPr("https://bitbucket.org/ws/r/pull-requests/7")).toEqual({ ref: "ws/r#7", url: "https://bitbucket.org/ws/r/pull-requests/7" });
+    // A Forgejo PR is no card PR (the Board has no Forgejo source): never the GitHub-shaped `/pull/N` link.
+    expect(parseInboxCardPr("https://codeberg.org/acme/w/pulls/7/files")).toBeNull();
+    expect(parseInboxCardPr("http://forgejo.lan:3000/acme/w/pulls/7")).toBeNull();
     expect(parseInboxCardPr("https://ghe.corp/o/r/pull/5")).toEqual({ ref: "ghe.corp/o/r#5", url: "https://ghe.corp/o/r/pull/5" });
     for (const bad of ["#12", "PR 12", "https://github.com/o/r/issues/1", "", 12, null]) expect(parseInboxCardPr(bad)).toBeNull();
   });
@@ -446,6 +449,22 @@ describe("cards: the Board page's fields (step 2)", () => {
     writeFileSync(file, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
     // Linked as `prs` then, so each is the card's own PR (`via: "pr"`).
     expect(InboxStore.open(dir).card(card.id)!.refs).toEqual([{ kind: "pr", source: "github", ref: "acme/widgets#12", url: "https://github.com/acme/widgets/pull/12", via: "pr" }]);
+  });
+
+  test("the person removes a link: its PR leaves prs too, the history says so, a retry writes nothing, and it reads back", () => {
+    const { dir, store, project } = world();
+    const { card } = store.createCard({ project_id: project.id, by: AGENT, title: "Forge", prs: ["acme/widgets#12"], refs: ["acme/widgets#11"] });
+    const pr = "https://github.com/acme/widgets/pull/12";
+    const after = store.unlinkCardRef(card.id, ` ${pr} `);
+    expect(after.refs.map((ref) => ref.ref)).toEqual(["acme/widgets#11"]);
+    expect(after.prs).toEqual([]);
+    expect(store.cardHistory(card.id)[0]).toMatchObject({ kind: "unlinked_ref", by: PERSON, ref: "acme/widgets#12", ref_kind: "pr" });
+    const lines = store.cardHistory(card.id).length;
+    expect(store.unlinkCardRef(card.id, pr)).toBe(store.card(card.id)!);
+    expect(store.cardHistory(card.id)).toHaveLength(lines);
+    expect(refusal(() => store.unlinkCardRef(card.id, ""))).toBe("validation_error");
+    expect(refusal(() => store.unlinkCardRef("crd_nope", pr))).toBe("card_not_found");
+    expect(InboxStore.open(dir).card(card.id)!.refs.map((ref) => ref.ref)).toEqual(["acme/widgets#11"]);
   });
 
   test("history: every write the card saw, newest first, with who wrote it", () => {

@@ -211,7 +211,7 @@ test('a waking connection: Queued, then one wake naming the message, then Delive
   expect(polled.commands).toHaveLength(1);
   const command = polled.commands[0]!;
   expect(command.ack_of).toBe(threads.wakeMessage);
-  expect(inboxWakeText(command).split('\n')[1]).toBe(`The person reacted 👍 Looks good to your message (${threads.wakeMessage}).`);
+  expect(inboxWakeText(command).split('\n')[1]).toBe(`The person reacted 👍 Looks good to your message (${threads.wakeMessage}). Take it as a go.`);
   expect((await bridge('/api/inbox/bridge/event', { session, host: 'claude-code', type: 'delivered', id: command.id })).status).toBe(200);
   expect(((await (await bridge('/api/inbox/bridge/poll', { session, host: 'claude-code', waitMs: 0 })).json()) as { commands: unknown[] }).commands).toEqual([]);
   await page.goto(`${world.url}#thread=${threads.wake}`);

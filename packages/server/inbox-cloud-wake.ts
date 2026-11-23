@@ -1,5 +1,4 @@
 
-import { homedir } from "node:os";
 import {
   INBOX_CLOUD_WAKE_GAP_MS,
   inboxCloudAnswer,
@@ -10,7 +9,7 @@ import {
   type InboxCloudWake,
   type InboxCloudWakeItem,
 } from "@plannotator/core/inbox-cloud";
-import type { InboxMessage } from "@plannotator/core/inbox-types";
+import { inboxSentFromLine, type InboxMessage } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { hasCloudWake, type InboxCloudAgent, type InboxCloudAgents, type InboxCloudWakeAgent } from "./inbox-cloud-agents";
 import { postCloudWebhook } from "./inbox-cloud-post";
@@ -57,8 +56,7 @@ export function createInboxCloudWake(options: {
     const seen = new Set<string>();
     for (const agent of list) {
       seen.add(agent.session);
-      const project = agent.project_id ? store.project(store.canonicalProjectId(agent.project_id)) : null;
-      options.pin(agent.session, project?.root ?? homedir(), agent.name, inboxCloudHostOf(agent.preset));
+      options.pin(agent.session, agents.homeRoot(agent), agent.name, inboxCloudHostOf(agent.preset));
       pinned.set(agent.session, agent.name);
     }
     for (const session of [...pinned.keys()]) {
@@ -102,7 +100,11 @@ export function createInboxCloudWake(options: {
     (timer as { unref?: () => void }).unref?.();
   };
 
-  const wakeItem = (item: InboxMessage): InboxCloudWakeItem => ({ id: item.id, at: item.created_at, body: item.body, files: item.attachments?.length ?? 0 });
+  // Where the person wrote it, when away from this computer (inbox-sent-from.ts): the one line under their words.
+  const wakeItem = (item: InboxMessage): InboxCloudWakeItem => {
+    const from = inboxSentFromLine(item);
+    return { id: item.id, at: item.created_at, body: from ? `${item.body}\n\n${from}` : item.body, files: item.attachments?.length ?? 0 };
+  };
 
   const wakeThread = async (agent: InboxCloudWakeAgent, threadId: string, listed: InboxMessage[]): Promise<number | null> => {
     const thread = store.thread(threadId);
@@ -162,7 +164,7 @@ export function createInboxCloudWake(options: {
         lastWake.set(threadId, 0);
         settle({ state: "key_rejected", status: answer.status });
         agents.markKeyRejected(agent.session);
-        log(`The cloud agent "${agent.name}" refused its key. Paste the new key in Settings → Devices.`);
+        log(`The cloud agent "${agent.name}" refused its key. Paste the new key in Settings → Remote devices.`);
         return null;
       case "failed":
         giveBack();

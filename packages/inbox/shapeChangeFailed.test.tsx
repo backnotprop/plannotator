@@ -1,7 +1,7 @@
 /**
  * A Change it the host did not take (a Shapes server that restarted and keeps refusing, Shape turned off, a server
  * that is gone) must not swallow the person's words: the same box opens again with them and says why, on a marked
- * part as on the whole board. An Ask the host did not take stays in the Ask panel and says so. What regresses: the
+ * part as on the whole board. An Ask the host did not take stays in its comment box and says so. What regresses: the
  * box closing on submit and the text vanishing with no message, or a failed Ask vanishing (an unhandled rejection).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -123,7 +123,7 @@ test.skipIf(!hasDom)("a Change it on a marked part the host refused: that part's
   expect(document.querySelector('[data-comment-popover]')?.textContent).toContain('One whistle');
 });
 
-test.skipIf(!hasDom)("an Ask the host refused: the question stays in the Ask panel with Ask's line, and nothing is left unhandled", async () => {
+test.skipIf(!hasDom)("an Ask the host refused: the question stays in its box, with Ask's line, and nothing is left unhandled", async () => {
   const unhandled: unknown[] = [];
   const onUnhandled = (reason: unknown) => unhandled.push(reason);
   process.on('unhandledRejection', onUnhandled);
@@ -133,10 +133,13 @@ test.skipIf(!hasDom)("an Ask the host refused: the question stays in the Ask pan
     async () => { throw new Error('HTTP 404'); },
   );
   await compose(el, 'Why one whistle?', 'Ask');
-  await wait(() => !!el.textContent?.includes(surface.SHAPE_ASK_NOT_SENT));
-  const panel = el.querySelector('.shp-sidep-body')!;
-  expect(panel.textContent).toContain('Why one whistle?');
-  expect(panel.textContent).toContain(surface.SHAPE_ASK_NOT_SENT);
+  // The box stays open on what it asked about, its words cleared, the question and the line above them.
+  await wait(() => !!document.querySelector('[data-comment-popover] [data-shape-talk]')?.textContent?.includes(surface.SHAPE_ASK_NOT_SENT));
+  const talk = document.querySelector('[data-comment-popover] [data-shape-talk]')!;
+  expect(talk.textContent).toContain('Why one whistle?');
+  expect(talk.querySelector('[role="alert"]')?.textContent).toBe(surface.SHAPE_ASK_NOT_SENT);
+  expect((document.querySelector('[data-comment-popover] textarea') as HTMLTextAreaElement).value).toBe('');
+  expect(el.querySelector('.shp-sidep.open')).toBeNull();
   await act(() => new Promise((r) => setTimeout(r, 20)));
   expect(unhandled).toEqual([]);
 });

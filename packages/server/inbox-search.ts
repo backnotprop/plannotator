@@ -3,7 +3,8 @@
  *
  * - `GET /api/inbox/search`: read-only. `q` (trimmed, 200 characters at
  *   most, 8 terms), `project=prj_…`, `status=waiting|new|sent|quiet|archived`,
- *   `from=agent|me`, `group=` with `offset=` for "Show all", `limit` (per
+ *   `from=agent|me`, `tag=ini_…` (repeatable, at most 50: threads in any of
+ *   those tags; an id this Inbox has no tag for matches nothing), `group=` with `offset=` for "Show all", `limit` (per
  *   group, at most 50), `current=prj_…` (the project open in the list: a tie
  *   boost, never a filter), `sort=best|newest` (best match, the default;
  *   newest: each group by its latest message first). The index (packages/shared/inbox/search.ts) is
@@ -28,6 +29,7 @@ import { isInboxId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
+import { INBOX_SEARCH_MACHINE_WAIT_MS, searchAcrossMachines, type InboxSearchMachines } from "./inbox-search-machines";
 import {
   INBOX_SEARCH_GROUPS,
   INBOX_SEARCH_LIMIT_MAX,
@@ -44,6 +46,8 @@ import {
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 
 export const INBOX_SEARCH_PATH = "/api/inbox/search";
+/** More tags than a person keeps; the window sends one id per picked tag. */
+const INBOX_SEARCH_TAGS_MAX = 200;
 export const INBOX_SEARCH_RECENT_PATH = "/api/inbox/search/recent";
 /** Recent searches kept. */
 export const INBOX_RECENT_SEARCHES_MAX = 6;
@@ -54,9 +58,11 @@ export const INBOX_SEARCH_BUILD_WAIT_MS = 250;
 export interface InboxSearchRoutes {
   index: InboxSearchIndex;
   /** The route's answer, or null for a path that is not search's. */
-  handle(req: Request, url: URL): Promise<Response | null>;
+  handle(req: Request, url: URL, machines?: InboxSearchMachines | null): Promise<Response | null>;
   dispose(): void;
 }
+
+type SearchBody = InboxSearchAnswer & { serverSession: string; recent_searches?: string[] };
 
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=utf-8",
@@ -106,11 +112,11 @@ function count(url: URL, name: string, min: number, max: number): number | null 
   return n;
 }
 
-export function createInboxSearchRoutes(input: { store: InboxStore; serverSession: string; index?: InboxSearchIndexOptions }): InboxSearchRoutes {
+export function createInboxSearchRoutes(input: { store: InboxStore; serverSession: string; index?: InboxSearchIndexOptions; machineWaitMs?: number }): InboxSearchRoutes {
   const { store, serverSession } = input;
   const index = new InboxSearchIndex(store, input.index);
 
-  const search = async (url: URL): Promise<Response> => {
+  const answerOf = async (url: URL): Promise<SearchBody> => {
     const q = (url.searchParams.get("q") ?? "").trim().slice(0, INBOX_SEARCH_QUERY_MAX);
     const projectParam = url.searchParams.get("project");
     let project: string | null = null;
@@ -127,18 +133,19 @@ export function createInboxSearchRoutes(input: { store: InboxStore; serverSessio
     const offset = count(url, "offset", 0, 1_000_000) ?? 0;
     const limit = count(url, "limit", 1, INBOX_SEARCH_LIMIT_MAX);
     const sort = oneOf<InboxSearchSort>(url, "sort", INBOX_SEARCH_SORTS);
+    const tags = [...new Set(url.searchParams.getAll("tag").filter(Boolean))];
+    if (tags.length > INBOX_SEARCH_TAGS_MAX || tags.some((tag) => !isInboxId("ini", tag))) throw new InboxError("validation_error", `tag: ini_ ids, at most ${INBOX_SEARCH_TAGS_MAX}.`, { field: "tag" });
     const recentSearches = (answer: InboxSearchAnswer) => (answer.recent ? { recent_searches: readRecentSearches(store.dir) } : {});
     if (!index.ready()) {
       // The build runs in slices; give a short query a chance to land on a finished index.
       const building = index.ensureBuilt();
       await Promise.race([building, new Promise((resolve) => setTimeout(resolve, INBOX_SEARCH_BUILD_WAIT_MS))]);
       if (!index.ready()) {
-        const answer: InboxSearchAnswer = { q, terms: [], took_ms: 0, indexing: true, threads: index.threadCount(), totals: null, groups: null, recent: null };
-        return json({ serverSession, ...answer });
+        return { serverSession, q, terms: [], took_ms: 0, indexing: true, threads: index.threadCount(), totals: null, groups: null, recent: null };
       }
     }
-    const answer = index.search({ q, project, status, from, group, offset, limit, current, sort });
-    return json({ serverSession, ...answer, ...recentSearches(answer) });
+    const answer = index.search({ q, project, status, from, tags, group, offset, limit, current, sort });
+    return { serverSession, ...answer, ...recentSearches(answer) };
   };
 
   const saveRecent = async (req: Request): Promise<Response> => {
@@ -165,14 +172,17 @@ export function createInboxSearchRoutes(input: { store: InboxStore; serverSessio
   return {
     index,
     dispose: () => index.dispose(),
-    async handle(req, url) {
+    async handle(req, url, machines) {
       if (url.pathname !== INBOX_SEARCH_PATH && url.pathname !== INBOX_SEARCH_RECENT_PATH) return null;
       // Another site (or another localhost port: same-site) never reaches search. It could not read
       // the answer, but it picks the query, and how long a search takes says whether it found anything.
       if (crossSite(req)) return json(CROSS_SITE_BODY, 403);
       if (url.pathname === INBOX_SEARCH_PATH) {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
-        return search(url);
+        if (machines && url.searchParams.get("machines") === "1") {
+          return json(await searchAcrossMachines({ req, url, machines, serverSession, waitMs: input.machineWaitMs ?? INBOX_SEARCH_MACHINE_WAIT_MS, hasProject: (id) => Boolean(store.project(id)), answerOf }));
+        }
+        return json(await answerOf(url));
       }
       if (url.pathname === INBOX_SEARCH_RECENT_PATH) {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);

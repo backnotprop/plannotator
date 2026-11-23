@@ -12,7 +12,8 @@ const noop = () => {};
 export interface ReaderDiffProps {
   fontFamily: string | undefined;
   fontSize: string | undefined;
-  onTokenHoverEnter: (props: DiffTokenEventBaseProps, filePath: string) => void;
+  /** False for a token that is not a symbol: the diff paints no hover affordance on it. */
+  onTokenHoverEnter: (props: DiffTokenEventBaseProps, filePath: string) => boolean;
   onTokenHoverLeave: () => void;
   onCodeNavRequest: (request: CodeNavRequest) => void;
   /** Ask the agent about the selected lines of a file. Absent: no asking (no agent). */

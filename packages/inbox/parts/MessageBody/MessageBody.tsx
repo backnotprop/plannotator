@@ -3,7 +3,7 @@
  * it, and its pictures. Drawn inside parts/MessageView.tsx, which draws it again only when what it draws from changed.
  * Its pieces are hooks beside it, called in the order its effects always ran.
  */
-import { useCallback, useRef, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useMemo, useRef, type MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Viewer } from '@plannotator/ui/components/Viewer';
 import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
@@ -12,17 +12,22 @@ import type { Block } from '@plannotator/ui/types';
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
 import { ImageResolverContext } from '@plannotator/ui/components/ImageResolverContext';
 import { SoftLineBreaksContext } from '@plannotator/ui/components/InlineMarkdown';
+import { ImageRowsContext } from '@plannotator/ui/components/imageRow';
 import { useRefRepo } from '../../links';
 import { OpenInCodeSpans } from '../../components/OpenIn';
+import { FileRefCodeSpans } from '../../components/FileRefSpan';
 import { InlineReuseLayer } from '../../reuse';
 import { SentAnswers, ReplyActions } from '../../components/ReplyAnswers';
 import { SkillsLine } from '../../components/SkillsLine';
+import { PullDetailsLine } from '../../pulls/PullDetailsLine';
 import { HostMark } from '../../icons';
 import type { MessageBodyProps } from './types';
 import { NO_ANNOTATIONS, noop } from '../../thread/helpers';
 import { useBodyText } from './useBodyText';
 import { useBodyImages } from './useBodyImages';
+import { PictureRetry } from './PictureRetry';
 import { useBodyLinks } from './useBodyLinks';
+import { useFileRefs } from './useFileRefs';
 import { useQuestionCards } from './useQuestionCards';
 import { useBodyComments } from './useBodyComments';
 import { useCommentPictures } from '../../commentPictures';
@@ -34,6 +39,7 @@ export function MessageBody({
   openInFiles = false,
   repo,
   onOpenAttachment,
+  onOpenFileRef,
   onOpenInlineImage,
   onOpenOptionSet,
   readOnly,
@@ -43,6 +49,7 @@ export function MessageBody({
   renderReplacedCard,
   renderReplacesLine,
   renderActions,
+  renderRunBlock,
   comments,
   sentAnswers,
   sentActions,
@@ -55,7 +62,7 @@ export function MessageBody({
   contextNotes,
   onTryPrototype,
 }: MessageBodyProps) {
-  const { skills, actionsSent, replyParts, ownReply, replyFileList, shown, noteBlocks, noteAtLine, notesRef, restShown, feedbackShown, blocks, restBlocks, feedbackBlocks } = useBodyText({ message, sentActions, sentAnswers, replyFiles, projectRoot, contextNotes });
+  const { skills, pullDetails, actionsSent, replyParts, ownReply, replyFileList, shown, noteBlocks, noteAtLine, notesRef, restShown, feedbackShown, blocks, restBlocks, feedbackBlocks } = useBodyText({ message, sentActions, sentAnswers, replyFiles, projectRoot, contextNotes });
   const refRepo = useRefRepo(repo);
   // The body's pictures are drawn whole in a box; a very long one shows its top with "Show all"
   // (images.ts fitMessageImage, inbox.css). A click on a picture still opens it in the viewer.
@@ -73,18 +80,21 @@ export function MessageBody({
       if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
-      if (link.getAttribute('href')!.startsWith('#board&') && tapOpens(link)) return;
+      if (tapOpens(link)) return;
       window.location.hash = link.getAttribute('href')!;
     },
     [tapOpens],
   );
   // Hover cards for issue, PR and MR links in the body (ui RefHoverCard).
   const refCard = useRefHoverCards(bodyRef);
-  const { imageBaseDir, htmlEmbeds, resolveImage, fallback, setFallback, onImageClick, onZoomChoice, pictureSizeOf } = useBodyImages({ message, imageBase, bodyRef, onOpenInlineImage, inlineRefOf, onImage, onOpenOptionSet });
-  const { tagLabels, tagHosts, tagLayerRef, tagMarks, resolveLocalLink } = useBodyLinks({ message, bodyRef, skills, replyFiles, replyFileList, projectRoot, openInFiles, onOpenAttachment, setFallback });
-  const { renderFooter, acceptBehavior, questionCard, belowPrompt, directiveBlock, afterChoices, answerLocked, statusLabel } = useQuestionCards({ message, projectRoot, readOnly, footerFor, answers, renderReplacedCard, renderReplacesLine, renderActions, onTryPrototype, blocks, noteAtLine, notesRef, refRepo });
+  const { refsOn, openFileRefRef } = useFileRefs({ message, projectRoot, onOpenFileRef, onOpenAttachment });
+  const { imageBaseDir, htmlEmbeds, resolveImage, fallback, setFallback, onImageClick, onZoomChoice, pictureSizeOf, refOf } = useBodyImages({ message, imageBase, bodyRef, onOpenInlineImage, inlineRefOf, onImage, onOpenOptionSet, openFileRefRef });
+  const { tagLabels, tagHosts, tagLayerRef, tagMarks, resolveLocalLink } = useBodyLinks({ message, bodyRef, skills, replyFiles, replyFileList, projectRoot, openInFiles, onOpenAttachment, setFallback, refsOn, openFileRefRef });
+  const { renderFooter, acceptBehavior, questionCard, belowPrompt, directiveBlock, afterChoices, answerLocked, statusLabel } = useQuestionCards({ message, projectRoot, readOnly, footerFor, answers, renderReplacedCard, renderReplacesLine, renderActions, renderRunBlock, onTryPrototype, blocks, noteAtLine, notesRef, refRepo });
   const pictures = useCommentPictures();
-  const { viewerRef, commentList, selectedBadge, selectBadge, commentsRef, addComment, restoreReport, sideButton, side, answerQuestion } = useBodyComments({ comments, message, blocks, onPick });
+  const { viewerRef, commentList, selectedBadge, selectBadge, commentsRef, addComment, restoreReport, sideButton, side, answerQuestion, embedAnnotate } = useBodyComments({ comments, message, blocks, onPick, pictures });
+  // The message's live html blocks take comments on their elements where its text takes them (the pen under a block).
+  const annotatableEmbeds = useMemo(() => (embedAnnotate ? { ...htmlEmbeds, annotate: embedAnnotate } : htmlEmbeds), [htmlEmbeds, embedAnnotate]);
 
   /** The sent reply's parts after the words (the rest, the feedback): read-only text. */
   const readOnlyViewer = (parts: Block[], markdown: string) => (
@@ -131,8 +141,13 @@ export function MessageBody({
 
   return (
     <ImageResolverContext.Provider value={resolveImage}>
+    {/* A picture named before it was written shows once it is there (PictureRetry). */}
+    <PictureRetry bodyRef={bodyRef} message={message} retries={(src) => refOf(src) !== null}>
+    {/* The body fits its pictures itself (images.ts, `.ib-body img[data-ib-fit]`): no image rows from ui. */}
+    <ImageRowsContext.Provider value={false}>
     <SoftLineBreaksContext.Provider value={ownReply}>
     <OpenInCodeSpans scope={{ thread: message.thread_id, message: message.id }} on={openInFiles}>
+    <FileRefCodeSpans on={refsOn} hover={openInFiles} scope={{ thread: message.thread_id, message: message.id }} openRef={openFileRefRef}>
     <div className="ib-body" data-message-id={message.id} data-text-comments={comments ? '' : undefined} data-sent-reply={replyParts ? '' : undefined} ref={bodyRef} onMouseUpCapture={comments?.onOpen ? readPress : undefined} onClickCapture={openHashtag} onClick={comments?.onOpen ? openHighlight : undefined}>
       {refCard}
       {tagPeek.node}
@@ -167,7 +182,7 @@ export function MessageBody({
         resolveLocalLink={resolveLocalLink}
         refRepo={refRepo}
         answerOnly
-        htmlEmbeds={htmlEmbeds}
+        htmlEmbeds={annotatableEmbeds}
         // `readOnly` is about the question cards (answerLocked locks them); with comments on, the text still takes them.
         readOnly={readOnly && !comments}
         questionAnswers={answers}
@@ -180,6 +195,8 @@ export function MessageBody({
         // Option lines (`Pros:`, `Cons:`, `Prototype:`) are read, not shown in the meaning line: the card draws the
         // Trade-offs table and the Try prototype tab (approval "inbox-question-tradeoffs").
         questionOptionLines
+        // Change lines (`Where:`, `Before:`, `After:`): the card draws the place and each version (approval "before-after").
+        questionChangeLines
         renderQuestionAfterChoices={onTryPrototype ? afterChoices : undefined}
         questionReadOnly={answerLocked}
         questionStatusLabel={statusLabel}
@@ -188,13 +205,14 @@ export function MessageBody({
         questionAcceptBehavior={acceptBehavior}
         renderQuestionCard={renderReplacedCard ? questionCard : undefined}
         renderQuestionBelowPrompt={renderReplacesLine ? belowPrompt : undefined}
-        renderDirectiveBlock={renderActions || noteBlocks.length > 0 ? directiveBlock : undefined}
+        renderDirectiveBlock={renderActions || renderRunBlock || noteBlocks.length > 0 ? directiveBlock : undefined}
       />
       )}
       {replyParts && sentAnswers && sentAnswers.length > 0 && <SentAnswers groups={sentAnswers} onJump={onJumpQuestion} />}
       {actionsSent && <ReplyActions actions={sentActions!} sent onJump={onJumpQuestion} />}
       {replyParts && restShown && <div data-sent-rest="">{readOnlyViewer(restBlocks, restShown)}</div>}
       {feedbackShown && <div data-reply-feedback="">{readOnlyViewer(feedbackBlocks, feedbackShown)}</div>}
+      {pullDetails && <PullDetailsLine details={pullDetails} />}
       {skills && <SkillsLine split={skills} />}
       {tagLabels && (
         <div className="ib-tg-marks" ref={tagLayerRef} aria-hidden="true" data-tag-marks="">
@@ -208,8 +226,11 @@ export function MessageBody({
       <InlineReuseLayer bodyRef={bodyRef} />
       {fallback && createPortal(<ImageLightbox src={fallback.src} alt={fallback.alt} onClose={() => setFallback(null)} />, document.body)}
     </div>
+    </FileRefCodeSpans>
     </OpenInCodeSpans>
     </SoftLineBreaksContext.Provider>
+    </ImageRowsContext.Provider>
+    </PictureRetry>
     </ImageResolverContext.Provider>
   );
 }

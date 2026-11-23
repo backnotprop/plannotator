@@ -31,6 +31,7 @@ import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { savedConfig } from '../helpers/saved-config';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 
@@ -86,10 +87,7 @@ async function agentWrites(w: World, body: string, subject: string): Promise<str
   }
 }
 
-function config(w: World): Record<string, any> {
-  const file = join(w.dataDir, 'config.json');
-  return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
-}
+const config = (w: World): Record<string, any> => savedConfig(w.dataDir);
 
 /** The person's list as the server holds it, without what moves on its own. */
 async function ownList(w: World): Promise<string> {

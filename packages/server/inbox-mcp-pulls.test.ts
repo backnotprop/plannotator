@@ -88,6 +88,24 @@ describe("thread_pulls", () => {
     expect(w.store.threadPulls(w.thread)).toEqual([]);
   });
 
+  test("an MR stored on gitlab.com before short refs followed a self-managed host stays as stored, and comes off by the text it shows", async () => {
+    const w = world(async () => "code.corp.example");
+    // How an older Inbox stored a short ref in a project whose host does not say gitlab.
+    await w.call({ thread_id: w.thread, add: ["https://gitlab.com/acme/api/-/merge_requests/7"], ...FILLED });
+    expect(threadPullsText(w.context, w.thread, "ses_a")[1]).toStartWith("- acme/api!7 ");
+    expect(w.store.threadPulls(w.thread).map((p) => p.url)).toEqual(["https://gitlab.com/acme/api/-/merge_requests/7"]);
+    const result = await w.call({ thread_id: w.thread, remove: ["acme/api!7"], ...FILLED });
+    expect(textOf(result).split("\n")[0]).toBe(`Thread ${w.thread}: Removed acme/api!7. Nothing was sent to the person.`);
+    expect(w.store.threadPulls(w.thread)).toEqual([]);
+    // Written again, it lands on the project's own host.
+    await w.call({ thread_id: w.thread, add: ["acme/api!7"], ...FILLED });
+    expect(w.store.threadPulls(w.thread).map((p) => p.url)).toEqual(["https://code.corp.example/acme/api/-/merge_requests/7"]);
+    // Both on the thread: the agent reads two lines, and each line's text takes off that row.
+    await w.call({ thread_id: w.thread, add: ["https://gitlab.com/acme/api/-/merge_requests/7"], ...FILLED });
+    await w.call({ thread_id: w.thread, remove: ["acme/api!7"], ...FILLED });
+    expect(w.store.threadPulls(w.thread).map((p) => p.url)).toEqual(["https://code.corp.example/acme/api/-/merge_requests/7"]);
+  });
+
   test("an agent that is not in the thread is refused, and so is a call with no session: nothing is written", async () => {
     const w = world();
     for (const who of [STRANGER, {}]) {

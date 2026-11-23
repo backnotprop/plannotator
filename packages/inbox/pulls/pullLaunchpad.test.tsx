@@ -1,20 +1,17 @@
 /**
- * One PR's launchpad (approval "pr-launchpad"), in the window, with the Inbox's doors stubbed at `fetch`. What regresses:
+ * One PR's launchpad, in the window, with the Inbox stubbed at `fetch`. What regresses:
  *  - a single open PR opening the stack page, or a stack of several opening the launchpad;
- *  - a door going anywhere but its own place: the guided review (its thread and message), the PR's diff (this layer),
- *    the review thread, the Shape board;
- *  - Start a guided review missing when there is none and a thread can start, not opening the New review box filled in
- *    with this PR, or offered beside a live thread (one review thread at a time); an ended agent's guide leaving no way
- *    to start a new one;
- *  - a thread that only named the PR (the Reviews page's rule) taken for its review thread: no way to start one;
+ *  - an action missing from the one row of buttons, or going anywhere but its own place: the PR's diff (this layer, the
+ *    one primary), Guided review and Picture it (the New review box filled in with this PR while no live thread is
+ *    about it; one reply in the live thread otherwise), Start a thread (only while no thread is about the PR), the
+ *    Shape board (only while Shape is on and the thread has one);
+ *  - a line for what was made missing, or opening anything but its own place: the Picture page beside its thread, the
+ *    guide's message, the thread; the agent's words while one is on its way, and when it stopped without one;
+ *  - a thread that only named the PR (the Reviews page's rule) taken for its review thread;
  *  - a guide the agent has not sent as a review (`review: false`) counted as one (the stack page's rule);
  *  - the facts losing "by you" on the person's own PR, or "Draft" on a draft;
- *  - the Shape board door offering a board that is not there, or showing while Shape is off; the System door showing
- *    while System does not (both are off in 0.29), or the grid keeping an empty slot for a door that is not there;
  *  - a Reviews row about one open PR opening anything but its launchpad, also once an agent reviewed it (the owner's
- *    routing answer, 2026-11-09); a local review, a thread of a stack of several, losing its way to the thread;
- *  - the diff card losing the approved words with the PR's file count ("All 70 files with your comments, Viewed and
- *    Approve."), or reading "All 1 files" / "All 0 files";
+ *    routing answer, 2026-11-09); a thread of a stack of several losing its way to the thread;
  *  - the details panel drawing its own head (author, branches, Close) under the page's;
  *  - a PR pane covering the list (stack.ts) with no way back to it but Close, unlike a covering thread's ‹ Inbox;
  *  - a phone's bar keeping `‹ Reviews` whole when the PR's number and repository have no room (a thread's
@@ -28,14 +25,17 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { inboxPullStacks, inboxReviewRows, type InboxPull, type InboxPullLink, type InboxPullsAnswer, type InboxReviewThread } from '@plannotator/core/inbox-types';
+import { inboxPullStacks, inboxReviewRows, type InboxMessageWire, type InboxPull, type InboxPullLink, type InboxPullsAnswer, type InboxReviewThread, type InboxThread } from '@plannotator/core/inbox-types';
 import type { InboxShapeSummary } from '../api';
-import type { PullsPageProps, PullsSystem } from './PullsPage';
+import type { PullsPageProps } from './PullsPage';
 import { pullsStateOf } from './reviewsTestState';
+import { REVIEW_ROW_AUTO_STOPPED } from './reviewsModel';
 
 const hasDom = typeof document !== 'undefined';
 const { PullsPage } = (hasDom ? await import('./PullsPage') : {}) as typeof import('./PullsPage');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
+const { forgetPictureItRequests, pictureItWords } = (hasDom ? await import('./usePictureItAsk') : {}) as typeof import('./usePictureItAsk');
+const { forgetPullGuideRequests, pullThreadGuideWords } = (hasDom ? await import('./usePullThreadGuide') : {}) as typeof import('./usePullThreadGuide');
 
 const REPO = 'northwind/web-app';
 
@@ -112,21 +112,36 @@ const board: InboxShapeSummary = {
 
 const liveSession = (session: string) => ({ session, host: 'claude-code', started_at: '2026-11-03T08:00:00.000Z', last_seen_at: '2026-11-03T09:29:00.000Z', busy: false, idle_since: null, last_thread: null });
 
+const asked = { id: 'msg_ask', project_id: 'prj_web', thread_id: 'thr_review', reply_to: null, author: { kind: 'person' }, subject: 'Review #880', subject_question: null, body: 'Review it.', created_at: '2026-11-03T09:00:00.000Z', resolved_at: null, idempotency_key: 'k', to: { host: 'claude-code', session: 'ses_web' } } as unknown as InboxMessageWire;
+const agentSays = (id: string, fields: Record<string, unknown> = {}) => ({ ...asked, id, reply_to: 'msg_ask', author: { kind: 'agent', host: 'claude-code', session: 'ses_web', name: 'Claude Code' }, body: 'Here.', to: undefined, wakes: true, created_at: '2026-11-03T09:10:00.000Z', ...fields }) as unknown as InboxMessageWire;
+const pictureMessage = agentSays('msg_page', { picture_it: { attachment_id: 'att_page', title: 'Late notes are offered' }, created_at: '2026-11-03T09:20:00.000Z' });
+let threadMessages: InboxMessageWire[] = [];
+const reviewThread = (): InboxThread => ({ thread_id: 'thr_review', project: { id: 'prj_web', key: 'web-app', name: 'web-app', root: '/home/dana/web-app', created_at: '2026-11-01T09:00:00.000Z' }, subject: 'Review #880', thread_name: 'Review #880', resolved_at: null, messages: threadMessages }) as unknown as InboxThread;
+
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 const went: string[] = [];
+let posts: { path: string; body: Record<string, unknown> }[] = [];
 
 beforeEach(() => {
   if (!hasDom) return;
   went.length = 0;
+  posts = [];
+  threadMessages = [asked, agentSays('msg_guide', { guide: { title: 'The RTL fix' } }), agentSays('msg_last')];
+  forgetPictureItRequests();
+  forgetPullGuideRequests();
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1');
     if (init?.method === 'POST') {
+      posts.push({ path: url.pathname.replace(/^.*\/api\/inbox/, ''), body: JSON.parse(String(init.body ?? '{}')) });
       if (url.pathname.endsWith('/api/inbox/messages')) return Response.json({ thread_id: 'thr_new', message: {}, replayed: false });
+      if (url.pathname.endsWith('/reply')) return Response.json({ message: { id: 'msg_reply' }, replayed: false });
       return Response.json({ ok: true });
     }
+    if (url.pathname.endsWith('/api/skills')) return Response.json({ skills: [] });
+    if (url.pathname.endsWith('/api/inbox/threads/thr_review')) return Response.json({ serverSession: 's', cursor: 1, thread: reviewThread() });
     if (url.pathname.endsWith('/api/inbox/sessions')) {
       return Response.json({ serverSession: 's', home: '/home/dana', projects: [{ project: { id: 'prj_web', name: 'web-app', root: '/home/dana/web-app' }, sessions: [liveSession('ses_web')] }] });
     }
@@ -167,8 +182,9 @@ function page(stackId: string, model: InboxPullsAnswer, extra: Partial<PullsPage
     onReview: (stack, key, scope) => went.push(`diff ${stack} ${key} ${scope}`),
     onOpenThread: (thread) => went.push(`thread ${thread}`),
     onNew: () => went.push('new'),
-    onNewReview: (pick, opener) => went.push(`new review ${pick.id} ${pick.thread ? 'in review' : 'none'} ${opener.getAttribute('data-launch-go')}`),
+    onNewReview: (pick, opener, ask) => went.push(`new review ${pick.id} ${pick.thread ? 'in review' : 'none'} ${opener.getAttribute('data-launch-go')}${ask ? ` ${ask}` : ''}`),
     onOpenGuide: (thread, message) => went.push(`guide ${thread} ${message}`),
+    onOpenPicture: (thread, attachment, message) => went.push(`picture ${thread} ${attachment} ${message}`),
     onOpenShape: (shape) => went.push(`shape ${shape.id}`),
     ...extra,
   };
@@ -271,69 +287,89 @@ test.skipIf(!hasDom)('covering the list (a window too narrow for both), the PR p
   host = null;
 });
 
-test.skipIf(!hasDom)("each door goes to its own place: the guide's message, this PR's diff, the review thread, its Shape board", async () => {
-  mount(single.key, answer({ [single.key]: live }), { shapes: new Map([[live.thread_id, board]]) });
-  await settle();
-  await click('[data-launch-go="guide"]');
-  await click('[data-launch-go="diff"]');
-  await click('[data-launch-go="thread"]');
-  await click('[data-launch-go="shape"]');
-  expect(went).toEqual([`guide thr_review msg_guide`, `diff ${single.key} ${single.key} layer`, 'thread thr_review', 'shape shp_1']);
-  // A guide is there: nothing to start.
-  expect(!!$('[data-launch-go="start"]')).toBe(false);
-});
+const row = () => [...document.querySelectorAll('[data-launch-row] button')].map((button) => button.getAttribute('data-launch-go'));
+const lines = () => [...document.querySelectorAll('[data-launch-line]')].map((line) => line.getAttribute('data-launch-line'));
+const line = (kind: string) => $(`[data-launch-line="${kind}"]`)!.textContent!;
+const pictureLink: InboxPullLink = { ...live, picture_it_asked_at: '2026-11-03T09:05:00.000Z', picture_it_page: { message_id: 'msg_page', title: 'Late notes are offered', at: '2026-11-03T09:20:00.000Z' } };
 
-test.skipIf(!hasDom)('no guided review and no thread: Start a guided review opens the New review box filled in with this PR', async () => {
+test.skipIf(!hasDom)('no thread yet: one row, Open the diff the one primary; Guided review and Picture it open the New review box filled in with this PR, Picture it asking for a page; Start a thread; no lines', async () => {
   mount(single.key, answer());
   await settle();
-  expect($('[data-launch-door="guide"] [data-launch-go="start"]')!.getAttribute('data-pulls-primary')).toBe('review');
-  // No thread yet: the Review thread door has nothing to open.
-  expect(!!$('[data-launch-go="thread"]')).toBe(false);
-  await click('[data-launch-go="start"]');
-  expect(went).toEqual([`new review ${single.key} none start`]);
+  expect(row()).toEqual(['diff', 'guide', 'picture', 'start-thread']);
+  expect([...document.querySelectorAll('.ib-lp .ib-btn.ib-pri')].map((b) => b.getAttribute('data-launch-go'))).toEqual(['diff']);
+  expect(lines()).toEqual([]);
+  await click('[data-launch-go="diff"]');
+  await click('[data-launch-go="guide"]');
+  await click('[data-launch-go="picture"]');
+  expect(went).toEqual([`diff ${single.key} ${single.key} layer`, `new review ${single.key} none guide`, `new review ${single.key} none picture picture_it`]);
+  await click('[data-launch-go="start-thread"]');
+  expect(!!$('[data-launchpad]')).toBe(false);
+  expect(!!$('[data-pull-thread-start]')).toBe(true);
 });
 
-test.skipIf(!hasDom)('a thread that only named the PR is no review thread: a guided review can start, and that thread opens as it is', async () => {
-  // The agent's own thread named the PR in a message (`url`): nobody handed it the review.
+test.skipIf(!hasDom)('a live thread with a guide and a Picture page: each line opens its own place, Start a thread leaves the row, the Shape board joins it', async () => {
+  threadMessages = [...threadMessages, pictureMessage];
+  mount(single.key, answer({ [single.key]: pictureLink }), { shapes: new Map([[live.thread_id, board]]) });
+  await settle();
+  expect(row()).toEqual(['diff', 'guide', 'picture', 'shape']);
+  expect(lines()).toEqual(['picture', 'guide', 'thread']);
+  expect(line('picture')).toContain('Late notes are offered');
+  expect(line('guide')).toContain('The RTL fix');
+  expect(line('thread')).toContain('“A guided review of #880.”');
+  await click('[data-launch-line="picture"]');
+  await click('[data-launch-line="guide"]');
+  await click('[data-launch-line="thread"]');
+  await click('[data-launch-go="shape"]');
+  expect(went).toEqual(['picture thr_review att_page msg_page', 'guide thr_review msg_guide', 'thread thr_review', 'shape shp_1']);
+});
+
+test.skipIf(!hasDom)('a live thread: Picture it and Guided review each ask once in that thread, the PR is told, and the lines say the agent is making them', async () => {
+  mount(single.key, answer({ [single.key]: live }));
+  await settle();
+  await click('[data-launch-go="picture"]');
+  await click('[data-launch-go="guide"]');
+  const stack = inboxPullStacks([single])[0]!;
+  const replies = posts.filter((post) => post.path.endsWith('/reply'));
+  expect(replies.map((post) => post.path)).toEqual(['/messages/msg_last/reply', '/messages/msg_last/reply']);
+  expect(String(replies[0]!.body.words).startsWith(pictureItWords({ kind: 'pull', stack, linkThreadId: 'thr_review' }))).toBe(true);
+  expect(String(replies[1]!.body.words).startsWith(pullThreadGuideWords(stack))).toBe(true);
+  expect(posts.filter((post) => post.path === '/pulls/owner').map((post) => post.body.ask)).toEqual(['picture_it', 'guide']);
+  expect(line('picture')).toContain('is making it…');
+  expect(line('guide')).toContain('is writing a new one…');
+  expect(!!$('[data-launch-go="picture"]:disabled') && !!$('[data-launch-go="guide"]:disabled')).toBe(true);
+  expect(went).toEqual([]);
+});
+
+test.skipIf(!hasDom)('an agent that ended without what it was asked for: the lines say it stopped, and both asks open the New review box again', async () => {
+  mount(single.key, answer({ [single.key]: { ...live, guide: null, picture_it_asked_at: '2026-11-03T09:05:00.000Z', agent: { ...live.agent!, ended: true } } }));
+  await settle();
+  expect(line('picture')).toBe('Picture page' + REVIEW_ROW_AUTO_STOPPED.picture_it);
+  expect(line('guide')).toBe('Guided review' + REVIEW_ROW_AUTO_STOPPED.guide);
+  expect(line('thread')).toContain('ended');
+  expect(row()).toEqual(['diff', 'guide', 'picture']);
+  await click('[data-launch-go="guide"]');
+  await click('[data-launch-go="picture"]');
+  expect(went).toEqual([`new review ${single.key} none guide`, `new review ${single.key} none picture picture_it`]);
+});
+
+test.skipIf(!hasDom)('a thread that only named the PR is no review thread: the asks open the New review box, and that thread opens as it is', async () => {
   mount(single.key, answer({ [single.key]: { ...live, via: 'url', ask: undefined, guide: null } }));
   await settle();
-  expect(!!$('[data-launch-go="guide-thread"]')).toBe(false);
-  expect($('[data-launch-door="guide"] [data-launch-go="start"]')!.getAttribute('data-pulls-primary')).toBe('review');
-  expect($('[data-launch-door="thread"]')!.textContent).toContain('Thread with');
-  await click('[data-launch-door="thread"] [data-pulls-open-thread]');
-  await click('[data-launch-go="start"]');
-  expect(went).toEqual(['thread thr_review', `new review ${single.key} none start`]);
+  expect(lines()).toEqual(['thread']);
+  await click('[data-launch-line="thread"]');
+  await click('[data-launch-go="guide"]');
+  expect(went).toEqual(['thread thr_review', `new review ${single.key} none guide`]);
 });
 
-test.skipIf(!hasDom)("a live thread with no guide yet: no second thread to start; its thread opens from the wide card and its own", async () => {
+test.skipIf(!hasDom)('a guide on its way says the agent is writing it; one the agent did not send as a review is none yet (the stack page rule)', async () => {
   mount(single.key, answer({ [single.key]: { ...live, guide: null } }));
   await settle();
-  expect(!!$('[data-launch-go="start"]')).toBe(false);
-  expect(!!$('[data-launch-go="guide"]')).toBe(false);
-  expect($('[data-launch-door="guide"] [data-launch-go="guide-thread"]')!.getAttribute('data-pulls-primary')).toBe('open');
-  await click('[data-launch-go="guide-thread"]');
-  await click('[data-launch-go="thread"]');
-  expect(went).toEqual(['thread thr_review', 'thread thr_review']);
-});
-
-test.skipIf(!hasDom)('a guide the agent did not send as a review is none yet (the stack page rule)', async () => {
-  mount(single.key, answer({ [single.key]: { ...live, guide: { ...live.guide!, review: false } } }));
+  expect(line('guide')).toContain('is writing it…');
+  act(() => root!.unmount());
+  host!.remove();
+  mount(single.key, answer({ [single.key]: { ...live, ask: 'thread', guide: { ...live.guide!, review: false } } }));
   await settle();
-  expect(!!$('[data-launch-go="guide"]')).toBe(false);
-  expect(!!$('[data-launch-go="guide-thread"]')).toBe(true);
-});
-
-test.skipIf(!hasDom)("an agent that ended after its guide: the guide opens, and a new guided review can start from the New review box", async () => {
-  mount(single.key, answer({ [single.key]: { ...live, agent: { ...live.agent!, ended: true } } }));
-  await settle();
-  const open = $('[data-launch-door="guide"] [data-launch-go="guide"]')!;
-  const again = $<HTMLButtonElement>('[data-launch-door="guide"] [data-launch-go="start"]')!;
-  expect(open.classList.contains('ib-pri')).toBe(true);
-  expect(again.classList.contains('ib-pri')).toBe(false);
-  expect(again.getAttribute('data-pulls-primary')).toBe('again');
-  await click('[data-launch-go="start"]');
-  await click('[data-launch-go="guide"]');
-  expect(went).toEqual([`new review ${single.key} none start`, 'guide thr_review msg_guide']);
+  expect(lines()).toEqual(['thread']);
 });
 
 test.skipIf(!hasDom)('the facts say "by you" on your own PR and "Draft" on a draft; a teammate\'s ready PR says neither', async () => {
@@ -349,36 +385,10 @@ test.skipIf(!hasDom)('the facts say "by you" on your own PR and "Draft" on a dra
   expect(facts()).not.toContain('Draft');
 });
 
-test.skipIf(!hasDom)('an agent that ended with no guide: Start a guided review is offered again', async () => {
-  mount(single.key, answer({ [single.key]: { ...live, guide: null, agent: { ...live.agent!, ended: true } } }));
+test.skipIf(!hasDom)('Shape on with no board for the thread: no Shape board button', async () => {
+  mount(single.key, answer({ [single.key]: live }), { shapes: new Map() });
   await settle();
-  expect($('[data-launch-go="start"]')!.getAttribute('data-pulls-primary')).toBe('again');
-});
-
-const systemOn: PullsSystem = { projects: [], open: null, sheet: null, full: false, onOpen: () => {}, onSheet: () => {}, onFull: () => {}, onMenu: () => {} };
-const doors = () => [...document.querySelectorAll('[data-launch-door]')].map((door) => door.getAttribute('data-launch-door'));
-
-test.skipIf(!hasDom)('Shape and System off (0.29): three doors and a grid laid out for three; each comes back with its switch', async () => {
-  const draw = async (extra: Partial<PullsPageProps>) => {
-    act(() => root?.unmount());
-    host?.remove();
-    mount(single.key, answer({ [single.key]: live }), extra);
-    await settle();
-  };
-  await draw({});
-  expect(doors()).toEqual(['guide', 'diff', 'thread']);
-  expect($('.ib-lp-grid')!.getAttribute('data-doors')).toBe('3');
-  // Shape on, with no board for this thread: the door, with nothing to open.
-  await draw({ shapes: new Map() });
-  expect(doors()).toEqual(['guide', 'diff', 'thread', 'shape']);
-  expect($('.ib-lp-grid')!.getAttribute('data-doors')).toBe('4');
-  expect(!!$('[data-launch-go="shape"]')).toBe(false);
-  await draw({ system: systemOn });
-  expect(doors()).toEqual(['guide', 'diff', 'thread', 'system']);
-  expect($('.ib-lp-grid')!.getAttribute('data-doors')).toBe('4');
-  await draw({ shapes: new Map(), system: systemOn });
-  expect(doors()).toEqual(['guide', 'diff', 'thread', 'shape', 'system']);
-  expect($('.ib-lp-grid')!.getAttribute('data-doors')).toBe('5');
+  expect(row()).toEqual(['diff', 'guide', 'picture']);
 });
 
 test.skipIf(!hasDom)("the details sit in the page under its own heading: no head of their own, no Close", async () => {
@@ -433,12 +443,33 @@ test.skipIf(!hasDom)("a Reviews row about one open PR opens its launchpad, also 
   expect(opened).toEqual([`stack ${one.id}`, 'thread thr_stack']);
 });
 
-test.skipIf(!hasDom)('the diff card says the approved words with the file count: All N files, the one file, or all files when the count is unknown', async () => {
-  const { diffWords } = await import('./PullLaunchpad');
-  mount(single.key, answer());
+const startThreadButton = '[data-launch-row] [data-launch-go="start-thread"]';
+
+test.skipIf(!hasDom)('Start a thread only while no thread is about the PR: a review thread, an ended one, or one that only named it keep their own line', async () => {
+  for (const link of [live, { ...live, guide: null }, { ...live, guide: null, agent: { ...live.agent!, ended: true } }, { ...live, via: 'url' as const, ask: undefined, guide: null }]) {
+    mount(single.key, answer({ [single.key]: link }));
+    await settle();
+    expect(!!$(startThreadButton)).toBe(false);
+    expect(!!$('[data-launch-line="thread"]')).toBe(true);
+    act(() => root!.unmount());
+    host!.remove();
+  }
+});
+
+test.skipIf(!hasDom)('Start a thread on a phone, on a draft and on your own PR; never for a PR in no project', async () => {
+  const draftMine: InboxPullsAnswer = { ...answer(), pulls: [{ ...single, state: 'draft', mine: true }, low, high] };
+  const cases: [InboxPullsAnswer, Partial<PullsPageProps>][] = [
+    [answer(), { phone: true }],
+    [draftMine, {}],
+  ];
+  for (const [model, extra] of cases) {
+    mount(single.key, model, extra);
+    await settle();
+    expect(!!$(startThreadButton)).toBe(true);
+    act(() => root!.unmount());
+    host!.remove();
+  }
+  mount(single.key, { ...answer(), projects: {} });
   await settle();
-  expect($('[data-launch-door="diff"] .ib-lp-sub')!.textContent).toBe('All 2 files with your comments, Viewed and Approve.');
-  expect(diffWords(70)).toBe('All 70 files with your comments, Viewed and Approve.');
-  expect(diffWords(1)).toBe('The one file with your comments, Viewed and Approve.');
-  expect(diffWords(0)).toBe('All files with your comments, Viewed and Approve.');
+  expect(!!$(startThreadButton)).toBe(false);
 });

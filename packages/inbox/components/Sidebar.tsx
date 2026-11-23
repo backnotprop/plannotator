@@ -41,9 +41,13 @@ import { inboxSearchShortcuts } from '../search/searchShortcut';
 import { ShortcutHint, useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
+import { ScheduledNav } from '../scheduled/ScheduledNav';
+import { PlansNav } from '../plans/PlansNav';
 
 export interface SidebarProps {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'shapes' | 'prs' | 'artifacts';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'shapes' | 'prs' | 'artifacts' | 'scheduled' | 'plans';
+  /** Plans: the row second under Inbox, only while Plans is on (config.json `inboxPlans`); no row, menu item or Customize entry while off. */
+  onPlans?: () => void;
   /**
    * Artifacts (approval "inbox-artifact-stars"): the row in the top group (before Reviews; Customize can hide it), drawn with `onArtifacts`, that opens
    * the Artifacts wall on All. No count.
@@ -55,6 +59,8 @@ export interface SidebarProps {
    * Board's header ("N in flight · N on you").
    */
   onBoard?: () => void;
+  /** Routines: the row under Board, only while Settings → Capabilities → Routines is on. */
+  onScheduled?: () => void;
   /**
    * Reviews (approvals "inbox-code-review-direction", item 4, and "inbox-reviews-page"): a row of its own (after Board when the Board is on; it needs none), shown only with
    * `onPulls` (Settings → Capabilities → Code review on). `pullsCount`: the last read's "On you".
@@ -95,7 +101,7 @@ export interface SidebarProps {
    * The Tags section (approval "inbox-thread-tags", TagsSection.tsx), under Starred: drawn while `shown` (a tag holds
    * a thread, or the person made one). Absent (an Inbox that keeps no tags, the tour): no section.
    */
-  tags?: Pick<TagsSectionProps, 'tags' | 'waiting' | 'tagId' | 'onOpen' | 'onCreate' | 'onRename' | 'onDelete'> & { shown: boolean };
+  tags?: Pick<TagsSectionProps, 'tags' | 'waiting' | 'tagId' | 'onOpen' | 'onCreate' | 'onRename' | 'onDelete' | 'colours'> & { shown: boolean };
   onAgentFilter?: (agentId: string | null) => void;
   onMessageAgent?: (session: string, opener: HTMLElement) => void;
   onAddAgent?: (opener: HTMLElement) => void;
@@ -430,6 +436,8 @@ export function Sidebar(props: SidebarProps) {
     );
   const drawn = drawnSidebarItems({
     board: Boolean(props.onBoard),
+    plans: Boolean(props.onPlans),
+    scheduled: Boolean(props.onScheduled),
     reviews: Boolean(props.onPulls),
     shape: Boolean(props.onShape),
     // The Usage row decides itself whether it shows (components/Usage.tsx); the menu offers it only where `cswap` is.
@@ -555,6 +563,10 @@ export function Sidebar(props: SidebarProps) {
           Board
         </button>
         );
+      case 'plans':
+        return <PlansNav on={props.page === 'plans' && !props.projectId} onClick={pick(() => props.onPlans?.())} pick={pick} phone={phone} />;
+      case 'scheduled':
+        return <ScheduledNav on={props.page === 'scheduled'} onClick={pick(() => props.onScheduled?.())} />;
       case 'shape':
         return (
         <button
@@ -778,6 +790,7 @@ export function Sidebar(props: SidebarProps) {
             onCreate={props.tags.onCreate}
             onRename={props.tags.onRename}
             onDelete={props.tags.onDelete}
+            colours={props.tags.colours}
           />,
         )}
         {agentsShown && (
@@ -850,7 +863,7 @@ export function Sidebar(props: SidebarProps) {
           ) : (
             shown.map((project) => {
               const n = props.projectCounts.get(project.id) ?? 0;
-              const on = props.page === 'inbox' && props.projectId === project.id;
+              const on = (props.page === 'inbox' || props.page === 'plans') && props.projectId === project.id;
               if (projectsClosed && !on) return null;
               if (!props.onProjectAction) {
                 return (
