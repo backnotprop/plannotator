@@ -28,10 +28,11 @@ export interface GuideReaderComments {
 }
 
 /**
- * Code review's image preview on changed images (review-editor's `ImageDiffPreview`, as its All files draws it): the
- * reads of `/api/review-image` sent to the host's own route (packages/inbox/reviewImages.ts), under a snapshot id of
- * the host's own. A host names it with `ReaderPart` `images` (lazyParts.tsx), which the reader reads from
- * `ReviewImagesContext`. Absent: an image's diff is the binary notice, as before.
+ * Code review's image preview on changed images (review-editor's `ImageDiffPreview`, as its All files draws it) and its
+ * package changes card (`PackageChangesCard`): the reads of `/api/review-image` and `/api/package-changes` sent to the
+ * host's own routes (packages/inbox/reviewImages.ts), under a snapshot id of the host's own. A host names it with
+ * `ReaderPart` `images` (lazyParts.tsx), which the reader reads from `ReviewImagesContext`. Absent: an image's diff is
+ * the binary notice, and a package file has no card, as before.
  */
 export interface GuideReaderImages {
   snapshotId: string;

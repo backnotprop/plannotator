@@ -217,6 +217,7 @@ import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT, inbox
 import { guideReviewOf, guidePullKey, inboxGuideFileContents, inboxGuideRoute } from "./inbox-guides";
 import { guideReviewImage, pullReviewImage, reviewImageHttp } from "./inbox-review-image";
 import { guideReviewMarkdownImage, pullReviewMarkdownImage } from "./inbox-review-markdown-image";
+import { guidePackageChanges, packageCardOn, pullPackageChanges } from "./inbox-package-changes";
 import { createInboxRepoCache } from "./inbox-repos";
 import { createGitlabHosts, unnamedForgeHost, type GitlabHosts } from "./inbox-gitlab-hosts";
 import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-refs";
@@ -6279,7 +6280,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         pullHiddenChanged();
         return json({ serverSession, hidden: hiddenList(), hidden_repos: pullHidden.repos(), hid: hide.map((pull) => pull.key), rehid, threads_left: left, threads_back: back });
       }
-      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes" || path === "/api/inbox/pulls/review-image" || path === "/api/inbox/pulls/review-markdown-image") {
+      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes" || path === "/api/inbox/pulls/review-image" || path === "/api/inbox/pulls/review-markdown-image" || path === "/api/inbox/pulls/package-changes") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
@@ -6357,6 +6358,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
           const asked = { pulls, key, scope: scoped.scope, ...(scoped.from ? { from: scoped.from } : {}), params: url.searchParams, roots: () => pullRoots(key), ifNoneMatch: req.headers.get("if-none-match"), signal: req.signal };
           return reviewImageHttp(await (path === "/api/inbox/pulls/review-image" ? pullReviewImage(asked) : pullReviewMarkdownImage(asked)));
+        }
+        // The package changes card under a package.json or lockfile the diff changes (inbox-package-changes.ts): the
+        // shared service's rows, from the diff at the head the window names; never npm.
+        if (path === "/api/inbox/pulls/package-changes") {
+          const key = url.searchParams.get("key") ?? "";
+          const scoped = pullDiffScopeOf(url.searchParams);
+          if (!scoped) throw new InboxError("validation_error", "scope: layer, stack, range with from (a layer's key) or since with from (a commit).", { field: "scope" });
+          if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
+          const out = await pullPackageChanges({ pulls, key, scope: scoped.scope, ...(scoped.from ? { from: scoped.from } : {}), params: url.searchParams, roots: () => pullRoots(key), cardOn: packageCardOn(loadConfig()) });
+          return Response.json(out.body, { status: out.status, headers: { "Cache-Control": "no-store" } });
         }
         if (path === "/api/inbox/pulls/file") {
           const key = url.searchParams.get("key") ?? "";
@@ -7903,8 +7914,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
       // A guided review's image previews (inbox-review-image.ts): one side of a changed image, the blob the guide's patch
       // names, from the project's git or working tree; as for the arrows, only Code review may ask the forge.
-      // And a picture a changed Markdown file shows (inbox-review-markdown-image.ts), with the same readers.
-      const guideImage = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/guide\/(review-image|review-markdown-image)$/.exec(path);
+      // And a picture a changed Markdown file shows (inbox-review-markdown-image.ts), and the package changes card
+      // (inbox-package-changes.ts): the same reader (`guideSideReader`), given the same extras.
+      const guideImage = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/guide\/(review-image|review-markdown-image|package-changes)$/.exec(path);
       if (guideImage) {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
@@ -7924,9 +7936,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 return projectRoot && roots.includes(projectRoot) ? pulls.fileBytes(pullKey, "layer", side, filePath, oldPath, roots, maxBytes) : ({ kind: "missing" } as const);
               }
             : undefined;
-        // One read of the guide: its patch, and the commit it pins (a pure rename's sides, an unchanged picture of a Markdown file).
+        // One read of the guide: its patch, and the commit it pins (a pure rename's sides, a file the patch does not change).
         const review = guideReviewOf(store, sha256);
-        const asked = { patch: review?.patch ?? null, revision: review?.revision ?? null, messageId: message.id, root: projectRoot, params: url.searchParams, ...(forge ? { forge } : {}), ifNoneMatch: req.headers.get("if-none-match"), signal: req.signal };
+        const read = { patch: review?.patch ?? null, revision: review?.revision ?? null, root: projectRoot, ...(forge ? { forge } : {}) };
+        if (guideImage[2] === "package-changes") {
+          const out = await guidePackageChanges({ ...read, messageId: message.id, params: url.searchParams, cardOn: packageCardOn(loadConfig()) });
+          return Response.json(out.body, { status: out.status, headers: { "Cache-Control": "no-store" } });
+        }
+        const asked = { ...read, messageId: message.id, params: url.searchParams, ifNoneMatch: req.headers.get("if-none-match"), signal: req.signal };
         return reviewImageHttp(await (guideImage[2] === "review-image" ? guideReviewImage(asked) : guideReviewMarkdownImage(asked)));
       }
 

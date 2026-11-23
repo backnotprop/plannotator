@@ -414,7 +414,7 @@ function patchFilesOf(store: InboxStore, sha256: string): DiffFile[] {
 
 /**
  * A guide's patch as the agent sent it (its image previews), and the commit it pins (where a pure rename's sides and a
- * Markdown file's unchanged pictures are read, inbox-review-image.ts): its commit for a guide of one commit, else the
+ * file the patch does not change are read, inbox-review-image.ts): its commit for a guide of one commit, else the
  * head it was made at (`source.headSha`), else null (a producer that records none). Read once per
  * guide; null when it cannot be read. Only a read that worked is kept: a failed one (a passing file error) is tried
  * again on the next request, never remembered.
