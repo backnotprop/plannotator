@@ -13,6 +13,8 @@ const SESSION = { surface: 'terminal', isInteractive: true, cwd: '/work' } as co
 /** What the engine names a plugin's registered tool (the mock answers with this). */
 const TOOL_PREFIX = 'mcp__plugin_plannotator_tools__'
 const TOOL = `${TOOL_PREFIX}plannotator`
+/** The Inbox's gate (packages/shared/inbox/turned-on.ts): the person's own `plannotator inbox` writes it. */
+const TURNED_ON = '/home/me/.plannotator/inbox/turned-on'
 
 /** The world beneath the mod: a session, a file map, and a CLI that comes up at once. */
 function world(
@@ -38,9 +40,12 @@ function world(
     /** Holds every `$.tool.register` until it settles; `onRegister` runs as each one arrives. */
     toolRegistered?: Promise<void>
     onRegister?: (name: string) => void
+    /** The person never ran `plannotator inbox` here: no `inbox/turned-on` mark (by default there is one). */
+    noMark?: boolean
   } = {},
 ) {
   const files = options.files ?? new Map<string, string>()
+  if (!options.noMark && !files.has(TURNED_ON)) files.set(TURNED_ON, '{"on":true,"by":"command"}')
   const runs: string[][] = []
   const submits: string[] = []
   const logs: string[] = []
@@ -636,8 +641,31 @@ describe('register', () => {
     // Every action a real Inbox offers, in the contract's order (INBOX_TOOL_ACTIONS).
     expect(registered?.inputSchema.properties.action.enum).toEqual(['send_message', 'read_thread', 'search', 'resolve_message', 'snooze_thread', 'thread_pulls', 'submit_guide', 'get_guide_brief'])
     expect(calls).toEqual([])
-    expect([...w.files.keys()].filter((path) => path.includes('/inbox'))).toEqual([])
+    expect([...w.files.keys()].filter((path) => path.includes('/inbox') && path !== TURNED_ON)).toEqual([])
     expect(w.runs.filter((argv) => argv.includes('inbox'))).toEqual([])
+  })
+
+  // The Inbox is off until the person runs it (inbox-turned-on.ts): no tool, no reminder, nothing asked or started.
+  test('the person never ran plannotator inbox here: no plannotator_inbox, no reminder, nothing run', async ($: any, on: any) => {
+    const calls: { url: string; body: any }[] = []
+    const w = world(on, { fetch: inbox(TOOLS, calls), noMark: true })
+    await $.session.start(SESSION)
+    await $.prompt.submit({ text: 'Refactor the handler.' })
+
+    expect(w.tools.map((t) => t.name)).toEqual(['plannotator'])
+    expect(w.contexts).toEqual([null])
+    expect(calls).toEqual([])
+    expect(w.runs.filter((argv) => argv.includes('inbox'))).toEqual([])
+    expect(w.files.has(TURNED_ON)).toBe(false)
+  })
+
+  // An Inbox that ran before the mark, or that an older plannotator started (it writes no mark): on, written once.
+  test('an Inbox ran here with no mark (inbox.json from before, or an older plannotator): plannotator_inbox, and the mark written on', async ($: any, on: any) => {
+    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []), noMark: true })
+    await $.session.start(SESSION)
+
+    expect(w.tools.map((t) => t.name)).toEqual(['plannotator_inbox', 'plannotator'])
+    expect(JSON.parse(w.files.get(TURNED_ON)!)).toMatchObject({ on: true, by: 'update-existing' })
   })
 
   test('the first plannotator_inbox call with no Inbox yet starts one with plannotator inbox --background', async ($: any, on: any) => {
@@ -1339,6 +1367,104 @@ describe('register', () => {
     expect(w.submits).toHaveLength(1)
   })
 
+  // --- The Claude desktop app's Code tab (#3239): a headless session plus the reply wake ---
+  //
+  // The desktop app runs a Code tab's Claude Code through the Agent SDK (not interactive, no surface at start) with
+  // CLAUDE_CODE_ENTRYPOINT=claude-desktop (claude-desktop-3p with a third-party provider). Before #3239 it was
+  // sorted headless: its first send went unmarked ("Saved for Claude Code…") and a reply went in only once the
+  // self-heal armed the Inbox tick, about 60 s after the session started.
+  const SDK_SESSION = { ...SESSION, surface: null, isInteractive: false }
+  const REPLY = { type: 'reply', id: 'msg_reply', thread_id: 'msg_1', reply_to: 'msg_1', subject: 'Ship it?', body: 'Yes, after the freeze.', url: 'http://localhost:5150/#thread=msg_1' }
+  /** An Inbox whose reply to the session's message is posted when `post()` is called, and handed out until delivered. */
+  function replyAfter(calls: { url: string; body: any }[]) {
+    const state = { posted: false, delivered: false }
+    const fetch = inbox(TOOLS, calls, (path, body) => {
+      if (path === '/api/inbox/bridge/event' && body.type === 'delivered' && body.id === REPLY.id) state.delivered = true
+      return path === '/api/inbox/bridge/poll' ? { commands: state.posted && !state.delivered ? [REPLY] : [] } : { ok: true }
+    })
+    return { state, fetch }
+  }
+  const sendsOf = (calls: { url: string; body: any }[]) => calls.filter((c) => c.body?.method === 'tools/call')
+  const pollsOf = (calls: { url: string; body: any }[]) => calls.filter((c) => c.url.endsWith('/api/inbox/bridge/poll'))
+
+  for (const entrypoint of ['claude-desktop', 'claude-desktop-3p']) {
+    test(`the desktop app's Code tab (${entrypoint}): plannotator_inbox alone, the first send marked to wake, and a reply posted seconds later arrives at once as one plugin turn`, async ($: any, on: any) => {
+      const calls: { url: string; body: any }[] = []
+      const inboxNow = replyAfter(calls)
+      const w = world(on, { files: withRegistry(), env: { CLAUDE_CODE_ENTRYPOINT: entrypoint }, fetch: inboxNow.fetch })
+      await $.session.start(SDK_SESSION)
+
+      // No `plannotator` tool and no slash commands: as before #3239.
+      expect(w.tools.map((t) => t.name)).toEqual(['plannotator_inbox'])
+      expect(w.registered).toEqual([])
+
+      const answer = await $.tool.call({ tool: INBOX_TOOL, action: 'send_message', body: 'Ship it?' })
+      expect(answer.result).toContain('Sent to the Plannotator Inbox')
+      // The mark the Inbox stores as the message's `wakes`: the send tool then says the reply arrives by itself.
+      expect(sendsOf(calls).at(-1)?.body.params._meta).toEqual({ 'ai.plannotator/inbox-wakes': true })
+
+      for (let second = 0; second < 2; second++) await w.clock.advance(1_000)
+      expect(pollsOf(calls).length).toBeGreaterThan(0)
+      expect(w.submits).toEqual([])
+
+      inboxNow.state.posted = true
+      for (let second = 0; second < 4; second++) await w.clock.advance(1_000)
+      expect(w.submits).toHaveLength(1)
+      expect(w.submits[0]).toContain('Plannotator Inbox: Ship it? (msg_reply)')
+      expect(w.submits[0]).toContain(REPLY.body)
+      expect(inboxNow.state.delivered).toBe(true)
+      expect(pollsOf(calls).every((c) => c.body.session === 'session-1' && c.body.host === 'claude-code')).toBe(true)
+      for (let second = 0; second < 10; second++) await w.clock.advance(1_000)
+      expect(w.submits).toHaveLength(1)
+    })
+  }
+
+  test("the desktop app's Code tab keeps the classic flows, as before #3239: ExitPlanMode and a Bash `plannotator review` pass on, no plan switch is set, no reminder", async ($: any, on: any) => {
+    const w = world(on, { files: withRegistry(), env: { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' }, fetch: inbox(TOOLS, []) })
+    on('tool.call', () => ({ result: 'the classic flow ran' }))
+    await $.session.start(SDK_SESSION)
+
+    expect((await $.tool.call({ tool: 'ExitPlanMode', plan: '# Plan\n' })).result).toBe('the classic flow ran')
+    expect((await $.tool.call({ tool: 'Bash', command: 'plannotator review' })).result).toBe('the classic flow ran')
+    expect(w.runs.filter((argv) => argv[3] === 'plannotator-launch')).toEqual([])
+    expect(w.env.has('PLANNOTATOR_PLAN_REVIEW')).toBe(false)
+
+    await $.prompt.submit({ text: 'Refactor the handler.' })
+    expect(w.contexts).toEqual([null])
+    expect(w.env.get('PLANNOTATOR_INBOX_REMINDER')).toBeUndefined()
+  })
+
+  test("the desktop app's Code tab with the Inbox not turned on here: no plannotator_inbox, nothing asked", async ($: any, on: any) => {
+    const calls: { url: string; body: any }[] = []
+    const w = world(on, { env: { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' }, fetch: inbox(TOOLS, calls), noMark: true })
+    await $.session.start(SDK_SESSION)
+    for (let second = 0; second < 6; second++) await w.clock.advance(1_000)
+    expect(w.tools.map((t) => t.name)).toEqual([])
+    expect(calls).toEqual([])
+  })
+
+  // A `claude -p` started from Claude's Bash in a Code tab inherits `claude-desktop`, and the variables Claude Code sets
+  // in every process it starts; and a plain `claude -p`. Both stay as they were: unmarked, nothing polled or submitted.
+  for (const [name, env] of [
+    ['a claude -p started inside a Code tab session', { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop', CLAUDECODE: '1', CLAUDE_CODE_CHILD_SESSION: '1' }],
+    ['a plain claude -p', { CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' }],
+  ] as const) {
+    test(`${name} is headless: plannotator_inbox alone, the send unmarked, and a waiting reply neither polled nor submitted`, async ($: any, on: any) => {
+      const calls: { url: string; body: any }[] = []
+      const inboxNow = replyAfter(calls)
+      inboxNow.state.posted = true
+      const w = world(on, { files: withRegistry(), env: { ...env }, fetch: inboxNow.fetch })
+      await $.session.start(SDK_SESSION)
+
+      expect(w.tools.map((t) => t.name)).toEqual(['plannotator_inbox'])
+      await $.tool.call({ tool: INBOX_TOOL, action: 'send_message', body: 'Ship it?' })
+      expect(sendsOf(calls).at(-1)?.body.params._meta).toBeUndefined()
+      for (let second = 0; second < 6; second++) await w.clock.advance(1_000)
+      expect(pollsOf(calls)).toEqual([])
+      expect(w.submits).toEqual([])
+    })
+  }
+
   test('Send now while a turn runs: the poll says the engine can, and the reply goes into the running turn as one user row ($.session.append), with no turn submitted', async ($: any, on: any) => {
     const calls: { url: string; body: any }[] = []
     let delivered = false
@@ -1551,5 +1677,32 @@ describe("Claude Code's guard from 2.1.326 (early run)", () => {
     await $.tool.describe({ tool: 'mcp__org_tools__lookup', description: 'Looks a record up.', provider: { plugin: 'matcher-probe', tier: 'user' } })
 
     expect(w.logs.filter((line) => line.startsWith('passed by: ')).sort()).toEqual(['passed by: matcher-probe tool.describe', 'passed by: plannotator tool.describe'])
+  })
+})
+
+// What waits on the person where the session runs (hooks/mod/terminal-prompts.ts), for the Inbox's Agents list. The
+// mod reads it only from hooks it has anyway (tool.call, the Bash-matched tool.check, the matched tool.* run hook),
+// never with a wildcard or a hook on another tool's permission (an engine refuses two matcherless `tool.*` hooks, and
+// a hook there changes how other tools' prompts behave). The failures this guards on each engine of test.yml's
+// matrix: a question's answer, a Bash call's result or a Bash verdict reaching the caller changed (the mod only
+// watches).
+describe('watching for prompts where the session runs', () => {
+  test("an AskUserQuestion answer, a Bash result and a Bash ask verdict reach the caller unchanged", async ($: any, on: any) => {
+    world(on)
+    const called: string[] = []
+    // An ask for one command only (the call below is another): a Bash prompt as the session would raise it.
+    on('tool.check', ($: any, e: any, next: any) => (e.input?.command === 'rm -rf build' ? { decision: 'ask', reason: 'beneath' } : next(e)))
+    on('tool.call', ($: any, e: any) => {
+      called.push(e.tool)
+      return e.tool === 'AskUserQuestion' ? { result: { answers: { 'Which database?': 'Postgres' } } } : { result: `ran ${e.command}` }
+    })
+    await $.session.start(SESSION)
+    const asked = await $.tool.call({ tool: 'AskUserQuestion', questions: [{ question: 'Which database?' }] })
+    expect(asked.result).toEqual({ answers: { 'Which database?': 'Postgres' } })
+    const ran = await $.tool.call({ tool: 'Bash', command: 'npm run build' })
+    expect(ran.result).toBe('ran npm run build')
+    expect(called).toEqual(['AskUserQuestion', 'Bash'])
+    const verdict = await $.tool.check({ tool: 'Bash', input: { command: 'rm -rf build' } })
+    expect([verdict.decision, verdict.reason]).toEqual(['ask', 'beneath'])
   })
 })

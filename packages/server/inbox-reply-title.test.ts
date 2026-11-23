@@ -1,7 +1,9 @@
 /**
  * The title on what reaches an agent (#2464, approval "inbox-reply-title"): a
- * plain reply shows the thread's short name, or `a reply` with none, and
- * everything that is not a plain reply keeps the thread's subject. Proved
+ * plain reply shows the thread's short name, or `a reply` with none, everything
+ * in a thread the person started shows the name they typed for it or the
+ * compose suggestion they left, and everything else keeps the thread's
+ * subject. Proved
  * through the server's real doors: the connections' poll (which Codex and Qwen
  * share through `replyCommand`) and the window's routes. Every test uses its
  * own temp data dir.
@@ -15,6 +17,7 @@ import type { InboxThread } from "@plannotator/core/inbox-types";
 import {
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
+  INBOX_NAME_THREAD_LINE,
   INBOX_SEND_NOW_POLL_FIELD,
   INBOX_WAKE_INSTRUCTION,
   INBOX_WAKES_META_KEY,
@@ -254,13 +257,17 @@ describe("a plain reply", () => {
   });
 });
 
-describe("what is not a plain reply keeps the subject, in a named thread too", () => {
-  test("the first message of a thread the person started, then the reply after it changes", async () => {
+describe("the first message of a thread the person started", () => {
+  test("with a name they typed, shows that name, and only the title changes", async () => {
     const { server, client, project } = await setup();
     await poll(server, OWNER, project);
     const started = await post(server, "/api/inbox/messages", { to: { session: OWNER }, body: "Idea: retry the webhook on a 409.", idempotency_key: key(), thread_name: "Webhook retries" });
     const [root] = await poll(server, OWNER, project);
-    expect(root).toMatchObject({ type: "message", new_thread: true, subject: "Idea: retry the webhook on a 409" });
+    expect(root).toMatchObject({ type: "message", new_thread: true, subject: "Webhook retries" });
+    const wake = inboxWakeText(root!).split("\n");
+    expect(wake[0]).toBe(`Plannotator Inbox: Webhook retries (${started.message.id})`);
+    // Instruction, thread, body and closing, as the wake carried them with the body's first words.
+    expect(wake.slice(1)).toEqual(inboxWakeText({ ...root!, subject: "Idea: retry the webhook on a 409" }).split("\n").slice(1));
     await delivered(server, OWNER, started.message.id);
 
     const answer = await agentSends(client, project, OWNER, "Doing it.", { reply_to: started.message.id });
@@ -268,6 +275,179 @@ describe("what is not a plain reply keeps the subject, in a named thread too", (
     expect((await poll(server, OWNER, project))[0]).toMatchObject({ id, subject: "Webhook retries" });
   });
 
+  test("with no name, keeps the body's first words", async () => {
+    const { server, project } = await setup();
+    await poll(server, OWNER, project);
+    const bare = await post(server, "/api/inbox/messages", { to: { session: OWNER }, body: "Idea: retry the webhook on a 409.", idempotency_key: key() });
+    expect((await poll(server, OWNER, project))[0]).toMatchObject({ id: bare.message.id, new_thread: true, subject: "Idea: retry the webhook on a 409", name_thread: true });
+  });
+
+  test("with compose's suggestion left as it was, shows the suggestion and still asks the agent to name the thread", async () => {
+    const { server, project } = await setup();
+    await poll(server, OWNER, project);
+    const suggested = await post(server, "/api/inbox/messages", { to: { session: OWNER }, body: "Rework the retries.", idempotency_key: key(), thread_name: "Inbox list", thread_name_auto: true });
+    const [root] = await poll(server, OWNER, project);
+    expect(root).toMatchObject({ id: suggested.message.id, new_thread: true, subject: "Inbox list", name_thread: true });
+    const wake = inboxWakeText(root!).split("\n");
+    expect(wake[0]).toBe(`Plannotator Inbox: Inbox list (${suggested.message.id})`);
+    expect(wake).toContain(INBOX_NAME_THREAD_LINE);
+    // Only the title changes: the naming line and the rest as with the body's first words.
+    expect(wake.slice(1)).toEqual(inboxWakeText({ ...root!, subject: "Rework the retries" }).split("\n").slice(1));
+  });
+
+  test("New review's numbered suggestion is the title too", async () => {
+    const { server, project } = await setup();
+    await poll(server, OWNER, project);
+    const name = "Review ledger: uncommitted on main";
+    const body = (n: number) => ({ to: { session: OWNER }, body: `Review the changes, pass ${n}.`, idempotency_key: key(), thread_name: name, thread_name_auto: true, thread_name_numbered: true });
+    const first = await post(server, "/api/inbox/messages", body(1));
+    expect((await poll(server, OWNER, project))[0]).toMatchObject({ id: first.message.id, subject: name });
+    await delivered(server, OWNER, first.message.id);
+    const second = await post(server, "/api/inbox/messages", body(2));
+    expect((await poll(server, OWNER, project))[0]).toMatchObject({ id: second.message.id, subject: `${name} (2)` });
+  });
+});
+
+const NAMED_BY = [
+  { by: "named", named: { thread_name: "Webhook retries" } },
+  { by: "left with compose's suggested name", named: { thread_name: "Webhook retries", thread_name_auto: true } },
+] as const;
+
+for (const { by, named } of NAMED_BY) describe(`a thread the person started and ${by}: every wake takes the name, a session's first sight of it too`, () => {
+  const TITLE = named.thread_name;
+  /** The person's named thread, its first message delivered to the owner, and the owner's answer in it (no `thread`: a suggestion stays). */
+  async function personNamed(server: InboxServer, client: Client, project: string, answer = "On it.") {
+    await poll(server, OWNER, project);
+    const started = await post(server, "/api/inbox/messages", { to: { session: OWNER }, body: "Idea: retry the webhook on a 409.", idempotency_key: key(), ...named });
+    await delivered(server, OWNER, started.message.id);
+    const sent = await agentSends(client, project, OWNER, answer, { reply_to: started.message.id });
+    return { root: started.message.id as string, ...sent };
+  }
+  const titled = (command: InboxReplyCommand | undefined) => {
+    expect(command!.subject).toBe(TITLE);
+    expect(firstLine(command!)).toBe(`Plannotator Inbox: ${TITLE} (${command!.id})`);
+  };
+
+  test("a New message to a session new to the thread", async () => {
+    const { server, client, project } = await setup();
+    const sent = await personNamed(server, client, project);
+    await poll(server, OTHER, project);
+    const written = await post(server, `/api/inbox/threads/${sent.thread_id}/message`, { session: OTHER, body: "Pick this up.", idempotency_key: key() });
+    const [command] = await poll(server, OTHER, project);
+    expect(command).toMatchObject({ type: "message", id: written.message.id });
+    titled(command);
+  });
+
+  test("a tag: the session has never seen the thread", async () => {
+    const { server, client, project } = await setup();
+    const sent = await personNamed(server, client, project);
+    await poll(server, OTHER, project);
+    await personReplies(server, sent.message_id, "@Claude Code (other) a look?", { tags: [OTHER_TAG] });
+    const [command] = await poll(server, OTHER, project);
+    expect(command).toMatchObject({ tagged: { owner: "Claude Code" } });
+    titled(command);
+  });
+
+  test("the reply that adds a session to the thread", async () => {
+    const { server, client, project } = await setup();
+    const sent = await personNamed(server, client, project);
+    await poll(server, OTHER, project);
+    const id = await personReplies(server, sent.message_id, "@Claude Code (other) work on this too.", { tags: [{ ...OTHER_TAG, mode: "add" }] });
+    const [command] = await poll(server, OTHER, project);
+    expect(command).toMatchObject({ id, added: true });
+    titled(command);
+  });
+
+  test("a hand-off, and the former owner's notice", async () => {
+    const { server, client, project } = await setup(50);
+    const sent = await personNamed(server, client, project);
+    await poll(server, OTHER, project);
+    await personReplies(server, sent.message_id, "@Claude Code (other) this is yours.", { tags: [{ ...OTHER_TAG, mode: "handoff" }] });
+    const [handed] = await until(() => poll(server, OTHER, project), "the hand-off");
+    expect(handed).toMatchObject({ handoff: { from: "Claude Code" } });
+    titled(handed);
+    const [notice] = await until(() => poll(server, OWNER, project), "the notice");
+    expect(notice).toMatchObject({ handed_away: { to: "Claude Code" } });
+    titled(notice);
+  });
+
+  test("a reply sent on because the session that asked has ended", async () => {
+    const { server, client, project } = await setup();
+    const sent = await personNamed(server, client, project);
+    await poll(server, OTHER, project);
+    const id = await personReplies(server, sent.message_id, "Take this over.", { to: { host: "claude-code", session: OTHER } });
+    const [command] = await poll(server, OTHER, project);
+    expect(command).toMatchObject({ id, redirected_from: "Claude Code" });
+    titled(command);
+  });
+
+  test("words moved to a session that has seen nothing of the thread", async () => {
+    let now = 1_000_000;
+    const { server, project } = await setup(undefined, () => now);
+    await poll(server, OWNER, project);
+    const started = await post(server, "/api/inbox/messages", { to: { session: OWNER }, body: "Add a retry budget.", idempotency_key: key(), ...named });
+    await delivered(server, OWNER, started.message.id);
+    const id = await personReplies(server, started.message.id, "And log each retry.");
+    // A move needs the session it waits on to have ended.
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
+    await poll(server, OTHER, project);
+    await post(server, `/api/inbox/messages/${id}/to`, { to: { host: "claude-code", session: OTHER } });
+    const [command] = await poll(server, OTHER, project);
+    expect(command).toMatchObject({ id, continues_thread: true });
+    titled(command);
+  });
+
+  test("a 👍", async () => {
+    const { server, client, project } = await setup(50);
+    const sent = await personNamed(server, client, project, "Done, nothing needs you.");
+    await post(server, `/api/inbox/messages/${sent.message_id}/ack`, {});
+    const [command] = await until(() => poll(server, OWNER, project), "the 👍");
+    expect(command).toMatchObject({ ack_of: sent.message_id });
+    titled(command);
+  });
+
+  test("a Mark read note", async () => {
+    const { server, client, project } = await setup(50);
+    const sent = await personNamed(server, client, project, QUESTION);
+    await post(server, `/api/inbox/threads/${sent.thread_id}/read`, {});
+    const [command] = await until(() => poll(server, OWNER, project), "the set-aside note");
+    expect(command!.ack_of).toBeUndefined();
+    titled(command);
+  });
+
+  test("a Re-ask", async () => {
+    const { server, client, project } = await setup();
+    const asking = await personNamed(server, client, project, QUESTION);
+    await post(server, `/api/inbox/messages/${asking.message_id}/reask`, { idempotency_key: key() });
+    const [command] = await poll(server, OWNER, project);
+    expect(command).toMatchObject({ reask: true });
+    titled(command);
+  });
+});
+
+describe("a thread the person started that the agent named, over a suggestion or no name", () => {
+  for (const [label, named] of [["over a suggestion", { thread_name: "Inbox list", thread_name_auto: true }], ["with no name", {}]] as const) {
+    test(`${label}: plain replies and a session's first sight both take the agent's name`, async () => {
+      const { server, client, project } = await setup();
+      await poll(server, OWNER, project);
+      const started = await post(server, "/api/inbox/messages", { to: { session: OWNER }, body: "Idea: retry the webhook on a 409.", idempotency_key: key(), ...named });
+      await delivered(server, OWNER, started.message.id);
+      const renamed = await agentSends(client, project, OWNER, "On it.", { reply_to: started.message.id, thread: "Webhook retry budget" });
+      const plain = await personReplies(server, renamed.message_id, "Thanks.");
+      const [reply] = await poll(server, OWNER, project);
+      expect(reply).toMatchObject({ id: plain, subject: "Webhook retry budget" });
+      expect(reply!.name_thread).toBeUndefined();
+      await delivered(server, OWNER, plain);
+      await poll(server, OTHER, project);
+      await personReplies(server, renamed.message_id, "@Claude Code (other) a look?", { tags: [OTHER_TAG] });
+      const [tagged] = await poll(server, OTHER, project);
+      expect(tagged).toMatchObject({ tagged: { owner: "Claude Code" }, subject: "Webhook retry budget" });
+      expect(firstLine(tagged!)).toBe(`Plannotator Inbox: Webhook retry budget (${tagged!.id})`);
+    });
+  }
+});
+
+describe("what is not a plain reply keeps the subject, in a thread an agent started and named too", () => {
   test("a New message, which answers nothing and may reach a session new to the thread", async () => {
     const { server, client, project } = await setup();
     const sent = await asked(client, project);

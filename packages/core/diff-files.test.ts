@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { diffHunkLines, parseDiffToFiles, stripPatchColor } from "./diff-files";
+import { countPatchChanges, diffHunkLines, parseDiffToFiles, stripPatchColor } from "./diff-files";
 
 // #1661: `color.diff = always` (git) or `ui.color = "always"` (jj) wraps every
 // patch line in ANSI escapes, which used to parse to 0 files with no error.
@@ -38,7 +38,43 @@ describe("colorized patches", () => {
   });
 });
 
+describe("countPatchChanges", () => {
+  it("counts a merge conflict's combined diff by its first column", () => {
+    // Real `git diff` (git 2.50) of an unmerged file: `diff --cc`, a `@@@` hunk, two marker columns.
+    const combined = [
+      "diff --cc f.md",
+      "index 83deb0c,1405721..0000000",
+      "--- a/f.md",
+      "+++ b/f.md",
+      "@@@ -1,3 -1,3 +1,7 @@@",
+      "  one",
+      "++<<<<<<< HEAD",
+      " +main",
+      "++=======",
+      "+ side",
+      "++>>>>>>> side",
+      "  two",
+      "",
+    ].join("\n");
+    expect(countPatchChanges(combined)).toEqual({ additions: 4, deletions: 0 });
+  });
+});
+
 describe("parseDiffToFiles", () => {
+  it("counts lines beginning with patch-marker text inside a hunk", () => {
+    const [file] = parseDiffToFiles([
+      "diff --git a/notes.txt b/notes.txt",
+      "--- a/notes.txt",
+      "+++ b/notes.txt",
+      "@@ -1,2 +1,2 @@",
+      "---- old section",
+      " plain context",
+      "++++ new section",
+      "",
+    ].join("\n"));
+    expect({ additions: file.additions, deletions: file.deletions }).toEqual({ additions: 1, deletions: 1 });
+  });
+
   it("uses file header lines so paths containing separator text stay intact", () => {
     const files = parseDiffToFiles([
       'diff --git "a/api/foo b/bar.ts" "b/api/foo b/bar.ts"',
@@ -199,6 +235,19 @@ describe("parseDiffToFiles — change-type status", () => {
 });
 
 describe("diffHunkLines", () => {
+  it("keeps side line numbers when Git omits the prefix on blank context", () => {
+    // Real shape of a patch produced with diff.suppressBlankEmpty=true.
+    const patch = ["@@ -1,3 +1,3 @@", " same", "", "-old", "+new", ""].join("\n");
+    expect(diffHunkLines(patch)?.[0].lines).toEqual([
+      { kind: "context", oldLine: 1, newLine: 1, text: "same" },
+      { kind: "context", oldLine: 2, newLine: 2, text: "" },
+      { kind: "del", oldLine: 3, text: "old" },
+      { kind: "add", newLine: 3, text: "new" },
+    ]);
+    // The split sentinel after a newline cannot complete an unfinished hunk.
+    expect(diffHunkLines("@@ -1,2 +1,2 @@\n same\n")).toBeNull();
+  });
+
   // Real `git diff` (git 2.50): a SQL comment line removed and a line added
   // that look like file headers, and a last line that gains its newline.
   const sql = [

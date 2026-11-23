@@ -6,18 +6,30 @@
  * - The header holds the filter icon (three lines narrowing) alone, at every width. With picks it takes the accent
  *   colour and a small count in its corner (`CountBadge`, the PRs button's size): one per ticked row. No tokens, no line over the list: what is picked is read in the menu.
  * - The menu (Base UI's: arrows, Home/End, type-ahead, Escape and Tab close, focus back to the funnel): Not seen (one
- *   row: only the rows drawn bold), Updated (Today, Last 7 days, Last 30 days, Custom range…), Agent (several; only
- *   with two agents or more), Pull request (Open, Draft, Merged, Closed, Has a PR, No PR, several; only once a thread in the list has a PR), Tag (several, each
+ *   row: only the rows drawn bold) and Recent activity (one row, the cursor mark, not Updated's clock: the threads the
+ *   person did something in lately, newest first by that; listFilterRecent.ts), Updated (Today, Last 7 days, Last 30 days, Custom range…), Agent (several; only
+ *   with two agents or more), Routine (Routine threads, Other threads; only while Routines are on and a routine's thread
+ *   is in the list), Pull request (Open, Draft, Merged, Closed, Has a PR, No PR, several; only once a thread in the list has a PR), Tag (several, each
  *   with the `#` mark; only once a tag holds a thread in the list, never on a tag's own list), then Project last, since the
  *   sidebar already narrows by project (each project, several; only on the Inbox page and with two projects or
  *   more). Each row shows how many threads it would leave and a tick when picked, then "Clear filters". It stays open while picking. A phone draws it as the bottom
  *   sheet titled "Filter".
  * - Custom range… opens a small panel by the funnel: From, To, Apply.
+ * - Long lists (a section of more than 8 rows, listFilterSearch.ts): one field at the top, "Search filters".
+ *   Typing narrows every section at once (the match bold, a ticked row kept, a section with nothing left gone,
+ *   "Nothing matches “…”" when no row matches); the menu keeps its one scroll. Base UI's filterable menu
+ *   (`Menu.FilterProvider`, `Menu.Input`, `Menu.List`): the field keeps focus while ↑ ↓ move the highlight
+ *   (`aria-activedescendant`, wrapping as the plain menu does), Enter ticks or unticks the highlighted row, Space types
+ *   a space, Escape empties the field first and then closes. With the field empty Home and End go to the first and
+ *   last row; with text in it they move the caret. Tab moves focus out of the menu, which closes it. With nothing
+ *   matching no row is highlighted, and Enter does nothing until an arrow picks a row. A touch or pen open leaves the
+ *   field unfocused, so a phone's keyboard stays down; the phone's sheet then sits on the keyboard (inbox.css). The
+ *   menu keeps one width while typing. With short lists none of this: the plain menu, its type-ahead included.
  * - Nothing matches: `ListFilterEmpty` in the list's body, "No threads match" and Clear filters.
  *
  * No shortcut of its own.
  */
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { Popover } from '@base-ui/react/popover';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
@@ -29,14 +41,19 @@ import { TagIcon } from './InitiativePeek';
 import { CountBadge } from './CountBadge';
 import { useThreadTags } from '../threadTags';
 import { toggledTagPick, withLiveTagPicks } from '../listFilterTags';
+import { useRoutineThreads } from '../listFilterRoutines';
+import { rowRecentlyActed } from '../listFilterRecent';
+import { filterSearchShown, labelStart, searchFilterSections, type FilterSearchRow } from '../listFilterSearch';
 import {
   NO_LIST_FILTER,
   PULL_OPTIONS,
+  ROUTINE_OPTIONS,
   UPDATED_OPTIONS,
   rowNotSeen,
   rowPullMatches,
   rowPullStates,
   type PullPick,
+  type RoutinePick,
   agentHost,
   appliedFilter,
   countWhere,
@@ -77,12 +94,52 @@ function usePortal(anchor: RefObject<HTMLElement | null>) {
 
 const tick = (on: boolean) => <span className="ib-pc-tick">{on && <Icon name="check" />}</span>;
 
-function CheckRow({ label, on, count, onToggle, mark, data }: { label: string; on: boolean; count: number; onToggle: () => void; mark: React.ReactNode; data: Record<string, string> }) {
+/** The search's words (the field's placeholder and name; the line and the count a screen reader hears). */
+const FIND_WORDS = 'Search filters';
+/** The × in the field: its name, for a screen reader's touch or virtual cursor (Escape does the same from the keyboard).
+ * Base UI hides its clear button from screen readers; `aria-hidden={false}` puts it back. */
+const CLEAR_WORDS = 'Clear search';
+const nothingMatches = (query: string) => `Nothing matches “${query}”`;
+const matchWords = (n: number, query: string) => (n === 0 ? nothingMatches(query) : n === 1 ? '1 match' : `${formatCount(n)} matches`);
+
+/** A row's label with the search's match drawn bold, from `labelStart` ("…" for what it drops). */
+function lit(label: string, hit: readonly [number, number] | null) {
+  if (!hit) return label;
+  const from = labelStart(label, hit);
   return (
-    <Menu.CheckboxItem className="ib-pmi" label={label} checked={on} onCheckedChange={onToggle} closeOnClick={false} {...data}>
+    <>
+      {from > 0 && <span aria-hidden="true">…</span>}
+      {label.slice(from, hit[0])}
+      <b className="ib-lflt-hit">{label.slice(hit[0], hit[1])}</b>
+      {label.slice(hit[1])}
+    </>
+  );
+}
+
+/** One row of the menu: a pick, or (`opens`, its Base UI label) the row that opens Custom range's panel. */
+interface FilterRow {
+  key: string;
+  label: string;
+  on: boolean;
+  count: number | null;
+  onToggle: () => void;
+  mark: React.ReactNode;
+  data: Record<string, string>;
+  opens?: string;
+}
+interface FilterSection {
+  id: string;
+  /** Null: no group label (Not seen). */
+  title: string | null;
+  rows: FilterRow[];
+}
+
+function CheckRow({ label, hit, on, count, onToggle, mark, data }: { label: string; hit: readonly [number, number] | null; on: boolean; count: number; onToggle: () => void; mark: React.ReactNode; data: Record<string, string> }) {
+  return (
+    <Menu.CheckboxItem className="ib-pmi" label={label} aria-label={labelStart(label, hit) > 0 ? `${label} ${formatCount(count)}` : undefined} checked={on} onCheckedChange={onToggle} closeOnClick={false} {...data}>
       {mark}
       <span className="ib-pmi-l" dir="auto">
-        {label}
+        {lit(label, hit)}
       </span>
       <span className="ib-pmi-n">{formatCount(count)}</span>
       {tick(on)}
@@ -106,11 +163,20 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
   // Tags (approval "inbox-thread-tags", step 2): the window's, read with the rows' own rule (`rowTags`).
   const host = useThreadTags();
   const tagScoped = !!host?.listed;
-  const filter = withLiveTagPicks(appliedFilter(source.filter, scoped, tagScoped), host?.tags ?? null);
-  const tagsOf = host?.rowTags;
+  // Routines: off, the Routine picks step aside; not read yet, they still count in the badge; the group shows once read.
+  const routineThreads = useRoutineThreads();
+  const isRoutine = routineThreads.state === 'ready' ? routineThreads.test : null;
+  const filter = withLiveTagPicks(appliedFilter(source.filter, scoped, tagScoped, routineThreads.state !== 'off'), host?.tags ?? null);
+  // A row's tags as the Tag group reads them: its own and its project's (projectTags.ts).
+  const tagsOf = host?.filterTags ?? host?.rowTags;
+  const routineTest = isRoutine ?? undefined;
+  const countOf = (group: Parameters<typeof countWhere>[3], test: (row: InboxListRow) => boolean) => countWhere(rows, filter, now, group, test, tagsOf, routineTest);
   const [open, setOpen] = useState(false);
   const [rangeOpen, setRangeOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
+  // The funnel sits outside the menu (a detached trigger), so the menu can gain or lose its search without the funnel
+  // being drawn again.
+  const [handle] = useState(() => Menu.createHandle());
   const portal = usePortal(trigger);
   const now = Date.now();
   const count = pickCount(filter);
@@ -144,165 +210,320 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
 
   // Offered once a thread here has a PR, and while a pick of it is remembered (so it can be unticked).
   const pulls = source.filter.pulls.length > 0 || rows.some((row) => rowPullStates(row).length > 0);
-  const tagGroup = tags.length > 0 && (
-    <Menu.Group data-list-filter-group="tags">
-      <Menu.GroupLabel className="ib-pm-glabel">Tag</Menu.GroupLabel>
-      {tags.map((tag) => (
-        <CheckRow
-          key={tag.id}
-          label={tag.name}
-          on={filter.tags.includes(tag.id)}
-          count={countWhere(rows, filter, now, 'tags', (row) => (tagsOf ? tagsOf(row) : (row.tags ?? [])).includes(tag.id), tagsOf)}
-          onToggle={() => set({ tags: toggledTagPick(source.filter.tags, tag, host?.tags ?? []) })}
-          mark={<TagIcon className="ib-ic" />}
-          data={{ 'data-list-filter-tag': tag.id }}
-        />
-      ))}
-    </Menu.Group>
-  );
-  const projectGroup = showProjects && (
-    <Menu.Group>
-      <Menu.GroupLabel className="ib-pm-glabel">Project</Menu.GroupLabel>
-      {projects.map((p) => (
-        <CheckRow
-          key={p.id}
-          label={p.name}
-          on={filter.projects.includes(p.id)}
-          count={countWhere(rows, filter, now, 'projects', (row) => row.project.id === p.id, tagsOf)}
-          onToggle={() => set({ projects: toggled(source.filter.projects, p.id) })}
-          mark={<Icon name="folder" />}
-          data={{ 'data-list-filter-project': p.id }}
-        />
-      ))}
-    </Menu.Group>
-  );
+  // Offered while Routines are on, once a routine's thread is in the list, and while a pick of it is remembered.
+  const routines = isRoutine !== null && (source.filter.routines.length > 0 || rows.some(isRoutine));
+
+  // The menu as data, in its order (the owner, 2026-11-08): what the sidebar cannot do first, Project last (the sidebar
+  // has its own). Not seen first: what every row shows, bold or not. The search narrows these (listFilterSearch.ts).
+  const sections: FilterSection[] = [
+    {
+      id: 'notSeen',
+      title: null,
+      rows: [
+        { key: 'notSeen', label: 'Not seen', on: filter.notSeen, count: countOf('notSeen', rowNotSeen), onToggle: () => set({ notSeen: !source.filter.notSeen }), mark: <Icon name="envelope" />, data: { 'data-list-filter-not-seen': '' } },
+        { key: 'recent', label: 'Recent activity', on: filter.recent, count: countOf('recent', (row) => rowRecentlyActed(row, now)), onToggle: () => set({ recent: !source.filter.recent }), mark: <Icon name="clickHere" />, data: { 'data-list-filter-recent': '' } },
+      ],
+    },
+    {
+      id: 'updated',
+      title: 'Updated',
+      rows: [
+        ...UPDATED_OPTIONS.map((o) => ({
+          key: o.value,
+          label: o.label,
+          on: filter.updated === o.value,
+          count: countOf('updated', inSpan(o.value, now)),
+          onToggle: () => set({ updated: filter.updated === o.value ? null : o.value }),
+          mark: <Icon name="clock" />,
+          data: { 'data-list-filter-updated': o.value },
+        })),
+        {
+          key: 'range',
+          label: custom ? rangeWords(custom) : 'Custom range…',
+          on: custom !== null,
+          count: custom ? countOf('updated', inSpan(custom, now)) : null,
+          onToggle: () => {
+            setOpen(false);
+            requestAnimationFrame(() => setRangeOpen(true));
+          },
+          mark: <Icon name="clock" />,
+          data: { 'data-list-filter-updated': 'range' },
+          opens: 'Custom range',
+        },
+      ],
+    },
+    {
+      id: 'agents',
+      title: 'Agent',
+      rows: showAgents
+        ? agents.map((a) => ({
+            key: a.name,
+            label: a.name,
+            on: filter.agents.includes(a.name),
+            count: countOf('agents', (row) => rowAgentNames(row).includes(a.name)),
+            onToggle: () => set({ agents: toggled(source.filter.agents, a.name) }),
+            mark: (
+              <span className="ib-lflt-host" aria-hidden="true">
+                <HostMark host={a.host} />
+              </span>
+            ),
+            data: { 'data-list-filter-agent': a.name },
+          }))
+        : [],
+    },
+    {
+      id: 'routines',
+      title: 'Routine',
+      rows: routines
+        ? ROUTINE_OPTIONS.map((o) => ({
+            key: o.value,
+            label: o.label,
+            on: filter.routines.includes(o.value),
+            count: countOf('routines', (row) => !!isRoutine?.(row) === (o.value === 'routine')),
+            onToggle: () => set({ routines: toggled(source.filter.routines, o.value) as RoutinePick[] }),
+            mark: <Icon name={o.value === 'routine' ? 'scheduled' : 'minus'} />,
+            data: { 'data-list-filter-routine': o.value },
+          }))
+        : [],
+    },
+    {
+      id: 'pulls',
+      title: 'Pull request',
+      rows: pulls
+        ? PULL_OPTIONS.map((o) => ({
+            key: o.value,
+            label: o.label,
+            on: filter.pulls.includes(o.value),
+            count: countOf('pulls', (row) => rowPullMatches(row, o.value)),
+            onToggle: () => set({ pulls: toggled(source.filter.pulls, o.value) as PullPick[] }),
+            mark: o.value === 'none' ? <Icon name="minus" /> : <RefMarkIcon kind="pr" state={o.value === 'any' ? 'unknown' : o.value} size={16} />,
+            data: { 'data-list-filter-pull': o.value },
+          }))
+        : [],
+    },
+    {
+      id: 'tags',
+      title: 'Tag',
+      rows: tags.map((tag) => ({
+        key: tag.id,
+        label: tag.name,
+        on: filter.tags.includes(tag.id),
+        count: countOf('tags', (row) => (tagsOf ? tagsOf(row) : (row.tags ?? [])).includes(tag.id)),
+        onToggle: () => set({ tags: toggledTagPick(source.filter.tags, tag, host?.tags ?? []) }),
+        mark: <TagIcon className="ib-ic" />,
+        data: { 'data-list-filter-tag': tag.id },
+      })),
+    },
+    {
+      id: 'projects',
+      title: 'Project',
+      rows: showProjects
+        ? projects.map((p) => ({
+            key: p.id,
+            label: p.name,
+            on: filter.projects.includes(p.id),
+            count: countOf('projects', (row) => row.project.id === p.id),
+            onToggle: () => set({ projects: toggled(source.filter.projects, p.id) }),
+            mark: <Icon name="folder" />,
+            data: { 'data-list-filter-project': p.id },
+          }))
+        : [],
+    },
+  ];
+
+  // The search shows only while a section is long; whether it shows is fixed while the menu is open, so a list that
+  // changes under an open menu never swaps the menu out from under the person.
+  const long = filterSearchShown(sections.map((s) => s.rows.length));
+  const [searchable, setSearchable] = useState(long);
+  if (!open && searchable !== long) setSearchable(long);
+  const clear = count > 0 ? () => onChange(clearedFrom(source.filter, scoped, tagScoped)) : null;
 
   return (
     <>
-      <Menu.Root open={open} onOpenChange={setOpen} modal={phone}>
-        <Tip content={count > 0 ? `Filter · ${count} active` : 'Filter'}>
-          <Menu.Trigger ref={trigger} className="ib-lflt" aria-label={name} data-set={count > 0 ? '' : undefined} data-list-filter="">
-            <span className="ib-lflt-g ib-cnt-host">
-              <FilterGlyph size={phone ? 20 : 16} />
-              {count > 0 && <CountBadge count={count} data={{ 'data-list-filter-count': '' }} />}
-            </span>
-          </Menu.Trigger>
-        </Tip>
-        <Menu.Portal container={portal ?? undefined}>
-          {phone && <Menu.Backdrop className="ib-pm-scrim" />}
-          <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={6} data-phone={phone ? '' : undefined}>
-            {/* The order (the owner, 2026-11-08): what the sidebar cannot do first, Project last (the sidebar has its own). Not seen first: what every row shows, bold or not. */}
-            <Menu.Popup className="ib-pm ib-pc-menu ib-lflt-menu" aria-label="Filter" data-list-filter-menu="">
-              <div className="ib-pm-title" aria-hidden="true">
-                Filter
-              </div>
-              <CheckRow
-                label="Not seen"
-                on={filter.notSeen}
-                count={countWhere(rows, filter, now, 'notSeen', rowNotSeen, tagsOf)}
-                onToggle={() => set({ notSeen: !source.filter.notSeen })}
-                mark={<Icon name="envelope" />}
-                data={{ 'data-list-filter-not-seen': '' }}
-              />
-              <Menu.Separator className="ib-pm-sep" />
-              <Menu.Group data-list-filter-group="updated">
-                <Menu.GroupLabel className="ib-pm-glabel">Updated</Menu.GroupLabel>
-                {UPDATED_OPTIONS.map((o) => (
-                  <CheckRow
-                    key={o.value}
-                    label={o.label}
-                    on={filter.updated === o.value}
-                    count={countWhere(rows, filter, now, 'updated', inSpan(o.value, now), tagsOf)}
-                    onToggle={() => set({ updated: filter.updated === o.value ? null : o.value })}
-                    mark={<Icon name="clock" />}
-                    data={{ 'data-list-filter-updated': o.value }}
-                  />
-                ))}
-                <Menu.Item
-                  className="ib-pmi"
-                  label="Custom range"
-                  onClick={() => {
-                    setOpen(false);
-                    requestAnimationFrame(() => setRangeOpen(true));
-                  }}
-                  data-checked={custom ? '' : undefined}
-                  data-list-filter-updated="range"
-                >
-                  <Icon name="clock" />
-                  <span className="ib-pmi-l">{custom ? rangeWords(custom) : 'Custom range…'}</span>
-                  {custom && <span className="ib-pmi-n">{formatCount(countWhere(rows, filter, now, 'updated', inSpan(custom, now), tagsOf))}</span>}
-                  {tick(custom !== null)}
-                </Menu.Item>
-              </Menu.Group>
-              {showAgents && (
-                <>
-                  <Menu.Separator className="ib-pm-sep" />
-                  <Menu.Group data-list-filter-group="agents">
-                    <Menu.GroupLabel className="ib-pm-glabel">Agent</Menu.GroupLabel>
-                    {agents.map((a) => (
-                      <CheckRow
-                        key={a.name}
-                        label={a.name}
-                        on={filter.agents.includes(a.name)}
-                        count={countWhere(rows, filter, now, 'agents', (row) => rowAgentNames(row).includes(a.name), tagsOf)}
-                        onToggle={() => set({ agents: toggled(source.filter.agents, a.name) })}
-                        mark={
-                          <span className="ib-lflt-host" aria-hidden="true">
-                            <HostMark host={a.host} />
-                          </span>
-                        }
-                        data={{ 'data-list-filter-agent': a.name }}
-                      />
-                    ))}
-                  </Menu.Group>
-                </>
-              )}
-              {pulls && (
-                <>
-                  <Menu.Separator className="ib-pm-sep" />
-                  <Menu.Group data-list-filter-group="pulls">
-                    <Menu.GroupLabel className="ib-pm-glabel">Pull request</Menu.GroupLabel>
-                    {PULL_OPTIONS.map((o) => (
-                      <CheckRow
-                        key={o.value}
-                        label={o.label}
-                        on={filter.pulls.includes(o.value)}
-                        count={countWhere(rows, filter, now, 'pulls', (row) => rowPullMatches(row, o.value), tagsOf)}
-                        onToggle={() => set({ pulls: toggled(source.filter.pulls, o.value) as PullPick[] })}
-                        mark={o.value === 'none' ? <Icon name="minus" /> : <RefMarkIcon kind="pr" state={o.value === 'any' ? 'unknown' : o.value} size={16} />}
-                        data={{ 'data-list-filter-pull': o.value }}
-                      />
-                    ))}
-                  </Menu.Group>
-                </>
-              )}
-              {tagGroup && (
-                <>
-                  <Menu.Separator className="ib-pm-sep" />
-                  {tagGroup}
-                </>
-              )}
-              {projectGroup && (
-                <>
-                  <Menu.Separator className="ib-pm-sep" />
-                  {projectGroup}
-                </>
-              )}
-              {count > 0 && (
-                <>
-                  <Menu.Separator className="ib-pm-sep" />
-                  <Menu.Item className="ib-pmi" onClick={() => onChange(clearedFrom(source.filter, scoped, tagScoped))} data-list-filter-clear="">
-                    <Icon name="x" />
-                    <span className="ib-pmi-l">Clear filters</span>
-                  </Menu.Item>
-                </>
-              )}
-            </Menu.Popup>
-          </Menu.Positioner>
-        </Menu.Portal>
-      </Menu.Root>
+      <Tip content={count > 0 ? `Filter · ${count} active` : 'Filter'}>
+        <Menu.Trigger handle={handle} ref={trigger} className="ib-lflt" aria-label={name} data-set={count > 0 ? '' : undefined} data-list-filter="">
+          <span className="ib-lflt-g ib-cnt-host">
+            <FilterGlyph size={phone ? 20 : 16} />
+            {count > 0 && <CountBadge count={count} data={{ 'data-list-filter-count': '' }} />}
+          </span>
+        </Menu.Trigger>
+      </Tip>
+      <FilterMenu handle={handle} open={open} onOpenChange={setOpen} phone={phone} portal={portal} searchable={searchable} sections={sections} onClear={clear} />
       <RangePanel key={rangeOpen ? 'open' : 'shut'} open={rangeOpen} onOpenChange={setRangeOpen} anchor={trigger} portal={portal} phone={phone} start={custom} onApply={(range) => set({ updated: range })} />
     </>
+  );
+}
+
+/** The keys that pick a row from the field while nothing matches (Home and End only move the caret then). */
+const STEP_KEYS = new Set(['ArrowDown', 'ArrowUp']);
+
+/** How long the match count waits for typing to pause before a screen reader hears it. */
+const STATUS_WAIT_MS = 400;
+
+/**
+ * The menu itself. The search's query lives here, so typing redraws only the menu: the rows and their counts are worked
+ * out by `ListFilterButton`, which typing does not redraw.
+ */
+function FilterMenu({
+  handle,
+  open,
+  onOpenChange,
+  phone,
+  portal,
+  searchable,
+  sections,
+  onClear,
+}: {
+  handle: ReturnType<typeof Menu.createHandle>;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  phone: boolean;
+  portal: HTMLElement | null;
+  searchable: boolean;
+  sections: readonly FilterSection[];
+  /** Clear filters; null: nothing is picked, no row. */
+  onClear: (() => void) | null;
+}) {
+  const [query, setQuery] = useState('');
+  /** An arrow moved the highlight since the query last changed. */
+  const arrowed = useRef(false);
+  const found = searchFilterSections<FilterSection, FilterRow>(sections, searchable ? query : '');
+  const typed = query.trim();
+  // The count a screen reader hears, once typing pauses (not on every key).
+  const words = found.searching ? matchWords(found.matches, typed) : '';
+  const [said, setSaid] = useState('');
+  useEffect(() => {
+    if (words === '') {
+      setSaid('');
+      return;
+    }
+    const wait = setTimeout(() => setSaid(words), STATUS_WAIT_MS);
+    return () => clearTimeout(wait);
+  }, [words]);
+
+  // While nothing matches, the rows still drawn (kept because they are ticked, and Clear filters) take new keys, so Base
+  // UI sees new rows and drops a highlight left on one from the query before (it clears a highlight on a change only when
+  // `autoHighlight` was already off).
+  const keyOf = (row: FilterRow) => (found.searching && found.matches === 0 ? `${row.key}:kept` : row.key);
+  const drawRow = ({ row, hit }: FilterSearchRow<FilterRow>) =>
+    row.opens ? (
+      <Menu.Item key={keyOf(row)} className="ib-pmi" label={row.opens} onClick={row.onToggle} data-checked={row.on ? '' : undefined} {...row.data}>
+        {row.mark}
+        <span className="ib-pmi-l">{lit(row.label, hit)}</span>
+        {row.count !== null && <span className="ib-pmi-n">{formatCount(row.count)}</span>}
+        {tick(row.on)}
+      </Menu.Item>
+    ) : (
+      <CheckRow key={keyOf(row)} label={row.label} hit={hit} on={row.on} count={row.count ?? 0} onToggle={row.onToggle} mark={row.mark} data={row.data} />
+    );
+  const items = (
+    <>
+      {found.sections.map(({ section, rows: shown }, i) => (
+        <Fragment key={section.id}>
+          {i > 0 && <Menu.Separator className="ib-pm-sep" />}
+          {section.title === null ? (
+            shown.map(drawRow)
+          ) : (
+            <Menu.Group data-list-filter-group={section.id === 'projects' ? undefined : section.id}>
+              <Menu.GroupLabel className="ib-pm-glabel">{section.title}</Menu.GroupLabel>
+              {shown.map(drawRow)}
+            </Menu.Group>
+          )}
+        </Fragment>
+      ))}
+      {onClear && (
+        <>
+          {found.sections.length > 0 && <Menu.Separator className="ib-pm-sep" />}
+          <Menu.Item key={found.searching && found.matches === 0 ? 'clear:kept' : 'clear'} className="ib-pmi" onClick={onClear} data-list-filter-clear="">
+            <Icon name="x" />
+            <span className="ib-pmi-l">Clear filters</span>
+          </Menu.Item>
+        </>
+      )}
+    </>
+  );
+
+  const menu = (
+    <Menu.Root handle={handle} open={open} onOpenChange={onOpenChange} modal={phone}>
+      <Menu.Portal container={portal ?? undefined}>
+        {phone && <Menu.Backdrop className="ib-pm-scrim" />}
+        <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={6} data-phone={phone ? '' : undefined} data-list-filter-searchable={searchable ? '' : undefined}>
+          <Menu.Popup className="ib-pm ib-pc-menu ib-lflt-menu" aria-label="Filter" data-list-filter-menu="" data-list-filter-searchable={searchable ? '' : undefined}>
+            <div className="ib-pm-title" aria-hidden="true">
+              Filter
+            </div>
+            {searchable ? (
+              <>
+                <div className="ib-lflt-top">
+                  <div className="ib-lflt-find">
+                    <Icon name="search" />
+                    <Menu.Input
+                      aria-label={FIND_WORDS}
+                      placeholder={FIND_WORDS}
+                      onKeyDown={(event: React.KeyboardEvent<HTMLInputElement> & { preventBaseUIHandler?: () => void }) => {
+                        // During IME composition Enter and Escape are the IME's (commit, cancel): no tick, no close.
+                        if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) {
+                          if (event.key === 'Enter' || event.key === 'Escape') {
+                            event.preventBaseUIHandler?.();
+                            event.stopPropagation();
+                          }
+                          return;
+                        }
+                        if (STEP_KEYS.has(event.key)) arrowed.current = true;
+                        // With nothing matching, Enter acts only on a row an arrow picked since the last key typed.
+                        const enterBlocked = event.key === 'Enter' && found.searching && found.matches === 0 && !arrowed.current;
+                        // Escape empties the field first; with the field empty it closes the menu as always.
+                        if (!enterBlocked && (event.key !== 'Escape' || query === '')) return;
+                        event.preventDefault();
+                        event.preventBaseUIHandler?.();
+                        if (enterBlocked) return;
+                        event.stopPropagation();
+                        setQuery('');
+                      }}
+                      data-list-filter-search=""
+                    />
+                    <Menu.Clear className="ib-lflt-clear" aria-label={CLEAR_WORDS} aria-hidden={false} data-list-filter-search-clear="">
+                      <Icon name="x" />
+                    </Menu.Clear>
+                  </div>
+                </div>
+                <div className="ib-sr" role="status" data-list-filter-search-status="">
+                  {said}
+                </div>
+                {found.searching && found.matches === 0 && (
+                  <div className="ib-lflt-none" data-list-filter-none="">
+                    {nothingMatches(typed)}
+                  </div>
+                )}
+                {found.searching && found.matches === 0 && (found.sections.length > 0 || onClear) && <div className="ib-pm-sep" aria-hidden="true" />}
+                <Menu.List className="ib-lflt-list">{items}</Menu.List>
+              </>
+            ) : (
+              items
+            )}
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
+  );
+
+  // The highlight goes to the first match as you type (with a match, the first row is one: listFilterSearch.ts); Enter
+  // ticks or unticks it like any row. With no match it goes nowhere (`keyOf`, the Enter guard), so Enter never unticks
+  // a row kept only because it is ticked.
+  return searchable ? (
+    <Menu.FilterProvider
+      filter={null}
+      value={query}
+      onValueChange={(next) => {
+        arrowed.current = false;
+        setQuery(next);
+      }}
+      autoHighlight={found.matches > 0}
+    >
+      {menu}
+    </Menu.FilterProvider>
+  ) : (
+    menu
   );
 }
 

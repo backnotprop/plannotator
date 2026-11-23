@@ -1,0 +1,140 @@
+---
+// The Spaces pricing page, linked from the Spaces header's Pricing.
+// Every button opens the same waitlist dialog as /workspaces/; nothing takes money.
+import Base from '../../layouts/Base.astro';
+import SignupDialog from '../../components/spaces/SignupDialog.astro';
+import SpacesFootStrip from '../../components/spaces/SpacesFootStrip.astro';
+import SpacesTopStrip from '../../components/spaces/SpacesTopStrip.astro';
+import {
+  BILLING_INTERVALS,
+  CLOSING_LINE,
+  HEADLINE,
+  LEDE,
+  PLAN_CARDS,
+  PRICING_TITLE,
+  QUESTIONS,
+  QUESTIONS_HEADING,
+  SAVING_LINE,
+  UNLIMITED_FACTS,
+} from '../../lib/spaces-pricing';
+import '../../styles/spaces/page.css';
+import '../../styles/spaces/signup.css';
+import '../../styles/spaces/site.css';
+import '../../styles/spaces/header.css';
+import '../../styles/spaces/pricing.css';
+
+const STARS = [
+  [212, 148, 1.1, 0.6],
+  [648, 112, 1.3, 1],
+  [884, 64, 1.1, 0.7],
+  [1392, 236, 1.3, 0.8],
+  [60, 430, 1, 0.5],
+  [338, 96, 0.9, 0.5],
+  [470, 168, 1.3, 0.95],
+  [1414, 96, 0.9, 0.5],
+  [30, 120, 1.2, 0.6],
+  [1150, 96, 1.3, 0.85],
+  [1400, 470, 1.3, 0.8],
+] as const;
+
+const said = (amount: string, per: string | null) => (per === null ? amount : `${amount} ${per}`);
+---
+<Base title={PRICING_TITLE} description={LEDE}>
+  <Fragment slot="head">
+    <!-- Light or dark before paint, as on /workspaces/: the plannotator-theme cookie wins when it says
+         light or dark; otherwise the page follows the system setting. -->
+    <script is:inline>(function(){var m=document.cookie.match(/(?:^|; )plannotator-theme=([^;]*)/),t=m?decodeURIComponent(m[1]):"";if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.classList.toggle("light",t==="light")})();</script>
+    <link rel="preload" href="/fonts/spaces-hand/SpacesHandOne.woff2" as="font" type="font/woff2" crossorigin />
+    <!-- With scripts off the Monthly/Yearly switch could not switch, so it is not shown: the cards
+         show the monthly prices and the first answer names both. -->
+    <noscript><style is:inline>.spp .pp-pick .pp-sw{display:none}.spp .pp-pick .pp-saving{margin-top:0}</style></noscript>
+  </Fragment>
+
+<div class="spp">
+<svg class="stars" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><g class="dk">{STARS.map(([cx, cy, r, opacity]) => <circle cx={cx} cy={cy} r={r} opacity={opacity} />)}</g></svg>
+<SpacesTopStrip current="pricing" />
+<main class="pp-pg" id="pricing-main">
+  <section class="pp-hero">
+    <div class="pp-copy">
+      <h1>
+        <span class="ln">{HEADLINE.plain}</span>
+        <span class="ln"><mark class="v">{HEADLINE.marked}</mark></span>
+      </h1>
+      <p class="pp-lede">{LEDE.split(/(?<=\.) /u).map((sentence) => <span>{sentence} </span>)}</p>
+    </div>
+    <div class="pp-cards">
+      <div class="pp-pick">
+        <div class="pp-sw" role="radiogroup" aria-label="Billing period">
+          {BILLING_INTERVALS.map((choice, index) => (
+            <button
+              type="button"
+              role="radio"
+              aria-checked={index === 0 ? 'true' : 'false'}
+              tabindex={index === 0 ? '0' : '-1'}
+              data-interval={choice.interval}
+            >{choice.label}</button>
+          ))}
+        </div>
+        <p class="pp-saving">{SAVING_LINE}</p>
+      </div>
+      {PLAN_CARDS.map((plan) => {
+        const month = plan.price('month');
+        const year = plan.price('year');
+        return (
+          <article
+            class="pp-card"
+            data-plan={plan.id}
+            data-month-amount={month.amount}
+            data-month-per={month.per ?? ''}
+            data-year-amount={year.amount}
+            data-year-per={year.per ?? ''}
+          >
+            <div class="pp-top">
+              <h2 class="pp-name">{plan.name}</h2>
+              <p class="pp-price"><span class="pp-said">{said(month.amount, month.per)}</span><b aria-hidden="true">{month.amount}</b>{month.per !== null && <span class="pp-per" aria-hidden="true">{month.per}</span>}</p>
+              <button type="button" class={plan.id === 'free' ? 'act qt' : 'act'} data-signup aria-haspopup="dialog">Join the waitlist</button>
+            </div>
+            <ul>
+              {plan.includes.map((item) => <li>{item}</li>)}
+            </ul>
+          </article>
+        );
+      })}
+    </div>
+    <div class="pp-ask">
+      <ul class="note">
+        {UNLIMITED_FACTS.map((fact, at) => (
+          <li class="pp-fact">{at > 0 && <span class="pp-dot" aria-hidden="true">·</span>}{fact}</li>
+        ))}
+      </ul>
+    </div>
+  </section>
+  <section class="pp-row" data-job="questions">
+    <div>
+      <h2 class="h2s">{QUESTIONS_HEADING}</h2>
+    </div>
+    <div>
+      <dl class="pp-qa">
+        {QUESTIONS.map((item) => (
+          <div>
+            <dt>{item.question}</dt>
+            <dd>{item.answer}{item.small !== undefined && <small>{item.small}</small>}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  </section>
+  <section class="pp-close" data-job="close">
+    <h2 class="h2s">{CLOSING_LINE}</h2>
+    <div>
+      <button type="button" class="act" data-signup aria-haspopup="dialog">Join the waitlist</button>
+    </div>
+  </section>
+</main>
+<SpacesFootStrip />
+</div>
+
+<SignupDialog />
+
+  <script src="../../scripts/spaces/pricing.js"></script>
+</Base>

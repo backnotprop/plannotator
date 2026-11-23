@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import type { InboxRun } from '@plannotator/core/inbox-types';
-import { INBOX_TURN_FAILED_WORDS } from '@plannotator/core/inbox-run-line';
+import { inboxRunInRex, type InboxRun } from '@plannotator/core/inbox-types';
+import { INBOX_REX_SERVER_AWAY, INBOX_REX_SHARED, INBOX_RUN_REX_NOT_CONNECTED, INBOX_TURN_FAILED_WORDS } from '@plannotator/core/inbox-run-line';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { InboxApiError, inboxApi } from '../api';
 import { whenTime } from '../format';
 import { Icon } from '../icons';
 import { hostLabel } from '../compose/model';
+import { REX_WAITING_WORDS } from '../agents/model';
 import { Tip } from './Tip';
 import { useMinuteClock } from './Undelivered';
 
@@ -66,6 +67,8 @@ export function RunLine({
 }) {
   const [busy, setBusy] = useState<null | 'stop' | 'open' | 'retry' | 'trust'>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Try again on an agent in Rex that may still run: why nothing started, as a plain note (it is not an error). */
+  const [note, setNote] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [cloneCopied, setCloneCopied] = useState(false);
   const [whatsIn, setWhatsIn] = useState(false);
@@ -81,6 +84,7 @@ export function RunLine({
   const act = async (what: 'stop' | 'open' | 'retry' | 'trust') => {
     setBusy(what);
     setError(null);
+    setNote(null);
     try {
       if (what === 'stop') await inboxApi.launchStop(run.launch_id, machine);
       else if (what === 'retry') await inboxApi.launchRetry(run.launch_id, machine);
@@ -88,6 +92,10 @@ export function RunLine({
       else await inboxApi.launchOpen(run.launch_id);
       onChanged();
     } catch (cause) {
+      if (what === 'retry' && cause instanceof InboxApiError && cause.code === 'launch_in_rex') {
+        setNote(cause.message);
+        return;
+      }
       setError(cause instanceof InboxApiError ? cause.message : what === 'open' ? 'Terminal did not open; copy the command instead.' : 'That did not work; try again.');
       // The folder changed since this line was read: draw the new warning for the next click.
       if (cause instanceof InboxApiError && cause.code === 'trust_warning_changed') onChanged();
@@ -143,9 +151,22 @@ export function RunLine({
   );
   const kept = 'Your message is kept.';
   let bar: number | null = null;
+  // Started in Rex (Settings → Agents' "Start new agents in"): its tab is the way in; Stop (when given) closes that tab.
+  const inRex = inboxRunInRex(run);
+  const rexLine = inRex ? run.rex!.line : null;
+  // In Rex, Stop closes its tab: only when the Inbox knows that tab.
+  const stopHere = inRex && !run.rex!.stops ? null : stop;
   switch (run.state) {
     case 'starting':
-      text = run.again ? `Starting ${name} again…` : (
+      text = run.again ? `Starting ${name} again…` : inRex ? (
+        rexLine ? (
+          <span data-run-rex="">
+            Started in <bdi>{rexLine}</bdi>
+          </span>
+        ) : (
+          `Starting ${name} in Rex…`
+        )
+      ) : (
         <>
           Starting {name} in <bdi>{run.project}</bdi>…
           {/* E11: the name was taken between the pick and the clone. */}
@@ -258,7 +279,7 @@ export function RunLine({
           {name} is working{minutes ? ` · ${minutes}` : ''}
         </>
       );
-      actions = stop;
+      actions = stopHere;
       break;
     case 'waiting_answer':
       // A permission prompt asked above, as a question card (screen 09): answering it is the action.
@@ -267,10 +288,23 @@ export function RunLine({
           {name} is waiting on your answer{minutes ? ` · ${minutes}` : ''}
         </>
       );
-      actions = stop;
+      actions = stopHere;
       break;
     case 'waiting_terminal':
       icon = 'warn';
+      // Its Rex pane says it waits on the person (a prompt in that tab): the Agents row's Show in Rex goes there.
+      if (inRex) {
+        text = (
+          <>
+            <b>
+              {name} is waiting on you in Rex{REX_WAITING_WORDS[run.rex!.waiting ?? 'other']}
+            </b>
+            {minutes ? ` · ${minutes}` : ''}
+          </>
+        );
+        actions = stopHere;
+        break;
+      }
       text = (
         <>
           <b>{name} is waiting on a permission prompt</b>
@@ -289,12 +323,18 @@ export function RunLine({
     case 'stopped':
       icon = 'stop';
       // `cause`: the host's words for a stop that was not the person's (`LaunchHost.stoppedNote`). Anyone's reply starts it again.
+      // In Rex, a reply waiting while its old process may still run: never "Your reply starts it again" meanwhile.
       text =
-        run.stopped_by_person && run.since
-          ? `You stopped ${name} at ${whenTime(run.since)}. Your reply starts it again.`
-          : run.cause
-            ? `${name} stopped. ${run.cause}`
-            : `${name} stopped. Your reply starts it again.`;
+        run.rex?.held === 'may_run'
+          ? `${name} may still be running in Rex. Your reply waits for it to connect, or starts it again in a minute or two.`
+          : run.rex?.held === 'still_runs'
+            ? // The process found may be in its tab or wherever the person resumed it: never says which.
+              `${name} is still running. Your reply waits for it.`
+            : run.stopped_by_person && run.since
+              ? `You stopped ${name} at ${whenTime(run.since)}. Your reply starts it again.`
+              : run.cause
+                ? `${name} stopped. ${run.cause}`
+                : `${name} stopped. Your reply starts it again.`;
       break;
     case 'failed':
       icon = 'warn';
@@ -342,7 +382,7 @@ export function RunLine({
       }
       text = (
         <>
-          <b>{name} didn't start.</b> {run.cause ?? ''} Your message is kept.
+          {inRex && run.cause === INBOX_RUN_REX_NOT_CONNECTED ? <b>{name} opened in Rex but hasn't connected to the Inbox.</b> : <b>{name} didn't start.</b>} {run.cause ?? ''} Your message is kept.
           {/* Create a folder (E8): the folder the Send made is not taken away when the agent doesn't start. */}
           {run.made_folder ? (
             <span className="ib-run-sub" data-run-made-folder="">
@@ -374,7 +414,7 @@ export function RunLine({
               Trust folder
             </button>
           )}
-          {canOpen && openTerminal}
+          {canOpen && !inRex && openTerminal}
           <button type="button" className="ib-btn ib-sm" disabled={busy !== null} onClick={() => void act('retry')} data-run-retry="">
             Try again
           </button>
@@ -397,6 +437,21 @@ export function RunLine({
         {icon === 'spin' ? <span className="ib-run-spin" aria-hidden="true" /> : icon === 'warn' ? <Icon name="warn" size={14} /> : <span className="ib-run-stopmark" aria-hidden="true" />}
         <span className="ib-run-text" role={run.state === 'failed' || run.state === 'waiting_terminal' || run.state === 'clone_failed' ? 'status' : undefined}>
           {text}
+          {run.rex?.unavailable && (run.state === 'starting' || run.state === 'working') && (
+            <span className="ib-run-sub" data-run-rex-away="">
+              {run.rex.why === 'server' ? INBOX_REX_SERVER_AWAY : run.rex.why === 'shared' ? INBOX_REX_SHARED : "Rex isn't open on this computer, so it started in the background."}
+            </span>
+          )}
+          {note && (
+            <span className="ib-run-sub" data-run-note="">
+              {note}
+            </span>
+          )}
+          {run.rex?.refused && (run.state === 'starting' || run.state === 'working') && (
+            <span className="ib-run-sub" data-run-rex-refused="">
+              Rex didn't open a tab for it, so it started in the background.
+            </span>
+          )}
           {bar !== null && (
             <span className="ib-run-bar" aria-hidden="true" data-run-clone-bar="">
               <i style={{ width: `${bar}%` }} />

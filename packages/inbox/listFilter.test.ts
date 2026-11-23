@@ -11,7 +11,8 @@
  * a cookie from before Not seen that no longer loads. Tags (approval "inbox-thread-tags", step 2): several tags that
  * AND instead of OR, a Tag pick that ignores the other groups, a row's tags read past the window's rule (an older
  * linked machine's), a tag's list that still applies Tag picks, a pick whose tag moved to another machine's id or was
- * deleted.
+ * deleted. Routines: a Routine pick that keeps a linked machine's thread of the same id, applies while Routines are
+ * off, counts in the badge while off, or a cookie that keeps a pick it does not know.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { inboxThreadPullsSummary, type InboxListRow, type InboxListSection, type InboxThreadPull, type InboxThreadPullState } from '@plannotator/core/inbox-types';
@@ -33,6 +34,8 @@ import {
   type ListFilter,
 } from './listFilter';
 import { toggledTagPick, withLiveTagPicks } from './listFilterTags';
+import { routineHold, routineThreadTest, routineThreadsState } from './listFilterRoutines';
+import type { InboxScheduledRow } from '@plannotator/core/inbox-scheduled-types';
 import { clearedFrom } from './components/ListFilter';
 import { setStorageBackend, resetStorageBackend, getItem } from '@plannotator/ui/utils/storage';
 
@@ -184,9 +187,9 @@ test('the row summary the server builds is what the picks read: the PR still in 
 });
 
 test('a project\'s page sets its Project picks aside, and the badge counts what applies', () => {
-  const filter: ListFilter = { projects: ['prj_web', 'prj_docs'], updated: '7d', agents: ['Pi'], pulls: [], notSeen: false, tags: [] };
+  const filter: ListFilter = { projects: ['prj_web', 'prj_docs'], updated: '7d', agents: ['Pi'], pulls: [], notSeen: false, recent: false, tags: [], routines: [] };
   expect(pickCount(filter)).toBe(4);
-  expect(appliedFilter(filter, true)).toEqual({ projects: [], updated: '7d', agents: ['Pi'], pulls: [], notSeen: false, tags: [] });
+  expect(appliedFilter(filter, true)).toEqual({ projects: [], updated: '7d', agents: ['Pi'], pulls: [], notSeen: false, recent: false, tags: [], routines: [] });
   expect(pickCount(appliedFilter(filter, true))).toBe(2);
   expect(appliedFilter(filter, false)).toBe(filter);
 });
@@ -207,7 +210,7 @@ test('Smart groups keep their order and names and count only the matches; nothin
 });
 
 test('a menu row counts with the other groups\' picks, not its own group\'s', () => {
-  const filter: ListFilter = { projects: ['prj_web'], updated: '7d', agents: [], pulls: [], notSeen: false, tags: [] };
+  const filter: ListFilter = { projects: ['prj_web'], updated: '7d', agents: [], pulls: [], notSeen: false, recent: false, tags: [], routines: [] };
   // docs is not picked, but its row says what ticking it would add: docs rows in the last 7 days.
   expect(countWhere(ALL, filter, NOW, 'projects', (r) => r.project.id === 'prj_docs')).toBe(0);
   expect(countWhere(ALL, filter, NOW, 'projects', (r) => r.project.id === 'prj_billing')).toBe(1);
@@ -228,7 +231,7 @@ describe('remembered per browser', () => {
   });
 
   test('picks are written, read back, and removed when cleared', () => {
-    const filter: ListFilter = { projects: ['prj_web'], updated: { from: '2026-10-20', to: '2026-11-01' }, agents: ['Codex'], pulls: ['merged', 'none'], notSeen: true, tags: ['ini_release'] };
+    const filter: ListFilter = { projects: ['prj_web'], updated: { from: '2026-10-20', to: '2026-11-01' }, agents: ['Codex'], pulls: ['merged', 'none'], notSeen: true, recent: true, tags: ['ini_release'], routines: ['other'] };
     writeListFilter(filter);
     expect(parseListFilter(getItem(LIST_FILTER_COOKIE))).toEqual(filter);
     writeListFilter(NO_LIST_FILTER);
@@ -244,10 +247,12 @@ describe('remembered per browser', () => {
   const junk: Array<[string, string | null, ListFilter]> = [
     ['no cookie', null, NO_LIST_FILTER],
     ['not JSON', '{oops', NO_LIST_FILTER],
-    ['wrong shapes are dropped', JSON.stringify({ projects: 'prj_web', updated: 'yesterday', agents: [1, 'Pi', ''] }), { projects: [], updated: null, agents: ['Pi'], pulls: [], notSeen: false, tags: [] }],
+    ['wrong shapes are dropped', JSON.stringify({ projects: 'prj_web', updated: 'yesterday', agents: [1, 'Pi', ''] }), { projects: [], updated: null, agents: ['Pi'], pulls: [], notSeen: false, recent: false, tags: [], routines: [] }],
     ['unknown Pull request picks are dropped', JSON.stringify({ pulls: ['open', 'stale', 3] }), { ...NO_LIST_FILTER, pulls: ['open'] }],
     ['Not seen is on only for true', JSON.stringify({ notSeen: 'yes' }), NO_LIST_FILTER],
     ['a cookie from before Not seen loads with it off', JSON.stringify({ projects: ['prj_web'], updated: '7d', agents: [], pulls: ['open'] }), { ...NO_LIST_FILTER, projects: ['prj_web'], updated: '7d', pulls: ['open'] }],
+    ['unknown Routine picks are dropped', JSON.stringify({ routines: ['routine', 'cron', 1] }), { ...NO_LIST_FILTER, routines: ['routine'] }],
+    ['a cookie from before Routines loads with no Routine pick', JSON.stringify({ pulls: ['open'], tags: ['ini_release'] }), { ...NO_LIST_FILTER, pulls: ['open'], tags: ['ini_release'] }],
     ['a cookie from before tags loads with no Tag pick', JSON.stringify({ agents: ['Pi'], notSeen: true }), { ...NO_LIST_FILTER, agents: ['Pi'], notSeen: true }],
     ['a range with a bad day is dropped', JSON.stringify({ updated: { from: '2026-13', to: '2026-11-01' } }), NO_LIST_FILTER],
   ];
@@ -307,5 +312,72 @@ describe('Tag picks (approval "inbox-thread-tags", step 2)', () => {
     // Unticking takes every pick that names it; ticking adds the list's id.
     expect(toggledTagPick(['ini_far', 'ini_gone'], release, live)).toEqual(['ini_gone']);
     expect(toggledTagPick([], release, live)).toEqual(['ini_here']);
+  });
+});
+
+describe('Routine picks (Routine threads, Other threads)', () => {
+  const OTHER = 'ibx_01HYYYYYYYYYYYYYYYYYYYYYYY';
+  const routine = (thread_id: string | null) => ({ id: `sch_${thread_id}`, thread_id }) as unknown as InboxScheduledRow;
+  // A routine runs in billingToday's and mixed's threads; one not run yet has no thread.
+  const isRoutine = routineThreadTest([routine('billingToday'), routine('mixed'), routine(null)])!;
+  const keptR = (filter: Partial<ListFilter>) => ALL.filter((r) => rowMatches(r, { ...NO_LIST_FILTER, ...filter }, NOW, undefined, undefined, isRoutine)).map((r) => r.thread_id);
+
+  test('Routine threads keeps only routines\' threads; Other threads hides them; both are every row', () => {
+    expect(keptR({ routines: ['routine'] })).toEqual(['billingToday', 'mixed']);
+    expect(keptR({ routines: ['other'] })).toEqual(ALL.map((r) => r.thread_id).filter((id) => id !== 'billingToday' && id !== 'mixed'));
+    expect(keptR({ routines: ['routine', 'other'] })).toEqual(ALL.map((r) => r.thread_id));
+  });
+
+  test('with another group they narrow each other, and a menu row counts with the other groups only', () => {
+    expect(keptR({ routines: ['routine'], notSeen: true, projects: ['prj_ops'] })).toEqual(['mixed']);
+    const filter: ListFilter = { ...NO_LIST_FILTER, routines: ['routine'], projects: ['prj_web'] };
+    expect(countWhere(ALL, filter, NOW, 'routines', (r) => !isRoutine(r), undefined, isRoutine)).toBe(3);
+    expect(countWhere(ALL, filter, NOW, 'projects', (r) => r.project.id === 'prj_ops', undefined, isRoutine)).toBe(1);
+  });
+
+  test('the sections the list draws keep only the matches', () => {
+    const sections = [
+      { id: 'waiting', label: 'Waiting on you', threads: [ROWS.billingToday, ROWS.webLateYesterday] },
+      { id: 'quiet', label: 'Quiet', threads: [ROWS.mixed] },
+    ] as InboxListSection[];
+    const out = filterListSections(sections, { ...NO_LIST_FILTER, routines: ['other'] }, NOW, undefined, undefined, isRoutine);
+    expect(out.map((s) => [s.id, s.threads.map((r) => r.thread_id)])).toEqual([
+      ['waiting', ['webLateYesterday']],
+      ['quiet', []],
+    ]);
+  });
+
+  test('only this computer\'s routines: a linked machine\'s row with the same thread id is an ordinary thread', () => {
+    expect(isRoutine(ROWS.billingToday)).toBe(true);
+    expect(isRoutine({ ...ROWS.billingToday, machine: OTHER } as InboxListRow)).toBe(false);
+    expect(routineThreadTest(null)).toBeNull();
+  });
+
+  test('a deleted routine leaves the routines list: its thread stays and counts as Other', () => {
+    const afterDelete = routineThreadTest([routine('mixed')])!;
+    expect(afterDelete(ROWS.billingToday)).toBe(false);
+    expect(ALL.filter((r) => rowMatches(r, { ...NO_LIST_FILTER, routines: ['other'] }, NOW, undefined, undefined, afterDelete)).map((r) => r.thread_id)).toContain('billingToday');
+  });
+
+  test('three states: off (or a failed read) steps aside, not read yet waits, read applies; "not read" is never "no routine threads"', () => {
+    const state = (on: boolean | null, rows: InboxScheduledRow[] | null, error: string | null = null) => routineThreadsState({ on, rows, error });
+    expect(state(false, null)).toBe('off');
+    expect(state(null, null)).toBe('pending');
+    expect(state(true, null)).toBe('pending');
+    expect(state(true, null, 'Could not read routines')).toBe('off');
+    expect(state(true, [])).toBe('ready');
+    // Only a saved Routine pick waits; with none, nothing is held.
+    expect(routineHold({ state: 'pending' }, { routines: ['routine'] })).toBe(true);
+    expect(routineHold({ state: 'pending' }, { routines: [] })).toBe(false);
+    expect(routineHold({ state: 'off' }, { routines: ['routine'] })).toBe(false);
+  });
+
+  test('while Routines are off (or not read) the picks step aside: they neither filter nor count; on, they do', () => {
+    const filter: ListFilter = { ...NO_LIST_FILTER, routines: ['routine'], agents: ['Pi'] };
+    expect(appliedFilter(filter, false)).toEqual({ ...filter, routines: [] });
+    expect(pickCount(appliedFilter(filter, false))).toBe(1);
+    expect(appliedFilter(filter, false, false, true)).toBe(filter);
+    expect(pickCount(appliedFilter(filter, false, false, true))).toBe(2);
+    expect(clearedFrom(filter, false)).toEqual(NO_LIST_FILTER);
   });
 });

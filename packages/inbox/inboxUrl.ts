@@ -30,9 +30,47 @@ const contested = new Set<string>();
 
 const MACHINE_ID = /^ibx_[0-9A-HJKMNP-TV-Z]{26}$/;
 
-/** This Inbox's id, as the merged list names it. */
-export function setSelfMachine(id: string | null | undefined): void {
+/** What the merged list last said of each linked machine: its name, the marks it takes, and whether it can reach this Inbox. */
+export interface LinkedMachineFacts {
+  name: string;
+  marks: readonly string[];
+  /** It holds a link to this Inbox too (`both_ways`), so its Inbox can call this one's door. */
+  both_ways: boolean;
+  /** Its list was read (`list_cursor` not null): until then its marks are not known (an empty list says nothing). */
+  listed: boolean;
+  /** Its line's state (`needs_update`: too old to link at all). */
+  state: string;
+}
+const linkedFacts = new Map<string, LinkedMachineFacts>();
+/** This machine's own name, as the merged list names it. */
+let selfName: string | null = null;
+
+type MachineFactsWire = { id: string; self?: boolean; name: string; marks?: readonly string[]; both_ways?: boolean; list_cursor?: number | null; state?: string };
+
+/** The merged list's machines: each linked one's facts, for what an agent there can read (threadMentions.ts). */
+export function setLinkedMachines(machines: readonly MachineFactsWire[] | null | undefined): void {
+  if (!machines) return;
+  linkedFacts.clear();
+  for (const m of machines) {
+    if (m.self) selfName = m.name;
+    else if (MACHINE_ID.test(m.id)) linkedFacts.set(m.id, { name: m.name, marks: m.marks ?? [], both_ways: m.both_ways === true, listed: m.list_cursor !== null && m.list_cursor !== undefined, state: m.state ?? '' });
+  }
+}
+
+/** This machine's name as the merged list last said it, or null. */
+export function selfMachineName(): string | null {
+  return selfName;
+}
+
+/** A linked machine's facts as the merged list last said them, or null (not linked, or not heard of yet). */
+export function linkedMachineFacts(id: string): LinkedMachineFacts | null {
+  return linkedFacts.get(id) ?? null;
+}
+
+/** This Inbox's id, as the merged list names it, and (when the list carries them) every linked machine's facts. */
+export function setSelfMachine(id: string | null | undefined, machines?: Parameters<typeof setLinkedMachines>[0]): void {
   if (typeof id === 'string' && MACHINE_ID.test(id)) selfMachine = id;
+  setLinkedMachines(machines);
 }
 
 /** This Inbox's id once the merged list named it. */
@@ -56,6 +94,15 @@ export function rememberMachine(ids: Iterable<string>, machine: string | null | 
     }
     owners.set(id, machine);
   }
+}
+
+type SearchRowIds = { id: string; project: { id: string; machine?: string }; thread_id?: string; message_id?: string };
+
+export function rememberSearchMachines<T extends { groups: Partial<Record<string, readonly SearchRowIds[]>> | null; recent: readonly SearchRowIds[] | null }>(model: T): T {
+  for (const row of [...Object.values(model.groups ?? {}).flat(), ...(model.recent ?? [])]) {
+    if (row?.project.machine) rememberMachine([row.id, row.project.id, row.thread_id ?? '', row.message_id ?? ''], row.project.machine);
+  }
+  return model;
 }
 
 /** Ids this Inbox's own answers named: theirs for good (an earlier claim by another machine is dropped). */
@@ -86,6 +133,8 @@ export function localRoute(url: string): string {
 /** Tests only: forget every machine. */
 export function resetMachineRoutes(): void {
   selfMachine = null;
+  selfName = null;
+  linkedFacts.clear();
   owners.clear();
   local.clear();
   contested.clear();

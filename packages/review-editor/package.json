@@ -10,7 +10,8 @@
     "./worker-pool": "./workerPool.tsx",
     "./components/*": "./components/*.tsx",
     "./utils/*": "./utils/*.ts",
-    "./hooks/*": "./hooks/*.ts"
+    "./hooks/*": "./hooks/*.ts",
+    "./semDiff/*": "./semDiff/*.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",

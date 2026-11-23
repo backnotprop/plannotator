@@ -33,5 +33,25 @@
   },
   "include": ["**/*.ts", "**/*.tsx"],
   // guideFeedback.test.ts compares the window's export with review-editor's, which does not compile under these settings.
-  "exclude": ["node_modules", "dist", "guide/GuideReader.tsx", "guide/SurfaceGuideReader.tsx", "guide/PlatformPost.tsx", "guide/PullRepoParts.tsx", "shape/ShapeBoard.tsx", "guideFeedback.test.ts"]
+  // One path per line, so two changes that each add one do not touch the same line.
+  "exclude": [
+    "node_modules",
+    "dist",
+    "guide/GuideReader.tsx",
+    "guide/SurfaceGuideReader.tsx",
+    "guide/PlatformPost.tsx",
+    "guide/PullRepoParts.tsx",
+    "guide/PullChangesTree.tsx",
+    // guide/pullChangesTreeRisk.test.tsx renders guide/PullChangesTree.tsx, excluded for the same reason (it reaches
+    // review-editor's ReviewStateContext and AllFilesCodeView); tsconfig.guide.json checks both.
+    "guide/pullChangesTreeRisk.test.tsx",
+    "guide/useSemDiffClient.ts",
+    "guide/renderedFiles.tsx",
+    "guide/useSemDiffClient.test.tsx",
+    "guide/ReviewKeys.tsx",
+    "guide/reviewWalk.ts",
+    "guide/reviewKeys.test.tsx",
+    "shape/ShapeBoard.tsx",
+    "guideFeedback.test.ts"
+  ]
 }

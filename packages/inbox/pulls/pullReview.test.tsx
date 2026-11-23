@@ -29,7 +29,7 @@ import { handoffKeys, handoffStack, PULL_HANDOFF_TITLE_MAX, pullHandoffAskLine, 
 import { layerVerdictLink } from './topology';
 
 import { pullsStateOf } from './reviewsTestState';
-import { LAST, link, model, pull, STACK_ID, stack } from './pullReviewFixtures';
+import { keepComment, LAST, link, model, pull, SHA, STACK_ID, stack } from './pullReviewFixtures';
 const hasDom = typeof document !== 'undefined';
 const shown: { patch: string; title: string }[] = [];
 /** The reader's comment seam as the review last gave it (a test writes a comment through it). */
@@ -45,7 +45,10 @@ let readerFiles: ((path: string, signal: AbortSignal, patch: string) => Promise<
 /** The reader's Collapse all as the review last gave it. */
 let readerCollapse: { collapsed: boolean; token: number } | undefined;
 if (hasDom) {
+  const seam: string = '../guide/PullChangesTree.tsx';
+  const { PullChangesTree } = (await import(seam)) as Record<string, unknown>;
   mock.module('#guide-reader', () => ({
+    PullChangesTree,
     default: (props: { snapshot: { review: { rawPatch: string }; guide: { title: string } }; comments?: { onSave: (annotation: unknown) => void }; fileContents?: typeof readerFiles; lineNotes?: typeof readerNotes; wholeFileNotes?: typeof readerWhole; collapseAll?: typeof readerCollapse }) => {
       readerComments = props.comments;
       readerNotes = props.lineNotes;
@@ -311,7 +314,8 @@ test.skipIf(!hasDom)("others' threads from the details go on their lines in this
   await act(async () => bandRoot.unmount());
   bandBox.remove();
   // Open threads only: the resolved one is drawn but not counted.
-  expect(el('[data-review-file="src/a.ts"] [data-pull-file-threads]').textContent).toBe('3');
+  const railRow = [...(document.querySelector('[data-review-files] [data-changes-tree]')?.shadowRoot?.querySelectorAll<HTMLElement>('[data-type="item"]') ?? [])].find((row) => row.getAttribute('title') === 'src/a.ts');
+  expect(railRow?.querySelector('[data-item-section="trail"] [title="3 open threads"]')?.textContent).toBe('3');
   await act(async () => el('[data-pull-layer-all]').click());
   await settle();
   // The whole stack's diff is the top layer's answer: this layer's threads are not on it.
@@ -362,12 +366,6 @@ test.skipIf(!hasDom)("a teammate's PR has no agent thread here: its diff reads w
 
 // --- Post to GitHub/GitLab (the owner's answer C on #2590: the person chooses at the end) ---
 
-const SHA = 'a'.repeat(40);
-/** A comment kept for a layer's review, as the review keeps them (per head commit). */
-function keepComment(p: InboxPull, text: string) {
-  const comment = { id: `c-${p.number}`, type: 'comment', scope: 'line', filePath: 'src/retry.ts', lineStart: 12, lineEnd: 12, side: 'new', text, createdAt: 1 };
-  window.localStorage.setItem(`plannotator-inbox-pull-review:${p.key}:layer:${p.head_sha ?? SHA}`, JSON.stringify({ comments: [comment], viewed: [] }));
-}
 const dialogButton = (words: string) => {
   const found = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((b) => b.textContent?.trim() === words);
   if (!found) throw new Error(`no "${words}" in the dialog: ${[...document.querySelectorAll('[role="dialog"] button')].map((b) => b.textContent).join(' | ')}`);
@@ -601,7 +599,7 @@ test.skipIf(!hasDom)('a partial post keeps the dialog open on what did not go, w
 });
 
 
-test.skipIf(!hasDom)("top left is always the author's picture, from the Inbox's own origin; the agent is on the third line", async () => {
+test.skipIf(!hasDom)("the open row's second line leads with the author's picture, from the Inbox's own origin, then the agent", async () => {
   // The person's own stack (as "mara-lee", a login no other test drew), its review thread with Claude; a teammate's PR whose account is gone.
   const gone = pull(990, { repo: 'northwind/web-app', mine: false, requested: true, author: null, head: 'gone', updated_at: '2026-11-03T11:00:00.000Z' });
   const own = model.pulls.map((p) => (stack.some((l) => l.key === p.key) ? { ...p, author: 'mara-lee' } : p));
@@ -634,18 +632,15 @@ test.skipIf(!hasDom)("top left is always the author's picture, from the Inbox's 
   // The agent: its mark on the third line, named for a reader, and what it is doing.
   const agent = stackRow.querySelector('.ib-pv [data-pulls-row-agent]')!;
   expect(agent.getAttribute('data-pulls-row-agent')).toBe('claude-code');
-  expect(agent.getAttribute('aria-label')).toBe('Claude Code');
+  expect(agent.querySelector('.ib-sr')!.textContent).toBe('Claude Code, ');
   expect(stackRow.querySelector('[data-reviews-status]')!.textContent).toBe('Curating…');
   expect(agent.querySelector('svg, img')).not.toBeNull();
   // The picture failed: the initials stay, no broken image.
   expect(av.querySelector('img')).toBeNull();
   expect(av.getAttribute('data-pulls-avatar')).toBe('none');
   expect(av.textContent).toBe('ML');
-  // A deleted account: a grey person, never an empty box, and no picture asked for.
-  const ghost = row(gone.key).querySelector('[data-pulls-ghost]')!;
-  expect(ghost.getAttribute('aria-label')).toBe('A deleted account');
-  expect(ghost.querySelector('svg')).not.toBeNull();
-  expect(ghost.querySelector('img')).toBeNull();
+  // Only the open row has the second line: the other rows are one line, no picture (a deleted account's: reviewsCompact.test.tsx).
+  expect(row(gone.key).querySelector('[data-reviews-line2], [data-pulls-author], [data-pulls-ghost]')).toBeNull();
 });
 
 test.skipIf(!hasDom)('a stack page has one "Open the diff"; the whole stack is the review\'s own switch', async () => {
@@ -822,7 +817,7 @@ function Page({
   );
 }
 
-test.skipIf(!hasDom)('the list: On you, then the folded group; a stack is one row with its chain', async () => {
+test.skipIf(!hasDom)('the list: On you, then the folded group; a stack is one row whose count unfolds its layers', async () => {
   const opened: string[] = [];
   mount(
     <SidebarProvider>
@@ -855,7 +850,7 @@ test.skipIf(!hasDom)('the list: On you, then the folded group; a stack is one ro
   await settle();
   expect(new Set(rows().map((r) => r.getAttribute('data-pulls-move')))).toEqual(new Set(['on_you', 'not_reviewed']));
   const stackRow = rows().find((r) => r.getAttribute('data-pulls-layers') === '3')!;
-  expect(stackRow.querySelectorAll('.ib-pr-chain svg').length).toBe(3);
+  expect(el(`[data-reviews-stack-toggle="${stackRow.getAttribute('data-reviews-row')}"]`).textContent).toBe('3');
   await act(async () => stackRow.click());
   expect(opened).toEqual([STACK_ID]);
 });

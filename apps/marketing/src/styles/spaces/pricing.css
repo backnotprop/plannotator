@@ -1,0 +1,89 @@
+/* The Spaces pricing page (src/pages/workspaces/pricing.astro), on top of page.css.
+   Ported from the Spaces app's pricing page; every rule is scoped to .spp. */
+.spp{--quiet:#656a8a}
+html:not(.light) .spp{--quiet:#7d84b3}
+.spp .stars{inset:auto;left:0;top:0;width:100%;height:900px;z-index:0}
+.spp .ft{margin-top:100px}
+
+/* The quiet button (the Free card's): the same cell colour as the site's quiet tiles. */
+.spp .act.qt{background:var(--q2);color:var(--ink)}
+.spp .act.qt:hover{background:var(--sv);color:var(--svt)}
+
+.spp .pp-pg{position:relative;z-index:1;max-width:1440px;margin:0 auto}
+.spp .pp-pg .act{padding:0 24px}
+.spp .pp-hero{position:relative;padding:150px 96px 0}
+.spp .pp-copy{position:relative;z-index:1}
+.spp h1{line-height:1.22}
+.spp .pp-lede{margin:26px 0 0;font-size:18px;line-height:1.5;color:var(--soft);letter-spacing:-.005em}
+.spp .pp-lede span{display:block}
+.spp .pp-pick{grid-column:1 / -1;margin-bottom:4px}
+.spp .pp-sw{display:inline-flex;padding:4px;background:var(--stage)}
+.spp .pp-sw button{height:42px;margin:0;padding:0 18px;border:0;border-radius:0;background:none;font:500 15px/1 var(--sans);color:var(--soft);cursor:pointer;-webkit-appearance:none;appearance:none}
+.spp .pp-sw button[aria-checked="true"]{background:var(--paper);color:var(--p-ink);box-shadow:0 0 0 1px var(--p-line)}
+.spp .pp-sw button:focus-visible{outline:2px solid var(--iris);outline-offset:-2px}
+.spp .pp-saving{margin:12px 0 0;font-size:15px;line-height:normal;color:var(--soft)}
+
+.spp .pp-cards{position:relative;z-index:1;grid-column:1 / -1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:20px;margin-top:48px}
+.spp .pp-card{position:relative;padding:28px 28px 30px;background:var(--paper);color:var(--p-ink);box-shadow:var(--shadow);font-size:14px;line-height:21px;letter-spacing:-.004em}
+.spp .pp-name{margin:0;font:600 18px/1 var(--sans);letter-spacing:-.01em}
+.spp .pp-price{margin:22px 0 0;font:500 48px/1 var(--sans);letter-spacing:-.045em;white-space:nowrap}
+.spp .pp-price b{font-weight:500}
+.spp .pp-said{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.spp .pp-price .pp-per{font-size:17px;font-weight:400;letter-spacing:-.005em;color:var(--p-soft);margin-left:4px}
+.spp .pp-card .act{display:flex;width:100%;margin-top:24px;justify-content:center}
+.spp .pp-card .act.qt{font-weight:600}
+.spp .pp-card ul{list-style:none;margin:26px 0 0;padding:0;font-size:15px;line-height:21px}
+.spp .pp-card li{position:relative;padding-left:18px}
+.spp .pp-card li+li{margin-top:10px}
+.spp .pp-cards .pp-card ul{min-height:83px}
+.spp .pp-card li::before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;background:var(--sv)}
+html:not(.light) .spp .pp-card li::before{background:var(--violet)}
+
+/* The two facts under the cards are a two-item list; the dot between them is not read out. */
+.spp .pp-ask{display:flex;justify-content:center;white-space:nowrap;margin:30px 0 0}
+.spp .pp-ask .note{margin:0;padding:0;list-style:none;font-size:40px;transform-origin:50% 100%}
+.spp .pp-ask .pp-fact{display:inline}
+.spp .pp-ask .pp-dot{margin:0 .42em}
+
+.spp .pp-row,.spp .pp-close{display:grid;grid-template-columns:385px minmax(0,1fr);column-gap:35px;padding:0 96px;margin-top:150px}
+.spp .pp-row{position:relative;align-items:start}
+.spp .pp-close{align-items:center}
+.spp .pp-close .h2s{white-space:nowrap}
+.spp .pp-qa{display:grid;grid-template-columns:1fr 1fr;column-gap:20px;row-gap:44px;margin:6px 0 0}
+.spp .pp-qa dt{margin:0 0 6px;font:600 17px/1.4 var(--sans);letter-spacing:-.01em}
+.spp .pp-qa dd{margin:0;max-width:380px;font-size:17px;line-height:1.5;color:var(--soft);text-wrap:pretty}
+.spp .pp-qa dd small{display:block;margin-top:6px;font-size:14px;color:var(--quiet)}
+
+@media (max-width:1180px){
+  .spp .ft{margin-top:80px}
+  .spp .pp-hero{display:block;padding:120px 24px 0}
+  .spp .pp-lede{font-size:17px}
+  .spp .pp-cards{margin-top:36px}
+  .spp .pp-ask{margin-top:26px}
+  .spp .pp-row,.spp .pp-close{display:block;padding:0 24px;margin-top:96px}
+  .spp .pp-row>*+*{margin-top:30px}
+  .spp .pp-qa{row-gap:32px}
+  .spp .pp-close .h2s{white-space:normal}
+  .spp .pp-close .act{margin-top:24px}
+}
+@media (min-width:1024px) and (max-width:1180px){
+  .spp .pp-cards{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:1023px){
+  .spp .pp-cards{grid-template-columns:1fr}
+  .spp .pp-pick{grid-column:1}
+  .spp .pp-cards .pp-card ul{min-height:0}
+}
+@media (min-width:761px) and (max-width:1023px){
+  .spp .pp-card{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:48px;align-items:center}
+  .spp .pp-card ul{margin:0}
+}
+@media (max-width:760px){
+  .spp .pp-hero{padding-top:110px}
+  .spp .pp-price{font-size:44px}
+  .spp .pp-ask .note{font-size:34px}
+  .spp .pp-ask .pp-fact{display:block;text-align:center}
+  .spp .pp-ask .pp-fact+.pp-fact{margin-top:6px}
+  .spp .pp-ask .pp-dot{display:none}
+  .spp .pp-qa{grid-template-columns:1fr}
+}

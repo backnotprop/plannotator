@@ -29,7 +29,9 @@
  *
  * Plus the design review's bound: a write the owner keeps failing with 5xx is
  * parked after OUTBOX_MAX_SERVER_ERRORS tries as "may have been delivered",
- * so one poison entry never blocks a machine's queue for ever.
+ * so one poison entry never blocks a machine's queue for ever. A write this
+ * Inbox makes itself (`auto`) that gets a 5xx steps aside until the next try:
+ * the person's writes behind it are never held by it.
  *
  * Files: `inbox/outbox/<machine id>.jsonl`, 0600. Each line is a full
  * snapshot of one entry (the store's line rules: the last line per key wins,
@@ -42,7 +44,7 @@ import { join } from "node:path";
 import { JsonLines } from "@plannotator/shared/inbox/devices";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
-import { inboxTidyWords } from "@plannotator/core/inbox-types";
+import { inboxTidyWords, type InboxSentFromPlace } from "@plannotator/core/inbox-types";
 
 export const INBOX_OUTBOX_DIR = "outbox";
 /** The header a linked machine's Inbox sends with a write the person made in its window (`OutboxEntry.window`). */
@@ -61,7 +63,8 @@ export const OUTBOX_MAX_BODY_BYTES = 256 * 1024;
  * (it may have been applied). `delivered`: the owner answered 2xx.
  * `refused`: the owner answered 4xx. `parked`: repeated 5xx, given up.
  * `dropped`: the link went (Unlink, or the other machine removed this one).
- * `cancelled`: the person cancelled it before it ever left (a launch held for a machine that is asleep).
+ * `cancelled`: the person cancelled it before it ever left (a launch held for a machine that is asleep); or one of
+ * this Inbox's own past its `send_by` (it may have left: `left` says), or behind one that surely did not land (`follows`).
  */
 export type OutboxState = "queued" | "sending" | "delivered" | "refused" | "parked" | "dropped" | "cancelled";
 
@@ -101,6 +104,31 @@ export interface OutboxEntry {
    * `X-Plannotator-Window`: the other machine answers a permission prompt, or starts, stops or trusts an agent, only for one.
    */
   window?: true;
+  /** Where the person was when not at this Inbox's own window (inbox-sent-from.ts). Sent on as `X-Plannotator-Sent-From`. */
+  sent_from?: InboxSentFromPlace;
+  /**
+   * This Inbox made it itself, not a press of the person's (a Combine's archive on that machine, its Undo, its busy
+   * mark; inbox-combine-far.ts): never listed as waiting, never a notice. Its maker reads how it ended by its key.
+   */
+  auto?: true;
+  /**
+   * This Inbox's own write that undoes another (a Combine's Undo of its archive there), queued right behind it: sent
+   * only once that one may have been applied there; one that surely was not (refused, skipped there, taken back before
+   * it left) takes this one with it, `cancelled`, never sent.
+   */
+  follows?: string;
+  /**
+   * This Inbox's own write that is only worth sending until then (a Combine's archive there: its day): past it, it is
+   * never sent again, even one that left once, and ends `cancelled` (`cancel` then takes it back too, unless a request
+   * is on its way right now). So nothing of it lands after its maker said it did not.
+   */
+  send_by?: string;
+}
+
+/** Whether a settled entry may have been applied there: delivered (and not skipped there by its guard), given up after 5xx, or taken back after it left. */
+export function outboxMayHaveApplied(entry: OutboxEntry): boolean {
+  if (entry.state === "delivered") return typeof (entry.answer as { skipped?: unknown } | null)?.skipped !== "string";
+  return entry.state === "parked" || ((entry.state === "dropped" || entry.state === "cancelled") && entry.left);
 }
 
 /** What one try got back: the owner's status and JSON body, or `null` when the machine could not be reached. */
@@ -165,7 +193,8 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  *   the attachment at once; the owner adds a file to its message once, so a
  *   second copy answers the same attachment); and a Combine, or a Tidy with the
  *   person's words, which asks an agent there to act on the person's threads
- *   (one held for days would archive threads nobody is looking at).
+ *   (one held for days would archive threads nobody is looking at); and Show in
+ *   Rex for an agent there (`rex/show`), which moves Rex's app at the click.
  * - `local` is never forwarded: `doorWriteKind` has no kind for it, so the
  *   forward answers 404. A phone reaches it at this Inbox's own door. Reuse
  *   (`uploads/reuse`) is useful only as its answer, the new upload's id: a held
@@ -192,6 +221,8 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   // Undo go to each machine that holds it (approval "inbox-thread-tags").
   "POST threads/:id/tags": "set",
   "POST initiatives/:id": "set",
+  // A project's tags live on the project's own machine, named by the tag's name, as a thread's do.
+  "POST projects/:id/tags": "set",
   // A tag's colour and "Show tag colors" carry the time the person chose, so a held one lands as of then.
   "POST tag-colours": "set",
   // A Board card lives on its project's machine (mark `cards`): a move, an edit, a link or a tag puts a state there,
@@ -220,6 +251,10 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST messages/:id/reask": "append",
   "POST messages/:id/handoff/undo": "set",
   "POST messages/:id/actions/(a-[0-9a-f]{8}(?:-\\d{1,3})?)": "set",
+  // A run starts, stops or opens a terminal now, and a secret's value is never written to the outbox: sent now from a
+  // press in a window there, or not at all (inbox-run-routes.ts).
+  "POST messages/:id/run": "now",
+  "POST messages/:id/secret": "now",
   "POST threads/:id/delete": "set",
   "POST annotations": "set",
   "POST annotations/:id/remove": "set",
@@ -240,12 +275,18 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST combine": "now",
   "POST combine/(cmb_[^/]+)/cancel": "set",
   "POST combine/(cmb_[^/]+)/undo": "set",
+  // A Combine on a linked computer marks this Inbox's picked threads busy while it waits, and lets go: a state per
+  // Combine and thread (inbox-combine-across.ts), sent by that Inbox itself, never the person.
+  "POST combine/hold": "set",
   // A launched agent's buttons from another machine (remote launch). Stop, Trust folder and Delete put a state; Try
   // again is refused while a start runs and does nothing for a launch that is not failed or stopped.
   "POST launch/:id/stop": "set",
   "POST launch/:id/retry": "set",
   "POST launch/:id/trust": "set",
   "POST launch/:id/delete": "set",
+  // Show in Rex for an agent on another machine (inbox-rex-far.ts): a press that moves Rex's app now; held for later it
+  // would move it when nobody asked.
+  "POST rex/show": "now",
   "POST link-back": "set",
   "POST unlink": "set",
   // On this table so rule 8 knows it. The forward refuses it before this is read: an Update is never held to run days later.
@@ -310,6 +351,8 @@ export class InboxOutbox {
   private readonly again = new Set<string>();
   private readonly listeners = new Set<(change: OutboxChange) => void>();
   private readonly waiters = new Map<string, Set<() => void>>();
+  /** The keys whose request is on its way now. */
+  private readonly inFlight = new Set<string>();
   /** The folder is made with the first held write: an Inbox that never links keeps none. */
   private dirMade = false;
 
@@ -374,7 +417,7 @@ export class InboxOutbox {
 
   /** Every entry the person has not been told about yet, or not dismissed: refusals and losses (rules 3, 4). */
   notices(): OutboxEntry[] {
-    return [...this.entries.values()].filter((e) => e.notice !== null && !e.dismissed).sort((a, b) => (a.notice!.at < b.notice!.at ? -1 : 1));
+    return [...this.entries.values()].filter((e) => e.notice !== null && !e.dismissed && !e.auto).sort((a, b) => (a.notice!.at < b.notice!.at ? -1 : 1));
   }
 
   dismiss(key: string): OutboxEntry | null {
@@ -389,7 +432,16 @@ export class InboxOutbox {
    * whatever state it is in, and queues nothing. The same key on another
    * route or machine is refused, as the door refuses it.
    */
-  submit(machine: string, route: string, body: Record<string, unknown>, thread: string | null = null, window = false): { entry: OutboxEntry; fresh: boolean } {
+  submit(
+    machine: string,
+    route: string,
+    body: Record<string, unknown>,
+    thread: string | null = null,
+    window = false,
+    sentFrom: InboxSentFromPlace | null = null,
+    auto = false,
+    own: { follows?: string; send_by?: string } = {},
+  ): { entry: OutboxEntry; fresh: boolean } {
     if (!MACHINE_FILE.test(machine)) throw new InboxError("validation_error", "machine: an ibx_ id.", { field: "machine" });
     const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a write to another machine.", { field: "idempotency_key" });
@@ -422,6 +474,10 @@ export class InboxOutbox {
       dismissed: false,
       thread,
       ...(window ? { window: true as const } : {}),
+      ...(sentFrom ? { sent_from: sentFrom } : {}),
+      ...(auto ? { auto: true as const } : {}),
+      ...(auto && own.follows ? { follows: own.follows } : {}),
+      ...(auto && own.send_by ? { send_by: own.send_by } : {}),
     });
     return { entry, fresh: true };
   }
@@ -432,8 +488,15 @@ export class InboxOutbox {
    */
   cancel(key: string): OutboxEntry | null {
     const entry = this.entries.get(key);
-    if (!entry || entry.state !== "queued" || entry.left) return entry ?? null;
+    if (!entry) return null;
+    // Past its `send_by`, one that left is taken back too, once no request of it is on its way: none leaves again.
+    const expired = !!entry.send_by && pending(entry) && this.pastSendBy(entry) && !this.inFlight.has(key);
+    if (!expired && (entry.state !== "queued" || entry.left)) return entry;
     return this.save({ ...entry, state: "cancelled", settled_at: this.now().toISOString() });
+  }
+
+  private pastSendBy(entry: OutboxEntry): boolean {
+    return !!entry.send_by && this.now().getTime() >= Date.parse(entry.send_by);
   }
 
   /** Resolves when the entry settles, or after `ms`, whichever is first. */
@@ -517,16 +580,28 @@ export class InboxOutbox {
   }
 
   private async drainOnce(machine: string, send: (entry: OutboxEntry) => Promise<OutboxAnswer>): Promise<DrainResult> {
+    // This Inbox's own writes (`auto`) yield: once one fails with a 5xx, they all wait (in their order) for the next
+    // try, and the person's writes behind them go now.
+    let ownFailed = false;
     for (;;) {
-      const head = this.list(machine, "pending")[0];
-      if (!head) return "empty";
+      const head = this.list(machine, "pending").find((e) => !(ownFailed && e.auto));
+      if (!head) return ownFailed ? "server_error" : "empty";
+      // This Inbox's own: one past its day is never sent again; one behind a write that surely did not land goes with it.
+      const before = head.follows ? this.entries.get(head.follows) : undefined;
+      if (this.pastSendBy(head) || (!head.left && before && !pending(before) && !outboxMayHaveApplied(before))) {
+        this.save({ ...head, state: "cancelled", settled_at: this.now().toISOString() });
+        continue;
+      }
       // Rule 10: on disk as having left before a byte goes out.
       const leaving = head.left ? head : this.save({ ...head, state: "sending", left: true });
       let answer: OutboxAnswer;
+      this.inFlight.add(leaving.key);
       try {
         answer = await send(leaving);
       } catch {
         answer = null;
+      } finally {
+        this.inFlight.delete(leaving.key);
       }
       const current = this.entries.get(leaving.key);
       // Dropped while in flight (Unlink): its notice already says it may have landed.
@@ -550,6 +625,10 @@ export class InboxOutbox {
         continue;
       }
       this.save({ ...current, errors });
+      if (current.auto) {
+        ownFailed = true;
+        continue;
+      }
       return "server_error";
     }
   }

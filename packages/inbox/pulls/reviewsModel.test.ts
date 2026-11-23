@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { planFolds } from '@plannotator/core/inbox-folding';
 import { inboxPullStacks, type InboxPull, type InboxReviewRow, type InboxReviewsAnswer, type InboxReviewThread } from '@plannotator/core/inbox-types';
-import { readReviewFolds, reviewContextLine, reviewEarlierHidden, reviewOpenPlan, reviewRowLine, reviewRowsIn, reviewRowTitle, reviewViewOf, saveReviewFolds } from './reviewsModel';
+import { readReviewFolds, REVIEW_ROW_AUTO_STOPPED, reviewContextLine, reviewEarlierHidden, reviewOpenPlan, reviewRowLine, reviewRowsIn, reviewRowTitle, reviewViewOf, saveReviewFolds } from './reviewsModel';
 
 function pull(number: number, fields: Partial<InboxPull> = {}): InboxPull {
   const repo = fields.repo ?? 'northwind/web-app';
@@ -231,11 +231,14 @@ test('the groups start folded, are remembered, and a bad stored value is the def
   const saved = globalThis.localStorage;
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => store.set(k, v) } });
   try {
-    expect(readReviewFolds()).toEqual({ waiting: false, not_reviewed: false });
-    saveReviewFolds({ waiting: true, not_reviewed: false });
-    expect(readReviewFolds()).toEqual({ waiting: true, not_reviewed: false });
+    expect(readReviewFolds()).toEqual({ waiting: false, not_reviewed: false, local: false });
+    saveReviewFolds({ waiting: true, not_reviewed: false, local: true });
+    expect(readReviewFolds()).toEqual({ waiting: true, not_reviewed: false, local: true });
+    // Folds kept before "On this computer" was a group: it starts folded.
+    store.set([...store.keys()][0]!, JSON.stringify({ waiting: true, not_reviewed: true }));
+    expect(readReviewFolds()).toEqual({ waiting: true, not_reviewed: true, local: false });
     store.set([...store.keys()][0]!, '{not json');
-    expect(readReviewFolds()).toEqual({ waiting: false, not_reviewed: false });
+    expect(readReviewFolds()).toEqual({ waiting: false, not_reviewed: false, local: false });
   } finally {
     Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: saved });
   }
@@ -284,6 +287,11 @@ test('a walkthrough says Walkthrough, not a branch, from its start (Writing…) 
   const curatingReview = row({ reviewed: false, reason: 'curating', review: null, started: { ...started, kind: 'local' } } as unknown as Partial<InboxReviewRow>);
   expect(reviewRowLine(curatingReview).status).toBe('Curating…');
   expect(reviewViewOf(curatingReview, { messages: [], subject: null }, { projectName: null, onWholeThread: () => {}, onOpenStack: () => {} }).curating).toBe('Curating the review…');
+  // A local Picture it: the row and the thread say a page is being made, never a guided review.
+  const pictureIt = row({ reviewed: false, reason: 'curating', review: null, started: { ...started, kind: 'local', ask: 'picture_it' } } as unknown as Partial<InboxReviewRow>);
+  const pictureItView = reviewViewOf(pictureIt, { messages: [], subject: null }, { projectName: null, onWholeThread: () => {}, onOpenStack: () => {} });
+  expect(reviewRowLine(pictureIt).status).toBe('Making a Picture page…');
+  expect([pictureItView.curating, pictureItView.asked]).toEqual(['Making a Picture page…', 'New review · Picture it']);
   // Its review in: the source names a branch, but the row still says what it is; there is no verdict to wait on.
   const ready = row({ started, review: review({ walkthrough: true }) } as unknown as Partial<InboxReviewRow>);
   expect(reviewRowLine(ready)).toMatchObject({ lead: 'Walkthrough', status: 'Ready' });
@@ -305,4 +313,37 @@ test("the bar's name in Reviews is the row's title: the review's once it landed,
   expect(view(row({ review: null, reason: 'curating', started } as unknown as Partial<InboxReviewRow>)).name).toBeNull();
   // A PR row's title is the PR's: the bar keeps its thread name.
   expect(view(row({ stacks: [inboxPullStacks([pull(869)])[0]!] })).name).toBeNull();
+});
+
+test("a PR made for when it ranked: the row says what is being made while its agent works, the page until it is seen, or why it couldn't start until a thread is there", () => {
+  const stacked = (link: Record<string, unknown> | null = null, fields: Record<string, unknown> = {}) =>
+    row({ reviewed: !!link, reason: 'curating', review: null, thread_id: link ? 't' : null, stacks: inboxPullStacks([pull(880)]), link, ...fields } as unknown as Partial<InboxReviewRow>);
+  const key = pull(880).key;
+  const runs = (fields: Record<string, unknown>) => ({ [key]: { at: '2026-11-18T10:00:00.000Z', level: 'high', made: 'picture_it', state: 'started', thread_id: 't', ...fields } }) as never;
+  const working = { thread_id: 't', guide: null, agent: { host: 'codex', session: 's', name: 'Codex' } };
+  const ended = { ...working, agent: { ...working.agent, ended: true } };
+  expect(reviewRowLine(stacked(working), runs({})).status).toBe('Making a Picture page…');
+  expect(reviewRowLine(stacked(working), runs({ made: 'guide' })).status).toBe('Making a guided review…');
+  expect(reviewRowLine(stacked(), runs({ state: 'queued', thread_id: null })).status).not.toContain('Making');
+  const page = (seen: boolean) => ({ ...ended, picture_it_page: { message_id: 'm', title: 'Retries', at: '2026-11-18T10:05:00.000Z', ...(seen ? { seen: true } : {}) } });
+  expect(reviewRowLine(stacked(page(false)), runs({ level: 'high' })).status).toBe('Picture page ready, made when it ranked High');
+  expect(reviewRowLine(stacked(page(false)), runs({ level: 'medium' })).status).toBe('Picture page ready, made when it ranked Medium');
+  expect(reviewRowLine(stacked(page(true)), runs({})).status).toBe('Curating…');
+  const waiting = stacked(page(false), { review: review({}), reason: 'review_ready', move: 'on_you' });
+  expect(reviewRowLine(waiting, runs({})).status).toBe('Review ready');
+  const failed = runs({ state: 'failed', thread_id: null, reason: 'Codex can’t be started here.', tries: 3 });
+  expect(reviewRowLine(stacked(), failed).status).toBe("Couldn't start: Codex can’t be started here.");
+  expect(reviewRowLine(stacked(), runs({ state: 'failed', thread_id: null, reason: 'Codex can’t be started here.', tries: 1 })).status).toBe("Couldn't start: Codex can’t be started here. It will try again.");
+  expect(reviewRowLine(stacked(working), failed).status).toBe('Curating…');
+  const closed = [{ ...inboxPullStacks([pull(880)])[0]!, layers: [pull(880, { state: 'closed' })] }];
+  expect(reviewRowLine(stacked(null, { stacks: closed, reason: 'not_reviewed' }), failed).status).not.toContain("Couldn't start");
+  expect(reviewRowLine(stacked()).status).toBe('Curating…');
+});
+
+test('a PR made for when it ranked whose agent ended before sending what was asked for says so, not Curating…', () => {
+  const ended = { thread_id: 't', guide: null, agent: { host: 'codex', session: 's', name: 'Codex', ended: true } };
+  const stopped = row({ reviewed: true, reason: 'curating', review: null, thread_id: 't', stacks: inboxPullStacks([pull(880)]), link: ended } as unknown as Partial<InboxReviewRow>);
+  const runs = (made: string) => ({ [pull(880).key]: { at: '2026-11-18T10:00:00.000Z', level: 'high', made, state: 'started', thread_id: 't', done: true } }) as never;
+  expect(reviewRowLine(stopped, runs('picture_it')).status).toBe(REVIEW_ROW_AUTO_STOPPED.picture_it);
+  expect(reviewRowLine(stopped, runs('guide')).status).toBe(REVIEW_ROW_AUTO_STOPPED.guide);
 });

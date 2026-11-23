@@ -26,6 +26,7 @@ import { inboxPeerAgentsGroup } from "./inbox-agents-list";
 import { inboxPeerSessionNames } from "./inbox-session-names";
 import type { InboxLinkRecord } from "./inbox-links";
 import { MACHINE_WINDOW_HEADER, type InboxOutbox, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
+import { INBOX_SENT_FROM_HEADER } from "@plannotator/core/inbox-types";
 import type { InboxPeerTransport } from "./inbox-transport";
 import { farArchivedPage, type FarArchived } from "./inbox-archived-merged";
 import { readShowArchived, type InboxShowArchived } from "./inbox-show-archived";
@@ -508,9 +509,8 @@ export class PeerLink {
 
   /** A window asked for the merged Board: this machine's is read now (when its list takes `cards`) and kept current. */
   wantCards(): Promise<void> {
-    if (this.cardsWanted) return this.cardsReading ?? Promise.resolve();
     this.cardsWanted = true;
-    return this.refreshCards();
+    return this.cardsReading ?? (this.cards ? Promise.resolve() : this.refreshCards());
   }
 
   refreshCards(): Promise<void> {
@@ -621,7 +621,7 @@ export class PeerLink {
       const response = await this.options.transport.request(entry.route, "", {
         method: "POST",
         // A press in the person's window here: the other machine's door hands that on (inbox-devices.ts).
-        headers: this.auth({ "Content-Type": "application/json", ...(entry.window ? { [MACHINE_WINDOW_HEADER]: "1" } : {}) }),
+        headers: this.auth({ "Content-Type": "application/json", ...(entry.window ? { [MACHINE_WINDOW_HEADER]: "1" } : {}), ...(entry.sent_from ? { [INBOX_SENT_FROM_HEADER]: entry.sent_from } : {}) }),
         body: JSON.stringify(entry.body),
         signal: AbortSignal.timeout(this.t.sendMs),
       });

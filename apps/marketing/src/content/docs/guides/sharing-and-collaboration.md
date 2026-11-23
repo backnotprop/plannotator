@@ -98,6 +98,8 @@ Those confirmation steps describe markdown in the Export modal. Raw HTML cannot 
 
 A link creator can configure an `http://` or `https://` callback endpoint and a token. When the recipient chooses **Approve** or **Send Feedback**, the browser posts the action, token, and annotated share URL to that endpoint. For a short link, `annotated_url` can include the complete fragment decryption key. Trust the link creator and callback endpoint with the shared content and key, and use HTTPS to protect the callback in transit.
 
+A 2xx answer from the endpoint may name where the person came from, such as the issue the bot posted the link on: `{ "return_url": "https://github.com/owner/repo/issues/42" }`. The done screen then shows it as a link the person clicks, labeled with its host ("Back to github.com"). The page never moves by itself. Only an `https://` address of at most 2048 characters with no user name or password is shown; any other value, or no value, leaves the done screen as it was.
+
 ## Self-hosting the share portal
 
 By default, share URLs point to `https://share.plannotator.ai`. You can self-host the portal and point Plannotator at your instance. See the [self-hosting guide](/docs/guides/self-hosting/) for details.

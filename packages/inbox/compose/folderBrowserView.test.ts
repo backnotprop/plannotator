@@ -129,17 +129,17 @@ describe('folderBrowserView', () => {
 
 describe('cleanPastedPath', () => {
   test('B1: a full path in home reads as ~/…', () => {
-    expect(cleanPastedPath('/Users/ramos/code/web-app', '/Users/ramos')).toBe('~/code/web-app');
-    expect(cleanPastedPath('/Users/ramos', '/Users/ramos')).toBe('~/');
+    expect(cleanPastedPath('/Users/sam/code/web-app', '/Users/sam')).toBe('~/code/web-app');
+    expect(cleanPastedPath('/Users/sam', '/Users/sam')).toBe('~/');
   });
   test('B2: ~ and a trailing slash stay as typed', () => {
-    expect(cleanPastedPath('~/code/web-app/', '/Users/ramos')).toBe('~/code/web-app/');
+    expect(cleanPastedPath('~/code/web-app/', '/Users/sam')).toBe('~/code/web-app/');
   });
   test('B3: Terminal escapes, quotes, a file:// URL and a line break', () => {
     expect(cleanPastedPath('~/Documents/Client\\ Work', null)).toBe('~/Documents/Client Work');
-    expect(cleanPastedPath('"/Users/ramos/Documents/Client Work"', '/Users/ramos')).toBe('~/Documents/Client Work');
+    expect(cleanPastedPath('"/Users/sam/Documents/Client Work"', '/Users/sam')).toBe('~/Documents/Client Work');
     expect(cleanPastedPath("'~/code/x'\n", null)).toBe('~/code/x');
-    expect(cleanPastedPath('file:///Users/ramos/Documents/Client%20Work/', '/Users/ramos')).toBe('~/Documents/Client Work/');
+    expect(cleanPastedPath('file:///Users/sam/Documents/Client%20Work/', '/Users/sam')).toBe('~/Documents/Client Work/');
     expect(cleanPastedPath('~/code/Foo\\(1\\)', null)).toBe('~/code/Foo(1)');
   });
   test('a paste is unescaped once: the filter reading it again keeps the backslash the paste left', () => {
@@ -218,9 +218,9 @@ describe('a Windows machine (its home is C:\\Users\\…)', () => {
     expect(looksLikePath('C: drive')).toBe(false);
   });
   test('a Mac or Linux home reads as before: a backslash is an escape, a drive letter is a name', () => {
-    expect(homeRelative('/Users/ramos/code', '/Users/ramos')).toBe('~/code');
-    expect(cleanPastedPath('~/Documents/Client\\ Work', '/Users/ramos')).toBe('~/Documents/Client Work');
-    expect(homeRelative('C:\\x', '/Users/ramos')).toBe('C:\\x');
+    expect(homeRelative('/Users/sam/code', '/Users/sam')).toBe('~/code');
+    expect(cleanPastedPath('~/Documents/Client\\ Work', '/Users/sam')).toBe('~/Documents/Client Work');
+    expect(homeRelative('C:\\x', '/Users/sam')).toBe('C:\\x');
   });
   test('a folder there but not offered (Windows marks AppData hidden, no dot): its words, no Create row', () => {
     const view = folderBrowserView({ typed: '~/AppData', read: HOME, nameRead: null, nameRefused: "Hidden folders aren't offered." });

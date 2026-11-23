@@ -102,8 +102,8 @@ describe("the Code review switch", () => {
   test("off by default; on and off are saved in config.json; a malformed switch is refused", async () => {
     const w = await world();
     const read = async () => ((await (await fetch(`${w.base}/api/inbox/settings`)).json()) as { code_review?: { on: boolean } }).code_review;
-    // Held until the next big release (inbox.ts heldSwitch): off, the settings read leaves Code review out, so Settings draws no row.
-    expect(await read()).toBeUndefined();
+    // Shown to everyone (the owner, 2026-11-17): off, the settings read still carries the switch, so Settings draws its row.
+    expect(await read()).toEqual({ on: false });
 
     const on = await w.setCodeReview(true);
     expect(on.status).toBe(200);
@@ -114,11 +114,11 @@ describe("the Code review switch", () => {
     const off = await w.setCodeReview(false);
     expect(off.status).toBe(200);
     expect(((await off.json()) as { code_review: unknown }).code_review).toEqual({ on: false });
-    expect(await read()).toBeUndefined();
+    expect(await read()).toEqual({ on: false });
 
     const bad = await w.post("/api/inbox/settings", { code_review: true });
     expect(bad.status).toBe(422);
-    expect(await read()).toBeUndefined();
+    expect(await read()).toEqual({ on: false });
   });
 
   test("the owner turns it on from a phone over the tailnet", async () => {
@@ -321,19 +321,18 @@ describe("the skills catalog", () => {
   const catalog = async (codeReview: boolean, discovered: { name: string; root: string; description: string }[]) =>
     ((await inboxSkillCatalog(codeReview, () => discovered as never).json()) as { skills: { name: string; root: string; humanOnly?: boolean }[] }).skills;
 
-  test("off: no Plannotator skill; on: the offered review skills first, review-guide left out", async () => {
+  test("off: no review skill; on: the offered review skills after /picture-it, review-guide left out", async () => {
     const own = [{ name: "deploy", root: "agents-project", description: "Ship it" }];
-    // Off, the catalog route answers the discovered skills as before (handleReferenceSkills): none of Plannotator's.
     const w = await world();
     const offList = ((await (await fetch(`${w.base}/api/inbox/skills`)).json()) as { skills: { root: string }[] }).skills;
-    expect(offList.some((s) => s.root === "plannotator")).toBe(false);
+    expect((offList as { name: string; root: string }[]).filter((s) => s.root === "plannotator").map((s) => s.name)).toEqual(["picture-it"]);
     await w.setCodeReview(true);
     const onList = ((await (await fetch(`${w.base}/api/inbox/skills`)).json()) as { skills: { name: string; root: string }[] }).skills;
-    expect(onList.filter((s) => s.root === "plannotator").map((s) => s.name)).toEqual([...INBOX_REVIEW_SKILL_NAMES]);
+    expect(onList.filter((s) => s.root === "plannotator").map((s) => s.name)).toEqual(["picture-it", ...INBOX_REVIEW_SKILL_NAMES]);
     expect(onList.some((s) => s.name === "review-guide")).toBe(false);
 
     const on = await catalog(true, own);
-    expect(on.map((s) => `${s.root}:${s.name}`)).toEqual(["plannotator:review-curate", "plannotator:review-walkthrough", "plannotator:review-recheck", "agents-project:deploy"]);
+    expect(on.map((s) => `${s.root}:${s.name}`)).toEqual(["plannotator:picture-it", "plannotator:review-curate", "plannotator:review-walkthrough", "plannotator:review-recheck", "agents-project:deploy"]);
     expect(on[0]!.humanOnly).toBe(true);
   });
 

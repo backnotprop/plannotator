@@ -1,12 +1,13 @@
 /**
  * Who gets the reply (approval "inbox-reply-recipient", option E): the rules
- * behind the pill under the reply box in a thread with more than one agent.
- * Pure, for the tests; the pill and its list are ReplyRecipient.tsx.
+ * behind the chip at the start of the reply's words (approval
+ * "inbox-reply-target-chip") in a thread with more than one agent.
+ * Pure, for the tests; the chip and its list are ReplyRecipient.tsx.
  *
  * Names: two sessions of one agent in different folders read "Claude Code
  * (plannotator)", "Claude Code (billing-api)"; a second one in the same
- * folder "Claude Code 2", numbered by who came first. A phone shows the folder
- * alone beside the tile ("plannotator"). Live agents come first, ended last.
+ * folder "Claude Code 2", numbered by who came first. A narrow box (a phone)
+ * shows the folder alone beside the tile ("plannotator"). Live agents come first, ended last.
  */
 import { INBOX_REPLY_DRAFT_RECIPIENTS_MAX, type InboxMessageWire, type InboxThread } from '@plannotator/core/inbox-types';
 import type { TaggableModel } from './api';
@@ -18,10 +19,15 @@ export type RecipientState = 'live' | 'ended' | 'reader' | 'old';
 export interface RecipientRow {
   session: string;
   host: string | null;
-  /** The name in the pill and the list: "Claude Code (plannotator)", "Claude Code 2", "OpenCode". */
+  /** The name in the pill and the list: "Claude Code (plannotator)", "Claude Code 2", "OpenCode", or the name the person gave it. */
   label: string;
   /** What a phone's pill shows: the folder alone when the label carries one ("plannotator"), else the label. */
   short: string;
+  /**
+   * The name it would have if no session were renamed ("Claude Code 2"): what tells two rows apart when their names
+   * collide (thread/recipientNames.ts). Absent: the label (a start row's, a PR's new thread's).
+   */
+  fallback?: string;
   state: RecipientState;
   /**
    * It can take the reply alone (be the first recipient): false for an agent with no message of its own in the
@@ -89,23 +95,57 @@ export function recipientState(session: string, model: TaggableModel | null, end
   return found.taggable ? 'live' : 'old';
 }
 
-/** The pill's rows, named as the approval says, live first and ended last (each group in the order given). */
+interface Named extends RecipientPerson {
+  agent: string;
+  folder: string | null;
+  given: string | null;
+}
+
+/**
+ * The fallback names of `list`, by session: the agent's name, with the folder when its sessions are in more than one,
+ * numbered by order in the same folder ("Claude Code 2"). `taken`: names a number skips (names given to other rows).
+ */
+function fallbackNames(list: readonly Named[], taken: ReadonlySet<string> = new Set()): Map<string, { label: string; short: string }> {
+  const used = new Map<string, number>();
+  const out = new Map<string, { label: string; short: string }>();
+  for (const p of list) {
+    // The folder only when this agent's sessions are in more than one.
+    const folders = new Set(list.filter((o) => o.agent === p.agent).map((o) => o.folder));
+    const folder = folders.size > 1 ? p.folder : null;
+    const base = folder ? `${p.agent} (${folder})` : p.agent;
+    let n = used.get(base) ?? 0;
+    let label: string;
+    do {
+      n += 1;
+      label = n > 1 ? `${base} ${n}` : base;
+    } while (taken.has(label));
+    used.set(base, n);
+    out.set(p.session, { label, short: folder ? (n > 1 ? `${folder} ${n}` : folder) : label });
+  }
+  return out;
+}
+
+/**
+ * The pill's rows, named as the approval says, live first and ended last (each group in the order given). A session
+ * the person renamed in the Inbox (`givenNameOf`, agents/agentNames.ts) is that name alone, in full and short: no
+ * folder, no number. The others are named among themselves, so the numbering counts only them, and skips a name
+ * given to another row. Every row keeps its `fallback`, named over all rows as if none were renamed, which tells two
+ * rows apart when their names collide (thread/recipientNames.ts).
+ */
 export function recipientRows(
   people: readonly RecipientPerson[],
   folderOf: (session: string) => string | null,
   stateOf: (session: string) => RecipientState,
+  givenNameOf: (session: string) => string | null = () => null,
 ): RecipientRow[] {
-  const named = people.map((p) => ({ ...p, agent: agentName(p.host, p.name ?? null), folder: folderOf(p.session) }));
-  const used = new Map<string, number>();
+  const named: Named[] = people.map((p) => ({ ...p, agent: agentName(p.host, p.name ?? null), folder: folderOf(p.session), given: givenNameOf(p.session) || null }));
+  const fallbacks = fallbackNames(named);
+  const givenNames = new Set(named.flatMap((p) => (p.given ? [p.given] : [])));
+  const own = fallbackNames(named.filter((p) => !p.given), givenNames);
   const rows = named.map((p): RecipientRow => {
-    // The folder only when this agent's sessions are in more than one.
-    const folders = new Set(named.filter((o) => o.agent === p.agent).map((o) => o.folder));
-    const folder = folders.size > 1 ? p.folder : null;
-    const base = folder ? `${p.agent} (${folder})` : p.agent;
-    const n = (used.get(base) ?? 0) + 1;
-    used.set(base, n);
-    const label = n > 1 ? `${base} ${n}` : base;
-    return { session: p.session, host: p.host, label, short: folder ? (n > 1 ? `${folder} ${n}` : folder) : label, state: stateOf(p.session) };
+    const fallback = fallbacks.get(p.session)!.label;
+    const name = p.given ? { label: p.given, short: p.given } : own.get(p.session)!;
+    return { session: p.session, host: p.host, label: name.label, short: name.short, fallback, state: stateOf(p.session) };
   });
   return [...rows.filter((r) => r.state !== 'ended'), ...rows.filter((r) => r.state === 'ended')];
 }

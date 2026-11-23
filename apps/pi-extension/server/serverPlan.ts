@@ -33,7 +33,10 @@ import { createEditorAnnotationHandler } from "./annotations.ts";
 import { createExternalAnnotationHandler } from "./external-annotations.ts";
 import {
 	handleDraftRequest,
+	handleCustomThemesScript,
+	customThemesPage,
 	handleFavicon,
+	handleAnnotateMediaRequest,
 	handleImageRequest,
 	handleStarAskRequest,
 	handleReferenceSkillsRequest,
@@ -306,6 +309,8 @@ export async function startPlanReviewServer(options: {
 
 	// Draft key for annotation persistence
 	const draftKey = options.mode !== "archive" ? contentHash(options.plan) : "";
+	// Linked documents this review served: their folders may play local videos.
+	const servedMediaDocuments = new Set<string>();
 	// Per-document draft copies of the plan's linked documents, plus the index
 	// that lets a reload offer them all: mirror of packages/server/index.ts
 	// (#1545, annotate-draft.ts). A document may be saved exactly when this
@@ -363,7 +368,7 @@ export async function startPlanReviewServer(options: {
 	// Lazy cache for in-session archive tab
 	let cachedArchivePlans: ArchivedPlan[] | null = null;
 
-	const app = openPackedApp(options.htmlContent);
+	const app = openPackedApp(options.htmlContent, { page: (html) => customThemesPage(html) });
 	const requestHostGuard = createRequestHostGuard();
 	const server = createServer(async (req, res) => {
 		// Host allowlist first, before any route (request-host-guard.ts).
@@ -562,7 +567,10 @@ export async function startPlanReviewServer(options: {
 				json(res, crossOriginRefusalBody(), 403);
 				return;
 			}
-			await handleDocRequest(res, url, { anyPath: isThisMachineRequest(req) });
+			await handleDocRequest(res, url, { anyPath: isThisMachineRequest(req), onDocumentServed: (path) => servedMediaDocuments.add(path) });
+		} else if (url.pathname === "/api/annotate-media" && req.method === "GET") {
+			// A linked document's local <video> (HtmlBlock rewrites its src here).
+			handleAnnotateMediaRequest(req, res, url, servedMediaDocuments);
 		} else if (url.pathname === "/api/doc/exists" && req.method === "POST") {
 			await handleDocExistsRequest(res, req);
 		} else if (url.pathname === "/api/obsidian/vaults") {
@@ -627,6 +635,9 @@ export async function startPlanReviewServer(options: {
 			json(res, { agents: [] });
 		} else if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") {
 			handleFavicon(res, url.pathname);
+		} else if (url.pathname === "/plannotator-themes.js" && req.method === "GET") {
+			// The person's own themes, for the page's first frame (packages/shared/theme-files.ts).
+			handleCustomThemesScript(res, url.searchParams);
 		} else if (url.pathname === "/api/save-notes" && req.method === "POST") {
 			await handleSaveNotesRequest(req, res, { serverSession, notion: notionAvailable });
 		} else if (url.pathname === "/api/approve" && req.method === "POST") {
@@ -812,7 +823,7 @@ export async function startPlanReviewServer(options: {
 	boundPort = port;
 	// Remote sessions serve the app page compressed (#1617); start gzip (what
 	// browsers ask for over plain http) now so the first load does not wait.
-	if (isRemoteSession()) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
+	if (isRemoteSession()) prewarmAppHtml(app.page(), likelyAppHtmlEncoding(false));
 
 	// Mirror the Bun server: bind first, then warm through the async shared walk.
 	void warmFileListCache(process.cwd(), "code");

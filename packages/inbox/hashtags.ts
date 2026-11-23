@@ -27,6 +27,7 @@ import {
   type InboxListRow,
 } from '@plannotator/core/inbox-types';
 import type { SkillCatalogEntry, SkillReferenceToken } from '@plannotator/ui/utils/skillReferences';
+import { replaceUndoably } from '@plannotator/ui/utils/undoableEdit';
 import type { TaggedThreads } from './initiativePeek';
 
 export interface InitiativeTags {
@@ -173,21 +174,29 @@ export function useHashtagPicker(options: {
       const end = trigger.start + 1 + trigger.query.length;
       let next: string;
       let at: number;
+      /** What the pick replaces (`[from, end)`) and with what. */
+      let from: number;
+      let insert: string;
       if (onPick) {
         // New card: the `#query` leaves the text (and one space with it); the card's initiative says it.
         const before = text.slice(0, trigger.start).replace(/ $/, '');
         const after = text.slice(end);
-        next = before + (before && after && !/^\s/.test(after) ? ' ' : '') + after;
+        from = before.length;
+        insert = before && after && !/^\s/.test(after) ? ' ' : '';
+        next = before + insert + after;
         at = before.length;
         onPick(picked);
       } else {
         const tag = inboxInitiativeTag(picked.name);
         const after = text.slice(end);
         const space = /^\s/.test(after) ? '' : ' ';
+        from = trigger.start;
+        insert = tag + space;
         next = text.slice(0, trigger.start) + tag + space + after;
         at = trigger.start + tag.length + space.length;
       }
-      setText(next);
+      // The browser's own edit, one ⌘Z step of its own (ui's utils/undoableEdit.ts); else written as before.
+      if (el.value !== text || !replaceUndoably(el, from, end, insert)) setText(next);
       setCaret(at);
       setActiveIndex(null);
       setDismissedStart(trigger.start);

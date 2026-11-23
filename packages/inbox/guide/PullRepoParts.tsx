@@ -5,20 +5,22 @@
  * chunk (re-exported by GuideReader.tsx), so the window's first load carries none of it; checked by
  * tsconfig.guide.json.
  */
-import { useMemo } from 'react';
+import { useImperativeHandle, useMemo, useRef } from 'react';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import type { DiffFile } from '@plannotator/core/diff-files';
-import { RepoTreeView } from '@plannotator/review-editor/components/RepoTreeView';
+import { useCompactTouchLayout } from '@plannotator/ui/hooks/useIsMobile';
+import { RepoTreeView, type RepoTreeHandle } from '@plannotator/review-editor/components/RepoTreeView';
 import { RepoListingPlaceholder } from '@plannotator/review-editor/components/FileTree';
 import { RepoFileView } from '@plannotator/review-editor/components/RepoFileView';
 import { useRepoFiles } from '@plannotator/review-editor/hooks/useRepoFiles';
 import { pullRepoFetch } from '../pulls/RailScope';
+import { useRiskLead } from './PullChangesTree';
 import type { PullAllFilesProps, PullRepoFileProps } from './pullRepoTypes';
 
 const NO_COMMENTS: CodeAnnotation[] = [];
 const noop = () => {};
 
-export function PullAllFiles({ pullKey, sha, files, viewed, comments, activePath, openPath, head, onSelect, onOpen }: PullAllFilesProps) {
+export function PullAllFiles({ pullKey, sha, files, viewed, comments, activePath, openPath, head, onSelect, onOpen, handleRef, risk }: PullAllFilesProps) {
   const fetchImpl = useMemo(() => pullRepoFetch(pullKey), [pullKey]);
   const repo = useRepoFiles({ enabled: true, snapshotId: sha, fetchImpl });
   const list = files as DiffFile[];
@@ -27,11 +29,17 @@ export function PullAllFiles({ pullKey, sha, files, viewed, comments, activePath
     for (const comment of comments as CodeAnnotation[]) map.set(comment.filePath, (map.get(comment.filePath) ?? 0) + 1);
     return map;
   }, [comments]);
+  const fileLead = useRiskLead(risk);
+  const touch = useCompactTouchLayout();
+  const inner = useRef<RepoTreeHandle>(null);
+  useImperativeHandle(handleRef, () => ({ focus: () => inner.current?.focus() }), []);
   return (
     <div className="ib-prp-files ib-prp-tree ib-prp-pierre" data-pull-all-files="">
       {head}
       {repo.state.status === 'ready' ? (
         <RepoTreeView
+          key={touch ? 'touch' : 'pointer'}
+          touch={touch}
           repo={repo.state}
           loadDir={repo.loadDir}
           files={list}
@@ -44,6 +52,8 @@ export function PullAllFiles({ pullKey, sha, files, viewed, comments, activePath
           viewedFiles={viewed as Set<string>}
           showViewedControls
           annotationCounts={counts}
+          fileLead={fileLead}
+          handleRef={inner}
         />
       ) : (
         <RepoListingPlaceholder state={repo.state} onRetry={repo.reload} />

@@ -113,10 +113,10 @@ test("a checkout in a dot-folder's worktrees (Claude Code's agent worktrees) rea
 
 test('a worktrees folder right in a home folder (or with only dot-folders up to it) is an ordinary folder, never named for the person', () => {
   const names = shortProjectNames([
-    { id: 'mac', root: '/Users/ramos/worktrees/foo', name: 'x' },
-    { id: 'linux', root: '/home/ramos/worktrees/bar', name: 'x' },
-    { id: 'win', root: 'C:\\Users\\ramos\\worktrees\\baz', name: 'x' },
-    { id: 'dot', root: '/Users/ramos/.claude/worktrees/qux', name: 'x' },
+    { id: 'mac', root: '/Users/sam/worktrees/foo', name: 'x' },
+    { id: 'linux', root: '/home/sam/worktrees/bar', name: 'x' },
+    { id: 'win', root: 'C:\\Users\\sam\\worktrees\\baz', name: 'x' },
+    { id: 'dot', root: '/Users/sam/.claude/worktrees/qux', name: 'x' },
     { id: 'top', root: '/.hidden/worktrees/quux', name: 'x' },
   ]);
   expect(['mac', 'linux', 'win', 'dot', 'top'].map((id) => names.get(id))).toEqual(['foo', 'bar', 'baz', 'qux', 'quux']);
@@ -153,11 +153,11 @@ test('the window-wide names (a pin outside the sidebar included) carry the displ
   expect(names.get(acme.id)).toBe('acme');
 });
 
-// The owner, 2026-11-02: the list's banner read "1 new in appnotes · Users/ramos/workspaces/projects". On disk,
+// The owner, 2026-11-02: the list's banner read "1 new in appnotes · Users/sam/workspaces/projects". On disk,
 // `~/workspaces/projects/appnotes` is a plain folder of notes and `appnotes/worktrees/main` the repository's main
 // checkout; a session started in the folder made a folder project beside the repository's. Both name the place
 // `…/projects/appnotes`, so no parent told them apart and the old rule climbed to the filesystem root.
-const APPNOTES = '/Users/ramos/workspaces/projects/appnotes';
+const APPNOTES = '/Users/sam/workspaces/projects/appnotes';
 const FOLDER = { id: 'prj_folder', root: APPNOTES, name: 'appnotes' };
 const MAIN = { id: 'prj_main', root: `${APPNOTES}/worktrees/main`, name: 'main' };
 
@@ -171,23 +171,23 @@ test("a plain folder and the checkout in its worktrees folder read as one place:
 });
 
 test('that place beside another of the name: one parent for the place, the checkout only where the place holds two', () => {
-  const names = shortProjectNames([FOLDER, MAIN, { id: 'prj_ws', root: '/Users/ramos/workspaces/appnotes', name: 'appnotes' }]);
+  const names = shortProjectNames([FOLDER, MAIN, { id: 'prj_ws', root: '/Users/sam/workspaces/appnotes', name: 'appnotes' }]);
   expect(names.get(FOLDER.id)).toBe('appnotes · projects');
   expect(names.get(MAIN.id)).toBe('appnotes · projects · main');
   expect(names.get('prj_ws')).toBe('appnotes · workspaces');
   // The checkout alone at that place: no checkout name.
-  expect(shortProjectNames([MAIN, { id: 'prj_ws', root: '/Users/ramos/workspaces/appnotes', name: 'appnotes' }]).get(MAIN.id)).toBe('appnotes · projects');
+  expect(shortProjectNames([MAIN, { id: 'prj_ws', root: '/Users/sam/workspaces/appnotes', name: 'appnotes' }]).get(MAIN.id)).toBe('appnotes · projects');
 });
 
 test('each project takes its own shortest parents, and never spells out a home folder', () => {
   const layouts = [
     [FOLDER, MAIN],
-    [FOLDER, { id: 'x', root: '/Users/ramos/appnotes', name: 'appnotes' }],
-    [FOLDER, { id: 'x', root: '/Users/ramos/projects/appnotes', name: 'appnotes' }, { id: 'y', root: '/Users/ramos/appnotes', name: 'appnotes' }],
-    [FOLDER, { id: 'x', root: '/Users/ramos/.codex/worktrees/d4ed/appnotes', name: 'appnotes' }],
-    [FOLDER, { id: 'x', root: '/Users/ramos/Workspaces/projects/appnotes', name: 'appnotes' }],
-    [{ id: 'l', root: '/home/ramos/work/api', name: 'api' }, { id: 'm', root: '/home/ramos/api', name: 'api' }],
-    [{ id: 'w', root: 'C:\\Users\\ramos\\src\\api', name: 'api' }, { id: 'v', root: 'C:\\Users\\ramos\\api', name: 'api' }],
+    [FOLDER, { id: 'x', root: '/Users/sam/appnotes', name: 'appnotes' }],
+    [FOLDER, { id: 'x', root: '/Users/sam/projects/appnotes', name: 'appnotes' }, { id: 'y', root: '/Users/sam/appnotes', name: 'appnotes' }],
+    [FOLDER, { id: 'x', root: '/Users/sam/.codex/worktrees/d4ed/appnotes', name: 'appnotes' }],
+    [FOLDER, { id: 'x', root: '/Users/sam/Workspaces/projects/appnotes', name: 'appnotes' }],
+    [{ id: 'l', root: '/home/sam/work/api', name: 'api' }, { id: 'm', root: '/home/sam/api', name: 'api' }],
+    [{ id: 'w', root: 'C:\\Users\\sam\\src\\api', name: 'api' }, { id: 'v', root: 'C:\\Users\\sam\\api', name: 'api' }],
   ];
   for (const projects of layouts) {
     for (const name of shortProjectNames(projects).values()) expect(name).not.toMatch(/Users|home\//i);
@@ -198,7 +198,7 @@ test('each project takes its own shortest parents, and never spells out a home f
 });
 
 test('the same folder twice (as a person reads it) is one name, not a path to the root', () => {
-  const names = shortProjectNames([FOLDER, { id: 'x', root: '/Users/ramos/Workspaces/projects/appnotes/', name: 'appnotes' }]);
+  const names = shortProjectNames([FOLDER, { id: 'x', root: '/Users/sam/Workspaces/projects/appnotes/', name: 'appnotes' }]);
   expect([names.get(FOLDER.id), names.get('x')]).toEqual(['appnotes', 'appnotes']);
 });
 

@@ -13,6 +13,7 @@ import { questionKey, type QuestionAnswer } from "@plannotator/core/question-blo
 import type { InboxQuestion } from "@plannotator/core/inbox-types";
 import { inboxStatus, readInboxRegistry } from "@plannotator/shared/inbox/registry";
 import { packApp } from "@plannotator/shared/packed-app";
+import { SEM_DIFF_FILES, type SemDiffSources } from "@plannotator/shared/sem-diff-assets";
 import { INBOX_SERVER_SESSION_MISMATCH_ERROR } from "@plannotator/core/server-session";
 import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
 import { INBOX_AGENT_FIELD_DESCRIPTIONS, INBOX_REF_LINK_RULE, inboxAgentTool, parseInboxToolList } from "@plannotator/shared/inbox/connection";
@@ -413,6 +414,21 @@ describe("security refusals, by real requests", () => {
     expect((await fetch(`${base}/assets/../package.json`)).status).toBe(404);
   });
 
+  test("the semantic diff engine: its advert, and its wasm served beside the packed window", async () => {
+    const plain = await start(join(tempRoot(), "data"));
+    expect(await (await fetch(`http://127.0.0.1:${plain.port}/api/inbox/sem-diff`)).json()).toEqual({ advert: null });
+    const semDiff = Object.fromEntries(SEM_DIFF_FILES.map((name, i) => [name, new Uint8Array([0, 97, 115, 109, i + 1])])) as SemDiffSources;
+    const server = await start(join(tempRoot(), "data"), { htmlContent: packApp("<!doctype html>", {}), semDiff });
+    const base = `http://127.0.0.1:${server.port}`;
+    const { advert } = (await (await fetch(`${base}/api/inbox/sem-diff`)).json()) as { advert: { runtime: string; grammars: Record<string, string> } };
+    const grammar = Object.values(advert.grammars)[0]!;
+    for (const path of [advert.runtime, grammar]) {
+      const wasm = await fetch(`${base}${path}`);
+      expect([path, wasm.status, wasm.headers.get("content-type")]).toEqual([path, 200, "application/wasm"]);
+    }
+    expect((await fetch(`${base}/assets/sem-diff/unknown.wasm`)).status).toBe(404);
+  });
+
   test("an HTTP/1.0 request with no Host (allowed by the guard) is answered, not a 500", async () => {
     const server = await start(join(tempRoot(), "data"));
     const health = await raw(server.port, ["GET /api/inbox/health HTTP/1.0"]);
@@ -615,6 +631,48 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
     expect((result.content as { text: string }[])[0]!.text).toMatch(/^validation_error: project_path/);
     const missing = await client.callTool({ name: "read_thread", arguments: { thread_id: "msg_01ARZ3NDEKTSV4RRFFQ69G5FAV" } });
     expect((missing.content as { text: string }[])[0]!.text).toMatch(/^thread_not_found: /);
+  });
+
+  test("the person's Inbox rules and reminder reach an MCP session (#3555), read fresh on every connection", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    mkdirSync(dataDir, { recursive: true });
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      writeFileSync(
+        join(dataDir, "config.json"),
+        JSON.stringify({ prompts: { inbox: { rules: "Always ask before deleting.", reminder: "Ping me when done." } } }),
+      );
+      const server = await start(dataDir);
+      const guided = "A guided review of a code change: get_guide_brief, write the guide, then submit_guide with the exact patch.";
+      // A client that is not Claude Code (no known cut): the person's text beside all five built-in summary lines.
+      const first = await mcpClient(server);
+      const firstInstructions = first.getInstructions()!;
+      expect(firstInstructions).toContain("Always ask before deleting.");
+      expect(firstInstructions).toContain("Ping me when done.");
+      expect(firstInstructions).toContain(guided);
+      // Claude Code before 2.1.296 keeps 2,048 characters: the three lines the tools repeat step aside, the two no tool repeats stay.
+      const old = new Client({ name: "claude-code", version: "2.1.295" });
+      await old.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
+      clients.push(old);
+      const oldInstructions = old.getInstructions()!;
+      expect(oldInstructions.length).toBeLessThan(2048);
+      expect(oldInstructions).toContain("Always ask before deleting.");
+      expect(oldInstructions).not.toContain(guided);
+      expect(oldInstructions).toContain("(an id from the Inbox, never from memory)");
+      expect(oldInstructions).toContain("pictures go in the body, `![alt](path)`.");
+      // A change applies at the next session, with no restart.
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ prompts: { inbox: { rules: "Never delete anything." } } }));
+      const second = await mcpClient(server);
+      const secondInstructions = second.getInstructions()!;
+      expect(secondInstructions).toContain("Never delete anything.");
+      expect(secondInstructions).not.toContain("Always ask before deleting.");
+      expect(secondInstructions).not.toContain("Ping me when done.");
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
   });
 
   test("the event stream replays from a cursor, then streams live", async () => {
@@ -1163,14 +1221,14 @@ describe("the window's routes: settings, restart, favicon", () => {
     process.env.PLANNOTATOR_DATA_DIR = dataDir;
     try {
       mkdirSync(dataDir, { recursive: true });
-      // What code review saved: these read back under the wire's names; Whole file and the font are code review's own.
-      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ diffOptions: { lineDiffType: "char", tabSize: 4, expandUnchanged: true, fontSize: "13", diffIndicators: "sideways" } }));
+      // What code review saved: these read back under the wire's names, Whole file among them; the font and Hide whitespace are code review's own.
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ diffOptions: { lineDiffType: "char", tabSize: 4, expandUnchanged: true, hideWhitespace: true, fontSize: "13", diffIndicators: "sideways" } }));
       const server = await start(dataDir);
       const read = async () => (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json()) as { diff_options: Record<string, unknown>; diff_style: unknown };
       const onDisk = () => (JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { diffOptions?: Record<string, unknown> }).diffOptions;
       const save = (body: Record<string, unknown>) => post(server, "/api/inbox/settings", { serverSession: server.serverSession, ...body });
       // A value no build writes reads as never chosen.
-      expect((await read()).diff_options).toEqual({ diff_style: null, overflow: null, indicators: null, line_diff_type: "char", line_numbers: null, background: null, background_intensity: null, tab_size: 4 });
+      expect((await read()).diff_options).toEqual({ diff_style: null, overflow: null, indicators: null, line_diff_type: "char", line_numbers: null, background: null, background_intensity: null, tab_size: 4, semantic: null, expand_unchanged: true });
 
       // Every field is checked, and the refusal names it; nothing is written.
       const refusals: [unknown, string][] = [
@@ -1178,7 +1236,8 @@ describe("the window's routes: settings, restart, favicon", () => {
         ["wrap", "diff_options"],
         [{}, "diff_options"],
         [{ font_size: "14" }, "diff_options.font_size"],
-        [{ expand_unchanged: true }, "diff_options.expand_unchanged"],
+        [{ hide_whitespace: true }, "diff_options.hide_whitespace"],
+        [{ expand_unchanged: "yes" }, "diff_options.expand_unchanged"],
         // Names Object.prototype has are not diff options either (a computed key, so `__proto__` is an own key on the wire).
         [{ toString: "x" }, "diff_options.toString"],
         [{ ["__proto__"]: "x" }, "diff_options.__proto__"],
@@ -1193,6 +1252,7 @@ describe("the window's routes: settings, restart, favicon", () => {
         [{ tab_size: 9 }, "diff_options.tab_size"],
         [{ tab_size: 2.5 }, "diff_options.tab_size"],
         [{ overflow: "wrap", tab_size: "4" }, "diff_options.tab_size"],
+        [{ semantic: "off" }, "diff_options.semantic"],
       ];
       for (const [bad, field] of refusals) {
         const refused = await save({ diff_options: bad });
@@ -1203,14 +1263,14 @@ describe("the window's routes: settings, restart, favicon", () => {
       const clash = await save({ diff_style: "split", diff_options: { diff_style: "unified" } });
       expect(clash.status).toBe(422);
       expect((await clash.json()).field).toBe("diff_style");
-      expect(onDisk()).toEqual({ lineDiffType: "char", tabSize: 4, expandUnchanged: true, fontSize: "13", diffIndicators: "sideways" });
+      expect(onDisk()).toEqual({ lineDiffType: "char", tabSize: 4, expandUnchanged: true, hideWhitespace: true, fontSize: "13", diffIndicators: "sideways" });
 
       // A change saves only its fields; the others, code review's included, stay.
-      const saved = await save({ diff_options: { overflow: "wrap", indicators: "classic", line_numbers: false, background_intensity: "strong", tab_size: 8 } });
+      const saved = await save({ diff_options: { overflow: "wrap", indicators: "classic", line_numbers: false, background_intensity: "strong", tab_size: 8, semantic: false, expand_unchanged: false } });
       expect(saved.status).toBe(200);
       const answer = (await saved.json()) as { diff_options: Record<string, unknown> };
-      expect(answer.diff_options).toEqual({ diff_style: null, overflow: "wrap", indicators: "classic", line_diff_type: "char", line_numbers: false, background: null, background_intensity: "strong", tab_size: 8 });
-      expect(onDisk()).toEqual({ lineDiffType: "char", tabSize: 8, expandUnchanged: true, fontSize: "13", diffIndicators: "classic", overflow: "wrap", showLineNumbers: false, lineBgIntensity: "strong" });
+      expect(answer.diff_options).toEqual({ diff_style: null, overflow: "wrap", indicators: "classic", line_diff_type: "char", line_numbers: false, background: null, background_intensity: "strong", tab_size: 8, semantic: false, expand_unchanged: false });
+      expect(onDisk()).toEqual({ lineDiffType: "char", tabSize: 8, expandUnchanged: false, hideWhitespace: true, fontSize: "13", diffIndicators: "classic", overflow: "wrap", showLineNumbers: false, lineBgIntensity: "strong", semantic: false });
       expect((await read()).diff_options).toEqual(answer.diff_options);
 
       // `diff_style` alone (pages from before) sets the same field and is answered both ways.
