@@ -25,7 +25,7 @@ import { AuthorMark } from '../icons';
 import { inboxApi } from '../api';
 import { AskSparkle } from '../ask/AskChatMenu';
 import type { AskCorner } from '../ask/useInboxAsk';
-import { SIDE_CORNER_HIT } from '../ask/scoop';
+import { SIDE_CORNER, SIDE_CORNER_HIT, SIDE_CORNER_R } from '../ask/scoop';
 import type { InboxToastModel } from '../components/Toast';
 import { Icon } from '../icons';
 import { machineOf } from '../inboxUrl';
@@ -56,6 +56,13 @@ export interface ReplyFloatersOptions {
 const TILE = 44;
 /** A draft window's bottom offset while the minimized chat's circle is in the corner: clear of its 44 px box. */
 const CIRCLE_CLEAR = SIDE_CORNER_HIT + 8;
+/**
+ * The pile's right offset while it rests above the minimized chat's circle: on the circle's centre line (SIDE_CORNER_R
+ * in from the window's edge) as near as the window lets it, never nearer the edge than the circle itself (5 px).
+ * Exactly centred, 3 px of the 44 px tile and 8 of its count badge would be past the edge; so its right edge is the
+ * circle's, 8 px left of the centre line.
+ */
+const CIRCLE_LINE_RIGHT = Math.max(SIDE_CORNER_R - TILE / 2, SIDE_CORNER_R - SIDE_CORNER.d / 2);
 /** How long a closed box's or a left thread's draft is looked at again while its save lands. */
 const SETTLE_WINDOW_MS = 5_000;
 
@@ -383,9 +390,15 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
 
   // Where the button sits: level with Send at the foot's right end; beside Ask's window while that is open.
   const askGeom = !phone && askOpen && !ask.store.fullscreen ? ask.store.geometry() : null;
-  const place: CSSProperties = askGeom ? { right: askGeom.right + askGeom.w + 12, bottom: askGeom.bottom } : { right: room.right, bottom: room.bottom };
-  // In the window's very corner (no reply foot on screen): the minimized chat's circle keeps off it (SideChatCorner).
   const spot: StackProps['spot'] = askGeom ? 'ask' : room.foot ? 'foot' : 'corner';
+  // In the window's very corner (no reply foot on screen) while the minimized chat's circle shows there: both show, the
+  // pile straight above the circle, clear of its 44 px box as a draft's window is (CIRCLE_CLEAR).
+  const aboveCircle = spot === 'corner' && ask.circle;
+  const place: CSSProperties = askGeom
+    ? { right: askGeom.right + askGeom.w + 12, bottom: askGeom.bottom }
+    : aboveCircle
+      ? { right: CIRCLE_LINE_RIGHT, bottom: CIRCLE_CLEAR }
+      : { right: room.right, bottom: room.bottom };
   const showCorner = items.length > 0 && !room.hidden && !(phone && (room.boxOpen || askOpen || openRow !== null)) && !(!phone && openRow !== null) && !(askOpen && ask.store.fullscreen);
   const onAll = () => {
     setMenu(false);
