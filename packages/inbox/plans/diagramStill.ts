@@ -10,11 +10,17 @@ const VAR_REF = /var\(\s*(--[\w-]+)\s*(?:,\s*([^()]*(?:\([^()]*\)[^()]*)*))?\)/g
 /** Enough for the longest chain a drawing writes (Pele: `var(--_s)` → `var(--pele-surface,#f3f3f3)` → a colour). */
 const ROUNDS = 6;
 
+/**
+ * A looked-up value as markup text: it goes into an attribute or a `<style>`, so a quote in it (a theme's
+ * `"Inter", system-ui` font) must not end the attribute. A fallback is read from the markup, so it is already escaped.
+ */
+const asMarkup = (value: string): string => value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+
 /** `css` with every `var(--x)` put in, each name read through `lookup` (empty: not defined). */
 export function withVariables(css: string, lookup: (name: string) => string): string {
   let out = css;
   for (let round = 0; round < ROUNDS && out.includes('var('); round++) {
-    out = out.replace(VAR_REF, (_, name: string, fallback: string | undefined) => lookup(name).trim() || fallback?.trim() || 'currentColor');
+    out = out.replace(VAR_REF, (_, name: string, fallback: string | undefined) => asMarkup(lookup(name).trim()) || fallback?.trim() || 'currentColor');
   }
   return out;
 }

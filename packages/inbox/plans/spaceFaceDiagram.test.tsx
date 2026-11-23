@@ -128,3 +128,21 @@ test('a Mermaid plan drawn by Pele: the row thumbnail is the same picture in the
   const plan = planOf();
   expectPaletteColours(await drawn(<SpaceThumb plan={plan} />));
 });
+
+// The neutral and doom-64 themes quote their font (`"Inter", …`): put in raw, the quote ended the svg's style
+// attribute, the picture did not parse and the face was blank.
+test('a Mermaid plan drawn by Pele in a theme whose font is quoted: the face is still a picture, in that font', async () => {
+  if (!hasDom) return;
+  const font = '"Inter", system-ui, sans-serif';
+  document.documentElement.style.setProperty('--font-sans', font);
+  try {
+    const doc = await drawn(<SpaceFace plan={planOf()} />);
+    expect(doc.getElementsByTagName('parsererror')).toHaveLength(0);
+    expect(doc.documentElement.getAttribute('class')).toContain('pele-flowchart');
+    expect(new XMLSerializer().serializeToString(doc.documentElement)).not.toContain('var(');
+    // The font survives, quotes and all: the root style sets it for every word in the drawing.
+    expect(doc.documentElement.getAttribute('style') ?? '').toContain(`--pele-font: ${font};`);
+  } finally {
+    document.documentElement.style.removeProperty('--font-sans');
+  }
+});
