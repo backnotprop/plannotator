@@ -14,7 +14,8 @@
  * The rules:
  *  - Tenure: the later group's offers need two days or more since first use. The same-day group has none, so on a
  *    person's first day the update-day dialogs and the view choice (once there are five threads) may show, the gap
- *    apart, as may Code review's offer (`CODE_REVIEW_OFFER`, the owner, 2026-11-06: "show up like immediately").
+ *    apart, as may Code review's offer for someone who used an earlier Inbox (`CODE_REVIEW_OFFER`, the owner,
+ *    2026-11-06: "show up like immediately"; a fresh install never gets it).
  *  - One due at a time: the first entry, in table order, whose "who" holds (a release build, tenure since first use,
  *    enough threads, heavy use where it asks for it, its own conditions).
  *  - Ahead at its moment: an offer marked `ahead` (the view choice, whose "who" only the page can see) may also
@@ -96,11 +97,13 @@ export interface RevealEntry {
 
 /**
  * Code review's offer (approval "code-review-offer-card", 2026-11-06; the owner: "this one needs to show up like
- * immediately"): its slot in the line. First in the queue with no tenure, so it is next on day 0 (first use not known
- * yet is fine: no tenure to count), and the page opens it at once (`atOnce`, packages/inbox/codeReviewOffer.ts) once
- * the tour's entry screen is gone, before the agent note, which then keeps the gap and waits for a later
- * load. Only while Code review was never decided (config.json `inboxCodeReview` unset). To move the slot, change
- * this entry (its `tenureMs`) or its place in `INBOX_REVEALS`.
+ * immediately"): its slot in the line. First in the queue with no tenure, so it is next on the first day of the release
+ * that shows it (first use not known yet is fine: no tenure to count), and the page opens it at once (`atOnce`,
+ * packages/inbox/codeReviewOffer.ts) once the tour's entry screen is gone, before the agent note, which then keeps the
+ * gap and waits for a later load. Only for someone who used an earlier Inbox (approval "inbox-code-review-offer"; the
+ * server marks who at a release start, as the tab icon's, packages/server/inbox-code-review-offer.ts: a fresh install
+ * never gets it), and only while Code review was never decided (config.json `inboxCodeReview` unset). To move the
+ * slot, change this entry (its `tenureMs`) or its place in `INBOX_REVEALS`.
  */
 export const CODE_REVIEW_OFFER: RevealEntry = { id: "code_review", kind: "offer", tenureMs: 0, minThreads: 0, enabled: true };
 
@@ -108,8 +111,9 @@ export const CODE_REVIEW_OFFER: RevealEntry = { id: "code_review", kind: "offer"
  * Whether Code review's one-time offer is ever shown. Held back from 2026-11-17 (the owner: "keep code review, no need
  * for the code review dialogue, but enable it in the capabilities"); shown again from the release after 2026-11-23,
  * with its four new lines (approval "inbox-code-review-offer"; the owner: "show it in the next release? Yes, in the
- * next release"). True: the server lists the offer as open while config.json `inboxCodeReview` is unset
- * (packages/server/inbox.ts `codeReviewUndecided`), so it takes its slot (`CODE_REVIEW_OFFER`) under the line's rules.
+ * next release"). True: the server lists the offer as open for someone who used an earlier Inbox while config.json
+ * `inboxCodeReview` is unset (packages/server/inbox.ts `codeReviewUndecided`), so it takes its slot
+ * (`CODE_REVIEW_OFFER`) under the line's rules.
  * False: never next and never claimed, and any stamp already in config.json is kept as it is.
  */
 export const CODE_REVIEW_OFFER_SHOWN = true;

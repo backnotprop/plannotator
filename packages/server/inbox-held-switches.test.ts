@@ -10,8 +10,8 @@
  *    still carries Code review (off) and leaves Shape out;
  *  - PLANNOTATOR_INBOX_PREVIEW=1: Shape is there while off, in the read and the event;
  *  - a release build: Code review's switch is there and off, Shape's is absent, and Code review's one-time offer is
- *    next while Code review was never decided (`CODE_REVIEW_OFFER_SHOWN`, shown again from the release after
- *    2026-11-23), never once it is on.
+ *    next for someone who used an earlier Inbox while Code review was never decided (`CODE_REVIEW_OFFER_SHOWN`, shown
+ *    again from the release after 2026-11-23), never once it is on, never for a fresh install.
  *
  * What regresses: a person on a release build not finding Code review's switch, or seeing Shape's, or being shown the
  * offer with Code review on; the owner (on) losing a row; a shown switch that cannot be turned off. Delete Shape's
@@ -151,19 +151,26 @@ test("PLANNOTATOR_INBOX_PREVIEW=1: Shape is there while off, in the read and in 
 });
 
 test("a release build: the Code review switch is there and off, the Shape switch is absent, and Code review's offer is next only while Code review was never decided", async () => {
+  // Someone who used an earlier Inbox (a setting its page wrote, inbox.ts `inboxUsedBefore`): the offer is theirs.
+  const earlier = { updateCheck: false, inboxNotifications: { dismissed: true } };
   for (const version of ["0.28.50", "0.30.0"]) {
-    const off = await (await world({ updateCheck: false }, false, version)).read();
+    const off = await (await world(earlier, false, version)).read();
     expect(off.code_review).toEqual({ on: false });
     expect("shape" in off).toBe(false);
     expect(off.reveal).toBeDefined();
     expect(off.reveal!.next).toBe("code_review");
 
-    const on = await (await world({ updateCheck: false, inboxCodeReview: true, inboxShape: true }, false, version)).read();
+    // A fresh install: the switch is there, the offer never is.
+    const fresh = await (await world({ updateCheck: false }, false, version)).read();
+    expect(fresh.code_review).toEqual({ on: false });
+    expect(fresh.reveal!.next).not.toBe("code_review");
+
+    const on = await (await world({ ...earlier, inboxCodeReview: true, inboxShape: true }, false, version)).read();
     expect(on.code_review).toEqual({ on: true });
     expect(on.shape).toEqual({ on: true });
     expect(on.reveal!.next).not.toBe("code_review");
 
-    const preview = await (await world({ updateCheck: false }, true, version)).read();
+    const preview = await (await world(earlier, true, version)).read();
     expect(preview.code_review).toEqual({ on: false });
     expect(preview.shape).toEqual({ on: false });
     expect(preview.reveal).toBeDefined();

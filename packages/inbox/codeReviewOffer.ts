@@ -1,7 +1,8 @@
 /**
  * Code review's one-time offer, on the page (approval "code-review-offer-card", 2026-11-06; the owner: "this one needs
  * to show up like immediately"). Its slot is the line's (`CODE_REVIEW_OFFER`, packages/shared/inbox/reveals.ts: first
- * in the queue, no tenure, so it is `reveal.next` on day 0 while Code review was never decided). The page arms it from
+ * in the queue, no tenure, so it is `reveal.next` on the release's first day for someone who used an earlier Inbox,
+ * while Code review was never decided; a fresh install never gets it, packages/server/inbox-code-review-offer.ts). The page arms it from
  * `reveal.next`, and its moment needs no leave (`atOnce`): as soon as the tour's entry screen, its intro and the tour
  * itself are gone and the Inbox page is clear and settled, never over something typed or open, nor over a question
  * waiting in the open thread. The claim goes through the line (`useLineReveal`: `POST /api/inbox/reveal` `code_review`,

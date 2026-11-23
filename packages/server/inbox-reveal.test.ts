@@ -13,8 +13,8 @@
  * "inbox-checklist-reveal", 2026-11-04): its claim writing `inboxSteps` or touching a Checklist the person set; agent
  * text after Not now not byte-equal to a Checklist off, or not the steps text after Turn it on; its
  * 5 days or 5 threads moving; it needing the Board on. Code review's day-0 offer (approval "code-review-offer-card"):
- * not next for someone who never decided Code review (shown again, `CODE_REVIEW_OFFER_SHOWN`, approval
- * "inbox-code-review-offer"); its claim turning anything on, changing a word agents read, being spent twice or letting
+ * not next for someone who used an earlier Inbox and never decided Code review (shown again, `CODE_REVIEW_OFFER_SHOWN`,
+ * approval "inbox-code-review-offer"), or offered to a new user (a fresh install); its claim turning anything on, changing a word agents read, being spent twice or letting
  * another dialog follow inside the gap; Not now turning it on or letting it come back; asked of someone who switched
  * Code review off or on. The view choice
  * (`view_choice`): closed by List view's retired `list_view` stamp, holding the line, or claimed twice.
@@ -1149,10 +1149,10 @@ describe("the \"themes\" dialog (approval inbox-theme-chooser): after the tab ic
 
 describe("Code review's day-0 offer (approval code-review-offer-card)", () => {
   const KEY = "page-key-aaaa";
-  /** A fresh install on day 0: first use not known yet, no threads in the store, Code review never decided. */
-  const freshDay0 = (config: Record<string, unknown> = {}) => world({ days: 0, threads: 0, config: { inboxSnoozeIntro: {}, inboxCodeReview: undefined, ...config } });
+  /** A fresh install on day 0 (no Inbox ran here before): first use not known yet, nothing in the store, Code review never decided. */
+  const freshDay0 = (config: Record<string, unknown> = {}) => world({ fresh: true, days: 0, threads: 0, config: { inboxSnoozeIntro: {}, inboxCodeReview: undefined, ...config } });
   /** Someone who already uses the Inbox (day 4, six threads, Snooze seen 3 days ago), Code review never decided. */
-  const existing = (config: Record<string, unknown> = {}) => world({ config: { inboxCodeReview: undefined, ...config } });
+  const existing = (config: Record<string, unknown> = {}, version?: string) => world({ ...(version ? { version } : {}), config: { inboxCodeReview: undefined, ...config } });
 
   // Shown again from the release after 2026-11-23 (`CODE_REVIEW_OFFER_SHOWN`, approval "inbox-code-review-offer").
   test("someone who already uses the Inbox, Code review never decided: next, ahead of the offers that are due; the claim stamps it once, turns nothing on and starts the gap", async () => {
@@ -1197,10 +1197,22 @@ describe("Code review's day-0 offer (approval code-review-offer-card)", () => {
     expect((await w.claim("code_review", "another-key-22")).show).toBe(false);
   });
 
-  test("a fresh install on day 0: next too (no tenure), once the window's first-run screens are gone (the page's part)", async () => {
+  test("someone who used an earlier Inbox is marked due at the release start; a dev build decides nothing", async () => {
+    const w = await existing();
+    expect(typeof w.saved().inboxReveals.code_review.dueAt).toBe("string");
+    expect(w.saved().inboxReveals.code_review.freshAt).toBeUndefined();
+    const dev = await existing({}, "dev");
+    expect(dev.saved().inboxReveals?.code_review).toBeUndefined();
+    expect((await dev.claim("code_review", KEY)).show).toBe(false);
+  });
+
+  // A later start keeping the first start's mark: inbox-code-review-offer.test.ts.
+  test("a new user (a fresh install) on day 0: marked fresh at the release start and never offered", async () => {
     const w = await freshDay0();
-    expect((await w.settings()).reveal.next).toBe("code_review");
-    expect((await w.claim("code_review", KEY)).show).toBe(true);
+    expect(w.saved().inboxReveals.code_review).toEqual({ freshAt: expect.any(String) });
+    expect((await w.settings()).reveal.next).not.toBe("code_review");
+    expect((await w.claim("code_review", KEY)).show).toBe(false);
+    expect(w.saved().inboxReveals.code_review.shownAt).toBeUndefined();
     expect(w.saved().inboxCodeReview).toBeUndefined();
   });
 
