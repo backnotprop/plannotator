@@ -470,3 +470,49 @@ describe("the Inbox tells the agents whose questions moved, quietly", () => {
     expect(store.pendingReplies(SUB.session!)).toEqual([]);
   });
 });
+
+describe("moved_to's checks, from the final review", () => {
+  test("a brief in a project the person combined with this one is taken: the two read as one project", () => {
+    const { store } = open();
+    const { old } = world(store);
+    const clone = store.ensureProject({ name: "billing-checkout", root: "/work/billing-checkout" });
+    store.combineProject(clone.id, old.project_id);
+    const brief = store.sendMessage({ project_id: clone.id, author: ORCH, subject: "Morning brief", body: ASK("Retry failed charges? (from Retry policy)") }).message;
+    store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
+    expect(store.message(old.id)!.moved_to).toEqual({ thread_id: brief.id, subject: "Morning brief" });
+  });
+
+  test("an open permission prompt in the old thread gets no note: no wake reaches a perm: session, so it would wait for ever", () => {
+    const { store } = open();
+    const { project, old, brief } = world(store);
+    const perm = agent("perm:ses_sub");
+    store.sendMessage({ project_id: project.id, author: perm, reply_to: old.id, permission: true, body: ASK("Claude Code wants to run `ls`") });
+    store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
+    expect(store.pendingReplies(perm.session!)).toEqual([]);
+    expect(store.pendingReplies(SUB.session!).map((m) => !!m.moved_note)).toEqual([true]);
+  });
+
+  test("the brief must hold a question the caller asked after the old thread's open ones: an older thread is refused, asking again there is taken", () => {
+    const { store } = open();
+    const project = store.ensureProject({ name: "billing", root: "/work/billing" });
+    const earlier = store.sendMessage({ project_id: project.id, author: ORCH, subject: "Last week's plan", body: ASK("Ship on Friday?") }).message;
+    const old = store.sendMessage({ project_id: project.id, author: SUB, subject: "Retry policy", body: ASK("Retry failed charges?") }).message;
+    const refused = refusal(() => store.resolveThread(old.id, true, "agent", { to: earlier.id, session: ORCH.session }));
+    expect(refused).toMatchObject({ code: "validation_error", details: { field: "moved_to" } });
+    expect(refused.message).toStartWith(`moved_to: thread ${earlier.id} has no question from your session asked after this thread's open questions`);
+    expect(store.message(old.id)!.resolved_at).toBeNull();
+    expect(store.pendingReplies(SUB.session!)).toEqual([]);
+    store.sendMessage({ project_id: project.id, author: ORCH, reply_to: earlier.id, body: ASK("Retry failed charges? (from Retry policy)") });
+    store.resolveThread(old.id, true, "agent", { to: earlier.id, session: ORCH.session });
+    expect(store.message(old.id)!.moved_to?.thread_id).toBe(earlier.id);
+  });
+
+  test("the note names the old thread as it names the brief: its thread name over its subject", () => {
+    const { store } = open();
+    const project = store.ensureProject({ name: "billing", root: "/work/billing" });
+    const old = store.sendMessage({ project_id: project.id, author: SUB, subject: "Retry policy", thread: "Charge retries", body: ASK("Retry failed charges?") }).message;
+    const brief = store.sendMessage({ project_id: project.id, author: ORCH, subject: "Morning brief", thread: "Thursday brief", body: ASK("Retry failed charges?") }).message;
+    store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
+    expect(store.pendingReplies(SUB.session!)[0]!.body).toStartWith(`Your questions in "Charge retries" (${old.id}) were moved to another thread by Claude Code: "Thursday brief" (${brief.id}).`);
+  });
+});

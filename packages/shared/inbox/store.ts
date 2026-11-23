@@ -5783,7 +5783,8 @@ export class InboxStore {
     const out = new Map<string, { asking: InboxMessage; questions: string[] }>();
     for (const m of members) {
       const session = m.author.kind === "agent" ? m.author.session : null;
-      if (!session || session === caller || told.has(session)) continue;
+      // A permission prompt (`perm:`) is no agent a wake reaches: a note to it would wait for ever, as Re-ask all knows.
+      if (!session || session === caller || told.has(session) || isInboxPermissionSession(session)) continue;
       // Open or picked as the person left it, the archive aside: on a thread already archived the archive closed
       // them, and they still wait on the person all the same.
       const open = this.questionRecords(m.id).filter((q) => {
@@ -5823,7 +5824,7 @@ export class InboxStore {
     const callerAuthor = [...this.threadMessages(moved.thread_id)].reverse().find((m) => m.author.kind === "agent" && m.author.session === caller)?.author;
     const agent = callerAuthor ? inboxAgentName(callerAuthor) : "another agent";
     const body = composeInboxMovedNoteBody({
-      from: this.threadSubject(root.id),
+      from: root.thread_name || this.threadSubject(root.id),
       from_id: root.id,
       agent,
       to: (target?.thread_name || this.threadSubject(moved.thread_id)) ?? moved.subject,
@@ -5850,6 +5851,22 @@ export class InboxStore {
     }
   }
 
+  /**
+   * The thread's messages with a question still waiting on the person (open or picked as the person left it, the
+   * archive aside; never an action item, never a permission prompt's).
+   */
+  private openAskingMessages(threadId: string): InboxMessage[] {
+    return this.threadMessages(threadId).filter(
+      (m) =>
+        m.author.kind === "agent" &&
+        !isInboxPermissionSession(m.author.session) &&
+        this.questionRecords(m.id).some((q) => {
+          const state = inboxQuestionState(q, false);
+          return q.kind !== "action" && (state === "open" || state === "picked");
+        }),
+    );
+  }
+
   /** resolveThread's `movedTo`, checked: the thread it names and its subject, or a refusal (nothing written). */
   private movedToOf(root: InboxMessage, resolved: boolean, movedTo: { to: string; session: string | null }): InboxMovedTo {
     const refuse = (why: string, code: "validation_error" | "thread_resolved" = "validation_error") =>
@@ -5859,7 +5876,7 @@ export class InboxStore {
     const target = named ? this.messages.get(named.thread_id) : undefined;
     if (!target || target.taken_back_at) throw refuse(`no thread or message ${movedTo.to}.`);
     if (target.id === root.id) throw refuse("names this same thread; give the thread its questions went to.");
-    if (target.project_id !== root.project_id) throw refuse(`thread ${target.id} is in another project; questions move only within a project.`);
+    if (!this.sameProject(target.project_id, root.project_id)) throw refuse(`thread ${target.id} is in another project; questions move only within a project.`);
     if (target.resolved_at !== null) throw refuse(`thread ${target.id} is archived; move the questions to an open thread.`, "thread_resolved");
     const session = movedTo.session?.trim() || null;
     if (session === null) throw refuse("needs your session (agent_session).");
@@ -5868,12 +5885,17 @@ export class InboxStore {
     if (!wrote) throw refuse(`thread ${target.id} has no message from your session; name the thread you sent the questions in.`);
     // A thread where the caller asked nothing would swallow the old thread's questions. One the person already
     // answered and sent counts (they answered the brief quickly); a withdrawn or Mark-read-closed one does not.
-    const asks = members.some((m) =>
+    const asking = members.filter((m) =>
       this.questionsOf(m.id).some(
         (q) => q.kind !== "action" && q.asked_by_agent_id === session && (q.state === "open" || q.state === "picked" || q.state === "sent"),
       ),
     );
-    if (!asks) throw refuse(`thread ${target.id} has no question from your session; ask the questions there first.`);
+    if (asking.length === 0) throw refuse(`thread ${target.id} has no question from your session; ask the questions there first.`);
+    // And asked AFTER this thread's newest open question: questions asked again, never an older thread's that only
+    // looks like the place they went (it would silence this thread's asker with a believable link).
+    const seqOf = (m: InboxMessage) => this.messageSeq.get(m.id) ?? 0;
+    const newestOpen = Math.max(0, ...this.openAskingMessages(root.id).map(seqOf));
+    if (!asking.some((m) => seqOf(m) > newestOpen)) throw refuse(`thread ${target.id} has no question from your session asked after this thread's open questions; ask them again there first.`);
     return { thread_id: target.id, subject: this.threadSubject(target.id) };
   }
 

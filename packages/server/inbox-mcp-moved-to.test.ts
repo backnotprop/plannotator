@@ -22,12 +22,12 @@ afterEach(() => {
 type Result = { content: { text: string }[]; isError?: boolean; structuredContent?: Record<string, unknown> };
 type Tool = { handler: (input: Record<string, unknown>, ctx: unknown) => Promise<Result> };
 
-function world() {
+function world(far: Record<string, string> = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-mcp-moved-to-")));
   roots.push(root);
   const store = InboxStore.open(join(root, "data"));
   const project = store.ensureProject({ name: "billing", root: join(root, "billing") });
-  const context = { store, baseUrl: () => "http://localhost:1/", resolveProject: async () => project } as unknown as InboxMcpContext;
+  const context = { store, baseUrl: () => "http://localhost:1/", resolveProject: async () => project, farThreadMachine: (id: string) => far[id] ?? null } as unknown as InboxMcpContext;
   const tools = (createInboxMcpServer(context) as unknown as { _registeredTools: Record<string, Tool> })._registeredTools;
   const call = (name: string, session: string, input: Record<string, unknown>) =>
     tools[name]!.handler({ project_path: project.root, agent_session: session, agent_host: "claude-code", ...input }, {});
@@ -78,6 +78,16 @@ test("the close-out pushes nothing to the person's phone: its one new message is
   // The only new message the close-out wrote is the note (the archive is one more line on the old root), and it pushes nothing.
   expect([...new Set(written)].filter((id) => id !== old.thread_id)).toEqual([note!.id]);
   expect(inboxPushSummary(w.store, note!.id, () => w.store.listRows())).toBeNull();
+});
+
+test("a brief on a linked computer is refused as a thread there, as send_message says it, and nothing is archived", async () => {
+  const w = world({ msg_01FARBRIEF: "Mini" });
+  const old = (await w.call("send_message", "ses_sub", { subject: "Retry policy", body: ASK("Retry failed charges?") })).structuredContent!;
+  const refused = await w.call("resolve_message", "ses_orch", { message_id: old.thread_id, moved_to: "msg_01FARBRIEF" });
+  expect(refused.isError).toBe(true);
+  expect(w.text(refused)).toStartWith("thread_on_other_machine: moved_to: msg_01FARBRIEF is a thread on ");
+  expect(w.text(refused)).toEndWith(" Nothing was archived.");
+  expect(w.store.message(String(old.thread_id))!.resolved_at).toBeNull();
 });
 
 test("a thread the caller never wrote in is refused, naming the field, and nothing is archived", async () => {

@@ -58,7 +58,7 @@ export { fail, guarded, ok, okComplete, PROJECT_PATH_DESCRIPTION, type ToolResul
 import type { InboxSearchIndex } from "@plannotator/shared/inbox/search";
 import { isInsideFolder, type InboxProjectRoot } from "./inbox-project-root";
 import { registerInboxSnoozeTool, type InboxSnoozeMcpContext } from "./inbox-mcp-snooze";
-import { farReplyRefusal, farThreadRead, type InboxFarReadMcpContext } from "./inbox-mcp-far-read";
+import { farReplyRefusal, farThreadRead, farThreadWords, type InboxFarReadMcpContext } from "./inbox-mcp-far-read";
 import { farThreadsFor, mergedThreadRows, type InboxFarFindMcpContext } from "./inbox-mcp-far-find";
 import { notePullFoundLater, pullsToLookUp, quietHint, type InboxKnownPulls } from "./inbox-mcp-hints";
 import { registerInboxScheduledTool, type InboxScheduledMcpContext } from "./inbox-mcp-scheduled";
@@ -1599,6 +1599,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
     async (input) =>
       guarded(() => {
         const movedTo = input.moved_to === undefined ? undefined : { to: input.moved_to, session: input.agent_session ?? null };
+        // A thread on a linked computer: questions move only within this Inbox, said as send_message says where it is.
+        const far = movedTo && !store.message(movedTo.to.trim()) ? (context.farThreadMachine?.(movedTo.to.trim()) ?? null) : null;
+        if (far) throw new InboxError("thread_on_other_machine", `moved_to: ${farThreadWords(movedTo!.to.trim(), far)} Nothing was archived.`, { field: "moved_to" });
         const summary = store.resolveThread(ownMessageId(store, input.message_id), input.resolved ?? true, "agent", movedTo);
         const moved = summary.resolved_at ? store.message(summary.thread_id)?.moved_to : null;
         const where = moved ? `; its questions point to thread ${moved.thread_id}${moved.subject ? ` (${JSON.stringify(moved.subject)})` : ""}` : "";
