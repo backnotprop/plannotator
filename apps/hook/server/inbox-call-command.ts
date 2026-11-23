@@ -201,10 +201,10 @@ function argumentsOf(text: string, cwd: string): { args: Record<string, unknown>
   } catch (error) {
     return { code: "invalid_json", error: `The arguments are not JSON, so nothing was sent: ${error instanceof Error ? error.message : String(error)}` };
   }
-  if (!value || typeof value !== "object" || Array.isArray(value)) return { code: "invalid_json", error: "The arguments must be one JSON object." };
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { code: "invalid_json", error: "The arguments are not one JSON object, so nothing was sent." };
   const args = value as Record<string, unknown>;
   const identity = IDENTITY_FIELDS.find((field) => field in args);
-  if (identity) return { code: "invalid_arguments", error: `${identity}: not taken here. --session and this shell say who is calling.` };
+  if (identity) return { code: "invalid_arguments", error: `${identity}: not taken here, so nothing was sent. --session and this shell say who is calling.` };
   // The Inbox resolves a path in its own folder: a relative one means this one, as on the agent tool.
   if (typeof args.project_path === "string") args.project_path = resolve(cwd, args.project_path);
   return { args };
@@ -423,7 +423,7 @@ async function runPairedCall(
   let args: Record<string, unknown>;
   try {
     const value = JSON.parse((parsed.stdin ? await (deps.stdin ?? (() => Bun.stdin.text()))() : (parsed.json ?? "{}")).replace(/^\uFEFF/, "")) as unknown;
-    if (!value || typeof value !== "object" || Array.isArray(value)) return refused("invalid_json", "The arguments must be one JSON object.", 2);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return refused("invalid_json", "The arguments are not one JSON object, so nothing was sent.", 2);
     args = value as Record<string, unknown>;
   } catch (error) {
     return refused("invalid_json", `The arguments are not JSON, so nothing was sent: ${error instanceof Error ? error.message : String(error)}`, 2);

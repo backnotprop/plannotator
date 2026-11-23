@@ -1128,7 +1128,7 @@ export function inboxToolCall(
       projectPath = value as string
       continue
     }
-    if (name === 'id' && tool.name === 'read_thread' && 'message_id' in own && !('message_id' in rest) && !('thread_id' in rest)) {
+    if (name === 'id' && typeof value === 'string' && value.trim() && tool.name === 'read_thread' && 'message_id' in own && !('message_id' in rest) && !('thread_id' in rest)) {
       args.message_id = value
       continue
     }

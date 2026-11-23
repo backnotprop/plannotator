@@ -91,8 +91,8 @@ const INBOX_STEP_STATUS_ALIASES: Readonly<Record<string, InboxStepStatus>> = {
 export function inboxStepStatusOf(value: unknown): InboxStepStatus | null {
   if (typeof value !== "string") return null;
   const key = value.trim().toLowerCase();
-  if (Object.hasOwn(INBOX_STEP_STATUS_ALIASES, key)) return INBOX_STEP_STATUS_ALIASES[key]!;
-  return (INBOX_STEP_STATUSES as readonly string[]).includes(key) ? (key as InboxStepStatus) : null;
+  if ((INBOX_STEP_STATUSES as readonly string[]).includes(key)) return key as InboxStepStatus;
+  return Object.hasOwn(INBOX_STEP_STATUS_ALIASES, key) ? INBOX_STEP_STATUS_ALIASES[key]! : null;
 }
 
 /**

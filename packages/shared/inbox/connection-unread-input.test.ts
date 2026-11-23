@@ -69,6 +69,8 @@ test("a readable call with no action, or a wrong one, still gets the action list
 test("read_thread's id reads as message_id, only when neither thread_id nor message_id is given", () => {
   expect(inboxToolCall({ action: "read_thread", id: "msg_01" }, readTools, filled)).toEqual({ name: "read_thread", arguments: { message_id: "msg_01" } });
   expect(errorOf({ action: "read_thread", id: "msg_01", thread_id: "msg_02" }, readTools)).toContain('read_thread takes no "id"');
+  expect(errorOf({ action: "read_thread", id: "" }, readTools)).toContain('read_thread takes no "id"');
+  expect(errorOf({ action: "read_thread", id: 3 }, readTools)).toContain('read_thread takes no "id"');
   expect(errorOf({ action: "send_message", id: "msg_01", body: "x" })).toContain('send_message takes no "id"');
 });
 

@@ -32,7 +32,6 @@
 import { INBOX_ROWS_ASK_BLOCK } from "@plannotator/core/inbox-types";
 import { INBOX_DECISION_ASK_BLOCK, INBOX_HOST_NAMES, inboxAgentName, inboxBoardRequestBlock, inboxSentFromLine, isInboxNote, type InboxMessageWire, type InboxQuestion } from "@plannotator/core/inbox-types";
 import { inboxAnswersSectionEnd } from "@plannotator/core/inbox-questions";
-import { openItemsLabel } from "@plannotator/core/inbox-open-questions";
 import { QUESTION_ANSWERS_HEADING, type QuestionAnswer } from "@plannotator/core/question-block";
 import { inboxAckReaction } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -836,7 +835,9 @@ export function windowedThreadText(result: ThreadWindowResult, order: readonly s
     out.push("No question waits on the person.");
   } else {
     const actions = thread.open_questions.filter((q) => q.key.startsWith("a-")).length;
-    out.push(`Waiting on the person (${openItemsLabel(thread.open_questions.length - actions, actions)}):`);
+    const questions = thread.open_questions.length - actions;
+    const each = (n: number, noun: string) => (n > 0 ? [`${n} ${noun}${n === 1 ? "" : "s"}`] : []);
+    out.push(`Waiting on the person (${[...each(questions, "question"), ...each(actions, "action item")].join(", ")}):`);
     for (const q of thread.open_questions) {
       // An action item (key `a-…`): A1, A2…, "action item, open", or what the person marked and has not sent (in their reply draft, or inside its Undo window).
       const todo = q.key.startsWith("a-");

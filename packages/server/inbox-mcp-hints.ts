@@ -294,7 +294,7 @@ export function pullsToLookUp(
   const considered = new Set<string>();
   const out: ForgeRef[] = [];
   // Stops at LOOKUPS_PER_SEND to look up, or after BODY_REFS_MAX distinct numbers: never the whole of a huge body.
-  for (const { ref, own } of githubNumbersIn(ownWords(sent.body), known.repo)) {
+  for (const { ref, own } of githubNumbersIn(withoutPicturesAndUrls(ownWords(sent.body)), known.repo)) {
     if (!own) continue;
     const key = forgeRefKey(ref);
     if (considered.has(key)) continue;

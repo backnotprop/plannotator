@@ -887,7 +887,7 @@ export async function sendAgentMessage(
   input: AgentSendInput,
   guide?: InboxGuideRef,
   wakes = false,
-): Promise<{ structured: Record<string, unknown>; replayed: boolean; notFramed: string[]; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; mediaNotShown: MediaNotShown[]; attachedImagesNotInBody: string[]; questionOpenersWithText: QuestionOpenerWithText[]; noStakes: number; recommendedInLabel: number; questionsToCheck: InboxQuestionToCheck[]; choicesWithoutPictures: { keys: string[]; pictures: number }; naming: InboxSendResult["naming"] | null; priority: boolean | null }> {
+): Promise<{ structured: Record<string, unknown>; replayed: boolean; notFramed: string[]; questions: number; asked: { key: string; prompt: string }[]; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; mediaNotShown: MediaNotShown[]; attachedImagesNotInBody: string[]; questionOpenersWithText: QuestionOpenerWithText[]; noStakes: number; recommendedInLabel: number; questionsToCheck: InboxQuestionToCheck[]; choicesWithoutPictures: { keys: string[]; pictures: number }; naming: InboxSendResult["naming"] | null; priority: boolean | null }> {
   const { store } = context;
   refuseIdShapedThread(input.thread, input.reply_to);
   refuseBadSubject(input.subject);
@@ -1048,6 +1048,7 @@ export async function sendAgentMessage(
     naming: result.naming ?? null,
     priority,
     questions: questions.length,
+    asked: (message.questions ?? []).map((q) => ({ key: q.key, prompt: q.prompt })),
     attachments: message.attachments?.length ?? 0,
     structured: {
       message_id: message.id,
@@ -1136,10 +1137,11 @@ export interface InboxAgentThreadRow {
   message_count: number;
   /**
    * Questions and action items in it still waiting on the person: `open`
-   * (`actions` of them action items), and `picked` (answered in the window,
-   * not sent yet); `prompt` is the first open one's.
+   * (`actions` of them action items; absent from an older linked machine),
+   * and `picked` (answered in the window, not sent yet); `prompt` is the
+   * first open one's.
    */
-  questions: { open: number; actions: number; picked: number; prompt: string | null };
+  questions: { open: number; actions?: number; picked: number; prompt: string | null };
   last_author: InboxListRow["last_author"];
   last_at: string;
   /**
@@ -1210,7 +1212,7 @@ export function threadRowText(row: Omit<InboxAgentThreadRow, "unread"> & { unrea
   parts.push(row.section, `${row.message_count} message${row.message_count === 1 ? "" : "s"}`);
   const { open, actions, picked, prompt } = row.questions;
   if (open + picked > 0) {
-    parts.push(`${open > 0 ? openItemsLabel(open - actions, actions) : "0 open"}${picked > 0 ? `, ${picked} picked not sent` : ""}${prompt ? `: ${JSON.stringify(clip(prompt, 100))}` : ""}`);
+    parts.push(`${open > 0 && actions !== undefined ? openItemsLabel(open - actions, actions) : `${open} open`}${picked > 0 ? `, ${picked} picked not sent` : ""}${prompt ? `: ${JSON.stringify(clip(prompt, 100))}` : ""}`);
   }
   parts.push(`last ${row.last_author} ${shortTime(row.last_at)}`);
   if (row.last_person_message_id && row.last_person_at) parts.push(`person's last ${row.last_person_message_id} ${shortTime(row.last_person_at)}`);
@@ -1223,10 +1225,9 @@ export function threadRowText(row: Omit<InboxAgentThreadRow, "unread"> & { unrea
   return parts.join(" · ");
 }
 
-/** One line per question and action item a send asked: its `<message id>/<key>` (what `supersedes` and `done` take) and its prompt, clipped. */
-export function askedRefsText(structured: Record<string, unknown>): string {
-  const items = [...((structured.questions as { key: string; prompt: string }[] | undefined) ?? []), ...((structured.actions as { key: string; prompt: string }[] | undefined) ?? [])];
-  return items.map((item) => `\n- ${structured.message_id}/${item.key}: ${JSON.stringify(clip(item.prompt, 80))}`).join("");
+/** One line per question and action item a send asked, in their order in the message: its `<message id>/<key>` (what `supersedes` and `done` take) and its prompt, clipped. */
+export function askedRefsText(messageId: string, asked: readonly { key: string; prompt: string }[]): string {
+  return asked.map((item) => `\n- ${messageId}/${item.key}: ${JSON.stringify(clip(item.prompt, 80))}`).join("");
 }
 
 export function agentThreadRow(store: InboxStore, row: InboxListRow, caller: string | null): InboxAgentThreadRow {
@@ -1238,7 +1239,7 @@ export function agentThreadRow(store: InboxStore, row: InboxListRow, caller: str
     // The section without the person's unsent work: a reply draft (and comments not sent) never reach an agent.
     section: inboxSectionOf({ ...row, unsent: null }),
     message_count: row.message_count,
-    questions: { open: row.questions.open, actions: row.questions.actions ?? 0, picked: row.questions.picked, prompt: row.questions.prompt },
+    questions: { open: row.questions.open, actions: Math.min(row.questions.open, row.questions.actions ?? 0), picked: row.questions.picked, prompt: row.questions.prompt },
     last_author: row.last_author,
     last_at: row.last_at,
     last_person_at: person.last?.created_at ?? null,
@@ -1381,6 +1382,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           questionOpenersWithTextText(sent.questionOpenersWithText),
         ];
         if (stale) hints.push(`\n${staleThreadText(stale, shortTime)}`);
+        hints.push(askedRefsText(String(sent.structured.message_id), sent.asked));
         // The quiet hints (inbox-mcp-hints.ts): one kind at most, last and on lines of their own.
         // The project's host only for a body that may name a short `group/project!45`; what the Inbox knows of
         // the project's PRs (cached, no forge call) only for one that may name `#12`.
@@ -1423,7 +1425,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           }, 0);
         }
         return ok(
-          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${branchLine}${stepsLine}${pullsLine}${priorityLine(sent.priority)}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host, await t3WokenOnlyWhileRunning(context, wakes, input), antigravityHandsOver(ctx, wakes, input))}${hints.join("")}${askedRefsText(sent.structured)}`,
+          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${branchLine}${stepsLine}${pullsLine}${priorityLine(sent.priority)}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host, await t3WokenOnlyWhileRunning(context, wakes, input), antigravityHandsOver(ctx, wakes, input))}${hints.join("")}`,
           stale ? { ...sent.structured, not_read_since: lastContactOf(stale) } : sent.structured,
         );
       }),

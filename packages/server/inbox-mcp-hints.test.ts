@@ -54,7 +54,7 @@ function world(options: { projectHost?: InboxMcpContext["projectHost"]; known?: 
   const server = createInboxMcpServer(context) as unknown as { _registeredTools: Record<string, { handler: (input: Record<string, unknown>, ctx: unknown) => Promise<Result> }> };
   const send = async (session: string, input: Record<string, unknown>) => {
     const result = await server._registeredTools.send_message!.handler({ project_path: project.root, agent_session: session, agent_host: "claude-code", ...input }, {});
-    const lines = result.content[0]!.text.split("\n").filter((line) => !/^- msg_\w+\/[aq]-/.test(line));
+    const lines = result.content[0]!.text.split("\n");
     return { result, lines, last: lines.at(-1)!, id: result.structuredContent?.message_id as string, thread: String(result.structuredContent?.thread_id) };
   };
   return { store, project, send };
@@ -196,7 +196,8 @@ test("one kind a send: the PR line first, the question line on a later send that
   const next = await w.send("ses_a", { body: `${PR}\n\n${BARE.replace("Which", "And which")}`, reply_to: both.id });
   expect(next.last).toBe(QUESTION_OPTIONS_HINT);
   const third = await w.send("ses_a", { body: `${PR}\n\n${BARE.replace("Which", "Then which")}`, reply_to: next.id });
-  expect(third.lines).toHaveLength(1);
+  expect(third.lines).toHaveLength(2);
+  expect(third.last).toStartWith(`- ${third.id}/q-`);
 });
 
 test("no hint on a refused send or a replay; a refused send does not use up the thread's line", async () => {
@@ -209,7 +210,9 @@ test("no hint on a refused send or a replay; a refused send does not use up the 
   const replay = await w.send("ses_c", { body: `Opened ${PR}.`, idempotency_key: "k1" });
   expect(replay.lines[0]).toStartWith("Already sent");
   expect(replay.lines).toHaveLength(1);
-  expect((await w.send("", { body: BARE, thread: "anon" })).lines).toHaveLength(1);
+  const anon = await w.send("", { body: BARE, thread: "anon" });
+  expect(anon.lines).toHaveLength(2);
+  expect(anon.last).toStartWith(`- ${anon.id}/q-`);
 });
 
 test("the picture-choices advice is said on every send it holds for, in any session", async () => {
@@ -316,6 +319,14 @@ test("a body naming 50,000 numbers: the send's lines and the lookup's pick stay 
   expect(picked.map((ref) => ref.number)).toEqual([1, 2, 3]);
   await forge.settled();
   expect(forge.reads).toEqual([1, 2, 3]);
+});
+
+test("an unknown number only in a picture's alt text or a URL is never looked up", async () => {
+  const forge = lookingUp({});
+  const w = world({ known: forge.known });
+  await w.send("ses_a", { body: "Before and after:\n\n![Header after #411](shots/after.png)\n\nSee https://example.com/notes#412.", thread: "one" });
+  await forge.settled();
+  expect(forge.reads).toEqual([]);
 });
 
 test("a number past GitHub's 32 bits is never a PR: never named, never looked up", async () => {

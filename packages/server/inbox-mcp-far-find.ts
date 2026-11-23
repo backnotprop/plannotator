@@ -154,7 +154,7 @@ export async function farThreads(context: InboxMcpContext, ask: FarThreadsAsk, b
         thread_name: typeof r.thread_name === "string" ? r.thread_name : null,
         section: (SECTIONS.has(r.section) ? r.section : "quiet") as FarThreadRow["section"],
         message_count: count(r.message_count),
-        questions: { open: count(r.questions.open), actions: Math.min(count(r.questions.open), count(r.questions.actions)), picked: count(r.questions.picked), prompt: typeof r.questions.prompt === "string" ? r.questions.prompt : null },
+        questions: { open: count(r.questions.open), ...(typeof r.questions.actions === "number" ? { actions: Math.min(count(r.questions.open), count(r.questions.actions)) } : {}), picked: count(r.questions.picked), prompt: typeof r.questions.prompt === "string" ? r.questions.prompt : null },
         last_author: r.last_author === "person" ? "person" : "agent",
         last_at: r.last_at,
         last_person_at: personId && typeof r.last_person_at === "string" && Number.isFinite(Date.parse(r.last_person_at)) ? r.last_person_at : null,
