@@ -224,7 +224,7 @@ import { hearAgentFacesEvent, onAgentFaceRefused, readAgentFaces } from './agent
 import { DraftsPage } from './compose/DraftsPage';
 import { BoardPage } from './board/BoardPage';
 import { useBoardWrites } from './board/boardWrites';
-import { PullsPage, ReviewsOff } from './pulls/PullsPage';
+import { PullsPage, pullsPageAddress, ReviewsOff } from './pulls/PullsPage';
 import { PullReview } from './pulls/PullReview';
 import { usePulls, useRefCardReviews, useRowsAfterStore } from './pulls/usePulls';
 import { SheetPage, type SheetView } from './prs/SheetPage';
@@ -5085,7 +5085,7 @@ function Inbox() {
     return (
     <PullsPage
       state={pulls}
-      stackId={route.stack ?? null} layerId={route.layer ?? route.backLayer ?? null}
+      {...pullsPageAddress(route, threadId)}
       threadId={threadId}
       onHide={threadId && !stack.thread ? () => setThreadFull(true) : undefined}
       project={project}
@@ -5120,7 +5120,7 @@ function Inbox() {
         writeRoute({ page: 'inbox', reviews: { project, view }, project: null, thread: id }, { replace: !!replace });
       }}
       onOpenCard={boardEnabled ? (cardId) => go({ page: 'board', project: null, thread: null, board: 'lanes', card: cardId }) : undefined}
-      onNewReview={(pick, opener, ask) => openCompose({ review: ask ? { pick, ask } : { pick } }, opener)} onReviewBranch={(branch, opener) => openCompose({ review: { branch } }, opener)}
+      onNewReview={(pick, opener, ask) => openCompose({ review: ask ? { pick, ask } : { pick } }, opener)} onReviewLocal={(review, opener) => openCompose({ review }, opener)}
       onOpenGuide={(id, messageId) => go({ page: 'inbox', reviews: { project, view }, project: null, thread: id, guide: messageId })} onOpenPicture={(id, attachmentId, messageId) => go({ page: 'inbox', reviews: { project, view }, project: null, thread: id, ...(attachmentId ? { file: { id: attachmentId, version: 'current', focus: null, view: 'side' } } : { msg: messageId }) })}
       shapes={shapeOn ? shapes.byThread : null}
       onOpenShape={(s) => go(s.thread ? { page: 'inbox', project: null, thread: s.thread, shape: s.id } : { page: 'shapes', project: null, thread: null, shape: s.id })}

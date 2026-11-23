@@ -435,7 +435,8 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     let partial: boolean;
     let heldBack: string | null;
     // Whether the diff judged is the one the PR's diff on screen draws (the forge's one document, within its size):
-    // only then are a high judgment's places kept, so "See the N places" counts places the diff can show.
+    // only then are a high or medium judgment's places kept, so "See the N places" and the risk bars point only at
+    // places the diff can show.
     let onScreen: boolean;
     try {
       const diff = await read(stopping.signal);
@@ -472,7 +473,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       }
     };
     let result = await ask(patch);
-    // A high judgment's places are checked against the diff it read, held only for that.
+    // A judgment's places are checked against the diff it read, held only for that.
     let judgment = "text" in result ? parseRiskAnswer(result.text, { rules: current.rules, patch }) : null;
     // The whole diff is held only for its run.
     patch = null;
