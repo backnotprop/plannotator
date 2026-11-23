@@ -5,7 +5,7 @@
  * `revealNext` to the page (`GET /api/inbox/settings` `reveal.next`, and `reveal.setup` for the agent note) and spends
  * every claim against it.
  *
- * In the line, in this order (the owner's, 2026-11-10): Code review's day-0 offer (`CODE_REVIEW_OFFER`, never shown: `CODE_REVIEW_OFFER_SHOWN`), the
+ * In the line, in this order (the owner's, 2026-11-10): Code review's day-0 offer (`CODE_REVIEW_OFFER`, while `CODE_REVIEW_OFFER_SHOWN`), the
  * same-day group (the tab icon, themes, the view choice, list options "Rows", the sound, voice: no tenure, the
  * gap apart), then the later group, later only by tenure (Snooze, personal agents, Priority, the Board, the Checklist, Bro mode,
  * "Set the rules"). The agent note is a setup dialog: never in the queue, but it keeps the gap
@@ -105,18 +105,18 @@ export interface RevealEntry {
 export const CODE_REVIEW_OFFER: RevealEntry = { id: "code_review", kind: "offer", tenureMs: 0, minThreads: 0, enabled: true };
 
 /**
- * Whether Code review's one-time offer is ever shown. The owner chose the switch without the offer for this release
- * (2026-11-17: "keep code review, no need for the code review dialogue, but enable it in the capabilities"): Settings →
- * Capabilities shows the Code review switch to everyone, off unless the person turns it on, and nobody is offered it.
- * False: the server never lists the offer as open (packages/server/inbox.ts `codeReviewUndecided`), so it is never
- * next and never claimed; its slot (`CODE_REVIEW_OFFER`) and any stamp already in config.json are kept as they are.
- * To offer it again, set this to true.
+ * Whether Code review's one-time offer is ever shown. Held back from 2026-11-17 (the owner: "keep code review, no need
+ * for the code review dialogue, but enable it in the capabilities"); shown again from the release after 2026-11-23,
+ * with its four new lines (approval "inbox-code-review-offer"; the owner: "show it in the next release? Yes, in the
+ * next release"). True: the server lists the offer as open while config.json `inboxCodeReview` is unset
+ * (packages/server/inbox.ts `codeReviewUndecided`), so it takes its slot (`CODE_REVIEW_OFFER`) under the line's rules.
+ * False: never next and never claimed, and any stamp already in config.json is kept as it is.
  */
-export const CODE_REVIEW_OFFER_SHOWN = false;
+export const CODE_REVIEW_OFFER_SHOWN = true;
 
 /** The queue, in order. */
 export const INBOX_REVEALS: readonly RevealEntry[] = [
-  // Never shown for now (`CODE_REVIEW_OFFER_SHOWN`): its slot is kept as it was.
+  // Code review's offer (shown again, `CODE_REVIEW_OFFER_SHOWN`): first, ahead of the owner's order below.
   CODE_REVIEW_OFFER,
   // The order below is the owner's (2026-11-10, "Alright, let's ship it"). First the same-day group: no tenure, so each
   // may show on a person's first day, the line's gap apart (`REVEAL_SPACING_MS`), as each one's own "who" holds. Then

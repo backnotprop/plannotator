@@ -11,8 +11,8 @@
  * "Turn on code review" saves the switch as Settings → Capabilities does; "Not now", Escape and a click outside are the
  * line's Not now (`inboxApi.revealNotNow('code_review')`) and leave it off. Every way out is final.
  *
- * Never shown for now: the server never opens it (`CODE_REVIEW_OFFER_SHOWN` in packages/shared/inbox/reveals.ts; the
- * owner chose the Settings switch without the offer, 2026-11-17), so `reveal.next` is never `code_review`.
+ * The server opens it only while `CODE_REVIEW_OFFER_SHOWN` (packages/shared/inbox/reveals.ts; held from 2026-11-17,
+ * shown again from the release after 2026-11-23, approval "inbox-code-review-offer").
  */
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { useRef } from 'react';

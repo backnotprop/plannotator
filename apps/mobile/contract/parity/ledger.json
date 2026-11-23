@@ -1475,12 +1475,12 @@
     },
     {
       "id": "window-110",
-      "title": "Code review offer card (\"A new way to review\", Not now / \"Turn on code review\") — currently never shown",
+      "title": "Code review offer card (\"A new way to review\", Not now / \"Turn on code review\")",
       "surface": [],
       "flows": [],
       "mobile": "later",
-      "why": "L-off: the offer is never shown today",
-      "reason": "L-off",
+      "why": "L-door: after v1, slice S9 (owner, 2026-11-18: managing the computer comes later): turning a capability on at the computer from a phone",
+      "reason": "L-door",
       "source": "SCOPE I. One-time dialogs, tips and their schedule; L174",
       "ios": {
         "state": "not-started"

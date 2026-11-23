@@ -3649,8 +3649,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /**
    * Code review's day-0 offer (approval "code-review-offer-card", 2026-11-06; its slot: `CODE_REVIEW_OFFER` in
    * shared/inbox/reveals.ts): only while config.json `inboxCodeReview` is unset (nobody decided; `false` is the
-   * person's own off), and only while the offer is shown at all: `CODE_REVIEW_OFFER_SHOWN` (false for now: the
-   * owner chose the switch without the offer, 2026-11-17), so it is never open and never claimed.
+   * person's own off; `true` is theirs too), and only while the offer is shown at all: `CODE_REVIEW_OFFER_SHOWN`
+   * (held from 2026-11-17, shown again from the release after 2026-11-23, approval "inbox-code-review-offer").
    */
   const codeReviewUndecided = () => CODE_REVIEW_OFFER_SHOWN && options.codeReview === undefined && loadConfig().inboxCodeReview === undefined;
   /**

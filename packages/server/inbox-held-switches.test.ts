@@ -10,10 +10,12 @@
  *    still carries Code review (off) and leaves Shape out;
  *  - PLANNOTATOR_INBOX_PREVIEW=1: Shape is there while off, in the read and the event;
  *  - a release build: Code review's switch is there and off, Shape's is absent, and Code review's one-time offer is
- *    never next (`CODE_REVIEW_OFFER_SHOWN`: the owner chose the switch without the offer).
+ *    next while Code review was never decided (`CODE_REVIEW_OFFER_SHOWN`, shown again from the release after
+ *    2026-11-23), never once it is on.
  *
  * What regresses: a person on a release build not finding Code review's switch, or seeing Shape's, or being shown the
- * offer; the owner (on) losing a row; a shown switch that cannot be turned off. Delete Shape's cases with `heldSwitch`.
+ * offer with Code review on; the owner (on) losing a row; a shown switch that cannot be turned off. Delete Shape's
+ * cases with `heldSwitch`.
  */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -148,22 +150,23 @@ test("PLANNOTATOR_INBOX_PREVIEW=1: Shape is there while off, in the read and in 
   await stream.stop();
 });
 
-test("a release build: the Code review switch is there and off, the Shape switch is absent, and Code review's offer is never next", async () => {
+test("a release build: the Code review switch is there and off, the Shape switch is absent, and Code review's offer is next only while Code review was never decided", async () => {
   for (const version of ["0.28.50", "0.30.0"]) {
     const off = await (await world({ updateCheck: false }, false, version)).read();
     expect(off.code_review).toEqual({ on: false });
     expect("shape" in off).toBe(false);
     expect(off.reveal).toBeDefined();
-    expect(off.reveal!.next).not.toBe("code_review");
+    expect(off.reveal!.next).toBe("code_review");
 
     const on = await (await world({ updateCheck: false, inboxCodeReview: true, inboxShape: true }, false, version)).read();
     expect(on.code_review).toEqual({ on: true });
     expect(on.shape).toEqual({ on: true });
+    expect(on.reveal!.next).not.toBe("code_review");
 
     const preview = await (await world({ updateCheck: false }, true, version)).read();
     expect(preview.code_review).toEqual({ on: false });
     expect(preview.shape).toEqual({ on: false });
     expect(preview.reveal).toBeDefined();
-    expect(preview.reveal!.next).not.toBe("code_review");
+    expect(preview.reveal!.next).toBe("code_review");
   }
 });
