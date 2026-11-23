@@ -169,7 +169,7 @@ export function useListPicks(input: ListPicksInput) {
               if (dropOpened.current) leave();
               dropOpened.current = false;
             }}
-            onStarted={(record, machine) => (combines.begin(record, machine, rows), leave())}
+            onStarted={(record, machine, label) => (combines.begin(record, machine, rows, label), leave())}
           />
         )}
       </>

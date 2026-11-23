@@ -71,6 +71,7 @@ import {
   type InboxGuideRef,
   type InboxLine,
   type InboxMessage,
+  type InboxCombineLeft,
   type InboxMessageWire,
   type InboxPicker,
   type InboxProject,
@@ -874,6 +875,11 @@ export class InboxStore {
    */
   private readonly resolvedSeq = new Map<string, number>();
   /**
+   * A thread's last Unarchive: the seq of the root line that cleared its `resolved_at`. Derived from the log in seq
+   * order like `resolvedSeq`; read by a linked computer's Combine archive guard (`unarchiveSeq`).
+   */
+  private readonly unarchivedSeq = new Map<string, number>();
+  /**
    * The roots of threads the person started whose address moved ("Send to
    * another session": a later root line names another `to.session`). Derived
    * from the log in seq order, like `resolvedSeq`; read by `threadNamers`.
@@ -1116,6 +1122,7 @@ export class InboxStore {
         const archive = archiveSeqAfter(prev?.resolved_at, this.resolvedSeq.get(record.id) ?? null, record, line.seq);
         if (archive === null) this.resolvedSeq.delete(record.id);
         else this.resolvedSeq.set(record.id, archive);
+        if (prev?.resolved_at != null && record.resolved_at == null) this.unarchivedSeq.set(record.id, line.seq);
         if (movesAddress(prev, record)) this.readdressed.add(record.id);
         // A thread the person started routes by name only once an AGENT names it (sendMessage):
         // indexed at that line, in seq order, so later sends with the name join it and a replay
@@ -1936,6 +1943,11 @@ export class InboxStore {
   private closedByArchive(message: InboxMessage): boolean {
     const archiveSeq = this.archiveSeq(message.thread_id);
     return archiveSeq !== null && (this.messageSeq.get(message.id) ?? 0) < archiveSeq;
+  }
+
+  /** The seq of the thread's last Unarchive line, or null when it was never unarchived (as far as the log tells). */
+  unarchiveSeq(threadId: string): number | null {
+    return this.unarchivedSeq.get(threadId) ?? null;
   }
 
   /** The seq of a resolved thread's archive line, or null for an open thread. */
@@ -5772,6 +5784,19 @@ export class InboxStore {
     return attachment;
   }
 
+  /**
+   * What a Combine left where it was, on its new thread's first message (`InboxMessage.combine_left`; inbox-combine-across.ts):
+   * one more line for the message, its latest snapshot with it (or without it, `null`). The Inbox's own status: no unread.
+   */
+  setCombineLeft(messageId: string, left: InboxCombineLeft | null): InboxMessage {
+    const message = this.messages.get(messageId);
+    if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
+    const { combine_left: _was, ...rest } = message;
+    const next: InboxMessage = left ? { ...rest, combine_left: left } : rest;
+    this.appendMessage(next, this.stamp());
+    return next;
+  }
+
   /** The person's annotations in a thread still waiting for a Send (not removed, not sent). */
   pendingAnnotations(threadId: string): InboxAnnotationRecord[] {
     const out: InboxAnnotationRecord[] = [];
@@ -6660,6 +6685,7 @@ export class InboxStore {
     this.scheduledById.clear();
     this.messageSeq.clear();
     this.resolvedSeq.clear();
+    this.unarchivedSeq.clear();
     this.readdressed.clear();
     this.questions.clear();
     this.messageQuestions.clear();
