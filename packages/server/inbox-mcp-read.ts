@@ -58,8 +58,6 @@ import { inboxMessageForReader, type InboxSentFromReader } from "./inbox-sent-fr
 export const INBOX_THREAD_WINDOW = 6;
 /** A body longer than this is cut, with a marker naming the `expand` call. */
 export const INBOX_BODY_CUT_BYTES = 16 * 1024;
-/** The size the tool text and --help still name for the person's earlier messages; read_thread now shows them as one line each. */
-export const INBOX_EARLIER_PERSON_BYTES = 12 * 1024;
 /** At most this many messages as one line each, the most recent; older ones are one count line naming `before`. */
 export const INBOX_THREAD_LINES = 30;
 /** At most this many of the reader's unread replies older than the one-line messages are listed too, the oldest first. */
