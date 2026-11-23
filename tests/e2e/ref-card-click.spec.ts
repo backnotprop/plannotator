@@ -291,6 +291,15 @@ test('a click pins the card with Open in Reviews beside Open on GitHub; Escape, 
   try {
     await openThread(page);
     const pr = ref(page, 12);
+    // DIAGNOSTIC (to be removed): a Ctrl-click on a fresh page, before any plain click.
+    const freshTab = context.waitForEvent('page', { timeout: 6_000 }).then((p) => p, () => null);
+    await pr.click({ modifiers: ['ControlOrMeta'] });
+    const freshPage = await freshTab;
+    const fresh = `tab=${!!freshPage}`;
+    await freshPage?.close();
+    popups.length = 0;
+    await page.mouse.move(2, 2);
+    await expect(page.locator('[data-ref-card]')).toHaveCount(0);
     await pr.click();
     const c = card(page);
     await expect(c).toHaveAttribute('data-ref-card-pinned', '');
@@ -338,7 +347,37 @@ test('a click pins the card with Open in Reviews beside Open on GitHub; Escape, 
         if (e.target instanceof Node && el.contains(e.target)) w.__refClicks.push({ modified: e.ctrlKey || e.metaKey, prevented: e.defaultPrevented });
       });
     });
-    const [tab] = await Promise.all([context.waitForEvent('page'), pr.click({ modifiers: ['ControlOrMeta'] })]);
+    // DIAGNOSTIC (to be removed): what differs between a Ctrl-click that opens a tab and one that does not.
+    await pr.evaluate((el) => {
+      const w = window as unknown as { __diag: string[] };
+      w.__diag = [];
+      const body = el.closest('[data-message-id]')!;
+      new MutationObserver((records) => w.__diag.push(`mutations ${records.length} linkConnected=${el.isConnected}`)).observe(body, { subtree: true, childList: true, attributes: true, characterData: true });
+      for (const type of ['keydown', 'pointerdown', 'mousedown', 'mouseup', 'click']) {
+        window.addEventListener(type, (e) => {
+          const t = e.target as Element;
+          w.__diag.push(`${type} same=${t === el || el.contains(t)} connected=${t.isConnected} prevented=${e.defaultPrevented} active=${(navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation?.isActive} focus=${document.activeElement?.tagName} href=${el.getAttribute('href')} target=${el.getAttribute('target')}`);
+        });
+      }
+    });
+    const attempt = async (label: string) => {
+      const before = popups.length;
+      const got = context.waitForEvent('page', { timeout: 6_000 }).then(() => true, () => false);
+      await pr.click({ modifiers: ['ControlOrMeta'] });
+      const ok = await got;
+      return `${label}: tab=${ok} popups+${popups.length - before} cards=${await card(page).count()}`;
+    };
+    const first = await attempt('first');
+    if (!first.includes('tab=true')) {
+      const diag1 = await page.evaluate(() => (window as unknown as { __diag: string[] }).__diag.splice(0));
+      const second = await attempt('second, at once');
+      const diag2 = await page.evaluate(() => (window as unknown as { __diag: string[] }).__diag.splice(0));
+      await page.mouse.move(2, 2);
+      await page.waitForTimeout(3_000);
+      const third = await attempt('third, after 3 s at rest');
+      throw new Error(`${first} | ${second} | ${third} | diag1=${JSON.stringify(diag1)} | diag2=${JSON.stringify(diag2)} | fresh=${fresh}`);
+    }
+    const tab = context.pages().find((p) => p !== page)!;
     await tab.waitForLoadState();
     expect(tab.url()).toBe(`https://github.com/${REPO}/issues/12`);
     expect(await page.evaluate(() => (window as unknown as { __refClicks: unknown[] }).__refClicks)).toEqual([{ modified: true, prevented: false }]);
