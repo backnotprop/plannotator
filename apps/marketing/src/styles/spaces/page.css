@@ -353,7 +353,7 @@ body::after{background:
 .cap{box-shadow:var(--shadow)}
 .cap::after{display:none}
 .cap.dlg{border-radius:12px}
-.twm,.shf-thumb img.ph{display:none}
+.twm,.shf-thumb img.ph,html:not(.light) .shf-thumb img.ph{display:none}
 .nm{white-space:pre}
 .nmp{font-weight:400}
 .fanh,.fanf{z-index:1;left:calc(0px - var(--m));width:calc(100% + 2*var(--m));background:var(--ground)}
@@ -733,7 +733,54 @@ html:not(.light) .spw{--f:#070b14;--p:#151b24;--k:#dadee5;--s:#8e929a;--l:rgba(2
 html:not(.light) .fan-pen path{stroke-width:2.8}
 @media (hover:hover) and (min-width:1181px){.shf-fan:has(.shf-card[data-source]:hover,.shf-card[data-card="review"]:hover)+.fan-pen{opacity:0}}
 @media (prefers-reduced-motion:reduce){.fanbox .fan-pen{transition:none}}
+@media (min-width:761px) and (max-width:1180px){
+.fanbox .shf-fan{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,358px));gap:12px;height:auto}
+.fanbox .shf-card,.fanbox .shf-card:nth-child(n),.fanbox .shf-card[data-source]{position:static;width:auto;height:auto;margin:0;transform:none}
+.fanbox .shf-face,.fanbox .shf-card[data-source] .shf-face,html .fanbox .shf-card:hover .shf-face,html:not(.light) .fanbox .shf-card:hover .shf-face{height:100%;padding:12px;border-radius:16px;box-shadow:0 0 0 1px var(--shf-rule);transform:none;transition:none;will-change:auto}
+.fanbox .shf-thumb,.fanbox .shf-card[data-source] .shf-thumb{height:auto;border-radius:10px;aspect-ratio:25 / 12}
+.fanbox .shf-card[data-card="flow"] .shf-thumb img{object-position:left center}
+.fanbox .shf-card[data-card="review"] .shf-thumb{aspect-ratio:240 / 156}
+}
 /* fan6:end */
 /* phone6:start */
 @media (max-width:1180px){.copy .act{margin-top:24px}.art{grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))}}
 /* phone6:end */
+/* card3:start */
+.dw .pc-s{font-size:12px;fill:var(--mk-ink)}
+.shf-thumb .pc-face{position:absolute;inset:0;padding:12px 6.790% 0;background:var(--p);color:var(--k);font:400 11px/1.45 var(--sans);overflow:hidden}
+.pc-face h5{margin:0 0 5px;font:400 17px/17.500px var(--serif);letter-spacing:-.012em}
+.pc-face p{margin:0;color:var(--s)}
+.pc-face .pc-w{position:absolute;left:0;right:0;bottom:0;background:var(--p-well)}
+.pc-v{fill:var(--violet)}
+.pc-face .dw text{font-size:12px}
+@media (max-width:760px){.shf-card[data-source] .shf-thumb{container-type:inline-size}.shf-thumb .pc-face{padding-top:3.600cqw;font-size:3.290cqw}.pc-face h5{margin-bottom:1.500cqw;font-size:5.090cqw;line-height:5.240cqw}}
+.shf-thumb img.tb,.shf-thumb .pc-tall{display:none!important}
+@media (min-width:761px) and (max-width:1180px){
+.fanbox .shf-fan{grid-template-columns:minmax(0,1fr) minmax(0,1.2fr) minmax(0,1fr);grid-template-rows:auto auto}
+.fanbox .shf-card:nth-child(1){grid-area:1 / 1}.fanbox .shf-card:nth-child(2){grid-area:2 / 1}.fanbox .shf-card[data-source]{grid-area:1 / 2 / 3 / 3}.fanbox .shf-card:nth-child(4){grid-area:1 / 3}.fanbox .shf-card:nth-child(5){grid-area:2 / 3}
+.fanbox .shf-card:not([data-source]) .shf-thumb{aspect-ratio:240 / 156}
+.fanbox .shf-card:not([data-source]) .shf-line{max-width:36ch;text-wrap:balance}
+.fanbox .shf-card[data-card="question"] .shf-thumb img.ph{display:none!important}
+.fanbox .shf-thumb img.shf-l.tb{display:block!important}
+html:not(.light) .fanbox .shf-thumb img.shf-l.tb{display:none!important}
+html:not(.light) .fanbox .shf-thumb img.shf-d.tb{display:block!important}
+.fanbox .shf-card[data-source] .shf-face,html .fanbox .shf-card[data-source]:hover .shf-face,html:not(.light) .fanbox .shf-card[data-source]:hover .shf-face{display:flex;flex-direction:column;box-shadow:0 0 0 1.5px var(--shf-iris)}
+.fanbox .shf-card[data-source] .shf-thumb{flex:1 1 auto;min-height:0;height:auto;aspect-ratio:auto;container-type:size}
+.fanbox .shf-card[data-source] .shf-thumb .pc-face{display:none}
+.fanbox .shf-card[data-source] .shf-thumb .pc-tall{display:flex!important;flex-direction:column;position:absolute;inset:0;background:var(--paper);color:var(--p-ink);font:400 clamp(12.500px,3.500cqw,15px)/1.45 var(--sans);letter-spacing:-.003em;overflow:hidden}
+.pc-tall>*{flex:none;margin:0 5.500cqw}
+.pc-tall h5{margin-top:5cqw;font:400 clamp(19px,6.200cqw,26px)/1.2 var(--serif);letter-spacing:-.012em}
+.pc-tall .pr{margin-top:2.400cqw;color:var(--p-soft)}
+.pc-tall .fig{flex:1 1 auto;display:flex;align-items:center;min-height:0;margin:4cqw 0 0;padding:3cqw 0;background:var(--p-well)}
+.pc-tall .fig svg{flex:1 1 auto;max-height:100%}
+.pc-tall .fig svg.pc-mid,.pc-tall .fig svg.pc-long{display:none}
+.pc-tall .q{padding:3.400cqw 0 4.400cqw}
+.pc-tall b{font-weight:650}
+}
+@media (min-width:900px) and (max-width:1023px){.fanbox .shf-fan{grid-template-columns:minmax(0,1fr) minmax(0,1.45fr) minmax(0,1fr)}.pc-tall .fig svg{display:none}.pc-tall .fig svg.pc-mid{display:block}}
+@media (min-width:761px) and (max-width:899px){.pc-tall .fig svg{display:none}.pc-tall .fig svg.pc-long{display:block}}
+@media (min-width:1024px) and (max-width:1180px){.fanbox .shf-fan{grid-template-columns:minmax(0,1fr) minmax(0,1.9fr) minmax(0,1fr)}.fanbox .shf-card[data-source] .shf-face{padding:12px 14px}}
+@media (min-width:761px) and (max-width:799px){.fanbox .shf-card:not([data-source]) .shf-kind{font-size:13.5px;gap:6px}.fanbox .shf-card:not([data-source]) .shf-icon{width:24px;height:24px;border-radius:7px}.fanbox .shf-card:not([data-source]) .shf-icon svg{width:14px;height:14px}.fanbox .shf-card:not([data-source]) .shf-line{font-size:13.5px}}
+@media (min-width:800px) and (max-width:839px){.fanbox .shf-card:not([data-source]) .shf-kind{font-size:14px;gap:7px}.fanbox .shf-card:not([data-source]) .shf-icon{width:24px;height:24px;border-radius:7px}.fanbox .shf-card:not([data-source]) .shf-icon svg{width:14px;height:14px}.fanbox .shf-card:not([data-source]) .shf-line{font-size:13.5px}}
+@media (min-width:840px) and (max-width:1085px){.fanbox .shf-card:not([data-source]) .shf-kind{font-size:14.5px;gap:8px}.fanbox .shf-card:not([data-source]) .shf-icon{width:24px;height:24px;border-radius:7px}.fanbox .shf-card:not([data-source]) .shf-icon svg{width:14px;height:14px}.fanbox .shf-card:not([data-source]) .shf-line{font-size:13.5px}}
+/* card3:end */
