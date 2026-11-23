@@ -14,6 +14,8 @@
  *  5. The diff cramped: drawn as a guided review's chapter card (its "Every changed file" column beside a narrow
  *     diff) instead of the files across the pane's width, as the PR page draws them; a code line cut off (03, 04).
  *  6. On a phone (390 wide), the group open, and a row's diff in the list's place at the screen's width (05, 06).
+ *  7. On a phone, a long branch name in a long-named project cut to a few letters by the bar's buttons, or anything
+ *     in the bar or the facts under it overlapping, at 390 and 320 (07, 08).
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/reviews-on-this-computer, light and dark at 1440, and at 390 on a phone. HOME is a scratch folder,
  * and the sandbox env keeps the binary off the person's agents. Build the binary first (see inbox.spec.ts), then
@@ -60,6 +62,9 @@ function gitProject(parent: string, name: string) {
 interface World {
   browser: Browser;
   url: string;
+  /** The Inbox's MCP door, and the folder the projects are made in. */
+  mcp: string;
+  src: string;
   plannotator: string;
   plannotatorId: string;
   git: (args: string[]) => string;
@@ -144,7 +149,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const projects = (await (await page.request.get(`${url}api/inbox/projects`)).json()) as { projects?: { id: string; root: string }[] };
   const plannotatorId = projects.projects?.find((p) => p.root === plannotator.path)?.id ?? '';
   expect(plannotatorId).toBeTruthy();
-  world = { browser, url, plannotator: plannotator.path, plannotatorId, git: (args) => plannotator.git(args), context, page };
+  world = { browser, url, mcp: `http://127.0.0.1:${registry.port}/mcp`, src, plannotator: plannotator.path, plannotatorId, git: (args) => plannotator.git(args), context, page };
 });
 
 test.afterAll(async () => {
@@ -296,6 +301,72 @@ test.describe('phone at 390', () => {
       // In the list's place: the pane is the screen's width.
       expect((await pane.boundingBox())!.width).toBeGreaterThan(380);
       await readableDiff(pane, 'src/comments.ts', 'export const words = "kept";', 300);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("a long branch name in a long-named project: the bar gives the name its room, at 390 and 320", async () => {
+    // A project an agent wrote from, with a branch of its own; opened by its address (the group's kept answer may be older).
+    const name = 'charlie-dunn-spaces-site-share-links-and-previews';
+    const branch = 'feat/share-links-open-in-spaces-with-one-click-and-keep-the-preview-cards';
+    const project = gitProject(world.src, name);
+    project.git(['checkout', '-q', '-b', branch]);
+    project.commit('share.ts', 'export const share = "one click";\n', 5 * MINUTE);
+    project.git(['checkout', '-q', 'main']);
+    const client = new Client({ name: 'reviews-local-long', version: '1.0.0' });
+    await client.connect(new StreamableHTTPClientTransport(new URL(world.mcp)));
+    const note = (await client.callTool({ name: 'send_message', arguments: { project_path: project.path, subject: 'Previews', body: 'Started on previews.', agent_host: 'claude-code', agent_name: 'Claude Code' } })) as { isError?: boolean; content?: { text: string }[] };
+    await client.close().catch(() => {});
+    if (note.isError) throw new Error(note.content?.map((c) => c.text).join(' '));
+    const context = await world.browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, colorScheme: 'light', reducedMotion: 'reduce' });
+    try {
+      const page = await context.newPage();
+      const projects = (await (await page.request.get(`${world.url}api/inbox/projects`)).json()) as { projects?: { id: string; root: string }[] };
+      const id = projects.projects?.find((p) => p.root === project.path)?.id ?? '';
+      expect(id).toBeTruthy();
+      await page.goto(`${world.url}#reviews&local=${encodeURIComponent(id)}&branch=${encodeURIComponent(branch)}`);
+      const pane = page.locator('[data-local-diff="branch"]');
+      await expect(pane.locator('[data-guide-file-shell="share.ts"]')).toBeVisible({ timeout: 30_000 });
+      await shot(page, '07-phone-long-branch');
+      await page.setViewportSize({ width: 320, height: 700 });
+      await page.waitForTimeout(300);
+      await shot(page, '08-phone-long-branch-320');
+      for (const width of [390, 320]) {
+        await page.setViewportSize({ width, height: 760 });
+        await page.waitForTimeout(300);
+        const title = pane.locator('[data-local-title]');
+        // The whole name is there: its text, and its title where it wraps past two lines.
+        await expect(title).toHaveText(branch);
+        await expect(title).toHaveAttribute('title', branch);
+        const boxes = await pane.evaluate((root) => {
+          const box = (selector: string) => {
+            const el = root.querySelector(selector);
+            if (!el) return null;
+            const r = el.getBoundingClientRect();
+            return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height };
+          };
+          const facts = [...root.querySelectorAll('[data-local-facts] > *')].map((el) => el.getBoundingClientRect().right);
+          const own = root.getBoundingClientRect();
+          return { bar: box('.ib-pr-bar'), back: box('[data-phone-back]'), name: box('[data-local-title]'), review: box('[data-local-review]'), pane: { right: own.right }, facts };
+        });
+        const { bar, back, name: title2, review, pane: paneBox, facts } = boxes;
+        // The name has room to be read (two lines at most, more than a few letters wide), and nothing overlaps.
+        expect(title2!.width, `${width}`).toBeGreaterThan(120);
+        expect(title2!.height).toBeLessThan(44);
+        expect(back!.right).toBeLessThanOrEqual(title2!.left + 0.5);
+        expect(title2!.right).toBeLessThanOrEqual(review!.left + 0.5);
+        expect(review!.right).toBeLessThanOrEqual(bar!.right + 0.5);
+        expect(title2!.top).toBeGreaterThanOrEqual(bar!.top - 0.5);
+        expect(title2!.bottom).toBeLessThanOrEqual(bar!.bottom + 0.5);
+        // Review with an agent: its icon, a 44 px target, its name kept for a screen reader.
+        expect(review!.width).toBeGreaterThanOrEqual(44);
+        expect(review!.height).toBeGreaterThanOrEqual(44);
+        await expect(pane.locator('[data-local-review]')).toHaveAccessibleName('Review with an agent');
+        // The facts under it (the long project's name first) stay inside the pane.
+        await expect(pane.locator('[data-local-facts]')).toContainText(name);
+        for (const right of facts) expect(right).toBeLessThanOrEqual(paneBox!.right + 0.5);
+      }
     } finally {
       await context.close();
     }

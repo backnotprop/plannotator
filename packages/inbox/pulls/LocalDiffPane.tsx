@@ -4,7 +4,7 @@
  * and drawn read only by the reader every review uses (`GuideReader`, its files). Nothing goes to any agent. Its bar's
  * "Review with an agent" opens New review on that same work, for the person to send or not. No new keyboard shortcuts.
  */
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import { inboxLocalWorkLabel, inboxReviewPatchSize, type InboxLocalDiffAnswer } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
@@ -13,9 +13,13 @@ import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
 import { PullPaneBack } from './PullLaunchpad';
 import { readLocalDiff } from './localWork';
+import { usePhoneHeadFit } from '../headFit';
+import { useInboxTextSize } from '../textSize';
 import type { LocalOpen } from './localRoute';
 
 const GuideReader = GuideReaderPart.Part;
+/** A phone's bar keeps the work's name at least this room (headFit.ts): `‹ Reviews` gives way to its chevron first. */
+const NAME_FLOOR_PX = 120;
 const NO_TICKS: boolean[] = [];
 const keepTicks = () => {};
 
@@ -58,20 +62,24 @@ export function LocalDiffPane({ open, projectName, phone, stacked, onClose, onRe
     [diff],
   );
   const size = diff?.patch ? inboxReviewPatchSize(diff.patch) : null;
+  // A phone's bar is the work's name: `‹ Reviews` and Review with an agent (its icon, its name for a screen reader)
+  // give it the room, and a long name wraps to a second line.
+  const bar = useRef<HTMLDivElement>(null);
+  usePhoneHeadFit(bar, phone, [stacked, label, useInboxTextSize()].join('|'));
   return (
     <section className="ib-pane ib-prpane ib-local-pane" aria-labelledby={titleId} data-local-diff={diff?.kind ?? (open.branch ? 'branch' : 'uncommitted')}>
-      <div className="ib-pr-bar ib-lp-bar">
+      <div ref={bar} className="ib-pr-bar ib-lp-bar">
         <PullPaneBack phone={phone} stacked={stacked} onClose={onClose} />
-        <span className="ib-lp-id">
+        <span className="ib-lp-id" data-fit-subject={NAME_FLOOR_PX}>
           <Icon name={open.branch ? 'gitBranch' : 'laptop'} size={15} />
-          <h2 id={titleId} className="ib-local-title" dir="auto" data-local-title="">
+          <h2 id={titleId} className="ib-local-title" dir="auto" title={phone ? label : undefined} data-local-title="">
             {label}
           </h2>
         </span>
         {onReview && (
           <button type="button" className="ib-pr-ext" onClick={(event) => onReview(event.currentTarget)} data-local-review="">
             <Icon name="plus" size={15} />
-            Review with an agent
+            {phone ? <span className="ib-sr">Review with an agent</span> : 'Review with an agent'}
           </button>
         )}
         {!phone && !stacked && (
