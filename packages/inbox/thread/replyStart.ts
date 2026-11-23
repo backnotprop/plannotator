@@ -72,3 +72,8 @@ export function replyResumeOf(block: InboxComposeLaunch | null | undefined, thre
     to: { launch: { agent: agent.agent, project_id: project.id, resume: session } },
   };
 }
+
+/** The reply list's start row and Resume row for a thread, each null when it can't be offered (replyStartOf, replyResumeOf). */
+export function replyStartsOf(block: InboxComposeLaunch | null | undefined, thread: InboxThread, asking: AskingSession | null, asleep = false): { start: ReplyStart | null; resume: ReplyStart | null } {
+  return { start: replyStartOf(block, thread, asking, asleep), resume: replyResumeOf(block, thread, asking, asleep) };
+}

@@ -131,7 +131,7 @@ import { ReplyRecipientControl } from '../parts/ReplyRecipientControl';
 import { aimable, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, sessionFolder, toggleRecipient, type RecipientRow } from '../replyRecipients';
 import { replyRecipientList } from '../thread/recipientList';
 import { followedSession, useReplyAim, wordsHeldAt, wordsSession } from '../thread/replyAim';
-import { isStartRow, replyResumeOf, replyStartOf } from '../thread/replyStart';
+import { isStartRow, replyStartsOf } from '../thread/replyStart';
 import { useReplyLaunchBlock } from '../data/replyLaunch';
 import { coverVoice, useThreadVoice } from '../thread/useThreadVoice';
 import { useLateVoice } from '../thread/useLateVoice';
@@ -1049,10 +1049,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** The session the ended note and the choice are about: the words', else another this Send answers that ended. */
   const asking = endedOther ?? wordsAsking;
   const askerEnded = wordsEnded || endedOther !== null;
-  const replyBlock = useReplyLaunchBlock(!resolved && askerEnded, machine);
-  const replyStart = replyStartOf(replyBlock, thread, asking, !!machine && machine.state !== 'online');
-  /** The Resume row: the ended session itself, started again (an agent that resumes a session the Inbox never started). */
-  const replyResume = replyResumeOf(replyBlock, thread, asking, !!machine && machine.state !== 'online');
+  const { start: replyStart, resume: replyResume } = replyStartsOf(useReplyLaunchBlock(!resolved && askerEnded, machine), thread, asking, !!machine && machine.state !== 'online');
   /** Each session whose replies the choice sends on: every one of this Send's sessions that ended. */
   const endedSends = new Set([...(wordsEnded && wordsAsking ? [wordsAsking.session] : []), ...otherSessions.filter((s) => !resolved && endedOthers.has(s.session)).map((s) => s.session)]);
   // Tags (approval "inbox-tag-agents"): who the person can tag with `@`, read while the reply box is open. In a
