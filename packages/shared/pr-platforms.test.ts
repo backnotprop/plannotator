@@ -89,8 +89,8 @@ describe("helpers", () => {
     expect(pick("github")).toEqual([true, true, true, true, true, true, true]);
     expect(pick("gitlab")).toEqual([true, false, false, false, true, true, true]);
     expect(pick("bitbucket")).toEqual([true, false, false, false, false, false, false]);
-    // Forgejo refuses your own approval and request-changes (422), has no viewed sync, file-level comments or CLI.
-    expect(pick("forgejo")).toEqual([true, true, true, false, false, false, false]);
+    // Forgejo refuses your own approval and request-changes (422), has no viewed sync or file-level comments, no CLI.
+    expect(pick("forgejo")).toEqual([true, true, true, false, false, false, true]);
   });
 });
 

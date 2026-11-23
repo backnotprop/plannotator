@@ -441,7 +441,7 @@ export function plannotatorToolOpenedText(
 
 /**
  * The outcome a decision heading names for a code review the reviewer posted
- * straight to the PR platform (GitHub, GitLab, Bitbucket): the same words on
+ * straight to the PR platform (GitHub, GitLab, Bitbucket, Forgejo): the same words on
  * every host that delivers it as a message.
  */
 export const PLANNOTATOR_OUTCOME_REVIEW_POSTED = 'Review posted'
