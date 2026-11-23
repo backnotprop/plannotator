@@ -325,32 +325,25 @@ test('a click pins the card with Open in Reviews beside Open on GitHub; Escape, 
     await expect(page.locator('[data-message-id]')).toBeVisible();
     expect(popups).toEqual([]);
 
-    // Cmd/Ctrl-click opens GitHub in a new tab, as a link does.
-    // What the page did with the press (the window's last listeners, bubbling), named if no tab opens.
-    await page.evaluate(() => {
-      const seen: string[] = [];
-      (window as unknown as { __refPress: string[] }).__refPress = seen;
-      for (const type of ['keydown', 'pointerdown', 'mousedown', 'mouseup', 'click', 'auxclick']) {
-        window.addEventListener(type, (e) => {
-          const t = e.target instanceof Element ? `${e.target.tagName}${e.target.getAttribute('href') ? `[${e.target.getAttribute('href')}]` : ''}` : String(e.target);
-          seen.push(`${type} ${t} ctrl=${(e as MouseEvent).ctrlKey} meta=${(e as MouseEvent).metaKey} prevented=${e.defaultPrevented} focus=${document.activeElement?.tagName}`);
-        });
-      }
+    // Cmd/Ctrl-click is the browser's: the page lets the click through (nothing cancels it, no card) and GitHub
+    // opens in a new tab, as a link does. From a resting pointer and focus: headless Chromium opens no tab for a
+    // Ctrl-click on the link Escape just focused, though the page let that click through too (seen in CI).
+    await page.mouse.move(2, 2);
+    await pr.evaluate((el) => {
+      (el as HTMLElement).blur();
+      const w = window as unknown as { __refClicks: { modified: boolean; prevented: boolean }[] };
+      w.__refClicks = [];
+      // The window's last listener, bubbling: what every handler in the page left of the click.
+      window.addEventListener('click', (e) => {
+        if (e.target instanceof Node && el.contains(e.target)) w.__refClicks.push({ modified: e.ctrlKey || e.metaKey, prevented: e.defaultPrevented });
+      });
     });
-    const opened = context.waitForEvent('page', { timeout: 8_000 }).catch(async () => {
-      const seen = await page.evaluate(() => (window as unknown as { __refPress: string[] }).__refPress);
-      // Once more with the focus and the pointer elsewhere first: does the state before the press matter?
-      await page.mouse.move(2, 2);
-      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-      const again = context.waitForEvent('page', { timeout: 5_000 }).then(() => true, () => false);
-      await pr.click({ modifiers: ['ControlOrMeta'] });
-      const second = await again;
-      throw new Error(`second try (blurred) opened a tab: ${second}. ` +`Cmd/Ctrl-click opened no tab. url=${page.url()} cards=${await card(page).count()} popups=${JSON.stringify(popups)} events=${JSON.stringify(seen)}`);
-    });
-    await pr.click({ modifiers: ['ControlOrMeta'] });
-    const tab = await opened;
+    const [tab] = await Promise.all([context.waitForEvent('page'), pr.click({ modifiers: ['ControlOrMeta'] })]);
     await tab.waitForLoadState();
     expect(tab.url()).toBe(`https://github.com/${REPO}/issues/12`);
+    expect(await page.evaluate(() => (window as unknown as { __refClicks: unknown[] }).__refClicks)).toEqual([{ modified: true, prevented: false }]);
+    // The pointer resting on the link may bring its hover card; the click pinned none.
+    await expect(page.locator('[data-ref-card-pinned]')).toHaveCount(0);
     await tab.close();
     await page.mouse.move(2, 2);
 
