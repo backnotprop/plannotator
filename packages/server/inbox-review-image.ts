@@ -114,10 +114,25 @@ function indexIds(patch: string): { old: string | null; new: string | null } | n
   return { old: side(ids[1]!), new: side(ids[2]!) };
 }
 
+const insideRepository = (name: string) => {
+  try {
+    validateFilePath(name);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** A pure rename (`similarity index 100%`): both sides are the same bytes, under either name. */
+const pureRename = (patch: string, oldPath: string | undefined, filePath: string): oldPath is string =>
+  !!oldPath && oldPath !== filePath && /^similarity index 100%$/m.test(patch);
+
 /**
  * One side of a changed image in a guided review's patch (`/api/inbox/messages/:id/guide/review-image`). The guide
  * keeps the diff as sent while the working tree moves on, so a side is only ever the blob the patch's `index` line
- * names (a file whose patch names none, a pure rename or a patch rebuilt without them, reads from `forge` alone).
+ * names. A pure rename names none: its bytes are the file at the commit the guide was written at (`pinned`), under
+ * the side's own name or else the other one (a rename not yet committed has only the old name there). Any other file
+ * whose patch names no blob (a patch rebuilt without them) reads from `forge` alone.
  */
 export async function guideReviewImage(options: {
   /** The guide's patch, as the agent sent it (null when its snapshot is gone from the store). */
@@ -126,6 +141,8 @@ export async function guideReviewImage(options: {
   messageId: string;
   /** The project's folder on this computer, or null. */
   root: string | null;
+  /** The commit the guide records it was written at (its source's `headSha`), or null. */
+  pinned?: string | null;
   params: URLSearchParams;
   /** A guide of a pull request with Code review on: that PR's own side read (`InboxPulls.fileBytes`), else absent. */
   forge?: (side: DiffSide, filePath: string, oldPath: string | undefined, maxBytes: number) => Promise<FileBytesRead>;
@@ -158,6 +175,14 @@ export async function guideReviewImage(options: {
             // "missing", never "too large" (that would tell the size of whatever sits at a path the patch names).
             const tree = await readDiffSideBytes(gitRuntime, { kind: "worktree", path: filePath }, maxBytes, root);
             if (tree.kind === "ok" && gitBlobId(tree.bytes).startsWith(id)) return tree;
+          }
+        }
+        const pinned = options.pinned && /^[0-9a-f]{40,64}$/.test(options.pinned) ? options.pinned : null;
+        if (root && pinned && !ids && file && pureRename(file.patch, oldPath, filePath)) {
+          for (const name of side === "old" ? [oldPath, filePath] : [filePath, oldPath]) {
+            if (!insideRepository(name)) continue;
+            const named = await readGitObjectBytes(gitRuntime, `${pinned}:${name}`, maxBytes, root);
+            if (named.kind === "ok" || named.kind === "too-large") return named;
           }
         }
         if (!options.forge) return { kind: "missing" };

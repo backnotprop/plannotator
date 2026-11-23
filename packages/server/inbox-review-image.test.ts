@@ -14,7 +14,8 @@
  *  - the byte cap not holding;
  *  - a stale snapshot (another head, another message) answered;
  *  - a guide's side served from anything other than the blob its patch names
- *    (a working tree or a PR that moved on).
+ *    (a working tree or a PR that moved on), or, for a pure rename that names
+ *    none, from anything but the guide's own commit.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from "node:fs";
@@ -25,7 +26,7 @@ import { MAX_REVIEW_IMAGE_PREVIEW_BYTES } from "@plannotator/core/diff-paths";
 import type { FileBytesRead } from "@plannotator/shared/review-core";
 import { createInboxPulls, gitBlobId, type InboxPulls } from "./inbox-pulls";
 import { guideReviewImage, pullReviewImage } from "./inbox-review-image";
-import { guidePatchOf } from "./inbox-guides";
+import { guidePatchOf, guideRevisionOf } from "./inbox-guides";
 import { buildGuideSnapshot } from "@plannotator/core/guide-format";
 import { inboxBlobPath } from "@plannotator/shared/inbox/attachments";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -166,6 +167,43 @@ describe("a guided review's image", () => {
     expect(bytesOf((await read("img/far.png", "new", { patch: far, forge })).body).equals(png("far"))).toBe(true);
     answer = png("pushed since");
     expect((await read("img/far.png", "new", { patch: far, forge })).status).toBe(404);
+  });
+
+  test("a pure rename names no blob: both sides are the file at the guide's commit, under either name; nothing without one", async () => {
+    const dir = join(scratch, "renames");
+    mkdirSync(join(dir, "assets"), { recursive: true });
+    const inDir = (...args: string[]) => {
+      const run = Bun.spawnSync(["git", "-c", "user.name=Ada Novak", "-c", "user.email=ada@example.com", "-c", "commit.gpgsign=false", ...args], { cwd: dir, env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1" } });
+      if (run.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${run.stderr.toString()}`);
+      return run.stdout.toString();
+    };
+    inDir("init", "-q", "-b", "main");
+    writeFileSync(join(dir, "assets/logo.png"), png("logo"));
+    inDir("add", "-A");
+    inDir("commit", "-q", "-m", "logo");
+    inDir("mv", "assets/logo.png", "assets/brand-logo.png");
+    inDir("commit", "-q", "-m", "rename");
+    const head = inDir("rev-parse", "HEAD").trim();
+    const committed = inDir("diff", "-M", "HEAD~1", "HEAD");
+    expect(committed).toContain("similarity index 100%");
+    expect(committed).not.toMatch(/^index /m);
+    const at = (path: string, side: "old" | "new", rename: string, pinned: string | null) =>
+      guideReviewImage({ patch: rename, messageId: MESSAGE, root: dir, pinned, params: ask(path, side, MESSAGE) });
+    for (const side of ["old", "new"] as const) {
+      const answer = await at("assets/brand-logo.png", side, committed, head);
+      expect(answer.status).toBe(200);
+      expect(bytesOf(answer.body).equals(png("logo"))).toBe(true);
+      // No commit recorded, or one that is not a commit id: nothing is read.
+      expect([(await at("assets/brand-logo.png", side, committed, null)).status, (await at("assets/brand-logo.png", side, committed, "HEAD")).status]).toEqual([404, 404]);
+    }
+    // A rename not committed yet: the guide's commit has the old name only, and both sides read it.
+    inDir("mv", "assets/brand-logo.png", "assets/mark.png");
+    const staged = inDir("diff", "-M", "--cached", "HEAD");
+    expect(staged).toContain("similarity index 100%");
+    for (const side of ["old", "new"] as const) expect(bytesOf((await at("assets/mark.png", side, staged, head)).body).equals(png("logo"))).toBe(true);
+    // A rename that changed the picture, in a patch rebuilt without its `index` line: not taken for a pure one.
+    const edited = staged.replace("similarity index 100%", "similarity index 90%");
+    expect((await at("assets/mark.png", "new", edited, head)).status).toBe(404);
   });
 });
 
@@ -320,5 +358,25 @@ describe("a guide's patch for its previews", () => {
     mkdirSync(join(blob, ".."), { recursive: true });
     writeFileSync(blob, JSON.stringify(snapshot));
     expect(guidePatchOf(store, sha)).toBe(patch);
+  });
+
+  test("the commit a guide was written at is its source's head; none recorded, none", () => {
+    const dir = join(scratch, "store-revisions");
+    const store = { dir } as unknown as InboxStore;
+    const keep = (sha: string, source: { kind: "local"; headSha?: string }) => {
+      const blob = inboxBlobPath(dir, sha);
+      mkdirSync(join(blob, ".."), { recursive: true });
+      const snapshot = buildGuideSnapshot({
+        guide: { title: "T", intent: "I", sections: [{ title: "S", overview: "O", diffs: [{ file: "img/modified.png", summary: "s" }] }] },
+        reviewed: [false],
+        review: { rawPatch: patch, gitRef: "main...HEAD", source },
+        exportedAt: "2026-11-23T10:00:00.000Z",
+      });
+      writeFileSync(blob, JSON.stringify(snapshot));
+    };
+    keep("c".repeat(64), { kind: "local", headSha: "b".repeat(40) });
+    keep("d".repeat(64), { kind: "local" });
+    expect(guideRevisionOf(store, "c".repeat(64))).toBe("b".repeat(40));
+    expect(guideRevisionOf(store, "d".repeat(64))).toBeNull();
   });
 });
