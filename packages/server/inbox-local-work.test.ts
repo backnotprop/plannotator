@@ -7,17 +7,19 @@
  *  - any read reaching the network, asking anything, or writing to the repository (the index refreshed, a ref moved,
  *    a checkout), or reading more projects or branches than its caps;
  *  - every read of the list running git again instead of the kept answer;
- *  - a row's diff missing its changes, or a branch's diff checking the branch out.
+ *  - a row's diff missing its changes, or a branch's diff checking the branch out;
+ *  - a branch hidden by a same-named branch's open PR on another repository, or listed beside its own repository's
+ *    open PR (or its fork's).
  */
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { InboxProject } from "@plannotator/core/inbox-types";
+import type { InboxProject, InboxPull } from "@plannotator/core/inbox-types";
 import type { ReviewGitRuntime } from "@plannotator/shared/review-core";
 import { BRANCH_GIT_TIMEOUT_MS } from "./inbox-branch-reports";
-import { createInboxLocalWork, LOCAL_WORK_BRANCHES_MAX, LOCAL_WORK_CACHE_MS, LOCAL_WORK_PROJECTS_MAX } from "./inbox-local-work";
+import { createInboxLocalWork, localBranchInOpenPull, LOCAL_WORK_BRANCHES_MAX, LOCAL_WORK_CACHE_MS, LOCAL_WORK_PROJECTS_MAX } from "./inbox-local-work";
 import { runtime } from "./git";
 
 const DAY = 86_400;
@@ -257,5 +259,27 @@ describe("a row's diff", () => {
     const work = createInboxLocalWork({ runtime, projects: () => [], skip: () => false });
     await expect(work.diff(project("prj_a", repo), "ada/never-made")).rejects.toThrow("ada/never-made");
     expect(await work.diff(project("prj_gone", join(tmpdir(), "local-work-gone-never-made")), null)).toBeNull();
+  });
+
+  test("an open PR hides the branch on its own repository only (its own, or its fork's), never a same-named one elsewhere", () => {
+    const projectsByRepo = new Map([
+      ["github.com/charlie-dunn/plannotator", ["prj_plannotator"]],
+      ["github.com/charlie-dunn/spaces-site", ["prj_spaces"]],
+      ["github.com/ada-novak/plannotator", ["prj_fork"]],
+    ]);
+    const pull = (repo: string, head: string, extra: Partial<InboxPull> = {}) => ({ host: "github.com", repo, head, head_repo: repo, state: "open", ...extra }) as InboxPull;
+    const spacesPull = [pull("charlie-dunn/spaces-site", "fix/readme")];
+    // Another repository's open PR on a branch of the same name: this project's branch stays listed.
+    expect(localBranchInOpenPull(spacesPull, projectsByRepo, "prj_plannotator", "fix/readme")).toBe(false);
+    // Its own repository's: hidden, on that repository's project only.
+    expect(localBranchInOpenPull(spacesPull, projectsByRepo, "prj_spaces", "fix/readme")).toBe(true);
+    // A fork's PR into the upstream: the fork's clone (its head's repository) and the upstream's both have it.
+    const forkPull = [pull("charlie-dunn/plannotator", "feat/share", { head_repo: "Ada-Novak/plannotator" })];
+    expect(localBranchInOpenPull(forkPull, projectsByRepo, "prj_fork", "feat/share")).toBe(true);
+    expect(localBranchInOpenPull(forkPull, projectsByRepo, "prj_plannotator", "feat/share")).toBe(true);
+    expect(localBranchInOpenPull(forkPull, projectsByRepo, "prj_spaces", "feat/share")).toBe(false);
+    // A closed or merged PR hides nothing; another branch's PR hides nothing.
+    expect(localBranchInOpenPull([pull("charlie-dunn/spaces-site", "fix/readme", { state: "merged" })], projectsByRepo, "prj_spaces", "fix/readme")).toBe(false);
+    expect(localBranchInOpenPull(spacesPull, projectsByRepo, "prj_spaces", "fix/other")).toBe(false);
   });
 });

@@ -10526,7 +10526,19 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-local-pane { display: flex; flex-direction: column; }
 .ib-local-title { min-width: 0; margin: 0; overflow: hidden; font-size: var(--ib-fs-14, 14px); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .ib-local-meta { flex: none; margin: 0; padding: 10px 28px 0; }
-.ib-local-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 28px 28px; }
+.ib-local-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 0 28px; }
+.ib-local-body > .ib-error, .ib-local-body > .ib-pr-empty { margin: 8px 28px 0; }
+/* Its diff is the PR page's files (.ib-prreview's rules): no "Every changed file" column beside it (the guide viewer's
+   chapter card, two columns from md up), the files edge to edge at the pane's width. */
+.ib-local-body > .w-full { padding-inline: 0; padding-bottom: 0; }
+.ib-local-body [data-guide-section-grid] { display: block; }
+.ib-local-body [data-guide-section-narrative] { display: none; }
+.ib-local-body [data-guide-section] { border: 0; border-radius: 0; background: transparent; overflow: visible; }
+.ib-local-body [data-guide-section-grid] > :not([data-guide-section-narrative]) { background: transparent; padding: 0; }
+.ib-local-body [data-guide-section-grid] > :not([data-guide-section-narrative]) > * { margin: 0; }
+.ib-local-body [data-guide-code-view-mounted] { border: 0; border-radius: 0; background: transparent; }
+.ib-local-body diffs-container { --diffs-bg-separator-override: transparent; }
+.ib-local-body [data-guide-file-shell] + [data-guide-file-shell] { margin-top: 0; }
 .ib-pr-empty .ib-pr-risknote { margin: 0; padding: 0; }
 .ib-pr-riskline { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; margin: 10px 0 0; font-size: var(--ib-fs-13, 13px); line-height: 1.5; color: var(--muted-foreground); }
 .ib-pr-l1 .ib-risk { margin-left: 2px; }

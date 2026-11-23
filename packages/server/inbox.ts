@@ -362,7 +362,7 @@ import { createInboxPullStates, createInboxReviewIndex, readInboxReviewLink } fr
 import { INBOX_PULL_ASKS, inboxPullRiskAutoOf, inboxPullRefOfKey, inboxPullUrlOfKey, isInboxPullAsk, type InboxPull, type InboxPullLink } from "@plannotator/core/inbox-types";
 import { inboxThreadPullsSummary, parseInboxThreadPullRef, type InboxThreadPull } from "@plannotator/core/inbox-types";
 import { readInboxReviewChanges } from "./inbox-review-changes";
-import { createInboxLocalWork } from "./inbox-local-work";
+import { createInboxLocalWork, localBranchInOpenPull } from "./inbox-local-work";
 import { createInboxBranchService } from "./inbox-branch-service";
 import { inboxFarBranchReviewRow } from "@plannotator/core/inbox-branch-reports";
 import { runtime as gitRuntime } from "./git";
@@ -1640,7 +1640,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       for (const project of store.listProjects().reverse()) if (!seen.has(project.id)) seen.set(project.id, project);
       return [...seen.values()];
     },
-    skip: (projectId, branch) => (lastReviewsRead?.listed.pulls ?? []).some((pull) => inboxPullIsOpen(pull) && pull.head === branch) || (branchReviewsOn() && branchService.reported(projectId, branch)),
+    skip: (projectId, branch) =>
+      (!!lastReviewsRead && localBranchInOpenPull(lastReviewsRead.listed.pulls, lastReviewsRead.projectsByRepo, store.canonicalProjectId(projectId), branch)) ||
+      (branchReviewsOn() && branchService.reported(projectId, branch)),
   });
   let lastReviewsRead: { projectsByRepo: Awaited<ReturnType<typeof pullProjects>>["projectsByRepo"]; wanted: Awaited<ReturnType<typeof pullProjects>>["wanted"]; listed: Awaited<ReturnType<typeof pulls.list>> } | null = null;
   // A review thread's PR that left the list: one read of its state, so a closed PR, or one merged long ago, is recorded.

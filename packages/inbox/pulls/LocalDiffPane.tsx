@@ -91,7 +91,7 @@ export function LocalDiffPane({ open, projectName, phone, stacked, onClose, onRe
           </span>
         )}
       </div>
-      <div className="ib-local-body">
+      <div className="ib-local-body ib-gbody">
         {read.error && (
           <p className="ib-error" role="alert" data-local-error="">
             {read.error}

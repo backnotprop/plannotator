@@ -11,8 +11,11 @@
  *     untouched), or sending anything anywhere (03).
  *  4. The Uncommitted row not opening the folder's own changes, new files too (04); Close not returning to the list
  *     with the group still open.
+ *  5. The diff cramped: drawn as a guided review's chapter card (its "Every changed file" column beside a narrow
+ *     diff) instead of the files across the pane's width, as the PR page draws them; a code line cut off (03, 04).
+ *  6. On a phone (390 wide), the group open, and a row's diff in the list's place at the screen's width (05, 06).
  *
- * Shots land in PLANNOTATOR_E2E_PROOF_DIR/reviews-on-this-computer, light and dark at 1440. HOME is a scratch folder,
+ * Shots land in PLANNOTATOR_E2E_PROOF_DIR/reviews-on-this-computer, light and dark at 1440, and at 390 on a phone. HOME is a scratch folder,
  * and the sandbox env keeps the binary off the person's agents. Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-reviews-on-this-computer.spec.ts`.
  */
@@ -55,6 +58,7 @@ function gitProject(parent: string, name: string) {
 }
 
 interface World {
+  browser: Browser;
   url: string;
   plannotator: string;
   plannotatorId: string;
@@ -141,7 +145,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const projects = (await (await page.request.get(`${url}api/inbox/projects`)).json()) as { projects?: { id: string; root: string }[] };
   const plannotatorId = projects.projects?.find((p) => p.root === plannotator.path)?.id ?? '';
   expect(plannotatorId).toBeTruthy();
-  world = { url, plannotator: plannotator.path, plannotatorId, git: (args) => plannotator.git(args), context, page };
+  world = { browser, url, plannotator: plannotator.path, plannotatorId, git: (args) => plannotator.git(args), context, page };
 });
 
 test.afterAll(async () => {
@@ -160,6 +164,30 @@ async function shot(page: Page, name: string): Promise<void> {
     await page.screenshot({ path: join(proofDir, `${name}-${scheme}.png`) });
   }
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+}
+
+/**
+ * The diff is readable: its file takes most of the pane's width (no chapter column beside it), and a whole code line is
+ * drawn inside the file, not cut off by a narrow column.
+ */
+async function readableDiff(pane: ReturnType<Page['locator']>, file: string, line: string): Promise<void> {
+  const paneBox = (await pane.boundingBox())!;
+  const shell = pane.locator(`[data-guide-file-shell="${file}"]`);
+  const shellBox = (await shell.boundingBox())!;
+  expect(shellBox.width).toBeGreaterThan(paneBox.width * 0.85);
+  await expect(pane.locator('[data-guide-section-narrative]')).toBeHidden();
+  const code = shell.locator('[data-line-type="change-addition"]').filter({ hasText: line }).last();
+  await expect(code).toBeVisible();
+  // The line's text as drawn: wholly inside the file's box (a cramped column scrolls or clips it).
+  const text = await code.evaluate((el) => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const box = range.getBoundingClientRect();
+    return { left: box.left, right: box.right };
+  });
+  expect(text.right - text.left).toBeGreaterThan(0);
+  expect(text.right).toBeLessThanOrEqual(shellBox.x + shellBox.width);
+  expect(text.right).toBeLessThanOrEqual(paneBox.x + paneBox.width);
 }
 
 const group = (page: Page) => page.locator('[data-pulls-group="local"]');
@@ -215,6 +243,7 @@ test("a branch row opens that branch's whole diff beside the list; nothing is se
   // The branch's work only: the folder's own changes are not in it.
   await expect(pane.locator('[data-guide-file-shell="NOTES.md"]')).toHaveCount(0);
   await expect(row(page, `${world.plannotatorId}:${BRANCH}`)).toHaveAttribute('aria-current', 'true');
+  await readableDiff(pane, 'src/comments.ts', 'export const words = "kept";');
   await shot(page, '03-branch-diff');
   page.off('request', watch);
   expect(writes).toEqual([]);
@@ -231,9 +260,34 @@ test("the Uncommitted row opens the folder's own changes; Close returns to the l
   await expect(pane.locator('[data-local-title]')).toHaveText('Uncommitted on main');
   await expect(pane.locator('[data-guide-file-shell="NOTES.md"]')).toBeVisible({ timeout: 30_000 });
   await expect(pane.locator('[data-guide-file-shell="src/comments.ts"]')).toBeVisible();
+  await readableDiff(pane, 'src/comments.ts', 'export const draft = "Ada Novak";');
   await shot(page, '04-uncommitted-diff');
   await pane.locator('[data-local-close]').click();
   await expect(page.locator('[data-local-diff]')).toHaveCount(0);
   await expect(group(page).locator('[data-reviews-fold="local"]')).toHaveAttribute('aria-expanded', 'true');
   await expect(group(page).locator('[data-local-row]')).toHaveCount(3);
+});
+
+test("on a phone: the group open, and a branch row's diff in the list's place at the screen's width", async () => {
+  const context = await world.browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, colorScheme: 'light', reducedMotion: 'reduce' });
+  try {
+    const page = await context.newPage();
+    await page.goto(`${world.url}#reviews`);
+    const toggle = group(page).locator('[data-reviews-fold="local"]');
+    await expect(toggle).toHaveText('On this computer 3');
+    await toggle.click();
+    await expect(group(page).locator('[data-local-row]')).toHaveCount(3);
+    await group(page).scrollIntoViewIfNeeded();
+    await shot(page, '05-phone-group-open');
+    await row(page, `${world.plannotatorId}:${BRANCH}`).click();
+    const pane = page.locator('[data-local-diff="branch"]');
+    await expect(pane).toBeVisible();
+    await expect(pane.locator('[data-guide-file-shell="src/comments.ts"]')).toBeVisible({ timeout: 30_000 });
+    // In the list's place: the pane is the screen's width.
+    expect((await pane.boundingBox())!.width).toBeGreaterThan(380);
+    await readableDiff(pane, 'src/comments.ts', 'export const words = "kept";');
+    await shot(page, '06-phone-branch-diff');
+  } finally {
+    await context.close();
+  }
 });

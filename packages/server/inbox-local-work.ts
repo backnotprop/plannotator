@@ -22,6 +22,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { InboxLocalDiffAnswer, InboxLocalWork, InboxLocalWorkAnswer } from "@plannotator/core/inbox-types";
 import type { InboxProject } from "@plannotator/core/inbox-types";
+import { inboxPullIsOpen, inboxPullRepoKey, type InboxPull } from "@plannotator/core/inbox-types";
 import { getDefaultBranch, runGitDiff, type ReviewGitRuntime } from "@plannotator/shared/review-core";
 import { branchBaseName, offlineGit, OFFLINE_GIT_TOO_OLD, readBranchDiff, readUnreportedBranches } from "./inbox-branch-reports";
 
@@ -89,6 +90,16 @@ export async function readUncommitted(git: ReviewGitRuntime, top: string, projec
     }),
   );
   return { project_id: projectId, kind: "uncommitted", branch: await checkedOut(git, top), base: null, at: new Date(Math.min(newest || now, now)).toISOString() };
+}
+
+/**
+ * A project's branch is in an open pull request: one whose head is that branch, on that project's repository (the
+ * PR's own, or its head's for a fork; `projectsByRepo` is Reviews' map from a repository key to the projects on it).
+ * A same-named branch with an open PR on another repository is not this one.
+ */
+export function localBranchInOpenPull(pulls: readonly InboxPull[], projectsByRepo: ReadonlyMap<string, readonly string[]>, projectId: string, branch: string): boolean {
+  const on = (host: string, repo: string | null) => !!repo && (projectsByRepo.get(inboxPullRepoKey(host, repo)) ?? []).includes(projectId);
+  return pulls.some((pull) => inboxPullIsOpen(pull) && pull.head === branch && (on(pull.host, pull.repo) || on(pull.host, pull.head_repo)));
 }
 
 export interface InboxLocalWorkOptions {
