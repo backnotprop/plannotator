@@ -1,6 +1,6 @@
 /**
  * New thread from this message, in the store: the ask (`author_only`, the words of
- * packages/core/inbox-new-thread-ask.ts) reaches only the session that wrote the message, never a session the person
+ * packages/core/inbox-reply-quote.ts) reaches only the session that wrote the message, never a session the person
  * added to the thread; and a `#tag` in the agent's quoted words is not filed as the person's (no card moves, no
  * thread is listed under it, and a card made later does not start there). Each test uses its own temp data dir.
  */
@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxAuthor } from "@plannotator/core/inbox-types";
-import { isNewThreadFromMessageAsk, NEW_THREAD_FROM_MESSAGE_WORDS } from "@plannotator/core/inbox-new-thread-ask";
+import { isNewThreadFromMessageAsk, NEW_THREAD_FROM_MESSAGE_WORDS } from "@plannotator/core/inbox-reply-quote";
 import { InboxStore } from "./store";
 
 const roots: string[] = [];

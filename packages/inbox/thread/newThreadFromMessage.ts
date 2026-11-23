@@ -1,6 +1,6 @@
 import type { InboxMessageWire } from '@plannotator/core/inbox-types';
 import { inboxReplyQuoteExcerpt } from '@plannotator/core/inbox-reply-quote';
-import { NEW_THREAD_FROM_MESSAGE_WORDS } from '@plannotator/core/inbox-new-thread-ask';
+import { NEW_THREAD_FROM_MESSAGE_WORDS } from '@plannotator/core/inbox-reply-quote';
 import { postNewThreadFromMessage } from '../data/actions/newThreadFromMessage';
 import { errorToast } from '../toastError';
 import type { InboxToastModel } from '../components/Toast';
@@ -8,7 +8,7 @@ import type { InboxToastModel } from '../components/Toast';
 /** The item on an agent's message's ⋯ menu (approved by the owner, 2026-11-23). */
 export const NEW_THREAD_FROM_MESSAGE_LABEL = 'New thread from this message';
 
-/** The words (packages/core/inbox-new-thread-ask.ts, approved 2026-11-23): one constant, shared with the store. */
+/** The words (packages/core/inbox-reply-quote.ts, approved 2026-11-23): one constant, shared with the store. */
 export { NEW_THREAD_FROM_MESSAGE_WORDS };
 
 /** Offered on a message an agent with a session wrote: a script's post (no session) has nobody to ask. */

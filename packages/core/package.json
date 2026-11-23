@@ -73,7 +73,6 @@
     "./inbox-search": "./inbox-search.ts",
     "./inbox-folding": "./inbox-folding.ts",
     "./inbox-reply-quote": "./inbox-reply-quote.ts",
-    "./inbox-new-thread-ask": "./inbox-new-thread-ask.ts",
     "./inbox-thread-mention": "./inbox-thread-mention.ts",
     "./inbox-delivery-line": "./inbox-delivery-line.ts",
     "./inbox-run-line": "./inbox-run-line.ts",

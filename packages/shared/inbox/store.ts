@@ -128,7 +128,7 @@ import { createInboxHandover, type InboxHandover } from "./handover";
 import { inboxTakeBackRefusal, type InboxHolder } from "./take-back";
 import { inboxWakeQuote } from "./wake-quote";
 import { laterActed, personActOfAnnotation, personActOfMessage, personActOfMessageLine, personActOfQuestion } from "./acted";
-import { isNewThreadFromMessageAsk } from "@plannotator/core/inbox-new-thread-ask";
+import { isNewThreadFromMessageAsk } from "@plannotator/core/inbox-reply-quote";
 import { inboxReplyQuoteExcerpt, inboxReplyQuoteLead, inboxReplyQuoteTime, type InboxReplyQuote, type InboxReplyQuoteWhose } from "@plannotator/core/inbox-reply-quote";
 import { whenTime } from "@plannotator/core/inbox-format";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
