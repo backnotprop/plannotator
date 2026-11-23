@@ -21,7 +21,9 @@ html:not(.light) .spp{--quiet:#7d84b3}
 .spp .pp-sw button{height:42px;margin:0;padding:0 18px;border:0;border-radius:0;background:none;font:500 15px/1 var(--sans);color:var(--soft);cursor:pointer;-webkit-appearance:none;appearance:none}
 .spp .pp-sw button[aria-checked="true"]{background:var(--paper);color:var(--p-ink);box-shadow:0 0 0 1px var(--p-line)}
 .spp .pp-sw button:focus-visible{outline:2px solid var(--iris);outline-offset:-2px}
-.spp .pp-saving{margin:12px 0 0;font-size:15px;line-height:normal;color:var(--soft)}
+/* The yearly saving on the Yearly side: plain violet words, the same pair as the card bullets. */
+.spp .pp-sw .pp-off{margin-left:10px;color:var(--sv)}
+html:not(.light) .spp .pp-sw .pp-off{color:var(--violet)}
 
 .spp .pp-cards{position:relative;z-index:1;grid-column:1 / -1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:20px;margin-top:48px}
 .spp .pp-card{position:relative;padding:28px 28px 30px;background:var(--paper);color:var(--p-ink);box-shadow:var(--shadow);font-size:14px;line-height:21px;letter-spacing:-.004em}
