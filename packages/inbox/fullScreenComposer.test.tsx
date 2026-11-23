@@ -14,7 +14,7 @@
  * the card refuses as the thread's Send does (nothing to send, the server
  * refusing) and keeps the words, and a Send that goes clears them and the
  * draft while full screen stays. Files: the Reply tab's paperclip (the reply
- * box's, first in its toolbar; none on the Comment tab), a paste and a drop on
+ * box's, first in its toolbar; not the Comment tab's own), a paste and a drop on
  * the card attach to the reply box's own files, shown in both places, and the
  * card's Send carries them.
  *
@@ -492,9 +492,9 @@ test.skipIf(!hasDom)('the chord on the card (a tab, off the field) sends the rep
   expect(host!.querySelector('[data-attachment-pane][data-full-view]')).not.toBeNull();
 });
 
-test.skipIf(!hasDom)('the paperclip: none on the Comment tab, first in the Reply tab’s toolbar; a chosen file is the thread box’s file too, and the card’s Send carries it', async () => {
+test.skipIf(!hasDom)('the reply’s paperclip: not on the Comment tab, first in the Reply tab’s toolbar; a chosen file is the thread box’s file too, and the card’s Send carries it', async () => {
   await renderFull('shot.png');
-  // A comment takes no files: no paperclip with the image's comment row.
+  // The reply's paperclip is not on the Comment tab (the comment has its own: commentBoxFiles.test.tsx).
   expect(clip()).toBeNull();
   await click(radio('reply'));
   // The reply box's own button, first in the card's toolbar, named, the card's 30 px button.

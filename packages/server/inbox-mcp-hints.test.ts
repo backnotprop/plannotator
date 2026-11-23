@@ -17,6 +17,7 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_THREAD_PULLS_MAX, parseInboxThreadPullRefs } from "@plannotator/core/inbox-types";
+import { inboxToolResultText } from "@plannotator/shared/inbox/connection";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxMcpServer, type InboxMcpContext } from "./inbox-mcp";
 import { createInboxPullLookups } from "./inbox-pull-lookups";
@@ -58,6 +59,15 @@ function world(options: { projectHost?: InboxMcpContext["projectHost"]; known?: 
   };
   return { store, project, send };
 }
+
+test("a #N only in a picture's alt text or caption, or in a URL, names no PR; the same #N in prose does, and the agent reads that line once", async () => {
+  const w = world({ known: knowing("github.com/acme/api#411") });
+  const quiet = await w.send("ses_a", { body: 'Before and after:\n\n![Header after #411](shots/after.png "the fix for #411")\n\nSee https://example.com/notes#411.', thread: "pictures" });
+  expect(quiet.lines).toHaveLength(1);
+  const named = await w.send("ses_a", { body: "This lands #411.", thread: "prose" });
+  expect(named.last).toBe(nudge("#411", "acme/api#411"));
+  expect(inboxToolResultText(named.result).text.split(named.last)).toHaveLength(2);
+});
 
 test("a PR's URL or a GitLab short ref in the agent's words is read; code, quotes, issues and unknown numbers are not", () => {
   expect(keys(`Opened ${PR} for this.`)).toEqual(["github.com/acme/api#12"]);
@@ -195,7 +205,8 @@ test("one kind a send: the PR line first, the question line on a later send that
   const next = await w.send("ses_a", { body: `${PR}\n\n${BARE.replace("Which", "And which")}`, reply_to: both.id });
   expect(next.last).toBe(QUESTION_OPTIONS_HINT);
   const third = await w.send("ses_a", { body: `${PR}\n\n${BARE.replace("Which", "Then which")}`, reply_to: next.id });
-  expect(third.lines).toHaveLength(1);
+  expect(third.lines).toHaveLength(2);
+  expect(third.last).toStartWith(`- ${third.id}/q-`);
 });
 
 test("no hint on a refused send or a replay; a refused send does not use up the thread's line", async () => {
@@ -208,7 +219,9 @@ test("no hint on a refused send or a replay; a refused send does not use up the 
   const replay = await w.send("ses_c", { body: `Opened ${PR}.`, idempotency_key: "k1" });
   expect(replay.lines[0]).toStartWith("Already sent");
   expect(replay.lines).toHaveLength(1);
-  expect((await w.send("", { body: BARE, thread: "anon" })).lines).toHaveLength(1);
+  const anon = await w.send("", { body: BARE, thread: "anon" });
+  expect(anon.lines).toHaveLength(2);
+  expect(anon.last).toStartWith(`- ${anon.id}/q-`);
 });
 
 test("the picture-choices advice is said on every send it holds for, in any session", async () => {
@@ -315,6 +328,14 @@ test("a body naming 50,000 numbers: the send's lines and the lookup's pick stay 
   expect(picked.map((ref) => ref.number)).toEqual([1, 2, 3]);
   await forge.settled();
   expect(forge.reads).toEqual([1, 2, 3]);
+});
+
+test("an unknown number only in a picture's alt text or a URL is never looked up", async () => {
+  const forge = lookingUp({});
+  const w = world({ known: forge.known });
+  await w.send("ses_a", { body: "Before and after:\n\n![Header after #411](shots/after.png)\n\nSee https://example.com/notes#412.", thread: "one" });
+  await forge.settled();
+  expect(forge.reads).toEqual([]);
 });
 
 test("a number past GitHub's 32 bits is never a PR: never named, never looked up", async () => {

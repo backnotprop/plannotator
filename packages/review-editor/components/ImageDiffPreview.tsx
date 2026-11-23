@@ -20,6 +20,11 @@ export interface ImageDiffPreviewProps {
   tooLargeFallback?: React.ReactNode;
   onHeightChange?: () => void;
   patch?: string;
+  /**
+   * Where the image reads go: absent, code review's own `/api/review-image`. A host with its own routes (the Inbox)
+   * passes a fetch that sends `/api/review-image?path=…&side=…&snapshot=…` there; `snapshotId` must then be its own.
+   */
+  fetchImpl?: typeof fetch;
 }
 
 
@@ -57,6 +62,7 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
   tooLargeFallback,
   onHeightChange,
   patch,
+  fetchImpl,
 }) => {
   const sides = sidesFor(status);
   const [rootRef, visible] = useNearViewport();
@@ -68,6 +74,7 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
     visible,
     patch,
     knownBytes: { old: knownEntry?.old?.bytes, new: knownEntry?.new?.bytes },
+    ...(fetchImpl ? { fetchImpl } : {}),
   });
   const [natural, setNatural] = useState<Partial<Record<ReviewImageSide, Size>>>({});
   const settings = useImageDiffSettings();
