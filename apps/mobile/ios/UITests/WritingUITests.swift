@@ -201,6 +201,19 @@ final class WritingUITests: XCTestCase {
     shot("09-compose-sent")
   }
 
+  /// A new message whose agent session ended before it went says so as a message, not as a reply, and keeps its words.
+  @MainActor
+  func testANewMessageToASessionThatEndedSaysTheMessageWasNotSent() {
+    let app = launch(stage: "compose,noagents", open: nil)
+    app.buttons["New message"].tap()
+    XCTAssertTrue(app.textFields["compose-words"].waitForExistence(timeout: 10))
+    XCTAssertTrue(fileState(app, "export-p99.png").waitForExistence(timeout: 10))
+    app.buttons["compose-send"].tap()
+    XCTAssertTrue(text(app, "session ended before your message went. Nothing was sent.").waitForExistence(timeout: 10))
+    XCTAssertFalse(text(app, "before your reply went").exists)
+    XCTAssertEqual(app.textFields["compose-words"].value as? String, "Add a retry budget to the export job, and tell me what it costs at peak.")
+  }
+
   /// Closing New message keeps the words, the agent and the file for next time.
   @MainActor
   func testClosingNewMessageKeepsIt() {

@@ -123,12 +123,14 @@ enum PhoneWords {
   /// Why a Send was not taken (packages/inbox/sendFailure.ts): a short plain refusal of the Inbox is the line as it
   /// is, because it says what to do; anything else is the window's own line. Two cases have their own words: an
   /// answer another device changed (the Inbox's line for it names a key and a revision), and a session that ended.
-  static func notice(_ notice: InboxSession.Notice, computer: String, agent: String? = nil) -> String {
+  /// `newMessage`: the Send was a new message (New message), not a reply: the words say message.
+  static func notice(_ notice: InboxSession.Notice, computer: String, agent: String? = nil, newMessage: Bool = false) -> String {
+    let notSent = newMessage ? messageNotSent : replyNotSent
     switch notice {
     case .refused(_, "question_revision_conflict"): return answerChanged
-    case .refused(_, "session_not_live"): return sessionEnded(agent)
-    case .refused(let words, _): return SendFailure.plain(words) ?? replyNotSent
-    case .unreadable: return replyNotSent
+    case .refused(_, "session_not_live"): return newMessage ? messageSessionEnded(agent) : sessionEnded(agent)
+    case .refused(let words, _): return SendFailure.plain(words) ?? notSent
+    case .unreadable: return notSent
     case .notOffered: return "Plannotator on \(computer) cannot do this yet."
     case .appNeedsUpdate: return updatePhone
     case .gaveWay: return answerChanged
@@ -138,6 +140,10 @@ enum PhoneWords {
   static let replyNotSent = "The reply was not sent."
   /// `raceWhat` (packages/inbox/components/ReplyRoute.tsx:387).
   static func sessionEnded(_ agent: String?) -> String { "That \(agent.map { "\($0) " } ?? "")session ended before your reply went. Nothing was sent." }
+  /// A new message not taken (the window's New message, packages/inbox/components/ComposeDialog.tsx).
+  static let messageNotSent = "The message was not sent. Send again to retry."
+  /// A new message whose agent session ended before it went.
+  static func messageSessionEnded(_ agent: String?) -> String { "That \(agent.map { "\($0) " } ?? "")session ended before your message went. Nothing was sent." }
   /// A Send that named an answer another device changed after this phone read it.
   static let answerChanged = "An answer changed on another device. Check it, then send again."
   /// Why a pick did not go, on its card (packages/inbox/components/Thread.tsx:2499, :2505, :2516).

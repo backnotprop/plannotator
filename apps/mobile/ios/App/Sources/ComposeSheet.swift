@@ -32,7 +32,7 @@ struct ComposeSheet: View {
         toRow
         Hairline().padding(.horizontal, Space.page)
         if let notice = draft?.notice {
-          Trouble(words: PhoneWords.notice(notice, computer: session.computer.name, agent: draft?.to.map { Words.agents[$0.host] ?? $0.host }))
+          Trouble(words: PhoneWords.notice(notice, computer: session.computer.name, agent: draft?.to.map { Words.agents[$0.host] ?? $0.host }, newMessage: true))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, Space.page)
             .padding(.top, Space.step)
