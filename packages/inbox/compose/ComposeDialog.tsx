@@ -102,7 +102,7 @@ import {
 } from './model';
 import { newUuid } from '../uuid';
 import { handoffKeys, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk } from '../pulls/model';
-import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, reviewBoxPullAsk, walkthroughMessage, reviewDefaultTo, reviewLinkListed, reviewLinkStack, reviewToWithChanges, unsentReview, type ReviewBoxPull, type ReviewKind, type ReviewPullsRead, type ReviewBoxRequest, type ReviewSummary } from './reviewBox';
+import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, reviewBoxPullAsk, walkthroughMessage, reviewDefaultTo, reviewLinkListed, reviewLinkStack, reviewToWithChanges, reviewWorkOf, unsentReview, type ReviewBoxPull, type ReviewKind, type ReviewPullsRead, type ReviewBoxRequest, type ReviewSummary } from './reviewBox';
 import { ReviewRows } from './ReviewRows';
 import { LaunchTipCard } from './LaunchTipCard';
 import { LAUNCH_TIP_SAID, LAUNCH_TIP_TIMES, launchTipPlace, launchTipPlainOpen, type LaunchTipPlace } from './launchTip';
@@ -502,21 +502,21 @@ export function ComposeDialog(props: ComposeDialogProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!box, reviewKind, reviewLink]);
   useEffect(() => {
-    if (!box || reviewKind !== 'local' || !reviewProject?.id) {
-      setReviewSummary(null);
-      return;
-    }
     // Never the last project's: its branch would go into the message if Start came before this read.
     setReviewSummary(null);
+    if (!box || reviewKind !== 'local' || !reviewProject?.id) return;
     const read = new AbortController();
     inboxApi.reviewChanges(reviewProject.id, reviewChanges, read.signal, reviewChanges === 'branch' && box.branch?.projectId === reviewProject.id ? box.branch.name : undefined).then(setReviewSummary, () => setReviewSummary(null));
     return () => read.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!box, reviewKind, reviewProject?.id, reviewChanges]);
+  // What the words name: the summary's branch, else (unread, or past its cap: no summary) the branch the box is for.
+  const reviewWork = reviewWorkOf(reviewSummary, box, reviewChanges, reviewProject?.id);
   // The project To was filled in with has no changes of this kind: another live agent's project that has some, if any.
+  // Never for a box opened on one project's work (a branch, a folder's changes): another project's is not that work.
   const noChanges = !!box && reviewKind === 'local' && !!reviewSummary?.git && reviewSummary.files === 0;
   useEffect(() => {
-    if (!noChanges || !toFilled || !target?.project.id) return;
+    if (!noChanges || !toFilled || !target?.project.id || box?.branch || box?.project) return;
     const others = composeTargets(projects).filter((t) => t.project.id && t.project.id !== target.project.id);
     const ids = [...new Set(others.map((t) => t.project.id!))];
     if (ids.length === 0) return;
@@ -656,7 +656,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     return () => clearTimeout(timer);
   }, [body, fileNames]);
   // New review names its thread from what it reviews, not from the words.
-  const reviewName = !box ? null : boxPull ? pullHandoffThreadName(boxPull.stack, null) : linkOnly ? pullHandoffThreadName(reviewLinkStack(linkOnly.pull), null) : reviewKind !== 'local' ? null : localReviewName(reviewChanges, reviewProject?.name ?? null, reviewSummary?.branch ?? null, reviewSummary?.base ?? null);
+  const reviewName = !box ? null : boxPull ? pullHandoffThreadName(boxPull.stack, null) : linkOnly ? pullHandoffThreadName(reviewLinkStack(linkOnly.pull), null) : reviewKind !== 'local' ? null : localReviewName(reviewChanges, reviewProject?.name ?? null, reviewWork.branch, reviewWork.base);
   const threadName = draftThreadName(nameState);
   // Kept from the first change: opening the box on another PR doesn't wipe the words kept for this one.
   const keptAny = useRef(false);
@@ -808,7 +808,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           ? walkthroughMessage(body)
           : boxPull || linkOnly
           ? pullHandoffMessage(boxPull?.stack ?? reviewLinkStack(linkOnly!.pull), reviewBoxPullAsk(box.ask, body))
-          : localReviewMessage({ changes: reviewChanges, project: reviewProject?.name ?? null, branch: reviewSummary?.branch ?? null, base: reviewSummary?.base ?? null, words: body, ask: box.ask });
+          : localReviewMessage({ changes: reviewChanges, project: reviewProject?.name ?? null, branch: reviewWork.branch, base: reviewWork.base, words: body, ask: box.ask });
       // Checked first: a PR the Inbox can't keep for that agent is never sent to it.
       if (boxPull && sendProject) await inboxApi.pullOwnerCheck(pulls!.keys, sendProject);
       const skills = transport ? null : await inboxSkillsBlock([words], INBOX_MESSAGE_SKILL_AUDIENCE);
@@ -837,7 +837,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         idempotency_key: sendKey.current,
         ...(linkOnly ? { review: { kind: 'link' as const, url: linkOnly.pull.url, title: linkOnly.pull.title, mine: linkOnly.pull.mine, ask: box?.ask === 'picture_it' ? ('picture_it' as const) : body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
         ...(box && reviewKind === 'walkthrough' ? { review: { kind: 'walkthrough' as const } } : {}),
-        ...(box && reviewKind === 'local' ? { review: { kind: 'local' as const, changes: reviewChanges, branch: reviewSummary?.branch ?? null, base: reviewSummary?.base ?? null, ask: box?.ask === 'picture_it' ? ('picture_it' as const) : body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
+        ...(box && reviewKind === 'local' ? { review: { kind: 'local' as const, changes: reviewChanges, branch: reviewWork.branch, base: reviewWork.base, ask: box?.ask === 'picture_it' ? ('picture_it' as const) : body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
         uploads: uploadIds,
         ...named,
         // A second review of the same changes is named too: "… (2)" rather than the request's first line.

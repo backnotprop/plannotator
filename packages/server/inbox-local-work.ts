@@ -6,18 +6,23 @@
  *   commit in the last `INBOX_UNREPORTED_BRANCH_DAYS` days and commits not on the default branch, no open PR and (with
  *   Branch reviews on) no agent's report, the same read as Branch reviews' safety net (`readUnreportedBranches`) with
  *   its caps, each branch with its count of commits not on the default branch; and its folder's uncommitted changes.
- *   The answer also names the projects read that have nothing (`quiet`) and those with no git repository here
- *   (`not_git`), for a list filtered to one project. Two projects that are folders of one repository (worktrees,
- *   a combined clone) list its branches once.
+ *   The answer also names the projects read that have nothing (`quiet`), those with no git repository here
+ *   (`not_git`) and those whose git could not be read (`unread_projects`), for a list filtered to one project; `?project=`
+ *   answers that project's rows only, so another project's rows never use up its `LOCAL_WORK_ROWS_MAX`. Two projects
+ *   that are folders of one repository (worktrees, a combined clone) list its branches once, and a branch in a PR or
+ *   reported from any of them is left out for all of them.
  * - The diff (`GET /api/inbox/reviews/local/diff`): a branch's whole diff from its merge base with the default branch,
- *   by ref, checked out or not (`readBranchDiff`); or the folder's uncommitted changes as `plannotator review` reads
- *   them (`runGitDiff`'s `uncommitted`).
+ *   by ref, checked out or not, against the very ref its count used (`readDefaultBranch`, `readBranchDiffFrom`); or the
+ *   folder's uncommitted changes as `plannotator review` reads them (`runGitDiff`'s `uncommitted`). Either is held to
+ *   `BRANCH_DIFF_MAX_BYTES`: past it, `BranchDiffTooLarge`, never a cut diff.
  * - Never the network, never a write: every git command goes through `offlineGit` (no transport, no prompt, killed
  *   after `BRANCH_GIT_TIMEOUT_MS`) with `GIT_OPTIONAL_LOCKS=0`, so not even `git status` refreshes the index on disk. No
  *   checkout, no stash. A folder that is gone, moved or no repository is skipped before any git runs.
- * - Cost: at most `LOCAL_WORK_PROJECTS_MAX` projects (newest activity first), `LOCAL_WORK_PARALLEL` at a time; per
- *   repository about six commands plus one count per recent branch (no more than `LOCAL_WORK_SCAN_MAX`); one answer
- *   kept `LOCAL_WORK_CACHE_MS` and shared by every read while it is made. Read only when Reviews asks, after its list.
+ * - Cost: at most `LOCAL_WORK_PROJECTS_MAX` projects (newest activity first), `LOCAL_WORK_PARALLEL` git reads at a
+ *   time; per repository about seven commands plus one count per recent branch (no more than `LOCAL_WORK_SCAN_MAX`);
+ *   one answer kept `LOCAL_WORK_CACHE_MS` and shared by every read while it is made, whatever its project filter. Read
+ *   only when Reviews asks, after its list. A repository whose git fails counts once in `unread`, however many of its
+ *   projects reach it.
  * - Bun only: the Inbox is.
  */
 import { realpath, stat } from "node:fs/promises";
@@ -25,9 +30,9 @@ import { join } from "node:path";
 import type { InboxLocalDiffAnswer, InboxLocalWork, InboxLocalWorkAnswer } from "@plannotator/core/inbox-types";
 import type { InboxProject } from "@plannotator/core/inbox-types";
 import { inboxPullIsOpen, inboxPullRepoKey, type InboxPull } from "@plannotator/core/inbox-types";
-import { getDefaultBranch, runGitDiff, type GitCommandOptions, type ReviewGitRuntime } from "@plannotator/shared/review-core";
+import { runGitDiff, type GitCommandOptions, type ReviewGitRuntime } from "@plannotator/shared/review-core";
 import { INBOX_UNREPORTED_BRANCHES_MAX } from "@plannotator/core/inbox-branch-reports";
-import { BranchDiffTooLarge, branchBaseName, offlineGit, OFFLINE_GIT_TOO_OLD, readBranchDiff, readUnreportedBranches, UNREPORTED_SCAN_MAX } from "./inbox-branch-reports";
+import { BRANCH_DIFF_MAX_BYTES, BranchDiffTooLarge, branchBaseName, offlineGit, OFFLINE_GIT_TOO_OLD, readBranchDiffFrom, readDefaultBranch, readUnreportedBranches, UNREPORTED_SCAN_MAX } from "./inbox-branch-reports";
 
 /** A branch diff past its cap (the route says so with a 413). */
 export { BranchDiffTooLarge };
@@ -51,10 +56,16 @@ const quiet = new WeakMap<ReviewGitRuntime, ReviewGitRuntime>();
 
 /**
  * What every local-work command is given besides `offlineGit`'s guards. A list read runs in the background, so it starts
- * nothing a repository configures: no fsmonitor daemon (`core.fsmonitor`), no automatic gc or maintenance (as the PR
- * page's git, `createPullGitRunner`), and no optional lock (`git status` writes no refreshed index). Pager and colour are
- * off for every command already (`prepareGitCommand`), and both diffs run with `--no-ext-diff` (the branch's with
- * `--no-textconv` too; the uncommitted changes read as `plannotator review` reads them).
+ * no fsmonitor daemon (`core.fsmonitor`), no automatic gc or maintenance (as the PR page's git, `createPullGitRunner`),
+ * and takes no optional lock (`git status` writes no refreshed index). Pager and colour are off for every command
+ * already (`prepareGitCommand`), and both diffs run with `--no-ext-diff` (the branch's with `--no-textconv` too; the
+ * uncommitted changes read as `plannotator review` reads them).
+ * What does run: a clean filter that git config names for a file's `filter=` attribute (`filter.<driver>.clean` or
+ * `.process`, as Git LFS's), when `git status` (and the uncommitted diff) must compare a tracked file whose time changed
+ * with what is committed, as `git status` in that folder runs it. With no index refresh it runs again on each read until
+ * the person's own git refreshes the index. Turning the driver off for these commands (`-c filter.<driver>.clean=`) was
+ * tried: the row would then call a file changed that is not (the unfiltered bytes never match the committed ones), and
+ * a `required` driver fails the read, so it stays on.
  */
 export const LOCAL_WORK_GIT_CONFIG: Readonly<Record<string, string>> = Object.freeze({ "core.fsmonitor": "false", "maintenance.auto": "false", "gc.auto": "0" });
 export const LOCAL_WORK_GIT_ENV: Readonly<Record<string, string>> = Object.freeze({ GIT_OPTIONAL_LOCKS: "0" });
@@ -144,104 +155,139 @@ export interface InboxLocalWorkOptions {
   now?: () => number;
 }
 
+/** `jobs` run `LOCAL_WORK_PARALLEL` at a time. */
+async function inTurn(jobs: readonly (() => Promise<void>)[]): Promise<void> {
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(LOCAL_WORK_PARALLEL, jobs.length) }, async () => {
+      while (next < jobs.length) await jobs[next++]!();
+    }),
+  );
+}
+
+/** Where a project is: its repository (`common`, its git folder shared by its worktrees) and working tree, null with none. */
+type ProjectRepo = { top: string; common: string; atTop: boolean } | null;
+
+/** What one list read found, every project's rows (the window's filter takes its own; `answerFor` caps them). */
+type LocalWorkRead = Omit<InboxLocalWorkAnswer, "items"> & { items: InboxLocalWork[] };
+
+/** The answer for a list filtered to `project` (none: every project), at most `LOCAL_WORK_ROWS_MAX` rows, newest first. */
+function answerFor(read: LocalWorkRead, project: string | null): InboxLocalWorkAnswer {
+  const items = project ? read.items.filter((item) => item.project_id === project) : read.items;
+  return { ...read, items: items.slice(0, LOCAL_WORK_ROWS_MAX) };
+}
+
 export function createInboxLocalWork(options: InboxLocalWorkOptions) {
   const { runtime } = options;
   const now = options.now ?? Date.now;
-  let kept: { at: number; answer: InboxLocalWorkAnswer } | null = null;
-  let reading: Promise<InboxLocalWorkAnswer> | null = null;
+  let kept: { at: number; read: LocalWorkRead; all: InboxLocalWorkAnswer } | null = null;
+  let reading: Promise<{ read: LocalWorkRead; all: InboxLocalWorkAnswer }> | null = null;
 
-  const read = async (): Promise<InboxLocalWorkAnswer> => {
+  const read = async (): Promise<LocalWorkRead> => {
     const git = localWorkGit(runtime);
     const at = now();
     const projects = options.projects().slice(0, LOCAL_WORK_PROJECTS_MAX);
-    const repos = new Map<string, Promise<void>>();
-    // A working tree's uncommitted changes once, though projects inside it (a folder within another's) reach it too:
-    // read once, shown under the project whose folder is its top, else the first project (newest activity) to reach it.
-    const trees = new Map<string, { read: Promise<InboxLocalWork | null>; owners: { order: number; id: string; atTop: boolean }[] }>();
-    const items: InboxLocalWork[] = [];
-    let unread = 0;
-    // Each project read: its repository (null: no git repository here), for what a one-project list says it has.
-    const seen = new Map<string, string | null>();
-    const one = async (project: InboxProject, order: number) => {
-      try {
-        const repo = await repoOf(git, project.root);
-        seen.set(project.id, repo?.common ?? null);
-        if (!repo) return;
-        const atTop = (await realpath(project.root).catch(() => project.root)) === repo.top;
-        let tree = trees.get(repo.top);
-        if (!tree) {
-          tree = { read: readUncommitted(git, repo.top, project.id, at), owners: [] };
-          trees.set(repo.top, tree);
-        }
-        tree.owners.push({ order, id: project.id, atTop });
-        await tree.read;
-        // A repository's branches once, under the first of its projects to reach it.
-        if (repos.has(repo.common)) return;
-        const branches = readUnreportedBranches(git, repo.top, project.id, (branch, head) => options.skip(project.id, branch, head), at, { scan: LOCAL_WORK_SCAN_MAX, list: LOCAL_WORK_BRANCHES_MAX }).then(({ branches: found }) => {
-          for (const branch of found) items.push({ project_id: project.id, kind: "branch", branch: branch.branch, base: branch.base, at: branch.last_commit_at, ahead: branch.ahead });
-        });
-        repos.set(repo.common, branches);
-        await branches;
-      } catch {
-        seen.delete(project.id);
-        unread += 1;
-      }
-    };
-    let next = 0;
-    await Promise.all(
-      Array.from({ length: Math.min(LOCAL_WORK_PARALLEL, projects.length) }, async () => {
-        while (next < projects.length) {
-          const order = next++;
-          await one(projects[order]!, order);
+    // What failed, once per repository (a project's id when git could not even say which repository it is in).
+    const failed = new Set<string>();
+    const where = new Map<string, ProjectRepo>();
+    await inTurn(
+      projects.map((project) => async () => {
+        try {
+          const repo = await repoOf(git, project.root);
+          where.set(project.id, repo && { ...repo, atTop: (await realpath(project.root).catch(() => project.root)) === repo.top });
+        } catch {
+          failed.add(`project:${project.id}`);
         }
       }),
     );
-    for (const tree of trees.values()) {
-      const row = await tree.read.catch(() => null);
-      const owner = tree.owners.find((o) => o.atTop) ?? [...tree.owners].sort((a, b) => a.order - b.order)[0];
-      if (row && owner) items.push({ ...row, project_id: owner.id });
+    // Each repository once, with its projects newest first; each working tree once, though projects inside it (a folder
+    // within another's) reach it too: shown under the project whose folder is its top, else the newest to reach it.
+    const repos = new Map<string, { top: string; ids: string[] }>();
+    const trees = new Map<string, { common: string; owner: string; atTop: boolean }>();
+    for (const project of projects) {
+      const repo = where.get(project.id);
+      if (!repo) continue;
+      const one = repos.get(repo.common) ?? { top: repo.top, ids: [] };
+      one.ids.push(project.id);
+      repos.set(repo.common, one);
+      const tree = trees.get(repo.top);
+      if (!tree || (repo.atTop && !tree.atTop)) trees.set(repo.top, { common: repo.common, owner: project.id, atTop: repo.atTop });
     }
+    const items: InboxLocalWork[] = [];
+    const caps = { scan: LOCAL_WORK_SCAN_MAX, list: LOCAL_WORK_BRANCHES_MAX };
+    await inTurn([
+      ...[...trees].map(([top, tree]) => async () => {
+        try {
+          const row = await readUncommitted(git, top, tree.owner, at);
+          if (row) items.push(row);
+        } catch {
+          failed.add(tree.common);
+        }
+      }),
+      // A repository's branches under its newest project; one in a PR or reported from any of its projects is left out.
+      ...[...repos].map(([common, repo]) => async () => {
+        try {
+          const owner = repo.ids[0]!;
+          const read = await readUnreportedBranches(git, repo.top, owner, (branch, head) => repo.ids.some((id) => options.skip(id, branch, head)), at, caps);
+          for (const branch of read.branches) items.push({ project_id: owner, kind: "branch", branch: branch.branch, base: branch.base, at: branch.last_commit_at, ahead: branch.ahead });
+        } catch {
+          failed.add(common);
+        }
+      }),
+    ]);
     items.sort((a, b) => b.at.localeCompare(a.at));
-    // A repository with any row (under any of its projects) is not quiet for any of them.
-    const busy = new Set(items.map((item) => seen.get(item.project_id)).filter((repo): repo is string => !!repo));
+    // A repository with any row (under any of its projects) is not quiet for any of them; one whose read failed is
+    // never quiet: it could not be read.
+    const busy = new Set(items.map((item) => where.get(item.project_id)?.common));
     const quiet: string[] = [];
     const notGit: string[] = [];
-    for (const [id, repo] of seen) {
-      if (repo === null) notGit.push(id);
-      else if (!busy.has(repo)) quiet.push(id);
+    const unreadProjects: string[] = [];
+    for (const project of projects) {
+      const repo = where.get(project.id);
+      if (failed.has(`project:${project.id}`) || (repo && failed.has(repo.common))) unreadProjects.push(project.id);
+      else if (repo === null) notGit.push(project.id);
+      else if (repo && !busy.has(repo.common)) quiet.push(project.id);
     }
-    return { items: items.slice(0, LOCAL_WORK_ROWS_MAX), unread, quiet, not_git: notGit };
+    return { items, unread: failed.size, quiet, not_git: notGit, unread_projects: unreadProjects };
   };
 
   return {
-    /** Every project's local work, kept `LOCAL_WORK_CACHE_MS`; one read at a time. */
-    async list(): Promise<InboxLocalWorkAnswer> {
-      if (kept && now() - kept.at < LOCAL_WORK_CACHE_MS) return kept.answer;
-      reading ??= read().then(
-        (answer) => {
-          kept = { at: now(), answer };
-          reading = null;
-          return answer;
-        },
-        (cause: unknown) => {
-          reading = null;
-          throw cause;
-        },
-      );
-      return reading;
+    /**
+     * This computer's local work, for a list filtered to `project` (none: every project's), kept `LOCAL_WORK_CACHE_MS`
+     * whatever the filter; one read at a time.
+     */
+    async list(project: string | null = null): Promise<InboxLocalWorkAnswer> {
+      if (!kept || now() - kept.at >= LOCAL_WORK_CACHE_MS) {
+        reading ??= read().then(
+          (found) => {
+            const answer = { read: found, all: answerFor(found, null) };
+            kept = { at: now(), ...answer };
+            reading = null;
+            return answer;
+          },
+          (cause: unknown) => {
+            reading = null;
+            throw cause;
+          },
+        );
+        const answer = await reading;
+        return project ? answerFor(answer.read, project) : answer.all;
+      }
+      return project ? answerFor(kept.read, project) : kept.all;
     },
     /**
      * One row's diff, read now: `branch` its whole diff against the default branch, by ref; null the folder's
-     * uncommitted changes. Null: the folder is not a repository here. Throws a sentence when git could not read it.
+     * uncommitted changes. Null: the folder is not a repository here. Throws a sentence when git could not read it,
+     * `BranchDiffTooLarge` past `BRANCH_DIFF_MAX_BYTES`.
      */
     async diff(project: InboxProject, branch: string | null): Promise<InboxLocalDiffAnswer | null> {
       const git = localWorkGit(runtime);
       const repo = await repoOf(git, project.root);
       if (!repo) return null;
       if (branch) {
-        const defaultRef = await getDefaultBranch(git, repo.top);
+        const defaultRef = await readDefaultBranch(git, repo.top);
         const base = branchBaseName(defaultRef);
-        const patch = await readBranchDiff(git, repo.top, base, `refs/heads/${branch}`).catch((cause: unknown) => {
+        const patch = await readBranchDiffFrom(git, repo.top, defaultRef, `refs/heads/${branch}`).catch((cause: unknown) => {
           if (cause instanceof BranchDiffTooLarge) throw cause;
           throw new Error(`git couldn't read ${branch}'s diff against ${base} in this project's folder.`);
         });
@@ -250,9 +296,35 @@ export function createInboxLocalWork(options: InboxLocalWorkOptions) {
         const ahead = counted?.exitCode === 0 && /^\d+$/.test(counted.stdout.trim()) ? Number(counted.stdout.trim()) : null;
         return { project_id: project.id, kind: "branch", branch, base, patch, ahead };
       }
-      const result = await runGitDiff(git, "uncommitted", "HEAD", repo.top);
+      const capped = cappedDiffGit(git);
+      const result = await runGitDiff(capped.git, "uncommitted", "HEAD", repo.top);
+      if (capped.over() || new TextEncoder().encode(result.patch).byteLength > BRANCH_DIFF_MAX_BYTES) throw new BranchDiffTooLarge();
       if (result.error) throw new Error("git couldn't read the uncommitted changes.");
       return { project_id: project.id, kind: "uncommitted", branch: await checkedOut(git, repo.top), base: "HEAD", patch: result.patch, ahead: null };
+    },
+  };
+}
+
+/**
+ * The uncommitted diff's git with a branch diff's cap: each `git diff` read through the capped reader at
+ * `BRANCH_DIFF_MAX_BYTES` (stopped there, never held whole), and `over` once any was. Other commands as they were.
+ */
+function cappedDiffGit(git: ReviewGitRuntime): { git: ReviewGitRuntime; over: () => boolean } {
+  let over = false;
+  const bytes = git.runGitBytes;
+  return {
+    over: () => over,
+    git: {
+      ...git,
+      runGit: async (args, options) => {
+        if (!bytes || args[0] !== "diff" || options?.stdin !== undefined) return git.runGit(args, options);
+        const answer = await bytes(args, { ...options, maxOutputBytes: BRANCH_DIFF_MAX_BYTES });
+        if (answer.truncated) {
+          over = true;
+          return { stdout: "", stderr: "This diff is too large to read here.", exitCode: 1 };
+        }
+        return { stdout: new TextDecoder().decode(answer.stdout), stderr: answer.stderr, exitCode: answer.exitCode };
+      },
     },
   };
 }

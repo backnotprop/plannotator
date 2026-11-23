@@ -15,7 +15,14 @@
  *    open PR (or its fork's); a squash- or rebase-merged branch listed (its upstream gone, or its head a merged PR's);
  *  - a branch diff past its cap drawn cut instead of said too large;
  *  - a background read starting a repository's fsmonitor, gc or maintenance;
- *  - one working tree's uncommitted changes listed under each project inside it.
+ *  - one working tree's uncommitted changes listed under each project inside it;
+ *  - a branch's diff (the row's, New review's summary) against another base than its count (a stale local main adding
+ *    others' merged work); a branch diff that can't be read or is past its cap summed as no changes;
+ *  - a list filtered to one project missing its rows because other projects filled the cap;
+ *  - a branch reported (or in a PR) from one worktree project listed through another of the same repository;
+ *  - a repository whose default is neither main nor master (a local-only `trunk`) listing nothing, or a failed read
+ *    named quiet ("nothing") for any project of its repository, or counted unread once per project;
+ *  - the uncommitted diff sent whole past the branch diff's cap.
  */
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -25,7 +32,8 @@ import { join } from "node:path";
 import type { InboxProject, InboxPull } from "@plannotator/core/inbox-types";
 import type { ReviewGitRuntime } from "@plannotator/shared/review-core";
 import { BRANCH_DIFF_MAX_BYTES, BRANCH_GIT_TIMEOUT_MS } from "./inbox-branch-reports";
-import { BranchDiffTooLarge, createInboxLocalWork, localBranchInPull, LOCAL_WORK_BRANCHES_MAX, LOCAL_WORK_CACHE_MS, LOCAL_WORK_PROJECTS_MAX, LOCAL_WORK_SCAN_MAX } from "./inbox-local-work";
+import { BranchDiffTooLarge, createInboxLocalWork, localBranchInPull, LOCAL_WORK_BRANCHES_MAX, LOCAL_WORK_CACHE_MS, LOCAL_WORK_PROJECTS_MAX, LOCAL_WORK_ROWS_MAX, LOCAL_WORK_SCAN_MAX } from "./inbox-local-work";
+import { readInboxReviewChanges } from "./inbox-review-changes";
 import { runtime } from "./git";
 
 const DAY = 86_400;
@@ -92,6 +100,7 @@ const READ_SHAPES: RegExp[] = [
   /^rev-parse --verify HEAD$/,
   /^rev-parse --show-toplevel$/,
   /^symbolic-ref (refs\/remotes\/origin\/HEAD|-q --short HEAD)$/,
+  /^config --get init\.defaultBranch$/,
   /^show-ref --verify( --quiet)? refs\/(heads|remotes\/origin)\/[\w./-]+$/,
   /^for-each-ref --sort=-committerdate --format=%\(refname\)%00%\(committerdate:unix\)%00%\(objectname\)%00%\(upstream:track\) refs\/heads\/$/,
   /^rev-list --count --end-of-options \S+\.\.refs\/heads\/[\w./-]+$/,
@@ -216,6 +225,7 @@ describe("the list", () => {
     const work = createInboxLocalWork({ runtime: failing, projects: () => [project("prj_slow", slow), project("prj_fine", fine)], skip: () => false, now: () => now * 1000 });
     const answer = await work.list();
     expect(answer.unread).toBe(1);
+    expect(answer.unread_projects).toEqual(["prj_slow"]);
     expect(answer.items.some((item) => item.project_id === "prj_fine" && item.branch === "ada/retry-jitter")).toBe(true);
   });
 
@@ -408,5 +418,157 @@ describe("a row's diff", () => {
     expect(seen.commands.find((command) => command.args[0] === "diff")?.options?.maxOutputBytes).toBe(BRANCH_DIFF_MAX_BYTES);
     // Under the cap, the whole diff as before.
     expect((await work.diff(project("prj_a", repo), "ada/retry-jitter"))!.patch).toContain("ada-retry-jitter.txt");
+  });
+
+  test("the folder's uncommitted changes past the branch diff's cap are said too large, never sent whole", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const repo = scratchRepo(now);
+    // Two new files under the per-file limit, over the cap together.
+    const line = "export const filler = \"Ada Novak's generated fixture line\";\n";
+    for (const name of ["gen-a.ts", "gen-b.ts"]) writeFileSync(join(repo, name), line.repeat(Math.ceil((4.5 * 1024 * 1024) / line.length)));
+    const seen = watched();
+    const work = createInboxLocalWork({ runtime: seen.runtime, projects: () => [], skip: () => false });
+    await expect(work.diff(project("prj_a", repo), null)).rejects.toBeInstanceOf(BranchDiffTooLarge);
+    // Every diff read through the capped reader, at the cap: none held whole.
+    const diffs = seen.commands.filter((command) => command.args[0] === "diff");
+    expect(diffs.length).toBeGreaterThan(0);
+    for (const command of diffs) expect(command.options?.maxOutputBytes).toBe(BRANCH_DIFF_MAX_BYTES);
+  });
+});
+
+/** `count` branches off main, `<prefix>-<i>`, one commit each, the newest at `newest` and each a minute older. */
+function branchesAt(repo: string, prefix: string, count: number, newest: number) {
+  const tree = git(repo, ["rev-parse", "main^{tree}"]);
+  const lines = Array.from({ length: count }, (_, i) => {
+    const date = `@${newest - i * 60} +0000`;
+    const sha = git(repo, ["commit-tree", tree, "-p", "main", "-m", `${prefix} ${i}`], { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date });
+    return `create refs/heads/${prefix}-${i} ${sha}\n`;
+  });
+  git(repo, ["update-ref", "--stdin"], {}, lines.join(""));
+}
+
+describe("one base, every project, every repository", () => {
+  test("a stale local main: the row's count, its diff and New review's summary are all against origin/main", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const repo = mkdtempSync(join(tmpdir(), "local-work-stale-"));
+    git(repo, ["init", "--quiet", "-b", "main"]);
+    git(repo, ["remote", "add", "origin", "https://example.invalid/charlie/never.git"]);
+    commitAt(repo, "base.txt", now - 30 * DAY);
+    // Others' work merged upstream since this clone's main last moved: on origin/main only.
+    git(repo, ["checkout", "--quiet", "--detach"]);
+    commitAt(repo, "merged-by-ada.txt", now - 5 * DAY);
+    commitAt(repo, "merged-by-bob.txt", now - 4 * DAY);
+    git(repo, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    git(repo, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+    // Charlie's fix, started from origin/main: one commit of its own.
+    git(repo, ["checkout", "--quiet", "-b", "charlie/fix", "refs/remotes/origin/main"]);
+    commitAt(repo, "charlie-fix.txt", now - DAY);
+    git(repo, ["checkout", "--quiet", "main"]);
+    const work = createInboxLocalWork({ runtime, projects: () => [project("prj_a", repo)], skip: () => false, now: () => now * 1000 });
+    expect((await work.list()).items).toEqual([expect.objectContaining({ kind: "branch", branch: "charlie/fix", base: "main", ahead: 1 })]);
+    const diff = await work.diff(project("prj_a", repo), "charlie/fix");
+    expect(diff).toMatchObject({ base: "main", ahead: 1 });
+    expect(diff!.patch).toContain("+++ b/charlie-fix.txt");
+    expect(diff!.patch).not.toContain("merged-by-");
+    expect(await readInboxReviewChanges(repo, "branch", "charlie/fix", runtime)).toMatchObject({ git: true, files: 1, branch: "charlie/fix", base: "main" });
+  });
+
+  test("New review's summary of a branch past its cap, or not here, is no answer, never no changes", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const repo = scratchRepo(now);
+    git(repo, ["checkout", "--quiet", "-b", "bob/huge", "main"]);
+    const line = "export const filler = \"Bob Tully's generated fixture line\";\n";
+    writeFileSync(join(repo, "huge.ts"), line.repeat(Math.ceil((BRANCH_DIFF_MAX_BYTES + 1024 * 1024) / line.length)));
+    git(repo, ["add", "huge.ts"]);
+    git(repo, ["commit", "--quiet", "-m", "huge"]);
+    git(repo, ["checkout", "--quiet", "main"]);
+    await expect(readInboxReviewChanges(repo, "branch", "bob/huge", runtime)).rejects.toBeInstanceOf(BranchDiffTooLarge);
+    await expect(readInboxReviewChanges(repo, "branch", "ada/never-made", runtime)).rejects.toThrow("isn't in the project's checkout");
+    expect(await readInboxReviewChanges(repo, "branch", "ada/retry-jitter", runtime)).toMatchObject({ git: true, files: 1 });
+  });
+
+  test("a list filtered to one project has all of its rows, though two busy projects fill the whole list's cap", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const busy = (name: string) => {
+      const repo = mkdtempSync(join(tmpdir(), `local-work-busy-${name}-`));
+      git(repo, ["init", "--quiet", "-b", "main"]);
+      commitAt(repo, "base.txt", now - 30 * DAY);
+      branchesAt(repo, `bob/${name}`, LOCAL_WORK_BRANCHES_MAX, now - DAY);
+      return repo;
+    };
+    const third = mkdtempSync(join(tmpdir(), "local-work-third-"));
+    git(third, ["init", "--quiet", "-b", "main"]);
+    commitAt(third, "base.txt", now - 30 * DAY);
+    branchAt(third, "ada/older-work", now - 3 * DAY);
+    const work = createInboxLocalWork({ runtime, projects: () => [project("prj_a", busy("a")), project("prj_b", busy("b")), project("prj_c", third)], skip: () => false, now: () => now * 1000 });
+    expect(LOCAL_WORK_ROWS_MAX).toBe(2 * LOCAL_WORK_BRANCHES_MAX);
+    const all = await work.list();
+    expect(all.items).toHaveLength(LOCAL_WORK_ROWS_MAX);
+    expect(all.items.some((item) => item.project_id === "prj_c")).toBe(false);
+    expect(all.quiet).toEqual([]);
+    expect((await work.list("prj_c")).items).toEqual([expect.objectContaining({ project_id: "prj_c", branch: "ada/older-work", ahead: 1 })]);
+    expect((await work.list("prj_a")).items.every((item) => item.project_id === "prj_a")).toBe(true);
+    // One read served all three.
+    expect(await work.list()).toBe(all);
+  });
+
+  test("a branch in a PR or reported from one worktree project is left out, though it lists under another project of its repository", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const repo = scratchRepo(now);
+    const tree = join(mkdtempSync(join(tmpdir(), "local-work-tree-")), "wt");
+    git(repo, ["worktree", "add", "--quiet", tree, "ada/retry-jitter"]);
+    const asked = new Set<string>();
+    const work = createInboxLocalWork({
+      runtime,
+      projects: () => [project("prj_main", repo), project("prj_tree", tree)],
+      skip: (id, branch) => (asked.add(id), id === "prj_tree" && branch === "bob/has-a-pr"),
+      now: () => now * 1000,
+    });
+    const branches = (await work.list()).items.filter((item) => item.kind === "branch").map((item) => `${item.project_id} ${item.branch}`);
+    expect(branches).toEqual(["prj_main ada/retry-jitter"]);
+    expect([...asked].sort()).toEqual(["prj_main", "prj_tree"]);
+  });
+
+  test("a repository whose default is neither main nor master lists its branches against its own default", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const repoOn = (name: string) => {
+      const repo = mkdtempSync(join(tmpdir(), `local-work-${name}-`));
+      git(repo, ["init", "--quiet", "-b", name]);
+      commitAt(repo, "base.txt", now - 30 * DAY);
+      git(repo, ["checkout", "--quiet", "-b", "ada/feature"]);
+      commitAt(repo, "feature.txt", now - DAY);
+      git(repo, ["checkout", "--quiet", name]);
+      return repo;
+    };
+    // A local-only trunk (no origin); and a name no list knows, checked out in the main worktree.
+    for (const name of ["trunk", "stable"]) {
+      const repo = repoOn(name);
+      const work = createInboxLocalWork({ runtime, projects: () => [project(`prj_${name}`, repo)], skip: () => false, now: () => now * 1000 });
+      const answer = await work.list();
+      expect(answer.unread).toBe(0);
+      expect(answer.items).toEqual([expect.objectContaining({ kind: "branch", branch: "ada/feature", base: name, ahead: 1 })]);
+      const diff = await work.diff(project(`prj_${name}`, repo), "ada/feature");
+      expect(diff).toMatchObject({ base: name, ahead: 1 });
+      expect(diff!.patch).toContain("+++ b/feature.txt");
+    }
+  });
+
+  test("a repository whose branches can't be read: each of its projects says so, none is named quiet, and it counts once", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const repo = mkdtempSync(join(tmpdir(), "local-work-unlisted-"));
+    git(repo, ["init", "--quiet", "-b", "main"]);
+    commitAt(repo, "base.txt", now - 30 * DAY);
+    git(repo, ["branch", "same-as-main"]);
+    const tree = join(mkdtempSync(join(tmpdir(), "local-work-tree-")), "wt");
+    git(repo, ["worktree", "add", "--quiet", tree, "same-as-main"]);
+    const fine = mkdtempSync(join(tmpdir(), "local-work-fine-"));
+    git(fine, ["init", "--quiet", "-b", "main"]);
+    commitAt(fine, "base.txt", now - 30 * DAY);
+    const failing: ReviewGitRuntime = { ...runtime, runGit: (args, given) => (args[0] === "for-each-ref" && given?.cwd !== realpathSync(fine) ? Promise.resolve({ stdout: "", stderr: "timed out", exitCode: 124 }) : runtime.runGit(args, given)) };
+    const work = createInboxLocalWork({ runtime: failing, projects: () => [project("prj_main", repo), project("prj_tree", tree), project("prj_fine", fine)], skip: () => false, now: () => now * 1000 });
+    const answer = await work.list();
+    expect(answer.unread).toBe(1);
+    expect(answer.unread_projects).toEqual(["prj_main", "prj_tree"]);
+    expect(answer.quiet).toEqual(["prj_fine"]);
   });
 });

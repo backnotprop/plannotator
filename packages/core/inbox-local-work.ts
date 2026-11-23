@@ -26,8 +26,13 @@ export interface InboxLocalWork {
 /** `GET /api/inbox/reviews/local`. */
 export interface InboxLocalWorkAnswer {
   items: InboxLocalWork[];
-  /** Projects whose folder is here but whose git could not be read in time: not "nothing". */
+  /** Repositories here whose git could not be read in time (once each, however many projects reach one): not "nothing". */
   unread: number;
+  /**
+   * Projects whose repository's git could not be read (all of it or a part, as its branches): what a one-project list
+   * says could not be read for, never "nothing". An older Inbox: absent.
+   */
+  unread_projects?: string[];
   /**
    * Projects read whose repository has no row at all (no branch with work of its own, no uncommitted change): what a
    * one-project list says "nothing" for. An older Inbox: absent.

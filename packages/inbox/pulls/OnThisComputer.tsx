@@ -6,8 +6,9 @@
  * 20 s). A click opens that work's diff beside the list (localNav.ts); nothing goes to any agent. It takes the place of
  * Branch reviews' "Branches nobody reported", which listed the same branches for one project, and keeps what it said: a
  * branch's commits not on the default branch (on the row where it fits, else for a screen reader and in its diff's
- * facts), all its branches behind the Agents view's "N more" fold, and, for a list filtered to one project with
- * nothing here, its words for that. No new keyboard shortcuts.
+ * facts), all its branches behind the Agents view's "N more" fold, for a list filtered to one project with nothing
+ * here, its words for that, and for git that could not be read, its "The branches could not be read." (a filtered
+ * list reads that project's rows only, so none is crowded out by others). No new keyboard shortcuts.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { INBOX_UNREPORTED_BRANCH_DAYS, inboxLocalWorkKey, inboxLocalWorkLabel, type InboxLocalWork, type InboxLocalWorkAnswer } from '@plannotator/core/inbox-types';
@@ -16,7 +17,7 @@ import { Icon } from '../icons';
 import { AGENT_ROWS_SHOWN } from '../agentsView/AgentsList';
 import { Age, Title } from './ReviewRow';
 import { useRelativeClock } from '../relativeTime';
-import { localWorkIn, readLocalWork } from './localWork';
+import { localWorkIn, localWorkUnread, readLocalWork } from './localWork';
 import { ReviewGroup, type ReviewGroupFold } from './ReviewGroup';
 
 export interface OnThisComputerProps {
@@ -40,14 +41,14 @@ export function OnThisComputer({ project, projectNames, openKey, phone, readAgai
     const controller = new AbortController();
     // A read that fails, or answers without rows (an older Inbox), keeps what was last read: the group never says
     // "nothing" for a read it did not get, and never takes the list down with it.
-    readLocalWork(controller.signal).then(
+    readLocalWork(project, controller.signal).then(
       (read) => {
         if (Array.isArray(read?.items)) setAnswer(read);
       },
       () => {},
     );
     return () => controller.abort();
-  }, [readAgain]);
+  }, [readAgain, project]);
   // Back from a row's diff: the focus it left goes back to its row.
   const wasOpen = useRef(openKey);
   useEffect(() => {
@@ -68,15 +69,24 @@ export function OnThisComputer({ project, projectNames, openKey, phone, readAgai
     if (key) document.querySelector<HTMLElement>(`[data-pulls-group="local"] [data-local-row="${CSS.escape(key)}"]`)?.focus({ preventScroll: true });
   }, [more]);
   const items = answer ? localWorkIn(answer.items, project) : [];
+  // Git that could not be read for this list: Branch reviews' words for it, where the group is, never "nothing".
+  const unread = !!answer && localWorkUnread(answer, project);
+  const unreadNote = unread && (
+    <p className="ib-error" role="alert" data-local-unread="">
+      The branches could not be read.
+    </p>
+  );
   if (items.length === 0) {
     // One project, read, with nothing here: Branch reviews' words for it. Otherwise no group.
-    const nothing = project && answer ? (answer.not_git?.includes(project) ? "This project's folder isn't a git repository on this computer." : answer.quiet?.includes(project) ? `No other branch had a commit in the last ${INBOX_UNREPORTED_BRANCH_DAYS} days.` : null) : null;
-    if (!nothing) return null;
+    const nothing = project && answer && !unread ? (answer.not_git?.includes(project) ? "This project's folder isn't a git repository on this computer." : answer.quiet?.includes(project) ? `No other branch had a commit in the last ${INBOX_UNREPORTED_BRANCH_DAYS} days.` : null) : null;
+    if (!nothing && !unread) return null;
     return (
       <ReviewGroup label="On this computer" name="local" count={0} empty fold={fold}>
-        <p className="ib-pr-risknote ib-local-none" data-local-none="">
-          {nothing}
-        </p>
+        {unreadNote || (
+          <p className="ib-pr-risknote ib-local-none" data-local-none="">
+            {nothing}
+          </p>
+        )}
       </ReviewGroup>
     );
   }
@@ -102,6 +112,7 @@ export function OnThisComputer({ project, projectNames, openKey, phone, readAgai
           {formatCount(hidden)} more
         </button>
       )}
+      {unreadNote}
     </ReviewGroup>
   );
 }

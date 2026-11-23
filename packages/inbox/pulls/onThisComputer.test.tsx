@@ -10,7 +10,9 @@
  *  - Branch reviews' old "Branches nobody reported" drawn beside it (the same branches twice);
  *  - what that old list said lost: a branch's commits not on main (for a screen reader on the row, and in its diff's
  *    facts), branches past the first few with no way to see them (the Agents view's "N more"), and "nothing here"
- *    for a list filtered to one project (its words), or a "nothing" made up for a project that was not read.
+ *    for a list filtered to one project (its words), or a "nothing" made up for a project that was not read;
+ *  - git that could not be read not said ("The branches could not be read."), or a filtered list asking for every
+ *    project's rows (another project's would crowd its own out).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -285,4 +287,33 @@ test.skipIf(!hasDom)("one project with nothing here says so in the old list's wo
   // A project the answer did not read (past the cap, or its git unread): not "nothing".
   await render(page({ project: 'prj_other', reviews }));
   expect(group()).toBeNull();
+});
+
+test.skipIf(!hasDom)('git that could not be read says "The branches could not be read." where the group is, never "nothing"; a filtered list asks for its own rows', async () => {
+  const answer: InboxLocalWorkAnswer = { unread: 1, unread_projects: ['prj_spaces'], items: [LOCAL.items[0]!], quiet: ['prj_spaces'], not_git: [] };
+  const routes: Record<string, unknown> = { '/reviews/local': answer };
+  const seen = fetches(routes);
+  const unread = () => document.querySelector('[data-local-unread]')?.textContent ?? null;
+  const reviews = { ...REVIEWS, projects: { 'github.com/charlie-dunn/spaces-site': ['prj_spaces'], 'github.com/charlie-dunn/plannotator': ['prj_plannotator'] } };
+  // One project whose git was not read: the old list's words for it, not its words for nothing here.
+  await mount(page({ project: 'prj_spaces', reviews }));
+  expect(seen.filter((r) => r.url.includes('/reviews/local')).map((r) => r.url)).toEqual(['/api/inbox/reviews/local?project=prj_spaces']);
+  await act(async () => toggle().click());
+  expect(unread()).toBe('The branches could not be read.');
+  expect(document.querySelector('[data-local-none]')).toBeNull();
+  // The whole list: its rows, and the same words after them.
+  await render(page({ reviews }));
+  expect(rows()).toHaveLength(1);
+  expect(unread()).toBe('The branches could not be read.');
+  // A project that was read: its rows, no such words.
+  await render(page({ project: 'prj_plannotator', reviews }));
+  expect(rows()).toHaveLength(1);
+  expect(unread()).toBeNull();
+  // The whole list with no row at all and a read that failed: the group is there to say so.
+  await act(async () => root!.unmount());
+  root = null;
+  routes['/reviews/local'] = { unread: 1, unread_projects: ['prj_spaces'], items: [] } satisfies InboxLocalWorkAnswer;
+  await mount(page());
+  expect(group()).not.toBeNull();
+  expect(unread()).toBe('The branches could not be read.');
 });

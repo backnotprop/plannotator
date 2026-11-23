@@ -6,9 +6,17 @@ import type { InboxLocalDiffAnswer, InboxLocalWork, InboxLocalWorkAnswer } from 
 import { get } from '../api';
 import { inboxUrl } from '../inboxUrl';
 
-/** This computer's work in no PR (`GET /api/inbox/reviews/local`): always this Inbox's own, never a linked machine's. */
-export function readLocalWork(signal?: AbortSignal): Promise<InboxLocalWorkAnswer> {
-  return get<InboxLocalWorkAnswer>(inboxUrl('/reviews/local'), signal);
+/**
+ * This computer's work in no PR (`GET /api/inbox/reviews/local`): always this Inbox's own, never a linked machine's.
+ * With the list's project filter, that project's rows only, so other projects' rows never crowd out its own.
+ */
+export function readLocalWork(project: string | null, signal?: AbortSignal): Promise<InboxLocalWorkAnswer> {
+  return get<InboxLocalWorkAnswer>(inboxUrl('/reviews/local', project ? `project=${encodeURIComponent(project)}` : undefined), signal);
+}
+
+/** Its git could not be read, for this list (one project's, or any project's): said, never "nothing". */
+export function localWorkUnread(answer: InboxLocalWorkAnswer, project: string | null): boolean {
+  return project ? !!answer.unread_projects?.includes(project) : answer.unread > 0;
 }
 
 /** A row's diff (`GET /api/inbox/reviews/local/diff`): a branch's whole diff, or with no branch the uncommitted changes. */

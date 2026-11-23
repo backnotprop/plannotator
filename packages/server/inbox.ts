@@ -6584,7 +6584,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!project || (changes !== "uncommitted" && changes !== "last" && changes !== "branch")) return json({ error: "A project and which changes.", code: "validation_error" }, 400);
         // A named branch's whole diff (Reviews' "On this computer": a branch's Review with an agent), not the checked-out one's.
         const branch = changes === "branch" ? url.searchParams.get("branch") : null;
-        return json(await readInboxReviewChanges(project.root, changes, branch && inboxPullSafeBranch(branch) ? branch : null));
+        // A branch's diff that can't be read, or is past its cap, is said so, never "No changes" (the box would move To).
+        return await readInboxReviewChanges(project.root, changes, branch && inboxPullSafeBranch(branch) ? branch : null).then(json, (cause: unknown) =>
+          cause instanceof BranchDiffTooLarge ? json({ error: cause.message, code: "diff_too_large" }, 413) : json({ error: cause instanceof Error ? cause.message : "The diff could not be read.", code: "git_failed" }, 500),
+        );
       }
       // Reviews' "On this computer" (inbox-local-work.ts): this computer's work in no PR, and a row's diff, read only.
       // The window's own reads: never through the door, never a program without the window's same-origin mark.
@@ -6597,7 +6600,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json({ error: "Only the Inbox window reads this computer's local work.", code: "window_only" }, 403);
         }
         if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
-        if (path === "/api/inbox/reviews/local") return json({ serverSession, ...(await localWork.list()) });
+        // `?project=`: a list filtered to one project gets all of its rows, up to the cap, whatever the others have.
+        if (path === "/api/inbox/reviews/local") return json({ serverSession, ...(await localWork.list(url.searchParams.get("project") || null)) });
         const project = store.project(url.searchParams.get("project") ?? "");
         const branch = url.searchParams.get("branch");
         if (!project || (branch !== null && !inboxPullSafeBranch(branch))) return json({ error: "A project, and a branch or none.", code: "validation_error" }, 400);

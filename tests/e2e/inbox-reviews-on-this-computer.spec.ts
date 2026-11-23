@@ -610,4 +610,28 @@ test.describe('past five rows, and one project with nothing here, at 1440', () =
       await context.close();
     }
   });
+
+  test("a project whose default branch is its own (a local-only trunk, no main) lists its branch against it", async () => {
+    const trunk = gitProject(world.src, 'trunk-notes');
+    const context = await world.browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, colorScheme: 'light', reducedMotion: 'reduce' });
+    try {
+      const page = await context.newPage();
+      const id = await agentWrote(page, trunk.path, true);
+      // No main and no origin: the repository's default is trunk.
+      trunk.git(['branch', '-M', 'main', 'trunk']);
+      trunk.git(['checkout', '-q', '-b', 'ada/on-trunk']);
+      trunk.commit('src/trunk.ts', 'export const onTrunk = true;\n', 30 * MINUTE);
+      trunk.git(['checkout', '-q', 'trunk']);
+      const branchRow = row(page, `${id}:ada/on-trunk`);
+      await readUntil(page, `${world.url}#reviews&project=${encodeURIComponent(id)}`, async () => {
+        await expect(branchRow).toBeVisible({ timeout: 3_000 });
+      });
+      await expect(branchRow).toHaveAccessibleName(/1 commit not on trunk/);
+      await expect(group(page).locator('[data-local-unread], [data-local-none]')).toHaveCount(0);
+      await branchRow.click();
+      await expect(page.locator('[data-local-facts]')).toContainText('1 commit not on trunk');
+    } finally {
+      await context.close();
+    }
+  });
 });

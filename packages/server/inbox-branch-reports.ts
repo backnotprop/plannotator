@@ -189,6 +189,34 @@ export function branchBaseName(ref: string): string {
   return ref.replace(/^origin\//, "");
 }
 
+/** Long-lived names (`inboxPullLongLived`'s) a repository's own default may have besides main and master. */
+const LOCAL_DEFAULT_NAMES = ["trunk", "develop", "dev"] as const;
+
+/**
+ * The default branch's ref here, the one a branch's count and its diff both use (Reviews' "On this computer", New
+ * review's branch summary): `getDefaultBranch`'s answer when it names a commit. Its last answer is a blind "master";
+ * when that names nothing (a local-only `trunk`, no origin), the repository's own: `init.defaultBranch`, a long-lived
+ * name, the branch checked out in its main worktree, then the one checked out here. None: the guess, so the read that
+ * uses it fails, never reads as "nothing". Only for these reads: `getDefaultBranch` is unchanged for its other callers.
+ */
+export async function readDefaultBranch(runtime: ReviewGitRuntime, root: string): Promise<string> {
+  const guarded = offlineGit(runtime);
+  const guess = await getDefaultBranch(guarded, root);
+  if (await commitOf(runtime, root, guess)) return guess;
+  const has = async (name: string | null | undefined): Promise<boolean> => !!name && inboxPullSafeBranch(name) && (await commitOf(runtime, root, `refs/heads/${name}`)) !== null;
+  const named = async (args: string[]) => {
+    const answer = await git(runtime, root, args).catch(() => null);
+    return answer?.exitCode === 0 ? answer.stdout.trim() : "";
+  };
+  const configured = await named(["config", "--get", "init.defaultBranch"]);
+  if (await has(configured)) return configured;
+  for (const name of LOCAL_DEFAULT_NAMES) if (await has(name)) return name;
+  const main = (await getWorktrees(guarded, root).catch(() => []))[0]?.branch?.replace(/^refs\/heads\//, "");
+  if (main && (await has(main))) return main;
+  const here = await named(["symbolic-ref", "-q", "--short", "HEAD"]);
+  return (await has(here)) ? here : guess;
+}
+
 /**
  * What git here says of a reported branch: its head (the agent's, else, with `localTip`, the branch's tip here), its
  * base (the agent's, else the repository's default branch) and whether the head is a commit in this checkout. A cloud
@@ -293,6 +321,20 @@ export class BranchDiffTooLarge extends Error {
 export async function readBranchDiff(runtime: ReviewGitRuntime, root: string, base: string, head: string): Promise<string> {
   const ref = await baseRef(runtime, root, base);
   if (!ref) throw new Error(`The base ${base} isn't in the project's checkout on this computer.`);
+  return diffFrom(runtime, root, ref, head);
+}
+
+/**
+ * `readBranchDiff` against `ref` exactly as given, never a same-named local branch in its place: the ref
+ * `readDefaultBranch` answered, so the diff and the count of commits not on it agree (a stale local main would add
+ * every commit merged since to the diff).
+ */
+export async function readBranchDiffFrom(runtime: ReviewGitRuntime, root: string, ref: string, head: string): Promise<string> {
+  if (!(await commitOf(runtime, root, ref))) throw new Error(`The base ${branchBaseName(ref)} isn't in the project's checkout on this computer.`);
+  return diffFrom(runtime, root, ref, head);
+}
+
+async function diffFrom(runtime: ReviewGitRuntime, root: string, ref: string, head: string): Promise<string> {
   if (!(await commitOf(runtime, root, head))) throw new Error("The reported commit isn't in the project's checkout on this computer.");
   const git = offlineGit(runtime);
   const args = ["diff", "--no-ext-diff", "--no-textconv", "--no-relative", "--no-color", "--end-of-options", `${ref}...${head}`];
@@ -323,7 +365,7 @@ export async function readUnreportedBranches(
   const inside = await git(runtime, root, ["rev-parse", "--is-inside-work-tree"]).catch(() => null);
   if (inside?.stderr === OFFLINE_GIT_TOO_OLD) throw new Error(OFFLINE_GIT_TOO_OLD);
   if (!inside || inside.exitCode !== 0) return { git: false, branches: [] };
-  const baseRefName = await getDefaultBranch(offlineGit(runtime), root);
+  const baseRefName = await readDefaultBranch(runtime, root);
   const base = branchBaseName(baseRefName);
   const listed = await git(runtime, root, ["for-each-ref", "--sort=-committerdate", "--format=%(refname)%00%(committerdate:unix)%00%(objectname)%00%(upstream:track)", "refs/heads/"]);
   if (listed.exitCode !== 0) throw new Error("git couldn't list the branches.");
