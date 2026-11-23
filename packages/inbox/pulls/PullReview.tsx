@@ -45,6 +45,7 @@ import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { DecisionControl, type DecisionHandler } from '@plannotator/ui/components/DecisionControl';
 import { buildDecisionSpec, type DecisionActionId } from '@plannotator/ui/utils/decisionSpec';
 import { InboxApiError, inboxApi } from '../api';
+import { pullReviewImages } from '../reviewImages';
 import { guideCommentSections } from '../attachments';
 import { RefMarkIcon } from '../board/RefMark';
 import { Icon } from '../icons';
@@ -469,6 +470,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
     },
     [layerKey, on?.scope, on?.from, headMoved, patchHead], // eslint-disable-line react-hooks/exhaustive-deps
   );
+  // Code review's image previews on changed images, read at this diff's own head (reviewImages.ts).
+  const images = useMemo(() => pullReviewImages(layerKey, on?.scope ?? 'layer', on?.from, headMoved ? null : patchHead), [layerKey, on?.scope, on?.from, headMoved, patchHead]);
   const [picked, pick] = useReviewDestination();
   const [posted, setPosted] = useState<{ label: string; url: string; action: string } | null>(null);
   useEffect(() => setPosted(null), [keptId]);
@@ -1166,6 +1169,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
                     viewed={{ files: viewedSet, onToggle: toggleViewed }}
                     fileOpenIn={fileOpenIn}
                     fileContents={fileContents}
+                    {...(images ? { images } : {})}
                     lineNotes={lineNotes}
                     wholeFileNotes={wholeFileNotes}
                     {...(places.anchors.length > 0 ? { contextNotes: places.anchors, renderContextNote: places.renderContextNote } : {})}

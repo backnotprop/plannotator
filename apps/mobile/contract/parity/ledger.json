@@ -21819,6 +21819,34 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-window-api-inbox-messages-id-guide-review-image",
+      "title": "window:/api/inbox/messages/:id/guide/review-image",
+      "surface": [
+        "window:/api/inbox/messages/:id/guide/review-image"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-pulls-review-image",
+      "title": "window:/api/inbox/pulls/review-image",
+      "surface": [
+        "window:/api/inbox/pulls/review-image"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

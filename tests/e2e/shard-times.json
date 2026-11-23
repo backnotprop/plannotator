@@ -185,6 +185,7 @@
   "inbox-restart.spec.ts": 22,
   "inbox-reuse-attachments.spec.ts": 134,
   "inbox-review-comments-phone.spec.ts": 34,
+  "inbox-review-images.spec.ts": 30,
   "inbox-review-jumps.spec.ts": 18,
   "inbox-review-plus-button.spec.ts": 14,
   "inbox-review-selection-bar.spec.ts": 39,

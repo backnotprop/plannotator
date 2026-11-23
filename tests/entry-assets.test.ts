@@ -198,10 +198,12 @@ describe('review entry assets', () => {
       );
     // Shape's board (its Code view is a guided review) is the same kind of lazy module: `#shape-board`. So is the
     // Post to GitHub/GitLab dialog of a pull request's review (the review app's own): `#platform-post`. The PR page's
-    // All files (the review app's tree and file view) rides the reader's chunk, re-exported by GuideReader.tsx.
-    const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx', 'packages/inbox/shape/ShapeBoard.tsx', 'packages/inbox/guide/PlatformPost.tsx', 'packages/inbox/guide/PullRepoParts.tsx', 'packages/inbox/guide/PullChangesTree.tsx', 'packages/inbox/guide/useSemDiffClient.ts'];
+    // All files (the review app's tree and file view) rides the reader's chunk, re-exported by GuideReader.tsx, and so
+    // does code review's image preview (imagePreview.tsx), which only GuideReader.tsx imports.
+    const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx', 'packages/inbox/shape/ShapeBoard.tsx', 'packages/inbox/guide/PlatformPost.tsx', 'packages/inbox/guide/PullRepoParts.tsx', 'packages/inbox/guide/PullChangesTree.tsx', 'packages/inbox/guide/useSemDiffClient.ts', 'packages/inbox/guide/imagePreview.tsx'];
     const eager = walk('packages/inbox').filter((path) => !readers.includes(path) && heavy.test(read(path)));
     expect(eager).toEqual([]);
+    expect(walk('packages/inbox').filter((path) => /from\s+['"][^'"]*\/imagePreview['"]/.test(read(path)))).toEqual(['packages/inbox/guide/GuideReader.tsx']);
     // The window's parts (lazyParts.tsx): fetched in idle time, each through its dynamic import only.
     expect(read('packages/inbox/lazyParts.tsx')).toContain("lazyPart(() => import('#guide-reader'))");
     // The surface's reader (one section per screen) and its diagram engine wait the same way.

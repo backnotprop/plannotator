@@ -56,6 +56,7 @@ import { reviewSourceLine } from './sourceLine';
 import { withChapterMermaid, withOverviewMermaid } from './overviewMermaid';
 import { usePhone } from '../phone';
 import { useCommentPictures } from '../commentPictures';
+import { useImagePreviews } from './imagePreview';
 import type { ImageAttachment } from '@plannotator/ui/types';
 
 /** A line range the review app selects on (Pierre's). */
@@ -124,8 +125,11 @@ export const GuideDiff: FC<
     /** Context notes on this file's lines (review-editor's seam). Absent: none, as before. */
     contextNotes?: AllFilesCodeViewProps['contextNotes'];
     renderContextNote?: AllFilesCodeViewProps['renderContextNote'];
+    /** Code review's image preview and its view menu, for a changed image (imagePreview.tsx). Absent: the binary notice. */
+    renderImagePreview?: AllFilesCodeViewProps['renderImagePreview'];
+    renderImageViewControl?: AllFilesCodeViewProps['renderImageViewControl'];
   }
-> = ({ comments, diffStyleOverride, plainSeparators, viewedFiles, onToggleViewed, fileOpenIn, lineNotes, wholeFileNotes, contextNotes, renderContextNote, ...props }) => {
+> = ({ comments, diffStyleOverride, plainSeparators, viewedFiles, onToggleViewed, fileOpenIn, lineNotes, wholeFileNotes, contextNotes, renderContextNote, renderImagePreview, renderImageViewControl, ...props }) => {
   const savedDiffStyle = useConfigValue('diffStyle');
   const diffStyle = diffStyleOverride ?? savedDiffStyle;
   const diffOverflow = useConfigValue('diffOverflow');
@@ -167,6 +171,8 @@ export const GuideDiff: FC<
       {...(comments?.selectionActions ? { selectionActions: comments.selectionActions } : {})}
       {...(onToggleViewed ? { viewedFiles, onToggleViewed } : {})}
       {...(contextNotes && renderContextNote ? { contextNotes, renderContextNote } : {})}
+      {...(renderImagePreview ? { renderImagePreview } : {})}
+      {...(renderImageViewControl ? { renderImageViewControl } : {})}
     />
   );
 };
@@ -232,12 +238,14 @@ function Reader({
   wholeFileNotes,
   contextNotes,
   renderContextNote,
+  images,
 }: GuideReaderProps) {
   const savedDiffStyle = useConfigValue('diffStyle');
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
   const wholeFiles = useRef<KeptWholeFiles>(new Map());
   const fetchFileContent = useMemo<AllFilesCodeViewProps['fetchFileContent']>(() => (fileContents ? wholeFileReader(fileContents, wholeFiles.current) : undefined), [fileContents]);
   const semDiffClient = useSemDiffClient();
+  const imagePreviews = useImagePreviews(images);
   const walkthrough = useMemo<CodeGuideData>(
     () => ({
       title: snapshot.guide.title,
@@ -475,6 +483,8 @@ function Reader({
       wholeFileNotes?: readonly GuideFileNote[];
       contextNotes?: AllFilesCodeViewProps['contextNotes'];
       renderContextNote?: AllFilesCodeViewProps['renderContextNote'];
+      renderImagePreview?: AllFilesCodeViewProps['renderImagePreview'];
+      renderImageViewControl?: AllFilesCodeViewProps['renderImageViewControl'];
     } => ({
       ...(lineNotes ? { lineNotes: fileNotes(file.path) } : {}),
       ...(wholeFileNotes ? { wholeFileNotes: wholeNotesFor(file.path) } : {}),
@@ -487,6 +497,7 @@ function Reader({
       ...(fetchFileContent && { fetchFileContent }),
       ...(fetchFileContent && semDiffClient && !asItIs && { semDiffClient }),
       ...(fileOpenIn ? { fileOpenIn } : {}),
+      ...imagePreviews,
       ...(viewedSet && viewed ? { viewedFiles: viewedSet, onToggleViewed: viewed.onToggle } : {}),
       ...(comments
         ? {
@@ -505,7 +516,7 @@ function Reader({
           }
         : {}),
     }),
-    [bare, contextNotes, renderContextNote, phone, asItIs, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, semDiffClient, fileOpenIn, lineNotes, fileNotes, wholeFileNotes, wholeNotesFor],
+    [bare, contextNotes, renderContextNote, phone, asItIs, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, semDiffClient, fileOpenIn, imagePreviews, lineNotes, fileNotes, wholeFileNotes, wholeNotesFor],
   );
   // Global comments: the list under the header and its button, while the review takes comments (as line comments).
   // One chosen in the list is shown where the pane lists comments (its folded sheet opens on it).
