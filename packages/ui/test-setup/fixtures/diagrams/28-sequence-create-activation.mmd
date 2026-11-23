@@ -1,0 +1,22 @@
+sequenceDiagram
+  participant A
+  participant B
+  participant E
+  A->>+B: one
+  A->>+B: two
+  A->>+B: three
+  A->>+B: four
+  A->>+B: five
+  A->>+B: six
+  B->>E: deep
+  E->>B: back
+  create participant C
+  B->>C: make
+  create actor D as Dee
+  C->>D: call
+  B-->>-A: r6
+  B-->>-A: r5
+  B-->>-A: r4
+  B-->>-A: r3
+  B-->>-A: r2
+  B-->>-A: r1
