@@ -372,7 +372,8 @@ async function openCard(review: Locator, ref: LineRef, words: string[]) {
 async function openReview(n: number): Promise<Locator> {
   await page.goto(url);
   await page.locator('[data-pulls-nav]').click();
-  await expect(row(n).locator('[data-pull-risk]')).toBeVisible({ timeout: 30_000 });
+  // Ranked: a closed row shows only High's mark inline; every level is on the row itself.
+  await expect(row(n)).toHaveAttribute('data-pulls-risk', /^(high|medium|low)$/, { timeout: 30_000 });
   await row(n).click();
   await page.locator('[data-pulls-open-diff]').click();
   const review = page.locator(`[data-pull-review="${keyOf(n)}"]`);
