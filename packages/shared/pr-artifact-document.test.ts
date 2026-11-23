@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { GithubPRMetadata, GitlabMRMetadata, PRContext, PRRuntime } from './pr-types';
+import type { ForgejoPRMetadata, GithubPRMetadata, GitlabMRMetadata, PRContext, PRRuntime } from './pr-types';
 import {
   fetchPRArtifactContent,
   fetchPRArtifactDocument,
@@ -933,6 +933,317 @@ describe('fetchPRArtifactContent', () => {
       } finally {
         globalThis.fetch = originalFetch;
       }
+    }
+  });
+});
+
+const forgejoMetadata: ForgejoPRMetadata = {
+  platform: 'forgejo',
+  host: 'forgejo.example.com',
+  owner: 'acme',
+  repo: 'widgets',
+  number: 5,
+  title: 'Artifacts',
+  author: 'reviewer',
+  baseBranch: 'main',
+  headBranch: 'feature',
+  baseSha: 'base',
+  headSha: 'head',
+  url: 'https://forgejo.example.com/acme/widgets/pulls/5',
+};
+
+/** Forgejo names uploads with a lowercase UUID. */
+const forgejoUuid = '0b1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4d';
+const otherUuid = 'ffffffff-4f50-4a6b-8c7d-9e0f1a2b3c4d';
+const forgejoOrigin = 'https://forgejo.example.com';
+
+/** A PR whose text names each URL the way Forgejo's editor writes it: a relative path. */
+function forgejoContext(...paths: string[]): PRContext {
+  return { ...context, body: paths.map((path) => `![x](${path})`).join('\n') };
+}
+
+describe('Forgejo artifacts: which URLs are provider artifacts', () => {
+  test('accepts the routes Forgejo serves to a token, written relative as its editor writes them', () => {
+    const paths = [
+      `/attachments/${forgejoUuid}`,
+      `/acme/widgets/attachments/${forgejoUuid}`,
+      '/acme/widgets/raw/branch/main/docs/review.md',
+      '/acme/widgets/raw/tag/v1.0/docs/review.md',
+      '/acme/widgets/raw/commit/0123abc/docs/review.md',
+      '/acme/widgets/src/branch/main/docs/review.md',
+    ];
+    for (const path of paths) {
+      expect(isPRArtifactDocumentUrlAllowed(`${forgejoOrigin}${path}`, forgejoMetadata, forgejoContext(path))).toBe(true);
+    }
+  });
+
+  test('matches the repository name case-insensitively, as Forgejo does', () => {
+    const path = '/ACME/Widgets/raw/branch/main/review.md';
+    expect(isPRArtifactDocumentUrlAllowed(`${forgejoOrigin}${path}`, forgejoMetadata, forgejoContext(path))).toBe(true);
+  });
+
+  test('refuses everything else on the instance, even when the PR text links it', () => {
+    const refused = [
+      // The API: a credentialed GET here would read any repository the token can see.
+      '/api/v1/repos/acme/widgets/raw/review.md',
+      '/api/v1/user',
+      // Session-only routes the token cannot use.
+      `/acme/widgets/issues/5/attachments/${forgejoUuid}`,
+      `/acme/widgets/releases/attachments/${forgejoUuid}`,
+      '/acme/widgets/pulls/5',
+      // Right repository, right ref shape, wrong section: only the section check refuses these.
+      '/acme/widgets/issues/branch/main/review.md',
+      '/acme/widgets/releases/tag/v1/review.md',
+      '/acme/widgets/commits/commit/0123abc/review.md',
+      // Another repository, however it is spelled.
+      '/other/widgets/raw/branch/main/review.md',
+      `/other/widgets/attachments/${forgejoUuid}`,
+      // Not a UUID, a directory, an empty segment, a bare ref.
+      '/attachments/not-a-uuid',
+      `/attachments/${forgejoUuid}/extra`,
+      '/acme/widgets/raw/branch/main/',
+      '/acme/widgets/raw/branch/main/a//b.md',
+      '/acme/widgets/raw/branch',
+      '/acme/widgets/raw/blob/0123abc',
+      '/acme/widgets/raw/main/review.md',
+      // Encoded separators stay in one segment here, but a reverse proxy may decode them and
+      // route the token to the API: an encoded slash, backslash or dot, in either case, and a
+      // double-encoded one.
+      '/acme/widgets/raw/branch/..%2F..%2F..%2F..%2Fapi%2Fv1%2Frepos%2Fvictim%2Fprivate%2Fraw%2FREADME.md',
+      '/acme/widgets/raw/branch/main/..%2f..%2fapi%2fv1%2fuser',
+      '/acme/widgets/raw/branch/main/..%5C..%5Capi',
+      '/acme/widgets/raw/branch/main/..%5capi',
+      '/acme/widgets/raw/branch/%2E%2E/%2e%2e/api/v1/user',
+      '/acme/widgets/raw/branch/main/a%2Eb.md',
+      '/acme/widgets/raw/branch/..%252F..%252Fapi%252Fv1%252Fuser',
+      '/acme/widgets/raw/branch/main\\..\\..\\api\\v1\\user',
+    ];
+    for (const path of refused) {
+      expect(isPRArtifactDocumentUrlAllowed(`${forgejoOrigin}${path}`, forgejoMetadata, forgejoContext(path))).toBe(false);
+    }
+  });
+
+  test('refuses an upload the PR text never names', () => {
+    expect(isPRArtifactDocumentUrlAllowed(
+      `${forgejoOrigin}/attachments/${otherUuid}`,
+      forgejoMetadata,
+      forgejoContext(`/attachments/${forgejoUuid}`),
+    )).toBe(false);
+  });
+
+  test('refuses another host, the same host over http, and credentials in the URL', () => {
+    const path = `/attachments/${forgejoUuid}`;
+    for (const origin of [
+      'https://elsewhere.example.com',
+      'http://forgejo.example.com',
+      'https://forgejo.example.com:8443',
+      'https://user:pass@forgejo.example.com',
+    ]) {
+      expect(isPRArtifactDocumentUrlAllowed(`${origin}${path}`, forgejoMetadata, {
+        ...context,
+        body: `![x](${origin}${path})`,
+      })).toBe(false);
+    }
+  });
+
+  test('gives a PR no artifacts when its own url names another origin than the one it was opened on', () => {
+    const path = `/attachments/${forgejoUuid}`;
+    const spoofed: ForgejoPRMetadata = { ...forgejoMetadata, url: 'https://other-instance.example.com/acme/widgets/pulls/5' };
+    // Name each URL absolutely, so the PR text refers to it and only the origin check can refuse it.
+    for (const origin of [forgejoOrigin, 'https://other-instance.example.com']) {
+      expect(isPRArtifactDocumentUrlAllowed(`${origin}${path}`, spoofed, {
+        ...context,
+        body: `![x](${origin}${path})`,
+      })).toBe(false);
+      // The same URL is accepted when the PR's url and the opened origin agree.
+      expect(isPRArtifactDocumentUrlAllowed(`${forgejoOrigin}${path}`, forgejoMetadata, {
+        ...context,
+        body: `![x](${forgejoOrigin}${path})`,
+      })).toBe(true);
+    }
+  });
+
+  test('an http instance on a port is served over http, not https', () => {
+    const lan: ForgejoPRMetadata = {
+      ...forgejoMetadata,
+      host: 'forgejo.lan:3000',
+      scheme: 'http',
+      url: 'http://forgejo.lan:3000/acme/widgets/pulls/5',
+    };
+    const path = `/attachments/${forgejoUuid}`;
+    expect(isPRArtifactDocumentUrlAllowed(`http://forgejo.lan:3000${path}`, lan, forgejoContext(path))).toBe(true);
+    expect(isPRArtifactDocumentUrlAllowed(`https://forgejo.lan:3000${path}`, lan, forgejoContext(path))).toBe(false);
+  });
+});
+
+describe('Forgejo artifacts: fetching', () => {
+  /** Runs `body` with `globalThis.fetch` replaced; always restores it. */
+  async function withFetch<T>(
+    fake: (input: string, init: RequestInit | undefined) => Response | Promise<Response>,
+    body: () => Promise<T>,
+  ): Promise<T> {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => fake(String(input), init)) as typeof fetch;
+    try {
+      return await body();
+    } finally {
+      globalThis.fetch = original;
+    }
+  }
+
+  function runtimeWith(tokens: Record<string, string>, asked: string[] = []): PRRuntime {
+    return {
+      async runCommand() {
+        throw new Error('a Forgejo artifact must never run a CLI');
+      },
+      forgejoToken: (origin) => {
+        asked.push(origin);
+        return tokens[origin] ?? null;
+      },
+    };
+  }
+
+  const markdown = () => new Response('# Review', { headers: { 'content-type': 'text/markdown' } });
+
+  test('sends the token configured for this origin, as `Authorization: token`, and runs no CLI', async () => {
+    const path = `/acme/widgets/raw/branch/main/review.md`;
+    const asked: string[] = [];
+    let seen: string | null = null;
+    const result = await withFetch((_url, init) => {
+      seen = new Headers(init?.headers).get('authorization');
+      return markdown();
+    }, () => fetchPRArtifactDocument(
+      runtimeWith({ [forgejoOrigin]: 'secret-token' }, asked),
+      forgejoMetadata,
+      forgejoContext(path),
+      `${forgejoOrigin}${path}`,
+    ));
+    expect(result.content).toBe('# Review');
+    expect(seen).toBe('token secret-token');
+    expect(asked).toEqual([forgejoOrigin]);
+  });
+
+  test('without a token configured for the origin the request goes out anonymous', async () => {
+    const path = `/acme/widgets/raw/branch/main/review.md`;
+    let seen: string | null = 'unset';
+    await withFetch((_url, init) => {
+      seen = new Headers(init?.headers).get('authorization');
+      return markdown();
+    }, () => fetchPRArtifactDocument(
+      runtimeWith({ 'https://another.example.com': 'not-for-this-host' }),
+      forgejoMetadata,
+      forgejoContext(path),
+      `${forgejoOrigin}${path}`,
+    ));
+    expect(seen).toBeNull();
+  });
+
+  test('reads a src page as its raw file', async () => {
+    const path = '/acme/widgets/src/branch/main/docs/review.md';
+    const requested: string[] = [];
+    await withFetch((url) => {
+      requested.push(url);
+      return markdown();
+    }, () => fetchPRArtifactDocument(runtimeWith({}), forgejoMetadata, forgejoContext(path), `${forgejoOrigin}${path}`));
+    expect(requested).toEqual([`${forgejoOrigin}/acme/widgets/raw/branch/main/docs/review.md`]);
+  });
+
+  /** The outcome of one fetch: its status on failure, and every request with the token it carried. */
+  async function redirected(path: string, location: string, metadata: ForgejoPRMetadata = forgejoMetadata) {
+    const origin = new URL(metadata.url).origin;
+    const seen: Array<{ url: string; authorization: string | null }> = [];
+    const failure = await withFetch((url, init) => {
+      seen.push({ url, authorization: new Headers(init?.headers).get('authorization') });
+      return url === `${origin}${path}`
+        ? new Response(null, { status: 302, headers: { location } })
+        : markdown();
+    }, () => fetchPRArtifactDocument(
+      runtimeWith({ [origin]: 'secret-token' }),
+      metadata,
+      forgejoContext(path),
+      `${origin}${path}`,
+    ).then(() => null, (error: unknown) => error as Error & { status?: number }));
+    return { failure, seen };
+  }
+
+  test('follows no redirect off the instance, so nothing is fetched from the other host', async () => {
+    const path = `/attachments/${forgejoUuid}`;
+    for (const location of ['https://storage.example.net/blob/abc', 'http://127.0.0.1:9000/bucket/abc', '//forgejo.example.com.evil.example/x']) {
+      const { failure, seen } = await redirected(path, location);
+      expect(failure?.status).toBe(403);
+      expect(seen).toEqual([{ url: `${forgejoOrigin}${path}`, authorization: 'token secret-token' }]);
+    }
+  });
+
+  test('follows a redirect to another artifact route on the same instance, a private-network one included', async () => {
+    const lan: ForgejoPRMetadata = { ...forgejoMetadata, host: '192.168.1.20:3000', scheme: 'http', url: 'http://192.168.1.20:3000/acme/widgets/pulls/5' };
+    const path = '/acme/widgets/raw/branch/main/old.md';
+    const { failure, seen } = await redirected(path, '/acme/widgets/raw/branch/main/new.md', lan);
+    expect(failure).toBeNull();
+    expect(seen).toEqual([
+      { url: `http://192.168.1.20:3000${path}`, authorization: 'token secret-token' },
+      { url: 'http://192.168.1.20:3000/acme/widgets/raw/branch/main/new.md', authorization: 'token secret-token' },
+    ]);
+  });
+
+  test('a redirect to a src page on the same instance is read as its raw file', async () => {
+    const path = '/acme/widgets/raw/branch/main/old.md';
+    const { failure, seen } = await redirected(path, '/acme/widgets/src/branch/main/new.md');
+    expect(failure).toBeNull();
+    expect(seen.map((request) => request.url)).toEqual([
+      `${forgejoOrigin}${path}`,
+      `${forgejoOrigin}/acme/widgets/raw/branch/main/new.md`,
+    ]);
+  });
+
+  test('refuses a same-instance redirect to a route that is not an artifact, such as the API', async () => {
+    const path = `/attachments/${forgejoUuid}`;
+    const { failure, seen } = await redirected(path, '/api/v1/user');
+    expect(failure?.status).toBe(403);
+    expect(seen).toHaveLength(1);
+  });
+
+  test('a redirect to the sign-in page says a token is needed, and is not followed', async () => {
+    const path = `/attachments/${forgejoUuid}`;
+    const { failure, seen } = await redirected(path, '/user/login?redirect_to=%2Fattachments');
+    expect(failure?.status).toBe(401);
+    expect(failure?.message).toContain('forgejoTokens');
+    expect(seen).toHaveLength(1);
+  });
+
+  test('a configured token that is refused is named as refused, not as missing', async () => {
+    const path = `/attachments/${forgejoUuid}`;
+    for (const status of [401, 403]) {
+      const failure = await withFetch(
+        () => new Response('no', { status }),
+        () => fetchPRArtifactDocument(
+          runtimeWith({ [forgejoOrigin]: 'stale-token' }),
+          forgejoMetadata,
+          forgejoContext(path),
+          `${forgejoOrigin}${path}`,
+        ).then(() => null, (error: unknown) => error as Error & { status?: number }),
+      );
+      expect(failure?.status).toBe(401);
+      expect(failure?.message).toContain(`the token for ${forgejoOrigin} was refused`);
+      expect(failure?.message).not.toContain('add a token');
+      expect(failure?.message).not.toContain('stale-token');
+    }
+  });
+
+  test('a refused token says where to configure one, not which CLI to log in with', async () => {
+    const path = `/attachments/${forgejoUuid}`;
+    for (const status of [401, 403]) {
+      const failure = await withFetch(
+        () => new Response('no', { status }),
+        () => fetchPRArtifactDocument(runtimeWith({}), forgejoMetadata, forgejoContext(path), `${forgejoOrigin}${path}`).then(
+          () => null,
+          (error: unknown) => error as Error & { status?: number },
+        ),
+      );
+      expect(failure?.status).toBe(401);
+      expect(failure?.message).toContain('forgejoTokens');
+      expect(failure?.message).toContain(forgejoOrigin);
+      expect(failure?.message).not.toMatch(/glab|gh auth/);
     }
   });
 });
