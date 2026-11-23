@@ -73,11 +73,17 @@ export function replyResumeOf(block: InboxComposeLaunch | null | undefined, thre
   };
 }
 
+/** The reply list's start row and Resume row for a thread, each null when it can't be offered (replyStartOf, replyResumeOf),
+ * and whether the thread's machine says "Replies to an ended session resume it" (`resume_ended` on its launch block). */
+export function replyStartsOf(block: InboxComposeLaunch | null | undefined, thread: InboxThread, asking: AskingSession | null, asleep = false): { start: ReplyStart | null; resume: ReplyStart | null; resumeEnded: boolean } {
+  return { start: replyStartOf(block, thread, asking, asleep), resume: replyResumeOf(block, thread, asking, asleep), resumeEnded: block?.resume_ended === true };
+}
+
 /**
  * The session the reply box follows: the Resume row's id in place of the ended session it resumes, while the thread's
- * machine says "Replies to an ended session resume it" (`resume_ended` on its launch block); else `followed` as it is.
- * `ended`: the session the ended note is about, or null while none has ended.
+ * machine says "Replies to an ended session resume it" (`on`); else `followed` as it is. `ended`: the session the ended
+ * note is about, or null while none has ended.
  */
-export function resumesByDefault(block: InboxComposeLaunch | null | undefined, resume: ReplyStart | null, followed: string | null, ended: string | null): string | null {
-  return block?.resume_ended && resume && ended !== null && followed === ended && resume.row.start?.resume === ended ? resume.row.session : followed;
+export function resumesByDefault(on: boolean, resume: ReplyStart | null, followed: string | null, ended: string | null): string | null {
+  return on && resume && ended !== null && followed === ended && resume.row.start?.resume === ended ? resume.row.session : followed;
 }

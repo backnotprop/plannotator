@@ -131,7 +131,7 @@ import { ReplyRecipientControl } from '../parts/ReplyRecipientControl';
 import { aimable, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, sessionFolder, toggleRecipient, type RecipientRow } from '../replyRecipients';
 import { replyRecipientList } from '../thread/recipientList';
 import { followedSession, useReplyAim, wordsHeldAt, wordsSession } from '../thread/replyAim';
-import { isStartRow, replyResumeOf, replyStartOf, resumesByDefault } from '../thread/replyStart';
+import { isStartRow, replyStartsOf, resumesByDefault } from '../thread/replyStart';
 import { useReplyLaunchBlock } from '../data/replyLaunch';
 import { coverVoice, useThreadVoice } from '../thread/useThreadVoice';
 import { useLateVoice } from '../thread/useLateVoice';
@@ -1049,10 +1049,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** The session the ended note and the choice are about: the words', else another this Send answers that ended. */
   const asking = endedOther ?? wordsAsking;
   const askerEnded = wordsEnded || endedOther !== null;
-  const replyBlock = useReplyLaunchBlock(!resolved && askerEnded, machine);
-  const replyStart = replyStartOf(replyBlock, thread, asking, !!machine && machine.state !== 'online');
-  /** The Resume row: the ended session itself, started again (an agent that resumes a session the Inbox never started). */
-  const replyResume = replyResumeOf(replyBlock, thread, asking, !!machine && machine.state !== 'online');
+  const { start: replyStart, resume: replyResume, resumeEnded } = replyStartsOf(useReplyLaunchBlock(!resolved && askerEnded, machine), thread, asking, !!machine && machine.state !== 'online');
   /** Each session whose replies the choice sends on: every one of this Send's sessions that ended. */
   const endedSends = new Set([...(wordsEnded && wordsAsking ? [wordsAsking.session] : []), ...otherSessions.filter((s) => !resolved && endedOthers.has(s.session)).map((s) => s.session)]);
   // Tags (approval "inbox-tag-agents"): who the person can tag with `@`, read while the reply box is open. In a
@@ -1156,12 +1153,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     jumpToMessage: (messageId) => jumpTo({ kind: 'message', messageId }),
   });
   // The choice (thread/replyAim.ts): the first answers its own latest message, the rest ride as tags. It follows the
-  // agent that wrote last until the box holds something or the person picks; kept with the draft (its `recipients`).
-  // With the thread's machine set to resume an ended session (Settings → Agents), the Resume row leads in its place.
-  const followed = followedSession(thread, rcptAgents, rcptDefault);
-  const follow = resumesByDefault(replyBlock, replyResume, followed, askerEnded ? (asking?.session ?? null) : null);
+  // agent that wrote last (or the Resume row in an ended one's place, `resumesByDefault`) until the box holds something or the person picks; kept with the draft.
   const rcptAim = useReplyAim({
-    threadId: thread.thread_id, active: pillActive, boxOpen: box.open, boxOpenNow: () => boxRef.current.open, follow, text: replyText,
+    threadId: thread.thread_id, active: pillActive, boxOpen: box.open, boxOpenNow: () => boxRef.current.open, follow: resumesByDefault(resumeEnded, replyResume, followedSession(thread, rcptAgents, rcptDefault), askerEnded ? (asking?.session ?? null) : null), text: replyText,
     carries: replyFiles.files.length > 0 || records.length > 0 || thread.messages.some(answersItself) || [...pending.values()].some(Boolean) || voice.busy || quote !== null || (!box.open && (keptWords !== '' || draftPastes > 0)), saved: replyDraft.draft?.recipients, hasDraft: !!replyDraft.draft,
   });
   const { listOpen: rcptOpen, setListOpen: setRcptOpen } = rcptAim;

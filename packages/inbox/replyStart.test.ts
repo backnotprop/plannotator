@@ -71,10 +71,10 @@ test('Resume: the ended session itself, for an agent that adopts it, in the same
 test('resume by default: the Resume row leads in the ended session\'s place only with the machine\'s switch on, and only for that session', () => {
   const adopting = block({ agents: [{ agent: 'opencode', name: 'OpenCode', adopts: true }] });
   const resume = replyResumeOf(adopting, thread, asking('opencode'))!;
-  expect(resumesByDefault({ ...adopting, resume_ended: true }, resume, 'ses_asker', 'ses_asker')).toBe('resume:ses_asker');
+  expect(resumesByDefault(true, resume, 'ses_asker', 'ses_asker')).toBe('resume:ses_asker');
   // Switch off, nothing ended, the reply follows another session, or no Resume row: the followed session as it is.
-  expect(resumesByDefault(adopting, resume, 'ses_asker', 'ses_asker')).toBe('ses_asker');
-  expect(resumesByDefault({ ...adopting, resume_ended: true }, resume, 'ses_asker', null)).toBe('ses_asker');
-  expect(resumesByDefault({ ...adopting, resume_ended: true }, resume, 'ses_live', 'ses_asker')).toBe('ses_live');
-  expect(resumesByDefault({ ...adopting, resume_ended: true }, null, 'ses_asker', 'ses_asker')).toBe('ses_asker');
+  expect(resumesByDefault(false, resume, 'ses_asker', 'ses_asker')).toBe('ses_asker');
+  expect(resumesByDefault(true, resume, 'ses_asker', null)).toBe('ses_asker');
+  expect(resumesByDefault(true, resume, 'ses_live', 'ses_asker')).toBe('ses_live');
+  expect(resumesByDefault(true, null, 'ses_asker', 'ses_asker')).toBe('ses_asker');
 });
