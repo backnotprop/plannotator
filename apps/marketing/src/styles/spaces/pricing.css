@@ -16,21 +16,20 @@ html:not(.light) .spp{--quiet:#7d84b3}
 .spp h1{line-height:1.22}
 .spp .pp-lede{margin:26px 0 0;font-size:18px;line-height:1.5;color:var(--soft);letter-spacing:-.005em}
 .spp .pp-lede span{display:block}
-.spp .pp-pick{grid-column:2 / -1;margin-bottom:4px}
+.spp .pp-pick{grid-column:1 / -1;margin-bottom:4px}
 .spp .pp-sw{display:inline-flex;padding:4px;background:var(--stage)}
 .spp .pp-sw button{height:42px;margin:0;padding:0 18px;border:0;border-radius:0;background:none;font:500 15px/1 var(--sans);color:var(--soft);cursor:pointer;-webkit-appearance:none;appearance:none}
 .spp .pp-sw button[aria-checked="true"]{background:var(--paper);color:var(--p-ink);box-shadow:0 0 0 1px var(--p-line)}
 .spp .pp-sw button:focus-visible{outline:2px solid var(--iris);outline-offset:-2px}
 .spp .pp-saving{margin:12px 0 0;font-size:15px;line-height:normal;color:var(--soft)}
 
-.spp .pp-cards{position:relative;z-index:1;grid-column:1 / -1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;margin-top:48px}
+.spp .pp-cards{position:relative;z-index:1;grid-column:1 / -1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:20px;margin-top:48px}
 .spp .pp-card{position:relative;padding:28px 28px 30px;background:var(--paper);color:var(--p-ink);box-shadow:var(--shadow);font-size:14px;line-height:21px;letter-spacing:-.004em}
 .spp .pp-name{margin:0;font:600 18px/1 var(--sans);letter-spacing:-.01em}
 .spp .pp-price{margin:22px 0 0;font:500 48px/1 var(--sans);letter-spacing:-.045em;white-space:nowrap}
 .spp .pp-price b{font-weight:500}
 .spp .pp-said{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .spp .pp-price .pp-per{font-size:17px;font-weight:400;letter-spacing:-.005em;color:var(--p-soft);margin-left:4px}
-.spp .pp-line{margin:14px 0 0;color:var(--p-soft);font-size:15px;line-height:21px}
 .spp .pp-card .act{display:flex;width:100%;margin-top:24px;justify-content:center}
 .spp .pp-card .act.qt{font-weight:600}
 .spp .pp-card ul{list-style:none;margin:26px 0 0;padding:0;font-size:15px;line-height:21px}
@@ -68,8 +67,7 @@ html:not(.light) .spp .pp-card li::before{background:var(--violet)}
   .spp .pp-close .act{margin-top:24px}
 }
 @media (min-width:1024px) and (max-width:1180px){
-  .spp .pp-card{padding:24px 22px 26px}
-  .spp .pp-price{font-size:42px}
+  .spp .pp-cards{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media (max-width:1023px){
   .spp .pp-cards{grid-template-columns:1fr}

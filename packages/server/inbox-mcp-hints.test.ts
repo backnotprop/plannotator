@@ -30,7 +30,7 @@ afterEach(() => {
 
 const PR = "https://github.com/acme/api/pull/12";
 const ask = (kind: string, ...lines: string[]) => [`:::${kind}`, "Which retry policy?", "", ...lines, ":::"].join("\n");
-const BARE = ask("question", "- [ ] Fixed delay", "- [ ] Backoff");
+const BARE = ask("question", "- [ ] Fixed delay", "- [ ] Backoff", "- [ ] Backoff with jitter");
 const keys = (body: string, known?: InboxKnownPulls) => pullsNamedInBody(body, null, known).map((ref) => ref.key);
 /** The approved line, word for word. */
 const nudge = (label: string, add: string) => `You named ${label}, which is on no thread's row. If it is this work's PR, attach it: thread_pulls with add ["${add}"].`;
@@ -87,16 +87,25 @@ test("a PR's URL or a GitLab short ref in the agent's words is read; code, quote
   expect(keys("PR#13 is up.", knowing("github.com/acme/api#13"))).toEqual(["github.com/acme/api#13"]);
 });
 
-test("a question counts with two or more choices and no pros, cons or prototype anywhere", () => {
+test("a question counts with three or more choices and no pros, cons, prototype or scenario table anywhere", () => {
+  const three = ["- [ ] Fixed delay", "- [ ] Backoff", "- [ ] Backoff with jitter"];
   expect(questionWithBareOptions(BARE)).toBe(true);
-  expect(questionWithBareOptions(ask("question-multi", "- [ ] Yes", "- [ ] No"))).toBe(true);
-  expect(questionWithBareOptions(ask("question", "- [ ] Fixed delay", "    Pros: simple", "- [ ] Backoff"))).toBe(false);
-  expect(questionWithBareOptions(ask("question", "- [ ] Fixed delay", "    Cons: thundering herd", "- [ ] Backoff"))).toBe(false);
-  expect(questionWithBareOptions(ask("question", "- [ ] Fixed delay", "    Prototype: proto/a.html", "- [ ] Backoff"))).toBe(false);
-  expect(questionWithBareOptions(ask("question", "- [ ] Fixed delay", "- [ ] Backoff", "Prototype: proto/both.html"))).toBe(false);
+  expect(questionWithBareOptions(ask("question-multi", "- [ ] Yes", "- [ ] No", "- [ ] Later"))).toBe(true);
+  // Two choices (a yes/no) no longer count (approval "question-scenario-table", 2026-11-23).
+  expect(questionWithBareOptions(ask("question", "- [ ] Fixed delay", "- [ ] Backoff"))).toBe(false);
+  expect(questionWithBareOptions(ask("question-multi", "- [ ] Yes", "- [ ] No"))).toBe(false);
+  expect(questionWithBareOptions(ask("question", three[0]!, "    Pros: simple", three[1]!, three[2]!))).toBe(false);
+  expect(questionWithBareOptions(ask("question", three[0]!, "    Cons: thundering herd", three[1]!, three[2]!))).toBe(false);
+  expect(questionWithBareOptions(ask("question", three[0]!, "    Prototype: proto/a.html", three[1]!, three[2]!))).toBe(false);
+  expect(questionWithBareOptions(ask("question", ...three, "Prototype: proto/both.html"))).toBe(false);
+  // A scenario table already compares the options.
+  const table = ["", "| Situation | Fixed delay | Backoff | Backoff with jitter |", "| --- | --- | --- | --- |", "| The API is down an hour | Hammers it — every 5 s | Backs off — fewer calls | Backs off — spread out |"];
+  expect(questionWithBareOptions(ask("question", ...three, ...table))).toBe(false);
+  // A table that names no choice is context: the question still counts.
+  expect(questionWithBareOptions(ask("question", ...three, ...table.map((l) => l.replace("Fixed delay", "Something else"))))).toBe(true);
   expect(questionWithBareOptions(ask("question", "- [ ] Only this"))).toBe(false);
   expect(questionWithBareOptions(ask("question-text"))).toBe(false);
-  expect(questionWithBareOptions([":::action", "Rotate the key", "- [ ] In the console", "- [ ] With the CLI", ":::"].join("\n"))).toBe(false);
+  expect(questionWithBareOptions([":::action", "Rotate the key", "- [ ] In the console", "- [ ] With the CLI", "- [ ] Both", ":::"].join("\n"))).toBe(false);
 });
 
 test("a bare #N the Inbox knows as the project's PR is named once per thread; the same thread again is quiet, another thread hears it; an issue's number never", async () => {
