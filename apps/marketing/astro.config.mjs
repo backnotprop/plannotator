@@ -38,6 +38,9 @@ export default defineConfig({
         !page.startsWith('https://plannotator.ai/docs/') &&
         // A help page the installer opens, not one to find in search (noindex).
         page !== 'https://plannotator.ai/plugin-update/' &&
+        // Reached only by its address for now (noindex). Remove this, and the page's
+        // noindex in src/pages/workspaces/pricing.astro, when Pricing joins the header.
+        page !== 'https://plannotator.ai/workspaces/pricing/' &&
         (!page.startsWith('https://plannotator.ai/blog/') ||
           indexableBlogPages.has(page)),
     }),
