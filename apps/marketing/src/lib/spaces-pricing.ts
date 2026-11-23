@@ -29,7 +29,7 @@ export const PRICED_PLANS: Readonly<Record<PricedPlan, PricedPlanFacts>> = {
 
 export const YEARLY_SAVING = 'one month free, 8 percent off';
 export const REFUND_WINDOW_DAYS = 14;
-export const UNDER_CARDS = 'Unlimited agents';
+export const UNLIMITED_FACTS = ['Unlimited agents', 'Unlimited guests'] as const;
 const AGENTS_UNLIMITED_WORDS = 'Agents are unlimited and free on every plan, and do not count as members.';
 
 export const INTERVAL_WORDS: Readonly<Record<BillingInterval, string>> = {

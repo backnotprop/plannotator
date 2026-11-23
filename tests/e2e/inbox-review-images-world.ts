@@ -3,7 +3,8 @@
  * binary (its own HOME, data folder and fake `gh` and `glab` first on PATH,
  * every name invented), a teammate's pull request that changes three pictures
  * (one modified, one added, one deleted), and an agent's guided review of the
- * same real `git diff`.
+ * same real `git diff`; then a second guided review, of the next commit, that
+ * only renames a picture (`similarity index 100%`, so its patch names no blob).
  *
  * The pull request's head and base are the scratch repository's own commits,
  * and the repository is the project the review was sent from, so the Inbox
@@ -28,11 +29,16 @@ export const MODIFIED = 'assets/chart.png';
 export const ADDED = 'assets/badge.png';
 export const DELETED = 'assets/old-banner.png';
 export const PULL_KEY = 'github.com/northwind/web-app#815';
+/** A picture the second guide only moves: its contents unchanged. */
+export const RENAMED_FROM = 'assets/logo.png';
+export const RENAMED = 'brand/logo.png';
 
 export interface ImagesWorld {
   url: string;
   thread: string;
   message: string;
+  /** The guided review of the rename alone (the images world's; the Markdown world has none). */
+  renameThread?: string;
   agent: SimAgent;
 }
 
@@ -103,6 +109,7 @@ const CHART_BEFORE = picture(360, 230, PAPER, [...axis, ...bars([60, 90, 120, 80
 const CHART_AFTER = picture(360, 230, PAPER, [...axis, ...bars([60, 110, 150, 80, 170], BLUE), { x: 264, y: 22, w: 76, h: 18, color: ORANGE }]);
 const BADGE = picture(160, 160, [255, 255, 255], [{ x: 16, y: 16, w: 128, h: 128, color: GREEN }, { x: 52, y: 52, w: 56, h: 56, color: [255, 255, 255] }]);
 const BANNER = picture(420, 120, [36, 40, 56], [{ x: 24, y: 40, w: 220, h: 18, color: [220, 220, 230] }, { x: 24, y: 70, w: 140, h: 12, color: ORANGE }]);
+const LOGO = picture(120, 120, PAPER, [{ x: 20, y: 20, w: 80, h: 80, color: BLUE }, { x: 44, y: 44, w: 32, h: 32, color: ORANGE }]);
 
 // --- The repository, the forge, the Inbox ------------------------------------------------------
 
@@ -123,6 +130,8 @@ function change(parent: string): { project: string; patch: string; head: string;
   writeFileSync(join(project, 'README.md'), 'A scratch project.\n');
   writeFileSync(join(project, MODIFIED), CHART_BEFORE);
   writeFileSync(join(project, DELETED), BANNER);
+  // In the base and untouched by the pull request: only the second guide's commit moves it.
+  writeFileSync(join(project, RENAMED_FROM), LOGO);
   git(project, 'add', '-A');
   git(project, 'commit', '-q', '-m', 'base');
   writeFileSync(join(project, MODIFIED), CHART_AFTER);
@@ -198,7 +207,7 @@ const GUIDE = {
 };
 
 export async function startWorld(browser: Browser): Promise<ImagesWorld> {
-  return startPullWorld(browser, 'plannotator-review-images-e2e-', change, GUIDE, 'Three pictures to look at.');
+  return startPullWorld(browser, 'plannotator-review-images-e2e-', change, GUIDE, 'Three pictures to look at.', sendRenameGuide);
 }
 
 /**
@@ -212,6 +221,7 @@ export async function startPullWorld(
   made: (parent: string) => { project: string; patch: string; head: string; base: string },
   guide: { title: string; intent: string; sections: unknown[] },
   body: string,
+  next?: (agent: SimAgent, project: string) => Promise<Partial<ImagesWorld>>,
 ): Promise<ImagesWorld> {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch(prefix);
@@ -248,7 +258,19 @@ export async function startPullWorld(
   await context.close();
   const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const review = await agent.submitGuide({ project_path: project, subject: guide.title, guide, patch, body, review: true } as never);
-  return { url, thread: String(review.thread_id), message: String(review.message_id), agent };
+  return { url, thread: String(review.thread_id), message: String(review.message_id), agent, ...(next ? await next(agent, project) : {}) };
+}
+
+/** The images world's second guided review: the next commit only moves the logo, and its guide records that commit as the one it was written at. */
+async function sendRenameGuide(agent: SimAgent, project: string): Promise<Partial<ImagesWorld>> {
+  mkdirSync(join(project, 'brand'), { recursive: true });
+  git(project, 'mv', RENAMED_FROM, RENAMED);
+  git(project, 'commit', '-q', '-m', 'move the logo');
+  const renamePatch = git(project, 'diff', '-M', 'HEAD~1', 'HEAD');
+  expect(renamePatch).toContain('similarity index 100%');
+  const renameGuide = { title: 'Move the logo', intent: 'The logo moves to the brand folder.', sections: [{ title: 'The logo', overview: 'Same picture, new folder.', diffs: [{ file: RENAMED, summary: 'Moved.' }] }] };
+  const rename = await agent.submitGuide({ project_path: project, subject: 'Move the logo', guide: renameGuide, patch: renamePatch, body: 'One picture moves.', review: true } as never);
+  return { renameThread: String(rename.thread_id) };
 }
 
 export async function stopWorld(world: ImagesWorld | undefined): Promise<void> {
@@ -272,10 +294,10 @@ export async function openPull(world: ImagesWorld, page: Page, shown = MODIFIED)
   await expect(page.locator(`[data-guide-file-shell="${shown}"]`)).toBeVisible({ timeout: 30_000 });
 }
 
-export async function openReview(world: ImagesWorld, page: Page, shown = MODIFIED): Promise<void> {
-  await page.goto(`${world.url}#thread=${world.thread}`);
+export async function openReview(world: ImagesWorld, page: Page, thread = world.thread, file = MODIFIED): Promise<void> {
+  await page.goto(`${world.url}#thread=${thread}`);
   await clearSidebarPeek(page);
   await page.locator('[data-review-card]').getByRole('button', { name: /review/i }).first().click();
   await expect(page.locator('[data-review-message]')).toBeVisible();
-  await expect(page.locator(`[data-guide-file-shell="${shown}"]`)).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(`[data-guide-file-shell="${file}"]`)).toBeVisible({ timeout: 30_000 });
 }

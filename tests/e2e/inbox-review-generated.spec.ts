@@ -118,7 +118,7 @@ test('a phone at 390: the card fits the screen, its rows stacked', async ({ brow
 test("a guided review: the same card and reason, read from the message's own route", async ({ browser }) => {
   const { context, page } = await windowAt(browser, 1280, 900, false);
   const reads = watchReads(page);
-  await openReview(world, page, MANIFEST);
+  await openReview(world, page, world.thread, MANIFEST);
   const card = cardOf(page, MANIFEST);
   await card.scrollIntoViewIfNeeded();
   await expect(card).toBeVisible({ timeout: 30_000 });

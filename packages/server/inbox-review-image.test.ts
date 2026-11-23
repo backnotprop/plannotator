@@ -14,7 +14,8 @@
  *  - the byte cap not holding;
  *  - a stale snapshot (another head, another message) answered;
  *  - a guide's side served from anything other than the blob its patch names
- *    (a working tree or a PR that moved on).
+ *    (a working tree or a PR that moved on), or, for a pure rename that names
+ *    none, from anything but the guide's own commit.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from "node:fs";
@@ -166,6 +167,43 @@ describe("a guided review's image", () => {
     expect(bytesOf((await read("img/far.png", "new", { patch: far, forge })).body).equals(png("far"))).toBe(true);
     answer = png("pushed since");
     expect((await read("img/far.png", "new", { patch: far, forge })).status).toBe(404);
+  });
+
+  test("a pure rename names no blob: both sides are the file at the guide's commit, under either name; nothing without one", async () => {
+    const dir = join(scratch, "renames");
+    mkdirSync(join(dir, "assets"), { recursive: true });
+    const inDir = (...args: string[]) => {
+      const run = Bun.spawnSync(["git", "-c", "user.name=Ada Novak", "-c", "user.email=ada@example.com", "-c", "commit.gpgsign=false", ...args], { cwd: dir, env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1" } });
+      if (run.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${run.stderr.toString()}`);
+      return run.stdout.toString();
+    };
+    inDir("init", "-q", "-b", "main");
+    writeFileSync(join(dir, "assets/logo.png"), png("logo"));
+    inDir("add", "-A");
+    inDir("commit", "-q", "-m", "logo");
+    inDir("mv", "assets/logo.png", "assets/brand-logo.png");
+    inDir("commit", "-q", "-m", "rename");
+    const head = inDir("rev-parse", "HEAD").trim();
+    const committed = inDir("diff", "-M", "HEAD~1", "HEAD");
+    expect(committed).toContain("similarity index 100%");
+    expect(committed).not.toMatch(/^index /m);
+    const at = (path: string, side: "old" | "new", rename: string, pinned: string | null) =>
+      guideReviewImage({ patch: rename, messageId: MESSAGE, root: dir, revision: pinned, params: ask(path, side, MESSAGE) });
+    for (const side of ["old", "new"] as const) {
+      const answer = await at("assets/brand-logo.png", side, committed, head);
+      expect(answer.status).toBe(200);
+      expect(bytesOf(answer.body).equals(png("logo"))).toBe(true);
+      // No commit recorded, or one that is not a commit id: nothing is read.
+      expect([(await at("assets/brand-logo.png", side, committed, null)).status, (await at("assets/brand-logo.png", side, committed, "HEAD")).status]).toEqual([404, 404]);
+    }
+    // A rename not committed yet: the guide's commit has the old name only, and both sides read it.
+    inDir("mv", "assets/brand-logo.png", "assets/mark.png");
+    const staged = inDir("diff", "-M", "--cached", "HEAD");
+    expect(staged).toContain("similarity index 100%");
+    for (const side of ["old", "new"] as const) expect(bytesOf((await at("assets/mark.png", side, staged, head)).body).equals(png("logo"))).toBe(true);
+    // A rename that changed the picture, in a patch rebuilt without its `index` line: not taken for a pure one.
+    const edited = staged.replace("similarity index 100%", "similarity index 90%");
+    expect((await at("assets/mark.png", "new", edited, head)).status).toBe(404);
   });
 });
 

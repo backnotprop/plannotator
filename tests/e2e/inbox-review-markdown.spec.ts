@@ -138,7 +138,7 @@ test('a phone at 390: the rendered README fits the screen, its menu on the heade
 test("a guided review: the same rendered README, its pictures from the message's own route", async ({ browser }) => {
   const { context, page } = await windowAt(browser, 1280, 900, false);
   const reads = watchReads(page);
-  await openReview(world, page, README);
+  await openReview(world, page, world.thread, README);
   await chooseView(page, 'changes');
   await rendered(page, 'diff', 1);
   expect(reads.review).toEqual([]);
