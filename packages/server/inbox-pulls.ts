@@ -83,7 +83,9 @@ import { handleRepoFileRequest, handleRepoFilesRequest, type HandlerResult, type
 import { readRepoWorkingTreeFile } from "@plannotator/shared/repo-files-node";
 import { childEnv } from "@plannotator/shared/child-env";
 import { killGitTree, runtime as gitRuntime, trackIsolatedGitGroup } from "./git";
-import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, refRunnerKill, type RefCli, type RefCommandResult, type RefRunner } from "./ref-cards";
+import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readCliHosts, refCliRunner, refErrorOf, refRunnerKill, type RefCli, type RefCommandResult, type RefRunner } from "./ref-cards";
+import { cliAnsweredPlainly, createSignedKeep } from "./inbox-pull-signed-keep";
+import { createDepartedPulls } from "./inbox-pull-departed";
 
 /** A host's answer is fresh this long. */
 export const INBOX_PULLS_FRESH_MS = 60_000;
@@ -1062,7 +1064,7 @@ export function mergeListedPulls(own: readonly InboxPull[], others: readonly Inb
 /** A local clone's read of one object (`<sha>:<path>`) as bytes, capped (`readGitObjectBytes`). */
 export type PullFileBytesGitReader = (root: string, spec: string, maxBytes: number) => Promise<FileBytesRead>;
 
-export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffRunner; gitRead?: PullFileGitReader; gitBytes?: PullFileBytesGitReader; gitRun?: PullGitRunner; now?: () => number } = {}): InboxPulls {
+export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffRunner; gitRead?: PullFileGitReader; gitBytes?: PullFileBytesGitReader; gitRun?: PullGitRunner; now?: () => number; hidden?: (key: string) => boolean } = {}): InboxPulls {
   const run = options.run ?? refCliRunner;
   const gitRun = options.gitRun ?? createPullGitRunner();
   const diffRun = options.diffRun ?? (options.run ? cappedDiffRunner(options.run) : pullDiffCliRunner);
@@ -1076,6 +1078,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   /** GitHub's GraphQL budget nearly spent: list reads of the host wait until `resetAt` (diffs do not). */
   const budgetHold = new Map<string, number>();
   const signed =new Map<RefCli, { at: number; ttl: number; set: Promise<Set<string>>; missing: boolean }>();
+  const signedKeep = createSignedKeep(now);
   const diffs = new Map<string, { at: number; answer: InboxPullDiffAnswer }>();
   const diffsInFlight = new Map<string, Promise<InboxPullDiffAnswer>>();
   const readHeads = new Map<string, string>();
@@ -1167,6 +1170,9 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   /** The last everywhere list's PRs and repositories (the Pull requests page): `find` and All files take them too. */
   let knownWide = new Map<string, InboxPull>();
   let lastWideRepos = new Set<string>();
+  /** The PRs each list (Reviews', the Pull requests page's) stopped naming, for an open page's reads (`hidden`: the person hid it). */
+  const departed = createDepartedPulls({ now, hidden: options.hidden });
+  const departedWide = createDepartedPulls({ now, hidden: options.hidden });
   const findKnown = (key: string): InboxPull | undefined => known.get(key) ?? knownWide.get(key);
   /** The stack a listed PR is a layer of, from the list that names it (Reviews' first, as `findKnown`). */
   const stackOf = (pull: InboxPull) => {
@@ -1198,6 +1204,21 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   };
   /** A repository one of the last lists (scoped or everywhere) showed. */
   const listedRepo = (pull: InboxPull): boolean => lastRepos.has(inboxPullRepoKey(pull.host, pull.repo)) || lastWideRepos.has(inboxPullRepoKey(pull.host, pull.repo));
+  /**
+   * A PR that left the list, for the reads of a page still open on it (never `find`, never a list): Reviews' while its
+   * repository is still a project's, the Pull requests page's while its host is still asked.
+   */
+  const departedOf = (key: string): InboxPull | undefined => {
+    const own = departed.get(key);
+    if (own && lastRepos.has(inboxPullRepoKey(own.host, own.repo))) return own;
+    return departedWide.get(key);
+  };
+  /** The PR a diff, details or file read is for: one the last lists name in a repository they showed, or one that left. */
+  const readable = (key: string): InboxPull | undefined => {
+    const listed = findKnown(key);
+    if (listed) return listedRepo(listed) ? listed : undefined;
+    return departedOf(key);
+  };
   let avatars = new Map<string, Record<string, string>>();
   const listings = new Map<string, Promise<RepoFileListing | null>>();
   // A diff's base commit, by its head (a pushed head has its own), and each file's text by commit: a commit's file
@@ -1223,17 +1244,23 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     if (hit && now() - hit.at < hit.ttl) return hit.set;
     // The same calls `readSignedInHosts` makes, watched: a CLI that is not installed is told apart from one signed out.
     const entry = { at: now(), ttl: REF_AUTH_HOSTS_MS, set: Promise.resolve(new Set<string>()), missing: false };
+    const results: RefCommandResult[] = [];
     const watched: RefRunner = async (c, args, env) => {
       const result = await run(c, args, env);
+      results.push(result);
       if (refErrorOf(c, result) === "cli_missing") entry.missing = true;
       return result;
     };
-    const set = readSignedInHosts(watched, cli).catch(() => new Set<string>());
+    // A host signed in a moment ago whose check failed now stays signed in for a while (inbox-pull-signed-keep.ts).
+    const set = readCliHosts(watched, cli)
+      .then((found) => signedKeep.settle(cli, found, cliAnsweredPlainly(results)))
+      .catch(() => signedKeep.settle(cli, null, false))
+      .then(({ set: hosts, kept }) => {
+        if (hosts.size === 0 || kept) entry.ttl = REF_FAILURE_MS;
+        return hosts;
+      });
     entry.set = set;
     signed.set(cli, entry);
-    void set.then((found) => {
-      if (found.size === 0) entry.ttl = REF_FAILURE_MS;
-    });
     return set;
   };
 
@@ -1258,7 +1285,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     const heads = new Set<string>();
     const read = readHeads.get(key);
     if (read) heads.add(read);
-    const listed = findKnown(key)?.head_sha;
+    const listed = (findKnown(key) ?? departedOf(key))?.head_sha;
     if (listed) heads.add(listed.toLowerCase());
     return heads;
   };
@@ -1327,8 +1354,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     return read;
   };
   const repoAt = (key: string): { pull: InboxPull | null; unavailable: { reason: "unsupported" | "failed"; message: string } | null } => {
-    const pull = findKnown(key);
-    if (!pull || !listedRepo(pull)) {
+    const pull = readable(key);
+    if (!pull) {
       return { pull: null, unavailable: { reason: "unsupported", message: "That pull request is not in the list. Refresh the list and try again." } };
     }
     if (!forgeRef(pull)) return { pull: null, unavailable: { reason: "unsupported", message: "The repository's files could not be listed." } };
@@ -1602,11 +1629,17 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const listed: InboxPull[] = [];
       for (const { state, own } of asked) listed.push(...mergeListedPulls(own.answer?.pulls ?? [], state.others.answer?.pulls ?? [], wanted, everywhere));
       const pulls = withMergedHere(listed);
+      // What this read no longer names stays readable for a page still open on it (inbox-pull-departed.ts).
+      const askedHosts = new Set(asked.map((a) => a.host));
       if (everywhere) {
+        const before = knownWide;
         knownWide = new Map(pulls.map((p) => [p.key, p]));
+        departedWide.note(before, knownWide, askedHosts);
         lastWideRepos = new Set(pulls.map((p) => inboxPullRepoKey(p.host, p.repo)));
       } else {
+        const before = known;
         known = new Map(pulls.map((p) => [p.key, p]));
+        departed.note(before, known, askedHosts);
         lastRepos = wanted;
       }
       // Only the people this list names (a PR's author, its reviewers, who approved it): the window may ask for their
@@ -1727,8 +1760,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       return { ...named, ...(avatars.get(asked) ?? {}) };
     },
     async details(key) {
-      const pull = findKnown(key);
-      if (!pull || !listedRepo(pull)) throw new InboxPullsError("pull_unknown", "That pull request is not in the list.");
+      const pull = readable(key);
+      if (!pull) throw new InboxPullsError("pull_unknown", "That pull request is not in the list.");
       const forge = pull.platform === "github" ? "GitHub" : "GitLab";
       const failed = () => new InboxPullsError("pull_details_failed", `${forge} did not answer. Try again in a minute.`);
       const hit = detailReads.get(key);
@@ -1773,10 +1806,10 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     },
     async text(key) {
       // No forge read per picture while the PR has not moved.
-      const known = findKnown(key);
+      const known = findKnown(key) ?? departedOf(key);
       const kept = detailReads.get(key);
       if (!known || !kept?.context || kept.updated !== known.updated_at) await this.details(key);
-      const pull = findKnown(key);
+      const pull = findKnown(key) ?? departedOf(key);
       const context = detailReads.get(key)?.context;
       if (!pull || !context) throw new InboxPullsError("pull_unknown", "That pull request is not in the list.");
       return { pull, context, runtime: forgeRuntime(pull) };
@@ -1785,7 +1818,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     async file(key, path, repos) {
       // The PR may have moved since the last read of the list: its head is what the code is read at.
       if (repos) await this.list(repos, { refresh: false }).catch(() => {});
-      const pull = findKnown(key);
+      const pull = findKnown(key) ?? departedOf(key);
       const sha = pull ? (pull.head_sha ?? readHeads.get(key)) : null;
       const parts = pull ? splitPath(pull.repo) : null;
       if (!pull || !sha || !parts) return null;
@@ -1824,7 +1857,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       return { contents, label: inboxPullLabel(pull), platform: pull.platform, url };
     },
     async hasCommit(key, sha) {
-      const pull = findKnown(key);
+      const pull = findKnown(key) ?? departedOf(key);
       const parts = pull ? splitPath(pull.repo) : null;
       if (!pull || !parts) return null;
       const read =
@@ -1846,7 +1879,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       return commits.length >= PULL_COMMITS_LISTED_MAX ? null : false;
     },
     async hasVersion(key, sha) {
-      const pull = findKnown(key);
+      const pull = findKnown(key) ?? departedOf(key);
       if (!pull || pull.platform !== "gitlab") return null;
       const read = await run("glab", ["api", "--hostname", pull.host, `${glVersionsEndpoint({ host: pull.host, projectPath: pull.repo, iid: pull.number })}?per_page=100`, "--paginate"]).catch(() => null);
       if (!read || read.exitCode !== 0) return null;
@@ -1883,8 +1916,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       });
     },
     async diff(key, scope, from, pinnedHead) {
-      const pull = findKnown(key);
-      if (!pull || !listedRepo(pull)) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
+      const pull = readable(key);
+      if (!pull) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
       // Whole stack: from the branch the lowest open layer is based on (merged layers are not read again), and from
       // the stack's own base when that branch is gone (a merged layer's branch, deleted). A range likewise.
       const found = pullDiffBases(stackOf(pull), pull, scope, from);
@@ -1991,8 +2024,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       }
     },
     async wholeDiff(key, signal, roots = []) {
-      const pull = findKnown(key);
-      if (!pull || !listedRepo(pull)) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
+      const pull = readable(key);
+      if (!pull) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
       const cli: RefCli = hosts.get(pull.host)?.cli ?? (pull.platform === "github" ? "gh" : "glab");
       if (now() < (holdUntil.get(pull.host) ?? 0)) throw new InboxPullsError("pull_diff_failed", `${pull.host} asked to slow down. Try again in a minute.`);
       const github = pull.platform === "github";
@@ -2054,8 +2087,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       } catch {
         return missing;
       }
-      const pull = findKnown(key);
-      if (!pull || !listedRepo(pull)) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
+      const pull = readable(key);
+      if (!pull) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
       const ref = forgeRef(pull);
       const head = shaOf(at ?? readHeads.get(key) ?? pull.head_sha);
       if (!head || !ref) return missing;
@@ -2081,8 +2114,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           return none;
         }
       }
-      const pull = findKnown(key);
-      if (!pull || !listedRepo(pull)) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
+      const pull = readable(key);
+      if (!pull) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
       // The commit the patch on screen was read at, when the Inbox read one, else the list's. A patch whose head moved
       // during its read is the client's to catch (its answer has no head_sha, so it asks nothing); the blob ids catch the rest.
       const head = shaOf(readHeads.get(key) ?? pull.head_sha);

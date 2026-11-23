@@ -1472,7 +1472,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The project roots whose origin the Pull requests list has waited for once.
   const pullRepoRead = new Set<string>();
   const pullRepoReading = new Map<string, Promise<InboxProjectRepo | null>>();
-  const pulls = createInboxPulls(options.refRunner ? { run: options.refRunner } : {});
+  // A PR that left the list stays readable for an open page, unless the person hid it (inbox-pull-departed.ts).
+  const pulls = createInboxPulls({ ...(options.refRunner ? { run: options.refRunner } : {}), hidden: (key) => pullHidden.has(key) });
   // The attach line's lookups (inbox-pull-lookups.ts): a number an agent named, after its send, through the hover
   // cards' read; only while Code review is on and this computer's gh is signed in to the host.
   const pullLookups = createInboxPullLookups({

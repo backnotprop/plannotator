@@ -89,6 +89,7 @@ import { scopeOnPage } from './reviewScope';
 import { liveView } from '../prs/stackRange';
 import { lookedBefore, markLooked, useLooked } from '../prs/looked';
 import { RailScopeRows } from './RailScopeRows';
+import { useKeptStack } from './keptStack';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
 /** The file rail's width: dragged and kept. */
@@ -300,7 +301,9 @@ function forPost(comments: readonly KeptComment[], screen: Pick<OnScreen, 'stamp
 
 function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLayer, onBack, onSent, onPosted }: PullReviewProps) {
   const phone = usePhone();
-  const item = useMemo(() => (model ? findStack(pullGroups(model, null), stackId) : null), [model, stackId]);
+  const live = useMemo(() => (model ? findStack(pullGroups(model, null), stackId) : null), [model, stackId]);
+  // The list no longer naming this layer (merged, closed, a read without it) leaves the review as it is (keptStack.ts).
+  const item = useKeptStack(live?.stack.layers.some((l) => l.key === layerKey) ? live : null, `${stackId}\u0000${layerKey}`, model);
   const stack = item?.stack ?? null;
   const layer = stack?.layers.find((l) => l.key === layerKey) ?? null;
   // A range the list no longer holds as one (a layer merged or moved) shows the layer's own diff.

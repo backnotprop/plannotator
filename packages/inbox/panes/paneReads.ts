@@ -3,6 +3,7 @@ import type { InboxThread } from '@plannotator/core/inbox-types';
 import { InboxApiError, type ListModel, type ThreadModel } from '../api';
 import { FIRST_LIST_WAIT_MS, THREAD_READ_RETRY_MS, THREAD_READ_TIMEOUT_MS, UNLISTED_WAIT_MS, type ThreadLoad } from '../app/constants';
 import { dropThread, heldThread, isThreadStale, putThread, showableThread } from '../data/queries/thread';
+import { deletedHere } from '../data/deletedHere';
 import { sameThreadFiles } from '../data/queries/files';
 import { lookBoundary } from '../folding';
 import { machineOf } from '../inboxUrl';
@@ -183,7 +184,11 @@ export function createPaneReads(deps: PaneReadsDeps) {
       }
       const pane = shownIn(threadId);
       if (pane !== null && mine > record(pane).applied) {
-        const missing = cause instanceof InboxApiError && cause.status === 404 && !waiting;
+        // What is open stays open (the owner, 2026-11-23): only the Inbox saying it has no such thread is "missing", and
+        // a thread already on screen keeps its last read through any 404 (a linked machine briefly not known answers
+        // `machine_not_linked`), read again as after any failure. Only one the person deleted here goes (deletedHere.ts).
+        const onScreen = record(pane).loaded?.thread_id === threadId ? record(pane).loaded : null;
+        const missing = cause instanceof InboxApiError && cause.status === 404 && cause.code === 'thread_not_found' && !waiting && (!onScreen || deletedHere(onScreen));
         // Two linked machines claim it: it opens on neither, and says so (no retry would change that).
         const refused = cause instanceof InboxApiError && cause.code === 'machine_conflict';
         if (missing) dropThread(client, threadId);

@@ -235,7 +235,7 @@ import { type SheetLayout } from './prs/tableModel';
 import { repoLabels } from './pulls/labels';
 import { pullFilterOf, type PullFilter } from './pulls/model';
 import { reviewsOnYou } from './pulls/reviewsModel';
-import { appReviewView } from './app/reviewView';
+import { useAppReviewView } from './app/reviewView';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
 import { BroIntro } from './components/BroIntro';
@@ -5077,7 +5077,7 @@ function Inbox() {
     />
   );
 
-  const reviewView = appReviewView({ route, pulls, pullsShown, thread, projectNames, go });
+  const reviewView = useAppReviewView({ route, pulls, pullsShown, thread, projectNames, go });
   // The Reviews list: on its own page, or beside a thread opened from it (the thread pane is the Inbox's own).
   const reviewsList = (project: string | null, view: PullFilter, threadId: string | null) => {
     // A PR opened from a project's drawing closes back to it (its own page only).
@@ -5417,7 +5417,7 @@ function Inbox() {
     const stack = stacks.find((s) => s.id === route.stack || s.layers.some((l) => l.key === route.stack)) ?? null;
     main = (
       <StackPage
-        stack={stack && stack.layers.some(inboxPullIsOpen) ? stack : null}
+        stack={stack && stack.layers.some(inboxPullIsOpen) ? stack : null} id={route.stack}
         loading={!sheetPulls.model} board={sheetPulls.model}
         repoLabel={stack ? (repoLabels(stacks).get(`${stack.host}/${stack.repo}`.toLowerCase()) ?? stack.repo) : null}
         phone={phone}
