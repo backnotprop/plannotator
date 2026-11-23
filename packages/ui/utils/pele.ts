@@ -23,9 +23,15 @@ import type * as PeleLazy from 'pele/lazy';
 import { DIAGRAM_ENGINE_MODE } from './diagram-engine';
 import { MERMAID_LABEL_WRAP_WIDTH } from './mermaid';
 
-export const PELE_SOURCE_LIMIT = 100_000;
+/**
+ * What one source may cost: Mermaid's own defaults (`maxTextSize` 50,000,
+ * `maxEdges` 500), so Pele lays out on the main thread nothing Mermaid would
+ * refuse. A source over either is a Pele failure, so under
+ * `'pele-where-safe'` it goes to Mermaid, which refuses it as before.
+ */
+export const PELE_SOURCE_LIMIT = 50_000;
 export const PELE_OUTPUT_LIMIT = 1_000_000;
-export const PELE_MAX_EDGES = 5_000;
+export const PELE_MAX_EDGES = 500;
 
 export interface PeleRuntime {
   /** Whether Pele has a renderer for the source's diagram type (loads that type's chunk when it has). */

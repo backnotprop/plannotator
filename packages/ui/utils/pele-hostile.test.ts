@@ -16,6 +16,7 @@ import { loadRealPele, setPeleInBuildForTests } from '../test-setup/pele';
 import { __setDiagramEngineModeForTests } from './diagram-engine';
 import { renderDiagram } from './diagram-render';
 import { getMathRenderer, resetMathRenderer, setMathRenderer, type MathRenderer } from './math';
+import { __setMermaidRuntimeLoaderForTests, setMermaidRuntime } from './mermaid';
 import { __setPeleRuntimeLoaderForTests, PELE_OUTPUT_LIMIT, renderPeleSource, type PeleRuntime } from './pele';
 import { PELE_MATH_TOTAL_LIMIT, preparePeleLabels, safeLabelColor, typesetPeleMath, type MathTypesetter } from './pele-labels';
 import { readPeleAuthorColors } from './peleAuthorTheme';
@@ -214,6 +215,47 @@ describe.if(hasDom)('hostile sources drawn by Pele', () => {
     } finally {
       __setDiagramEngineModeForTests('pele');
       setMathRenderer(katex, 'host');
+    }
+  });
+
+  // What regresses: a graph Mermaid refuses (more than 500 edges, more than
+  // 50,000 characters) is laid out by Pele on the main thread, with no
+  // timeout, instead of ending in Mermaid's refusal as it did before Pele.
+  test("a source over Mermaid's limits is not drawn by Pele: in pele-where-safe Mermaid refuses it, as before", async () => {
+    const chain = (n: number): string => `flowchart TD\n${Array.from({ length: n }, (_, i) => `  N${i} --> N${i + 1}`).join('\n')}`;
+    const asked: string[] = [];
+    setMermaidRuntime(
+      {
+        initialize: () => {},
+        render: async (_id: string, source: string) => {
+          asked.push(source);
+          throw new Error('Mermaid refused this diagram.');
+        },
+      } as unknown as Parameters<typeof setMermaidRuntime>[0],
+      'host',
+    );
+    __setDiagramEngineModeForTests('pele-where-safe');
+    try {
+      // At Mermaid's limits Pele draws the fence; Mermaid is not asked.
+      const atLimit = await renderDiagram('mermaid', id(), chain(500), theme);
+      expect(atLimit.ok).toBe(true);
+      expect(atLimit.ok === true && atLimit.svgNode.classList.contains('pele')).toBe(true);
+      const longest = `${chain(3)}\n%%${'x'.repeat(50_000 - chain(3).length - 3)}`;
+      expect(longest.length).toBe(50_000);
+      expect((await renderDiagram('mermaid', id(), longest, theme)).ok).toBe(true);
+      expect(asked).toEqual([]);
+
+      // One edge over, or one character over: Mermaid's refusal, the error panel as before.
+      for (const over of [chain(501), `${longest}x`]) {
+        const result = await renderDiagram('mermaid', id(), over, theme);
+        expect(result.ok).toBe(false);
+        if (result.ok === true) continue;
+        expect(result.message).toBe('Mermaid refused this diagram.');
+      }
+      expect(asked).toHaveLength(2);
+    } finally {
+      __setDiagramEngineModeForTests('pele');
+      __setMermaidRuntimeLoaderForTests(undefined);
     }
   });
 
