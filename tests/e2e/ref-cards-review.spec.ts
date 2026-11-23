@@ -14,8 +14,9 @@
  * opens its card, Tab moves into it, Escape closes it, returns the focus to
  * the link and stops there. A click (plan review): `#12` opens its card
  * pinned, with no tab opened and only the forge's link (no Reviews outside the
- * Inbox); a ref the forge does not know follows the link to GitHub (the opened
- * tab is stubbed). A touch screen (plan review): a tap shows the card as the
+ * Inbox); a ref the forge does not know follows the link to GitHub once its
+ * answer is known (the opened tab is stubbed), and a pasted link to a comment
+ * on a PR follows the link with no card, as before. A touch screen (plan review): a tap shows the card as the
  * bottom sheet and opens no tab. The card's
  * height (code review): a long description shows about eight lines (a 216 px
  * box) before it scrolls; in a window too short for the card (1440 by 480),
@@ -147,6 +148,7 @@ The list jitters after load (#12). The fix is already open as https://github.com
 
 1. Merge the two caches into one store.
 2. Keep #99 in mind for the follow-up.
+3. Answer the note on the cache: https://github.com/acme/widgets/pull/14#discussion_r7
 `;
 
 const DOC_AFTER = `# Doc
@@ -443,14 +445,30 @@ test('plan review: a click on #12 pins its card and opens no tab; a ref with no 
     await expect(card).toHaveCount(0);
     expect(popups).toEqual([]);
 
-    // #99: the forge does not know it, so there is no card: the click opens it on GitHub, as before.
+    // #99: the forge does not know it (asked by the hover), so there is no card: the click opens it on GitHub at
+    // once, as before.
+    const unknown = page.locator('a[href="https://github.com/acme/widgets/issues/99"]').first();
+    await unknown.hover();
+    await expect.poll(() => session.forge.calls()).toContain('gh number=99');
+    await page.waitForTimeout(300);
     const opened = context.waitForEvent('page');
-    await page.locator('a[href="https://github.com/acme/widgets/issues/99"]').first().click();
+    await unknown.click();
     const tab = await opened;
     await tab.waitForLoadState();
     expect(tab.url()).toBe('https://github.com/acme/widgets/issues/99');
     await expect(card).toHaveCount(0);
     expect(session.forge.calls()).toEqual(['gh number=12', 'gh number=99']);
+    await tab.close();
+
+    // A link to a comment on #14 goes to that comment: a plain click follows it, no card pinned, nothing asked.
+    await page.mouse.move(5, 5);
+    const permalink = 'https://github.com/acme/widgets/pull/14#discussion_r7';
+    const toComment = context.waitForEvent('page');
+    await page.locator(`a[href="${permalink}"]`).first().click();
+    const commentTab = await toComment;
+    await commentTab.waitForLoadState();
+    expect(commentTab.url()).toBe(permalink);
+    await expect(page.locator('[data-ref-card-pinned]')).toHaveCount(0);
     await context.close();
   } finally {
     await session.close();

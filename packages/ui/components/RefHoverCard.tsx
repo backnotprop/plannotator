@@ -13,19 +13,26 @@
  *   installed a transport (`utils/refCard`), and asks for data only once a
  *   hover or keyboard focus has rested on a link for `REF_CARD_DELAY_MS`.
  *
- * Behaviour: open on hover after the delay, or on keyboard focus. A click on
- * the link (Enter or Space on it too) opens its card at once and pins it
- * instead of following the link; a click with a modifier or the middle button
- * still follows it. Tab from the focused link moves into the card;
+ * Behaviour: open on hover after the delay, or on keyboard focus (Enter on
+ * the link still follows it). Tab from the focused link moves into the card;
  * Shift+Tab from its first control goes back. A press inside the card pins it
- * too (it then stays when the pointer leaves, and scrolls); Escape, Close, a
- * press outside or a second click on the link close it, focus back on the
- * link when it was in the card or the card came from a click. A ref link in
- * the card's description opens that ref's card in its place. One card at a
- * time. On a touch screen a tap on the link shows the card as a sheet from the
- * bottom edge instead of following it; the sheet's "Open on GitHub" follows
- * it. A host may add its own link beside "Open on GitHub"
+ * (it then stays when the pointer leaves, and scrolls); Escape, Close or a
+ * press outside close it, focus back on the link when it was in the card.
+ * One card at a time. On a touch screen a tap on the link shows the card as a
+ * sheet from the bottom edge instead of following it; the sheet's "Open on
+ * GitHub" follows it. A host may add its own link beside "Open on GitHub"
  * (`utils/refCardAction`). No keyboard shortcut of its own.
+ *
+ * Click to pin (`configurePlannotatorUI({ refCardClick })`, `utils/refCardClick`;
+ * off by default): on a ref written in prose (the renderer marks it) whose URL
+ * is the page itself, a plain click, tap, Enter or Space opens its card pinned
+ * instead of following the link, the focus in the card when by the keyboard;
+ * a modified or middle click follows it, and so does a click on a ref known to
+ * have no card. While a card is pinned, a hover or focus on another ref opens
+ * nothing; a click there moves the pin; a second click on the link closes it
+ * (a double-click leaves it open). A ref in the card's description opens its
+ * card in its place. Every other link (an "Open on GitHub" button, a
+ * permalink to a comment) behaves as above.
  *
  * Untrusted text: the body and the comment come from anyone who can write on
  * the repo. They render through `RenderedMarkdown` (DOMPurify on HTML
@@ -33,7 +40,7 @@
  * inside them does nothing until the person confirms it in the card.
  */
 
-import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   forgeRefLabel,
@@ -46,8 +53,9 @@ import {
 } from '@plannotator/core/forge-ref-card';
 import { FORGE_SPECS } from '@plannotator/core/forge-refs';
 import { cardProblem, refUnsupportedLine } from '@plannotator/core/problem-words';
-import { loadRefCard, peekRefCard, refCardTarget } from '../utils/refCard';
-import { refCardActionFor, type RefCardActionLink } from '../utils/refCardAction';
+import { loadRefCard, peekRefCard, refCardKnownMissing, refCardTarget } from '../utils/refCard';
+import { refCardActionFor, useRefCardActionVersion, type RefCardActionLink } from '../utils/refCardAction';
+import { REF_CARD_PROSE_ATTR, refCardClickOn, refCardClickPins, refUrlIsWhole } from '../utils/refCardClick';
 import { ProblemNotice } from './ProblemNotice';
 import { providedRefCardLabel, providedRefCardView } from '../utils/refCardProviders';
 import { RenderedMarkdown } from './RenderedMarkdown';
@@ -65,11 +73,6 @@ const GAP = 6;
 const BODY_MAX = 216;
 /** The same once pinned: the person asked for it, so more of the description shows. */
 const BODY_MAX_PINNED = 340;
-/** A click on a link whose card has no answer yet (plan review, annotate, code review): how long before the loading card shows, so a quick "no card" follows the link with nothing drawn. */
-const CLICK_LOADING_MS = 120;
-/** The same: a "no card" answer this soon after the click follows the link (the browser still takes it as the click's); a later one shows the card's quiet failure, whose Open on GitHub is the link. */
-const CLICK_FOLLOW_MS = 1000;
-
 /** Inside a card the controller drew: a ref link in its description opens that ref's card in its place. */
 const OpenRefContext = createContext<((href: string, target: ForgeRef) => void) | null>(null);
 
@@ -321,9 +324,11 @@ function SafeMarkdown({ markdown }: { markdown: string }) {
       if (e.type === 'mousedown') return;
       const href = a.getAttribute('data-ref-card-href') ?? linkHref(a) ?? '';
       const https = /^https?:\/\//i.test(href);
-      // A plain click or Enter on an issue / PR link opens its card here; anything else, or any other link, asks first.
+      // A plain click or Enter on a ref written in the description (utils/refCardClick) opens its card here; anything
+      // else, or any other link, asks first.
       const plain = (e.type === 'click' && (e as MouseEvent).button === 0) || e.type === 'keydown';
-      const ref = plain && https && openRef.current && !modified(e as MouseEvent | KeyboardEvent) ? refCardTarget(href) : null;
+      const prose = refCardClickOn() && a.hasAttribute(REF_CARD_PROSE_ATTR) && refUrlIsWhole(href);
+      const ref = plain && https && prose && openRef.current && !modified(e as MouseEvent | KeyboardEvent) ? refCardTarget(href) : null;
       if (ref) {
         setConfirm(null);
         openRef.current?.(href, ref);
@@ -452,10 +457,17 @@ function FootWords({ forms, line }: { forms: { key: string; node: React.ReactNod
       setPick(first === -1 ? widths.length - 1 : first);
     };
     fit();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(fit);
-    observer.observe(box);
-    return () => observer.disconnect();
+    // The words' widths change once the page's fonts load (the box's own size may not).
+    let live = true;
+    void document.fonts?.ready.then(() => {
+      if (live) fit();
+    });
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(fit);
+    observer?.observe(box);
+    return () => {
+      live = false;
+      observer?.disconnect();
+    };
   }, [keys]);
   const shown = forms[Math.min(pick, forms.length - 1)];
   return (
@@ -765,8 +777,12 @@ interface OpenCard {
   result: ForgeRefCardResult | null | undefined;
 }
 
-/** The card open anywhere on the page closes when another opens. */
-let closeOther: (() => void) | null = null;
+/**
+ * The card open anywhere on the page: it closes when another opens. With click to pin on (`utils/refCardClick`),
+ * while it is pinned a hover or a focus elsewhere opens nothing; a click on another ref moves it there.
+ */
+let shownCard: { close: () => void; pinned: () => boolean } | null = null;
+const pinnedShown = () => refCardClickOn() && !!shownCard?.pinned();
 
 function touchOnly(): boolean {
   return typeof window !== 'undefined' && !!window.matchMedia?.('(hover: none)').matches;
@@ -827,13 +843,12 @@ interface Pos {
  *
  * `onlyWithData` (default false): a hover opens the card only once its data
  * arrived and only when the forge answered (`ok`), with no loading state and
- * no failure card; a hover that leaves first shows nothing. A click or tap on
- * a link whose card is known to have no data follows the link as it always
- * did; one whose answer has not come yet shows the loading card after
- * `CLICK_LOADING_MS`, and a "no card" answer within `CLICK_FOLLOW_MS` follows
- * the link (later, the card's quiet failure, with its Open on GitHub). For
- * hosts where a person without gh / glab must see links work as before (plan
- * review, annotate and code review).
+ * no failure card; a hover that leaves first shows nothing, and a tap on a
+ * link a click does not pin follows it (no sheet). For hosts where a person
+ * without gh / glab must see links work as before (plan review, annotate and
+ * code review). With click to pin on, a click on a ref known to have no card
+ * follows the link at once; one whose answer has not come yet shows the
+ * loading card, whose Open on GitHub is the link, then the answer.
  */
 export function useRefHoverCards(
   rootRef: React.RefObject<HTMLElement | null>,
@@ -853,10 +868,11 @@ export function useRefHoverCards(
   const lastPointer = useRef('mouse');
   /** Each open, pin and close: an answer for an older one is dropped. */
   const seq = useRef(0);
-  /** The link being followed on purpose (`follow`): its click is the browser's. */
-  const following = useRef<HTMLAnchorElement | null>(null);
-  /** A ref in the description replaced the card while the focus was in it: the focus goes back into the new one. */
+  /** The focus goes into the card once it draws (a pin by the keyboard, or a ref in the description replaced it while the focus was in it). */
   const refocus = useRef(false);
+  const cardId = useId();
+  // The host's link ("Open in Reviews") is asked again when the host says its answer changed.
+  useRefCardActionVersion();
 
   const clearTimers = () => {
     if (openTimer.current !== null) window.clearTimeout(openTimer.current);
@@ -873,10 +889,17 @@ export function useRefHoverCards(
     setCard(null);
     if (restoreFocus && (focusWasInside || was.via === 'tap' || was.via === 'click')) was.anchor.focus({ preventScroll: true });
   }, []);
-  // One function for the hook's life (`close` never changes), so `closeOther` can tell this card from another's.
-  const closeSelf = useRef(() => close());
+  // One object for the hook's life (`close` never changes), so `shownCard` can tell this card from another's.
+  const self = useRef({ close: () => close(), pinned: () => !!current.current?.pinned });
+  const claim = () => {
+    if (shownCard && shownCard !== self.current) shownCard.close();
+    shownCard = self.current;
+  };
 
   const open = useCallback((anchor: HTMLAnchorElement, target: ForgeRef, via: OpenCard['via']) => {
+    // A hover or a focus never replaces a pinned card (a tap does: the person asked for this one).
+    const passing = via === 'hover' || via === 'focus';
+    if (passing && pinnedShown()) return;
     clearTimers();
     seq.current++;
     if (dataOnly.current) {
@@ -886,15 +909,13 @@ export function useRefHoverCards(
       void loadRefCard(href, target).then((result) => {
         if (wanted.current !== anchor) return;
         wanted.current = null;
-        if (!result?.ok || !anchor.isConnected) return;
-        if (closeOther && closeOther !== closeSelf.current) closeOther();
-        closeOther = closeSelf.current;
+        if (!result?.ok || !anchor.isConnected || pinnedShown()) return;
+        claim();
         setCard({ anchor, href, target, via, pinned: false, result });
       });
       return;
     }
-    if (closeOther && closeOther !== closeSelf.current) closeOther();
-    closeOther = closeSelf.current;
+    claim();
     const href = anchor.href;
     setCard({ anchor, href, target, via, pinned: via === 'tap', result: undefined });
     void loadRefCard(href, target).then((result) => {
@@ -902,73 +923,53 @@ export function useRefHoverCards(
     });
   }, []);
 
-  /** Follows the link as the click would have, once (the click handler lets this one through). */
-  const follow = useCallback((anchor: HTMLAnchorElement) => {
-    following.current = anchor;
-    try {
-      anchor.click();
-    } finally {
-      following.current = null;
-    }
+  /**
+   * A click's card: pinned at once, anchored to `anchor`, for `href` (the link's own, or a ref in the card's
+   * description, which replaces the card). With no answer yet it draws loading, its Open on GitHub the link itself,
+   * so the click is never a dead one; then the answer, or the quiet failure with the same link.
+   */
+  const pin = useCallback((anchor: HTMLAnchorElement, href: string, target: ForgeRef, via: OpenCard['via'], keyboard: boolean) => {
+    clearTimers();
+    wanted.current = null;
+    const mine = ++seq.current;
+    if (keyboard) refocus.current = true;
+    claim();
+    const known = peekRefCard(target);
+    setCard({ anchor, href, target, via, pinned: true, result: known });
+    if (known !== undefined) return;
+    void loadRefCard(href, target).then((result) => {
+      if (seq.current !== mine) return;
+      setCard((c) => (c && c.anchor === anchor && c.href === href ? { ...c, result } : c));
+    });
   }, []);
 
   /**
-   * A click's card: pinned at once, anchored to `anchor`, for `href` (the link's own, or a ref in the card's
-   * description: `inCard`, which replaces the card and never follows anything).
+   * A plain click, Enter or Space on a ref a click opens (`refCardClickPins`). True: it is the card's (the caller
+   * stops the link); false: the link does what it always did.
    */
-  const pin = useCallback(
-    (anchor: HTMLAnchorElement, href: string, target: ForgeRef, via: OpenCard['via'], inCard: boolean) => {
-      clearTimers();
-      wanted.current = null;
-      const mine = ++seq.current;
-      const show = (result: ForgeRefCardResult | null | undefined) => {
-        if (closeOther && closeOther !== closeSelf.current) closeOther();
-        closeOther = closeSelf.current;
-        setCard({ anchor, href, target, via, pinned: true, result });
-      };
-      const known = peekRefCard(target);
-      if (known !== undefined) return show(known);
-      const started = Date.now();
-      if (!dataOnly.current || inCard) show(undefined);
-      else
-        openTimer.current = window.setTimeout(() => {
-          openTimer.current = null;
-          if (seq.current === mine) show(undefined);
-        }, CLICK_LOADING_MS);
-      void loadRefCard(href, target).then((result) => {
-        if (seq.current !== mine) return;
-        if (openTimer.current !== null) window.clearTimeout(openTimer.current);
-        openTimer.current = null;
-        if (dataOnly.current && !inCard && !result?.ok && Date.now() - started <= CLICK_FOLLOW_MS && anchor.isConnected) {
-          close();
-          follow(anchor);
-          return;
-        }
-        show(result);
-      });
-    },
-    [close, follow],
-  );
-
-  /** A plain click, Enter or Space on a ref link in the region. True: it is the card's (the caller stops the link). */
   const activate = useCallback(
-    (anchor: HTMLAnchorElement, target: ForgeRef, tap: boolean): boolean => {
+    (anchor: HTMLAnchorElement, target: ForgeRef, tap: boolean, keyboard: boolean, clicks: number): boolean => {
       const c = current.current;
-      if (c && c.anchor === anchor) {
+      const mine = !!c && c.anchor === anchor && c.href === anchor.href;
+      // A double-click's second click leaves the card it opened.
+      if (mine && c!.pinned && clicks >= 2) return true;
+      // Known to have no card (no gh / glab, signed out, offline, a forge this computer does not read, a ref the forge
+      // does not know): the link opens at once, as it always did.
+      if (refCardKnownMissing(target)) {
+        if (mine) close();
+        return false;
+      }
+      if (mine) {
         // Its card is open: a hover's or focus's is pinned; a pinned one closes.
-        if (c.pinned) close(true);
+        if (c!.pinned) close(true);
         else {
           clearTimers();
-          setCard({ ...c, pinned: true, via: c.via === 'hover' ? 'click' : c.via });
+          if (keyboard) refocus.current = true;
+          setCard({ ...c!, pinned: true, via: c!.via === 'hover' ? 'click' : c!.via });
         }
         return true;
       }
-      // Known to have no card (plan review, annotate, code review): the link does what it always did.
-      if (dataOnly.current) {
-        const known = peekRefCard(target);
-        if (known !== undefined && !known?.ok) return false;
-      }
-      pin(anchor, anchor.href, target, tap ? 'tap' : 'click', false);
+      pin(anchor, anchor.href, target, tap ? 'tap' : 'click', keyboard);
       return true;
     },
     [close, pin],
@@ -978,8 +979,8 @@ export function useRefHoverCards(
     (href: string, target: ForgeRef) => {
       const c = current.current;
       if (!c) return;
-      refocus.current = !!cardRef.current?.contains(document.activeElement);
-      pin(c.anchor, href, target, c.via === 'hover' ? 'click' : c.via, true);
+      const focusInside = !!cardRef.current?.contains(document.activeElement);
+      pin(c.anchor, href, target, c.via === 'hover' ? 'click' : c.via, focusInside);
     },
     [pin],
   );
@@ -1003,6 +1004,11 @@ export function useRefHoverCards(
     };
     const onPointerDown = (e: PointerEvent) => {
       lastPointer.current = e.pointerType;
+      // A press on a ref a click opens: its answer is asked now, so the click it ends in more often knows it (a ref
+      // with no card then follows its link at once).
+      const a = linkOf(e.target);
+      const target = a && e.button === 0 && refCardClickPins(a) ? targetOf(a) : null;
+      if (a && target) void loadRefCard(a.href, target);
     };
     const onOver = (e: PointerEvent) => {
       if (e.pointerType === 'touch' || touchOnly()) return;
@@ -1013,6 +1019,7 @@ export function useRefHoverCards(
         if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
         return;
       }
+      if (pinnedShown()) return;
       later(() => open(a, target, 'hover'));
     };
     const onOut = (e: PointerEvent) => {
@@ -1028,7 +1035,7 @@ export function useRefHoverCards(
     const onFocusIn = (e: FocusEvent) => {
       const a = linkOf(e.target);
       const target = targetOf(a);
-      if (!a || !target || !a.matches(':focus-visible') || current.current?.anchor === a) return;
+      if (!a || !target || !a.matches(':focus-visible') || current.current?.anchor === a || pinnedShown()) return;
       later(() => open(a, target, 'focus'));
     };
     const onFocusOut = (e: FocusEvent) => {
@@ -1042,10 +1049,16 @@ export function useRefHoverCards(
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === ' ' && !modified(e) && !e.defaultPrevented) {
-        // Space on a ref link opens its card as a click does (Enter clicks the link itself).
+        // Space on a ref a click opens opens its card as a click does (Enter clicks the link itself).
         const a = linkOf(e.target);
-        const target = a === e.target ? targetOf(a) : null;
-        if (a && target && activate(a, target, false)) {
+        const target = a && a === e.target && refCardClickPins(a) ? targetOf(a) : null;
+        if (!a || !target) return;
+        // A held Space repeats: the first press opened the card, the rest neither close it nor scroll.
+        if (e.repeat) {
+          if (current.current?.anchor === a) e.preventDefault();
+          return;
+        }
+        if (activate(a, target, false, true, 1)) {
           e.preventDefault();
           e.stopPropagation();
         }
@@ -1061,13 +1074,23 @@ export function useRefHoverCards(
     };
     const onClick = (e: MouseEvent) => {
       const a = linkOf(e.target);
-      // A modified or middle click opens the link as a link (a new tab, a window); so does `follow`.
-      if (!a || following.current === a || e.defaultPrevented || e.button !== 0 || modified(e)) return;
+      // A modified or middle click opens the link as a link (a new tab, a window).
+      if (!a || e.defaultPrevented || e.button !== 0 || modified(e)) return;
       const target = targetOf(a);
       if (!target) return;
+      const touch = lastPointer.current === 'touch' || touchOnly();
+      if (!refCardClickPins(a)) {
+        // Any other link (an "Open on GitHub" button, a comment's permalink, a host with click to pin off): as it
+        // always was. A tap on a touch screen shows the sheet, except where cards show only with data.
+        if (dataOnly.current || !touch) return;
+        e.preventDefault();
+        e.stopPropagation();
+        open(a, target, 'tap');
+        return;
+      }
       // `detail` 0: Enter on the link (the keyboard), never the sheet.
-      const tap = e.detail !== 0 && (lastPointer.current === 'touch' || touchOnly());
-      if (!activate(a, target, tap)) return;
+      const keyboard = e.detail === 0;
+      if (!activate(a, target, !keyboard && touch, keyboard, e.detail)) return;
       e.preventDefault();
       e.stopPropagation();
     };
@@ -1089,6 +1112,20 @@ export function useRefHoverCards(
       clearTimers();
     };
   }, [rootRef, delayMs, open, close, scheduleClose, activate]);
+
+  // A ref a click opens says it has a card, open or not, and which (the renderer sets `aria-haspopup` and
+  // `aria-expanded` false where it knew; a transport installed later is caught up here).
+  useEffect(() => {
+    const a = card?.anchor;
+    if (!a || !refCardClickPins(a)) return;
+    a.setAttribute('aria-haspopup', 'dialog');
+    a.setAttribute('aria-expanded', 'true');
+    a.setAttribute('aria-controls', cardId);
+    return () => {
+      a.setAttribute('aria-expanded', 'false');
+      a.removeAttribute('aria-controls');
+    };
+  }, [card?.anchor, cardId]);
 
   const reposition = useCallback(() => {
     const c = current.current;
@@ -1132,7 +1169,7 @@ export function useRefHoverCards(
 
   useEffect(
     () => () => {
-      if (closeOther === closeSelf.current) closeOther = null;
+      if (shownCard === self.current) shownCard = null;
     },
     [],
   );
@@ -1142,7 +1179,8 @@ export function useRefHoverCards(
     else reposition();
   }, [card?.anchor, card?.href, card?.result, card?.pinned, reposition]);
 
-  // A ref in the description replaced the card with the focus in it: the focus stays in the card (until its answer drew).
+  // A pin by the keyboard, or a ref in the description replaced the card with the focus in it: the focus goes into
+  // the card (and stays there until its answer drew).
   useLayoutEffect(() => {
     if (!refocus.current) return;
     if (!card) {
@@ -1165,6 +1203,7 @@ export function useRefHoverCards(
   const body = (
     <div
       ref={cardRef}
+      id={cardId}
       role="dialog"
       aria-label={label}
       aria-modal={sheet ? true : undefined}
@@ -1212,8 +1251,11 @@ export function useRefHoverCards(
             action && {
               label: action.label,
               open: () => {
+                // Asked again now: the list may have changed since the card drew. Gone from it, the forge's page opens.
+                const now = refCardActionFor(card.target, card.result);
                 close();
-                action.open();
+                if (now) now.open();
+                else window.open(card.result?.ok ? card.result.data.url : card.href, '_blank', 'noopener,noreferrer');
               },
             }
           }

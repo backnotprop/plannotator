@@ -28,6 +28,7 @@ import { setDiagramRemoteLoads } from './utils/diagramRemoteLoadsPolicy';
 import { setCrossRepoRefsWithoutRepo, setDigitHexIssueRefs, type CrossRepoRefsWithoutRepo } from './components/InlineMarkdown';
 import { setRefCardBitbucket, setRefCardTransport, type RefCardTransport } from './utils/refCard';
 import { setRefCardAction, type RefCardAction } from './utils/refCardAction';
+import { setRefCardClick } from './utils/refCardClick';
 
 // One-stop type barrel: every seam contract a host implements is importable
 // from this module, next to configurePlannotatorUI itself.
@@ -234,6 +235,12 @@ export interface PlannotatorUIConfig {
    */
   refCardAction?: RefCardAction | null;
   /**
+   * A plain click, tap, Enter or Space on an issue / PR / MR reference written in prose (a `#12`, an `owner/repo#12`,
+   * a bare pasted URL to the page itself) opens its card pinned instead of following the link (`utils/refCardClick`).
+   * Default false: a click follows the link, as before. Any other link follows its href either way.
+   */
+  refCardClick?: boolean;
+  /**
    * Highlight a code fence only when it comes near the screen (a screen
    * above or below it), and the rest in idle time, nearest first
    * (`utils/codeHighlight`). A fence on screen is still highlighted before
@@ -306,6 +313,7 @@ export function configurePlannotatorUI(config: PlannotatorUIConfig): void {
   if (config.refCardTransport) setRefCardTransport(config.refCardTransport);
   if (config.refCardBitbucket !== undefined) setRefCardBitbucket(config.refCardBitbucket);
   if (config.refCardAction !== undefined) setRefCardAction(config.refCardAction);
+  if (config.refCardClick !== undefined) setRefCardClick(config.refCardClick);
   if (config.deferOffscreenCodeHighlight !== undefined) setDeferOffscreenCodeHighlight(config.deferOffscreenCodeHighlight);
   if (config.codeHighlightWorker) setCodeHighlightWorker(config.codeHighlightWorker);
   // Re-hydrate AFTER storageBackend is installed (load-bearing order — gated last).

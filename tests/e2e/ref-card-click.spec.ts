@@ -10,9 +10,12 @@
  * GitHub in a new tab; Open in Reviews opens the PR's page in Reviews in the same window; an issue's card has only
  * GitHub's link; dark; on a phone a tap shows the sheet with both links in one row, which still fits with a long forge
  * name and at 320 px, no button and no comment count cut short (on the sheet the count is a line of its own above the row; beside the desktop row it drops to its icon and number first); with Code review off the card has only GitHub's link.
+ * While a card is pinned, a hover on another ref opens nothing and a click there moves the pin; a link to a comment
+ * on the PR follows the link with no card; a ref the forge does not know, once its hover card said so, follows the
+ * link on a click (never a second click).
  *
  * Proof (PLANNOTATOR_E2E_PROOF_DIR/ref-card-click, `.local/proof` in CI): 01-inbox-pinned-reviews-on.png,
- * 02-inbox-pinned-reviews-off.png, 03-inbox-pinned-dark.png, 04-inbox-issue.png, 06-phone-tap.png (390 px), 07-phone-320.png, 08-phone-320-long-forge-name.png (05 is plan
+ * 02-inbox-pinned-reviews-off.png, 03-inbox-pinned-dark.png, 04-inbox-issue.png, 06-phone-tap.png (390 px), 07-phone-320.png, 08-phone-320-long-forge-name.png, 09-pinned-ignores-hover-light.png (05 is plan
  * review's, from ref-cards-review.spec.ts). Made-up people and repositories.
  */
 import { devices, expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
@@ -33,6 +36,8 @@ const OWNER_INBOX_PORT = '59812';
 const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com' };
 const REPO = 'acme/widgets';
 const TITLE = 'Ship the widget picker';
+/** A link to a comment on #12: it goes to that comment, never to #12's card. */
+const PERMALINK = `https://github.com/${REPO}/pull/12#discussion_r7`;
 
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 
@@ -220,7 +225,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   let threadId = '';
   try {
-    const sent = await agent.send({ project_path: widgets, subject: 'The widget picker', body: 'The widget picker is up for review as #12 (it closes #11).' });
+    const sent = await agent.send({ project_path: widgets, subject: 'The widget picker', body: `The widget picker is up for review as #12 (it closes #11; #13 is gone). Charlie asked about the keyboard order: ${PERMALINK}` });
     threadId = sent.thread_id as string;
   } finally {
     await agent.close().catch(() => {});
@@ -399,6 +404,52 @@ test('a click pins the card with Open in Reviews beside Open on GitHub; Escape, 
     await expect(c.locator('[data-ref-card-open]')).toHaveText(/Open on GitHub/);
     await page.mouse.move(2, 2);
     await proof(page, '04-inbox-issue');
+  } finally {
+    await context.close();
+  }
+});
+
+test('pinned: a hover on another ref opens nothing, a click there moves the pin; a comment link and a ref with no card follow the link', async ({ browser }) => {
+  const { context, page, popups } = await newContext(browser, { viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, colorScheme: 'light' });
+  try {
+    await openThread(page);
+    await ref(page, 12).click();
+    const c = card(page);
+    await expect(c.locator('[data-ref-card-title]')).toContainText(TITLE);
+    // The pointer rests on #11 well past the hover delay: still one card, #12's, pinned.
+    await ref(page, 11).hover();
+    await page.waitForTimeout(900);
+    await expect(c).toHaveCount(1);
+    await expect(c).toHaveAttribute('data-ref-card-pinned', '');
+    await expect(c.locator('[data-ref-card-title]')).toContainText(TITLE);
+    await proof(page, '09-pinned-ignores-hover-light');
+    // A click on #11 moves the pin there.
+    await ref(page, 11).click();
+    await expect(c.locator('[data-ref-card-title]')).toContainText('No way to pick a widget');
+    await expect(c).toHaveAttribute('data-ref-card-pinned', '');
+    await page.keyboard.press('Escape');
+    await expect(c).toHaveCount(0);
+    expect(popups).toEqual([]);
+
+    // A link to a comment on #12 goes to that comment: a new tab, no card pinned.
+    const toComment = context.waitForEvent('page');
+    await page.locator(`[data-message-id] a[href="${PERMALINK}"]`).first().click();
+    const commentTab = await toComment;
+    await commentTab.waitForLoadState();
+    expect(commentTab.url()).toBe(PERMALINK);
+    await expect(page.locator('[data-ref-card-pinned]')).toHaveCount(0);
+    await commentTab.close();
+
+    // #13: the forge does not know it. Its hover card says so; then a click opens it on GitHub, the first time.
+    await page.mouse.move(2, 2);
+    await ref(page, 13).hover();
+    await expect(c.locator('[data-ref-card-error]')).toBeVisible();
+    const toForge = context.waitForEvent('page');
+    await ref(page, 13).click();
+    const forgeTab = await toForge;
+    await forgeTab.waitForLoadState();
+    expect(forgeTab.url()).toBe(`https://github.com/${REPO}/issues/13`);
+    await expect(page.locator('[data-ref-card-pinned]')).toHaveCount(0);
   } finally {
     await context.close();
   }

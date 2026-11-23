@@ -128,9 +128,10 @@ function renderInline(text: string, startKey: number, opts?: InlineMarkdownOptio
     } else if (token.startsWith('*')) {
       nodes.push(<em key={key++}>{token.slice(1, -1)}</em>);
     } else if (token.startsWith('http')) {
-      // Bare URL
+      // Bare URL. Marked as a ref written in prose (`@plannotator/ui` utils/refCardClick's REF_CARD_PROSE_ATTR): with
+      // click to pin on, a click on a pasted issue / PR URL opens its card; any other link follows its href.
       nodes.push(
-        <a key={key++} href={token} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all">
+        <a key={key++} href={token} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all" data-ref-card-prose="">
           {token}
         </a>
       );

@@ -7,6 +7,7 @@
  * off); answer null for a ref it has nothing for.
  */
 
+import { useSyncExternalStore } from 'react';
 import type { ForgeRef, ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 
 export interface RefCardActionLink {
@@ -20,9 +21,30 @@ export interface RefCardActionLink {
 export type RefCardAction = (ref: ForgeRef, result: ForgeRefCardResult | null | undefined) => RefCardActionLink | null;
 
 let action: RefCardAction | null = null;
+let version = 0;
+const listeners = new Set<() => void>();
 
 export function setRefCardAction(next: RefCardAction | null): void {
   action = next;
+  refreshRefCardAction();
+}
+
+/** What the host answers changed (its list was read again): an open card asks again, so its link comes or goes. */
+export function refreshRefCardAction(): void {
+  version++;
+  for (const l of listeners) l();
+}
+
+/** Re-renders the caller when the host's answer may have changed (`refreshRefCardAction`). */
+export function useRefCardActionVersion(): number {
+  return useSyncExternalStore(
+    (l) => {
+      listeners.add(l);
+      return () => listeners.delete(l);
+    },
+    () => version,
+    () => version,
+  );
 }
 
 /** The host's link for this card, or null. A host that throws gives none. */

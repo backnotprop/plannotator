@@ -9,7 +9,7 @@
 import { useEffect, useRef } from 'react';
 import { forgeRefKey, type ForgeRef } from '@plannotator/core/forge-ref-card';
 import { inboxPullIsOpen, inboxPullStacks, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
-import { setRefCardAction, type RefCardAction } from '@plannotator/ui/utils/refCardAction';
+import { refreshRefCardAction, setRefCardAction, type RefCardAction } from '@plannotator/ui/utils/refCardAction';
 import { writeRoute } from '../app/writeRoute';
 
 export const OPEN_IN_REVIEWS = 'Open in Reviews';
@@ -39,4 +39,6 @@ export function useRefCardReviews(model: InboxPullsAnswer | null): void {
     setRefCardAction(refCardReviewsAction(() => latest.current, (stack) => writeRoute({ page: 'reviews', project: null, thread: null, stack, layer: null })));
     return () => setRefCardAction(null);
   }, []);
+  // The list was read again: an open card asks again, so "Open in Reviews" goes when its PR left the list.
+  useEffect(() => refreshRefCardAction(), [model]);
 }
