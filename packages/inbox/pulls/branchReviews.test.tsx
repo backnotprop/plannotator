@@ -71,11 +71,12 @@ const fetches = (routes: Record<string, unknown>) => {
   restores.push(() => made.mockRestore());
   return seen;
 };
-const page = (answer: InboxReviewsAnswer, onReviewBranch?: (branch: { name: string; projectId: string }) => void) => (
+const page = (answer: InboxReviewsAnswer, onReviewBranch?: (branch: { name: string; projectId: string }) => void, threadId?: string) => (
   <SidebarProvider>
     <PullsPage
       state={{ model: LIST, reviews: answer, error: null, loading: false, refresh: () => {}, reload: () => {}, reloadRows: () => {} }}
       stackId={null}
+      threadId={threadId}
       project="prj_billing"
       projects={[{ id: 'prj_billing', name: 'billing', root: '/tmp/billing' } as never]}
       projectNames={new Map([['prj_billing', 'billing']])}
@@ -106,10 +107,19 @@ test.skipIf(!hasDom)('on: each reported branch says where it is and waits on the
   const restore = spyOn(inboxApi, 'pullRisk').mockImplementation(async () => RISK);
   restores.push(() => restore.mockRestore());
   fetches({});
-  await mount(page({ fetched_at: null, hosts: [], rows: ROWS, projects: {}, branch_reviews: true }));
-  expect(rowLine(ROWS[0]!.thread_id)).toBe('retry-jitter · Ready for review');
-  expect(rowLine(ROWS[1]!.thread_id)).toBe('cache-keys from a cloud agent · Ready for review');
-  expect(rowLine(ROWS[2]!.thread_id)).toBe('web-fonts on Mac mini · Ready for review');
+  const answer: InboxReviewsAnswer = { fetched_at: null, hosts: [], rows: ROWS, projects: {}, branch_reviews: true };
+  await mount(page(answer));
+  // Closed, a row is one line: what the second line says is not drawn.
+  expect(ROWS.map((row) => rowLine(row.thread_id))).toEqual([null, null, null]);
+  // Open, its second line says where the branch is, its project and why it waits.
+  const opened = async (row: (typeof ROWS)[number]) => {
+    await act(async () => root!.render(page(answer, undefined, row.thread_id!)));
+    await settle();
+    return rowLine(row.thread_id);
+  };
+  expect(await opened(ROWS[0]!)).toBe('retry-jitter · billing · Ready for review');
+  expect(await opened(ROWS[1]!)).toBe('cache-keys from a cloud agent · billing · Ready for review');
+  expect(await opened(ROWS[2]!)).toBe('web-fonts on Mac mini · billing · Ready for review');
   expect(document.querySelector(`[data-reviews-row="${ROWS[0]!.thread_id}"] [data-pull-risk]`)).toBeNull();
   expect(document.querySelector(`[data-reviews-row="${ROWS[1]!.thread_id}"] [data-pull-risk]`)?.getAttribute('data-pull-risk')).toBe('high');
   // No onReviewBranch: no safety net.
