@@ -266,6 +266,27 @@ async function dragPart(page: Page, el: Locator, to: number): Promise<void> {
   await page.mouse.up();
 }
 
+/** Drag the mouse along the words of `el`'s first line of text (not its padding), from their start to `to` (a fraction of their width). */
+async function dragWords(page: Page, el: Locator, to: number): Promise<void> {
+  await el.scrollIntoViewIfNeeded();
+  const rect = await el.evaluate((node) => {
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    let text: Node | null;
+    while ((text = walker.nextNode()) && !text.textContent!.trim());
+    if (!text) return null;
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    const r = range.getClientRects()[0]!;
+    return { x: r.left, y: r.top, width: r.width, height: r.height };
+  });
+  if (!rect) throw new Error('no words to drag across');
+  const y = rect.y + rect.height / 2;
+  await page.mouse.move(rect.x + 1, y);
+  await page.mouse.down();
+  await page.mouse.move(rect.x + rect.width * to, y, { steps: 12 });
+  await page.mouse.up();
+}
+
 test('a drag across an action item\'s task, part of its why, or a command selects those words and leaves the item as it was, desktop and phone', async ({ browser }) => {
   const shotDir = join(proofDir, '..', 'action-select');
   mkdirSync(shotDir, { recursive: true });
@@ -306,7 +327,7 @@ test('a drag across an action item\'s task, part of its why, or a command select
 
       // A command's text.
       await page.evaluate(() => window.getSelection()?.removeAllRanges());
-      await dragPart(page, row.locator('[data-action-why] pre code').first(), 0.6);
+      await dragWords(page, row.locator('[data-action-why] pre code').first(), 0.8);
       await page.waitForTimeout(300);
       expect(await selected(page)).toContain('npm pack ./packages/core');
       await asItWas();
