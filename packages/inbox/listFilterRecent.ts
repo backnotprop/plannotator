@@ -14,15 +14,17 @@
  * `ListSort.by` is set; listView.ts `flatRows`), its folded Snoozed band included; the view chosen in the ⋮ menu is
  * left as it is and comes back when the pick goes. The order holds as the list does (held.ts): each row is placed by
  * the time it had when the list was last sorted whole (`ListSort`: Show, a thread closing, a refresh, another folder),
- * so a row the person just acted in moves to the top when the list settles, never under the pointer. This file holds
- * no routes or server calls.
+ * so a row the person just acted in moves to the top when the list settles, never under the pointer. Which rows it
+ * keeps holds the same way (`heldRecentRows`): a thread that comes into the filter between two whole sorts (an open
+ * from search or a notification, an act on the phone) waits for the next one, as a row's new place does, so no row
+ * is pushed down under the pointer. This file holds no routes or server calls.
  */
 import { useMemo, useState } from 'react';
-import type { InboxListRow } from '@plannotator/core/inbox-types';
+import { INBOX_RECENT_ACTIVITY_DAYS, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
 import type { ListSort } from './listView';
 
 /** How far back "recent" reaches. */
-export const RECENT_ACTIVITY_DAYS = 30;
+export const RECENT_ACTIVITY_DAYS = INBOX_RECENT_ACTIVITY_DAYS;
 const DAY_MS = 86_400_000;
 
 /** Films the person played in this window, by thread, since the list was read (recentActs.ts writes them). */
@@ -82,6 +84,33 @@ export function actedPlaces(before: ReadonlyMap<string, string> | null, keep: st
     return at;
   };
   return { keys, key };
+}
+
+/**
+ * The filter's rows while the list holds: `kept` (the filter's live answer) less each row whose time as of the last
+ * whole sort (`key`) was not recent. Every row of `listed` (the list before the filter) is asked first, so a row that
+ * had no recent act at the sort keeps that answer until the next one, however it is drawn meanwhile.
+ */
+export function heldRecentRows(listed: readonly InboxListSection[], kept: InboxListSection[], key: ActedKey, now: number): InboxListSection[] {
+  for (const section of listed) for (const row of section.threads) key(row);
+  const reach = now - RECENT_ACTIVITY_DAYS * DAY_MS;
+  return kept.map((section) => ({ ...section, threads: section.threads.filter((row) => { const at = key(row); return at !== '' && Date.parse(at) >= reach; }) }));
+}
+
+/** What Recent activity gives the list while on (useListView.ts): the sort InboxList reads, and the filter's held rows. */
+export interface RecentActivity {
+  /** `listSort` with Recent activity's places as `by` while on, which also draws List's one list whatever the view. */
+  sort: ListSort;
+  /** `heldRecentRows` with this sort's places; null while off. */
+  held: ((listed: readonly InboxListSection[], kept: InboxListSection[], now: number) => InboxListSection[]) | null;
+}
+
+export function useRecentActivity(on: boolean, listSort: ListSort): RecentActivity {
+  const key = useActedKeys(on, listSort);
+  return useMemo(
+    () => ({ sort: key ? { ...listSort, by: key } : listSort, held: key ? (listed, kept, now) => heldRecentRows(listed, kept, key, now) : null }),
+    [key, listSort],
+  );
 }
 
 /** Tests only: forget the films this window saw played. */

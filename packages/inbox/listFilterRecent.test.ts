@@ -6,7 +6,8 @@
  * newest first by the act across the groups (or by `last_at` instead), a snoozed row drawn among them; a row that moves
  * under the person before the list settles, or one that stays put after it does; the List view still sorting by
  * `last_at` with the filter on, or keeping the filter's order once it is off; the pick lost on reload, or still
- * counted once off; a thread counted as opened without the person's gesture (shown on load, opened by an agent, or
+ * counted once off; a thread that comes into the filter while the list holds drawn at once (pushing the rows down
+ * under the pointer) instead of at the next whole sort; a thread counted as opened without the person's gesture (shown on load, opened by an agent, or
  * opened while the browser's user activation lingers after an unrelated click), or not counted with one; a film played without a gesture written, or one written on every play.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
@@ -14,7 +15,7 @@ import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-typ
 import { INBOX_SNOOZED_BAND } from '@plannotator/core/inbox-snooze';
 import { setStorageBackend, resetStorageBackend } from '@plannotator/ui/utils/storage';
 import { LIST_FILTER_COOKIE, NO_LIST_FILTER, filterListSections, parseListFilter, pickCount, resetListFilterForTests, writeListFilter } from './listFilter';
-import { RECENT_ACTIVITY_DAYS, actedPlaces, noteActedHere, resetActedHereForTests, rowActedAt, rowRecentlyActed } from './listFilterRecent';
+import { RECENT_ACTIVITY_DAYS, actedPlaces, heldRecentRows, noteActedHere, resetActedHereForTests, rowActedAt, rowRecentlyActed } from './listFilterRecent';
 import { flatRows } from './listView';
 import { gestured, mediaPlayed, personOpened, resetRecentActsForTests, routeChanged } from './recentActs';
 
@@ -96,6 +97,25 @@ describe('the order', () => {
     expect(actedPlaces(first.keys, null).key(row('ada', { acted: ago(0) }))).toBe(ago(0));
     // ...unless it is the thread the sort keeps in place.
     expect(actedPlaces(first.keys, 'ada').key(row('ada', { acted: ago(0) }))).toBe(ago(5));
+  });
+
+  test('a thread that comes into the filter while the list holds waits for the next whole sort; one already in stays', () => {
+    const on = { ...NO_LIST_FILTER, recent: true };
+    const rowsOf = (sections: readonly InboxListSection[]) => sections.flatMap((s) => s.threads.map((r) => r.thread_id));
+    const listed = [section('waiting', [row('charlie', { acted: ago(2) }), row('bob')]), section('quiet', [row('ada', { acted: ago(3) })])];
+    const first = actedPlaces(null, null);
+    expect(rowsOf(heldRecentRows(listed, filterListSections(listed, on, NOW), first.key, NOW))).toEqual(['charlie', 'ada']);
+    // Bob is acted in on the phone, and Ada again: the filter's live answer takes Bob in, the held one does not yet.
+    const later = [section('waiting', [row('charlie', { acted: ago(2) }), row('bob', { acted: ago(0) })]), section('quiet', [row('ada', { acted: ago(0) })])];
+    const live = filterListSections(later, on, NOW);
+    expect(rowsOf(live)).toEqual(['charlie', 'bob', 'ada']);
+    const held = heldRecentRows(later, live, first.key, NOW);
+    expect(rowsOf(held)).toEqual(['charlie', 'ada']);
+    expect(flatRows(held, null, { epoch: 1, keep: null, by: first.key }).rows.map((r) => r.row.thread_id)).toEqual(['charlie', 'ada']);
+    // The next whole sort takes Bob in, every row by its time now.
+    const next = actedPlaces(first.keys, null);
+    const settled = heldRecentRows(later, live, next.key, NOW);
+    expect(flatRows(settled, null, { epoch: 2, keep: null, by: next.key }).rows.map((r) => r.row.thread_id)).toEqual(['ada', 'bob', 'charlie']);
   });
 
   test('the List view sorts by the acted time while on, and by last_at again once off', () => {
