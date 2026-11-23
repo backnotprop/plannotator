@@ -379,8 +379,7 @@ const ROUTINE_CREATE_OPTIONS = [
   "  --file <path>       A file each run gets with its prompt. Repeat for more.",
   "  --thread <id>       The Inbox thread you work in: the line that tells the person",
   "                      about your change goes there. Default: the routine's own",
-  "                      thread; with no thread, none is posted and the result says",
-  "                      so. Runs never reply there.",
+  "                      thread. Runs never reply there.",
 ];
 
 const ROUTINE_ON_OFF_USAGE = [
