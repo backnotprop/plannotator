@@ -43,7 +43,7 @@ const placeOf = (page: Page, path: string) =>
   });
 const changeIn = (page: Page, path: string) => page.locator(`[data-guide-file-shell="${path}"] [data-line-type^="change-"]`).first();
 const newMessage = (page: Page) => page.getByRole('dialog', { name: /New message/ });
-const arrowOf = (page: Page, path: string) => page.locator(`[data-guide-file-shell="${path}"] [data-file-header-path] > div > button`).first();
+const arrowOf = (page: Page, path: string) => page.locator(`[data-guide-file-shell="${path}"] [data-file-collapse-toggle]`).first();
 
 /** The review's files in the order drawn. */
 const filesOf = (page: Page) =>
@@ -104,9 +104,9 @@ async function walk(page: Page, picture?: string): Promise<void> {
 
   // X folds the file on screen, Z opens it again (and undoes nothing).
   await page.keyboard.press('x');
-  await expect(arrowOf(page, FIRST!)).toHaveAttribute('title', 'Expand diff');
+  await expect(arrowOf(page, FIRST!)).toHaveAttribute('data-file-collapse-toggle', 'collapsed');
   await page.keyboard.press('z');
-  await expect(arrowOf(page, FIRST!)).toHaveAttribute('title', 'Collapse diff');
+  await expect(arrowOf(page, FIRST!)).toHaveAttribute('data-file-collapse-toggle', 'expanded');
 
   // C: no file comments in the Inbox's review yet, so nothing, and never New message.
   await page.keyboard.press('c');

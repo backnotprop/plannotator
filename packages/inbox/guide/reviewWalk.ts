@@ -1,14 +1,21 @@
 /**
  * Where the review's keys go in the Inbox (ReviewKeys.tsx): the files and changes as the reader draws them. The
- * Inbox mounts one review-editor viewer per file (GuideFileCard), so moving between files and changes is read off
- * the page: each file's shell (`data-guide-file-shell`, always in the page), its header's own buttons (collapse,
- * Viewed), and the change rows Pierre has drawn (`data-line-type="change-…"`, `data-line-index="u,s"`). The keys do
- * what those controls do, and a review without a control (no Viewed ticks) has nothing for its key to do.
+ * Inbox mounts one review-editor viewer per file (GuideFileCard), so moving between files is read off the page: each
+ * file's shell (`data-guide-file-shell`, always in the page) and its header's own controls (the collapse arrow's
+ * `data-file-collapse-toggle`, Viewed). The keys do what those controls do, and a review without a control (no Viewed
+ * ticks) has nothing for its key to do.
  *
- * Production's own rules are reused: which change is next (`resolveChangeJump`), the line it is measured from
- * (`readingLineFor`) and where a change sits (`placementOf`), review-editor/utils/changeNavigation.ts.
+ * The changes are production's: every change of each file from its patch (`listDiffChanges`), found among the drawn
+ * rows (`findChangeElement`, `renderedUnifiedRange`), placed (`placementOf`, from `readingLineFor`) and picked
+ * (`resolveChangeJump`) as AllFilesCodeView's `jumpChange` does, review-editor/utils/changeNavigation.ts.
  */
-import { placementOf, readingLineFor, resolveChangeJump, type ChangePlacement } from '@plannotator/review-editor/utils/changeNavigation';
+import {
+  findChangeElement,
+  placementOf,
+  renderedUnifiedRange,
+  type ChangePlacement,
+  type DiffChange,
+} from '@plannotator/review-editor/utils/changeNavigation';
 import { getSearchRoots } from '@plannotator/review-editor/utils/reviewSearchHighlight';
 
 export const FILE_SHELL = '[data-guide-file-shell]';
@@ -99,16 +106,15 @@ function headerOf(shell: HTMLElement): HTMLElement | null {
   return queryDeep<HTMLElement>(shell, '[data-file-header-path]')[0] ?? null;
 }
 
-/** The header's collapse arrow (FileHeader's `collapseToggle`, the first control of its path). */
+/** The header's collapse arrow (AllFilesCodeView's `collapseToggle`), once the file's viewer is mounted. */
 export function collapseToggle(shell: HTMLElement): HTMLButtonElement | null {
-  const first = headerOf(shell)?.firstElementChild;
-  const button = first?.querySelector(':scope > button');
+  const button = queryDeep<HTMLElement>(shell, '[data-file-collapse-toggle]')[0];
   return button instanceof HTMLButtonElement ? button : null;
 }
 
-/** Whether the file shows only its header: its arrow offers to expand (the review app's own title for it). */
+/** Whether the file shows only its header, as its arrow says. */
 export function isCollapsed(shell: HTMLElement): boolean {
-  return collapseToggle(shell)?.title === 'Expand diff';
+  return collapseToggle(shell)?.dataset.fileCollapseToggle === 'collapsed';
 }
 
 /** The header's Viewed button, where the review has Viewed ticks. */
@@ -117,63 +123,36 @@ export function viewedToggle(shell: HTMLElement): HTMLElement | null {
   return header?.querySelector<HTMLElement>('[data-file-header-viewed]') ?? null;
 }
 
-export interface ChangeStart {
-  /** The run's first unified row (Pierre's `data-line-index` "u,s"). */
-  index: number;
-  el: HTMLElement;
+export interface ChangeSpot {
+  shell: HTMLElement;
+  change: DiffChange;
+  /** Its first row, where drawn. */
+  el: HTMLElement | null;
+  placement: ChangePlacement;
 }
-
-/** A row this near its file's top (the header, a separator, a few lines) can only open the file's first change. */
-const NEAR_FILE_TOP = 160;
 
 /**
- * The changes Pierre has drawn in a file, each by its first row: a run of consecutive `-` / `+` rows is one change,
- * as in the review app (changeNavigation.ts `listDiffChanges`). A mounted viewer draws only the rows near the view, so
- * the first drawn row can sit inside a run whose start is not drawn: it counts only at the top of its file.
+ * Every change of the review's open files, in page order, placed against the reading line as production places them
+ * (AllFilesCodeView `jumpChange`): a drawn row by where it is; a row of a drawn file outside its drawn rows by its
+ * index; a file not drawn yet by where its box is. A collapsed file's changes are not on the page: none.
  */
-export function changeStarts(shell: HTMLElement): ChangeStart[] {
-  // Each drawn row by its unified index, the row with its line type first (a gutter cell can carry the index alone).
-  const isChange = (el: HTMLElement | undefined) => !!el?.getAttribute('data-line-type')?.startsWith('change-');
-  const drawn = new Map<number, HTMLElement>();
-  for (const el of queryDeep<HTMLElement>(shell, '[data-line-index]')) {
-    const index = Number.parseInt(el.getAttribute('data-line-index') ?? '', 10);
-    if (!Number.isFinite(index)) continue;
-    const kept = drawn.get(index);
-    if (!kept || (!kept.hasAttribute('data-line-type') && el.hasAttribute('data-line-type'))) drawn.set(index, el);
+export function changeSpots(shells: readonly HTMLElement[], changesOf: (shell: HTMLElement) => readonly DiffChange[], readingLine: number): ChangeSpot[] {
+  const spots: ChangeSpot[] = [];
+  for (const shell of shells) {
+    if (isCollapsed(shell)) continue;
+    const changes = changesOf(shell);
+    if (changes.length === 0) continue;
+    const rows = renderedUnifiedRange(shell);
+    const box = shell.getBoundingClientRect();
+    for (const change of changes) {
+      const el = rows ? findChangeElement(shell, change) : null;
+      const placement: ChangePlacement = el
+        ? placementOf(el.getBoundingClientRect(), readingLine)
+        : rows
+          ? change.unifiedIndex < rows.min ? 'before' : 'after'
+          : box.bottom <= readingLine ? 'before' : 'after';
+      spots.push({ shell, change, el, placement });
+    }
   }
-  const first = Math.min(...drawn.keys());
-  const top = shell.getBoundingClientRect().top;
-  return [...drawn.entries()]
-    .filter(([index, el]) => {
-      if (!isChange(el)) return false;
-      const before = drawn.get(index - 1);
-      if (before) return !isChange(before);
-      return index !== first || el.getBoundingClientRect().top - top < NEAR_FILE_TOP;
-    })
-    .sort(([a], [b]) => a - b)
-    .map(([index, el]) => ({ index, el }));
-}
-
-export interface ChangeSpot extends ChangeStart {
-  file: string;
-}
-
-/** The change a step lands on among the drawn ones, measured as the review app measures (null: none that way). */
-export function pickChange(
-  spots: readonly ChangeSpot[],
-  direction: 'next' | 'prev',
-  view: Span,
-  scroll: { atTop: boolean; atBottom: boolean },
-  cursor: { file: string; index: number } | null,
-): ChangeSpot | null {
-  const readingLine = readingLineFor(view, direction, scroll);
-  const placements: ChangePlacement[] = spots.map((spot) => placementOf(spot.el.getBoundingClientRect(), readingLine));
-  let current: number | null = null;
-  if (cursor) {
-    const at = spots.findIndex((spot) => spot.file === cursor.file && spot.index === cursor.index);
-    const rect = at === -1 ? null : spots[at]!.el.getBoundingClientRect();
-    if (rect && rect.bottom > view.top && rect.top < view.bottom) current = at;
-  }
-  const target = resolveChangeJump(placements, direction, current);
-  return target == null ? null : spots[target]!;
+  return spots;
 }

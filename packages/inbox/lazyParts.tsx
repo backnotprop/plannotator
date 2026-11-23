@@ -120,7 +120,7 @@ function NoKeys() {
  * Beside a review's reader: the review's keys win while it is on screen. Drawn once its chunk is in (the reader's, so
  * at once beside a drawn reader), never through Suspense, so it never holds the reader or its failure notice.
  */
-export function ReviewKeysHere() {
+export function ReviewKeysHere(props: { diff: string; viewed: boolean }) {
   const [ready, setReady] = useState(ReviewKeysPart.isLoaded);
   useEffect(() => {
     if (ready) return;
@@ -131,7 +131,7 @@ export function ReviewKeysHere() {
       live = false;
     };
   }, [ready]);
-  return ready ? <ReviewKeysPart.Part /> : null;
+  return ready ? <ReviewKeysPart.Part {...props} /> : null;
 }
 export const ShapeBoardPart = lazyPart(() => import('#shape-board'));
 export const SearchPalettePart = lazyPart(() => import('#search-palette'));

@@ -1273,7 +1273,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
               </div>
             )}
             <ReaderPart diff={snapshot.review.rawPatch}>
-              <ReviewKeysHere />
+              <ReviewKeysHere diff={snapshot.review.rawPatch} viewed={!!viewedProp} />
               <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on={codeReview}>
               <ContextNotesProvider api={noteRows.api}>
               <GuideReader

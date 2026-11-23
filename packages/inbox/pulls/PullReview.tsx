@@ -1150,7 +1150,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
             // same code keeps it, whatever the head reads said. The reader is a chunk loaded on first use: one that cannot
             // arrive says so here.
             <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch}>
-              <ReviewKeysHere />
+              <ReviewKeysHere diff={snapshot.review.rawPatch} viewed />
               <OpenInCodeSpans scope={{ repo: repoKey ?? '', pull: layerKey }} on={!!repoKey}>
                 <ContextNotesProvider api={places.api}>
                   <GuideReader
