@@ -74,6 +74,16 @@ function setup() {
   return { store, dir, project, first, q1, q2 };
 }
 
+function refusal(run: () => unknown): InboxError {
+  try {
+    run();
+  } catch (error) {
+    if (error instanceof InboxError) return error;
+    throw error;
+  }
+  throw new Error("expected a refusal");
+}
+
 function sectionOf(store: InboxStore, threadId: string): string | undefined {
   return store.listSections().find((s) => s.threads.some((t) => t.thread_id === threadId))?.id;
 }
@@ -163,16 +173,6 @@ describe("superseding a question", () => {
 });
 
 describe("refusals: one bad id refuses the whole send and lists the thread's open questions", () => {
-  function refusal(run: () => unknown): InboxError {
-    try {
-      run();
-    } catch (error) {
-      if (error instanceof InboxError) return error;
-      throw error;
-    }
-    throw new Error("expected a refusal");
-  }
-
   test("an unknown key, a malformed id and a question of another thread", () => {
     const { store, first, q1, q2, project } = setup();
     const other = store.sendMessage({ project_id: project.id, author: { ...AGENT, session: "ses_b" }, body: WORKER }).message;
@@ -189,23 +189,70 @@ describe("refusals: one bad id refuses the whole send and lists the thread's ope
     expect(store.thread(first.thread_id)!.messages.length).toBe(1);
   });
 
-  test("a closed question: one already sent, one already superseded, and a Replaces: line naming one", () => {
+  test("a key alone names a question when exactly one open question of the thread has it, else it is refused with the open ids", () => {
     const { store, first, q1, q2 } = setup();
+    const sent = store.sendMessage({ project_id: first.project_id, author: AGENT, body: queueBlock(q1.key), reply_to: first.id });
+    expect(store.questionsOf(first.id)[0]!.superseded_by).toEqual({ message_id: sent.message.id, key: sent.message.questions![0]!.key });
+    const again = store.sendMessage({ project_id: first.project_id, author: AGENT, body: WORKER, reply_to: first.id }).message;
+    const cursor = store.cursor();
+    const error = refusal(() => store.sendMessage({ project_id: first.project_id, author: AGENT, body: "Not that one.", reply_to: first.id, supersedes: [q2.key] }));
+    expect(error.code).toBe("invalid_supersedes");
+    expect(error.message).toContain(`${first.id}/${q2.key}`);
+    expect(error.message).toContain(`${again.id}/${q2.key}`);
+    expect(store.cursor()).toBe(cursor);
+  });
+});
+
+describe("a question no longer open is left as it is and the message is sent", () => {
+  function answered() {
+    const world = setup();
+    const { store, first, q2 } = world;
     store.savePicks(first.id, [{ key: q2.key, revision: 0, answer: answerFor(q2, "Yes") }]);
     store.sendReply(first.id, { idempotency_key: "s1", questions: [{ key: q2.key, revision: 1 }] });
-    expect(refusal(() => store.sendMessage({ project_id: first.project_id, author: AGENT, body: "x", reply_to: first.id, supersedes: [`${first.id}/${q2.key}`] })).code).toBe(
-      "invalid_supersedes",
-    );
-    store.sendMessage({ project_id: first.project_id, author: AGENT, body: queueBlock(), reply_to: first.id, supersedes: [`${first.id}/${q1.key}`] });
-    const again = refusal(() => store.sendMessage({ project_id: first.project_id, author: AGENT, body: queueBlock(`${first.id}/${q1.key}`), reply_to: first.id }));
-    expect(again.code).toBe("invalid_supersedes");
-    expect(again.message).toContain("is not open (it is superseded)");
-    // The whole message has no open question left.
-    expect(refusal(() => store.sendMessage({ project_id: first.project_id, author: AGENT, body: "x", reply_to: first.id, supersedes: [first.id] })).message).toContain(
-      "no open question",
-    );
+    return world;
+  }
+
+  test("supersedes naming an answered question: sent, the answer untouched, and the skip says the new question is open on its own", () => {
+    const { store, first, q2 } = answered();
+    const sent = store.sendMessage({ project_id: first.project_id, author: AGENT, body: queueBlock(), reply_to: first.id, supersedes: [`${first.id}/${q2.key}`] });
+    const old = store.questionsOf(first.id)[1]!;
+    expect(old.state).toBe("sent");
+    expect(old.answer?.selected).toEqual(["Yes"]);
+    expect(store.supersededBy(sent.message.id)).toEqual([]);
+    expect(sent.skipped).toEqual([
+      { ref: `${first.id}/${q2.key}`, id: `${first.id}/${q2.key}`, was: "answered", new_question: `${sent.message.id}/${sent.message.questions![0]!.key}` },
+    ]);
   });
 
+  test("a Replaces: line naming an answered question by its key alone does the same", () => {
+    const { store, first, q2 } = answered();
+    const sent = store.sendMessage({ project_id: first.project_id, author: AGENT, body: queueBlock(q2.key), reply_to: first.id });
+    expect(store.questionsOf(first.id)[1]!.state).toBe("sent");
+    expect(sent.message.questions![0]!.state).toBe("open");
+    expect(sent.skipped?.map((s) => [s.id, s.was, s.new_question])).toEqual([[`${first.id}/${q2.key}`, "answered", `${sent.message.id}/${sent.message.questions![0]!.key}`]]);
+  });
+
+  test("one open and one answered: the open one is replaced, the answered one skipped, and the new question is not alone", () => {
+    const { store, first, q1, q2 } = answered();
+    const sent = store.sendMessage({ project_id: first.project_id, author: AGENT, body: queueBlock(), reply_to: first.id, supersedes: [`${first.id}/${q1.key}`, `${first.id}/${q2.key}`] });
+    const [old1, old2] = store.questionsOf(first.id);
+    expect(old1!.superseded_by).toEqual({ message_id: sent.message.id, key: sent.message.questions![0]!.key });
+    expect(old2!.state).toBe("sent");
+    expect(sent.skipped).toEqual([{ ref: `${first.id}/${q2.key}`, id: `${first.id}/${q2.key}`, was: "answered", new_question: null }]);
+  });
+
+  test("already replaced, and a whole message with nothing open, are skipped with their own words", () => {
+    const { store, first, q1 } = answered();
+    store.sendMessage({ project_id: first.project_id, author: AGENT, body: queueBlock(), reply_to: first.id, supersedes: [`${first.id}/${q1.key}`] });
+    const sent = store.sendMessage({ project_id: first.project_id, author: AGENT, body: "Still on it.", reply_to: first.id, supersedes: [`${first.id}/${q1.key}`, first.id] });
+    expect(sent.skipped?.map((s) => [s.id, s.was])).toEqual([
+      [`${first.id}/${q1.key}`, "replaced"],
+      [first.id, "no_open_question"],
+    ]);
+  });
+});
+
+describe("refusals that stay", () => {
   test("two blocks naming the same old question refuse the send", () => {
     const { store, first, q1 } = setup();
     const cursor = store.cursor();

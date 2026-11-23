@@ -32,6 +32,7 @@ import {
   inboxRowWaits,
   isInboxQuestionSupersedable,
   parseInboxQuestionBlocks,
+  parseInboxBareKey,
   parseInboxSupersedeRef,
   splitInboxReplyBody,
   summarizeInboxQuestions,
@@ -40,6 +41,7 @@ import {
   type ParsedInboxQuestion,
 } from "@plannotator/core/inbox-questions";
 import type { InboxPictureItPage } from "@plannotator/core/picture-it-page";
+import { inboxSupersedeSkipState, type InboxSupersedeSkip } from "./supersede-skips";
 import { inboxFileQuestionTwin } from "@plannotator/core/inbox-file-question-twin";
 import { inboxTwinChoicesRefusal } from "@plannotator/core/inbox-choice-twins";
 import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
@@ -309,8 +311,9 @@ export interface InboxSendInput {
    * Earlier questions of the same thread this message supersedes:
    * `<message id>` (each open question of it) or `<message id>/<key>`. A
    * `Replaces:` line in the body's blocks does the same per block. One id
-   * that names no open question of the thread refuses the whole send
-   * (`invalid_supersedes`).
+   * that names no question of the thread refuses the whole send
+   * (`invalid_supersedes`); one that names a question no longer open is
+   * left as it is (`InboxSendResult.skipped`).
    */
   supersedes?: readonly string[] | null;
   /**
@@ -344,6 +347,7 @@ export interface InboxSendResult {
   naming?: InboxThreadNaming;
   /** The action items this send marked done (`done`), `<message id>/<key>`. Absent when none. */
   done?: string[];
+  skipped?: InboxSupersedeSkip[];
 }
 
 export interface InboxAnswerEntry {
@@ -4407,7 +4411,7 @@ export class InboxStore {
     if (twins) throw new InboxError("validation_error", twins.message, { field: twins.field });
     // Checked before anything is written: one id that names no open question
     // of this thread refuses the whole send.
-    const superseding = this.planSupersede(threadId, id, supersedes, [...parsed, ...fileQuestions.map((f) => ({ key: f.key, replaces: f.question.replaces }))], actions);
+    const { plan: superseding, skipped } = this.planSupersede(threadId, id, supersedes, [...parsed, ...fileQuestions.map((f) => ({ key: f.key, replaces: f.question.replaces }))], actions);
     const doneIds = this.planDone(threadId, done, superseding, input.author);
     const agentSubject = subjectCheck.subject;
     const message: InboxMessage = {
@@ -4580,7 +4584,13 @@ export class InboxStore {
       }
     }
     // A reply from the agent reopens nothing: a resolved thread stays resolved.
-    return { message: this.wire(message), replayed: false, ...(naming ? { naming } : {}), ...(doneIds.length > 0 ? { done: doneIds } : {}) };
+    return {
+      message: this.wire(message),
+      replayed: false,
+      ...(naming ? { naming } : {}),
+      ...(doneIds.length > 0 ? { done: doneIds } : {}),
+      ...(skipped.length > 0 ? { skipped } : {}),
+    };
   }
 
   /**
@@ -4788,9 +4798,11 @@ export class InboxStore {
    * `supersedes` (replaced by the message's only question when it asks
    * exactly one, else by the message alone: "No longer applies"), then each
    * block's `Replaces:` line (replaced by that block's question, which
-   * wins). Every id must name an open question of `threadId`, the thread the
-   * message lands in, else the whole send is refused with
-   * `invalid_supersedes`, listing that thread's open questions.
+   * wins). Every id must name a question of `threadId`, the thread the
+   * message lands in (a key alone names the one open question of the thread
+   * with it), else the whole send is refused with `invalid_supersedes`,
+   * listing that thread's open questions. One no longer open is left as it
+   * is and returned in `skipped`.
    */
   private planSupersede(
     threadId: string | null,
@@ -4805,8 +4817,9 @@ export class InboxStore {
      * records of its own kind.
      */
     actions: readonly { key: string; replaces: string[] }[] = [],
-  ): Map<string, InboxSupersededBy> {
+  ): { plan: Map<string, InboxSupersededBy>; skipped: InboxSupersedeSkip[] } {
     const plan = new Map<string, InboxSupersededBy>();
+    const skips: { skip: InboxSupersedeSkip; meant: string | null }[] = [];
     const onlyQuestion = parsed.length === 1 ? parsed[0]!.key : null;
     const onlyAction = actions.length === 1 ? actions[0]!.key : null;
     type Family = "question" | "action" | null;
@@ -4823,14 +4836,20 @@ export class InboxStore {
     // `supersedes`: the new message's only block of the old record's kind replaces it, else "No longer applies".
     const byFor = (request: { by: InboxSupersededBy; family: Family }, record: InboxQuestionRecord): InboxSupersededBy =>
       request.family === null ? { message_id: messageId, key: familyOf(record) === "action" ? onlyAction : onlyQuestion } : request.by;
-    if (requests.length === 0) return plan;
+    if (requests.length === 0) return { plan, skipped: [] };
     const problems: string[] = [];
     // Which new block's Replaces: line claimed each old question: two blocks
     // cannot both replace one question.
     const claimedBy = new Map<string, string>();
     for (const request of requests) {
       const { ref, by, where, family } = request;
-      const target = parseInboxSupersedeRef(ref);
+      const bare = parseInboxBareKey(ref);
+      const named = bare === null ? null : this.bareKeyRef(threadId, bare, family);
+      if (named !== null && "problem" in named) {
+        problems.push(`${where} ${ref}: ${named.problem}`);
+        continue;
+      }
+      const target = parseInboxSupersedeRef(named?.ref ?? ref);
       if (!target) {
         problems.push(`${where} "${ref}" is not an id: write <message id>/<key> (read_thread gives the keys) or <message id>.`);
         continue;
@@ -4866,13 +4885,21 @@ export class InboxStore {
         r.kind === "action" && inboxQuestionState(r, resolved) === "picked" && r.action_result?.staged !== true;
       const open = records.filter((r) => isInboxQuestionSupersedable(inboxQuestionState(r, resolved)) && !personMarked(r));
       if (open.length === 0) {
-        problems.push(
-          target.key !== null && personMarked(records[0]!)
-            ? `${where} ${ref}: ${PERSON_MARKED_WORDS}.`
-            : target.key === null
-              ? `${where} ${ref}: that message has no open question.`
-              : `${where} ${ref} is not open (it is ${inboxQuestionState(records[0]!, resolved)}).`,
-        );
+        if (records.length === 0) {
+          problems.push(`${where} ${ref}: that message has no question.`);
+          continue;
+        }
+        const first = records[0]!;
+        const meant = request.family === null ? (familyOf(first) === "action" ? onlyAction : onlyQuestion) : by.key;
+        skips.push({
+          skip: {
+            ref,
+            id: target.key === null ? message.id : first.id,
+            was: target.key === null ? "no_open_question" : inboxSupersedeSkipState(first, resolved, personMarked(first)),
+            new_question: null,
+          },
+          meant,
+        });
         continue;
       }
       // A block's own Replaces: line names the replacement exactly, so it wins over the argument.
@@ -4902,7 +4929,34 @@ export class InboxStore {
         open_questions: open,
       });
     }
-    return plan;
+    const replacing = new Set([...plan.values()].map((by) => by.key));
+    const skipped: InboxSupersedeSkip[] = [];
+    for (const { skip, meant } of skips) {
+      if (skipped.some((s) => s.id === skip.id)) continue;
+      skipped.push({ ...skip, new_question: meant !== null && !replacing.has(meant) ? `${messageId}/${meant}` : null });
+    }
+    return { plan, skipped };
+  }
+
+  private bareKeyRef(threadId: string | null, key: string, family: "question" | "action" | null): { ref: string } | { problem: string } {
+    if (threadId === null) return { problem: "a key alone names a question of the thread you reply to; this message would start a new thread." };
+    const named: InboxQuestionRecord[] = [];
+    const open: InboxQuestionRecord[] = [];
+    for (const message of this.threadMessages(threadId)) {
+      if (message.author.kind !== "agent") continue;
+      const resolved = this.closedByArchive(message);
+      for (const record of this.questionRecords(message.id)) {
+        if (record.key !== key || (family !== null && (record.kind === "action" ? "action" : "question") !== family)) continue;
+        named.push(record);
+        const state = inboxQuestionState(record, resolved);
+        if (isInboxQuestionSupersedable(state) && !(record.kind === "action" && state === "picked" && record.action_result?.staged !== true)) open.push(record);
+      }
+    }
+    if (open.length === 1) return { ref: open[0]!.id };
+    if (open.length > 1) return { problem: `${open.length} open questions in this thread have that key (${open.map((r) => r.id).join(", ")}); write the one you mean as <message id>/<key>.` };
+    if (named.length === 1) return { ref: named[0]!.id };
+    if (named.length > 1) return { problem: `${named.length} questions in this thread have that key and none is open (${named.map((r) => r.id).join(", ")}); write the one you mean as <message id>/<key>.` };
+    return { problem: "no question in this thread has that key; write <message id>/<key>." };
   }
 
   private targetMessage(messageId: string): InboxMessage {

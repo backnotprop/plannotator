@@ -41,6 +41,7 @@ import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly 
 import { QUESTION_OPENERS_WITH_TEXT_MAX, questionOpenersWithText, questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxSendResult, InboxStore } from "@plannotator/shared/inbox/store";
+import { inboxSupersedeSkipsText, type InboxSupersedeSkip } from "@plannotator/shared/inbox/supersede-skips";
 import type { InboxAttachment, InboxListRow, InboxLiveSiteRef, InboxMessageWire } from "@plannotator/core/inbox-types";
 import { inboxAgentFilesOf } from "./inbox-agent-files";
 import { registerInboxGuideTools } from "./inbox-guides";
@@ -1067,6 +1068,7 @@ export async function sendAgentMessage(
       superseded,
       /** The action items this message marked done (`done`). */
       ...(markedDone.length > 0 ? { done: markedDone } : {}),
+      ...(result.skipped ? { skipped: result.skipped } : {}),
       replayed: result.replayed,
       cursor: store.messageCursor(message.id) ?? store.cursor(),
       url: threadUrl(context.baseUrl(), message.thread_id),
@@ -1383,6 +1385,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           pictureChoices,
           prototypesNotFramedText(sent.notFramed),
           questionOpenersWithTextText(sent.questionOpenersWithText),
+          inboxSupersedeSkipsText(sent.structured.skipped as InboxSupersedeSkip[] | undefined),
         ];
         if (stale) hints.push(`\n${staleThreadText(stale, shortTime)}`);
         hints.push(askedRefsText(String(sent.structured.message_id), sent.asked));
