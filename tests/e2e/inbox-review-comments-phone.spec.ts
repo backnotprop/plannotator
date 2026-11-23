@@ -357,9 +357,35 @@ test('a desktop: the panel is the docked column or the 300 px sheet at the right
 /** Review parity's shots (code review in the Inbox brought up to the code review app). */
 const parityDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(resolve(__dirname, '../..'), '.local/proof')), 'review-parity');
 
+/** The visible boxes of a row's children: none overlaps another, and all are inside the window. */
+async function expectRowFits(row: Locator, width: number, what: string): Promise<void> {
+  const boxes = await row.evaluate((el) =>
+    [...el.children]
+      // The spacer is room, not a control; a part laid over the row (a sheet, a live region) is not in its line.
+      .filter((child) => !child.classList.contains('ib-sp') && !['absolute', 'fixed'].includes(getComputedStyle(child).position))
+      .map((child) => {
+        const box = child.getBoundingClientRect();
+        return { name: `${child.tagName.toLowerCase()}.${[...child.classList].join('.')}`, left: box.left, right: box.right, top: box.top, bottom: box.bottom, w: box.width, h: box.height };
+      })
+      .filter((box) => box.w > 1 && box.h > 1),
+  );
+  expect(boxes.length, what).toBeGreaterThan(0);
+  for (const box of boxes) {
+    expect(box.left, `${what}: ${box.name} past the left edge`).toBeGreaterThanOrEqual(0);
+    expect(box.right, `${what}: ${box.name} past the right edge`).toBeLessThanOrEqual(width);
+  }
+  for (const [i, a] of boxes.entries()) {
+    for (const b of boxes.slice(i + 1)) {
+      const apart = a.right <= b.left + 0.5 || b.right <= a.left + 0.5 || a.bottom <= b.top + 0.5 || b.bottom <= a.top + 0.5;
+      expect(apart, `${what}: ${a.name} ${JSON.stringify(a)} overlaps ${b.name} ${JSON.stringify(b)}`).toBe(true);
+    }
+  }
+}
+
 for (const [name, open] of Object.entries(opens)) {
   for (const [width, height] of [[390, 844], [320, 568]] as const) {
-    test(`a phone at ${width}, ${name}: the Diff display gear sits in a row of the bar, not a row of its own, and its Whole file switch is on screen`, async ({ browser }) => {
+    const where = name === 'a pull request' ? 'beside Files, in the row under the bar' : "at the right end of the heading's row of the review's own actions, not in the bar";
+    test(`a phone at ${width}, ${name}: the Diff display gear sits ${where}, and its menu and Whole file switch are on screen`, async ({ browser }) => {
       mkdirSync(parityDir, { recursive: true });
       const { context, page } = await windowAt(browser, width, height, true);
       const errors: string[] = [];
@@ -371,28 +397,51 @@ for (const [name, open] of Object.entries(opens)) {
         await expect(gear).toBeInViewport({ ratio: 1 });
         // A phone draws every diff Unified and folds nothing at once: the gear is its only diff control.
         await expect(page.locator('[data-diff-controls] button')).toHaveCount(1);
-        // Its row (the PR's row under the bar, or the guided review's bar) is one line, inside the window.
-        const row = await gear.evaluate((el) => {
-          const at = el.getBoundingClientRect();
-          const middle = at.top + at.height / 2;
-          const line = el.closest('.ib-prp-row2, .ib-vhead')!;
-          const parts = [...line.children].map((child) => child.getBoundingClientRect()).filter((box) => box.width > 0 && box.height > 0);
-          return { off: parts.filter((box) => Math.abs(box.top + box.height / 2 - middle) > 3).length, left: Math.min(...parts.map((box) => box.left)), right: Math.max(...parts.map((box) => box.right)) };
-        });
-        expect(row.off).toBe(0);
-        expect(row.left).toBeGreaterThanOrEqual(0);
-        expect(row.right).toBeLessThanOrEqual(width);
+        // A 44 px target.
+        const gearBox = (await gear.boundingBox())!;
+        expect(gearBox.width).toBeGreaterThanOrEqual(name === 'a pull request' ? 30 : 44);
+        expect(gearBox.height).toBeGreaterThanOrEqual(name === 'a pull request' ? 30 : 44);
         expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-        // The guided review's place (its chapter or file) keeps room to read beside it.
-        if (name === 'a guided review') expect((await page.locator('.ib-vhead [data-review-jump]').boundingBox())!.width).toBeGreaterThanOrEqual(40);
+        const bar = page.locator('.ib-review:visible > .ib-vhead').first();
+        await expectRowFits(bar, width, `the bar at ${width}`);
+
+        if (name === 'a guided review') {
+          // The bar is main's: the gear is not in it, so the place (Overview) reads whole beside the other controls.
+          await expect(bar.locator('[data-diff-controls]')).toHaveCount(0);
+          const place = bar.locator('[data-review-jump] .ib-rj-name');
+          await expect(place).toHaveText('Overview');
+          const cut = await place.evaluate((el) => `${el.scrollWidth} in ${el.clientWidth}`);
+          expect(await place.evaluate((el) => el.scrollWidth <= el.clientWidth), `Overview reads ${cut} at ${width} px`).toBe(true);
+          // The gear: in the heading's row (Show me, Global comment), under the bar, at its right end.
+          const row = page.locator('[data-review-message] [data-guide-heading] .gv-tools');
+          await expect(row.locator('[data-diff-display-options]')).toHaveCount(1);
+          await expectRowFits(row, width, `the heading's row at ${width}`);
+          const rowBox = (await row.boundingBox())!;
+          const barBox = (await bar.boundingBox())!;
+          expect(gearBox.y).toBeGreaterThanOrEqual(barBox.y + barBox.height);
+          expect(Math.abs(gearBox.x + gearBox.width - (rowBox.x + rowBox.width))).toBeLessThanOrEqual(1);
+        } else {
+          await expectRowFits(page.locator('.ib-prp-row2').first(), width, `the row under the bar at ${width}`);
+        }
+        if (width === 390 && name === 'a guided review') await page.screenshot({ path: join(parityDir, 'b0-05-phone-390-guided-review-light.png') });
+        if (width === 320 && name === 'a guided review') await page.screenshot({ path: join(parityDir, 'b0-06-phone-320-guided-review-light.png') });
 
         await gear.tap();
-        const whole = page.locator('[data-diff-display-popup]').getByRole('switch', { name: 'Whole file' });
+        const popup = page.locator('[data-diff-display-popup]');
+        await expect(popup).toBeVisible();
+        await page.waitForTimeout(300);
+        // The menu fits inside the window, whole.
+        const menu = (await popup.boundingBox())!;
+        expect(menu.x).toBeGreaterThanOrEqual(0);
+        expect(menu.y).toBeGreaterThanOrEqual(0);
+        expect(menu.x + menu.width, `the menu ${JSON.stringify(menu)} at ${width}`).toBeLessThanOrEqual(width);
+        expect(menu.y + menu.height, `the menu ${JSON.stringify(menu)} at ${height} tall`).toBeLessThanOrEqual(height);
+        const whole = popup.getByRole('switch', { name: 'Whole file' });
+        await whole.scrollIntoViewIfNeeded();
         await expect(whole).toBeInViewport({ ratio: 1 });
         await expect(whole).toHaveAttribute('aria-checked', 'false');
-        await page.waitForTimeout(300);
         if (width === 390 && name === 'a pull request') await page.screenshot({ path: join(parityDir, 'b0-03-phone-390-light.png') });
-        if (width === 320 && name === 'a guided review') await page.screenshot({ path: join(parityDir, 'b0-04-phone-320-guided-review-light.png') });
+        if (width === 320 && name === 'a guided review') await page.screenshot({ path: join(parityDir, 'b0-07-phone-320-menu-open-light.png') });
         await whole.tap();
         await expect(whole).toHaveAttribute('aria-checked', 'true');
         await whole.tap();

@@ -20,9 +20,11 @@
  *   title in quiet grey. The diff controls (one Split / Unified button,
  *   Collapse all, the "Diff display" gear: DiffControls, approval
  *   "diff-controls-headers") sit in the bar only, never on the chapters. A
- *   phone's bar is one row: the same menu holds its title and switch, and of
- *   the diff controls only the gear stays (its Whole file is the way back from
- *   whole files chosen in code review).
+ *   phone's bar is one row: the same menu holds its title and switch, and no
+ *   diff control. Of those a phone keeps only the gear (its Whole file is the
+ *   way back from whole files chosen in code review), at the right end of the
+ *   heading's row of the review's own actions (renderHeadActions), so the
+ *   bar's place keeps its room.
  * - All files has the PR page's file tree on the left (approval
  *   "review-allfiles-tree", the PR page's `PullChangesTree`): a click on a file goes to
  *   it. As on the PR page, a phone has no rail: the bar's Files button opens the
@@ -782,10 +784,20 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
     [isReview, shape, author, files, chapters, mode],
   );
   // Before there is a picture, Show me is one of the review's own actions, in its heading beside Global comment.
+  // A phone's Diff display gear is one too, at the row's right end: the bar's room is the place's (its label stays whole).
   const renderHeadActions = useCallback(
-    (): ReactNode | null => (!overviewHtml && showMeOn ? <ShowMeButton onShowMe={() => showMe.open({ file: null, lines: null })} /> : null),
+    (): ReactNode | null => {
+      const showMeButton = !overviewHtml && showMeOn ? <ShowMeButton onShowMe={() => showMe.open({ file: null, lines: null })} /> : null;
+      if (!phone) return showMeButton;
+      return (
+        <>
+          {showMeButton}
+          <DiffControls files={files.length} collapseAll={null} onCollapseAll={() => {}} layout={!walkthrough} />
+        </>
+      );
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [overviewHtml, showMeOn],
+    [overviewHtml, showMeOn, phone, files.length, walkthrough],
   );
 
   const viewedSet = useMemo(() => new Set(viewed), [viewed]);
@@ -1061,7 +1073,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
           </span>
         )}
         <span className="ib-sp" />
-        {snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} layout={!walkthrough} />}
+        {!phone && snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} layout={!walkthrough} />}
         {threadBoard && <ShapePebbleButton shape={threadBoard} open={!!board} onToggle={() => onBoard(board ? null : threadBoard.id)} />}
         {phone && showTree && tree && (
           <button

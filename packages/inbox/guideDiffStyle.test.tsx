@@ -6,7 +6,8 @@
  * no tab on any card. Every setting is code review's own (its
  * `plannotator-diff-*` cookie and config.json `diffOptions`); the popover
  * leaves out Hide whitespace but has code review's Whole file, which the diffs
- * obey. On a phone the bar has the gear alone and every diff is drawn
+ * obey. On a phone the gear alone, in the heading's row of the review's own
+ * actions (the bar keeps its room for the place), and every diff is drawn
  * Unified, the saved layout left as it is.
  *
  * The whole window (InboxApp) over a REAL Inbox server in a temp data dir
@@ -342,6 +343,8 @@ test.skipIf(!hasDom)('a phone draws only the Diff display gear and every diff in
   // No Split / Unified and no Collapse all: the gear alone, so Whole file can still be turned off.
   const controls = el.querySelector('[data-diff-controls]')!;
   expect([...controls.querySelectorAll('button')].map((b) => b.getAttribute('aria-label'))).toEqual(['Diff display options']);
+  expect(bar(el).querySelector('[data-diff-controls]')).toBeNull();
+  expect(controls.closest('[data-guide-heading]')).not.toBeNull();
   expect(el.querySelector('[data-diff-layout-toggle]')).toBeNull();
   expect(el.querySelector('[data-diff-style-switch]')).toBeNull();
   // Every diff in one column though the saved layout says Split.

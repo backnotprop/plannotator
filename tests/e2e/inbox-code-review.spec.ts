@@ -817,16 +817,19 @@ test('a phone at 390 px: one row of one height, and the same menu as a desktop h
     await page.goto(`${world.url}#thread=${review.thread_id}&guide=${review.message_id}`);
     const pane = page.locator('[data-review-message]');
     await expect(pane.locator('[data-guide-file-shell]').first()).toBeVisible({ timeout: 30_000 });
-    // A phone reads Unified only: no layout to choose, in the bar or on a card. The Diff display gear alone stays.
+    // A phone reads Unified only: no layout to choose, in the bar or on a card. The Diff display gear alone stays, in
+    // the heading's row of the review's own actions, not the bar.
     await expect(pane.locator('[data-diff-style-switch]')).toHaveCount(0);
     await expect(pane.locator('[data-diff-layout-toggle]')).toHaveCount(0);
     await expect(pane.locator('[data-diff-controls] button')).toHaveCount(1);
+    await expect(pane.locator('.ib-vhead [data-diff-controls]')).toHaveCount(0);
+    await expect(pane.locator('[data-guide-heading] .gv-tools [data-diff-display-options]')).toBeVisible();
     await expect(pane.locator('select')).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 
     // One row, every control one height; Approve says so in a word.
     const bar = pane.locator('.ib-vhead');
-    const parts = [bar.locator('.ib-back'), bar.locator('[data-review-jump]'), bar.locator('[data-diff-display-options]'), bar.locator('.ib-vcomments'), bar.locator('[data-decision-primary]'), bar.getByRole('button', { name: 'Close the review' })];
+    const parts = [bar.locator('.ib-back'), bar.locator('[data-review-jump]'), bar.locator('.ib-vcomments'), bar.locator('[data-decision-primary]'), bar.getByRole('button', { name: 'Close the review' })];
     const boxes = await Promise.all(parts.map(async (part) => (await part.boundingBox())!));
     expect(new Set(boxes.map((box) => box.height))).toEqual(new Set([36]));
     expect(new Set(boxes.map((box) => box.y))).toEqual(new Set([boxes[0]!.y]));

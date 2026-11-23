@@ -4,8 +4,8 @@
  * `plannotator-diff-expand-unchanged` cookie and config.json
  * `diffOptions.expandUnchanged`), so its "Diff display" popover must carry
  * that switch: hidden, a person who once chose Whole file in code review gets
- * whole files in the Inbox with no way back. On a phone the bar keeps the gear
- * alone, so the switch is still reachable there.
+ * whole files in the Inbox with no way back. A phone keeps the gear alone, so
+ * the switch is still reachable there.
  *
  * The failures this catches: the switch missing from the popover (desktop or
  * phone), a click that does not reach the setting or the Inbox's settings
