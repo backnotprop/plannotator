@@ -58,6 +58,7 @@ import { loadPeleRuntime, PELE_IN_BUILD, PELE_OUTPUT_LIMIT, PELE_SOURCE_LIMIT, p
 import { finishPeleLabels, needsPeleLabels, pageMathTypesetter, peleLabelMeasurer, preparePeleLabels, restorePeleLabelMessage, type PreparedPeleLabels } from './pele-labels';
 import { peleAuthorColors } from './peleAuthorTheme';
 import { clampPeleStyles } from './peleStyleClamp';
+import { spaceWrappedRows } from './peleRowSpaces';
 import { applyPeleThemeVariables, peleShadowCss, readPeleThemeVariables } from './peleTheme';
 
 export type { DiagramKind } from '@plannotator/core/diagram-anchor';
@@ -1156,6 +1157,8 @@ async function renderPele(renderId: string, source: string, theme: DiagramTheme,
     scrubFetchingStyles(svgNode);
     // An author's sizes (`stroke-dasharray:0.0001`, `stroke-width:9999px`) held to sane ranges (`peleStyleClamp.ts`).
     clampPeleStyles(svgNode);
+    // A label wrapped over rows reads with a space between them (`peleRowSpaces.ts`).
+    spaceWrappedRows(svgNode);
     const personColors = readPeleThemeVariables(theme.mode);
     // The colours an author spells out, over the person's palette; never a theme name, never a panel (`peleAuthorTheme.ts`).
     const author = peleAuthorColors(source, personColors);
@@ -1214,9 +1217,9 @@ const engineSwitchRenderer: DiagramRenderer = {
 
 /**
  * The engine switch's renderer, when Pele is part of the build
- * (`PELE_IN_BUILD`, false while `DIAGRAM_ENGINE_MODE` is `'mermaid'`). A
- * conditional on that constant, so a shipped build drops the switch and all
- * of Plannotator's Pele code behind it (`renderPele`, the Pele finders,
+ * (`PELE_IN_BUILD`, false only while `DIAGRAM_ENGINE_MODE` is `'mermaid'`). A
+ * conditional on that constant, so a build under `'mermaid'` drops the switch
+ * and Plannotator's Pele code behind it (`renderPele`, the Pele finders,
  * `peleTheme`), not only Pele's library.
  */
 let engineSwitch: DiagramRenderer | undefined = PELE_IN_BUILD ? engineSwitchRenderer : undefined;
@@ -1228,8 +1231,8 @@ export function __setPeleInBuildForTests(on: boolean | undefined): void {
   engineSwitch = (on ?? PELE_IN_BUILD) ? engineSwitchRenderer : undefined;
 }
 
-/** The renderer for a kind. With the switch on `'mermaid'` (the shipped
- * value) a Mermaid fence gets exactly the Mermaid entry above. */
+/** The renderer for a kind. With the switch on `'mermaid'` a Mermaid fence
+ * gets exactly the Mermaid entry above; otherwise the engine switch. */
 function rendererFor(kind: DiagramKind): DiagramRenderer {
   if (kind === 'graphviz') return graphvizRenderer;
   return engineSwitch === undefined || diagramEngineMode() === 'mermaid' ? mermaidRenderer : engineSwitch;

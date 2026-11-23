@@ -164,7 +164,7 @@ describe('review entry assets', () => {
     expect(read('packages/ui/utils/graphviz.ts')).not.toMatch(staticImport('@viz-js/viz'));
     expect(read('packages/ui/utils/graphviz.ts')).toContain("import('@viz-js/viz')");
     expect(read('packages/ui/utils/generateIdentity.ts')).not.toMatch(staticImport('unique-username-generator'));
-    // Pele (the second Mermaid engine, off by default) arrives only through
+    // Pele (the second Mermaid engine) arrives only through
     // `pele/lazy`, whose core and diagram types are chunks of their own.
     for (const path of ['packages/ui/utils/pele.ts', 'packages/ui/utils/diagram-render.ts', 'packages/ui/utils/diagram-engine.ts', 'packages/ui/utils/peleTheme.ts', 'packages/ui/components/DiagramBlock.tsx', 'packages/ui/components/MermaidBlock.tsx']) {
       expect(read(path)).not.toMatch(/^import\s+(?!type\b)[^;]*from\s+['"]pele(?:\/[^'"]*)?['"]/m);
@@ -172,11 +172,11 @@ describe('review entry assets', () => {
     expect(read('packages/ui/utils/pele.ts')).toContain("import('pele/lazy')");
   });
 
-  // While the switch is 'mermaid', Pele's library is in no build: its one
-  // import sits behind `PELE_IN_BUILD` (utils/pele.ts), a constant Rollup
-  // folds. A second import of Pele anywhere else (a new module, a component)
-  // would bring it back ungated, and the single-file builds would inline all
-  // of it, so only that one file may name it outside tests.
+  // Pele's one import sits behind `PELE_IN_BUILD` (utils/pele.ts), a
+  // constant Rollup folds, so a build under the switch's 'mermaid' carries
+  // none of it. A second import of Pele anywhere else (a new module, a
+  // component) would be ungated and could pack a second copy, so only that
+  // one file may name it outside tests.
   test("only utils/pele.ts names Pele's library, and only behind its build gate", () => {
     const listed = Bun.spawnSync(['git', 'ls-files', '-z', '--', 'packages', 'apps', 'build'], { cwd: root }).stdout.toString().split('\0');
     const sources = listed.filter((file) => /\.(?:[cm]?[jt]sx?)$/.test(file) && !/(?:^|\/)(?:test-setup|tests?)\/|\.test\.[jt]sx?$/.test(file));
@@ -447,6 +447,65 @@ describe('review entry assets', () => {
     });
   }
 
+  // With the switch on Pele ('pele-where-safe', shipped), a packed page that
+  // draws diagrams carries Pele as Mermaid is carried: in the pack, fetched on
+  // the first fence, never up front. Pele's core is one chunk (its error
+  // class's name is in it and nowhere else), so a second copy riding in
+  // through another import shows as a second chunk. Mermaid stays lazy too, so
+  // a page Pele draws whole never fetches it. Code review's page carries
+  // neither: its diagrams come from the engine file, which holds Pele (and
+  // fetches the Mermaid runtime file only for a fence that falls back).
+  const PELE_CORE_MARKER = 'PeleError';
+  const MERMAID_MARKER = 'flowchart-v2';
+  const packedScripts = async (path: string): Promise<{ upFront: Map<string, string>; all: Map<string, string> }> => {
+    const bundle = readFileSync(resolve(root, path), 'utf8');
+    const app = openPackedApp(bundle);
+    const indexAt = bundle.indexOf(PACKED_ASSETS_MARKER) + PACKED_ASSETS_MARKER.length;
+    const packed = Object.keys(JSON.parse(bundle.slice(indexAt, bundle.indexOf('\n', indexAt))) as Record<string, unknown>);
+    const text = async (asset: string) => (await app.answer(asset, 'GET', null, false)).body.toString();
+    const upFront = new Map<string, string>();
+    const load = async (asset: string): Promise<void> => {
+      if (upFront.has(asset)) return;
+      const code = await text(asset);
+      upFront.set(asset, code);
+      for (const entry of new Bun.Transpiler({ loader: 'js' }).scanImports(code)) {
+        if (entry.kind === 'import-statement') await load(new URL(entry.path, `http://app${asset}`).pathname);
+      }
+    };
+    for (const m of app.html.matchAll(/(?:src|href)="(\/assets\/[^"]+\.js)"/g)) await load(m[1]!);
+    const all = new Map<string, string>();
+    for (const asset of packed.filter((name) => name.endsWith('.js'))) all.set(asset, await text(asset));
+    return { upFront, all };
+  };
+  const pelePacked = ['apps/hook/dist/index.html', 'apps/hook/dist/inbox.html', 'apps/opencode-plugin/plannotator.html'];
+  for (const path of pelePacked) {
+    test.skipIf(DIAGRAM_ENGINE_MODE === 'mermaid' || !existsSync(resolve(root, path)))(`${path} packs Pele once and fetches it and Mermaid only on first use`, async () => {
+      const { upFront, all } = await packedScripts(path);
+      const holding = (codes: Map<string, string>, marker: string) => [...codes].filter(([, code]) => code.includes(marker)).map(([asset]) => asset);
+      const facts = {
+        path,
+        peleCoreChunks: holding(all, PELE_CORE_MARKER).length,
+        peleUpFront: holding(upFront, PELE_CORE_MARKER).length > 0,
+        mermaidPacked: holding(all, MERMAID_MARKER).length > 0,
+        mermaidUpFront: holding(upFront, MERMAID_MARKER).length > 0,
+      };
+      expect(facts).toEqual({ path, peleCoreChunks: 1, peleUpFront: false, mermaidPacked: true, mermaidUpFront: false });
+    });
+  }
+  const reviewPages = ['apps/review/dist/index.html', 'apps/hook/dist/review.html', 'apps/opencode-plugin/review-editor.html'];
+  for (const dir of ENGINE_DIRS) {
+    test.skipIf(DIAGRAM_ENGINE_MODE === 'mermaid' || !existsSync(resolve(root, dir)))(`${dir}/engine.js holds Pele and the review page does not`, () => {
+      const engine = readFileSync(resolve(root, dir, 'engine.js'), 'utf8');
+      const pages = reviewPages.filter((page) => existsSync(resolve(root, page)));
+      const facts = {
+        dir,
+        engineHasPele: engine.includes(PELE_CORE_MARKER),
+        pagesWithPele: pages.filter((page) => readFileSync(resolve(root, page), 'utf8').includes(PELE_CORE_MARKER)),
+      };
+      expect(facts).toEqual({ dir, engineHasPele: true, pagesWithPele: [] });
+    });
+  }
+
   // While the switch is 'mermaid' no built file carries any of Pele's
   // library: not the single-file builds that inline every dynamic import
   // (the Inbox surface, code review's diagram engine), and no
@@ -454,7 +513,8 @@ describe('review entry assets', () => {
   // names only Pele's own svg writer prints (Plannotator's finder reads
   // `pele-edge`, `pele-node`, `pele-marker`, never these). The last two are
   // Plannotator's own Pele code (`utils/pele-labels.ts`), which the same
-  // switch keeps out: its math labels' attribute and class.
+  // switch keeps out: its math labels' attribute and class. Skipped while
+  // the switch is on Pele (the checks above hold then).
   const PELE_MARKERS = ['pele-shape-', 'pele-icon', 'pele-ticket', 'pele-slice-labels', 'pele-commit-label', 'data-pele-tex', 'pele-math'];
   const builtFiles = [
     'apps/review/dist/index.html',
@@ -503,9 +563,11 @@ describe('review entry assets', () => {
     'Shiki TypeScript grammar': '"scopeName":"source.ts"',
     Mermaid: 'flowchart-v2',
     Graphviz: 'viz_set_y_invert',
-    KaTeX: 'katex-display',
+    // KaTeX's own error text: its class names are also in Plannotator's
+    // label code (`utils/pele-labels.ts` reads `katex-display`).
+    KaTeX: 'KaTeX parse error',
     // Pele is in no build while the engine switch is 'mermaid' (checked
-    // above); once it is on, it is a lazy part like Mermaid.
+    // above); on, it is a lazy part like Mermaid.
     ...(DIAGRAM_ENGINE_MODE === 'mermaid' ? {} : { Pele: 'pele-shape-' }),
   };
   test.skipIf(!existsSync(resolve(root, inboxWindow)))(`${inboxWindow} loads its entry script up front and the review, diagrams and grammars on first use`, async () => {

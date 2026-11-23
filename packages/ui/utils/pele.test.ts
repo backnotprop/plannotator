@@ -9,15 +9,16 @@ import { __setPeleRuntimeLoaderForTests, loadPeleRuntime, PELE_IN_BUILD, PELE_SO
 
 const fonts = { sans: 'sans-serif', mono: 'monospace' };
 
-// What regresses if this fails: a build with the shipped switch carries
-// Pele's library again, or a fence reaches it (tests/entry-assets.test.ts
-// reads the built files for the same promise).
+// What regresses if this fails: the shipped build leaves Pele out again, so
+// every fence silently goes back to Mermaid (tests/entry-assets.test.ts reads
+// the built files for the same promise).
 describe('Pele under the shipped switch', () => {
-  test("is not part of the build while the switch is 'mermaid': its loader refuses", async () => {
+  test("is part of the build with the switch on 'pele-where-safe': its own loader draws", async () => {
     __setPeleRuntimeLoaderForTests(undefined);
-    expect(DIAGRAM_ENGINE_MODE).toBe('mermaid');
-    expect(PELE_IN_BUILD).toBe(false);
-    await expect(loadPeleRuntime()).rejects.toThrow(/not part of this build/u);
+    expect(DIAGRAM_ENGINE_MODE).toBe('pele-where-safe');
+    expect(PELE_IN_BUILD).toBe(true);
+    const runtime = await loadPeleRuntime();
+    expect(await runtime.supports('flowchart TD\n  A --> B')).toBe(true);
   });
 });
 

@@ -2,17 +2,23 @@
  * Which engine draws a Mermaid-syntax fence: Mermaid or Pele.
  *
  * ONE switch, `DIAGRAM_ENGINE_MODE`, decides for every fence. It is
- * `'mermaid'`, so every fence is drawn by Mermaid exactly as before Pele was
- * added, and no build carries any of Pele: `PELE_IN_BUILD` (`pele.ts`) is
- * derived from this switch, and its one import of `pele/lazy` and the
- * engine switch in `diagram-render.ts` sit behind it, so the bundler drops
- * them (`tests/entry-assets.test.ts` reads the built files). Changing this
- * constant is the one change that turns Pele on (`PELE.md`, "Turning Pele
- * on"). The other modes:
- *   - `'pele-where-safe'`: Pele draws a fence unless doing so would lose
- *     something Plannotator offers under Mermaid (`diagramEngineFor` below);
- *     then Mermaid draws it, quietly. A fence Pele cannot draw at render time
- *     (its `supports()` says no, or it throws) also falls back to Mermaid.
+ * `'pele-where-safe'`: Pele draws a fence unless doing so would lose
+ * something Plannotator offers under Mermaid (`diagramEngineFor` below);
+ * then Mermaid draws it, quietly. A fence Pele cannot draw at render time
+ * (its `supports()` says no, or it throws, as on a parse error) also falls
+ * back to Mermaid, whose error panel shows when Mermaid cannot draw it
+ * either. Both engines are lazy: Pele's core and each diagram type arrive
+ * through `pele/lazy` on the first fence Pele draws, and Mermaid's runtime
+ * only when a fence falls back to it, so a page Pele draws whole never
+ * fetches Mermaid (`tests/entry-assets.test.ts` checks the built files).
+ * The other modes:
+ *   - `'mermaid'`: Mermaid draws every fence, as before Pele was added.
+ *     `PELE_IN_BUILD` (`pele.ts`) is derived from this switch, and its one
+ *     import of `pele/lazy` and the engine switch in `diagram-render.ts`
+ *     sit behind it, so a build under `'mermaid'` drops Pele's library and
+ *     the switch. It is not free of every Pele name: code that does not sit
+ *     behind the constant stays (`diagram-anchor.ts` reads Pele's root
+ *     class, for one).
  *   - `'pele'`: Pele draws every fence; its errors are shown as errors.
  *
  * `PELE_CAPABILITIES` is the data the fallback reads: per Mermaid diagram
@@ -23,8 +29,8 @@
 export type DiagramEngine = 'mermaid' | 'pele';
 export type DiagramEngineMode = 'mermaid' | 'pele-where-safe' | 'pele';
 
-/** THE switch. `'mermaid'` is Plannotator's behavior before Pele. */
-export const DIAGRAM_ENGINE_MODE: DiagramEngineMode = 'mermaid';
+/** THE switch. `'mermaid'` is Plannotator's behavior before Pele; `'pele-where-safe'` ships. */
+export const DIAGRAM_ENGINE_MODE: DiagramEngineMode = 'pele-where-safe';
 
 let modeOverride: DiagramEngineMode | undefined;
 
@@ -154,7 +160,7 @@ export const PELE_CAPABILITIES: Readonly<Record<MermaidDiagramType, Readonly<Rec
 export const DIAGRAM_FEATURES = {
   /** `$$...$$` labels typeset with KaTeX (MathML). Pele: through the label step (`pele-labels.ts`). */
   mathLabels: { mermaid: true, pele: true },
-  /** Styled label text: colour, underline, strike, code, bold, italic, line breaks (`pele-labels.ts`). Pictures and icons in a label draw under neither. */
+  /** Styled label text: colour, underline, strike, code, bold, italic, line breaks (`pele-labels.ts`). Pele drops a picture or icon beside words; a label that is only one is a Pele failure, so Mermaid draws that fence, picture included. */
   htmlLabels: { mermaid: true, pele: true },
   /** An author's theme settings (`%%{init}%%`, front matter `config:`). Pele: only the colours they spell out (`themeVariables`), never a theme name or `themeCSS` (`peleAuthorTheme.ts`). */
   initThemeDirectives: { mermaid: true, pele: true },

@@ -28,6 +28,10 @@ import { join, resolve } from 'node:path';
 import { FIXTURE_V2_OVERVIEW } from '@plannotator/core/guide-format-fixtures';
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
+import { drawMermaidFencesWithMermaid } from '@plannotator/ui/test-setup/mermaidEngine';
+
+// A stand-in Mermaid runtime draws here; Pele is DiagramBlock.engine.test.tsx's.
+drawMermaidFencesWithMermaid();
 
 
 // The window's tsconfig points `#guide-reader` at the reader's type shape (reader-module.d.ts), which Bun
