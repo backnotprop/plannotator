@@ -38,6 +38,7 @@ export function readSource(path: string): string {
 export const ROUTE_FILES = [
   'packages/server/inbox.ts',
   'packages/ai/endpoints.ts',
+  'packages/server/inbox-acted.ts',
   'packages/server/inbox-agent-door.ts',
   'packages/server/inbox-agent-faces.ts',
   'packages/server/inbox-agent-icons.ts',

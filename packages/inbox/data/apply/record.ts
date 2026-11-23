@@ -55,6 +55,8 @@ export function applyRecord(model: HeldThread, event: InboxEvent): RecordOutcome
     const record = event.message;
     if (record.thread_id !== thread.thread_id) return NONE;
     if (isAckNote(record)) return REREAD;
+    // The Inbox's quiet note to an agent whose questions moved: never listed in the thread (the read leaves it out).
+    if (record.author.kind === 'person' && record.moved_note) return NONE;
     const at = thread.messages.findIndex((m) => m.id === record.id);
     const before = at >= 0 ? thread.messages[at]! : undefined;
     if ((model.applied?.[record.id] ?? -1) >= event.seq) return NONE;
@@ -68,6 +70,8 @@ export function applyRecord(model: HeldThread, event: InboxEvent): RecordOutcome
       if (record.ack || before?.ack) return REREAD;
     }
     if (record.id === thread.thread_id && before && (record.subject ?? null) !== (before.subject ?? null)) return REREAD;
+    // Where the thread's questions moved, gained or dropped: the read serves that thread's name and whether it is open.
+    if (record.id === thread.thread_id && before && (record.moved_to?.thread_id ?? null) !== (before.moved_to?.thread_id ?? null)) return REREAD;
     const seq = before?.seq ?? (event.first ? event.seq : undefined);
     const next: InboxMessageWire = {
       ...record,
@@ -76,6 +80,8 @@ export function applyRecord(model: HeldThread, event: InboxEvent): RecordOutcome
       ...(seq === undefined ? {} : { seq }),
       ...(record.author.kind === 'person' ? { sent_annotations: before?.sent_annotations ?? model.sentWith?.[record.id] ?? 0 } : {}),
       ...(before?.ack && record.ack ? { ack: before.ack } : {}),
+      // The stored line has no served `open` / `name`: keep the read's (same thread, checked above).
+      ...(before?.moved_to && record.moved_to ? { moved_to: before.moved_to } : {}),
     };
     let messages = [...thread.messages];
     if (before) messages[at] = next;

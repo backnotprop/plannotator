@@ -11,7 +11,7 @@ import { RowTagName, rowTintOf, tintProps, type ListTagColours, type RowTintProp
 import { RowAgents, RowAgentTiles } from './RowAgents';
 import { RowPullsMark } from '../threadPulls/ThreadPulls';
 import { isTextCut, ProjectTipText, Tip } from './Tip';
-import { LazyRowTips, RowTip } from './RowTip';
+import { RowTip } from './RowTip';
 import { Icon } from '../icons';
 import { PinMark, PinnedWords } from '../parts/RowPin';
 import { notePressPointer, pressRow } from '../starPress';
@@ -58,7 +58,7 @@ import { bandOnScreen, useBandTip, type BandTipHost } from '../bandTip';
 import { bandMenuOf, listMarkAllRows } from '../markAllRead';
 import { AgentsList } from '../agentsView/AgentsList';
 import { LineRow } from '../agentsView/LineRow';
-import { rowAgent, slotSession, cardOf, SnoozedUntil, RowTime, BadgeWords, subjectOf, sentWordsOf, titleOf, RowTitle, countWords, liveCount, CountWords, EndedMark, LineCount, openCountsKey, OpenCounts, ClipText, RowWithAction } from './rowParts';
+import { rowAgent, slotSession, cardOf, SnoozedUntil, RowTime, ListRows, BadgeWords, subjectOf, sentWordsOf, titleOf, RowTitle, countWords, liveCount, CountWords, EndedMark, LineCount, openCountsKey, OpenCounts, ClipText, RowWithAction } from './rowParts';
 import { ArchivedGroup } from './ArchivedGroup';
 import type { ArchivedGroupHost } from '../data/actions/archivedGroup';
 import { useShowArchived } from '../showArchived';
@@ -727,11 +727,11 @@ export function InboxList(props: InboxListProps) {
   });
   // The list's look options in its ⋮ menu (listLook.ts): smaller thread names on by default, the others off.
   const [look, setLook] = useListLook(props.rememberLook !== false);
-  // Grouped (the default) or List (listView.ts), this browser's choice in the same ⋮ menu.
+  // Grouped (the default) or List (listView.ts), this browser's choice in the same ⋮ menu; Recent activity (`sort.by`) draws List's one list whatever it is.
   const [view, setView] = useListView(props.rememberLook !== false);
-  const asList = view === 'list';
+  const asList = view === 'list' || props.sort?.by !== undefined;
   // Agents (agentsView/): its drawn rows (Select all picks only those), its Shows (each opens the agents rows land under).
-  const asAgents = view === 'agents', [agentRows, setAgentRows] = useState<readonly string[] | null>(null), [shows, setShows] = useState(0);
+  const asAgents = view === 'agents' && !asList, [agentRows, setAgentRows] = useState<readonly string[] | null>(null), [shows, setShows] = useState(0);
   // The starred threads as pills above the list, or (off, the default) the sidebar's Starred section (starredPills.ts).
   const [starredAbove, setStarredAbove] = useStarredAbove(props.rememberLook !== false);
   const showArchived = useShowArchived();
@@ -841,8 +841,8 @@ export function InboxList(props: InboxListProps) {
   const sortEpoch = props.sort?.epoch;
   const sortKeep = props.sort?.keep ?? null;
   const flat = useMemo(
-    () => (asList ? flatRows(props.sections, sortEpoch === undefined ? null : places.current, { epoch: sortEpoch ?? 0, keep: sortKeep }) : null),
-    [asList, props.sections, sortEpoch, sortKeep],
+    () => (asList ? flatRows(props.sections, sortEpoch === undefined ? null : places.current, { epoch: sortEpoch ?? 0, keep: sortKeep, by: props.sort?.by }) : null),
+    [asList, props.sections, sortEpoch, sortKeep, props.sort?.by],
   );
   useLayoutEffect(() => {
     places.current = flat?.places ?? null;
@@ -913,7 +913,7 @@ export function InboxList(props: InboxListProps) {
     // The groups the rows land in open with the press (the owner, 2026-11-08), in the same render as the
     // rows: closed, they would come in out of sight and Show would seem to do nothing.
     const lands = props.notice?.lands;
-    if (lands && view === 'grouped') groups.open(lands); else if (asAgents) setShows((n) => n + 1);
+    if (lands && !asList && !asAgents) groups.open(lands); else if (asAgents) setShows((n) => n + 1);
     props.onShowNew();
   };
   // The row whose right-click menu is open: a muted background, as the project row's.
@@ -1193,8 +1193,8 @@ export function InboxList(props: InboxListProps) {
           {/* The band alone is an empty list with a band under it: nothing else says the list is clear. */}
           {/* So is a list whose rows are all archived, waiting for the list to settle without them (Archive all). */}
           {visible.every((section) => section.id === 'snoozed' || section.threads.every(inboxRowArchived)) && props.empty}
-          {/* The rows' tooltips mount on first use (RowTip.tsx): drawing every row's at once is most of a redraw. */}
-          <LazyRowTips.Provider value={true}>
+          {/* The rows' tooltips mount on first use (RowTip.tsx): drawing every row's at once is most of a redraw. Recent activity's times (`sort.by`). */}
+          <ListRows timeBy={props.sort?.by}>
           {flat && flat.rows.length > 0 && (
             // List: one run of rows, newest first, no bands; each row keeps the group it is drawn in for its actions.
             <div className="ib-group" data-section-id="list" data-flat-list="">
@@ -1238,7 +1238,7 @@ export function InboxList(props: InboxListProps) {
             );
           })}
           {props.archived && showArchived && <ArchivedGroup host={props.archived} renderRow={renderRow} onRows={setArchivedRows} phone={props.phone === true} onSearch={props.onSearch} />}
-          </LazyRowTips.Provider>
+          </ListRows>
         </ThreadRowMenu>
       {pick.sheet}
       <HeldNoticeSaid words={bar.words} place={`${props.scope ?? ''}\n${props.title}`} />

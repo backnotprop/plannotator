@@ -30,7 +30,7 @@
  */
 
 import { INBOX_ROWS_ASK_BLOCK } from "@plannotator/core/inbox-types";
-import { INBOX_DECISION_ASK_BLOCK, INBOX_HOST_NAMES, inboxAgentName, inboxBoardRequestBlock, inboxSentFromLine, isInboxNote, type InboxMessageWire, type InboxQuestion } from "@plannotator/core/inbox-types";
+import { INBOX_DECISION_ASK_BLOCK, INBOX_HOST_NAMES, inboxAgentName, inboxBoardRequestBlock, inboxSentFromLine, isInboxNote, type InboxMessageWire, type InboxMovedTo, type InboxQuestion } from "@plannotator/core/inbox-types";
 import { inboxAnswersSectionEnd } from "@plannotator/core/inbox-questions";
 import { QUESTION_ANSWERS_HEADING, type QuestionAnswer } from "@plannotator/core/question-block";
 import { inboxAckReaction } from "@plannotator/shared/inbox/connection";
@@ -234,6 +234,8 @@ export interface ThreadWindowResult {
     subject: string | null;
     thread_name: string | null;
     resolved_at: string | null;
+    /** An archived thread whose questions an agent moved to another thread (resolve_message's moved_to). Absent otherwise. */
+    moved_to?: InboxMovedTo;
     project: { id: string; name: string; root: string };
     message_count: number;
     /** `you: true` on the reader's own session (its messages counted apart from another session of the same agent). */
@@ -691,12 +693,14 @@ export function windowedThread(
     participants.set(`${author.kind}:${name}`, entry);
   }
 
+  const movedTo = thread.resolved_at ? (store.message(thread.thread_id)?.moved_to ?? null) : null;
   const result: ThreadWindowResult = {
     thread: {
       thread_id: thread.thread_id,
       subject: thread.subject,
       thread_name: thread.thread_name,
       resolved_at: thread.resolved_at,
+      ...(movedTo ? { moved_to: movedTo } : {}),
       project: { id: thread.project.id, name: thread.project.name, root: thread.project.root },
       message_count: all.length,
       participants: [...participants.values()],
@@ -828,6 +832,7 @@ export function windowedThreadText(result: ThreadWindowResult, order: readonly s
     `Project: ${thread.project.name} (${thread.project.root})`,
     `From: ${thread.participants.map((p) => `${p.you ? `${p.name} (you)` : p.name} ${p.messages}`).join(", ")}`,
     thread.resolved_at ? `Resolved ${shortTime(thread.resolved_at)}` : null,
+    thread.moved_to ? `Its questions moved to thread ${thread.moved_to.thread_id}${thread.moved_to.subject ? ` (${thread.moved_to.subject})` : ""}` : null,
     result.url,
   ].filter((part): part is string => part !== null);
   out.push(facts.join(" · "));
