@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { cleanWindowRecord, debugPageId, debugRoute, isDebugRequestId, resolveInboxDebug } from './debug-log';
+import { cleanWindowRecord, debugPageId, debugRoute, isDebugRequestId, pullCloseFields, pullKeyForLog, resolveInboxDebug } from './debug-log';
 import { inboxId } from '@plannotator/core/inbox-types';
 
 const MSG = 'msg_01J9Z3V5K8Q2W4E6R7T8Y9M0NP';
@@ -15,6 +15,23 @@ describe('what may enter the debug log', () => {
     expect(debugRoute('/api/inbox/ref?url=https%3A%2F%2Fexample.com%2Fprivate')).toBe('/api/inbox/ref');
     expect(debugRoute('/api/inbox/embeds/salary-review.pdf')).toBe('/api/inbox/embeds/*');
     expect(debugRoute('/api/inbox/agents/Secret%20Project')).toBe('/api/inbox/agents/*');
+  });
+
+  test("the board's close and reopen show as themselves, here and on another machine, not as `*/*`", () => {
+    expect(debugRoute('/api/inbox/pulls/close')).toBe('/api/inbox/pulls/close');
+    expect(debugRoute('/api/inbox/pulls/reopen')).toBe('/api/inbox/pulls/reopen');
+    const machine = inboxId('ibx');
+    expect(debugRoute(`/api/inbox/m/${machine}/pulls/close`)).toBe(`/api/inbox/m/${machine}/pulls/close`);
+  });
+
+  test("a close's debug line says what and how it ended, never which PR; the kept line's key is the key or `*`", () => {
+    expect(pullCloseFields('close', 200, undefined, 'local', 'window')).toEqual({ act: 'close', ok: true, status: 200, via: 'local', by: 'window' });
+    expect(pullCloseFields('reopen', 409, 'reopen_not_closed_here', 'tailnet', 'machine')).toEqual({ act: 'reopen', ok: false, status: 409, code: 'reopen_not_closed_here', via: 'tailnet', by: 'machine' });
+    expect(pullCloseFields('close', 0, 'threw', 'local', 'window')).toMatchObject({ ok: false, status: 0, code: 'threw' });
+    expect(pullCloseFields('close', 404, 'something typed', 'local', 'window')).toMatchObject({ code: 'other' });
+    expect(Object.keys(pullCloseFields('close', 200, undefined, 'local', 'window'))).not.toContain('key');
+    expect(pullKeyForLog('gitlab.example.com/group/sub/api!12')).toBe('gitlab.example.com/group/sub/api!12');
+    expect(pullKeyForLog('Fix the salary review page')).toBe('*');
   });
 
   test('every id the Inbox really makes survives in a route', () => {
