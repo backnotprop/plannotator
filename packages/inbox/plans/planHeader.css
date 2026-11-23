@@ -18,10 +18,14 @@
 .ib-plan-dock-sp { flex: 1 1 0; min-width: 0; }
 .ib-plan-dock .ib-toolstrip[data-tools-in-bar] { position: static; inset: auto; flex: none; padding: 0; margin: 0; background: transparent; box-shadow: none; border: 0; pointer-events: auto; }
 .ib-plan-dock .ib-plan-send-t { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* A computer keeps the Send line at every width: it takes the bar's free room, against the comments, and is cut at
-   its end rather than pushed to a row of its own. */
+/* A computer keeps the Send line at every width: it takes the bar's free room, against the comments; where the bar
+   is narrow it is a line of words above the controls (as a failed Send's are on a phone), the controls one row. */
 .ib-plan-dock:has(> [data-plan-send-line="shown"]) > .ib-plan-dock-sp { display: none; }
 .ib-plan-dock .ib-plan-send-t[data-plan-send-line="shown"] { flex: 1 1 0; text-align: end; }
+@container ib-plan-dock (max-width: 640px) {
+  .ib-plan-dock:has(> [data-plan-send-line="shown"]) > .ib-plan-dock-sp { display: block; }
+  .ib-plan-dock .ib-plan-send-t[data-plan-send-line="shown"] { order: -1; flex: 1 0 100%; text-align: start; }
+}
 .ib-plan-dock .ib-vcomments { flex: none; }
 .ib-plan-globalmark { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 34px; height: 32px; border-radius: 8px; color: var(--muted-foreground); background: color-mix(in oklch, var(--muted) 50%, transparent); border: 1px solid color-mix(in oklch, var(--border) 30%, transparent); cursor: pointer; }
 .ib-plan-globalmark:hover { color: var(--foreground); background: var(--muted); }

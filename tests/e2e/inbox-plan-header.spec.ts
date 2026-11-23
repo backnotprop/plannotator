@@ -273,6 +273,10 @@ test('the document’s title is the header: a phone’s bar, state line, bottom 
       const line = page.locator('[data-plan-dock] [data-plan-send-line="shown"]');
       await expect(line).toBeVisible();
       expect(await line.evaluate((el) => el.getBoundingClientRect().width)).toBeGreaterThan(40);
+      expect(await line.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+      // The controls stay one row (the line is words above them where the bar is narrow).
+      const controlTops = await page.locator('[data-plan-dock]').evaluate((dock) => [...dock.querySelectorAll('.ib-toolstrip button, [data-plan-global], [data-annotations-sheet], [data-plan-send-button]')].map((el) => Math.round(el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2)));
+      expect(Math.max(...controlTops) - Math.min(...controlTops)).toBeLessThanOrEqual(2);
       const contents = page.locator('[data-plan-annotate] [data-contents-open]');
       await expect(contents).toBeVisible({ timeout: 10_000 });
       await blur(page);
