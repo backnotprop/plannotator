@@ -15,6 +15,24 @@ public enum ReplyQuoteRules {
     return messages[(at + 1)...].contains { $0.author.kind == .agent }
   }
 
+  /// What ↩ on a message does to the reply box (the window's `arrowReply`, packages/inbox/replyQuote.ts).
+  public struct Arrow: Hashable, Sendable {
+    /// The quote the box holds after it; nil inside: none (a quote there is dropped).
+    public var quote: DraftQuote??
+    /// The agent session the reply is aimed at, when the message is an agent's.
+    public var aim: String?
+  }
+
+  /// With words selected in the message, those words; else the whole message when an agent wrote after it; else a
+  /// plain Reply, and a quote already in the box is dropped. `quoted`: whether the box quotes a message now.
+  public static func arrow(_ messages: [InboxMessageWire], at id: MessageID, words: String?, quoted: Bool) -> Arrow {
+    let message = messages.first { $0.id == id }
+    let aim = message.flatMap { $0.author.kind == .agent ? $0.author.session : nil }
+    if let words, !words.isEmpty { return Arrow(quote: .some(DraftQuote(of: id, words: words)), aim: aim) }
+    if quotesWhole(messages, id) { return Arrow(quote: .some(DraftQuote(of: id)), aim: aim) }
+    return Arrow(quote: quoted ? .some(nil) : nil, aim: aim)
+  }
+
   /// A person's reply body without the lead the Inbox wrote: at its start, or right after the store's first line
   /// ("Answered 1 question.", "Did 1 action item."). The body as it is when there is none (`withoutInboxReplyQuoteLead`).
   public static func withoutLead(_ body: String) -> String {
@@ -48,7 +66,7 @@ public enum ReplyQuoteRules {
   }
 
   /// A time a lead may print: one short line of letters, digits, spaces and , : . (else "").
-  static func leadTime(_ value: String?) -> String {
+  public static func leadTime(_ value: String?) -> String {
     guard let value else { return "" }
     let line = value.replacingOccurrences(of: "\u{00A0}", with: " ").replacingOccurrences(of: "\u{202F}", with: " ")
       .split(whereSeparator: \.isWhitespace).joined(separator: " ")

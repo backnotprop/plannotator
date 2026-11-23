@@ -338,6 +338,12 @@ struct LaunchOptions {
           await door.refuseUploads("upload_refused")
           await session.attach(Data("TOKEN=example".utf8), name: ".env", type: "text/plain", to: .thread(StandInData.retry))
           await door.refuseUploads(nil)
+        case "retryfile":
+          // A file the computer could not receive just now, in the reply: its tile offers Try again.
+          await session.open(StandInData.retry)
+          await door.refuseUploads("upload_refused", words: "The file could not be received; try again.", field: "body")
+          await session.attach(StandInMedia.flameGraph(), name: "rollout-notes.png", type: "image/png", to: .thread(StandInData.retry))
+          await door.refuseUploads(nil)
         case "compose":
           // New message to the first live session, with words and a picture.
           await session.readSessions()

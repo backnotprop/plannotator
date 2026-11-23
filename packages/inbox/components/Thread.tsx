@@ -162,7 +162,7 @@ import { fetchSkillCatalog, getCachedSkillCatalog } from '@plannotator/ui/utils/
 import { type ActionMark } from './ActionChecklist';
 import { Tip } from './Tip';
 import { ReplyQuoteLine, SentQuoteLine } from './ReplyQuote';
-import { arrowQuotesWhole, quoteToSend, selectedWordsIn } from '../replyQuote';
+import { arrowReply, quoteToSend, selectedWordsIn } from '../replyQuote';
 import { useReplyQuote } from '../useReplyQuote';
 import { useTileArrows } from '../useTileArrows';
 import type { ThreadPaneProps } from '../thread/paneProps';
@@ -4016,18 +4016,16 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /**
    * The Reply arrow on a message: the pill aims at that message's agent, and the words stay. On an older message the
    * box quotes it; with words selected in the message, those words (approval "inbox-reply-quote"). With nothing
-   * selected, on a message no agent wrote after (`arrowQuotesWhole`), it is a plain Reply, as before (a quote there is dropped).
+   * selected, on a message no agent wrote after (`arrowReply`), it is a plain Reply, as before (a quote there is dropped).
    */
   const replyToMessage = (message: InboxMessageWire) => {
     const pressed = quoteWordsAtPress.current;
     quoteWordsAtPress.current = null;
     const article = bodyRef.current?.querySelector(`[data-message-article="${CSS.escape(message.id)}"] .ib-msg`) ?? null;
     const words = (pressed?.id === message.id ? pressed.words : null) ?? selectedWordsIn(article);
-    if (words) setQuote({ of: message.id, words });
-    else if (arrowQuotesWhole(thread.messages, message.id)) setQuote({ of: message.id });
-    else if (quoteRef.current) setQuote(null);
+    const { quote: arrowQuote, aim: session } = arrowReply(thread.messages, message, words, !!quoteRef.current);
+    if (arrowQuote !== undefined) setQuote(arrowQuote);
     if (words) window.getSelection()?.removeAllRanges();
-    const session = message.author.kind === 'agent' ? (message.author.session ?? null) : null;
     if (!pillActive || !session) {
       openBox();
       return;

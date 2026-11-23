@@ -15,6 +15,7 @@ struct ComposeSheet: View {
   /// What Send said when it could not go (the window's line, until the person changes something).
   @State private var said: String?
   @FocusState private var focused: Bool
+  @Environment(\.dynamicTypeSize) private var typeSize
 
   init(session: InboxSession, sent: @escaping (ComposeOutcome) -> Void) {
     self.session = session
@@ -76,18 +77,39 @@ struct ComposeSheet: View {
 
   /// To: who gets it. A touch opens the live sessions.
   private var toRow: some View {
-    Button { choosing = true } label: {
-      HStack(spacing: Space.close) {
-        Text(PhoneWords.toLabel).font(TextRole.secondary).foregroundStyle(Token.mutedForeground)
-        if let to = draft?.to {
-          AgentMark(author: InboxAuthor(kind: .agent, host: to.host, session: to.session), size: 22)
-          Text(SessionPicker.name(to)).font(TextRole.label).foregroundStyle(Token.foreground).lineLimit(1)
-          Text(PhoneWords.inProject(to.project)).font(TextRole.secondary).foregroundStyle(Token.mutedForeground).lineLimit(1)
+    let large = typeSize.isAccessibilitySize
+    return Button { choosing = true } label: {
+      Group {
+        if large, let to = draft?.to {
+          // At the largest text sizes: To, the mark and the chevron on one line, then the agent and its project each
+          // on its own lines across the whole width, never cut.
+          VStack(alignment: .leading, spacing: Space.hair) {
+            HStack(spacing: Space.close) {
+              Text(PhoneWords.toLabel).font(TextRole.secondary).foregroundStyle(Token.mutedForeground)
+              AgentMark(author: InboxAuthor(kind: .agent, host: to.host, session: to.session), size: 22)
+              Spacer(minLength: Space.close)
+              Image(systemName: "chevron.down").font(TextRole.glyph).foregroundStyle(Token.mutedForeground)
+            }
+            Text(SessionPicker.name(to)).font(TextRole.label).foregroundStyle(Token.foreground)
+            Text(PhoneWords.inProject(to.project)).font(TextRole.secondary).foregroundStyle(Token.mutedForeground)
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .multilineTextAlignment(.leading)
+          .padding(.vertical, Space.close)
         } else {
-          Text(session.sessions == .reading ? PhoneWords.lookingForAgents : PhoneWords.chooseAnAgent).font(TextRole.label).foregroundStyle(Token.primary)
+          HStack(spacing: Space.close) {
+            Text(PhoneWords.toLabel).font(TextRole.secondary).foregroundStyle(Token.mutedForeground)
+            if let to = draft?.to {
+              AgentMark(author: InboxAuthor(kind: .agent, host: to.host, session: to.session), size: 22)
+              Text(SessionPicker.name(to)).font(TextRole.label).foregroundStyle(Token.foreground).lineLimit(1)
+              Text(PhoneWords.inProject(to.project)).font(TextRole.secondary).foregroundStyle(Token.mutedForeground).lineLimit(1)
+            } else {
+              Text(session.sessions == .reading ? PhoneWords.lookingForAgents : PhoneWords.chooseAnAgent).font(TextRole.label).foregroundStyle(Token.primary)
+            }
+            Spacer(minLength: Space.close)
+            Image(systemName: "chevron.down").font(TextRole.glyph).foregroundStyle(Token.mutedForeground)
+          }
         }
-        Spacer(minLength: Space.close)
-        Image(systemName: "chevron.down").font(TextRole.glyph).foregroundStyle(Token.mutedForeground)
       }
       .padding(.horizontal, Space.page)
       .frame(minHeight: Space.touch + Space.close)
@@ -141,7 +163,8 @@ struct ComposeSheet: View {
       choosing = true
       return
     case .waitForFiles:
-      said = PhoneWords.waitForFiles
+      // A file that waits for the computer's own network says so, not "uploading".
+      said = session.filesNeedNetwork(draft?.files ?? []) ? PhoneWords.needsNetwork : PhoneWords.waitForFiles
       return
     case .ready: break
     case .empty, .notOffered: return

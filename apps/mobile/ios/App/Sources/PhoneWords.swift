@@ -497,6 +497,8 @@ extension PhoneWords {
   static func sentToSpeech(_ agent: String, _ project: String) -> String { "Sent to \(agent) in \(project). It takes it as its next turn." }
   /// packages/inbox/replyQuote.ts REPLY_QUOTE_WORDS.
   static let removeQuote = "Remove quote"
+  /// Said when × takes the quote away (REPLY_QUOTE_WORDS.removed).
+  static let quoteRemoved = "Quote removed."
   /// The sent reply's quote line: a touch goes to the quoted message (the window's REPLY_QUOTE_WORDS.goTo).
   static let goToMessage = "Go to the message"
   static func replyingTo(_ who: String, time: String, words: Bool) -> String {

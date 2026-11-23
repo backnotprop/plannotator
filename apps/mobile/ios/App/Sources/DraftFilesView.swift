@@ -41,39 +41,73 @@ struct AttachButton: View {
       Task { for url in urls { await add(url) } }
     }
     .fullScreenCover(isPresented: $camera) {
-      CameraPicker { data in Task { await session.attach(data, name: Self.name("photo", ext: "jpg"), type: "image/jpeg", to: place) } }
+      CameraPicker { data in Task { await session.attach(data, name: name("photo", ext: "jpg"), type: "image/jpeg", to: place) } }
         .ignoresSafeArea()
     }
   }
 
-  /// A picture from the library. A HEIC picture goes as a JPEG: every agent reads that.
+  /// A picture or film from the library, handed over as a file: its size is read before any of it is, and it is
+  /// copied, never held whole in memory. A HEIC picture goes as a JPEG: every agent reads that.
   private func add(_ item: PhotosPickerItem) async {
-    guard let data = try? await item.loadTransferable(type: Data.self) else { return }
     let type = item.supportedContentTypes.first ?? .data
-    if type.conforms(to: .image), !type.conforms(to: .jpeg), !type.conforms(to: .png), let jpeg = UIImage(data: data)?.jpegData(compressionQuality: 0.9) {
-      await session.attach(jpeg, name: Self.name("photo", ext: "jpg"), type: "image/jpeg", to: place)
+    guard let picked = try? await item.loadTransferable(type: PickedFile.self) else { return }
+    defer { picked.discard() }
+    let kind = type.conforms(to: .movie) ? "video" : "photo"
+    let size = (try? picked.url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize.map(Int64.init) ?? 0
+    if type.conforms(to: .image), !type.conforms(to: .jpeg), !type.conforms(to: .png), size <= DraftFiles.maxBytes,
+      let data = try? Data(contentsOf: picked.url), let jpeg = UIImage(data: data)?.jpegData(compressionQuality: 0.9) {
+      await session.attach(jpeg, name: name("photo", ext: "jpg"), type: "image/jpeg", to: place)
       return
     }
     let ext = type.preferredFilenameExtension ?? "bin"
-    await session.attach(data, name: Self.name(type.conforms(to: .movie) ? "video" : "photo", ext: ext), type: type.preferredMIMEType ?? "application/octet-stream", to: place)
+    await session.attach(fileAt: picked.url, name: name(kind, ext: ext), type: type.preferredMIMEType ?? "application/octet-stream", to: place)
   }
 
-  /// A file from Files, under its own name.
+  /// A file from Files, under its own name: its size is read first, and it is copied rather than read into memory.
   private func add(_ url: URL) async {
     let scoped = url.startAccessingSecurityScopedResource()
     defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-    guard let data = try? Data(contentsOf: url) else { return }
     let type = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
-    await session.attach(data, name: url.lastPathComponent, type: type, to: place)
+    await session.attach(fileAt: url, name: url.lastPathComponent, type: type, to: place)
   }
 
-  /// A picture or film from the phone has no name of its own: when it was added.
-  static func name(_ what: String, ext: String) -> String {
+  /// A picture or film from the phone has no name of its own: when it was added. Two added in the same second get
+  /// "-2", "-3" after it, so no two files in a draft share a name.
+  private func name(_ what: String, ext: String) -> String {
+    Self.name(what, ext: ext, taken: Set(session.files(place).map(\.name)))
+  }
+
+  static func name(_ what: String, ext: String, taken: Set<String> = [], now: Date = Date()) -> String {
     let format = DateFormatter()
     format.locale = Locale(identifier: "en_US_POSIX")
     format.dateFormat = "yyyyMMdd-HHmmss"
-    return "\(what)-\(format.string(from: Date())).\(ext)"
+    let stem = "\(what)-\(format.string(from: now))"
+    var made = "\(stem).\(ext)"
+    var count = 2
+    while taken.contains(made) {
+      made = "\(stem)-\(count).\(ext)"
+      count += 1
+    }
+    return made
   }
+}
+
+/// A file the photo library hands over: a copy in the app's temporary folder, read from there and then let go.
+struct PickedFile: Transferable {
+  let url: URL
+
+  static var transferRepresentation: some TransferRepresentation {
+    FileRepresentation(importedContentType: .item) { received in
+      let folder = FileManager.default.temporaryDirectory.appendingPathComponent("picked-\(UUID().uuidString)", isDirectory: true)
+      try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+      let copy = folder.appendingPathComponent(received.file.lastPathComponent)
+      try FileManager.default.copyItem(at: received.file, to: copy)
+      return PickedFile(url: copy)
+    }
+  }
+
+  /// The temporary copy goes once the draft keeps its own.
+  func discard() { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
 }
 
 /// The system's camera, for one photo.
@@ -155,7 +189,19 @@ struct DraftTile: View {
     case .attached: return ("\(FileFacts.kind(InboxAttachmentKind(rawValue: file.kind ?? "other"), name: file.name, mediaType: file.type)), \(FileFacts.bytes(file.size))", false)
     case .waiting: return (FileFacts.bytes(file.size), false)
     case .needsNetwork: return (PhoneWords.needsNetwork, false)
-    case .refused(let words): return (words, true)
+    case .refused(let words), .refusedForNow(let words): return (words, true)
+    }
+  }
+
+  /// The computer could not take it just now: Try again sends it up again.
+  private var mayRetry: Bool { if case .refusedForNow = session.fileState(file) { true } else { false } }
+
+  /// What VoiceOver hears when the tile changes: the name and how it stands, once it is on the computer or refused
+  /// (the window's refusal is an alert; the tile's own words, nothing new).
+  private func tell(_ state: DraftFileState) {
+    switch state {
+    case .attached, .refused, .refusedForNow: AccessibilityNotification.Announcement("\(file.name), \(line.words)").post()
+    case .uploading, .waiting, .needsNetwork: break
     }
   }
 
@@ -180,10 +226,18 @@ struct DraftTile: View {
         Text(file.name).font(TextRole.secondary).foregroundStyle(Token.foreground).lineLimit(1).truncationMode(.middle)
         Text(line.words).font(TextRole.caption).foregroundStyle(line.trouble ? Role.stop.ink : Token.mutedForeground)
           .fixedSize(horizontal: false, vertical: true)
+        if mayRetry {
+          Button(PhoneWords.tryAgain) { Task { await session.retryFile(file.id, in: place) } }
+            .font(TextRole.caption.weight(.semibold))
+            .foregroundStyle(Token.primary)
+            .buttonStyle(PressStyle())
+            .frame(minHeight: Space.touch, alignment: .leading)
+            .accessibilityIdentifier("draft-file-retry")
+        }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
-      // VoiceOver reads the name, then how it stands: a refused file's reason in full.
-      .accessibilityElement(children: .ignore)
+      // VoiceOver reads the name, then how it stands: a refused file's reason in full. Try again is its own button.
+      .accessibilityElement(children: mayRetry ? .contain : .ignore)
       .accessibilityLabel("\(file.name), \(line.words)")
       .accessibilityIdentifier("draft-file-state")
       Button {
@@ -199,6 +253,7 @@ struct DraftTile: View {
     .barSized()
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("draft-file")
+    .onChange(of: session.fileState(file)) { _, now in tell(now) }
     .task(id: file.id) {
       guard file.isPicture, let data = session.fileBytes(file) else { return }
       thumb = await Task.detached { UIImage(data: data)?.preparingThumbnail(of: CGSize(width: 120, height: 120)) }.value

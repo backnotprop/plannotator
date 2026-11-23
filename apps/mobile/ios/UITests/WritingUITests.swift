@@ -74,6 +74,61 @@ final class WritingUITests: XCTestCase {
     shot("02-quote")
     app.buttons["Remove quote"].tap()
     XCTAssertFalse(app.buttons["Remove quote"].waitForExistence(timeout: 2))
+    // Quoted again, then ↩ on the newest message: a plain Reply, and the quote goes (the window's rule).
+    for _ in 0..<6 where !arrow.isHittable { app.swipeDown() }
+    arrow.tap()
+    XCTAssertTrue(app.buttons["Remove quote"].waitForExistence(timeout: 5))
+    let newest = app.buttons["reply-to/msg_STANDIN0000000000000033"]
+    for _ in 0..<8 where !newest.isHittable { app.swipeUp() }
+    XCTAssertTrue(newest.isHittable)
+    newest.tap()
+    XCTAssertTrue(app.buttons["Remove quote"].waitForNonExistence(timeout: 3))
+  }
+
+  /// Two quick presses of Send with a file in the reply: one reply goes, with the file in it once.
+  @MainActor
+  func testTwoQuickPressesOfSendSendOnce() {
+    let app = launch(stage: "writing")
+    XCTAssertTrue(fileState(app, "error-dashboard.png").waitForExistence(timeout: 20))
+    app.buttons["Remove .env"].tap()
+    XCTAssertFalse(fileState(app, ".env").waitForExistence(timeout: 2))
+    app.buttons["Send"].doubleTap()
+    XCTAssertTrue(app.buttons["file/error-dashboard.png"].waitForExistence(timeout: 10))
+    usleep(1_500_000)
+    XCTAssertEqual(app.buttons.matching(identifier: "file/error-dashboard.png").count, 1, "one reply carries the file")
+    XCTAssertFalse(text(app, "not sent").exists, "no second Send was made and refused")
+  }
+
+  /// A file the computer could not receive just now says so in its words, with Try again; tried again, it is on the
+  /// computer.
+  @MainActor
+  func testAFileTheComputerCouldNotReceiveIsTriedAgain() {
+    let app = launch(stage: "retryfile")
+    let tile = fileState(app, "rollout-notes.png")
+    XCTAssertTrue(tile.waitForExistence(timeout: 20))
+    XCTAssertTrue(text(app, "The file could not be received; try again.").exists)
+    let again = app.buttons["draft-file-retry"]
+    XCTAssertTrue(again.exists)
+    XCTAssertEqual(again.label, "Try again")
+    shot("14-reply-file-try-again-r3")
+    again.tap()
+    XCTAssertFalse(app.buttons["draft-file-retry"].waitForExistence(timeout: 3))
+    XCTAssertFalse(text(app, "could not be received").exists)
+  }
+
+  /// At the largest text sizes New message's To names the agent and its project in full, each on its own line.
+  @MainActor
+  func testTheToRowKeepsItsWordsAtTheLargestTextSize() {
+    let app = XCUIApplication()
+    app.launchArguments = ["-standIn", "YES", "-AppleLanguages", "(en)", "-resetFolds", "YES", "-stage", "compose", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+    app.launch()
+    let new = app.buttons["New message"]
+    XCTAssertTrue(new.waitForExistence(timeout: 20))
+    new.tap()
+    let project = text(app, "in api-server")
+    XCTAssertTrue(project.waitForExistence(timeout: 10))
+    XCTAssertTrue(app.windows.firstMatch.frame.contains(project.frame), "the project is cut at the screen's edge")
+    shot("15-compose-to-large-text-r3")
   }
 
   /// A reply with a quote, a picture on the computer and a file the Inbox refused: the refused one says why, and
@@ -184,8 +239,10 @@ final class WritingUITests: XCTestCase {
     XCTAssertTrue(fileState(app, "export-p99.png").waitForExistence(timeout: 10))
     XCTAssertEqual(fileState(app, "export-p99.png").label, "export-p99.png, Needs your computer's network")
     app.buttons["compose-send"].tap()
-    XCTAssertTrue(text(app, "Wait for the files to finish uploading.").waitForExistence(timeout: 5))
-    shot("12-compose-needs-network-r2")
+    // What holds the Send is the network, and Send says that, not "uploading".
+    XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Needs your computer's network")).element(boundBy: 1).waitForExistence(timeout: 5))
+    XCTAssertFalse(text(app, "Wait for the files to finish uploading.").exists)
+    shot("12-compose-needs-network-r3")
   }
 
   /// No agent running: the picker says so.

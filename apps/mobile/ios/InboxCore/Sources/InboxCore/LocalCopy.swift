@@ -40,6 +40,27 @@ public struct LocalCopy: Sendable {
 
   func read(_ name: String) -> Data? { file(name).flatMap { try? Data(contentsOf: $0) } }
 
+  /// A file of the copy mapped rather than read whole into memory (an attached file's bytes, up to 100 MB).
+  func read(_ name: String, mapped: Bool) -> Data? { file(name).flatMap { try? Data(contentsOf: $0, options: mapped ? .alwaysMapped : []) } }
+
+  /// Copy a file into the copy as it is, never read whole into memory. False when it could not be.
+  func copyFile(_ source: URL, to name: String) -> Bool {
+    guard let folder, let file = file(name) else { return false }
+    do {
+      try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+      if FileManager.default.fileExists(atPath: file.path) { try FileManager.default.removeItem(at: file) }
+      try FileManager.default.copyItem(at: source, to: file)
+      try (file as NSURL).setResourceValue(URLFileProtection.completeUntilFirstUserAuthentication, forKey: .fileProtectionKey)
+      var values = URLResourceValues()
+      values.isExcludedFromBackup = true
+      var target = folder
+      try? target.setResourceValues(values)
+      return true
+    } catch {
+      return false
+    }
+  }
+
   /// Let go of one file of the copy (a drawing the computer has now).
   func remove(_ name: String) {
     guard let file = file(name) else { return }
@@ -139,4 +160,6 @@ public struct HeldWrite: Codable, Hashable, Sendable, Identifiable {
   public var files: [DraftFile]?
   /// The quote a reply carries: handed back with its words.
   public var quote: DraftQuote?
+  /// True once its files went up again under new keys because the computer no longer had an upload it named.
+  public var reuploaded: Bool?
 }

@@ -17,7 +17,7 @@ import { INBOX_ACTION_LABEL } from '../../packages/core/inbox-actions';
 import { INBOX_STOPPED_REPLY_TEXT, TURN_ENDED_TEXT, autoAfterText, reaskRowLine, sentRowLine } from '../../packages/core/inbox-delivery-line';
 import { INBOX_TURN_FAILED_WORDS } from '../../packages/core/inbox-run-line';
 import { INBOX_SNOOZED_BAND } from '../../packages/core/inbox-snooze';
-import { INBOX_ACK_LABEL, INBOX_AGENT_LABELS, INBOX_PRIORITY_GROUP, INBOX_SECTIONS } from '../../packages/core/inbox-types';
+import { INBOX_ACK_LABEL, INBOX_AGENT_LABELS, INBOX_HOST_NAMES, INBOX_PRIORITY_GROUP, INBOX_SECTIONS, INBOX_UPLOAD_MAX_BYTES } from '../../packages/core/inbox-types';
 import { ATTACHMENT_FEEDBACK_HEADING, SENT_VERSION_SUFFIX } from '../../packages/inbox/attachments';
 import { MARKUP_ONLY_TEXT } from '../../packages/inbox/markup';
 import { OUT, cli, jsonText, type Output } from './lib';
@@ -62,6 +62,10 @@ export function buildWords(): Record<string, Word> {
   words['feedback.files_intro'] = fixed(ATTACHMENT_FEEDBACK_HEADING.intro, 'packages/inbox/attachments.ts ATTACHMENT_FEEDBACK_HEADING intro');
   words['feedback.sent_yours'] = fixed(SENT_VERSION_SUFFIX.yours, 'packages/inbox/attachments.ts SENT_VERSION_SUFFIX yours');
   words['markup.only'] = fixed(MARKUP_ONLY_TEXT, 'packages/inbox/markup.ts MARKUP_ONLY_TEXT');
+  // The Inbox's refusal of a file past its limit (receiveInboxUpload), said by the phone before it reads any of it.
+  words['upload.too_large'] = fixed(`Not attached: a file is at most ${Math.round(INBOX_UPLOAD_MAX_BYTES / (1024 * 1024))} MB.`, 'packages/shared/inbox/uploads.ts receiveInboxUpload, INBOX_UPLOAD_MAX_BYTES');
+  // The names a quoting reply's lead gives another agent's message (store.ts planQuote), by host.
+  for (const [id, name] of Object.entries(INBOX_HOST_NAMES)) words[`host.${id}`] = fixed(name, `packages/core/inbox-types.ts INBOX_HOST_NAMES ${id}`);
   return words;
 }
 
@@ -102,6 +106,7 @@ export function swiftWords(words: Record<string, Word>): string {
   };
   table('section.', 'sections', 'A section\'s name by its id (InboxSectionId\'s raw value).');
   table('agent.', 'agents', 'An agent\'s name by its id.');
+  table('host.', 'hosts', 'A host\'s name by its id, as a quoting reply\'s lead names it (INBOX_HOST_NAMES).');
   lines.push('}', '');
   return lines.join('\n');
 }

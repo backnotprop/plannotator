@@ -160,10 +160,10 @@ struct ThreadScreen: View {
     // Every change of the words is kept on the phone at once: leaving the thread, the app going to the background or
     // being closed loses nothing.
     .onChange(of: words) { _, now in session.keepDraft(id, words: now) }
-    // ↩ on a message: an older one is quoted in the reply; the newest is a plain Reply.
+    // ↩ on a message (the window's rule): an older one is quoted in the reply and the reply goes to its agent; the
+    // newest is a plain Reply, and a quote already in the box goes.
     .environment(\.replyTo) { message in
-      guard let thread = model?.thread else { return }
-      if ReplyQuoteRules.quotesWhole(thread.messages, message) { session.setQuote(id, DraftQuote(of: message)) }
+      session.replyArrow(id, at: message)
       composing = true
     }
     .task {

@@ -243,6 +243,8 @@ public final class InboxSession {
     retry = nil
     // An act on several rows on its way stops after the writes already sent: the rest wait in the outbox.
     for lanes in sendLanes.values { for lane in lanes { lane.cancel() } }
+    // Words typed a moment ago are kept now.
+    keepDraftsNow()
   }
 
   private func stopListening() {
@@ -600,6 +602,8 @@ public final class InboxSession {
       // (its comments stay, each with the reason).
       let emptied = releaseSends(after: write, without: named)
       if !emptied.isEmpty {
+        // A quote such a Send held goes back to the draft.
+        for gone in held where emptied.contains(gone.id) { returnToDraft(gone, fresh: false) }
         held.removeAll { emptied.contains($0.id) }
         copy.saveOutbox(held)
         notices[ThreadID(write.thread)] = notice
@@ -628,6 +632,9 @@ public final class InboxSession {
     guard !pulled.isEmpty else { return }
     var more = false
     for reply in pulled {
+      // Its files and quote go back to the draft with its words: nothing the person made is dropped. The files are
+      // still the computer's pending uploads (nothing named them), so they go as they are.
+      returnToDraft(reply, fresh: false)
       if let words = reply.words, !words.isEmpty {
         returned[thread] = [returned[thread], words].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n\n")
         more = true
@@ -804,6 +811,9 @@ public final class InboxSession {
         return false
       }
       if await settleConflict(write, failure) { return true }
+      // An upload the Send named is gone from the computer (it sweeps one no draft there names after a day; a phone's
+      // draft lives on the phone): its files go up again under new keys and the Send goes again, once.
+      if write.kind == .reply || write.kind == .compose, case .refused(_, let error) = failure, error.code == "upload_not_found", await sendFilesAgain(write) { return true }
       // A drawing removed while it was on its way: its refusal is no one's, and nothing else is touched.
       if write.kind == .markup, let hash = write.subject, !drawingNamed(hash) {
         quietly(quiet) { settle(write.id) }
@@ -850,6 +860,9 @@ public final class InboxSession {
       }
       // Show what the computer has now, beside the refusal.
       if write.kind != .seen, write.kind != .state, write.kind != .compose { await readThread(ThreadID(write.thread)) }
+      // The files a refused Send handed back to the draft go up again at once, under new keys.
+      if write.kind == .reply, !(write.files ?? []).isEmpty { await uploadWaiting(.thread(ThreadID(write.thread))) }
+      if write.kind == .compose, !(write.files ?? []).isEmpty { await uploadWaiting(.compose) }
       // A refused Send that carried comments: the computer's list of them is read again (the window may have sent or
       // removed some), and a comment it does not have is held back from the next Send.
       if write.kind == .reply, case .refused(_, let error) = failure { await rereadAfterRefusedSend(write, notice: .refused(error.error, code: error.code)) }
@@ -977,6 +990,8 @@ public final class InboxSession {
     if on {
       lookForAnotherWay()
     } else {
+      // Leaving the front may be the last chance to write: the words typed a moment ago are kept now.
+      keepDraftsNow()
       pathSearch?.cancel()
       pathSearch = nil
     }
@@ -1155,10 +1170,15 @@ public final class InboxSession {
     stopped.remove(id)
     guard let model = thread(id), !sending.contains(id), !SendPlan.needsComputer(model.thread), offers(DoorRoutes.postMessageReply) || skew == nil else { return false }
     let text = words.trimmingCharacters(in: .whitespacesAndNewlines)
+    // Only the files still in the reply's draft: a second press made before the first Send ran holds files that
+    // Send has spent, and they never go twice.
+    let inDraft = Set(self.files(.thread(id)).map(\.id))
+    let files = files.filter { inDraft.contains($0.id) }
     // A file not on the computer yet holds the Send (the window's "Wait for the files to finish uploading.").
     guard let uploads = DraftFiles.uploads(files) else { return false }
     let carried = DraftFiles.carried(files)
-    let targets = SendPlan.targets(in: model.thread)
+    // The words go to the agent ↩ aimed them at, in a thread with more than one.
+    let targets = SendPlan.targets(in: model.thread, aim: draftBook.local[id]?.aim)
     // Comments whose drawing cannot reach the computer now (away from its network): no Send carries them, and none
     // waits for them. They stay in the list, marked, and each goes by itself once its drawing is there.
     let owing = commentsToOwe(id)
@@ -1197,7 +1217,9 @@ public final class InboxSession {
       // The files and the quote ride the reply that carries the words (the last one).
       let carries = target.message == targets.last?.message
       if carries, !uploads.isEmpty { body.uploads = uploads }
-      if carries, let quote, let quoted = model.thread.messages.first(where: { $0.id == quote.of }) {
+      // A quote rides the person's words only (the store keeps none on a reply without them): with none, it stays
+      // in the draft for the words that come.
+      if carries, !words.isEmpty, let quote, let quoted = model.thread.messages.first(where: { $0.id == quote.of }) {
         body.quote = DoorReplyBodyQuote(of: quote.of.rawValue, words: quote.words, time: TimeWords().when(quoted.createdAt))
       }
       if last, !riding.isEmpty {
@@ -1213,7 +1235,7 @@ public final class InboxSession {
       }
     }
     // The words and files are in the outbox now: what they spent of the thread's draft on the phone goes.
-    if !text.isEmpty || !carried.isEmpty || quote != nil { forgetDraft(id, words: text, files: carried, quoted: quote != nil) }
+    if !text.isEmpty || !carried.isEmpty { forgetDraft(id, words: text, files: carried, quoted: quote != nil && !text.isEmpty) }
     // The texts the comments' lines are read from, fetched now when the phone does not keep them (as the window
     // reads them at Send), for a short while at most; the feedback is then written again with them. A comment whose
     // text did not come goes with its quote and no line.

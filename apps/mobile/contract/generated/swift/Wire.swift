@@ -341,14 +341,14 @@ public struct DoorAnnotationRemoveBody: Codable, Hashable, Sendable {
 public struct DoorComposeAnswer: Codable, Hashable, Sendable {
   public var threadId: ThreadID
   public var message: InboxMessageWire
-  public var project: DoorComposeAnswerProject
+  public var project: DoorComposeAnswerProject?
   public var replayed: Bool
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
   static let knownKeys: Set<String> = ["thread_id", "message", "project", "replayed"]
 
-  public init(threadId: ThreadID, message: InboxMessageWire, project: DoorComposeAnswerProject, replayed: Bool, unknownFields: [String: JSONValue] = [:]) {
+  public init(threadId: ThreadID, message: InboxMessageWire, project: DoorComposeAnswerProject? = nil, replayed: Bool, unknownFields: [String: JSONValue] = [:]) {
     self.threadId = threadId
     self.message = message
     self.project = project
@@ -360,7 +360,7 @@ public struct DoorComposeAnswer: Codable, Hashable, Sendable {
     let c = try decoder.container(keyedBy: WireKey.self)
     self.threadId = try c.decode(ThreadID.self, forKey: WireKey("thread_id"))
     self.message = try c.decode(InboxMessageWire.self, forKey: WireKey("message"))
-    self.project = try c.decode(DoorComposeAnswerProject.self, forKey: WireKey("project"))
+    self.project = try c.decodeIfPresent(DoorComposeAnswerProject.self, forKey: WireKey("project"))
     self.replayed = try c.decode(Bool.self, forKey: WireKey("replayed"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
@@ -369,7 +369,7 @@ public struct DoorComposeAnswer: Codable, Hashable, Sendable {
     var c = encoder.container(keyedBy: WireKey.self)
     try c.encode(self.threadId, forKey: WireKey("thread_id"))
     try c.encode(self.message, forKey: WireKey("message"))
-    try c.encode(self.project, forKey: WireKey("project"))
+    try c.encodeIfPresent(self.project, forKey: WireKey("project"))
     try c.encode(self.replayed, forKey: WireKey("replayed"))
     try WireKey.write(unknownFields, to: &c)
   }

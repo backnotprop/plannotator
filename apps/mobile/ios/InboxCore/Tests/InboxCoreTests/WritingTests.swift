@@ -94,7 +94,7 @@ final class WritingTests: XCTestCase {
     let back = try XCTUnwrap(session.draft(StandInData.docs))
     XCTAssertEqual(back.quote?.of, quoted)
     XCTAssertEqual(back.files?.map(\.id), files.map(\.id))
-    XCTAssertNil(back.files?.first?.upload, "a refused Send's file goes up again: the computer may not keep that upload")
+    XCTAssertNotEqual(back.files?.first?.upload, files.first?.upload, "a refused Send's file goes up again: the computer may not keep that upload")
     XCTAssertNotNil(session.fileBytes(try XCTUnwrap(back.files?.first)), "its bytes are still on the phone")
   }
 
@@ -125,10 +125,15 @@ final class WritingTests: XCTestCase {
     let session = await pairedSession(door: door)
     await session.start()
     await session.open(StandInData.docs)
-    let going = DraftFile(name: "a.png", size: 1, type: "image/png")
-    XCTAssertFalse(session.canSend(thread: StandInData.docs, words: "Hi", files: [going]))
+    // Attached while the computer was away: in the draft, not on the computer yet.
+    await door.setOffline(true)
+    await session.attach(picture(), name: "a.png", type: "image/png", to: .thread(StandInData.docs))
+    await door.setOffline(false)
+    let going = session.files(.thread(StandInData.docs))
+    XCTAssertNil(going.first?.upload)
+    XCTAssertFalse(session.canSend(thread: StandInData.docs, words: "Hi", files: going))
     await door.clearCalls()
-    let sent = await session.send(thread: StandInData.docs, words: "Hi", files: [going])
+    let sent = await session.send(thread: StandInData.docs, words: "Hi", files: going)
     XCTAssertFalse(sent)
     let calls = await door.calls
     XCTAssertTrue(calls.filter { $0.path.hasSuffix("/reply") }.isEmpty)

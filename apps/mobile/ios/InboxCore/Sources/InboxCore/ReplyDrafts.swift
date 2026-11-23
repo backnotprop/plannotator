@@ -13,17 +13,20 @@ public struct LocalDraft: Codable, Hashable, Sendable {
   public var files: [DraftFile]?
   /// The message the reply quotes.
   public var quote: DraftQuote?
+  /// The agent session ↩ aimed the reply at (`SendPlan.targets(in:aim:)`).
+  public var aim: String?
 
-  public init(words: String, editedAt: Date, base: String? = nil, files: [DraftFile]? = nil, quote: DraftQuote? = nil) {
+  public init(words: String, editedAt: Date, base: String? = nil, files: [DraftFile]? = nil, quote: DraftQuote? = nil, aim: String? = nil) {
     self.words = words
     self.editedAt = editedAt
     self.base = base
     self.files = files
     self.quote = quote
+    self.aim = aim
   }
 
   /// Nothing the person made is in it: it is not kept.
-  public var isEmpty: Bool { words.isEmpty && (files ?? []).isEmpty && quote == nil }
+  public var isEmpty: Bool { words.isEmpty && (files ?? []).isEmpty && quote == nil && aim == nil }
 }
 
 /// The message a reply quotes (the window's `quote`, approval "inbox-reply-quote"): the whole message, or the words
@@ -100,7 +103,7 @@ struct DraftBook {
   /// Files on their way to the computer now, and files the way in use cannot carry (the relay takes no uploads).
   var uploading: Set<String> = []
   var needsNetwork: Set<String> = []
-  /// New messages the computer wrote, by Send key, until the Send that made them reads it.
+  /// New messages the computer wrote, by the stand-in thread of the Send that made them, until that Send reads it.
   var sent: [String: ThreadID] = [:]
   /// Attached files' bytes when the phone keeps no copy (the demo).
   var memory: [String: Data] = [:]
@@ -108,6 +111,8 @@ struct DraftBook {
   var computer: [ThreadID: InboxReplyDraft?] = [:]
   /// The computer's draft the open reply box started from.
   var base: [ThreadID: String] = [:]
+  /// A write of the drafts that waits for the typing to pause.
+  var soon: Task<Void, Never>?
 }
 
 private struct KeptDrafts: Codable {
@@ -153,7 +158,28 @@ extension InboxSession {
     if let sessions = copy.keptSessions() { draftBook.sessions = .kept(sessions) }
   }
 
-  func keepDrafts() { copy.saveDrafts(local: draftBook.local, computer: draftBook.computer, compose: draftBook.compose) }
+  func keepDrafts() {
+    draftBook.soon?.cancel()
+    draftBook.soon = nil
+    copy.saveDrafts(local: draftBook.local, computer: draftBook.computer, compose: draftBook.compose)
+  }
+
+  /// How long typing pauses before its words are written to the phone's copy.
+  static let typingPause: Duration = .milliseconds(400)
+
+  /// Keep the drafts once the typing pauses: a keystroke changes them in memory at once, and the copy is written
+  /// after a short pause, not once for every key. Leaving the front, and stopping, write at once.
+  func keepDraftsSoon() {
+    draftBook.soon?.cancel()
+    draftBook.soon = Task { [weak self] in
+      try? await Task.sleep(for: Self.typingPause)
+      guard !Task.isCancelled, let self else { return }
+      self.keepDrafts()
+    }
+  }
+
+  /// Write a pending keep of the drafts now (there is none: nothing is written).
+  public func keepDraftsNow() { if draftBook.soon != nil { keepDrafts() } }
 
   /// The words kept on the phone for a thread.
   public func draft(_ thread: ThreadID) -> LocalDraft? { draftBook.local[thread] }
@@ -166,22 +192,39 @@ extension InboxSession {
   public func keepDraft(_ thread: ThreadID, words: String, now: Date = Date()) {
     if let kept = draftBook.local[thread], kept.words == words { return }
     if words.isEmpty, draftBook.local[thread] == nil { return }
-    changeDraft(thread, now: now) { $0.words = words }
+    changeDraft(thread, now: now, typing: true) { $0.words = words }
   }
 
-  /// Change a thread's draft on the phone and keep it at once.
-  func changeDraft(_ thread: ThreadID, now: Date? = nil, _ change: (inout LocalDraft) -> Void) {
+  /// Change a thread's draft on the phone and keep it at once (`typing`: once the typing pauses).
+  func changeDraft(_ thread: ThreadID, now: Date? = nil, typing: Bool = false, _ change: (inout LocalDraft) -> Void) {
     var draft = draftBook.local[thread] ?? LocalDraft(words: "", editedAt: now ?? clock.now())
     change(&draft)
     if let now { draft.editedAt = now }
     draft.base = draftBook.base[thread]
     if draft.files?.isEmpty == true { draft.files = nil }
     draftBook.local[thread] = draft.isEmpty ? nil : draft
-    keepDrafts()
+    if typing { keepDraftsSoon() } else { keepDrafts() }
   }
 
-  /// Quote a message in the thread's reply (nil takes the quote away).
-  public func setQuote(_ thread: ThreadID, _ quote: DraftQuote?) { changeDraft(thread) { $0.quote = quote } }
+  /// Quote a message in the thread's reply (nil takes the quote away). The phone names no recipient in the reply
+  /// box, so taking the quote away takes away the aim it came with too: the words go where a plain reply goes.
+  public func setQuote(_ thread: ThreadID, _ quote: DraftQuote?) {
+    changeDraft(thread) { draft in
+      draft.quote = quote
+      if quote == nil { draft.aim = nil }
+    }
+  }
+
+  /// ↩ on a message (the window's `arrowReply`): the quote it leaves, and the agent the reply is aimed at. `words`:
+  /// the words selected in that message, if any.
+  public func replyArrow(_ thread: ThreadID, at message: MessageID, words: String? = nil) {
+    guard let messages = self.thread(thread)?.thread.messages else { return }
+    let arrow = ReplyQuoteRules.arrow(messages, at: message, words: words, quoted: draftBook.local[thread]?.quote != nil)
+    changeDraft(thread) { draft in
+      if let quote = arrow.quote { draft.quote = quote }
+      draft.aim = arrow.aim
+    }
+  }
 
   /// What a Send carried is spent: the words, the quote and the files it took. Words typed after them stay.
   func forgetDraft(_ thread: ThreadID, words sent: String, files: [DraftFile], quoted: Bool) {
@@ -191,19 +234,21 @@ extension InboxSession {
     }
     if draft.words.trimmingCharacters(in: .whitespacesAndNewlines) == sent { draft.words = "" }
     if quoted { draft.quote = nil }
+    if !sent.isEmpty { draft.aim = nil }
     let gone = Set(files.map(\.id))
     draft.files = draft.files?.filter { !gone.contains($0.id) }
     draftBook.base[thread] = nil
     changeDraft(thread) { $0 = draft }
   }
 
-  /// A Send the computer refused: its files and quote go back into the draft (its words go back through `returned`).
-  func returnToDraft(_ write: HeldWrite) {
-    guard (write.files ?? []).isEmpty == false || write.quote != nil else { return }
+  /// A Send that will not go (refused, or taken back): its files and quote go back into the draft (its words go back
+  /// through `returned`). `fresh`: the computer refused it, and may not keep the uploads it named, so each file goes
+  /// up again, under a new key, before the next Send.
+  func returnToDraft(_ write: HeldWrite, fresh: Bool = true) {
+    guard write.kind == .reply, (write.files ?? []).isEmpty == false || write.quote != nil else { return }
     changeDraft(ThreadID(write.thread)) { draft in
       let have = Set((draft.files ?? []).map(\.id))
-      // A refused Send may name an upload the computer no longer keeps: each file goes up again before the next Send.
-      draft.files = (write.files ?? []).filter { !have.contains($0.id) }.map(\.again) + (draft.files ?? [])
+      draft.files = (write.files ?? []).filter { !have.contains($0.id) }.map { fresh ? $0.again : $0 } + (draft.files ?? [])
       if draft.quote == nil { draft.quote = write.quote }
     }
   }

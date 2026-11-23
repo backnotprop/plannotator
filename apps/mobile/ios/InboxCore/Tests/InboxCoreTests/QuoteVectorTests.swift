@@ -39,4 +39,39 @@ final class QuoteVectorTests: XCTestCase {
       XCTAssertEqual(messages.map { ReplyQuoteRules.quotesWhole(messages, $0.id) }, expected, shape)
     }
   }
+
+  func testTheArrowDoesToTheReplyBoxWhatTheWindowsDoes() throws {
+    let suite = try Contract.json("vectors/quote.json")
+    let selected = try suite.at("selected").str()
+    let arrows = try suite.at("arrows").items
+    XCTAssertGreaterThanOrEqual(arrows.count, 5)
+    for thread in arrows {
+      let shape = try thread.at("shape").str()
+      let messages = shape.enumerated().map { i, who in
+        InboxMessageWire(
+          seq: Int64(i), id: MessageID("msg_R\(i)"), projectId: ProjectID("p"), threadId: ThreadID("t"),
+          author: who == "p" ? InboxAuthor(kind: .person) : InboxAuthor(kind: .agent, host: "claude-code", session: "ses_\(String(who).uppercased())"),
+          body: "", createdAt: "2026-11-20T10:00:00.000Z")
+      }
+      for press in try thread.at("presses").items {
+        let at = MessageID(try press.at("at").str())
+        let words = press["words"]?.text
+        XCTAssertTrue(words == nil || words == selected)
+        let made = ReplyQuoteRules.arrow(messages, at: at, words: words, quoted: try XCTUnwrap(press.at("quoted").flag))
+        let quote = try press.at("quote")
+        let expected: DraftQuote?? = quote.text == "keep" ? nil : quote == .null ? .some(nil) : .some(DraftQuote(of: MessageID(try quote.at("of").str()), words: quote["words"]?.text))
+        XCTAssertEqual(made.quote, expected, "\(shape) \(at) words \(words ?? "none")")
+        XCTAssertEqual(made.aim, press["aim"]?.text, "\(shape) \(at)")
+      }
+    }
+  }
+
+  func testAWholeMessageIsQuotedAsTheStoresExcerpt() throws {
+    let excerpts = try Contract.json("vectors/quote.json").at("excerpts").items
+    XCTAssertGreaterThanOrEqual(excerpts.count, 8)
+    for item in excerpts {
+      let body = try item.at("body").str()
+      XCTAssertEqual(ReplyQuoteRules.excerpt(person: try item.at("kind").str() == "person", body: body), try item.at("excerpt").str(), body)
+    }
+  }
 }

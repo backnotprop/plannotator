@@ -36,8 +36,18 @@ extension StandInDoor {
   /// Which sessions are running: `nil` puts back every agent that wrote; `[]` is no agent running.
   public func setLiveSessions(_ projects: [InboxComposeProject]?) { state.liveSessions = projects }
 
-  /// Uploads the next Sends of new messages or replies are refused with, by code (`upload_refused`, say).
-  public func refuseUploads(_ code: String?, words: String = "Not attached: .env files often hold secrets.") { state.refusesUploads = code.map { ($0, words) } }
+  /// Uploads the next Sends of new messages or replies are refused with, by code (`upload_refused`, say), with the
+  /// field the Inbox names (`name`: the file itself; `body`: it could not be received).
+  public func refuseUploads(_ code: String?, words: String = "Not attached: .env files often hold secrets.", field: String = "name") {
+    state.refusesUploads = code.map { ($0, words, field) }
+  }
+
+  /// The computer sweeps its pending uploads (it drops those no draft on it names after a day; a phone's draft lives
+  /// on the phone). Their keys still answer their old ids, as the door's command log does.
+  public func sweepUploads() { state.uploads = [:] }
+
+  /// The `POST uploads` calls the door received, for the tests.
+  public var uploadCalls: [DoorCall] { calls.filter { $0.method == .post && $0.path == "uploads" } }
 
   /// New messages the computer wrote, newest last (the tests read them).
   public var startedThreads: [InboxThread] { threads.filter { state.started.contains($0.threadId) } }
@@ -53,19 +63,18 @@ extension StandInDoor {
     if options.refusesMarkups == WireErrorCode.relayUploadUnavailable.rawValue {
       return refuse(413, WireErrorCode.relayUploadUnavailable.rawValue, "The relay does not carry files.")
     }
-    if let refusal = state.refusesUploads { return refuse(422, refusal.code, refusal.words, field: "name") }
+    // A key the door knows answers what it answered first, whether that upload is still pending or not.
+    if let earlier = state.uploadKeys[key] { return encode(200, DoorUploadAnswer(upload: earlier)) }
+    if let refusal = state.refusesUploads { return refuse(refusal.code == "upload_no_space" ? 507 : 422, refusal.code, refusal.words, field: refusal.field) }
     let bytes = call.body ?? Data()
     let name = query["name"].flatMap { $0.isEmpty ? nil : $0 } ?? "file"
-    if let earlier = state.uploads.values.first(where: { $0.record.unknownFields["key"] == .string(key) }) { return encode(200, DoorUploadAnswer(upload: earlier.record)) }
     counter += 1
     let type = call.headers.first { $0.key.lowercased() == "content-type" }?.value
-    var record = InboxUpload(
+    let record = InboxUpload(
       uploadId: UploadID("upl_STANDIN\(counter)"), name: name, size: Int64(bytes.count), kind: Self.kind(of: name, type: type), sha256: Self.sha(bytes), createdAt: StandInData.iso(Date()), mediaType: type)
-    record.unknownFields["key"] = .string(key)
-    state.uploads[record.uploadId.rawValue] = StandInUpload(record: record, bytes: bytes)
-    var answer = record
-    answer.unknownFields = [:]
-    return encode(200, DoorUploadAnswer(upload: answer))
+    if !options.sweepsUploads { state.uploads[record.uploadId.rawValue] = StandInUpload(record: record, bytes: bytes) }
+    state.uploadKeys[key] = record
+    return encode(200, DoorUploadAnswer(upload: record))
   }
 
   static func kind(of name: String, type: String?) -> InboxAttachmentKind {
@@ -95,8 +104,16 @@ extension StandInDoor {
     }
   }
 
+  /// The next new message is written and then answered `503`, as when the computer fails after writing: the door
+  /// keeps no answer under 500, so the phone's retry meets the store's own replay.
+  public func failNextComposeAnswer() { state.failsNextCompose = true }
+
   /// `POST messages`: a new thread to one live session (`409 session_not_live`, nothing written).
   func startThread(_ fields: [String: JSONValue]) -> DoorAnswerBytes {
+    // A key the store wrote a thread under answers that thread again, with no project (store.ts personThreadByKey).
+    if case .string(let key)? = fields["idempotency_key"], let made = state.startedByKey[key], let thread = threads.first(where: { $0.threadId == made }), let first = thread.messages.first {
+      return encode(200, DoorComposeAnswer(threadId: made, message: first, project: nil, replayed: true))
+    }
     guard case .object(let to)? = fields["to"], case .string(let session)? = to["session"], !session.isEmpty else {
       return refuse(422, "validation_error", "to.session: the live session to send to.", field: "to.session")
     }
@@ -120,8 +137,13 @@ extension StandInDoor {
     let first = words.split(separator: "\n").first.map(String.init) ?? taken.uploads.first?.record.name ?? ""
     threads.insert(InboxThread(threadId: thread, project: project, subject: String(first.prefix(60)), messages: [message]), at: 0)
     state.started.append(thread)
+    if case .string(let key)? = fields["idempotency_key"] { state.startedByKey[key] = thread }
     attach(taken.uploads, thread: thread, message: id)
     let written = threads.first { $0.threadId == thread }?.messages.first ?? message
+    if state.failsNextCompose {
+      state.failsNextCompose = false
+      return refuse(503, "internal_error", "The Inbox failed after writing.")
+    }
     return encode(200, DoorComposeAnswer(threadId: thread, message: written, project: DoorComposeAnswerProject(id: project.id, name: project.name, root: project.root), replayed: false))
   }
 }

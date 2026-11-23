@@ -258,7 +258,9 @@ export interface DoorComposeBody {
 export interface DoorComposeAnswer {
   thread_id: string;
   message: InboxMessageWire;
-  project: { id: string; name: string; root: string };
+  /** The project it was written in. A Send the Inbox replays from its own store (the key known, not the door's
+   * record of it) answers without it. */
+  project?: { id: string; name: string; root: string };
   replayed: boolean;
 }
 

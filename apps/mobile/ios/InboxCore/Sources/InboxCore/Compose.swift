@@ -118,24 +118,26 @@ extension InboxSession {
   public var composeDraft: ComposeDraft? { draftBook.compose }
   public var sessions: SessionsRead { draftBook.sessions }
 
-  /// Keep the new message as it stands now. An empty one with no agent chosen is not kept.
-  public func keepCompose(_ draft: ComposeDraft?) {
+  /// Keep the new message as it stands now. An empty one with no agent chosen is not kept. `typing`: written once
+  /// the typing pauses.
+  public func keepCompose(_ draft: ComposeDraft?, typing: Bool = false) {
     if let draft, draft.isEmpty, draft.to == nil, draft.notice == nil {
       draftBook.compose = nil
     } else {
       draftBook.compose = draft
     }
-    keepDrafts()
+    if typing { keepDraftsSoon() } else { keepDrafts() }
   }
 
-  /// Change the new message's words or agent, and keep it at once.
+  /// Change the new message's words or agent, and keep it: a change of the words only once the typing pauses.
   public func changeCompose(now: Date? = nil, _ change: (inout ComposeDraft) -> Void) {
     var draft = draftBook.compose ?? ComposeDraft(editedAt: now ?? clock.now())
     let before = draft
     change(&draft)
     guard draft != before else { return }
+    let typing = draft.to == before.to && draft.files == before.files && draft.notice == before.notice
     draft.editedAt = now ?? clock.now()
-    keepCompose(draft)
+    keepCompose(draft, typing: typing)
   }
 
   /// Throw the new message away, its files with it.
@@ -194,8 +196,9 @@ extension InboxSession {
     draftBook.compose = nil
     keepDrafts()
     await pump(thread.rawValue)
-    if held.contains(where: { $0.id == key }) { return .held }
-    if let sent = draftBook.sent.removeValue(forKey: key) {
+    // Its key may change on the way (its files sent up again): the thread it stands in for does not.
+    if held.contains(where: { $0.thread == thread.rawValue }) { return .held }
+    if let sent = draftBook.sent.removeValue(forKey: thread.rawValue) {
       if client != nil { await readList() }
       return .sent(thread: sent, to: to)
     }
@@ -218,7 +221,7 @@ extension InboxSession {
   /// The computer wrote the thread: the files' bytes are let go, and the Send says where it went.
   func composeSent(_ write: HeldWrite, _ answer: DoorAnswerBytes) {
     releaseBytes(write.files ?? [])
-    if let made = try? JSONDecoder().decode(DoorComposeAnswer.self, from: answer.body) { draftBook.sent[write.id] = made.threadId }
+    if let made = try? JSONDecoder().decode(DoorComposeAnswer.self, from: answer.body) { draftBook.sent[write.thread] = made.threadId }
     book.needsListRead = true
   }
 

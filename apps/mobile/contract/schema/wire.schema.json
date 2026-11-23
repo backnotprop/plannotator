@@ -231,7 +231,6 @@
       "required": [
         "thread_id",
         "message",
-        "project",
         "replayed"
       ],
       "additionalProperties": true,
