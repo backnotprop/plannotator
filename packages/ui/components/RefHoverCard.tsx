@@ -492,13 +492,20 @@ function SheetRow({ children }: { children: (closeIcon: boolean) => React.ReactN
   useLayoutEffect(() => {
     const row = rowRef.current;
     if (!row) return;
+    // The buttons' widths and gaps: right-aligned, a row too wide spills to the left, which scrollWidth never counts.
+    const width = () => {
+      const kids = Array.from(row.children) as HTMLElement[];
+      const gap = parseFloat(getComputedStyle(row).columnGap) || 0;
+      return kids.reduce((sum, k) => sum + k.getBoundingClientRect().width, 0) + gap * Math.max(0, kids.length - 1);
+    };
     const fit = () => {
       if (!icon.current) {
-        if (row.scrollWidth > row.clientWidth + 0.5) {
-          needed.current = row.scrollWidth;
+        const need = width();
+        if (need > row.clientWidth + 0.5) {
+          needed.current = need;
           setCloseIcon(true);
         }
-      } else if (row.clientWidth >= needed.current) setCloseIcon(false);
+      } else if (row.clientWidth + 0.5 >= needed.current) setCloseIcon(false);
     };
     fit();
     if (typeof ResizeObserver === 'undefined') return;

@@ -12,7 +12,7 @@
  * name and at 320 px, no button and no comment count cut short (on the sheet the count is a line of its own above the row; beside the desktop row it drops to its icon and number first); with Code review off the card has only GitHub's link.
  *
  * Proof (PLANNOTATOR_E2E_PROOF_DIR/ref-card-click, `.local/proof` in CI): 01-inbox-pinned-reviews-on.png,
- * 02-inbox-pinned-reviews-off.png, 03-inbox-pinned-dark.png, 04-inbox-issue.png, 06-phone-tap.png (390 px), 07-phone-320.png (05 is plan
+ * 02-inbox-pinned-reviews-off.png, 03-inbox-pinned-dark.png, 04-inbox-issue.png, 06-phone-tap.png (390 px), 07-phone-320.png, 08-phone-320-long-forge-name.png (05 is plan
  * review's, from ref-cards-review.spec.ts). Made-up people and repositories.
  */
 import { devices, expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
@@ -283,7 +283,8 @@ async function footFits(page: Page, at: string): Promise<string | null> {
   // The count picks its form once the room is known (a ResizeObserver): settled within a frame or two.
   await expect(async () => {
     const fit = await foot.evaluate((el) => {
-      const box = el.getBoundingClientRect();
+      // The sheet's buttons stay inside its row (the footer's padding is no room for them).
+      const box = (el.querySelector('[data-ref-card-row]') ?? el).getBoundingClientRect();
       const controls = [...el.querySelectorAll<HTMLElement>('button, a')];
       const buttons = controls.map((b) => b.getBoundingClientRect());
       const count = el.querySelector<HTMLElement>('[data-ref-card-count]');
@@ -435,7 +436,9 @@ test('a phone: a tap shows the sheet with both links in one row, which fits with
     await proof(page, '06-phone-tap');
     await page.setViewportSize({ width: 320, height: 640 });
     expect(await footFits(page, '320 px')).toBe('full');
-    await expect(sheet.locator('[data-ref-card-close]')).toHaveAccessibleName('Close');
+    // GitHub's three buttons fit at 320 with the narrow padding: Close keeps its word.
+    await expect(sheet.locator('[data-ref-card-close-icon]')).toHaveCount(0);
+    await expect(sheet.locator('[data-ref-card-close]')).toHaveText('Close');
     await proof(page, '07-phone-320');
     await page.setViewportSize({ width: 390, height: 844 });
     // The longest forge name ("Open on Bitbucket"), then the narrowest phone: still one row, inside the sheet.
@@ -445,8 +448,16 @@ test('a phone: a tap shows the sheet with both links in one row, which fits with
       if (arrow) el.appendChild(arrow);
     });
     await footFits(page, '390 px, Bitbucket');
+    await expect(sheet.locator('[data-ref-card-close-icon]')).toHaveCount(0);
+    // At 320 the longest forge name leaves no room for the word: Close is its ×, still named Close.
     await page.setViewportSize({ width: 320, height: 640 });
     await footFits(page, '320 px, Bitbucket');
+    await expect(sheet.locator('[data-ref-card-close-icon]')).toHaveCount(1);
+    await expect(sheet.locator('[data-ref-card-close]')).toHaveAccessibleName('Close');
+    await proof(page, '08-phone-320-long-forge-name');
+    // Room again: the word comes back.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(sheet.locator('[data-ref-card-close]')).toHaveText('Close');
     await expect(sheet.locator('[data-ref-card-open]')).toHaveText(/Open on Bitbucket/);
   } finally {
     await context.close();
