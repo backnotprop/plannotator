@@ -13,7 +13,7 @@
  * first (the frame's sheet, `RailSheet docked={false}`), then the versions open as the frame's sheet; on a phone the
  * frame's sheets carry both. A write of the page's own (a version, an approval, a Send) reads the plan again in place.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactElement } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactElement, type ReactNode } from 'react';
 import { planApprovalState, planDecisionVersion, planDocumentFileName, type PlanDecision, type PlanDocument as PlanDocumentRecord, type PlanVersion } from '@plannotator/core/plans';
 import { storage } from '@plannotator/ui/utils/storage';
 import {
@@ -49,7 +49,7 @@ import { PlanAnnotate } from './PlanAnnotate';
 import { PlanDiffView } from './PlanDiffView';
 import { PlanArtifactView } from './PlanArtifactView';
 import { ArtifactLine, PlanVersions } from './PlanRail';
-import { PLAN_FILES_OPEN_KEY, PLAN_FILES_WIDTH_KEY, PlanFiles, PlanRailHead, planFileRoute, type PlanFileRef, type PlanRailDecision } from './PlanFiles';
+import { PLAN_FILES_OPEN_KEY, PLAN_FILES_WIDTH_KEY, PlanBackLink, PlanFiles, PlanRailHead, planFileRoute, type PlanFileRef, type PlanRailDecision } from './PlanFiles';
 
 const plansRoute = { page: 'plans' as const, project: null, thread: null };
 const toList = () => writeRoute(plansRoute);
@@ -133,6 +133,18 @@ function useWidth(el: HTMLElement | null): number {
 }
 
 /** The "Spaces" crumb: back to the home the plan was opened from, its document shrinking into its card (a plain click). */
+/** A computer's crumbs, the panel's back arrow first (approval P2); a phone's as they were. */
+function PlanCrumbs({ back, children }: { back: ReactNode; children: ReactNode }) {
+  return back ? (
+    <span className="ib-plan-crumbs">
+      {back}
+      {children}
+    </span>
+  ) : (
+    <>{children}</>
+  );
+}
+
 function spacesLink(id: string): ReactElement<{ className?: string }> {
   const onClick = (e: MouseEvent<HTMLAnchorElement>) => {
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -228,7 +240,8 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions, fresh
       leading={
         <>
           <SidebarTrigger />
-          <RailSheet closeKey={`${document.id}:${file ?? ''}`} docked={railDocks ? undefined : false} head={head} triggerLabel={PLAN_FILES_WORDS.show} triggerTitle={PLAN_FILES_WORDS.panel} title={PLAN_FILES_WORDS.panel} description="This plan's pages and artifacts." open={filesSheet} onOpenChange={setFilesSheet} trigger={!phone}>
+          {/* A computer: the panel has no head (approval P2), its back arrow is the crumbs' first; a phone's sheet keeps it. */}
+          <RailSheet closeKey={`${document.id}:${file ?? ''}`} docked={railDocks ? undefined : false} head={phone ? head : null} triggerLabel={PLAN_FILES_WORDS.show} triggerTitle={PLAN_FILES_WORDS.panel} title={PLAN_FILES_WORDS.panel} description="This plan's pages and artifacts." open={filesSheet} onOpenChange={setFilesSheet} trigger={!phone}>
             <PlanFiles {...filesProps} />
           </RailSheet>
         </>
@@ -238,12 +251,18 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions, fresh
         identity={
           phone && bar.a3 ? (
             <PlanBarTitle rest={project ?? 'Spaces'} name={read.plan.name} away={bar.away} shown={bar.shown} decision={railDecision} versionsOpen={place.open} onVersions={place.setOpen} />
-          ) : onMain && project ? (
-            <Breadcrumbs root={{ label: 'Spaces', link: spacesLink(id) }} collectionName={project} collectionLink={<span data-plan-crumb-project="" />} path={read.plan.name} />
-          ) : onMain ? (
-            <Breadcrumbs collectionName="Spaces" collectionLink={spacesLink(id)} path={read.plan.name} />
           ) : (
-            <Breadcrumbs root={{ label: 'Spaces', link: spacesLink(id) }} collectionName={read.plan.name} collectionLink={routeLink(planFileRoute(id, primary, { kind: 'doc', id: primary }))} path={fileName} />
+            <PlanCrumbs back={phone ? null : <PlanBackLink name={read.plan.name} />}>
+              {onMain && project ? (
+                <Breadcrumbs root={{ label: 'Spaces', link: spacesLink(id) }} collectionName={project} collectionLink={<span data-plan-crumb-project="" />} path={read.plan.name} />
+              ) : onMain ? (
+                <Breadcrumbs collectionName="Spaces" collectionLink={spacesLink(id)} path={read.plan.name} />
+              ) : (
+                // Another page: the crumbs have three places (Spaces, the plan, the file), and with the panel's head gone
+                // on a computer the project would be nowhere on screen, so it joins the first crumb there.
+                <Breadcrumbs root={{ label: !phone && project ? `Spaces / ${project}` : 'Spaces', link: spacesLink(id) }} collectionName={read.plan.name} collectionLink={routeLink(planFileRoute(id, primary, { kind: 'doc', id: primary }))} path={fileName} />
+              )}
+            </PlanCrumbs>
           )
         }
         actions={phone ? null : share}
@@ -256,7 +275,7 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions, fresh
       <section className="ib-plans ib-plan-page" aria-label={read.plan.name} data-plan-page={id} data-phone={phone ? '' : undefined} data-files={railDocks ? (filesOpen ? 'docked' : 'closed') : phone ? 'phone' : 'sheet'} data-rail={place.docked ? (place.open ? 'docked' : 'closed') : phone ? 'phone' : 'sheet'} data-plan-header={phone && bar.a3 ? (bar.away ? 'name' : 'project') : undefined}>
         <FrameBox band={band} rowRef={setRow}>
           <DocumentRailShell
-            head={head}
+            head={null}
             defaults={{ open: true }}
             enabled={!phone}
             fitsForWidth={railFits}

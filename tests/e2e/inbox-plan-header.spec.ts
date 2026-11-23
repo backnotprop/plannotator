@@ -10,7 +10,8 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-plan-header.spec.ts`.
  * PNGs land in .local/proof/plan-header/: phone-<light|dark>, phone-scrolled-<scheme>, phone-menu-<scheme>,
  * phone-<390|375|320>-light, phone-long-name-light, desktop-<scheme>, desktop-menu-<scheme>, desktop-copied-light,
- * desktop-scrolled-light, desktop-narrow-light, desktop-narrow-contents-light.
+ * desktop-scrolled-light, desktop-narrow-light, desktop-narrow-contents-light, desktop-panel-p2-<scheme> (the panel with no
+ * head, Pages first, the back arrow first in the top bar).
  */
 
 import { expect, test, type Browser, type Page } from './inbox-test';
@@ -219,6 +220,14 @@ test('the document’s title is the header: a phone’s bar, state line, bottom 
       await expect(page.locator('[data-plan-dock] [data-plan-global]')).toBeVisible();
       await blur(page);
       await page.screenshot({ path: join(proofDir, `desktop-${scheme}.png`) });
+      // The panel has no head (approval P2): Pages comes first; the head's back arrow, its name kept, is the top
+      // bar's first, before the crumbs.
+      await expect(page.locator('[data-pages-rail-head]')).toHaveCount(0);
+      const back = page.locator('[data-page-header] [data-plan-crumb-back]');
+      await expect(back).toBeVisible();
+      await expect(back).toHaveAccessibleName('Back to Rate limiting for public endpoints');
+      expect((await back.boundingBox())!.x).toBeLessThan((await page.locator('[data-page-header] [data-breadcrumb-root]').boundingBox())!.x);
+      await page.screenshot({ path: join(proofDir, `desktop-panel-p2-${scheme}.png`), clip: { x: 0, y: 0, width: 760, height: 320 } });
       await reading.locator('[data-plan-more]').click();
       await expect(page.locator('[data-plan-menu] [data-plan-menu-row]')).toHaveText(['Copy file', 'Download', 'Full screen']);
       await page.screenshot({ path: join(proofDir, `desktop-menu-${scheme}.png`) });
@@ -240,6 +249,10 @@ test('the document’s title is the header: a phone’s bar, state line, bottom 
         expect((await reading.boundingBox())!.y).toBe(before.y);
         await blur(page);
         await page.screenshot({ path: join(proofDir, 'desktop-scrolled-light.png') });
+        // The back arrow goes where the panel's did: the Spaces home.
+        await page.locator('[data-page-header] [data-plan-crumb-back]').click();
+        await expect.poll(() => page.evaluate(() => window.location.hash)).toBe('#plans');
+        await expect(page.locator(`[data-plan-page="${plan.id}"]`)).toHaveCount(0);
       }
       expect(errors).toEqual([]);
     } finally {

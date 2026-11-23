@@ -207,13 +207,14 @@ function rowWidth(width: () => number) {
   };
 }
 
-test.skipIf(!hasDom)('an approval of an older version never reads as current: the rail head and the reading line say the newest is not approved', async () => {
+test.skipIf(!hasDom)('an approval of an older version never reads as current: the reading line says the newest is not approved', async () => {
   const older = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate\n\nv1\n', '# Rotate\n\nv2\n', '# Rotate\n\nv3\n', '# Rotate\n\nv4\n'], { seen: 4, approvedOn: 2 });
   const current = plan('Offline drafts', 'field-notes', ['# Offline drafts\n\nv1\n', '# Offline drafts\n\nv2\n'], { seen: 2, approvedOn: 2 });
   window.location.hash = `#plans=${older}`;
   const host = draw();
   await settle();
-  expect(text(host.querySelector('[data-pages-rail-meta] [data-plan-rail-decision]'))).toBe('v4 is new and not approved');
+  // A computer's panel has no head (approval P2): the reading line holds the approval.
+  expect(host.querySelector('[data-pages-rail-head]')).toBeNull();
   expect(host.querySelector('[data-plan-reading] [data-plan-decision]')).toBeNull();
   // The reading line of the newest version says why, in one line (history imported before the stored fact).
   expect(text(host.querySelector('[data-plan-reading] [data-plan-approval="cleared"]'))).toBe('v4 is new and not approved. You approved v2, and that does not carry over.');
@@ -222,8 +223,8 @@ test.skipIf(!hasDom)('an approval of an older version never reads as current: th
 
   window.location.hash = `#plans=${current}`;
   await settle();
-  // On its newest version the decision is current: just its words.
-  expect(text(host.querySelector('[data-pages-rail-meta] [data-plan-rail-decision]'))).toBe('Approved');
+  // On its newest version the decision is current.
+  expect(text(host.querySelector('[data-plan-reading] [data-plan-approval="approved"]'))).toBe('Approved by you');
 });
 
 test.skipIf(!hasDom)('the frame: top bar, files rail, page card and versions panel; main page first, other pages and artifacts by name; a row opens its file, the versions and the address follow', async () => {
@@ -264,15 +265,13 @@ test.skipIf(!hasDom)('the frame: top bar, files rail, page card and versions pan
   expect(projectCrumb.closest('a')).toBeNull();
   expect(projectCrumb.hasAttribute('href')).toBe(false);
   expect(text(shell.querySelector('[data-page-header] [aria-current="page"]'))).toBe('Rotate refresh tokens');
-  // The rail head: back to Plans with the plan's name; on the quiet line under it the project, then the plan's decision.
-  expect(text(row.querySelector('[data-pages-back-link]'))).toBe('Rotate refresh tokens');
-  const meta = row.querySelector('[data-pages-rail-head] [data-pages-rail-meta]')!;
-  expect(text(meta.querySelector('[data-plan-rail-project]'))).toBe('harbor-api');
-  const railDecision = meta.querySelector('[data-plan-rail-decision]')!;
-  expect(text(railDecision)).toBe('Approved');
-  expect(railDecision.getAttribute('data-plan-decision')).toBe('approved');
-  expect(meta.querySelector('[data-plan-rail-project]')!.compareDocumentPosition(railDecision) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(meta.querySelector('[title]')?.getAttribute('title')).toBe('harbor-api · Approved');
+  // No head above Pages (approval P2): Pages comes first, and the head's back arrow (its name kept) is the top bar's
+  // first, before the crumbs.
+  expect(row.querySelector('[data-pages-rail-head]')).toBeNull();
+  const back = shell.querySelector<HTMLAnchorElement>('[data-page-header] [data-plan-crumb-back]')!;
+  expect(back.getAttribute('aria-label')).toBe('Back to Rotate refresh tokens');
+  expect(back.getAttribute('href')).toBe('#plans');
+  expect(back.compareDocumentPosition(shell.querySelector('[data-page-header] [data-breadcrumb-root]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   // The reading line: Edit at its start (approved already: no Approve), the approval of this newest version, then the
   // version words and the versions toggle (with their count) at its end; no project, no decision mark.
   const reading = host.querySelector('[data-plan-reading]')!;
@@ -309,8 +308,8 @@ test.skipIf(!hasDom)('the frame: top bar, files rail, page card and versions pan
   expect(text(host.querySelector('[data-plan-document]'))).toContain('Rollout second version.');
   expect(host.querySelectorAll('[data-versions-panel] [data-version-row]').length).toBe(2);
   expect(host.querySelector(`[data-plan-file="d:${rollout.id}"]`)?.getAttribute('aria-current')).toBe('page');
-  // The top bar: Spaces / the plan / the page.
-  expect(text(host.querySelector('[data-page-header] [data-breadcrumb-root]'))).toBe('Spaces');
+  // The top bar: Spaces / the project (which has no other place on screen here) / the plan / the page.
+  expect(text(host.querySelector('[data-page-header] [data-breadcrumb-root]'))).toBe('Spaces / harbor-api');
   expect(host.querySelector('[data-page-header] a[aria-label="Rotate refresh tokens"]')?.getAttribute('href')).toBe(`#plans=${id}`);
   expect(text(host.querySelector('[data-page-header] [aria-current="page"]'))).toBe('Rollout');
   expect(readingWords(host)).toBe('v2 · newest');
@@ -400,7 +399,9 @@ test.skipIf(!hasDom)('short of room the rail gives way first, to the frame\'s sh
     await act(async () => (shows[0] as HTMLButtonElement).click());
     await settle();
     expect(fileNames(document.querySelector('[data-plan-sidebar="compact"]')!)).toEqual(['Rotate refresh tokens']);
-    expect(text(document.querySelector('[data-plan-sidebar="compact"] [data-pages-rail-meta]'))).toBe('harbor-api');
+    // A computer's sheet has no head either (approval P2): the top bar's back arrow and crumbs are on screen.
+    expect(document.querySelector('[data-plan-sidebar="compact"] [data-pages-rail-head]')).toBeNull();
+    expect(host.querySelector('[data-page-header] [data-plan-crumb-back]')).not.toBeNull();
     // The kept choice waits for a row that fits.
     expect(kept.get('plannotator-inbox-plan-files-open')).toBe('0');
     // 700 px: the versions do not dock either; the reading line opens them as the frame's sheet.
@@ -458,8 +459,8 @@ test.skipIf(!hasDom)('the versions panel closes, stays closed after a remount, a
     expect(host.querySelector('[data-plan-page]')!.getAttribute('data-rail')).toBe('closed');
     expect([...host.querySelector('[data-frame-row]')!.querySelectorAll(':scope > [data-docked-panel-clip]')]).toEqual([]);
     expect(kept.get('plannotator-inbox-plan-rail-hidden')).toBe('1');
-    // With the panel closed the plan's decision is still on screen, in the rail head.
-    expect(text(host.querySelector('[data-pages-rail-meta] [data-plan-rail-decision]'))).toBe('Approved');
+    // With the panel closed the plan's decision is still on screen, in the reading line.
+    expect(text(host.querySelector('[data-plan-reading] [data-plan-approval="approved"]'))).toBe('Approved by you');
     // Kept on this computer: a remount draws it closed.
     host = await redraw();
     expect(host.querySelector('[data-versions-panel]')).toBeNull();
@@ -689,8 +690,11 @@ test.skipIf(!hasDom)('an Escape never leaves the plan page for the Spaces home; 
     expect(window.location.hash).toBe(`#plans=${id}`);
     expect(host.querySelector(`[data-plan-page="${id}"]`)).not.toBeNull();
   }
-  // The Spaces crumb and the rail's back go back (a phone's menu has Close, planHeader.test.tsx).
+  // The Spaces crumb and the top bar's back arrow go back (a phone's menu has Close, planHeader.test.tsx).
   expect(host.querySelector('[data-plan-annotate] button[aria-label^="Close"]')).toBeNull();
+  await act(async () => host.querySelector<HTMLAnchorElement>('[data-page-header] [data-plan-crumb-back]')!.click());
+  await settle();
+  expect(window.location.hash).toBe('#plans');
 });
 
 test.skipIf(!hasDom)('Edit is on the newest version of a Markdown page only: an older version offers Restore, a diagram page no Edit', async () => {
@@ -1062,7 +1066,6 @@ test.skipIf(!hasDom)('approving names the version on screen: refused once the pl
   await settle();
   expect(text(host.querySelector('[data-plan-reading] [data-plan-approval="approved"]'))).toBe('Approved by you');
   expect(host.querySelector('[data-plan-approve]')).toBeNull();
-  expect(text(host.querySelector('[data-pages-rail-meta] [data-plan-rail-decision]'))).toBe('Approved');
   // The person's own edit: the approval moves, and the line says so until its Dismiss.
   await editAndDone(host, '# Rotate refresh tokens\n\nv2, tightened\n');
   expect(text(host.querySelector('[data-plan-reading] [data-plan-approval="moved"]'))).toBe('Your approval moved to v3.');

@@ -66,6 +66,13 @@
 .ib-plan-reading:has(> [data-plan-more]) > [data-reading-line] { flex: 1 1 auto; min-width: 0; }
 .ib-plan-reading > [data-plan-more] { width: 30px; height: 30px; margin-right: 8px; }
 
+/* ── A computer's crumbs: the panel's back arrow first (approval P2) ── */
+.ib-plan-crumbs { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; }
+.ib-plan-crumb-back { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; margin-left: -4px; border-radius: 7px; color: var(--muted-foreground); }
+.ib-plan-crumb-back:hover { background: var(--muted); color: var(--foreground); }
+.ib-plan-crumb-back:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+.ib-plan-crumb-back svg.ib-ic { width: 16px; height: 16px; }
+
 /* ── A phone's top bar: the project, Share, the menu ── */
 .ib-plan-page[data-phone] [data-page-account] .ib-shr-btn[data-phone] { height: 44px; }
 .ib-plan-bartitle { position: relative; flex: 1 1 0; min-width: 0; height: 44px; }

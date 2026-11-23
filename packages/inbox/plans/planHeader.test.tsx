@@ -290,6 +290,9 @@ test.skipIf(!hasDom)('a phone’s menu holds what the file-name row and the chip
     await pick('files');
     expect(document.querySelector('[data-plan-sidebar="compact"]')).not.toBeNull();
     expect(text(document.querySelector('[data-plan-sidebar="compact"]'))).toContain('Load test notes');
+    // A phone has no crumbs: its files sheet keeps its own back row.
+    expect(document.querySelector('[data-plan-sidebar="compact"] [data-pages-back-link]')!.getAttribute('aria-label')).toBe('Back to Rate limiting for public endpoints');
+    expect(host.querySelector('[data-plan-crumb-back]')).toBeNull();
     await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     await settle();
 
