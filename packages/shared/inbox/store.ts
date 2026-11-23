@@ -6795,6 +6795,11 @@ export class InboxStore {
     return new Map([...found].map(([session, list]) => [session, list.sort((a, b) => a.seq - b.seq).map((entry) => entry.message)]));
   }
 
+  /** Whether a person's `message` waits for `session` as its owner, untagged (`pendingReplies`' rule): read_thread lists it, and its mark never passes it unshown. */
+  owedTo(message: InboxMessage, session: string): boolean {
+    return this.isOwner(message, session) && this.pendingFor(message, session, { tags: false });
+  }
+
   /** Whether a person's `message` waits for `session` (the rules of `pendingReplies`). */
   private pendingFor(message: InboxMessage, session: string, options: { tags?: boolean }): boolean {
     // A hand-off inside its Undo window goes to nobody yet.

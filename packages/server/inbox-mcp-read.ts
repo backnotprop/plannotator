@@ -66,6 +66,8 @@ export const INBOX_THREAD_LINES = 30;
 export const INBOX_UNREAD_LINES = 20;
 /** A one-line message at most this long: past it, its questions lose their prompts and answers, then the line is clipped. */
 export const INBOX_LINE_MAX_CHARS = 400;
+/** A clipped one-line message keeps at least this many characters of its first words before its questions lose their prompts. */
+export const INBOX_LINE_MIN_WORDS = 24;
 /** An open question's prompt in the header, clipped to this; its ref is always whole. */
 export const INBOX_HEADER_PROMPT_CHARS = 300;
 /** The header lists the open questions' choices while they total at most this many characters; past it, expand shows them in the message. */
@@ -663,14 +665,16 @@ export function windowedThread(
   const caller = input.caller ?? null;
   const checked = store.message(threadId)?.agent_checked_seq ?? 0;
   const byId = new Map(all.map((m) => [m.id, m]));
-  // A reply of the person's this reader is owed and has not had (no delivery, past the read mark). Never one
-  // delivered by design to nobody here: a review comment after its batch's lead, a reply addressed to another
-  // session, a reply to the person's own message, a reply to another session's message.
+  // A message of the person's this reader is owed and has not had: with a session, exactly what its wake would
+  // deliver (`owedTo`, Inbox notes included; never a review comment after its batch's lead, a reply to another
+  // session or to the person's own message); without one, a reply to a message sent without a session.
   const owedHere = (m: InboxMessageWire): boolean => {
-    if (m.author.kind !== "person" || m.delivery || seq.get(m.id)! <= checked || (m.review_batch && !m.review_batch.lead)) return false;
-    if (m.to) return !caller || m.to.session === caller;
-    const asked = m.reply_to ? byId.get(m.reply_to) : undefined;
-    return asked?.author.kind === "agent" && (!caller || !asked.author.session || asked.author.session === caller);
+    const stored = store.message(m.id);
+    if (!stored || stored.author.kind !== "person") return false;
+    if (caller) return store.owedTo(stored, caller);
+    if (stored.delivery || stored.to || seq.get(m.id)! <= checked || (stored.review_batch && !stored.review_batch.lead)) return false;
+    const asked = stored.reply_to ? byId.get(stored.reply_to) : undefined;
+    return asked?.author.kind === "agent" && !asked.author.session;
   };
   const rest = inRange.filter((m) => !full.has(m.id));
   const recent = new Set(rest.slice(-INBOX_THREAD_LINES).map((m) => m.id));
@@ -774,12 +778,12 @@ export function windowedThread(
   };
   const lineIds = new Set(earlier.map((line) => line.id));
   const order = all.filter((m) => full.has(m.id) || lineIds.has(m.id)).map((m) => m.id);
-  // What the read may mark read: up to `before`, and never past a reply this
-  // reader is owed and was not shown (in full or as one line), so it still
-  // wakes its session and stays unread (an Inbox note never holds it); and
-  // the acks of the messages it showed (an ack on a message left out is not seen).
+  // What the read may mark read: up to `before`, and never past a message this
+  // reader is owed and was not shown (in full or as one line; the rule that
+  // lists it), so it still wakes its session and stays unread; and the acks
+  // of the messages it showed (an ack on a message left out is not seen).
   const shownIds = new Set(order);
-  const unshown = all.filter((m) => !shownIds.has(m.id) && owedHere(m) && !isInboxNote(m)).map((m) => seq.get(m.id)!);
+  const unshown = all.filter((m) => !shownIds.has(m.id) && owedHere(m)).map((m) => seq.get(m.id)!);
   const stop = unshown.length > 0 ? Math.min(...unshown) - 1 : Number.POSITIVE_INFINITY;
   return { result, order, shown: shownIds, readThrough: Math.min(stop, before === null ? Number.POSITIVE_INFINITY : before - 1) };
 }
@@ -810,8 +814,8 @@ function whenAndWhat(item: { id: string; created_at: string; reply_to: string | 
 
 /**
  * One message as one line of text, at most INBOX_LINE_MAX_CHARS where it can
- * be: its first words are clipped first, then its questions lose their
- * prompts and answers, then they read `N questions: key state, …`. A question
+ * be: its first words are clipped first (to no fewer than INBOX_LINE_MIN_WORDS
+ * characters), then its questions lose their prompts and answers, then they read `N questions: key state, …`. A question
  * key and what follows (files, guided review, 👍, Board request) are never cut.
  */
 export function messageLineText(line: AgentMessageLine, context: TranscriptContext): string {
@@ -846,9 +850,10 @@ export function messageLineText(line: AgentMessageLine, context: TranscriptConte
   if (build(line.words, forms[0]!).length <= INBOX_LINE_MAX_CHARS) return build(line.words, forms[0]!);
   for (const qs of forms) {
     const room = INBOX_LINE_MAX_CHARS - build("", qs).length;
-    if (room >= 1) return build(clip(line.words, room), qs);
+    if (room >= Math.min(INBOX_LINE_MIN_WORDS, line.words.length)) return build(clip(line.words, room), qs);
   }
-  return build("…", forms.at(-1)!);
+  const room = INBOX_LINE_MAX_CHARS - build("", forms.at(-1)!).length;
+  return build(room >= 1 ? clip(line.words, room) : "…", forms.at(-1)!);
 }
 
 /**

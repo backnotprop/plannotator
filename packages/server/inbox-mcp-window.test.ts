@@ -344,6 +344,30 @@ describe("read_thread reads a window", () => {
     expect(store.pendingReplies("ses_b").filter((m) => toB.slice(0, 5).includes(m.id))).toEqual([]);
   });
 
+  test("the unread list and the mark follow the wake's routing: a reply to the person's own reply is nobody's, one to their message addressed to a session is that session's", async () => {
+    const w = await world();
+    const store = w.server.store;
+    const seeded = seedBigThread(store, 40, w.project);
+    store.markAgentChecked(seeded.threadId);
+    const replies = replyIds(store, seeded.ids);
+    const ownReply = store.sendReply(replies.at(-1)!, { words: "And one more thing on my own reply.", idempotency_key: "own" }).reply;
+    let last = ownReply.id;
+    for (let i = 0; i < 20; i++) {
+      last = store.sendMessage({ project_id: store.message(seeded.threadId)!.project_id, author: BIG_THREAD_AGENT, body: `Later step ${i}.`, reply_to: last }).message.id;
+      last = store.sendReply(last, { words: `Later ${i}.`, idempotency_key: `later-${i}` }).reply.id;
+    }
+    const addressed = store.startPersonThread({ project_id: store.message(seeded.threadId)!.project_id, body: "New work.", to: { host: "claude-code", session: BIG_THREAD_AGENT.session! }, idempotency_key: "new" }).message;
+    const followUp = store.sendReply(addressed.id, { words: "Also this.", idempotency_key: "follow" }).reply;
+    const session = BIG_THREAD_AGENT.session!;
+    expect(store.owedTo(ownReply, session)).toBe(false);
+    expect(followUp.to?.session).toBe(session);
+    expect(store.owedTo(followUp, session)).toBe(true);
+    const text = await readAs(w, seeded.threadId, session, { limit: 3 });
+    expect(text).toContain("more messages, older than the recent lines below");
+    expect(text).not.toContain(`- ${ownReply.id} `);
+    expect(store.message(seeded.threadId)!.agent_checked_seq).toBeGreaterThanOrEqual(store.messageCursor(ownReply.id)!);
+  });
+
   test("a one-line message past its length keeps every question key and the Board request pointer, clipping its first words", () => {
     const line = {
       id: "msg_01M5C00000000000000000000A",
