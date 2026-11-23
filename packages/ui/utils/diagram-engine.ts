@@ -160,7 +160,7 @@ export const PELE_CAPABILITIES: Readonly<Record<MermaidDiagramType, Readonly<Rec
 export const DIAGRAM_FEATURES = {
   /** `$$...$$` labels typeset with KaTeX (MathML). Pele: through the label step (`pele-labels.ts`). */
   mathLabels: { mermaid: true, pele: true },
-  /** Styled label text: colour, underline, strike, code, bold, italic, line breaks (`pele-labels.ts`). Pictures and icons in a label draw under neither. */
+  /** Styled label text: colour, underline, strike, code, bold, italic, line breaks (`pele-labels.ts`). Pele drops a picture or icon beside words; a label that is only one is a Pele failure, so Mermaid draws that fence, picture included. */
   htmlLabels: { mermaid: true, pele: true },
   /** An author's theme settings (`%%{init}%%`, front matter `config:`). Pele: only the colours they spell out (`themeVariables`), never a theme name or `themeCSS` (`peleAuthorTheme.ts`). */
   initThemeDirectives: { mermaid: true, pele: true },
