@@ -1,0 +1,10 @@
+erDiagram
+  CUSTOMER ||--o{ ORDER : places
+  CUSTOMER ||--o{ ORDER : returns
+  ORDER ||--|{ LINE-ITEM : contains
+  CUSTOMER {
+    string name
+  }
+  PERSON ||--o| PERSON : "is married to"
+  p["Person A & B"]
+  p ||--o{ ORDER : "x < y"

@@ -271,6 +271,7 @@
   "notifications.spec.ts": 65,
   "packed-page-load.spec.ts": 10,
   "packed-page-old-server.spec.ts": 7,
+  "pele-labels.spec.ts": 12,
   "plan-lazy-chunk-failure.spec.ts": 7,
   "plan-linked-doc-drafts.spec.ts": 6,
   "question-card-narrow.spec.ts": 57,
