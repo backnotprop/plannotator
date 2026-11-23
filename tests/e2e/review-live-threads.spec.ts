@@ -7,7 +7,7 @@
  */
 import { expect, test } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { TagConnection } from '../helpers/inbox-tag-world';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
@@ -17,6 +17,8 @@ const repoRoot = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repoRoot, '.local/plannotator'));
 const OWNER = 'cc-live-owner-1';
 const SECOND = 'pi-live-second-2';
+// Its own folder under the proof root, which CI keeps as the shard's proof artifact.
+const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repoRoot, '.local/proof')), 'review-live-reply-words');
 
 test('a comment reaches the agent that opened the review, its answer lands live on the lines, a tag wakes another, resolve folds it', async ({ browser }) => {
   test.skip(!existsSync(binary), `build the binary first: ${binary}`);
@@ -73,7 +75,7 @@ test('a comment reaches the agent that opened the review, its answer lands live 
     const mcp = await fetch(`${inboxUrl}/mcp`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'send_message', arguments: { project_path: repo, reply_to: commentId, body: 'It throws RangeError("amount must be positive") now.', agent_session: OWNER, agent_host: 'claude-code' } } }),
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'send_message', arguments: { project_path: repo, reply_to: commentId, body: 'It throws RangeError("amount must be positive") now.\n\n:::question\nKeep the old message too?\n\n- [ ] Yes\n- [ ] No\n:::', agent_session: OWNER, agent_host: 'claude-code' } } }),
     });
     expect(mcp.status).toBe(200);
     await expect(card.locator('[data-live-message][data-author="agent"]')).toContainText('RangeError');
@@ -89,6 +91,18 @@ test('a comment reaches the agent that opened the review, its answer lands live 
     await card.locator('[data-live-composer] button', { hasText: 'Reply' }).click();
     await expect.poll(() => second.commands.length).toBe(1);
     expect(second.commands[0]!.body).toContain('Pi, can you add a test?');
+    // The agent's question is still open, so the stored reply carries the Inbox's sentence for the agent after the
+    // words; under the person's reply the page shows their words only.
+    await expect.poll(() => page.evaluate(async () => {
+      const state = (await (await fetch('/api/live/state')).json()) as { messages?: { author: { kind: string }; body: string }[] };
+      return (state.messages ?? []).find((m) => m.author.kind === 'person' && m.body.includes('Pi, can you add a test?'))?.body ?? '';
+    })).toContain("Don't re-ask it; the person will answer in the Inbox.");
+    const mine = card.locator('[data-live-message][data-author="person"]').last();
+    await expect(mine.locator('[data-live-body]')).toContainText('Pi, can you add a test?');
+    await expect(mine.locator('[data-live-body]')).not.toContainText('still open');
+    await expect(card).not.toContainText("Don't re-ask");
+    mkdirSync(proofDir, { recursive: true });
+    await card.screenshot({ path: join(proofDir, 'reply-words-with-a-question-open.png') });
 
     await card.locator('[data-live-resolve]').click();
     await expect(card).toHaveAttribute('data-resolved');

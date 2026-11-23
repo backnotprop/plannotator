@@ -3,7 +3,7 @@ import type { LiveReviewActions } from './useLiveReview';
 import { LiveComposer } from './LiveComposer';
 import { LiveAuthorMark } from './LiveMark';
 import { LiveBody } from './LiveBody';
-import { authorName, deliveryWord, type LiveMessage, type PlacedThread } from './model';
+import { authorName, deliveryWord, liveShownText, type LiveMessage, type PlacedThread } from './model';
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 const QUIET = 'inline-flex h-6 -my-0.5 items-center rounded px-1 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground';
@@ -28,7 +28,7 @@ export function LiveMessageRow({ message, messages, onTakeBack, tail }: { messag
           </span>
           {tail ? <span className="ml-auto flex shrink-0 items-baseline gap-0.5 whitespace-nowrap">{tail}</span> : null}
         </div>
-        <LiveBody body={message.body} quiet={QUIET} />
+        <LiveBody body={liveShownText(message)} quiet={QUIET} />
       </div>
     </div>
   );
@@ -56,7 +56,7 @@ export function LiveThreadCard({ thread, messages, actions }: { thread: PlacedTh
     return (
       <div className="live-thread mx-2 my-1 flex items-center gap-2 rounded border border-border bg-card px-3 py-1 text-[12px] leading-5 text-muted-foreground" data-live-thread={conversation.id} data-resolved>
         <span>Resolved</span>
-        <span className="min-w-0 flex-1 truncate">{first.body}</span>
+        <span className="min-w-0 flex-1 truncate">{liveShownText(first)}</span>
         <button type="button" className={QUIET} data-pn-touch-target onClick={() => setOpen(true)}>Show</button>
       </div>
     );
