@@ -563,6 +563,14 @@ export const INBOX_THREAD_NEW_ISSUE_RULE =
 export const INBOX_OPTION_LINES_RULE =
   `Indented under a \`- [ ]\` choice (not a plain bullet), only when it helps the person pick: \`Pros: <item>; <item>\` and \`Cons: <item>; <item>\` (the card lines them up across options), and \`Prototype: <page>\`, a page they try before picking: an HTML file you also attach, an https:// address you serve, or the http://localhost address of an app you are running (the send is refused if it does not answer). ${INBOX_PROTOTYPE_TRY_RULE} One \`Prototype:\` line at the block's own indent is one page for all the options.`
 
+/**
+ * The scenario table (approval "question-scenario-table", words approved by the owner 2026-11-23): when the best
+ * choice depends on the situation, a table after `Why:`. On every copy of send_message's body, right after the
+ * option lines.
+ */
+export const INBOX_SCENARIO_TABLE_RULE =
+  'When the best choice depends on the situation, add a table after `Why:`: a row per situation the person would recognise (not per cost), a column per choice headed with its label word for word, each cell `<verdict> — <detail>`. Leave out a row where every choice does the same; skip the table when one choice wins in every case.'
+
 export const INBOX_PICTURES_RULE =
   'Pictures go in the body where you write about them, `![alt](/abs/path.png)`, never only in `attachments`; do not also attach one the body shows. Sound and video files written the same way play in place. When the person picks between looks (designs, variants, today\'s screen against a redesign), write about the options inside the question, not above it: each option is a picture choice, `- [ ] A · Label — ![alt](path) what it means`, its own picture inside it and what you would say about it as its description; a choice with nothing to show (both, none yet) stays plain text. Above the question, one or two sentences at most; the label comes back. A mock that ends on a screen the product already has shows a real screenshot of that screen.'
 
@@ -652,6 +660,7 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
       '',
       'Optional lines after the question; most questions need none of these: `Stakes: <what it affects>` (give one with every Stopped or Holds up), `Shows: ![alt](path)` or `Shows: [name](file)` (the one picture or file it is about), `Why: <why your recommendation>` on its own line, `Reversible: no — <why>` only when it cannot be undone.',
       INBOX_OPTION_LINES_RULE,
+      INBOX_SCENARIO_TABLE_RULE,
       INBOX_DELEGATED_OPTIONS_RULE,
       '',
       'Only for a true blocker the person must go and do outside this chat, that you cannot do yourself (approve a deploy, sign in, touch a security key, merge a PR you cannot merge), write a `:::action` block: first line the order, then why. Each command the person must run goes in the why in its own fenced code block (```), one block per command in the order to run them, so each gets a copy button. Optional: `Where: <url>`, `Stopped:`, `Watching: <what you watch>`. Never for a decision or a question, for what you can do yourself, or as a checklist or status update; most messages need none. Done, Can\'t do it or Skip comes back under "Action items you asked for". Skipped means the person chose not to do it: carry on without it where you can, say what stays blocked, and don\'t ask for it again unless they bring it up.',

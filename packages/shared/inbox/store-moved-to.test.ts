@@ -189,6 +189,24 @@ describe("resolve_message with moved_to", () => {
     expect(replay.message(old.id)!.moved_to ?? null).toBeNull();
   });
 
+  test("a withdrawal into the moved thread that replaces nothing is refused: nothing written, the move and the sub-agent's note stay", () => {
+    const { store } = open();
+    const { old, brief } = world(store);
+    store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
+    const cursor = store.cursor();
+    const error = refusal(() => store.sendMessage({ project_id: old.project_id, author: SUB, body: "Never mind.", reply_to: old.id, supersedes: [old.id] }));
+    expect(error.code).toBe("invalid_supersedes");
+    expect(error.message).toBe(`This thread is archived and its questions moved to thread ${brief.id} (Morning brief): nothing you named is open here, so nothing was sent.`);
+    expect(store.cursor()).toBe(cursor);
+    expect(store.message(old.id)!.moved_to?.thread_id).toBe(brief.id);
+    expect(store.pendingReplies(SUB.session!).filter((m) => m.moved_note)).toHaveLength(1);
+    const moved = `${old.id}/${store.questionsOf(old.id)[0]!.key}`;
+    const again = refusal(() => store.sendMessage({ project_id: old.project_id, author: SUB, body: ASK("Retry failed charges?").replace(":::question\n", `:::question\nReplaces: ${moved}\n`), reply_to: old.id }));
+    expect(again.code).toBe("invalid_supersedes");
+    expect(store.cursor()).toBe(cursor);
+    expect(store.message(old.id)!.moved_to?.thread_id).toBe(brief.id);
+  });
+
   test("Unarchive drops it, and the person's own Archive never sets it", () => {
     const { store, dir } = open();
     const { old, brief } = world(store);

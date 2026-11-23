@@ -292,6 +292,8 @@ import { createInboxTakeBack } from "./inbox-take-back";
 import { createInboxAsk } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
+import { createInboxActedRoute } from "./inbox-acted";
+import { createInboxActed, laterActed } from "@plannotator/shared/inbox/acted";
 import { createInboxPriority } from "./inbox-priority";
 import { priorityIntroOpen, priorityIntroUnused, priorityIntroUsed } from "./inbox-priority-intro";
 import { createInboxThreadTags } from "./inbox-thread-tags";
@@ -844,7 +846,7 @@ const ERROR_STATUS: Record<string, number> = {
   question_revision_conflict: 409,
   question_already_sent: 409,
   // Replaced questions: answering one the agent superseded, or superseding
-  // an id that names no open question of the thread.
+  // an id that names no question of the thread.
   question_superseded: 422,
   invalid_supersedes: 422,
   // A pick on a question a Mark read closed: Move back first.
@@ -1923,6 +1925,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** Which list rows each window already holds, so a list read sends only the changed ones (#2593). */
   const listVersions = createInboxListVersions();
 
+  /**
+   * When the person last did something in each thread (approval "inbox-recent-activity-filter", shared's acted.ts):
+   * what the log holds (`store.personActedAt`) and what acted.json holds (an open, a film, a draft, an Ask AI question). `withActed` puts
+   * it on the rows the window and the phone read as `acted_at`, never on `store.listRow`, which agents read through.
+   */
+  // A thread this store held and deleted leaves the file at its next write (acted.ts `sweep`); a linked machine's stays.
+  const acted = createInboxActed(store.dir, { held: (id) => store.message(id)?.thread_id === id });
+  store.onDeletion(() => acted.sweep());
+  const withActed = (row: InboxListRow): InboxListRow => {
+    const at = laterActed(laterActed(row.acted_at, store.personActedAt(row.thread_id)), acted.at(row.thread_id));
+    return at ? { ...row, acted_at: at } : row;
+  };
   const snoozesById = () => new Map(store.snoozes().map((snooze) => [snooze.thread_id, snooze]));
   /**
    * A row as the window and the phone read it (approval "inbox-snooze"): its
@@ -2081,7 +2095,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     };
     const allOwn = store
       .listRows()
-      .map((row) => withHidePulls(withTags(withPriority(withPulls(withSnooze(withStepsWaiting(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row)), byThread, now))))));
+      .map((row) => withActed(withHidePulls(withTags(withPriority(withPulls(withSnooze(withStepsWaiting(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row)), byThread, now)))))));
     const own = hiddenPulls ? allOwn.filter((row) => !hiddenPulls.out(row)) : allOwn;
     hiddenPulls?.keep();
     if (pullsByThread.size > 0) {
@@ -2111,7 +2125,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       return tags.length > 0 ? { ...rest, tags } : rest;
     };
     const rows: InboxListRow[] = merged
-      ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id)).map((row) => inboxRowAsOf(withoutStepsWaiting(withFarTags(row)), now))]
+      ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id)).map((row) => withActed(inboxRowAsOf(withoutStepsWaiting(withFarTags(row)), now)))]
       : own;
     // Rows carry the head of a combined project; an id from before the combine (a phone, an API client) means that head.
     const shownProject = projectFilter ? store.canonicalProjectId(projectFilter) : null;
@@ -2476,7 +2490,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       limit,
       threads: scoped.slice(head ? 0 : offset, offset + limit).map((row): InboxListRow => {
         const tags = tagsOf.get(row.thread_id);
-        return tags ? { ...row, tags } : row;
+        return withActed(tags ? { ...row, tags } : row);
       }),
     };
   };
@@ -5422,8 +5436,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     onChange: (threadId) => {
       for (const listener of draftListeners) listener(threadId);
     },
+    // A draft changed or dropped is the person's doing in the thread ("Recent activity", acted.ts); a save of the same draft is not.
+    onEdited: (threadId) => acted.note(threadId),
   });
-  const commentDrafts = createInboxCommentDrafts({ store, serverSession, readBody: (req) => readBody(req), json });
+  const commentDrafts = createInboxCommentDrafts({ store, serverSession, readBody: (req) => readBody(req), json, onSaved: (threadId) => acted.note(threadId) });
+  // A film played: "Recent activity"'s one write of its own (inbox-acted.ts).
+  const actedRoute = createInboxActedRoute({ acted, serverSession, readBody: (req) => readBody(req), json });
   const takeBack = createInboxTakeBack({ store, serverSession, readBody: (req) => readBody(req), json });
   // Ask AI: the conversation a thread keeps with its agent (packages/server/inbox-ask.ts).
   const ask = createInboxAsk({
@@ -5453,6 +5471,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     onChange: (threadId) => {
       for (const listener of askListeners) listener(threadId);
     },
+    // A question the person asked is their doing in the thread ("Recent activity", acted.ts).
+    onAsked: (threadId) => acted.note(threadId),
     token,
     hostOf: (session) => live.askHostOf(session),
     ...(options.askTimes ? { times: options.askTimes } : {}),
@@ -7444,6 +7464,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (drafted) return drafted;
       const commentDrafted = await commentDrafts.route(req, url);
       if (commentDrafted) return commentDrafted;
+      const actedAnswer = await actedRoute.route(req, url);
+      if (actedAnswer) return actedAnswer;
       const takenBack = await takeBack.route(req, url);
       if (takenBack) return takenBack;
       // Ask AI: on for everyone; only the owner's own window is answered.
@@ -7708,7 +7730,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (through !== undefined && through !== null && !(typeof through === "number" && Number.isSafeInteger(through) && through >= 0)) {
           throw new InboxError("validation_error", "through_seq: a message seq (a whole number, 0 or more).", { field: "through_seq" });
         }
-        return json({ thread: store.markSeen(seenMatch[1]!, typeof through === "number" ? through : undefined) });
+        const looked = store.markSeen(seenMatch[1]!, typeof through === "number" ? through : undefined);
+        // `opened` (additive): the person chose this thread (the window's opening look): "Recent activity" (acted.ts).
+        if (body.opened === true) acted.note(seenMatch[1]!);
+        return json({ thread: looked });
       }
 
       // Mark read and its Undo: the thread leaves the top for Quiet, its waiting questions closed (store.markRead).
@@ -8594,6 +8619,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     releasePerfPhases?.();
     // The debug log's kept lines go in now (it keeps lines in memory for a moment).
     debugLog?.close();
+    // Recent activity's notes waiting for their write go in now too (acted.ts).
+    acted.flush();
     clearInterval(dataCheck);
     windows.stop();
     liveSites.stop();

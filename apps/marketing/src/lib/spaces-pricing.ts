@@ -1,11 +1,11 @@
 // The words and numbers on the Spaces pricing page (src/pages/workspaces/pricing.astro).
-// Ported from the Spaces app's pricing page: its plan facts (plan-words.ts, plans.ts)
-// and its words (pricing/content.ts). Change them there first, then here.
+// Ported from the Spaces app's pricing page: its plan facts (plan-words.ts) and its
+// words (pricing/content.ts). Change them there first, then here.
 
 export type BillingInterval = 'month' | 'year';
-export type PricedPlan = 'free' | 'team' | 'team_unlimited';
+export type PricedPlan = 'free' | 'team_5' | 'team_10' | 'team_unlimited';
 
-export const PRICED_PLAN_ORDER: readonly PricedPlan[] = ['free', 'team', 'team_unlimited'];
+export const PRICED_PLAN_ORDER: readonly PricedPlan[] = ['free', 'team_5', 'team_10', 'team_unlimited'];
 
 const GIB = 1_073_741_824;
 
@@ -13,16 +13,19 @@ interface PricedPlanFacts {
   readonly name: string;
   readonly cents: Readonly<Record<BillingInterval, number>> | null;
   readonly memberLimit: number | null;
+  readonly guestLimit: number | null;
   readonly uploadBytes: number;
 }
 
 export const PRICED_PLANS: Readonly<Record<PricedPlan, PricedPlanFacts>> = {
-  free: { name: 'Free', cents: null, memberLimit: null, uploadBytes: 10 * GIB },
-  team: { name: 'Team', cents: { month: 2900, year: 31900 }, memberLimit: 10, uploadBytes: 100 * GIB },
+  free: { name: 'Free', cents: null, memberLimit: 3, guestLimit: 3, uploadBytes: 10 * GIB },
+  team_5: { name: 'Team 5', cents: { month: 2900, year: 31900 }, memberLimit: 5, guestLimit: null, uploadBytes: 100 * GIB },
+  team_10: { name: 'Team 10', cents: { month: 5900, year: 64900 }, memberLimit: 10, guestLimit: null, uploadBytes: 200 * GIB },
   team_unlimited: {
     name: 'Team Unlimited',
-    cents: { month: 9900, year: 108900 },
+    cents: { month: 11900, year: 130900 },
     memberLimit: null,
+    guestLimit: null,
     uploadBytes: 1024 * GIB,
   },
 };
@@ -69,6 +72,16 @@ export function planPriceWords(plan: PricedPlan, interval: BillingInterval): str
   return PRICED_PLANS[plan].cents === null ? amount : `${amount} ${INTERVAL_WORDS[interval]}`;
 }
 
+function planMemberWords(plan: PricedPlan): string {
+  const limit = PRICED_PLANS[plan].memberLimit;
+  return limit === null ? 'Any number of members' : `Up to ${limit} members`;
+}
+
+function planGuestWords(plan: PricedPlan): string {
+  const limit = PRICED_PLANS[plan].guestLimit;
+  return limit === null ? 'Unlimited guests' : `Up to ${limit} guests`;
+}
+
 export const PRICING_TITLE = 'Pricing · Plannotator Spaces';
 export const HEADLINE = { plain: 'Priced', marked: 'per team.' } as const;
 export const LEDE = 'No fee per person. Agents and guests are free.';
@@ -82,32 +95,24 @@ export const BILLING_INTERVALS: ReadonlyArray<{ readonly interval: BillingInterv
 
 export const SAVING_LINE = `Yearly: ${YEARLY_SAVING}`;
 
-const NAMES = {
-  free: PRICED_PLANS.free.name,
-  team: PRICED_PLANS.team.name,
-  team_unlimited: PRICED_PLANS.team_unlimited.name,
-} as const;
-const TEAM_MEMBERS = PRICED_PLANS.team.memberLimit ?? 0;
+const FREE = PRICED_PLANS.free;
+const PAID = PRICED_PLAN_ORDER.filter((plan) => PRICED_PLANS[plan].cents !== null);
+const CAPPED = PAID.filter((plan) => PRICED_PLANS[plan].memberLimit !== null);
+const FREE_MEMBERS = FREE.memberLimit ?? 0;
+const FREE_GUESTS = FREE.guestLimit ?? 0;
 
 function room(plan: PricedPlan): string {
   return `${readableBytes(PRICED_PLANS[plan].uploadBytes)} of uploaded files`;
 }
 
 function bothPrices(plan: PricedPlan): string {
-  return `${planPriceWords(plan, 'month')} or ${planPriceWords(plan, 'year')}`;
+  return `${PRICED_PLANS[plan].name} is ${planPriceWords(plan, 'month')} or ${planPriceWords(plan, 'year')}.`;
 }
 
-const WHO: Readonly<Record<PricedPlan, string>> = {
-  free: 'For getting started.',
-  team: `For teams of up to ${TEAM_MEMBERS}.`,
-  team_unlimited: 'For teams of any size.',
-};
-
-const INCLUDES: Readonly<Record<PricedPlan, readonly string[]>> = {
-  free: ['Up to 3 members', 'Up to 3 guests', room('free')],
-  team: [`Up to ${TEAM_MEMBERS} members`, 'Unlimited guests', room('team')],
-  team_unlimited: ['Any number of members', 'Unlimited guests', room('team_unlimited')],
-};
+function holds(plan: PricedPlan, at: number): string {
+  const limit = PRICED_PLANS[plan].memberLimit ?? 0;
+  return at === 0 ? `${PRICED_PLANS[plan].name} holds up to ${limit} members` : `${PRICED_PLANS[plan].name} up to ${limit}`;
+}
 
 export interface PlanPrice {
   readonly amount: string;
@@ -118,19 +123,17 @@ export interface PlanCard {
   readonly id: PricedPlan;
   readonly name: string;
   readonly price: (interval: BillingInterval) => PlanPrice;
-  readonly line: string;
   readonly includes: readonly string[];
 }
 
 export const PLAN_CARDS: readonly PlanCard[] = PRICED_PLAN_ORDER.map((id) => ({
   id,
-  name: NAMES[id],
+  name: PRICED_PLANS[id].name,
   price: (interval) => ({
     amount: planAmountWords(id, interval),
     per: PRICED_PLANS[id].cents === null ? null : INTERVAL_WORDS[interval],
   }),
-  line: WHO[id],
-  includes: INCLUDES[id],
+  includes: [planMemberWords(id), planGuestWords(id), room(id)],
 }));
 
 export interface PricingQuestion {
@@ -142,7 +145,7 @@ export interface PricingQuestion {
 export const QUESTIONS: readonly PricingQuestion[] = [
   {
     question: 'What does it cost?',
-    answer: `${NAMES.team} is ${bothPrices('team')}. ${NAMES.team_unlimited} is ${bothPrices('team_unlimited')}. Paying yearly: ${YEARLY_SAVING}.`,
+    answer: `${PAID.map(bothPrices).join(' ')} Paying yearly: ${YEARLY_SAVING}.`,
   },
   {
     question: 'Is there a fee per person?',
@@ -150,15 +153,15 @@ export const QUESTIONS: readonly PricingQuestion[] = [
   },
   {
     question: 'What about clients and partners?',
-    answer: 'People you invite from outside the team are free and do not count as members. Free holds up to 3 guests. Paid plans have no guest limit.',
+    answer: `People you invite from outside the team are free and do not count as members. ${FREE.name} holds up to ${FREE_GUESTS} guests. Paid plans have no guest limit.`,
   },
   {
-    question: `What happens at ${TEAM_MEMBERS + 1} members?`,
-    answer: `${NAMES.team} holds up to ${TEAM_MEMBERS} members. The invite asks an admin to move to ${NAMES.team_unlimited}.`,
+    question: 'What happens when a plan is full?',
+    answer: `${CAPPED.map(holds).join(' and ')}. The invite asks an admin to move to the next plan.`,
   },
   {
     question: 'What is free?',
-    answer: `Everything in Spaces, for up to 3 members and 3 guests, with ${room('free')}. ${NAMES.free} is a plan, not a trial.`,
+    answer: `Everything in Spaces, for up to ${FREE_MEMBERS} members and ${FREE_GUESTS} guests, with ${room('free')}. ${FREE.name} is a plan, not a trial.`,
   },
   {
     question: 'What counts as storage?',

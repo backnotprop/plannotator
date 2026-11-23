@@ -1510,6 +1510,19 @@ export interface InboxQuestionContract {
   reversible?: { value: false; why: string | null };
   /** `Prototype:` at the block's own indent: one page every option shows (approval "inbox-question-tradeoffs"), as written. */
   prototype?: { target: string; label?: string };
+  /**
+   * The scenario table (core `question-scenarios.ts`): scenarios as rows and the
+   * choices it names as columns. Each column's `choice` is a choice's label;
+   * `rows[].cells` follow `columns`. Absent when the block has none, and on
+   * older records (an older reader ignores it).
+   */
+  scenarios?: InboxQuestionScenarios;
+}
+
+/** A question's scenario table as stored and served (inline markdown, as written). */
+export interface InboxQuestionScenarios {
+  columns: { choice: string; header: string }[];
+  rows: { situation: string; cells: { verdict: string; detail?: string }[] }[];
 }
 
 /** The parsed facts of a question block, kept on its record. */
@@ -1901,6 +1914,9 @@ export const INBOX_SECTIONS: readonly { readonly id: InboxSectionId; readonly la
   { id: "quiet", label: "Quiet" },
 ];
 
+/** How far back the list filter's "Recent activity" reaches (`acted_at`), and how long acted.json keeps a time. */
+export const INBOX_RECENT_ACTIVITY_DAYS = 30;
+
 /**
  * One row of the list: a thread (owner ruling 2026-10-07, "a row is a
  * thread"), with its project as a label and a filter, placed in its section.
@@ -1955,6 +1971,14 @@ export interface InboxListRow extends InboxThreadSummary {
    * reads. Additive: absent from an older Inbox.
    */
   pinned_at?: string | null;
+  /**
+   * When the person last did something in the thread (approval "inbox-recent-activity-filter"; the rule is shared's
+   * inbox/acted.ts): sent something, picked, marked an action item, commented, saved a draft, played a film, or opened
+   * it. The list filter's "Recent activity" keeps and sorts by it. Like `pinned_at`, only on the list model the window
+   * and the phone read, never on anything an agent reads; absent when the person has done nothing there (or from an
+   * older Inbox).
+   */
+  acted_at?: string;
   /**
    * The live tags the thread is in (approval "inbox-thread-tags"), `ini_` ids, oldest tag first; absent when none.
    * Like `pinned_at`, only on the list model the window and the phone read, never on anything an agent reads.

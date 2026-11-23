@@ -42,10 +42,12 @@ import {
   INBOX_COMMAND_BRIEFING,
   INBOX_DELEGATED_OPTIONS_RULE,
   INBOX_FOLLOW_THROUGH_RULE,
+  INBOX_OPTION_LINES_RULE,
   INBOX_PICTURES_RULE,
   INBOX_REMINDER_TEXT,
   INBOX_REMINDER_TEXT_NO_WAKE,
   INBOX_REPLY_TO_CHECK,
+  INBOX_SCENARIO_TABLE_RULE,
   INBOX_SUBAGENT_RULE,
   INBOX_THREAD_RULE,
   INBOX_TOOL_WAKE_NOTE,
@@ -318,6 +320,23 @@ describe("Inbox guidance parity across harnesses", () => {
     }
     // Right after the pictures rule on every body.
     for (const body of [toolBody, modBody, mcpBody]) expect(body).toContain(`${INBOX_PICTURES_RULE}\n${INBOX_CHANGE_RULE}`);
+  });
+
+  test("the scenario table rule: every body description carries it once, right after the option lines", () => {
+    // Approval "question-scenario-table" (2026-11-23): the owner's sentence word for word.
+    const send = INBOX_DEFAULT_TOOLS.find((tool) => tool.name === "send_message")!;
+    const bodyOf = (tool: { inputSchema: Record<string, unknown> } | null) =>
+      ((tool!.inputSchema.properties ?? {}) as Record<string, { description?: string }>).body!.description!;
+    const bodies: Record<string, string> = {
+      "tool: Claude Code, Pi, OpenCode": bodyOf(inboxAgentTool(INBOX_DEFAULT_TOOLS)),
+      "tool: OpenCode 1 (no wake)": bodyOf(inboxAgentTool(INBOX_DEFAULT_TOOLS, { wakes: false })),
+      "tool: the Claude Code mod": bodyOf(modAgentTool(INBOX_DEFAULT_TOOLS)),
+      "MCP send_message (Codex, Gemini, Cursor, MCP clients)": bodyOf(send),
+    };
+    for (const [surface, body] of Object.entries(bodies)) {
+      expect([surface, body.split(INBOX_SCENARIO_TABLE_RULE).length - 1]).toEqual([surface, 1]);
+      expect([surface, body.includes(`${INBOX_OPTION_LINES_RULE}\n${INBOX_SCENARIO_TABLE_RULE}`)]).toEqual([surface, true]);
+    }
   });
 
   test("the skill's description carries the subagent rule", () => {
