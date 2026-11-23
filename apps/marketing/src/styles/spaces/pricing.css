@@ -18,11 +18,12 @@ html:not(.light) .spp{--quiet:#7d84b3}
 .spp .pp-lede span{display:block}
 .spp .pp-pick{grid-column:1 / -1;margin-bottom:4px}
 .spp .pp-sw{display:inline-flex;padding:4px;background:var(--stage)}
-.spp .pp-sw button{height:42px;margin:0;padding:0 18px;border:0;border-radius:0;background:none;font:500 15px/1 var(--sans);color:var(--soft);cursor:pointer;-webkit-appearance:none;appearance:none}
+.spp .pp-sw button{height:42px;margin:0;padding:0 18px;border:0;border-radius:0;background:none;font:500 15px/1 var(--sans);color:var(--soft);white-space:nowrap;cursor:pointer;-webkit-appearance:none;appearance:none}
 .spp .pp-sw button[aria-checked="true"]{background:var(--paper);color:var(--p-ink);box-shadow:0 0 0 1px var(--p-line)}
 .spp .pp-sw button:focus-visible{outline:2px solid var(--iris);outline-offset:-2px}
-/* The yearly saving on the Yearly side: plain violet words, the same pair as the card bullets. */
-.spp .pp-sw .pp-off{margin-left:10px;color:var(--sv)}
+/* The yearly saving on the Yearly side: plain violet words, the same pair as the card bullets.
+   A real space comes before it (4px), so the gap to "Yearly" is 10px. */
+.spp .pp-sw .pp-off{margin-left:6px;color:var(--sv)}
 html:not(.light) .spp .pp-sw .pp-off{color:var(--violet)}
 
 .spp .pp-cards{position:relative;z-index:1;grid-column:1 / -1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:20px;margin-top:48px}
@@ -88,4 +89,8 @@ html:not(.light) .spp .pp-card li::before{background:var(--violet)}
   .spp .pp-ask .pp-fact+.pp-fact{margin-top:6px}
   .spp .pp-ask .pp-dot{display:none}
   .spp .pp-qa{grid-template-columns:1fr}
+}
+/* Below 341 the 286px switch is wider than the 272px it gets at 320: slimmer sides keep it on one line. */
+@media (max-width:340px){
+  .spp .pp-sw button{padding:0 14px}
 }

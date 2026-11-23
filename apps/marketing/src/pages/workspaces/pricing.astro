@@ -72,7 +72,7 @@ const said = (amount: string, per: string | null) => (per === null ? amount : `$
               tabindex={index === 0 ? '0' : '-1'}
               data-interval={choice.interval}
               aria-label={choice.off === undefined ? undefined : `${choice.label}, ${choice.off}`}
-            >{choice.label}{choice.off !== undefined && <span class="pp-off">{choice.off}</span>}</button>
+            >{choice.label}{choice.off !== undefined && ' '}{choice.off !== undefined && <span class="pp-off">{choice.off}</span>}</button>
           ))}
         </div>
       </div>

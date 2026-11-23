@@ -258,7 +258,7 @@ describe('the Spaces pricing page as built', () => {
     const html = await readFile(join(outputRoot, 'workspaces/pricing/index.html'), 'utf8');
     const group = /<div class="pp-sw" role="radiogroup"[^>]*>([\s\S]*?)<\/div>/.exec(html)?.[1] ?? '';
     const radios = [...group.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)].map(([, attrs, inner]) => ({
-      text: inner.replace(/<span class="pp-off"[^>]*>/g, ' ').replace(/<[^>]*>/g, ''),
+      text: inner.replace(/<[^>]*>/g, ''),
       name: /aria-label="([^"]*)"/.exec(attrs)?.[1] ?? null,
       checked: /aria-checked="true"/.test(attrs),
     }));
