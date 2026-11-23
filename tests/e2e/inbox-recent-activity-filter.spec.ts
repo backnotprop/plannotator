@@ -26,7 +26,8 @@
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/recent-activity-filter: 01 the menu open, 02 the list with the filter on,
  * 03 the list after turning it off, 04b (dark) and 05b (light) the seeded threads filtered, one list newest first by
- * replies minutes apart (no pointer, no focus ring on them). Build the
+ * replies minutes apart (no pointer, no focus ring on them), 06 (dark) and 07 (light) the same on a phone 390 wide.
+ * Build the
  * binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
 
@@ -197,7 +198,9 @@ test.afterAll(async () => {
 
 /** No pointer over a row (no tooltip, no hover) and no focus ring: the list as it reads. */
 async function still(page: Page) {
-  await page.mouse.move(1430, 890);
+  const size = page.viewportSize();
+  // Below the rows, at the right, clear of the phone's corner button.
+  await page.mouse.move((size?.width ?? 1440) - 10, (size?.height ?? 900) - 200);
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 }
 
@@ -212,6 +215,14 @@ test('the seeded replies minutes apart: one list newest first, the row times rea
   await expect(bands(page)).toHaveCount(0);
   await still(page);
   await shotBoth(page, '04b-flat-minutes-apart.png', '05b-flat-minutes-apart-light.png');
+  // A phone, 390 wide: the same one list.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => listOrder(page)).toEqual([seeded.ada, seeded.bob, seeded.charlie]);
+  await expect(bands(page)).toHaveCount(0);
+  await still(page);
+  await shotBoth(page, '06-phone-flat-minutes-apart.png', '07-phone-flat-minutes-apart-light.png');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(listFilter(page)).toBeVisible();
   // Off again for what follows.
   await listFilter(page).click();
   await recentPick(page).click();
