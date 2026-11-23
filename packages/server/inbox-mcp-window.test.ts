@@ -297,6 +297,10 @@ describe("read_thread reads a window", () => {
     expect(store.message(seeded.threadId)!.agent_checked_seq).toBeGreaterThanOrEqual(store.messageCursor(replies.at(-1)!)!);
     const list = (await call(w.client, "read_thread", { project_path: w.project, agent_session: BIG_THREAD_AGENT.session! })).structuredContent;
     expect(list.threads.find((t: any) => t.thread_id === seeded.threadId).unread).toBe(false);
+    // Read, never woken: the next read lists nothing as unread.
+    const again = await readAs(w, seeded.threadId, BIG_THREAD_AGENT.session!, { limit: 5 });
+    expect(again).not.toContain(" · unread · ");
+    expect(again).not.toContain("unread repl");
   });
 
   test("past twenty unread replies a read lists the oldest twenty, names the call for the rest, and marks none it did not show", async () => {
