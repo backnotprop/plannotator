@@ -289,6 +289,10 @@
       "name",
       "state"
     ],
+    "InboxCombineLeftOpenItem": [
+      "machine",
+      "subject"
+    ],
     "InboxDelivery": [
       "at",
       "host",

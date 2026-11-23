@@ -514,6 +514,26 @@ export interface InboxReplyViewing {
   as_sent?: true;
 }
 
+/**
+ * What a Combine left where it was (approval "inbox-combine-across-computers", the owner: "One quiet line on the
+ * combined thread naming what stayed or was left out"): each picked thread on a linked computer that stayed open there
+ * (its archive skipped there, as it had something newer, or taken back after a day), by that computer's name and the
+ * thread's subject; and each file of the picks that was not copied in, by name.
+ */
+export interface InboxCombineLeft {
+  open?: { machine: string; subject: string }[];
+  files?: string[];
+}
+
+/** The window's one quiet line for it: "Still open on Mini: Refund totals · Not copied: plan.pdf". At most three names a part. */
+export function inboxCombineLeftLine(left: InboxCombineLeft): string {
+  const names = (all: readonly string[]) => (all.length <= 3 ? all.join(", ") : `${all.slice(0, 3).join(", ")} and ${all.length - 3} more`);
+  const machines = [...new Set((left.open ?? []).map((o) => o.machine))];
+  const parts = machines.map((machine) => `Still open on ${machine}: ${names((left.open ?? []).filter((o) => o.machine === machine).map((o) => o.subject))}`);
+  if ((left.files?.length ?? 0) > 0) parts.push(`Not copied: ${names(left.files!)}`);
+  return parts.join(" · ");
+}
+
 /** A message or reply. A thread is its root message's id. */
 export interface InboxMessage {
   id: string;
@@ -627,6 +647,11 @@ export interface InboxMessage {
    * on a message whose body shows no local image, and on older records.
    */
   inline_images?: InboxInlineImage[];
+  /**
+   * On a Combine's new thread's first message (approval "inbox-combine-across-computers"): what of the picked threads
+   * it does not hold, written by the Inbox as it learns it. Absent when everything came along.
+   */
+  combine_left?: InboxCombineLeft;
   /**
    * On an agent's message: the running apps its question choices name as
    * prototypes (`Prototype: http://localhost:…`), each checked and probed when
@@ -3506,8 +3531,11 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * window (`projects/:id/tags`, by the tag's name), kept there. `agent-read`: a linked machine's agents read this
  * Inbox's threads and fetch their files through its door (`agent-read`, `agent-file`; inbox-far-read.ts in the server).
  * `agent-search`: they search and list this Inbox's threads too (`agent-search`, `agent-threads`; inbox-far-find.ts).
+ * `combine-across` (approval "inbox-combine-across-computers"): a Combine here takes picked threads of a linked
+ * machine too (read there, archived there through the outbox), so a linked machine's window offers this Inbox's
+ * agents for picks on both.
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**
