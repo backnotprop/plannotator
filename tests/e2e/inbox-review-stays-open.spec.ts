@@ -188,12 +188,17 @@ test('a merged PR’s diff stays open with the comment being written, and its he
   await page.waitForTimeout(FOCUS_READ_MS);
   const served = (await (await page.request.get(`${url}api/inbox/pulls?refresh=1`)).json()) as { pulls: { key: string; state: string }[] };
   expect(served.pulls.find((p) => p.key === KEY)?.state).toBe('merged');
-  const reread = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/inbox/pulls' && !response.url().includes('everywhere=1'), { timeout: 30_000 });
-  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  const answer = (await (await reread).json()) as { pulls: { key: string; state: string }[] };
-  expect(answer.pulls.find((p) => p.key === KEY)?.state).toBe('merged');
-
-  await expect(review.locator('[data-pull-review-title] .ib-refmark')).toHaveAttribute('data-ref-state', 'merged');
+  // Focus reads the list at most every 20 s (a background read may have just run): focus again until it lands.
+  const mark = review.locator('[data-pull-review-title] .ib-refmark');
+  await expect
+    .poll(
+      async () => {
+        await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+        return mark.getAttribute('data-ref-state');
+      },
+      { timeout: 90_000, intervals: [5_000] },
+    )
+    .toBe('merged');
   await expect(page.getByText('This pull request is no longer in the list.')).toHaveCount(0);
   await expect(review.locator(`[data-guide-file-shell="${FILE}"]`)).toBeVisible();
   expect(await review.locator('.ib-rrail').innerText()).toBe(rail);
