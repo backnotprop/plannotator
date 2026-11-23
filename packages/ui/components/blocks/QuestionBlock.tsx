@@ -13,6 +13,7 @@ import {
 } from '@plannotator/core/question-block';
 import { InlineMarkdown } from '../InlineMarkdown';
 import { QuestionContext } from './QuestionContext';
+import { QuestionScenarios } from './QuestionScenarios';
 import { QuestionChangeGroups, QuestionChoiceChange, QuestionWhere, questionChoiceHasChange, type QuestionChangeHost } from './QuestionChange';
 import { HostTitle } from '../HostTitle';
 import { UNAVAILABLE_IMAGE_CLASS, useImageResolver } from '../ImageResolverContext';
@@ -1249,6 +1250,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
           {inline(question.why)}
         </p>
       )}
+
+      {question.kind !== 'text' && question.scenarios && <QuestionScenarios table={question.scenarios} picked={selected} inline={inline} />}
 
       {/* Trade-offs (option lines, approval "inbox-question-tradeoffs"): one quiet line under Why that opens into a
           table, one row per option with its Pros and Cons side by side (stacked in a narrow card). No Recommended

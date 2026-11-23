@@ -1475,6 +1475,19 @@ export interface InboxQuestionContract {
   reversible?: { value: false; why: string | null };
   /** `Prototype:` at the block's own indent: one page every option shows (approval "inbox-question-tradeoffs"), as written. */
   prototype?: { target: string; label?: string };
+  /**
+   * The scenario table (core `question-scenarios.ts`): scenarios as rows and the
+   * choices it names as columns. Each column's `choice` is a choice's label;
+   * `rows[].cells` follow `columns`. Absent when the block has none, and on
+   * older records (an older reader ignores it).
+   */
+  scenarios?: InboxQuestionScenarios;
+}
+
+/** A question's scenario table as stored and served (inline markdown, as written). */
+export interface InboxQuestionScenarios {
+  columns: { choice: string; header: string }[];
+  rows: { situation: string; cells: { verdict: string; detail?: string }[] }[];
 }
 
 /** The parsed facts of a question block, kept on its record. */

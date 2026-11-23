@@ -6358,12 +6358,13 @@ public struct InboxQuestion: Codable, Hashable, Sendable {
   public var why: String?
   public var reversible: InboxQuestionReversible?
   public var prototype: InboxQuestionPrototype?
+  public var scenarios: InboxQuestionScenarios?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["key", "position", "kind", "prompt", "context", "choices", "recommendation", "suggested_text", "stopped", "holds_up", "asked_by_agent_id", "orphaned", "state", "answer", "revision", "sent_revision", "picked_by", "picked_at", "sent_reply_id", "message_id", "superseded_by", "set_aside_at", "action", "action_result", "attachment", "stakes", "shows", "why", "reversible", "prototype"]
+  static let knownKeys: Set<String> = ["key", "position", "kind", "prompt", "context", "choices", "recommendation", "suggested_text", "stopped", "holds_up", "asked_by_agent_id", "orphaned", "state", "answer", "revision", "sent_revision", "picked_by", "picked_at", "sent_reply_id", "message_id", "superseded_by", "set_aside_at", "action", "action_result", "attachment", "stakes", "shows", "why", "reversible", "prototype", "scenarios"]
 
-  public init(key: String, position: Int64, kind: InboxQuestionKind, prompt: String, context: String? = nil, choices: [InboxQuestionChoice], recommendation: String? = nil, suggestedText: String? = nil, stopped: String? = nil, holdsUp: [String], askedByAgentId: String? = nil, orphaned: Bool, state: InboxQuestionState, answer: QuestionAnswer? = nil, revision: Int64, sentRevision: Int64, pickedBy: InboxPicker? = nil, pickedAt: String? = nil, sentReplyId: String? = nil, messageId: MessageID, supersededBy: InboxSupersededBy? = nil, setAsideAt: String? = nil, action: InboxActionFacts? = nil, actionResult: InboxActionResult? = nil, attachment: InboxQuestionAttachment? = nil, stakes: String? = nil, shows: InboxQuestionShows? = nil, why: String? = nil, reversible: InboxQuestionReversible? = nil, prototype: InboxQuestionPrototype? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(key: String, position: Int64, kind: InboxQuestionKind, prompt: String, context: String? = nil, choices: [InboxQuestionChoice], recommendation: String? = nil, suggestedText: String? = nil, stopped: String? = nil, holdsUp: [String], askedByAgentId: String? = nil, orphaned: Bool, state: InboxQuestionState, answer: QuestionAnswer? = nil, revision: Int64, sentRevision: Int64, pickedBy: InboxPicker? = nil, pickedAt: String? = nil, sentReplyId: String? = nil, messageId: MessageID, supersededBy: InboxSupersededBy? = nil, setAsideAt: String? = nil, action: InboxActionFacts? = nil, actionResult: InboxActionResult? = nil, attachment: InboxQuestionAttachment? = nil, stakes: String? = nil, shows: InboxQuestionShows? = nil, why: String? = nil, reversible: InboxQuestionReversible? = nil, prototype: InboxQuestionPrototype? = nil, scenarios: InboxQuestionScenarios? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.key = key
     self.position = position
     self.kind = kind
@@ -6394,6 +6395,7 @@ public struct InboxQuestion: Codable, Hashable, Sendable {
     self.why = why
     self.reversible = reversible
     self.prototype = prototype
+    self.scenarios = scenarios
     self.unknownFields = unknownFields
   }
 
@@ -6429,6 +6431,7 @@ public struct InboxQuestion: Codable, Hashable, Sendable {
     self.why = try c.decodeIfPresent(String.self, forKey: WireKey("why"))
     self.reversible = try c.decodeIfPresent(InboxQuestionReversible.self, forKey: WireKey("reversible"))
     self.prototype = try c.decodeIfPresent(InboxQuestionPrototype.self, forKey: WireKey("prototype"))
+    self.scenarios = try c.decodeIfPresent(InboxQuestionScenarios.self, forKey: WireKey("scenarios"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -6464,6 +6467,7 @@ public struct InboxQuestion: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.why, forKey: WireKey("why"))
     try c.encodeIfPresent(self.reversible, forKey: WireKey("reversible"))
     try c.encodeIfPresent(self.prototype, forKey: WireKey("prototype"))
+    try c.encodeIfPresent(self.scenarios, forKey: WireKey("scenarios"))
     try WireKey.write(unknownFields, to: &c)
   }
 }
@@ -6703,6 +6707,123 @@ public struct InboxQuestionReversible: Codable, Hashable, Sendable {
     var c = encoder.container(keyedBy: WireKey.self)
     try c.encode(self.value, forKey: WireKey("value"))
     try c.encode(self.why, forKey: WireKey("why"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+/// From `packages/core/inbox-types.ts`.
+public struct InboxQuestionScenarios: Codable, Hashable, Sendable {
+  public var columns: [InboxQuestionScenariosColumnsItem]
+  public var rows: [InboxQuestionScenariosRowsItem]
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["columns", "rows"]
+
+  public init(columns: [InboxQuestionScenariosColumnsItem], rows: [InboxQuestionScenariosRowsItem], unknownFields: [String: JSONValue] = [:]) {
+    self.columns = columns
+    self.rows = rows
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.columns = try c.decode([InboxQuestionScenariosColumnsItem].self, forKey: WireKey("columns"))
+    self.rows = try c.decode([InboxQuestionScenariosRowsItem].self, forKey: WireKey("rows"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.columns, forKey: WireKey("columns"))
+    try c.encode(self.rows, forKey: WireKey("rows"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+public struct InboxQuestionScenariosColumnsItem: Codable, Hashable, Sendable {
+  public var choice: String
+  public var header: String
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["choice", "header"]
+
+  public init(choice: String, header: String, unknownFields: [String: JSONValue] = [:]) {
+    self.choice = choice
+    self.header = header
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.choice = try c.decode(String.self, forKey: WireKey("choice"))
+    self.header = try c.decode(String.self, forKey: WireKey("header"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.choice, forKey: WireKey("choice"))
+    try c.encode(self.header, forKey: WireKey("header"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+public struct InboxQuestionScenariosRowsItem: Codable, Hashable, Sendable {
+  public var situation: String
+  public var cells: [InboxQuestionScenariosRowsItemCellsItem]
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["situation", "cells"]
+
+  public init(situation: String, cells: [InboxQuestionScenariosRowsItemCellsItem], unknownFields: [String: JSONValue] = [:]) {
+    self.situation = situation
+    self.cells = cells
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.situation = try c.decode(String.self, forKey: WireKey("situation"))
+    self.cells = try c.decode([InboxQuestionScenariosRowsItemCellsItem].self, forKey: WireKey("cells"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.situation, forKey: WireKey("situation"))
+    try c.encode(self.cells, forKey: WireKey("cells"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+public struct InboxQuestionScenariosRowsItemCellsItem: Codable, Hashable, Sendable {
+  public var verdict: String
+  public var detail: String?
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["verdict", "detail"]
+
+  public init(verdict: String, detail: String? = nil, unknownFields: [String: JSONValue] = [:]) {
+    self.verdict = verdict
+    self.detail = detail
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.verdict = try c.decode(String.self, forKey: WireKey("verdict"))
+    self.detail = try c.decodeIfPresent(String.self, forKey: WireKey("detail"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.verdict, forKey: WireKey("verdict"))
+    try c.encodeIfPresent(self.detail, forKey: WireKey("detail"))
     try WireKey.write(unknownFields, to: &c)
   }
 }

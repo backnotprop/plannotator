@@ -21819,6 +21819,48 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-field-inboxquestion-scenarios",
+      "title": "field:InboxQuestion.scenarios",
+      "surface": [
+        "field:InboxQuestion.scenarios"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxquestionscenarios-columns",
+      "title": "field:InboxQuestionScenarios.columns",
+      "surface": [
+        "field:InboxQuestionScenarios.columns"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxquestionscenarios-rows",
+      "title": "field:InboxQuestionScenarios.rows",
+      "surface": [
+        "field:InboxQuestionScenarios.rows"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

@@ -121,9 +121,24 @@
  *   so an answer stored against it still matches), the answer is the label,
  *   and the rest is the choice's description. A choice with no words but the
  *   image takes its alt text as its label.
+ * - Scenario table (`question-scenarios.ts`): one markdown table at the
+ *   block's own indent whose first column names a situation and whose every
+ *   other header names a different choice (matched as `Recommended:` matches
+ *   one, or by the label's first words), each cell `<verdict> — <detail>`,
+ *   becomes `scenarios` and leaves the context. Any other table stays context.
  */
 
 import { sliceText } from "./text-cut";
+import { readQuestionScenarioTable, type QuestionScenarioTable } from './question-scenarios';
+export {
+  MAX_QUESTION_SCENARIO_CELL_CHARS,
+  MAX_QUESTION_SCENARIO_COLUMNS,
+  MAX_QUESTION_SCENARIO_ROWS,
+  type QuestionScenarioCell,
+  type QuestionScenarioColumn,
+  type QuestionScenarioRow,
+  type QuestionScenarioTable,
+} from './question-scenarios';
 import { stripInlineMarkup } from "./inline-markdown";
 import {
   DIRECTIVE_OPEN_RE,
@@ -305,6 +320,10 @@ export interface ParsedQuestion {
    *  (change lines only, `ParseQuestionBlockOptions.changeLines`). Absent when
    *  the block has none of them and no choice carries a change. */
   change?: QuestionChange;
+  /** The scenario table (`question-scenarios.ts`): scenarios as rows, the
+   *  choices it names as columns. Absent when the block has none (a table
+   *  that does not qualify stays in `context`). */
+  scenarios?: QuestionScenarioTable;
 }
 
 /** A recorded decision a question links to (`Decision: [statement](url)`). */
@@ -628,6 +647,21 @@ const plainWordsChoice = (candidates: string[], texts: string[][]): number => {
   if (targets.size === 0) return -1;
   const hits = texts.flatMap((list, i) => (list.some((t) => t && targets.has(plainWords(t))) ? [i] : []));
   return hits.length === 1 ? hits[0] : -1;
+};
+
+/** The one choice whose label (plain words) is `text` or begins with it and
+ *  then a word break (`Local only` names `Local only, purged after 30 days`),
+ *  or -1 when none or several do. */
+const firstWordsChoice = (text: string, choices: ReadonlyArray<QuestionChoice>): number => {
+  const target = plainWords(text);
+  if (!target) return -1;
+  const hits = choices.flatMap((c, i) => {
+    const label = plainWords(c.label);
+    if (!label.startsWith(target)) return [];
+    const next = label.charAt(target.length);
+    return next === '' || !/[\p{L}\p{N}]/u.test(next) ? [i] : [];
+  });
+  return hits.length === 1 ? hits[0]! : -1;
 };
 
 /** Resolve a recommendation's text against the choices. Returns the matched
@@ -1682,6 +1716,20 @@ export const parseQuestionBlock = (
     for (const i of markedAt) withoutMarker(i);
   }
 
+  // The scenario table: its header names choices by their final labels, so it
+  // is read last; its lines leave the context.
+  let scenarios: QuestionScenarioTable | undefined;
+  if (kind !== 'text') {
+    const names = choices.map((c, i) => [...(choiceNames[i] ?? []), ...(c.aliases ?? []), ...(marked[i] ? [marked[i]!.label] : [])]);
+    const matchHeader = (header: string): number =>
+      matchRecommendation(header, raws, choices, false, names, choicesArePlainBullets)[0] ?? firstWordsChoice(header, choices);
+    const read = readQuestionScenarioTable(contextLines, indentWidth(lines[promptLine] ?? ''), choices.map((c) => c.label), matchHeader);
+    if (read) {
+      scenarios = read.table;
+      for (let k = read.indices.length - 1; k >= 0; k--) contextLines.splice(read.indices[k]!, 1);
+    }
+  }
+
   // Context keeps each line's indentation (a nested list, a wrapped list item,
   // a code fence), less the indentation every line shares, so it renders as
   // the markdown it was written as.
@@ -1712,6 +1760,7 @@ export const parseQuestionBlock = (
     ...(readContractLines && contract.reversible ? { reversible: contract.reversible } : {}),
     ...(readOptionLines && contract.prototype ? { prototype: contract.prototype } : {}),
     ...(change ? { change } : {}),
+    ...(scenarios ? { scenarios } : {}),
   };
 };
 

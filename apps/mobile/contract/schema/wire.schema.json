@@ -4870,6 +4870,9 @@
             "target"
           ],
           "additionalProperties": true
+        },
+        "scenarios": {
+          "$ref": "#/$defs/InboxQuestionScenarios"
         }
       },
       "required": [
@@ -5003,6 +5006,70 @@
         "text"
       ],
       "x-open": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxQuestionScenarios": {
+      "type": "object",
+      "properties": {
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "choice": {
+                "type": "string"
+              },
+              "header": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "choice",
+              "header"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "situation": {
+                "type": "string"
+              },
+              "cells": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "verdict": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "verdict"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            },
+            "required": [
+              "situation",
+              "cells"
+            ],
+            "additionalProperties": true
+          }
+        }
+      },
+      "required": [
+        "columns",
+        "rows"
+      ],
+      "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"
     },
     "InboxQuestionState": {

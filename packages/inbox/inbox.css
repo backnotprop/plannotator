@@ -5746,6 +5746,8 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 @media (hover: hover) { .pn-inbox .question-block [data-question-option-with-change]:hover { background: var(--ib-qc-opt-hover-s, color-mix(in oklab, var(--muted) 45%, transparent)); } }
 .pn-inbox .question-block [data-question-option-with-change]:has(input:checked), .pn-inbox .question-block [data-question-option-with-change]:has(input:checked):hover { background: var(--ib-qc-opt-on-s, color-mix(in oklab, var(--primary) 12%, transparent)); }
 .pn-inbox .question-block [data-question-part="choice"] > span:first-child { font-weight: var(--ib-qc-choice-w-s, 550); }
+/* The scenario table's picked column (or, narrow, the picked option's line): the picked row's fill. */
+.pn-inbox .question-block [data-question-scenario-on] { background: var(--ib-qc-opt-on-s, color-mix(in oklab, var(--primary) 12%, transparent)); }
 /* The Recommended tag only (ui's Tag carries data-question-tag): an image or inline code in a choice keeps its
    own radius. */
 .pn-inbox .question-block [data-question-part="choice"] [data-question-tag] { border-radius: var(--ib-qc-pill-s, 0.25rem); letter-spacing: var(--ib-qc-tag-track-s, 0.03em); }

@@ -598,6 +598,21 @@
       "value",
       "why"
     ],
+    "InboxQuestionScenarios": [
+      "columns",
+      "rows"
+    ],
+    "InboxQuestionScenariosColumnsItem": [
+      "choice",
+      "header"
+    ],
+    "InboxQuestionScenariosRowsItem": [
+      "cells",
+      "situation"
+    ],
+    "InboxQuestionScenariosRowsItemCellsItem": [
+      "verdict"
+    ],
     "InboxQuestionShows": [
       "kind",
       "label",
