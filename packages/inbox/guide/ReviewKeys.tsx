@@ -121,8 +121,15 @@ export function reviewKeyAllowed(event: KeyboardEvent, root: HTMLElement): boole
     if (!fromPage && !path.includes(root)) return false;
     if (path.some((node) => node instanceof Element && node.matches(ARROW_OWNERS))) return false;
   }
-  if (modalOpen() || selectionToolbarShowing(document)) return false;
+  if (modalOpen() || selectionToolbarShowing(document) || boardOver(target)) return false;
   return true;
+}
+
+/** A Shape board open over the review (ShapeBoardLayer), or the key from inside one: the board has the keys then. */
+function boardOver(target: Element | null): boolean {
+  if (target?.closest('[data-shape-layer]')) return true;
+  const layers = document.querySelectorAll<HTMLElement>('[data-shape-layer]:not([data-shape-in-thread])');
+  return [...layers].some((layer) => !layer.closest('[hidden]'));
 }
 
 const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
