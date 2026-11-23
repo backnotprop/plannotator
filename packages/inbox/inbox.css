@@ -6290,6 +6290,11 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .pn-inbox .ib-chk-do { flex: 1; min-width: 0; font-weight: 550; font-size: var(--ib-fs-14, 14px); line-height: 1.4; overflow-wrap: anywhere; }
 .pn-inbox .ib-chk-toggle > .ib-ic { width: 14px; height: 14px; flex: none; color: var(--muted-foreground); }
 .pn-inbox .ib-chk-toggle .ib-badge { flex: none; }
+/* The toggle button fills the line under the task's words (ActionChecklist.tsx), which stay selectable above it; the chevron lets clicks through. */
+.pn-inbox .ib-chk-toggle { position: relative; }
+.pn-inbox .ib-chk-hit { position: absolute; inset: 0; margin: 0; padding: 0; border: 0; background: transparent; border-radius: inherit; cursor: inherit; appearance: none; }
+.pn-inbox .ib-chk-toggle > :not(.ib-chk-hit) { position: relative; }
+.pn-inbox .ib-chk-toggle > .ib-ic { pointer-events: none; }
 .pn-inbox .ib-chk-row:not([data-action-state="open"]) .ib-chk-do { color: var(--muted-foreground); font-weight: 500; }
 .pn-inbox .ib-chk-row:is([data-action-state="done"], [data-action-state="seen"], [data-action-state="pending"][data-action-outcome="done"]) .ib-chk-do { text-decoration: line-through; text-decoration-color: color-mix(in oklch, var(--muted-foreground) 70%, transparent); }
 .pn-inbox .ib-chk-under { margin: -3px 10px 7px 38px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); line-height: 1.45; overflow-wrap: anywhere; }
