@@ -23,6 +23,12 @@ export interface InboxPullRiskJudgment {
    * judged before medium named places. Readers that do not know them show the judgment as before.
    */
   where?: InboxPullRiskPlace[];
+  /**
+   * The head commit it was judged at, stamped by the server that kept it (never written by the agent). A window holds
+   * an answer across a failed read: it draws a judgment's places only on a diff at this head. Absent from a server
+   * from before it: such a judgment shows as before.
+   */
+  head?: string;
 }
 
 /** The most places one judgment marks. */

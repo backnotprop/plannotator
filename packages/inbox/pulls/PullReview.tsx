@@ -80,7 +80,7 @@ import { reviewFiles } from './reviewFiles';
 import { layerVerdictLink, nextLayer, stackVerdictLink } from './topology';
 import { RiskMark } from './RiskMark';
 import { placesWord, riskNotes, takeRiskPlaces } from '../contextNotes/model';
-import { riskBarsMarkId, riskBarsOf } from './riskBars';
+import { riskBarsMarkFor, riskBarsOf, riskJudgedAt } from './riskBars';
 import { useRiskBarsCard } from './RiskBarsCard';
 import { riskBarsLineMarks } from './riskBarsMarks';
 import { usePullRisk } from './usePullRisk';
@@ -753,18 +753,15 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
     setTreeScope(next);
     if (next === 'changes') setRepoOpen(null);
   };
-  // A high judgment's places (approval "inbox-context-notes"): on this layer's own diff, at the head it judged. The
-  // header's "N places" steps through them, opening each one's risk bars card (no row under the code: q-070bc2a3).
-  const placeNotes = useMemo(
-    () => (scope === 'layer' && judged && layer && diff?.head_sha && diff.head_sha === layer.head_sha ? riskNotes(judged, files) : []),
-    [scope, judged, layer?.head_sha, diff?.head_sha, files], // eslint-disable-line react-hooks/exhaustive-deps
-  );
-  // The risk bars (approval "review-risk-bars"): a High or Medium judgment's places, on the same diff at the same head,
-  // marked once on each named file's tree row and once in the diff at each named range (riskBars.ts).
-  const riskBars = useMemo(
-    () => (scope === 'layer' && judged && layer && diff?.head_sha && diff.head_sha === layer.head_sha ? riskBarsOf(judged, files) : null),
-    [scope, judged, layer?.head_sha, diff?.head_sha, files], // eslint-disable-line react-hooks/exhaustive-deps
-  );
+  // The judgment whose places this diff may draw: this layer's own diff, at the head the list shows and the judgment
+  // was made at (an answer held across a failed read can be an earlier head's: riskJudgedAt).
+  const placed = scope === 'layer' && layer && diff?.head_sha && diff.head_sha === layer.head_sha ? riskJudgedAt(judged, diff.head_sha) : null;
+  // A high judgment's places (approval "inbox-context-notes"). The header's "N places" steps through them, opening
+  // each one's risk bars card (no row under the code: q-070bc2a3).
+  const placeNotes = useMemo(() => (placed ? riskNotes(placed, files) : []), [placed, files]);
+  // The risk bars (approval "review-risk-bars"): a High or Medium judgment's places, marked once on each named file's
+  // tree row and once in the diff at each named range (riskBars.ts).
+  const riskBars = useMemo(() => (placed ? riskBarsOf(placed, files) : null), [placed, files]);
   const treeRiskKey = riskBars ? `${riskBars.level}\u0000${[...riskBars.files].join('\u0000')}` : '';
   const treeRisk = useMemo(() => (riskBars ? { level: riskBars.level, files: riskBars.files } : null), [treeRiskKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const riskLineMarks = useMemo(() => riskBarsLineMarks(riskBars), [riskBars]);
@@ -775,7 +772,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
     if (!note) return;
     placeAt.current = index;
     move(note.file);
-    riskCard.show(riskBarsMarkId(note.file, note.side, note.lineStart));
+    riskCard.show(riskBarsMarkFor(riskBars, note.file, note.side, note.lineStart));
   };
   const nextPlace = () => goToPlace((placeAt.current + 1) % placeNotes.length);
   // The PR page's "See the N places": taken as this layer's diff mounts (the ask is gone after that, whatever it
@@ -797,8 +794,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
       goToPlace(0);
       return;
     }
-    if (scope !== 'layer' || diffError || (judged && layer && diff?.head_sha && diff.head_sha === layer.head_sha)) placesWanted.current = false;
-  }, [placeNotes.length, layerKey, scope, diffError, judged, diff?.head_sha, layer?.head_sha]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (scope !== 'layer' || diffError || placed) placesWanted.current = false;
+  }, [placeNotes.length, layerKey, scope, diffError, placed]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The verdict: one reply to the agent's last message in its thread.
   const [sending, setSending] = useState(false);

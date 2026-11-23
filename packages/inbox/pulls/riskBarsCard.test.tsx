@@ -196,6 +196,31 @@ describe.skipIf(!hasDom)('the risk bars card', () => {
     expect(card()).toBeNull();
   });
 
+  test('with a menu open, Escape closes the menu first and the next one the card', async () => {
+    await mount(HIGH);
+    const b = bars('src/retry.ts');
+    // A popup menu (role="menu") and ui's anchored menus (ActionMenu): each closes on an Escape the document hears.
+    for (const mark of [['role', 'menu'], ['data-pn-dismissable-popover', 'true']] as const) {
+      await act(async () => b.click());
+      const menu = document.createElement('div');
+      menu.setAttribute(mark[0], mark[1]);
+      document.body.appendChild(menu);
+      const shut = (e: KeyboardEvent) => {
+        if (e.key !== 'Escape' || e.defaultPrevented) return;
+        e.preventDefault();
+        menu.remove();
+        document.removeEventListener('keydown', shut);
+      };
+      document.addEventListener('keydown', shut);
+      await act(async () => b.focus());
+      await act(async () => void b.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, composed: true })));
+      expect(menu.isConnected).toBe(false);
+      expect(card()).not.toBeNull();
+      await act(async () => void b.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, composed: true })));
+      expect(card()).toBeNull();
+    }
+  });
+
   test('the bars say they open a dialog, and whether it is open', async () => {
     await mount(HIGH);
     const b = bars('src/retry.ts');
