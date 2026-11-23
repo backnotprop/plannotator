@@ -366,7 +366,9 @@
 .ib-shr-msg.ib-shr-quiet { color: var(--muted-foreground); }
 .ib-shr-msg.ib-shr-warn .ib-shr-msgico { color: var(--warning); }
 
-.ib-shr-foot { display: flex; align-items: center; gap: 8px; margin-top: 14px; min-height: 30px; font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-shr-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; min-height: 30px; font-size: var(--ib-fs-12-5, 12.5px); }
+/* The buttons are one group: short of room it goes whole under Details, at the right, never one button per row. */
+.ib-shr-acts { display: flex; flex: none; align-items: center; gap: 8px; margin-left: auto; }
 .ib-shr-det { font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; color: var(--muted-foreground); cursor: pointer; border-radius: 4px; }
 .ib-shr-det:hover { color: var(--foreground); }
 
@@ -406,3 +408,5 @@
 .ib-shr[data-phone] .ib-shr-row dd { font-size: var(--ib-fs-13, 13px); }
 .ib-shr[data-phone] .ib-shr-backb, .ib-shr[data-phone] .ib-shr-info { width: 44px; height: 44px; align-items: center; justify-content: center; }
 .ib-shr[data-phone] .ib-shr-info { margin-right: -12px; }
+/* A 320 px phone: the buttons keep their words whole, a little closer. */
+@media (max-width: 359px) { .ib-shr[data-phone] .ib-shr-b { padding: 0 12px; } }

@@ -10,7 +10,8 @@
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-share-panel.spec.ts`.
- * PNGs (`b1-<state>-<phone|desktop>-<light|dark>.png`) land in .local/proof/share-panel/.
+ * PNGs (`b1-<state>-<phone|desktop>-<light|dark>.png`, and `b1-<state>-phone320-light.png`) land in
+ * .local/proof/share-panel/.
  */
 
 import { expect, test, type Page } from './inbox-test';
@@ -147,6 +148,53 @@ test('the Share panel, B1: three parts in every state, one row of actions with o
         }
         await page.emulateMedia({ colorScheme: 'light' });
 
+        await page.keyboard.press('Escape');
+        await expect(page.locator('[data-plan-share-panel]')).toHaveCount(0);
+      }
+      expect(errors).toEqual([]);
+    } finally {
+      await context.close();
+    }
+  }
+
+  // A 320 px phone: nothing in the row of actions is cut or runs out of the panel; the buttons stay one row (they
+  // may go together under Details).
+  {
+    const context = await browser.newContext({ viewport: { width: 320, height: 700 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, colorScheme: 'light' });
+    try {
+      const page = await context.newPage();
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      let current = STATES[0]!.s;
+      await standIn(page, () => current);
+      await page.goto(`${url}#plans=${plan.id}`);
+      const button = page.locator('[data-plan-share]');
+      await expect(button).toBeVisible();
+      for (const state of STATES) {
+        current = state.s;
+        await button.click();
+        const panel = page.locator('[data-plan-share-panel]');
+        await expect(panel.locator('[data-share-status] h2')).toHaveText(state.title);
+        const sheet = page.locator('[data-sheet][data-plan-share-sheet]');
+        await expect.poll(() => sheet.evaluate((el) => getComputedStyle(el).transform)).toBe('none');
+        await expect.poll(() => panel.locator('.ib-shr-b').evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.shareAct))).toEqual(state.actions);
+        const inner = await panel.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          const style = getComputedStyle(el);
+          return { left: r.left + parseFloat(style.paddingLeft), right: r.right - parseFloat(style.paddingRight) };
+        });
+        const items = await panel.locator('[data-share-actions] :is(.ib-shr-b, [data-share-act="details"])').evaluateAll((els) => els.map((el) => { const r = el.getBoundingClientRect(); return { act: (el as HTMLElement).dataset.shareAct, top: Math.round(r.top), left: r.left, right: r.right, cut: el.scrollWidth > el.clientWidth + 1 }; }));
+        const buttons = items.filter((i) => i.act !== 'details');
+        expect(new Set(buttons.map((b) => b.top)).size, state.name).toBeLessThanOrEqual(1);
+        for (const i of items) {
+          expect(i.cut, `${state.name} ${i.act}`).toBe(false);
+          expect(i.left, `${state.name} ${i.act}`).toBeGreaterThanOrEqual(inner.left - 0.5);
+          expect(i.right, `${state.name} ${i.act}`).toBeLessThanOrEqual(inner.right + 0.5);
+        }
+        expect(await panel.locator('[data-share-actions]').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+        await page.evaluate(() => (document.activeElement as HTMLElement | null)?.matches('button, a') && (document.activeElement as HTMLElement).blur());
+        await page.screenshot({ path: join(proofDir, `b1-${state.name}-phone320-light.png`) });
         await page.keyboard.press('Escape');
         await expect(page.locator('[data-plan-share-panel]')).toHaveCount(0);
       }

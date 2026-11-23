@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Popover } from '@base-ui/react/popover';
 import { spaceShareButton, type SpaceShareDetails, type SpaceShareMode, type SpaceShareStatus } from '@plannotator/core/space-share';
+import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { BottomSheet } from '../components/BottomSheet';
 import { Icon, type IconName } from '../icons';
 import { plansApi } from './client';
@@ -92,9 +93,10 @@ const Spinner = () => <span className="ib-shr-spin" aria-hidden="true" />;
 // it), and one row of actions (Details at its left; at its right one main button and at most one more). The address is
 // never shown: Copy link is a button, and the status line's mark opens the space.
 
-function Status({ title, warn, right }: { title: ReactNode; warn?: boolean; right?: ReactNode }) {
+/** `live` (a warning, by default): said as it shows, as its words were when they were a message under the title. */
+function Status({ title, warn, right, live = warn }: { title: ReactNode; warn?: boolean; right?: ReactNode; live?: boolean }) {
   return (
-    <div className="ib-shr-head" data-share-status="">
+    <div className="ib-shr-head" role={live ? 'status' : undefined} data-share-status="">
       {warn && (
         <span className="ib-shr-warn">
           <Mark name="excl" />
@@ -137,15 +139,14 @@ function CopyBtn({ link, primary }: { link: string; primary?: boolean }) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
+  // The Inbox's own copy (the address field's fallback, plain http included).
   const copy = () => {
-    void navigator.clipboard?.writeText(link).then(
-      () => {
-        setCopied(true);
-        if (timer.current) clearTimeout(timer.current);
-        timer.current = setTimeout(() => setCopied(false), 1500);
-      },
-      () => {},
-    );
+    void copyTextToClipboard(link).then((ok) => {
+      if (!ok) return;
+      setCopied(true);
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(() => setCopied(false), 1500);
+    });
   };
   return (
     <button type="button" className={`ib-shr-b${primary ? ' ib-shr-pri' : ''}`} onClick={copy} data-share-act="copy">
@@ -154,9 +155,9 @@ function CopyBtn({ link, primary }: { link: string; primary?: boolean }) {
   );
 }
 
-function Row({ mark, children, right, warn, quiet, oneLine }: { mark: Parameters<typeof Mark>[0]['name']; children: ReactNode; right?: ReactNode; warn?: boolean; quiet?: boolean; oneLine?: boolean }) {
+function Row({ mark, children, right, warn, quiet, oneLine, live }: { mark: Parameters<typeof Mark>[0]['name']; children: ReactNode; right?: ReactNode; warn?: boolean; quiet?: boolean; oneLine?: boolean; live?: boolean }) {
   return (
-    <div className={`ib-shr-arow${warn ? ' ib-shr-warnrow' : ''}${quiet ? ' ib-shr-quietrow' : ''}${oneLine ? ' ib-shr-oneline' : ''}`} data-share-row-mark={mark}>
+    <div className={`ib-shr-arow${warn ? ' ib-shr-warnrow' : ''}${quiet ? ' ib-shr-quietrow' : ''}${oneLine ? ' ib-shr-oneline' : ''}`} role={live ? 'status' : undefined} data-share-row-mark={mark}>
       <span className="ib-shr-disc">
         <Mark name={mark} />
       </span>
@@ -175,13 +176,17 @@ function Msg({ mark, children, tone }: { mark: Parameters<typeof Mark>[0]['name'
   );
 }
 
-/** The one row of actions: what is at its left (Details), then the buttons at its right, the main one last. */
+/**
+ * The one row of actions: what is at its left (Details), then the buttons at its right, the main one last. The
+ * buttons stay together: where the row is too narrow for all of it (a 320 px phone), they go under Details as one
+ * row, nothing cut.
+ */
 function Actions({ left, children }: { left?: ReactNode; children?: ReactNode }) {
   return (
     <div className="ib-shr-foot" data-share-actions="">
       {left}
       <span className="ib-shr-sp" />
-      {children}
+      <span className="ib-shr-acts">{children}</span>
     </div>
   );
 }
@@ -539,7 +544,7 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
       return (
         <>
           <Status title={SHARE_WORDS.keptByOther} />
-          <Row mark="info" quiet>
+          <Row mark="info" quiet live>
             {SHARE_WORDS.stillComment}
           </Row>
           <Actions>

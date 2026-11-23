@@ -11,7 +11,8 @@
  * - the version switch shows for a plan with one version, or cannot be changed from the keyboard;
  * - a press sends the wrong thing (Share without its mode, Share as new onto the old space, Sign in that shares);
  * - the button reads the wrong word, or stops following an upload that is still going;
- * - a link that is not http(s) becomes something to press.
+ * - a link that is not http(s) becomes something to press;
+ * - Copy link does nothing without the async clipboard (plain http), or a warning is no longer said as it shows.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -314,6 +315,46 @@ describe.if(hasDom)('what a press sends', () => {
       if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard);
       else delete (navigator as { clipboard?: unknown }).clipboard;
     }
+  });
+
+  test('Copy link still copies where the window has no async clipboard (plain http): the copy command\'s way', async () => {
+    const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const realExec = document.execCommand;
+    const copied: string[] = [];
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+    document.execCommand = ((command: string) => {
+      if (command !== 'copy') return false;
+      const data = new Map<string, string>();
+      const event = new Event('copy', { cancelable: true }) as ClipboardEvent;
+      Object.defineProperty(event, 'clipboardData', { value: { setData: (type: string, value: string) => void data.set(type, value) } });
+      document.dispatchEvent(event);
+      if (data.has('text/plain')) copied.push(data.get('text/plain')!);
+      return true;
+    }) as typeof document.execCommand;
+    try {
+      const p = panel(shared());
+      await act(async () => p.host.querySelector<HTMLElement>('[data-share-act="copy"]')!.click());
+      expect(copied).toEqual([LINK]);
+      expect(p.host.querySelector('[data-share-act="copy"]')!.textContent).toBe('Copied');
+    } finally {
+      document.execCommand = realExec;
+      if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard);
+      else delete (navigator as { clipboard?: unknown }).clipboard;
+    }
+  });
+
+  test('a warning, and the line beside a space someone else kept, are said as they show (a live region); the rest are not', () => {
+    const live = (s: SpaceShareStatus) => [...panel(s).host.querySelectorAll('[role="status"]')].map((el) => el.textContent);
+    expect(live(status({ phase: 'failed', link: LINK }))).toEqual(['Couldn’t reach Spaces.']);
+    expect(live(status({ phase: 'stopped', link: LINK }))).toEqual(['Sharing stopped']);
+    expect(live(status({ phase: 'gone', shared_once: true }))).toEqual(['This space is gone']);
+    expect(live(status({ phase: 'over_limit' }))).toEqual(['Over 100 MB without sign-in.']);
+    expect(live(status({ phase: 'over_limit', limit_own: true, link: LINK }))).toEqual(['Over the limit']);
+    expect(live(status({ phase: 'sharing', waiting: 3, progress: { done: 0, total: 9 } }))).toEqual(['Spaces is busy. Trying again in 3 s.']);
+    expect(live(status({ phase: 'refused', link: LINK, shared_once: true }))).toEqual(['You can still comment there.']);
+    // Calm states say nothing by themselves.
+    expect(live(shared())).toEqual([]);
+    expect(live(status())).toEqual([]);
   });
 });
 
