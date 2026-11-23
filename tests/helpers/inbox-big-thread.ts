@@ -15,7 +15,7 @@ const PROSE =
   "I went through the retry worker again. The queue drains in order, the dead-letter path is wired, and the metrics land in the dashboard. " +
   "Everything else in this step is done and pushed to the branch.";
 
-export const BIG_THREAD_SKILL_LINE = "Write every release note as one plain sentence a person reads in five seconds.";
+const BIG_THREAD_SKILL_LINE = "Write every release note as one plain sentence a person reads in five seconds.";
 
 export function bigThreadSkillsBlock(name: string): string {
   return [

@@ -1496,7 +1496,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             store.markAcksSeen(threadId, shown);
           }
           // What this session was owed in the messages it was shown, and no wake is left to settle.
-          if (reader) store.recordOwnRead(threadId, reader, shown);
+          if (reader) store.recordOwnRead(threadId, reader, shown, readThrough);
           store.recordAgentRead(shown, reader);
           noteSessionRead(store, reader, threadId, clock());
           // The thread's steps (approval "inbox-thread-steps"), the reader's own first: only while the person has steps on.

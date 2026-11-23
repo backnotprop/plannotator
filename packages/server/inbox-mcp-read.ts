@@ -4,22 +4,26 @@
  * whole thread.
  *
  * - The header: subject, name, who wrote, and every question still waiting
- *   on the person (open or picked) with its key, state and prompt, and its
- *   choices while they total at most INBOX_HEADER_CHOICES_CHARS.
+ *   on the person (open or picked) with its key, state and prompt (clipped to
+ *   INBOX_HEADER_PROMPT_CHARS), and its choices while they total at most
+ *   INBOX_HEADER_CHOICES_CHARS (a question in an attached file keeps them).
  * - The newest `limit` messages (default 6) in full, and the person's newest
- *   message wherever it is.
- * - The INBOX_THREAD_LINES most recent other messages as one line each: id,
- *   author, time, first words, size, and each of its questions with its state
- *   and answer. Older ones are one count line naming the `before` call.
- * - In a message shown in full, a skills block's instructions and a settled
- *   Re-ask note's list and steps are one marker line, and a body over
- *   INBOX_BODY_CUT_BYTES (16 KB) is cut; both markers name the `expand` call
- *   that shows the message as sent.
+ *   message, as sent, wherever it is.
+ * - The INBOX_THREAD_LINES most recent other messages as one line each (at
+ *   most INBOX_LINE_MAX_CHARS): id, author, time, first words, size, the
+ *   sections a reply carries after its words, and each of its questions with
+ *   its state and answer. Older ones are one count line naming the `before`
+ *   call.
+ * - In any other message shown in full, a skills block's instructions are one
+ *   marker line and a body over INBOX_BODY_CUT_BYTES (16 KB) is cut; both
+ *   markers name the `expand` call that shows the message as sent. A settled
+ *   Re-ask note says it is settled, and outside `expand` and the person's
+ *   newest message its list and steps are left out too.
  *
  * No open or picked question is ever lost: each is in the header. Any other
  * question is on a message shown in full, on a one-line message, for a
- * message `before` / `after` left out in `thread.questions`, or, for one
- * older than the one-line messages, a `before` read away.
+ * message older than `after` whose question changed since in
+ * `thread.questions`, or a read without `before` / with `before` away.
  *
  * The messages keep the field names of the full records (`id`, `author.kind`,
  * `body`, `questions[].key/state/answer`, `attachments[].path`, `ack`), with
@@ -37,6 +41,8 @@ import { INBOX_ROWS_ASK_BLOCK } from "@plannotator/core/inbox-types";
 import { INBOX_DECISION_ASK_BLOCK, INBOX_HOST_NAMES, inboxAgentName, inboxBoardRequestBlock, inboxSentFromLine, isInboxNote, type InboxMessageWire, type InboxQuestion } from "@plannotator/core/inbox-types";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
 import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
+import { INBOX_ACTIONS_HEADING } from "@plannotator/core/inbox-actions";
+import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE, INBOX_OWN_MESSAGE_FEEDBACK_TITLE } from "@plannotator/core/inbox-review";
 import { inboxAckReaction } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSearchBodyText, inboxSearchReplyText } from "@plannotator/shared/inbox/search";
@@ -55,6 +61,10 @@ export const INBOX_BODY_CUT_BYTES = 16 * 1024;
 export const INBOX_EARLIER_PERSON_BYTES = 12 * 1024;
 /** At most this many messages as one line each, the most recent; older ones are one count line naming `before`. */
 export const INBOX_THREAD_LINES = 30;
+/** A one-line message at most this long: past it, its questions lose their prompts and answers, then the line is clipped. */
+export const INBOX_LINE_MAX_CHARS = 400;
+/** An open question's prompt in the header, clipped to this; its ref is always whole. */
+export const INBOX_HEADER_PROMPT_CHARS = 300;
 /** The header lists the open questions' choices while they total at most this many characters; past it, expand shows them in the message. */
 export const INBOX_HEADER_CHOICES_CHARS = 3000;
 /** First words of a one-line message. */
@@ -206,6 +216,8 @@ export interface AgentMessageLine {
   viewing?: string;
   sent_from?: string;
   review_comment?: string;
+  /** The sections a reply carries after its words (action items, feedback), named so the reader knows to expand it. */
+  carries?: string[];
 }
 
 export interface ThreadReadInput {
@@ -239,7 +251,7 @@ export interface ThreadWindowResult {
     messages: AgentMessage[];
     /** The INBOX_THREAD_LINES most recent other messages in range, oldest first, one line each. */
     earlier: AgentMessageLine[];
-    /** Questions of messages `before` / `after` left out, so no question's state is lost. */
+    /** Questions of messages older than `after` whose state changed since the cursor (open and picked ones are in the header). */
     questions?: (AgentQuestionRef & { message_id: string })[];
   };
   window: {
@@ -248,9 +260,8 @@ export interface ThreadWindowResult {
     full: number;
     lines: number;
     left_out: number;
-    /** Of `full`: the newest in range, the person's newest message past them, and the ones expanded or asked for. */
+    /** Of `full`: the newest in range and the ones expanded or asked for; the person's newest message past them is the rest. */
     newest: number;
-    person_earlier: number;
     expanded: number;
     before?: string | number;
     after?: string | number;
@@ -428,38 +439,41 @@ export function questionWords(q: AgentQuestionRef, withPrompt = false): string {
 }
 
 /**
- * A body without what read_thread never replays whole: on the person's
- * message, a skills block's instructions (its heading and the list of skills
- * stay), and a Re-ask note's list and steps (its first line stays; a note
- * whose questions still wait is shown as sent). Each is
- * one marker line naming the `expand` call that shows the message as sent.
+ * The person's message without its skills block's sections (each skill's
+ * instructions, the Inbox's note on a skill): the heading and the list of
+ * skills stay, the sections are one marker line naming the `expand` call.
  */
-function withoutReplayedBlocks(message: InboxMessageWire): string {
+function withoutSkillSections(message: InboxMessageWire): string {
   if (message.author.kind !== "person") return message.body;
-  const expand = `read_thread expand: ["${message.id}"]`;
-  if ((message.reask?.length ?? 0) > 0) {
-    const [first = "", ...rest] = message.body.split("\n");
-    if (rest.length === 0) return message.body;
-    return `${first}\n[The note's ${message.reask!.length} question ids and how to ask them again (${sizeText(byteLength(rest.join("\n")))}): left out here; ${expand} shows them]`;
-  }
   const split = splitInboxSkillsBlock(message.body);
   if (!split) return message.body;
   const lines = split.block.split("\n");
   const listEnd = lines.findIndex((line, at) => at > 0 && !line.startsWith("- `"));
-  const rest = listEnd < 0 ? "" : lines.slice(listEnd).join("\n").trim();
-  if (!rest) return message.body;
-  const names = split.skills.filter((skill) => skill.included).map((skill) => skill.name);
-  const marker = `[Instructions${names.length > 0 ? ` of ${names.join(", ")}` : ""} (${sizeText(byteLength(rest))}): left out here; ${expand} shows them]`;
+  const rest = listEnd < 0 ? [] : lines.slice(listEnd);
+  if (rest.join("").trim() === "") return message.body;
+  const skills = rest.flatMap((line) => /^--- BEGIN SKILL INSTRUCTIONS: (.+) ---$/.exec(line)?.[1] ?? []);
+  const notes = rest.flatMap((line) => /^--- BEGIN PLANNOTATOR NOTE: (.+) ---$/.exec(line)?.[1] ?? []);
+  const what = [...(skills.length > 0 ? [`the instructions of ${skills.join(", ")}`] : []), ...(notes.length > 0 ? [`the Inbox's note on ${notes.join(", ")}`] : [])];
+  const marker = `[Left out here (${sizeText(byteLength(rest.join("\n").trim()))}): ${what.length > 0 ? what.join("; ") : "the rest of the skills block"}. read_thread expand: ["${message.id}"] shows them]`;
   return [split.before, ...(split.before ? [""] : []), ...lines.slice(0, listEnd), marker].join("\n");
 }
 
+/** Said under a settled Re-ask note, so the agent does not ask again. */
+export const INBOX_REASK_SETTLED = "[Settled: every question this note asked again was since replaced, dropped, answered or closed; nothing is left to ask.]";
+
+/** A settled Re-ask note shown in full: as sent with the settled line (`whole`), or its first line, the settled line and a marker. */
+function settledNoteBody(message: InboxMessageWire, form: AgentMessageForm): string {
+  if (form === "whole") return `${message.body.trimEnd()}\n${INBOX_REASK_SETTLED}`;
+  const [first = "", ...rest] = message.body.split("\n");
+  return `${first}\n${INBOX_REASK_SETTLED}\n[Its list and steps (${sizeText(byteLength(rest.join("\n")))}): left out here; read_thread expand: ["${message.id}"] shows them]`;
+}
+
 /**
- * How a message is shown in full: `window` (without its replayed blocks, and
- * a body over 16 KB is cut), `newest` (the person's newest message: without
- * its replayed blocks, never cut), or `whole` (expanded or asked for: exactly
- * as sent).
+ * How a message is shown in full: `window` (without its skills block's
+ * sections, and a body over 16 KB is cut) or `whole` (the person's newest
+ * message, or expanded or asked for: exactly as sent).
  */
-export type AgentMessageForm = "window" | "newest" | "whole";
+export type AgentMessageForm = "window" | "whole";
 
 /** A message in full, as read_thread shows it. */
 /** Who a person's message is addressed to, if anyone. */
@@ -470,8 +484,8 @@ function addressee(message: InboxMessageWire, caller: string | null, names?: Ses
   return { host: message.to.host, session: message.to.session, ...(name ? { name } : {}), you };
 }
 
-export function agentMessage(message: InboxMessageWire, form: AgentMessageForm = "window", caller: string | null = null, names?: SessionNameOf, filesOf?: ThreadReadInput["filesOf"]): AgentMessage {
-  const source = form === "whole" ? message.body : withoutReplayedBlocks(message);
+export function agentMessage(message: InboxMessageWire, form: AgentMessageForm = "window", caller: string | null = null, names?: SessionNameOf, filesOf?: ThreadReadInput["filesOf"], settled = false): AgentMessage {
+  const source = settled ? settledNoteBody(message, form) : form === "whole" ? message.body : withoutSkillSections(message);
   const total = byteLength(message.body);
   const over = form === "window" && byteLength(source) > INBOX_BODY_CUT_BYTES;
   const body = over
@@ -549,7 +563,23 @@ export function agentMessageLine(message: InboxMessageWire, caller: string | nul
     ...(inboxViewingLine(message) ? { viewing: inboxViewingLine(message) } : {}),
     ...(inboxSentFromLine(message) ? { sent_from: inboxSentFromLine(message) } : {}),
     ...(message.review_anchor ? { review_comment: reviewCommentLine(message) } : {}),
+    ...(carriesOf(message).length > 0 ? { carries: carriesOf(message) } : {}),
   };
+}
+
+const CARRIED_SECTIONS = new Map([
+  [`## ${INBOX_ACTIONS_HEADING}`, "action items"],
+  [`# ${INBOX_MESSAGE_FEEDBACK_TITLE}`, "feedback on your messages"],
+  [`# ${INBOX_OWN_MESSAGE_FEEDBACK_TITLE}`, "feedback on the person's messages"],
+  [`# ${INBOX_ATTACHMENT_FEEDBACK_TITLE}`, "feedback on the attached files"],
+  [`# ${INBOX_GUIDE_FEEDBACK_TITLE}`, "feedback on the guided review"],
+]);
+
+/** The sections a person's reply carries after its words, as a Send appends them (each heading after a blank line). */
+function carriesOf(message: InboxMessageWire): string[] {
+  if (message.author.kind !== "person") return [];
+  const lines = message.body.split("\n");
+  return [...new Set(lines.flatMap((line, at) => (at > 0 && lines[at - 1] === "" ? (CARRIED_SECTIONS.get(line.trimEnd()) ?? []) : [])))];
 }
 
 /** A before / after bound as a seq: a cursor, digits, or a message id of this thread. */
@@ -610,7 +640,7 @@ export function windowedThread(
   const newest = new Set(inRange.slice(-limit).map((m) => m.id));
   const full = new Set(newest);
   for (const id of expand) full.add(id);
-  // The person's newest message is shown in full, whatever its size, and never folded into a line.
+  // The person's newest message is shown as sent, whatever its size, and never folded into a line.
   const personNewest = [...inRange].reverse().find((m) => m.author.kind === "person" && !isInboxNote(m));
   if (personNewest) full.add(personNewest.id);
 
@@ -619,10 +649,11 @@ export function windowedThread(
   const older = new Set(rest.slice(0, -INBOX_THREAD_LINES).map((m) => m.id));
   const shown = new Set(inRange.filter((m) => !older.has(m.id)).map((m) => m.id));
   for (const id of full) shown.add(id);
-  // A Re-ask note whose questions still wait is the agent's to act on: shown as sent until each is replaced or dropped.
+  // A Re-ask note whose questions still wait is the agent's to act on: shown as sent until each is replaced, dropped or answered.
   const waiting = new Set(all.flatMap((m) => (m.questions ?? []).filter((q) => q.state === "open" || q.state === "picked").map((q) => `${m.id}/${q.key}`)));
-  const asSent = (m: InboxMessageWire) => expand.has(m.id) || (m.reask ?? []).some((ref) => waiting.has(ref));
-  const formOf = (m: InboxMessageWire): AgentMessageForm => (asSent(m) ? "whole" : m.id === personNewest?.id ? "newest" : "window");
+  const pending = (m: InboxMessageWire) => (m.reask ?? []).some((ref) => waiting.has(ref));
+  const settled = (m: InboxMessageWire) => (m.reask?.length ?? 0) > 0 && !pending(m);
+  const formOf = (m: InboxMessageWire): AgentMessageForm => (expand.has(m.id) || m.id === personNewest?.id || pending(m) ? "whole" : "window");
   const caller = input.caller ?? null;
   // A Board request in full names the cards that link the thread already (review of #2249: no second card on a re-read).
   // Only cards still in flight: a card in Done is finished (new work in the thread gets a new card), and the card
@@ -634,7 +665,7 @@ export function windowedThread(
       .map((card) => ({ id: card.id, title: card.title }));
   const messages = all
     .filter((m) => full.has(m.id))
-    .map((m) => agentMessage(m, formOf(m), caller, input.names, input.filesOf))
+    .map((m) => agentMessage(m, formOf(m), caller, input.names, input.filesOf, settled(m)))
     .map((m) => (m.board_request ? { ...m, board_cards: linkedCards() } : m));
   const earlier = lined.map((m) => agentMessageLine(m, caller, input.names));
   const leftOut = all.filter((m) => !shown.has(m.id) && !older.has(m.id));
@@ -642,15 +673,16 @@ export function windowedThread(
   // open and picked ones are in the header; for a message older than `after`
   // only a question whose state changed since (a pick, an answer, a
   // replacement, a Mark read, the archive), so a read of what is new stays
-  // small however long the thread; for a message newer than `before`, every one.
+  // small however long the thread; for a message newer than `before`, none
+  // (a read without `before` shows them, and paging back stays small).
   const archived = store.archiveSeq(threadId);
   const changedSince = (q: InboxQuestion, messageId: string): boolean =>
     after !== null && ((store.questionLineSeq(`${messageId}/${q.key}`) ?? 0) > after || (q.state === "closed" && archived !== null && archived > after));
   const elsewhere = leftOut.flatMap((m) => {
     const n = numbering(m.questions ?? []);
-    const older = after !== null && seq.get(m.id)! <= after;
+    if (after === null || seq.get(m.id)! > after) return [];
     return (m.questions ?? [])
-      .filter((q) => q.state !== "open" && q.state !== "picked" && (!older || changedSince(q, m.id)))
+      .filter((q) => q.state !== "open" && q.state !== "picked" && changedSince(q, m.id))
       .map((q) => ({ message_id: m.id, ...questionRef(q, n.get(q.key) ?? 1), prompt: clip(q.prompt, INBOX_LINE_PROMPT_CHARS) }));
   });
 
@@ -700,7 +732,6 @@ export function windowedThread(
       lines: earlier.length,
       left_out: leftOut.length,
       newest: newest.size,
-      person_earlier: personNewest && !newest.has(personNewest.id) && !expand.has(personNewest.id) ? 1 : 0,
       expanded: [...expand].filter((id) => !newest.has(id)).length,
       ...(input.before !== undefined ? { before: input.before } : {}),
       ...(input.after !== undefined ? { after: input.after } : {}),
@@ -710,10 +741,15 @@ export function windowedThread(
   };
   const lineIds = new Set(earlier.map((line) => line.id));
   const order = all.filter((m) => full.has(m.id) || lineIds.has(m.id)).map((m) => m.id);
-  // What the read may mark read: everything up to `before` (a newer reply it
-  // left out must still wake its session and stay unread), and the acks of
-  // the messages it showed (an ack on a message `after` left out is not seen).
-  return { result, order, shown: new Set(order), readThrough: before === null ? Number.POSITIVE_INFINITY : before - 1 };
+  // What the read may mark read: up to `before`, and never past a reply of
+  // the person's it did not show (in full or as one line) that is not
+  // delivered or marked yet, so it still wakes its session and stays unread;
+  // and the acks of the messages it showed (an ack on a message left out is not seen).
+  const shownIds = new Set(order);
+  const checked = store.message(threadId)?.agent_checked_seq ?? 0;
+  const unshown = all.filter((m) => m.author.kind === "person" && !shownIds.has(m.id) && !m.delivery && !isInboxNote(m) && seq.get(m.id)! > checked).map((m) => seq.get(m.id)!);
+  const stop = unshown.length > 0 ? Math.min(...unshown) - 1 : Number.POSITIVE_INFINITY;
+  return { result, order, shown: shownIds, readThrough: Math.min(stop, before === null ? Number.POSITIVE_INFINITY : before - 1) };
 }
 
 /**
@@ -738,7 +774,7 @@ function whenAndWhat(item: { id: string; created_at: string; reply_to: string | 
   return parts;
 }
 
-/** One message as one line of text. */
+/** One message as one line of text, at most INBOX_LINE_MAX_CHARS: past it, its questions keep only their keys and states, then the line is clipped. */
 export function messageLineText(line: AgentMessageLine, context: TranscriptContext): string {
   const parts = [`- ${line.id}`, authorName(line.author), ...whenAndWhat(line, context)];
   const to = addresseeWords(line.to);
@@ -746,16 +782,21 @@ export function messageLineText(line: AgentMessageLine, context: TranscriptConte
   const tagged = taggedWords(line.tagged);
   if (tagged) parts.push(tagged);
   parts.push(`"${line.words}" (${sizeText(line.bytes)})`);
+  if (line.carries?.length) parts.push(`with ${line.carries.join(", ")} (expand shows them)`);
   if (line.viewing) parts.push(line.viewing);
   if (line.sent_from) parts.push(line.sent_from);
   if (line.review_comment) parts.push(line.review_comment);
-  if (line.questions?.length) parts.push(line.questions.map((q) => questionWords(q, true)).join("; "));
-  if (line.attachments?.length) parts.push(`files: ${line.attachments.join(", ")}`);
-  if (line.guide) parts.push(`guided review: ${line.guide}`);
-  if (line.ack) parts.push(line.reaction ?? "👍");
+  const tail: string[] = [];
+  if (line.attachments?.length) tail.push(`files: ${line.attachments.join(", ")}`);
+  if (line.guide) tail.push(`guided review: ${line.guide}`);
+  if (line.ack) tail.push(line.reaction ?? "👍");
   // Shown in full only: the line says it is there, so a reader that sees just the line expands it.
-  if (line.board_request) parts.push(`Board request (read_thread expand: ["${line.id}"] shows it)`);
-  return parts.join(" · ");
+  if (line.board_request) tail.push(`Board request (read_thread expand: ["${line.id}"] shows it)`);
+  const questions = line.questions ?? [];
+  const text = [...parts, ...(questions.length > 0 ? [questions.map((q) => questionWords(q, true)).join("; ")] : []), ...tail].join(" · ");
+  if (text.length <= INBOX_LINE_MAX_CHARS) return text;
+  const brief = [...parts, ...(questions.length > 0 ? [`${questions.map((q) => questionWords({ ...q, prompt: undefined, answer: undefined, result: undefined })).join("; ")} (read_thread expand: ["${line.id}"] shows the answers)`] : []), ...tail].join(" · ");
+  return brief.length <= INBOX_LINE_MAX_CHARS ? brief : clip(brief, INBOX_LINE_MAX_CHARS);
 }
 
 /**
@@ -821,6 +862,8 @@ export function windowedThreadText(result: ThreadWindowResult, order: readonly s
   ].filter((part): part is string => part !== null);
   out.push(facts.join(" · "));
   const withChoices = thread.open_questions.reduce((sum, q) => sum + q.choices.join(" | ").length, 0) <= INBOX_HEADER_CHOICES_CHARS;
+  const older = thread.message_count - window.full - window.lines - window.left_out;
+  const personNewest = window.full - window.newest - window.expanded > 0;
   if (thread.open_questions.length === 0) {
     out.push("No question waits on the person.");
   } else {
@@ -835,8 +878,8 @@ export function windowedThreadText(result: ThreadWindowResult, order: readonly s
         : q.state === "picked"
           ? `picked, not sent${q.answer ? `: ${answerWords(q.answer)}` : ""}`
           : "open";
-      const choices = q.choices.length === 0 ? "" : withChoices ? ` Choices: ${q.choices.map((c) => clip(c, 200)).join(" | ")}` : ` (${q.choices.length} choices; read_thread expand: ["${q.message_id}"] shows them)`;
-      out.push(`- ${q.message_id}/${q.key} (${todo ? "A" : "Q"}${q.q}${q.file ? ` in your file ${q.file}` : ""}) ${state}: ${q.prompt}${choices}`);
+      const choices = q.choices.length === 0 ? "" : withChoices || q.file ? ` Choices: ${q.choices.map((c) => clip(c, 200)).join(" | ")}` : ` (${q.choices.length} choices; read_thread expand: ["${q.message_id}"] shows them)`;
+      out.push(`- ${q.message_id}/${q.key} (${todo ? "A" : "Q"}${q.q}${q.file ? ` in your file ${q.file}` : ""}) ${state}: ${clip(q.prompt, INBOX_HEADER_PROMPT_CHARS)}${choices}`);
     }
   }
   if (thread.questions?.length) {
@@ -847,12 +890,13 @@ export function windowedThreadText(result: ThreadWindowResult, order: readonly s
   const range = window.after !== undefined || window.before !== undefined
     ? ` Range:${window.after !== undefined ? ` after ${window.after}` : ""}${window.before !== undefined ? ` before ${window.before}` : ""}; ${window.left_out} other message${window.left_out === 1 ? "" : "s"} left out.`
     : "";
-  const older = thread.message_count - window.full - window.lines - window.left_out;
   out.push(
-    `Shown: ${window.full} in full (the newest ${window.newest}${window.person_earlier > 0 ? ", the person's newest" : ""}${window.expanded > 0 ? `, ${window.expanded} expanded` : ""}) and ${window.lines} earlier as one line each.${range} A message replies to the one above it unless it says otherwise; times are UTC. read_thread expand: [ids] shows messages in full; before: <id> reads further back; after: <cursor> returns only what is new.`,
+    `Shown: ${window.full} in full (the newest ${window.newest}${personNewest ? ", the person's newest" : ""}${window.expanded > 0 ? `, ${window.expanded} expanded` : ""}) and ${window.lines} earlier as one line each.${range} A message replies to the one above it unless it says otherwise; times are UTC. read_thread expand: [ids] shows messages in full; before: <id> reads further back; after: <cursor> returns only what is new.`,
   );
   out.push("");
-  if (older > 0 && thread.earlier[0]) out.push(`… ${older} earlier message${older === 1 ? "" : "s"} (read_thread before: ${thread.earlier[0].id} reads further back)`);
+  const firstLine = thread.earlier[0]?.id;
+  const since = window.after !== undefined ? ` new since after ${window.after}` : "";
+  const countLine = `… ${older} more message${older === 1 ? "" : "s"}${since}, older than the line below, not shown here (read_thread ${since ? `after: ${window.after}, ` : ""}before: ${firstLine} reads them)`;
   // Oldest first, one line or in full.
   const lines = new Map(thread.earlier.map((line) => [line.id, line]));
   const fulls = new Map(thread.messages.map((message) => [message.id, message]));
@@ -861,6 +905,7 @@ export function windowedThreadText(result: ThreadWindowResult, order: readonly s
   for (const id of order) {
     const line = lines.get(id);
     if (line) {
+      if (id === firstLine && older > 0) out.push(countLine);
       out.push(messageLineText(line, context));
       previousWasLine = true;
       continue;

@@ -6873,9 +6873,10 @@ export class InboxStore {
    * records it (`delivery` for its owner, the tag's own `delivery` for a
    * tagged session), and, for the owner, the thread counts as read by the
    * agent up to it (the Sent band's "Delivered to <agent>, <time>"). A tagged
-   * session's delivery marks nothing for the owner. Idempotent per session.
+   * session's delivery marks nothing for the owner, and `markThrough` bounds
+   * the owner's mark (a read's delivery, `recordOwnRead`). Idempotent per session.
    */
-  recordDelivery(deliveryId: string, by: { host: string; session: string; intoTurn?: boolean }): InboxMessage {
+  recordDelivery(deliveryId: string, by: { host: string; session: string; intoTurn?: boolean; markThrough?: number }): InboxMessage {
     const noticeOf = inboxStopNoticeReply(deliveryId);
     const replyId = noticeOf ?? deliveryId;
     const reply = this.messages.get(replyId);
@@ -6904,7 +6905,7 @@ export class InboxStore {
     const delivered: InboxMessage = { ...kept, delivery: { state: "delivered", host: by.host, session: by.session, at, ...intoTurnOf(reply.deliver_now_by, by.intoTurn) } };
     this.appendMessage(delivered, at);
     // Up to it, but never past a reply still owed to another session.
-    this.markAgentChecked(reply.thread_id, this.messageSeq.get(reply.id) ?? 0, at, by.session);
+    this.markAgentChecked(reply.thread_id, Math.min(this.messageSeq.get(reply.id) ?? 0, by.markThrough ?? Number.POSITIVE_INFINITY), at, by.session);
     // A 👍 that reached the agent was seen.
     if (isAckNote(reply) && reply.ack_of) this.markAckSeen(reply.ack_of, at);
     return delivered;
@@ -6921,7 +6922,8 @@ export class InboxStore {
    * owns that tags others, a waking tag. A connection that polls hands its
    * items until they are delivered, so its session keeps "only the wake
    * delivers". A Tidy note is left to its wake: a read shows it as one line.
-   * No write when nothing is new.
+   * `markThrough`: how far the read may mark the thread read (a delivery here
+   * never marks past a reply the read did not show). No write when nothing is new.
    */
   private cloudPolls: (session: string) => boolean = () => false;
 
@@ -6929,7 +6931,7 @@ export class InboxStore {
     this.cloudPolls = polls;
   }
 
-  recordOwnRead(threadId: string, session: string, shown?: ReadonlySet<string>): void {
+  recordOwnRead(threadId: string, session: string, shown?: ReadonlySet<string>, markThrough?: number): void {
     for (const message of this.threadMessages(threadId)) {
       if (message.author.kind !== "person" || message.tidy || (shown && !shown.has(message.id))) continue;
       const owner = this.isOwner(message, session);
@@ -6948,7 +6950,7 @@ export class InboxStore {
       // session comes before it): its read settles it, as the mark does, so the wake never repeats it.
       const plain = !tag && !message.to && !hasTags(message);
       if (wakes && !plain && !INBOX_MCP_WAKING_HOSTS.includes(host ?? "") && !this.cloudPolls(session)) continue;
-      this.recordDelivery(message.id, { host: host ?? "agent", session });
+      this.recordDelivery(message.id, { host: host ?? "agent", session, markThrough });
     }
   }
 
