@@ -19,12 +19,13 @@ import {
 
 describe('the plain contract is unchanged for every other host', () => {
   // Deliberately frozen: the sha256 of the plain tool definition (name,
-  // description, schema) as it was before #2166. Pi and OpenCode send this
-  // definition with every request, so a change here changes their prompt.
+  // description, schema) as it was before #2166, then with Forgejo named in
+  // the review action (owner-approved words, 2026-11-23). Pi and OpenCode send
+  // this definition with every request, so a change here changes their prompt.
   test('the plain name, description and schema are byte for byte the ones before #2166', () => {
     const definition = JSON.stringify({ d: PLANNOTATOR_TOOL_DESCRIPTION, s: PLANNOTATOR_TOOL_INPUT_SCHEMA, name: PLANNOTATOR_TOOL_NAME })
     const sha = new Bun.CryptoHasher('sha256').update(definition).digest('hex')
-    expect(sha).toBe('c894a10c388e121888ab145097ce4537ba0f3044672b69763a764863439cb44f')
+    expect(sha).toBe('9d7222ad06329058e714fcd28d9c097c54f44a992c68c83a2a45256927479cf9')
   })
 
   test('without the option, tailscale is an unknown field and `--tailscale` runs as written', () => {

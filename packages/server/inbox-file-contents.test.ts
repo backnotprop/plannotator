@@ -111,7 +111,8 @@ function scripted(pull: Record<string, unknown> = ghPull()): Scripted {
       if (args.includes("graphql")) {
         return { stdout: JSON.stringify({ data: { viewer: { login: "dana" }, requested: { nodes: [] }, authored: { nodes: [f.pull] }, merged: { nodes: [] } } }), stderr: "", exitCode: 0 };
       }
-      const endpoint = args[3]!;
+      // `gh api --hostname <host> <endpoint>`; the image previews' byte reads name github.com's endpoint first (`gh api <endpoint>`).
+      const endpoint = args[1] === "--hostname" ? args[3]! : (args.find((a) => /^(repos|projects)\//.test(a)) ?? args[3]!);
       f.reads.push(endpoint);
       if (f.failWith) return { stdout: "", stderr: f.failWith.stderr, exitCode: 1 };
       if (args.includes(".merge_base_commit.sha")) return { stdout: `${f.mergeBase}\n`, stderr: "", exitCode: 0 };
@@ -846,5 +847,119 @@ describe("a guide's file", () => {
     // A text-looking patch of a file git treats as binary, as an agent could send with --text.
     const id = await w.sendGuide(w.git("diff", "--text"), ["a.ts"]);
     expect(await contentsOf(await w.askGuide(id, "a.ts"))).toEqual(NO_CONTENTS);
+  });
+});
+
+/**
+ * The image previews' routes (review parity B2: `/api/inbox/pulls/review-image` and
+ * `/api/inbox/messages/:id/guide/review-image`) through the running Inbox's doors: the guards inbox.ts puts around the
+ * shared handler (inbox-review-image.test.ts proves the handler's own answers).
+ */
+describe("the image previews' routes", () => {
+  const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+  const png = (tag: string) => Buffer.concat([PNG, Buffer.from(tag, "latin1")]);
+  const imageOf = async (response: Response) => Buffer.from(await response.arrayBuffer());
+
+  /** A PR that changes img/a.png, its two commits in the project's clone. */
+  async function pictured(w: Awaited<ReturnType<typeof world>>) {
+    mkdirSync(join(w.project, "img"), { recursive: true });
+    writeFileSync(join(w.project, "img/a.png"), png("before"));
+    w.git("add", ".");
+    w.git("commit", "-qm", "one");
+    const baseSha = w.git("rev-parse", "HEAD").trim();
+    writeFileSync(join(w.project, "img/a.png"), png("after"));
+    w.git("commit", "-qam", "two");
+    const headSha = w.git("rev-parse", "HEAD").trim();
+    const patch = w.git("diff", `${baseSha}..${headSha}`);
+    // The Inbox learns of the project from an agent's message, and of the PR from the list.
+    await w.sendGuide(patch, ["img/a.png"]);
+    w.forge.pull = ghPull({ headRefOid: headSha });
+    w.forge.mergeBase = baseSha;
+    w.forge.patch = patch;
+    w.forge.headNow = headSha;
+    expect((await fetch(`${w.base}/api/inbox/pulls?refresh=1`)).status).toBe(200);
+    w.forge.reads.length = 0;
+    return headSha;
+  }
+  const askPull = (base: string, side: "old" | "new", snapshot: string, headers: Record<string, string> = {}) =>
+    fetch(`${base}/api/inbox/pulls/review-image?key=${encodeURIComponent(KEY)}&scope=layer&path=img/a.png&side=${side}&snapshot=${snapshot}`, { headers });
+  const askGuideImage = (base: string, id: string, path: string, side: "old" | "new", headers: Record<string, string> = {}) =>
+    fetch(`${base}/api/inbox/messages/${id}/guide/review-image?path=${encodeURIComponent(path)}&side=${side}&snapshot=${id}`, { headers });
+
+  test("a PR's image: each side from the project's clone at the head on screen", async () => {
+    const w = await world({ codeReview: true });
+    const head = await pictured(w);
+    const before = await askPull(w.base, "old", head);
+    expect(before.status).toBe(200);
+    expect(before.headers.get("content-type")).toBe("image/png");
+    expect((await imageOf(before)).equals(png("before"))).toBe(true);
+    expect((await imageOf(await askPull(w.base, "new", head))).equals(png("after"))).toBe(true);
+    expect(w.forge.reads.filter((r) => r.includes("/contents/"))).toEqual([]);
+  });
+
+  test("a PR's image with Code review off: 409 code_review_off, and nothing runs", async () => {
+    const w = await world({ codeReview: false });
+    const response = await askPull(w.base, "new", HEAD);
+    expect(response.status).toBe(409);
+    expect(((await response.json()) as { code: string }).code).toBe("code_review_off");
+    expect(w.forge.reads).toEqual([]);
+  });
+
+  test("a PR's image asked by another site: 403, and nothing is read", async () => {
+    const w = await world({ codeReview: true });
+    const head = await pictured(w);
+    expect((await askPull(w.base, "new", head, { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect((await askPull(w.base, "new", head, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect(w.forge.reads).toEqual([]);
+  });
+
+  test("a guide's image: the blobs its patch names, through the route", async () => {
+    const w = await world({ codeReview: false });
+    mkdirSync(join(w.project, "img"), { recursive: true });
+    writeFileSync(join(w.project, "img/a.png"), png("before"));
+    w.git("add", ".");
+    w.git("commit", "-qm", "one");
+    writeFileSync(join(w.project, "img/a.png"), png("after"));
+    const id = await w.sendGuide(w.git("diff"), ["img/a.png"]);
+    const before = await askGuideImage(w.base, id, "img/a.png", "old");
+    expect(before.status).toBe(200);
+    expect((await imageOf(before)).equals(png("before"))).toBe(true);
+    expect((await imageOf(await askGuideImage(w.base, id, "img/a.png", "new"))).equals(png("after"))).toBe(true);
+    expect((await askGuideImage(w.base, id, "img/a.png", "new", { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect(w.forge.reads).toEqual([]);
+  });
+
+  test("a guide in another project naming this PR: the forge is never asked for its image", async () => {
+    const w = await world({ codeReview: true, repoOf: (root) => ({ host: "github.com", display: root.endsWith("billing-svc") ? "northwind/billing-svc" : "someone/third" }) });
+    const bytes = png("forge");
+    w.forge.files.set(`repos/northwind/billing-svc/contents/${encodeURIComponent("img/b.png")}?ref=${HEAD}`, JSON.stringify({ type: "file", sha: "c".repeat(40), size: bytes.length, encoding: "base64", content: bytes.toString("base64") }));
+    const imagePatch = `diff --git a/img/b.png b/img/b.png\nindex ${gitBlobId(png("old")).slice(0, 10)}..${gitBlobId(png("forge")).slice(0, 10)} 100644\nBinary files a/img/b.png and b/img/b.png differ\n`;
+    const pr = (project?: string) =>
+      w.sendGuide("", [], {
+        ...(project ? { project_path: project } : {}),
+        patch: undefined,
+        guide: undefined,
+        snapshot: buildGuideSnapshot({
+          guide: { title: "T", intent: "I", sections: [{ title: "S", overview: "O", diffs: [{ file: "img/b.png", summary: "s" }] }] },
+          review: { rawPatch: imagePatch, gitRef: "main...head", source: { kind: "pr", pr: { url: "https://github.com/northwind/billing-svc/pull/412", number: 412, title: "PR 412", platform: "github" } } },
+          reviewed: [],
+        } as unknown as Parameters<typeof buildGuideSnapshot>[0]),
+      });
+    // The PR's own project is known to the Inbox, from a guide there.
+    const own = await pr();
+    const third = join(w.project, "..", "third");
+    mkdirSync(third, { recursive: true });
+    Bun.spawnSync(["git", "init", "-q"], { cwd: third, env: GIT_ENV });
+    const cross = await pr(third);
+    expect((await fetch(`${w.base}/api/inbox/pulls?refresh=1`)).status).toBe(200);
+    // The PR's own project's guide reads the PR's side from the forge ...
+    const near = await askGuideImage(w.base, own, "img/b.png", "new");
+    expect(near.status).toBe(200);
+    expect((await imageOf(near)).equals(bytes)).toBe(true);
+    // ... and one in another project naming the same PR reads nothing of it.
+    w.forge.reads.length = 0;
+    const response = await askGuideImage(w.base, cross, "img/b.png", "new");
+    expect(response.status).toBe(404);
+    expect(w.forge.reads).toEqual([]);
   });
 });
