@@ -63,6 +63,15 @@ test("a #tag in the agent's quoted words is not the person's: no card moves, the
   expect(store.cardWire(store.card(card.id)!).initiative).toBe(billing.id);
 });
 
+test("on a message with an open question the agent reads the approved words alone, no \"still open\" line", () => {
+  const { store, project } = world();
+  const asked = store.sendMessage({ project_id: project.id, author: CLAUDE, body: "Keep ids how long?\n\n:::question\nStore processed event ids for how long?\n\n- [ ] 3 days\n- [ ] 30 days\n:::" }).message;
+  const words = NEW_THREAD_FROM_MESSAGE_WORDS("Keep ids how long?", asked.id);
+  expect(store.sendReply(asked.id, { words, idempotency_key: "k1", author_only: true }).reply.body).toBe(words);
+  // Guard: a plain reply there carries the line.
+  expect(store.sendReply(asked.id, { words: "Thinking.", idempotency_key: "k2" }).reply.body).not.toBe("Thinking.");
+});
+
 test("the recognizer matches the ask with or without first words, and not the person's own words", () => {
   expect(isNewThreadFromMessageAsk(NEW_THREAD_FROM_MESSAGE_WORDS("", "msg_01ABC"))).toBe(true);
   expect(isNewThreadFromMessageAsk(NEW_THREAD_FROM_MESSAGE_WORDS("Some #tag words", "msg_01ABC"))).toBe(true);

@@ -5326,7 +5326,11 @@ export class InboxStore {
     // posted a plain update after it, and the words go to the update), never
     // another session's.
     const asker = message.author.kind === "agent" && message.author.session ? message.author : null;
-    const stillOpen = asker
+    // New thread from this message asks the agent to carry its questions on and withdraw them here: no "still open,
+    // don't re-ask it" line under those words.
+    const stillOpen = input.author_only === true
+      ? []
+      : asker
       ? this.threadMessages(message.thread_id)
           .filter(
             (m) =>
