@@ -794,8 +794,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
       goToPlace(0);
       return;
     }
-    if (scope !== 'layer' || diffError || placed) placesWanted.current = false;
-  }, [placeNotes.length, layerKey, scope, diffError, placed]); // eslint-disable-line react-hooks/exhaustive-deps
+    // A judgment held for this diff, whatever its head (an earlier head's draws nothing): the ask is dropped too.
+    if (scope !== 'layer' || diffError || (judged && layer && diff?.head_sha && diff.head_sha === layer.head_sha)) placesWanted.current = false;
+  }, [placeNotes.length, layerKey, scope, diffError, judged, diff?.head_sha, layer?.head_sha]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The verdict: one reply to the agent's last message in its thread.
   const [sending, setSending] = useState(false);

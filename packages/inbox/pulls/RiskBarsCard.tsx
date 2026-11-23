@@ -84,9 +84,19 @@ export function escapeIsOthers(from: Element | null, anchor: Element): boolean {
  */
 export function menuOpenBesides(card: Element | null): boolean {
   for (const menu of document.querySelectorAll('[role="menu"], [data-pn-dismissable-popover]')) {
-    if (!card?.contains(menu) && !menu.closest('[hidden]')) return true;
+    if (!card?.contains(menu) && shows(menu)) return true;
   }
   return false;
+}
+
+/** A menu kept mounted while shut (hidden, closed, or not drawn by CSS) is not open. */
+function shows(menu: Element): boolean {
+  if (menu.closest('[hidden], [inert], [aria-hidden="true"], [data-closed], [data-state="closed"]')) return false;
+  for (let el: Element | null = menu; el; el = el.parentElement) {
+    const style = getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+  }
+  return true;
 }
 
 /** What the card says: the old row's head and words, for each place on the line. */

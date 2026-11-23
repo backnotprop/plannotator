@@ -221,6 +221,31 @@ describe.skipIf(!hasDom)('the risk bars card', () => {
     }
   });
 
+  test('a menu kept mounted while shut (hidden by CSS, closed) does not keep Escape from the card', async () => {
+    await mount(HIGH);
+    const b = bars('src/retry.ts');
+    const sheet = document.createElement('style');
+    sheet.textContent = '.shut-menu { display: none; }';
+    document.head.appendChild(sheet);
+    const shut = [document.createElement('div'), document.createElement('div'), document.createElement('div')];
+    shut[0]!.className = 'shut-menu';
+    shut[0]!.setAttribute('role', 'menu');
+    shut[1]!.setAttribute('data-pn-dismissable-popover', 'true');
+    shut[1]!.style.visibility = 'hidden';
+    shut[2]!.setAttribute('role', 'menu');
+    shut[2]!.setAttribute('data-closed', '');
+    for (const menu of shut) document.body.appendChild(menu);
+    try {
+      await act(async () => b.click());
+      await act(async () => b.focus());
+      await act(async () => void b.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, composed: true })));
+      expect(card()).toBeNull();
+    } finally {
+      for (const menu of shut) menu.remove();
+      sheet.remove();
+    }
+  });
+
   test('the bars say they open a dialog, and whether it is open', async () => {
     await mount(HIGH);
     const b = bars('src/retry.ts');
