@@ -9,10 +9,10 @@
  * row; a second click and Escape close it, Escape giving the focus back to the link; Cmd/Ctrl-click still opens
  * GitHub in a new tab; Open in Reviews opens the PR's page in Reviews in the same window; an issue's card has only
  * GitHub's link; dark; on a phone a tap shows the sheet with both links in one row, which still fits with a long forge
- * name and at 320 px; with Code review off the card has only GitHub's link.
+ * name and at 320 px, no button and no comment count cut short (the count drops to its icon and number first); with Code review off the card has only GitHub's link.
  *
  * Proof (PLANNOTATOR_E2E_PROOF_DIR/ref-card-click, `.local/proof` in CI): 01-inbox-pinned-reviews-on.png,
- * 02-inbox-pinned-reviews-off.png, 03-inbox-pinned-dark.png, 04-inbox-issue.png, 06-phone-tap.png (05 is plan
+ * 02-inbox-pinned-reviews-off.png, 03-inbox-pinned-dark.png, 04-inbox-issue.png, 06-phone-tap.png (390 px), 07-phone-320.png (05 is plan
  * review's, from ref-cards-review.spec.ts). Made-up people and repositories.
  */
 import { devices, expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
@@ -271,19 +271,37 @@ async function newContext(browser: Browser, options: Parameters<Browser['newCont
   return { context, page, popups };
 }
 
-/** The footer holds its buttons in one row, inside the card: nothing past its edge, no second row. */
-async function footFits(page: Page): Promise<void> {
+/**
+ * The footer holds its buttons in one row, inside the card: nothing past its edge, no second row, no button cut
+ * short of its words, and the comment count's words whole (not clipped). Returns the count's form (FootWords).
+ */
+async function footFits(page: Page, at: string): Promise<string | null> {
   const foot = card(page).locator('[data-ref-card-foot]');
-  const fit = await foot.evaluate((el) => {
-    const box = el.getBoundingClientRect();
-    const buttons = [...el.querySelectorAll('button, a')].map((b) => b.getBoundingClientRect());
-    return {
-      inside: buttons.every((b) => b.left >= box.left - 0.5 && b.right <= box.right + 0.5),
-      oneRow: buttons.every((b) => Math.abs(b.top - buttons[0]!.top) < 1),
-      overflow: el.scrollWidth - el.clientWidth,
-    };
-  });
-  expect(fit).toEqual({ inside: true, oneRow: true, overflow: 0 });
+  let form: string | null = null;
+  // The count picks its form once the room is known (a ResizeObserver): settled within a frame or two.
+  await expect(async () => {
+    const fit = await foot.evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      const controls = [...el.querySelectorAll<HTMLElement>('button, a')];
+      const buttons = controls.map((b) => b.getBoundingClientRect());
+      const count = el.querySelector<HTMLElement>('[data-ref-card-count]');
+      return {
+        inside: buttons.every((b) => b.left >= box.left - 0.5 && b.right <= box.right + 0.5),
+        oneRow: buttons.every((b) => Math.abs(b.top - buttons[0]!.top) < 1),
+        overflow: el.scrollWidth - el.clientWidth,
+        buttonsWhole: controls.every((b) => b.scrollWidth <= b.clientWidth),
+        countWhole: !count || count.scrollWidth <= count.clientWidth,
+        form: count?.getAttribute('data-ref-card-count-form') ?? null,
+        // Named in a failure: the room and what took it.
+        sizes: `foot ${Math.round(el.clientWidth)}; count ${count ? `${count.clientWidth}/${count.scrollWidth}` : 'none'}; ${controls.map((b) => `${b.textContent?.trim()} ${b.clientWidth}/${b.scrollWidth}`).join('; ')}`,
+      };
+    });
+    const { form: shown, sizes, ...rest } = fit;
+    expect(rest, `${at}: ${sizes}`).toEqual({ inside: true, oneRow: true, overflow: 0, buttonsWhole: true, countWhole: true });
+    form = shown;
+  }).toPass({ timeout: 3_000 });
+  console.log(`ref card footer at ${at}: the count's form is ${form}`);
+  return form;
 }
 
 test('a click pins the card with Open in Reviews beside Open on GitHub; Escape, a second click, Cmd/Ctrl-click; Open in Reviews opens the PR in Reviews', async ({ browser }) => {
@@ -304,7 +322,8 @@ test('a click pins the card with Open in Reviews beside Open on GitHub; Escape, 
     const f = (await forge.boundingBox())!;
     expect(Math.abs(a.y + a.height / 2 - (f.y + f.height / 2))).toBeLessThan(1);
     expect(a.x + a.width).toBeLessThanOrEqual(f.x);
-    await footFits(page);
+    // Room enough on a desktop: the count's words in full.
+    expect(await footFits(page, 'desktop, pinned')).not.toBe('short');
     // Pinned: the pointer leaving does not close it, and nothing opened.
     await page.mouse.move(2, 2);
     await page.waitForTimeout(600);
@@ -406,17 +425,22 @@ test('a phone: a tap shows the sheet with both links in one row, which fits with
     expect(page.url()).toBe(before);
     expect(popups).toEqual([]);
     expect((await sheet.locator('[data-ref-card-action]').boundingBox())!.height).toBeGreaterThanOrEqual(44);
-    await footFits(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await footFits(page, '390 px');
     await proof(page, '06-phone-tap');
+    await page.setViewportSize({ width: 320, height: 640 });
+    await footFits(page, '320 px');
+    await proof(page, '07-phone-320');
+    await page.setViewportSize({ width: 390, height: 844 });
     // The longest forge name ("Open on Bitbucket"), then the narrowest phone: still one row, inside the sheet.
     await sheet.locator('[data-ref-card-open]').evaluate((el) => {
       const arrow = el.querySelector('span');
       el.textContent = 'Open on Bitbucket ';
       if (arrow) el.appendChild(arrow);
     });
-    await footFits(page);
+    await footFits(page, '390 px, Bitbucket');
     await page.setViewportSize({ width: 320, height: 640 });
-    await footFits(page);
+    await footFits(page, '320 px, Bitbucket');
     await expect(sheet.locator('[data-ref-card-open]')).toHaveText(/Open on Bitbucket/);
   } finally {
     await context.close();

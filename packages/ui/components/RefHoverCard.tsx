@@ -397,6 +397,83 @@ export interface RefCardViewProps {
   action?: RefCardActionLink | null;
 }
 
+/** The comment count, longest first: with "· pinned", without it, then the icon and the number (the words said, unseen). */
+function commentForms(comments: number, pinned: boolean): { key: string; node: React.ReactNode }[] {
+  const words = `${comments} comment${comments === 1 ? '' : 's'}`;
+  const full = (
+    <span className="inline-flex items-center gap-1">
+      <span aria-hidden="true">💬</span> {words}
+    </span>
+  );
+  return [
+    ...(pinned
+      ? [
+          {
+            key: 'pinned',
+            node: (
+              <span className="inline-flex items-center gap-1">
+                <span aria-hidden="true">💬</span> {words}
+                <span className="ml-1.5 text-muted-foreground/80">· pinned</span>
+              </span>
+            ),
+          },
+        ]
+      : []),
+    { key: 'full', node: full },
+    {
+      key: 'short',
+      node: (
+        <span className="inline-flex items-center gap-1">
+          <span aria-hidden="true">💬 {comments}</span>
+          <span className="sr-only">{words}</span>
+        </span>
+      ),
+    },
+  ];
+}
+
+/**
+ * The footer's words, whole: the first of `forms` (longest first) that fits the room the buttons leave, else the
+ * last. Never cut. Each form is measured in a clipped zero-size box, so the measuring adds no room to the footer.
+ */
+function FootWords({ forms }: { forms: { key: string; node: React.ReactNode }[] }) {
+  const boxRef = useRef<HTMLSpanElement | null>(null);
+  const measureRef = useRef<HTMLSpanElement | null>(null);
+  const [pick, setPick] = useState(0);
+  const keys = forms.map((f) => f.key).join('|');
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    const measure = measureRef.current;
+    if (!box || !measure) return;
+    const fit = () => {
+      const room = box.clientWidth;
+      const widths = Array.from(measure.children, (c) => (c as HTMLElement).offsetWidth);
+      const first = widths.findIndex((w) => w <= room);
+      setPick(first === -1 ? widths.length - 1 : first);
+    };
+    fit();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(fit);
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [keys]);
+  const shown = forms[Math.min(pick, forms.length - 1)];
+  return (
+    <span ref={boxRef} className="relative min-w-0 flex-1 overflow-hidden whitespace-nowrap" data-ref-card-count="" data-ref-card-count-form={shown?.key}>
+      {shown?.node}
+      <span aria-hidden="true" className="pointer-events-none invisible absolute left-0 top-0 h-0 w-0 overflow-hidden">
+        <span ref={measureRef} className="flex w-max flex-col">
+          {forms.map((f) => (
+            <span key={f.key} className="block w-max whitespace-nowrap">
+              {f.node}
+            </span>
+          ))}
+        </span>
+      </span>
+    </span>
+  );
+}
+
 export function RefCardView({ target, href, result, pinned, onClose, sheet, tight, action }: RefCardViewProps) {
   // A provider's own card (utils/refCardProviders.ts).
   const Provided = providedRefCardView(target);
@@ -404,9 +481,9 @@ export function RefCardView({ target, href, result, pinned, onClose, sheet, tigh
   const repoName = `${target.owner}/${target.repo}`;
   const forge = forgeName(target.platform);
   const btn = sheet ? 'min-h-11 px-3' : 'h-7 px-2.5';
-  const footer = (extra?: React.ReactNode) => (
+  const footer = (words?: { key: string; node: React.ReactNode }[]) => (
     <div className="flex flex-none items-center gap-2 border-t border-border px-3.5 py-2 text-[11.5px] text-muted-foreground" data-ref-card-foot="">
-      <span className="min-w-0 flex-1 truncate">{extra}</span>
+      {words ? <FootWords forms={words} /> : <span className="min-w-0 flex-1" />}
       {onClose && (pinned || sheet) ? (
         <button type="button" onClick={onClose} className={`${btn} flex-none rounded-md hover:bg-muted hover:text-foreground`} data-ref-card-close="">
           Close
@@ -416,11 +493,11 @@ export function RefCardView({ target, href, result, pinned, onClose, sheet, tigh
         <button
           type="button"
           onClick={action.open}
-          // Short of room the comment count goes first, then these words end in "…": never a second row.
-          className={`${btn} inline-flex min-w-0 items-center rounded-md bg-muted/60 font-medium text-foreground hover:bg-muted`}
+          // Never shorter than its words: short of room the comment count gives way (FootWords).
+          className={`${btn} inline-flex flex-none items-center whitespace-nowrap rounded-md bg-muted/60 font-medium text-foreground hover:bg-muted`}
           data-ref-card-action=""
         >
-          <span className="min-w-0 truncate">{action.label}</span>
+          {action.label}
         </button>
       ) : null}
       <a
@@ -598,12 +675,7 @@ export function RefCardView({ target, href, result, pinned, onClose, sheet, tigh
           ) : null}
         </div>
       </div>
-      {footer(
-        <span className="inline-flex items-center gap-1">
-          <span aria-hidden="true">💬</span> {d.comments} comment{d.comments === 1 ? '' : 's'}
-          {pinned && !sheet ? <span className="ml-1.5 text-muted-foreground/80">· pinned</span> : null}
-        </span>,
-      )}
+      {footer(commentForms(d.comments, pinned && !sheet))}
     </div>
   );
 }
