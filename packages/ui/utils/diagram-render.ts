@@ -58,6 +58,7 @@ import { loadPeleRuntime, PELE_IN_BUILD, PELE_OUTPUT_LIMIT, PELE_SOURCE_LIMIT, p
 import { finishPeleLabels, needsPeleLabels, pageMathTypesetter, peleLabelMeasurer, preparePeleLabels, restorePeleLabelMessage, type PreparedPeleLabels } from './pele-labels';
 import { peleAuthorColors } from './peleAuthorTheme';
 import { clampPeleStyles } from './peleStyleClamp';
+import { spaceWrappedRows } from './peleRowSpaces';
 import { applyPeleThemeVariables, peleShadowCss, readPeleThemeVariables } from './peleTheme';
 
 export type { DiagramKind } from '@plannotator/core/diagram-anchor';
@@ -1156,6 +1157,8 @@ async function renderPele(renderId: string, source: string, theme: DiagramTheme,
     scrubFetchingStyles(svgNode);
     // An author's sizes (`stroke-dasharray:0.0001`, `stroke-width:9999px`) held to sane ranges (`peleStyleClamp.ts`).
     clampPeleStyles(svgNode);
+    // A label wrapped over rows reads with a space between them (`peleRowSpaces.ts`).
+    spaceWrappedRows(svgNode);
     const personColors = readPeleThemeVariables(theme.mode);
     // The colours an author spells out, over the person's palette; never a theme name, never a panel (`peleAuthorTheme.ts`).
     const author = peleAuthorColors(source, personColors);
