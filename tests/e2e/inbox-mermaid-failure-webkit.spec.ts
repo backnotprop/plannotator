@@ -8,7 +8,7 @@
  *    app, and one more piles up on every re-render (a theme change);
  *  - a diagram type whose chunk does not arrive (a dropped request, or a tab
  *    older than the Inbox's build, whose chunk names are gone) shows as a red
- *    "Mermaid Error" that blames the source, where it should show the source
+ *    "Diagram error" that blames the source, where it should show the source
  *    under the quiet Reload line; and leaves the same graphic on the body.
  *
  * The other diagram and the fences around it still render. Made-up diagrams.
@@ -103,7 +103,7 @@ test('a diagram that does not parse shows its source in the message, and nothing
     const blocks = message.locator('[data-diagram-block="mermaid"]');
     await expect(blocks).toHaveCount(2);
     await expect(blocks.nth(1).locator('[data-diagram-svg] svg')).toBeVisible();
-    await expect(blocks.nth(0)).toContainText('Mermaid Error');
+    await expect(blocks.nth(0)).toContainText('Diagram error');
     await expect(blocks.nth(0)).toContainText('B{{"Check<br/>it"}');
     expect(await outside(page)).toEqual({ stray: [], overflows: false });
 
@@ -158,7 +158,7 @@ test('a diagram type whose chunk does not arrive shows the source under Reload, 
     await expect(block.locator('[data-lazy-load-failed]')).toBeVisible();
     await expect(block.getByRole('button', { name: 'Reload' })).toBeVisible();
     await expect(block).toContainText('participant P as Person');
-    await expect(block).not.toContainText('Mermaid Error');
+    await expect(block).not.toContainText('Diagram error');
     expect(await outside(page)).toEqual({ stray: [], overflows: false });
     await page.screenshot({ path: join(proofDir, '02-ipad-chunk-missing.png') });
   } finally {
