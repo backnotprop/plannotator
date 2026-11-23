@@ -115,6 +115,17 @@ describe('the order', () => {
     expect(ids(again.live[0]!.rows)).toEqual(['a-quiet-tie-a', 'a-wait-tie-b']);
   });
 
+  test("past five threads the fold hides the oldest, one that waits on the person too; the agent still ranks and opens by it", () => {
+    // AgentsList.tsx shows an open agent's first AGENT_ROWS_SHOWN (5) rows, then "N more" (the owner, 2026-11-23: "Fold it like any other").
+    const quiet = [2, 3, 4, 5, 6].map((minute) => row(`a-quiet-${minute}`, minute, 'quiet', by('ses_a')));
+    const s = sections({ stopped: [row('a-stopped', 1, 'stopped', by('ses_a'))], quiet: [...quiet, row('b-quiet', 9, 'quiet', by('ses_b'))] });
+    const layout = agentsLayout(inputs(s, groups(agent('ses_a', 'waiting'), agent('ses_b', 'idle'))), null, { epoch: 1, keep: null });
+    expect(layout.live.map((b) => [b.agent.id, b.open])).toEqual([['ses_a', true], ['ses_b', false]]);
+    const rows = layout.live[0]!.rows;
+    expect(ids(rows.slice(0, 5))).toEqual(['a-quiet-6', 'a-quiet-5', 'a-quiet-4', 'a-quiet-3', 'a-quiet-2']);
+    expect(rows.slice(5).map((r) => [r.row.thread_id, r.drawn])).toEqual([['a-stopped', 'stopped']]);
+  });
+
   test("the time a row prints orders it: a delivered message's time", () => {
     const delivered = row('delivered', 2, 'sent', { ...by('ses_a'), delivery: { state: 'delivered', at: T(7) } } as Partial<InboxListRow>);
     const layout = agentsLayout(inputs(sections({ sent: [row('later', 5, 'sent', by('ses_a')), delivered] }), groups(agent('ses_a', 'idle'))), null, { epoch: 1, keep: null });
@@ -170,6 +181,23 @@ describe('held order between two sorts', () => {
     expect(held.live.map((b) => [b.agent.id, ids(b.rows)])).toEqual([['ses_a', ['a']], ['ses_b', ['b', 'b2']]]);
     const settled = agentsLayout(inputs(moved, live), held.places, { epoch: 2, keep: null });
     expect(settled.live.map((b) => [b.agent.id, ids(b.rows)])).toEqual([['ses_b', ['b2', 'b']], ['ses_a', ['a']]]);
+  });
+
+  test('rows of mixed groups hold their places between two sorts, then go newest first', () => {
+    const mixed = (p: number, s: number) =>
+      sections({
+        priority: [row('p', p, 'waiting', by('ses_a'))],
+        stopped: [row('s', s, 'stopped', by('ses_a'))],
+        waiting: [row('w', 4, 'waiting', by('ses_a'))],
+        quiet: [row('q', 5, 'quiet', by('ses_a')), row('b', 6, 'quiet', by('ses_b'))],
+      });
+    const one = agentsLayout(inputs(mixed(3, 2), live), null, { epoch: 1, keep: null });
+    expect(one.live.map((b) => [b.agent.id, ids(b.rows)])).toEqual([['ses_a', ['q', 'w', 'p', 's']], ['ses_b', ['b']]]);
+    // The Priority and the Stopped thread get newer messages in their groups: nothing moves under the reader.
+    const held = agentsLayout(inputs(mixed(9, 7), live), one.places, { epoch: 1, keep: null });
+    expect(held.live.map((b) => [b.agent.id, ids(b.rows)])).toEqual([['ses_a', ['q', 'w', 'p', 's']], ['ses_b', ['b']]]);
+    const settled = agentsLayout(inputs(mixed(9, 7), live), held.places, { epoch: 2, keep: null });
+    expect(settled.live.map((b) => [b.agent.id, ids(b.rows)])).toEqual([['ses_a', ['p', 's', 'q', 'w']], ['ses_b', ['b']]]);
   });
 
   test('an agent that ends keeps its place and changes only its state until the list settles', () => {
