@@ -18,6 +18,10 @@
  *     off the rows' left edge, or a screen reader not hearing the whole branch (05, 05b).
  *  6c. On a phone, a 60-letter branch in a long-named project: the name under 120px, or the project not giving way
  *     first (05c).
+ *  6d. What Branch reviews' "Branches nobody reported" said, lost: a branch's commits not on main (on the row where
+ *     the list has room beside a readable name, always to a screen reader, and in its diff's facts; 09, 11), the
+ *     rows past the fifth with no way to see them ("N more", the Agents view's fold; 10), or "nothing here" for a list
+ *     filtered to one project (its words; 12).
  *  7. On a phone, a long branch name in a long-named project cut to a few letters by the bar's buttons, or anything
  *     in the bar or the facts under it overlapping, at 390 and 320; Review with an agent a bare "+" (07, 08).
  *
@@ -292,7 +296,8 @@ test.describe('desktop at 1440', () => {
     await expect(changedRow(pane, 'src/comments.ts', 'export const words = "kept";')).toBeVisible();
     await shot(page, '03-branch-diff');
     await expect(pane.locator('[data-local-title]')).toHaveText(BRANCH);
-    await expect(pane.locator('[data-local-facts]')).toContainText('against main');
+    // Its facts: its commits not on main, in Branch reviews' words.
+    await expect(pane.locator('[data-local-facts]')).toContainText('1 commit not on main');
     // The branch's work only: the folder's own changes are not in it.
     await expect(pane.locator('[data-guide-file-shell="NOTES.md"]')).toHaveCount(0);
     await expect(row(page, `${world.plannotatorId}:${BRANCH}`)).toHaveAttribute('aria-current', 'true');
@@ -318,6 +323,32 @@ test.describe('desktop at 1440', () => {
     await expect(page.locator('[data-local-diff]')).toHaveCount(0);
     await expect(fold).toHaveAttribute('aria-expanded', 'true');
     await expect(group(page).locator('[data-local-row]')).toHaveCount(3);
+  });
+
+  test("a branch row says its commits not on main where the list has room for them beside the name; always to a screen reader", async () => {
+    const { page } = world;
+    const branchRow = row(page, `${world.plannotatorId}:${BRANCH}`);
+    const count = branchRow.locator('[data-local-ahead]');
+    const edge = page.getByRole('separator', { name: 'List width' });
+    // The list at its widest: the count on the row, the name still readable.
+    await edge.focus();
+    await page.keyboard.press('End');
+    await page.waitForTimeout(300);
+    await expect(count).toBeVisible();
+    await shot(page, '09-commit-count');
+    await expect(count).toHaveText('1 commit not on main');
+    const name = (await branchRow.locator('.ib-rvr-t').boundingBox())!;
+    expect(name.width).toBeGreaterThanOrEqual(120);
+    const countBox = (await count.boundingBox())!;
+    expect(countBox.x).toBeGreaterThanOrEqual(name.x + name.width);
+    await expect(branchRow).toHaveAccessibleName(/1 commit not on main/);
+    // At its narrowest the count gives way to the name; a screen reader still hears it.
+    await page.keyboard.press('Home');
+    await page.waitForTimeout(300);
+    await expect(count).toBeHidden();
+    await expect(branchRow).toHaveAccessibleName(/1 commit not on main/);
+    // The rows without a count of their own say none.
+    await expect(row(page, `${world.plannotatorId}:`).locator('[data-local-ahead]')).toHaveCount(0);
   });
 });
 
@@ -347,6 +378,9 @@ test.describe('phone at 390', () => {
           expect(height, `row ${i} at ${width}`).toBeLessThanOrEqual(45);
         }
         await phoneRowsReadable(page, [BRANCH, 'feat/spaces-share-link'], width);
+        // No room on a phone's row for the commits beside a readable name: heard, not drawn.
+        await expect(row(page, `${world.plannotatorId}:${BRANCH}`).locator('[data-local-ahead]')).toBeHidden();
+        await expect(row(page, `${world.plannotatorId}:${BRANCH}`)).toHaveAccessibleName(/1 commit not on main/);
       }
       await expect(toggle).toHaveText('On this computer 3');
       await row(page, `${world.plannotatorId}:${BRANCH}`).click();
@@ -354,6 +388,9 @@ test.describe('phone at 390', () => {
       await expect(pane.locator('[data-guide-file-shell="src/comments.ts"]')).toBeVisible({ timeout: 30_000 });
       await expect(changedRow(pane, 'src/comments.ts', 'export const words = "kept";')).toBeVisible();
       await shot(page, '06-phone-branch-diff');
+      // A phone's row has no room for the commits beside a readable name: its diff's facts say them.
+      await expect(pane.locator('[data-local-facts] [data-local-ahead]')).toHaveText('1 commit not on main');
+      await shot(page, '11-phone-commit-count');
       // In the list's place: the pane is the screen's width.
       expect((await pane.boundingBox())!.width).toBeGreaterThan(380);
       await readableDiff(pane, 'src/comments.ts', 'export const words = "kept";', 300);
@@ -479,6 +516,96 @@ test.describe('phone at 390', () => {
         expect(box.cut, `project cut at ${width}`).toBe(true);
         expect((await longRow.boundingBox())!.height).toBeLessThanOrEqual(45);
       }
+    } finally {
+      await context.close();
+    }
+  });
+});
+
+/** An agent writes from `path` (a guide makes a review row, which the list's project filter offers), and its project's id. */
+async function agentWrote(page: Page, path: string, guide: boolean): Promise<string> {
+  const client = new Client({ name: 'reviews-local-more', version: '1.0.0' });
+  await client.connect(new StreamableHTTPClientTransport(new URL(world.mcp)));
+  try {
+    const patch = 'diff --git a/notes.md b/notes.md\n--- a/notes.md\n+++ b/notes.md\n@@ -1 +1 @@\n-old\n+new\n';
+    const call = guide
+      ? { name: 'submit_guide', arguments: { project_path: path, guide: { title: 'Quiet notes', intent: 'One line.', sections: [{ title: 'The line', overview: 'One line.', diffs: [{ file: 'notes.md', summary: 'New.' }] }], review: { gitRef: 'main...HEAD', base: 'main' }, generator: { engine: 'claude-code', model: 'claude-opus-5' } }, patch, review: true, subject: 'Quiet notes', body: 'Ready for review.', agent_session: 'ses-quiet', agent_host: 'claude-code', agent_name: 'Claude Code' } }
+      : { name: 'send_message', arguments: { project_path: path, subject: 'Spikes', body: 'Started on the spikes.', agent_host: 'claude-code', agent_name: 'Claude Code' } };
+    const sent = (await client.callTool(call)) as { isError?: boolean; content?: { text: string }[] };
+    if (sent.isError) throw new Error(sent.content?.map((c) => c.text).join(' '));
+  } finally {
+    await client.close().catch(() => {});
+  }
+  const projects = (await (await page.request.get(`${world.url}api/inbox/projects`)).json()) as { projects?: { id: string; root: string }[] };
+  const id = projects.projects?.find((p) => p.root === path)?.id ?? '';
+  expect(id).toBeTruthy();
+  return id;
+}
+
+/** Loads the list again until `ready` holds (the server keeps one answer 20 s; a goto to the same address reads nothing). */
+async function readUntil(page: Page, address: string, ready: () => Promise<void>): Promise<void> {
+  await page.goto(address);
+  await expect(async () => {
+    await page.reload();
+    const toggle = group(page).locator('[data-reviews-fold="local"]');
+    await expect(toggle).toBeVisible({ timeout: 3_000 });
+    if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+    await ready();
+  }).toPass({ timeout: 60_000, intervals: [2_000, 4_000, 5_000] });
+}
+
+// After the phone's: the projects these make join the group.
+test.describe('past five rows, and one project with nothing here, at 1440', () => {
+  test('"N more" (the Agents view\'s fold) shows the rest of the group, focus on the first it shows', async () => {
+    const spikes = gitProject(world.src, 'spikes');
+    for (let i = 0; i < 7; i++) {
+      spikes.git(['checkout', '-q', '-b', `bob/spike-${i}`, 'main']);
+      spikes.commit(`spike-${i}.ts`, `export const spike = ${i};\n`, (20 + i) * MINUTE);
+      spikes.git(['checkout', '-q', 'main']);
+    }
+    const context = await world.browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, colorScheme: 'light', reducedMotion: 'reduce' });
+    try {
+      const page = await context.newPage();
+      const id = await agentWrote(page, spikes.path, false);
+      await readUntil(page, `${world.url}#reviews`, async () => {
+        const total = Number((await group(page).locator('[data-reviews-fold="local"] .ib-n').textContent({ timeout: 3_000 }))?.trim());
+        expect(total).toBeGreaterThanOrEqual(10);
+      });
+      const total = Number((await group(page).locator('[data-reviews-fold="local"] .ib-n').textContent())!.trim());
+      const rows = group(page).locator('[data-local-row]');
+      const more = group(page).locator('[data-local-more]');
+      await expect(rows).toHaveCount(5);
+      await expect(more).toHaveText(`${total - 5} more`);
+      await shot(page, '10-fold-more');
+      await more.click();
+      await expect(rows).toHaveCount(total);
+      await expect(more).toHaveCount(0);
+      await expect(rows.nth(5)).toBeFocused();
+      // Every spike is there, each with its one commit not on main.
+      for (let i = 0; i < 7; i++) await expect(row(page, `${id}:bob/spike-${i}`)).toHaveAccessibleName(/1 commit not on main/);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("a list filtered to a project with nothing here says so, in Branch reviews' words", async () => {
+    const quiet = gitProject(world.src, 'quiet-notes');
+    const context = await world.browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, colorScheme: 'light', reducedMotion: 'reduce' });
+    try {
+      const page = await context.newPage();
+      const id = await agentWrote(page, quiet.path, true);
+      const none = group(page).locator('[data-local-none]');
+      await readUntil(page, `${world.url}#reviews&project=${encodeURIComponent(id)}`, async () => {
+        await expect(none).toBeVisible({ timeout: 3_000 });
+      });
+      await shot(page, '12-one-project-empty');
+      await expect(none).toHaveText('No other branch had a commit in the last 14 days.');
+      await expect(group(page).locator('[data-local-row]')).toHaveCount(0);
+      // The whole list: other projects' rows, no such words.
+      await page.goto(`${world.url}#reviews`);
+      await page.reload();
+      await expect(group(page).locator('[data-local-row]').first()).toBeVisible();
+      await expect(group(page).locator('[data-local-none]')).toHaveCount(0);
     } finally {
       await context.close();
     }

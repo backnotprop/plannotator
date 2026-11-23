@@ -19,6 +19,8 @@ export interface InboxLocalWork {
   base: string | null;
   /** The last commit (a branch row) or the newest change to a changed file (an uncommitted row), ISO. */
   at: string;
+  /** A branch row: its commits not on `base` (an older Inbox: absent). An uncommitted row: null. */
+  ahead?: number | null;
 }
 
 /** `GET /api/inbox/reviews/local`. */
@@ -26,6 +28,13 @@ export interface InboxLocalWorkAnswer {
   items: InboxLocalWork[];
   /** Projects whose folder is here but whose git could not be read in time: not "nothing". */
   unread: number;
+  /**
+   * Projects read whose repository has no row at all (no branch with work of its own, no uncommitted change): what a
+   * one-project list says "nothing" for. An older Inbox: absent.
+   */
+  quiet?: string[];
+  /** Projects read whose folder is no git repository on this computer (or is gone). An older Inbox: absent. */
+  not_git?: string[];
 }
 
 /** `GET /api/inbox/reviews/local/diff?project=&branch=` (no branch: the uncommitted changes). */
@@ -36,6 +45,8 @@ export interface InboxLocalDiffAnswer {
   /** What the patch is against: the default branch (a branch's whole diff), or `HEAD`. */
   base: string;
   patch: string;
+  /** A branch's commits not on `base` (null: uncommitted changes, or git couldn't count them; an older Inbox: absent). */
+  ahead?: number | null;
 }
 
 /** A row's words: the branch, or "Uncommitted on main" (on its short commit id when detached; "Uncommitted changes" with no commit). */

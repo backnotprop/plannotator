@@ -10530,6 +10530,15 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-mrow.ib-local-row > .ib-rvr-l1 { flex: 1 1 auto; min-width: 0; }
 .ib-mrow.ib-local-row .ib-rvr-t { min-width: 120px; }
 .ib-mrow.ib-local-row .ib-rvr-end { flex: 0 1 auto; min-width: 0; }
+/* A branch's commits not on its default branch ("3 commits not on main"): quiet, before the project, only on a row
+   with room for them beside a 120px name, the longest project (14ch) and the age; else a screen reader hears them
+   and the row's diff says them. */
+.ib-local-row { container: ib-local-row / inline-size; }
+.ib-local-ahead { display: none; flex: 0 1 auto; min-width: 0; max-width: 160px; overflow: hidden; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); text-overflow: ellipsis; white-space: nowrap; }
+@container ib-local-row (min-width: 510px) { .ib-local-ahead { display: block; } }
+/* Past the fifth row, the Agents view's "N more" (agentsView.css), its words where the rows' names start. */
+.pn-inbox .ib-agmore.ib-local-more { width: calc(100% - 28px); margin-left: 28px; }
+.ib-local-none { margin: 2px 0 6px; padding: 0 12px 0 36px; }
 .ib-local-pane { display: flex; flex-direction: column; }
 .ib-local-title { min-width: 0; margin: 0; overflow: hidden; font-size: var(--ib-fs-14, 14px); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .ib-local-meta { flex: none; margin: 0; padding: 10px 28px 0; }
@@ -10658,6 +10667,9 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   .ib-local-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; line-height: 1.25; }
   /* Its Review with an agent: the words on two short lines, so the name keeps its room at 320. */
   .pn-inbox .ib-lp-bar .ib-pr-ext.ib-lp-review { line-height: 1.2; text-align: start; }
+  /* "N more" and the group's words where the rows' names start (16px padding, the mark and its 10px). */
+  .pn-inbox .ib-agmore.ib-local-more { width: calc(100% - 33px); margin-left: 33px; }
+  .ib-local-none { padding: 0 16px 0 41px; font-size: var(--ib-fs-14, 14px); }
   .ib-pr-body { padding: 18px 16px 24px; }
   .ib-pr-h { font-size: var(--ib-fs-22, 22px); }
   .ib-pr-actions .ib-pr-note { flex-basis: 100%; }

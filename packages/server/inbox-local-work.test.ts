@@ -5,7 +5,10 @@
  *  - a folder's uncommitted changes missing, named by the wrong branch, or dated by anything but its files;
  *  - a repository read twice through its worktrees, or a folder that is gone breaking the whole list;
  *  - any read reaching the network, asking anything, or writing to the repository (the index refreshed, a ref moved,
- *    a checkout), or reading more projects or branches than its caps;
+ *    a checkout), or reading more projects or branches than its caps, or fewer than Branch reviews' safety net (30 of
+ *    the newest 120);
+ *  - a branch's count of commits not on main missing; a project with nothing not named so (`quiet`), or one with no
+ *    git repository here not named so (`not_git`);
  *  - every read of the list running git again instead of the kept answer;
  *  - a row's diff missing its changes, or a branch's diff checking the branch out;
  *  - a branch hidden by a same-named branch's open PR on another repository, or listed beside its own repository's
@@ -22,13 +25,13 @@ import { join } from "node:path";
 import type { InboxProject, InboxPull } from "@plannotator/core/inbox-types";
 import type { ReviewGitRuntime } from "@plannotator/shared/review-core";
 import { BRANCH_DIFF_MAX_BYTES, BRANCH_GIT_TIMEOUT_MS } from "./inbox-branch-reports";
-import { BranchDiffTooLarge, createInboxLocalWork, localBranchInPull, LOCAL_WORK_BRANCHES_MAX, LOCAL_WORK_CACHE_MS, LOCAL_WORK_PROJECTS_MAX } from "./inbox-local-work";
+import { BranchDiffTooLarge, createInboxLocalWork, localBranchInPull, LOCAL_WORK_BRANCHES_MAX, LOCAL_WORK_CACHE_MS, LOCAL_WORK_PROJECTS_MAX, LOCAL_WORK_SCAN_MAX } from "./inbox-local-work";
 import { runtime } from "./git";
 
 const DAY = 86_400;
 
-function git(repo: string, args: string[], env: Record<string, string> = {}): string {
-  const result = spawnSync("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", ...args], { encoding: "utf-8", env: { ...process.env, ...env } });
+function git(repo: string, args: string[], env: Record<string, string> = {}, input?: string): string {
+  const result = spawnSync("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", ...args], { encoding: "utf-8", env: { ...process.env, ...env }, input });
   if (result.status !== 0) throw new Error(result.stderr || `git ${args.join(" ")} failed`);
   return result.stdout.trim();
 }
@@ -139,9 +142,12 @@ describe("the list", () => {
     const answer = await work.list();
     expect(answer.unread).toBe(0);
     expect(answer.items).toEqual([
-      { project_id: "prj_a", kind: "uncommitted", branch: "main", base: null, at: new Date((now - 600) * 1000).toISOString() },
-      { project_id: "prj_a", kind: "branch", branch: "ada/retry-jitter", base: "main", at: new Date((now - 2 * DAY) * 1000).toISOString() },
+      { project_id: "prj_a", kind: "uncommitted", branch: "main", base: null, at: new Date((now - 600) * 1000).toISOString(), ahead: null },
+      { project_id: "prj_a", kind: "branch", branch: "ada/retry-jitter", base: "main", at: new Date((now - 2 * DAY) * 1000).toISOString(), ahead: 1 },
     ]);
+    // It has work: not "nothing" for a list filtered to it.
+    expect(answer.quiet).toEqual([]);
+    expect(answer.not_git).toEqual([]);
     onlyGuardedReads(seen);
     for (const { options } of seen.commands) expect(options?.timeoutMs).toBeLessThanOrEqual(BRANCH_GIT_TIMEOUT_MS);
     expect(repoState(repo)).toEqual(before);
@@ -176,6 +182,29 @@ describe("the list", () => {
     expect(answer.items.filter((item) => item.kind === "uncommitted")).toEqual([expect.objectContaining({ project_id: "prj_tree", branch: "ada/retry-jitter" })]);
     // The folder that is gone: no git ran there at all.
     expect(seen.commands.some((command) => command.cwd === gone)).toBe(false);
+    // What a list filtered to one of them says: no git repository here for the gone folder and the plain one; the
+    // repository's two folders have work, so neither is "nothing".
+    expect([...(answer.not_git ?? [])].sort()).toEqual(["prj_gone", "prj_plain"]);
+    expect(answer.quiet).toEqual([]);
+  });
+
+  test("a project whose repository has nothing is named quiet; its count of commits not on main is on each branch", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const still = mkdtempSync(join(tmpdir(), "local-work-still-"));
+    git(still, ["init", "--quiet", "-b", "main"]);
+    commitAt(still, "base.txt", now - 30 * DAY);
+    git(still, ["branch", "same-as-main"]);
+    const busy = mkdtempSync(join(tmpdir(), "local-work-busy-"));
+    git(busy, ["init", "--quiet", "-b", "main"]);
+    commitAt(busy, "base.txt", now - 30 * DAY);
+    git(busy, ["checkout", "--quiet", "-b", "ada/three"]);
+    for (const [i, at] of [now - 3 * DAY, now - 2 * DAY, now - DAY].entries()) commitAt(busy, `three-${i}.txt`, at);
+    git(busy, ["checkout", "--quiet", "main"]);
+    const work = createInboxLocalWork({ runtime, projects: () => [project("prj_still", still), project("prj_busy", busy)], skip: () => false, now: () => now * 1000 });
+    const answer = await work.list();
+    expect(answer.quiet).toEqual(["prj_still"]);
+    expect(answer.not_git).toEqual([]);
+    expect(answer.items).toEqual([expect.objectContaining({ project_id: "prj_busy", branch: "ada/three", ahead: 3 })]);
   });
 
   test("a folder whose git can't be read in time counts as unread, and the others still list", async () => {
@@ -219,6 +248,27 @@ describe("the list", () => {
     await work.list();
     expect(seen.commands.length).toBeGreaterThan(ran);
     expect(asked).toBe(2);
+  });
+
+  test("caps as Branch reviews' safety net had: 30 branches listed, from the newest 120 looked at", async () => {
+    expect(LOCAL_WORK_BRANCHES_MAX).toBe(30);
+    expect(LOCAL_WORK_SCAN_MAX).toBe(120);
+    const now = Math.floor(Date.now() / 1000);
+    const repo = mkdtempSync(join(tmpdir(), "local-work-scan-"));
+    git(repo, ["init", "--quiet", "-b", "main"]);
+    commitAt(repo, "base.txt", now - 5 * DAY);
+    // Charlie's branch with work of its own, older than main's next commit...
+    branchAt(repo, "charlie/older-work", now - 3 * DAY);
+    commitAt(repo, "main-later.txt", now - DAY);
+    // ...and newer branches with nothing of their own (at main's tip): the scan looks at the newest first.
+    const empties = (count: number) => git(repo, ["update-ref", "--stdin"], {}, Array.from({ length: count }, (_, i) => `create refs/heads/empty-${i} main\n`).join(""));
+    const listed = async () => (await createInboxLocalWork({ runtime, projects: () => [project("prj_scan", repo)], skip: () => false, now: () => now * 1000 }).list()).items.map((item) => item.branch);
+    empties(LOCAL_WORK_SCAN_MAX - 1);
+    // 119 newer (main itself is never looked at): Charlie's is the 120th.
+    expect(await listed()).toEqual(["charlie/older-work"]);
+    git(repo, ["update-ref", "refs/heads/empty-extra", "main"]);
+    // 120 newer: past the scan.
+    expect(await listed()).toEqual([]);
   });
 
   test("two reads at once share one read", async () => {
@@ -285,7 +335,7 @@ describe("a row's diff", () => {
     const seen = watched();
     const work = createInboxLocalWork({ runtime: seen.runtime, projects: () => [], skip: () => false });
     const answer = await work.diff(project("prj_a", repo), "ada/retry-jitter");
-    expect(answer).toMatchObject({ project_id: "prj_a", kind: "branch", branch: "ada/retry-jitter", base: "main" });
+    expect(answer).toMatchObject({ project_id: "prj_a", kind: "branch", branch: "ada/retry-jitter", base: "main", ahead: 1 });
     expect(answer!.patch).toContain("+++ b/ada-retry-jitter.txt");
     expect(answer!.patch).not.toContain("bob-has-a-pr.txt");
     onlyGuardedReads(seen);

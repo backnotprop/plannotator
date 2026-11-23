@@ -102,7 +102,8 @@ export function LocalDiffPane({ open, projectName, phone, stacked, onClose, onRe
       </div>
       <div className="ib-pr-meta ib-local-meta" data-local-facts="">
         {projectName && <span dir="auto">{projectName}</span>}
-        {diff?.kind === 'branch' && <span>against {diff.base}</span>}
+        {/* A branch: its commits not on the default branch (Branch reviews' words), else what its diff is against. */}
+        {diff?.kind === 'branch' && <span data-local-ahead="">{typeof diff.ahead === 'number' && diff.ahead > 0 ? `${plural(diff.ahead, 'commit')} not on ${diff.base}` : `against ${diff.base}`}</span>}
         {size && (
           <span>
             {plural(size.files, 'file')} <span className="ib-add">+{formatCount(size.additions)}</span> <span className="ib-del">−{formatCount(size.deletions)}</span>

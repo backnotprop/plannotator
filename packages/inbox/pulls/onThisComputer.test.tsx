@@ -7,7 +7,10 @@
  *    a diff of other work than the row's;
  *  - the diff's Review with an agent starting anything itself instead of opening New review on that same work;
  *  - Back losing the open group;
- *  - Branch reviews' old "Branches nobody reported" drawn beside it (the same branches twice).
+ *  - Branch reviews' old "Branches nobody reported" drawn beside it (the same branches twice);
+ *  - what that old list said lost: a branch's commits not on main (for a screen reader on the row, and in its diff's
+ *    facts), branches past the first few with no way to see them (the Agents view's "N more"), and "nothing here"
+ *    for a list filtered to one project (its words), or a "nothing" made up for a project that was not read.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -42,7 +45,7 @@ const LOCAL: InboxLocalWorkAnswer = {
   unread: 0,
   items: [
     { project_id: 'prj_plannotator', kind: 'uncommitted', branch: 'main', base: null, at: ago(3 * 60_000) },
-    { project_id: 'prj_plannotator', kind: 'branch', branch: 'fix/guide-global-comment-keep-words', base: 'main', at: ago(12 * 60_000) },
+    { project_id: 'prj_plannotator', kind: 'branch', branch: 'fix/guide-global-comment-keep-words', base: 'main', at: ago(12 * 60_000), ahead: 3 },
     { project_id: 'prj_spaces', kind: 'branch', branch: 'feat/spaces-share-link', base: 'main', at: ago(2 * 3_600_000) },
   ],
 };
@@ -149,6 +152,13 @@ test.skipIf(!hasDom)('the group is at the foot of the whole list, folded, with i
     ['feat/spaces-share-link', 'spaces-site', '2h'],
   ]);
   expect(rows().map((row) => row.getAttribute('data-local-kind'))).toEqual(['uncommitted', 'branch', 'branch']);
+  // A branch's commits not on main, in the old list's words: heard on its row (drawn where it fits, inbox.css), and
+  // nothing for a row the answer gave no count (an older Inbox).
+  const said = (row: HTMLElement) => [...row.querySelectorAll('.ib-sr')].map((el) => el.textContent).join('');
+  expect(said(rows()[1]!)).toContain('3 commits not on main');
+  expect(rows()[1]!.querySelector('[data-local-ahead]')?.textContent).toBe('3 commits not on main');
+  expect(rows()[2]!.querySelector('[data-local-ahead]')).toBeNull();
+  expect(said(rows()[2]!)).not.toContain('not on');
   // Nothing but the list was asked for: no diff until a click.
   expect(seen.some((r) => r.url.includes('/reviews/local/diff'))).toBe(false);
   // Its fold is kept with the list's others, and comes back open.
@@ -172,7 +182,7 @@ test.skipIf(!hasDom)("a project filter keeps that project's rows only, and the o
 });
 
 test.skipIf(!hasDom)("a branch row opens its diff beside the list: that branch's whole diff, read only, nothing sent; Back keeps the group open", async () => {
-  const seen = fetches({ '/reviews/local/diff': { serverSession: 's', project_id: 'prj_plannotator', kind: 'branch', branch: 'fix/guide-global-comment-keep-words', base: 'main', patch: PATCH }, '/reviews/local': LOCAL });
+  const seen = fetches({ '/reviews/local/diff': { serverSession: 's', project_id: 'prj_plannotator', kind: 'branch', branch: 'fix/guide-global-comment-keep-words', base: 'main', patch: PATCH, ahead: 1 }, '/reviews/local': LOCAL });
   await mount(page());
   await act(async () => toggle().click());
   await act(async () => rows()[1]!.click());
@@ -184,7 +194,9 @@ test.skipIf(!hasDom)("a branch row opens its diff beside the list: that branch's
   const pane = document.querySelector('[data-local-diff]');
   expect(pane?.getAttribute('data-local-diff')).toBe('branch');
   expect(document.querySelector('[data-local-title]')?.textContent).toBe('fix/guide-global-comment-keep-words');
-  expect(document.querySelector('[data-local-facts]')?.textContent).toContain('against main');
+  // Its facts: its commits not on main (the old list's words) in place of "against main".
+  expect(document.querySelector('[data-local-facts]')?.textContent).toContain('1 commit not on main');
+  expect(document.querySelector('[data-local-facts]')?.textContent).not.toContain('against main');
   expect(seen.filter((r) => r.url.includes('/reviews/local/diff'))).toEqual([{ url: '/api/inbox/reviews/local/diff?project=prj_plannotator&branch=fix%2Fguide-global-comment-keep-words', method: 'GET' }]);
   expect(drawn.at(-1)).toEqual({ patch: PATCH, title: 'fix/guide-global-comment-keep-words' });
   // The open row is the list's selection, and nothing went anywhere but reads.
@@ -230,4 +242,47 @@ test.skipIf(!hasDom)('an answer without rows (an older Inbox) draws no group, an
   expect(group()).toBeNull();
   // The list's own view is drawn: the group's answer took nothing down.
   expect(document.querySelector('[data-pulls-empty="nothing"]')).not.toBeNull();
+});
+
+test.skipIf(!hasDom)('past five rows, the Agents view\'s "N more" shows the rest, focus on the first it shows; an open row past the fold shows', async () => {
+  const many: InboxLocalWorkAnswer = {
+    unread: 0,
+    items: Array.from({ length: 8 }, (_, i) => ({ project_id: 'prj_plannotator', kind: 'branch' as const, branch: `bob/spike-${i}`, base: 'main', at: ago((i + 1) * 60_000), ahead: 1 })),
+  };
+  fetches({ '/reviews/local': many });
+  await mount(page());
+  await act(async () => toggle().click());
+  expect(toggle().textContent).toBe('On this computer 8');
+  expect(rows().map((row) => row.getAttribute('data-local-row'))).toEqual(Array.from({ length: 5 }, (_, i) => `prj_plannotator:bob/spike-${i}`));
+  const more = () => document.querySelector<HTMLButtonElement>('[data-local-more]');
+  expect(more()?.textContent).toBe('3 more');
+  expect(more()?.classList.contains('ib-agmore')).toBe(true);
+  await act(async () => more()!.click());
+  expect(rows()).toHaveLength(8);
+  expect(more()).toBeNull();
+  expect(document.activeElement?.getAttribute('data-local-row')).toBe('prj_plannotator:bob/spike-5');
+  // Drawn again folded, the row open beside the list shows though it is past the fold.
+  await act(async () => root!.unmount());
+  root = null;
+  await mount(page({ local: { project: 'prj_plannotator', branch: 'bob/spike-7' } }));
+  expect(rows().map((row) => row.getAttribute('data-local-row'))).toEqual([...Array.from({ length: 5 }, (_, i) => `prj_plannotator:bob/spike-${i}`), 'prj_plannotator:bob/spike-7']);
+  expect(more()?.textContent).toBe('2 more');
+});
+
+test.skipIf(!hasDom)("one project with nothing here says so in the old list's words; the whole list, or a project not read, draws no group", async () => {
+  const answer: InboxLocalWorkAnswer = { unread: 0, items: [], quiet: ['prj_spaces'], not_git: ['prj_plannotator'] };
+  fetches({ '/reviews/local': answer });
+  const reviews = { ...REVIEWS, projects: { 'github.com/charlie-dunn/spaces-site': ['prj_spaces'], 'github.com/charlie-dunn/plannotator': ['prj_plannotator'] } };
+  await mount(page({ project: 'prj_spaces', reviews }));
+  expect(toggle().textContent?.trim()).toBe('On this computer');
+  await act(async () => toggle().click());
+  expect(document.querySelector('[data-local-none]')?.textContent).toBe('No other branch had a commit in the last 14 days.');
+  await render(page({ project: 'prj_plannotator', reviews }));
+  expect(document.querySelector('[data-local-none]')?.textContent).toBe("This project's folder isn't a git repository on this computer.");
+  // No filter: nothing to say for every project at once, no group.
+  await render(page({ reviews }));
+  expect(group()).toBeNull();
+  // A project the answer did not read (past the cap, or its git unread): not "nothing".
+  await render(page({ project: 'prj_other', reviews }));
+  expect(group()).toBeNull();
 });
