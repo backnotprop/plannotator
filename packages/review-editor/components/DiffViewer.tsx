@@ -1,4 +1,5 @@
 import { revealFirstChange } from '../utils/revealFirstChange';
+import { MarkdownPreviewFailed } from './MarkdownPreviewFailed';
 import { EXPAND_COLOUR_WAIT_MS, MAX_LINE_DIFF_LENGTH } from '../utils/diffChromeMetrics';
 import React, { useMemo, useRef, useEffect, useLayoutEffect, useCallback, useState } from 'react';
 import { FileDiff, type DiffLineAnnotation } from '@pierre/diffs/react';
@@ -336,14 +337,8 @@ const MarkdownPreviewPending: React.FC = () => (
   </div>
 );
 
-/** The preview's chunk could not load (`LazyBlockBoundary`): the same box, saying so. */
-export const MarkdownPreviewFailed: React.FC<{ notice: React.ReactNode }> = ({ notice }) => (
-  <div className="min-h-full px-4 py-4 sm:px-6" data-markdown-preview="" data-markdown-preview-view="failed">
-    <div className="mx-auto max-w-3xl rounded-md border border-border/60 bg-muted/20 p-4 [&>[role=status]]:mb-0">
-      {notice}
-    </div>
-  </div>
-);
+// The preview's chunk could not load: its own file, so a host without this view (the Inbox's reader) draws it too.
+export { MarkdownPreviewFailed };
 
 export const DiffViewer: React.FC<DiffViewerProps> = ({
   hostLineNotes = NO_HOST_LINE_NOTES,

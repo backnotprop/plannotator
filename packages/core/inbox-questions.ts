@@ -63,6 +63,7 @@ import { INBOX_ROW_WAITS_MAX, INBOX_ROW_WAIT_ENTRY_MAX, INBOX_ROW_WAIT_HOLDS_MAX
 import type {
   InboxRowWait,
   InboxQuestionContract,
+  InboxQuestionScenarios,
   InboxQuestion,
   InboxQuestionFacts,
   InboxQuestionRecord,
@@ -222,8 +223,29 @@ function prototypeFact(prototype: { target: string; label?: string }): { target:
   return { target: prototype.target, ...(prototype.label ? { label: prototype.label } : {}) };
 }
 
-function contractFacts(parsed: Pick<ParsedQuestion, "stakes" | "shows" | "why" | "reversible" | "prototype">): InboxQuestionContract {
+/** A scenario table as stored and served: a deep copy, absent when malformed (a hand-edited record: a
+ *  missing list, a `null` column, row or cell, a word that is not a string). Never throws. */
+function scenariosFact(table: InboxQuestionScenarios | undefined): InboxQuestionScenarios | undefined {
+  const str = (v: unknown): v is string => typeof v === "string";
+  const obj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
+  if (!obj(table) || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return undefined;
+  const { columns, rows } = table as { columns: unknown[]; rows: unknown[] };
+  if (!columns.every((c) => obj(c) && str(c.choice) && str(c.header))) return undefined;
+  const cellOk = (c: unknown) => obj(c) && str(c.verdict) && (c.detail === undefined || str(c.detail));
+  if (!rows.every((r) => obj(r) && str(r.situation) && Array.isArray(r.cells) && r.cells.every(cellOk))) return undefined;
   return {
+    columns: table.columns.map((c) => ({ choice: c.choice, header: c.header })),
+    rows: table.rows.map((r) => ({
+      situation: r.situation,
+      cells: r.cells.map((cell) => ({ verdict: cell.verdict, ...(cell.detail ? { detail: cell.detail } : {}) })),
+    })),
+  };
+}
+
+function contractFacts(parsed: Pick<ParsedQuestion, "stakes" | "shows" | "why" | "reversible" | "prototype" | "scenarios">): InboxQuestionContract {
+  const scenarios = scenariosFact(parsed.scenarios);
+  return {
+    ...(scenarios ? { scenarios } : {}),
     ...(parsed.prototype ? { prototype: prototypeFact(parsed.prototype) } : {}),
     ...(parsed.stakes ? { stakes: parsed.stakes } : {}),
     ...(parsed.shows ? { shows: { kind: parsed.shows.kind, label: parsed.shows.label, src: parsed.shows.src } } : {}),
@@ -240,6 +262,7 @@ function wireContract(facts: InboxQuestionContract): InboxQuestionContract {
     ...(typeof facts.why === "string" && facts.why ? { why: facts.why } : {}),
     ...(facts.reversible ? { reversible: { value: false as const, why: facts.reversible.why ?? null } } : {}),
     ...(facts.prototype && typeof facts.prototype.target === "string" ? { prototype: prototypeFact(facts.prototype) } : {}),
+    ...(scenariosFact(facts.scenarios) ? { scenarios: scenariosFact(facts.scenarios)! } : {}),
   };
 }
 

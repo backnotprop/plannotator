@@ -37,8 +37,8 @@ export interface ImagesWorld {
   url: string;
   thread: string;
   message: string;
-  /** The guided review of the rename alone. */
-  renameThread: string;
+  /** The guided review of the rename alone (the images world's; the Markdown world has none). */
+  renameThread?: string;
   agent: SimAgent;
 }
 
@@ -63,8 +63,8 @@ const chunk = (type: string, data: Buffer) => {
   return Buffer.concat([head, body, tail]);
 };
 
-type Rgb = [number, number, number];
-interface Box {
+export type Rgb = [number, number, number];
+export interface Box {
   x: number;
   y: number;
   w: number;
@@ -73,7 +73,7 @@ interface Box {
 }
 
 /** A `width` × `height` picture: `background`, then each box over it. */
-function picture(width: number, height: number, background: Rgb, boxes: Box[]): Buffer {
+export function picture(width: number, height: number, background: Rgb, boxes: Box[]): Buffer {
   const rows = Buffer.alloc((width * 3 + 1) * height);
   for (let y = 0; y < height; y++) {
     const row = y * (width * 3 + 1);
@@ -113,7 +113,7 @@ const LOGO = picture(120, 120, PAPER, [{ x: 20, y: 20, w: 80, h: 80, color: BLUE
 
 // --- The repository, the forge, the Inbox ------------------------------------------------------
 
-function git(project: string, ...args: string[]): string {
+export function git(project: string, ...args: string[]): string {
   const run = spawnSync('git', args, {
     cwd: project,
     encoding: 'utf8',
@@ -144,11 +144,11 @@ function change(parent: string): { project: string; patch: string; head: string;
 }
 
 /** The fake forge: signed in, one pull request asked of the person, its diff, its head and where it left main. */
-function writeForge(dir: string, patch: string, head: string, base: string): void {
+function writeForge(dir: string, patch: string, head: string, base: string, title: string): void {
   mkdirSync(dir, { recursive: true });
   const pull = {
     number: 815,
-    title: 'Refresh the dashboard pictures',
+    title,
     url: 'https://github.com/northwind/web-app/pull/815',
     state: 'OPEN',
     isDraft: false,
@@ -207,15 +207,30 @@ const GUIDE = {
 };
 
 export async function startWorld(browser: Browser): Promise<ImagesWorld> {
+  return startPullWorld(browser, 'plannotator-review-images-e2e-', change, GUIDE, 'Three pictures to look at.', sendRenameGuide);
+}
+
+/**
+ * A scratch Inbox whose one pull request (#815, its title the guide's) is `made`'s change, with an agent's guided
+ * review of the same diff (shared by inbox-review-markdown-world.ts).
+ */
+export async function startPullWorld(
+  browser: Browser,
+  prefix: string,
+  made: (parent: string) => { project: string; patch: string; head: string; base: string },
+  guide: { title: string; intent: string; sections: unknown[] },
+  body: string,
+  next?: (agent: SimAgent, project: string) => Promise<Partial<ImagesWorld>>,
+): Promise<ImagesWorld> {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
-  const root = inboxScratch('plannotator-review-images-e2e-');
+  const root = inboxScratch(prefix);
   const home = join(root, 'home');
   const dataDir = join(root, 'data');
   mkdirSync(home, { recursive: true });
   markTourDecided(dataDir);
-  const { project, patch, head, base } = change(join(root, 'src'));
+  const { project, patch, head, base } = made(join(root, 'src'));
   const forge = join(root, 'forge');
-  writeForge(forge, patch, head, base);
+  writeForge(forge, patch, head, base, guide.title);
   for (const dir of ['claude', 'codex', 'xdg']) mkdirSync(join(root, dir), { recursive: true });
   const env: Record<string, string> = {
     PATH: `${forge}:${process.env.PATH ?? ''}`,
@@ -241,8 +256,12 @@ export async function startWorld(browser: Browser): Promise<ImagesWorld> {
   expect(on.status()).toBe(200);
   await context.close();
   const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
-  const review = await agent.submitGuide({ project_path: project, subject: 'Refresh the dashboard pictures', guide: GUIDE, patch, body: 'Three pictures to look at.', review: true } as never);
-  // The next commit only moves the logo; its guide records that commit as the one it was written at.
+  const review = await agent.submitGuide({ project_path: project, subject: guide.title, guide, patch, body, review: true } as never);
+  return { url, thread: String(review.thread_id), message: String(review.message_id), agent, ...(next ? await next(agent, project) : {}) };
+}
+
+/** The images world's second guided review: the next commit only moves the logo, and its guide records that commit as the one it was written at. */
+async function sendRenameGuide(agent: SimAgent, project: string): Promise<Partial<ImagesWorld>> {
   mkdirSync(join(project, 'brand'), { recursive: true });
   git(project, 'mv', RENAMED_FROM, RENAMED);
   git(project, 'commit', '-q', '-m', 'move the logo');
@@ -250,7 +269,7 @@ export async function startWorld(browser: Browser): Promise<ImagesWorld> {
   expect(renamePatch).toContain('similarity index 100%');
   const renameGuide = { title: 'Move the logo', intent: 'The logo moves to the brand folder.', sections: [{ title: 'The logo', overview: 'Same picture, new folder.', diffs: [{ file: RENAMED, summary: 'Moved.' }] }] };
   const rename = await agent.submitGuide({ project_path: project, subject: 'Move the logo', guide: renameGuide, patch: renamePatch, body: 'One picture moves.', review: true } as never);
-  return { url, thread: String(review.thread_id), message: String(review.message_id), renameThread: String(rename.thread_id), agent };
+  return { renameThread: String(rename.thread_id) };
 }
 
 export async function stopWorld(world: ImagesWorld | undefined): Promise<void> {
@@ -267,11 +286,11 @@ export async function windowAt(browser: Browser, width: number, height: number, 
   return { context, page: await context.newPage() };
 }
 
-export async function openPull(world: ImagesWorld, page: Page): Promise<void> {
+export async function openPull(world: ImagesWorld, page: Page, shown = MODIFIED): Promise<void> {
   const key = encodeURIComponent(PULL_KEY);
   await page.goto(`${world.url}#pulls&stack=${key}&layer=${key}&scope=layer`);
   await clearSidebarPeek(page);
-  await expect(page.locator(`[data-guide-file-shell="${MODIFIED}"]`)).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(`[data-guide-file-shell="${shown}"]`)).toBeVisible({ timeout: 30_000 });
 }
 
 export async function openReview(world: ImagesWorld, page: Page, thread = world.thread, file = MODIFIED): Promise<void> {

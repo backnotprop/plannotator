@@ -36,6 +36,11 @@ export interface GuideReaderComments {
 export interface GuideReaderImages {
   snapshotId: string;
   fetchImpl: typeof fetch;
+  /**
+   * Where a rendered Markdown file's pictures are read (review parity B3): code review's
+   * `/api/review-markdown-image?…` turned into the host's own route (review-editor's `MarkdownFilePreview` `imageUrl`).
+   */
+  markdownImageUrl: (url: string) => string;
 }
 
 export interface GuideReaderProps {
