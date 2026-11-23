@@ -149,7 +149,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
     late: waiting?.late,
     phone,
     inCard: fullComposer !== null,
-    focus: () => textRef.current?.focus({ preventScroll: true }),
+    field: () => textRef.current,
     text: { get value() { return textNow.current; }, set: setText },
   });
   /** The row's words as a save took them: the file closing before the save answers (and the row clears) keeps no draft of them. */
@@ -271,15 +271,19 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
     return next;
   }, [pinned, current, replaceFrame, audio]);
 
-  /** The row starts over; its added files go too unless `keepFiles` (they did not ride the comment just saved). */
+  /**
+   * The row starts over; its added files go too unless `keepFiles` (they did not ride the comment just saved): then
+   * a phone's row stays open with them, as the row beside the thread does, so no file waits out of sight.
+   */
   const reset = (keepFiles = false) => {
     setText('');
     setPinned(null);
     setMarkup(null);
     setKept(null);
     replaceFrame(null);
+    if (keepFiles) return;
     setComposing(false);
-    if (!keepFiles) files.clear();
+    files.clear();
   };
 
   const shownTime = pinned ?? current;
@@ -314,7 +318,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
     }
     setMarkup(null);
     // Files still uploading did not go with the words: they stay in the row for the next comment.
-    if (words) reset(added.length === 0);
+    if (words) reset(added.length === 0 && (files.uploading || files.ready > 0));
     else {
       setText('');
       setKept({ id, image, time });

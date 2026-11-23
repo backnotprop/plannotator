@@ -233,7 +233,7 @@ export function ImageAttachmentView({
     late: waiting?.late,
     phone,
     inCard: composer !== null,
-    focus: () => textRef.current?.focus({ preventScroll: true }),
+    field: () => textRef.current,
     text: { get value() { return textNow.current; }, set: setText },
   });
   const wide = natural !== null && natural.width > natural.height * WIDE_IMAGE_RATIO;

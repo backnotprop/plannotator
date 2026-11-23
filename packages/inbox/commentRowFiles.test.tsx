@@ -515,3 +515,172 @@ test.skipIf(!hasDom)('closing the file while a file uploads: the upload goes on,
   await settle();
   expect(tiles().map((t) => [t.getAttribute('data-compose-file-name'), t.getAttribute('data-compose-file')])).toEqual([['late.png', 'done']]);
 });
+
+// ── The second review's cases (2026-11-22): an upload closed twice, a pin card's files, Put back, a phone's ✓. ──
+
+test.skipIf(!hasDom)('closed, opened and closed again before an upload lands: it is still in the row when the file opens the third time', async () => {
+  await render(<Harness attachment={shot} />);
+  const open = holdUploads();
+  await choose(clipInput()!, [picture('late.png')]);
+  await act(async () => root?.unmount());
+  // Open again while it is still on its way: no tile yet, and closed again at once.
+  await render(<Harness attachment={shot} />);
+  expect(tiles()).toHaveLength(0);
+  await act(async () => root?.unmount());
+  root = null;
+  await open();
+  await render(<Harness attachment={shot} />);
+  await settle();
+  expect(tiles().map((t) => [t.getAttribute('data-compose-file-name'), t.getAttribute('data-compose-file')])).toEqual([['late.png', 'done']]);
+});
+
+/** A long paste of text alone on `target` (32 KB or more: the reply box's pasted text tile). */
+async function pasteWords(target: HTMLElement, words: string) {
+  const event = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'clipboardData', { value: { files: [], items: [{ kind: 'string', type: 'text/plain', getAsFile: () => null }], types: ['text/plain'], getData: (type: string) => (type === 'text/plain' ? words : '') } });
+  await act(async () => target.dispatchEvent(event));
+  await settle();
+}
+
+test.skipIf(!hasDom)('a pasted text put back goes into the comment’s field with the caret after it, and is said as in the reply box', async () => {
+  await render(<Harness attachment={shot} />);
+  const area = $<HTMLTextAreaElement>('[data-image-composer] textarea')!;
+  const LOG = `run 1: ok\n${'x'.repeat(33 * 1024)}`;
+  act(() => area.focus());
+  await pasteWords(area, LOG);
+  expect(tiles()).toHaveLength(1);
+  // Typed after the paste: the browser's undo no longer reaches it, only the tile does.
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+  await act(async () => {
+    const before = new Event('beforeinput', { bubbles: true, cancelable: true });
+    Object.defineProperty(before, 'inputType', { value: 'insertText' });
+    area.dispatchEvent(before);
+    setter.call(area, 'See:');
+    area.setSelectionRange(4, 4);
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const back = tiles()[0]!.querySelector<HTMLButtonElement>('[data-pasted-side]')!;
+  act(() => back.focus());
+  await act(async () => back.click());
+  await settle();
+  expect(tiles()).toHaveLength(0);
+  // Back where it was pasted (before the words typed since), the caret after it.
+  expect(area.value).toBe(`${LOG}See:`);
+  expect(document.activeElement === area).toBe(true);
+  expect(area.selectionStart).toBe(LOG.length);
+  expect(document.querySelector('[data-drag-live]')?.textContent).toBe('The pasted text is back in your reply.');
+});
+
+test.skipIf(!hasDom)('a phone’s film row: the ✓ with words while a file uploads keeps the row open with the file in it', async () => {
+  stub(HTMLMediaElement.prototype, 'pause', { value: () => {}, writable: true });
+  stub(HTMLVideoElement.prototype, 'videoWidth', { get: () => 1920 });
+  stub(HTMLVideoElement.prototype, 'videoHeight', { get: () => 1080 });
+  await render(<PhoneHarness attachment={film} />);
+  await act(async () => $<HTMLButtonElement>('[data-video-compose]')!.click());
+  await settle();
+  const open = holdUploads();
+  await choose(clipInput()!, [picture('cut.png')]);
+  await typeInto($<HTMLTextAreaElement>('[data-video-composer] textarea')!, 'The logo is clipped.');
+  await openAndDraw();
+  await press('Enter');
+  await settle();
+  expect(saved()).toHaveLength(1);
+  // Not closed with the file still waiting in it.
+  expect($('[data-video-composer]') !== null).toBe(true);
+  expect(states()).toEqual(['uploading']);
+  await open();
+  expect(states()).toEqual(['done']);
+  // With no file left in it, the ✓ with words closes the row as before.
+  await act(async () => tiles()[0]!.querySelector<HTMLButtonElement>('button')!.click());
+  await typeInto($<HTMLTextAreaElement>('[data-video-composer] textarea')!, 'And here.');
+  await openAndDraw();
+  await press('Enter');
+  await settle();
+  expect(saved()).toHaveLength(2);
+  expect($('[data-video-composer]') === null).toBe(true);
+});
+
+/** The pane as a phone draws it outside full screen (no full-screen composer: the film's row opens from "Comment at"). */
+function PhoneHarness({ attachment }: { attachment: InboxAttachmentState }) {
+  const [records, setRecords] = useState<InboxAnnotationRecord[]>([]);
+  const noop = () => {};
+  return (
+    <CommentFilesContext.Provider value={host_}>
+      <div className="pn-inbox">
+        <AttachmentPane
+          attachment={attachment}
+          attachments={[attachment]}
+          records={records}
+          agent="Claude Code"
+          projectName="api"
+          projectRoot="/work/api"
+          version="current"
+          onVersion={noop}
+          full={false}
+          phone
+          onToggleFull={noop}
+          focusId={null}
+          readOnly={false}
+          onSaved={(saved) => setRecords((now) => [...now.filter((r) => r.id !== saved.id), saved])}
+          onRemoved={(id) => setRecords((now) => now.filter((r) => r.id !== id))}
+          onOpenAt={noop}
+          onClose={noop}
+          strip={{ picks: 0, annotations: records.length, onWriteReply: noop }}
+          onToast={(toast) => toasts.push(toast)}
+        />
+      </div>
+    </CommentFilesContext.Provider>
+  );
+}
+
+// A phone page's pin card (HtmlPageComment.tsx), held by the hook as the pane holds it.
+const { useHtmlPageComment } = (hasDom ? await import('./components/HtmlPageComment') : {}) as typeof import('./components/HtmlPageComment');
+type PinCard = ReturnType<typeof import('./components/HtmlPageComment').useHtmlPageComment>;
+let pinCard: PinCard | null = null;
+function PinCardHarness() {
+  const viewer = { current: null };
+  pinCard = useHtmlPageComment({ enabled: true, fileKey: 'att_page:current', threadId: null, name: 'report.html', viewer, onSave: async () => true, covered: () => 0, onDone: () => {} });
+  return <div className="pn-inbox">{pinCard.card}</div>;
+}
+/** The uploads come from the provider above the pane, as the thread's. */
+function PinCardWorld() {
+  return (
+    <CommentFilesContext.Provider value={host_}>
+      <PinCardHarness />
+    </CommentFilesContext.Provider>
+  );
+}
+const pin = (id: string) => ({
+  annotation: { id, blockId: '', startOffset: 0, endOffset: 0, type: 'COMMENT', text: '', originalText: '412 ms', createdA: 1 } as never,
+  intent: 'compose' as const,
+  cancel: () => {},
+});
+const cardClip = () => $<HTMLInputElement>('[data-html-comment] input[type="file"][data-comment-attach]');
+const cardTiles = () => [...document.querySelectorAll<HTMLElement>('[data-html-comment] [data-comment-files] [data-compose-file]')];
+
+test.skipIf(!hasDom)('a phone page’s pin card: its files are kept with it as the file closes (alone too, and still uploading) and come back on its pin', async () => {
+  await render(<PinCardWorld />);
+  await act(async () => pinCard!.onHostDraft(pin('pin-1')));
+  await choose(cardClip()!, [picture('legend.png')]);
+  const open = holdUploads();
+  await choose(cardClip()!, [picture('late.png')]);
+  expect(cardTiles().map((t) => t.getAttribute('data-compose-file'))).toEqual(['done', 'uploading']);
+  // The file closes: no words, only files, and the card is kept.
+  const kept = pinCard!.kept();
+  expect(kept).not.toBeNull();
+  expect(kept!.files!.map((f) => f.name)).toEqual(['legend.png']);
+  expect(kept!.late).toHaveLength(1);
+  await act(async () => root?.unmount());
+  root = null;
+  await open();
+  // Opened again: the page hands the same pin back, and the card holds both files.
+  await render(<PinCardWorld />);
+  pinCard!.expect(kept!);
+  await act(async () => pinCard!.onHostDraft(pin('pin-1')));
+  await settle();
+  expect(cardTiles().map((t) => [t.getAttribute('data-compose-file-name'), t.getAttribute('data-compose-file')])).toEqual([
+    ['legend.png', 'done'],
+    ['late.png', 'done'],
+  ]);
+  expect($<HTMLButtonElement>('[data-html-comment-save]')!.disabled).toBe(false);
+});

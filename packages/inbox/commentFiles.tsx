@@ -110,6 +110,13 @@ export interface CommentFiles {
   kept: () => InboxUpload[];
   /** Uploads still on their way, for the row's draft as the file closes (they keep going: `late`). */
   flying: () => Promise<InboxUpload | null>[];
+  /**
+   * What the comment holds as it is kept for later (a phone's pin card as the file closes or steps): the finished
+   * uploads and those on their way, which keep going even when the comment is cleared next.
+   */
+  handOver: () => { files: InboxUpload[]; late: Promise<InboxUpload | null>[] };
+  /** A kept comment's files back in it: its finished uploads now, each still on its way as it lands. */
+  restore: (files: readonly InboxUpload[], late: readonly Promise<InboxUpload | null>[]) => void;
   /** A save carries these entries: the uploads they name are no draft's while it is on its way. The way back if it fails. */
   sending: (images: readonly ImageAttachment[] | undefined) => () => void;
   /** The comment was saved: its files go with it. */
@@ -129,13 +136,14 @@ function CommentDropTarget({ add }: { add: (list: FileList) => void }) {
  * A comment row's files. `initial`: the uploads its draft kept (the file closed and opened again). `phone`: the
  * paperclip's size and its picker (the photo library), as the reply box's. `inCard`: the row is full screen's Comment
  * tab, whose card takes the drop (the row draws `dropTarget`); beside the thread the row is its own drop target.
+ * `field`: the row's words field, where focus goes after a tile's × and a pasted text's Put back.
  */
 export function useCommentFiles({
   initial,
   late,
   phone = false,
   inCard = false,
-  focus,
+  field,
   text,
 }: {
   initial?: readonly InboxUpload[] | null;
@@ -143,7 +151,7 @@ export function useCommentFiles({
   late?: readonly Promise<InboxUpload | null>[] | null;
   phone?: boolean;
   inCard?: boolean;
-  focus?: () => void;
+  field?: () => HTMLTextAreaElement | null;
   /** The row's words: a paste of 32 KB or more becomes the reply box's pasted text tile, put back into them. */
   text?: ComposeFilesText;
 }): CommentFiles {
@@ -173,15 +181,34 @@ export function useCommentFiles({
     // As the reply box: a paste is said in a polite live region, and a long one is a pasted text tile.
     onPasted: (names) => announce(attachedAnnouncement(names)),
     ...(text ? { text } : {}),
+    // As the reply box: a pasted text put back is said (the caret is after it, in `field`).
+    onPutBack: () => announce('The pasted text is back in your reply.'),
     // The row goes (the file closed or stepped) while files upload: they keep going, for its draft (`late`).
     onUnmountUploads: () => {},
   });
-  const restore = files.restoreDraft;
+  const restoreDraft = files.restoreDraft;
+  /** The row is drawn: an upload still on its way joins it as it lands (gone, the row's draft has it: `flying`). */
+  const mounted = useRef(true);
+  /** Counts hand-overs: an upload handed to a kept comment lands there, not here. */
+  const handedOver = useRef(0);
+  const join = useCallback(
+    (promise: Promise<InboxUpload | null>) => {
+      // On its way still: closed again before it lands, the row's draft keeps it again.
+      flying.current.add(promise);
+      const at = handedOver.current;
+      void promise
+        .then((upload) => {
+          if (mounted.current && at === handedOver.current && upload) restoreDraft([upload], '', 'add');
+        })
+        .finally(() => flying.current.delete(promise));
+    },
+    [restoreDraft],
+  );
   useEffect(() => {
-    let live = true;
-    for (const promise of late ?? []) void promise.then((upload) => live && upload && restore([upload], '', 'add'));
+    mounted.current = true;
+    for (const promise of late ?? []) join(promise);
     return () => {
-      live = false;
+      mounted.current = false;
     };
     // Once, as the row mounts with its draft.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -198,11 +225,11 @@ export function useCommentFiles({
         <ComposeFileTiles
           // A finished tile says the name the agent gets (a second shot.png is stored as shot-2.png).
           files={files.files.map((file) => (file.upload && file.upload.name !== file.name ? { ...file, name: file.upload.name } : file))}
-          onPutBack={text ? (key) => void files.putBack(key) : undefined}
+          onPutBack={text ? (key) => void files.putBack(key, field?.() ?? null) : undefined}
           onRemove={(key) => {
             files.remove(key);
             // The × goes with its tile: focus stays in the comment, as in the reply box.
-            focus?.();
+            field?.()?.focus({ preventScroll: true });
           }}
         />
       </div>
@@ -210,6 +237,8 @@ export function useCommentFiles({
   const current = files.current;
   /** Uploads a save on its way carries (by id). */
   const inSave = useRef(new Set<string>());
+  /** The finished uploads not on their way in a save. */
+  const kept = () => current().flatMap((file) => (file.state === 'done' && file.upload && !inSave.current.has(file.upload.upload_id) ? [file.upload] : []));
   return {
     on,
     clip,
@@ -233,8 +262,22 @@ export function useCommentFiles({
     images: () => current().flatMap((file) => (file.state === 'done' && file.upload ? [commentImageOf(file.upload)] : [])),
     uploading: files.uploading,
     ready: files.uploaded.length,
-    kept: () => current().flatMap((file) => (file.state === 'done' && file.upload && !inSave.current.has(file.upload.upload_id) ? [file.upload] : [])),
+    kept,
     flying: () => [...flying.current],
+    handOver: () => {
+      const done = kept();
+      // Not stopped by the clear that follows: they land in the kept comment.
+      files.detach();
+      handedOver.current += 1;
+      const late = [...flying.current];
+      // Theirs now: never handed to the next comment kept here too.
+      flying.current.clear();
+      return { files: done, late };
+    },
+    restore: (done, waiting) => {
+      if (done.length > 0) restoreDraft(done, '', 'add');
+      for (const promise of waiting) join(promise);
+    },
     sending: (images) => {
       const ids = (images ?? []).map((image) => image.path.split('/')[0]!).filter((id) => current().some((file) => file.upload?.upload_id === id));
       for (const id of ids) inSave.current.add(id);

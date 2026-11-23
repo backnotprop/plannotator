@@ -11,7 +11,7 @@
  * `data-image-composer`, so the pane's Escape rungs treat it as they treat an
  * image's comment row. Words typed when the file closes wait as its draft
  * (`kept`), and come back on the same pin or words when it opens again
- * (`expectWords`, then the page's own draft).
+ * (`expect`, then the page's own draft); so do the files added to it.
  *
  * Focus lands in the field for a pin. A selection leaves it in the page, where
  * the person may still be dragging its handles; moving it would end them.
@@ -30,7 +30,7 @@ import { shortLabel } from '../attachments';
 import { composerMinimized, openComposerComment, setComposerMinimized, showComposerComment } from '../fullScreenComposer';
 import { Icon } from '../icons';
 import { isWindowPinched } from '../windowPinch';
-import { useRowDraft } from '../fileCommentDrafts';
+import { useRowDraft, type CommentDraft } from '../fileCommentDrafts';
 import { InboxComposerField, type InboxComposerTags } from './ComposerField';
 import { FullScreenCommentBin } from './FullScreenComposer';
 import { TagNotes } from './TagPicker';
@@ -65,10 +65,10 @@ export interface HtmlPageComment {
   card: ReactNode | null;
   /** For the composer's minimize: a comment with no words yet is dropped. */
   onMinimized: () => void;
-  /** The comment being written, as the file closes (its words as `text`, what it is on), or null: none has words. */
-  kept: () => Annotation | null;
-  /** The next draft the page hands over (a kept comment put back on its pin or words) opens holding these words. */
-  expectWords: (text: string) => void;
+  /** The comment being written, as the file closes (its words as `text`, what it is on, its files), or null: it holds none. */
+  kept: () => CommentDraft | null;
+  /** The next draft the page hands over (a kept comment put back on its pin or words) opens holding its words and files. */
+  expect: (draft: CommentDraft) => void;
 }
 
 export function useHtmlPageComment({ enabled, fileKey, threadId, name, viewer, tags, onSave, covered, onDone }: HtmlPageCommentOptions): HtmlPageComment {
@@ -84,17 +84,20 @@ export function useHtmlPageComment({ enabled, fileKey, threadId, name, viewer, t
   const restore = useRef<(() => void) | null>(null);
   /** Parent or Child was pressed: the next draft is the same comment, focus stays where it is. */
   const stepping = useRef(false);
-  /** Words a kept comment had, for the draft the page hands over next (`expectWords`). */
-  const expected = useRef<string | null>(null);
+  /** The words and files a kept comment had, for the draft the page hands over next (`expect`). */
+  const expected = useRef<CommentDraft | null>(null);
   /** Pictures and files added to the comment (a phone's card: the paperclip and a paste). They go with its words. */
   const fieldRef = useRef<HTMLTextAreaElement | null>(null);
   const files = useCommentFiles({
     phone: true,
     inCard: true,
-    focus: () => fieldRef.current?.focus({ preventScroll: true }),
+    field: () => fieldRef.current,
     text: { get value() { return wordsRef.current; }, set: setWords },
   });
   const clearFiles = files.clear;
+  /** The files as drawn now, for the callbacks below (which keep one identity). */
+  const filesNow = useRef(files);
+  filesNow.current = files;
   /** Files wait in the card: as words do, they keep it open. */
   const holdsFiles = useRef(false);
   holdsFiles.current = files.ready > 0 || files.uploading;
@@ -120,21 +123,26 @@ export function useHtmlPageComment({ enabled, fileKey, threadId, name, viewer, t
         else restore.current = openComposerComment(threadId);
       }
       setDraft(next);
-      if (expected.current !== null) {
-        setWords(expected.current);
+      const back = expected.current;
+      if (back !== null) {
+        setWords(back.annotation.text ?? '');
+        filesNow.current.restore(back.files ?? [], back.late ?? []);
         expected.current = null;
       }
     },
     [threadId, drop],
   );
-  const kept = useCallback((): Annotation | null => {
+  const kept = useCallback((): CommentDraft | null => {
     const held = draftRef.current;
     const text = wordsRef.current;
-    if (!held || text.trim() === '') return null;
-    return { ...held.annotation, text, ...(mentions.current.length > 0 ? { mentions: mentions.current } : {}) };
+    if (!held) return null;
+    // Its files go with its words (uploads still on their way land in the draft), or alone.
+    const added = filesNow.current.handOver();
+    if (text.trim() === '' && added.files.length === 0 && added.late.length === 0) return null;
+    return { kind: 'comment', annotation: { ...held.annotation, text, ...(mentions.current.length > 0 ? { mentions: mentions.current } : {}) }, files: added.files, late: added.late };
   }, []);
-  const expectWords = useCallback((text: string) => {
-    expected.current = text;
+  const expect = useCallback((draft: CommentDraft) => {
+    expected.current = draft;
   }, []);
 
   const onMinimized = useCallback(() => {
@@ -212,7 +220,7 @@ export function useHtmlPageComment({ enabled, fileKey, threadId, name, viewer, t
     />
   ) : null;
 
-  return { open: draft !== null, onHostDraft, card, onMinimized, kept, expectWords };
+  return { open: draft !== null, onHostDraft, card, onMinimized, kept, expect };
 }
 
 function HtmlCommentCard({
@@ -356,7 +364,7 @@ export function HtmlPageCommentRow({
     late: waiting?.late ?? parked?.late,
     phone: usePhone(),
     inCard: true,
-    focus: () => fieldRef.current?.focus({ preventScroll: true }),
+    field: () => fieldRef.current,
     text: { get value() { return wordsRef.current; }, set: setWords },
   });
   const filesRef = useRef(files);

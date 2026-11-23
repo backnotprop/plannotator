@@ -74,7 +74,7 @@ import { ReuseButton } from '../reuse';
 import { FullScreenComposer, FullScreenComposerContext, type FullScreenComposerValue } from './FullScreenComposer';
 import { forgetComposerOpened, useComposerFolded } from '../fullScreenComposer';
 import { HtmlPageCommentRow, useHtmlPageComment, type PageCommentParking } from './HtmlPageComment';
-import { anchorKeyOf, draftHasWords, FileDraftContext, fileDraftKey, keepFileDrafts, peekFileDrafts, takeFileDrafts, type FileCommentDraft, type FileDraftSeat, type RowDraft } from '../fileCommentDrafts';
+import { anchorKeyOf, draftHasWords, FileDraftContext, fileDraftKey, keepFileDrafts, peekFileDrafts, takeFileDrafts, type CommentDraft, type FileCommentDraft, type FileDraftSeat, type RowDraft } from '../fileCommentDrafts';
 import { releaseWindowZoom, useWindowPinched } from '../windowPinch';
 import { FilePeek, peekSheetHost } from './AttachmentStepper';
 import { CommentCount, EarlierSection, commentsLabel } from './EarlierSection';
@@ -1762,11 +1762,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       if (row && draftHasWords(row)) taken.push(row);
     }
     const parked = pageParking.current; // An HTML page's row words and files, its row off screen (out of full screen): kept as its draft, as if drawn.
-    const parkedRow: RowDraft | null = parked?.key === draftKeyRef.current ? { kind: 'row', text: parked.text, markup: null, files: parked.files } : null;
+    const parkedRow: RowDraft | null = parked?.key === draftKeyRef.current ? { kind: 'row', text: parked.text, markup: null, files: parked.files, late: parked.late } : null;
     if (parkedRow && draftHasWords(parkedRow)) taken.push(parkedRow);
     pageParking.current = null;
-    const page = htmlComment.kept() ?? null;
-    if (page) taken.push({ kind: 'comment', annotation: page });
+    const page = htmlComment.kept(); // A phone page's pin card: its words and files.
+    if (page) taken.push(page);
     const caught: FileCommentDraft[] = [];
     capturing.current = caught;
     try {
@@ -1881,7 +1881,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     const read = tearing && !taken.some((d) => d.kind !== 'row') ? readComposers().filter(unsaved) : [];
     // A kept comment not back in its box yet (the pane was still moving, or the text still loading) waits on, and so
     // does anything put back whose box has not shown yet.
-    const notShown: FileCommentDraft[] = reopenNext.current ? [{ kind: 'comment', annotation: reopenNext.current }] : [];
+    const notShown: FileCommentDraft[] = reopenNext.current ? [reopenNext.current] : [];
     reopenNext.current = null;
     for (const entry of reopening.current) if (!entry.seen()) notShown.push(entry.draft);
     reopening.current = [];
@@ -1914,7 +1914,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   /** A kept edit of a comment in the panel, put back in its card's edit box. */
   const [panelReopenEdit, setPanelReopenEdit] = useState<{ id: string; text: string } | null>(null);
   /** A kept comment waiting for the viewer to be drawn (the document loads after the pane mounts). */
-  const reopenNext = useRef<Annotation | null>(null);
+  const reopenNext = useRef<CommentDraft | null>(null);
   /** A comment box waiting for the pane to stop moving before it opens (`whenStill`): its way to stop waiting. */
   const settling = useRef<(() => void) | null>(null);
   /** Open a kept comment's box once the pane is still, so it opens where a click on the same words opens one. */
@@ -1961,7 +1961,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         rest.push(draft);
         continue;
       }
-      reopenNext.current = draft.annotation;
+      reopenNext.current = draft;
     }
     waiting.current = [...waiting.current, ...rest];
     // Still on the file: its viewer is drawn. A file just opened waits for its text (the effect on `view` below).
@@ -1973,11 +1973,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     afterSettle(() => reopenNowRef.current());
   };
   const reopenNow = () => {
-    const annotation = reopenNext.current;
+    const draft = reopenNext.current;
     // The file's own text, not the last file's (the view is reset just after a step).
-    if (!annotation || !view || view.attachment.id !== attachment.id) return;
+    if (!draft || !view || view.attachment.id !== attachment.id) return;
     reopenNext.current = null;
-    const draft: FileCommentDraft = { kind: 'comment', annotation };
+    const { annotation } = draft;
     const key = draftKeyRef.current;
     let missed = false;
     const missing = () => {
@@ -2002,11 +2002,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     }
     const viewer = viewerRef.current;
     if (!viewer) {
-      reopenNext.current = annotation;
+      reopenNext.current = draft;
       return;
     }
     trackReopen(draft, () => popoverShown() || (annotation.diagramAnchor != null && sectionRef.current?.querySelector('[data-diagram-composer] textarea') != null) || htmlComment.open);
-    if (phoneHtml && hasComposer) htmlComment.expectWords(annotation.text ?? '');
+    if (phoneHtml && hasComposer) htmlComment.expect(draft);
     if (!viewer.reopenComment?.(annotation, missing)) missing();
   };
   const reopenInViewerRef = useRef(reopenInViewer);
