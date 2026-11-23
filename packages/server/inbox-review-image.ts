@@ -62,8 +62,15 @@ export function refusedAsked(params: URLSearchParams, pathParam = "path"): Revie
   return null;
 }
 
-/** One side of a changed image in a pull request's diff (`/api/inbox/pulls/review-image`). */
-export async function pullReviewImage(options: {
+/** Where a request's sides come from: the patch it is checked against, its snapshot rule and its side reader. */
+export interface ImageSource {
+  available: boolean;
+  patch: string;
+  isCurrentSnapshot: (snapshot: string) => boolean;
+  readSide: (side: DiffSide, filePath: string, oldPath: string | undefined, maxBytes: number, signal?: AbortSignal) => Promise<FileBytesRead>;
+}
+
+export interface PullImageOptions {
   pulls: Pick<InboxPulls, "diff" | "fileBytes">;
   key: string;
   scope: InboxPullDiffScope;
@@ -73,11 +80,15 @@ export async function pullReviewImage(options: {
   roots: () => Promise<string[]>;
   ifNoneMatch?: string | null;
   signal?: AbortSignal;
-}): Promise<ReviewImageResponse> {
+}
+
+/**
+ * A pull request's diff in `scope`, read at the head the request's `snapshot` names, and its reader: any path of the
+ * repository at that head (the new side) or where the diff runs from (the old), never anything else. The caller has
+ * checked what the request names first (`refusedAsked`); an answer here is the forge's refusal.
+ */
+export async function pullImageSource(options: PullImageOptions): Promise<ImageSource | ReviewImageResponse> {
   const { pulls, key, scope, from, params } = options;
-  // What the request names is checked before anything is read: a bad path or side never reads the diff (or the forge).
-  const refused = refusedAsked(params);
-  if (refused) return refused;
   const asked = params.get("snapshot") ?? "";
   const pinned = /^[0-9a-f]{40,64}$/.test(asked) ? asked : null;
   // The diff on screen, read at the head the window names (the PR page's `/pulls/diff` read it a moment ago).
@@ -91,19 +102,28 @@ export async function pullReviewImage(options: {
     }
   }
   let roots: Promise<string[]> | null = null;
-  return handleReviewImageRequest({
-    params,
-    ifNoneMatch: options.ifNoneMatch ?? null,
+  return {
     available: true,
     patch: answer?.patch ?? "",
     isCurrentSnapshot: (snapshot) => !!answer?.head_sha && snapshot === answer.head_sha,
-    ...(options.signal ? { signal: options.signal } : {}),
     readSide: (side, filePath, oldPath, maxBytes, signal) =>
       runImageRead(async () => {
         roots ??= options.roots();
         return pulls.fileBytes(key, scope, side, filePath, oldPath, await roots, maxBytes, from, answer!.head_sha!).catch(forgeRefusal);
       }, signal),
-  });
+  };
+}
+
+export const isImageResponse = (value: ImageSource | ReviewImageResponse): value is ReviewImageResponse => "status" in value;
+
+/** One side of a changed image in a pull request's diff (`/api/inbox/pulls/review-image`). */
+export async function pullReviewImage(options: PullImageOptions): Promise<ReviewImageResponse> {
+  // What the request names is checked before anything is read: a bad path or side never reads the diff (or the forge).
+  const refused = refusedAsked(options.params);
+  if (refused) return refused;
+  const source = await pullImageSource(options);
+  if (isImageResponse(source)) return source;
+  return handleReviewImageRequest({ params: options.params, ifNoneMatch: options.ifNoneMatch ?? null, ...source, ...(options.signal ? { signal: options.signal } : {}) });
 }
 
 /** The two blob ids a file's patch names (its `index` line), each null where that side does not exist. */
@@ -114,12 +134,7 @@ function indexIds(patch: string): { old: string | null; new: string | null } | n
   return { old: side(ids[1]!), new: side(ids[2]!) };
 }
 
-/**
- * One side of a changed image in a guided review's patch (`/api/inbox/messages/:id/guide/review-image`). The guide
- * keeps the diff as sent while the working tree moves on, so a side is only ever the blob the patch's `index` line
- * names (a file whose patch names none, a pure rename or a patch rebuilt without them, reads from `forge` alone).
- */
-export async function guideReviewImage(options: {
+export interface GuideImageOptions {
   /** The guide's patch, as the agent sent it (null when its snapshot is gone from the store). */
   patch: string | null;
   /** The message the guide is on: the request's `snapshot`. */
@@ -131,22 +146,30 @@ export async function guideReviewImage(options: {
   forge?: (side: DiffSide, filePath: string, oldPath: string | undefined, maxBytes: number) => Promise<FileBytesRead>;
   ifNoneMatch?: string | null;
   signal?: AbortSignal;
-}): Promise<ReviewImageResponse> {
+}
+
+/**
+ * A guided review's patch and its reader. The guide keeps the diff as sent while the working tree moves on, so a side
+ * of a file the patch changes is only ever the blob its `index` line names (a file whose patch names none, a pure
+ * rename or a patch rebuilt without them, reads from `forge` alone). `unchanged`: how a path the patch does not change
+ * is read (a Markdown file's picture): `"head"`, as committed at the project's HEAD, a git object (never the working
+ * tree, never the forge); absent, it is missing.
+ */
+export function guideImageSource(options: GuideImageOptions, unchanged?: "head"): ImageSource {
   const { patch, root } = options;
-  const refused = refusedAsked(options.params);
-  if (refused) return refused;
   let files: ReturnType<typeof parseDiffToFiles> | null = null;
-  return handleReviewImageRequest({
-    params: options.params,
-    ifNoneMatch: options.ifNoneMatch ?? null,
+  return {
     available: patch !== null,
     patch: patch ?? "",
     isCurrentSnapshot: (snapshot) => snapshot === options.messageId,
-    ...(options.signal ? { signal: options.signal } : {}),
     readSide: (side, filePath, oldPath, maxBytes, signal) =>
       runImageRead(async (): Promise<FileBytesRead> => {
         files ??= parseDiffToFiles(patch ?? "");
         const file = files.find((f) => f.path === filePath);
+        if (!file && unchanged === "head") {
+          validateFilePath(filePath);
+          return root ? readGitObjectBytes(gitRuntime, `HEAD:${filePath}`, maxBytes, root) : { kind: "missing" };
+        }
         const ids = file ? indexIds(file.patch) : null;
         const id = ids?.[side] ?? null;
         if (root && id) {
@@ -165,5 +188,12 @@ export async function guideReviewImage(options: {
         const far = await options.forge(side, filePath, oldPath, maxBytes).catch(forgeRefusal);
         return far.kind !== "ok" || !id || gitBlobId(far.bytes).startsWith(id) ? far : { kind: "missing" };
       }, signal),
-  });
+  };
+}
+
+/** One side of a changed image in a guided review's patch (`/api/inbox/messages/:id/guide/review-image`). */
+export async function guideReviewImage(options: GuideImageOptions): Promise<ReviewImageResponse> {
+  const refused = refusedAsked(options.params);
+  if (refused) return refused;
+  return handleReviewImageRequest({ params: options.params, ifNoneMatch: options.ifNoneMatch ?? null, ...guideImageSource(options), ...(options.signal ? { signal: options.signal } : {}) });
 }

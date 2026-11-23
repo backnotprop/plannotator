@@ -51,6 +51,14 @@ export interface MarkdownFilePreviewProps {
   imageSnapshotId?: string;
   /** Whether the server reads images for this review (static patch / P4: no). */
   imagesAvailable?: boolean;
+  /**
+   * Where an image of the document is read: absent, code review's own
+   * `/api/review-markdown-image?doc=…&side=…&src=…&snapshot=…`. A host with
+   * its own routes (the Inbox) passes a function that turns that URL into
+   * one of its own, as `ImageDiffPreview`'s `fetchImpl` does for a changed
+   * image; `imageSnapshotId` must then be its own.
+   */
+  imageUrl?: (url: string) => string;
   /** Every file path in this review: a link to one of them opens it. */
   reviewFilePaths?: ReadonlySet<string>;
   onOpenReviewFile?: (filePath: string) => void;
@@ -124,6 +132,7 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
   reviewSnapshotId,
   imageSnapshotId,
   imagesAvailable = false,
+  imageUrl,
   reviewFilePaths,
   onOpenReviewFile,
   variant,
@@ -208,8 +217,9 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
     // The patch names the file by its display path (a deletion's is its old
     // one). The source goes as written: the route normalizes it the same way
     // it reads the file's references.
-    return { kind: 'src', src: markdownPreviewImageUrl({ doc: filePath, side, src, snapshot }) };
-  }, [canLoadImages, filePath, snapshot, holdRemote, holdingRemote]);
+    const url = markdownPreviewImageUrl({ doc: filePath, side, src, snapshot });
+    return { kind: 'src', src: imageUrl ? imageUrl(url) : url };
+  }, [canLoadImages, filePath, snapshot, holdRemote, holdingRemote, imageUrl]);
   const resolveOldImage = useMemo(() => makeImageResolver('old'), [makeImageResolver]);
   const resolveNewImage = useMemo(() => makeImageResolver('new'), [makeImageResolver]);
 
