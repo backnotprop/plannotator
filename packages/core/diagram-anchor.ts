@@ -41,7 +41,8 @@ export type DiagramFamily =
   | 'sequence'
   | 'other'
   // A Graphviz graph: the id is the DOT node name.
-  | 'graphviz';
+  | 'graphviz'
+  | 'plannotator-diagram';
 
 /** `diagram` is the WHOLE diagram: no id, the label is the diagram's first
  * source line and `sourceLine` is the fence's full range. It is what a click
@@ -63,7 +64,15 @@ export interface DiagramTarget {
   readonly label: string;
 }
 
+/** The point inside a native part, as fractions of its measured box. */
+export interface NativeDiagramPoint {
+  readonly kind: 'panel' | 'section' | 'group' | 'link';
+  readonly x: number;
+  readonly y: number;
+}
+
 export interface DiagramAnchor extends DiagramTarget {
+  readonly point?: NativeDiagramPoint;
   readonly v: 1;
   /** 1-based lines in the document that holds the source, or null when
    * the writer could not locate the part in the text. */
@@ -82,6 +91,7 @@ const FAMILIES: ReadonlySet<string> = new Set<DiagramFamily>([
   'sequence',
   'other',
   'graphviz',
+  'plannotator-diagram',
 ]);
 const KINDS: ReadonlySet<string> = new Set<DiagramTargetKind>(['node', 'edge', 'cluster', 'diagram']);
 
@@ -145,7 +155,7 @@ export function diagramAnchorLocationLine(anchor: DiagramAnchor): string {
         ? `${anchor.from} → ${anchor.to}`
         : '';
   const label = anchor.label !== '' ? anchor.label : ref;
-  let line = `Diagram ${anchor.kind} ${label}`;
+  let line = `Diagram ${anchor.point?.kind ?? anchor.kind} ${label}`;
   if (ref !== '' && ref !== label) line += ` (${ref})`;
   if (anchor.sourceLine !== null) {
     const [first, last] = anchor.sourceLine;
@@ -391,6 +401,14 @@ export function parseDiagramAnchor(value: unknown): DiagramAnchor | null {
     line.every((n) => typeof n === 'number' && Number.isInteger(n) && n > 0)
       ? ([line[0] as number, line[1] as number] as const)
       : null;
+  if (target.family === 'plannotator-diagram') {
+    const point = raw.point as Partial<NativeDiagramPoint> | null;
+    const unit = (n: unknown): n is number => typeof n === 'number' && n >= 0 && n <= 1;
+    if (!target.id || !point || !unit(point.x) || !unit(point.y)) return null;
+    const kind = point.kind;
+    if (kind !== 'panel' && kind !== 'section' && kind !== 'group' && kind !== 'link') return null;
+    return { ...target, v: 1, sourceLine, point: { kind, x: point.x, y: point.y } };
+  }
   return { ...target, v: 1, sourceLine };
 }
 

@@ -93,6 +93,22 @@ function copyAssets(packageDir, configDir) {
     if (attempt(() => fs.copyFileSync(skillSrc, dest))) written.push(dest);
   }
 
+  // A separately installed /diagram belongs to its author. Keep it on upgrade.
+  const diagramDir = path.join(configDir, "skills", "diagram");
+  const diagramSrc = path.join(packageDir, "skills", "diagram");
+  attempt(() => {
+    const prior = fs.lstatSync(diagramDir, { throwIfNoEntry: false });
+    const marker = ".plannotator-installed";
+    if (prior && (!prior.isDirectory() || !fs.existsSync(path.join(diagramDir, marker)))) return;
+    if (!fs.existsSync(path.join(diagramSrc, "SKILL.md"))) return;
+    fs.mkdirSync(diagramDir, { recursive: true });
+    for (const name of [marker, "SKILL.md"]) {
+      const dest = path.join(diagramDir, name);
+      fs.copyFileSync(path.join(diagramSrc, name), dest);
+      written.push(dest);
+    }
+  });
+
   return written;
 }
 

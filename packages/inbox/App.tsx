@@ -163,6 +163,7 @@ import { useIdleClock } from './idleClock';
 import { launchTipDue } from './compose/launchTip';
 import { useLaunchTipClaim } from './data/actions/launchTip';
 import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
+import { NativeDiagramEnabled } from '@plannotator/ui/components/diagram/nativeDiagramEnabled';
 import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeListLookOptions } from './listLook';
@@ -1739,7 +1740,7 @@ function Inbox() {
         // A capability switch saved here or in another window (approval "inbox-thread-steps"; the Board too): every window follows.
         onCapabilities: (capabilities) => {
           // Code review, Shape and Routines (/create-routine) move the "/" list: the next box reads the catalog again.
-          if (capabilities.code_review || capabilities.shape || capabilities.scheduled_threads) reloadSkillCatalog();
+          if (capabilities.code_review || capabilities.shape || capabilities.scheduled_threads || capabilities.diagrams) reloadSkillCatalog();
           // The Board too (its sidebar row; capabilities.ts): settings sync everywhere.
           if (namesCapability(capabilities)) setSettings((current) => (current ? withCapabilities(current, capabilities) : current));
           else void refreshSettings();
@@ -3702,7 +3703,7 @@ function Inbox() {
     };
   }, [whatsNewVersion, whatsNewRetry]);
 
-  const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleShape, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
+  const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleDiagrams, toggleChapterDiagrams, toggleShape, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
     useSettingsSaves({ setSettings, setError: setSettingsError, refresh: refreshSettings, adoptStore, readStore, refreshList });
   const scheduledOn = useScheduledOn(settings, settingsReadFailed);
   const plansOn = usePlansOn(settings, showToast);
@@ -5198,6 +5199,7 @@ function Inbox() {
         onToggleCodeReview={(next) => void toggleCodeReview(next)}
         onToggleShape={(next) => void toggleShape(next)}
         onToggleSystem={(next) => void toggleSystem(next)}
+        onToggleDiagrams={(next) => void toggleDiagrams(next)}
         onToggleChapterDiagrams={(next) => void toggleChapterDiagrams(next)}
         systemProjects={systemProjects.projects}
         agents={agents}
@@ -5706,6 +5708,7 @@ function Inbox() {
   );
 
   return (
+    <NativeDiagramEnabled.Provider value={route.page === 'plans' || settings?.diagrams?.on === true}>
     <InitiativeTagsContext.Provider value={initiativeTags}>
     <LiveInitiativesContext.Provider value={liveTags}>
     <ThreadTagsContext.Provider value={threadTagsHost}>
@@ -6459,6 +6462,7 @@ function Inbox() {
     </ThreadTagsContext.Provider>
     </LiveInitiativesContext.Provider>
     </InitiativeTagsContext.Provider>
+    </NativeDiagramEnabled.Provider>
   );
 }
 

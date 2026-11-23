@@ -103,6 +103,39 @@ describe("a file a message names, on a linked machine's thread, two real Inboxes
       [B, A],
     ] as const;
 
+  test("a diagram is read and annotated on its owning machine in both directions", async () => {
+    for (const [here, there] of both()) {
+      const source = JSON.stringify({ title: `Delivery on ${there.name}`, columns: [{ id: "queue", title: "Queue" }] });
+      writeFileSync(join(there.w.project, "delivery.diagram.json"), source);
+      const client = new Client({ name: "diagram-review", version: "1" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(`${base(there)}/mcp`)));
+      try {
+        const sent = await client.callTool({ name: "send_message", arguments: {
+          body: "Please review the delivery path.", subject: "Delivery", attachments: ["delivery.diagram.json"],
+          project_path: there.w.project, agent_session: "diagram-author", agent_host: "codex",
+        } });
+        const thread = (sent.structuredContent as Json).thread_id;
+        const listing = await getJson(there, `/api/inbox/threads/${thread}/attachments`);
+        const attachment = listing.attachments[0];
+        expect(attachment.kind).toBe("plannotator-diagram");
+        const remote = `/api/inbox/m/${there.id}`;
+        const view = await windowGet(here, `${remote}/attachments/${attachment.id}/view?version=sent`);
+        expect(await view.json()).toMatchObject({ text: source, version: attachment.sent_sha256 });
+        const anchor = { v: 1, family: "plannotator-diagram", kind: "node", id: "queue", label: "Queue", sourceLine: null, point: { kind: "panel", x: 0.34, y: 0.7 } };
+        const save = await windowPost(here, `${remote}/annotations`, { idempotency_key: crypto.randomUUID(), attachment_id: attachment.id, version: attachment.sent_sha256,
+          annotation: { id: crypto.randomUUID(), type: "COMMENT", text: "Show the retry path", originalText: "Queue", blockId: "block-0", startOffset: 0, endOffset: 0, createdA: Date.now(), diagramAnchor: anchor },
+        });
+        expect(save.status, await save.text()).toBe(200);
+        const onOwner = await getJson(there, `/api/inbox/threads/${thread}/attachments`);
+        expect(onOwner.annotations).toContainEqual(expect.objectContaining({
+          attachment_id: attachment.id, version: attachment.sent_sha256, annotation: expect.objectContaining({ diagramAnchor: anchor }),
+        }));
+      } finally {
+        await client.close();
+      }
+    }
+  }, 30_000);
+
   test("each machine offers file refs on the other's threads: its list names the mark", async () => {
     for (const [here, there] of both()) {
       const listed = await waitFor(`${here.name} has read ${there.name}'s list`, async () => ((await getJson(here, "/api/inbox/machines")).machines as Json[]).find((m) => m.id === there.id && (m.marks as string[]).length > 0) ?? null);

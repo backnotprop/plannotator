@@ -1,0 +1,119 @@
+import { afterEach, describe, expect, test } from 'bun:test';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { renderDiagram, type DiagramSpec } from '@plannotator/diagrams';
+import { NativeDiagramReview, type NativeDiagramReviewProps, type NativeDiagramAnchor, type NativeDiagramAskContext } from './NativeDiagramReview';
+import { partKey, placeCommentPins } from './nativeDiagramDrawing';
+
+const file = { kind: 'file', title: 'Configuration', path: 'src/config.ts', start: 8, end: 12 } as const;
+const link = { kind: 'link', title: 'Protocol', url: 'https://example.org/protocol' } as const;
+const spec: DiagramSpec = {
+  id: 'review', title: 'Service route', columns: [
+    { id: 'client', title: 'Client', refs: [file, link], sections: [{ id: 'queue', title: 'Queue', content: 'Requests' }] },
+    { id: 'server', title: 'Server', refs: [{ ...file, url: 'https://example.org/versions/a/src/config.ts' }] },
+  ], groups: [{ id: 'cluster', label: 'Cluster', members: ['server'] }],
+  links: [{ id: 'request', from: 'client', to: 'server', label: 'Request' }],
+};
+const source = JSON.stringify(spec);
+const anchor: NativeDiagramAnchor = { kind: 'panel', id: 'client', title: 'Client', x: .25, y: .75 };
+
+test('nearby comments remain reachable at every zoom and orphaned pins never land on a namesake of a different kind', async () => {
+  const drawing = await renderDiagram(spec);
+  const parts = new Map(drawing.parts.map(p => [partKey(p), p]));
+  const comments = [
+    { id: 'first', text: 'One', anchor }, { id: 'second', text: 'Two', anchor },
+    { id: 'gone', text: 'Unresolved', anchor: { ...anchor, kind: 'section' as const } },
+  ];
+  for (const scale of [.1, 1, 3]) {
+    const view = { x: 12, y: -2, scale };
+    const pins = placeCommentPins(comments, parts, view);
+    const part = parts.get(partKey(anchor))!;
+    expect(pins.map(p => p.comment.id)).toEqual(['first', 'second']);
+    expect(pins[0].x).toBeCloseTo(view.x + (part.x + .25 * part.w) * scale);
+    expect(pins[0].y).toBeCloseTo(view.y + (part.y + .75 * part.h) * scale);
+    expect(Math.abs(pins[1].x - pins[0].x)).toBeGreaterThanOrEqual(25);
+  }
+});
+
+describe.if(typeof document !== 'undefined')('native diagram review', () => {
+  let root: Root;
+  let host: HTMLElement;
+  afterEach(async () => { if (root) await act(async () => root.unmount()); host?.remove(); });
+  async function show(props: Partial<NativeDiagramReviewProps> = {}) {
+    if (!host?.isConnected) {
+      host = document.createElement('div'); document.body.appendChild(host);
+      root = createRoot(host);
+    }
+    await act(async () => { root.render(<NativeDiagramReview source={source} {...props} />); });
+  }
+  function button(text: string) {
+    const found = [...host.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === text || b.textContent === text);
+    if (!found) throw new Error(`Missing button "${text}" in ${host.textContent}`);
+    return found;
+  }
+  async function click(text: string) { await act(async () => button(text).click()); }
+  async function type(text: string) {
+    const input = host.querySelector('textarea')!;
+    const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => { set.call(input, text); input.dispatchEvent(new Event('input', { bubbles: true })); });
+  }
+  function pointer(type: string, target: Element, x: number, y: number) {
+    target.dispatchEvent(new PointerEvent(type, { pointerId: 5, pointerType: 'mouse', clientX: x, clientY: y, bubbles: true, button: 0, buttons: type === 'pointerup' ? 0 : 1 }));
+  }
+
+  test('dragging a part pans; a click there pins its real metadata. Comment replaces the card and reopens on the saved pin', async () => {
+    const saved: { anchor: NativeDiagramAnchor; text: string }[] = [];
+    const opened: typeof file[] = [];
+    const props = { onCreateComment: (a: NativeDiagramAnchor, text: string) => { saved.push({ anchor: a, text }); }, onOpenFile: (ref: typeof file) => { opened.push(ref); } };
+    await show(props);
+    const hit = host.querySelector('[data-native-hit="'+button('panel Client').dataset.nativeFocus+'"]')!;
+    hit.getBoundingClientRect = () => new DOMRect(100, 50, 400, 200);
+    await act(async () => { pointer('pointerdown', hit, 195, 190); pointer('pointermove', hit, 214, 198); pointer('pointerup', hit, 214, 198); });
+    expect(host.querySelector('[role=dialog]')).toBeNull();
+    await act(async () => { pointer('pointerdown', hit, 200, 200); pointer('pointerup', hit, 200, 200); });
+    expect(host.textContent).toContain('Lines 8–12');
+    await click('Open file'); expect(opened).toEqual([file]);
+    await click('Protocol'); expect(host.querySelector('a')?.href).toBe(link.url);
+    await click('Comment');
+    expect(host.querySelector('[role=dialog]')?.textContent).not.toContain('Protocol');
+    await type('Rename this part'); await click('Add comment');
+    expect(saved).toEqual([{ anchor, text: 'Rename this part' }]);
+    expect(host.querySelector('textarea')).toBeNull();
+    let edited = '';
+    await show({ ...props, comments: [{ id: 'annotation', ...saved[0] }], onEditComment: (id, text) => { edited = id + text; } });
+    await click('Comment 1 on Client');
+    expect(host.querySelector('[role=dialog]')?.textContent).toContain('Rename this part');
+    await click('Edit'); await type('New label'); await click('Save');
+    expect(edited).toBe('annotationNew label');
+  });
+
+  test('scoped Ask AI carries both link endpoints; a failed dispatch keeps the question for retry', async () => {
+    const asks: NativeDiagramAskContext[] = [];
+    await show({ onAskAI: ctx => { asks.push(ctx); return asks.length > 1; } });
+    await click('link Request');
+    const dialog = host.querySelector('[role=dialog]')!;
+    await act(async () => [...dialog.querySelectorAll('button')].find(b => b.textContent === 'Ask AI')!.click());
+    await type('What happens on a timeout?'); await click('Send question');
+    expect(host.querySelector('[role=alert]')?.textContent).toContain('Try again');
+    expect(host.querySelector('textarea')?.value).toBe('What happens on a timeout?');
+    await click('Send question');
+    expect(asks[1]).toMatchObject({ assetId: 'review', question: 'What happens on a timeout?', part: { id: 'request', from: 'client', to: 'server' } });
+    expect(host.querySelector('[role=dialog]')?.getAttribute('aria-label')).toBe('Request');
+  });
+
+  test('keyboard targets cover every kind; a revision permalink opens the exact file and unavailable parts stay unresolved', async () => {
+    let resolution = new Map<string, boolean>();
+    await show({ onOpenFile: () => { throw new Error('Unversioned file opened'); },
+      comments: [{ id: 'removed', text: 'Still here', anchor: { ...anchor, id: 'removed' } }],
+      onResolutionChange: m => { resolution = new Map(m); } });
+    expect(resolution.get('removed')).toBe(false);
+    expect(host.querySelectorAll('[data-native-focus]').length).toBe(5);
+    await click('panel Server');
+    expect(host.querySelector('a')?.getAttribute('href')).toBe('https://example.org/versions/a/src/config.ts');
+    expect(host.querySelector('[data-diagram-svg] image')?.getAttribute('href')).toMatch(/^blob:/);
+    expect(host.querySelector('[data-diagram-svg] [data-panel]')).toBeNull();
+    await show({ source: '{' });
+    expect(host.querySelector('[role=alert]')?.textContent).toContain('Couldn’t draw the diagram');
+    expect(host.querySelector('[data-native-focus]')).toBeNull();
+  });
+});

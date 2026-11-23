@@ -1,0 +1,120 @@
+/* Native diagram files share DiagramCanvas's camera. Its UI is drawn in screen pixels over the measured SVG. */
+.ndr {
+  position: relative;
+  isolation: isolate;
+  container-type: inline-size;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+.ndr-inline { height: clamp(18rem, 54vh, 38rem); }
+.ndr-surface { position: absolute; inset: 0; }
+.ndr-status { padding: 1rem; font-size: 13px; overflow-wrap: anywhere; }
+.ndr [data-diagram-canvas]:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ndr [data-native-hit] { cursor: grab; }
+.ndr .cursor-grabbing [data-native-hit] { cursor: grabbing; }
+.ndr [data-selected] rect { fill: color-mix(in srgb, var(--primary) 5%, transparent); stroke: var(--primary); stroke-width: 2px; vector-effect: non-scaling-stroke; }
+.ndr [data-selected] polyline { stroke: color-mix(in srgb, var(--primary) 50%, transparent); stroke-width: 5px; }
+.ndr-targets { position: absolute; inset: 0; pointer-events: none; }
+.ndr-key-hit { position: absolute; padding: 0; border: none; border-radius: 5px; background: transparent; pointer-events: none; }
+.ndr-key-hit:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ndr [data-native-ref-badge] { color: var(--primary); cursor: pointer; }
+.ndr [data-native-ref-badge] rect { fill: color-mix(in srgb, var(--primary) 12%, var(--card)); }
+.ndr [data-native-ref-badge] text { fill: currentColor; font: 600 11px var(--font-sans); font-variant-numeric: tabular-nums; }
+.ndr-bubble { position: absolute; z-index: 2; display: grid; place-items: center; width: 25px; height: 25px; padding: 0; transform: translate(-50%, -50%); border: 0; background: transparent; cursor: pointer; }
+.ndr-bubble::before { content: ""; position: absolute; inset: -3px; }
+.ndr-bubble svg { position: absolute; inset: 0; width: 100%; height: 100%; filter: drop-shadow(0 1px 3px rgb(0 0 0 / .3)); }
+.ndr-bubble path { fill: var(--annotation-comment, var(--primary)); stroke: white; stroke-width: 1.65; }
+.ndr-bubble span { position: relative; transform: translate(-.5px, -1.5px); color: white; font: 700 10px/1 system-ui, sans-serif; }
+.ndr [data-diagram-zoom-strip], .ndr .ndr-ask-button {
+  position: absolute;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  height: 40px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / .07);
+}
+.ndr [data-diagram-zoom-strip] { left: max(16px, env(safe-area-inset-left)); right: auto; padding: 2px; }
+.ndr [data-diagram-zoom-strip] button { min-width: 34px; height: 34px; }
+.ndr .ndr-ask-button { right: max(16px, env(safe-area-inset-right)); z-index: 10; padding: 0 12px; font-size: 13px; }
+.ndr-card {
+  position: absolute;
+  z-index: 20;
+  box-sizing: border-box;
+  width: min(400px, calc(100% - 16px));
+  max-height: calc(100% - 16px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  user-select: text;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 12px 36px -8px rgb(0 0 0 / .22), 0 2px 6px rgb(0 0 0 / .08);
+  font-size: 13px;
+  line-height: 1.45;
+  cursor: default;
+}
+.ndr-card[data-pinned][data-mode=references] { box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 30%, transparent), 0 12px 36px -8px rgb(0 0 0 / .22); }
+.ndr-card[data-mode=write], .ndr-card[data-mode=note] { width: min(316px, calc(100% - 16px)); }
+.ndr-card-head { padding: 12px 38px 12px 14px; overflow-wrap: anywhere; user-select: none; }
+.ndr-card[data-pinned] .ndr-card-head { cursor: grab; touch-action: none; }
+.ndr-meta, .ndr-ends, .ndr-note-heading { color: var(--muted-foreground); font-size: 11.5px; }
+.ndr-meta::first-letter { text-transform: uppercase; }
+.ndr-summary { margin: 4px 0 0; font-size: 12.5px; line-height: 1.5; }
+.ndr-card-head strong { display: block; margin-top: 3px; font-size: 14px; font-weight: 600; }
+.ndr .ndr-close { position: absolute; right: 6px; top: 6px; width: 28px; height: 28px; color: var(--muted-foreground); }
+.ndr-references, .ndr-actions, .ndr-editor-actions { border-top: 1px solid var(--border); }
+.ndr-references { padding: 10px 14px 12px; overflow-wrap: anywhere; }
+.ndr-references ul { list-style: none; margin: -3px -5px 10px; padding: 0 0 8px; border-bottom: 1px solid var(--border); }
+.ndr-references li { margin: 0; padding: 0; }
+.ndr-references li button, .ndr-reference-title, .ndr-link, .ndr-file-actions, .ndr-actions, .ndr-note-heading, .ndr-ask-context { display: flex; align-items: center; gap: 7px; }
+.ndr-references svg, .ndr-ask-context svg { flex-shrink: 0; }
+.ndr-references li button { width: 100%; min-height: 30px; padding: 4px 6px; border-radius: 7px; text-align: start; }
+.ndr-references li button[aria-current=true] { color: var(--primary); background: color-mix(in srgb, var(--primary) 9%, transparent); }
+.ndr-reference-title { font-size: 13px; font-weight: 600; }
+.ndr-file-path { margin-top: 6px; font: 11.5px/1.5 var(--font-mono); }
+.ndr-link { width: fit-content; margin-top: 5px; color: var(--primary); font-size: 12px; }
+.ndr-file-actions { justify-content: space-between; margin-top: 8px; color: var(--muted-foreground); font-size: 11.5px; }
+.ndr-file-actions:empty { display: none; }
+.ndr-actions { padding: 6px 8px; }
+.ndr-editor textarea { display: block; box-sizing: border-box; width: 100%; min-height: 66px; max-height: 30dvh; margin: 0; padding: 12px 14px 8px; border: 0; border-radius: 0; background: transparent; color: var(--foreground); outline-offset: -2px; resize: vertical; font: 14px/1.5 var(--font-sans); }
+.ndr-editor-actions { display: flex; justify-content: flex-end; align-items: center; gap: 7px; padding: 6px 10px 9px; }
+.ndr-error { padding: 0 12px 8px; font-size: 12px; color: var(--destructive); }
+.ndr-saved { padding: 12px 38px 12px 14px; }
+.ndr-saved p { margin: 5px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
+.ndr-note-heading button { color: var(--primary); }
+.ndr-ask {
+  position: absolute;
+  z-index: 30;
+  inset: 0 0 0 auto;
+  width: min(400px, 94%);
+  display: flex;
+  flex-direction: column;
+  user-select: text;
+  border-left: 1px solid var(--border);
+  background: var(--card);
+  box-shadow: -8px 0 32px rgb(0 0 0 / .07);
+  cursor: default;
+}
+.ndr-ask header { position: relative; display: flex; align-items: center; min-height: 54px; padding-inline: 20px 46px; border-bottom: 1px solid var(--border); }
+.ndr-ask header .ndr-close { top: 10px; right: 10px; width: 34px; height: 34px; }
+.ndr-ask-context { align-items: flex-start; flex: 1; min-height: 0; overflow: auto; padding: 16px 20px; font-size: 13px; font-weight: 550; overflow-wrap: anywhere; }
+.ndr-ask-context svg { margin-top: 2px; }
+.ndr-ask .ndr-editor { margin: 12px; border: 1px solid var(--border); border-radius: 12px; overflow: auto; }
+.ndr-ask .ndr-editor-actions { border: 0; }
+.ndr-ask .ndr-editor-actions button { width: 32px; height: 32px; border-radius: 50%; }
+@container (max-width: 640px) {
+  .ndr .ndr-card { inset: auto 8px max(8px, env(safe-area-inset-bottom)) !important; width: auto; max-height: calc(100% - 16px); }
+  .ndr [data-diagram-zoom-strip], .ndr .ndr-ask-button { height: 46px; bottom: max(10px, env(safe-area-inset-bottom)); }
+  .ndr [data-diagram-zoom-strip] { left: 10px; }
+  .ndr .ndr-ask-button { right: 10px; }
+  .ndr [data-diagram-zoom-strip] button, .ndr-actions button, .ndr-editor-actions button { min-width: 44px; min-height: 44px; }
+  .ndr .ndr-close { width: 40px; height: 40px; top: 1px; right: 1px; }
+  .ndr-editor textarea { font-size: 16px; }
+}

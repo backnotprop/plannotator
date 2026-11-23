@@ -2238,6 +2238,10 @@ if [ "$1" = "clone" ]; then
   dest="\${dest//\\\\//}"
   mkdir -p "$dest/apps"
   cp -R "${join(scriptsDir, "..", "apps", "skills")}" "$dest/apps/skills"
+  if [ -n "$GIT_SHIM_KIRO_VIBE" ]; then
+    cp -R "${join(scriptsDir, "..", "apps", "kiro-cli")}" "$dest/apps/kiro-cli"
+    cp -R "${join(scriptsDir, "..", "apps", "vibe")}" "$dest/apps/vibe"
+  fi
   [ -n "$GIT_SHIM_NO_QWEN" ] || cp -R "${join(scriptsDir, "..", "apps", "qwen-code")}" "$dest/apps/qwen-code"
   exit 0
 fi
@@ -2917,6 +2921,26 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
 describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
   "install.sh functional (stubbed PATH, sandbox HOME)",
   () => {
+    test("diagram is installed for supported skill hosts and a separately installed copy survives", () => {
+      const sandbox = setupInstallSandbox({ gh: "pass-all", git: "repo-copy" });
+      mkdirSync(join(sandbox.home, ".kiro"), { recursive: true });
+      mkdirSync(join(sandbox.home, ".vibe"), { recursive: true });
+      const args = ["--version", "v99.9.9", "--non-interactive", "--no-extras"];
+      const env = { GIT_SHIM_KIRO_VIBE: "1" };
+      expect(runInstallSh(sandbox, args, env).code).toBe(0);
+      const skill = readFileSync(join(scriptsDir, "..", "apps", "skills", "core", "diagram", "SKILL.md"), "utf8");
+      for (const scope of [".claude", ".agents", ".kiro", ".vibe"]) {
+        const dir = join(sandbox.home, scope, "skills", "diagram");
+        expect(readFileSync(join(dir, "SKILL.md"), "utf8")).toBe(skill);
+        expect(readFileSync(join(dir, "agents", "openai.yaml"), "utf8")).toContain("allow_implicit_invocation: false");
+      }
+      const custom = join(sandbox.home, ".agents", "skills", "diagram");
+      rmSync(join(custom, ".plannotator-installed"));
+      writeFileSync(join(custom, "SKILL.md"), "A different author's skill");
+      expect(runInstallSh(sandbox, args, env).code).toBe(0);
+      expect(readFileSync(join(custom, "SKILL.md"), "utf8")).toBe("A different author's skill");
+    });
+
     test("H1: a gh that rejects --bundle falls back to the authenticated path, never a provenance false alarm", () => {
       const sandbox = setupInstallSandbox({ gh: "reject-bundle" });
       const { code, out } = runInstallSh(sandbox, [

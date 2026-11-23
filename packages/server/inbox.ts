@@ -413,7 +413,7 @@ import { shapeCodeRoot } from "@plannotator/shared/shape/store";
 import { shapeEventFrame } from "@plannotator/shared/shape/routes";
 import { shapeAgentName, unlocked as unlockedShape } from "@plannotator/shared/shape/routes";
 import { SHAPE_SWITCH_NOT_SAVED, setShapeSwitch, shapeSwitchOn } from "@plannotator/shared/shape/switch";
-import { answerInboxCapabilities, capabilitiesFrame, capabilitiesWire, checkInboxCapabilities, inboxCapabilities, namesInboxCapability, routeInboxCapabilities, startInboxCapabilities, stopInboxCapabilities } from "./inbox-capability";
+import { answerInboxCapabilities, capabilitiesFrame, capabilitiesWire, checkInboxCapabilities, inboxCapabilities, inboxDiagramsOn, namesInboxCapability, routeInboxCapabilities, startInboxCapabilities, stopInboxCapabilities } from "./inbox-capability";
 import {
   agentSpec,
   claudeCodeModOn,
@@ -5374,7 +5374,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       store,
       resolveProject,
       projectOf: async ({ stack }) => (await pullRepoProjects(stack))[0] ?? null,
-      skillsBlock: (names) => inboxSkillsBlockFor(names, { codeReview: codeReviewOn(), shape: shapeOn(), routines: scheduledCap.on(), diagrams: chapterDiagramsOn() }),
+      skillsBlock: (names) => inboxSkillsBlockFor(names, { codeReview: codeReviewOn(), shape: shapeOn(), routines: scheduledCap.on(), diagrams: chapterDiagramsOn(), diagramArtifacts: inboxDiagramsOn() }),
       own: (layers, threadId, made) => {
         const keys = layers.map((layer) => layer.key);
         const theirs = layers.every((layer) => !layer.mine);
@@ -7497,7 +7497,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       });
       if (searched) return searched;
       // The composers' skill picker and the SKILL.md a Send pastes in (inbox-skills.ts): read routes.
-      const skills = inboxSkillsRoute(req, url, { codeReview: codeReviewOn(), shape: shapeOn(), routines: scheduledCap.on() });
+      const skills = inboxSkillsRoute(req, url, { codeReview: codeReviewOn(), shape: shapeOn(), routines: scheduledCap.on(), diagramArtifacts: inboxDiagramsOn() });
       if (skills) return skills;
 
       // Launch: Stop, Open in Terminal, Delete, Try again, Trust folder and its settings (404 while `inboxLaunch.enabled` is off, but for the settings route).

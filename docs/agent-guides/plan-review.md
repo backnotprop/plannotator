@@ -189,6 +189,8 @@ description/parameters to the shared constants, no `promptSnippet` /
 `promptGuidelines` on any Plannotator tool, and no `systemPrompt` from
 `before_agent_start`.
 
+**Diagram authoring.** `apps/skills/core/diagram/SKILL.md` travels with the CLI's agent installs and the Pi and OpenCode packages. Run `bun run gen:skills` after editing the instructions in `packages/core/diagram-skill.ts`. The Effective HTML skill mirrors the same body. In Inbox, the diagram capability makes that body available in the composer even on machines without an installed authoring skill. On Pi, use `/skill:diagram`.
+
 **The bundled knowledge skill is user-invoked only.** `vendor.sh` adds
 `disable-model-invocation: true` to the vendored copy's frontmatter (the
 source `apps/skills/core/plannotator` stays model-invocable for the installers

@@ -165,6 +165,7 @@ export function MessageBody({
         textDeletions={comments !== undefined && message.author.kind === 'agent'}
         questionTextComments={comments !== undefined}
         suggestComment={comments?.suggest}
+        onOpenDiagramFile={refsOn ? (ref) => openFileRefRef.current?.({ path: ref.path, line: ref.start, lineEnd: ref.end }) : undefined}
         onSide={comments?.onSide ? side : undefined}
         sideButton={sideButton}
         allowImages={pictures}

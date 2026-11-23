@@ -49,9 +49,9 @@ import { ulid } from "./inbox-types";
  * window reading a newer store, a newer kind on a phone) treats it as `file`,
  * a download (`readInboxAttachmentKind`).
  */
-export type InboxAttachmentKind = "markdown" | "text" | "html" | "mermaid" | "graphviz" | "code" | "image" | "video" | "audio" | "pdf" | "file";
+export type InboxAttachmentKind = "markdown" | "text" | "html" | "mermaid" | "graphviz" | "plannotator-diagram" | "code" | "image" | "video" | "audio" | "pdf" | "file";
 
-const KNOWN_KINDS: ReadonlySet<string> = new Set(["markdown", "text", "html", "mermaid", "graphviz", "code", "image", "video", "audio", "pdf", "file"]);
+const KNOWN_KINDS: ReadonlySet<string> = new Set(["markdown", "text", "html", "mermaid", "graphviz", "plannotator-diagram", "code", "image", "video", "audio", "pdf", "file"]);
 
 /** A kind as a reader should treat it: a value it does not know is `file` (a download). */
 export function readInboxAttachmentKind(kind: unknown): InboxAttachmentKind {
@@ -408,6 +408,8 @@ export function inboxAttachmentKindLabel(kind: InboxAttachmentKind | string, nam
       return "HTML";
     case "mermaid":
       return "Mermaid";
+    case "plannotator-diagram":
+      return "Diagram";
     case "graphviz":
       return "Graphviz";
     case "text":

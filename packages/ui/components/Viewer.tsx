@@ -41,6 +41,7 @@ import { FloatingQuickLabelPicker } from './FloatingQuickLabelPicker';
  * while its engine loads (`DiagramPending`), inside the same boxes, so the
  * source fence paints once and the two waits read as one.
  */
+const NativeDiagramBlock = lazy(async () => ({ default: (await import('./diagram/NativeDiagramBlock')).NativeDiagramBlock }));
 const MermaidBlock = lazy(async () => ({ default: (await import('./MermaidBlock')).MermaidBlock }));
 const GraphvizBlock = lazy(async () => ({ default: (await import('./GraphvizBlock')).GraphvizBlock }));
 /** ```html and ```svg fences drawn, for a host that opts in (`htmlEmbeds`); loaded only then. */
@@ -83,7 +84,9 @@ import { DiagramAnchorClaims, DiagramAnchorClaimsContext } from './diagram/ancho
 import { DiagramBlockPending } from './diagram/DiagramPending';
 import type { DiagramReopenRequest } from './diagram/reopen';
 import { LazyBlockBoundary } from './LazyBlockBoundary';
-import { isGraphvizLanguage, isMermaidLanguage } from './diagramLanguages';
+import { NativeDiagramEnabled } from './diagram/nativeDiagramEnabled';
+import type { NativeDiagramFileReference } from './diagram/nativeDiagramDrawing';
+import { isGraphvizLanguage, isMermaidLanguage, isNativeDiagramLanguage } from './diagramLanguages';
 import { isHtmlEmbedLanguage, isSvgFenceLanguage } from './html-embed/languages';
 import type { HtmlEmbedHost } from './html-embed/HtmlEmbedBlock';
 import { getIdentity } from '../utils/identity';
@@ -213,6 +216,8 @@ export interface ViewerProps {
   fillHeight?: boolean;
   onOpenLinkedDoc?: (path: string) => void;
   onOpenCodeFile?: (path: string) => void;
+  /** Opens a diagram's repository-relative source reference in this document's host. */
+  onOpenDiagramFile?: (ref: NativeDiagramFileReference) => void;
   /**
    * Opt-in host capability: decide what a link to a local path does
    * (`[the mock](mock.html)`, markdown and raw-HTML `<a href>` alike; never
@@ -925,6 +930,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   maxWidth,
   onOpenLinkedDoc,
   onOpenCodeFile,
+  onOpenDiagramFile,
   resolveLocalLink,
   linkedDocInfo,
   imageBaseDir,
@@ -993,6 +999,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // (the selection toolbar, comment-only, and its composer); everything else
   // of authoring stays off. Without it this is exactly `!authoringOff`.
   const textCommentsOnly = answerOnly && textComments && !readOnly;
+  const nativeDiagrams = React.useContext(NativeDiagramEnabled);
   const selectionCommentsOn = !authoringOff || textCommentsOnly;
   const hostComposes = onHostDraft !== undefined && !authoringOff;
   const viewerAnnotationHeader = authoringOff ? undefined : annotationHeader;
@@ -2101,6 +2108,17 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             <LazyBlockBoundary key={group.block.id} fallback={embedFallback(group.block)}>
               <Suspense fallback={<CodeBlock block={group.block} isHovered={false} />}>
                 <SvgFenceBlock block={group.block} />
+              </Suspense>
+            </LazyBlockBoundary>
+          ) : group.block.type === 'code' && nativeDiagrams && isNativeDiagramLanguage(group.block.language) ? (
+            <LazyBlockBoundary key={group.block.id} fallback={embedFallback(group.block)}>
+              <Suspense fallback={<CodeBlock block={group.block} isHovered={false} />}>
+                <NativeDiagramBlock block={group.block} annotations={annotations}
+                  selectedAnnotationId={selectedAnnotationId} onSelectAnnotation={onSelectAnnotation}
+                  onAddAnnotation={selectionCommentsOn ? onAddAnnotation : undefined}
+                  onEditAnnotation={selectionCommentsOn ? onEditAnnotation : undefined}
+                  onRestoreReport={onRestoreReport} onOpenFile={onOpenDiagramFile}
+                  onAskAI={selectionCommentsOn ? onAskAI : undefined} sourcePath={linkedDocInfo?.filepath ?? sourceInfo} />
               </Suspense>
             </LazyBlockBoundary>
           ) : group.block.type === 'code' && isMermaidLanguage(group.block.language) ? (

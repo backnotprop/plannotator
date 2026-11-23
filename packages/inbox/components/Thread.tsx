@@ -29,6 +29,7 @@ import { ArchivedFoot } from '../parts/ArchivedFoot';
 import { ThreadMeta } from '../parts/ThreadMeta';
 import { replyViewingOf } from '../replyViewing';
 import { AttachmentTiles, changedCount } from './AttachmentTiles';
+import { InlineDiagrams } from './InlineDiagrams';
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import type { PageStart } from './htmlPageFrame';
 import type { OpenInSurface } from './OpenIn';
@@ -5249,6 +5250,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 />
                 </>
                 )}
+                {(message.attachments?.length ?? 0) > 0 && (
+                  <InlineDiagrams files={attachments.filter((a) => a.message_id === message.id)} records={fileRecords}
+                    readOnly={!liveMessage(message) || message.author.kind === 'person'} onSaved={saveRecord}
+                    onOpenFile={onOpenNamedFile && fileRefsHere ? (ref) => openFileRef(message.id, { path: ref.path, line: ref.start, lineEnd: ref.end }) : undefined}
+                    onSide={onSide} />
+                )}
                 {/* An agent's files, and the person's own (compose): the same tiles and viewers. */}
                 {(message.attachments?.length ?? 0) > 0 && (
                   <AttachmentTiles
@@ -5888,6 +5895,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         ref={paneRef}
         pageStart={pageStart}
         attachment={openAttachment}
+        onOpenDiagramFile={onOpenNamedFile && fileRefsHere ? (ref) => openFileRef(openAttachment.message_id, { path: ref.path, line: ref.start, lineEnd: ref.end }) : undefined}
         pin={{ threadId: thread.thread_id, key: openArtifactKey(artifactList, openAttachment.id) }}
         attachments={allFiles}
         // The files' annotations only: a guided-review comment is on the guide's diff, not on a file.

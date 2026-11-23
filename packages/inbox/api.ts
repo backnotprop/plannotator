@@ -419,6 +419,7 @@ export interface SettingsModel {
    * draws folded. Absent: on.
    */
   chapter_diagrams?: { on: boolean };
+  diagrams?: { on: boolean };
   /**
    * Settings → General: "Open Plannotator at plannotator.localhost" (#2184): config.json
    * `urlHost: "plannotator.localhost"`. `env` is PLANNOTATOR_URL_HOST and `url_host`
@@ -1323,6 +1324,7 @@ export const inboxApi = {
   /** System on or off (Settings → Capabilities, under Code review): every window hears `event: capabilities`. */
   saveSystem: (on: boolean) => post<{ system?: { on: boolean } }>(inboxUrl('/settings'), { system: { on } }),
   /** Chapter diagrams on or off (Settings → Capabilities, under Code review): every window hears `event: capabilities`. */
+  saveDiagrams: (on: boolean) => post<{ diagrams: { on: boolean } }>(inboxUrl('/settings'), { diagrams: { on } }),
   saveChapterDiagrams: (on: boolean) => post<{ chapter_diagrams?: { on: boolean } }>(inboxUrl('/settings'), { chapter_diagrams: { on } }),
   /** System (on only): the projects with their drawing's state, one project's drawing, and the open PRs that change it. */
   systemProjects: () => get<SystemProjectsAnswer>(inboxUrl('/system/projects')),

@@ -472,6 +472,10 @@ if (isReviewDrawCommand(rawArgs, () => {
     );
   }
 }
+if (rawArgs[0] === "diagram") {
+  const { runDiagramCommand } = await import("./diagram-command");
+  process.exit(await runDiagramCommand(rawArgs.slice(1), process.env.PLANNOTATOR_CWD || process.cwd(), getPlannotatorDataDir()));
+}
 // `plannotator system …`: System's drawing of a project (system-command.ts;
 // unreleased, HIDDEN_SUBCOMMANDS), for the agents that draw it and the launchd
 // job that keeps it current. Before the strict-annotate parse: it takes its own

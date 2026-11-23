@@ -1025,6 +1025,34 @@ function removeInstalledFiles(
   paths: ReturnType<typeof resolveOwnedPaths>,
   state: MutableUninstallResult,
 ): void {
+  // /diagram is also distributed by Effective HTML. Remove only an install we marked.
+  for (const dir of [
+    join(paths.claudeDir, "skills", "diagram"),
+    join(environment.homeDir, ".agents", "skills", "diagram"),
+    join(environment.homeDir, ".kiro", "skills", "diagram"),
+    join(paths.vibeDir, "skills", "diagram"),
+    ...paths.configDirs.map((config) => join(config, "opencode", "skills", "diagram")),
+  ]) {
+    const marker = join(dir, ".plannotator-installed");
+    if (!existsSync(marker)) continue;
+    try {
+      if (!lstatSync(dir).isDirectory()) continue;
+      const agents = join(dir, "agents");
+      const ownedAgents = !existsSync(agents) || (lstatSync(agents).isDirectory() && readdirSync(agents).every((name) => name === "openai.yaml"));
+      if (ownedAgents && readdirSync(dir).every((name) => name === ".plannotator-installed" || name === "SKILL.md" || name === "agents")) {
+        removePath(dir, request, state);
+      } else {
+        removePath(marker, request, state);
+        removePath(join(dir, "SKILL.md"), request, state);
+        if (existsSync(agents) && lstatSync(agents).isDirectory()) {
+          removePath(ownedAgents ? agents : join(agents, "openai.yaml"), request, state);
+        }
+      }
+    } catch (error) {
+      state.errors.push(`Could not inspect ${dir}: ${formatError(error)}`);
+    }
+  }
+
   for (const skill of [...CORE_SKILLS, INBOX_SKILL, ...KNOWLEDGE_SKILLS]) {
     removePath(
       join(paths.claudeDir, "skills", skill),

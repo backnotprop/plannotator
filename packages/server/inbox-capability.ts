@@ -11,6 +11,7 @@
  */
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { loadConfig, saveConfig } from "@plannotator/shared/config";
 import { createPlansCapability } from "./plans-capability";
 
 export interface InboxCapability {
@@ -40,8 +41,20 @@ export interface InboxCore {
 }
 
 /** The Inbox's capabilities, in order. */
+export const inboxDiagramsOn = (): boolean => loadConfig({ quiet: true }).inboxDiagrams === true;
+
 export function inboxCapabilities(core: InboxCore): InboxCapability[] {
-  return [createPlansCapability(core)];
+  return [createPlansCapability(core), {
+    key: "diagrams",
+    on: inboxDiagramsOn,
+    save: (on) => {
+      const was = inboxDiagramsOn();
+      if (!saveConfig({ inboxDiagrams: on }) || inboxDiagramsOn() !== on) return false;
+      if (was !== on) core.changed();
+      return true;
+    },
+    settingsWire: () => ({ diagrams: { on: inboxDiagramsOn() } }),
+  }];
 }
 
 /** The request's standing, as the Inbox's guards decide it. */

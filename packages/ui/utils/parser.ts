@@ -344,13 +344,13 @@ export interface ParseMarkdownOptions {
  * block itself, so the export's `(lines a–b)` label names the file's real
  * span.
  */
-export const diagramDocumentBlocks = (text: string, kind: 'mermaid' | 'graphviz'): Block[] => [
+export const diagramDocumentBlocks = (text: string, kind: import('@plannotator/core/annotatable').DiagramRenderKind): Block[] => [
   {
     id: 'block-0',
     type: 'code',
     content: text,
     // `dot` is what isGraphvizLanguage reads for the Graphviz engine.
-    language: kind === 'graphviz' ? 'dot' : 'mermaid',
+    language: kind === 'graphviz' ? 'dot' : kind,
     order: 1,
     startLine: 1,
     // A trailing newline ends the last line, it does not start another.

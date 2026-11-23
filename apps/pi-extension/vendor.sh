@@ -222,5 +222,7 @@ done
 rm -rf skills
 mkdir -p skills
 cp -R ../skills/core/plannotator skills/plannotator
+mkdir -p skills/diagram
+cp ../skills/core/diagram/SKILL.md skills/diagram/SKILL.md
 awk 'NR == 1 && $0 != "---" { exit 1 } NR == 2 && $0 !~ /^name: / { exit 1 } { print } NR == 2 { print "disable-model-invocation: true" }' \
   ../skills/core/plannotator/SKILL.md > skills/plannotator/SKILL.md

@@ -151,7 +151,7 @@ export function isDocPathAllowed(candidate: string, roots: string[], anyPath = f
 // viewer renders (Markdown, MDX, HTML, AsciiDoc, diagram sources) and the
 // user's own markdown extensions. Never plain text, data or config formats,
 // and never a code file: those keep the roots for every reader.
-const ANY_PATH_DOCUMENT_RE = /\.(?:mdx?|html?|adoc|asciidoc|mmd|mermaid|dot|gv)$/i;
+const ANY_PATH_DOCUMENT_RE = /\.(?:mdx?|html?|adoc|asciidoc|mmd|mermaid|dot|gv|diagram\.json)$/i;
 
 /** Whether `path` is a document type a reader on this machine may open anywhere (#2291). */
 export function isAnyPathDocument(path: string): boolean {
@@ -458,8 +458,9 @@ export async function resolveDocTarget(
 	const base = options.base ?? null;
 	const projectRoot = roots[0];
 	const docExtensions = getAnnotatableDocRegex();
+	const nativeDiagram = (path: string) => /\.diagram\.json$/i.test(path);
 	const wantsDocRender = (path: string) =>
-		docExtensions.test(path) && (options.forceDoc || !isCodeFilePath(path));
+		docExtensions.test(path) && (options.forceDoc || nativeDiagram(path) || !isCodeFilePath(path));
 
 	// Relative to the source document's own directory (annotate sibling links).
 	if (base && !isAbsoluteUserPath(requestedPath) && wantsDocRender(requestedPath)) {
@@ -483,7 +484,7 @@ export async function resolveDocTarget(
 
 	// Literal path first; on a miss the smart resolver walks the roots for
 	// case-insensitive and suffix matches.
-	if (isCodeFilePath(requestedPath) && !(options.forceDoc && isAnnotatableTextPath(requestedPath))) {
+	if (isCodeFilePath(requestedPath) && !nativeDiagram(requestedPath) && !(options.forceDoc && isAnnotatableTextPath(requestedPath))) {
 		const parsed = parseCodePath(requestedPath);
 		const cleanPath = parsed.filePath;
 		const literalPath = resolveUserPath(cleanPath, base || projectRoot);

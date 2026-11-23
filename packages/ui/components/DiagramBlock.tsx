@@ -225,6 +225,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
           ann.diagramAnchor != null &&
           ann.blockId !== block.id &&
           !claims.blockIds.includes(ann.blockId) &&
+          ann.diagramAnchor.family !== 'plannotator-diagram' &&
           // A Graphviz anchor names a DOT part; it is never a Mermaid one.
           (ann.diagramAnchor?.family === 'graphviz') === (kind === 'graphviz'),
       ),

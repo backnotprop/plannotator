@@ -51,7 +51,7 @@ export function shareableDocumentMarkdown(
   renderAs: DocumentRenderAs | undefined,
 ): string {
   if (!isDiagramRenderKind(renderAs) || markdown === '') return markdown;
-  const language = renderAs === 'graphviz' ? 'dot' : 'mermaid';
+  const language = renderAs === 'graphviz' ? 'dot' : renderAs;
   // A diagram source can itself contain a ``` run only in a comment/label;
   // a four-backtick fence keeps such a body intact.
   const fence = markdown.includes('```') ? '````' : '```';

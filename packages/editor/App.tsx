@@ -8156,6 +8156,11 @@ const App: React.FC = () => {
                     maxWidth={annotateReaderMaxWidth}
                     onOpenLinkedDoc={handleOpenLinkedDoc}
                     onOpenCodeFile={codeFilePopout.open}
+                    onOpenDiagramFile={!projectRoot || !isApiMode ? undefined : (ref) => {
+                      const path = `${projectRoot.replace(/[\\/]$/, '')}/${ref.path}`;
+                      if (/\.(?:mdx?|adoc|asciidoc|html?|diagram\.json)$/i.test(ref.path)) handleOpenLinkedDoc(path);
+                      else codeFilePopout.open(path + (ref.start ? `:${ref.start}${ref.end ? `-${ref.end}` : ''}` : ''));
+                    }}
                     linkedDocInfo={
                       linkedDocHook.isActive
                         ? {

@@ -34,6 +34,8 @@ export const BUNDLED_SKILL_PATH = join(
 	"SKILL.md",
 );
 
+export const BUNDLED_DIAGRAM_SKILL_PATH = join(dirname(fileURLToPath(import.meta.url)), "skills", "diagram", "SKILL.md");
+
 /** The slice of Pi's `SlashCommandInfo` this decision reads. */
 export interface LoadedCommand {
 	name: string;

@@ -644,6 +644,8 @@ export interface PlannotatorConfig {
    * no read of the library. Read on every request.
    */
   inboxPlans?: boolean;
+  /** Native diagram previews, comments and skill discovery in the Inbox. */
+  inboxDiagrams?: boolean;
   /** The Spaces home's view, the person's choice (`POST /api/plans/view`): "cards" unless they chose "list". */
   inboxSpacesView?: "cards" | "list";
   /**

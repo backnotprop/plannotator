@@ -105,6 +105,7 @@ export interface SettingsPageProps {
   /** System's projects with their drawing's state, listed under its switch while it is on; null until read. */
   systemProjects?: SystemProjectRow[] | null;
   /** Settings → Capabilities → Chapter diagrams, under Code review and shown only while it is on. Absent (or an Inbox without it): no row. */
+  onToggleDiagrams?: (next: boolean) => void;
   onToggleChapterDiagrams?: (next: boolean) => void;
   /** Settings → Capabilities → Checklist (thread steps, approval "inbox-thread-steps"). Absent (or an Inbox without it): no row. */
   onToggleSteps?: (next: boolean) => void;
@@ -553,6 +554,7 @@ function CapabilitiesSection({
   system,
   onToggleSystem,
   systemProjects,
+  diagrams, onToggleDiagrams,
   chapterDiagrams,
   onToggleChapterDiagrams,
   bro,
@@ -582,7 +584,9 @@ function CapabilitiesSection({
   onToggleSystem?: (next: boolean) => void;
   systemProjects?: SystemProjectRow[] | null;
   /** Chapter diagrams: null unless Code review is on (the server sends it only then). */
+  diagrams?: { on: boolean };
   chapterDiagrams: { on: boolean } | null;
+  onToggleDiagrams?: (next: boolean) => void;
   onToggleChapterDiagrams?: (next: boolean) => void;
   /** Bro mode (approval "bro-mode"), null on an Inbox without it. */
   bro: { on: boolean } | null;
@@ -614,7 +618,7 @@ function CapabilitiesSection({
   const decisionRow = experimental && onToggleExperimental;
   return (
     <>
-      {(boardRow || stepsRow || scheduledRow || codeReviewRow || shapeRow) && (
+      {(boardRow || stepsRow || scheduledRow || codeReviewRow || shapeRow || diagrams) && (
         <section className="ib-sgroup" data-settings-capabilities="" aria-label="Capabilities">
           <div className="ib-card">
             {boardRow && (
@@ -630,6 +634,15 @@ function CapabilitiesSection({
                 <span className="ib-ctl">
                   <Switch on={board.on} labelledBy="ib-board-label" onClick={() => onToggleBoard(!board.on)} />
                 </span>
+              </div>
+            )}
+            {diagrams && onToggleDiagrams && (
+              <div className="ib-prow" data-settings-diagrams="">
+                <span className="ib-txt">
+                  <span className="ib-l" id="ib-native-diagrams-label">Diagrams</span>
+                  <span className="ib-desc">Preview diagram files in threads and leave comments on their parts.</span>
+                </span>
+                <Switch on={diagrams.on} labelledBy="ib-native-diagrams-label" onClick={() => onToggleDiagrams(!diagrams.on)} />
               </div>
             )}
             {stepsRow && (
@@ -1320,6 +1333,7 @@ export function SettingsPage(props: SettingsPageProps) {
               system={system}
               onToggleSystem={props.onToggleSystem}
               systemProjects={props.systemProjects}
+              diagrams={settings?.diagrams} onToggleDiagrams={props.onToggleDiagrams}
               chapterDiagrams={chapterDiagrams}
               onToggleChapterDiagrams={props.onToggleChapterDiagrams}
               bro={bro}

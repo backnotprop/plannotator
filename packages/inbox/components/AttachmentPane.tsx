@@ -21,6 +21,7 @@ import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { PaneToolstrip } from '../parts/PaneToolstrip';
 import { HtmlSurfaceControls } from '@plannotator/ui/components/HtmlSurfaceControls';
 import { HtmlViewer, type HtmlViewerFrame } from '@plannotator/ui/components/html-viewer';
+import type { NativeDiagramFileReference } from '@plannotator/ui/components/diagram/nativeDiagramDrawing';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { ScrollViewportProvider } from '@plannotator/ui/hooks/useScrollViewport';
 import type { Annotation, EditorMode, InputMethod } from '@plannotator/ui/types';
@@ -149,6 +150,7 @@ const paneEscapes = new WeakSet<Event>();
 
 export interface AttachmentPaneProps {
   attachment: InboxAttachmentState;
+  onOpenDiagramFile?: (ref: NativeDiagramFileReference) => void;
   /**
    * The file's pin (approval "inbox-artifact-stars"): its thread and its artifact key (the shown image's id for an
    * image both shown and attached). Pin / Unpin sits in the viewer's bar and the pane's header. Absent (the tour): none.
@@ -2811,11 +2813,18 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 markdown={view.text}
                 imageBaseDir={imageBaseDir}
                 resolveLocalLink={kind === 'markdown' ? resolveFileLink : undefined}
+                onOpenDiagramFile={props.onOpenDiagramFile}
+                onAskAI={kind === 'plannotator-diagram' && props.onSide ? (question, context) =>
+                  props.onSide!(question, [fileSideSource(attachment, effectiveVersion, { selected: context.text ?? '', blockId: blocks[0]?.id ?? '', blocks, annotations }), context.detail].filter(Boolean).join('\n')) : undefined}
+                onEditAnnotation={(id, changes) => {
+                  const prior = annotations.find((a) => a.id === id);
+                  if (prior) return save({ ...prior, ...changes });
+                }}
                 questionDecisionLines={false}
                 {...fileQuestionProps}
                 annotations={annotations}
                 mentionSource={props.mentionSource}
-                onAddAnnotation={(annotation) => void save(annotation)}
+                onAddAnnotation={save}
                 onSelectAnnotation={setSelectedId}
                 selectedAnnotationId={selectedId}
                 mode={isText ? mode : 'comment'}

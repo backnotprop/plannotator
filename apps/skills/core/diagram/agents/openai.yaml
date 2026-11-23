@@ -1,0 +1,7 @@
+interface:
+  display_name: "Plannotator Diagram"
+  short_description: "Create an editable architecture diagram and SVG"
+  default_prompt: "Use $diagram to draw this system as an editable Plannotator diagram."
+
+policy:
+  allow_implicit_invocation: false

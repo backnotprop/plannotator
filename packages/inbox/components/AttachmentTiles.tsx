@@ -19,6 +19,7 @@ export function iconOf(attachment: InboxAttachmentState): IconName {
     case 'code':
       return 'code';
     case 'mermaid':
+    case 'plannotator-diagram':
     case 'graphviz':
       return 'diagram';
     case 'image':
