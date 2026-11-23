@@ -76,11 +76,9 @@ export function peleLabelText(el: Element | null | undefined, lineJoin: string):
   return cleanText(out.replace(/\u200b/gu, ''));
 }
 
-function labelOf(el: Element): string {
-  return peleLabelText(el, '');
-}
-
-/** A text's words: its lines joined by a space, never run together. */
+/** A text's words: its lines joined by a space, never run together. Pele
+ * wraps a long label into one line per row where Mermaid's is one run of
+ * words, so a comment's label reads the same under either engine. */
 function textOf(el: Element | null | undefined): string {
   return peleLabelText(el, ' ');
 }
@@ -106,7 +104,7 @@ function nodeIds(svg: Element): ReadonlySet<string> {
 
 function flowchartTarget(svg: Element, el: Element, id: string): DiagramTarget | null {
   if (el.classList.contains('pele-node') || el.classList.contains('pele-cluster')) {
-    return { family: 'flowchart', kind: el.classList.contains('pele-cluster') ? 'cluster' : 'node', id, label: labelOf(el) };
+    return { family: 'flowchart', kind: el.classList.contains('pele-cluster') ? 'cluster' : 'node', id, label: textOf(el) };
   }
   if (!el.classList.contains('pele-edge')) return null;
   const stem = /^L_(.+)_\d+$/u.exec(id)?.[1];
@@ -123,7 +121,7 @@ function flowchartTarget(svg: Element, el: Element, id: string): DiagramTarget |
   });
   if (matches.length !== 1) return null;
   const edgeLabel = byDataId(svg, '.pele-edge-label[data-id]', id);
-  return { family: 'flowchart', kind: 'edge', ...ends, label: labelOf(edgeLabel ?? el) };
+  return { family: 'flowchart', kind: 'edge', ...ends, label: textOf(edgeLabel ?? el) };
 }
 
 // ------------------------------------------------------------------ sequence

@@ -66,6 +66,18 @@ describe.if(hasDom)('Pele 1.3.0 flowchart anchors', () => {
     expect(PELE_FINDER.findTarget(svg, { family: 'flowchart', kind: 'node', id: 'gone', label: 'Approve?' }, RENDER_ID)).toBeNull();
   });
 
+  // What regresses: a label Pele wraps over two rows is stored as
+  // "Detect installedagents", so the export names the part wrongly and the
+  // label differs from the one Mermaid gives the same part.
+  test('a label Pele wraps over rows reads as its words, a space between rows', () => {
+    const svg = parseInertSvg(
+      '<svg class="pele pele-flowchart" aria-roledescription="flowchart"><g class="pele-node pele-shape-rect" data-id="B"><rect/><text class="pele-label"><tspan x="0" y="-6.4">Detect installed</tspan><tspan x="0" y="17.6">agents</tspan></text></g></svg>',
+    )!;
+    const node = svg.querySelector('.pele-node[data-id="B"]')!;
+    expect(PELE_FINDER.targetFromElement(svg, node, RENDER_ID)).toEqual({ family: 'flowchart', kind: 'node', id: 'B', label: 'Detect installed agents' });
+    expect(PELE_FINDER.findTarget(svg, { family: 'flowchart', kind: 'node', id: 'gone', label: 'Detect installed agents' }, RENDER_ID)).toBe(node);
+  });
+
   test('compatibility finder chooses from the rendered SVG and leaves Mermaid SVG handling intact', () => {
     const pele = load('pele-flowchart');
     const peleNode = pele.querySelector('.pele-node[data-id="A"]')!;
