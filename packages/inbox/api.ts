@@ -1392,10 +1392,10 @@ export const inboxApi = {
    * message the window showed; the look stops there, so a message that landed
    * after the window read the thread stays new (an older Inbox ignores it).
    */
-  seen: (threadId: string, throughSeq?: number | null) =>
+  seen: (threadId: string, throughSeq?: number | null, opened?: boolean) =>
     post<{ thread: InboxListRow }>(
-      threadUrl(threadId, `/seen`),
-      typeof throughSeq === 'number' ? { through_seq: throughSeq } : {},
+      threadUrl(threadId, `/seen`), // `opened`: the person chose the thread (recentActs.ts); an older Inbox ignores it.
+      { ...(typeof throughSeq === 'number' ? { through_seq: throughSeq } : {}), ...(opened ? { opened: true } : {}) },
     ),
   /** Mark read (the thread leaves the top for Quiet, its waiting questions closed) or its Undo. */
   markRead: (threadId: string, read: boolean) =>

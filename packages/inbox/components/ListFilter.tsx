@@ -6,7 +6,8 @@
  * - The header holds the filter icon (three lines narrowing) alone, at every width. With picks it takes the accent
  *   colour and a small count in its corner (`CountBadge`, the PRs button's size): one per ticked row. No tokens, no line over the list: what is picked is read in the menu.
  * - The menu (Base UI's: arrows, Home/End, type-ahead, Escape and Tab close, focus back to the funnel): Not seen (one
- *   row: only the rows drawn bold), Updated (Today, Last 7 days, Last 30 days, Custom range…), Agent (several; only
+ *   row: only the rows drawn bold) and Recent activity (one row, the cursor mark, not Updated's clock: the threads the
+ *   person did something in lately, newest first by that; listFilterRecent.ts), Updated (Today, Last 7 days, Last 30 days, Custom range…), Agent (several; only
  *   with two agents or more), Routine (Routine threads, Other threads; only while Routines are on and a routine's thread
  *   is in the list), Pull request (Open, Draft, Merged, Closed, Has a PR, No PR, several; only once a thread in the list has a PR), Tag (several, each
  *   with the `#` mark; only once a tag holds a thread in the list, never on a tag's own list), then Project last, since the
@@ -41,6 +42,7 @@ import { CountBadge } from './CountBadge';
 import { useThreadTags } from '../threadTags';
 import { toggledTagPick, withLiveTagPicks } from '../listFilterTags';
 import { useRoutineThreads } from '../listFilterRoutines';
+import { rowRecentlyActed } from '../listFilterRecent';
 import { filterSearchShown, labelStart, searchFilterSections, type FilterSearchRow } from '../listFilterSearch';
 import {
   NO_LIST_FILTER,
@@ -217,7 +219,10 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
     {
       id: 'notSeen',
       title: null,
-      rows: [{ key: 'notSeen', label: 'Not seen', on: filter.notSeen, count: countOf('notSeen', rowNotSeen), onToggle: () => set({ notSeen: !source.filter.notSeen }), mark: <Icon name="envelope" />, data: { 'data-list-filter-not-seen': '' } }],
+      rows: [
+        { key: 'notSeen', label: 'Not seen', on: filter.notSeen, count: countOf('notSeen', rowNotSeen), onToggle: () => set({ notSeen: !source.filter.notSeen }), mark: <Icon name="envelope" />, data: { 'data-list-filter-not-seen': '' } },
+        { key: 'recent', label: 'Recent activity', on: filter.recent, count: countOf('recent', (row) => rowRecentlyActed(row, now)), onToggle: () => set({ recent: !source.filter.recent }), mark: <Icon name="clickHere" />, data: { 'data-list-filter-recent': '' } },
+      ],
     },
     {
       id: 'updated',
