@@ -16,6 +16,8 @@ import { lazy, Suspense, useEffect, useMemo, useState, type ComponentType, type 
 import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
 import { diffDrawReady, diffLanguages, diffReadyNow } from './threadDrawReady';
 import { loadSemDiffAdvert, semDiffAdvertNow } from './semDiffAdvert';
+import { ReviewImagesContext } from './reviewImages';
+import type { GuideReaderImages } from './guide/types';
 
 type Loaded<P> = { default: ComponentType<P> };
 
@@ -86,9 +88,10 @@ export function PanePart({ children, loading = null, onFailed }: { children: Rea
 /**
  * The review reader in a pane (ReviewPane, PullReview): drawn once its chunk is in and its diff's
  * grammars are attached in the diff themes (threadDrawReady.ts), so no diff line paints plain first. Both
- * already in (the usual case once the window has been idle): it draws in the same commit.
+ * already in (the usual case once the window has been idle): it draws in the same commit. `images`: where the reader
+ * reads its changed images (reviewImages.ts); absent, none.
  */
-export function ReaderPart({ diff, children }: { diff: string; children: ReactNode }) {
+export function ReaderPart({ diff, images, children }: { diff: string; images?: GuideReaderImages | undefined; children: ReactNode }) {
   const langs = useMemo(() => diffLanguages(diff), [diff]);
   const [waited, setWaited] = useState<readonly string[] | null>(null);
   const show = waited === langs || (GuideReaderPart.isLoaded() && diffReadyNow(langs) && semDiffAdvertNow() !== undefined);
@@ -103,7 +106,12 @@ export function ReaderPart({ diff, children }: { diff: string; children: ReactNo
       live = false;
     };
   }, [langs, show]);
-  return <PanePart>{show ? children : null}</PanePart>;
+  // `images`: code review's image previews for the reader inside (reviewImages.ts). Always the provider, so it never remounts.
+  return (
+    <ReviewImagesContext.Provider value={images}>
+      <PanePart>{show ? children : null}</PanePart>
+    </ReviewImagesContext.Provider>
+  );
 }
 
 export const GuideReaderPart = lazyPart(() => import('#guide-reader'));
@@ -111,6 +119,28 @@ export const GuideReaderPart = lazyPart(() => import('#guide-reader'));
 export const PullAllFilesPart = lazyPart(() => import('#guide-reader').then((mod) => ({ default: mod.PullAllFiles })));
 export const PullRepoFilePart = lazyPart(() => import('#guide-reader').then((mod) => ({ default: mod.PullRepoFile })));
 export const PullChangesTreePart = lazyPart(() => import('#guide-reader').then((mod) => ({ default: mod.PullChangesTree })));
+/** The review app's keys on a review (guide/ReviewKeys.tsx), from the reader's own chunk; a reader without them takes none. */
+export const ReviewKeysPart = lazyPart(() => import('#guide-reader').then((mod) => ({ default: mod.ReviewKeys ?? NoKeys })));
+function NoKeys() {
+  return null;
+}
+/**
+ * Beside a review's reader: the review's keys win while it is on screen. Drawn once its chunk is in (the reader's, so
+ * at once beside a drawn reader), never through Suspense, so it never holds the reader or its failure notice.
+ */
+export function ReviewKeysHere(props: { diff: string; viewed: boolean }) {
+  const [ready, setReady] = useState(ReviewKeysPart.isLoaded);
+  useEffect(() => {
+    if (ready) return;
+    let live = true;
+    // A chunk that cannot arrive: no keys, and the reader's own boundary says so.
+    ReviewKeysPart.preload().then(() => live && setReady(true), () => {});
+    return () => {
+      live = false;
+    };
+  }, [ready]);
+  return ready ? <ReviewKeysPart.Part {...props} /> : null;
+}
 export const ShapeBoardPart = lazyPart(() => import('#shape-board'));
 export const SearchPalettePart = lazyPart(() => import('#search-palette'));
 export const PlatformPostPart = lazyPart(() => import('#platform-post'));

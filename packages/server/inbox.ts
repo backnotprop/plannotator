@@ -166,7 +166,7 @@ import { foldCheckoutFolderProjects } from "./inbox-checkout-folders";
 import { combineSuggestions, type InboxAgentWork } from "./inbox-combine-suggestions";
 import { createInboxTidy } from "./inbox-tidy";
 import { createInboxListVersions } from "./inbox-list-delta";
-import { debugRoute, INBOX_DEBUG_PATH, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
+import { debugRoute, INBOX_DEBUG_PATH, pullCloseFields, pullKeyForLog, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
 import { perfPhase, retainPerfPhases, syncSection, watchLoopStalls, withServerTiming } from "./inbox-perf";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
@@ -214,7 +214,8 @@ import { isAddressInUseError } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
 import { markPlannotatorResponse, withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT, inboxMcpInitializeClient, resolveInboxMcpReminder, type InboxMcpClient, type InboxMcpContext } from "./inbox-mcp";
-import { guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewSnapshot } from "./inbox-guides";
+import { guidePatchOf, guidePullKey, guideRevisionOf, inboxGuideFileContents, inboxGuideRoute, readInboxReviewSnapshot } from "./inbox-guides";
+import { guideReviewImage, pullReviewImage, reviewImageHttp } from "./inbox-review-image";
 import { createInboxRepoCache } from "./inbox-repos";
 import { createGitlabHosts, unnamedForgeHost, type GitlabHosts } from "./inbox-gitlab-hosts";
 import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-refs";
@@ -372,6 +373,7 @@ import { createInboxTagsRoute } from "./inbox-tags";
 import { createThreadPullStates, createThreadPullsRoute, threadPullsChangedForWake, type ThreadPullFixture } from "./inbox-thread-pulls";
 import { createInboxStepsRoute, inboxStepsStale, inboxStepsWaitOnPerson as stepsListWaitsOnPerson } from "./inbox-steps";
 import { createInboxDebugLog } from "./inbox-debug-log";
+import { keepPullClose } from "./inbox-pull-closes";
 import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller, type InboxDoorTimers } from "./inbox-devices";
 import { inboxRequestSentFrom } from "./inbox-sent-from";
 import { doorHealth } from "./inbox-door-version";
@@ -4504,8 +4506,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const command = replyCommandOf(reply, sendNow, session);
     // A Tidy body is written when the run starts: with steps turned off since, it goes without its steps lines.
     if (command.tidy && !stepsOn()) return { ...command, body: inboxTidyBodyStepsOff(command.body) };
-    // Never on a Tidy, a 👍 or a hand-off notice: those are not about the thread's work.
-    if (command.tidy || command.ack_of || command.handed_away) return command;
+    // Never on a Tidy, a 👍, a hand-off notice or the note that questions moved: those are not about the thread's work.
+    if (command.tidy || command.ack_of || command.handed_away || command.moved) return command;
     const receiver = session ?? store.recipientOf(reply)?.session ?? null;
     // The details line (approval "inbox-wake-context"). A brand new thread has nothing to say yet: its only message is this one.
     const context = command.new_thread ? {} : wakeContextOf(reply, receiver);
@@ -4607,10 +4609,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // (approval "inbox-launched-agent-note"). Only the root, so only that session's first wake.
       ...(launchedWake ? { launched: launchedWake } : {}),
       // A thread the person started with no name yet, handed to a session that may name it: the wake asks it to.
-      ...(!reply.ack_of && store.canNameThread(reply.thread_id, reply.to?.session ?? recipientOf(reply)) ? { name_thread: true } : {}),
+      ...(!reply.ack_of && !reply.moved_note && store.canNameThread(reply.thread_id, reply.to?.session ?? recipientOf(reply)) ? { name_thread: true } : {}),
       // The person's 👍 Looks good (amended 2026-10-16): the wake is the one ack line,
       // with the tray reaction the ack had when its window closed (approval "inbox-reaction-tray").
       ...(reply.ack_of ? { ack_of: reply.ack_of, ...(reply.ack_reaction ? { ack_reaction: reply.ack_reaction } : {}) } : {}),
+      // The Inbox's note that this session's questions moved to another thread: the wake is a notice with no reply
+      // instruction (INBOX_MOVED_WAKE_INSTRUCTION). An older connection words it as a reply.
+      ...(reply.moved_note ? { moved: true as const } : {}),
       // The person's Re-ask (approval "inbox-reask"): the wake takes INBOX_REASK_INSTRUCTION.
       ...((reply.reask?.length ?? 0) > 0 ? { reask: true } : {}),
       // What the note lists (#2059): the wake names action items only when it lists some.
@@ -6339,7 +6344,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         pullHiddenChanged();
         return json({ serverSession, hidden: hiddenList(), hidden_repos: pullHidden.repos(), hid: hide.map((pull) => pull.key), rehid, threads_left: left, threads_back: back });
       }
-      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes") {
+      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes" || path === "/api/inbox/pulls/review-image") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
@@ -6406,6 +6411,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, cause.code === "pull_unknown" ? 404 : cause.code === "pull_diff_fork" ? 409 : 502);
             throw cause;
           }
+        }
+        // One side of a changed image, for the review app's own image preview on the PR page (inbox-review-image.ts):
+        // only a file the diff at the head the window names changes, every check the shared handler's.
+        if (path === "/api/inbox/pulls/review-image") {
+          const key = url.searchParams.get("key") ?? "";
+          const scoped = pullDiffScopeOf(url.searchParams);
+          if (!scoped) throw new InboxError("validation_error", "scope: layer, stack, range with from (a layer's key) or since with from (a commit).", { field: "scope" });
+          if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
+          return reviewImageHttp(await pullReviewImage({ pulls, key, scope: scoped.scope, ...(scoped.from ? { from: scoped.from } : {}), params: url.searchParams, roots: () => pullRoots(key), ifNoneMatch: req.headers.get("if-none-match"), signal: req.signal }));
         }
         if (path === "/api/inbox/pulls/file") {
           const key = url.searchParams.get("key") ?? "";
@@ -6794,24 +6808,39 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const key = typeof body.key === "string" && body.key.length > 0 && body.key.length <= 600 ? body.key : null;
         if (!key) throw new InboxError("validation_error", "key: a pull request key from the list.", { field: "key" });
         const reopen = path === "/api/inbox/pulls/reopen";
-        const closedHere = closedByInbox.get(key);
-        if (reopen && !reopenAllowed(closedHere?.at, Date.now())) {
-          return json({ error: `Only a pull request closed here in the last ${PULL_REOPEN_WINDOW_MS / 60_000} minutes can be reopened here.`, code: "reopen_not_closed_here" }, 409);
-        }
-        if (!reopen && !pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
-        const pull = reopen ? (pulls.find(key) ?? closedHere?.pull) : pulls.find(key);
-        if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
-        if (!reopen && !inboxPullIsOpen(pull)) return json({ error: pull.state === "merged" ? "It is already merged." : "It is already closed.", code: pull.state === "merged" ? "pull_merged" : "pull_closed" }, 409);
-        const result = reopen ? await reopenPull(options.refRunner ?? refCliRunner, pull) : await closePull(options.refRunner ?? refCliRunner, pull);
-        if (!result.ok) return json({ error: result.message, code: result.code }, result.code === "pull_close_failed" ? 502 : 409);
-        if (reopen) {
-          closedByInbox.delete(key);
-          pulls.markReopened(key);
-        } else {
-          closedByInbox.set(key, { at: Date.now(), pull });
-          pulls.markClosed(key);
-        }
-        return json({ serverSession, ok: true, key, url: pull.url });
+        // One line per close and per reopen, whatever its end (a throw too): kept in pull-closes.jsonl always, with the
+        // PR's key; in the debug log while it is on, without it (`pull_close`, debug-log.ts). Never the title.
+        const by = fromDeviceDoor.has(req) ? "machine" : "window";
+        const line = (status: number, code: unknown) => {
+          const fields = pullCloseFields(reopen ? "reopen" : "close", status, code, via, by);
+          keepPullClose(inboxDir(dataDir), { ...fields, key: pullKeyForLog(key) });
+          debugLog?.note("pull_close", fields);
+        };
+        const [answer, status] = await (async (): Promise<[Record<string, unknown>, number]> => {
+          const closedHere = closedByInbox.get(key);
+          if (reopen && !reopenAllowed(closedHere?.at, Date.now())) {
+            return [{ error: `Only a pull request closed here in the last ${PULL_REOPEN_WINDOW_MS / 60_000} minutes can be reopened here.`, code: "reopen_not_closed_here" }, 409];
+          }
+          if (!reopen && !pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
+          const pull = reopen ? (pulls.find(key) ?? closedHere?.pull) : pulls.find(key);
+          if (!pull) return [{ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404];
+          if (!reopen && !inboxPullIsOpen(pull)) return [{ error: pull.state === "merged" ? "It is already merged." : "It is already closed.", code: pull.state === "merged" ? "pull_merged" : "pull_closed" }, 409];
+          const result = reopen ? await reopenPull(options.refRunner ?? refCliRunner, pull) : await closePull(options.refRunner ?? refCliRunner, pull);
+          if (!result.ok) return [{ error: result.message, code: result.code }, result.code === "pull_close_failed" ? 502 : 409];
+          if (reopen) {
+            closedByInbox.delete(key);
+            pulls.markReopened(key);
+          } else {
+            closedByInbox.set(key, { at: Date.now(), pull });
+            pulls.markClosed(key);
+          }
+          return [{ serverSession, ok: true, key, url: pull.url }, 200];
+        })().catch((cause: unknown) => {
+          line(0, "threw");
+          throw cause;
+        });
+        line(status, answer.code);
+        return json(answer, status);
       }
       if (path === "/api/inbox/events" && req.method === "GET") {
       // Another site's page must not hold (or time) a stream of everything the Inbox holds:
@@ -7929,6 +7958,31 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             : null;
         });
         return json({ serverSession, ...contents });
+      }
+
+      // A guided review's image previews (inbox-review-image.ts): one side of a changed image, the blob the guide's patch
+      // names, from the project's git or working tree; as for the arrows, only Code review may ask the forge.
+      const guideImage = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/guide\/review-image$/.exec(path);
+      if (guideImage) {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        const message = store.message(guideImage[1]!);
+        if (!message) return json({ error: "No such message.", code: "message_not_found" }, 404);
+        if (!message.guide) return json({ error: "This message carries no guided review.", code: "guide_not_found" }, 404);
+        const { sha256 } = message.guide;
+        const projectRoot = store.project(message.project_id)?.root ?? null;
+        const pullKey = codeReviewOn() ? guidePullKey(store, sha256) : null;
+        const forge =
+          pullKey && pulls.find(pullKey)
+            ? async (side: "old" | "new", filePath: string, oldPath: string | undefined, maxBytes: number) => {
+                const roots = await pullRoots(pullKey);
+                // Only a PR of this message's own project: a guide cannot name any PR on this machine to read its files.
+                return projectRoot && roots.includes(projectRoot) ? pulls.fileBytes(pullKey, "layer", side, filePath, oldPath, roots, maxBytes) : ({ kind: "missing" } as const);
+              }
+            : undefined;
+        return reviewImageHttp(await guideReviewImage({ patch: guidePatchOf(store, sha256), messageId: message.id, root: projectRoot, pinned: guideRevisionOf(store, sha256), params: url.searchParams, ...(forge ? { forge } : {}), ifNoneMatch: req.headers.get("if-none-match"), signal: req.signal }));
       }
 
       // Guided reviews (step 5): the snapshot a message carries (packages/server/inbox-guides.ts).

@@ -4,6 +4,7 @@ import {
   PRICED_PLAN_ORDER,
   PRICED_PLANS,
   QUESTIONS,
+  UNLIMITED_FACTS,
   YEARLY_SAVING,
   planPriceWords,
 } from './src/lib/spaces-pricing';
@@ -54,6 +55,15 @@ describe('Spaces pricing facts', () => {
     const answers = QUESTIONS.map((item) => item.answer).join(' ');
     expect(answers).toContain(`Free holds up to ${guests} guests.`);
     expect(answers).toContain(`for up to ${members} members and ${guests} guests`);
+  });
+
+  test('the line under the cards says unlimited guests only where the paid cards do, and Free states its limit', () => {
+    expect(UNLIMITED_FACTS).toEqual(['Unlimited agents', 'Unlimited guests']);
+    const rows = (id: string) => PLAN_CARDS.find((card) => card.id === id)?.includes ?? [];
+    expect(rows('team')).toContain('Unlimited guests');
+    expect(rows('team_unlimited')).toContain('Unlimited guests');
+    expect(rows('free').some((row) => /^Up to \d+ guests$/.test(row))).toBe(true);
+    expect(rows('free')).not.toContain('Unlimited guests');
   });
 
   test("the Team card's member limit is the one the questions use", () => {
