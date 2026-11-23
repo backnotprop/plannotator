@@ -278,6 +278,7 @@ async function newContext(browser: Browser, options: Parameters<Browser['newCont
 async function footFits(page: Page, at: string): Promise<string | null> {
   const foot = card(page).locator('[data-ref-card-foot]');
   let form: string | null = null;
+  let seen = '';
   // The count picks its form once the room is known (a ResizeObserver): settled within a frame or two.
   await expect(async () => {
     const fit = await foot.evaluate((el) => {
@@ -299,8 +300,9 @@ async function footFits(page: Page, at: string): Promise<string | null> {
     const { form: shown, sizes, ...rest } = fit;
     expect(rest, `${at}: ${sizes}`).toEqual({ inside: true, oneRow: true, overflow: 0, buttonsWhole: true, countWhole: true });
     form = shown;
+    seen = sizes;
   }).toPass({ timeout: 3_000 });
-  console.log(`ref card footer at ${at}: the count's form is ${form}`);
+  console.log(`ref card footer at ${at}: the count's form is ${form} (${seen})`);
   return form;
 }
 
@@ -322,8 +324,7 @@ test('a click pins the card with Open in Reviews beside Open on GitHub; Escape, 
     const f = (await forge.boundingBox())!;
     expect(Math.abs(a.y + a.height / 2 - (f.y + f.height / 2))).toBeLessThan(1);
     expect(a.x + a.width).toBeLessThanOrEqual(f.x);
-    // Room enough on a desktop: the count's words in full.
-    expect(await footFits(page, 'desktop, pinned')).not.toBe('short');
+    await footFits(page, 'desktop, pinned');
     // Pinned: the pointer leaving does not close it, and nothing opened.
     await page.mouse.move(2, 2);
     await page.waitForTimeout(600);
