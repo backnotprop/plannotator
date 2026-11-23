@@ -27,6 +27,17 @@ export interface GuideReaderComments {
   onShowGlobalComment?: (id: string) => void;
 }
 
+/**
+ * Code review's image preview on changed images (review-editor's `ImageDiffPreview`, as its All files draws it): the
+ * reads of `/api/review-image` sent to the host's own route (packages/inbox/reviewImages.ts), under a snapshot id of
+ * the host's own. A host names it with `ReaderPart` `images` (lazyParts.tsx), which the reader reads from
+ * `ReviewImagesContext`. Absent: an image's diff is the binary notice, as before.
+ */
+export interface GuideReaderImages {
+  snapshotId: string;
+  fetchImpl: typeof fetch;
+}
+
 export interface GuideReaderProps {
   snapshot: GuideSnapshot;
   /** The reviewed ticks as the person left them (kept with the thread by the pane). */
