@@ -10062,6 +10062,8 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   .pn-inbox .ib-rv-walk .ib-vhead .ib-iconbtn { width: 36px; }
   .pn-inbox .ib-rv-walk .ib-vhead .ib-vcomments { min-width: 0; padding-inline: 10px; }
   .pn-inbox .ib-rv-walk .ib-vhead > .ib-rj-btn { flex: 1 1 0; max-width: none; background: var(--ib-hover-s, var(--muted)); }
+  /* With the Diff display gear in the bar too, the place takes the free room, not the spacer: it keeps its width. */
+  .ib-rv-walk .ib-vhead:has(> .ib-dctl) > .ib-rj-btn ~ .ib-sp { flex-grow: 0; }
   /* The name over the count: the menu's rows and foot say where the chapter sits. */
   .ib-rv-walk .ib-vhead > .ib-rj-btn .ib-rj-lead { display: none; }
   .ib-rv-walk .ib-vhead > .ib-rj-btn .ib-rj-chev { margin-left: auto; }
@@ -10959,6 +10961,8 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   .ib-prreview { --ib-prp-h: 30px; }
   .pn-inbox .ib-prreview :is(.ib-vhead, .ib-prp-row2) :is(.ib-iconbtn, .ib-back) { position: relative; min-width: 30px; }
   .pn-inbox .ib-prreview :is(.ib-vhead, .ib-prp-row2) :is(.ib-iconbtn, .ib-back)::after { content: ""; position: absolute; inset: -7px 0; }
+  /* The Diff display gear beside Files, one height with it (a phone's only diff control). */
+  .pn-inbox .ib-prreview .ib-prp-row2 .ib-dctl .ib-dctl-b { height: var(--ib-prp-h); }
 }
 
 .ib-prreview { --ib-prp-chrome: color-mix(in oklab, var(--muted) 42%, var(--background)); --ib-prp-file: color-mix(in oklab, var(--foreground) 4.5%, var(--background)); --ib-prp-page: var(--ib-prp-file); --ib-prp-fill: color-mix(in oklab, var(--foreground) 7%, transparent); background: var(--ib-prp-chrome); }

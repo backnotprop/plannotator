@@ -8,7 +8,9 @@
  *
  * Code review draws it in its dock strip (review-editor DiffOptionsPopover);
  * the Inbox in its review bars, without the two rows that need the local
- * repository (`repositoryOptions={false}`: Whole file, Hide whitespace).
+ * repository (`repositoryOptions={false}`: Whole file, Hide whitespace), and
+ * with Whole file alone again where its diffs can read whole files
+ * (`wholeFileOption`).
  *
  * The option lists are this file's own, not Settings.tsx's, so a host that
  * draws only this popover does not load the settings dialog.
@@ -152,6 +154,8 @@ export interface DiffDisplayOptionsPopoverProps {
   /** The Minimap switch, for a host that draws the diff overview strip. Default: hidden. */
   minimapOption?: boolean;
   semanticOption?: boolean;
+  /** The Whole file switch on its own, for a host without `repositoryOptions` whose diffs still read whole files (the Inbox). Default: hidden. */
+  wholeFileOption?: boolean;
 }
 
 const GEAR = (
@@ -167,7 +171,8 @@ export const DiffDisplayOptionsBody: React.FC<{
   actions?: React.ReactNode;
   minimapOption?: boolean;
   semanticOption?: boolean;
-}> = ({ repositoryOptions = true, onChange, actions, minimapOption = false, semanticOption = false }) => {
+  wholeFileOption?: boolean;
+}> = ({ repositoryOptions = true, onChange, actions, minimapOption = false, semanticOption = false, wholeFileOption = false }) => {
   const set: DiffDisplayChange = onChange ?? ((key, value) => configStore.set(key, value));
   const overflow = useConfigValue('diffOverflow');
   const indicators = useConfigValue('diffIndicators');
@@ -226,10 +231,11 @@ export const DiffDisplayOptionsBody: React.FC<{
           {semanticDiffEnabled && <Switch label="Show moved & renamed code" checked={semantic} onChange={(v) => set('diffSemantic', v)} />}
         </>
       )}
-      {!repositoryOptions && semanticOption && semanticDiffEnabled && (
+      {!repositoryOptions && (wholeFileOption || (semanticOption && semanticDiffEnabled)) && (
         <>
           <div className="border-t border-border/60 my-2 -mx-2" />
-          <Switch label="Show moved & renamed code" checked={semantic} onChange={(v) => set('diffSemantic', v)} />
+          {wholeFileOption && <Switch label="Whole file" checked={expandUnchanged} onChange={(v) => set('diffExpandUnchanged', v)} />}
+          {semanticOption && semanticDiffEnabled && <Switch label="Show moved & renamed code" checked={semantic} onChange={(v) => set('diffSemantic', v)} />}
         </>
       )}
     </>
@@ -246,6 +252,7 @@ export const DiffDisplayOptionsPopover: React.FC<DiffDisplayOptionsPopoverProps>
   actions,
   minimapOption = false,
   semanticOption = false,
+  wholeFileOption = false,
 }) => {
   return (
     <Popover.Root>
@@ -275,7 +282,7 @@ export const DiffDisplayOptionsPopover: React.FC<DiffDisplayOptionsPopoverProps>
             className="w-[min(18rem,calc(100vw-1rem))] max-h-[calc(var(--pn-viewport-height,100vh)-2rem-var(--pn-safe-top)-var(--pn-safe-bottom))] overflow-y-auto bg-popover text-popover-foreground border border-transparent rounded-lg shadow-[var(--float-shadow)] origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0"
           >
             <div className="p-2">
-              <DiffDisplayOptionsBody repositoryOptions={repositoryOptions} onChange={onChange} actions={actions} minimapOption={minimapOption} semanticOption={semanticOption} />
+              <DiffDisplayOptionsBody repositoryOptions={repositoryOptions} onChange={onChange} actions={actions} minimapOption={minimapOption} semanticOption={semanticOption} wholeFileOption={wholeFileOption} />
             </div>
           </Popover.Popup>
         </Popover.Positioner>

@@ -20,7 +20,9 @@
  *   title in quiet grey. The diff controls (one Split / Unified button,
  *   Collapse all, the "Diff display" gear: DiffControls, approval
  *   "diff-controls-headers") sit in the bar only, never on the chapters. A
- *   phone's bar is one row: the same menu holds its title and switch.
+ *   phone's bar is one row: the same menu holds its title and switch, and of
+ *   the diff controls only the gear stays (its Whole file is the way back from
+ *   whole files chosen in code review).
  * - All files has the PR page's file tree on the left (approval
  *   "review-allfiles-tree", the PR page's `PullChangesTree`): a click on a file goes to
  *   it. As on the PR page, a phone has no rail: the bar's Files button opens the

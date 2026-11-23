@@ -2850,6 +2850,57 @@ test('a PR of 21 small files on a tall window: every file on screen draws, all t
   }
 });
 
+/** Review parity's shots (code review in the Inbox brought up to the code review app). */
+const parityDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'review-parity');
+
+test("Whole file chosen in code review draws whole files on the PR page too; the bar's Diff display gear turns it off, back to hunks with expand arrows, and code review's cookie and config.json say so", async () => {
+  const { page, context } = world;
+  mkdirSync(parityDir, { recursive: true });
+  // Code review's Whole file, as code review leaves it: its cookie, which every port on this host shares.
+  await context.addCookies([{ name: 'plannotator-diff-expand-unchanged', value: 'true', url: world.url }]);
+  await page.goto(`${world.url}#pulls&stack=${encodeURIComponent(TEAMMATE)}&layer=${encodeURIComponent(TEAMMATE)}&scope=layer`);
+  await page.reload();
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+  try {
+    const review = page.locator('[data-pull-review]');
+    const shell = review.locator(`[data-guide-file-shell="${TOKENS_PATH}"]`);
+    // Whole: line 20, in no hunk, is drawn with nothing opened, and no expand arrow is left.
+    await expect(shell.locator('[data-column-number="20"]').first()).toBeVisible({ timeout: 30_000 });
+    await expect(shell.locator('[data-expand-button]').filter({ visible: true })).toHaveCount(0);
+    const gear = review.locator('.ib-vhead [data-diff-controls] [data-diff-display-options]');
+    await expect(gear).toBeVisible();
+    await gear.click();
+    const popup = page.locator('[data-diff-display-popup]');
+    const whole = popup.getByRole('switch', { name: 'Whole file' });
+    await expect(whole).toHaveAttribute('aria-checked', 'true');
+    // Hide whitespace needs the local repository: not offered here.
+    await expect(popup.getByRole('switch', { name: 'Hide whitespace' })).toHaveCount(0);
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: join(parityDir, 'b0-01-whole-file-light.png') });
+    await whole.click();
+    await expect(whole).toHaveAttribute('aria-checked', 'false');
+    // Hunks with their context, and the expand arrows to open more, as code review draws by default.
+    await expect(shell.locator('[data-expand-button]').filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(shell.locator('[data-column-number="20"]')).toHaveCount(0);
+    await gear.click();
+    await expect(popup).toHaveCount(0);
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: join(parityDir, 'b0-02-diffs-light.png') });
+    // Kept where code review reads it: its cookie at once, config.json a moment later.
+    expect((await context.cookies(world.url)).find((cookie) => cookie.name === 'plannotator-diff-expand-unchanged')?.value).toBe('false');
+    await expect
+      .poll(() => (JSON.parse(readFileSync(join(world.dataDir, 'config.json'), 'utf8')) as { diffOptions?: { expandUnchanged?: unknown } }).diffOptions?.expandUnchanged)
+      .toBe(false);
+    // A reload opens on hunks: nothing turns Whole file back on.
+    await page.reload();
+    await expect(shell.locator('[data-expand-button]').filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(shell.locator('[data-column-number="20"]')).toHaveCount(0);
+  } finally {
+    await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+  }
+  expect(world.errors).toEqual([]);
+});
+
 test('the expand arrows on the PR page: read from the forge, opening a gap grows the box; a comment on an opened line posts in the main comment', async () => {
   const { page } = world;
   // A page with no diff holds no workers.

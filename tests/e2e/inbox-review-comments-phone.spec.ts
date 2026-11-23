@@ -12,6 +12,8 @@
  * desktop's panel stays the 300 px column or edge sheet it was.
  */
 import { expect, test, type Locator, type Page } from './inbox-test';
+import { mkdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { LONG_FILE, openPull, openReview, seedPull, seedReview, SHORT_FILE, startWorld, stopWorld, windowAt, type Comment, type PhoneWorld } from './inbox-review-comments-phone-world';
 
 const COMMENTS: Comment[] = [
@@ -351,3 +353,54 @@ test('a desktop: the panel is the docked column or the 300 px sheet at the right
     }
   }
 });
+
+/** Review parity's shots (code review in the Inbox brought up to the code review app). */
+const parityDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(resolve(__dirname, '../..'), '.local/proof')), 'review-parity');
+
+for (const [name, open] of Object.entries(opens)) {
+  for (const [width, height] of [[390, 844], [320, 568]] as const) {
+    test(`a phone at ${width}, ${name}: the Diff display gear sits in a row of the bar, not a row of its own, and its Whole file switch is on screen`, async ({ browser }) => {
+      mkdirSync(parityDir, { recursive: true });
+      const { context, page } = await windowAt(browser, width, height, true);
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      try {
+        await open(page);
+        const gear = page.locator('[data-diff-controls] [data-diff-display-options]');
+        await expect(gear).toHaveCount(1);
+        await expect(gear).toBeInViewport({ ratio: 1 });
+        // A phone draws every diff Unified and folds nothing at once: the gear is its only diff control.
+        await expect(page.locator('[data-diff-controls] button')).toHaveCount(1);
+        // Its row (the PR's row under the bar, or the guided review's bar) is one line, inside the window.
+        const row = await gear.evaluate((el) => {
+          const at = el.getBoundingClientRect();
+          const middle = at.top + at.height / 2;
+          const line = el.closest('.ib-prp-row2, .ib-vhead')!;
+          const parts = [...line.children].map((child) => child.getBoundingClientRect()).filter((box) => box.width > 0 && box.height > 0);
+          return { off: parts.filter((box) => Math.abs(box.top + box.height / 2 - middle) > 3).length, left: Math.min(...parts.map((box) => box.left)), right: Math.max(...parts.map((box) => box.right)) };
+        });
+        expect(row.off).toBe(0);
+        expect(row.left).toBeGreaterThanOrEqual(0);
+        expect(row.right).toBeLessThanOrEqual(width);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+        // The guided review's place (its chapter or file) keeps room to read beside it.
+        if (name === 'a guided review') expect((await page.locator('.ib-vhead [data-review-jump]').boundingBox())!.width).toBeGreaterThanOrEqual(40);
+
+        await gear.tap();
+        const whole = page.locator('[data-diff-display-popup]').getByRole('switch', { name: 'Whole file' });
+        await expect(whole).toBeInViewport({ ratio: 1 });
+        await expect(whole).toHaveAttribute('aria-checked', 'false');
+        await page.waitForTimeout(300);
+        if (width === 390 && name === 'a pull request') await page.screenshot({ path: join(parityDir, 'b0-03-phone-390-light.png') });
+        if (width === 320 && name === 'a guided review') await page.screenshot({ path: join(parityDir, 'b0-04-phone-320-guided-review-light.png') });
+        await whole.tap();
+        await expect(whole).toHaveAttribute('aria-checked', 'true');
+        await whole.tap();
+        await expect(whole).toHaveAttribute('aria-checked', 'false');
+        expect(errors).toEqual([]);
+      } finally {
+        await context.close();
+      }
+    });
+  }
+}
