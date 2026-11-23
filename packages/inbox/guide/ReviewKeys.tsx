@@ -203,17 +203,28 @@ const pathOf = (shell: HTMLElement) => shell.dataset.guideFileShell ?? '';
 const reach = (shell: HTMLElement) => shell.scrollIntoView({ block: 'start' });
 const drawn = (shell: HTMLElement) => renderedUnifiedRange(shell) !== null;
 
-/** Every change of each file in `diff`, by path: the patch the reader draws each file from (GuideReader's files). */
-export function changesByPath(diff: string): Map<string, DiffChange[]> {
-  const byPath = new Map<string, DiffChange[]>();
-  for (const file of parseDiffToFiles(diff)) {
+/**
+ * Every change of a file in `diff`, by path: the patch the reader draws each file from (GuideReader's files). Read
+ * only when a key asks (N, Shift+N), once per file: a review never stepped through is never parsed here, and a patch
+ * Pierre finds fault with says so only when it is read for a step, as the review app's own reading does.
+ */
+export function changesByPath(diff: string): (path: string) => DiffChange[] {
+  let patches: Map<string, string> | null = null;
+  const read = new Map<string, DiffChange[]>();
+  return (path) => {
+    const known = read.get(path);
+    if (known) return known;
+    patches ??= new Map(parseDiffToFiles(diff).map((file) => [file.path, file.patch]));
+    const patch = patches.get(path);
+    let changes: DiffChange[] = [];
     try {
-      byPath.set(file.path, listDiffChanges(getSingularPatch(file.patch).hunks));
+      changes = patch === undefined ? [] : listDiffChanges(getSingularPatch(patch).hunks);
     } catch {
-      byPath.set(file.path, []);
+      changes = [];
     }
-  }
-  return byPath;
+    read.set(path, changes);
+    return changes;
+  };
 }
 
 export interface ReviewKeysProps {
@@ -316,7 +327,7 @@ export function ReviewKeys({ diff, viewed }: ReviewKeysProps) {
         atTop: scroller.scrollTop <= 1,
         atBottom: scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 1,
       };
-      const spots = changeSpots(shells, (shell) => changes.get(pathOf(shell)) ?? [], readingLineFor(view, direction, scroll));
+      const spots = changeSpots(shells, (shell) => changes(pathOf(shell)), readingLineFor(view, direction, scroll));
       let current: number | null = null;
       if (cursor.current) {
         const at = spots.findIndex((spot) => spot.shell === cursor.current!.shell && spot.change.unifiedIndex === cursor.current!.index);

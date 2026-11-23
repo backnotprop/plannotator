@@ -91,7 +91,7 @@ describe.skipIf(!hasDom)('the review’s keys in the Inbox', () => {
     };
   };
 
-  const Review = ({ keys = true, viewed = true, details = false }: { keys?: boolean; viewed?: boolean; details?: boolean }) => (
+  const Review = ({ keys = true, viewed = true, details = false, diff = DIFF }: { keys?: boolean; viewed?: boolean; details?: boolean; diff?: string }) => (
     <section data-pull-review="">
       <div data-scroller="" style={{ overflowY: 'auto' }}>
         {FILES.map((file) => (
@@ -118,11 +118,11 @@ describe.skipIf(!hasDom)('the review’s keys in the Inbox', () => {
           <button type="button" data-in-details="">Reviewers</button>
         </aside>
       )}
-      {keys && <ReviewKeys diff={DIFF} viewed={viewed} />}
+      {keys && <ReviewKeys diff={diff} viewed={viewed} />}
     </section>
   );
 
-  const mount = async (keys = true, options: { viewed?: boolean; details?: boolean } = {}) => {
+  const mount = async (keys = true, options: { viewed?: boolean; details?: boolean; diff?: string } = {}) => {
     await act(async () => root.render(
       <>
         <InboxKeys />
@@ -446,6 +446,22 @@ describe.skipIf(!hasDom)('the review’s keys in the Inbox', () => {
     await draw(false);
     expect(host.querySelector('[data-toast-undo]')?.hasAttribute('aria-keyshortcuts')).toBe(true);
     expect(toastSpeech(toast, false, true)).toBe('Marked read. Press Z to undo.');
+  });
+
+  test('a review is not read for its changes until a key asks: a patch Pierre finds fault with says nothing on open', async () => {
+    // A hunk that declares more lines than it has (Pierre logs it when it reads the patch).
+    const bad = 'diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,4 +1,6 @@\n const a = 0;\n+const b = 1;\n';
+    const errors: unknown[] = [];
+    const real = console.error;
+    console.error = (...args: unknown[]) => void errors.push(args);
+    try {
+      await mount(true, { diff: bad });
+      press('j');
+      press('x');
+      expect(errors).toEqual([]);
+    } finally {
+      console.error = real;
+    }
   });
 
   test('every key is the code review app’s own: its registry entries, no binding of its own', () => {
