@@ -97,6 +97,8 @@ export function createInboxCompose(options: {
   onReviewStart?: (threadId: string, review: unknown, where: { host: string; project_id: string; at: string }) => void;
   /** This Inbox's stable id (linked machines): the sessions answer says whose sessions they are. */
   machine?: () => string;
+  /** Uploads something else keeps for later (a Combine's files copied from a linked computer): the sweep leaves them. */
+  keepUploads?: () => Iterable<string>;
   /** A compose draft was saved, deleted or sent: every window's stream says `event: drafts`, so its Drafts count follows (#2593). */
   onDraftsChange?: () => void;
   /** Where live sessions live, as this computer's Rex last confirmed (inbox-rex.ts): one line each. Absent: none. */
@@ -439,6 +441,7 @@ export function createInboxCompose(options: {
       // A reply draft's files (long pastes too) are kept as a compose draft's files are, at any age.
       for (const id of store.replyDraftUploadIds()) keep.add(id);
       for (const id of store.commentPictureUploadIds()) keep.add(id);
+      for (const id of options.keepUploads?.() ?? []) keep.add(id);
       for (const id of inboxCommentDraftUploadIds(store.dir, (threadId: string) => store.thread(threadId) !== null)) keep.add(id);
       sweepInboxUploads(store.dir, { keep, usedBlobs: store.usedBlobs(), now: now().getTime() });
     } catch {

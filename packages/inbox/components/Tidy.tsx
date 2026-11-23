@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { Popover } from '@base-ui/react/popover';
-import type { InboxTidyCombine, InboxTidyRun } from '@plannotator/core/inbox-types';
+import { isInboxId, type InboxTidyCombine, type InboxTidyRun } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 import { formatCount } from '../format';
 import { Icon } from '../icons';
@@ -422,13 +422,17 @@ export function TidyMenu({
   );
 }
 
-/** A Tidy note in its thread: one quiet line, "Tidy sent to Claude Code · 8:54 AM". */
-export function TidyNote({ agent, time, fullWhen }: { agent: string; time: string; fullWhen: string }) {
+/**
+ * A Tidy note in its thread: one quiet line, "Tidy sent to Claude Code · 8:54 AM". A Combine's wake is the same note
+ * (its run a `cmb_` id): "Combine sent to Claude Code · 8:54 AM" (approval "inbox-combine-across-computers": a Combine
+ * is not a Tidy).
+ */
+export function TidyNote({ run, agent, time, fullWhen }: { run?: string; agent: string; time: string; fullWhen: string }) {
   return (
     <p className="ib-tidy-mark" data-tidy-note="">
       <Icon name="todo" size={14} />
       <span>
-        Tidy sent to {agent}
+        {run && isInboxId('cmb', run) ? 'Combine' : 'Tidy'} sent to {agent}
         {' · '}
         <Tip content={fullWhen}>
           <span data-full-when="">{time}</span>
@@ -437,3 +441,6 @@ export function TidyNote({ agent, time, fullWhen }: { agent: string; time: strin
     </p>
   );
 }
+
+/** What a Combine left where it was, in the same quiet note style (CombineLeftNote.tsx). */
+export { CombineLeftNote } from './CombineLeftNote';

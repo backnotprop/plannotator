@@ -811,6 +811,7 @@ packages/review-editor/dock/panels/ReviewCallFlowPanel.callTree.test.tsx
 packages/inbox/paneRetention.test.tsx
 packages/review-editor/components/guide/GuideEmptyState.aiOff.test.tsx
 packages/review-editor/components/PRMediaScope.test.tsx
+packages/review-editor/components/AnnotatableDescription.forgejo.test.tsx
 packages/inbox/pulls/forgeMedia.test.tsx
 packages/ui/components/InlineMarkdown.imgTags.test.tsx
 packages/inbox/composeMachineSwitch.test.tsx
@@ -852,6 +853,7 @@ packages/inbox/threadTagsStep2.test.tsx
 packages/inbox/listPicks.test.tsx
 packages/inbox/pickWork.test.tsx
 packages/inbox/combines.test.tsx
+packages/inbox/tidyNote.test.tsx
 packages/inbox/tagColours.test.tsx
 packages/inbox/pressKeys.test.tsx
 packages/review-editor/components/AllFilesCodeView.lineTarget.test.tsx
