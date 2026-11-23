@@ -521,6 +521,14 @@ export function parseInboxSupersedeRef(value: unknown): { message_id: string; ke
   return { message_id: match[1]!, key: match[2] ?? null };
 }
 
+const BARE_KEY_RE = /^(?:q|a)-[0-9a-f]{8}(?:-\d{1,3})?$/;
+
+export function parseInboxBareKey(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const key = value.trim();
+  return BARE_KEY_RE.test(key) ? key : null;
+}
+
 /** A question that can still be superseded: one the person has not answered and sent. */
 export function isInboxQuestionSupersedable(state: InboxQuestionState): boolean {
   return state === "open" || state === "picked";

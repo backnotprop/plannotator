@@ -3294,6 +3294,9 @@
             }
           ]
         },
+        "acted_at": {
+          "type": "string"
+        },
         "tags": {
           "type": "array",
           "items": {
