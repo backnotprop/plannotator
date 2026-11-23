@@ -66,10 +66,13 @@ async function walk(page: Page, picture?: string): Promise<void> {
   await expect.poll(() => placeOf(page, SHORT_FILE)).toBeLessThan(60);
   expect(await route()).toBe(at);
 
-  // N: the next change, in the other file; Shift+N back. Nothing opens.
-  await page.keyboard.press('n');
-  await expect(changeIn(page, LONG_FILE)).toBeInViewport({ timeout: 10_000 });
-  await expect.poll(() => placeOf(page, LONG_FILE)).toBeLessThan(600);
+  // N: on to the next change until it is the other file's (the first press from the top of the page can land on the
+  // first file's own change, as in the review app); Shift+N back to the first file's. Nothing opens.
+  await expect(async () => {
+    await page.keyboard.press('n');
+    await expect(changeIn(page, LONG_FILE)).toBeInViewport({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+  expect(await placeOf(page, LONG_FILE)).toBeLessThan(600);
   expect(await route()).toBe(at);
   await expect(newMessage(page)).toHaveCount(0);
   if (picture) {
@@ -78,7 +81,9 @@ async function walk(page: Page, picture?: string): Promise<void> {
     await page.screenshot({ path: join(proofDir, picture) });
   }
   await page.keyboard.press('Shift+N');
-  await expect(changeIn(page, SHORT_FILE)).toBeInViewport({ timeout: 10_000 });
+  // The first file's change starts at its top: back there, its top is on screen again.
+  await expect.poll(() => placeOf(page, SHORT_FILE), { timeout: 10_000 }).toBeGreaterThan(-200);
+  expect(await placeOf(page, SHORT_FILE)).toBeLessThan(700);
 
   // X folds the file on screen, Z opens it again (and undoes nothing).
   await page.keyboard.press('x');

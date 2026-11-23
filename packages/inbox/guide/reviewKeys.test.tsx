@@ -162,6 +162,34 @@ describe.skipIf(!hasDom)('the review’s keys in the Inbox', () => {
     expect(inbox).toEqual([]);
   });
 
+  test('N from the top, with the next change not drawn yet: it scrolls on until it is, never back to the same change', async () => {
+    await mount();
+    // The other files' rows are not drawn until the view comes near them (a mounted viewer draws only rows near it).
+    const later = FILES.slice(1).map((file) => {
+      const tbody = host.querySelector(`[data-guide-file-shell="${file.path}"] tbody`)!;
+      const rows = [...tbody.children];
+      for (const row of rows) row.remove();
+      return { file, tbody, rows };
+    });
+    Object.defineProperty(scroller, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value: number) => {
+        scrollTop = value;
+        for (const { file, tbody, rows } of later) if (scrollTop + VIEW > file.change && !tbody.firstChild) tbody.append(...rows);
+      },
+    });
+    press('n');
+    expect(reached).toEqual(['1,1']);
+    expect(scrollTop).toBe(100 - VIEW / 2);
+    scrollTop = 0;
+    press('n');
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 300)));
+    expect(reached).toEqual(['1,1', '1,1']);
+    expect(scrollTop).toBe(650 - VIEW / 2);
+    expect(inbox).toEqual([]);
+  });
+
   test('Z opens the collapsed file again and never undoes; X folds and V ticks the file on screen', async () => {
     await mount();
     expect(press('z').defaultPrevented).toBe(true);

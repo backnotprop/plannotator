@@ -213,11 +213,18 @@ export function ReviewKeys() {
       const { scroller } = first;
       const atTop = scroller.scrollTop <= 1;
       const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 1;
-      const spot = pickChange(drawnChanges(first.shells), direction, first.view, { atTop, atBottom }, cursor.current);
+      const drawn = drawnChanges(first.shells);
+      const spot = pickChange(drawn, direction, first.view, { atTop, atBottom }, cursor.current);
       if (spot) return land(spot);
-      // Where the key was pressed, in the scroller's own coordinates: the drawn rows past it had no change.
+      // Where the step starts, in the scroller's own coordinates: the change last landed on while it is on screen, else
+      // the reading line. The drawn rows past it had no change.
       const contentOf = (y: number, view: { top: number }) => scroller.scrollTop + y - view.top;
-      const from = contentOf(readingLineFor(first.view, direction, { atTop, atBottom }), first.view);
+      const landed = cursor.current && drawn.find((candidate) => candidate.file === cursor.current!.file && candidate.index === cursor.current!.index);
+      const landedRect = landed?.el.getBoundingClientRect();
+      const onScreen = landedRect && landedRect.bottom > first.view.top && landedRect.top < first.view.bottom;
+      const from = onScreen
+        ? contentOf(landedRect.top + landedRect.height / 2, first.view)
+        : contentOf(readingLineFor(first.view, direction, { atTop, atBottom }), first.view);
       void (async () => {
         for (let tries = 0; tries < MAX_SEEK; tries++) {
           const before = scroller.scrollTop;
