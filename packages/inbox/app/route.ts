@@ -53,8 +53,9 @@ export interface Route {
   layer?: string | null;
   scope?: PullViewScope;
   /**
-   * The layer whose diff closed back to this stack's page (`&back=`, `layerClosed`): the list shows that layer's row
-   * selected. Only a diff's Back writes it, so any other way to the stack (a row, a thread, a tile) shows the stack's.
+   * The layer whose diff closed back to this stack's page (`&back=`, `layerClosed`), or to the list it was opened from
+   * (a layer's row, focus.ts `listUnder`): the list shows that layer's row selected, its stack unfolded. Only a diff's
+   * Back writes it, so any other way to the stack (a row, a thread, a tile) shows the stack's.
    */
   backLayer?: string | null;
   /**
@@ -216,7 +217,7 @@ export function routeOf(fullHash: string): Route {
       stack,
       layer,
       scope: layer ? viewScopeOf(params) : 'layer',
-      backLayer: stack && !layer ? params.get('back') || null : null,
+      backLayer: !layer ? params.get('back') || null : null,
       new: params.has('new'),
       ...systemRouteOf(params),
       ...localRouteOf(params),

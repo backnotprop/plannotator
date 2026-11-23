@@ -119,7 +119,7 @@ import {
   useEndedSessions, type RouteState
 } from './ReplyRoute';
 import { ReaskNote } from './ReaskNote';
-import { TidyNote } from './Tidy';
+import { CombineLeftNote, TidyNote } from './Tidy';
 import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } from '../reask';
 import { ChangedNotice, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
 import type { ComposerCommand } from './ComposerField';
@@ -5092,7 +5092,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           }
           // A Tidy note: one quiet line in place of the message.
           if (message.tidy) {
-            before.push(<TidyNote key={message.id} agent={message.to ? toName(message, message.to) : 'the agent'} time={time} fullWhen={fullWhen} />);
+            before.push(<TidyNote key={message.id} run={message.tidy.id} agent={message.to ? toName(message, message.to) : 'the agent'} time={time} fullWhen={fullWhen} />);
             return before;
           }
           if (message.scheduled_run) {
@@ -5292,10 +5292,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     onOpenAs={phone || fileStacked ? undefined : openFromMessage}
                     openId={file && !full && !phone && !fileStacked ? file.id : null}
                     openIn={openIn} pinOf={(a) => ({ threadId: thread.thread_id, key: openArtifactKey(artifactList, a.id) })}
-                    newestId={newestFileId}
-                    newestKeycap={!file}
+                    newestId={newestFileId} newestKeycap={!file}
                   />
                 )}
+                {isAgent && <CombineLeftNote left={message.combine_left} />}
                 {message.guide &&
                   (codeReview && message.guide.review ? (
                     <ReviewCard guide={message.guide} outcome={reviewOutcomes.get(message.id) ?? null} verdict={!thread.pull_theirs && !message.guide.walkthrough} onInReviews={onInReviews} onOpen={() => onOpenGuide(message.id)} />

@@ -110,7 +110,7 @@ export interface PullsPageProps {
   state: PullsState;
   /** The stack open beside the list (its id, or any layer's key), or null. */
   stackId: string | null;
-  /** The layer of that stack the list shows selected: the one open, or the one whose diff closed back to it (`Route.backLayer`). */
+  /** The layer the list shows selected: the one open, or the one whose diff closed back to its stack or to the list (`Route.backLayer`). */
   layerId?: string | null;
   project: string | null;
   /** The list's view (`&view=`): All, Mine, To review or Others. */
@@ -192,6 +192,8 @@ export function PullsPage(given: PullsPageProps) {
     if (!groups || !model || !props.stackId) return null;
     return findStack(groups, props.stackId) ?? (props.filter === 'all' ? null : findStack(pullGroups(model, props.project), props.stackId));
   }, [groups, model, props.stackId, props.filter, props.project]);
+  // The list a layer's diff closed back to (`#reviews&back=`, no stack open): that layer's stack is the open row.
+  const listed = open ?? (groups && !props.stackId && props.layerId ? findStack(groups, props.layerId) : null);
   const rows = useMemo(() => (answer ? reviewRowsIn(answer, props.project, props.filter) : null), [answer, props.project, props.filter]);
   // Risk ranking (inbox-pull-risk.ts). The filter acts only once rules exist, and never closes the stack open beside the list.
   const risk = usePullRisk(model);
@@ -314,8 +316,8 @@ export function PullsPage(given: PullsPageProps) {
             riskFailed={riskFailed}
             autoRuns={risk.answer?.auto_runs}
             projectNames={props.projectNames}
-            selected={props.threadId ?? open?.stack.id ?? null}
-            selectedLayer={selectedLayerOf(open?.stack.id ?? null, props)}
+            selected={props.threadId ?? listed?.stack.id ?? null}
+            selectedLayer={selectedLayerOf(listed?.stack.id ?? null, props)}
             phone={phone}
             onOpen={(row) => {
               // One open PR opens its launchpad, reviewed or not; else a review its thread, a listed stack its page.

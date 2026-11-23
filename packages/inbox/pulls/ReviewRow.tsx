@@ -154,11 +154,15 @@ function PhoneLine({ lead, quietRisk, riskFailure, where, age }: { lead: React.R
   );
 }
 
-/** The row's full title as its tooltip, only while the line cuts it: read on the pointer's arrival, never per frame. */
+/**
+ * The row's full title as its title's tooltip, only while the line cuts it: read on the pointer's arrival, never per
+ * frame. On the title, not the row's button, whose own title a screen reader would say again after its name.
+ */
 function titleWhenCut(event: React.PointerEvent<HTMLElement>, title: string) {
-  const row = event.currentTarget;
-  if (titleIsCut(row.querySelector('.ib-rvr-t'))) row.title = title;
-  else row.removeAttribute('title');
+  const shown = event.currentTarget.querySelector<HTMLElement>('.ib-rvr-t');
+  if (!shown) return;
+  if (titleIsCut(shown)) shown.title = title;
+  else shown.removeAttribute('title');
 }
 
 const STATE_WORD: Record<InboxPull['state'], string> = { open: 'Open', draft: 'Draft', merged: 'Merged', closed: 'Closed' };
@@ -254,9 +258,9 @@ export function ReviewRowItem({ row, links, place, selected, phone, now, judgmen
             </Tip>
           )}
           {line.agent && (
-            <span className="ib-pr-magent ib-rvr-agent" data-reviews-agent={line.agent.host ?? ''} title={line.agent.name}>
+            // The desktop's open row's second line names the agent: once (this mark's tooltip would name it too).
+            <span className="ib-pr-magent ib-rvr-agent" data-reviews-agent={line.agent.host ?? ''} title={line.agent.name} aria-hidden={wide ? 'true' : undefined}>
               <HostMark host={line.agent.host} />
-              {/* The desktop's open row's second line names the agent: once. */}
               {!wide && <span className="ib-sr">, {line.agent.name}</span>}
             </span>
           )}

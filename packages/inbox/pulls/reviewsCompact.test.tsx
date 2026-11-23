@@ -167,13 +167,17 @@ const row = (id: string) => $(`[data-reviews-row="${id}"]`)!;
 
 /**
  * What a screen reader hears from an element: its text, without what is hidden from it. An aria-label counts only on
- * an element with a role (an image, a button): on a plain span some screen readers never read it.
+ * an element with a role (an image, a button): on a plain span some screen readers never read it. An element with
+ * nothing to say is named by its `title`, as a browser names it.
  */
 function spoken(el: Element): string {
   let out = '';
   for (const node of el.childNodes) {
     if (node.nodeType === 3) out += node.textContent;
-    else if (node instanceof Element && node.getAttribute('aria-hidden') !== 'true') out += (node.hasAttribute('role') || node.tagName === 'BUTTON' ? node.getAttribute('aria-label') : null) ?? spoken(node);
+    else if (node instanceof Element && node.getAttribute('aria-hidden') !== 'true') {
+      const said = (node.hasAttribute('role') || node.tagName === 'BUTTON' ? node.getAttribute('aria-label') : null) ?? spoken(node);
+      out += said.trim() === '' ? (node.getAttribute('title') ?? said) : said;
+    }
   }
   return out;
 }

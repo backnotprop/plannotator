@@ -510,7 +510,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
         version: peer?.version ?? null,
         address: openTransport(link.transport).describe(),
         both_ways: link.device_id !== null,
-        waiting: outbox.list(link.id, "pending").length,
+        waiting: outbox.list(link.id, "pending").filter((e) => !e.auto).length,
         list_cursor: peer?.list?.cursor ?? null,
         snoozes: peer?.list?.snoozes ?? false,
         snooze_old: peer?.list ? !peer.list.snoozes : false,
@@ -549,6 +549,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
   };
 
   outbox.onChange(({ entry }) => {
+    // What this Inbox writes itself (a Combine's archive there) is not the person's: the window never draws it.
+    if (entry.auto) return;
     emit({ event: "outbox", data: outboxView(entry) });
     machinesChanged();
   });
@@ -1121,7 +1123,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (path === "/api/inbox/outbox") {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
       const machine = url.searchParams.get("machine");
-      const waiting = links.list().flatMap((l) => (machine && l.id !== machine ? [] : outbox.list(l.id, "pending")));
+      const waiting = links.list().flatMap((l) => (machine && l.id !== machine ? [] : outbox.list(l.id, "pending").filter((e) => !e.auto)));
       return json({ waiting: waiting.map(outboxView), notices: outbox.notices().map(outboxView) });
     }
     // Cancel a write still waiting that never left (a launch held for a machine that is asleep): it is never sent.
@@ -1347,6 +1349,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     selfId: links.selfId,
     /** Whether any link exists (the tailnet door then publishes at start even with Phones off). */
     hasLinks: () => links.list().length > 0,
+    /** A linked machine's name, or null when it is not linked. */
+    nameOf: (machine: string): string | null => links.get(machine)?.name ?? null,
     machinesView,
     /** This Inbox's door changed by itself (published again once Tailscale ran): the windows hear the machines block. */
     machinesChanged,
@@ -1371,7 +1375,30 @@ export function createInboxMachines(context: InboxMachinesContext) {
     branchLists: () => machineBranches.start((machine) => links.get(machine)?.name ?? null),
     farCard,
     snoozeThread,
+    /**
+     * A write this Inbox makes itself on a linked machine's thread (a Combine's archive there, and its Undo;
+     * inbox-combine-far.ts): held in the outbox as the window's writes are, so one queue and one key per write, sent
+     * now while that machine is online and when it is back otherwise. Waits up to `waitMs` for its answer. Null when
+     * that machine is not linked. `own`: the write it undoes (`follows`), and when it stops being worth sending (`send_by`).
+     */
+    holdWrite: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number, own: { follows?: string; send_by?: string } = {}): Promise<OutboxEntry | null> | null => {
+      const peer = peers.get(machine);
+      if (!peer) return null;
+      // Marked as this Inbox's own (`auto`): the window never lists it as the person's waiting write.
+      const { entry } = outbox.submit(machine, route, body, thread, false, null, true, own);
+      if (peer.state === "online") peer.flush();
+      else peer.poke();
+      return outbox.waitSettled(entry.key, peer.state === "online" ? waitMs : 0);
+    },
+    /** A held write of this Inbox's own, by its key: how it stands (null: never held). */
+    heldWrite: (key: string): OutboxEntry | null => outbox.get(key),
+    /** Take back a held write of this Inbox's own that never left (rule 10: one that left stays), or one past its `send_by`. */
+    cancelHeld: (key: string): OutboxEntry | null => outbox.cancel(key),
+    /** A linked machine's rows as its list last said, or null while this Inbox holds no list of it. */
+    listedRows: (machine: string): readonly InboxListRow[] | null => peers.get(machine)?.list?.rows ?? null,
     readThread: agentRead.readThread,
+    /** A linked machine's file of a thread its agents read, streamed (a Combine copies the other computer's files in). */
+    fetchFile: agentRead.fetchFile,
     /** A piece of a linked machine's file, for a paired cloud agent's fetch_file (inbox-machine-agent-piece.ts). */
     filePiece: agentRead.filePiece,
     /** An agent's search and thread list on every linked machine (inbox-machine-agent-find.ts). */

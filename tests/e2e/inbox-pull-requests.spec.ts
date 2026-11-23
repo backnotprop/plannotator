@@ -1062,6 +1062,40 @@ test("compact rows (approval inbox-reviews-compact-list): one 30px line each, th
   if ((await unfold.getAttribute('aria-expanded')) === 'true') await unfold.click();
 });
 
+test("compact rows on a phone: a layer opened from the list, its Back is the browser's Back to the list, that layer still shown", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'light' });
+  const page = await context.newPage();
+  try {
+    // The Inbox first, then Reviews as a screen of its own: a Back past Reviews has somewhere to land.
+    await page.goto(world.url);
+    await page.evaluate(() => (location.hash = '#reviews'));
+    const list = page.locator('[data-pulls-list]');
+    await expect(list.locator('[data-reviews-row]').first()).toBeVisible();
+    await openNotReviewed(page);
+    const unfold = list.locator(`[data-reviews-stack-toggle="${STACK_ID}"]`);
+    if ((await unfold.getAttribute('aria-expanded')) !== 'true') await unfold.click();
+    const before = await page.evaluate(() => history.length);
+    await list.locator(`[data-reviews-layer="${LAYER_413}"]`).click();
+    const review = page.locator('[data-pull-review]');
+    await expect(review).toHaveAttribute('data-pull-review', LAYER_413);
+    // The window's Back: the list again, as the swipe back would go, and no entry added.
+    await review.getByRole('button', { name: 'Reviews' }).first().click();
+    await expect(list.locator(`[data-reviews-layer="${LAYER_413}"]`)).toBeVisible();
+    await expect(page.locator('[data-pulls-stack]')).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).not.toContain('stack=');
+    expect(await page.evaluate(() => history.length)).toBe(before + 1);
+    // The list as it was: that layer's stack unfolded, the layer its open row.
+    await expect(unfold).toHaveAttribute('aria-expanded', 'true');
+    await expect(list.locator(`[data-reviews-layer="${LAYER_413}"]`)).toHaveAttribute('aria-current', 'true');
+    // A second Back leaves Reviews: never the stack's page.
+    await page.goBack();
+    await expect.poll(() => page.evaluate(() => location.hash)).not.toContain('reviews');
+    await expect(page.locator('[data-pulls-stack]')).toHaveCount(0);
+  } finally {
+    await context.close();
+  }
+});
+
 test('compact rows: one row with every mark at once in the narrowest list, and a title tooltip only while the title is cut', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark', reducedMotion: 'reduce' });
   const page = await context.newPage();
@@ -1120,11 +1154,14 @@ test('compact rows: one row with every mark at once in the narrowest list, and a
     await page.mouse.move(0, 0);
     await page.waitForTimeout(400);
     await page.screenshot({ path: join(proofDir, 'compact-06-every-mark-dark.png') });
-    // The tooltip: the full title only while the line cuts it.
+    // The tooltip: the full title only while the line cuts it, on the title, never on the row's button (a screen
+    // reader would say the title again after the row's name).
     await row.hover();
-    await expect(row).toHaveAttribute('title', long);
+    await expect(row.locator('.ib-rvr-t')).toHaveAttribute('title', long);
+    await expect(row).not.toHaveAttribute('title', /./);
     const short = page.locator('[data-reviews-row][data-pulls-row="github.com/northwind/web-app#880"]');
     await short.hover();
+    await expect(short.locator('.ib-rvr-t')).not.toHaveAttribute('title', /./);
     await expect(short).not.toHaveAttribute('title', /./);
   } finally {
     await context.close();
