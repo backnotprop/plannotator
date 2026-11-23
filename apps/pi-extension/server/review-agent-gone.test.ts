@@ -38,8 +38,14 @@ async function sandboxed(run: (dataDir: string) => Promise<void>): Promise<void>
 
 const patch = () => `diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-a${Math.random()}\n+b\n`;
 const json = { "Content-Type": "application/json" };
+// The reviewer's words as the page saves them: a line comment, and a general
+// (global) comment with an attached image.
+const DRAFT_COMMENTS = [
+	{ id: "c1", type: "comment", scope: "line", filePath: "a.ts", lineStart: 1, lineEnd: 1, side: "new", text: "Why b?" },
+	{ id: "g1", type: "comment", scope: "general", filePath: "", lineStart: 0, lineEnd: 0, side: "new", text: "Keep the old name.", images: [{ path: "/tmp/screenshot-ada.png", name: "screenshot" }] },
+];
 const saveDraft = (url: string) =>
-	fetch(`${url}/api/draft`, { method: "POST", headers: json, body: JSON.stringify({ annotations: [], codeAnnotations: [{ id: "c1" }], globalAttachments: [] }) });
+	fetch(`${url}/api/draft`, { method: "POST", headers: json, body: JSON.stringify({ annotations: [], codeAnnotations: DRAFT_COMMENTS, globalAttachments: [] }) });
 const send = (url: string, body: Record<string, unknown> = { approved: false, feedback: "Fix a.ts", annotations: [{ id: "c1" }] }) =>
 	fetch(`${url}/api/feedback`, { method: "POST", headers: json, body: JSON.stringify(body) });
 
@@ -53,7 +59,8 @@ describe("Send when the agent is gone (Pi)", () => {
 				expect(refused.status).toBe(410);
 				expect(await refused.json()).toMatchObject({ code: "agent_gone" });
 				expect((await send(server.url, { approved: true, feedback: "", annotations: [] })).status).toBe(410);
-				expect((await (await fetch(`${server.url}/api/draft`)).json()).codeAnnotations).toHaveLength(1);
+				// Every comment, the global one and its attachment, exactly as written.
+				expect((await (await fetch(`${server.url}/api/draft`)).json()).codeAnnotations).toEqual(DRAFT_COMMENTS);
 				expect(existsSync(join(dataDir, "feedback"))).toBe(false);
 			} finally {
 				server.stop();
@@ -83,7 +90,7 @@ describe("Send when the agent is gone (Pi)", () => {
 				const refused = await send(server.url);
 				expect(refused.status).toBe(409);
 				expect(await refused.json()).toMatchObject({ code: "agent_away" });
-				expect((await (await fetch(`${server.url}/api/draft`)).json()).codeAnnotations).toHaveLength(1);
+				expect((await (await fetch(`${server.url}/api/draft`)).json()).codeAnnotations).toEqual(DRAFT_COMMENTS);
 				presence = "here";
 				expect((await send(server.url)).status).toBe(200);
 				expect(await server.waitForDecision()).toMatchObject({ feedback: "Fix a.ts" });

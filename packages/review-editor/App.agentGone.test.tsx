@@ -21,6 +21,7 @@ import {
 } from "@plannotator/ui/utils/storage";
 import { configStore } from "@plannotator/ui/config";
 import { REVIEW_ENDED_KEPT_UNFINISHED_TEXT, REVIEW_ENDED_TITLE, reviewEndedSubtitle } from "./components/ReviewEnded";
+import { describeSendFailure } from "@plannotator/ui/utils/sendFailure";
 
 // Vite-only virtual module (`?worker&inline`): stubbed like App.panelView.test.tsx.
 mock.module("./workerPool", () => ({
@@ -96,6 +97,9 @@ class StubEventSource {
 
 let configPosts: unknown[] = [];
 let draftPosts: string[] = [];
+/** What /api/feedback answers: the server's agent-gone refusal, or ok (a live agent). */
+let feedbackAnswer: "gone" | "ok" = "ok";
+let feedbackPosts: Array<{ annotations?: Array<{ scope?: string; text?: string }> }> = [];
 
 function makeFetch(origin: string, agentTool: Record<string, unknown> | undefined): typeof fetch {
   // SAFETY: the app only ever calls fetch(input, init).
@@ -115,6 +119,14 @@ function makeFetch(origin: string, agentTool: Record<string, unknown> | undefine
       return Response.json({ ok: true });
     }
     if (url.pathname === "/api/draft") return Response.json({ error: "Not found" }, { status: 404 });
+    if (url.pathname === "/api/feedback" && init?.method === "POST") {
+      feedbackPosts.push(JSON.parse(String(init.body)));
+      // packages/shared/review-agent-gone.ts: what both review servers answer.
+      if (feedbackAnswer === "gone") {
+        return Response.json({ error: "The agent that asked for this review is gone.", code: "agent_gone" }, { status: 410 });
+      }
+      return Response.json({ ok: true });
+    }
     return Response.json({});
   };
   return impl as unknown as typeof fetch;
@@ -183,6 +195,8 @@ afterEach(async () => {
   memory.clear();
   configPosts = [];
   draftPosts = [];
+  feedbackAnswer = "ok";
+  feedbackPosts = [];
   window.close = originalClose;
   streams.length = 0;
   resetStorageBackend();
@@ -262,5 +276,69 @@ describe.if(hasDom)("a code review whose agent is gone", () => {
     expect(screen).not.toBeNull();
     expect(document.querySelector("[data-review-ended]")).toBeNull();
     expect(screen?.textContent).not.toContain(REVIEW_ENDED_TITLE);
+  });
+});
+
+/**
+ * Send while the agent is gone, before any end was announced: the server
+ * refuses it (`410 agent_gone`). Regression guarded: the page showing its sent
+ * screen, or dropping the reviewer's comment, for a Send nobody received.
+ */
+describe.if(hasDom)("Send to an agent that is gone", () => {
+  // Sonner keeps earlier toasts in its module store: find this one by title.
+  const failureToast = () =>
+    Array.from(document.querySelectorAll<HTMLElement>("[data-sonner-toast]"))
+      .filter((el) => el.getAttribute("data-removed") !== "true")
+      .find((el) => el.querySelector("[data-title]")?.textContent?.endsWith(" not sent"));
+  const primaryButton = () => document.querySelector<HTMLButtonElement>("[data-decision-primary]");
+
+  async function addGeneralCommentAndSend(text: string): Promise<void> {
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>("button[data-review-panel-toggle]")!.click();
+    });
+    await settle();
+    await act(async () => document.querySelector<HTMLButtonElement>("[data-add-general-comment]")!.click());
+    await settle();
+    const input = document.querySelector<HTMLTextAreaElement>("[data-review-general-composer] [data-decision-note-input]")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, text);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => document.querySelector<HTMLButtonElement>("[data-general-comment-add]")!.click());
+    await settle();
+    expect(primaryButton()!.textContent).toContain("Send Feedback");
+    await act(async () => primaryButton()!.click());
+    for (let attempt = 0; attempt < 10; attempt += 1) await settle();
+  }
+
+  test("is reported as not sent, shows no sent screen, and keeps the comment", async () => {
+    seedEarlierChainSeen();
+    feedbackAnswer = "gone";
+    await mount("claude-code", undefined);
+    await addGeneralCommentAndSend("Split this into two PRs.");
+    for (let attempt = 0; attempt < 40 && !failureToast(); attempt += 1) await settle();
+
+    expect(feedbackPosts).toHaveLength(1);
+    expect(feedbackPosts[0]!.annotations?.some((a) => a.scope === "general" && a.text === "Split this into two PRs.")).toBe(true);
+    expect(document.querySelector("[data-completion-state]")).toBeNull();
+    expect(failureToast()!.textContent).toContain("Feedback not sent");
+    expect(failureToast()!.textContent).toContain(describeSendFailure({ kind: "agent-gone" }));
+    // Retry cannot reach a gone agent: not offered.
+    expect(Array.from(failureToast()!.querySelectorAll("button")).some((b) => b.textContent === "Retry")).toBe(false);
+    // The comment is still the reviewer's: still on the page, still sendable.
+    expect(document.body.textContent).toContain("Split this into two PRs.");
+    expect(primaryButton()!.textContent).toContain("Send Feedback");
+  });
+
+  test("a live agent still gets it: the sent screen, as before", async () => {
+    seedEarlierChainSeen();
+    feedbackAnswer = "ok";
+    await mount("claude-code", undefined);
+    await addGeneralCommentAndSend("Split this into two PRs.");
+    for (let attempt = 0; attempt < 40 && !document.querySelector("[data-completion-state]"); attempt += 1) await settle();
+
+    expect(feedbackPosts).toHaveLength(1);
+    expect(document.querySelector("[data-completion-state]")).not.toBeNull();
+    expect(failureToast()).toBeUndefined();
   });
 });

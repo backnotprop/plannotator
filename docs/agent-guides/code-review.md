@@ -41,7 +41,7 @@ so every doubt keeps the review.
   be back a moment later), "no-session" `410 no_session`; each archives,
   decides and deletes nothing. A probe that throws is "here". The platform
   path's status post (`platform: true`) is never refused: the review went to
-  GitHub, GitLab or Bitbucket. Without the probe nothing changes.
+  GitHub, GitLab, Bitbucket or Forgejo. Without the probe nothing changes.
 - **How each launch path knows (`apps/hook/server/review-agent-watch.ts`).**
   Each watch has `presence()` (Send, asked live, never latched while the agent
   can come back) and `ended()` (the 10 s timer; latched).
