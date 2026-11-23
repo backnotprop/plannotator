@@ -859,8 +859,9 @@ test('a Mermaid diagram opens beside its thread and takes a node comment', async
   const pane = page.locator(`[data-attachment-pane="${world.attachments.flow}"]`);
   await expect(pane).toBeVisible();
   await expect(pane).not.toHaveClass(/ib-full/);
-  // Pele draws the file (`g.pele-node`); Mermaid's `g.node` if it falls back.
-  const node = pane.locator('svg :is(g.node, g.pele-node)', { hasText: 'Detect installed agents' }).first();
+  // Pele draws the file (`g.pele-node`); Mermaid's `g.node` if it falls back. Pele wraps a label into one
+  // tspan per line, with no space between them in the text the locator reads.
+  const node = pane.locator('svg :is(g.node, g.pele-node)', { hasText: /Detect installed\s*agents/ }).first();
   await expect(node).toBeVisible({ timeout: 30_000 });
   await node.click();
   const composer = pane.getByRole('textbox').last();
