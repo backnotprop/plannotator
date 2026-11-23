@@ -276,6 +276,9 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
     <div
       ref={register}
       data-guide-file-shell={file.path}
+      // Folded or not, on the box whether or not the file is drawn yet (a generated file starts folded): what the Inbox's
+      // review keys read to pass over a folded file.
+      data-guide-file-folded={collapsed ? 'true' : 'false'}
       className="scroll-mt-4"
       onPointerEnter={() => {
         requestMount();

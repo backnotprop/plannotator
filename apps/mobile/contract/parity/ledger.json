@@ -21528,6 +21528,118 @@
       }
     },
     {
+      "id": "undecided-field-inboxmessagewire-moved-to",
+      "title": "field:InboxMessageWire.moved_to",
+      "surface": [
+        "field:InboxMessageWire.moved_to"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmovedto-subject",
+      "title": "field:InboxMovedTo.subject",
+      "surface": [
+        "field:InboxMovedTo.subject"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmovedto-thread-id",
+      "title": "field:InboxMovedTo.thread_id",
+      "surface": [
+        "field:InboxMovedTo.thread_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmovedto-name",
+      "title": "field:InboxMovedTo.name",
+      "surface": [
+        "field:InboxMovedTo.name"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmovedto-open",
+      "title": "field:InboxMovedTo.open",
+      "surface": [
+        "field:InboxMovedTo.open"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-moved-note",
+      "title": "field:InboxMessageWire.moved_note",
+      "surface": [
+        "field:InboxMessageWire.moved_note"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmovednote-questions",
+      "title": "field:InboxMovedNote.questions",
+      "surface": [
+        "field:InboxMovedNote.questions"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmovednote-thread-id",
+      "title": "field:InboxMovedNote.thread_id",
+      "surface": [
+        "field:InboxMovedNote.thread_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "files-101-annotate",
       "title": "Pen under an `html` block: comment on an element of the live page in place (the element boxed, the comment box beside it, a numbered marker, \"HTML · <element>\" in the list of comments)",
       "surface": [
@@ -21832,6 +21944,34 @@
       "mobile": "undecided",
       "why": "",
       "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-threads-id-acted",
+      "title": "window:/api/inbox/threads/:id/acted",
+      "surface": [
+        "window:/api/inbox/threads/:id/acted"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlistrow-acted-at",
+      "title": "field:InboxListRow.acted_at",
+      "surface": [
+        "field:InboxListRow.acted_at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
       "ios": {
         "state": "not-started"
       }
