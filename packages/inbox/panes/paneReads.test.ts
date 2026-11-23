@@ -190,9 +190,21 @@ describe('a thread on screen stays on screen', () => {
     return h;
   }
 
+  test('deleted elsewhere (404 thread_not_found): it stays, says it is gone, and is not read again', async () => {
+    const h = await onScreen('thr_a');
+    void h.reads.refreshThread('thr_a');
+    h.take('thr_a').fail(new InboxApiError(404, 'thread_not_found', 'No such thread.'));
+    await settle();
+    expect(heldThread(h.client, 'thr_a')?.thread.messages).toHaveLength(2);
+    expect(h.reads.view('main').load).toMatchObject({ state: 'failed', gone: true });
+    // The answer was definite: no retry storm.
+    await new Promise((done) => setTimeout(done, 1500));
+    expect(h.pending.some((p) => p.threadId === 'thr_a')).toBe(false);
+  });
+
   for (const [why, cause] of [
     ['a linked machine briefly not known (404 machine_not_linked)', new InboxApiError(404, 'machine_not_linked', 'That machine is not linked.')],
-    ['the Inbox saying it has no such thread (404 thread_not_found)', new InboxApiError(404, 'thread_not_found', 'No such thread.')],
+    ['a network failure', new Error('Failed to fetch')],
   ] as const) {
     test(`a re-read that answers ${why} keeps its last read, and reads again`, async () => {
       const h = await onScreen('thr_a');

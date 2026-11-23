@@ -10,9 +10,15 @@
  *    age or past the count;
  *  - a `gh auth status` that fails for a moment (its token not checked: the Mac just woke) dropping the host's PRs
  *    and the open page's reads; a real sign-out (no login left for the host) not dropping them at once, or a host
- *    kept through failed checks for ever.
+ *    kept through failed checks for ever;
+ *  - a reload or a restart of this Inbox losing a PR that left the list (the page it had open says "no longer in the
+ *    list"), or a PR no list keeps any more not read from the forge by number; the forge's merged or closed state not
+ *    reaching the page; an action on a PR that left the list answered "not in the list".
  */
 import { expect, test } from "bun:test";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createInboxPulls, INBOX_PULLS_FRESH_MS, InboxPullsError } from "./inbox-pulls";
 import { INBOX_PULLS_DEPARTED_MAX, INBOX_PULLS_DEPARTED_MS } from "./inbox-pull-departed";
 import { INBOX_PULLS_SIGNED_KEEP_MS } from "./inbox-pull-signed-keep";
@@ -55,6 +61,8 @@ const SIGNED_OUT = JSON.stringify({ hosts: {} });
 function forge() {
   const f = {
     listed: [880, 881] as number[],
+    /** PRs the forge says are merged. */
+    merged: new Set<number>(),
     auth: { stdout: SIGNED_IN, stderr: "", exitCode: 0 },
     authChecks: 0,
     calls: [] as string[][],
@@ -71,7 +79,12 @@ function forge() {
       }
       if (args.includes("--jq")) {
         const number = String(args[3]!.split("/").at(-1));
-        return { stdout: `${JSON.stringify({ sha: number.padStart(40, "a"), body: null })}\n`, stderr: "", exitCode: 0 };
+        const sha = number.padStart(40, "a");
+        // The PR as the forge has it now: one answer for the diff's head read and for a read of the PR itself.
+        const merged = f.merged.has(Number(number));
+        const state = { state: merged ? "closed" : "open", merged, merged_at: merged ? "2026-11-03T12:00:00Z" : null, draft: false };
+        const whole = { number: Number(number), html_url: `https://github.com/${REPO}/pull/${number}`, title: `PR ${number}`, user: { login: "tomas" }, base: { ref: "main" }, head: { ref: `branch-${number}`, sha, repo: { full_name: REPO } }, additions: 1, deletions: 1, changed_files: 1, updated_at: "2026-11-03T12:00:00Z", requested_reviewers: [] };
+        return { stdout: `${JSON.stringify({ sha, body: null, ...state, ...whole })}\n`, stderr: "", exitCode: 0 };
       }
       if (args[0] === "api") return { stdout: `diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-a\n+${args[3]}\n`, stderr: "", exitCode: 0 };
       return { stdout: "", stderr: "unexpected", exitCode: 1 };
@@ -191,4 +204,50 @@ test("a failed sign-in check keeps the host's PRs; a real sign-out drops them at
   expect(out.unsigned).toEqual(["github.com"]);
   // And its PRs are not read for an open page either: the host is not asked any more.
   expect(await diffOf(pulls, keyOf(880))).toBe("pull_unknown");
+});
+
+test("a restart keeps a PR that left the list readable, and one no list kept is read from the forge, merged", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "plannotator-pull-departed-"));
+  try {
+    let now = 1_000_000;
+    const f = forge();
+    const before = createInboxPulls({ run: f.run, now: () => now, dir });
+    await before.list(repos);
+    f.listed = [880];
+    f.merged.add(881);
+    now += INBOX_PULLS_FRESH_MS;
+    await before.list(repos, { refresh: true });
+    expect(statSync(join(dir, "pull-departed.json")).mode & 0o777).toBe(0o600);
+    // This Inbox restarts; the window reloads on #881's page.
+    const after = createInboxPulls({ run: f.run, now: () => now, dir });
+    await after.list(repos);
+    expect(await diffOf(after, keyOf(881))).toBe("read");
+    // An action on it: no longer open (`pull_closed`), never "not in the list".
+    expect(after.held(keyOf(881))?.number).toBe(881);
+    expect(after.find(keyOf(881))).toBeNull();
+    // The page asks for it: the forge's answer, merged.
+    expect((await after.pull(keyOf(881)))?.state).toBe("merged");
+    // A PR of a project's repository that no list ever named (merged before this Inbox read it): read by number.
+    f.merged.add(777);
+    const read = await after.pull(keyOf(777));
+    expect(read).toMatchObject({ number: 777, state: "merged", checks: null });
+    expect(await diffOf(after, keyOf(777))).toBe("read");
+    expect((await after.list(repos)).pulls.map((p) => p.number)).toEqual([880]);
+    // Never one of a repository no list shows.
+    expect(await after.pull("github.com/elsewhere/other#5")).toBeNull();
+    expect(f.calls.some((c) => c.join(" ").includes("elsewhere/other"))).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a diff read says the PR's state as the forge has it now", async () => {
+  let now = 1_000_000;
+  const f = forge();
+  const pulls = createInboxPulls({ run: f.run, now: () => now });
+  await pulls.list(repos);
+  expect((await pulls.diff(keyOf(880), "layer")).state).toBe("open");
+  // A teammate merges it elsewhere; the list has not read again yet.
+  f.merged.add(881);
+  expect((await pulls.diff(keyOf(881), "layer")).state).toBe("merged");
 });

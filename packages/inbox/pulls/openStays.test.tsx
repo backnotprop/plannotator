@@ -9,7 +9,11 @@
  *  - the PR merged or closed and the page not saying so in place, with the state mark it gets everywhere else;
  *  - the Reviews pane falling back to "Pick a review to open it." or the board, its "Start a thread" words lost;
  *  - a stack's own page turning into "This stack isn't open any more";
- *  - a PR the person hid (in any window) kept open; a deep link to a PR never seen saying anything new.
+ *  - a PR the person hid (in any window) kept open; a deep link to a PR never seen saying anything new;
+ *  - a reload (or a restart of the Inbox) on a PR the list no longer names: the page must reopen on it, its diff and
+ *    state there (the raw list's copy, else the server's read of it: routePull.ts), and a layer opened from a held
+ *    stack's page must open on that stack;
+ *  - a PR merged or closed elsewhere (the forge says so at the diff's read, or the server's read) still marked open.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -64,12 +68,17 @@ const hidden = (p: InboxPull, model = base): InboxPullsAnswer => ({ ...without(p
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
+/** What the forge says now: the diff read's state, and the server's read of one PR (`/pulls/pull`) by key. */
+let forgeState: Record<string, 'merged' | 'closed'> = {};
+let serverPull: Record<string, InboxPull> = {};
 
 beforeEach(() => {
   if (!hasDom) return;
   savedFetch = globalThis.fetch;
   window.localStorage.clear();
   forgetPullThreadStarts();
+  forgeState = {};
+  serverPull = {};
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1');
     if (init?.method === 'POST') return Response.json({ ok: true });
@@ -77,8 +86,9 @@ beforeEach(() => {
     if (url.pathname.endsWith('/pulls/diff')) {
       const key = url.searchParams.get('key')!;
       const patch = 'diff --git a/src/retry.ts b/src/retry.ts\n--- a/src/retry.ts\n+++ b/src/retry.ts\n@@ -12 +12 @@\n-a\n+b\n';
-      return Response.json({ serverSession: 's', key, scope: 'layer', base: 'main', head: 'y', patch, head_sha: SHA });
+      return Response.json({ serverSession: 's', key, scope: 'layer', base: 'main', head: 'y', patch, head_sha: SHA, state: forgeState[key] ?? 'open', merged_at: null });
     }
+    if (url.pathname.endsWith('/pulls/pull')) return Response.json({ serverSession: 's', pull: serverPull[url.searchParams.get('key')!] ?? null });
     if (url.pathname.endsWith('/api/inbox/sessions')) {
       return Response.json({
         serverSession: 's',
@@ -151,12 +161,13 @@ async function openDiff(layer: InboxPull) {
   return { reader, section: $('[data-pull-review]')!, rail: $('.ib-rrail')!.textContent };
 }
 
-for (const [what, next] of [
-  ['someone merged it and the list no longer names it', () => without(theirs.key)],
-  ['a read comes back without it (a gh blip)', () => ({ ...without(theirs.key), pulls: [] })],
+for (const [what, next, forge, mark] of [
+  ['someone merged it and the list no longer names it', () => without(theirs.key), 'merged', 'merged'],
+  ['a read comes back without it (a gh blip)', () => ({ ...without(theirs.key), pulls: [] }), null, 'open'],
 ] as const) {
   test.skipIf(!hasDom)(`the diff stays when ${what}: rail, reader, the comment being written and the scroll`, async () => {
     const before = await openDiff(theirs);
+    if (forge) serverPull[theirs.key] = { ...theirs, state: forge, checks: null };
     await act(async () => read(next()));
     await settle();
     expect(document.body.textContent!.includes('no longer in the list')).toBe(false);
@@ -165,10 +176,37 @@ for (const [what, next] of [
     expect(before.reader.scrollTop).toBe(240);
     expect($('.ib-rrail')!.textContent).toBe(before.rail);
     expect(!!$('[data-pull-review-title]')).toBe(true);
-    // Nothing new is said: the mark is the open PR's as it was.
-    expect($('[data-pull-review-title] .ib-refmark')!.getAttribute('data-ref-state')).toBe('open');
+    // Merged elsewhere: the server's read of it says so, with the mark it gets everywhere. A blip: nothing new is said.
+    expect($('[data-pull-review-title] .ib-refmark')!.getAttribute('data-ref-state')).toBe(mark);
   });
 }
+
+test.skipIf(!hasDom)('merged elsewhere while the list still names it open: the diff read says merged, and the header does', async () => {
+  // A PR whose diff this window has not read yet (a diff read a moment ago is drawn again, not read).
+  const other = pull(881, { repo: 'northwind/web-app', mine: false, requested: true, author: 'tomas', head: 'ltr', head_sha: SHA });
+  forgeState[other.key] = 'merged';
+  mount(<PullReview model={{ ...base, pulls: [...base.pulls, other] }} modelError={null} stackId={other.key} layerKey={other.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />);
+  for (let i = 0; i < 40 && !$('[data-stub-reader]'); i += 1) await settle(2);
+  await settle();
+  expect($('[data-pull-review-title] .ib-refmark')!.getAttribute('data-ref-state')).toBe('merged');
+});
+
+test.skipIf(!hasDom)('a reload on a merged PR no stack holds reopens its page: the raw list’s copy, else the server’s', async () => {
+  // The person's own, merged: still in the raw list.
+  mount(<PullReview model={merged(mine.key)} modelError={null} stackId={mine.key} layerKey={mine.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />);
+  for (let i = 0; i < 40 && !$('[data-stub-reader]'); i += 1) await settle(2);
+  expect($('[data-pull-review-title] .ib-refmark')!.getAttribute('data-ref-state')).toBe('merged');
+  act(() => root?.unmount());
+  host?.remove();
+  // A teammate's, merged: no list has it; the server reads it from the forge.
+  serverPull[theirs.key] = { ...theirs, state: 'merged', checks: null };
+  mount(<PullReview model={without(theirs.key)} modelError={null} stackId={theirs.key} layerKey={theirs.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />);
+  for (let i = 0; i < 40 && !$('[data-stub-reader]'); i += 1) await settle(2);
+  await settle();
+  expect(!!$('[data-stub-reader]')).toBe(true);
+  expect($('[data-pull-review-title] .ib-refmark')!.getAttribute('data-ref-state')).toBe('merged');
+  expect(document.body.textContent!.includes('no longer in the list')).toBe(false);
+});
 
 test.skipIf(!hasDom)('merged: everything stays and the header mark says merged, the mark it has everywhere', async () => {
   const before = await openDiff(mine);
@@ -260,4 +298,19 @@ test.skipIf(!hasDom)('a stack’s own page stays with its layers when they merge
   expect($('[data-pr-stack-page]') === page).toBe(true);
   expect($(`[data-pr-layer="${CSS.escape(mine.key)}"]`)!.getAttribute('data-state')).toBe('merged');
   expect($('.ib-prst-repo')!.textContent).toBe('/ northwind/billing-svc');
+});
+
+test.skipIf(!hasDom)('a layer opened from a held stack’s page opens on that stack, not "no longer in the list"', async () => {
+  mount(<Stack id={theirs.key} />);
+  await settle();
+  await act(async () => read(without(theirs.key)));
+  await settle();
+  expect(!!$('[data-pr-stack-page]')).toBe(true);
+  act(() => root?.unmount());
+  host?.remove();
+  // The layer's own page: the list lacks it and the server has nothing either (a forge blip).
+  mount(<PullReview model={without(theirs.key)} modelError={null} stackId={theirs.key} layerKey={theirs.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />);
+  for (let i = 0; i < 40 && !$('[data-stub-reader]'); i += 1) await settle(2);
+  expect(!!$('[data-stub-reader]')).toBe(true);
+  expect(document.body.textContent!.includes('no longer in the list')).toBe(false);
 });

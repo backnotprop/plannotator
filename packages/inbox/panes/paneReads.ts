@@ -188,15 +188,18 @@ export function createPaneReads(deps: PaneReadsDeps) {
         // a thread already on screen keeps its last read through any 404 (a linked machine briefly not known answers
         // `machine_not_linked`), read again as after any failure. Only one the person deleted here goes (deletedHere.ts).
         const onScreen = record(pane).loaded?.thread_id === threadId ? record(pane).loaded : null;
-        const missing = cause instanceof InboxApiError && cause.status === 404 && cause.code === 'thread_not_found' && !waiting && (!onScreen || deletedHere(onScreen));
+        const notHere = cause instanceof InboxApiError && cause.status === 404 && cause.code === 'thread_not_found' && !waiting;
+        const missing = notHere && (!onScreen || deletedHere(onScreen));
+        // Deleted elsewhere while on screen: it stays, says it is gone (ThreadGone.tsx), and is not read again.
+        const gone = notHere && !missing;
         // Two linked machines claim it: it opens on neither, and says so (no retry would change that).
         const refused = cause instanceof InboxApiError && cause.code === 'machine_conflict';
         if (missing) dropThread(client, threadId);
-        setLoad(pane, { threadId, state: refused ? 'refused' : missing ? 'missing' : 'failed', error: cause instanceof Error ? cause.message : String(cause), waiting });
+        setLoad(pane, { threadId, state: refused ? 'refused' : missing ? 'missing' : 'failed', error: cause instanceof Error ? cause.message : String(cause), waiting, ...(gone ? { gone: true as const } : {}) });
         // The thread is on screen already (the open retries a first read itself): this re-read is tried again, or
         // what it would have brought (an agent's new message) waits until some other record re-reads the thread.
         const r = record(pane);
-        if (!missing && !refused && r.loaded?.thread_id === threadId) {
+        if (!missing && !gone && !refused && r.loaded?.thread_id === threadId) {
           const attempt = r.live?.threadId === threadId ? r.live.attempt : 0;
           stopLive(pane);
           const timer = setTimeout(() => {
@@ -295,7 +298,7 @@ export function createPaneReads(deps: PaneReadsDeps) {
         if (read) break;
         // Another thread opened meanwhile, or the server said this one is not there.
         const load = view(paneId).load;
-        if (paneThread(deps.panes(), paneId) !== threadId || (load?.threadId === threadId && (load.state === 'missing' || load.state === 'refused'))) return;
+        if (paneThread(deps.panes(), paneId) !== threadId || (load?.threadId === threadId && (load.state === 'missing' || load.state === 'refused' || load.gone))) return;
         const waitMs = THREAD_READ_RETRY_MS[Math.min(attempt, THREAD_READ_RETRY_MS.length - 1)]!;
         await new Promise<void>((done) => {
           retry = setTimeout(done, waitMs);

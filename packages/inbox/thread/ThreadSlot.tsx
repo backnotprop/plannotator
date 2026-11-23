@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { ThreadGone } from './ThreadGone';
 import { closeTo } from '../app/focus';
 import { writeRoute } from '../app/writeRoute';
 import { CardChip } from '../board/CardChip';
@@ -116,6 +117,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
               {/* No list beside the thread (a phone, a stacked window, full screen, a card's thread, beside a file):
                   the stale page notice is here instead. */}
               {(phone || stack.thread || full || fromCard || fileOpen) && host.staleNotice}
+              {load?.gone && <ThreadGone />}
               {host.notifyAgainIn === thread.thread_id ? (
               <div className="ib-tour-notify-again" data-tour-notify-again="">
                 <NotificationAsk

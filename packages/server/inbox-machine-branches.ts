@@ -81,14 +81,19 @@ export function createMachineBranches(options: { peers: () => Iterable<PeerLink>
       // None yet, or unreadable: the next reads bring them.
     }
   }
+  /** What the file holds now: a read that changed nothing writes nothing. */
+  let written = "";
   const save = () => {
     if (!file) return;
+    const text = `${JSON.stringify({ v: 1, machines: Object.fromEntries(lists) })}\n`;
+    if (text === written) return;
     try {
       mkdirSync(options.dir!, { recursive: true, mode: 0o700 });
       const temp = `${file}.${process.pid}.tmp`;
-      writeFileSync(temp, `${JSON.stringify({ v: 1, machines: Object.fromEntries(lists) })}\n`, { mode: 0o600 });
+      writeFileSync(temp, text, { mode: 0o600 });
       chmodSync(temp, 0o600);
       renameSync(temp, file);
+      written = text;
     } catch {
       // A read-only folder: the rows stay in memory.
     }
@@ -126,7 +131,14 @@ export function createMachineBranches(options: { peers: () => Iterable<PeerLink>
   };
 
   // A machine whose list is not read yet (asleep since this Inbox started) is taken while its last rows are kept.
-  const takers = () => [...options.peers()].filter((peer) => (peer.list ? peer.list.marks.includes("branches") : lists.has(peer.id)));
+  // One whose list no longer takes `branches` (Branch reviews turned off there) leaves nothing behind, on disk either.
+  const takers = () => {
+    const peers = [...options.peers()];
+    let dropped = false;
+    for (const peer of peers) if (peer.list && !peer.list.marks.includes("branches") && lists.delete(peer.id)) dropped = true;
+    if (dropped) save();
+    return peers.filter((peer) => (peer.list ? peer.list.marks.includes("branches") : lists.has(peer.id)));
+  };
 
   return {
     /** A read of each taker starts now (or joins the one under way), never waited for; the answer is what each had when asked. */

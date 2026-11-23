@@ -20,7 +20,7 @@ export function restack(stack: InboxPullStack, pulls: readonly InboxPull[]): Inb
 }
 
 /** The person hid one of its layers, or its repository. */
-function hiddenIn(stack: InboxPullStack, model: Pick<InboxPullsAnswer, 'hidden' | 'hidden_repos'>): boolean {
+export function hiddenIn(stack: InboxPullStack, model: Pick<InboxPullsAnswer, 'hidden' | 'hidden_repos'>): boolean {
   const keys = new Set((model.hidden ?? []).map((h) => h.key));
   const repos = new Set((model.hidden_repos ?? []).map((r) => r.key));
   return stack.layers.some((l) => keys.has(l.key) || repos.has(inboxPullRepoOfKey(l.key)));
@@ -49,6 +49,20 @@ export function keptStackValue<T extends { stack: InboxPullStack } | InboxPullSt
   return ('layers' in value ? now : { ...value, stack: now }) as T;
 }
 
+/** The stacks pages drew last (the last few): a layer opened from a held stack's page opens on that stack. */
+const DRAWN = new Map<string, InboxPullStack>();
+const DRAWN_MAX = 20;
+
+/** The stack a page drew last that the address names (its id or a layer's key) and that holds this layer. */
+export function drawnStackWith(stackId: string, layerKey: string, model: Pick<InboxPullsAnswer, 'pulls' | 'hidden' | 'hidden_repos'> | null | undefined): InboxPullStack | null {
+  if (!model) return null;
+  for (const stack of [...DRAWN.values()].reverse()) {
+    if (!stack.layers.some((l) => l.key === layerKey) || (stack.id !== stackId && !stack.layers.some((l) => l.key === stackId))) continue;
+    return hiddenIn(stack, model) ? null : restack(stack, model.pulls);
+  }
+  return null;
+}
+
 /** `keptStackValue` across renders: one page's hold, forgotten when its `id` changes. */
 export function useKeptStack<T extends { stack: InboxPullStack } | InboxPullStack>(
   found: T | null,
@@ -58,5 +72,12 @@ export function useKeptStack<T extends { stack: InboxPullStack } | InboxPullStac
   const held = useRef<KeptStack<T> | null>(null);
   const value = id ? keptStackValue(found, held.current, id, model) : null;
   held.current = value && id ? { id, value } : null;
+  if (value) {
+    const drawn: { stack: InboxPullStack } | InboxPullStack = value;
+    const stack = 'layers' in drawn ? drawn : drawn.stack;
+    DRAWN.delete(stack.id);
+    DRAWN.set(stack.id, stack);
+    while (DRAWN.size > DRAWN_MAX) DRAWN.delete(DRAWN.keys().next().value!);
+  }
   return value;
 }

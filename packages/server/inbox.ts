@@ -1475,7 +1475,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pullRepoRead = new Set<string>();
   const pullRepoReading = new Map<string, Promise<InboxProjectRepo | null>>();
   // A PR that left the list stays readable for an open page, unless the person hid it (inbox-pull-departed.ts).
-  const pulls = createInboxPulls({ ...(options.refRunner ? { run: options.refRunner } : {}), hidden: (key) => pullHidden.has(key) });
+  const pulls = createInboxPulls({ ...(options.refRunner ? { run: options.refRunner } : {}), hidden: (key) => pullHidden.has(key), dir: inboxDir(dataDir) });
   // The attach line's lookups (inbox-pull-lookups.ts): a number an agent named, after its send, through the hover
   // cards' read; only while Code review is on and this computer's gh is signed in to the host.
   const pullLookups = createInboxPullLookups({
@@ -6403,7 +6403,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         pullHiddenChanged();
         return json({ serverSession, hidden: hiddenList(), hidden_repos: pullHidden.repos(), hid: hide.map((pull) => pull.key), rehid, threads_left: left, threads_back: back });
       }
-      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes" || path === "/api/inbox/pulls/review-image" || path === "/api/inbox/pulls/review-markdown-image" || path === "/api/inbox/pulls/package-changes") {
+      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/pull" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes" || path === "/api/inbox/pulls/review-image" || path === "/api/inbox/pulls/review-markdown-image" || path === "/api/inbox/pulls/package-changes") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
@@ -6435,12 +6435,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         // Reviewers, checks, labels and comments beside the diff, from the forge's own answer. The pictures of the people
         // it names join the avatar route's allow-list, and stay while the PR is on the list.
+        // One PR for a page open on it that the list no longer names (merged, closed, a reload since): inbox-pull-forge.ts.
+        if (path === "/api/inbox/pulls/pull") {
+          const key = url.searchParams.get("key") ?? "";
+          if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
+          const pull = await pulls.pull(key);
+          if (pull) pullAvatars.allow(pull.host, pulls.avatarUrls(pull.host));
+          return json({ serverSession, pull });
+        }
         if (path === "/api/inbox/pulls/details") {
           const key = url.searchParams.get("key") ?? "";
           if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
           try {
             const answer = await pulls.details(key);
-            const host = pulls.find(key)?.host;
+            const host = (pulls.find(key) ?? pulls.held(key))?.host;
             if (host) pullAvatars.allow(host, pulls.avatarUrls(host));
             return json({ serverSession, ...answer });
           } catch (cause) {
@@ -6755,7 +6763,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         for (const key of keys as string[]) {
           const pull = pulls.find(key);
           if (pull && pull.mine) theirs = false;
-          if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
+          if (!pull) return pulls.held(key) ? json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409) : json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
           if (!(projectsByRepo.get(`${pull.host}/${pull.repo}`.toLowerCase()) ?? []).includes(projectId)) {
             const field = validateOnly ? "project_id" : "thread_id";
             throw new InboxError("validation_error", `${field}: ${validateOnly ? "a project" : "a thread in a project"} of that pull request's repository.`, { field });
@@ -6801,7 +6809,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const unlisted = !pulls.find(key) && pullOwners.get(key) ? inboxPullRefOfKey(key) : null;
         const pull = pulls.find(key) ?? (unlisted ? await readUnlistedPull(unlisted) : null);
         if (!pull && unlisted) return json({ error: "Couldn't check that link. Try again.", code: "pull_unknown" }, 404);
-        if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
+        if (!pull) return pulls.held(key) ? json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409) : json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
         if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
         // Pinned to the commit the person read: the list's head, or the head of the patch they read (the list can be a
         // minute behind the forge). On GitHub also an older commit of this PR, as GitHub takes a review there and marks
@@ -6872,7 +6880,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // After a restart the list may not have been read yet: read it once, as the review route does.
         if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
         const pull = pulls.find(key);
-        if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
+        if (!pull) return pulls.held(key) ? json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409) : json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
         if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
         const result = await mergePull(options.refRunner ?? refCliRunner, pull, seen);
         if (!result.ok) return json({ error: result.message, code: result.code }, result.code === "pull_merge_failed" ? 502 : 409);
@@ -6911,7 +6919,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
           if (!reopen && !pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
           const pull = reopen ? (pulls.find(key) ?? closedHere?.pull) : pulls.find(key);
-          if (!pull) return [{ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404];
+          if (!pull) return pulls.held(key) ? [{ error: "That pull request is no longer open.", code: "pull_closed" }, 409] : [{ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404];
           if (!reopen && !inboxPullIsOpen(pull)) return [{ error: pull.state === "merged" ? "It is already merged." : "It is already closed.", code: pull.state === "merged" ? "pull_merged" : "pull_closed" }, 409];
           const result = reopen ? await reopenPull(options.refRunner ?? refCliRunner, pull) : await closePull(options.refRunner ?? refCliRunner, pull);
           if (!result.ok) return [{ error: result.message, code: result.code }, result.code === "pull_close_failed" ? 502 : 409];

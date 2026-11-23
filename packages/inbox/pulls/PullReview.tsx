@@ -91,7 +91,8 @@ import { scopeOnPage } from './reviewScope';
 import { liveView } from '../prs/stackRange';
 import { lookedBefore, markLooked, useLooked } from '../prs/looked';
 import { RailScopeRows } from './RailScopeRows';
-import { useKeptStack } from './keptStack';
+import { drawnStackWith, hiddenIn, useKeptStack } from './keptStack';
+import { forgeSaid, loneStack, useRoutePull, withForgeState } from './routePull';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
 /** The file rail's width: dragged and kept. */
@@ -304,9 +305,16 @@ function forPost(comments: readonly KeptComment[], screen: Pick<OnScreen, 'stamp
 function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLayer, onBack, onSent, onPosted }: PullReviewProps) {
   const phone = usePhone();
   const live = useMemo(() => (model ? findStack(pullGroups(model, null), stackId) : null), [model, stackId]);
-  // The list no longer naming this layer (merged, closed, a read without it) leaves the review as it is (keptStack.ts).
-  const item = useKeptStack(live?.stack.layers.some((l) => l.key === layerKey) ? live : null, `${stackId}\u0000${layerKey}`, model);
-  const stack = item?.stack ?? null;
+  // The list no longer naming this layer (merged, closed, a read without it) leaves the review as it is (keptStack.ts);
+  // after a reload or a restart, or a layer of a held stack's page, the stack drawn last or the PR the address names
+  // (routePull.ts). Its state is the forge's when it merged or closed elsewhere.
+  const listed = !!live?.stack.layers.some((l) => l.key === layerKey);
+  const kept = useKeptStack(listed ? live : null, `${stackId}\u0000${layerKey}`, model);
+  const route = useRoutePull(layerKey, model, !listed);
+  const lone = useMemo(() => (route.pull ? loneStack(route.pull) : null), [route.pull]);
+  const [said, setSaid] = useState<ReturnType<typeof forgeSaid>>(null);
+  const found = kept?.stack ?? drawnStackWith(stackId, layerKey, model) ?? (lone && model && !hiddenIn(lone, model) ? lone : null);
+  const stack = useMemo(() => withForgeState(found, layerKey, listed, said, route.pull), [found, layerKey, listed, said, route.pull]);
   const layer = stack?.layers.find((l) => l.key === layerKey) ?? null;
   // A range the list no longer holds as one (a layer merged or moved) shows the layer's own diff.
   const scope = stack ? liveView(stack, layerKey, asked) : asked;
@@ -329,6 +337,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
   const diffBase = on?.base;
   const seenId = layer ? `${layer.key}\u0000${scope}\u0000${layer.head_sha ?? layer.updated_at}\u0000${diffBase}` : '';
   const [diff, setDiff] = useState<InboxPullDiffAnswer | null>(() => seenDiff(seenId, layerKey) ?? null);
+  useEffect(() => setSaid(forgeSaid(diff, layerKey)), [diff, layerKey]);
   const [diffError, setDiffError] = useState<string | null>(null);
   // A patch this review read itself named its head. One remembered in `SEEN` can be older than what another window kept.
   const read = useRef(false);
@@ -871,7 +880,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
           </Tip>
         </div>
         <div className="ib-pr-empty" role={modelError || model ? 'alert' : undefined}>
-          {modelError ?? (model ? 'This pull request is no longer in the list.' : 'Reading your pull requests…')}
+          {modelError ?? (model && !route.asking ? 'This pull request is no longer in the list.' : 'Reading your pull requests…')}
         </div>
       </section>
     );

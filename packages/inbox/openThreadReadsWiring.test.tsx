@@ -225,8 +225,12 @@ test('a thread deleted elsewhere: the next record of another thread reads it onc
   expect((await loopback(`/api/inbox/threads/${world.waiting}/delete`, 'POST', '{}')).status).toBe(200);
   await agentWrites(world.stopped);
   await until(() => threadReads(world.waiting) > thread, 'the read of the thread the list no longer has');
-  // What is open stays open (paneReads.ts): only a thread deleted in this window leaves the screen.
-  await wait(300);
+  // What is open stays open (paneReads.ts): only a thread deleted in this window leaves the screen. This one says it
+  // is gone, in the words the Inbox has for a thread it does not have, and is not read again.
+  await until(() => el.querySelector('[data-thread-gone]') !== null, 'the gone line');
   expect(pane(el, world.waiting)).not.toBeNull();
   expect(el.querySelector('[data-thread-wait="missing"]')).toBeNull();
+  const reads = threadReads(world.waiting);
+  await wait(1500);
+  expect(threadReads(world.waiting)).toBe(reads);
 }, 15000);

@@ -111,6 +111,32 @@ describe("a linked machine's reported branches", () => {
     }
   });
 
+  test("the file is written only when a read changes it, and a machine that stops taking branches leaves it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-machine-branches-"));
+    try {
+      let clock = 0;
+      let marks = ["branches"];
+      const b = { ...peer(B, [], () => Response.json({ reports: [far] }), []), get list() { return { marks }; } } as unknown as PeerLink;
+      const branches = createMachineBranches({ now: () => clock, peers: () => [b], dir });
+      branches.start(() => null);
+      await branches.settled();
+      const path = join(dir, MACHINE_BRANCHES_FILE);
+      const first = statSync(path).mtimeMs;
+      await Bun.sleep(20);
+      clock = 60_000;
+      branches.start(() => null);
+      await branches.settled();
+      expect(statSync(path).mtimeMs).toBe(first);
+      // Branch reviews turned off there: its list no longer takes `branches`; nothing of it after a restart either.
+      marks = ["pulls"];
+      expect(branches.start(() => null)().rows).toEqual([]);
+      const asleep = { ...peer(B, [], () => Response.json({}, { status: 502 }), []), state: "offline", list: null } as unknown as PeerLink;
+      expect(createMachineBranches({ peers: () => [asleep], dir }).start(() => null)().rows).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("a far row is taken by its shape only", () => {
     expect(farBranchRow(far)).toMatchObject({ branch: "retry-jitter", risk: { level: "medium" } });
     expect(farBranchRow({ ...far, place: "elsewhere" })).toBeNull();

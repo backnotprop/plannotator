@@ -8,10 +8,11 @@
  * PR (the person's searches now list it as merged, out of every open stack) and the window reads the list again:
  * the diff, the file rail and the half-written comment are all still there, and the header's state mark says merged
  * (the mark the PR gets everywhere in the Inbox). Before, the page turned into "This pull request is no longer in the
- * list." and the comment was gone.
+ * list." and the comment was gone. Then the person reloads: the page reopens on the merged PR (no stack holds it), its
+ * diff and its kept comment there, the header still saying merged.
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/review-stays-open (CI keeps .local/proof/ as "inbox-window-proof-N"):
- * 1440 light and dark, and a phone at 390.
+ * 1440 light and dark, a phone at 390, and the page after the reload, light and dark.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-review-stays-open.spec.ts`.
@@ -203,10 +204,24 @@ test('a merged PR’s diff stays open with the comment being written, and its he
   await expect(review.locator(`[data-guide-file-shell="${FILE}"]`)).toBeVisible();
   expect(await review.locator('.ib-rrail').innerText()).toBe(rail);
   await expect(composer).toHaveValue(words);
+  // The comment is added (kept with the review, not posted).
+  await page.getByRole('button', { name: 'Add Comment' }).click();
+  await expect(review.locator('.ib-vcomments')).toContainText('1');
 
   await shot('merged', 1440, 900, 'light');
   await shot('merged', 1440, 900, 'dark');
   await shot('merged', 390, 844, 'light');
   await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+
+  // The person reloads: the merged PR is in no list's stack any more, and its page reopens on it all the same, its
+  // diff and its comment there, the header saying merged.
+  await page.reload();
+  await expect(review.locator(`[data-guide-file-shell="${FILE}"]`)).toBeVisible({ timeout: 30_000 });
+  await expect(mark).toHaveAttribute('data-ref-state', 'merged');
+  await expect(page.getByText('This pull request is no longer in the list.')).toHaveCount(0);
+  await expect(review.locator('.ib-vcomments')).toContainText('1');
+  await shot('reloaded', 1440, 900, 'light');
+  await shot('reloaded', 1440, 900, 'dark');
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
 });
