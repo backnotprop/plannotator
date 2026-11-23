@@ -282,6 +282,7 @@
   "plan-linked-doc-drafts.spec.ts": 6,
   "question-card-narrow.spec.ts": 57,
   "question-other-lines.spec.ts": 5,
+  "ref-card-click.spec.ts": 40,
   "ref-cards-review.spec.ts": 63,
   "review-arrow-ctrl-click.spec.ts": 5,
   "review-arrow-press-webkit.spec.ts": 10,
