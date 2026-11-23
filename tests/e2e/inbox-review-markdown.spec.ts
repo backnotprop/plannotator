@@ -128,6 +128,9 @@ test('a phone at 390: the rendered README fits the screen, its menu on the heade
   expect(fits.right).toBeLessThanOrEqual(fits.width + 0.5);
   expect(fits.page).toBeLessThanOrEqual(fits.width);
   await expect(shell(page, README).locator('[data-markdown-view-menu]')).toBeVisible();
+  // The rendered README on screen, its header at the top.
+  await shell(page, README).evaluate((el) => el.scrollIntoView({ block: 'start' }));
+  await expect(card(page)).toBeInViewport();
   await page.screenshot({ path: join(parityDir, 'b3-05-phone-390-light.png') });
   await context.close();
 });
