@@ -190,6 +190,24 @@ describe.skipIf(!hasDom)('decision mode: refs link into the thread repo', () => 
 });
 
 describe.skipIf(!hasDom)('decision mode: the contract lines', () => {
+  test('a scenario table shows in the context as a plain table, as before the section existed (approval question-scenario-table)', () => {
+    const table = ['| Scenario | Nowhere | Local only |', '| --- | --- | --- |', '| You edit offline on a plane | Lost — nothing says so | Kept — in History |'].join('\n');
+    render(decision(question({
+      context: `Two copies disagree.\n\n${table}`,
+      choices: [
+        { label: 'Nowhere', description: null, recommended: false, settled: false },
+        { label: 'Local only', description: null, recommended: true, settled: false },
+      ],
+      scenarios: {
+        columns: [{ choice: 'Nowhere', header: 'Nowhere' }, { choice: 'Local only', header: 'Local only' }],
+        rows: [{ situation: 'You edit offline on a plane', cells: [{ verdict: 'Lost', detail: 'nothing says so' }, { verdict: 'Kept', detail: 'in History' }] }],
+      },
+    })));
+    expect($$('table')).toHaveLength(1);
+    expect($('table')!.textContent).toContain('You edit offline on a plane');
+    expect($('[data-question-part="scenarios"]')).toBeNull();
+  });
+
   test('Stakes under the prompt, Why under the answers, the tiles as the thread card draws them', () => {
     render(decision(DRAWERS, DRAWER_PICTURES));
     const stakes = $('[data-decision-stakes]')!;

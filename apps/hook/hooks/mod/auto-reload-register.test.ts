@@ -38,17 +38,22 @@ const realSleep = (ms: number, options?: { signal?: AbortSignal }) =>
   })
 
 /** The `$` the module runs on, in memory, with an Inbox whose poll answers offer `installed`. */
-function engineOver(sessionId: string, installed: string) {
+function engineOver(sessionId: string, installed: string, env: Record<string, string> = {}, config?: string) {
   const files = new Map<string, string>([
     ['/bin/sh', ''],
     [inboxRegistryPathOf(DATA), REGISTRY],
+    // The person turned the Inbox on here (inbox-turned-on.ts).
+    [`${DATA}/inbox/turned-on`, '{"on":true,"by":"command"}'],
     [`${ROOT}/.claude-plugin/plugin.json`, JSON.stringify({ name: 'plannotator', version: '0.28.50' })],
   ])
+  if (config !== undefined) files.set(`${DATA}/config.json`, config)
   const store = new Map<string, unknown>()
   const timers = new Set<{ ms: number; fn: () => void; due: number }>()
   let clock = 1_000_000
   const world = {
     commands: [] as string[],
+    tools: [] as string[],
+    envSet: new Map<string, string>(),
     polls: [] as Record<string, unknown>[],
     agents: [] as { id: string; status: string }[],
     box: '',
@@ -66,7 +71,7 @@ function engineOver(sessionId: string, installed: string) {
     },
     $: {
       plugin: { root: ROOT },
-      env: { get: async (name: string) => (name === 'HOME' ? '/home/me' : name === 'PLANNOTATOR_DATA_DIR' ? DATA : undefined), set: async () => undefined },
+      env: { get: async (name: string) => (name in env ? env[name] : name === 'HOME' ? '/home/me' : name === 'PLANNOTATOR_DATA_DIR' ? DATA : undefined), set: async (name: string, value: string) => void world.envSet.set(name, value) },
       fs: {
         exists: async (path: string) => files.has(path),
         read: async (path: string) => {
@@ -101,7 +106,12 @@ function engineOver(sessionId: string, installed: string) {
           return { status: 200, ok: true, text: JSON.stringify({ commands: [], [INBOX_RELOAD_FIELD]: { installed } }) }
         },
       },
-      tool: { register: async (spec: { name: string }) => ({ tool: `mcp__plugin_plannotator__${spec.name}` }) },
+      tool: {
+        register: async (spec: { name: string }) => {
+          world.tools.push(spec.name)
+          return { tool: `mcp__plugin_plannotator__${spec.name}` }
+        },
+      },
       command: {
         list: async () => [],
         register: async () => undefined,
@@ -137,6 +147,26 @@ describe('auto reload through the registered hooks', () => {
     expect(world.commands).toEqual([RELOAD])
     await hook('session.end')($, {}, pass)
   })
+
+  const offBy: [key: string, name: string, env: Record<string, string>, config: string | undefined][] = [
+    ['env', 'PLANNOTATOR_AUTO_RELOAD=0', { PLANNOTATOR_AUTO_RELOAD: '0' }, undefined],
+    ['config', 'config.json autoReload: false', {}, '{ "autoReload": false }'],
+  ]
+  for (const [key, name, env, config] of offBy) {
+    test(`${name}: the polls never ask for a reload and nothing runs, while the Inbox tool, its reminder and link stay`, async () => {
+      const hook = await freshHooks(`auto-reload-off-${key}`)
+      const world = engineOver('sess-off', '0.28.51', env, config)
+      const { $ } = world
+      await hook('session.start')($, { isInteractive: true }, async () => ({ cwd: '/home/me/src/app' }))
+      await world.tick(5)
+      expect(world.tools).toContain('plannotator_inbox')
+      expect(world.envSet.get('PLANNOTATOR_INBOX_REMINDER')).toBeTruthy()
+      expect(world.polls.length).toBeGreaterThan(0)
+      expect(world.polls.some((poll) => INBOX_AUTO_RELOAD_POLL_FIELD in poll)).toBe(false)
+      expect(world.commands).toEqual([])
+      await hook('session.end')($, {}, pass)
+    })
+  }
 
   test("the main turn still holds the run while a subagent runs, and a subagent's end does not end it", async () => {
     const hook = await freshHooks('auto-reload-main-turn')

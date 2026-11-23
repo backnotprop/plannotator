@@ -27,6 +27,7 @@ import {
   DIAGRAM_ENGINE_HOST_KEY,
   DIAGRAM_ENGINE_SHARED_MODULES,
 } from '../../../packages/review-editor/utils/diagramEngineContract';
+import { DIAGRAM_ENGINE_MODE } from '../../../packages/ui/utils/diagram-engine';
 
 // Vite's module ids use `/` on every platform; every path compared with one
 // goes through normalizePath, or nothing matches on Windows.
@@ -133,12 +134,16 @@ function noSourcePane(): Plugin {
 
 /** The proof the sharing is complete. The engine must not carry a second
  * copy of a stateful ui module: the config store and its settings, cookie
- * storage, the theme registry, the identity and math slots, or any
+ * storage, the theme registry, the identity and math slots, the diagram
+ * remote-loads switch, or any
  * repository module that defines a React context (its consumers would read
  * an empty copy, not the page's provider). The engine's own context
  * (anchorClaims) is provided and read inside the engine only. React and the
- * runtimes must not be bundled either. */
+ * runtimes must not be bundled either, nor Pele's library while the engine
+ * switch is 'mermaid' (packages/ui/PELE.md): this build inlines every dynamic
+ * import, so a reachable dynamic import of pele/lazy would put all of Pele here. */
 function guardBundle(): Plugin {
+  const forbidPele = DIAGRAM_ENGINE_MODE === 'mermaid';
   const ownContexts = new Set([normalizePath(path.join(uiRoot, 'components/diagram/anchorClaims.ts'))]);
   const stateful = [
     'config/',
@@ -148,11 +153,25 @@ function guardBundle(): Plugin {
     'utils/generateIdentity.ts',
     'utils/math.ts',
     'components/ThemeProvider.tsx',
+    'utils/diagramRemoteLoadsPolicy.ts',
   ].map((entry) => normalizePath(path.join(uiRoot, entry)));
   return {
     name: 'pn-diagram-guard',
-    generateBundle() {
+    generateBundle(_options, bundle) {
       const problems: string[] = [];
+      // Pele is in the module graph either way (Rollup loads a dynamic
+      // import before it drops the dead branch holding it): what must not
+      // happen is a Pele module rendered into the output.
+      if (forbidPele) {
+        for (const output of Object.values(bundle)) {
+          if (output.type !== 'chunk') continue;
+          for (const [id, rendered] of Object.entries(output.modules)) {
+            if (rendered.renderedLength > 0 && /[\\/]node_modules[\\/](?:\.bun[\\/][^\\/]+[\\/]node_modules[\\/])?pele[\\/]/.test(id)) {
+              problems.push(`${id} (Pele is not part of a build while DIAGRAM_ENGINE_MODE is 'mermaid')`);
+            }
+          }
+        }
+      }
       for (const id of this.getModuleIds()) {
         if (id.startsWith('\0')) continue;
         const file = id.replace(/\?.*$/, '');

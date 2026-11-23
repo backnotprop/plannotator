@@ -21,10 +21,40 @@ describe("parseTailscaleSelfIdentity", () => {
   test("a tagged machine has no owner, whatever pseudo-user Tailscale lists for it", () => {
     expect(parseTailscaleSelfIdentity(status({ UserID: 42, Tags: ["tag:server"] }, { "42": { LoginName: "tagged-devices" } }))).toEqual({ login: null, tagged: true });
   });
+  test("large 64-bit Self.UserIDs beyond Number.MAX_SAFE_INTEGER keep their exact User key", () => {
+    const exact = '{"Self":{"UserID":12345678901234567},"User":{"12345678901234567":{"LoginName":"me@example.com"}}}';
+    expect(parseTailscaleSelfIdentity(exact)).toEqual({ login: "me@example.com", tagged: false });
+
+    const maxInt64 = '{"Self":{"UserID":9223372036854775807},"User":{"9223372036854775807":{"LoginName":"max@example.com"}}}';
+    expect(parseTailscaleSelfIdentity(maxInt64)).toEqual({ login: "max@example.com", tagged: false });
+
+    // Adjacent 64-bit ids that round to the same IEEE-754 float64 must never collide.
+    const bothNeighbors =
+      '{"Peer":{"n1":{"UserID":12345678901234568}},"Self":{"UserID":12345678901234567},"User":{"12345678901234567":{"LoginName":"owner@example.com"},"12345678901234568":{"LoginName":"other@example.com"}}}';
+    expect(parseTailscaleSelfIdentity(bothNeighbors)).toEqual({ login: "owner@example.com", tagged: false });
+
+    const roundedNeighborOnly =
+      '{"Self":{"UserID":12345678901234567},"User":{"12345678901234568":{"LoginName":"other@example.com"}}}';
+    expect(parseTailscaleSelfIdentity(roundedNeighborOnly)).toEqual({ login: null, tagged: false });
+
+    // Non-canonical unsafe numeric forms must fail closed instead of matching a rounded neighbor.
+    const unsafeFloat =
+      '{"Self":{"UserID":12345678901234567.0},"User":{"12345678901234568":{"LoginName":"other@example.com"}}}';
+    expect(parseTailscaleSelfIdentity(unsafeFloat)).toEqual({ login: null, tagged: false });
+
+    const unsafeExponent =
+      '{"Self":{"UserID":1.2345678901234567e16},"User":{"12345678901234568":{"LoginName":"other@example.com"}}}';
+    expect(parseTailscaleSelfIdentity(unsafeExponent)).toEqual({ login: null, tagged: false });
+
+    const taggedLarge = '{"Self":{"UserID":12345678901234567,"Tags":["tag:server"]},"User":{"12345678901234567":{"LoginName":"tagged-devices"}}}';
+    expect(parseTailscaleSelfIdentity(taggedLarge)).toEqual({ login: null, tagged: true });
+  });
   test("an unknown user id, a missing User map or an empty login is no login; not a status document is undefined", () => {
     expect(parseTailscaleSelfIdentity(status({ UserID: 9 }))).toEqual({ login: null, tagged: false });
     expect(parseTailscaleSelfIdentity(JSON.stringify({ Self: { UserID: 42 } }))).toEqual({ login: null, tagged: false });
     expect(parseTailscaleSelfIdentity(status({ UserID: 42 }, { "42": { LoginName: "" } }))).toEqual({ login: null, tagged: false });
+    expect(parseTailscaleSelfIdentity(JSON.stringify({ Self: { UserID: "toString" }, User: {} }))).toEqual({ login: null, tagged: false });
+    expect(parseTailscaleSelfIdentity(JSON.stringify({ Self: { UserID: 0 }, User: [{ LoginName: "me@example.com" }] }))).toEqual({ login: null, tagged: false });
     expect(parseTailscaleSelfIdentity("not json")).toBeUndefined();
     expect(parseTailscaleSelfIdentity("null")).toBeUndefined();
     expect(parseTailscaleSelfIdentity(JSON.stringify({ User: {} }))).toBeUndefined();

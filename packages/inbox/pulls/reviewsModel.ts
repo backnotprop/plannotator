@@ -8,6 +8,9 @@ import {
   type InboxMessageWire,
   type InboxPull,
   type InboxPullLink,
+  INBOX_PULL_RISK_AUTO_TRIES,
+  type InboxPullRiskAutoMake,
+  type InboxPullRiskAutoRun,
   type InboxPullStack,
   type InboxReviewRow,
   type InboxReviewsAnswer,
@@ -113,7 +116,7 @@ function statusOf(row: InboxReviewRow): { status: Words; tone: ReviewRowLine['to
     case 'branch_ready':
       return { status: ['Ready for review'], tone: null };
     case 'curating':
-      return { status: ['Curating…'], tone: null };
+      return { status: [row.started?.ask === 'picture_it' ? 'Making a Picture page…' : 'Curating…'], tone: null };
     case 'feedback_sent': {
       const verdict = row.review?.verdict;
       if (verdict?.verdict !== 'changes_requested') return { status: ['You answered'], tone: null };
@@ -151,7 +154,35 @@ export function reviewRowLanding(row: InboxReviewRow): InboxReviewRow['landed'][
   return (handed ? row.landed.find((landing) => landing.key === handed.key) : row.landed[0]) ?? null;
 }
 
-export function reviewRowLine(row: InboxReviewRow): ReviewRowLine {
+const LEVEL_WORD = { high: 'High', medium: 'Medium', low: 'Low' } as const;
+
+export const REVIEW_ROW_AUTO_STOPPED: Record<InboxPullRiskAutoMake, string> = {
+  picture_it: 'The agent stopped before sending a Picture page.',
+  guide: 'The agent stopped before sending a guided review.',
+};
+
+export function reviewRowAutoRun(row: Pick<InboxReviewRow, 'stacks'>, runs: Readonly<Record<string, InboxPullRiskAutoRun>> | undefined): InboxPullRiskAutoRun | null {
+  const layer = runs ? row.stacks[0]?.layers.find((pull) => runs[pull.key]) : undefined;
+  return layer ? runs![layer.key]! : null;
+}
+
+export function reviewRowAutoWords(run: InboxPullRiskAutoRun | null, row: Pick<InboxReviewRow, 'link' | 'review' | 'thread_id' | 'stacks'>): string | null {
+  if (!run) return null;
+  const link = row.link;
+  if (run.state === 'failed') {
+    const open = row.stacks[0] ? openLayers(row.stacks[0]).length > 0 : false;
+    const again = (run.tries ?? 1) < INBOX_PULL_RISK_AUTO_TRIES ? ' It will try again.' : '';
+    return open && !link && !row.thread_id ? `Couldn't start: ${run.reason ?? 'the agent did not start.'}${again}` : null;
+  }
+  if (run.state !== 'started' || !link || link.thread_id !== run.thread_id) return null;
+  const page = run.made !== 'guide' && link.picture_it_page && link.picture_it_page.at >= run.at ? link.picture_it_page : null;
+  if (page) return !page.seen && !row.review ? `Picture page ready, made when it ranked ${LEVEL_WORD[run.level]}` : null;
+  if (row.review) return null;
+  if (link.agent?.ended) return REVIEW_ROW_AUTO_STOPPED[run.made];
+  return run.made === 'picture_it' ? 'Making a Picture page…' : 'Making a guided review…';
+}
+
+export function reviewRowLine(row: InboxReviewRow, autoRuns?: Readonly<Record<string, InboxPullRiskAutoRun>>): ReviewRowLine {
   const stack = row.stacks[0];
   const name = row.review?.agent?.name ?? linkAgentName(row.link) ?? (row.started ? hostLabel(row.started.host) : null);
   const host = row.review?.agent?.host ?? row.link?.agent?.host ?? row.started?.host ?? null;
@@ -159,7 +190,8 @@ export function reviewRowLine(row: InboxReviewRow): ReviewRowLine {
   const said = statusOf(row);
   const { tone } = said;
   // A walkthrough has nothing to review: Ready once it's in, Writing… while the agent writes it.
-  const parts: Words = reviewIsWalkthrough(row) && (row.reason === 'review_ready' || row.reason === 'curating') ? [row.reason === 'review_ready' ? 'Ready' : 'Writing…'] : said.status;
+  const auto = reviewRowAutoWords(reviewRowAutoRun(row, autoRuns), row);
+  const parts: Words = auto ? [auto] : reviewIsWalkthrough(row) && (row.reason === 'review_ready' || row.reason === 'curating') ? [row.reason === 'review_ready' ? 'Ready' : 'Writing…'] : said.status;
   const status = wordsText(parts);
   if (reviewIsWalkthrough(row)) return { kind: 'local', lead: 'Walkthrough', agent, status, parts, tone };
   if (stack) {
@@ -328,8 +360,8 @@ export function reviewViewOf(
     name: row.review && !stack ? inboxReviewTitleLine(row.review.title) : null,
     firstReviewId: folds ? first : null,
     latestReviewId: row.review?.latest_review_id ?? null,
-    curating: row.reason !== 'curating' ? null : reviewIsWalkthrough(row) ? 'Writing the walkthrough…' : 'Curating the review…',
-    asked: ask ? `New review · ${reviewIsWalkthrough(row) ? 'Walkthrough' : ask === 'custom' ? 'Custom curation' : 'Guided review'}` : null,
+    curating: row.reason !== 'curating' ? null : reviewIsWalkthrough(row) ? 'Writing the walkthrough…' : row.started?.ask === 'picture_it' ? 'Making a Picture page…' : 'Curating the review…',
+    asked: ask ? `New review · ${reviewIsWalkthrough(row) ? 'Walkthrough' : ask === 'custom' ? 'Custom curation' : ask === 'picture_it' ? 'Picture it' : 'Guided review'}` : null,
     fromThread: folds ? (thread.thread_name ?? thread.subject ?? null) : null,
     onWholeThread: options.onWholeThread,
     onOpenPull: stack ? () => options.onOpenStack(stack.id) : null,
@@ -345,14 +377,15 @@ export { ReviewViewNote } from './ReviewViewNote';
 
 /** The groups that start folded, and the person's own choice for each, kept in this browser. */
 export const REVIEW_FOLDS_KEY = 'plannotator-inbox-reviews-folds';
-export type ReviewFolds = { waiting: boolean; not_reviewed: boolean };
+/** Which folded groups are open, kept: "On this computer" (`local`, OnThisComputer.tsx) is one. */
+export type ReviewFolds = { waiting: boolean; not_reviewed: boolean; local: boolean };
 
 export function readReviewFolds(): ReviewFolds {
   try {
     const kept = JSON.parse(localStorage.getItem(REVIEW_FOLDS_KEY) ?? '{}') as Partial<ReviewFolds>;
-    return { waiting: kept.waiting === true, not_reviewed: kept.not_reviewed === true };
+    return { waiting: kept.waiting === true, not_reviewed: kept.not_reviewed === true, local: kept.local === true };
   } catch {
-    return { waiting: false, not_reviewed: false };
+    return { waiting: false, not_reviewed: false, local: false };
   }
 }
 

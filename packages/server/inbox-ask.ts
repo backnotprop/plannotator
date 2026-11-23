@@ -99,6 +99,8 @@ export function createInboxAsk(options: {
   json: (body: unknown, status?: number) => Response;
   /** A conversation changed: the windows' streams say so. */
   onChange: (threadId: string) => void;
+  /** The person asked a question in the thread (saved): their doing there ("Recent activity", shared's acted.ts). */
+  onAsked?: (threadId: string) => void;
   /** The Inbox's token, and the host of a session that can answer live: inbox-ask-live.ts. */
   token: string;
   hostOf: (session: string) => string | null;
@@ -293,6 +295,7 @@ export function createInboxAsk(options: {
         }
         const added = addInboxAskTurn(store.dir, threadId, { ...input, ...showMeFields, at: new Date().toISOString(), session: owner.session, host: owner.host });
         saved = { conversation: added.conversation, turn: added.turn };
+        options.onAsked?.(threadId);
         options.onChange(threadId);
       }
     } catch (error) {

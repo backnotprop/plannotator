@@ -51,6 +51,8 @@ export interface MessageBodyProps {
    */
   onOpenOptionSet?: (key: string, image: InboxInlineImage, choice: number) => void;
   readOnly: boolean;
+  /** The thread's questions moved to another thread (its root's `moved_to`): a card the archive closed reads "Closed". */
+  movedThread?: boolean;
   answers: ReadonlyMap<string, QuestionAnswer>;
   onPick: (key: string, answer: QuestionAnswer | null) => void;
   footerFor: (key: string) => string | null;
@@ -65,6 +67,11 @@ export interface MessageBodyProps {
    * `recordFor` names the record a block draws (null: the block stays text
    * and ends the run); `render` draws a run's records, in body order.
    */
+  /**
+   * `:::run` and `:::secret` blocks (parts/RunBlocks): the host's card for one block, by its opening line; undefined
+   * leaves the block as text (a callout, its command with Copy).
+   */
+  renderRunBlock?: (block: { startLine: number; directiveKind?: string }) => React.ReactNode | undefined;
   renderActions?: {
     recordFor: (block: { startLine: number; content: string }) => InboxQuestion | null;
     render: (records: InboxQuestion[]) => React.ReactNode;

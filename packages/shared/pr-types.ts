@@ -59,11 +59,18 @@ export interface PRRuntime {
    * (Bitbucket Cloud). Defaults to the global `fetch`; tests inject one.
    */
   fetch?: typeof fetch;
+  /**
+   * The API token configured for one Forgejo origin (`https://host[:port]`), or
+   * null. Only the servers set it, from config.json and the environment:
+   * browser code never sees a token. A token is returned only for the exact
+   * origin it was configured for.
+   */
+  forgejoToken?: (origin: string) => string | null;
 }
 
 // --- Platform Types ---
 
-export type Platform = "github" | "gitlab" | "bitbucket";
+export type Platform = "github" | "gitlab" | "bitbucket" | "forgejo";
 
 /** GitHub PR reference */
 export interface GithubPRRef {
@@ -91,8 +98,20 @@ export interface BitbucketPRRef {
   number: number;
 }
 
+/** Forgejo PR reference (`{host}/{owner}/{repo}/pulls/{number}`) */
+export interface ForgejoPRRef {
+  platform: "forgejo";
+  /** As written in the URL; may include `:port`. */
+  host: string;
+  /** Omitted means https; only `http` is ever stored. */
+  scheme?: "http";
+  owner: string;
+  repo: string;
+  number: number;
+}
+
 /** Discriminated union — auto-detected from URL */
-export type PRRef = GithubPRRef | GitlabMRRef | BitbucketPRRef;
+export type PRRef = GithubPRRef | GitlabMRRef | BitbucketPRRef | ForgejoPRRef;
 
 /** GitHub PR metadata */
 export interface GithubPRMetadata {
@@ -163,8 +182,36 @@ export interface BitbucketPRMetadata {
   url: string;
 }
 
+/** Forgejo PR metadata */
+export interface ForgejoPRMetadata {
+  platform: "forgejo";
+  /** As written in the URL; may include `:port`. */
+  host: string;
+  /** Omitted means https; only `http` is ever stored. */
+  scheme?: "http";
+  owner: string;
+  repo: string;
+  number: number;
+  title: string;
+  author: string;
+  baseBranch: string;
+  headBranch: string;
+  /** Repository default branch, used to infer whether this PR targets another PR branch. */
+  defaultBranch?: string;
+  baseSha: string;
+  headSha: string;
+  /** Merge-base SHA — the common ancestor commit used to compute the PR diff. Differs from baseSha when the base branch has moved. */
+  mergeBaseSha?: string;
+  /**
+   * `owner/repo` of the source repository when the PR comes from a fork.
+   * Absent for same-repository PRs.
+   */
+  sourceRepo?: string;
+  url: string;
+}
+
 /** Discriminated union — downstream gets type narrowing for free */
-export type PRMetadata = GithubPRMetadata | GitlabMRMetadata | BitbucketPRMetadata;
+export type PRMetadata = GithubPRMetadata | GitlabMRMetadata | BitbucketPRMetadata | ForgejoPRMetadata;
 
 // --- PR Context Types (platform-agnostic) ---
 
@@ -507,6 +554,27 @@ const PLATFORM_CAPABILITIES: Record<Platform, PRPlatformCapabilities> = {
     agentCliAccess: false,
     cli: null,
   },
+  forgejo: {
+    label: "Forgejo",
+    changeLabel: "PR",
+    numberPrefix: "#",
+    // `event: "REQUEST_CHANGES"` on POST /pulls/{n}/reviews.
+    requestChanges: true,
+    // Forgejo answers 422 to approve and to request-changes on your own PR
+    // ("approve your own pull is not allowed" / "reject your own pull ...").
+    selfReviewBlocked: true,
+    selfRequestChangesBlocked: true,
+    // File-level comments fold into the body until the review post supports them.
+    fileLevelComments: false,
+    viewedSync: false,
+    // Attachments and raw files load from the instance's own origin, with the
+    // configured token when there is one (see pr-artifact-document.ts).
+    artifacts: true,
+    // REQUEST_CHANGES needs a body; COMMENT needs a body or an inline comment.
+    reviewBodyRequired: true,
+    agentCliAccess: false,
+    cli: null,
+  },
 };
 
 // --- Label Helpers ---
@@ -539,9 +607,14 @@ export function getMRNumberLabel(m: PRRef | PRMetadata): string {
   return `${getPRPlatformCapabilities(m).numberPrefix}${getPRNumber(m)}`;
 }
 
+/** `scheme://host` of a Forgejo instance; the scheme is https unless the ref says http. */
+export function getForgejoOrigin(m: ForgejoPRRef | ForgejoPRMetadata): string {
+  return `${m.scheme ?? "https"}://${m.host}`;
+}
+
 /** "owner/repo", "group/project" or "workspace/repo" */
 export function getDisplayRepo(m: PRRef | PRMetadata): string {
-  if (m.platform === "github") return `${m.owner}/${m.repo}`;
+  if (m.platform === "github" || m.platform === "forgejo") return `${m.owner}/${m.repo}`;
   if (m.platform === "bitbucket") return `${m.workspace}/${m.repo}`;
   return m.projectPath;
 }
@@ -563,6 +636,10 @@ export function prBlobPermalink(m: PRMetadata, path: string, lineStart: number, 
   if (m.platform === "gitlab") {
     return `https://${host}/${m.projectPath}/-/blob/${sha}/${encodedPath}#L${lineStart}${single ? "" : `-${lineEnd}`}`;
   }
+  if (m.platform === "forgejo") {
+    const origin = `${m.scheme ?? "https"}://${host}`;
+    return `${origin}/${m.owner}/${m.repo}/src/commit/${sha}/${encodedPath}#L${lineStart}${single ? "" : `-L${lineEnd}`}`;
+  }
   return `https://${host}/${m.workspace}/${m.repo}/src/${sha}/${encodedPath}#lines-${lineStart}${single ? "" : `:${lineEnd}`}`;
 }
 
@@ -573,6 +650,16 @@ export function prRefFromMetadata(m: PRMetadata): PRRef {
   }
   if (m.platform === "bitbucket") {
     return { platform: "bitbucket", host: m.host, workspace: m.workspace, repo: m.repo, number: m.number };
+  }
+  if (m.platform === "forgejo") {
+    return {
+      platform: "forgejo",
+      host: m.host,
+      ...(m.scheme ? { scheme: m.scheme } : {}),
+      owner: m.owner,
+      repo: m.repo,
+      number: m.number,
+    };
   }
   return { platform: "gitlab", host: m.host, projectPath: m.projectPath, iid: m.iid };
 }
@@ -589,6 +676,13 @@ export function isSameProject(a: PRRef, b: PRRef): boolean {
     // Bitbucket workspace and repository slugs are case-insensitive.
     return a.host === b.host
       && a.workspace.toLowerCase() === b.workspace.toLowerCase()
+      && a.repo.toLowerCase() === b.repo.toLowerCase();
+  }
+  if (a.platform === "forgejo" && b.platform === "forgejo") {
+    // Host names and Forgejo owner/repo names are case-insensitive; http and https are different instances.
+    return a.host.toLowerCase() === b.host.toLowerCase()
+      && (a.scheme ?? "https") === (b.scheme ?? "https")
+      && a.owner.toLowerCase() === b.owner.toLowerCase()
       && a.repo.toLowerCase() === b.repo.toLowerCase();
   }
   return false;
@@ -613,6 +707,8 @@ export function getCliInstallUrl(ref: PRRef): string {
 export function getPRHeadFetchSpec(m: PRMetadata): { remote: string | null; ref: string } {
   if (m.platform === "github") return { remote: null, ref: `refs/pull/${m.number}/head` };
   if (m.platform === "gitlab") return { remote: null, ref: `refs/merge-requests/${m.iid}/head` };
+  // Forgejo publishes the head, forks included, as refs/pull/N/head on the base repository.
+  if (m.platform === "forgejo") return { remote: null, ref: `refs/pull/${m.number}/head` };
   if (m.headBranch.startsWith("-") || m.headBranch.includes("..")) {
     throw new Error(`Invalid source branch: ${m.headBranch}`);
   }
@@ -639,6 +735,13 @@ export function getPRCloneCommand(
     // background.
     return {
       argv: ["git", "clone", "--depth=1", "--no-checkout", "--", `https://${m.host}/${m.workspace}/${m.repo}.git`, dest],
+      env: { GIT_TERMINAL_PROMPT: "0" },
+    };
+  }
+  if (m.platform === "forgejo") {
+    // Plain git, like Bitbucket: no CLI, and the API token never goes on a command line.
+    return {
+      argv: ["git", "clone", "--depth=1", "--no-checkout", "--", `${getForgejoOrigin(m)}/${m.owner}/${m.repo}.git`, dest],
       env: { GIT_TERMINAL_PROMPT: "0" },
     };
   }
@@ -692,6 +795,34 @@ export function encodeApiFilePath(filePath: string): string {
 
 // --- URL Parsing ---
 
+/** The public hosts of the other platforms: never a Forgejo instance. */
+const NOT_FORGEJO_HOSTS = new Set(["github.com", "gitlab.com", "bitbucket.org"]);
+/** A Forgejo host as a URL may write it: a DNS name or IPv4 address, or a bracketed IPv6 literal, then an optional port. */
+const FORGEJO_HOST = /^(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?$/;
+/** A Forgejo owner or repository name. */
+const FORGEJO_NAME = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * True when `host` is one the API origin is built from exactly as written:
+ * only name characters (never a backslash, which a URL parser reads as `/`),
+ * no trailing dot, the same host after the URL parser reads it (so no
+ * shorthand IP form and no default port it would drop), and none of the other
+ * platforms' public hosts.
+ */
+function isForgejoHost(scheme: string, host: string): boolean {
+  if (!FORGEJO_HOST.test(host)) return false;
+  const name = host.toLowerCase().replace(/:\d+$/, "");
+  if (name.endsWith(".")) return false;
+  try {
+    if (new URL(`${scheme}://${host}`).host !== host.toLowerCase()) return false;
+  } catch {
+    return false;
+  }
+  return !NOT_FORGEJO_HOSTS.has(name.replace(/\.+$/, "").replace(/^www\./, ""));
+}
+
+const isForgejoName = (name: string) => FORGEJO_NAME.test(name) && name !== "." && name !== "..";
+
 /**
  * Parse a PR/MR URL into its components. Auto-detects platform.
  *
@@ -702,6 +833,7 @@ export function encodeApiFilePath(filePath: string): string {
  * - Self-hosted GitLab: https://gitlab.mycompany.com/group/project/-/merge_requests/42
  *
  * - Bitbucket Cloud: https://bitbucket.org/workspace/repo/pull-requests/7[/diff|/overview]
+ * - Forgejo / Gitea, any host but the three above: https://codeberg.org/owner/repo/pulls/5
  *
  * GitLab is checked first because `/-/merge_requests/` is unambiguous,
  * while `/pull/` could theoretically appear on any host. Bitbucket is matched
@@ -751,6 +883,28 @@ export function parsePRUrl(url: string): PRRef | null {
       repo: ghMatch[3],
       number: parseInt(ghMatch[4], 10),
     };
+  }
+
+  // Forgejo / Gitea: {scheme}://{host}[:{port}]/{owner}/{repo}/pulls/{number}[/...]
+  // `/pulls/` (plural) cannot collide with GitHub's `/pull/`. Read last, so
+  // every URL another platform reads parses exactly as it did before. The host
+  // and names are checked strictly (isForgejoHost, isForgejoName) because the
+  // API URL and a checkout folder are built from them: no credentials, no
+  // backslash, no `..`, and never github.com, gitlab.com or bitbucket.org,
+  // where such a path is no Forgejo PR and stays unparsed, as it always was.
+  const fjMatch = url.match(
+    /^(https?):\/\/([^/?#]+)\/([^/?#]+)\/([^/?#]+)\/pulls\/(\d+)(?:[/?#]|$)/,
+  );
+  if (fjMatch && isForgejoHost(fjMatch[1], fjMatch[2]) && isForgejoName(fjMatch[3]) && isForgejoName(fjMatch[4])) {
+    const ref: ForgejoPRRef = {
+      platform: "forgejo",
+      host: fjMatch[2],
+      owner: fjMatch[3],
+      repo: fjMatch[4],
+      number: parseInt(fjMatch[5], 10),
+    };
+    if (fjMatch[1] === "http") ref.scheme = "http";
+    return ref;
   }
 
   return null;

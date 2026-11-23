@@ -209,13 +209,13 @@ describe("send_message's branch", () => {
     expect(row).toMatchObject({ branch: "pushed-elsewhere", reachable: false });
   });
 
-  test("the safety net reads git only: no report, no risk", async () => {
+  test("a reported branch is known by project and branch, so \"On this computer\" leaves it to its row", async () => {
     const w = world();
-    const answer = await w.service.unreported(w.project, new Set());
-    expect(answer.branches.map((b) => b.branch)).toEqual(["retry-jitter"]);
-    expect(w.judged).toHaveLength(0);
-    expect(w.messages()).toBe(0);
-    expect(w.service.mcp.get(w.project.id, "retry-jitter")).toBeNull();
+    expect(w.service.reported(w.project.id, "retry-jitter")).toBe(false);
+    const sent = await w.send({ body: "Ready.", subject: "retry-jitter", branch: { name: "retry-jitter" } });
+    expect(sent.error).toBe(false);
+    expect(w.service.reported(w.project.id, "retry-jitter")).toBe(true);
+    expect(w.service.reported(w.project.id, "old-spike")).toBe(false);
   });
 
   test("a cloud agent's pushed branch files under the project whose origin it pushed to", async () => {

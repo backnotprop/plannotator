@@ -17,7 +17,7 @@
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, mock, spyOn, test } from 'bun:test';
-import { act } from 'react';
+import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxAnnotationRecord, InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
@@ -349,4 +349,42 @@ test.skipIf(!hasDom)("a teammate's PR review: nothing in the decision's place un
   });
   // Not listed (closed, or not read): the agent's way, which for a teammate's PR is the reply.
   expect(has('[data-review-write-reply]')).toBe(true);
+});
+
+test.skipIf(!hasDom)("a phone: the Diff display gear leaves the bar to the place and sits in the heading's row of the review's own actions; a desktop keeps it in the bar", async () => {
+  const savedMatchMedia = window.matchMedia;
+  const phoneMedia = ((query: string) => ({
+    media: query,
+    matches: query.includes('max-width: 767px'),
+    onchange: null,
+    addEventListener() {},
+    removeEventListener() {},
+    addListener() {},
+    removeListener() {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+  const headActions = () => {
+    const out = document.createElement('div');
+    document.body.appendChild(out);
+    const headRoot = createRoot(out);
+    act(() => headRoot.render(<div className="pn-inbox">{(readerProps!.renderHeadActions as () => ReactNode)()}</div>));
+    const gears = out.querySelectorAll('[data-diff-controls] [data-diff-display-options]').length;
+    act(() => headRoot.unmount());
+    out.remove();
+    return gears;
+  };
+  try {
+    window.matchMedia = phoneMedia;
+    await render(true, true);
+    expect(document.querySelectorAll('[data-review-message] .ib-vhead [data-diff-controls]').length).toBe(0);
+    expect(has('[data-review-message] .ib-vhead [data-review-jump]')).toBe(true);
+    expect(headActions()).toBe(1);
+  } finally {
+    window.matchMedia = savedMatchMedia;
+  }
+  act(() => root?.unmount());
+  host?.remove();
+  await render(true, true);
+  expect(document.querySelectorAll('[data-review-message] .ib-vhead [data-diff-controls] [data-diff-display-options]').length).toBe(1);
+  expect(headActions()).toBe(0);
 });

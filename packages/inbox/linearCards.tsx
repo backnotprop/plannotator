@@ -14,6 +14,7 @@ import { findLinearIdentifiers, isLinearRef, linearAsForgeRef, linearIssueUrl, p
 import { LinearRefCardView } from '@plannotator/ui/components/LinearRefCardView';
 import { registerPlainTextLinker, registerRefCardProvider, type PlainTextLinker, type RefCardProvider } from '@plannotator/ui/utils/refCardProviders';
 import { getRefCardTransport, setRefCardTransport } from '@plannotator/ui/utils/refCard';
+import { proseRefLinkProps } from '@plannotator/ui/utils/refCardClick';
 import { useSyncExternalStore } from 'react';
 import { inboxUrl } from './inboxUrl';
 
@@ -25,7 +26,7 @@ export function linearIdentifierLinker(refs: LinearIssueRefs): PlainTextLinker {
       start,
       end,
       node: (key: number) => (
-        <a key={key} href={linearIssueUrl(refs.workspace, identifier)} target="_blank" rel="noopener noreferrer" className="text-primary font-medium hover:underline" data-linear-ref="">
+        <a key={key} href={linearIssueUrl(refs.workspace, identifier)} target="_blank" rel="noopener noreferrer" className="text-primary font-medium hover:underline" data-linear-ref="" {...proseRefLinkProps(linearIssueUrl(refs.workspace, identifier))}>
           {identifier}
         </a>
       ),

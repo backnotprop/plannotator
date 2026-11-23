@@ -20,6 +20,18 @@
       "id",
       "name"
     ],
+    "DoorAnnotationAnswer": [
+      "annotation"
+    ],
+    "DoorAnnotationBody": [
+      "annotation",
+      "attachment_id",
+      "idempotency_key",
+      "version"
+    ],
+    "DoorAnnotationRemoveBody": [
+      "idempotency_key"
+    ],
     "DoorError": [
       "code",
       "error"
@@ -27,6 +39,18 @@
     "DoorHelloFrame": [
       "cursor",
       "serverSession"
+    ],
+    "DoorKeyBody": [
+      "idempotency_key"
+    ],
+    "DoorMarkUnreadAnswer": [
+      "thread",
+      "through_seq",
+      "wrote"
+    ],
+    "DoorMarkupAnswer": [
+      "name",
+      "path"
     ],
     "DoorPairAnswer": [
       "addresses",
@@ -66,6 +90,28 @@
       "key",
       "revision"
     ],
+    "DoorPinBody": [
+      "idempotency_key",
+      "pinned"
+    ],
+    "DoorPinsBody": [
+      "idempotency_key"
+    ],
+    "DoorPinsBodyRestore": [
+      "index",
+      "pinned_at",
+      "thread_id"
+    ],
+    "DoorPriorityAnswer": [
+      "before"
+    ],
+    "DoorPriorityBefore": [
+      "at",
+      "off_at"
+    ],
+    "DoorPriorityBody": [
+      "idempotency_key"
+    ],
     "DoorQuestionPick": [
       "key",
       "revision"
@@ -93,11 +139,30 @@
     "DoorReplyBodyTo": [
       "session"
     ],
+    "DoorResolveBody": [
+      "idempotency_key",
+      "resolved"
+    ],
     "DoorRevokeAnswer": [
       "device"
     ],
     "DoorSeenBody": [
       "idempotency_key"
+    ],
+    "DoorSnoozeAnswer": [
+      "snoozed"
+    ],
+    "DoorSnoozeBody": [
+      "idempotency_key",
+      "until"
+    ],
+    "DoorThreadAttachmentsAnswer": [
+      "attachments",
+      "serverSession"
+    ],
+    "DoorThreadDraftAnswer": [
+      "draft",
+      "serverSession"
     ],
     "InboxAck": [
       "at",
@@ -148,6 +213,9 @@
       "id",
       "thread_id"
     ],
+    "InboxAgentMark": [
+      "state"
+    ],
     "InboxAgentPlace": [
       "kind",
       "line"
@@ -164,6 +232,20 @@
       "ended_today",
       "total"
     ],
+    "InboxAnnotationRecord": [
+      "annotation",
+      "attachment_id",
+      "created_at",
+      "id",
+      "message_id",
+      "path",
+      "project_id",
+      "removed_at",
+      "sent_reply_id",
+      "thread_id",
+      "updated_at",
+      "version"
+    ],
     "InboxAttachment": [
       "id",
       "kind",
@@ -175,6 +257,30 @@
       "sent_sha256",
       "size"
     ],
+    "InboxAttachmentState": [
+      "changed_since_sent",
+      "current",
+      "id",
+      "kind",
+      "message_id",
+      "name",
+      "named_path",
+      "path",
+      "sent_at",
+      "sent_mtime",
+      "sent_sha256",
+      "size",
+      "unavailable"
+    ],
+    "InboxAttachmentStateCurrent": [
+      "mtime",
+      "sha256",
+      "size"
+    ],
+    "InboxAttachmentStateUnavailable": [
+      "code",
+      "message"
+    ],
     "InboxAuthor": [
       "kind"
     ],
@@ -182,6 +288,10 @@
       "at",
       "name",
       "state"
+    ],
+    "InboxCombineLeftOpenItem": [
+      "machine",
+      "subject"
     ],
     "InboxDelivery": [
       "at",
@@ -256,6 +366,13 @@
       "project_root",
       "session",
       "started_at"
+    ],
+    "InboxGuideCommentTarget": [
+      "file",
+      "line_end",
+      "line_start",
+      "side",
+      "title"
     ],
     "InboxGuideRef": [
       "additions",
@@ -344,6 +461,9 @@
       "at",
       "label"
     ],
+    "InboxListRowLastAgent": [
+      "host"
+    ],
     "InboxListRowProject": [
       "id",
       "name"
@@ -357,11 +477,19 @@
       "label",
       "threads"
     ],
+    "InboxLiveCommentTarget": [
+      "page_url",
+      "site_id",
+      "url"
+    ],
     "InboxLiveSiteRef": [
       "id",
       "opened_at",
       "opened_by",
       "url"
+    ],
+    "InboxMessageCommentTarget": [
+      "at"
     ],
     "InboxMessageWire": [
       "author",
@@ -387,8 +515,19 @@
       "at",
       "session"
     ],
+    "InboxMessageWireSentFrom": [
+      "kind"
+    ],
     "InboxMessageWireThreadNaming": [
       "status"
+    ],
+    "InboxMovedNote": [
+      "questions",
+      "thread_id"
+    ],
+    "InboxMovedTo": [
+      "subject",
+      "thread_id"
     ],
     "InboxNotifyReach": [
       "allowed",
@@ -403,6 +542,10 @@
     "InboxPicker": [
       "id",
       "name"
+    ],
+    "InboxPictureItPage": [
+      "attachment_id",
+      "title"
     ],
     "InboxProject": [
       "created_at",
@@ -463,6 +606,21 @@
       "value",
       "why"
     ],
+    "InboxQuestionScenarios": [
+      "columns",
+      "rows"
+    ],
+    "InboxQuestionScenariosColumnsItem": [
+      "choice",
+      "header"
+    ],
+    "InboxQuestionScenariosRowsItem": [
+      "cells",
+      "situation"
+    ],
+    "InboxQuestionScenariosRowsItemCellsItem": [
+      "verdict"
+    ],
     "InboxQuestionShows": [
       "kind",
       "label",
@@ -477,6 +635,19 @@
     ],
     "InboxReaction": [
       "emoji"
+    ],
+    "InboxReplyDraft": [
+      "body",
+      "created_at",
+      "thread_id",
+      "updated_at",
+      "v"
+    ],
+    "InboxReplyMention": [
+      "at",
+      "label",
+      "thread_id",
+      "title"
     ],
     "InboxReplyQuote": [
       "of"

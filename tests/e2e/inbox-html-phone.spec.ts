@@ -435,12 +435,12 @@ test('Pixel 7 (Chromium): words in the card wait for their version: the other ve
     // ⌄ gathers the tools; the changed chip stays (a fact about the file), and its link still works.
     await page.locator('[data-fcomp-minimize]').tap();
     await expect.poll(() => tools(page)).toBe('tucked');
-    await page.getByRole('button', { name: 'Open the version it sent' }).tap();
+    await page.getByRole('button', { name: 'View sent version' }).tap();
     // Nothing asks: the sent version opens on that tap.
     await expect(page.locator('.ib-fvver-t')).toHaveText('Showing the sent version');
     await expect(page.locator('.ib-stepguard')).toHaveCount(0);
     // Back on the file as it is now: the page pins the same element again, and the card holds the words.
-    await page.getByRole('button', { name: 'Open the file as it is now' }).tap();
+    await page.getByRole('button', { name: 'View current file' }).tap();
     await expect(page.locator('.ib-fvver-t')).toHaveText('Changed since sent');
     await expect(field(page)).toHaveValue('Keep this');
   });

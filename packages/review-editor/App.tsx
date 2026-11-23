@@ -37,6 +37,8 @@ import { claimAutoUpdateNotice, describeAutoUpdateNotice, parseAutoUpdateNotice,
 import { storage } from '@plannotator/ui/utils/storage';
 import { RefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { refCardRouteTransport, setRefCardTransport } from '@plannotator/ui/utils/refCard';
+import { registerRefCardProvider } from '@plannotator/ui/utils/refCardProviders';
+import { linearLinkCardProvider } from '@plannotator/ui/utils/linearLinkCards';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { useStarAskDoneScreen } from '@plannotator/ui/components/StarAskDoneScreen';
 import {
@@ -55,7 +57,8 @@ import { repoLabel } from '@plannotator/ui/utils/repoLabel';
 import { loadDiffFont } from '@plannotator/ui/utils/diffFonts';
 import { monoFontStack, normalizeCssFontSize } from '@plannotator/ui/utils/cssFontFamily';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
-import { adoptServerSession, noteServerSessionMismatch, withServerSession, withServerSessionQuery } from '@plannotator/ui/utils/serverSession';
+import { adoptServerSession, currentServerSession, noteServerSessionMismatch, withServerSession, withServerSessionQuery } from '@plannotator/ui/utils/serverSession';
+import { aiChatStorageKey } from '@plannotator/ui/utils/aiChatPersistence';
 import { assertSendOk, sendErrorAfterAgentGone, throwUnreachable } from '@plannotator/ui/utils/sendFailure';
 import { ReviewEndedScreen, useAgentGoneEnding, useTypedTextBoxes } from './components/ReviewEnded';
 import { dismissSendFailureToast, sendSettled, sendStarted, showSendFailureToast } from '@plannotator/ui/components/SendFailureToast';
@@ -140,7 +143,7 @@ import {
   type NavLocation,
   type RevealTarget,
 } from './utils/explorerNavigation';
-import { changeRuns, stepChange, type ChangeStep } from './utils/explorerChangeNavigation';
+import { changeRuns, changeStepQueue, stepChange, type ChangeStep } from './utils/explorerChangeNavigation';
 import { GoToFile } from './components/GoToFile';
 import type { FileTokenHandlers } from './components/RepoFileView';
 import type { CodeNavLocation, CodeNavResponse } from '@plannotator/shared/code-nav';
@@ -177,7 +180,10 @@ import { PRSwitchOverlay } from './components/PRSwitchOverlay';
 import { usePRStack } from './hooks/usePRStack';
 import { useDiffFreshness } from './hooks/useDiffFreshness';
 import { useTreeScope } from './hooks/useTreeScope';
+import { compileReviewFileFilter } from '@plannotator/shared/review-file-filter';
 import { useRepoFiles } from './hooks/useRepoFiles';
+import { useFilteredRepoFiles } from './hooks/useFilteredRepoFiles';
+import { useReviewFileFilter } from './hooks/useReviewFileFilter';
 import { useAutoViewed } from './hooks/useAutoViewed';
 import { useGroupByKind } from './hooks/useGroupByKind';
 import type { AllFilesLineTarget, AllFilesOrder } from './components/AllFilesCodeView';
@@ -286,7 +292,8 @@ declare const __APP_VERSION__: string;
 // text, and on a touch screen the toolbar sits below the selection (clear of
 // iOS's edit menu), inside the screen, with thumb-sized buttons;
 // @plannotator/ui hosts keep both unchanged unless they opt in.
-configurePlannotatorUI({ richCopy: true, touchSelectionToolbar: true });
+// A click on a #12 or a pasted PR / issue URL in the text opens its card pinned (utils/refCardClick).
+configurePlannotatorUI({ richCopy: true, touchSelectionToolbar: true, refCardClick: true });
 
 function getReviewRecoveryStorage(): ReviewRecoveryStorage | null {
   try {
@@ -348,6 +355,9 @@ function orderFilesBySections(files: DiffFile[], sections?: SinceBaseSections | 
 
 /** Hint shown following the cursor while hovering a sidebar/panel resize handle. */
 const RESIZE_HANDLE_TOOLTIP = 'Click to close · Drag to resize';
+
+/** Keys that scroll a view: pressed while Next change waits to land, they skip the landing. */
+const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
 
 type ReviewHistoryAction =
   | {
@@ -470,6 +480,16 @@ const ReviewApp: React.FC = () => {
   const { resolvedMode } = useTheme();
   const [diffData, setDiffData] = useState<DiffData | null>(null);
   const [files, setFiles] = useState<DiffFile[]>([]);
+  const fileFilter = useReviewFileFilter();
+  const matchesFileFilter = useMemo(() => compileReviewFileFilter(fileFilter.applied), [fileFilter.applied]);
+  const filteredDiffFiles = useMemo(
+    () => matchesFileFilter ? files.filter((file) => matchesFileFilter(file.path)) : files,
+    [files, matchesFileFilter],
+  );
+  const visiblePaths = useMemo(
+    () => matchesFileFilter ? new Set(filteredDiffFiles.map((file) => file.path)) : undefined,
+    [matchesFileFilter, filteredDiffFiles],
+  );
   const [activeFileIndex, setActiveFileIndex] = useState(0);
   const activeFileIndexRef = useRef(activeFileIndex);
   activeFileIndexRef.current = activeFileIndex;
@@ -921,6 +941,9 @@ const ReviewApp: React.FC = () => {
   const [sessionTitle, setSessionTitle] = useState<string | null>(null);
   /** The region the issue / PR / MR hover cards listen on (the whole app). */
   const refCardRootRef = useRef<HTMLDivElement>(null);
+  // Linear issue links get Linear's card too (ui linearLinkCards; the server reads them with the Linear API key,
+  // and without one the link stays plain). Nothing is asked until the transport below is installed.
+  useEffect(() => registerRefCardProvider(linearLinkCardProvider), []);
 
   // Settings → General → "Hide the repository owner": the tab title and the
   // header's repository label; the header's hover keeps the full owner/repo.
@@ -1385,6 +1408,7 @@ const ReviewApp: React.FC = () => {
     handleSelectSearchMatch,
   } = useReviewSearch({
     files,
+    visiblePaths,
     activeFilePath: files[activeFileIndex]?.path ?? null,
     onRevealMatch: handleRevealSearchMatch,
   });
@@ -1566,6 +1590,7 @@ const ReviewApp: React.FC = () => {
   }, [guideOpen, guideHintActive]);
   const agentTool = useAgentToolSetting();
   const aiChat = useAIChat({
+    storageKey: isLoading ? null : aiChatStorageKey(currentServerSession(), 'review'),
     patch: diffData?.rawPatch ?? '',
     diffType,
     base: committedBase,
@@ -2023,10 +2048,14 @@ const ReviewApp: React.FC = () => {
   // Stitching lives here, not in the diff views: rebuilding a fragmented
   // identifier is app-only work, and both views are compiled into the portable
   // guide viewer, which must not carry it.
+  // Returns whether the token is a symbol at all, so the views paint the hover
+  // affordance only on tokens a card can open for.
   const handleTokenHoverEnter = useCallback(
-    (props: DiffTokenEventBaseProps, filePath: string) => {
+    (props: DiffTokenEventBaseProps, filePath: string): boolean => {
       const request = buildTokenHoverRequest(props, filePath);
-      if (request) startTokenHover(request, props.tokenElement);
+      if (!request) return false;
+      startTokenHover(request, props.tokenElement);
+      return true;
     },
     [startTokenHover],
   );
@@ -2326,36 +2355,62 @@ const ReviewApp: React.FC = () => {
       : lastMainPanelIdRef.current ? dockApi.getPanel(lastMainPanelIdRef.current) : undefined;
     return (panel?.group?.element as HTMLElement | undefined) ?? null;
   }, [dockApi]);
-  const stepToChange = useCallback(async (direction: ChangeStep) => {
+  const stepToChangeNow = useCallback(async (direction: ChangeStep) => {
     const container = codeGroupElement();
     if (!container) return;
     if ((await stepChange(container, direction)) === 'moved') return;
     const location = currentNavLocation();
     const index = location?.path != null ? files.findIndex((file) => file.path === location.path) : -1;
-    const next = index === -1 ? undefined : files[index + direction];
+    let nextIndex = index + direction;
+    while (files[nextIndex] && visiblePaths && !visiblePaths.has(files[nextIndex].path)) nextIndex += direction;
+    const next = index === -1 ? undefined : files[nextIndex];
     if (!next) {
       toast(direction === 1 ? 'No more changes' : 'No earlier changes', { duration: 1800 });
       return;
     }
     openRepoFile(next.path, { pin: false });
     // Wait for the next file's rows to settle (the diff draws, then redraws
-    // with the full file), then land on its first (or last) run.
-    let previous = '';
-    let stable = 0;
-    for (let attempt = 0; attempt < 60; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      const nextContainer = codeGroupElement();
-      if (!nextContainer) return;
-      const runs = changeRuns(nextContainer);
-      const shape = runs.length > 0 ? `${runs.length}:${Math.round(runs[0].top)}` : '';
-      stable = shape && shape === previous ? stable + 1 : 0;
-      previous = shape;
-      if (stable >= 3) {
-        await stepChange(nextContainer, direction, { edge: direction === 1 ? 'first' : 'last' });
-        return;
+    // with the full file), then land on its first (or last) run. A click, a
+    // touch or a scroll by hand or by keyboard meanwhile is the person's own
+    // move, and so is leaving the file: skip the landing.
+    let touched = false;
+    const touch = () => { touched = true; };
+    const scrollKey = (event: KeyboardEvent) => {
+      if (SCROLL_KEYS.has(event.key)) touched = true;
+    };
+    const inputs = ['wheel', 'pointerdown', 'touchstart'] as const;
+    for (const type of inputs) window.addEventListener(type, touch, { capture: true, passive: true });
+    window.addEventListener('keydown', scrollKey, { capture: true });
+    try {
+      let previous = '';
+      let stable = 0;
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        if (touched || currentNavLocation()?.path !== next.path) return;
+        const nextContainer = codeGroupElement();
+        if (!nextContainer) return;
+        const runs = changeRuns(nextContainer);
+        const shape = runs.length > 0 ? `${runs.length}:${Math.round(runs[0].top)}` : '';
+        stable = shape && shape === previous ? stable + 1 : 0;
+        previous = shape;
+        if (stable >= 3) {
+          await stepChange(nextContainer, direction, { edge: direction === 1 ? 'first' : 'last' });
+          return;
+        }
       }
+    } finally {
+      for (const type of inputs) window.removeEventListener(type, touch, { capture: true });
+      window.removeEventListener('keydown', scrollKey, { capture: true });
     }
-  }, [codeGroupElement, currentNavLocation, files, openRepoFile]);
+  }, [codeGroupElement, currentNavLocation, files, openRepoFile, visiblePaths]);
+  // One press at a time, and a held key's repeats only while none is under
+  // way (changeStepQueue). The queue calls the latest stepToChangeNow.
+  const stepToChangeNowRef = useRef(stepToChangeNow);
+  stepToChangeNowRef.current = stepToChangeNow;
+  const [stepToChange] = useState(() => changeStepQueue(
+    (direction) => stepToChangeNowRef.current(direction),
+    (error) => console.error('Next change failed', error),
+  ));
 
   useEffect(() => {
     if (!dockApi) return;
@@ -3399,7 +3454,7 @@ const ReviewApp: React.FC = () => {
       });
     }
   }, [deleteExternalAnnotation, externalAnnotations, reviewHistory]);
-  const livePR = useMemo(() => (prMetadata ? { forge: prMetadata.platform === 'gitlab' ? 'GitLab' : prMetadata.platform === 'bitbucket' ? 'Bitbucket' : 'GitHub', platform: prMetadata.platform, threads: prContext?.reviewThreads ?? null, load: () => void fetchPRContext() } : null), [prMetadata, prContext, fetchPRContext]);
+  const livePR = useMemo(() => (prMetadata ? { forge: getPlatformLabel(prMetadata), platform: prMetadata.platform, threads: prContext?.reviewThreads ?? null, load: () => void fetchPRContext() } : null), [prMetadata, prContext, fetchPRContext]);
   const revealLiveLines = useCallback((filePath: string, start: number, end: number, side: 'old' | 'new') => {
     handleScrollToAILines(filePath, start, end, side);
     window.setTimeout(() => setPendingSelection((current) => (current && current.start === start && current.end === end ? null : current)), 900);
@@ -3590,6 +3645,12 @@ const ReviewApp: React.FC = () => {
   const repoFiles = useRepoFiles({
     enabled: repoFilesSupported && ((treeScope === 'all' && effectivePanelView === 'tree' && isNavigatorOpen) || goToFileOpen),
     snapshotId,
+  });
+  const filteredRepoFiles = useFilteredRepoFiles({
+    repo: repoFiles,
+    enabled: treeScope === 'all' && effectivePanelView === 'tree' && isNavigatorOpen,
+    snapshotId,
+    filter: matchesFileFilter ? fileFilter.applied : null,
   });
   const allFilesOrder: AllFilesOrder =
     effectivePanelView === 'sections' ? 'list' : effectivePanelView === 'tree' && groupByKind ? 'kind' : 'tree';
@@ -4548,8 +4609,9 @@ const ReviewApp: React.FC = () => {
     // Outdated comments (#1590) are not drawn on the diff, so a scroll target
     // could never resolve: open the file when it is still in the diff and
     // select the card, without a dead scroll request.
+    const fileHidden = visiblePaths && !visiblePaths.has(annotation.filePath);
     if (navigation === 'select-file') {
-      if (!guideOpen && !isAllFilesActiveRef.current) {
+      if (!guideOpen && (!isAllFilesActiveRef.current || fileHidden)) {
         const fileIndex = files.findIndex(f => f.path === annotation.filePath);
         if (fileIndex !== -1) handleFileSwitch(fileIndex);
       }
@@ -4566,13 +4628,13 @@ const ReviewApp: React.FC = () => {
     if (guideOpen) {
       const targetPath = annotation.filePath;
       setGuideRevealFile(prev => ({ path: targetPath, token: (prev?.token ?? 0) + 1 }));
-    } else if (!isAllFilesActiveRef.current) {
+    } else if (!isAllFilesActiveRef.current || fileHidden) {
       const fileIndex = files.findIndex(f => f.path === annotation.filePath);
       if (fileIndex !== -1) handleFileSwitch(fileIndex);
     }
     setSelectedAnnotationId(id);
     setScrollTargetAnnotation(prev => ({ id, token: (prev?.token ?? 0) + 1 }));
-  }, [files, handleFileSwitch, prMetadata, prDiffScope, guideOpen, openCallFlowPanel, handleFileViewChange, openRepoFile]);
+  }, [files, handleFileSwitch, prMetadata, prDiffScope, guideOpen, openCallFlowPanel, handleFileViewChange, openRepoFile, visiblePaths]);
 
   const agentsPanel = useAgentsPanelSlots({
     enabled: !!origin && agentJobs.capabilities?.available === true,
@@ -4627,6 +4689,8 @@ const ReviewApp: React.FC = () => {
   };
   const reviewStateValue = useMemo<ReviewState>(() => ({
     files,
+    filteredDiffFiles: matchesFileFilter ? filteredDiffFiles : undefined,
+    onClearFileFilter: fileFilter.input.clear,
     rawPatch: diffData?.rawPatch ?? '',
     focusedFileIndex: activeFileIndex,
     // Null while the guide takeover is open — the CSS-hidden dock's DiffViewer
@@ -4805,7 +4869,7 @@ const ReviewApp: React.FC = () => {
     codeNavIsLoading: codeNav.isLoading,
     codeNavActiveSymbol: codeNav.activeSymbol,
   }), [
-    files, diffData?.rawPatch, activeFileIndex, guideOpen, isDiffPanelActive, effectiveDiffStyle, handleDiffStyleChange, isCompactTouchLayout, diffOverflow, diffIndicators,
+    files, filteredDiffFiles, matchesFileFilter, fileFilter.input, diffData?.rawPatch, activeFileIndex, guideOpen, isDiffPanelActive, effectiveDiffStyle, handleDiffStyleChange, isCompactTouchLayout, diffOverflow, diffIndicators,
     diffLineDiffType, diffShowLineNumbers, diffShowBackground,
     diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions, isStaticPatch, imagePreviewSupported, snapshotId, markdownPreview, diagramEngine, semDiffClient, revealInAllChanges, semanticChanges, allFilesLineTarget, jumpTo, powerUp, rejectPowerUpLink, handleAddMarkdownPreviewComment, handleAskAIForMarkdownPreview,
     diffAnnotations, externalAnnotations,
@@ -5569,11 +5633,11 @@ const ReviewApp: React.FC = () => {
       },
       nextChange: {
         when: (event) => canHandleExplorerKey(event),
-        handle: () => { void stepToChange(1); },
+        handle: (event) => stepToChange(1, event.repeat),
       },
       previousChange: {
         when: (event) => canHandleExplorerKey(event),
-        handle: () => { void stepToChange(-1); },
+        handle: (event) => stepToChange(-1, event.repeat),
       },
     },
   });
@@ -5843,6 +5907,8 @@ const ReviewApp: React.FC = () => {
       : undefined,
     onGoToFile: dockApi ? () => setGoToFileOpen(true) : undefined,
     searching: hasSearchableFiles && !!searchQuery.trim(),
+    fileFilterInput: fileFilter.input,
+    fileFilterActive: !!matchesFileFilter,
   };
   const agentsScope = reviewScopeText({
     prLabel: prMetadata ? getMRNumberLabel(prMetadata) : null,
@@ -6332,9 +6398,10 @@ const ReviewApp: React.FC = () => {
               resizeHandle={fileTreeResizeHandle}
             >
               <FileTree
+                visiblePaths={visiblePaths}
                 header={panelHeader}
                 treeScope={repoFilesSupported ? treeScope : 'changes'}
-                repoFiles={repoFiles}
+                repoFiles={filteredRepoFiles}
                 onOpenRepoFile={(path, options) => completeNavigatorSelection(() => openRepoFile(path, options))}
                 activeRepoPath={activeRepoPath}
                 groupByKind={groupByKind}

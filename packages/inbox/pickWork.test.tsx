@@ -2,8 +2,9 @@
  * Tidy… and Combine… on the picked rows (approval "inbox-multi-select", 4A and 4b), on the window's own InboxList:
  * the wide bar has both as buttons and Combine… is greyed with one pick; beside an open thread they are the ⋯'s first
  * items; Tidy… reads and asks about the picked threads only, with the person's words; Combine… names who can write
- * it, sends the picks, the chosen session and the words, and ends picking; threads on two machines are said so and
- * nobody is offered; a row in a Combine still waiting says "Combining…" and draws again when that changes.
+ * it, sends the picks, the chosen session and the words, and ends picking; threads on two computers list each
+ * computer's agents with its name and start on the chosen one's (one away or older is said so and nobody is offered);
+ * a row in a Combine still waiting says "Combining…" and draws again when that changes.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -33,7 +34,9 @@ beforeEach(() => {
     const url = String(input);
     const method = init?.method ?? 'GET';
     requests.push({ method, url, body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null });
-    return new Response(JSON.stringify(answers(url, method)), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    // `status`: a refusal with that status and the rest as its body.
+    const { status = 200, ...body } = answers(url, method) as { status?: number };
+    return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
 });
 afterEach(() => {
@@ -135,7 +138,8 @@ test.skipIf(!hasDom)('the wide bar has Tidy… and Combine…; Combine… is gre
   expect(dialog.querySelector('h2')?.textContent).toBe('Combine 2 threads');
   // Not the field: on a phone a focused field opens the keyboard over the dialog.
   expect(document.activeElement?.textContent).toBe('Cancel');
-  expect(requests.some((r) => r.method === 'GET' && r.url.includes('/api/inbox/combine?threads=a,b'))).toBe(true);
+  // No computer linked: every running agent here is asked for (`all=1`: any of them may write it), and none says a computer.
+  expect(requests.filter((r) => r.method === 'GET' && r.url.includes('/combine')).map((r) => r.url)).toEqual(['/api/inbox/combine?threads=a,b&all=1']);
   const option = dialog.querySelector('[data-combine-agent="ses_a"]')!;
   expect(option.querySelector('input')!.checked).toBe(true);
   // Named by host and title, the count under it.
@@ -204,23 +208,221 @@ test.skipIf(!hasDom)('Tidy… reads and asks about the picked threads only, with
   expect(again.textContent).not.toContain('can be reached');
 });
 
-test.skipIf(!hasDom)('threads on two machines: the dialog says so, offers nobody and reads nothing', async () => {
-  const machines: MachinesModel = {
-    self: 'm_self',
-    all: [{ id: 'm_self', name: 'MacBook', self: true } as never, { id: 'm_mini', name: 'Mac mini', marks: ['combine', 'tidy'] } as never],
-    linked: [{ id: 'm_mini', name: 'Mac mini', marks: ['combine', 'tidy'] } as never],
-    names: new Map([['m_mini', 'Mac mini']]),
-    away: new Set(),
-  } as MachinesModel;
-  host = document.createElement('div');
-  document.body.appendChild(host);
+const TWO: MachinesModel = {
+  self: 'm_self',
+  all: [{ id: 'm_self', name: 'MacBook', self: true } as never, { id: 'm_mini', name: 'Mac mini', state: 'online', marks: ['combine', 'tidy', 'combine-across'] } as never],
+  linked: [{ id: 'm_mini', name: 'Mac mini', state: 'online', marks: ['combine', 'tidy', 'combine-across'] } as never],
+  names: new Map([['m_mini', 'Mac mini']]),
+  away: new Set(),
+} as MachinesModel;
+
+test.skipIf(!hasDom)('threads on two computers: each computer lists every running agent, the writers first, each with its computer, and the chosen one’s computer runs it', async () => {
+  answers = (url, method) => {
+    if (method === 'POST') return { combine: { ...RECORD, session: 'ses_m' } };
+    if (url.startsWith('/api/inbox/m/m_mini/combine'))
+      return { serverSession: 's', agents: [{ session: 'ses_m', host: 'codex', name: 'Codex', project: 'ledger', wrote_at: '2026-11-22T09:00:00.000Z', threads: 1 }, { session: 'ses_idle_m', host: 'pi', name: 'Pi', project: 'docs-site', wrote_at: '2026-11-22T11:00:00.000Z', threads: 0 }], combines: [] };
+    return { serverSession: 's', agents: [{ session: 'ses_a', host: 'claude-code', name: 'Claude Code', title: 'Billing work', wrote_at: '2026-11-22T10:00:00.000Z', threads: 1 }, { session: 'ses_idle_a', host: 'claude-code', name: 'Claude Code', title: 'Release prep', threads: 0 }], combines: [] };
+  };
+  const started: { machine: string | null; label: string }[] = [];
+  host = document.body.appendChild(document.createElement('div'));
   root = createRoot(host);
-  act(() => root!.render(<div className="pn-inbox"><CombineDialog rows={[row('a'), row('b', { machine: 'm_mini' } as Partial<InboxListRow>)]} machines={machines} onClose={() => {}} onStarted={() => {}} /></div>));
+  act(() => root!.render(<div className="pn-inbox"><CombineDialog rows={[row('a'), row('b', { machine: 'm_mini' } as Partial<InboxListRow>)]} machines={TWO} onClose={() => {}} onStarted={(_record, machine, label) => void started.push({ machine, label })} /></div>));
+  await settle();
+  // Any running agent on either computer can write it: each is asked for all of its own (`all=1`).
+  expect(requests.filter((r) => r.method === 'GET').map((r) => r.url).sort()).toEqual(['/api/inbox/combine?threads=a&all=1', '/api/inbox/m/m_mini/combine?threads=b&all=1']);
+  const dialog = document.querySelector('[data-dialog="combine"]')!;
+  expect(dialog.querySelector('.ib-cmb-why')).toBeNull();
+  const line = (session: string) => {
+    const el = dialog.querySelector(`[data-combine-agent="${session}"]`)!;
+    return `${el.querySelector('b')!.textContent} / ${el.querySelector('small')!.textContent}`;
+  };
+  // The writers first, the one that wrote last first; then the ones that wrote in none; each says its computer, this one too.
+  expect([...dialog.querySelectorAll('[data-combine-agent]')].map((el) => el.getAttribute('data-combine-agent'))).toEqual(['ses_a', 'ses_m', 'ses_idle_m', 'ses_idle_a']);
+  expect(line('ses_a')).toBe('Claude Code · Billing work / 1 of these · MacBook');
+  expect(line('ses_m')).toBe('Codex · ledger / 1 of these · Mac mini');
+  expect(line('ses_idle_m')).toEndWith(' · Mac mini');
+  expect(line('ses_idle_a')).toEndWith(' · MacBook');
+  click(dialog.querySelector('[data-combine-agent="ses_m"] input'));
+  click(dialog.querySelector('[data-combine-go]'));
+  await settle();
+  const sent = requests.find((r) => r.method === 'POST')!;
+  expect(sent.url).toBe('/api/inbox/m/m_mini/combine');
+  expect(sent.body).toMatchObject({ thread_ids: ['a', 'b'], session: 'ses_m' });
+  // The toasts that follow name the agent as the dialog did, not as one computer names it among its own.
+  expect(started).toEqual([{ machine: 'm_mini', label: 'Codex · ledger' }]);
+});
+
+test.skipIf(!hasDom)('every pick on one computer: both computers’ running agents are offered, the writers first, each with its computer; one on the other computer takes it there', async () => {
+  answers = (url, method) => {
+    if (method === 'POST') return { combine: { ...RECORD, session: 'ses_m' } };
+    if (url.startsWith('/api/inbox/m/m_mini/combine')) return { serverSession: 's', agents: [{ session: 'ses_m', host: 'codex', name: 'Codex', project: 'ledger', wrote_at: '2026-11-22T11:00:00.000Z', threads: 0 }], combines: [] };
+    return { serverSession: 's', agents: [{ session: 'ses_a', host: 'claude-code', name: 'Claude Code', title: 'Billing work', wrote_at: '2026-11-22T09:00:00.000Z', threads: 2 }, { session: 'ses_idle_a', host: 'pi', name: 'Pi', title: 'Release prep', threads: 0 }], combines: [] };
+  };
+  const started: { machine: string | null; label: string }[] = [];
+  host = document.body.appendChild(document.createElement('div'));
+  root = createRoot(host);
+  act(() => root!.render(<div className="pn-inbox"><CombineDialog rows={[row('a'), row('b')]} machines={TWO} onClose={() => {}} onStarted={(_record, machine, label) => void started.push({ machine, label })} /></div>));
+  await settle();
+  // Both computers asked about the same picks: the one that holds none answers with its running agents.
+  expect(requests.filter((r) => r.method === 'GET').map((r) => r.url).sort()).toEqual(['/api/inbox/combine?threads=a,b&all=1', '/api/inbox/m/m_mini/combine?threads=a,b&all=1']);
+  const dialog = document.querySelector('[data-dialog="combine"]')!;
+  expect([...dialog.querySelectorAll('[data-combine-agent]')].map((el) => `${el.getAttribute('data-combine-agent')} ${el.querySelector('small')!.textContent}`)).toEqual(['ses_a 2 of these · MacBook', 'ses_m 0 of these · Mac mini', 'ses_idle_a 0 of these · MacBook']);
+  click(dialog.querySelector('[data-combine-agent="ses_m"] input'));
+  click(dialog.querySelector('[data-combine-go]'));
+  await settle();
+  const sent = requests.find((r) => r.method === 'POST')!;
+  // Mac mini runs it, and owns the new thread: the picks are this computer's.
+  expect(sent.url).toBe('/api/inbox/m/m_mini/combine');
+  expect(sent.body).toMatchObject({ thread_ids: ['a', 'b'], session: 'ses_m' });
+  expect(started).toEqual([{ machine: 'm_mini', label: 'Codex · ledger' }]);
+});
+
+test.skipIf(!hasDom)('every pick on one computer, the other one not read: its agents are left out, without a word, and this one’s are offered', async () => {
+  answers = (url) =>
+    url.startsWith('/api/inbox/m/m_mini/combine')
+      ? { status: 503, code: 'machine_offline', error: AGENT_WORDS }
+      : { serverSession: 's', agents: [{ session: 'ses_a', host: 'claude-code', name: 'Claude Code', title: 'Billing work', threads: 2 }], combines: [] };
+  host = document.body.appendChild(document.createElement('div'));
+  root = createRoot(host);
+  act(() => root!.render(<div className="pn-inbox"><CombineDialog rows={[row('a'), row('b')]} machines={TWO} onClose={() => {}} onStarted={() => {}} /></div>));
   await settle();
   const dialog = document.querySelector('[data-dialog="combine"]')!;
-  expect(dialog.querySelector('.ib-cmb-why')?.textContent).toBe('These threads are on two machines, MacBook and Mac mini. An agent reads only the threads on its own machine: pick threads from one machine to combine them.');
+  expect(dialog.querySelector('.ib-cmb-err')).toBeNull();
+  expect([...dialog.querySelectorAll('[data-combine-agent]')].map((el) => el.getAttribute('data-combine-agent'))).toEqual(['ses_a']);
+  expect(dialog.querySelector<HTMLButtonElement>('[data-combine-go]')!.disabled).toBe(false);
+});
+
+test.skipIf(!hasDom)('every pick on the linked computer: this computer’s running agents are offered too', async () => {
+  answers = (url) =>
+    url.startsWith('/api/inbox/m/m_mini/combine')
+      ? { serverSession: 's', agents: [{ session: 'ses_m', host: 'codex', name: 'Codex', project: 'ledger', threads: 2 }], combines: [] }
+      : { serverSession: 's', agents: [{ session: 'ses_a', host: 'claude-code', name: 'Claude Code', title: 'Billing work', threads: 0 }], combines: [] };
+  host = document.body.appendChild(document.createElement('div'));
+  root = createRoot(host);
+  const on = (id: string) => row(id, { machine: 'm_mini' } as Partial<InboxListRow>);
+  act(() => root!.render(<div className="pn-inbox"><CombineDialog rows={[on('a'), on('b')]} machines={TWO} onClose={() => {}} onStarted={() => {}} /></div>));
+  await settle();
+  expect(requests.filter((r) => r.method === 'GET').map((r) => r.url).sort()).toEqual(['/api/inbox/combine?threads=a,b&all=1', '/api/inbox/m/m_mini/combine?threads=a,b&all=1']);
+  const dialog = document.querySelector('[data-dialog="combine"]')!;
+  expect([...dialog.querySelectorAll('[data-combine-agent]')].map((el) => `${el.getAttribute('data-combine-agent')} ${el.querySelector('small')!.textContent}`)).toEqual(['ses_m 2 of these · Mac mini', 'ses_a 0 of these · MacBook']);
+});
+
+const THREE: MachinesModel = {
+  ...TWO,
+  all: [...TWO.all, { id: 'm_studio', name: 'Studio', state: 'online', marks: ['combine', 'tidy', 'combine-across'] } as never],
+  linked: [...TWO.linked, { id: 'm_studio', name: 'Studio', state: 'online', marks: ['combine', 'tidy', 'combine-across'] } as never],
+  names: new Map([['m_mini', 'Mac mini'], ['m_studio', 'Studio']]),
+} as MachinesModel;
+
+test.skipIf(!hasDom)('threads on two linked computers neither of which is this one, or on three: the dialog says they are on machines apart and offers nobody', async () => {
+  const on = (id: string, machine?: string) => row(id, (machine ? { machine } : {}) as Partial<InboxListRow>);
+  const cases = [
+    [[on('a', 'm_mini'), on('b', 'm_studio')], 'These threads are on two machines, Mac mini and Studio. An agent reads only the threads on its own machine: pick threads from one machine to combine them.'],
+    [[on('a'), on('b', 'm_mini'), on('c', 'm_studio')], 'These threads are on 3 machines, MacBook, Mac mini and Studio. An agent reads only the threads on its own machine: pick threads from one machine to combine them.'],
+  ] as const;
+  for (const [rows, why] of cases) {
+    host = document.body.appendChild(document.createElement('div'));
+    root = createRoot(host);
+    act(() => root!.render(<div className="pn-inbox"><CombineDialog rows={rows} machines={THREE} onClose={() => {}} onStarted={() => {}} /></div>));
+    await settle();
+    const dialog = document.querySelector('[data-dialog="combine"]')!;
+    expect(dialog.querySelector('.ib-cmb-why')?.textContent).toBe(why);
+    expect(dialog.querySelector('[data-combine-agent]')).toBeNull();
+    expect(dialog.querySelector<HTMLButtonElement>('[data-combine-go]')!.disabled).toBe(true);
+    act(() => root!.unmount());
+    host.remove();
+  }
+  root = null;
+  host = null;
+  expect(requests).toHaveLength(0);
+});
+
+/** Words written for an agent, never for the person. */
+const AGENT_WORDS = 'Mac mini is asleep. Ask the person to update Plannotator on Mac mini.';
+
+test.skipIf(!hasDom)('the other computer not read: the person’s line, never the server’s words, and nobody offered', async () => {
+  answers = (url) =>
+    url.startsWith('/api/inbox/m/m_mini/combine')
+      ? { status: 503, code: 'machine_offline', error: AGENT_WORDS }
+      : { serverSession: 's', agents: [{ session: 'ses_a', host: 'claude-code', name: 'Claude Code', title: 'Billing work', threads: 1 }], combines: [] };
+  host = document.body.appendChild(document.createElement('div'));
+  root = createRoot(host);
+  act(() => root!.render(<div className="pn-inbox"><CombineDialog rows={[row('a'), row('b', { machine: 'm_mini' } as Partial<InboxListRow>)]} machines={TWO} onClose={() => {}} onStarted={() => {}} /></div>));
+  await settle();
+  const dialog = document.querySelector('[data-dialog="combine"]')!;
+  expect(dialog.querySelector('.ib-cmb-err')?.textContent).toBe('Mac mini can’t be asked now: it is away.');
+  expect(dialog.textContent).not.toContain('Ask the person');
   expect(dialog.querySelector('[data-combine-agent]')).toBeNull();
   expect(dialog.querySelector<HTMLButtonElement>('[data-combine-go]')!.disabled).toBe(true);
+});
+
+test.skipIf(!hasDom)('a start that fails on a computer: the person’s line for the computer the refusal names, never the server’s words', async () => {
+  const cases = [
+    [{ code: 'machine_offline', machine: 'm_mini' }, 'ses_a', 'Mac mini can’t be asked now: it is away.'],
+    [{ code: 'machine_needs_update', machine: 'm_mini' }, 'ses_a', 'Mac mini runs an older Plannotator: update it to combine its threads.'],
+    // Mac mini runs it and could not read this computer: this computer's own id is this computer.
+    [{ code: 'machine_answer_unreadable', machine: 'm_self' }, 'ses_m', 'MacBook can’t be asked now: it is away.'],
+    // Through the forward to Mac mini, asleep: no machine named, so the one the request went to.
+    [{ code: 'machine_offline' }, 'ses_m', 'Mac mini can’t be asked now: it is away.'],
+  ] as const;
+  for (const [refusal, session, why] of cases) {
+    answers = (url, method) => {
+      if (method === 'POST') return { status: url.includes('/m/') && !('machine' in refusal) ? 503 : 409, ...refusal, error: AGENT_WORDS };
+      if (url.startsWith('/api/inbox/m/m_mini/combine')) return { serverSession: 's', agents: [{ session: 'ses_m', host: 'codex', name: 'Codex', project: 'ledger', threads: 1 }], combines: [] };
+      return { serverSession: 's', agents: [{ session: 'ses_a', host: 'claude-code', name: 'Claude Code', title: 'Billing work', threads: 1 }], combines: [] };
+    };
+    host = document.body.appendChild(document.createElement('div'));
+    root = createRoot(host);
+    act(() => root!.render(<div className="pn-inbox"><CombineDialog rows={[row('a'), row('b', { machine: 'm_mini' } as Partial<InboxListRow>)]} machines={TWO} onClose={() => {}} onStarted={() => {}} /></div>));
+    await settle();
+    const dialog = document.querySelector('[data-dialog="combine"]')!;
+    click(dialog.querySelector(`[data-combine-agent="${session}"] input`));
+    click(dialog.querySelector('[data-combine-go]'));
+    await settle();
+    expect(dialog.querySelector('.ib-cmb-err')?.textContent).toBe(why);
+    expect(dialog.textContent).not.toContain('Ask the person');
+    act(() => root!.unmount());
+    host.remove();
+  }
+  root = null;
+  host = null;
+});
+
+test.skipIf(!hasDom)('a thread deleted on the other computer since it was picked: the Inbox’s words that it is not there, never that the computer is away', async () => {
+  const gone = 'No thread msg_b on this machine.';
+  answers = (url, method) => {
+    if (method === 'POST') return { status: 409, code: 'thread_not_found', machine: 'm_mini', error: gone };
+    if (url.startsWith('/api/inbox/m/m_mini/combine')) return { serverSession: 's', agents: [], combines: [] };
+    return { serverSession: 's', agents: [{ session: 'ses_a', host: 'claude-code', name: 'Claude Code', title: 'Billing work', threads: 1 }], combines: [] };
+  };
+  host = document.body.appendChild(document.createElement('div'));
+  root = createRoot(host);
+  act(() => root!.render(<div className="pn-inbox"><CombineDialog rows={[row('a'), row('b', { machine: 'm_mini' } as Partial<InboxListRow>)]} machines={TWO} onClose={() => {}} onStarted={() => {}} /></div>));
+  await settle();
+  const dialog = document.querySelector('[data-dialog="combine"]')!;
+  click(dialog.querySelector('[data-combine-agent="ses_a"] input'));
+  click(dialog.querySelector('[data-combine-go]'));
+  await settle();
+  expect(dialog.querySelector('.ib-cmb-err')?.textContent).toBe(gone);
+});
+
+test.skipIf(!hasDom)('threads on two computers, the other one away or older: the dialog says so, offers nobody and reads nothing', async () => {
+  const older: MachinesModel = { ...TWO, linked: [{ id: 'm_mini', name: 'Mac mini', state: 'online', marks: ['combine', 'tidy'] } as never] };
+  const away: MachinesModel = { ...TWO, linked: [{ ...TWO.linked[0]!, state: 'offline' } as never] };
+  for (const [machines, why] of [[older, 'Mac mini runs an older Plannotator: update it to combine its threads.'], [away, 'Mac mini can’t be asked now: it is away.']] as const) {
+    host = document.body.appendChild(document.createElement('div'));
+    root = createRoot(host);
+    act(() => root!.render(<div className="pn-inbox"><CombineDialog rows={[row('a'), row('b', { machine: 'm_mini' } as Partial<InboxListRow>)]} machines={machines} onClose={() => {}} onStarted={() => {}} /></div>));
+    await settle();
+    const dialog = document.querySelector('[data-dialog="combine"]')!;
+    expect(dialog.querySelector('.ib-cmb-why')?.textContent).toBe(why);
+    expect(dialog.querySelector('[data-combine-agent]')).toBeNull();
+    expect(dialog.querySelector<HTMLButtonElement>('[data-combine-go]')!.disabled).toBe(true);
+    act(() => root!.unmount());
+    host.remove();
+  }
+  root = null;
+  host = null;
   expect(requests).toHaveLength(0);
 });
 
@@ -310,4 +512,14 @@ test.skipIf(!hasDom)('a row in a Combine still waiting says “Combining…”, 
   draw(SECTIONS());
   expect(rowEl('b')).toBe(before);
   expect(rowEl('b').textContent).not.toContain('Combining…');
+});
+
+test.skipIf(!hasDom)('Combine… with a thread archived before: Undo is said to bring back only the others', async () => {
+  answers = (url) => (url.includes('/combine') ? { serverSession: 's', agents: [{ session: 'ses_a', host: 'claude-code', name: 'Claude Code', title: 'Billing work', threads: 2 }], combines: [] } : {});
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+  act(() => root!.render(<div className="pn-inbox"><CombineDialog rows={[row('a'), row('b'), row('c', { resolved_at: AGO })]} onClose={() => {}} onStarted={() => {}} /></div>));
+  await settle();
+  expect(document.querySelector('.ib-cmb-what')?.textContent).toEndWith('Undo brings back the 2 not already archived.');
 });

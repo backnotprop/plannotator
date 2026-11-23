@@ -32,6 +32,29 @@ import type { Mermaid, MermaidConfig } from 'mermaid';
 export const MERMAID_LABEL_WRAP_WIDTH = 140;
 
 /**
+ * Elements a label's own HTML may not keep: what navigates the tab or submits
+ * when clicked (an image map, a form and its controls, a `<base>` that would
+ * retarget links). Mermaid writes every label into the live page to measure it
+ * before `diagram-render` sanitizes the drawn svg, so this is what Mermaid's
+ * own label pass removes. The text inside a removed element is kept
+ * (`<button>Go</button>` leaves "Go"). `style` is Mermaid's own default.
+ * What only loads (a picture, media) is not listed: a label draws it as it did,
+ * under the page's own policy.
+ */
+export const MERMAID_LABEL_FORBIDDEN_TAGS = [
+  'style',
+  'form', 'button', 'input', 'select', 'option', 'optgroup', 'datalist', 'textarea',
+  'map', 'area', 'base',
+];
+
+/** See MERMAID_LABEL_FORBIDDEN_TAGS: the attributes that navigate or submit. */
+// `for` and `accesskey`: a label's click (or a key) would otherwise press a control of the app that has that id.
+export const MERMAID_LABEL_FORBIDDEN_ATTRS = ['action', 'formaction', 'ping', 'target', 'usemap', 'for', 'accesskey'];
+
+/** Mermaid's own secure keys (its default `secure`), which a diagram's directive or front matter cannot change. */
+const MERMAID_DEFAULT_SECURE_KEYS = ['secure', 'securityLevel', 'startOnLoad', 'maxTextSize', 'suppressErrorRendering', 'maxEdges'];
+
+/**
  * Hoisted verbatim from the former module-scope `mermaid.initialize(...)` in
  * MermaidBlock. Nothing in it reads a CSS token or the resolved mode.
  * `securityLevel: 'strict'` is a deliberate security pin (see MermaidBlock.test.ts).
@@ -39,6 +62,14 @@ export const MERMAID_LABEL_WRAP_WIDTH = 140;
 export const MERMAID_CONFIG: MermaidConfig = {
   startOnLoad: false,
   securityLevel: 'strict',
+  /**
+   * The DOMPurify config Mermaid sanitizes each label with, in place of its
+   * default `{ FORBID_TAGS: ['style'] }` (see MERMAID_LABEL_FORBIDDEN_TAGS).
+   * Listed in `secure`, so a `%%{init}%%` directive or front matter cannot
+   * replace it.
+   */
+  dompurifyConfig: { FORBID_TAGS: MERMAID_LABEL_FORBIDDEN_TAGS, FORBID_ATTR: MERMAID_LABEL_FORBIDDEN_ATTRS },
+  secure: [...MERMAID_DEFAULT_SECURE_KEYS, 'dompurifyConfig'],
   /**
    * Mermaid's own failure output is a "Syntax error in text" graphic drawn
    * into a temporary node on `document.body`, left there when it throws. The
@@ -87,6 +118,62 @@ export const MERMAID_CONFIG: MermaidConfig = {
     wrappingWidth: MERMAID_LABEL_WRAP_WIDTH,
   },
 };
+
+/**
+ * With `configurePlannotatorUI({ diagramRemoteLoads: false })`
+ * (`utils/diagramRemoteLoadsPolicy`): what Mermaid's label pass also drops,
+ * so nothing in a label is fetched while Mermaid measures it in the live
+ * page. Media and the attributes that only ever name a picture go here; a
+ * label's `<img>` / svg `<image>` keep a `data:` picture through the
+ * attribute hook `diagram-render` installs (MERMAID_NO_REMOTE_LABEL_MARK),
+ * which also drops every other reference and every style declaration that
+ * fetches.
+ */
+export const MERMAID_NO_REMOTE_LABEL_TAGS = ['picture', 'source', 'track', 'audio', 'video'];
+export const MERMAID_NO_REMOTE_LABEL_ATTRS = ['srcset', 'imagesrcset', 'poster', 'background', 'lowsrc', 'dynsrc'];
+
+/**
+ * When the hook cannot reach Mermaid's own DOMPurify (a host bundle with two
+ * copies of it), the label pass falls back to dropping every picture,
+ * reference and style in a label instead (coloured spans lose their colour).
+ */
+export const MERMAID_NO_REMOTE_LABEL_FALLBACK_TAGS = ['img', 'image', 'svg'];
+export const MERMAID_NO_REMOTE_LABEL_FALLBACK_ATTRS = ['src', 'href', 'xlink:href', 'style'];
+
+/** The key in the label pass's DOMPurify config that the no-remote attribute hook acts on. */
+export const MERMAID_NO_REMOTE_LABEL_MARK = 'PLANNOTATOR_DIAGRAM_LABEL_NO_REMOTE';
+
+/**
+ * Config keys a diagram's directive or front matter may not set when
+ * diagrams load nothing from another host: Mermaid writes their values into
+ * its stylesheet while it draws, before any sanitizer, so `url(` there loads.
+ * Every other string key was tried with CSS that loads, in a directive, and
+ * none loaded. Mermaid applies `secure` at every level of a directive, so
+ * `themeVariables.fontFamily` set by a diagram is ignored too (the page's
+ * font applies).
+ */
+export const MERMAID_NO_REMOTE_SECURE_KEYS = ['themeCSS', 'fontFamily', 'altFontFamily'];
+
+/**
+ * `config` as it is for the policy: unchanged (the same object) when diagrams
+ * may load from other hosts; otherwise with the label pass and `secure`
+ * extended (see the constants above). `labelHook: false` is the fallback for
+ * a runtime the attribute hook does not reach.
+ */
+export function mermaidConfigForRemoteLoads(config: MermaidConfig, remoteLoads: boolean, labelHook = true): MermaidConfig {
+  if (remoteLoads) return config;
+  const label = (config.dompurifyConfig ?? {}) as { FORBID_TAGS?: string[]; FORBID_ATTR?: string[] };
+  return {
+    ...config,
+    dompurifyConfig: {
+      ...label,
+      FORBID_TAGS: [...(label.FORBID_TAGS ?? []), ...MERMAID_NO_REMOTE_LABEL_TAGS, ...(labelHook ? [] : MERMAID_NO_REMOTE_LABEL_FALLBACK_TAGS)],
+      FORBID_ATTR: [...(label.FORBID_ATTR ?? []), ...MERMAID_NO_REMOTE_LABEL_ATTRS, ...(labelHook ? [] : MERMAID_NO_REMOTE_LABEL_FALLBACK_ATTRS)],
+      [MERMAID_NO_REMOTE_LABEL_MARK]: true,
+    } as MermaidConfig['dompurifyConfig'],
+    secure: [...(config.secure ?? []), ...MERMAID_NO_REMOTE_SECURE_KEYS],
+  };
+}
 
 /**
  * Who filled the slot. The eager value doubles as a build marker: the literal

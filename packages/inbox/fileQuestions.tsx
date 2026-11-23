@@ -33,10 +33,25 @@ export interface FileQuestions {
   footerFor: (key: string) => string | null;
   /** A card to bring into view (the open questions list, a reply's answer row): its record key; `seq` changes per ask. */
   focus?: { key: string; seq: number } | null;
+  /** The thread's questions moved to another thread (its root's `moved_to`): an archive-closed card reads "Closed". */
+  moved?: boolean;
 }
 
 /** The status tag a pick not sent shows, as on the body's cards. */
 const DRAFT_STATUS = { label: 'Draft', tone: 'open' } as const;
+/**
+ * A question the archive closed (state `closed` with no Mark read): the card's own tag reads its answer, and it has
+ * none, so it would say "Open". The words and muted tone an archived action item's badge already has
+ * (ActionChecklist). The body's cards use it too (useQuestionCards).
+ */
+export const ARCHIVE_CLOSED_STATUS = { label: 'Closed', tone: 'skip' } as const;
+/**
+ * The archive closed it unanswered: `closed` with no Mark read's `set_aside_at` (a Mark read's has its skip
+ * answer's tag) and never sent. An answer or skip the person sent before the archive reads `closed` too, and keeps
+ * its own "Answered" / "Skipped" tag.
+ */
+export const closedByArchive = (q: Pick<InboxQuestion, 'state' | 'set_aside_at' | 'sent_reply_id' | 'revision' | 'sent_revision'> | undefined): boolean =>
+  q?.state === 'closed' && !q.set_aside_at && !q.sent_reply_id && !(q.revision > 0 && q.sent_revision === q.revision);
 
 /** The records of `message` asked inside the attachment `attachmentId`, then the questions of its body. */
 export function fileQuestionRecords(message: Pick<InboxMessageWire, 'questions'> | undefined, attachmentId: string): InboxQuestion[] {
@@ -90,6 +105,7 @@ export function useFileQuestionViewerProps(questions: FileQuestions | null | und
   const locked = questions?.locked ?? true;
   const onPick = questions?.onPick;
   const footerFor = questions?.footerFor;
+  const moved = questions?.moved === true;
   return useMemo(() => {
     if (!records || records.length === 0 || !answers || !onPick || !footerFor) return {};
     const byFileKey = recordsByFileKey(records);
@@ -101,8 +117,10 @@ export function useFileQuestionViewerProps(questions: FileQuestions | null | und
       },
       questionReadOnly: (indexed: IndexedQuestion) => fileQuestionLocked(cardRecord(byFileKey, indexed), locked),
       questionStatusLabel: (indexed: IndexedQuestion, status: QuestionStatus) => {
-        if (status !== 'answered' && status !== 'skipped') return undefined;
         const record = cardRecord(byFileKey, indexed);
+        // Closed by the archive of a moved thread: "Closed", as the body's cards (useQuestionCards), never "Open".
+        if (moved && closedByArchive(record)) return ARCHIVE_CLOSED_STATUS;
+        if (status !== 'answered' && status !== 'skipped') return undefined;
         return record && (record.state === 'open' || record.state === 'picked') ? DRAFT_STATUS : undefined;
       },
       renderQuestionFooter: (indexed: IndexedQuestion) => {
@@ -112,6 +130,7 @@ export function useFileQuestionViewerProps(questions: FileQuestions | null | und
       },
       questionContractLines: true,
       questionOptionLines: true,
+      questionChangeLines: true,
     };
-  }, [records, answers, locked, onPick, footerFor]);
+  }, [records, answers, locked, onPick, footerFor, moved]);
 }

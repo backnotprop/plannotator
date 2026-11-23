@@ -11,7 +11,8 @@
  *   takes no Escape, and this is Ask's window); the bin working while a Send is on its way;
  * - Ask's return arrow pressable with nothing to ask, or not turning into Stop while an answer runs;
  * - a draft floating while "Float reply drafts" is off (the default, the owner 2026-11-08), or a draft that floated
- *   before staying in the corner once it is known to be off; no Ask row in the corner.
+ *   before staying in the corner once it is known to be off; no Ask row in the drafts' corner (the minimized chat is
+ *   Ask's own circle in the window's corner, ask/sideCorner.test.tsx).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -28,8 +29,21 @@ const mods = (hasDom
       ...(await import('./model')),
       ...(await import('../ask/AskChat')),
       ...(await import('../ask/AskChatMenu')),
+      ...(await import('../components/MentionMenuItem')),
+      ...(await import('../data/threadMentionRefs')),
+      ...(await import('@base-ui/react/menu')),
+      ...(await import('../components/Thread')),
+      ...(await import('../app/route')),
     }
-  : {}) as typeof import('./useReplyFloaters') & typeof import('./model') & typeof import('../ask/AskChat') & typeof import('../ask/AskChatMenu');
+  : {}) as typeof import('./useReplyFloaters') &
+  typeof import('./model') &
+  typeof import('../ask/AskChat') &
+  typeof import('../ask/AskChatMenu') &
+  typeof import('../components/MentionMenuItem') &
+  typeof import('../data/threadMentionRefs') &
+  typeof import('@base-ui/react/menu') &
+  typeof import('../components/Thread') &
+  typeof import('../app/route');
 
 const PROJECT = { id: 'prj_1', name: 'billing' };
 const T0 = '2026-11-07T10:00:00.000Z';
@@ -138,6 +152,7 @@ beforeEach(() => {
       const found = fake.threads.get(decodeURIComponent(m[1]!));
       return found ? json({ serverSession: 's', cursor: 1, thread: found }) : new Response('{}', { status: 404 });
     }
+    if (path.includes('/attachments')) return json({ serverSession: 's', attachments: [], annotations: [] });
     if (path.includes('/sessions')) return json({ serverSession: 's', home: '/h', project: PROJECT, sessions: [] });
     // The drafts list holds every reply draft, so a menu that read it would list them.
     if (path.endsWith('/drafts')) return json({ serverSession: 's', drafts: [], replies: [...fake.drafts.keys()].map((id) => row(id)) });
@@ -176,7 +191,7 @@ async function until(check: () => boolean, what: string, ms = 3000) {
 
 function fakeAsk(over: Partial<import('../ask/useInboxAsk').AskCorner> = {}): import('../ask/useInboxAsk').AskCorner {
   const store = new ChatWindowStore();
-  return { on: true, threadId: null, hasChat: false, unseen: false, host: 'claude-code', subject: null, minimized: true, store, open: () => {}, minimize: () => {}, ...over };
+  return { on: true, threadId: null, hasChat: false, unseen: false, answering: false, host: 'claude-code', subject: null, minimized: true, circle: false, store, open: () => {}, minimize: () => {}, ...over };
 }
 
 let setThreadId: (id: string | null) => void = () => {};
@@ -379,15 +394,81 @@ function typeInto(el: HTMLTextAreaElement, value: string) {
   });
 }
 
-async function openFloating(id: string, words: string, files: InboxReplyDraft['files'] = []) {
+async function openFloating(id: string, words: string, files: InboxReplyDraft['files'] = [], ask = fakeAsk()) {
   fake.threads.set(id, thread(id));
   fake.drafts.set(id, { ...draft(id, words), files });
   mods.floatThread(id, Date.now() - 10_000);
-  await act(async () => root!.render(<Harness start={null} rows={[row(id)]} ask={fakeAsk()} />));
+  await act(async () => root!.render(<Harness start={null} rows={[row(id)]} ask={ask} />));
   await until(() => card(id) !== null, 'the corner');
   act(() => card(id)!.click());
   await until(() => field(id)?.value === words, 'the words in the window');
 }
+
+/** The draft's window: its offsets from the viewport's right and bottom, as ChatFrame places it. */
+function windowAt(id: string) {
+  const win = box(id)!.closest<HTMLElement>('[data-chat-window]') ?? box(id)!;
+  return { right: win.style.right, bottom: win.style.bottom };
+}
+
+test("a draft's window rests clear of the minimized chat's circle, and above it if moved onto it", async () => {
+  if (!hasDom) return;
+  // The circle shows (a thread's chat minimized): the window opens lifted clear of the circle's 44 px corner box.
+  const circle = fakeAsk({ threadId: 'thr_x', hasChat: true, minimized: true, circle: true });
+  await openFloating('thr_a', 'Key the retry on invoice_id alone', [], circle);
+  expect(windowAt('thr_a')).toEqual({ right: '16px', bottom: '52px' });
+  expect(document.querySelector('[data-rf-layer]')!.hasAttribute('data-rf-over-circle')).toBe(true);
+  // No circle: the plain corner, and Ask's layer stays above.
+  act(() => document.querySelector<HTMLElement>('[data-rf-box="thr_a"] [aria-label="Minimize"]')!.click());
+  await until(() => box('thr_a') === null, 'the window minimized');
+  const plain = fakeAsk();
+  await act(async () => root!.render(<Harness start={null} rows={[row('thr_a')]} ask={plain} />));
+  await until(() => card('thr_a') !== null, 'the corner');
+  act(() => card('thr_a')!.click());
+  await until(() => box('thr_a') !== null, 'the window again');
+  expect(windowAt('thr_a')).toEqual({ right: '16px', bottom: '16px' });
+  expect(document.querySelector('[data-rf-layer]')!.hasAttribute('data-rf-over-circle')).toBe(false);
+  // The circle comes while the window rests on the corner (another thread's chat minimized): the window moves up.
+  await act(async () => root!.render(<Harness start={null} rows={[row('thr_a')]} ask={{ ...plain, threadId: 'thr_x', hasChat: true, circle: true }} />));
+  await until(() => windowAt('thr_a').bottom === '52px', 'the window lifted');
+  expect(windowAt('thr_a').right).toBe('16px');
+});
+
+test("in a thread with no reply foot on screen (its Artifacts view), the pile rests straight above the minimized chat's circle; back at the foot, beside it", async () => {
+  if (!hasDom) return;
+  // The open thread in its Artifacts view: its foot is hidden.
+  const pane = document.createElement('section');
+  pane.className = 'ib-pane';
+  const foot = document.createElement('div');
+  foot.className = 'ib-pfoot';
+  foot.hidden = true;
+  pane.appendChild(foot);
+  document.body.appendChild(pane);
+  try {
+    fake.drafts.set('thr_a', draft('thr_a', 'Key the retry on invoice_id alone'));
+    mods.floatThread('thr_a', Date.now() - 10_000);
+    const pile = () => document.querySelector<HTMLElement>('[data-rf-corner]');
+    // No circle (no chat on this thread): the plain corner, 16 px in.
+    await act(async () => root!.render(<Harness start="thr_x" rows={[row('thr_a')]} ask={fakeAsk({ threadId: 'thr_x' })} />));
+    await until(() => pile() !== null, 'the pile');
+    expect(pile()!.getAttribute('data-rf-spot')).toBe('corner');
+    expect({ right: pile()!.style.right, bottom: pile()!.style.bottom }).toEqual({ right: '16px', bottom: '16px' });
+    // The thread's chat minimized, its circle drawn: the pile stays, lifted clear of the circle's 44 px box (as a draft's
+    // window is), its right edge the circle's own (5 px in), so its middle is 8 px off the circle's (centred, it would
+    // run past the window's edge); before, 16 px in, it sat 19 px off.
+    const circle = fakeAsk({ threadId: 'thr_x', hasChat: true, minimized: true, circle: true });
+    await act(async () => root!.render(<Harness start="thr_x" rows={[row('thr_a')]} ask={circle} />));
+    await until(() => pile()?.style.bottom === '52px', 'the pile above the circle');
+    expect(pile()!.style.right).toBe('5px');
+    // The reply foot back on screen (the thread view): level with Send again, nothing lifted.
+    foot.hidden = false;
+    window.dispatchEvent(new Event('resize'));
+    await until(() => pile()?.getAttribute('data-rf-spot') === 'foot', 'the pile at the foot');
+    expect(pile()!.style.bottom).not.toBe('52px');
+    expect(pile()!.style.right).not.toBe('5px');
+  } finally {
+    pane.remove();
+  }
+});
 
 test('Discard while a file still uploads: the upload stops and no draft comes back', async () => {
   if (!hasDom) return;
@@ -467,6 +548,118 @@ test('emptying the words to rewrite them keeps the window open; Escape does not 
   expect(box('thr_a')).toBeNull();
 });
 
+/** A list row's menu (right-click), drawn beside the corner: its Mention in reply item, or null. */
+function mentionMenu() {
+  const menuHost = document.createElement('div');
+  document.body.appendChild(menuHost);
+  const menuRoot = createRoot(menuHost);
+  const other = { thread_id: 'thr_other', thread_name: 'Rate limit for the public API', subject: null, resolved_at: null, project: PROJECT } as never;
+  return {
+    item: () => {
+      act(() =>
+        menuRoot.render(
+          <mods.Menu.Root open>
+            <mods.Menu.Portal>
+              <mods.Menu.Positioner>
+                <mods.Menu.Popup>
+                  <mods.MentionMenuItem rows={[other]} phone={false} />
+                </mods.Menu.Popup>
+              </mods.Menu.Positioner>
+            </mods.Menu.Portal>
+          </mods.Menu.Root>,
+        ),
+      );
+      return document.querySelector<HTMLElement>('[data-row-action="mention"]');
+    },
+    done: () => {
+      act(() => menuRoot.unmount());
+      menuHost.remove();
+    },
+  };
+}
+
+test("a draft's open window with words is the reply a row menu's Mention in reply goes to; emptied, sending or closed, no item", async () => {
+  if (!hasDom) return;
+  window.location.hash = '';
+  await openFloating('thr_a', 'Key the retry on invoice_id alone');
+  const menu = mentionMenu();
+  mods.noteMentionRefs([{ id: 'thr_a', title: 'Subject thr_a', project: PROJECT.name }]);
+  expect(menu.item()?.textContent).toBe('Mention in replySubject thr_a');
+  // Emptied to rewrite: no words, no item; words again, it is back.
+  typeInto(field('thr_a')!, ' ');
+  expect(menu.item()?.textContent ?? null).toBeNull();
+  typeInto(field('thr_a')!, 'Key it on the invoice and the attempt');
+  expect(menu.item()?.textContent ?? null).not.toBeNull();
+  // A Send on its way: the reply is sent, so no item.
+  let release = () => {};
+  fake.holdReply = new Promise<void>((done) => (release = done));
+  await until(() => document.querySelector('[data-rf-box="thr_a"] [data-rf-peek]') !== null, 'the thread read');
+  act(() => document.querySelector<HTMLElement>('[data-rf-box="thr_a"] [data-rf-send]')!.click());
+  await until(() => fake.posts.some((p) => p.path.endsWith('/reply')), 'the reply on its way');
+  expect(menu.item()?.textContent ?? null).toBeNull();
+  release();
+  fake.holdReply = null;
+  await until(() => box('thr_a') === null, 'the window to close once sent');
+  expect(menu.item()?.textContent ?? null).toBeNull();
+  menu.done();
+});
+
+test("a draft's window minimized: no item", async () => {
+  if (!hasDom) return;
+  window.location.hash = '';
+  await openFloating('thr_a', 'Key the retry on invoice_id alone');
+  const menu = mentionMenu();
+  expect(menu.item()?.textContent ?? null).not.toBeNull();
+  act(() => document.querySelector<HTMLElement>('[data-rf-box="thr_a"] [aria-label="Minimize"]')!.click());
+  await until(() => box('thr_a') === null, 'the window to close');
+  expect(menu.item()?.textContent ?? null).toBeNull();
+  menu.done();
+});
+
+test("the item pressed for a floating draft: its thread opens in the pane, the window closes, and the mention lands after the draft's words", async () => {
+  if (!hasDom) return;
+  window.location.hash = '';
+  // An open thread (not archived), as the list's pane would show it.
+  const open = thread('thr_a');
+  fake.threads.set('thr_a', { ...open, thread_name: null, resolved_at: null, messages: open.messages.map((m) => ({ ...m, resolved_at: null, reply_to: null })) } as InboxThread);
+  fake.drafts.set('thr_a', draft('thr_a', 'Key the retry on invoice_id alone'));
+  mods.floatThread('thr_a', Date.now() - 10_000);
+  let setPane: (id: string | null) => void = () => {};
+  /** App's half: the thread the address names, open in the pane beside the corner. */
+  function WithPane() {
+    const [pane, setPaneState] = useState<string | null>(null);
+    setPane = setPaneState;
+    const open = pane ? fake.threads.get(pane) : undefined;
+    return (
+      <>
+        <Harness start={null} rows={[row('thr_a')]} ask={fakeAsk()} />
+        {open && <mods.ThreadPane thread={open} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} />}
+      </>
+    );
+  }
+  await act(async () => root!.render(<WithPane />));
+  await until(() => card('thr_a') !== null, 'the corner');
+  act(() => card('thr_a')!.click());
+  await until(() => field('thr_a')?.value === 'Key the retry on invoice_id alone', 'the words in the window');
+  const menu = mentionMenu();
+  const item = menu.item()!;
+  await act(async () => {
+    item.click();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  // The press went to the draft's thread (the address); App opens it in the pane.
+  const to = mods.readRoute().thread;
+  expect(to).toBe('thr_a');
+  act(() => {
+    setThreadId(to);
+    setPane(to);
+  });
+  await until(() => box('thr_a') === null, 'the window to close (the thread has the draft now)');
+  const paneField = () => document.querySelector<HTMLTextAreaElement>('.ib-rbox textarea');
+  await until(() => paneField()?.value === 'Key the retry on invoice_id alone Rate limit for the public API ', "the mention after the draft's words");
+  menu.done();
+});
+
 test('Undo after Discard brings back the words and the files; a refused Undo says so', async () => {
   if (!hasDom) return;
   const kept = { upload_id: 'up_9', name: 'trace.log', size: 12, kind: 'file', sha256: 'x', created_at: T0 } as unknown as NonNullable<InboxReplyDraft['files']>[number];
@@ -532,7 +725,8 @@ test('"Float reply drafts" off (the default): typing and leaving floats nothing,
   expect(floating()).toEqual([]);
   expect(document.querySelector('[data-rf-card][data-kind="draft"]')).toBeNull();
   expect(document.querySelector('[data-rf-box]')).toBeNull();
-  // Ask minimized has no row in the corner: nothing is there.
+  // The drafts' corner has no Ask row: a minimized chat is the circle in the window's corner, which Ask draws itself
+  // (ask/SideChatCorner.tsx, the owner's decision of 2026-11-20; proved in ask/sideCorner.test.tsx), never a row here.
   expect(document.querySelectorAll('[data-rf-card], [data-rf-corner]').length).toBe(0);
   // Turned on (0.28.54's behaviour): typing and leaving floats again.
   act(() => setFloatDrafts(true));

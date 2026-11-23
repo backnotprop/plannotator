@@ -24,7 +24,7 @@
  *    (`link-back`, `unlink`).
  */
 
-import { INBOX_LINKED_MARKS, inboxPullUrlOfKey, inboxRowArchived, isInboxId, type InboxAgentsGroup, type InboxCardWire, type InboxInitiative, type InboxListRow, type InboxMachineAccountsRead, type InboxTagColours } from "@plannotator/core/inbox-types";
+import { INBOX_LINKED_MARKS, inboxPullUrlOfKey, inboxRowArchived, isInboxId, type InboxAgentsGroup, type InboxCardWire, type InboxInitiative, type InboxListRow, type InboxMachineAccountsRead, type InboxSentFrom, type InboxTagColours } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSnoozeRefusal, inboxSnoozeRunning } from "@plannotator/core/inbox-snooze";
@@ -39,7 +39,12 @@ import { createMachinePulls } from "./inbox-machine-pulls";
 import { MACHINE_IMAGE_CSP, MACHINE_LINKED_PAGE_ROUTE, MACHINE_MARKDOWN_IMAGE_ROUTE, machineLinkedPageAnswer, machineMarkdownImageAnswer } from "./inbox-machine-files";
 import { farCsp, MACHINE_ASSET_ROUTE, MACHINE_PAGE_ROUTE, MACHINE_VIEW_ROUTE, machineAssetAnswer, machineAssetCsp, machinePageAnswer, machineViewAnswer } from "./inbox-machine-page";
 import { createMachineLaunchReads, MACHINE_SESSIONS_ROUTE } from "./inbox-machine-launch-reads";
+import { createMachineAgentRead, FAR_READ_REFUSALS } from "./inbox-machine-agent-read";
+import { inboxFarReaderName, inboxMachineRecordName } from "./inbox-sent-from-reader";
+import { createMachineAgentFind } from "./inbox-machine-agent-find";
+import { INBOX_RUN_WINDOW_ONLY_BODY } from "./inbox-run-routes";
 import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
+import { inboxForwardedPlace } from "./inbox-sent-from";
 import { createMachineBranches } from "./inbox-machine-branches";
 import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerCards, type PeerLinkTimings, type PeerRecord, type PeerRereadEvent } from "./inbox-peer-link";
 import { installCommandFor, isNewerStableVersion, normalizeStableVersion } from "@plannotator/shared/update-check";
@@ -130,6 +135,8 @@ export interface InboxMachinesContext {
   ownVersions?: () => { current: string; latest: string | null };
   /** A linked machine's list was read: this Inbox takes its "Show archived" switch when that one is newer. */
   showArchivedSaid?: (value: InboxShowArchived) => void;
+  /** Where the person wrote a write this Inbox forwards, told from the request (inbox-sent-from.ts). */
+  sentFrom?: (req: Request, via: "local" | "tailnet") => InboxSentFrom | null;
   /** Tests: the links' clocks. */
   timings?: MachineLinkTimings;
   now?: () => Date;
@@ -450,6 +457,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const machineBranches = createMachineBranches({ peers: () => peers.values() });
   /** Each linked machine's last good launch read, so a window opened while it sleeps still lists its projects. */
   const launchReads = createMachineLaunchReads();
+  // An agent here reads a linked machine's thread, and saves its files here (inbox-machine-agent-read.ts).
+  const agentRead = createMachineAgentRead({ peers: () => peers.values(), nameOf: (id) => links.get(id)?.name ?? "A linked machine" });
+  // ...and finds them: its search and read_thread's list ask every linked machine too (inbox-machine-agent-find.ts).
+  const agentFind = createMachineAgentFind({ peers: () => peers.values(), nameOf: (id) => links.get(id)?.name ?? "A linked machine" });
   const listeners = new Set<(frame: MachineFrame) => void>();
   /** An offer that published the door: the door comes down when it expires unused. */
   let offerTimer: ReturnType<typeof setTimeout> | null = null;
@@ -499,7 +510,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
         version: peer?.version ?? null,
         address: openTransport(link.transport).describe(),
         both_ways: link.device_id !== null,
-        waiting: outbox.list(link.id, "pending").length,
+        waiting: outbox.list(link.id, "pending").filter((e) => !e.auto).length,
         list_cursor: peer?.list?.cursor ?? null,
         snoozes: peer?.list?.snoozes ?? false,
         snooze_old: peer?.list ? !peer.list.snoozes : false,
@@ -538,6 +549,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
   };
 
   outbox.onChange(({ entry }) => {
+    // What this Inbox writes itself (a Combine's archive there) is not the person's: the window never draws it.
+    if (entry.auto) return;
     emit({ event: "outbox", data: outboxView(entry) });
     machinesChanged();
   });
@@ -921,7 +934,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // person comments on it (the window needs the attachment now); a Combine, or a Tidy with the person's words, which
     // held for days would act on threads nobody is looking at. A Tidy without words stays held like any append.
     if (forwardsNow(route, body)) {
-      if (!window) return json(route === "open-in/file/attach" ? INBOX_MACHINE_FILE_WINDOW_ONLY_BODY : INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
+      if (!window) return json(route === "open-in/file/attach" ? INBOX_MACHINE_FILE_WINDOW_ONLY_BODY : /^messages\/[^/]+\/(run|secret)$/.test(route) ? INBOX_RUN_WINDOW_ONLY_BODY : INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
       if (peer.state !== "online") return offline();
       delete body.serverSession;
       try {
@@ -974,7 +987,9 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (SNOOZE_ROUTE.test(route) && !outbox.get(String(body.idempotency_key)) && inboxSnoozeRefusal(body.until) === "past") throw new InboxError("snooze_past", "That time has passed.", { field: "until" });
     // The window names the thread a write is about, so a held answer shows even where that thread cannot open.
     const named = req.headers.get("X-Plannotator-Thread")?.trim() ?? "";
-    const { entry, fresh } = outbox.submit(machine, route, body, THREAD_HINT.test(named) ? named : null, window);
+    // Where the person was, when not at this window, said on so that machine's agent reads where they wrote it.
+    const place = inboxForwardedPlace(context.sentFrom?.(req, via) ?? null);
+    const { entry, fresh } = outbox.submit(machine, route, body, THREAD_HINT.test(named) ? named : null, window, place);
     if (peer.state === "online") peer.flush();
     else peer.poke();
     const settled = (await outbox.waitSettled(entry.key, peer.state === "online" ? MACHINE_WRITE_WAIT_MS : 0)) ?? entry;
@@ -1108,7 +1123,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (path === "/api/inbox/outbox") {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
       const machine = url.searchParams.get("machine");
-      const waiting = links.list().flatMap((l) => (machine && l.id !== machine ? [] : outbox.list(l.id, "pending")));
+      const waiting = links.list().flatMap((l) => (machine && l.id !== machine ? [] : outbox.list(l.id, "pending").filter((e) => !e.auto)));
       return json({ waiting: waiting.map(outboxView), notices: outbox.notices().map(outboxView) });
     }
     // Cancel a write still waiting that never left (a launch held for a machine that is asleep): it is never sent.
@@ -1232,6 +1247,13 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const body = await context.readBody(req);
     if (path === "/api/inbox/control/machines/offer") return json(offer({ tailscale: body.tailscale === true }), 201);
     if (path === "/api/inbox/control/machines/link") return json(await link(body), 201);
+    // `plannotator inbox call fetch_file` of a linked machine's message: its bytes streamed on to the command, which
+    // saves them in its own process. Nothing is written here, and a body's other fields (a folder) are not read.
+    if (path === "/api/inbox/control/machines/fetch-file") {
+      const id = typeof body.message_id === "string" ? body.message_id.trim() : "";
+      if (id && context.holds("messages", id)) throw new InboxError("file_is_local", FAR_READ_REFUSALS.fileLocal(id));
+      return await agentRead.fetchFile({ message_id: id, file: typeof body.file === "string" ? body.file.trim() : "" }, req.signal);
+    }
     if (path === "/api/inbox/control/machines/unlink") {
       const target = typeof body.machine === "string" ? body.machine.trim() : "";
       const record = links.list().find((l) => l.id === target || l.name.toLowerCase() === target.toLowerCase());
@@ -1327,6 +1349,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     selfId: links.selfId,
     /** Whether any link exists (the tailnet door then publishes at start even with Phones off). */
     hasLinks: () => links.list().length > 0,
+    /** A linked machine's name, or null when it is not linked. */
+    nameOf: (machine: string): string | null => links.get(machine)?.name ?? null,
     machinesView,
     /** This Inbox's door changed by itself (published again once Tailscale ran): the windows hear the machines block. */
     machinesChanged,
@@ -1346,11 +1370,55 @@ export function createInboxMachines(context: InboxMachinesContext) {
       const snapshot = machinePulls.start(refresh);
       return () => snapshot().map((entry) => ({ ...entry, name: links.get(entry.machine)?.name }));
     },
+    pullLinkedThere: (key: string) => machinePulls.linkedThere(key),
     /** Each linked machine's reported branches (mark `branches`), for Reviews (inbox-machine-branches.ts). */
     branchLists: () => machineBranches.start((machine) => links.get(machine)?.name ?? null),
     farCard,
     snoozeThread,
+    /**
+     * A write this Inbox makes itself on a linked machine's thread (a Combine's archive there, and its Undo;
+     * inbox-combine-far.ts): held in the outbox as the window's writes are, so one queue and one key per write, sent
+     * now while that machine is online and when it is back otherwise. Waits up to `waitMs` for its answer. Null when
+     * that machine is not linked. `own`: the write it undoes (`follows`), and when it stops being worth sending (`send_by`).
+     */
+    holdWrite: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number, own: { follows?: string; send_by?: string } = {}): Promise<OutboxEntry | null> | null => {
+      const peer = peers.get(machine);
+      if (!peer) return null;
+      // Marked as this Inbox's own (`auto`): the window never lists it as the person's waiting write.
+      const { entry } = outbox.submit(machine, route, body, thread, false, null, true, own);
+      if (peer.state === "online") peer.flush();
+      else peer.poke();
+      return outbox.waitSettled(entry.key, peer.state === "online" ? waitMs : 0);
+    },
+    /** A held write of this Inbox's own, by its key: how it stands (null: never held). */
+    heldWrite: (key: string): OutboxEntry | null => outbox.get(key),
+    /** Take back a held write of this Inbox's own that never left (rule 10: one that left stays), or one past its `send_by`. */
+    cancelHeld: (key: string): OutboxEntry | null => outbox.cancel(key),
+    /** A linked machine's rows as its list last said, or null while this Inbox holds no list of it. */
+    listedRows: (machine: string): readonly InboxListRow[] | null => peers.get(machine)?.list?.rows ?? null,
+    readThread: agentRead.readThread,
+    /** A linked machine's file of a thread its agents read, streamed (a Combine copies the other computer's files in). */
+    fetchFile: agentRead.fetchFile,
+    /** A piece of a linked machine's file, for a paired cloud agent's fetch_file (inbox-machine-agent-piece.ts). */
+    filePiece: agentRead.filePiece,
+    /** An agent's search and thread list on every linked machine (inbox-machine-agent-find.ts). */
+    agentFind,
+    /** The name of the linked machine whose list names `threadId` (send_message's reply_to there is refused in words). */
+    farThreadMachine: (threadId: string): string | null => {
+      const peer = [...peers.values()].find((p) => p.list?.rows.some((row) => row.thread_id === threadId));
+      return peer ? (links.get(peer.id)?.name ?? "A linked machine") : null;
+    },
     /** The linked machine a device on this Inbox's door belongs to (a launch it starts here records it), or null. */
+    /**
+     * The name a forward from the linked machine on this door device records here, for a far read of its agent
+     * (inbox-sent-from-reader.ts); none when another linked machine records the same name.
+     */
+    readerNameOfDevice: (deviceId: string, deviceName: string): string => {
+      const all = links.list();
+      const record = all.find((l) => l.device_id === deviceId);
+      const others = all.filter((l) => l !== record).map((l) => inboxMachineRecordName(l.name, null));
+      return inboxFarReaderName(inboxMachineRecordName(record?.name, deviceName), others);
+    },
     machineOfDevice: (deviceId: string): { machine: string; name: string } | null => {
       const record = links.list().find((l) => l.device_id === deviceId);
       return record ? { machine: record.id, name: record.name } : null;

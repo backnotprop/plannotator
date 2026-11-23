@@ -22,6 +22,7 @@ export type ImageResolution =
        * while the browser decodes only the copy.
        */
       width?: number;
+      media?: "audio" | "video";
     }
   | { kind: "unavailable"; title: string };
 
@@ -37,6 +38,19 @@ export const ImageResolverContext = createContext<ImageResolver | null>(null);
 export function useImageResolver(): ImageResolver | null {
   return useContext(ImageResolverContext);
 }
+
+/**
+ * A host's say on pictures that failed to load (a markdown image, or an inline
+ * `<img>`, drawn through the resolver): when `key` changes, each failed one
+ * whose URL `retries` accepts is loaded again off the page (at most four at a
+ * time in the window, imageRetryProbe.ts) and drawn once it loads; its
+ * placeholder stays meanwhile, and stays when it fails again. For a picture
+ * that may be written after the document names it.
+ */
+export type ImageRetry = { key: string | number; retries: (src: string) => boolean };
+
+/** Absent (null), a picture that failed stays failed, as it always has. */
+export const ImageRetryContext = createContext<ImageRetry | null>(null);
 
 /** Classes for the inert placeholder an `unavailable` image renders as. */
 export const UNAVAILABLE_IMAGE_CLASS =

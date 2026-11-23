@@ -135,7 +135,8 @@ const page = (stackId: string | null = null, opened: string[] = [], state = pull
   </SidebarProvider>
 );
 const shownRows = () => [...document.querySelectorAll('[data-pulls-row]')].map((r) => r.getAttribute('data-pulls-row'));
-const markOf = (n: number) => document.querySelector(`[data-pulls-row="${key(n)}"] [data-pull-risk]`)?.getAttribute('data-pull-risk') ?? null;
+/** The level a row says: High's pill on its line, the others on the open row's second line and to a reader on every row. */
+const markOf = (n: number) => document.querySelector(`[data-pulls-row="${key(n)}"]`)?.getAttribute('data-pulls-risk') ?? null;
 
 test.skipIf(!hasDom)('no rules: the chip and no marks, however a remembered filter reads', async () => {
   window.localStorage.setItem('plannotator-inbox-pr-risk-filter', 'high');
@@ -154,6 +155,23 @@ test.skipIf(!hasDom)('marks: a stack takes its highest open layer, never a merge
   expect(markOf(3)).toBe('medium');
   expect(markOf(6)).toBe('high');
   expect(markOf(8)).toBe('low');
+});
+
+test.skipIf(!hasDom)('High is a pill on its row; Medium, Low and Couldn\u2019t rank show on the open row only, with their sentence', async () => {
+  const judgments = { ...JUDGED.judgments };
+  delete judgments[key(1)];
+  spy('pullRisk', async () => ({ ...JUDGED, judgments, failed: { [key(1)]: 'Too big.' } }));
+  await mount(page(key(3)));
+  const marks = (n: number) => [...document.querySelectorAll(`[data-pulls-row="${key(n)}"] [data-pull-risk]`)].map((m) => `${m.closest('[data-reviews-line2]') ? 'line2' : 'line1'}:${m.getAttribute('data-pull-risk')}`);
+  expect(marks(2)).toEqual(['line1:high']);
+  // #3 is open: its Medium is on its second line, with the sentence for a reader.
+  expect(marks(3)).toEqual(['line2:medium']);
+  expect(document.querySelector(`[data-pulls-row="${key(3)}"] [data-pull-risk]`)!.textContent).toContain('It may reach charges.');
+  // Closed rows: no Medium, Low or failure mark drawn; a reader still hears the level.
+  expect(marks(1)).toEqual([]);
+  expect(marks(8)).toEqual([]);
+  expect(document.querySelector(`[data-pulls-row="${key(1)}"]`)!.textContent).toContain('Couldn\u2019t rank');
+  expect(document.querySelector(`[data-pulls-row="${key(8)}"]`)!.textContent).toContain('Low risk');
 });
 
 test.skipIf(!hasDom)('High keeps the high rows, also from the folded group, and counts what has no judgment', async () => {
@@ -313,7 +331,7 @@ test.skipIf(!hasDom)('a tap on a mark, on a touch screen, shows the sentence ins
 });
 
 /** Pick from one of the dialog's two lists, as a person does: the button, then the entry. */
-const pick = async (list: 'agent' | 'model', label: string) => {
+const pick = async (list: 'agent' | 'model' | 'auto', label: string) => {
   const holder = document.querySelector(`[data-pull-risk-${list}]`)!;
   await act(async () => holder.querySelector('button')!.click());
   const entry = [...holder.querySelectorAll('button')].slice(1).find((b) => b.textContent === label)!;
@@ -477,6 +495,49 @@ test.skipIf(!hasDom)('Save waits for a new agent\'s pick, so a save during the r
 
   await mount(<RiskRulesDialog answer={JUDGED} onSaved={() => {}} onClose={() => {}} />);
   expect(save().disabled).toBe(false);
+});
+
+test.skipIf(!hasDom)('the automatic line saves what to make only when changed, keeping a saved level and agent the dialog does not show; nothing clears it', async () => {
+  spy('pullRiskModels', async () => ({ models: [{ id: 'a/sonnet', label: 'Sonnet' }], default_model: null }));
+  const saves: Record<string, unknown>[] = [];
+  spy('savePullRisk', async (input) => {
+    saves.push(input);
+    return JUDGED;
+  });
+  await mount(<RiskRulesDialog answer={{ ...JUDGED, auto: { level: 'medium', make: 'guide', agent: 'codex' }, auto_agent: { agent: 'codex', name: 'Codex' } }} onSaved={() => {}} onClose={() => {}} />);
+  expect(document.querySelector('[data-pull-risk-auto] button')!.textContent).toContain('a guided review');
+  expect(document.querySelector('[data-pull-risk-auto-agent]')!.textContent).toMatch(/^with\s+Codex$/);
+  expect(document.querySelector('[data-pull-risk-auto] span')!.textContent).toBe('On Medium and up, make');
+  const submit = async () => {
+    await act(async () => {
+      document.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    await settle();
+  };
+  await submit();
+  await pick('auto', 'a Picture page');
+  await submit();
+  await pick('auto', 'nothing');
+  expect(document.querySelector('[data-pull-risk-auto-agent]')).toBeNull();
+  await submit();
+  expect(saves.map((save) => ('auto' in save ? save.auto : 'kept'))).toEqual(['kept', { level: 'medium', make: 'picture_it', agent: 'codex' }, null]);
+});
+
+test.skipIf(!hasDom)('with the automatic run off, a pick reads the agent a run would start, and a set agent that cannot start says why', async () => {
+  spy('pullRiskModels', async () => ({ models: [{ id: 'a/sonnet', label: 'Sonnet' }], default_model: null }));
+  const reads = spy('pullRisk', async () => ({ ...JUDGED, auto: null, auto_agent: { agent: 'codex', name: 'Codex' } }));
+  await mount(<RiskRulesDialog answer={{ ...JUDGED, auto: null, auto_agent: null }} onSaved={() => {}} onClose={() => {}} />);
+  expect(reads).not.toHaveBeenCalled();
+  await pick('auto', 'a Picture page');
+  await settle();
+  expect(reads.mock.calls[0]?.[1]).toBe(true);
+  expect(document.querySelector('[data-pull-risk-auto-agent]')!.textContent).toMatch(/^with\s+Codex$/);
+  if (root) await act(async () => root!.unmount());
+  document.body.innerHTML = '';
+
+  const why = "Codex isn't signed in on this computer.";
+  await mount(<RiskRulesDialog answer={{ ...JUDGED, auto: { level: 'high', make: 'guide', agent: 'codex' }, auto_agent: null, auto_agent_unavailable: why }} onSaved={() => {}} onClose={() => {}} />);
+  expect(document.querySelector('[data-pull-risk-auto-agent]')!.textContent).toBe(why);
 });
 
 test.skipIf(!hasDom)('no agent installed: one line, and the rules can still be saved', async () => {

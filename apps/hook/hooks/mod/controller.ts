@@ -93,6 +93,7 @@ import {
   type PlannotatorTarget,
 } from './tool'
 import { TurnTracker, type EnteredPrompt } from './turns'
+import { TerminalPrompts } from './terminal-prompts'
 
 /** Persisted in `$.store` so open reviews reattach after a restart or `--resume`. */
 export interface LaunchRecord {
@@ -335,6 +336,9 @@ export interface SessionInfo {
   /** The name the person gave the session, read for each Inbox poll (`InboxLinkOptions.label`). */
   label?: () => string | Promise<string>
   title?: () => string | Promise<string>
+  model?: () => Promise<string | null>
+  effort?: () => string | null
+  contextPercent?: () => Promise<number | null>
   /** The session's first start, given the link's (`InboxLinkOptions.firstStart`). */
   firstStart?: (startedAt: number) => Promise<number>
   /** The session ids this conversation continues, read for each Inbox poll (`InboxLinkOptions.continues`). */
@@ -352,6 +356,8 @@ export interface SessionInfo {
 
 export class PlannotatorMod {
   readonly turns = new TurnTracker()
+  /** What the session waits on in its terminal now (terminal-prompts.ts), for the Inbox's Agents list. */
+  readonly prompts = new TerminalPrompts()
   private launches = new Map<string, LiveLaunch>()
   private approval: PendingApproval | null = null
   /** ExitPlanMode calls passed through as the approved plan, by tool_use_id. */
@@ -438,6 +444,7 @@ export class PlannotatorMod {
           sessionId: session.sessionId,
           tools: session.inboxTools,
           isBusy: () => this.turns.busy,
+          blocked: (now) => this.prompts.kind(now),
           // Send now goes into a running main turn, never into this session's own Ask question, and
           // never into a turn another plugin's prompt started (that plugin may read its answer as its own).
           steerableTurn: () => {
@@ -448,6 +455,9 @@ export class PlannotatorMod {
           ...(session.root ? { root: session.root } : {}),
           ...(session.label ? { label: session.label } : {}),
           ...(session.title ? { title: session.title } : {}),
+          ...(session.model ? { model: session.model } : {}),
+          ...(session.effort ? { effort: session.effort } : {}),
+          ...(session.contextPercent ? { contextPercent: session.contextPercent } : {}),
           ...(session.firstStart ? { firstStart: session.firstStart } : {}),
           ...(session.continues ? { continues: session.continues } : {}),
           ...(session.place ? { place: session.place } : {}),
@@ -1967,6 +1977,31 @@ export class PlannotatorMod {
     this.inbox?.onMainStep(turnId)
   }
 
+  /** `tool.check` answered `ask` for a call: a permission prompt is up in the terminal (terminal-prompts.ts). */
+  async onToolAsked(callId: string, agentId?: string): Promise<void> {
+    this.prompts.asked(callId, agentId, await this.host.now())
+  }
+
+  /** An `AskUserQuestion` call started: a question is up in the terminal. */
+  async onQuestionAsked(callId: string, agentId?: string): Promise<void> {
+    this.prompts.question(callId, agentId, await this.host.now())
+  }
+
+  /** The call was allowed and runs (`tool.run`): its permission prompt is over. */
+  onToolRan(callId: string): void {
+    this.prompts.ran(callId)
+  }
+
+  /** The call settled (its `tool.call` returned): nothing of it waits. */
+  onToolSettled(callId: string): void {
+    this.prompts.settled(callId)
+  }
+
+  /** A model request of a loop is about to go out (every turn.step): what that loop waited on was answered. */
+  onLoopStep(agentId?: string): void {
+    this.prompts.stepped(agentId)
+  }
+
   /** A model request of a turn is about to go out (turn.step), from register.ts. */
   onTurnStep(turnId: string): void {
     this.turns.onStep(turnId)
@@ -1997,6 +2032,7 @@ export class PlannotatorMod {
   onTurnComplete(turnId: string, answer: string, aborted: boolean): void {
     this.host.debug(`turn.complete ${turnId}${aborted ? ' (aborted)' : ''}: ${answer.length} chars`)
     this.turns.onTurnComplete(turnId, answer, aborted)
+    this.prompts.ended()
     this.inbox?.onMainTurnComplete(turnId)
     this.pushBridgeStatus()
   }

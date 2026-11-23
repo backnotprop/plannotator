@@ -42,7 +42,7 @@
 import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxMachineTags, inboxRowsBy, inboxTagColoursOf, isInboxCombineRun, type InboxRowsBy } from "@plannotator/core/inbox-types";
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
 import { listIntroAtStart, listIntroDue, listIntroLookPicked } from "./inbox-list-intro";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { timingSafeEqual } from "node:crypto";
@@ -86,6 +86,8 @@ import {
   isCodexThreadId,
   isInboxId,
   isInboxSoundVolume,
+  inboxSoundWhen,
+  INBOX_SOUND_WHEN,
   isInboxTextSize,
   type InboxTextSize,
   isInboxReactionEmoji,
@@ -106,6 +108,7 @@ import {
   type InboxAgentsGroup,
   type InboxListRow,
   type InboxMessage,
+  type InboxSentFrom,
   type InboxProject,
   type InboxProjectRepo,
   type InboxRestartAgents,
@@ -150,7 +153,9 @@ import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/sha
 import { DecisionDataAborted, decisionDataCsv, decisionDataSummary, readDecisionLines } from "@plannotator/shared/inbox/decision-data";
 import { createInboxSearchRoutes } from "./inbox-search";
 import { createInboxCombine } from "./inbox-combine";
-import { inboxSkillsRoute } from "./inbox-skills";
+import { createInboxCombineFar, type InboxCombineFar } from "./inbox-combine-far";
+import { combineArchiveAgain, combineArchiveSkip } from "./inbox-combine-guard";
+import { inboxSkillsBlockFor, inboxSkillsRoute } from "./inbox-skills";
 import { assertTestHome } from "./test-home-guard";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { answerSemDiffRequest, createSemDiffAssets, isSemDiffRequest, type SemDiffSource } from "@plannotator/shared/sem-diff-assets";
@@ -161,7 +166,7 @@ import { foldCheckoutFolderProjects } from "./inbox-checkout-folders";
 import { combineSuggestions, type InboxAgentWork } from "./inbox-combine-suggestions";
 import { createInboxTidy } from "./inbox-tidy";
 import { createInboxListVersions } from "./inbox-list-delta";
-import { debugRoute, INBOX_DEBUG_PATH, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
+import { debugRoute, INBOX_DEBUG_PATH, pullCloseFields, pullKeyForLog, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
 import { perfPhase, retainPerfPhases, syncSection, watchLoopStalls, withServerTiming } from "./inbox-perf";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
@@ -172,6 +177,7 @@ import { INBOX_DB_FILE, inboxReturnHoldFromEnv, returnFromSqlite } from "@planno
 import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly, inboxTidyStepsOnlyWakes } from "@plannotator/shared/inbox/tidy";
 import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "@plannotator/shared/inbox/list";
 import { archiveProject, markProjectRead, unarchiveProject, unmarkProjectRead } from "@plannotator/shared/inbox/project-batch";
+import { messageReaskInput, reaskAllReachable, reaskThreadAll } from "@plannotator/shared/inbox/reask-all";
 import {
   INBOX_ASK_BRIDGE_PREFIX,
   INBOX_ASK_WAITS_FIELD,
@@ -207,8 +213,11 @@ import { openBrowser } from "./browser";
 import { isAddressInUseError } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
 import { markPlannotatorResponse, withPlannotatorServerHeader } from "./plannotator-server-marker";
-import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT, type InboxMcpContext } from "./inbox-mcp";
-import { guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewSnapshot } from "./inbox-guides";
+import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT, inboxMcpInitializeClient, resolveInboxMcpReminder, type InboxMcpClient, type InboxMcpContext } from "./inbox-mcp";
+import { guideReviewOf, guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewSnapshot } from "./inbox-guides";
+import { guideReviewImage, pullReviewImage, reviewImageHttp } from "./inbox-review-image";
+import { guideReviewMarkdownImage, pullReviewMarkdownImage } from "./inbox-review-markdown-image";
+import { guidePackageChanges, packageCardOn, pullPackageChanges } from "./inbox-package-changes";
 import { createInboxRepoCache } from "./inbox-repos";
 import { createGitlabHosts, unnamedForgeHost, type GitlabHosts } from "./inbox-gitlab-hosts";
 import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-refs";
@@ -224,7 +233,8 @@ import { createLinearCards, linearRefsRoute, withLinearCards } from "./inbox-lin
 import { createLinearKey } from "./inbox-linear-key";
 import { mergePull } from "@plannotator/shared/inbox-pull-merge";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
-import { handleFavicon } from "./shared-handlers";
+import { handleCustomThemesScript, handleFavicon } from "./shared-handlers";
+import { isRegisteredThemeId, pageWithCustomThemes } from "@plannotator/shared/theme-files";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxLiveSites, type InboxLiveBridgeSources, type InboxLiveSites } from "./inbox-live";
 import type { WebFraming } from "./inbox-web-prototypes";
@@ -233,12 +243,12 @@ import { INBOX_DECISION_EXPORT_ROUTE, inboxDecisionExportRoute } from "./inbox-d
 import { INBOX_DECISION_POST_ROUTE, postThreadDecisions } from "./inbox-decision-post";
 import { DECISION_POST_DESTINATIONS, decisionPostDestinationOf } from "@plannotator/shared/inbox/decision-post";
 import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
-import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, type InboxNoteAutoAdd } from "@plannotator/core/inbox-types";
+import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, type InboxNoteAutoAdd, type InboxPullRiskAnswer } from "@plannotator/core/inbox-types";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { createInboxLiveSessions, takesOver, thereInThread } from "./inbox-sessions";
-import { inboxAgentsGroup, inboxFolderProject, inboxMergedAgents, inboxStartOfDay, type InboxAgentWait } from "./inbox-agents-list";
+import { inboxAgentsEndedSince, inboxAgentsGroup, inboxFolderProject, inboxMergedAgents, inboxStartOfDay, type InboxAgentWait } from "./inbox-agents-list";
 import { createInboxFirstSeen } from "./inbox-first-seen";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { createT3Local, INBOX_T3_PROBE_MS, type T3Route } from "./inbox-t3-local";
@@ -267,20 +277,28 @@ import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
 import { createInboxLiveReview } from "./inbox-live-review";
 import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { createInboxLaunch } from "./inbox-launch";
-import { createInboxRex, inboxRexSocketPath, type InboxRex, type InboxRexStatus } from "./inbox-rex";
+import { createInboxRex, type InboxRex, type InboxRexReach, type InboxRexStatus } from "./inbox-rex";
+import { inboxRaiseAfterFarShow } from "./inbox-rex-far";
+import { inboxRexHeadless, inboxRexSockets } from "./inbox-rex-where";
 import { withRexMark, withRexStatus } from "./inbox-rex-status";
+import { createInboxAgentStatusSetting } from "./inbox-agent-status-setting";
 import { createInboxCodexAccount } from "./inbox-codex-account";
 import type { LaunchHost, LaunchHostContext } from "./inbox-launch-host";
-import { createLoginEnv } from "./inbox-launch-env";
+import { createLoginEnv, launchPlainEnv } from "./inbox-launch-env";
+import { createInboxRunSetup } from "./inbox-run-setup";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxCommentDrafts } from "./inbox-comment-drafts";
 import { createInboxTakeBack } from "./inbox-take-back";
 import { createInboxAsk } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
+import { createInboxActedRoute } from "./inbox-acted";
+import { createInboxActed, laterActed } from "@plannotator/shared/inbox/acted";
 import { createInboxPriority } from "./inbox-priority";
 import { priorityIntroOpen, priorityIntroUnused, priorityIntroUsed } from "./inbox-priority-intro";
 import { createInboxThreadTags } from "./inbox-thread-tags";
+import { createInboxProjectTagsRoute, farProjectTags } from "./inbox-project-tags";
+import { createInboxProjectTags } from "@plannotator/shared/inbox/project-tags";
 import { createInboxAgentFaces } from "./inbox-agent-faces";
 import { createAgentIcons, createInboxAgentIcons, INBOX_AGENT_ICONS_DIR } from "./inbox-agent-icons";
 import { createInboxIconAnimate } from "./inbox-icon-animate";
@@ -311,17 +329,19 @@ import {
   revealAgainAt,
   revealStamp,
   revealStampNotNow,
+  revealWaitStarts,
   type RevealId,
   type RevealState,
 } from "@plannotator/shared/inbox/reveals";
 import { launchTipClaim, launchTipDue, launchTipLaunched, type LaunchTipState } from "@plannotator/shared/inbox/launch-tip";
 import { sidebarTipClaim, sidebarTipDue, type SidebarTipState } from "@plannotator/shared/inbox/sidebar-tip";
+import { bandTipClaim, bandTipDue, bandTipUsed, type BandTipState } from "@plannotator/shared/inbox/band-tip";
 import { revealGrillMeGap, type GrillMeTipQuestion } from "@plannotator/shared/inbox/grill-me-tip";
 import { routinesIntroGoodDaysOnce, routinesIntroOpen, routinesIntroSend, routinesIntroWaits } from "@plannotator/shared/inbox/routines-intro";
 import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import { configStarAskStore, createStarAsk, readStarAskRecord, runGh, starAskEnabled, starAskOpen, type StarAskClaim } from "@plannotator/shared/star-ask";
 import { claimInboxStar, inboxStarAction } from "./inbox-star-ask";
-import { createInboxEmbeds } from "./inbox-embeds";
+import { createInboxEmbedPages, createInboxEmbeds } from "./inbox-embeds";
 import { createInboxPages } from "./inbox-pages";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
@@ -339,14 +359,17 @@ import { createInboxPullLinks } from "./inbox-pull-links";
 import { createInboxPullLooked, pullLookedSeenOf } from "./inbox-pull-looked";
 import { createInboxPullHidden, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, threadStaysHidden, type PullToHide } from "./inbox-pull-hidden";
 import { createPullRisk, type PullRiskOptions } from "./inbox-pull-risk";
+import { createPullRiskAuto, type PullRiskAuto } from "./inbox-pull-risk-auto";
+import { lastStartedReviewAgent, pullRiskAutoAgent, pullRiskAutoSettled, pullRiskAutoStart } from "./inbox-pull-risk-auto-start";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
 import { pullMediaResponse, pullMediaSizesResponse } from "./inbox-pull-media";
 import { createProjectPictures, pictureSources, type ProjectPictureOptions } from "./inbox-project-pictures";
 import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullSafeBranch, inboxPullStacks, inboxReviewLandingChanges, inboxReviewLinkOf, inboxReviewRows, inboxReviewStartOf, type InboxPullReason, type InboxReviewStart, inboxPullRepoKey } from "@plannotator/core/inbox-types";
 import { createInboxPullStates, createInboxReviewIndex, readInboxReviewLink } from "./inbox-reviews";
-import { inboxPullRefOfKey, inboxPullUrlOfKey, type InboxPull, type InboxPullLink } from "@plannotator/core/inbox-types";
+import { INBOX_PULL_ASKS, inboxPullRiskAutoOf, inboxPullRefOfKey, inboxPullUrlOfKey, isInboxPullAsk, type InboxPull, type InboxPullLink } from "@plannotator/core/inbox-types";
 import { inboxThreadPullsSummary, parseInboxThreadPullRef, type InboxThreadPull } from "@plannotator/core/inbox-types";
 import { readInboxReviewChanges } from "./inbox-review-changes";
+import { BranchDiffTooLarge, createInboxLocalWork, localBranchInPull } from "./inbox-local-work";
 import { createInboxBranchService } from "./inbox-branch-service";
 import { inboxFarBranchReviewRow } from "@plannotator/core/inbox-branch-reports";
 import { runtime as gitRuntime } from "./git";
@@ -355,9 +378,14 @@ import { createInboxTagsRoute } from "./inbox-tags";
 import { createThreadPullStates, createThreadPullsRoute, threadPullsChangedForWake, type ThreadPullFixture } from "./inbox-thread-pulls";
 import { createInboxStepsRoute, inboxStepsStale, inboxStepsWaitOnPerson as stepsListWaitsOnPerson } from "./inbox-steps";
 import { createInboxDebugLog } from "./inbox-debug-log";
+import { keepPullClose } from "./inbox-pull-closes";
 import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller, type InboxDoorTimers } from "./inbox-devices";
+import { inboxRequestSentFrom } from "./inbox-sent-from";
 import { doorHealth } from "./inbox-door-version";
 import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
+import { agentFileDoorAnswer, agentReadDoorAnswer } from "./inbox-far-read";
+import { agentSearchDoorAnswer, agentThreadsDoorAnswer } from "./inbox-far-find";
+import { farRemoteOf } from "./inbox-machine-agent-find";
 import { archivedAskOf, farRowTags, mergeArchived } from "./inbox-archived-merged";
 import { createShowArchived, type InboxShowArchived } from "./inbox-show-archived";
 import { mergePullBoards } from "./inbox-machine-pulls";
@@ -385,7 +413,7 @@ import { shapeCodeRoot } from "@plannotator/shared/shape/store";
 import { shapeEventFrame } from "@plannotator/shared/shape/routes";
 import { shapeAgentName, unlocked as unlockedShape } from "@plannotator/shared/shape/routes";
 import { SHAPE_SWITCH_NOT_SAVED, setShapeSwitch, shapeSwitchOn } from "@plannotator/shared/shape/switch";
-import { answerInboxCapabilities, capabilitiesFrame, capabilitiesWire, checkInboxCapabilities, inboxCapabilities, namesInboxCapability, routeInboxCapabilities, startInboxCapabilities } from "./inbox-capability";
+import { answerInboxCapabilities, capabilitiesFrame, capabilitiesWire, checkInboxCapabilities, inboxCapabilities, namesInboxCapability, routeInboxCapabilities, startInboxCapabilities, stopInboxCapabilities } from "./inbox-capability";
 import {
   agentSpec,
   claudeCodeModOn,
@@ -415,6 +443,7 @@ import {
   type InboxNoteAgentId,
   type InboxStepsWire,
 } from "@plannotator/core/inbox-types";
+import { createInboxSessionLabels } from "./inbox-session-labels";
 
 /**
  * The hosts whose own connection polls the bridge and wakes its session with the reply: the waking hosts but Codex,
@@ -498,7 +527,7 @@ function isPageOrigin(value: string): boolean {
 export interface InboxServerOptions {
   /** Default: `getPlannotatorDataDir()`. */
   dataDir?: string;
-  /** This computer's Rex (inbox-rex.ts). Default: the app's server socket on macOS (under a sandboxed test, its own home's). */
+  /** This computer's Rex (inbox-rex.ts). Default: where Rex's server listens on this system (inbox-rex-where.ts; under a sandboxed test, only the socket it names). */
   rex?: InboxRex;
   liveReviewCommand?: string[];
   /** The running binary's version; `dev` for a source run. */
@@ -818,7 +847,7 @@ const ERROR_STATUS: Record<string, number> = {
   question_revision_conflict: 409,
   question_already_sent: 409,
   // Replaced questions: answering one the agent superseded, or superseding
-  // an id that names no open question of the thread.
+  // an id that names no question of the thread.
   question_superseded: 422,
   invalid_supersedes: 422,
   // A pick on a question a Mark read closed: Move back first.
@@ -1189,11 +1218,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const storeLoadMs = performance.now() - storeLoadStarted;
   // A send a crash interrupted leaves a temp blob; the next start removes it once it is stale.
   sweepStaleInboxSendTemps(store.dir);
+  /** The tags the person put on projects (project-tags.ts): only the filters read them. */
+  const projectTags = createInboxProjectTags(store);
   const serverSession = createServerSessionNonce();
   // The requests the device door hands in, in-process, after it checked the device's token (inbox-devices.ts
   // `toWindow`), with the device that asked: a paired phone answers a permission prompt as a window does; a linked
   // machine does for a press in a window there (`window`), and may start, stop or trust for one (remote launch).
   const fromDeviceDoor = new WeakMap<Request, InboxDoorCaller>();
+  // The tailnet's requests this computer opened itself (a browser here on the tailnet address: inbox-tailscale.ts
+  // `ownNode`). Still the tailnet for every guard; only Show in Rex reads it, as this computer's own window.
+  const fromOwnTailnetNode = new WeakSet<Request>();
+  /** This computer's own window (Show in Rex's `here`): its loopback port, or its tailnet address opened here; never the door. */
+  const thisComputersWindow = (req: Request, via: RequestVia): boolean => !fromDeviceDoor.has(req) && (via === "local" || fromOwnTailnetNode.has(req));
   // The person's Send of /create-routine: a one-time grant on its thread, so the routine it asks for is made on
   // (inbox-routine-grants.ts). Only the person's own call mints one, by the bar a permission prompt's answer has: a
   // window's (its Origin, this Host and serverSession), a paired phone's, or a linked machine's for a press in a window
@@ -1319,8 +1355,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * which writes no record: the windows' streams say `event: thread-pulls` and each reads those threads' PRs again.
    */
   const threadPullLiveListeners = new Set<(threadIds: readonly string[]) => void>();
+  // A `:::run` card's state changed (a run started, ended or was stopped; a secret saved or removed: null, every card).
+  const runStateListeners = new Set<(messageIds: readonly string[] | null) => void>();
   /** How the list's rows look was saved (config.json `inboxRows`): the windows' streams say `event: rows`. */
   const rowsListeners = new Set<(rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => void>();
+  /** The sound's settings were saved (config.json `inboxSound`): the windows' streams say `event: sound`, so a window in the background rings by the new choice at once. */
+  const soundListeners = new Set<(sound: unknown, rev: number) => void>();
+  /**
+   * The sound's save count, for ordering only (a window never takes an older save's frame over a newer one): it starts at
+   * this start's clock and only grows, so it stays ahead of an earlier start's. In memory.
+   */
+  let soundRev = Date.now();
   /** The sidebar's layout was saved (config.json `inboxSidebar`): the windows' streams say `event: sidebar`. */
   const sidebarListeners = new Set<(sidebar: InboxSidebarLayout, rev: number) => void>();
   /** An agent icon's face was saved (inbox/agent-faces.json): the windows' streams say `event: agent-faces`. */
@@ -1333,10 +1378,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const withIcons = { ...wire, icons: agentIconFiles.list() };
     for (const listener of agentFaceListeners) listener(withIcons);
   });
+  const sessionLabelStore = createInboxSessionLabels(inboxDir(dataDir));
   /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
   const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
   /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: lets the save of a held switch (Shape, heldSwitch) reach the windows. */
-  const capabilityListeners = new Set<(changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning" | "scheduled_threads" | "seam") => void>();
+  const capabilityListeners = new Set<(changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning" | "split_view" | "scheduled_threads" | "seam") => void>();
   /** "Over your tailnet" published by itself once Tailscale came back: the windows' streams say `event: tailscale` with the new state. */
   const tailscaleListeners = new Set<() => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
@@ -1571,7 +1617,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     );
   };
   // PR risk ranking (inbox-pull-risk.ts): judged in the background from the list reads below, while Code review is on and rules exist.
-  const pullRisk = createPullRisk({ dataDir, pulls, roots: (key) => pullRoots(key), isOn: () => codeReviewOn(), branchesOn: () => branchReviewsOn(), ...options.pullRisk });
+  let pullRiskAuto: PullRiskAuto | null = null;
+  const pullRisk = createPullRisk({ dataDir, pulls, roots: (key) => pullRoots(key), isOn: () => codeReviewOn(), branchesOn: () => branchReviewsOn(), onJudged: (pull, level, earlier) => pullRiskAuto?.judged(pull, level, earlier), autoRuns: () => pullRiskAuto?.runs() ?? {}, ...options.pullRisk });
   // Branch reviews (inbox-branch-service.ts): agents report a branch ready for review; nothing in it runs by itself.
   const branchService = createInboxBranchService({
     store,
@@ -1588,6 +1635,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   // Reviews (inbox-reviews.ts): every thread with a review card, derived from the store's messages on read.
   const reviewIndex = createInboxReviewIndex(store);
+  // Reviews' "On this computer" (inbox-local-work.ts): the projects newest activity first, and a branch with an open PR
+  // (or, with Branch reviews on, an agent's report) left to its own row.
+  const localWork = createInboxLocalWork({
+    runtime: gitRuntime,
+    projects: () => {
+      const seen = new Map<string, InboxProject>();
+      for (const row of store.listRows()) {
+        const project = row.project?.id ? store.project(store.canonicalProjectId(row.project.id)) : null;
+        if (project && !seen.has(project.id)) seen.set(project.id, project);
+      }
+      for (const project of store.listProjects().reverse()) if (!seen.has(project.id)) seen.set(project.id, project);
+      return [...seen.values()];
+    },
+    skip: (projectId, branch, head) =>
+      (!!lastReviewsRead && localBranchInPull(lastReviewsRead.listed.pulls, lastReviewsRead.projectsByRepo, store.canonicalProjectId(projectId), branch, head)) ||
+      (branchReviewsOn() && branchService.reported(projectId, branch)),
+  });
   let lastReviewsRead: { projectsByRepo: Awaited<ReturnType<typeof pullProjects>>["projectsByRepo"]; wanted: Awaited<ReturnType<typeof pullProjects>>["wanted"]; listed: Awaited<ReturnType<typeof pulls.list>> } | null = null;
   // A review thread's PR that left the list: one read of its state, so a closed PR, or one merged long ago, is recorded.
   // A PR's owner as the lists use it. A thread archived before any review came is no one's to curate: its PR is
@@ -1615,6 +1679,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     threadsOf: (id) => store.threadsOf(id),
     threadMessageIds: (id) => store.threadMessageIds(id),
     message: (id) => store.message(id),
+    messageSeq: (id) => store.messageCursor(id),
     threadSubject: (id) => store.threadSubject(id),
     threadProject: (id) => {
       const root = store.message(id);
@@ -1816,6 +1881,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     broOn: () => broOn(),
     // Code review: submit_guide's `review` field is listed and served only while the person has it on.
     codeReviewOn: () => codeReviewOn(),
+    // The person's own Inbox rules and reminder reach MCP sessions too, read on every connection.
+    inboxReminder: () => resolveInboxMcpReminder(loadConfig()),
     // Branch reviews: send_message's `branch` field is listed and served only while the person has it on.
     branches: branchService.mcp,
     walkthroughThread: (threadId) => pullOwners.started().get(threadId)?.kind === "walkthrough",
@@ -1825,10 +1892,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     chapterDiagramsOn: () => chapterDiagramsOn(),
     // A thread only a linked machine holds goes through the window's own forward (inbox-machines.ts).
     snoozeOnMachine: async (threadId, until) => (machines ? machines.snoozeThread(threadId, until) : null),
+    readOnMachine: async (ask) => (machines ? machines.readThread(ask) : null),
+    filePieceOnMachine: async (args, offset) => (machines ? machines.filePiece(args, offset) : null),
+    farThreadMachine: (threadId) => machines?.farThreadMachine(threadId) ?? null,
+    // search and read_thread's list ask the linked machines too, naming a project by its git remote (inbox-mcp-far-find.ts).
+    findOnMachines: () => machines?.agentFind ?? null,
+    projectRemoteKey: (root, waitMs) => farRemoteOf(repos, root, waitMs),
     snoozeMade: () => markSnoozeUsed(),
     ...(options.mcpNow ? { now: options.mcpNow } : {}),
   };
   const mcp = createMcpHandler(() => createInboxMcpServer(mcpContext), { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES });
+  // An initialize request gets a server built for its client: the person's rules are sized to what that client keeps.
+  const mcpForInitialize = (client: InboxMcpClient) =>
+    createMcpHandler(() => createInboxMcpServer({ ...mcpContext, mcpClient: client }), { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES });
 
   const health = (): InboxHealth => ({
     ok: true,
@@ -1867,6 +1943,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** Which list rows each window already holds, so a list read sends only the changed ones (#2593). */
   const listVersions = createInboxListVersions();
 
+  /**
+   * When the person last did something in each thread (approval "inbox-recent-activity-filter", shared's acted.ts):
+   * what the log holds (`store.personActedAt`) and what acted.json holds (an open, a film, a draft, an Ask AI question). `withActed` puts
+   * it on the rows the window and the phone read as `acted_at`, never on `store.listRow`, which agents read through.
+   */
+  // A thread this store held and deleted leaves the file at its next write (acted.ts `sweep`); a linked machine's stays.
+  const acted = createInboxActed(store.dir, { held: (id) => store.message(id)?.thread_id === id });
+  store.onDeletion(() => acted.sweep());
+  const withActed = (row: InboxListRow): InboxListRow => {
+    const at = laterActed(laterActed(row.acted_at, store.personActedAt(row.thread_id)), acted.at(row.thread_id));
+    return at ? { ...row, acted_at: at } : row;
+  };
   const snoozesById = () => new Map(store.snoozes().map((snooze) => [snooze.thread_id, snooze]));
   /**
    * A row as the window and the phone read it (approval "inbox-snooze"): its
@@ -1887,6 +1975,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const projectFolders = (rows?: readonly InboxListRow[]) => {
     const byThread = snoozesById();
     const counted = rows ?? store.listRows().map((row) => withSnooze(row, byThread));
+    // The tags the person put on projects (project-tags.ts): null, and no work, while no project is tagged.
+    const tagsOf = projectTags.reader();
     return store.listProjects().map((project) => {
       const mine = counted.filter((row) => row.project.id === project.id);
       const archived = mine.filter((row) => inboxRowArchived(row)).length;
@@ -1899,7 +1989,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Its git origin's host (null: a remote that names none), additive and only for a project with a repo: the window
       // links an owner/repo#123 in a repoless thread on the host most projects use. `peek` never runs git.
       const repo = repos.peek(project.root);
-      return { ...project, ...(combined.length > 0 ? { combined } : {}), ...(picture !== undefined ? { picture } : {}), ...(repo ? { repo_host: repo.host, ...(gitlabRemote(repo.host) ? { repo_forge: "gitlab" as const } : {}) } : {}), threads: mine.length, unread, listed: mine.length - archived, archived };
+      // Its tags, additive and only when there are any.
+      const tags = tagsOf?.(project.id) ?? [];
+      return { ...project, ...(tags.length > 0 ? { tags } : {}), ...(combined.length > 0 ? { combined } : {}), ...(picture !== undefined ? { picture } : {}), ...(repo ? { repo_host: repo.host, ...(gitlabRemote(repo.host) ? { repo_forge: "gitlab" as const } : {}) } : {}), threads: mine.length, unread, listed: mine.length - archived, archived };
     });
   };
 
@@ -2021,7 +2113,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     };
     const allOwn = store
       .listRows()
-      .map((row) => withHidePulls(withTags(withPriority(withPulls(withSnooze(withStepsWaiting(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row)), byThread, now))))));
+      .map((row) => withActed(withHidePulls(withTags(withPriority(withPulls(withSnooze(withStepsWaiting(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row)), byThread, now)))))));
     const own = hiddenPulls ? allOwn.filter((row) => !hiddenPulls.out(row)) : allOwn;
     hiddenPulls?.keep();
     if (pullsByThread.size > 0) {
@@ -2051,7 +2143,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       return tags.length > 0 ? { ...rest, tags } : rest;
     };
     const rows: InboxListRow[] = merged
-      ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id)).map((row) => inboxRowAsOf(withoutStepsWaiting(withFarTags(row)), now))]
+      ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id)).map((row) => withActed(inboxRowAsOf(withoutStepsWaiting(withFarTags(row)), now)))]
       : own;
     // Rows carry the head of a combined project; an id from before the combine (a phone, an API client) means that head.
     const shownProject = projectFilter ? store.canonicalProjectId(projectFilter) : null;
@@ -2075,7 +2167,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       /** Checking for updates has failed for hours: the sidebar's quiet "Can't check for updates". Additive. */
       update_check_failing: updates.checkFailing(),
       notice: portChanged ? "The Inbox moved to a new port: allow notifications again on this page." : null,
-      projects: merged ? [...projectFolders(own).map((project) => ({ ...project, machine: machines.selfId })), ...machines.projects().filter((project) => typeof project.id !== "string" || !store.project(project.id))] : projectFolders(own),
+      projects: merged ? [...projectFolders(own).map((project) => ({ ...project, machine: machines.selfId })), ...machines.projects().filter((project) => typeof project.id !== "string" || !store.project(project.id)).map((project) => farProjectTags(project, tagsTaken, machineTags!.idOn))] : projectFolders(own),
       project: projectFilter,
       // `?archived=exclude` (the window): archived threads leave every section,
       // Quiet included, and Settings lists them (GET /api/inbox/threads/archived).
@@ -2118,6 +2210,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     };
   };
 
+  /** "Agent status" (config.json `inboxAgentStatus`, off by default): the windows draw every agent's status mark. */
+  const agentStatus = createInboxAgentStatusSetting({
+    loadConfig,
+    saveConfig,
+    // config.json's stat: parsed again only when it changed (the 1 s delivery watch asks, as inbox-launch.ts's cache).
+    configKey: () => {
+      try {
+        const stat = statSync(join(getPlannotatorDataDir(), "config.json"));
+        return `${stat.mtimeMs}:${stat.size}:${stat.ino}`;
+      } catch {
+        return "absent";
+      }
+    },
+  });
   /** This Inbox's agents for the list model (inbox-agents-list.ts), from its own rows (decorated) and the live sessions. */
   const agentsOf = (own: InboxListRow[], now: Date, listed?: ReadonlySet<string>): InboxAgentsGroup => {
     const projectById = (id: string) => {
@@ -2139,8 +2245,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // that is not running (an ended one shows ended, with nothing waiting).
       if (owner && (!listed || listed.has(row.thread_id))) waits.push({ thread_id: row.thread_id, session: owner.session, host: owner.host, project: row.project, at: row.last_agent_at ?? row.last_at });
     }
-    return inboxAgentsGroup({
-      sessions: live.agentSessions(inboxStartOfDay(live.clock())),
+    const group = inboxAgentsGroup({
+      sessions: live.agentSessions(inboxAgentsEndedSince(live.clock())),
+      today: inboxStartOfDay(live.clock()),
       launches: launch.agents(),
       waits,
       archived,
@@ -2170,6 +2277,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       kept: agentFirstSeen,
       labels: true,
     });
+    // The person's "Agent status" setting, for every window that reads this list (inbox-agent-status-setting.ts).
+    return agentStatus.on() ? { ...group, status_marks: true } : group;
   };
 
   /** `GET /api/inbox/activity`'s `from` and `to`: ISO times, `from` first, at most INBOX_ACTIVITY_MAX_DAYS apart. */
@@ -2399,7 +2508,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       limit,
       threads: scoped.slice(head ? 0 : offset, offset + limit).map((row): InboxListRow => {
         const tags = tagsOf.get(row.thread_id);
-        return tags ? { ...row, tags } : row;
+        return withActed(tags ? { ...row, tags } : row);
       }),
     };
   };
@@ -2690,8 +2799,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
-   * The question sound (the "Ding-dong"), resolved from config.json: on, at
-   * 60, unless set. `dialog_shown_for`: the version the one-time dialog was
+   * The Inbox's sound (the "Ding-dong"), resolved from config.json: on, at
+   * 60, for every agent message, unless set. `dialog_shown_for`: the version the one-time dialog was
    * shown for, or that a fresh install was marked with; null while it never
    * was. `dialog_due`: the dialog waits for a page on this computer to claim it.
    */
@@ -2702,6 +2811,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return {
       enabled: saved.enabled !== false,
       volume: isInboxSoundVolume(saved.volume) ? saved.volume : INBOX_SOUND_DEFAULT_VOLUME,
+      // Nothing chosen yet (an update included): every agent message rings, the owner's default.
+      when: inboxSoundWhen(saved.when),
       dialog_shown_for: shownFor,
       dialog_due: shownFor === null && typeof saved.dialogDueFor === "string" && saved.dialogDueFor !== "",
     };
@@ -2731,17 +2842,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
           next.volume = value;
           break;
+        case "when":
+          if (!INBOX_SOUND_WHEN.includes(value as never)) throw new InboxError("validation_error", 'sound.when: "messages" or "asks".', { field: "sound.when" });
+          next.when = value as NonNullable<typeof next.when>;
+          break;
         default:
           // The dialog's marks are the server's to write (below), never the page's.
-          throw new InboxError("validation_error", `sound.${field}: not a setting (enabled, volume).`, { field: `sound.${field}` });
+          throw new InboxError("validation_error", `sound.${field}: not a setting (enabled, volume, when).`, { field: `sound.${field}` });
       }
     }
     if (validateOnly) return soundState();
     saveConfig({ inboxSound: next });
-    if (loadConfig().inboxSound?.enabled !== next.enabled || loadConfig().inboxSound?.volume !== next.volume) {
+    const kept = loadConfig().inboxSound;
+    if (kept?.enabled !== next.enabled || kept?.volume !== next.volume || kept?.when !== next.when) {
       throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     }
-    return soundState();
+    const state = soundState();
+    soundRev = Math.max(soundRev + 1, Date.now());
+    for (const listener of soundListeners) listener(state, soundRev);
+    return state;
   };
 
   /**
@@ -2774,9 +2893,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           break;
         case "light":
         case "dark":
-          // A palette id (packages/ui/themes); the page resolves an unknown one to its default.
-          if (typeof value !== "string" || !THEME_ID.test(value)) {
-            throw new InboxError("validation_error", `theme.${field}: a palette id.`, { field: `theme.${field}` });
+          // A palette id: a built-in (packages/ui/themes) or a custom theme in this data dir
+          // (`plannotator theme add`, packages/shared/theme-files.ts), and nothing else.
+          if (typeof value !== "string" || !THEME_ID.test(value) || !isRegisteredThemeId(dataDir, value)) {
+            throw new InboxError("validation_error", `theme.${field}: a palette id (a built-in theme, or one added with plannotator theme add).`, { field: `theme.${field}` });
           }
           next[field] = value;
           break;
@@ -3372,6 +3492,26 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * Thread panes, several threads side by side (config.json `inboxSplitView`; Settings → General → Appearance, off
+   * unless the person turned it on; docs/agent-guides/inbox-window.md "Free layout"). A window preference: nothing an
+   * agent reads changes. `event: capabilities` names it only when it was the change, so every window, the one that
+   * saved it too, turns the panes on or off at once, with no reload.
+   */
+  const splitViewOn = () => loadConfig().inboxSplitView === true;
+  const saveSplitView = (input: unknown, validateOnly = false) => {
+    if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
+      throw new InboxError("validation_error", "split_view: { on: boolean }.", { field: "split_view" });
+    }
+    const on = (input as { on: boolean }).on;
+    if (validateOnly) return { on: splitViewOn() };
+    const was = splitViewOn();
+    saveConfig({ inboxSplitView: on });
+    if (splitViewOn() !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    if (was !== on) for (const listener of capabilityListeners) listener("split_view");
+    return { on };
+  };
+
+  /**
    * The list's "Show archived" (approval "inbox-archived-group", off by default): one switch on every linked machine
    * (inbox-show-archived.ts). `event: show-archived` tells every window, and a linked machine that asks
    * (`show-archived=1`), which then reads this list and takes the newer switch.
@@ -3516,7 +3656,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /**
    * The offers the line claims for itself (approval "inbox-one-time-dialogs"): each one's "undecided" (the person never
    * set its switch). The claim stamps `inboxReveals[id]` with the page's key and turns nothing on; its dialog's "Turn it
-   * on" writes the switch. A registered offer (Bro mode, List view) adds its own here, and its id to `INBOX_REVEALS`.
+   * on" writes the switch. A registered offer (Bro mode, the view choice) adds its own here, and its id to `INBOX_REVEALS`.
    */
   /**
    * The "Star the repo" ask (approval "star-ask"; packages/shared/star-ask.ts): open while no surface showed or answered
@@ -3547,9 +3687,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // read in `revealState`, only while it is unshown and could go today.
     grill_me_tip: () => true,
     star: starUndecided,
-    // List view's choice (approval "inbox-list-view-dialog"): the view is each browser's own (packages/inbox/listView.ts),
-    // so the Inbox never sees it decided; the page holds it back on Simple list (`holds`, `mayClaim`).
-    list_view: () => true,
+    // "Which view do you prefer?" (reveals.ts `view_choice`): the view is each browser's own (packages/inbox/listView.ts),
+    // so the Inbox never sees it decided; the page holds it back on Agents (reveal.ts `viewChoiceWanted`). Only its own
+    // stamp closes it: List view's retired `list_view` stamp is not read, so whoever saw that dialog is offered this one.
+    view_choice: () => true,
     // The tab icon dialog (an update-day dialog): due since the release start and no favicon chosen, read live, so a
     // pick in Settings (here, plan review or code review) before its moment drops it.
     tab_icon: tabIconUndecided,
@@ -3668,19 +3809,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** The line's own rules hold for this page load (`setup`: the agent note, which keeps no spacing). A dev build: free. */
   const lineFree = (kind: "setup" | "spaced", load: string | null): boolean => revealLineFree(kind, revealState(new Date(), load), new Date());
   /**
-   * The dialog this page may arm, or null. The first time an entry is next is kept, for the patience and the
-   * retirement.
+   * The dialog this page may arm, or null. The first time an entry is next, or an `ahead` offer is armed beside it, is
+   * kept, for the patience and the retirement (reveals.ts `revealWaitStarts`).
    */
   const revealNow = (load: string | null = null, read?: { now: Date; state: RevealState }): RevealId | null => {
     if (!snoozeIntroRelease) return null;
     const now = read?.now ?? new Date();
     const state = read?.state ?? revealState(now, load);
-    const next = revealNext(state, now);
-    if (next && !state.waitingSince?.[next]) {
+    const starts = revealWaitStarts(state, now);
+    if (starts.length > 0) {
       const reveals = loadConfig().inboxReveals;
-      saveConfig({ inboxReveals: { ...reveals, waitingSince: { ...reveals?.waitingSince, [next]: now.toISOString() } } });
+      saveConfig({ inboxReveals: { ...reveals, waitingSince: { ...reveals?.waitingSince, ...Object.fromEntries(starts.map((id) => [id, now.toISOString()])) } } });
     }
-    return next;
+    return revealNext(state, now);
   };
   /**
    * The page about to show a reveal claims it: a compare-and-set over the whole queue (no await between the read and
@@ -3808,10 +3949,39 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return loadConfig().inboxReveals?.sidebar_tip?.shownAt === at;
   };
   /**
+   * The Group tip (packages/shared/inbox/band-tip.ts): a band's one-time tooltip, a day or more after first use, until
+   * it was shown once or a band's menu was opened. A tooltip the person's pointer calls up: reported due only outside
+   * the gap (`lineReport`), but its claim neither waits for nor starts one, so opening a band's menu always retires it.
+   */
+  const bandTipState = (): BandTipState => ({
+    firstUseAt: snoozeIntroSaved()?.firstUseAt ?? null,
+    tenure: snoozeIntroRelease,
+    saved: loadConfig().inboxReveals?.band_tip,
+  });
+  const claimBandTip = (key: string | null, used: boolean): boolean => {
+    const at = new Date().toISOString();
+    // A band's menu opened: stamped whatever the tenure or the gap, and never shown.
+    if (used) {
+      const save = bandTipUsed(bandTipState(), at);
+      if (save) saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, band_tip: save } });
+      return false;
+    }
+    const claim = bandTipClaim(bandTipState(), key, at);
+    if (!claim.save) return claim.show;
+    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, band_tip: claim.save } });
+    // Not written (a read-only data dir): showing it anyway would show it on every load.
+    return loadConfig().inboxReveals?.band_tip?.shownAt === at;
+  };
+  /**
    * What a settings read reports of the line (`reveal`), from one read of its state (one walk of the threads for heavy
    * use): the dialog this page may arm, the `ahead` offers it may also arm at their moment, and the agent note's `setup`.
    */
   const againIn = (at: number | null, now: Date): number | null => (at === null ? null : at - now.getTime());
+  /** `state` with the waits `revealNow` starts at `now` (reveals.ts `revealWaitStarts`) kept. */
+  const waitingFrom = (state: RevealState, now: Date): RevealState => {
+    const starts = revealWaitStarts(state, now);
+    return starts.length === 0 ? state : { ...state, waitingSince: { ...state.waitingSince, ...Object.fromEntries(starts.map((id) => [id, now.toISOString()])) } };
+  };
   const lineReport = (load: string | null) => {
     const now = new Date();
     const state = revealState(now, load);
@@ -3826,15 +3996,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       line: snoozeIntroRelease,
       // How long until a date can change the line (reveals.ts `revealAgainAt`: the gap's end, a Not now's, a tenure),
       // null when none can: a page left loaded asks again once, then, and keeps no other timer for the line.
-      // With `next` waiting from this read on (`revealNow` has just kept it), so the end of its patience is named too.
-      again_in:
-        snoozeIntroRelease
-          ? againIn(revealAgainAt(next && !state.waitingSince?.[next] ? { ...state, waitingSince: { ...state.waitingSince, [next]: now.toISOString() } } : state, now), now)
-          : null,
+      // With `next` and the `ahead` offers waiting from this read on (`revealNow` has just kept them), so the end of
+      // their patience and their 14 days is named too.
+      again_in: snoozeIntroRelease ? againIn(revealAgainAt(waitingFrom(state, now), now), now) : null,
       // The Launch tip (outside the line): compose may claim it at the first plain New message.
       launch_tip: launchTipDue(launchTipState()) && revealLineFree("setup", state, now),
       // The Sidebar tip (outside the line): the page may claim it at a calm moment beside the open sidebar.
       sidebar_tip: sidebarTipDue(sidebarTipState(), now.toISOString()) && revealLineFree("setup", state, now),
+      // The Group tip (outside the line): the page may claim it at the first hover of a band with a menu.
+      band_tip: bandTipDue(bandTipState(), now.toISOString()) && revealLineFree("setup", state, now),
     };
   };
   /** An offer closed with Not now (Escape, a click outside): the next dialog waits three days. A release build. */
@@ -3911,7 +4081,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     notifications: notificationsState(),
     /** Whether a notification can reach the person now: the windows open and how many may notify. */
     notify_reach: windows.reach(notificationsState().enabled),
-    /** The question sound: the Settings row, and whether the one-time dialog was shown. */
+    /** The Inbox's sound: the Settings row, and whether the one-time dialog was shown. */
     sound: soundState(),
     /** The one-time list options dialog: whether it waits to be claimed (POST /api/inbox/list-intro). */
     list_intro: listIntroState(),
@@ -3962,6 +4132,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     steps: { on: stepsOn() },
     /** Bro mode (config.json `inboxBro`): off unless the person turned it on. */
     bro: { on: broOn() },
+    /** Agent status (config.json `inboxAgentStatus`): off unless the person turned it on. */
+    agent_status: { on: agentStatus.on() },
     /** Floating reply drafts (config.json `inboxFloatDrafts`): off unless the person turned it on. */
     float_drafts: { on: floatDraftsOn() },
     /** The warning before a Mark read that sets questions aside (config.json `inboxMarkReadWarning`): on unless turned off. */
@@ -3977,8 +4149,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...systemWire(),
     /** Chapter diagrams (config.json `inboxChapterDiagrams`, on unless false): present only while Code review is on, as System's. */
     ...chapterDiagramsWire(),
-    /** The second thread pane's preview (config.json `inboxSplitView`): present only while on, so a window off draws nothing new. */
-    ...(loadConfig().inboxSplitView === true ? { split_view: { on: true } } : {}),
+    /** Thread panes (config.json `inboxSplitView`, Settings → General → Appearance): off unless the person turned them on. */
+    split_view: { on: splitViewOn() },
     /** The onboarding tour: started, finished or skipped, and whether the first real thread offers notifications once more. */
     tour: tourState(),
     /** Settings → Prompts: the Inbox reminder and the plan, review and annotate prompts. */
@@ -4157,9 +4329,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // again. Windows only (additive; a window that predates it skips the frame).
         const onThreadPullsLive = (threadIds: readonly string[]) => send(`event: thread-pulls\ndata: ${JSON.stringify({ thread_ids: threadIds })}\n\n`);
         if (windowId) threadPullLiveListeners.add(onThreadPullsLive);
+        // A run card's state changed here (any window's press, a phone's, a run ending): the cards showing it read
+        // again, so a window polls only while a command it shows is running. Windows only (additive).
+        const onRunState = (messageIds: readonly string[] | null) => send(`event: runs\ndata: ${JSON.stringify(messageIds ? { message_ids: messageIds } : { all: true })}\n\n`);
+        if (windowId) runStateListeners.add(onRunState);
         // How the rows look was saved (any window's, a phone's too): every window takes it at once. Windows only.
         const onRows = (rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev, prev: last.prev, by: last.by })}\n\n`);
         if (windowId) rowsListeners.add(onRows);
+        // The sound's switch, volume or choice was saved (any window's, a phone's too): every window rings by it at once. Windows only.
+        const onSound = (sound: unknown, rev: number) => send(`event: sound\ndata: ${JSON.stringify({ sound, rev })}\n\n`);
+        if (windowId) soundListeners.add(onSound);
         // "Show archived" was saved here or taken from a linked machine: every window, and a linked machine that asks
         // (`show-archived=1`: a switch writes no record, inbox-peer-link.ts).
         const stopShowArchived =
@@ -4187,10 +4366,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
         };
         syncShapes();
-        const onCapabilities = (changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning" | "scheduled_threads" | "seam") => {
+        const onCapabilities = (changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning" | "split_view" | "scheduled_threads" | "seam") => {
           syncShapes();
           const floats = floatDraftsOn();
-          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), code_review: { on: codeReviewOn() }, ...heldSwitch("shape", shapeOn(), changed === "shape"), ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
+          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...(changed === "split_view" ? { split_view: { on: splitViewOn() } } : {}), code_review: { on: codeReviewOn() }, ...heldSwitch("shape", shapeOn(), changed === "shape"), ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
           // Routines: while on, and to the save that turned them off.
           if (scheduledCap.on() || changed === "scheduled_threads") Object.assign(frame, scheduledCap.wire());
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
@@ -4236,7 +4415,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           showListeners.delete(onShow);
           snoozeListeners.delete(onSnoozes);
           threadPullLiveListeners.delete(onThreadPullsLive);
+          runStateListeners.delete(onRunState);
           rowsListeners.delete(onRows);
+          soundListeners.delete(onSound);
           stopShowArchived();
           sidebarListeners.delete(onSidebar);
           agentFaceListeners.delete(onAgentFaces);
@@ -4359,8 +4540,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const command = replyCommandOf(reply, sendNow, session);
     // A Tidy body is written when the run starts: with steps turned off since, it goes without its steps lines.
     if (command.tidy && !stepsOn()) return { ...command, body: inboxTidyBodyStepsOff(command.body) };
-    // Never on a Tidy, a 👍 or a hand-off notice: those are not about the thread's work.
-    if (command.tidy || command.ack_of || command.handed_away) return command;
+    // Never on a Tidy, a 👍, a hand-off notice or the note that questions moved: those are not about the thread's work.
+    if (command.tidy || command.ack_of || command.handed_away || command.moved) return command;
     const receiver = session ?? store.recipientOf(reply)?.session ?? null;
     // The details line (approval "inbox-wake-context"). A brand new thread has nothing to say yet: its only message is this one.
     const context = command.new_thread ? {} : wakeContextOf(reply, receiver);
@@ -4462,10 +4643,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // (approval "inbox-launched-agent-note"). Only the root, so only that session's first wake.
       ...(launchedWake ? { launched: launchedWake } : {}),
       // A thread the person started with no name yet, handed to a session that may name it: the wake asks it to.
-      ...(!reply.ack_of && store.canNameThread(reply.thread_id, reply.to?.session ?? recipientOf(reply)) ? { name_thread: true } : {}),
+      ...(!reply.ack_of && !reply.moved_note && store.canNameThread(reply.thread_id, reply.to?.session ?? recipientOf(reply)) ? { name_thread: true } : {}),
       // The person's 👍 Looks good (amended 2026-10-16): the wake is the one ack line,
       // with the tray reaction the ack had when its window closed (approval "inbox-reaction-tray").
       ...(reply.ack_of ? { ack_of: reply.ack_of, ...(reply.ack_reaction ? { ack_reaction: reply.ack_reaction } : {}) } : {}),
+      // The Inbox's note that this session's questions moved to another thread: the wake is a notice with no reply
+      // instruction (INBOX_MOVED_WAKE_INSTRUCTION). An older connection words it as a reply.
+      ...(reply.moved_note ? { moved: true as const } : {}),
       // The person's Re-ask (approval "inbox-reask"): the wake takes INBOX_REASK_INSTRUCTION.
       ...((reply.reask?.length ?? 0) > 0 ? { reask: true } : {}),
       // What the note lists (#2059): the wake names action items only when it lists some.
@@ -4573,6 +4757,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       throw new InboxError("validation_error", 'type: "delivered" with the reply id, or "state" with busy.', { field: "type" });
     }
     live.steerDone(session);
+    live.tookItem(session);
     // An item the Inbox marked to go in by itself: whether it went into the running turn, or waited for the
     // turn to end (the session was seen idle after the mark: its own Ask question held the turn).
     const marked = store.message(body.id);
@@ -4688,7 +4873,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...(options.sessionsNow ? { now: options.sessionsNow } : {}),
     store,
     serverSession,
-    resolveRoot: async (path) => (await projectRoots.resolve(path)).root,
+    resolveRoot: async (path) => (await projectRoots.resolveNamed(path)).root,
     outdatedOf: (host, plugin, folder) => {
       if (host === "claude-code") {
         return claudeSessionOutdated({
@@ -4698,6 +4883,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           cliVersion: version,
           pluginsDir: claudePluginInstall.pluginsDir(),
           changedAt: claudePluginInstall.changedAt,
+          realPath: claudePluginInstall.realPath,
         });
       }
       if (host === "pi") return piSessionOutdated(plugin, version, { pinned: piPinned() });
@@ -4722,6 +4908,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           .filter((agent) => agent.session === session)
           .map((agent) => agent.launch_id),
       ]),
+    onLabel: (session, label, title) => sessionLabelStore.note(session, label, title),
   });
 
   // Shape (approval "shape-inbox-placement"): the boards' routes and event feed, mounted only while boards are on.
@@ -4844,7 +5031,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       .list()
       .flatMap((agent) => (agent.device_id && agentDoor.inScopeOf(threadId, agent.device_id) ? [agent.device_id] : []));
   };
-  const agentDoor = createInboxAgentDoor({ store, agents: cloudAgents, devices: () => phones?.agentDevices ?? null, mcp: mcpContext });
+  // `route`: the window routes a paired agent's `inbox rows`, `projects`, `icon` and `export-decisions` use, answered by
+  // this listener's own handler as the same commands on this computer are (inbox-agent-routes.ts).
+  const agentDoor = createInboxAgentDoor({ store, agents: cloudAgents, devices: () => phones?.agentDevices ?? null, mcp: mcpContext, route: (req) => handle(req, "local") });
   const cloudWake = createInboxCloudWake({
     store,
     agents: cloudAgents,
@@ -4902,6 +5091,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     connection: live.deliveryConnectionOf,
     askerLive: live.askerLive,
     launchResumes: (threadId, session) => launch.resumes(threadId, session),
+    onePass: (read) => launch.onePass(read),
     hostOf: live.hostOf,
     // A Codex reply whose `codex queue` ran out of time may not have gone: its row says it is saved, not queued.
     uncertain: (session, itemId) => codexWake.uncertain(session, itemId) || qwenWake.uncertain(session, itemId) || t3Wake.uncertain(session, itemId) || antigravityWake.uncertain(session, itemId),
@@ -4928,7 +5118,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let lastLabelVersion = live.labelVersion();
   // From the start, as the presence: a session's first poll moves the Agents however soon a window opened. The launches'
   // part is learned at the first look (they are made below), so an Inbox with launches says `agents` once then.
-  let lastAgentsSignature = `${live.agentsSignature(inboxStartOfDay(live.clock()))}#`;
+  let lastAgentsSignature = `${live.agentsSignature(inboxAgentsEndedSince(live.clock()))}#`;
   // What the list shows from Rex (inbox-rex.ts, made below): a place line or the app moving says `agents` too.
   let rexVersion: () => number = () => 0;
   let rexWatch: () => void = () => {};
@@ -4945,7 +5135,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const sessions = presence !== lastPresenceSignature;
     const moved = sessions || signature !== lastDeliverySignature;
     const labels = live.labelVersion() !== lastLabelVersion;
-    const agentsSignature = `${live.agentsSignature(inboxStartOfDay(live.clock()))}#${launched}#${rexVersion()}`;
+    const agentsSignature = `${live.agentsSignature(inboxAgentsEndedSince(live.clock()))}#${launched}#${rexVersion()}#${agentStatus.on() ? 1 : 0}`;
     const agents = agentsSignature !== lastAgentsSignature;
     lastAgentsSignature = agentsSignature;
     if (!moved && !labels && !agents) return;
@@ -4964,11 +5154,22 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The plain env launch finds agents on: this Inbox's own, or a sandboxed test's fakes.
   const launchOwnEnv = (): Readonly<Record<string, string | undefined>> =>
     process.env.PLANNOTATOR_TEST_SANDBOX ? { HOME: join(dataDir, "agents-home"), PATH: process.env.PLANNOTATOR_TEST_LAUNCH_PATH ?? "" } : process.env;
+  // The person's login-shell env: a launch's, and a `:::run` command's (inbox-run-routes.ts).
+  const loginEnv = process.env.PLANNOTATOR_TEST_SANDBOX
+    ? async () => ({ HOME: join(dataDir, "agents-home"), PATH: process.env.PLANNOTATOR_TEST_LAUNCH_PATH ?? "" })
+    : createLoginEnv({
+        run: (argv, o) => createAgentEnvironmentFor({ platform: process.platform, homeDir: homedir(), env: o.env }).run(argv, { timeoutMs: o.timeoutMs }),
+        env: () => process.env,
+        log: (line) => process.stderr.write(`${line}\n`),
+      });
   // Rex (superlogical.com/rex): where agents live and what their panes say, starting agents in Rex, Show in Rex. Only an existing server is ever reached.
   // Under test (bun test, or a sandboxed binary) no Rex is reached but one a test names: `options.rex`, or a sandbox's
-  // PLANNOTATOR_TEST_REX_SOCKET (its fake). The person's own Rex never is.
-  const rexSocket = process.env.NODE_ENV === "test" ? null : process.env.PLANNOTATOR_TEST_SANDBOX ? (process.env.PLANNOTATOR_TEST_REX_SOCKET || null) : inboxRexSocketPath(process.platform, homedir());
-  const rex = options.rex ?? createInboxRex({ socketPath: rexSocket, version, sessionsFile: join(store.dir, "rex-sessions.json") });
+  // PLANNOTATOR_TEST_REX_SOCKET (its fake). The person's own Rex never is. Any system Rex runs on (inbox-rex-where.ts):
+  // on a Mac the app's server; elsewhere a server with no app beside it (`headless`; a sandbox says so itself with
+  // PLANNOTATOR_TEST_REX_HEADLESS, whatever system the test runs on).
+  const rexSocket = process.env.NODE_ENV === "test" ? null : process.env.PLANNOTATOR_TEST_SANDBOX ? (process.env.PLANNOTATOR_TEST_REX_SOCKET || null) : inboxRexSockets(process.platform, homedir(), process.env, process.getuid?.() ?? null);
+  const rexHeadless = process.env.PLANNOTATOR_TEST_SANDBOX ? process.env.PLANNOTATOR_TEST_REX_HEADLESS === "1" : inboxRexHeadless(process.platform);
+  const rex = options.rex ?? createInboxRex({ socketPath: rexSocket, headless: rexHeadless, version, sessionsFile: join(store.dir, "rex-sessions.json") });
   rexVersion = rex.version;
   rexWatch = () => rex.watch(rexHints([...live.placedSessions(), ...(launch.rexPanes()?.keys() ?? [])]));
   /**
@@ -5012,11 +5213,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /**
    * This Inbox's agents with where they live (inbox-rex.ts), for every window (a phone, the tailnet and a linked
    * machine too): each place Rex last confirmed, as one line, and what that pane says the agent is doing
-   * (`withRexStatus`, the marks). `show` (Show in Rex) only for a window on this computer (`here`): elsewhere it would
-   * move a screen no one there looks at. Answered at once from the last read; a stale one starts the next in the
+   * (`withRexStatus`, the marks). `show` (Show in Rex) by where the window is (`reach`; null: a phone, which has no
+   * such item): this computer's own while Rex's app is attached here; another computer's (the tailnet, a linked
+   * machine) while a Rex app is attached to this Rex from elsewhere, never through a Mac's own app, which would move
+   * a screen no one there looks at. Answered at once from the last read; a stale one starts the next in the
    * background (never waited on).
    */
-  const withRexPlaces = (groups: InboxAgentsGroup[], here: boolean): InboxAgentsGroup[] => {
+  const withRexPlaces = (groups: InboxAgentsGroup[], reach: InboxRexReach | null): InboxAgentsGroup[] => {
     const at = groups.findIndex((group) => !group.machine || group.machine === machines.selfId);
     const own = at >= 0 ? groups[at]! : null;
     if (!own) return groups;
@@ -5025,7 +5228,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const shown = rex.places(hints);
     if (shown.size === 0) return groups;
     const statuses = rex.statuses(hints);
-    const show = here && rex.offersShow();
+    const show = reach !== null && rex.offersShow(reach);
     // The icons' status marks, from a fresh read.
     const fresh = rex.freshStatuses(hints);
     const agents = own.agents.map((agent) => {
@@ -5062,13 +5265,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     homeDir: process.env.PLANNOTATOR_TEST_SANDBOX ? join(dataDir, "agents-home") : homedir(),
     platform: process.platform,
     // A sandboxed test Inbox finds agents only on the PATH its test names (PLANNOTATOR_TEST_LAUNCH_PATH: the fakes), never the person's.
-    loginEnv: process.env.PLANNOTATOR_TEST_SANDBOX
-      ? async () => ({ HOME: join(dataDir, "agents-home"), PATH: process.env.PLANNOTATOR_TEST_LAUNCH_PATH ?? "" })
-      : createLoginEnv({
-          run: (argv, o) => createAgentEnvironmentFor({ platform: process.platform, homeDir: homedir(), env: o.env }).run(argv, { timeoutMs: o.timeoutMs }),
-          env: () => process.env,
-          log: (line) => process.stderr.write(`${line}\n`),
-        }),
+    loginEnv,
     ownEnv: launchOwnEnv,
     installDirs: process.env.PLANNOTATOR_TEST_SANDBOX ? [] : [join(homedir(), ".local", "bin"), join(homedir(), ".claude", "local")],
     // Read once: the env this Inbox started with. Over SSH, macOS keeps Claude Code's login locked (remote launch);
@@ -5153,6 +5350,39 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The hand-off stands without the coupling.
     }
   };
+  const pullRepoProjects = async (pull: Pick<InboxPull, "host" | "repo">) => (await pullProjects()).projectsByRepo.get(`${pull.host}/${pull.repo}`.toLowerCase()) ?? [];
+  const pullRiskAutoPick = { launch, lastReviewAgent: () => lastStartedReviewAgent(store, [...[...pullOwners.all().values()].map((owner) => owner.thread_id), ...pullOwners.started().keys()]) };
+  const pullRiskAutoAgentWords = async (on: boolean): Promise<Pick<InboxPullRiskAnswer, "auto_agent" | "auto_agent_unavailable">> => {
+    if (!on) return { auto_agent: null };
+    const configured = (loadConfig().inboxPullRisk as { auto?: { agent?: unknown } } | undefined)?.auto?.agent;
+    const picked = await pullRiskAutoAgent(pullRiskAutoPick, typeof configured === "string" && configured.trim() ? configured.trim() : null);
+    if (picked && "unavailable" in picked) return { auto_agent: null, auto_agent_unavailable: picked.unavailable };
+    return { auto_agent: picked ? { agent: picked.agent, name: picked.name } : null };
+  };
+  pullRiskAuto = createPullRiskAuto({
+    dataDir,
+    settings: () => (codeReviewOn() ? inboxPullRiskAutoOf((loadConfig().inboxPullRisk as { auto?: unknown } | undefined)?.auto) : null),
+    listed: () => pullRisk.listed(),
+    covered: () => pullRisk.covered(),
+    pullOf: (key) => pulls.find(key),
+    stackOf: (key) => pulls.stack(key),
+    levelOf: (pull) => pullRisk.levelOf(pull),
+    hasThread: async (pull) => machines?.pullLinkedThere(pull.key) === true || !!linkInboxPulls([pull], pullLinkStore, new Map([[`${pull.host}/${pull.repo}`.toLowerCase(), await pullRepoProjects(pull)]]), pullOwnersNow())[pull.key],
+    settled: (run) => pullRiskAutoSettled(pullLinkStore, run),
+    start: pullRiskAutoStart({
+      ...pullRiskAutoPick,
+      store,
+      resolveProject,
+      projectOf: async ({ stack }) => (await pullRepoProjects(stack))[0] ?? null,
+      skillsBlock: (names) => inboxSkillsBlockFor(names, { codeReview: codeReviewOn(), shape: shapeOn(), routines: scheduledCap.on(), diagrams: chapterDiagramsOn() }),
+      own: (layers, threadId, made) => {
+        const keys = layers.map((layer) => layer.key);
+        const theirs = layers.every((layer) => !layer.mine);
+        pullOwners.set(keys, threadId, { ask: made, theirs });
+        couplePulls(keys, threadId);
+      },
+    }),
+  });
   /**
    * A thread started from a PR's page that the window never tied (a list found it by its first message,
    * `linkInboxPulls`): kept as the PR's owner now, as the tie would have, with the same coupling (`theirs`, the
@@ -5173,7 +5403,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   // A reply sent to a new session in place of the one that ended (packages/server/inbox-reply-launch.ts).
   const replyLaunch = createInboxReplyLaunch({ store, launch, live, resolveProject });
+  // A Combine's files copied from a linked computer wait as uploads until its new thread is here (inbox-combine-across.ts).
+  let combineUploads: () => string[] = () => [];
   const compose = createInboxCompose({
+    keepUploads: () => combineUploads(),
     store,
     serverSession,
     live,
@@ -5221,8 +5454,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     onChange: (threadId) => {
       for (const listener of draftListeners) listener(threadId);
     },
+    // A draft changed or dropped is the person's doing in the thread ("Recent activity", acted.ts); a save of the same draft is not.
+    onEdited: (threadId) => acted.note(threadId),
   });
-  const commentDrafts = createInboxCommentDrafts({ store, serverSession, readBody: (req) => readBody(req), json });
+  const commentDrafts = createInboxCommentDrafts({ store, serverSession, readBody: (req) => readBody(req), json, onSaved: (threadId) => acted.note(threadId) });
+  // A film played: "Recent activity"'s one write of its own (inbox-acted.ts).
+  const actedRoute = createInboxActedRoute({ acted, serverSession, readBody: (req) => readBody(req), json });
   const takeBack = createInboxTakeBack({ store, serverSession, readBody: (req) => readBody(req), json });
   // Ask AI: the conversation a thread keeps with its agent (packages/server/inbox-ask.ts).
   const ask = createInboxAsk({
@@ -5252,6 +5489,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     onChange: (threadId) => {
       for (const listener of askListeners) listener(threadId);
     },
+    // A question the person asked is their doing in the thread ("Recent activity", acted.ts).
+    onAsked: (threadId) => acted.note(threadId),
     token,
     hostOf: (session) => live.askHostOf(session),
     ...(options.askTimes ? { times: options.askTimes } : {}),
@@ -5262,6 +5501,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const priority = createInboxPriority({ store, serverSession, readBody: (req) => readBody(req), json });
   // Tags on threads (packages/server/inbox-thread-tags.ts).
   const threadTags = createInboxThreadTags({ store, serverSession, readBody: (req) => readBody(req), json });
+  const projectTagsRoute = createInboxProjectTagsRoute({ tags: projectTags, serverSession, readBody: (req) => readBody(req), json });
   // Pinned artifacts and the Artifacts wall (packages/server/inbox-artifact-pins.ts).
   const artifactPins = createInboxArtifactPins({ store, serverSession, readBody: (req) => readBody(req), json });
   // Icon sets for agents' icons ("Sets": built in, or fetched into the data folder on one click; inbox-icon-sets.ts).
@@ -5303,6 +5543,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   // Live HTML embeds (approval "inbox-inline-html"): the documents the window frames for a message's ```html fences (inbox-embeds.ts).
   const embeds = createInboxEmbeds({ readBody: (req) => readBody(req), json });
+  // The same block while the person comments on it: the window's own build of its page, under the same policy.
+  const embedPages = createInboxEmbedPages({ readBody: (req) => readBody(req), json });
   // Attached HTML pages ("Pages only"): the documents the window frames for an attached page, under their own policy (inbox-pages.ts).
   const attachedPages = createInboxPages({ readBody: (req) => readBody(req), json });
   // The sidebar's Feedback dialog: forwards what the person typed to the feedback Worker (inbox-feedback.ts),
@@ -5316,6 +5558,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     for (const listener of priorityListeners) listener();
   });
   const stopThreadTagEvents = store.onThreadTagsChange(() => {
+    for (const listener of threadTagListeners) listener();
+  });
+  // A project's tags changed: the same `event: tags`, so windows and linked machines read the list again.
+  const stopProjectTagEvents = projectTags.onChange(() => {
     for (const listener of threadTagListeners) listener();
   });
   const stopArtifactPinEvents = store.onArtifactPinsChange(() => {
@@ -5350,6 +5596,22 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let cfAccess: InboxCfAccess | null = null;
   let cfRoutes: ReturnType<typeof createCfAccessRoutes> | null = null;
   const fromCfDoor = new WeakSet<Request>();
+  /**
+   * Where the person wrote a message, told from this request (inbox-sent-from.ts): `here` for this computer's own
+   * window (its marks are in `body`, `isWindowRequest`), null when not known (a program's call, among others).
+   */
+  const sentFromOf = (req: Request, via: RequestVia, body?: Record<string, unknown>): InboxSentFrom | null => {
+    const door = fromDeviceDoor.get(req);
+    // The name this Inbox shows for a linked computer, else (missing or empty) its device's name: inbox-sent-from.ts picks.
+    const machineName = door?.platform === MACHINE_PLATFORM ? (machines?.machineOfDevice(door.device_id)?.name ?? null) : null;
+    return inboxRequestSentFrom({
+      via,
+      ownNode: fromOwnTailnetNode.has(req),
+      cloudflare: fromCfDoor.has(req),
+      window: !door && body !== undefined && isWindowRequest(req, body, serverSession),
+      door: door ? { platform: door.platform, machineName, deviceName: door.name, place: door.place ?? null } : null,
+    });
+  };
 
   const readBody = async (req: Request): Promise<Record<string, unknown>> => {
     try {
@@ -5432,13 +5694,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const accounts = createInboxAccountsFor(agentEnvironment, options.accounts);
 
   /** "Open in" for attachments: launches an app on this computer, so local only (never the tailnet, never the device door). */
+  const openInLauncher = options.openInLauncher ?? systemOpenInLauncher();
   const openInRoute = createInboxOpenInRoute({
     store,
     serverSession,
     readBody,
     json,
     localOnly,
-    launcher: options.openInLauncher ?? systemOpenInLauncher(),
+    launcher: openInLauncher,
     home: options.openInHome,
     doorOf: (req) => fromDeviceDoor.get(req) ?? null,
     codeReviewOn,
@@ -5461,6 +5724,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const { wanted } = await pullProjects();
       if (!pulls.find(pull)) await findPulls([pull], wanted);
       return pulls.file(pull, path, wanted);
+    },
+  });
+
+  // Run and Secret (`:::run`, `:::secret`; inbox-run-setup.ts): the person's press runs a command here, as them; a
+  // secret's value goes to this computer's keychain (a sandboxed test Inbox: a file in its own folder, never a keychain).
+  const runRoutes = createInboxRunSetup({
+    store,
+    serverSession,
+    dataDir,
+    sandbox: !!process.env.PLANNOTATOR_TEST_SANDBOX,
+    readBody,
+    json,
+    readLoginEnv: process.platform === "win32" && !process.env.PLANNOTATOR_TEST_SANDBOX ? async () => launchPlainEnv(launchOwnEnv(), [], "win32") : loginEnv,
+    door: (req) => fromDeviceDoor.get(req),
+    computer: (viaDoor) => (viaDoor ? phones?.machineDoor.computerName() : null) ?? (process.platform === "darwin" ? "your Mac" : process.platform === "win32" ? "your PC" : "your computer"),
+    displayFolder: (path) => displayPath(path, agentEnvironment) ?? path,
+    openInLauncher,
+    changed: (messageIds) => {
+      for (const listener of runStateListeners) listener(messageIds);
     },
   });
 
@@ -5542,6 +5824,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
 
   // Combine (packages/server/inbox-combine.ts): picked threads, one agent writes a new thread, then they are archived.
+  let combineFar: InboxCombineFar | undefined;
   const combine = createInboxCombine({
     store,
     serverSession,
@@ -5550,7 +5833,30 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     titleOf: (session) => live.labelOf(session) ?? live.titles()[session] ?? null,
     readBody,
     json,
+    // Picked threads on a linked machine (inbox-combine-far.ts): read there, archived there through the outbox.
+    far: () => {
+      if (!machines?.hasLinks()) return null;
+      const linked = machines;
+      return (combineFar ??= createInboxCombineFar({
+        readThread: (ask) => linked.readThread(ask),
+        rowOf: (threadId) => linked.rows().find((row) => row.thread_id === threadId) ?? null,
+        hold: (machine, route, body, thread, waitMs, own) => linked.holdWrite(machine, route, body, thread, waitMs, own),
+        heldWrite: (key) => linked.heldWrite(key),
+        listedRows: (machine) => linked.listedRows(machine),
+        cancelHeld: (key) => linked.cancelHeld(key),
+        fetchFile: (args) => linked.fetchFile(args),
+        online: (machine) => linked.machinesView().some((m) => m.id === machine && m.state === "online"),
+      }));
+    },
+    // Every running agent here: the ones with a connection (New message's), and the ones reached at their next MCP call.
+    liveSessions: () => [...live.allLive(), ...live.mcpAgents().map((agent) => ({ session: agent.session, host: agent.host, root: store.project(agent.project_id ?? "")?.root ?? null }))],
+    nameOf: (machine) => machines?.nameOf(machine) ?? "another computer",
+    doorMachine: (req) => {
+      const door = fromDeviceDoor.get(req);
+      return door?.platform === MACHINE_PLATFORM ? (machines?.machineOfDevice(door.device_id)?.machine ?? null) : null;
+    },
   });
+  combineUploads = () => combine.uploads();
 
   /** The optional debug log (inbox-debug-log.ts): null, the default, changes nothing and writes nothing. */
   const debugLog = (options.debug ?? resolveInboxDebug(loadConfig(), process.env)) ? createInboxDebugLog(join(dataDir, "inbox")) : null;
@@ -5561,7 +5867,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * `/assets/`, so the page loads its entry script up front and the rest (the guided and code review, the
    * diagram runtimes, the syntax grammars) on first use. An unpacked page (the not-built line) serves whole.
    */
-  const windowApp = openPackedApp(options.htmlContent ?? NOT_BUILT_PAGE);
+  const windowApp = openPackedApp(options.htmlContent ?? NOT_BUILT_PAGE, { page: (html) => pageWithCustomThemes(html, dataDir) });
+  // The page as it goes out (the person's themes written in), and a number that changes with it: a compressed
+  // body made for one page is ready only for that page.
+  let windowPageNow = "";
+  let windowPageVersion = 0;
+  const currentWindowPage = (): string => {
+    const page = windowApp.page();
+    if (page !== windowPageNow) {
+      windowPageNow = page;
+      windowPageVersion++;
+    }
+    return page;
+  };
+  const readyKey = (encoding: string, path: string) => (path === "/" ? `${encoding} /#${windowPageVersion}` : `${encoding} ${path}`);
   const semDiffAssets = createSemDiffAssets(options.semDiff);
   const windowEntryScripts = [...windowApp.html.matchAll(/<script type="module"[^>]*\ssrc="(\/assets\/[^"]+)"/g)].map((m) => m[1]!);
   // Every listener sends the page and its scripts compressed. Each compressed body is made once per Inbox run,
@@ -5569,10 +5888,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // asks of localhost and of an HTTPS address); gzip (a plain-http address, Safari) on first ask.
   const compressedReady = new Set<string>();
   const warmCompressed = (path: string, encoding: "br" | "gzip"): Promise<void> => {
-    const key = `${encoding} ${path}`;
+    if (path === "/") currentWindowPage();
+    const key = readyKey(encoding, path);
     if (compressedReady.has(key)) return Promise.resolve();
     const made: Promise<boolean> =
-      path === "/" ? encodeAppHtml(windowApp.html, encoding).then(() => true) : windowApp.answer(path, "GET", encoding, true).then((answer) => answer.status === 200);
+      path === "/" ? encodeAppHtml(windowPageNow, encoding).then(() => true) : windowApp.answer(path, "GET", encoding, true).then((answer) => answer.status === 200);
     return made.then(
       (ok) => {
         if (ok) compressedReady.add(key);
@@ -5589,7 +5909,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const compressWindowAsset = (req: Request, via: RequestVia, path: string): boolean => {
     if (via !== "local" || req.headers.has("x-forwarded-for")) return true;
     const encoding = negotiateAppHtmlEncoding(req.headers.get("accept-encoding"));
-    if (encoding === "identity" || compressedReady.has(`${encoding} ${path}`)) return true;
+    if (path === "/") currentWindowPage();
+    if (encoding === "identity" || compressedReady.has(readyKey(encoding, path))) return true;
     void warmCompressed(path, encoding);
     return false;
   };
@@ -5710,6 +6031,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           headers.delete("content-length");
           return mcp.fetch(new Request(req.url, { method: "POST", headers, body: JSON.stringify(stripped) }));
         }
+        const client = inboxMcpInitializeClient(body);
+        if (client !== undefined) return mcpForInitialize(client).fetch(req);
       }
       return mcp.fetch(req);
     }
@@ -5861,8 +6184,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const snoozedMode = snoozedModeOf(url);
         // A linked machine's read lists every thread: its own window hides by its own records (inbox-pull-hidden.ts).
         const rows = perfPhase("rows", () => listModel(projectFilter, archivedMode, merged, snoozedMode, fromDeviceDoor.get(req)?.platform !== MACHINE_PLATFORM));
-        const labels = merged ? { ...machines.sessionNames().labels, ...live.labels() } : live.labels();
-        const titles = { ...(merged ? machines.sessionNames().titles : {}), ...live.titles() };
+        const liveNow = new Set(live.allLive().map((s) => s.session));
+        const remembered = (all: Record<string, string>) => {
+          const out: Record<string, string> = {};
+          for (const [session, text] of Object.entries(all)) if (!liveNow.has(session)) out[session] = text;
+          return out;
+        };
+        const labels = { ...remembered(sessionLabelStore.labels()), ...(merged ? machines.sessionNames().labels : {}), ...live.labels() };
+        const titles = { ...remembered(sessionLabelStore.titles()), ...(merged ? machines.sessionNames().titles : {}), ...live.titles() };
         // A linked machine's read carries this Inbox's agent faces and given names in its group: they live here
         // (inbox-linked-marks), and that machine's windows show them. This Inbox's own windows read them apart.
         const door = fromDeviceDoor.get(req);
@@ -5870,8 +6199,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const faces = fromMachine ? agentFacesFile.wire() : null;
         const phone = door !== undefined && !fromMachine;
         const listed = faces ? rows.agents.map((group) => ({ ...group, faces: faces.faces, faces_rev: faces.rev, face_tiles: true as const })) : rows.agents;
-        // Where this computer's agents live and what their panes say, as Rex says now, in every window; Show in Rex only in one on this computer.
-        const agents = withRexPlaces(listed, via === "local" && door === undefined);
+        // Where this computer's agents live and what their panes say, as Rex says now, in every window; Show in Rex by where the window is.
+        const agents = withRexPlaces(listed, phone ? null : thisComputersWindow(req, via) ? "here" : "away");
         // And the "Show archived" switch, which every linked machine keeps the same (inbox-show-archived.ts).
         const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state() } : {}) };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
@@ -5880,23 +6209,28 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (since === null) return json(model);
         return json(listVersions.answer(`${projectFilter ?? ""}|${archivedMode}|${merged ? 1 : 0}|${snoozedMode}|${phone ? 1 : 0}`, model, since || null));
       }
-      // Show in Rex (inbox-rex.ts): Rex's app on this computer goes to the pane a live session said it lives in, on the
-      // person's click, for any session the list places in Rex (`rexHints`). Only this computer's windows offer it (it
-      // moves this screen); another site's page never asks.
+      // Show in Rex (inbox-rex.ts): Rex's app goes to the pane a live session said it lives in, on the person's click,
+      // for any session the list places in Rex (`rexHints`). From this computer's own window: this computer's app (on a
+      // Mac). From another computer's (the tailnet, or a linked machine's window through its door): the Rex apps
+      // attached to this Rex from elsewhere. Another site's page never asks.
       if (path === "/api/inbox/rex/show") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        // From a linked machine: only for a press in a window there (its Inbox marks it), never an agent's bare call.
+        const rexDoor = fromDeviceDoor.get(req);
+        if (rexDoor && !rexDoor.window) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
         const session = typeof body.session === "string" ? body.session : "";
         const place = session ? rexHints([session]).get(session) : undefined;
         if (!place) return json({ error: "That session isn't in Rex.", code: "not_in_rex" }, 404);
-        return json(await rex.show(place));
+        return json(await rex.show(place, thisComputersWindow(req, via) ? "here" : "away"));
       }
       // Linked machines (inbox-machines.ts): the forward /api/inbox/m/<machine>/<route>, the machines and the outbox.
       if (path.startsWith("/api/inbox/m/") || path.startsWith("/api/inbox/machines") || path.startsWith("/api/inbox/outbox")) {
         const answer = await machines.route(req, url, via);
-        if (answer) return answer;
+        // A linked machine's Rex showed a pane for this computer's own window: this computer's Rex app comes to the front (inbox-rex-far.ts).
+        if (answer) return thisComputersWindow(req, via) ? await inboxRaiseAfterFarShow(path, answer, rex) : answer;
       }
       if (path === "/api/inbox/threads/archived" && req.method === "GET") return json(url.searchParams.get("machines") === "1" ? await mergedArchivedModel(url) : archivedModel(url));
       // Decision mode (experimental, approval "inbox-decision-mode"): a read-only projection of every
@@ -5981,9 +6315,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method === "POST") {
           const body = await readBody(req);
           if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-          pullRisk.save(body);
+          if (body && typeof body === "object" && (body as { make_now?: unknown }).make_now === true) {
+            if (!launch.enabled()) return json({ error: "Starting agents from the Inbox is off in Settings \u2192 Agents.", code: "launch_off" }, 409);
+            const keys = (body as { keys?: unknown }).keys;
+            await pullRiskAuto?.makeNow(Array.isArray(keys) ? keys.filter((key): key is string => typeof key === "string") : []);
+          } else if (body && typeof body === "object" && (body as { not_now?: unknown }).not_now === true) {
+            const keys = (body as { keys?: unknown }).keys;
+            await pullRiskAuto?.notNow(Array.isArray(keys) ? keys.filter((key): key is string => typeof key === "string") : []);
+          } else {
+            pullRisk.save(body);
+            pullRiskAuto?.resume();
+          }
         }
-        return json({ serverSession, ...pullRisk.answer() });
+        const answer = pullRisk.answer();
+        const waiting = (await pullRiskAuto?.waiting()) ?? { high: [], medium: [] };
+        return json({ serverSession, ...answer, auto_would_start: { high: waiting.high.length, medium: waiting.medium.length }, auto_waiting: answer.auto ? waiting[answer.auto.level] : [], auto_dismissed: answer.auto ? waiting[answer.auto.level].filter((key) => pullRiskAuto?.dismissed().has(key)) : [], ...(await pullRiskAutoAgentWords(!!answer.auto || url.searchParams.get("auto_agent") === "1")) });
       }
       // "Changed since you looked" (inbox-pull-looked.ts): the PR page's look at PRs this machine lists, from its window,
       // the owner's over the tailnet, or a linked machine's window through the forward (rule 8's `set`). Same guards as the list.
@@ -6038,7 +6384,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         pullHiddenChanged();
         return json({ serverSession, hidden: hiddenList(), hidden_repos: pullHidden.repos(), hid: hide.map((pull) => pull.key), rehid, threads_left: left, threads_back: back });
       }
-      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes") {
+      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes" || path === "/api/inbox/pulls/review-image" || path === "/api/inbox/pulls/review-markdown-image" || path === "/api/inbox/pulls/package-changes") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
@@ -6106,6 +6452,27 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             throw cause;
           }
         }
+        // One side of a changed image, for the review app's own image preview on the PR page (inbox-review-image.ts):
+        // only a file the diff at the head the window names changes, every check the shared handler's.
+        // And a picture a changed Markdown file shows, for code review's rendered view (inbox-review-markdown-image.ts).
+        if (path === "/api/inbox/pulls/review-image" || path === "/api/inbox/pulls/review-markdown-image") {
+          const key = url.searchParams.get("key") ?? "";
+          const scoped = pullDiffScopeOf(url.searchParams);
+          if (!scoped) throw new InboxError("validation_error", "scope: layer, stack, range with from (a layer's key) or since with from (a commit).", { field: "scope" });
+          if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
+          const asked = { pulls, key, scope: scoped.scope, ...(scoped.from ? { from: scoped.from } : {}), params: url.searchParams, roots: () => pullRoots(key), ifNoneMatch: req.headers.get("if-none-match"), signal: req.signal };
+          return reviewImageHttp(await (path === "/api/inbox/pulls/review-image" ? pullReviewImage(asked) : pullReviewMarkdownImage(asked)));
+        }
+        // The package changes card under a package.json or lockfile the diff changes (inbox-package-changes.ts): the
+        // shared service's rows, from the diff at the head the window names; never npm.
+        if (path === "/api/inbox/pulls/package-changes") {
+          const key = url.searchParams.get("key") ?? "";
+          const scoped = pullDiffScopeOf(url.searchParams);
+          if (!scoped) throw new InboxError("validation_error", "scope: layer, stack, range with from (a layer's key) or since with from (a commit).", { field: "scope" });
+          if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
+          const out = await pullPackageChanges({ pulls, key, scope: scoped.scope, ...(scoped.from ? { from: scoped.from } : {}), params: url.searchParams, roots: () => pullRoots(key), cardOn: packageCardOn(loadConfig()) });
+          return Response.json(out.body, { status: out.status, headers: { "Cache-Control": "no-store" } });
+        }
         if (path === "/api/inbox/pulls/file") {
           const key = url.searchParams.get("key") ?? "";
           const scoped = pullDiffScopeOf(url.searchParams);
@@ -6142,7 +6509,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const far = everywhere && url.searchParams.get("machines") === "1" ? machines.pullLists(refresh) : null;
         const listed = await pulls.list(wanted, { refresh, others: url.searchParams.get("others") === "1", everywhere });
         // Risk is judged for the projects' PRs only, as before: the page never starts an agent on a repository it doesn't work in.
-        pullRisk.assess(everywhere ? listed.pulls.filter((pull) => projectsByRepo.has(`${pull.host}/${pull.repo}`.toLowerCase())) : listed.pulls);
+        pullRisk.assess(everywhere ? listed.pulls.filter((pull) => projectsByRepo.has(`${pull.host}/${pull.repo}`.toLowerCase())) : listed.pulls, { covered: pulls.othersCovered(listed), board: everywhere });
+        pullRiskAuto?.resume();
         // Only this list's authors: a host it did not list (project removed, CLI signed out) keeps no login.
         pullAvatars.allowOnly(listed.hosts.map(({ host }) => ({ host, avatars: pulls.avatarUrls(host) })));
         const owners = new Map([...(await branchService.owners(listed.pulls, projectsByRepo)), ...pullOwnersNow()]);
@@ -6180,7 +6548,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const { projectsByRepo, wanted } = last ?? (await pullProjects());
         const listed = last?.listed ?? (await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1", others: url.searchParams.get("others") === "1" }));
         lastReviewsRead = { projectsByRepo, wanted, listed };
-        pullRisk.assess(listed.pulls);
+        pullRisk.assess(listed.pulls, { covered: pulls.othersCovered(listed) });
+        pullRiskAuto?.resume();
         // A reported branch's thread owns the person's own PR on that branch (the person's own choice still wins).
         const branchOwners = await branchService.owners(listed.pulls, projectsByRepo);
         const owners = new Map([...branchOwners, ...pullOwnersNow()]);
@@ -6250,36 +6619,53 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const project = store.project(url.searchParams.get("project") ?? "");
         const changes = url.searchParams.get("changes");
         if (!project || (changes !== "uncommitted" && changes !== "last" && changes !== "branch")) return json({ error: "A project and which changes.", code: "validation_error" }, 400);
-        // Branch reviews: a named branch's whole diff (the safety net's Start a review), not the checked-out one's.
-        const branch = changes === "branch" && branchReviewsOn() ? url.searchParams.get("branch") : null;
-        return json(await readInboxReviewChanges(project.root, changes, branch && inboxPullSafeBranch(branch) ? branch : null));
+        // A named branch's whole diff (Reviews' "On this computer": a branch's Review with an agent), not the checked-out one's.
+        const branch = changes === "branch" ? url.searchParams.get("branch") : null;
+        // A branch's diff that can't be read, or is past its cap, is said so, never "No changes" (the box would move To).
+        return await readInboxReviewChanges(project.root, changes, branch && inboxPullSafeBranch(branch) ? branch : null).then(json, (cause: unknown) =>
+          cause instanceof BranchDiffTooLarge ? json({ error: cause.message, code: "diff_too_large" }, 413) : json({ error: cause instanceof Error ? cause.message : "The diff could not be read.", code: "git_failed" }, 500),
+        );
       }
-      // Branch reviews (inbox-branch-service.ts): the reported branches, the by-hand list of branches nobody reported,
-      // and a reported branch's Rank. Refused before any git while Branch reviews (or Code review) is off.
-      if (path === "/api/inbox/reviews/branches" || path === "/api/inbox/reviews/branches/unreported" || path === "/api/inbox/reviews/branches/rank") {
+      // Reviews' "On this computer" (inbox-local-work.ts): this computer's work in no PR, and a row's diff, read only.
+      // The window's own reads: never through the door, never a program without the window's same-origin mark.
+      if (path === "/api/inbox/reviews/local" || path === "/api/inbox/reviews/local/diff") {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (fromDeviceDoor.get(req) || req.headers.get("sec-fetch-site")?.trim().toLowerCase() !== "same-origin") {
+          return json({ error: "Only the Inbox window reads this computer's local work.", code: "window_only" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        // `?project=`: a list filtered to one project gets all of its rows, up to the cap, whatever the others have.
+        if (path === "/api/inbox/reviews/local") return json({ serverSession, ...(await localWork.list(url.searchParams.get("project") || null)) });
+        const project = store.project(url.searchParams.get("project") ?? "");
+        const branch = url.searchParams.get("branch");
+        if (!project || (branch !== null && !inboxPullSafeBranch(branch))) return json({ error: "A project, and a branch or none.", code: "validation_error" }, 400);
+        try {
+          const answer = await localWork.diff(project, branch);
+          if (!answer) return json({ error: "This project's folder isn't a git repository on this computer.", code: "not_git" }, 404);
+          return json({ serverSession, ...answer });
+        } catch (cause) {
+          // Past the cap: said, never a cut diff.
+          if (cause instanceof BranchDiffTooLarge) return json({ error: cause.message, code: "diff_too_large" }, 413);
+          return json({ error: cause instanceof Error ? cause.message : "The diff could not be read.", code: "git_failed" }, 500);
+        }
+      }
+      // Branch reviews (inbox-branch-service.ts): the reported branches and a reported branch's Rank. Refused before any
+      // git while Branch reviews (or Code review) is off.
+      if (path === "/api/inbox/reviews/branches" || path === "/api/inbox/reviews/branches/rank") {
         const rank = path === "/api/inbox/reviews/branches/rank";
         if (req.method !== (rank ? "POST" : "GET")) return json({ error: rank ? "Use POST." : "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
         if (!branchReviewsOn()) return json({ error: "Branch reviews are off.", code: "branch_reviews_off" }, 409);
-        if (path === "/api/inbox/reviews/branches") return json({ serverSession, reports: await branchService.rows() });
-        if (rank) {
-          const body = (await readBody(req)) as { thread_id?: unknown };
-          if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-          if (!isInboxId("msg", body?.thread_id)) return json({ error: "thread_id: a reported branch's thread.", code: "validation_error" }, 400);
-          return json({ serverSession, started: await branchService.rank(body.thread_id) });
-        }
-        const project = store.project(url.searchParams.get("project") ?? "");
-        if (!project) return json({ error: "A project.", code: "validation_error" }, 400);
-        // A branch with an open PR is the PR's row: never listed here.
-        const openHeads = new Set((lastReviewsRead?.listed.pulls ?? []).filter(inboxPullIsOpen).map((pull) => pull.head));
-        try {
-          return json({ serverSession, ...(await branchService.unreported(store.project(store.canonicalProjectId(project.id)) ?? project, openHeads)) });
-        } catch {
-          // A git read that failed or ran out of time: the list says so, never "no branches".
-          return json({ error: "The branches could not be read.", code: "git_failed" }, 500);
-        }
+        if (!rank) return json({ serverSession, reports: await branchService.rows() });
+        const body = (await readBody(req)) as { thread_id?: unknown };
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        if (!isInboxId("msg", body?.thread_id)) return json({ error: "thread_id: a reported branch's thread.", code: "validation_error" }, 400);
+        return json({ serverSession, started: await branchService.rank(body.thread_id) });
       }
       // System's project setup (inbox-system-setup.ts): the projects found on this Mac with a git remote, and the
       // save of one project's setup.json. Owner only, same origin, and only while System is on.
@@ -6362,8 +6748,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           const links = linkInboxPulls((keys as string[]).map((key) => pulls.find(key)!), pullLinkStore, projectsByRepo, pullOwnersNow());
           return json({ serverSession, ok: true, owner: Object.values(links).find((link) => link.via === "owner")?.thread_id ?? null });
         }
-        if (body.ask !== undefined && body.ask !== "guide" && body.ask !== "custom" && body.ask !== "thread") throw new InboxError("validation_error", "ask: guide, custom or thread.", { field: "ask" });
-        pullOwners.set(keys as string[], threadId, { ask: (body.ask as "guide" | "custom" | "thread" | undefined) ?? null, theirs });
+        if (body.ask !== undefined && !isInboxPullAsk(body.ask)) throw new InboxError("validation_error", `ask: ${INBOX_PULL_ASKS.join(", ")}.`, { field: "ask" });
+        pullOwners.set(keys as string[], threadId, { ask: body.ask ?? null, theirs });
         couplePulls(keys as string[], threadId);
         return json({ serverSession, ok: true });
       }
@@ -6491,24 +6877,39 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const key = typeof body.key === "string" && body.key.length > 0 && body.key.length <= 600 ? body.key : null;
         if (!key) throw new InboxError("validation_error", "key: a pull request key from the list.", { field: "key" });
         const reopen = path === "/api/inbox/pulls/reopen";
-        const closedHere = closedByInbox.get(key);
-        if (reopen && !reopenAllowed(closedHere?.at, Date.now())) {
-          return json({ error: `Only a pull request closed here in the last ${PULL_REOPEN_WINDOW_MS / 60_000} minutes can be reopened here.`, code: "reopen_not_closed_here" }, 409);
-        }
-        if (!reopen && !pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
-        const pull = reopen ? (pulls.find(key) ?? closedHere?.pull) : pulls.find(key);
-        if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
-        if (!reopen && !inboxPullIsOpen(pull)) return json({ error: pull.state === "merged" ? "It is already merged." : "It is already closed.", code: pull.state === "merged" ? "pull_merged" : "pull_closed" }, 409);
-        const result = reopen ? await reopenPull(options.refRunner ?? refCliRunner, pull) : await closePull(options.refRunner ?? refCliRunner, pull);
-        if (!result.ok) return json({ error: result.message, code: result.code }, result.code === "pull_close_failed" ? 502 : 409);
-        if (reopen) {
-          closedByInbox.delete(key);
-          pulls.markReopened(key);
-        } else {
-          closedByInbox.set(key, { at: Date.now(), pull });
-          pulls.markClosed(key);
-        }
-        return json({ serverSession, ok: true, key, url: pull.url });
+        // One line per close and per reopen, whatever its end (a throw too): kept in pull-closes.jsonl always, with the
+        // PR's key; in the debug log while it is on, without it (`pull_close`, debug-log.ts). Never the title.
+        const by = fromDeviceDoor.has(req) ? "machine" : "window";
+        const line = (status: number, code: unknown) => {
+          const fields = pullCloseFields(reopen ? "reopen" : "close", status, code, via, by);
+          keepPullClose(inboxDir(dataDir), { ...fields, key: pullKeyForLog(key) });
+          debugLog?.note("pull_close", fields);
+        };
+        const [answer, status] = await (async (): Promise<[Record<string, unknown>, number]> => {
+          const closedHere = closedByInbox.get(key);
+          if (reopen && !reopenAllowed(closedHere?.at, Date.now())) {
+            return [{ error: `Only a pull request closed here in the last ${PULL_REOPEN_WINDOW_MS / 60_000} minutes can be reopened here.`, code: "reopen_not_closed_here" }, 409];
+          }
+          if (!reopen && !pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
+          const pull = reopen ? (pulls.find(key) ?? closedHere?.pull) : pulls.find(key);
+          if (!pull) return [{ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404];
+          if (!reopen && !inboxPullIsOpen(pull)) return [{ error: pull.state === "merged" ? "It is already merged." : "It is already closed.", code: pull.state === "merged" ? "pull_merged" : "pull_closed" }, 409];
+          const result = reopen ? await reopenPull(options.refRunner ?? refCliRunner, pull) : await closePull(options.refRunner ?? refCliRunner, pull);
+          if (!result.ok) return [{ error: result.message, code: result.code }, result.code === "pull_close_failed" ? 502 : 409];
+          if (reopen) {
+            closedByInbox.delete(key);
+            pulls.markReopened(key);
+          } else {
+            closedByInbox.set(key, { at: Date.now(), pull });
+            pulls.markClosed(key);
+          }
+          return [{ serverSession, ok: true, key, url: pull.url }, 200];
+        })().catch((cause: unknown) => {
+          line(0, "threw");
+          throw cause;
+        });
+        line(status, answer.code);
+        return json(answer, status);
       }
       if (path === "/api/inbox/events" && req.method === "GET") {
       // Another site's page must not hold (or time) a stream of everything the Inbox holds:
@@ -6786,8 +7187,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.board === undefined &&
           body.steps === undefined &&
           body.bro === undefined &&
+          body.agent_status === undefined &&
           body.float_drafts === undefined &&
           body.mark_read_warning === undefined &&
+          body.split_view === undefined &&
           body.code_review === undefined &&
           body.shape === undefined &&
           body.system === undefined &&
@@ -6799,7 +7202,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.show_archived === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, float_drafts, mark_read_warning, code_review, shape, plans, system, scheduled_threads, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, agent_status, float_drafts, mark_read_warning, split_view, code_review, shape, plans, system, scheduled_threads, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
         }
         // System: a malformed value throws here.
         system.check(body);
@@ -6844,8 +7247,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.board !== undefined) saveBoard(body.board, true);
         if (body.steps !== undefined) saveSteps(body.steps, true);
         if (body.bro !== undefined) saveBro(body.bro, true);
+        if (body.agent_status !== undefined) agentStatus.save(body.agent_status, true);
         if (body.float_drafts !== undefined) saveFloatDrafts(body.float_drafts, true);
         if (body.mark_read_warning !== undefined) saveMarkReadWarning(body.mark_read_warning, true);
+        if (body.split_view !== undefined) saveSplitView(body.split_view, true);
         if (body.code_review !== undefined) saveCodeReview(body.code_review, true);
         if (body.shape !== undefined) saveShape(body.shape, true);
         if (body.chapter_diagrams !== undefined) saveChapterDiagrams(body.chapter_diagrams, true);
@@ -6877,8 +7282,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const board = body.board === undefined ? { on: boardOn() } : saveBoard(body.board);
         const steps = body.steps === undefined ? { on: stepsOn() } : saveSteps(body.steps);
         const bro = body.bro === undefined ? { on: broOn() } : saveBro(body.bro);
+        const agentStatusNow = body.agent_status === undefined ? { on: agentStatus.on() } : agentStatus.save(body.agent_status);
         const floatDrafts = body.float_drafts === undefined ? { on: floatDraftsOn() } : saveFloatDrafts(body.float_drafts);
         const markReadWarning = body.mark_read_warning === undefined ? { on: markReadWarningOn() } : saveMarkReadWarning(body.mark_read_warning);
+        const splitView = body.split_view === undefined ? { on: splitViewOn() } : saveSplitView(body.split_view);
         const codeReview = body.code_review === undefined ? { on: codeReviewOn() } : saveCodeReview(body.code_review);
         const shape = body.shape === undefined ? { on: shapeOn() } : saveShape(body.shape);
         const systemAnswer = { ...system.answer(body), ...answerInboxCapabilities(capabilities, body) };
@@ -6888,7 +7295,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
         const showArchivedNow = showArchivedOn === undefined ? showArchived.state() : saveShowArchived(showArchivedOn);
-        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, float_drafts: floatDrafts, mark_read_warning: markReadWarning, code_review: { on: codeReview.on }, ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
+        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, ...(body.sound === undefined ? {} : { sound_rev: soundRev }), tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, agent_status: agentStatusNow, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, code_review: { on: codeReview.on }, ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
       }
       // Routines (inbox-scheduled-routes.ts): the window's list, editor, Run now and Stop.
       if (path === "/api/inbox/scheduled" || path.startsWith("/api/inbox/scheduled/")) {
@@ -6983,8 +7390,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Not now keeps the usual day, approval "inbox-one-time-dialogs").
         if (body.answer === "not_now") {
           if (!revealNotNowAllowed(id)) throw new InboxError("validation_error", `id: ${INBOX_REVEALS.filter((entry) => entry.kind === "offer").map((entry) => entry.id).join(", ")}.`, { field: "id" });
-        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || id === "sidebar_tip" || (typeof id === "string" && id in lineOffers))) {
-          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip, sidebar_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
+        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || id === "sidebar_tip" || id === "band_tip" || (typeof id === "string" && id in lineOffers))) {
+          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip, sidebar_tip, band_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
         }
         // The agent note's agents (the ones it would ask about): it shows once for each. Optional (an older page).
         const agents = id === "agent_note" ? revealAgentNoteAgents(body.agents) : null;
@@ -6992,6 +7399,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The page's own key for this claim (a retry after a lost answer sends it again): optional, as an older page sends none.
         const key = body.key;
         if (key !== undefined && (typeof key !== "string" || !/^[A-Za-z0-9_-]{8,64}$/.test(key))) throw new InboxError("validation_error", "key: 8 to 64 letters, digits, - or _.", { field: "key" });
+        // `used`: the Group tip only, a band's menu opened (it retires the tip, never shows it).
+        if (body.used !== undefined && (body.used !== true || id !== "band_tip")) throw new InboxError("validation_error", "used: true, with id band_tip only.", { field: "used" });
         const load = revealLoadId(req.headers.get("x-plannotator-load"));
         // Not now on an offer already shown: the line waits three days. Nothing is claimed.
         if (body.answer === "not_now") {
@@ -7005,6 +7414,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The Sidebar tip: outside the line too (packages/shared/inbox/sidebar-tip.ts).
         if (id === "sidebar_tip") {
           return json({ show: claimSidebarTip(key ?? null), reveal: { next: revealNow(load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
+        }
+        // The Group tip: outside the line, its own stamp only (packages/shared/inbox/band-tip.ts).
+        if (id === "band_tip") {
+          return json({ show: claimBandTip(key ?? null, body.used === true), reveal: { next: revealNow(load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
         }
         // The star ask: its claim waits on the already-starred check (gh, up to 3 s) and says how the button works.
         if (id === "star") {
@@ -7059,7 +7472,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const capable = await routeInboxCapabilities(capabilities, req, url, { local: via === "local" && !fromDeviceDoor.has(req), crossSite: () => crossSiteCardRead(req), serverSession });
       if (capable) return capable;
       // Search: a read route (and the recent searches the window writes on opening a result).
-      const searched = await search.handle(req, url);
+      const searched = await search.handle(req, url, {
+        linked: () => machines.machinesView().filter((machine) => !machine.self && machine.state !== "revoked").map((machine) => ({ id: machine.id, name: machine.name, online: machine.state === "online" })),
+        projectOwner: (projectId) => machines.projectOwner(projectId),
+        forward: (forwarded, target) => machines.route(forwarded, target, via),
+      });
       if (searched) return searched;
       // The composers' skill picker and the SKILL.md a Send pastes in (inbox-skills.ts): read routes.
       const skills = inboxSkillsRoute(req, url, { codeReview: codeReviewOn(), shape: shapeOn(), routines: scheduledCap.on() });
@@ -7073,15 +7490,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The device door is never the owner here: it may not trust a folder, so it is offered none.
       // A linked machine is the owner's other computer: it may trust a folder for a press in its window (remote launch).
       const machineDoor = door?.platform === MACHINE_PLATFORM;
-      const composed = await compose.route(req, url, !door || machineDoor, door ? { machine: machineDoor, window: door.window, from: machineDoor ? machines.machineOfDevice(door.device_id) : null } : null, via === "local" && !door);
+      const composed = await compose.route(req, url, !door || machineDoor, door ? { machine: machineDoor, window: door.window, from: machineDoor ? machines.machineOfDevice(door.device_id) : null } : null, via === "local" && !door, (body) => sentFromOf(req, via, body));
       if (composed) return composed;
-      const reviewed = await liveReview.route(req, url, !door);
+      const reviewed = await liveReview.route(req, url, !door, (body) => sentFromOf(req, via, body));
       if (reviewed) return reviewed;
       // Reply drafts: the reply box's words per thread (approval "inbox-reply-drafts").
       const drafted = await replyDrafts.route(req, url);
       if (drafted) return drafted;
       const commentDrafted = await commentDrafts.route(req, url);
       if (commentDrafted) return commentDrafted;
+      const actedAnswer = await actedRoute.route(req, url);
+      if (actedAnswer) return actedAnswer;
       const takenBack = await takeBack.route(req, url);
       if (takenBack) return takenBack;
       // Ask AI: on for everyone; only the owner's own window is answered.
@@ -7096,6 +7515,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Tags on threads (approval "inbox-thread-tags"): Add tag, untick, Remove from.
       const threadTagged = await threadTags.route(req, url);
       if (threadTagged) return threadTagged;
+      // Tags on projects (project-tags.ts): the project's ⋯ → Add tag.
+      const projectTagged = await projectTagsRoute(req, url);
+      if (projectTagged) return projectTagged;
       // Pinned artifacts and the Artifacts wall (approval "inbox-artifact-stars").
       const artifactPinned = await artifactPins.route(req, url);
       if (artifactPinned) return artifactPinned;
@@ -7116,6 +7538,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Live HTML embeds: keep a fence's page, and serve it under its own sandboxing policy.
       const embedded = await embeds.route(req, url, framers);
       if (embedded) return embedded;
+      const embeddedPage = await embedPages.route(req, url, framers);
+      if (embeddedPage) return embeddedPage;
       // Attached HTML pages: keep a page's frame document, and serve it under its own policy (web pictures, never in the window).
       const paged = await attachedPages.route(req, url, framers);
       if (paged) return paged;
@@ -7341,7 +7765,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (through !== undefined && through !== null && !(typeof through === "number" && Number.isSafeInteger(through) && through >= 0)) {
           throw new InboxError("validation_error", "through_seq: a message seq (a whole number, 0 or more).", { field: "through_seq" });
         }
-        return json({ thread: store.markSeen(seenMatch[1]!, typeof through === "number" ? through : undefined) });
+        const looked = store.markSeen(seenMatch[1]!, typeof through === "number" ? through : undefined);
+        // `opened` (additive): the person chose this thread (the window's opening look): "Recent activity" (acted.ts).
+        if (body.opened === true) acted.note(seenMatch[1]!);
+        return json({ thread: looked });
       }
 
       // Mark read and its Undo: the thread leaves the top for Quiet, its waiting questions closed (store.markRead).
@@ -7355,6 +7782,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const row = store.markRead(readMatch[1]!, read);
         if (read) scheduleSetAside(readMatch[1]!);
         return json({ thread: row });
+      }
+
+      // Re-ask all (a group's menu in the list; shared/inbox/reask-all.ts): the thread's Re-ask to each session with a
+      // question open that can still be woken, each delivered and woken as the thread's own Re-ask note. `batch_id`: the
+      // press's key, so a retry answers the notes it wrote. A session past waking is counted (`unreached`), never written to.
+      const reaskAllMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/reask$/.exec(path);
+      if (reaskAllMatch) {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const threadId = reaskAllMatch[1]!;
+        const wakes = {
+          gone: (session: string) => t3Wake.gone(session) || cloudWake.status(session) === "dead",
+          askerLive: (session: string) => live.askerLive(session),
+          resumes: (thread: string, session: string) => launch.resumes(thread, session),
+        };
+        return json(reaskThreadAll(store, threadId, typeof body.batch_id === "string" ? body.batch_id : "", (message) => reaskAllReachable(message, threadId, wakes), sentFromOf(req, via, body)));
       }
 
       // Mark unread: the latest agent message is new again (New, bold); nothing is sent, and a Mark read stands (store.markUnread).
@@ -7590,6 +8034,41 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ serverSession, ...contents });
       }
 
+      // A guided review's image previews (inbox-review-image.ts): one side of a changed image, the blob the guide's patch
+      // names, from the project's git or working tree; as for the arrows, only Code review may ask the forge.
+      // And a picture a changed Markdown file shows (inbox-review-markdown-image.ts), and the package changes card
+      // (inbox-package-changes.ts): the same reader (`guideSideReader`), given the same extras.
+      const guideImage = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/guide\/(review-image|review-markdown-image|package-changes)$/.exec(path);
+      if (guideImage) {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        const message = store.message(guideImage[1]!);
+        if (!message) return json({ error: "No such message.", code: "message_not_found" }, 404);
+        if (!message.guide) return json({ error: "This message carries no guided review.", code: "guide_not_found" }, 404);
+        const { sha256 } = message.guide;
+        const projectRoot = store.project(message.project_id)?.root ?? null;
+        const pullKey = codeReviewOn() ? guidePullKey(store, sha256) : null;
+        const forge =
+          pullKey && pulls.find(pullKey)
+            ? async (side: "old" | "new", filePath: string, oldPath: string | undefined, maxBytes: number) => {
+                const roots = await pullRoots(pullKey);
+                // Only a PR of this message's own project: a guide cannot name any PR on this machine to read its files.
+                return projectRoot && roots.includes(projectRoot) ? pulls.fileBytes(pullKey, "layer", side, filePath, oldPath, roots, maxBytes) : ({ kind: "missing" } as const);
+              }
+            : undefined;
+        // One read of the guide: its patch, and the commit it pins (a pure rename's sides, a file the patch does not change).
+        const review = guideReviewOf(store, sha256);
+        const read = { patch: review?.patch ?? null, revision: review?.revision ?? null, root: projectRoot, ...(forge ? { forge } : {}) };
+        if (guideImage[2] === "package-changes") {
+          const out = await guidePackageChanges({ ...read, messageId: message.id, params: url.searchParams, cardOn: packageCardOn(loadConfig()) });
+          return Response.json(out.body, { status: out.status, headers: { "Cache-Control": "no-store" } });
+        }
+        const asked = { ...read, messageId: message.id, params: url.searchParams, ifNoneMatch: req.headers.get("if-none-match"), signal: req.signal };
+        return reviewImageHttp(await (guideImage[2] === "review-image" ? guideReviewImage(asked) : guideReviewMarkdownImage(asked)));
+      }
+
       // Guided reviews (step 5): the snapshot a message carries (packages/server/inbox-guides.ts).
       const guide = await inboxGuideRoute(req, path, store, serverSession, codeReviewOn);
       if (guide) return guide;
@@ -7709,6 +8188,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 feedback: typeof body.feedback === "string" ? body.feedback : undefined,
                 annotation_ids: body.annotation_ids as never,
                 viewing: body.viewing,
+                sent_from: sentFromOf(req, via, body),
                 // A verdict on a review (Approve / Send feedback in the review's header): only while Code review is on.
                 ...(body.review_verdict !== undefined && body.review_verdict !== null
                   ? codeReviewOn()
@@ -7776,10 +8256,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             // (checked as a reply's is; null: not live, 409, nothing written).
             const asked = body.to === undefined ? undefined : store.message(messageId);
             const to = body.to === undefined || !asked ? undefined : live.replyTarget(asked.thread_id, body.to);
-            const result = store.sendReask(messageId, {
-              idempotency_key: body.idempotency_key as string,
-              ...(to === undefined ? {} : { to }),
-            });
+            // The key and `to` only: Re-ask all's left picks are never taken from a body.
+            const result = store.sendReask(messageId, { ...messageReaskInput(body, to), sent_from: sentFromOf(req, via, body) });
             return json({
               message_id: messageId,
               questions: store.questionsOf(messageId),
@@ -7791,6 +8269,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             if (body.resolved !== undefined && typeof body.resolved !== "boolean") {
               throw new InboxError("validation_error", "resolved: must be a boolean.");
             }
+            // A linked computer's Combine archive that lands late (inbox-combine-guard.ts): skipped, not refused, when
+            // the thread moved on since that Combine read it.
+            const skipped = combineArchiveSkip(store, messageId, body);
+            if (skipped) return json({ skipped });
+            combineArchiveAgain(store, messageId, body);
             // The person's Archive (the window, a phone, a linked machine's forward): it ends a snooze.
             const thread = store.resolveThread(messageId, body.resolved !== false, "person");
             // Unarchived: a Mark read's set-aside note an archive held back is due again.
@@ -7809,7 +8292,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // One origin: notification permission is per origin (inbox-canonical.ts).
         const canonical = inboxCanonicalRedirect(req, url, baseUrl, via);
         if (canonical) return canonical;
-        const page = windowApp.html;
+        const page = currentWindowPage();
         // A page load (or a refresh) asks for a new release when the answer is
         // over a minute old: fire-and-forget, the button follows on the event stream.
         if (req.method === "GET") updates.nudge();
@@ -7822,6 +8305,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The window's scripts, by exact name from the pack (404 for any other), compressed on every listener as the page is.
       if (path.startsWith(PACKED_ASSET_ROUTE_PREFIX)) return packedAppResponse(windowApp, req, path, compressWindowAsset(req, via, path));
       if ((path === "/favicon.png" || path === "/favicon.ico") && req.method === "GET") return handleFavicon(path);
+      // The person's own themes, for the window's first frame (packages/shared/theme-files.ts).
+      // A literal (CUSTOM_THEMES_SCRIPT_PATH), so the API table check reads this route.
+      if (path === "/plannotator-themes.js" && req.method === "GET") return handleCustomThemesScript(url.searchParams, dataDir);
       // The installed app's manifest and icons (inbox-app-icons.ts), of the same favicon style.
       if (req.method === "GET") {
         const appIcon = inboxAppIconResponse(path, faviconState());
@@ -7835,11 +8321,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
       // Step 8: the live sessions of a thread's project, and New message.
       // Session labels (issue #2450) ride these two.
-      const newMessage = await live.route(req, path);
+      const newMessage = await live.route(req, path, (body) => sentFromOf(req, via, body));
       if (newMessage) return newMessage;
       // Tags (approval "inbox-tag-agents"): who the person can tag with `@` (packages/server/inbox-tags.ts).
       const taggable = tagsRoute.route(req, path);
       if (taggable) return taggable;
+      // Run on a `:::run` block and Save on a `:::secret` block (inbox-run-routes.ts): the person's press only.
+      const ran = await runRoutes.route(req, path);
+      if (ran) return ran;
       // Thread steps (approval "inbox-thread-steps"): a thread's lists with each session's presence (packages/server/inbox-steps.ts).
       const steps = stepsRoute.route(req, path);
       if (steps) return steps;
@@ -7855,7 +8344,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
       // #1813: an image a message's body shows, read from wherever it is on this
       // computer outside the home folder's hidden folders (packages/server/inbox-message-images.ts).
-      const image = await inboxMessageImageRoute(req, url, store);
+      const image = await inboxMessageImageRoute(req, url, store, imageCapture.shown);
       if (image) return image;
 
       // "Open in": an attachment in its own app, by id only (packages/server/inbox-open-in.ts).
@@ -7978,7 +8467,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     dataDir,
     port: () => port,
     registry: () => registry,
-    dispatch: async (req) => markPlannotatorResponse(await encodeInboxResponse(req, await served(req, "tailnet"))),
+    dispatch: async (req, from) => {
+      if (from?.ownNode) fromOwnTailnetNode.add(req);
+      return markPlannotatorResponse(await encodeInboxResponse(req, await served(req, "tailnet")));
+    },
     tailscale: options.tailscale,
     timers: options.tailscaleTimers,
     // Published by itself after Tailscale came back: every window's Settings row follows at once.
@@ -8034,6 +8526,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       relay: { paired: async (device) => (relay ? relay.paired(device) : null), revoked: (device) => relay?.revoked(device) },
       phones: phonesOn,
       machines: () => machines ?? null,
+      // A linked machine's agents read this Inbox's threads and their files (inbox-far-read.ts).
+      // Each message's place is worded from the reading computer's side: who it is comes from its token (inbox-sent-from-reader.ts).
+      agentRead: { read: (url, device) => agentReadDoorAnswer(mcpContext, url, machines?.readerNameOfDevice(device.id, device.name) ?? ""), file: (url) => agentFileDoorAnswer(store, url) },
+      // ...and search and list them (inbox-far-find.ts): a project named by its git remote (unknown while git has not said).
+      agentFind: {
+        search: (url) => agentSearchDoorAnswer({ store, searchIndex: search.index, remoteOf: (root, waitMs) => farRemoteOf(repos, root, waitMs) }, url),
+        threads: (url) => agentThreadsDoorAnswer({ store, remoteOf: (root, waitMs) => farRemoteOf(repos, root, waitMs) }, url),
+      },
       machineUpdate: {
         read: () => updates.machineRead(),
         start: () => updates.machineStart(),
@@ -8061,6 +8561,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           // config.json could not be written: this machine keeps its own switch until the next read.
         }
       },
+      sentFrom: sentFromOf,
       timings: options.machineLinkTimings,
     });
     relay = createInboxRelay({
@@ -8070,6 +8571,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       payload: eventPayload,
       apply: devices.asDevice,
       phones: phonesOn,
+      // The push's badge and `time_sensitive` (push version 2): the rows as the window places them, a session on a prompt in Stopped on you.
+      rows: () => store.listRows().map(launch.rowDecorator()),
       agents: {
         apply: (deviceId, request, commandId) => agentDoor.asAgent(deviceId, request, commandId),
         signalsFor: (line) => agentSignalsFor(line),
@@ -8145,11 +8648,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const stop = () => {
     if (stopped) return;
     stopped = true;
+    stopInboxCapabilities(capabilities);
     clearTimeout(lazyAssetWarm);
     stopLoopWatch?.();
     releasePerfPhases?.();
     // The debug log's kept lines go in now (it keeps lines in memory for a moment).
     debugLog?.close();
+    // Recent activity's notes waiting for their write go in now too (acted.ts).
+    acted.flush();
     clearInterval(dataCheck);
     windows.stop();
     liveSites.stop();
@@ -8164,6 +8670,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     stopPinEvents();
     stopPriorityEvents();
     stopThreadTagEvents();
+    stopProjectTagEvents();
     stopArtifactPinEvents();
     snoozes.stop();
     clearInterval(restartWatch);
@@ -8175,6 +8682,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     rex.close();
     unsubscribeLaunchTip();
     unsubscribeAgentWork();
+    // Every `:::run` still running stops with the Inbox: no command outlives it.
+    runRoutes.stop();
     combine.close();
     codexWake.stop();
     qwenWake.stop();
@@ -8189,6 +8698,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ask.stop();
     // No judgment written after stop, and no agent left running.
     pullRisk.stop();
+    pullRiskAuto?.stop();
     void mcp.close().catch(() => {});
     server.stop(true);
     // The tailnet mapping and the door listener, the Wi-Fi listener and its

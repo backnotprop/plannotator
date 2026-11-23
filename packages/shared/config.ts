@@ -357,10 +357,13 @@ export interface PlannotatorConfig {
    */
   planReview?: boolean;
   /**
-   * Pi only: when the Plannotator extension on disk is newer than the one this
+   * Pi: when the Plannotator extension on disk is newer than the one this
    * Pi loaded, Pi reloads itself once the session is quiet (no run, no open
    * review, question or dialog, nothing typed for a while, an empty editor).
    * `false` turns it off: Pi then shows the one-line note with `/reload`.
+   * Claude Code (the mod): an idle session runs `/reload-plugins plannotator`
+   * when the Inbox says a newer plugin is installed. `false` turns it off: the
+   * Inbox tool stays, and the Inbox shows its manual `/reload-plugins` notice.
    * PLANNOTATOR_AUTO_RELOAD wins over this key. Unset: AUTO_RELOAD_DEFAULT.
    */
   autoReload?: boolean;
@@ -404,7 +407,7 @@ export interface PlannotatorConfig {
     allowedOrigin?: string | null;
   };
   /**
-   * The Plannotator Inbox's question sound ("Ding-dong"), set from the Inbox
+   * The Plannotator Inbox's sound ("Ding-dong"), set from the Inbox
    * page (its Settings row and its one-time dialog), kept here for the same
    * reason as `inboxNotifications`: the Inbox's port, and so its origin, can
    * change. `enabled`: ring at all (unset: on). `volume`: 10 to 100 (unset:
@@ -553,6 +556,13 @@ export interface PlannotatorConfig {
    */
   inboxBro?: boolean;
   /**
+   * Agent status (owner, 2026-11-18; off by default): the status mark on every agent's icon in the Inbox (working,
+   * waiting on you in the Inbox or in the agent; no idle mark). Off or unset: only agents in a Rex pane
+   * carry one, as before. Written by Settings → General → Appearance and the list's ⋮ menu
+   * (`POST /api/inbox/settings` `{ agent_status: { on } }`), read on every list.
+   */
+  inboxAgentStatus?: boolean;
+  /**
    * Floating reply drafts (approval "inbox-reply-floaters"; the owner, 2026-11-08: off by default). On: a reply draft
    * set aside or left behind floats in the Inbox's bottom right corner. Off or unset: it stays in Drafts. Written by
    * Settings → Capabilities → Experimental (`POST /api/inbox/settings` `{ float_drafts: { on } }`), read on every request.
@@ -568,7 +578,7 @@ export interface PlannotatorConfig {
   /**
    * The warning before a Mark read that sets questions aside (the owner's ask, 2026-11-10). On unless false: false
    * once the person ticked "Don't show this again" in it. Written by the warning and by Settings → General → When an
-   * agent asks you (`POST /api/inbox/settings` `{ mark_read_warning: { on } }`), read on every request.
+   * agent sends you something (`POST /api/inbox/settings` `{ mark_read_warning: { on } }`), read on every request.
    */
   inboxMarkReadWarning?: boolean;
   /**
@@ -637,6 +647,18 @@ export interface PlannotatorConfig {
   /** The Spaces home's view, the person's choice (`POST /api/plans/view`): "cards" unless they chose "list". */
   inboxSpacesView?: "cards" | "list";
   /**
+   * Share this space (packages/shared/spaces/): the Share button on a plan's page in the Inbox, which puts a copy of
+   * the plan in a hosted space. Off unless set to `true` here (config only: no Settings row, no command); it also
+   * needs `inboxPlans`, and `PLANNOTATOR_SHARE=disabled` (or `share: "disabled"`) turns it off with every other
+   * share. Off: no share route, no button, no call to any host.
+   */
+  inboxSpaceShare?: boolean;
+  /**
+   * The Spaces origin a plan is shared to (`resolveSpacesUrl` in packages/shared/spaces/url.ts). Overridden by the
+   * PLANNOTATOR_SPACES_URL env var. `https`, or `http` on this computer only.
+   */
+  spacesUrl?: string;
+  /**
    * System in the Inbox (approval "system-inbox"): a drawing of each project's code, kept current by an agent.
    * Shown only while Code review is on. Off unless turned on; config only until Settings → Capabilities' switch
    * lands. Read on every request.
@@ -690,7 +712,7 @@ export interface PlannotatorConfig {
     notNowAt?: string;
     shownLoad?: string;
     agentNote?: { shownFor?: string[] };
-    waitingSince?: { theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; agent_rules?: string; list_view?: string; personal_agents?: string; priority?: string; routines?: string };
+    waitingSince?: { theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; agent_rules?: string; list_view?: string; view_choice?: string; personal_agents?: string; priority?: string; routines?: string };
     /** Code review's day-0 offer (approval "code-review-offer-card"): claimed once, as the Board's. */
     code_review?: { shownAt?: string; key?: string };
     board?: { shownAt?: string; key?: string };
@@ -711,7 +733,10 @@ export interface PlannotatorConfig {
     grill_me_tip?: { shownAt?: string; key?: string };
     /** The "Star the repo" ask's claim in the line (config.json `starAsk` is its record across surfaces). */
     star?: { shownAt?: string; key?: string };
+    /** List view's two-choice dialog, retired (its entry left the line): kept as written, read by nothing. */
     list_view?: { shownAt?: string; key?: string };
+    /** "Which view do you prefer?" (reveals.ts `view_choice`): claimed once, as the Board's; a pick sets the browser's view. */
+    view_choice?: { shownAt?: string; key?: string };
     /**
      * The tab icon dialog (an update-day dialog): `dueAt` for someone who used an earlier Inbox, `freshAt` for a fresh
      * install (never due), both written at the first release start of the version that ships it; then claimed once.
@@ -723,11 +748,15 @@ export interface PlannotatorConfig {
     launch_tip?: { shownAt?: string; key?: string; launchedAt?: string };
     /** The Sidebar tip (packages/shared/inbox/sidebar-tip.ts): stamped once when shown, outside the line. */
     sidebar_tip?: { shownAt?: string; key?: string };
+    /** The Group tip (packages/shared/inbox/band-tip.ts): stamped once when shown, or when a band's menu was opened first. */
+    band_tip?: { shownAt?: string; key?: string; usedAt?: string };
   };
   /** `enabled` / `volume` are settings (config.json); `dialogDueFor` / `dialogShownFor` are machine state (state.json). */
   inboxSound?: {
     enabled?: boolean;
     volume?: number;
+    /** What rings it: "messages" (any new agent message; the default when absent) or "asks" (only an agent asking). */
+    when?: "messages" | "asks";
     dialogDueFor?: string;
     dialogShownFor?: string;
   };
@@ -869,6 +898,18 @@ export interface PlannotatorConfig {
    * this takes precedence over `bitbucketToken`.
    */
   bitbucketTokenCommand?: string[];
+  /**
+   * API tokens for Forgejo / Gitea instances, keyed by origin: scheme, host and
+   * port as they appear in the PR URL (`"https://forgejo.example.com"`,
+   * `"http://forgejo.lan:3000"`). A token is sent only to the origin it is keyed
+   * to, so a link to any other host, or to the same host over another scheme,
+   * never receives it. Scopes: `read:repository` and `read:issue` to read a PR and its
+   * attachments, `write:repository` to post a review.
+   * Stored in plain text in config.json, so prefer PLANNOTATOR_FORGEJO_TOKEN
+   * with PLANNOTATOR_FORGEJO_URL. Never sent to the browser: getServerConfig()
+   * allowlists its keys.
+   */
+  forgejoTokens?: Record<string, string>;
   /**
    * Pass `--sandbox enabled` when launching Cursor's `agent` CLI for review
    * jobs. When true (default), review jobs run with Cursor's sandbox forced
@@ -1055,6 +1096,7 @@ function writeState(state: Record<string, unknown>, read: ReturnType<typeof read
     }
     if (read.problem) {
       const aside = `${statePath}.corrupt-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+      forgetConfigRead(statePath);
       renameSync(statePath, aside);
       process.stderr.write(`[plannotator] Warning: state.json could not be used (${read.problem}); kept it as ${aside} and started a new one.\n`);
     }
@@ -1074,7 +1116,7 @@ function writeState(state: Record<string, unknown>, read: ReturnType<typeof read
 function readState(): { raw: string | null; state: Record<string, unknown>; problem?: string } {
   let raw: string;
   try {
-    raw = readFileSync(getStatePath(), "utf-8");
+    raw = readForLoad(getStatePath());
   } catch (e) {
     const code = (e as NodeJS.ErrnoException)?.code;
     if (code === "ENOENT") return { raw: null, state: {} };
@@ -1226,18 +1268,128 @@ export function inboxChapterDiagramsOn(config: Pick<PlannotatorConfig, "inboxCha
  * before it existed: a later read in the same command still warns).
  */
 export function loadConfig(options: { quiet?: boolean } = {}): PlannotatorConfig {
-  return withMachineState(loadSettings(options), readState().state);
+  return withMachineState(loadSettings(options), loadState());
+}
+
+// --- config.json / state.json read cache --------------------------------------
+//
+// loadConfig is called many times per request (one settings read asks it ~80
+// times), so each file's parse is kept, keyed by its path and its stat: an
+// unchanged file costs one stat per call and no read. The key is mtime, ctime,
+// size, device and inode (the pattern of inbox-launch.ts's config cache, with
+// ctime and device added: a copy that keeps the old mtime still changes
+// ctime), so a hand edit,
+// an editor's rename over the file, a delete or a write by another process is
+// read on the next call. A parse is kept only once the file is older than any
+// filesystem's timestamp tick (CONFIG_READ_SETTLE_MS: HFS+ 1 s, FAT 2 s, and
+// a margin for the lag at a tick's edge), so
+// two writes in one tick with the same size can never hide the second one. A
+// write from this process (writeConfigAtomic, writeState's set-aside) drops
+// the entry at once. Only a good parse is kept: a missing, unreadable or
+// invalid file is read again on every call, as before, with its warning.
+// Every call gets its own copy, so a caller that changes what it got changes
+// nothing for the next one.
+
+const CONFIG_READ_SETTLE_MS = 3000;
+const CONFIG_READ_CACHE_LIMIT = 8;
+const configReadCache = new Map<string, { key: string; value: Record<string, unknown> }>();
+
+let statForLoad: (path: string) => { mtimeMs: number; ctimeMs: number; size: number; dev: number; ino: number; isFile(): boolean } = (path) => statSync(path);
+let readForLoad: (path: string) => string = (path) => readFileSync(path, "utf-8");
+let nowForLoad: () => number = Date.now;
+
+/**
+ * Test-only seam: replaces the stat, the read and the clock loadConfig uses, so a test can count the reads and
+ * stats, or let a file it just wrote count as settled. Null, or a field left out, restores the real one.
+ */
+export function __setConfigReadForTest(
+  seams: { stat?: typeof statForLoad; read?: (path: string) => string; now?: () => number } | null,
+): void {
+  statForLoad = seams?.stat ?? ((path) => statSync(path));
+  readForLoad = seams?.read ?? ((path) => readFileSync(path, "utf-8"));
+  nowForLoad = seams?.now ?? Date.now;
+  configReadCache.clear();
+}
+
+/** The file's stat as a cache key, and whether it is old enough to keep a parse under. "absent": no stat (not there, or not reachable); null: not a regular file (read as before, never kept). */
+function configFileSignature(path: string): { key: string; settled: boolean } | "absent" | null {
+  let stat: ReturnType<typeof statForLoad>;
+  try {
+    stat = statForLoad(path);
+  } catch {
+    return "absent";
+  }
+  if (!stat.isFile()) return null;
+  return {
+    key: `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}:${stat.dev}:${stat.ino}`,
+    settled: nowForLoad() - Math.max(stat.mtimeMs, stat.ctimeMs) >= CONFIG_READ_SETTLE_MS,
+  };
+}
+
+function rememberConfigRead(path: string, signature: { key: string; settled: boolean }, value: Record<string, unknown>): void {
+  configReadCache.delete(path);
+  if (!signature.settled) return;
+  configReadCache.set(path, { key: signature.key, value: copyJson(value) });
+  if (configReadCache.size > CONFIG_READ_CACHE_LIMIT) configReadCache.delete(configReadCache.keys().next().value!);
+}
+
+/** A write to `path` from this process: the next load reads it again. */
+function forgetConfigRead(path: string): void {
+  configReadCache.delete(path);
+}
+
+/** A parsed JSON value, copied all the way down (own keys kept as own keys, `__proto__` included). */
+function copyJson<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(copyJson) as T;
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, copyJson(inner)])) as T;
+  }
+  return value;
 }
 
 function loadSettings(options: { quiet?: boolean }): Record<string, unknown> {
   try {
     const configPath = getConfigPath();
-    if (!existsSync(configPath)) return {};
+    // Not there (or not reachable): {}, as existsSync said before.
+    const signature = configFileSignature(configPath);
+    if (signature === "absent") {
+      forgetConfigRead(configPath);
+      return {};
+    }
+    const kept = signature && configReadCache.get(configPath);
+    if (kept && kept.key === signature.key) return copyJson(kept.value);
+    if (kept) forgetConfigRead(configPath);
     // A UTF-8 BOM (Notepad's "UTF-8 with BOM") is not part of the JSON.
-    const raw = readFileSync(configPath, "utf-8").replace(/^\uFEFF/, "");
-    return plainRecord(JSON.parse(raw)) ?? {};
+    const raw = readForLoad(configPath).replace(/^\uFEFF/, "");
+    const settings = plainRecord(JSON.parse(raw));
+    if (!settings) return {};
+    if (signature) rememberConfigRead(configPath, signature, settings);
+    return settings;
   } catch (e) {
     if (!options.quiet) process.stderr.write(`[plannotator] Warning: failed to read config.json: ${e}\n`);
+    return {};
+  }
+}
+
+/**
+ * state.json's records for loadConfig, through the read cache. saveConfig reads it with readState, never from here.
+ * Any failure (no data dir to name, as readState's own) reads as no state, without a warning, as readState did.
+ */
+function loadState(): Record<string, unknown> {
+  try {
+    const statePath = getStatePath();
+    const signature = configFileSignature(statePath);
+    if (signature === "absent") {
+      forgetConfigRead(statePath);
+      return {};
+    }
+    const kept = signature && configReadCache.get(statePath);
+    if (kept && kept.key === signature.key) return copyJson(kept.value);
+    if (kept) forgetConfigRead(statePath);
+    const read = readState();
+    if (signature && read.raw !== null && !read.problem) rememberConfigRead(statePath, signature, read.state);
+    return read.state;
+  } catch {
     return {};
   }
 }
@@ -1427,6 +1579,15 @@ export function __setConfigWriteForTest(
  * its old bytes, and the caller reports the save as failed.
  */
 function writeConfigAtomic(configPath: string, contents: string): void {
+  try {
+    writeConfigFile(configPath, contents);
+  } finally {
+    // Written or not, the next load reads the file again.
+    forgetConfigRead(configPath);
+  }
+}
+
+function writeConfigFile(configPath: string, contents: string): void {
   let targetPath = configPath;
   try {
     if (existsSync(configPath)) targetPath = realpathSync(configPath);
@@ -1837,7 +1998,7 @@ export function resolveInboxLaunch(
  * a string and would fail `=== false` checks downstream. Accepts real booleans
  * plus "true"/"false"/"1"/"0" strings; anything else falls back to the default.
  */
-function coerceConfigBoolean(value: unknown, fallback: boolean): boolean {
+export function coerceConfigBoolean(value: unknown, fallback: boolean): boolean {
   return parseConfigBoolean(value) ?? fallback;
 }
 
@@ -2083,15 +2244,16 @@ export function parseAgentToolEnv(env: NodeJS.ProcessEnv = process.env): boolean
 }
 
 /**
- * Whether Pi reloads itself for an updated Plannotator when neither the env
- * var nor config.json decides (owner's call 2026-10-29: on). The one place to
- * flip the default.
+ * Whether Pi and the Claude Code mod reload an updated Plannotator when neither
+ * the env var nor config.json decides (owner's call 2026-10-29: on). The one
+ * place to flip the default (the mod's mirror: apps/hook/hooks/mod/enabled.ts).
  */
 export const AUTO_RELOAD_DEFAULT = true;
 
 /**
- * Whether Pi reloads itself to load an updated Plannotator extension (see
- * `autoReload`, apps/pi-extension/auto-reload.ts).
+ * Whether Pi or the Claude Code mod reloads itself to load an updated
+ * Plannotator (see `autoReload`, apps/pi-extension/auto-reload.ts and
+ * apps/hook/hooks/mod/auto-reload.ts).
  *
  * Priority (highest wins):
  *   PLANNOTATOR_AUTO_RELOAD env var  →  config.autoReload  →  AUTO_RELOAD_DEFAULT
@@ -2891,6 +3053,56 @@ export function resolveBitbucketTokenCommand(
   if (!Array.isArray(argv) || argv.length === 0 || !argv.every((part) => typeof part === "string" && part !== "")) return null;
   const email = typeof config.bitbucketEmail === "string" && config.bitbucketEmail.trim() !== "" ? config.bitbucketEmail.trim() : undefined;
   return { argv: [...argv], ...(email ? { email } : {}) };
+}
+
+/**
+ * The origin of an http(s) URL in its canonical form (lower-case host, default
+ * port dropped), or null for anything else, including a URL with credentials.
+ * Forgejo tokens are matched on this, so `https://Forgejo.Example.com:443` and
+ * `https://forgejo.example.com` are one instance.
+ */
+export function normalizeForgejoOrigin(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    if (url.username || url.password) return null;
+    return url.origin.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The API token for one Forgejo / Gitea instance, or null. A token goes only to
+ * the origin it is configured for (scheme, host and port), so a PR or a link
+ * naming any other host, or the same host over http, gets none.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_FORGEJO_TOKEN, used only for the origin named by
+ *   PLANNOTATOR_FORGEJO_URL  →  config.forgejoTokens[origin]
+ *
+ * Empty values count as unset. Never log the result.
+ */
+export function resolveForgejoToken(
+  config: PlannotatorConfig,
+  origin: string,
+  env: Record<string, string | undefined> = process.env,
+): string | null {
+  const wanted = normalizeForgejoOrigin(origin);
+  if (!wanted) return null;
+  const clean = (v: unknown): string | undefined =>
+    typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
+  const envToken = clean(env.PLANNOTATOR_FORGEJO_TOKEN);
+  const envUrl = clean(env.PLANNOTATOR_FORGEJO_URL);
+  if (envToken && envUrl && normalizeForgejoOrigin(envUrl) === wanted) return envToken;
+  const tokens = config.forgejoTokens;
+  if (tokens && typeof tokens === "object" && !Array.isArray(tokens)) {
+    for (const [key, value] of Object.entries(tokens)) {
+      const token = clean(value);
+      if (token && normalizeForgejoOrigin(key) === wanted) return token;
+    }
+  }
+  return null;
 }
 
 /**

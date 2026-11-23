@@ -166,6 +166,23 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
       expect(placed().left).toBe('100px');
     });
 
+    test('Split with Wrap long lines on (each column drawn as `display: contents`): it shows under the lines (#3718)', async () => {
+      const diff = paintedDiff([
+        { column: 'deletions', line: 18, top: 340, left: 100 },
+        { column: 'additions', line: 18, top: 340, left: 803 },
+      ]);
+      // What Pierre's split Wrap draws: the columns keep their clipping overflow (`scroll clip` computes overflow-y
+      // `hidden`; happy-dom does not expand the shorthand, so it is set as computed) but have no box (a rect of zeros).
+      diff.shadowRoot!.querySelectorAll<HTMLElement>('[data-code]').forEach((code) => {
+        code.style.display = 'contents';
+        code.style.overflowY = 'hidden';
+      });
+      mount({ onShowMe: () => {} });
+      await frames();
+      expect(chooser(), 'the bar shows').not.toBeNull();
+      expect(placed()).toEqual({ top: '366px', left: '803px', transform: '', hidden: '' });
+    });
+
     test("another diff's painted lines don't take it: this selection's last line does", async () => {
       paintedDiff([{ line: 5, top: 100, left: 300 }]);
       paintedDiff([{ line: 18, top: 500, left: 803 }]);

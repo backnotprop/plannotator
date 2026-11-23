@@ -65,9 +65,11 @@ import {
   type InboxPullHost,
   inboxPullLabel,
   inboxPullSafeBranch,
+  type InboxPullAsk,
   type InboxPullCard,
   type InboxPullLink,
   type InboxPullReview,
+  type InboxPullStack,
   type InboxPullState,
 } from "@plannotator/core/inbox-types";
 import { parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
@@ -76,7 +78,7 @@ import type { PRContext, PRRef, PRRuntime } from "@plannotator/shared/pr-types";
 import { glVersionOf, glVersionsEndpoint } from "@plannotator/shared/pr-gitlab-versions";
 import { pullDetailsOf, type PullDetailsRead } from "./inbox-pull-details";
 import { MAX_REPO_FILE_BYTES } from "@plannotator/shared/repo-file";
-import { compareRepoPaths, MAX_REVIEW_FILE_CONTENT_BYTES, prepareGitCommand, readGitObjectBytes, validateFilePath, type RepoFileListing } from "@plannotator/shared/review-core";
+import { compareRepoPaths, MAX_REVIEW_FILE_CONTENT_BYTES, prepareGitCommand, readGitObjectBytes, validateFilePath, type FileBytesRead, type RepoFileListing } from "@plannotator/shared/review-core";
 import { handleRepoFileRequest, handleRepoFilesRequest, type HandlerResult, type RepoFileRead } from "@plannotator/shared/repo-files";
 import { readRepoWorkingTreeFile } from "@plannotator/shared/repo-files-node";
 import { childEnv } from "@plannotator/shared/child-env";
@@ -195,7 +197,9 @@ function shaOf(value: unknown): string | null {
 
 // --- the queries ---
 
-const GH_PULL = `number title url state isDraft updatedAt mergedAt baseRefName headRefName headRefOid additions deletions changedFiles reviewDecision mergeable
+const GH_WRITERS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+
+const GH_PULL = `number title url state isDraft authorAssociation updatedAt mergedAt baseRefName headRefName headRefOid additions deletions changedFiles reviewDecision mergeable
       repository { nameWithOwner } baseRepository { defaultBranchRef { name } } headRepository { nameWithOwner } author { login avatarUrl }
       reviewRequests(first: 5) { nodes { requestedReviewer { __typename ... on User { login avatarUrl } ... on Team { slug } } } }
       latestReviews(first: 5) { nodes { state author { login avatarUrl } } }
@@ -398,6 +402,7 @@ export interface ParsedPulls {
    * `issueCount`, GitLab `count`).
    */
   open_total?: number;
+  cut?: number[];
   /** GitHub's GraphQL budget after this read: what is left, and when it fills again (ISO). */
   rate?: { remaining: number; reset_at: string };
   /**
@@ -434,6 +439,10 @@ function cappedOf(lists: unknown[], countKey: "issueCount" | "count"): ParsedPul
 /** The Others reads' total count (GitHub `issueCount`, GitLab `count`). */
 function totalOf(lists: unknown[], countKey: "issueCount" | "count"): number {
   return lists.reduce<number>((sum, list) => sum + Math.max(num(obj(list)[countKey]), nodes(list).length), 0);
+}
+
+function cutOf(lists: [string, unknown][], countKey: "issueCount" | "count"): number[] {
+  return lists.filter(([, list]) => typeof obj(list)[countKey] !== "number" || num(obj(list)[countKey]) > nodes(list).length).map(([name]) => Number(name.replace(/^\D+/, "")));
 }
 
 /** Which lists an answer is read for: the person's own (requested, authored, assigned, merged), or Others. */
@@ -498,6 +507,7 @@ export function parseGithubPulls(stdout: string, host: string, part: PullsPart =
         title: str(item.title),
         author,
         mine: login !== null && author === login,
+        ...(GH_WRITERS.has(str(item.authorAssociation)) ? { author_member: true as const } : {}),
         requested: flag === "requested" || earlier?.requested === true,
         ...(flag === "assigned" || earlier?.assigned === true ? { assigned: true } : {}),
         state,
@@ -524,11 +534,12 @@ export function parseGithubPulls(stdout: string, host: string, part: PullsPart =
   const reset = str(rate.resetAt);
   const budget = typeof rate.remaining === "number" && reset ? { rate: { remaining: rate.remaining, reset_at: reset } } : {};
   if (part === "others") {
-    const others = Object.keys(data)
+    const named = Object.keys(data)
       .filter((k) => /^others\d+$/.test(k))
-      .map((k) => data[k]);
+      .map((k): [string, unknown] => [k, data[k]]);
+    const others = named.map(([, list]) => list);
     for (const list of others) read(list, null);
-    return { login, pulls: [...out.values()], avatars, open_total: totalOf(others, "issueCount"), ...budget };
+    return { login, pulls: [...out.values()], avatars, open_total: totalOf(others, "issueCount"), cut: cutOf(named, "issueCount"), ...budget };
   }
   const list = (name: "authored" | "merged" | "assigned" | "requested") => (part === "every" ? data[`every${name[0]!.toUpperCase()}${name.slice(1)}`] : data[name]);
   read(list("authored"), null);
@@ -621,11 +632,12 @@ export function parseGitlabPulls(stdout: string | readonly string[], host: strin
     }
   };
   if (part === "others") {
-    const projects = Object.keys(data)
+    const named = Object.keys(data)
       .filter((k) => /^p\d+$/.test(k))
-      .map((k) => obj(data[k]).mergeRequests);
+      .map((k): [string, unknown] => [k, obj(data[k]).mergeRequests]);
+    const projects = named.map(([, list]) => list);
     for (const list of projects) read(list, null);
-    return { login, pulls: [...out.values()], avatars, open_total: totalOf(projects, "count") };
+    return { login, pulls: [...out.values()], avatars, open_total: totalOf(projects, "count"), cut: cutOf(named, "count") };
   }
   read(user.authored, null);
   read(user.merged, null);
@@ -667,6 +679,8 @@ interface OthersAnswer {
   total: number | null;
   /** The projects' repositories when it was read (as `HostAnswer.repos`). */
   repos: string;
+  /** The repositories (lowercased) whose every open PR this answer holds: none of a search that came back cut. */
+  covered: string[];
 }
 
 /** The Others read of a host: separate from the person's own lists, which never fail with it. */
@@ -722,8 +736,11 @@ export interface InboxPulls {
      */
     options?: { refresh?: boolean; others?: boolean; everywhere?: boolean },
   ): Promise<{ fetched_at: string | null; hosts: InboxPullHost[]; pulls: InboxPull[]; clis: Partial<Record<RefCli, InboxPullCliState>>; unsigned: string[] }>;
+  /** The projects' repositories (`host/owner/repo`, lowercased) whose every open PR that list answer holds, Others' included. */
+  othersCovered(listed: object): readonly string[];
   /** A PR the last list named, by key. */
   find(key: string): InboxPull | null;
+  stack(key: string): InboxPullStack | null;
   /**
    * This Inbox merged the PR (the Pull requests page's Merge): every list from now on shows it merged, even a cached
    * answer read before the merge or a forge read that still says open (GitHub's search lags), for
@@ -791,6 +808,13 @@ export interface InboxPulls {
    */
   /** `ids` are the blobs the patch on screen names: a text that does not hash to them is not that patch's file, and no arrows open. */
   fileContents(key: string, scope: InboxPullDiffScope, path: string, roots: readonly string[], ids: PullFileCheck | null, oldPath?: string, from?: string, signal?: AbortSignal): Promise<InboxFileContents>;
+  /**
+   * One side of a changed file as bytes, for the image preview (inbox-review-image.ts): the new side at `head` (the
+   * head the patch on screen was read at; absent, the last one read), the old at the commit its diff runs from (as the expand arrows read them), from the first of
+   * `roots` that has it, else from the forge. `oldPath`: a renamed or deleted file's old side. Capped at `maxBytes`.
+   * Throws InboxPullsError for a PR the last list did not name, and for a forge that is holding its reads.
+   */
+  fileBytes(key: string, scope: InboxPullDiffScope, side: "old" | "new", path: string, oldPath: string | undefined, roots: readonly string[], maxBytes: number, from?: string, head?: string): Promise<FileBytesRead>;
 }
 
 export type PullFileCheck = PatchBlobIds | { patch: string };
@@ -1035,13 +1059,18 @@ export function mergeListedPulls(own: readonly InboxPull[], others: readonly Inb
   return [...out.values()];
 }
 
-export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffRunner; gitRead?: PullFileGitReader; gitRun?: PullGitRunner; now?: () => number } = {}): InboxPulls {
+/** A local clone's read of one object (`<sha>:<path>`) as bytes, capped (`readGitObjectBytes`). */
+export type PullFileBytesGitReader = (root: string, spec: string, maxBytes: number) => Promise<FileBytesRead>;
+
+export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffRunner; gitRead?: PullFileGitReader; gitBytes?: PullFileBytesGitReader; gitRun?: PullGitRunner; now?: () => number } = {}): InboxPulls {
   const run = options.run ?? refCliRunner;
   const gitRun = options.gitRun ?? createPullGitRunner();
   const diffRun = options.diffRun ?? (options.run ? cappedDiffRunner(options.run) : pullDiffCliRunner);
   const gitRead = options.gitRead ?? pullFileGitRead;
+  const gitBytes = options.gitBytes ?? ((root, spec, maxBytes) => readGitObjectBytes(gitRuntime, spec, maxBytes, root));
   const now = options.now ?? Date.now;
   const hosts = new Map<string, HostState>();
+  const coveredOf = new WeakMap<object, string[]>();
   const holdUntil = new Map<string, number>();
   const fileHoldUntil = new Map<string, number>();
   /** GitHub's GraphQL budget nearly spent: list reads of the host wait until `resetAt` (diffs do not). */
@@ -1249,6 +1278,54 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       return result;
     },
   });
+  /** A forge read for a file of `pull`: the command's output, null when the forge says there is none, and a throw for anything passing. */
+  const forgeFileAsk = (pull: InboxPull, cli: RefCli) => async (endpoint: string, extra: string[] = []): Promise<string | null> => {
+    if (now() < Math.max(holdUntil.get(pull.host) ?? 0, fileHoldUntil.get(pull.host) ?? 0)) throw new InboxPullsError("pull_diff_failed", "rate limited");
+    const result = await diffRun(cli, ["api", "--hostname", pull.host, endpoint, ...extra], INBOX_PULL_FILE_MAX_BYTES);
+    if (result.tooLarge) return null;
+    if (result.exitCode === 0) return result.stdout;
+    // Its own hold: scrolling a big PR must not refuse the next layer's diff.
+    if (refErrorOf(cli, result) === "rate_limited") fileHoldUntil.set(pull.host, now() + REF_RATE_LIMIT_MS);
+    else if (/\b404\b|not found/i.test(`${result.stderr}\n${result.stdout}`)) return null;
+    throw new InboxPullsError("pull_diff_failed", `${cli} could not read this file.`);
+  };
+  /** The commit a PR's diff in `scope` runs from: where `head` left its base branch, not the branch's tip. */
+  const pullMergeBase = (key: string, pull: InboxPull, scope: InboxPullDiffScope, from: string | undefined, head: string, ask: (endpoint: string, extra?: string[]) => Promise<string | null>): Promise<string | null> => {
+    const parts = splitPath(pull.repo)!;
+    const project = encodeURIComponent(pull.repo);
+    const found = pullDiffBases(stackOf(pull), pull, scope, from);
+    if ("error" in found) return Promise.resolve(null);
+    const bases = found.bases;
+    // With the bases: a retarget keeps the head and moves where the diff runs from.
+    const baseKey = `${key}\u0000${scope}\u0000${head}\u0000${bases.join("\u0000")}`;
+    const hit = mergeBases.get(baseKey);
+    if (hit) return hit;
+    const read = (async () => {
+      if (pull.platform === "gitlab" && scope === "layer") {
+        const answer = await ask(`projects/${project}/merge_requests/${pull.number}`);
+        return answer === null ? null : shaOf(obj(obj(JSON.parse(answer)).diff_refs).base_sha);
+      }
+      for (const base of bases) {
+        const answer =
+          pull.platform === "github"
+            ? await ask(`repos/${parts.owner}/${parts.repo}/compare/${compareRef(base)}...${head}?per_page=1`, ["--jq", ".merge_base_commit.sha"])
+            : await ask(`projects/${project}/repository/merge_base?refs%5B%5D=${encodeURIComponent(base)}&refs%5B%5D=${head}`);
+        if (answer === null) continue;
+        return pull.platform === "github" ? shaOf(answer.trim()) : shaOf(obj(JSON.parse(answer)).id);
+      }
+      return null;
+    })();
+    mergeBases.set(baseKey, read);
+    // Only a commit is kept: "no base" can be a passing sign-in problem, and the next click asks again.
+    const drop = () => {
+      if (mergeBases.get(baseKey) === read) mergeBases.delete(baseKey);
+    };
+    read.then((base) => {
+      if (!base) drop();
+    }, drop);
+    while (mergeBases.size > 64) mergeBases.delete(mergeBases.keys().next().value!);
+    return read;
+  };
   const repoAt = (key: string): { pull: InboxPull | null; unavailable: { reason: "unsupported" | "failed"; message: string } | null } => {
     const pull = findKnown(key);
     if (!pull || !listedRepo(pull)) {
@@ -1390,17 +1467,20 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const cli = state.cli;
       let calls: string[][];
       let covered: string[];
+      let groups: string[][];
       if (cli === "gh") {
         const plan = githubOthersSearches(ordered);
         covered = plan.covered;
+        groups = plan.searches.map((q) => q.split(" ").filter((t) => t.startsWith("repo:")).map((t) => t.slice(5)));
         calls = plan.searches.length ? [["api", "graphql", "--hostname", host, "-f", `query=${githubOthersQuery(plan.searches.length)}`, ...plan.searches.flatMap((q, i) => ["-f", `others${i}=${q}`])]] : [];
       } else {
         const plan = gitlabOthersQueries(ordered);
         covered = plan.covered;
+        groups = plan.covered.map((repo) => [repo]);
         calls = plan.queries.map((query) => ["api", "--hostname", host, "graphql", "-f", `query=${query}`]);
       }
       if (calls.length === 0) {
-        others.answer = { at: now(), pulls: [], avatars: {}, total: 0, repos: reposKey };
+        others.answer = { at: now(), pulls: [], avatars: {}, total: 0, repos: reposKey, covered: [] };
         others.error = null;
         return;
       }
@@ -1435,7 +1515,9 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       }
       spent(host, parsed);
       const all = covered.length >= new Set(repos.map((r) => r.toLowerCase())).size;
-      others.answer = { at: now(), pulls: parsed.pulls, avatars: parsed.avatars, total: all ? (parsed.open_total ?? 0) : null, repos: reposKey };
+      const cut = new Set(parsed.cut ?? []);
+      const whole = groups.flatMap((group, i) => (cut.has(i) ? [] : group.map((r) => r.toLowerCase())));
+      others.answer = { at: now(), pulls: parsed.pulls, avatars: parsed.avatars, total: all ? (parsed.open_total ?? 0) : null, repos: reposKey, covered: whole };
       others.error = null;
     })()
       .catch(() => {
@@ -1567,7 +1649,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         return othersTotal > shown ? { shown, total: othersTotal, of: "others" } : undefined;
       };
       const times = asked.map((a) => a.own.answer?.at).filter((t): t is number => typeof t === "number");
-      return {
+      const result = {
         fetched_at: times.length > 0 ? new Date(Math.min(...times)).toISOString() : null,
         hosts: asked.map(({ host, state, own, reposKey }): InboxPullHost => {
           const capped = cappedOfHost(host, state, own, reposKey);
@@ -1589,9 +1671,18 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         clis: { ...cliStates },
         unsigned: unsigned.sort(),
       };
+      coveredOf.set(result, asked.flatMap(({ host, state }) => (state.others.answer?.covered ?? []).filter((repo) => wanted.has(inboxPullRepoKey(host, repo))).map((repo) => inboxPullRepoKey(host, repo))));
+      return result;
+    },
+    othersCovered(listed) {
+      return coveredOf.get(listed) ?? [];
     },
     find(key) {
       return findKnown(key) ?? null;
+    },
+    stack(key) {
+      const pull = findKnown(key);
+      return (pull && stackOf(pull)) ?? null;
     },
     markMerged(key) {
       const at = now();
@@ -1954,6 +2045,31 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const headAfter = headBefore ? await readHeadNow(pull, cli) : null;
       return { patch, partial, head_sha: headBefore && headBefore === headAfter ? headBefore : null, ...(heldBack ? { held_back: heldBack } : {}), ...(perFile ? { per_file: true as const } : {}) };
     },
+    async fileBytes(key, scope, side, path, oldPath, roots, maxBytes, from, at) {
+      const missing: FileBytesRead = { kind: "missing" };
+      // The paths come from the patch: neither may walk out of the repository or the forge's route.
+      try {
+        validateFilePath(path);
+        if (oldPath !== undefined) validateFilePath(oldPath);
+      } catch {
+        return missing;
+      }
+      const pull = findKnown(key);
+      if (!pull || !listedRepo(pull)) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
+      const ref = forgeRef(pull);
+      const head = shaOf(at ?? readHeads.get(key) ?? pull.head_sha);
+      if (!head || !ref) return missing;
+      const cli: RefCli = hosts.get(pull.host)?.cli ?? (pull.platform === "github" ? "gh" : "glab");
+      const sha = side === "new" ? head : await pullMergeBase(key, pull, scope, from, head, forgeFileAsk(pull, cli));
+      if (!sha) return missing;
+      const filePath = side === "old" ? (oldPath ?? path) : path;
+      for (const root of roots) {
+        const local = await gitBytes(root, `${sha}:${filePath}`, maxBytes).catch(() => null);
+        if (local && (local.kind === "ok" || local.kind === "too-large")) return local;
+      }
+      if (now() < Math.max(holdUntil.get(pull.host) ?? 0, fileHoldUntil.get(pull.host) ?? 0)) throw new InboxPullsError("pull_diff_failed", "rate limited");
+      return fetchPRFileBytes(forgeRuntime(pull), ref, sha, filePath, maxBytes);
+    },
     async fileContents(key, scope, path, roots, ids, oldPath, from, signal) {
       const none: InboxFileContents = { oldContent: null, newContent: null };
       if (!ids) return none;
@@ -1974,52 +2090,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const cli: RefCli = hosts.get(pull.host)?.cli ?? (pull.platform === "github" ? "gh" : "glab");
       const parts = splitPath(pull.repo)!;
       const project = encodeURIComponent(pull.repo);
-      /** A forge read: the command's output, null when the forge says there is none, and a throw for anything passing. */
-      const ask = async (endpoint: string, extra: string[] = []): Promise<string | null> => {
-        if (now() < Math.max(holdUntil.get(pull.host) ?? 0, fileHoldUntil.get(pull.host) ?? 0)) throw new InboxPullsError("pull_diff_failed", "rate limited");
-        const result = await diffRun(cli, ["api", "--hostname", pull.host, endpoint, ...extra], INBOX_PULL_FILE_MAX_BYTES);
-        if (result.tooLarge) return null;
-        if (result.exitCode === 0) return result.stdout;
-        // Its own hold: scrolling a big PR must not refuse the next layer's diff.
-        if (refErrorOf(cli, result) === "rate_limited") fileHoldUntil.set(pull.host, now() + REF_RATE_LIMIT_MS);
-        else if (/\b404\b|not found/i.test(`${result.stderr}\n${result.stdout}`)) return null;
-        throw new InboxPullsError("pull_diff_failed", `${cli} could not read this file.`);
-      };
-      /** The commit the diff runs from: where the head left its base branch, not the branch's tip. */
-      const mergeBase = (): Promise<string | null> => {
-        const found = pullDiffBases(stackOf(pull), pull, scope, from);
-        if ("error" in found) return Promise.resolve(null);
-        const bases = found.bases;
-        // With the bases: a retarget keeps the head and moves where the diff runs from.
-        const baseKey = `${key}\u0000${scope}\u0000${head}\u0000${bases.join("\u0000")}`;
-        const hit = mergeBases.get(baseKey);
-        if (hit) return hit;
-        const read = (async () => {
-          if (pull.platform === "gitlab" && scope === "layer") {
-            const answer = await ask(`projects/${project}/merge_requests/${pull.number}`);
-            return answer === null ? null : shaOf(obj(obj(JSON.parse(answer)).diff_refs).base_sha);
-          }
-          for (const base of bases) {
-            const answer =
-              pull.platform === "github"
-                ? await ask(`repos/${parts.owner}/${parts.repo}/compare/${compareRef(base)}...${head}?per_page=1`, ["--jq", ".merge_base_commit.sha"])
-                : await ask(`projects/${project}/repository/merge_base?refs%5B%5D=${encodeURIComponent(base)}&refs%5B%5D=${head}`);
-            if (answer === null) continue;
-            return pull.platform === "github" ? shaOf(answer.trim()) : shaOf(obj(JSON.parse(answer)).id);
-          }
-          return null;
-        })();
-        mergeBases.set(baseKey, read);
-        // Only a commit is kept: "no base" can be a passing sign-in problem, and the next click asks again.
-        const drop = () => {
-          if (mergeBases.get(baseKey) === read) mergeBases.delete(baseKey);
-        };
-        read.then((base) => {
-          if (!base) drop();
-        }, drop);
-        while (mergeBases.size > 64) mergeBases.delete(mergeBases.keys().next().value!);
-        return read;
-      };
+      const ask = forgeFileAsk(pull, cli);
+      const mergeBase = () => pullMergeBase(key, pull, scope, from, head, ask);
       const stillWanted = (read: Promise<string | null>, sha: string, filePath: string): Promise<string | null> =>
         read.catch((cause: unknown) => (cause === READ_CLOSED && !signal?.aborted ? textAt(sha, filePath) : Promise.reject(cause)));
       const textAt = (sha: string, filePath: string): Promise<string | null> => {
@@ -2102,6 +2174,7 @@ export interface InboxPullLinkStore {
   threadsOf(projectId: string): { thread_id: string; last_at: string }[];
   threadMessageIds(threadId: string): readonly string[];
   message(id: string): InboxMessage | null;
+  messageSeq?(id: string): number | null;
   threadSubject(threadId: string): string | null;
   /** The project a thread is in (canonical id), or null when there is no such thread. */
   threadProject(threadId: string): string | null;
@@ -2160,17 +2233,30 @@ export function previewOf(body: string): string {
 }
 
 /** What a thread says about the agent behind it. */
-function threadFacts(store: InboxPullLinkStore, threadId: string) {
+function threadFacts(store: InboxPullLinkStore, threadId: string, pictureItSince: string | null = null) {
   const ids = store.threadMessageIds(threadId);
   let last: InboxMessage | null = null;
   let guide: InboxMessage | null = null;
-  for (let i = ids.length - 1; i >= 0 && (!last || !guide); i--) {
+  let pictureIt: InboxMessage | null = null;
+  let replied = false;
+  let pictureItSeen = false;
+  let looking = pictureItSince !== null;
+  for (let i = ids.length - 1; i >= 0 && (!last || !guide || looking); i--) {
     const message = store.message(ids[i]!);
-    if (!message || message.author.kind !== "agent") continue;
+    if (!message) continue;
+    if (looking && message.created_at < pictureItSince!) looking = false;
+    if (looking && message.author.kind === "person") replied = true;
+    if (message.author.kind !== "agent") continue;
     if (!last) last = message;
     if (!guide && message.guide) guide = message;
+    if (looking && message.picture_it) {
+      pictureIt = message;
+      looking = false;
+      const seq = store.messageSeq?.(message.id) ?? null;
+      pictureItSeen = replied || (seq !== null && (store.message(threadId)?.person_seen_seq ?? 0) >= seq);
+    }
   }
-  return { last, guide };
+  return { last, guide, pictureIt, pictureItSeen };
 }
 
 /**
@@ -2201,7 +2287,7 @@ export function linkInboxPulls(
   pulls: readonly InboxPull[],
   store: InboxPullLinkStore,
   projectsByRepo: ReadonlyMap<string, readonly string[]>,
-  owners: ReadonlyMap<string, { thread_id: string; ask?: "guide" | "custom" | "thread"; page?: true }> = new Map(),
+  owners: ReadonlyMap<string, { thread_id: string; ask?: InboxPullAsk; picture_it_at?: string; page?: true }> = new Map(),
 ): Record<string, InboxPullLink> {
   const links: Record<string, InboxPullLink> = {};
   if (pulls.length === 0) return links;
@@ -2245,8 +2331,8 @@ export function linkInboxPulls(
     }
   }
 
-  const linkOf = (via: InboxPullLink["via"], threadId: string, projectId: string): InboxPullLink => {
-    const { last, guide } = threadFacts(store, threadId);
+  const linkOf = (via: InboxPullLink["via"], threadId: string, projectId: string, pictureItSince: string | null = null): InboxPullLink => {
+    const { last, guide, pictureIt, pictureItSeen } = threadFacts(store, threadId, pictureItSince);
     const root = store.message(threadId)?.to ?? null;
     return {
       via,
@@ -2259,6 +2345,7 @@ export function linkInboxPulls(
       guide: guide?.guide
         ? { message_id: guide.id, title: guide.guide.title, steps: guide.guide.sections, review: guide.guide.review === true, session: guide.author.kind === "agent" ? guide.author.session : null }
         : null,
+      ...(pictureIt?.picture_it ? { picture_it_page: { message_id: pictureIt.id, title: pictureIt.picture_it.title, at: pictureIt.created_at, ...(pictureItSeen ? { seen: true as const } : {}) } } : {}),
     };
   };
 
@@ -2266,7 +2353,7 @@ export function linkInboxPulls(
     const owner = owners.get(pull.key);
     const ownerProject = owner ? store.threadProject(owner.thread_id) : null;
     if (owner && ownerProject) {
-      links[pull.key] = { ...linkOf("owner", owner.thread_id, ownerProject), ...(owner.ask ? { ask: owner.ask } : {}), ...(owner.page ? { page: true as const } : {}) };
+      links[pull.key] = { ...linkOf("owner", owner.thread_id, ownerProject, owner.picture_it_at ?? null), ...(owner.ask ? { ask: owner.ask } : {}), ...(owner.picture_it_at ? { picture_it_asked_at: owner.picture_it_at } : {}), ...(owner.page ? { page: true as const } : {}) };
       continue;
     }
     const started = startedThread.get(pull.key);

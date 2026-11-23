@@ -11,6 +11,10 @@
  * The one thing a shape cannot rule out: a crafted 26-character string in the ULID alphabet passes as an id. The Inbox
  * makes no such string from a person's words.
  *
+ * The server's `pull_close` line (approval "inbox-pr-board-close-safe"), one per close and per reopen from the Pull
+ * requests board, says how it went and never which PR: this log may be pasted in public. Which PR it was is kept only in
+ * the Inbox's own `pull-closes.jsonl` (packages/server/inbox-pull-closes.ts).
+ *
  * The window imports this by relative path, so it stays free of imports. It is private: `@plannotator/core` is
  * published, and a new core export would need a release of core before the UI's.
  */
@@ -33,11 +37,11 @@ export function resolveInboxDebug(config: { inboxDebug?: unknown }, env: Record<
 
 const ROUTE_WORDS = new Set(
   (
-    "api inbox ack actions agents annotations apps archived assets attachments audio board bridge cards check checks combine " +
+    "api inbox ack actions agents annotations apps archived assets attachments audio board bridge cards check checks close combine " +
     "connect content control debug decisions delete device devices dialog dismiss download draft drafts dropped embeds " +
     "event events feedback fixture.json guide handoff health image intro key lan link linked-page list-intro log m " +
     "machines mark-unread markdown-image marks markups message messages name none notes offer open-in outbox page " +
-    "pairing picks pin pins poll projects reask read recent ref refs remove reply resolve restart reviewed revoke search " +
+    "pairing picks pin pins poll projects pulls reask read recent ref refs remove reopen reply resolve restart reviewed revoke search " +
     "seen send-now sessions settings skills snooze sound status stop tailnet taggable threads tidy to tour transcribe " +
     "undo unlink unread update uploads video view voice whats-new window worklet.js"
   ).split(" "),
@@ -54,6 +58,26 @@ export function debugRoute(path: string): string {
     .split("/")
     .map((segment) => (segment === "" || ROUTE_WORDS.has(segment) || ID_SEGMENT.test(segment) ? segment : "*"))
     .join("/");
+}
+
+/** A PR's key as the Inbox makes it (`host/owner/repo#12`, GitLab `!12`): anything else is written as `*`. */
+const PULL_KEY = /^[A-Za-z0-9.-]{1,253}(?::\d{1,5})?\/[A-Za-z0-9._/-]{1,300}[#!]\d{1,9}$/;
+const PULL_CLOSE_CODES = new Set(["reopen_not_closed_here", "pull_unknown", "pull_merged", "pull_closed", "pull_open", "pull_state_unknown", "pull_close_failed", "threw"]);
+
+/** The PR's key for `pull-closes.jsonl`: the key when it is of the Inbox's shape, else `*`. Never for the debug log. */
+export function pullKeyForLog(key: string): string {
+  return PULL_KEY.test(key) ? key : "*";
+}
+
+/**
+ * A close's or reopen's line from the Pull requests board: which (`act`), how it ended (`ok`, the answer's `status`, a
+ * refusal's `code`; `status` 0 with `code` `threw` when it threw before an answer), and how the press came (`via`, and
+ * `by`: this window, or another machine's through its link). No PR key, title or name: the debug log writes it as is.
+ */
+export function pullCloseFields(act: "close" | "reopen", status: number, code: unknown, via: string, by: "window" | "machine"): Record<string, unknown> {
+  const fields: Record<string, unknown> = { act, ok: status >= 200 && status < 300, status, via, by };
+  if (typeof code === "string") fields.code = PULL_CLOSE_CODES.has(code) ? code : "other";
+  return fields;
 }
 
 /** A window's page id and its requests' ids: digits only, so no words fit. */
