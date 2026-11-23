@@ -14,9 +14,12 @@
  *  5. The diff cramped: drawn as a guided review's chapter card (its "Every changed file" column beside a narrow
  *     diff) instead of the files across the pane's width, as the PR page draws them; a code line cut off (03, 04).
  *  6. On a phone (390 wide), the group open, and a row's diff in the list's place at the screen's width (05, 06).
- *  6b. On a phone, a row shorter than 44px, at 390 and 320 (05b).
+ *  6b. On a phone, a row shorter than 44px, at 390 and 320 (05b); a branch row's name not drawn (no width), its icon
+ *     off the rows' left edge, or a screen reader not hearing the whole branch (05, 05b).
+ *  6c. On a phone, a 60-letter branch in a long-named project: the name under 120px, or the project not giving way
+ *     first (05c).
  *  7. On a phone, a long branch name in a long-named project cut to a few letters by the bar's buttons, or anything
- *     in the bar or the facts under it overlapping, at 390 and 320 (07, 08).
+ *     in the bar or the facts under it overlapping, at 390 and 320; Review with an agent a bare "+" (07, 08).
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/reviews-on-this-computer, light and dark at 1440, and at 390 on a phone. HOME is a scratch folder,
  * and the sandbox env keeps the binary off the person's agents. Build the binary first (see inbox.spec.ts), then
@@ -203,6 +206,42 @@ const changedRow = (pane: ReturnType<Page['locator']>, file: string, line: strin
 const group = (page: Page) => page.locator('[data-pulls-group="local"]');
 const row = (page: Page, key: string) => group(page).locator(`[data-local-row="${key}"]`);
 
+/**
+ * A phone's group reads from the row's edge: every row's icon on one left edge (the screen's padding, as the rows
+ * above), and each branch row's name drawn with its text, at least 120px wide, after its icon. A screen reader hears
+ * the whole branch. Once a column centred each line and a cut name had no width at all (only the icon, project and
+ * age showed, in the middle of the row).
+ */
+async function phoneRowsReadable(page: Page, branches: readonly string[], width: number): Promise<void> {
+  const rows = await group(page).evaluate((root) =>
+    [...root.querySelectorAll<HTMLElement>('[data-local-row]')].map((el) => {
+      const mark = el.querySelector('.ib-rvr-mark')!.getBoundingClientRect();
+      const name = el.querySelector<HTMLElement>('.ib-rvr-t')!;
+      const shown = name.querySelector<HTMLElement>('.ib-rvr-tin') ?? name;
+      const box = name.getBoundingClientRect();
+      const parts = [...shown.querySelectorAll<HTMLElement>('.ib-rvr-th, .ib-rvr-tt')].map((part) => part.getBoundingClientRect().width);
+      return { kind: el.dataset.localKind, row: el.getBoundingClientRect().left, markLeft: mark.left, markRight: mark.right, nameLeft: box.left, nameWidth: box.width, shownWidth: shown.getBoundingClientRect().width, text: shown.textContent ?? '', parts };
+    }),
+  );
+  const lefts = rows.map((r) => r.markLeft);
+  expect(Math.max(...lefts) - Math.min(...lefts), `icons' left edges at ${width}: ${lefts.join(', ')}`).toBeLessThanOrEqual(2);
+  // On the row's left, inside its padding (not floated to its middle).
+  for (const r of rows) expect(r.markLeft - r.row, `icon at ${width}`).toBeLessThanOrEqual(20);
+  const branchRows = rows.filter((r) => r.kind === 'branch');
+  expect(branchRows.length).toBe(branches.length);
+  for (const r of branchRows) {
+    expect(r.text.trim().length, `name text at ${width}`).toBeGreaterThan(0);
+    expect(r.nameWidth, `name "${r.text}" at ${width}`).toBeGreaterThanOrEqual(120);
+    expect(r.shownWidth, `drawn name "${r.text}" at ${width}`).toBeGreaterThanOrEqual(120);
+    for (const part of r.parts) expect(part, `a cut name's parts at ${width}`).toBeGreaterThan(0);
+    expect(r.nameLeft, `name after its icon at ${width}`).toBeGreaterThanOrEqual(r.markRight);
+  }
+  for (const branch of branches) {
+    const escaped = branch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    await expect(group(page).locator(`[data-local-row$=":${branch}"]`)).toHaveAccessibleName(new RegExp(escaped));
+  }
+}
+
 // Desktop and phone are apart: a failure in one never skips the other's shots. Each shot is taken before its checks.
 test.describe('desktop at 1440', () => {
   test.describe.configure({ mode: 'serial' });
@@ -307,6 +346,7 @@ test.describe('phone at 390', () => {
           expect(height, `row ${i} at ${width}`).toBeGreaterThanOrEqual(43.5);
           expect(height, `row ${i} at ${width}`).toBeLessThanOrEqual(45);
         }
+        await phoneRowsReadable(page, [BRANCH, 'feat/spaces-share-link'], width);
       }
       await expect(toggle).toHaveText('On this computer 3');
       await row(page, `${world.plannotatorId}:${BRANCH}`).click();
@@ -375,13 +415,67 @@ test.describe('phone at 390', () => {
         expect(review!.right).toBeLessThanOrEqual(bar!.right + 0.5);
         expect(title2!.top).toBeGreaterThanOrEqual(bar!.top - 0.5);
         expect(title2!.bottom).toBeLessThanOrEqual(bar!.bottom + 0.5);
-        // Review with an agent: its icon, a 44 px target, its name kept for a screen reader.
+        // Review with an agent: its words shown (not a bare "+", New review's own glyph in the list's bar), a 44 px
+        // target, the same name for a screen reader.
         expect(review!.width).toBeGreaterThanOrEqual(44);
         expect(review!.height).toBeGreaterThanOrEqual(44);
-        await expect(pane.locator('[data-local-review]')).toHaveAccessibleName('Review with an agent');
+        const reviewButton = pane.locator('[data-local-review]');
+        await expect(reviewButton).toHaveAccessibleName('Review with an agent');
+        expect((await reviewButton.evaluate((el) => (el as HTMLElement).innerText)).replace(/\s+/g, ' ').trim()).toBe('Review with an agent');
+        await expect(reviewButton.locator('svg')).toHaveCount(0);
         // The facts under it (the long project's name first) stay inside the pane.
         await expect(pane.locator('[data-local-facts]')).toContainText(name);
         for (const right of facts) expect(right).toBeLessThanOrEqual(paneBox!.right + 0.5);
+      }
+    } finally {
+      await context.close();
+    }
+  });
+
+  test('the group with a 60-letter branch in a long-named project: the name keeps its room, the project gives way, at 390 and 320', async () => {
+    const name = 'bob-tully-plannotator-inbox-reviews-on-this-computer-group';
+    const branch = 'fix/reviews-group-keeps-the-whole-branch-name-on-every-phone';
+    expect(branch).toHaveLength(60);
+    const project = gitProject(world.src, name);
+    project.git(['checkout', '-q', '-b', branch]);
+    project.commit('group.ts', 'export const group = "kept";\n', 7 * MINUTE);
+    project.git(['checkout', '-q', 'main']);
+    const client = new Client({ name: 'reviews-local-group-long', version: '1.0.0' });
+    await client.connect(new StreamableHTTPClientTransport(new URL(world.mcp)));
+    const note = (await client.callTool({ name: 'send_message', arguments: { project_path: project.path, subject: 'Group', body: 'Started on the group.', agent_host: 'claude-code', agent_name: 'Claude Code' } })) as { isError?: boolean; content?: { text: string }[] };
+    await client.close().catch(() => {});
+    if (note.isError) throw new Error(note.content?.map((c) => c.text).join(' '));
+    const context = await world.browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, colorScheme: 'light', reducedMotion: 'reduce' });
+    try {
+      const page = await context.newPage();
+      const projects = (await (await page.request.get(`${world.url}api/inbox/projects`)).json()) as { projects?: { id: string; root: string }[] };
+      const id = projects.projects?.find((p) => p.root === project.path)?.id ?? '';
+      expect(id).toBeTruthy();
+      // The server keeps one answer 20 s: read the list again until the new branch is in the group.
+      const longRow = row(page, `${id}:${branch}`);
+      await expect(async () => {
+        await page.goto(`${world.url}#reviews`);
+        const toggle = group(page).locator('[data-reviews-fold="local"]');
+        await expect(toggle).toBeVisible();
+        if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+        await expect(longRow).toBeVisible({ timeout: 3_000 });
+      }).toPass({ timeout: 60_000, intervals: [2_000, 4_000, 5_000] });
+      await longRow.scrollIntoViewIfNeeded();
+      await shot(page, '05c-phone-390-long-names');
+      const branches = await group(page).locator('[data-local-row][data-local-kind="branch"]').evaluateAll((els) => els.map((el) => el.getAttribute('data-local-row')!.split(':').slice(1).join(':')));
+      expect(branches).toContain(branch);
+      for (const width of [390, 320]) {
+        await page.setViewportSize({ width, height: 844 });
+        await page.waitForTimeout(300);
+        await phoneRowsReadable(page, branches, width);
+        // The project gives way before the name: cut with "…", still inside the row.
+        const box = await longRow.evaluate((el) => {
+          const project = el.querySelector<HTMLElement>('[data-local-project]')!;
+          return { right: project.getBoundingClientRect().right, row: el.getBoundingClientRect().right, cut: project.scrollWidth > project.clientWidth };
+        });
+        expect(box.right, `project inside the row at ${width}`).toBeLessThanOrEqual(box.row);
+        expect(box.cut, `project cut at ${width}`).toBe(true);
+        expect((await longRow.boundingBox())!.height).toBeLessThanOrEqual(45);
       }
     } finally {
       await context.close();

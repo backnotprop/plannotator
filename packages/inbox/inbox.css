@@ -10523,9 +10523,13 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 /* Reviews' "On this computer" (pulls/OnThisComputer.tsx): a compact Reviews row (ReviewRow.tsx's parts), with the
    project quiet before the age. Its diff (LocalDiffPane.tsx) under the pane's bar. */
 .ib-local-project { flex: 0 1 auto; min-width: 0; max-width: 14ch; overflow: hidden; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); text-overflow: ellipsis; white-space: nowrap; }
-/* On a phone (`.ib-mrow`) a row keeps a finger's 44px, its one line in the middle (approval: phone rows 44px). */
-.ib-mrow.ib-local-row { display: flex; align-items: center; min-height: 44px; }
-.ib-mrow.ib-local-row > .ib-rvr-l1 { flex: 1 1 auto; }
+/* On a phone (`.ib-mrow`) a row keeps a finger's 44px, its one line in the middle (approval: phone rows 44px). A row
+   (not the phone row's column, which would centre a line its own width and leave a cut name no width at all): the
+   line runs from the row's edge, the work's name keeps 120px and the project gives way before it. */
+.ib-mrow.ib-local-row { display: flex; flex-direction: row; align-items: center; min-height: 44px; }
+.ib-mrow.ib-local-row > .ib-rvr-l1 { flex: 1 1 auto; min-width: 0; }
+.ib-mrow.ib-local-row .ib-rvr-t { min-width: 120px; }
+.ib-mrow.ib-local-row .ib-rvr-end { flex: 0 1 auto; min-width: 0; }
 .ib-local-pane { display: flex; flex-direction: column; }
 .ib-local-title { min-width: 0; margin: 0; overflow: hidden; font-size: var(--ib-fs-14, 14px); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .ib-local-meta { flex: none; margin: 0; padding: 10px 28px 0; }
@@ -10652,6 +10656,8 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   .ib-pr-bar[data-subject-off] [data-fit-subject] { visibility: hidden; }
   /* A row's local diff (LocalDiffPane.tsx): its work's name wraps to a second line, the rest of it in its title. */
   .ib-local-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; line-height: 1.25; }
+  /* Its Review with an agent: the words on two short lines, so the name keeps its room at 320. */
+  .pn-inbox .ib-lp-bar .ib-pr-ext.ib-lp-review { line-height: 1.2; text-align: start; }
   .ib-pr-body { padding: 18px 16px 24px; }
   .ib-pr-h { font-size: var(--ib-fs-22, 22px); }
   .ib-pr-actions .ib-pr-note { flex-basis: 100%; }

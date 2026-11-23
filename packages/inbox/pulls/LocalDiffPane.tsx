@@ -62,8 +62,9 @@ export function LocalDiffPane({ open, projectName, phone, stacked, onClose, onRe
     [diff],
   );
   const size = diff?.patch ? inboxReviewPatchSize(diff.patch) : null;
-  // A phone's bar is the work's name: `‹ Reviews` and Review with an agent (its icon, its name for a screen reader)
-  // give it the room, and a long name wraps to a second line.
+  // A phone's bar is the work's name: `‹ Reviews` gives it the room, and a long name wraps to a second line. Review
+  // with an agent keeps its words, on two short lines and without the "+" that New review's button already is (the
+  // product has no mark of its own for this action).
   const bar = useRef<HTMLDivElement>(null);
   usePhoneHeadFit(bar, phone, [stacked, label, useInboxTextSize()].join('|'));
   return (
@@ -76,12 +77,21 @@ export function LocalDiffPane({ open, projectName, phone, stacked, onClose, onRe
             {label}
           </h2>
         </span>
-        {onReview && (
-          <button type="button" className="ib-pr-ext" onClick={(event) => onReview(event.currentTarget)} data-local-review="">
-            <Icon name="plus" size={15} />
-            {phone ? <span className="ib-sr">Review with an agent</span> : 'Review with an agent'}
-          </button>
-        )}
+        {onReview &&
+          (phone ? (
+            <button type="button" className="ib-pr-ext ib-lp-review" onClick={(event) => onReview(event.currentTarget)} aria-label="Review with an agent" data-local-review="">
+              <span aria-hidden="true">
+                Review with
+                <br />
+                an agent
+              </span>
+            </button>
+          ) : (
+            <button type="button" className="ib-pr-ext" onClick={(event) => onReview(event.currentTarget)} data-local-review="">
+              <Icon name="plus" size={15} />
+              Review with an agent
+            </button>
+          ))}
         {!phone && !stacked && (
           <Tip content="Close">
             <button type="button" className="ib-iconbtn" onClick={onClose} aria-label="Close" data-local-close="">
