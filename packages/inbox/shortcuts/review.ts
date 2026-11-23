@@ -22,6 +22,11 @@ export interface OpenReviewKeys {
   rows: readonly (readonly ReviewKeyRef[])[];
   /** Every binding the review takes while it is open, acting or not: the Inbox's meaning of each is away. */
   claimed: ReadonlySet<string>;
+  /**
+   * Whether the review has its keys right now: not while they stand down (focus in the PR's Details, a repository file
+   * over the diff, a menu or a dialog open). While they stand down the keys are the Inbox's again.
+   */
+  live: () => boolean;
 }
 
 const claims: OpenReviewKeys[] = [];
@@ -45,6 +50,31 @@ export function claimReviewKeys(keys: OpenReviewKeys): () => void {
 /** The review whose keys are live, the latest one drawn; null with no review on screen. */
 export function openReviewKeys(): OpenReviewKeys | null {
   return claims[claims.length - 1] ?? null;
+}
+
+/** The review whose keys act now: the open one while it has them; null while there is none or they stand down. */
+export function liveReviewKeys(): OpenReviewKeys | null {
+  const keys = openReviewKeys();
+  return keys?.live() ? keys : null;
+}
+
+/** Where focus moves or a press lands (Details, a menu, a sheet opening or closing): the keys may change hands. */
+const HANDOVERS = ['focusin', 'focusout', 'pointerup', 'keyup'] as const;
+
+/** liveReviewKeys, kept current: what the Undo toast offers follows whose Z it is. */
+export function useLiveReviewKeys(): OpenReviewKeys | null {
+  return useSyncExternalStore(
+    (listener) => {
+      listeners.add(listener);
+      for (const type of HANDOVERS) window.addEventListener(type, listener, true);
+      return () => {
+        listeners.delete(listener);
+        for (const type of HANDOVERS) window.removeEventListener(type, listener, true);
+      };
+    },
+    liveReviewKeys,
+    () => null,
+  );
 }
 
 export function useOpenReviewKeys(): OpenReviewKeys | null {

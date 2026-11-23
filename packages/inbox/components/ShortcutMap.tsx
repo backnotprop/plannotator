@@ -10,9 +10,10 @@
  * closes it, focus goes back to what opened it. On the phone layout there is
  * no button: `?` opens it (a narrow desktop window, a phone's hardware keyboard).
  */
+import { useState } from 'react';
 import { Icon } from '../icons';
 import { mapColumns, MAP_COLUMNS, present, withReviewKeys, type MapRow } from '../shortcuts/map';
-import { useOpenReviewKeys } from '../shortcuts/review';
+import { openReviewKeys, useOpenReviewKeys } from '../shortcuts/review';
 import { isEditableTarget } from '../shortcuts/guards';
 import { keyLive, MapKeys } from '../shortcuts/hint';
 import { useTouchPhone } from '../phone';
@@ -47,8 +48,15 @@ export function ShortcutMap({ onClose, onSettings }: { onClose: () => void; onSe
   // A touch phone (a hardware keyboard opened it with `?`): only the keys that act there, and no way to the
   // Keyboard settings, which a touch phone does not show.
   const touchPhone = useTouchPhone();
-  // A review on screen: its keys lead, and the Inbox's meanings of them are away (shortcuts/review.ts).
-  const { columns: drawn, hidden } = withReviewKeys(MAP_COLUMNS, useOpenReviewKeys());
+  // A review on screen: its keys lead, and the Inbox's meanings of them are away (shortcuts/review.ts). Not while its
+  // keys stood down when the map opened (focus in Details, a menu, a repository file over the diff): the keys are the
+  // Inbox's then. Asked as the map first draws, before its own dialog is open (which would stand them down too).
+  const open = useOpenReviewKeys();
+  const [standingDown] = useState(() => {
+    const keys = openReviewKeys();
+    return keys && !keys.live() ? keys : null;
+  });
+  const { columns: drawn, hidden } = withReviewKeys(MAP_COLUMNS, open === standingDown ? null : open);
   const columns = mapColumns(drawn)
     .map((groups) => groups.map((group) => ({ ...group, rows: group.rows.filter((row) => rowBindings(row, touchPhone, group.review ? NONE : hidden).length > 0) })).filter((group) => group.rows.length > 0))
     .filter((groups) => groups.length > 0);

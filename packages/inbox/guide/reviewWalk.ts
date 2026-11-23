@@ -1,8 +1,8 @@
 /**
  * Where the review's keys go in the Inbox (ReviewKeys.tsx): the files and changes as the reader draws them. The
  * Inbox mounts one review-editor viewer per file (GuideFileCard), so moving between files is read off the page: each
- * file's shell (`data-guide-file-shell`, always in the page) and its header's own controls (the collapse arrow's
- * `data-file-collapse-toggle`, Viewed). The keys do what those controls do, and a review without a control (no Viewed
+ * file's shell (`data-guide-file-shell`, always in the page, and whether it is folded, `data-guide-file-folded`) and its
+ * header's own controls (the collapse arrow's `data-file-collapse-toggle`, Viewed). The keys do what those controls do, and a review without a control (no Viewed
  * ticks) has nothing for its key to do.
  *
  * The changes are production's: every change of each file from its patch (`listDiffChanges`), found among the drawn
@@ -112,9 +112,12 @@ export function collapseToggle(shell: HTMLElement): HTMLButtonElement | null {
   return button instanceof HTMLButtonElement ? button : null;
 }
 
-/** Whether the file shows only its header, as its arrow says. */
+/**
+ * Whether the file shows only its header, as its card says: on the shell, so a folded file not drawn yet (a generated
+ * file starts folded, every file after Collapse all) is folded too; its arrow is not there until it is drawn.
+ */
 export function isCollapsed(shell: HTMLElement): boolean {
-  return collapseToggle(shell)?.dataset.fileCollapseToggle === 'collapsed';
+  return shell.dataset.guideFileFolded === 'true';
 }
 
 /** The header's Viewed button, where the review has Viewed ticks. */
@@ -131,28 +134,63 @@ export interface ChangeSpot {
   placement: ChangePlacement;
 }
 
+/** The change a step lands on, where it is and how it is placed against the reading line. */
+function spotOf(shell: HTMLElement, change: DiffChange, readingLine: number, rows = renderedUnifiedRange(shell)): ChangeSpot {
+  const el = rows ? findChangeElement(shell, change) : null;
+  const placement: ChangePlacement = el
+    ? placementOf(el.getBoundingClientRect(), readingLine)
+    : rows
+      ? change.unifiedIndex < rows.min ? 'before' : 'after'
+      : shell.getBoundingClientRect().bottom <= readingLine ? 'before' : 'after';
+  return { shell, change, el, placement };
+}
+
 /**
- * Every change of the review's open files, in page order, placed against the reading line as production places them
- * (AllFilesCodeView `jumpChange`): a drawn row by where it is; a row of a drawn file outside its drawn rows by its
- * index; a file not drawn yet by where its box is. A collapsed file's changes are not on the page: none.
+ * The change N (`next`) or Shift+N (`prev`) goes to, as production picks it (AllFilesCodeView `jumpChange`,
+ * `resolveChangeJump`) among every change of the review's open files in page order: from `from` (the change it last
+ * landed on, while on screen) the one after or before it; else the first placed after the reading line, or the last
+ * placed before it. A drawn row is placed by where it is; a row of a drawn file outside its drawn rows by its index; a
+ * file not drawn yet by where its box is. A folded file's changes are not on the page: none.
+ *
+ * The files are read one at a time in the direction of travel, and the walk stops at the first that has the change: a
+ * big review is not read whole for one step. A file not drawn yet wholly on the far side of the reading line has none
+ * that way, so it is passed over unread.
  */
-export function changeSpots(shells: readonly HTMLElement[], changesOf: (shell: HTMLElement) => readonly DiffChange[], readingLine: number): ChangeSpot[] {
-  const spots: ChangeSpot[] = [];
-  for (const shell of shells) {
-    if (isCollapsed(shell)) continue;
-    const changes = changesOf(shell);
-    if (changes.length === 0) continue;
-    const rows = renderedUnifiedRange(shell);
-    const box = shell.getBoundingClientRect();
-    for (const change of changes) {
-      const el = rows ? findChangeElement(shell, change) : null;
-      const placement: ChangePlacement = el
-        ? placementOf(el.getBoundingClientRect(), readingLine)
-        : rows
-          ? change.unifiedIndex < rows.min ? 'before' : 'after'
-          : box.bottom <= readingLine ? 'before' : 'after';
-      spots.push({ shell, change, el, placement });
+export function changeTarget(
+  shells: readonly HTMLElement[],
+  changesOf: (shell: HTMLElement) => readonly DiffChange[],
+  readingLine: number,
+  direction: 'next' | 'prev',
+  from: { shell: HTMLElement; index: number } | null = null,
+): ChangeSpot | null {
+  const forward = direction === 'next';
+  const order = forward ? shells : [...shells].reverse();
+  const start = from ? order.indexOf(from.shell) : -1;
+  if (from && start !== -1 && !isCollapsed(from.shell)) {
+    const changes = changesOf(from.shell);
+    const at = changes.findIndex((change) => change.unifiedIndex === from.index);
+    if (at !== -1) {
+      const next = changes[forward ? at + 1 : at - 1];
+      if (next) return spotOf(from.shell, next, readingLine);
+      for (const shell of order.slice(start + 1)) {
+        if (isCollapsed(shell)) continue;
+        const theirs = changesOf(shell);
+        const first = theirs[forward ? 0 : theirs.length - 1];
+        if (first) return spotOf(shell, first, readingLine);
+      }
+      return null;
     }
   }
-  return spots;
+  const wanted: ChangePlacement = forward ? 'after' : 'before';
+  for (const shell of order) {
+    if (isCollapsed(shell)) continue;
+    const rows = renderedUnifiedRange(shell);
+    if (rows === null && (shell.getBoundingClientRect().bottom <= readingLine) === forward) continue;
+    const changes = changesOf(shell);
+    for (const change of forward ? changes : [...changes].reverse()) {
+      const spot = spotOf(shell, change, readingLine, rows);
+      if (spot.placement === wanted) return spot;
+    }
+  }
+  return null;
 }

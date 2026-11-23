@@ -29,7 +29,7 @@ import {
 } from '@plannotator/ui/shortcuts';
 import { parseDiffToFiles } from '@plannotator/guide-viewer/diffParser';
 import { codeReviewSurface, reviewEditorShortcuts } from '@plannotator/review-editor/shortcuts';
-import { findChangeElement, listDiffChanges, readingLineFor, renderedUnifiedRange, resolveChangeJump, type DiffChange } from '@plannotator/review-editor/utils/changeNavigation';
+import { findChangeElement, listDiffChanges, readingLineFor, renderedUnifiedRange, type DiffChange } from '@plannotator/review-editor/utils/changeNavigation';
 import { focusFileHeaderWhenLost } from '@plannotator/review-editor/utils/focusFileHeader';
 import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import { inOverlay, isComposingKey, isEditableTarget, keyTarget, modalOpen, singleKeysLive } from '../shortcuts/guards';
@@ -37,7 +37,7 @@ import { claimReviewKeys, openReviewKeys, type OpenReviewKeys, type ReviewKeyRef
 import { selectionToolbarShowing, STRANGERS_MARKUP } from '../selectionToolbar';
 import {
   activeFile,
-  changeSpots,
+  changeTarget,
   collapseToggle,
   fileShells,
   fileStep,
@@ -158,22 +158,32 @@ function coverOpen(): boolean {
   return false;
 }
 
-/** Whether a review key may act now: never while typing, composing, in a dialog, menu, frame or the PR's Details, under a modal or a cover. */
+/**
+ * Whether the review has the keys now, from where focus is (`target`): not while focus is in a dialog, menu, frame or
+ * the PR's Details, or under a modal, a cover, a Shape board or a repository file. Otherwise the keys are the Inbox's
+ * again, and the map and the Undo toast say so (OpenReviewKeys `live`).
+ */
+export function reviewKeysLive(root: HTMLElement, scroller: HTMLElement, target: Element | null): boolean {
+  if (target && (inOverlay(target) || target.closest('[role="menu"], [role="listbox"], iframe, [data-pull-details]'))) return false;
+  if (modalOpen() || selectionToolbarShowing(document) || boardOver(target) || coverOpen()) return false;
+  return diffOnScreen(scroller);
+}
+
+/** Whether a review key may act now: never while typing or composing, and only while the review has the keys. */
 export function reviewKeyAllowed(event: KeyboardEvent, root: HTMLElement, scroller: HTMLElement): boolean {
   if (event.defaultPrevented || isComposingKey(event)) return false;
   const pageKey = PAGE_KEYS.has(event.key) || event.key === 'F5';
   // The letters and `[` `]` are single keys: off with Single-key shortcuts, as every Inbox single key (WCAG 2.1.4).
   if (!pageKey && !singleKeysLive()) return false;
   const target = keyTarget(event);
-  if (target && (isEditableTarget(target) || inOverlay(target) || target.closest('[role="menu"], [role="listbox"], iframe, [data-pull-details]'))) return false;
+  if (target && isEditableTarget(target)) return false;
   if (PAGE_KEYS.has(event.key)) {
     const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
     const fromPage = !target || target === document.body || target === document.documentElement;
     if (!fromPage && !path.includes(root)) return false;
     if (path.some((node) => node instanceof Element && node.matches(ARROW_OWNERS))) return false;
   }
-  if (modalOpen() || selectionToolbarShowing(document) || boardOver(target) || coverOpen()) return false;
-  return diffOnScreen(scroller);
+  return reviewKeysLive(root, scroller, target);
 }
 
 /** A Shape board open over the review (ShapeBoardLayer), or the key from inside one: the board has the keys then. */
@@ -254,7 +264,18 @@ export function ReviewKeys({ diff, viewed }: ReviewKeysProps) {
     return () => window.removeEventListener('keydown', note, true);
   }, []);
   // Two reviews drawn at once (a guided review over a PR's page): the keys are the one drawn last.
-  const claim = useMemo<OpenReviewKeys>(() => ({ title: codeReviewSurface.title, rows: mapRows(viewed), claimed: CLAIMED }), [viewed]);
+  const claim = useMemo<OpenReviewKeys>(
+    () => ({
+      title: codeReviewSurface.title,
+      rows: mapRows(viewed),
+      claimed: CLAIMED,
+      live: () => {
+        const root = rootOf();
+        return !!root && reviewKeysLive(root, layoutOf(root).scroller, document.activeElement);
+      },
+    }),
+    [viewed],
+  );
   const claimRef = useRef(claim);
   claimRef.current = claim;
   useEffect(() => claimReviewKeys(claim), [claim]);
@@ -327,20 +348,13 @@ export function ReviewKeys({ diff, viewed }: ReviewKeysProps) {
         atTop: scroller.scrollTop <= 1,
         atBottom: scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 1,
       };
-      const spots = changeSpots(shells, (shell) => changes(pathOf(shell)), readingLineFor(view, direction, scroll));
-      let current: number | null = null;
-      if (cursor.current) {
-        const at = spots.findIndex((spot) => spot.shell === cursor.current!.shell && spot.change.unifiedIndex === cursor.current!.index);
-        const rect = at === -1 ? null : spots[at]!.el?.getBoundingClientRect();
-        if (rect && rect.bottom > view.top && rect.top < view.bottom) current = at;
-      }
-      const target = resolveChangeJump(
-        spots.map((spot) => spot.placement),
-        direction,
-        current,
-      );
-      if (target === null) return;
-      const spot = spots[target]!;
+      // From the change it last landed on while that is on screen (its row drawn, in view).
+      const last = cursor.current;
+      const lastChange = last && shells.includes(last.shell) ? changes(pathOf(last.shell)).find((change) => change.unifiedIndex === last.index) : undefined;
+      const lastRect = lastChange ? findChangeElement(last!.shell, lastChange)?.getBoundingClientRect() : undefined;
+      const from = lastRect && lastRect.bottom > view.top && lastRect.top < view.bottom ? last : null;
+      const spot = changeTarget(shells, (shell) => changes(pathOf(shell)), readingLineFor(view, direction, scroll), direction, from);
+      if (!spot) return;
       cursor.current = { shell: spot.shell, index: spot.change.unifiedIndex };
       if (spot.el) {
         spot.el.scrollIntoView({ block: 'center' });

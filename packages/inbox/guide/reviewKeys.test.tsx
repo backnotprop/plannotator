@@ -29,7 +29,7 @@ const hasDom = typeof document !== 'undefined';
 // review-editor reads `window` as it loads: only under happy-dom (the plain unit lane loads this file too).
 const { reviewSettingsShortcutRegistry } = (hasDom ? await import('@plannotator/review-editor/shortcuts') : {}) as typeof import('@plannotator/review-editor/shortcuts');
 const { REVIEW_KEY_ACTIONS, ReviewKeys, endsSequence } = (hasDom ? await import('./ReviewKeys') : {}) as typeof import('./ReviewKeys');
-const { activeFile, changeSpots, fileStep, reopenTarget, stepOrigin } = (hasDom ? await import('./reviewWalk') : {}) as typeof import('./reviewWalk');
+const { activeFile, changeTarget, fileStep, reopenTarget, stepOrigin } = (hasDom ? await import('./reviewWalk') : {}) as typeof import('./reviewWalk');
 const { ShortcutMap } = (hasDom ? await import('../components/ShortcutMap') : {}) as typeof import('../components/ShortcutMap');
 const { InboxToast, toastSpeech } = (hasDom ? await import('../components/Toast') : {}) as typeof import('../components/Toast');
 const VIEW = 400;
@@ -91,14 +91,17 @@ describe.skipIf(!hasDom)('the review’s keys in the Inbox', () => {
     };
   };
 
-  const Review = ({ keys = true, viewed = true, details = false, diff = DIFF }: { keys?: boolean; viewed?: boolean; details?: boolean; diff?: string }) => (
+  /** The files folded (the card's state, on its shell): c unless a test says otherwise. */
+  type ReviewOptions = { viewed?: boolean; details?: boolean; diff?: string; folded?: ReadonlySet<string> };
+  const C_FOLDED: ReadonlySet<string> = new Set(['src/c.ts']);
+  const Review = ({ keys = true, viewed = true, details = false, diff = DIFF, folded = C_FOLDED }: ReviewOptions & { keys?: boolean }) => (
     <section data-pull-review="">
       <div data-scroller="" style={{ overflowY: 'auto' }}>
         {FILES.map((file) => (
-          <div key={file.path} data-guide-file-shell={file.path}>
+          <div key={file.path} data-guide-file-shell={file.path} data-guide-file-folded={folded.has(file.path) ? 'true' : 'false'}>
             <div data-file-header-path={file.path} tabIndex={0}>
               <div>
-                <button type="button" data-file-collapse-toggle={file.path === 'src/c.ts' ? 'collapsed' : 'expanded'} onClick={() => clicks.push(`arrow ${file.path}`)} />
+                <button type="button" data-file-collapse-toggle={folded.has(file.path) ? 'collapsed' : 'expanded'} onClick={() => clicks.push(`arrow ${file.path}`)} />
               </div>
               <button type="button" data-file-header-viewed="" onClick={() => clicks.push(`viewed ${file.path}`)} />
             </div>
@@ -122,7 +125,7 @@ describe.skipIf(!hasDom)('the review’s keys in the Inbox', () => {
     </section>
   );
 
-  const mount = async (keys = true, options: { viewed?: boolean; details?: boolean; diff?: string } = {}) => {
+  const mount = async (keys = true, options: ReviewOptions = {}) => {
     await act(async () => root.render(
       <>
         <InboxKeys />
@@ -151,6 +154,18 @@ describe.skipIf(!hasDom)('the review’s keys in the Inbox', () => {
       place(rows[2]!, file.change + 20, 20);
     }
   };
+  /** Files whose viewer is not mounted yet: no header, no rows, until the view comes near them. */
+  const undraw = (paths: string[]) => {
+    const later = paths.map((path) => {
+      const shell = host.querySelector(`[data-guide-file-shell="${path}"]`)!;
+      const parts = [...shell.children];
+      for (const part of parts) part.remove();
+      return { shell, parts, top: FILES.find((file) => file.path === path)!.top };
+    });
+    onScroll = () => {
+      for (const { shell, parts, top } of later) if (scrollTop + VIEW > top && !shell.firstChild) shell.append(...parts);
+    };
+  };
   const press = (key: string, init: KeyboardEventInit = {}, target: EventTarget = document.body) => {
     const event = new KeyboardEvent('keydown', { key, code: key.length === 1 ? `Key${key.toUpperCase()}` : key, bubbles: true, cancelable: true, composed: true, ...init });
     target.dispatchEvent(event);
@@ -159,7 +174,8 @@ describe.skipIf(!hasDom)('the review’s keys in the Inbox', () => {
 
   beforeEach(() => {
     onScroll = () => {};
-    atPoint = () => scroller;
+    // The review's scroller, whichever review is drawn (a test that draws one without `mount` too).
+    atPoint = () => host.querySelector('[data-scroller]');
     (document as { elementFromPoint: unknown }).elementFromPoint = () => atPoint();
     inbox = [];
     reached = [];
@@ -207,16 +223,9 @@ describe.skipIf(!hasDom)('the review’s keys in the Inbox', () => {
 
   test('N toward a file not drawn yet: its file comes on screen, then its change; never back to the same change', async () => {
     await mount();
-    // The other files' rows are not drawn until the view comes near them (each file's viewer mounts near the view).
-    const later = FILES.slice(1).map((file) => {
-      const tbody = host.querySelector(`[data-guide-file-shell="${file.path}"] tbody`)!;
-      const rows = [...tbody.children];
-      for (const row of rows) row.remove();
-      return { file, tbody, rows };
-    });
-    onScroll = () => {
-      for (const { file, tbody, rows } of later) if (scrollTop + VIEW > file.top && !tbody.firstChild) tbody.append(...rows);
-    };
+    // The other files are not drawn until the view comes near them (each file's viewer mounts near the view): no
+    // header, no arrow, no rows.
+    undraw(['src/b.ts', 'src/c.ts']);
     press('n');
     expect(reached).toEqual(['1,1']);
     expect(scrollTop).toBe(100 - VIEW / 2);
@@ -244,6 +253,34 @@ describe.skipIf(!hasDom)('the review’s keys in the Inbox', () => {
     await frames();
     expect(scrollTop).toBe(100 - VIEW / 2);
     expect(reached).toEqual(['1,1', '1,1', '1,1']);
+    expect(inbox).toEqual([]);
+  });
+
+  test('N passes over a folded file not drawn yet (a generated file starts folded) to the next open one', async () => {
+    await mount(true, { folded: new Set(['src/b.ts']) });
+    // b has no arrow to say it is folded: its viewer is not mounted.
+    undraw(['src/b.ts', 'src/c.ts']);
+    press('n');
+    press('n');
+    await frames();
+    // Never b: its file is not brought on screen and no change of it is looked for; c's change, centred.
+    expect(reached).toEqual(['1,1', 'src/c.ts', '1,1']);
+    expect(scrollTop).toBe(1100 - VIEW / 2);
+    press('N', { shiftKey: true });
+    await frames();
+    expect(scrollTop).toBe(100 - VIEW / 2);
+    expect(inbox).toEqual([]);
+  });
+
+  test('after Collapse all, N and Shift+N stay put: no change is on the page, none is looked for', async () => {
+    await mount(true, { folded: new Set(FILES.map((file) => file.path)) });
+    undraw(['src/b.ts', 'src/c.ts']);
+    expect(press('n').defaultPrevented).toBe(true);
+    await frames();
+    press('N', { shiftKey: true });
+    await frames();
+    expect(reached).toEqual([]);
+    expect(scrollTop).toBe(0);
     expect(inbox).toEqual([]);
   });
 
@@ -448,6 +485,41 @@ describe.skipIf(!hasDom)('the review’s keys in the Inbox', () => {
     expect(toastSpeech(toast, false, true)).toBe('Marked read. Press Z to undo.');
   });
 
+  test('while the review’s keys stand down (Details, a menu), the map and the Undo toast are the Inbox’s again', async () => {
+    const mapRows = () => [...document.querySelectorAll<HTMLElement>('[data-map-row]')].map((row) => row.dataset.mapRow);
+    const toast = { id: 1, icon: 'check' as const, lead: 'Marked read', onUndo: () => {} };
+    await act(async () => root.render(
+      <>
+        <Review details />
+        <InboxToast toast={toast} />
+      </>,
+    ));
+    const undo = () => host.querySelector('[data-toast-undo]')!;
+    expect(undo().hasAttribute('aria-keyshortcuts')).toBe(false);
+    // A menu opens: Z is the Inbox's Undo again, and the toast says so.
+    const menu = document.createElement('div');
+    menu.setAttribute('role', 'menu');
+    menu.getClientRects = () => [{}] as unknown as DOMRectList;
+    document.body.append(menu);
+    await act(async () => void document.body.dispatchEvent(new Event('pointerup', { bubbles: true })));
+    expect(undo().hasAttribute('aria-keyshortcuts')).toBe(true);
+    expect(toastSpeech(toast, false, true)).toBe('Marked read. Press Z to undo.');
+    menu.remove();
+    await act(async () => void document.body.dispatchEvent(new Event('pointerup', { bubbles: true })));
+    expect(undo().hasAttribute('aria-keyshortcuts')).toBe(false);
+    // The map opened with focus in the PR's Details: J / K threads, N and Z are the Inbox's, and listed as such.
+    const inDetails = host.querySelector<HTMLElement>('[data-in-details]')!;
+    await act(async () => inDetails.focus());
+    await act(async () => root.render(
+      <>
+        <Review details />
+        <ShortcutMap onClose={() => {}} onSettings={() => {}} />
+      </>,
+    ));
+    expect(document.querySelector('section.ib-map-group[aria-label="Code review"]')).toBeNull();
+    for (const row of ['inbox-thread.nextThread', 'inbox-thread.firstNew', 'inbox-thread.undo']) expect(mapRows()).toContain(row);
+  });
+
   test('a review is not read for its changes until a key asks: a patch Pierre finds fault with says nothing on open', async () => {
     // A hunk that declares more lines than it has (Pierre logs it when it reads the patch).
     const bad = 'diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,4 +1,6 @@\n const a = 0;\n+const b = 1;\n';
@@ -496,26 +568,64 @@ describe.skipIf(!hasDom)('the review’s keys in the Inbox', () => {
     expect(reopenTarget([false, false], 1)).toBeNull();
   });
 
-  test('the changes a step picks from: every change of the file, drawn or not, placed as production places them', () => {
+  test('the change a step picks: every change of the file, drawn or not, placed as production places them', () => {
     const shell = document.createElement('div');
+    shell.dataset.guideFileFolded = 'false';
     // Rows 30 to 50 drawn, 40 a change's first row; the file's other changes start at 1 (above) and 90 (below).
     shell.innerHTML = Array.from({ length: 21 }, (_, i) => `<div data-line-index="${30 + i},${30 + i}" data-line-type="${30 + i === 40 ? 'change-addition' : 'context'}"></div>`).join('');
     [...shell.children].forEach((row, i) => ((row as HTMLElement).getBoundingClientRect = () => ({ top: i * 20, bottom: i * 20 + 20, height: 20 }) as DOMRect));
     shell.getBoundingClientRect = () => ({ top: -600, bottom: 1400 }) as DOMRect;
     const changes = [1, 40, 90].map((unifiedIndex) => ({ unifiedIndex, lineNumber: unifiedIndex + 1, side: 'additions' as const }));
-    // Reading line at 300: row 40 is drawn at 200, above it.
-    expect(changeSpots([shell], () => changes, 300).map((spot) => [spot.change.unifiedIndex, spot.placement, !!spot.el])).toEqual([
-      [1, 'before', false],
-      [40, 'before', true],
-      [90, 'after', false],
-    ]);
+    const pick = (shells: HTMLElement[], line: number, direction: 'next' | 'prev', from: { shell: HTMLElement; index: number } | null = null) => {
+      const spot = changeTarget(shells, () => changes, line, direction, from);
+      return spot && [spot.change.unifiedIndex, spot.placement, !!spot.el];
+    };
+    // Reading line at 300: row 40 is drawn at 200, above it; 90 is past the drawn rows, 1 before them.
+    expect(pick([shell], 300, 'next')).toEqual([90, 'after', false]);
+    expect(pick([shell], 300, 'prev')).toEqual([40, 'before', true]);
+    expect(pick([shell], 100, 'next')).toEqual([40, 'after', true]);
+    // From the change it landed on: the one after or before it in the file.
+    expect(pick([shell], 300, 'prev', { shell, index: 40 })).toEqual([1, 'before', false]);
     // A file not drawn yet: by where its box is.
     const notDrawn = document.createElement('div');
+    notDrawn.dataset.guideFileFolded = 'false';
     notDrawn.getBoundingClientRect = () => ({ top: 900, bottom: 1500 }) as DOMRect;
-    expect(changeSpots([notDrawn], () => changes, 300).map((spot) => spot.placement)).toEqual(['after', 'after', 'after']);
-    // A collapsed file: none.
+    expect(pick([notDrawn], 300, 'next')).toEqual([1, 'after', false]);
+    expect(pick([notDrawn], 300, 'prev')).toBeNull();
+    // A folded file, drawn or not (its card says so on its shell): none.
     const folded = document.createElement('div');
-    folded.innerHTML = '<button data-file-collapse-toggle="collapsed"></button>';
-    expect(changeSpots([folded], () => changes, 300)).toEqual([]);
+    folded.dataset.guideFileFolded = 'true';
+    folded.getBoundingClientRect = () => ({ top: 900, bottom: 1500 }) as DOMRect;
+    expect(pick([folded], 300, 'next')).toBeNull();
+    expect(pick([folded, notDrawn], 300, 'next')).toEqual([1, 'after', false]);
+  });
+
+  test('a step reads the files one at a time the way it goes, and stops at the first with a change', () => {
+    const box = (top: number) => {
+      const shell = document.createElement('div');
+      shell.dataset.guideFileFolded = 'false';
+      shell.getBoundingClientRect = () => ({ top, bottom: top + 500 }) as DOMRect;
+      return shell;
+    };
+    // A big review: files above the view, the one being read, and many below, none drawn.
+    const shells = Array.from({ length: 200 }, (_, i) => box(-5000 + i * 500));
+    const read: number[] = [];
+    const changesOf = (shell: HTMLElement) => {
+      const at = shells.indexOf(shell);
+      read.push(at);
+      // File 10 has no change (a rename, a mode change).
+      return at === 10 ? [] : [{ unifiedIndex: 1, lineNumber: 2, side: 'additions' as const }];
+    };
+    // The reading line at 200, in file 10 (0 to 500): the files above it are not read, and 10 has no change, so 11.
+    expect(shells.indexOf(changeTarget(shells, changesOf, 200, 'next')!.shell)).toBe(11);
+    expect(read).toEqual([10, 11]);
+    read.length = 0;
+    // From file 9's change on: file 10 has none, so 11.
+    expect(shells.indexOf(changeTarget(shells, changesOf, 200, 'next', { shell: shells[9]!, index: 1 })!.shell)).toBe(11);
+    expect(read).toEqual([9, 10, 11]);
+    read.length = 0;
+    // Back: the files below the reading line are not read; file 9 is the first before it with a change.
+    expect(shells.indexOf(changeTarget(shells, changesOf, 200, 'prev')!.shell)).toBe(9);
+    expect(read).toEqual([9]);
   });
 });
