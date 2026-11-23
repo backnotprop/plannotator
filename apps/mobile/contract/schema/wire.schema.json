@@ -3294,6 +3294,9 @@
             }
           ]
         },
+        "acted_at": {
+          "type": "string"
+        },
         "tags": {
           "type": "array",
           "items": {
@@ -3777,6 +3780,16 @@
             }
           ]
         },
+        "moved_to": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InboxMovedTo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "idempotency_key": {
           "anyOf": [
             {
@@ -3842,6 +3855,16 @@
           "items": {
             "type": "string"
           }
+        },
+        "moved_note": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InboxMovedNote"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "reopened": {
           "type": "array",
@@ -4454,6 +4477,64 @@
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"
     },
+    "InboxMovedNote": {
+      "type": "object",
+      "properties": {
+        "thread_id": {
+          "type": "string"
+        },
+        "questions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "thread_id",
+        "questions"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxMovedTo": {
+      "type": "object",
+      "properties": {
+        "thread_id": {
+          "type": "string"
+        },
+        "subject": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "open": {
+          "type": "boolean",
+          "const": true
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "thread_id",
+        "subject"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
     "InboxNotifyReach": {
       "type": "object",
       "properties": {
@@ -4870,6 +4951,9 @@
             "target"
           ],
           "additionalProperties": true
+        },
+        "scenarios": {
+          "$ref": "#/$defs/InboxQuestionScenarios"
         }
       },
       "required": [
@@ -5003,6 +5087,70 @@
         "text"
       ],
       "x-open": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxQuestionScenarios": {
+      "type": "object",
+      "properties": {
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "choice": {
+                "type": "string"
+              },
+              "header": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "choice",
+              "header"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "situation": {
+                "type": "string"
+              },
+              "cells": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "verdict": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "verdict"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            },
+            "required": [
+              "situation",
+              "cells"
+            ],
+            "additionalProperties": true
+          }
+        }
+      },
+      "required": [
+        "columns",
+        "rows"
+      ],
+      "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"
     },
     "InboxQuestionState": {

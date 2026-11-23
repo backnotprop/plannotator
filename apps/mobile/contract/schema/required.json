@@ -521,6 +521,14 @@
     "InboxMessageWireThreadNaming": [
       "status"
     ],
+    "InboxMovedNote": [
+      "questions",
+      "thread_id"
+    ],
+    "InboxMovedTo": [
+      "subject",
+      "thread_id"
+    ],
     "InboxNotifyReach": [
       "allowed",
       "allowed_origins",
@@ -597,6 +605,21 @@
     "InboxQuestionReversible": [
       "value",
       "why"
+    ],
+    "InboxQuestionScenarios": [
+      "columns",
+      "rows"
+    ],
+    "InboxQuestionScenariosColumnsItem": [
+      "choice",
+      "header"
+    ],
+    "InboxQuestionScenariosRowsItem": [
+      "cells",
+      "situation"
+    ],
+    "InboxQuestionScenariosRowsItemCellsItem": [
+      "verdict"
     ],
     "InboxQuestionShows": [
       "kind",

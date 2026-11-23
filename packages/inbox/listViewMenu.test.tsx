@@ -21,6 +21,7 @@ const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { LIST_VIEW_COOKIE, resetListViewForTests } = await import('./listView');
+import type { ListSort } from './listView';
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
 const stored = new Map<string, string>();
@@ -88,35 +89,37 @@ const LIST = sections({
   snoozed: [row('zz', T(5), 'new', { snoozed: { until: '2026-11-06T09:00:00Z', at: T(4) } } as unknown as Partial<InboxListRow>)],
 });
 
-function render(
-  options: { notice?: { count: number; project?: string | null } | null; rememberLook?: boolean; onShowNew?: () => void; sections?: InboxListSection[]; empty?: ReactNode } = {},
-): HTMLElement {
+type RenderOptions = { notice?: { count: number; project?: string | null } | null; rememberLook?: boolean; onShowNew?: () => void; sections?: InboxListSection[]; empty?: ReactNode; sort?: ListSort };
+
+function tree(options: RenderOptions) {
+  return (
+    <SidebarProvider>
+      <InboxList
+        title="Inbox"
+        path={null}
+        sections={options.sections ?? LIST}
+        empty={options.empty}
+        sort={options.sort ?? { epoch: 1, keep: null }}
+        filtered={false}
+        narrow={false}
+        phone={false}
+        selectedThreadId={null}
+        notice={options.notice ?? null}
+        onShowNew={options.onShowNew ?? (() => {})}
+        onOpen={() => {}}
+        tidy={TIDY}
+        rememberLook={options.rememberLook}
+      />
+    </SidebarProvider>
+  );
+}
+
+function render(options: RenderOptions = {}): HTMLElement {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.append(host);
   root = createRoot(host);
-  act(() => {
-    root!.render(
-      <SidebarProvider>
-        <InboxList
-          title="Inbox"
-          path={null}
-          sections={options.sections ?? LIST}
-          empty={options.empty}
-          sort={{ epoch: 1, keep: null }}
-          filtered={false}
-          narrow={false}
-          phone={false}
-          selectedThreadId={null}
-          notice={options.notice ?? null}
-          onShowNew={options.onShowNew ?? (() => {})}
-          onOpen={() => {}}
-          tidy={TIDY}
-          rememberLook={options.rememberLook}
-        />
-      </SidebarProvider>,
-    );
-  });
+  act(() => root!.render(tree(options)));
   return host;
 }
 
@@ -186,6 +189,33 @@ describe.skipIf(!hasDom)('the ⋮ menu choice', () => {
     const el = render({ rememberLook: false });
     expect(bands(el)).toContain('quiet');
   });
+});
+
+describe.skipIf(!hasDom)('Recent activity draws List whatever the view (listFilterRecent.ts)', () => {
+  // When the person acted: Ada Novak's thread in Quiet a minute ago, Charlie Dunn's waiting since last week, Bob Tully's since yesterday.
+  const ACTED: Record<string, string> = { q2: '2026-11-05T10:59:00Z', wait: '2026-10-29T10:00:00Z', new2: '2026-11-04T10:00:00Z' };
+  const ON = sections({
+    waiting: [row('wait', T(9), 'waiting', { questions: { open: 1, picked: 0, stopped: false, holds_up: [] } } as unknown as Partial<InboxListRow>)],
+    new: [row('new2', T(8), 'new')],
+    quiet: [row('q2', T(6), 'quiet')],
+  });
+  const by = (r: InboxListRow) => ACTED[r.thread_id] ?? '';
+
+  for (const view of ['grouped', 'list', 'agents'] as const) {
+    test(`one list, newest act first, no bands (${view}); off, the view comes back as it was`, () => {
+      if (view !== 'grouped') stored.set(LIST_VIEW_COOKIE, view);
+      const el = render({ sections: ON, sort: { epoch: 1, keep: null, by } });
+      expect(rowIds(el)).toEqual(['q2', 'new2', 'wait']);
+      expect(bands(el)).toEqual([]);
+      expect(el.querySelector('[data-agent-head]')).toBeNull();
+      // The ⋮ menu's choice is untouched.
+      expect(stored.get(LIST_VIEW_COOKIE)).toBe(view === 'grouped' ? undefined : view);
+      act(() => root!.render(tree({ sections: ON, sort: { epoch: 1, keep: null } })));
+      if (view === 'grouped') expect(bands(el)).toEqual(['waiting', 'new', 'quiet']);
+      if (view === 'list') expect(rowIds(el)).toEqual(['wait', 'new2', 'q2']);
+      if (view === 'agents') expect(el.querySelector('[data-agent-head]')).not.toBeNull();
+    });
+  }
 });
 
 describe.skipIf(!hasDom)('"N new · Show" in List', () => {

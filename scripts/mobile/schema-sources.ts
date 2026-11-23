@@ -52,6 +52,7 @@ export const SCHEMA_SOURCES = [
   'packages/core/picture-it-page.ts',
   'packages/core/problem.ts',
   'packages/core/question-block.ts',
+  'packages/core/question-scenarios.ts',
   'packages/core/review-threads.ts',
   'packages/core/shape-scene.ts',
   'packages/core/shape.ts',

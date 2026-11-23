@@ -3,6 +3,9 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { ossMenu, readOssStars } from './src/lib/oss-stars';
+import { PLAN_CARDS } from './src/lib/spaces-pricing';
+
 const marketingRoot = fileURLToPath(new URL('.', import.meta.url));
 const hostileWaitlistUrl =
   'https://example.invalid/%3C%2Fscript%3E</ScRiPt ><img id="astro-define-vars-probe" src=x onerror=alert(1)>';
@@ -131,5 +134,111 @@ describe('marketing security build', () => {
 
     expect(sitemap).not.toContain('https://plannotator.ai/plugin-update/');
     expect(html).toContain('<meta name="robots" content="noindex, follow">');
+  });
+});
+
+describe('the Spaces header on the built pages', () => {
+  const BOOK_CALL =
+    'https://cal.com/plannotator/workspaces?utm_source=plannotator&utm_medium=website&utm_campaign=founder_call&utm_content=header';
+  const REPOS = [
+    'https://github.com/backnotprop/plannotator',
+    'https://github.com/plannotator/effective-html',
+    'https://github.com/plannotator/herdr-annotate',
+    'https://github.com/plannotator/artifact-server',
+    'https://github.com/plannotator/plannotator-tui',
+    'https://github.com/plannotator/talkto',
+    'https://github.com/plannotator',
+  ];
+
+  async function header(page: string) {
+    const html = await readFile(join(outputRoot, page), 'utf8');
+    const found = /<header class="nav">[\s\S]*?<\/header>/.exec(html);
+    expect(found, page).not.toBeNull();
+    const markup = found![0];
+    const links = [...markup.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/g)].map(([, attrs, inner]) => ({
+      href: (/\bhref="([^"]*)"/.exec(attrs)?.[1] ?? '').replaceAll('&amp;', '&'),
+      attrs,
+      text: inner.replace(/<[^>]+>/g, '').trim(),
+    }));
+    return { html, markup, links };
+  }
+
+  for (const page of ['workspaces/index.html', 'workspaces/pricing/index.html']) {
+    test(`${page}: home, Pricing, Book a call and the repositories, at their addresses`, async () => {
+      const { links } = await header(page);
+      const to = (text: string) => links.filter((link) => link.text === text).map((link) => link.href);
+      expect(links.find((link) => link.attrs.includes('class="act home"'))?.href).toBe('/workspaces/');
+      expect(to('Pricing')).toEqual(['/workspaces/pricing/', '/workspaces/pricing/']);
+      expect(to('Book a call')).toEqual([BOOK_CALL, BOOK_CALL]);
+      // Each repository is in the drop-down and again in the phone menu, opening in a new tab.
+      const repos = links.filter((link) => link.href.startsWith('https://github.com/'));
+      expect(repos.map((link) => link.href)).toEqual([...REPOS, ...REPOS]);
+      for (const link of repos) {
+        expect(link.attrs).toContain('target="_blank"');
+        expect(link.attrs).toContain('rel="noreferrer"');
+      }
+    });
+
+    test(`${page}: no Sign in`, async () => {
+      const { markup } = await header(page);
+      expect(markup).not.toMatch(/sign in/i);
+      expect(markup).not.toContain('/auth/login');
+    });
+
+    test(`${page}: the star count is the committed snapshot's`, async () => {
+      const { markup } = await header(page);
+      const menu = ossMenu(readOssStars(await readFile(join(marketingRoot, 'src/data/oss-stars.json'), 'utf8')));
+      expect(menu.count).not.toBeNull();
+      expect(markup).toContain(`<span class="lk-c">${menu.count}</span>`);
+      expect(markup).toContain(`aria-label="${menu.label}"`);
+    });
+  }
+
+  test('only the pricing page marks Pricing as the current page', async () => {
+    const pricing = await header('workspaces/pricing/index.html');
+    const front = await header('workspaces/index.html');
+    const current = (links: { attrs: string; text: string }[]) =>
+      links.filter((link) => link.attrs.includes('aria-current="page"')).map((link) => link.text);
+    expect(current(pricing.links)).toEqual(['Pricing', 'Pricing']);
+    expect(current(front.links)).toEqual([]);
+  });
+
+  test('the pricing page, now linked from the header, is indexable and in the sitemap', async () => {
+    const sitemap = await readFile(join(outputRoot, 'sitemap-0.xml'), 'utf8');
+    const { html } = await header('workspaces/pricing/index.html');
+    expect(sitemap).toContain('<loc>https://plannotator.ai/workspaces/pricing/</loc>');
+    expect(html).toContain('<meta name="robots" content="index, follow">');
+  });
+});
+
+describe('the Spaces pricing page as built', () => {
+  test('every card carries both prices for the switch and shows the monthly one first', async () => {
+    const html = await readFile(join(outputRoot, 'workspaces/pricing/index.html'), 'utf8');
+    const cards = [...html.matchAll(/<article class="pp-card"([^>]*)>([\s\S]*?)<\/article>/g)];
+    expect(cards.map(([, attrs]) => /data-plan="([^"]*)"/.exec(attrs)?.[1])).toEqual(PLAN_CARDS.map((card) => card.id));
+    for (const [index, [, attrs, inner]] of cards.entries()) {
+      const plan = PLAN_CARDS[index]!;
+      const month = plan.price('month');
+      const year = plan.price('year');
+      expect(attrs).toContain(`data-month-amount="${month.amount}"`);
+      expect(attrs).toContain(`data-year-amount="${year.amount}"`);
+      if (year.per !== null) expect(attrs).toContain(`data-year-per="${year.per}"`);
+      expect(inner).toContain(`<b aria-hidden="true">${month.amount}</b>`);
+    }
+  });
+
+  test('Monthly is the checked choice, and without scripts the switch is not shown', async () => {
+    const html = await readFile(join(outputRoot, 'workspaces/pricing/index.html'), 'utf8');
+    const group = /<div class="pp-sw" role="radiogroup"[^>]*>([\s\S]*?)<\/div>/.exec(html)?.[1] ?? '';
+    const radios = [...group.matchAll(/<button\b([^>]*)>([^<]*)<\/button>/g)].map(([, attrs, label]) => ({
+      label,
+      checked: /aria-checked="true"/.test(attrs),
+    }));
+    expect(radios).toEqual([
+      { label: 'Monthly', checked: true },
+      { label: 'Yearly', checked: false },
+    ]);
+    const noscript = [...html.matchAll(/<noscript>([\s\S]*?)<\/noscript>/g)].map(([, inner]) => inner).join('');
+    expect(noscript).toMatch(/\.pp-sw\{display:none\}/);
   });
 });

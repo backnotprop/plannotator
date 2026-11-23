@@ -1,5 +1,5 @@
 ---
-// The Spaces pricing page. Not linked from any page yet: it is reached by its address.
+// The Spaces pricing page, linked from the Spaces header's Pricing.
 // Every button opens the same waitlist dialog as /workspaces/; nothing takes money.
 import Base from '../../layouts/Base.astro';
 import SignupDialog from '../../components/spaces/SignupDialog.astro';
@@ -39,19 +39,20 @@ const STARS = [
 
 const said = (amount: string, per: string | null) => (per === null ? amount : `${amount} ${per}`);
 ---
-<Base title={PRICING_TITLE} description={LEDE} noindex>
-  {/* noindex while the page is reached only by its address. Remove it, and the sitemap
-      exclusion in astro.config.mjs, when Pricing joins the header. */}
+<Base title={PRICING_TITLE} description={LEDE}>
   <Fragment slot="head">
     <!-- Light or dark before paint, as on /workspaces/: the plannotator-theme cookie wins when it says
          light or dark; otherwise the page follows the system setting. -->
     <script is:inline>(function(){var m=document.cookie.match(/(?:^|; )plannotator-theme=([^;]*)/),t=m?decodeURIComponent(m[1]):"";if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.classList.toggle("light",t==="light")})();</script>
     <link rel="preload" href="/fonts/spaces-hand/SpacesHandOne.woff2" as="font" type="font/woff2" crossorigin />
+    <!-- With scripts off the Monthly/Yearly switch could not switch, so it is not shown: the cards
+         show the monthly prices and the first answer names both. -->
+    <noscript><style is:inline>.spp .pp-pick .pp-sw{display:none}.spp .pp-pick .pp-saving{margin-top:0}</style></noscript>
   </Fragment>
 
 <div class="spp">
 <svg class="stars" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><g class="dk">{STARS.map(([cx, cy, r, opacity]) => <circle cx={cx} cy={cy} r={r} opacity={opacity} />)}</g></svg>
-<SpacesTopStrip />
+<SpacesTopStrip current="pricing" />
 <main class="pp-pg" id="pricing-main">
   <section class="pp-hero">
     <div class="pp-copy">
@@ -91,7 +92,6 @@ const said = (amount: string, per: string | null) => (per === null ? amount : `$
             <div class="pp-top">
               <h2 class="pp-name">{plan.name}</h2>
               <p class="pp-price"><span class="pp-said">{said(month.amount, month.per)}</span><b aria-hidden="true">{month.amount}</b>{month.per !== null && <span class="pp-per" aria-hidden="true">{month.per}</span>}</p>
-              <p class="pp-line">{plan.line}</p>
               <button type="button" class={plan.id === 'free' ? 'act qt' : 'act'} data-signup aria-haspopup="dialog">Join the waitlist</button>
             </div>
             <ul>

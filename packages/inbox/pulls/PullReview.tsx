@@ -34,7 +34,7 @@
  */
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
-import { GuideReaderPart, PanePart, PullAllFilesPart, PullChangesTreePart, PullRepoFilePart, ReaderPart } from '../lazyParts';
+import { GuideReaderPart, PanePart, PullAllFilesPart, PullChangesTreePart, PullRepoFilePart, ReaderPart, ReviewKeysHere } from '../lazyParts';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import { patchBlobIds, type DiffFile } from '@plannotator/core/diff-files';
 import { anchorStillMatches, captureAnchor } from '@plannotator/ui/utils/codeAnnotationAnchor';
@@ -975,7 +975,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
         <span className="ib-sp" />
         {/* Every review header's diff controls (approval diff-controls-headers), in the bar as in a thread's review: one
             Split / Unified button, Collapse all, the Diff display gear. No row over the code holds them: in the Inbox they
-            are always in the header (the owner). A phone has none. */}
+            are always in the header (the owner). A phone has the gear alone, in the row under the bar. */}
         {!phone && snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
         {!phone && <div ref={setControlsHost} className="ib-prr-controls" data-pull-controls="" />}
         {(readerComments || comments.length > 0) && (
@@ -1055,6 +1055,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
                 <span>{files.length}</span>
               </button>
             )}
+            {snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
           </div>
         )}
         {detailsOpen && (
@@ -1153,6 +1154,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
             // same code keeps it, whatever the head reads said. The reader is a chunk loaded on first use: one that cannot
             // arrive says so here.
             <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch} images={images}>
+              <ReviewKeysHere diff={snapshot.review.rawPatch} viewed />
               <OpenInCodeSpans scope={{ repo: repoKey ?? '', pull: layerKey }} on={!!repoKey}>
                 <ContextNotesProvider api={places.api}>
                   <GuideReader

@@ -12,16 +12,19 @@ import {
 // The Spaces pricing page states prices in three places (the cards, the Yearly
 // line, the first answer). These guard that they never disagree.
 describe('Spaces pricing facts', () => {
-  test('the cards show $0, $29 and $99 a month, and $0, $319 and $1,089 a year', () => {
+  test('four cards: $0, $29, $59 and $119 a month, and $0, $319, $649 and $1,309 a year', () => {
+    expect(PLAN_CARDS.map((card) => card.name)).toEqual(['Free', 'Team 5', 'Team 10', 'Team Unlimited']);
     expect(PLAN_CARDS.map((card) => card.price('month'))).toEqual([
       { amount: '$0', per: null },
       { amount: '$29', per: 'a month' },
-      { amount: '$99', per: 'a month' },
+      { amount: '$59', per: 'a month' },
+      { amount: '$119', per: 'a month' },
     ]);
     expect(PLAN_CARDS.map((card) => card.price('year'))).toEqual([
       { amount: '$0', per: null },
       { amount: '$319', per: 'a year' },
-      { amount: '$1,089', per: 'a year' },
+      { amount: '$649', per: 'a year' },
+      { amount: '$1,309', per: 'a year' },
     ]);
   });
 
@@ -35,15 +38,16 @@ describe('Spaces pricing facts', () => {
     }
   });
 
-  test('the first answer names the prices the cards show', () => {
+  test('the first answer names every paid plan with the prices its card shows', () => {
     const answer = QUESTIONS[0]?.answer ?? '';
-    for (const plan of ['team', 'team_unlimited'] as const) {
-      expect(answer).toContain(`${planPriceWords(plan, 'month')} or ${planPriceWords(plan, 'year')}`);
+    for (const plan of PRICED_PLAN_ORDER) {
+      if (PRICED_PLANS[plan].cents === null) continue;
+      expect(answer).toContain(`${PRICED_PLANS[plan].name} is ${planPriceWords(plan, 'month')} or ${planPriceWords(plan, 'year')}.`);
     }
   });
 
   test('every card has three rows, so the cards line up', () => {
-    expect(PLAN_CARDS.map((card) => card.includes.length)).toEqual([3, 3, 3]);
+    expect(PLAN_CARDS.map((card) => card.includes.length)).toEqual([3, 3, 3, 3]);
   });
 
   test("the Free card's member and guest limits are the ones the answers use", () => {
@@ -59,17 +63,33 @@ describe('Spaces pricing facts', () => {
 
   test('the line under the cards says unlimited guests only where the paid cards do, and Free states its limit', () => {
     expect(UNLIMITED_FACTS).toEqual(['Unlimited agents', 'Unlimited guests']);
-    const rows = (id: string) => PLAN_CARDS.find((card) => card.id === id)?.includes ?? [];
-    expect(rows('team')).toContain('Unlimited guests');
-    expect(rows('team_unlimited')).toContain('Unlimited guests');
-    expect(rows('free').some((row) => /^Up to \d+ guests$/.test(row))).toBe(true);
-    expect(rows('free')).not.toContain('Unlimited guests');
+    for (const card of PLAN_CARDS) {
+      if (card.id === 'free') {
+        expect(card.includes.some((row) => /^Up to \d+ guests$/.test(row))).toBe(true);
+        expect(card.includes).not.toContain('Unlimited guests');
+      } else {
+        expect(card.includes, card.id).toContain('Unlimited guests');
+      }
+    }
   });
 
-  test("the Team card's member limit is the one the questions use", () => {
-    const limit = PRICED_PLANS.team.memberLimit;
-    const team = PLAN_CARDS.find((card) => card.id === 'team');
-    expect(team?.line).toBe(`For teams of up to ${limit}.`);
-    expect(QUESTIONS.some((item) => item.question === `What happens at ${(limit ?? 0) + 1} members?`)).toBe(true);
+  test('the answer for a full plan names each capped paid plan with the member limit its card shows', () => {
+    const full = QUESTIONS.find((item) => item.question === 'What happens when a plan is full?');
+    expect(full).toBeDefined();
+    for (const card of PLAN_CARDS) {
+      const limit = card.includes.map((row) => /^Up to (\d+) members$/.exec(row)?.[1]).find(Boolean);
+      if (card.id === 'free' || limit === undefined) continue;
+      expect(full?.answer, card.id).toMatch(new RegExp(`${card.name} (holds )?up to ${limit}\\b`));
+    }
+  });
+
+  test('no plan is called plain "Team" and no retired price is stated', () => {
+    const words = [
+      ...PLAN_CARDS.flatMap((card) => [card.name, ...card.includes, ...(['month', 'year'] as const).map((at) => card.price(at).amount)]),
+      ...QUESTIONS.flatMap((item) => [item.question, item.answer, item.small ?? '']),
+    ].join('\n');
+    expect(words).not.toMatch(/\bTeam\b(?! (?:5|10|Unlimited)\b)(?=[ .,])/);
+    expect(words).not.toContain('$99');
+    expect(words).not.toContain('$1,089');
   });
 });

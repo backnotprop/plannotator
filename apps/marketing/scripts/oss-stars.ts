@@ -1,5 +1,6 @@
-// Refreshes src/data/oss-stars.json, the star count the Spaces page shows in
-// its top strip. Run it by hand and commit the file:
+// Refreshes src/data/oss-stars.json, the star counts the Spaces header shows
+// (the total beside "Open source" and each repository's count in its
+// drop-down). Run it by hand and commit the file:
 //
 //   bun apps/marketing/scripts/oss-stars.ts
 //
@@ -22,7 +23,6 @@ import { readOssStars, snapshotRefusal } from '../src/lib/oss-stars';
 
 const REPOS = ['backnotprop/plannotator'];
 const ORGS = ['plannotator'];
-const TOP = 5;
 
 const API = 'https://api.github.com';
 const headers: Record<string, string> = {
@@ -75,7 +75,7 @@ const snapshot = {
   repoCount: ranked.length,
   fetchedAt: new Date().toISOString().slice(0, 10),
   set: { repos: REPOS, orgs: ORGS, rule: 'listed repos plus every public non-fork repo of each org' },
-  top: ranked.slice(0, TOP).map(([repo, n]) => ({ repo, stars: n })),
+  repos: ranked.map(([repo, n]) => ({ repo, stars: n })),
 };
 
 const previous = existsSync(file) ? readOssStars(readFileSync(file, 'utf8')) : null;
