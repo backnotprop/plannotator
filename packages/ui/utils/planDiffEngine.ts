@@ -14,6 +14,12 @@ import { diffLines, diffWordsWithSpace, type Change } from "diff";
 import { parseMarkdownToBlocks } from "./parser";
 import type { Block } from "../types";
 
+export type PlanDiffBlockParser = (text: string) => Block[];
+
+export interface ComputePlanDiffOptions {
+  parseBlocks?: PlanDiffBlockParser;
+}
+
 const normalizeLineEndings = (text: string): string => text.replace(/\r\n?/g, "\n");
 
 export interface InlineDiffToken {
@@ -171,6 +177,75 @@ function restoreCodeSpans(
 ): string {
   if (codeMap.size === 0) return value;
   return value.replace(SENTINEL_PATTERN, (m) => codeMap.get(m) ?? m);
+}
+
+// Inline-math sentinel (`$...$`, non-escaped, non-double-dollar) so word
+// diffing treats inline formulas as atomic tokens instead of injecting
+// <ins>/<del> tags inside a KaTeX span.
+const MATH_SENTINEL_PREFIX = "__PLDIFFMATH";
+const MATH_SENTINEL_SUFFIX = "PLDIFFMATH__";
+const MATH_SENTINEL_PATTERN = /__PLDIFFMATH\d+PLDIFFMATH__/g;
+
+function mathSentinelFor(id: number): string {
+  return `${MATH_SENTINEL_PREFIX}${id}${MATH_SENTINEL_SUFFIX}`;
+}
+
+function substituteMathSpans(
+  text: string,
+  mathMap: Map<string, string>,
+  mathToId: Map<string, number>
+): string {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === "\\" && i + 1 < text.length) {
+      out += text.slice(i, i + 2);
+      i += 2;
+      continue;
+    }
+    if (text[i] === "$" && text[i + 1] !== "$") {
+      let end = -1;
+      for (let j = i + 1; j < text.length; j++) {
+        if (text[j] === "\\") {
+          j++;
+          continue;
+        }
+        if (text[j] === "$" && text[j + 1] !== "$") {
+          end = j;
+          break;
+        }
+      }
+      if (end > i + 1) {
+        const inner = text.slice(i + 1, end);
+        const afterClose = text[end + 1];
+        const looksLikeMoney =
+          /^\s*\d/.test(inner) && afterClose !== undefined && /\d/.test(afterClose);
+        if (!looksLikeMoney && inner.trim()) {
+          const match = text.slice(i, end + 1);
+          let id = mathToId.get(match);
+          if (id === undefined) {
+            id = mathToId.size;
+            mathMap.set(mathSentinelFor(id), match);
+            mathToId.set(match, id);
+          }
+          out += mathSentinelFor(id);
+          i = end + 1;
+          continue;
+        }
+      }
+    }
+    out += text[i];
+    i++;
+  }
+  return out;
+}
+
+function restoreMathSpans(
+  value: string,
+  mathMap: Map<string, string>
+): string {
+  if (mathMap.size === 0) return value;
+  return value.replace(MATH_SENTINEL_PATTERN, (m) => mathMap.get(m) ?? m);
 }
 
 // Link sentinel. Same trick as inline-code spans but applied to markdown
@@ -508,10 +583,11 @@ function wrapFromBlock(block: Block): InlineDiffWrap {
  */
 export function computeInlineDiff(
   oldContent: string,
-  newContent: string
+  newContent: string,
+  parseBlocks: PlanDiffBlockParser = parseMarkdownToBlocks
 ): { tokens: InlineDiffToken[]; wrap: InlineDiffWrap } | null {
-  const oldBlocks = parseMarkdownToBlocks(oldContent);
-  const newBlocks = parseMarkdownToBlocks(newContent);
+  const oldBlocks = parseBlocks(oldContent);
+  const newBlocks = parseBlocks(newContent);
 
   if (oldBlocks.length !== 1 || newBlocks.length !== 1) return null;
 
@@ -543,6 +619,8 @@ export function computeInlineDiff(
   // constructs are already hidden. Restorations run in reverse order.
   const codeMap = new Map<string, string>();
   const codeToId = new Map<string, number>();
+  const mathMap = new Map<string, string>();
+  const mathToId = new Map<string, number>();
   const linkMap = new Map<string, string>();
   const linkToId = new Map<string, number>();
   const pairMap = new Map<string, string>();
@@ -550,6 +628,8 @@ export function computeInlineDiff(
 
   let substA = substituteCodeSpans(a.content, codeMap, codeToId);
   let substB = substituteCodeSpans(b.content, codeMap, codeToId);
+  substA = substituteMathSpans(substA, mathMap, mathToId);
+  substB = substituteMathSpans(substB, mathMap, mathToId);
   substA = substituteLinks(substA, linkMap, linkToId);
   substB = substituteLinks(substB, linkMap, linkToId);
   substA = substituteEmphasisPairs(substA, pairMap, pairToId);
@@ -561,9 +641,12 @@ export function computeInlineDiff(
   const rawTokens: InlineDiffToken[] = changes.map((c) => ({
     type: c.added ? "added" : c.removed ? "removed" : "unchanged",
     value: restoreCodeSpans(
-      restoreLinks(
-        restoreEmphasisPairs(restoreHyphens(c.value), pairMap),
-        linkMap
+      restoreMathSpans(
+        restoreLinks(
+          restoreEmphasisPairs(restoreHyphens(c.value), pairMap),
+          linkMap
+        ),
+        mathMap
       ),
       codeMap
     ),
@@ -619,8 +702,10 @@ export function computeCodeInlineDiff(oldText: string, newText: string): InlineD
  */
 export function computePlanDiff(
   oldText: string,
-  newText: string
+  newText: string,
+  options: ComputePlanDiffOptions = {}
 ): { blocks: PlanDiffBlock[]; stats: PlanDiffStats } {
+  const parseBlocks = options.parseBlocks ?? parseMarkdownToBlocks;
   const oldLines = normalizeLineEndings(oldText);
   const newLines = normalizeLineEndings(newText);
 
@@ -662,7 +747,7 @@ export function computePlanDiff(
 
     if (change.removed && next?.added) {
       // Adjacent remove + add = modification
-      const inline = computeInlineDiff(change.value, next.value);
+      const inline = computeInlineDiff(change.value, next.value, parseBlocks);
       blocks.push({
         type: "modified",
         content: next.value,
@@ -758,9 +843,12 @@ interface UnchangedPiece {
  * block, such as frontmatter, stays with the first piece). Concatenating the
  * pieces gives the chunk back byte for byte.
  */
-function splitUnchangedChunk(block: PlanDiffBlock): UnchangedPiece[] {
+function splitUnchangedChunk(
+  block: PlanDiffBlock,
+  parseBlocks: PlanDiffBlockParser = parseMarkdownToBlocks
+): UnchangedPiece[] {
   const content = block.content;
-  const parsed = parseMarkdownToBlocks(content);
+  const parsed = parseBlocks(content);
   if (parsed.length <= 1) {
     const only = parsed[0];
     return [only?.type === "heading" ? { piece: block, heading: plainHeadingText(only.content) } : { piece: block }];
@@ -843,10 +931,11 @@ function joinPieces(pieces: PlanDiffBlock[]): PlanDiffBlock {
  */
 export function foldUnchangedPlanDiff(
   blocks: PlanDiffBlock[],
-  options: { context?: number; minHidden?: number } = {}
+  options: { context?: number; minHidden?: number; parseBlocks?: PlanDiffBlockParser } = {}
 ): PlanDiffSegment[] {
   const context = Math.max(0, options.context ?? 1);
   const minHidden = Math.max(1, options.minHidden ?? 2);
+  const parseBlocks = options.parseBlocks ?? parseMarkdownToBlocks;
   const segments: PlanDiffSegment[] = [];
 
   blocks.forEach((block, index) => {
@@ -854,7 +943,7 @@ export function foldUnchangedPlanDiff(
       segments.push({ kind: "block", block, index });
       return;
     }
-    const pieces = splitUnchangedChunk(block);
+    const pieces = splitUnchangedChunk(block, parseBlocks);
     const head = index > 0 ? Math.min(context, pieces.length) : 0;
     const tail = index < blocks.length - 1 ? Math.min(context, pieces.length - head) : 0;
     const hidden = pieces.length - head - tail;

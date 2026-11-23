@@ -42,6 +42,8 @@ import { LINK_WAITS_FOR_DRAFT_TITLE, linkWaitsForDraftDescription, typedCommentD
 import { createPortal } from 'react-dom';
 import { annotateFileFeedback, annotateMessageFeedback, wrapFeedbackForClipboard, type AnnotateFeedbackTemplates } from '@plannotator/shared/feedback-templates';
 import { parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, exportCodeFileAnnotations, exportMessageAnnotations, formatDraftAnnotationsForAsk, extractFrontmatter, wrapFeedbackForAgent, Frontmatter, type LinkedDocAnnotationEntry, type MessageAnnotationEntry } from '@plannotator/ui/utils/parser';
+import { parseAsciidocToBlocks } from '@plannotator/ui/utils/asciidocParser';
+import { parseLatexToBlocks } from '@plannotator/ui/utils/latexParser';
 import { primeSkillCatalog, primeSkillContentsForExport } from '@plannotator/ui/utils/skillCatalog';
 import { Viewer, ViewerHandle } from '@plannotator/ui/components/Viewer';
 import type { AnnotationRestoreReport } from '@plannotator/ui/hooks/useAnnotationHighlighter';
@@ -587,6 +589,10 @@ const App: React.FC = () => {
   const planDiffCodeDocument = useMemo(
     () => (renderAs === 'code' ? { language: blocks[0]?.language } : undefined),
     [renderAs, blocks],
+  );
+  const planDiffParseBlocks = useMemo(
+    () => (renderAs === 'latex' ? parseLatexToBlocks : renderAs === 'asciidoc' ? parseAsciidocToBlocks : undefined),
+    [renderAs],
   );
   const [showExport, setShowExport] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -1602,6 +1608,7 @@ const App: React.FC = () => {
         ? `live-version:${liveSavedVersion}`
         : appliedPlanRevision !== null ? `plan-revision:${appliedPlanRevision}` : null
     ),
+    planDiffParseBlocks,
   );
   // Exit diff view when the active document switches to one with no diff
   // baseline (e.g. a history-less folder file) — otherwise the stale active
@@ -4074,7 +4081,7 @@ const App: React.FC = () => {
         } else if (typeof data.plan === 'string') {
           // An .adoc file renders through the AsciiDoc block parser, and a
           // config or data file (.toml, .yaml, …) as one code block.
-          if (data.renderAs === 'asciidoc' || data.renderAs === 'code') setRenderAs(data.renderAs);
+          if (data.renderAs === 'asciidoc' || data.renderAs === 'latex' || data.renderAs === 'code') setRenderAs(data.renderAs);
           // CM6 joins lines with \n; CRLF input would make an untouched
           // edit round-trip fabricate a whole-document diff. Normalize once.
           const normalizedPlan = data.plan.replace(/\r\n?/g, '\n');
@@ -7617,7 +7624,7 @@ const App: React.FC = () => {
           onAgentToolChange={agentTool.save}
           agentTerminalAvailable={showAgentTerminalControls}
           webmcpAvailable={webmcp.available}
-          documentTextSizeAvailable={renderAs === 'markdown' || renderAs === 'asciidoc' || renderAs === 'code'}
+          documentTextSizeAvailable={renderAs === 'markdown' || renderAs === 'asciidoc' || renderAs === 'latex' || renderAs === 'code'}
           agentConnected={webmcpActivity.calls > 0}
           onCallbackFeedback={handleCallbackFeedback}
           onCallbackApprove={handleCallbackApprove}
@@ -7912,6 +7919,7 @@ const App: React.FC = () => {
                     mode={effectiveEditorMode}
                     fillHeight={gridDiffPaperFillsView}
                     codeDocument={planDiffCodeDocument}
+                    parseBlocks={planDiffParseBlocks}
                   />
                 </div>
               )}

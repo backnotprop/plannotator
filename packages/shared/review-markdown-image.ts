@@ -50,7 +50,7 @@ export const REVIEW_MARKDOWN_IMAGE_SRC_MAX = 2048;
 /** The most of the Markdown file read to check that it references `src`. */
 export const REVIEW_MARKDOWN_DOC_MAX_BYTES = 2 * 1024 * 1024;
 
-const BUILTIN_MARKDOWN_RE = /\.(md|mdx|markdown)$/i;
+const BUILTIN_MARKDOWN_RE = /\.(md|mdx|markdown|tex|ltx)$/i;
 
 /** True when `path` is a Markdown file the preview renders. */
 export function isReviewMarkdownPath(path: string, extraExtensions: readonly string[] = []): boolean {
@@ -69,6 +69,24 @@ const MARKDOWN_REF_IMAGE_RE = /!\[([^\]]*)\](?:\[([^\]]*)\])?/g;
 const REFERENCE_DEFINITION_RE = /^ {0,3}\[([^\]]+)\]:[ \t]*(<[^>\n]*>|\S+)/gm;
 /** An `<img>` tag's src attribute, quoted or not. */
 const HTML_IMG_SRC_RE = /<img\b[^>]*?\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi;
+/** LaTeX `\includegraphics[...]{path}` image reference. */
+const LATEX_INCLUDEGRAPHICS_RE = /\\includegraphics\*?(?:\s*\[[^\]]*\])?\s*\{([^}\n]+)\}/g;
+
+function stripLatexComments(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => {
+      for (let i = 0; i < line.length; i++) {
+        if (line[i] === "\\") {
+          i++;
+          continue;
+        }
+        if (line[i] === "%") return line.slice(0, i);
+      }
+      return line;
+    })
+    .join("\n");
+}
 
 const NAMED_ENTITIES: Record<string, string> = { amp: "&", quot: '"', apos: "'", lt: "<", gt: ">", nbsp: " " };
 
@@ -167,6 +185,7 @@ export function markdownImageRefs(markdown: string): Set<string> {
     }
   }
   for (const match of text.matchAll(HTML_IMG_SRC_RE)) add(decodeAttribute(match[1] ?? match[2] ?? match[3] ?? ""));
+  for (const match of stripLatexComments(text).matchAll(LATEX_INCLUDEGRAPHICS_RE)) add(match[1]);
   return refs;
 }
 

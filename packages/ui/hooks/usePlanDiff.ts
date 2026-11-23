@@ -9,6 +9,7 @@ import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   computePlanDiff,
   type PlanDiffBlock,
+  type PlanDiffBlockParser,
   type PlanDiffStats,
 } from "../utils/planDiffEngine";
 
@@ -104,7 +105,8 @@ export function usePlanDiff(
    * exactly today's one-time-hydration behavior via the two sync effects
    * below.
    */
-  docKey?: string | null
+  docKey?: string | null,
+  parseBlocks?: PlanDiffBlockParser
 ): UsePlanDiffReturn {
   const fetchVersionImpl = fetchers?.fetchVersion ?? defaultFetchVersion;
   const fetchVersionsImpl = fetchers?.fetchVersions ?? defaultFetchVersions;
@@ -195,8 +197,8 @@ export function usePlanDiff(
   // Compute diff whenever currentPlan or diffBasePlan changes
   const diffResult = useMemo(() => {
     if (!diffBasePlan) return null;
-    return computePlanDiff(diffBasePlan, currentPlan);
-  }, [currentPlan, diffBasePlan]);
+    return computePlanDiff(diffBasePlan, currentPlan, parseBlocks ? { parseBlocks } : undefined);
+  }, [currentPlan, diffBasePlan, parseBlocks]);
 
   const diffBlocks = diffResult?.blocks ?? null;
   const diffStats = diffResult?.stats ?? null;

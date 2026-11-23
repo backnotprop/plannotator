@@ -7,7 +7,7 @@
  */
 
 import React, { useState } from "react";
-import type { PlanDiffBlock, PlanDiffStats } from "../../utils/planDiffEngine";
+import type { PlanDiffBlock, PlanDiffBlockParser, PlanDiffStats } from "../../utils/planDiffEngine";
 import type { Annotation, EditorMode } from "../../types";
 import {
   PlanDiffModeSwitcher,
@@ -50,6 +50,10 @@ interface PlanDiffViewerProps {
    * parsing them as markdown. Absent, the diff renders as markdown.
    */
   codeDocument?: PlanDiffCodeDocument;
+  /**
+   * Optional block parser for chunks and folding (LaTeX / AsciiDoc diffs).
+   */
+  parseBlocks?: PlanDiffBlockParser;
 }
 
 const defaultOpenVscodeDiff = async (
@@ -93,6 +97,7 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
   onOpenVscodeDiff,
   fillHeight = false,
   codeDocument,
+  parseBlocks,
 }) => {
   const hideRepoOwner = useConfigValue('hideRepoOwner');
   const [vscodeDiffLoading, setVscodeDiffLoading] = useState(false);
@@ -233,6 +238,7 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
             mode={mode}
             wordLevel={diffMode === "clean"}
             codeDocument={codeDocument}
+            parseBlocks={parseBlocks}
           />
         )}
       </article>

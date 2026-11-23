@@ -129,7 +129,7 @@ export function isTestPath(path: string): boolean {
 }
 
 const DOCS_FOLDERS = new Set(['docs', 'doc', 'documentation']);
-const DOCS_EXT = /\.(?:md|mdx|markdown|rst|adoc)$/i;
+const DOCS_EXT = /\.(?:md|mdx|markdown|rst|adoc|tex|ltx)$/i;
 const DOCS_NAME = /^(?:readme|changelog|changes|history|license|licence|copying|notice|contributing|authors|code_of_conduct|security|support)(?:\.[^/]*)?$|^(?:license|licence)-[^/]+$/i;
 
 /** Is the path documentation, by its extension, its name or a docs folder above it? */

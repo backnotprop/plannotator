@@ -23,6 +23,7 @@ import {
   type MessageAnnotationEntry,
 } from '@plannotator/ui/utils/parser';
 import { parseAsciidocToBlocks } from '@plannotator/ui/utils/asciidocParser';
+import { parseLatexToBlocks } from '@plannotator/ui/utils/latexParser';
 import { codeDocumentLanguage, documentRenderKindForPath, isDiagramRenderKind, shouldStripFrontmatter } from '@plannotator/shared/annotatable';
 
 /**
@@ -39,6 +40,7 @@ export const blocksForRenderAs = (
 ): Block[] => {
   if (isDiagramRenderKind(renderAs)) return diagramDocumentBlocks(text, renderAs);
   if (renderAs === 'asciidoc') return parseAsciidocToBlocks(text);
+  if (renderAs === 'latex') return parseLatexToBlocks(text);
   if (renderAs === 'code') return codeDocumentBlocks(text, codeDocumentLanguage(path));
   return parseMarkdownToBlocks(text, { frontmatter });
 };

@@ -9,8 +9,16 @@
 import { getExtraMarkdownExtensions } from '@plannotator/ui/utils/markdownExtensions';
 import type { DiffFileStatus } from '../types';
 
-/** Built-in extensions the preview renders as Markdown. */
-const BUILTIN_MARKDOWN_PREVIEW_RE = /\.(md|mdx|markdown)$/i;
+/** Built-in extensions the preview renders as Markdown or LaTeX. */
+const BUILTIN_MARKDOWN_PREVIEW_RE = /\.(md|mdx|markdown|tex|ltx)$/i;
+
+/** LaTeX document extensions rendered via `parseLatexToBlocks`. */
+export const LATEX_PREVIEW_RE = /\.(tex|ltx)$/i;
+
+/** True when `path` is a LaTeX source that uses the LaTeX block parser. */
+export function isLatexPreviewPath(path: string): boolean {
+  return LATEX_PREVIEW_RE.test(path.trim());
+}
 
 /** Above this many bytes the preview asks before rendering ("Preview anyway"). */
 export const MARKDOWN_PREVIEW_SIZE_LIMIT = 300 * 1024;

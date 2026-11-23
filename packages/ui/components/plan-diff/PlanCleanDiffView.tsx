@@ -14,13 +14,17 @@ import { useFenceTheme } from "../../hooks/useFenceTheme";
 import { ListItemBody } from "../ListItemBody";
 import { SourceLikeInlineContext } from "../InlineMarkdown";
 import { BlockquoteBlock, BLOCKQUOTE_CLASS_NAME } from "../blocks/BlockquoteBlock";
+import { MathBlock } from "../blocks/MathBlock";
 import { parseTableContent } from "../blocks/TableBlock";
+import { normalizeMathTex, renderMathToHtml } from "../../utils/math";
+import { useMathRenderer } from "../../hooks/useMathRenderer";
 import type { Block, Annotation, EditorMode, ImageAttachment } from "../../types";
 import { AnnotationType } from "../../types";
 import {
   computeCodeInlineDiff,
   foldUnchangedPlanDiff,
   type PlanDiffBlock,
+  type PlanDiffBlockParser,
   type PlanDiffFold,
   type InlineDiffToken,
   type InlineDiffWrap,
@@ -58,6 +62,9 @@ export interface PlanDiffCodeDocument {
 
 /** Provided only when a host passes `codeDocument`; absent, chunks parse as markdown. */
 const CodeDocumentContext = createContext<PlanDiffCodeDocument | null>(null);
+
+/** Block parser for diff chunks (defaults to markdown). */
+const ParseBlocksContext = createContext<PlanDiffBlockParser>(parseMarkdownToBlocks);
 
 interface PlanCleanDiffViewProps {
   blocks: PlanDiffBlock[];
@@ -104,6 +111,11 @@ interface PlanCleanDiffViewProps {
    * Absent, the view renders exactly as before.
    */
   codeDocument?: PlanDiffCodeDocument;
+  /**
+   * Optional: block parser for chunks and unchanged-section folding (defaults
+   * to `parseMarkdownToBlocks`). Used for LaTeX / AsciiDoc rendered diffs.
+   */
+  parseBlocks?: PlanDiffBlockParser;
 }
 
 const DEFAULT_UNCHANGED_CLASS = "opacity-60 hover:opacity-100 transition-opacity";
@@ -137,6 +149,7 @@ const PlanCleanDiffViewBody: React.FC<PlanCleanDiffViewProps> = ({
   foldUnchanged = false,
   unchangedClassName,
   codeDocument,
+  parseBlocks,
 }) => {
   const modeRef = useRef<EditorMode>(mode);
   const onAddAnnotationRef = useRef(onAddAnnotation);
@@ -394,8 +407,8 @@ const PlanCleanDiffViewBody: React.FC<PlanCleanDiffViewProps> = ({
     });
   }, []);
   const segments = useMemo(
-    () => (foldUnchanged ? foldUnchangedPlanDiff(blocks) : null),
-    [blocks, foldUnchanged],
+    () => (foldUnchanged ? foldUnchangedPlanDiff(blocks, { parseBlocks }) : null),
+    [blocks, foldUnchanged, parseBlocks],
   );
 
   const renderDiffBlock = (block: PlanDiffBlock, index: number, key: React.Key) => {
@@ -474,15 +487,19 @@ const PlanCleanDiffViewBody: React.FC<PlanCleanDiffViewProps> = ({
       )
     : blocks.map((block, index) => renderDiffBlock(block, index, index));
 
+  const activeParseBlocks = parseBlocks ?? parseMarkdownToBlocks;
+
   return (
     <div className="space-y-1">
-      {codeDocument ? (
-        <CodeDocumentContext.Provider value={codeDocument}>{body}</CodeDocumentContext.Provider>
-      ) : renderBlock ? (
-        <RenderBlockContext.Provider value={renderBlock}>{body}</RenderBlockContext.Provider>
-      ) : (
-        body
-      )}
+      <ParseBlocksContext.Provider value={activeParseBlocks}>
+        {codeDocument ? (
+          <CodeDocumentContext.Provider value={codeDocument}>{body}</CodeDocumentContext.Provider>
+        ) : renderBlock ? (
+          <RenderBlockContext.Provider value={renderBlock}>{body}</RenderBlockContext.Provider>
+        ) : (
+          body
+        )}
+      </ParseBlocksContext.Provider>
 
       {/* Block hover toolbar (selection mode) */}
       {hoveredBlock && !commentPopover && !quickLabelPicker && (
@@ -927,9 +944,10 @@ const MarkdownChunk: React.FC<{ content: string; side?: PlanDiffSide }> = ({ con
 
 const ParsedMarkdownChunk: React.FC<{ content: string; side: PlanDiffSide }> = ({ content, side }) => {
   const renderBlock = useContext(RenderBlockContext);
+  const parseBlocks = useContext(ParseBlocksContext);
   const blocks = React.useMemo(
-    () => parseMarkdownToBlocks(content),
-    [content]
+    () => parseBlocks(content),
+    [parseBlocks, content]
   );
   // Compute ordered-list display indices across the entire chunk so every
   // list-item gets the right numeral even though we don't group here.
@@ -1022,6 +1040,9 @@ const SimpleBlockRenderer: React.FC<{ block: Block; orderedIndex?: number | null
     case "hr":
       return <hr className="border-border/30 my-8" />;
 
+    case "math":
+      return <MathBlock block={block} />;
+
     case "table": {
       const { headers, rows } = parseTableContent(block.content);
       if (headers.length === 0) return null;
@@ -1109,6 +1130,47 @@ function sanitizeLinkUrl(url: string): string | null {
   return url;
 }
 
+const PlanDiffInlineMath: React.FC<{ tex: string }> = ({ tex }) => {
+  const normalizedTex = normalizeMathTex(tex);
+  const renderer = useMathRenderer();
+  const html = useMemo(() => renderMathToHtml(normalizedTex, false, renderer), [normalizedTex, renderer]);
+
+  if (html === null) {
+    return (
+      <span
+        className="math-inline math-annotatable text-foreground"
+        data-math-tex={normalizedTex}
+        data-math-display="false"
+        aria-label={normalizedTex}
+      >
+        {normalizedTex}
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className="math-inline math-annotatable text-foreground"
+      data-math-tex={normalizedTex}
+      data-math-display="false"
+      aria-label={normalizedTex}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+};
+
+function canRenderSpacedDollarMath(tex: string): boolean {
+  const trimmed = normalizeMathTex(tex);
+  if (!trimmed) return false;
+  if (!/^\s|\s$/.test(tex)) return true;
+  if (/^\s/.test(tex) !== /\s$/.test(tex)) return false;
+  return (
+    /\\[a-zA-Z]+/.test(trimmed) ||
+    /[=^_{}+\-*/<>|]/.test(trimmed) ||
+    /^[a-zA-Z]$/.test(trimmed)
+  );
+}
+
 const InlineMarkdown: React.FC<{ text: string }> = ({ text }) => {
   // A host's image and link rules (ImageResolverContext, LocalLinkContext and
   // LocalLinkMatchContext), as the document view applies them. With no
@@ -1148,6 +1210,62 @@ const InlineMarkdown: React.FC<{ text: string }> = ({ text }) => {
       remaining = remaining.slice(match[0].length);
       previousChar = match[0][match[0].length - 1] || previousChar;
       continue;
+    }
+
+    // Inline math: \( ... \)
+    if (remaining.startsWith('\\(')) {
+      let end = -1;
+      for (let i = 2; i < remaining.length - 1; i++) {
+        if (remaining[i] === '\\' && remaining[i + 1] === ')') {
+          if (i > 0 && remaining[i - 1] === '\\') continue;
+          end = i;
+          break;
+        }
+      }
+      if (end > 1) {
+        const tex = remaining.slice(2, end);
+        if (tex.trim()) {
+          parts.push(<PlanDiffInlineMath key={key++} tex={tex} />);
+          remaining = remaining.slice(end + 2);
+          previousChar = ')';
+          continue;
+        }
+      }
+    }
+
+    // Backslash escaping: \. \* \_ \` \[ \~ \$ etc. — emit literal char, hide backslash
+    match = remaining.match(/^\\([\\*_`\[\]~!.()\-#>+|{}&$])/);
+    if (match) {
+      parts.push(match[1]);
+      remaining = remaining.slice(2);
+      previousChar = match[1];
+      continue;
+    }
+
+    // Inline math: $...$ — require non-space content and avoid $$ display fences.
+    if (remaining.startsWith('$') && previousChar !== '$' && !remaining.startsWith('$$')) {
+      let end = -1;
+      for (let i = 1; i < remaining.length; i++) {
+        if (remaining[i] === '\\') {
+          i++;
+          continue;
+        }
+        if (remaining[i] === '$') {
+          end = i;
+          break;
+        }
+      }
+      if (end > 1) {
+        const tex = remaining.slice(1, end);
+        const afterClose = remaining[end + 1];
+        const looksLikeMoney = /^\s*\d/.test(tex) && afterClose !== undefined && /\d/.test(afterClose);
+        if (!looksLikeMoney && canRenderSpacedDollarMath(tex)) {
+          parts.push(<PlanDiffInlineMath key={key++} tex={tex} />);
+          remaining = remaining.slice(end + 1);
+          previousChar = '$';
+          continue;
+        }
+      }
     }
 
     // Bold: **text** ([\s\S]+? allows matching across hard line breaks)
@@ -1303,7 +1421,7 @@ const InlineMarkdown: React.FC<{ text: string }> = ({ text }) => {
 
     // Include '<' so the loop re-enters when an <ins>/<del> tag is next,
     // rather than swallowing it as plain text.
-    const nextSpecial = remaining.slice(1).search(/[\*_`\[!<]/);
+    const nextSpecial = remaining.slice(1).search(/[\*_`\[!<\\$]/);
     if (nextSpecial === -1) {
       parts.push(remaining);
       previousChar = remaining[remaining.length - 1] || previousChar;

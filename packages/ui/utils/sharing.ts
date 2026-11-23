@@ -29,7 +29,7 @@ export interface SharePayload {
   d?: (string | null)[];  // diffContext per annotation, parallel to `a`
   s?: (string | undefined)[];  // source per annotation (external tool identifier), parallel to `a`
   h?: string;  // raw HTML content (direct HTML rendering mode)
-  r?: 'html' | 'asciidoc';  // render mode flag (omitted = markdown)
+  r?: 'html' | 'asciidoc' | 'latex';  // render mode flag (omitted = markdown)
 }
 
 /**
@@ -212,7 +212,7 @@ export async function generateShareUrl(
     g: globalAttachments?.length ? toShareableImages(globalAttachments) : undefined,
     ...(diffContexts ? { d: diffContexts } : {}),
     ...(sources ? { s: sources } : {}),
-    ...(renderAs === 'asciidoc' ? { r: 'asciidoc' as const } : {}),
+    ...(renderAs === 'asciidoc' || renderAs === 'latex' ? { r: renderAs } : {}),
   };
 
   const hash = await compress(payload);
@@ -298,7 +298,7 @@ export async function createShortShareUrl(
       g: globalAttachments?.length ? toShareableImages(globalAttachments) : undefined,
       ...(diffContexts ? { d: diffContexts } : {}),
       ...(sources ? { s: sources } : {}),
-      ...(rawHtml ? { h: rawHtml, r: 'html' as const } : renderAs === 'asciidoc' ? { r: 'asciidoc' as const } : {}),
+      ...(rawHtml ? { h: rawHtml, r: 'html' as const } : renderAs === 'asciidoc' || renderAs === 'latex' ? { r: renderAs } : {}),
     };
 
     const compressed = await compress(payload);

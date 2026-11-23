@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  isLatexPreviewPath,
   isMarkdownPreviewFile,
   isRemoteImageSource,
   markdownViewsFor,
@@ -181,8 +182,12 @@ describe('file views', () => {
     expect(parseMarkdownFileView('true')).toBeNull();
   });
 
-  test('only Markdown files offer a preview', () => {
+  test('Markdown and LaTeX files offer a preview', () => {
     expect(isMarkdownPreviewFile({ path: 'docs/a.md', status: 'modified' }, [])).toBe(true);
+    expect(isMarkdownPreviewFile({ path: 'paper/main.tex', status: 'modified' }, [])).toBe(true);
+    expect(isMarkdownPreviewFile({ path: 'paper/appendix.LTX', status: 'added' }, [])).toBe(true);
+    expect(isLatexPreviewPath('paper/main.tex')).toBe(true);
+    expect(isLatexPreviewPath('docs/a.md')).toBe(false);
     expect(isMarkdownPreviewFile({ path: 'src/a.ts', status: 'modified' }, [])).toBe(false);
     expect(isMarkdownPreviewFile({ path: 'notes.txt', oldPath: 'notes.md', status: 'renamed' }, [])).toBe(false);
   });
