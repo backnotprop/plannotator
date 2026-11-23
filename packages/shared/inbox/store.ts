@@ -4891,10 +4891,6 @@ export class InboxStore {
           problems.push(`${where} ${ref}: that message has no question.`);
           continue;
         }
-        if (resolved) {
-          problems.push(target.key === null ? `${where} ${ref}: that message has no open question.` : `${where} ${ref} is not open (it is closed).`);
-          continue;
-        }
         const first = records[0]!;
         const meant = request.family === null ? (familyOf(first) === "action" ? onlyAction : onlyQuestion) : by.key;
         skips.push({

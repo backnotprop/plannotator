@@ -1371,7 +1371,7 @@ class ThreadStateModel {
           const s = this.state(thread, message, q);
           return s === "open" || s === "picked";
         });
-        if (named.length === 0 || (open.length === 0 && this.closedByArchive(thread, message))) return "refused:invalid_supersedes";
+        if (named.length === 0) return "refused:invalid_supersedes";
         this.addAgent(thread, tick, store);
         for (const q of open) q.superseded = true;
         return "ok";

@@ -12,6 +12,7 @@ import type { QuestionAnswer } from "@plannotator/core/question-block";
 import type { InboxAuthor, InboxQuestion } from "@plannotator/core/inbox-types";
 import { InboxError, parseInboxLine } from "./schema";
 import { InboxStore } from "./store";
+import { inboxSupersedeSkipLine } from "./supersede-skips";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -241,6 +242,17 @@ describe("a question no longer open is left as it is and the message is sent", (
     expect(sent.skipped).toEqual([{ ref: `${first.id}/${q2.key}`, id: `${first.id}/${q2.key}`, was: "answered", new_question: null }]);
   });
 
+  test("in an archived thread: the message is sent, the thread comes back, the closed question is untouched and the skip says so", () => {
+    const { store, first, q1 } = setup();
+    store.resolveThread(first.id, true);
+    const ref = `${first.id}/${q1.key}`;
+    const sent = store.sendMessage({ project_id: first.project_id, author: AGENT, body: "Picking this up again.", reply_to: first.id, supersedes: [ref, first.id] });
+    expect(store.questionsOf(first.id)[0]!.state).toBe("closed");
+    expect(store.questionsOf(first.id)[0]!.superseded_by).toBeNull();
+    expect(store.listRow(first.thread_id)!.back_from_archive).toBe(true);
+    expect(sent.skipped?.map(inboxSupersedeSkipLine)).toEqual([`${ref} was already closed, so it was left as it is.`, `${first.id} has no open question left, so it was left as it is.`]);
+  });
+
   test("already replaced, and a whole message with nothing open, are skipped with their own words", () => {
     const { store, first, q1 } = answered();
     store.sendMessage({ project_id: first.project_id, author: AGENT, body: queueBlock(), reply_to: first.id, supersedes: [`${first.id}/${q1.key}`] });
@@ -253,16 +265,6 @@ describe("a question no longer open is left as it is and the message is sent", (
 });
 
 describe("refusals that stay", () => {
-  test("a question the archive closed is still refused, by key and by message", () => {
-    const { store, first, q1 } = setup();
-    store.resolveThread(first.id, true);
-    const cursor = store.cursor();
-    const byKey = refusal(() => store.sendMessage({ project_id: first.project_id, author: AGENT, body: "x", reply_to: first.id, supersedes: [`${first.id}/${q1.key}`] }));
-    expect(byKey.message).toContain(`${first.id}/${q1.key} is not open (it is closed).`);
-    expect(refusal(() => store.sendMessage({ project_id: first.project_id, author: AGENT, body: "x", reply_to: first.id, supersedes: [first.id] })).message).toContain("no open question");
-    expect(store.cursor()).toBe(cursor);
-  });
-
   test("two blocks naming the same old question refuse the send", () => {
     const { store, first, q1 } = setup();
     const cursor = store.cursor();
