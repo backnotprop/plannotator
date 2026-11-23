@@ -80,3 +80,6 @@
 .ib-plan-kstate > svg.ib-ic { opacity: 0.7; flex: none; }
 .ib-plan-kstate:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
 .ib-plan-kicker + div article { padding-top: 6px; }
+/* A phone's 44 px targets: the line's small buttons (Approve, Dismiss) take a taller hit area than they draw. */
+.ib-plan-kicker-start > button, .ib-plan-kicker .ib-plan-approval-x { position: relative; }
+.ib-plan-kicker-start > button::after, .ib-plan-kicker .ib-plan-approval-x::after { content: ""; position: absolute; inset: -10px -6px; }
