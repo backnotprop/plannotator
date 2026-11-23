@@ -32,6 +32,7 @@ import { pageInFront } from './sound';
 import { RANG_FOR_NOTHING, type RangFor, type RingNews } from './soundRing';
 import { inboxEventsServedBy } from './sharedEvents';
 import { signalNotificationClick } from './history';
+import { gestured } from './recentActs';
 
 /** The one tag every Inbox notification carries: a new one replaces the last. */
 export const NOTIFICATION_TAG = 'plannotator-inbox';
@@ -578,6 +579,8 @@ export function useInboxNotifications(options: {
         notification.close();
         burst.current.clear();
         lastNotice.current = null;
+        // The person's click: the thread it opens is one they chose ("Recent activity", recentActs.ts).
+        gestured();
         open();
         signalNotificationClick();
       };
