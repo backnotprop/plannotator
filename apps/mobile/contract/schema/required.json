@@ -315,6 +315,10 @@
       "name",
       "state"
     ],
+    "InboxCombineLeftOpenItem": [
+      "machine",
+      "subject"
+    ],
     "InboxComposeProject": [
       "project",
       "sessions"

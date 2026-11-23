@@ -153,6 +153,8 @@ import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/sha
 import { DecisionDataAborted, decisionDataCsv, decisionDataSummary, readDecisionLines } from "@plannotator/shared/inbox/decision-data";
 import { createInboxSearchRoutes } from "./inbox-search";
 import { createInboxCombine } from "./inbox-combine";
+import { createInboxCombineFar, type InboxCombineFar } from "./inbox-combine-far";
+import { combineArchiveAgain, combineArchiveSkip } from "./inbox-combine-guard";
 import { inboxSkillsBlockFor, inboxSkillsRoute } from "./inbox-skills";
 import { assertTestHome } from "./test-home-guard";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
@@ -5362,7 +5364,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   // A reply sent to a new session in place of the one that ended (packages/server/inbox-reply-launch.ts).
   const replyLaunch = createInboxReplyLaunch({ store, launch, live, resolveProject });
+  // A Combine's files copied from a linked computer wait as uploads until its new thread is here (inbox-combine-across.ts).
+  let combineUploads: () => string[] = () => [];
   const compose = createInboxCompose({
+    keepUploads: () => combineUploads(),
     store,
     serverSession,
     live,
@@ -5774,6 +5779,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
 
   // Combine (packages/server/inbox-combine.ts): picked threads, one agent writes a new thread, then they are archived.
+  let combineFar: InboxCombineFar | undefined;
   const combine = createInboxCombine({
     store,
     serverSession,
@@ -5782,7 +5788,30 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     titleOf: (session) => live.labelOf(session) ?? live.titles()[session] ?? null,
     readBody,
     json,
+    // Picked threads on a linked machine (inbox-combine-far.ts): read there, archived there through the outbox.
+    far: () => {
+      if (!machines?.hasLinks()) return null;
+      const linked = machines;
+      return (combineFar ??= createInboxCombineFar({
+        readThread: (ask) => linked.readThread(ask),
+        rowOf: (threadId) => linked.rows().find((row) => row.thread_id === threadId) ?? null,
+        hold: (machine, route, body, thread, waitMs, own) => linked.holdWrite(machine, route, body, thread, waitMs, own),
+        heldWrite: (key) => linked.heldWrite(key),
+        listedRows: (machine) => linked.listedRows(machine),
+        cancelHeld: (key) => linked.cancelHeld(key),
+        fetchFile: (args) => linked.fetchFile(args),
+        online: (machine) => linked.machinesView().some((m) => m.id === machine && m.state === "online"),
+      }));
+    },
+    // Every running agent here: the ones with a connection (New message's), and the ones reached at their next MCP call.
+    liveSessions: () => [...live.allLive(), ...live.mcpAgents().map((agent) => ({ session: agent.session, host: agent.host, root: store.project(agent.project_id ?? "")?.root ?? null }))],
+    nameOf: (machine) => machines?.nameOf(machine) ?? "another computer",
+    doorMachine: (req) => {
+      const door = fromDeviceDoor.get(req);
+      return door?.platform === MACHINE_PLATFORM ? (machines?.machineOfDevice(door.device_id)?.machine ?? null) : null;
+    },
   });
+  combineUploads = () => combine.uploads();
 
   /** The optional debug log (inbox-debug-log.ts): null, the default, changes nothing and writes nothing. */
   const debugLog = (options.debug ?? resolveInboxDebug(loadConfig(), process.env)) ? createInboxDebugLog(join(dataDir, "inbox")) : null;
@@ -8102,6 +8131,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             if (body.resolved !== undefined && typeof body.resolved !== "boolean") {
               throw new InboxError("validation_error", "resolved: must be a boolean.");
             }
+            // A linked computer's Combine archive that lands late (inbox-combine-guard.ts): skipped, not refused, when
+            // the thread moved on since that Combine read it.
+            const skipped = combineArchiveSkip(store, messageId, body);
+            if (skipped) return json({ skipped });
+            combineArchiveAgain(store, messageId, body);
             // The person's Archive (the window, a phone, a linked machine's forward): it ends a snooze.
             const thread = store.resolveThread(messageId, body.resolved !== false, "person");
             // Unarchived: a Mark read's set-aside note an archive held back is due again.
