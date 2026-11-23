@@ -183,7 +183,7 @@ function build(s:DiagramSpec,pack:Fonts,extended:ReadonlySet<Weight>) {
             occurrences.set(pair,ordinal);
         }
         parts.push({kind:"link",id,title:link.label || link.a.panel.title+" → "+link.b.panel.title,
-            refs:authored.refs??[],from:link.a.id,to:link.b.id,...box(link.bounds),
+            refs:authored.refs??[],from:link.a.id,to:link.b.id,...box(link.labelBox ? extent([link.bounds,link.labelBox]) : link.bounds),
             labelBox:link.labelBox && box(link.labelBox),
             points:link.samples.concat([link.tip]).map(([x,y]):Point=>[x+dx,y+dy])});
     }
