@@ -63,7 +63,7 @@ export async function seedControlsWorld(binary: string, prefix: string): Promise
 
   const project = scratchProject(join(root, 'src'), 'ledger');
   const picture = join(project, 'shot.png');
-  copyFileSync(join(repo, 'docs/releases/0.28.31/first-run.png'), picture);
+  copyFileSync(join(repo, 'packages/review-editor/assets/edit-mode-demo-poster.png'), picture);
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const pi = await SimAgent.connect({ binary, env, name: 'Pi', host: 'pi' });
   const sent = await claude.send({ project_path: project, subject: 'The ledger export is ready', thread: 'export', body: 'The ledger export is ready. The picture shows the new page.', attachments: ['shot.png'] });
