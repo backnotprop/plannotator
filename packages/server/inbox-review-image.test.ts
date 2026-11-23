@@ -25,6 +25,10 @@ import { MAX_REVIEW_IMAGE_PREVIEW_BYTES } from "@plannotator/core/diff-paths";
 import type { FileBytesRead } from "@plannotator/shared/review-core";
 import { createInboxPulls, gitBlobId, type InboxPulls } from "./inbox-pulls";
 import { guideReviewImage, pullReviewImage } from "./inbox-review-image";
+import { guidePatchOf } from "./inbox-guides";
+import { buildGuideSnapshot } from "@plannotator/core/guide-format";
+import { inboxBlobPath } from "@plannotator/shared/inbox/attachments";
+import type { InboxStore } from "@plannotator/shared/inbox/store";
 import type { RefRunner } from "./ref-cards";
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
@@ -141,6 +145,19 @@ describe("a guided review's image", () => {
     writeFileSync(join(repo, "img/modified.png"), png("after"));
   });
 
+  test("a working-tree file past the cap at a path the patch names: missing, its size never told", async () => {
+    const id = gitBlobId(png("never stored"));
+    const draft = `diff --git a/img/modified.png b/img/modified.png\nindex ${gitBlobId(png("after"))}..${id} 100644\nBinary files a/img/modified.png and b/img/modified.png differ\n`;
+    writeFileSync(join(repo, "img/modified.png"), Buffer.concat([PNG, Buffer.alloc(MAX_REVIEW_IMAGE_PREVIEW_BYTES + 1)]));
+    try {
+      const answer = await read("img/modified.png", "new", { patch: draft });
+      expect([answer.status, reasonOf(answer.body)]).toEqual([404, "missing"]);
+      expect(String(answer.body)).not.toContain(String(MAX_REVIEW_IMAGE_PREVIEW_BYTES));
+    } finally {
+      writeFileSync(join(repo, "img/modified.png"), png("after"));
+    }
+  });
+
   test("a guide of a PR whose blobs are not here: the forge's side only while it is the patch's blob", async () => {
     const id = gitBlobId(png("far"));
     const far = `diff --git a/img/far.png b/img/far.png\nindex ${gitBlobId(png("near"))}..${id} 100644\nBinary files a/img/far.png and b/img/far.png differ\n`;
@@ -192,6 +209,27 @@ describe("a pull request's image", () => {
     expect((await read(fake(null).pulls, "img/modified.png", "new")).status).toBe(409);
     expect((await read(pulls, "../img/modified.png", "new")).status).toBe(404);
     expect(reads).toEqual([]);
+  });
+
+  test("a bad path or side reads neither the diff nor the forge", async () => {
+    let diffs = 0;
+    let files = 0;
+    const pulls: Pick<InboxPulls, "diff" | "fileBytes"> = {
+      diff: async () => {
+        diffs += 1;
+        return { patch, partial: false, head_sha: HEAD };
+      },
+      fileBytes: async () => {
+        files += 1;
+        return { kind: "ok", bytes: png("x") };
+      },
+    };
+    const climbs = await read(pulls, "../../etc/passwd", "new");
+    expect([climbs.status, reasonOf(climbs.body)]).toEqual([404, "not-in-diff"]);
+    expect((await read(pulls, "/etc/passwd", "new")).status).toBe(404);
+    const noSide = await pullReviewImage({ pulls, key: "github.com/northwind/billing-svc#412", scope: "layer", params: new URLSearchParams({ path: "img/modified.png", side: "both", snapshot: HEAD }), roots: async () => [] });
+    expect([noSide.status, reasonOf(noSide.body)]).toEqual([400, "bad-request"]);
+    expect([diffs, files]).toEqual([0, 0]);
   });
 
   test("a side past the cap: 413", async () => {
@@ -263,5 +301,24 @@ describe("InboxPulls.fileBytes", () => {
   test("past the cap on the forge: too large, never decoded", async () => {
     const { pulls } = await listed(new Map([[contents("img/a.png", HEAD), png("x".repeat(2000))]]), () => null);
     expect((await pulls.fileBytes(KEY, "layer", "new", "img/a.png", undefined, [], 1000)).kind).toBe("too-large");
+  });
+});
+
+describe("a guide's patch for its previews", () => {
+  test("a read that fails is not remembered: once the snapshot can be read, its patch is served", () => {
+    const dir = join(scratch, "store");
+    const sha = "e".repeat(64);
+    const store = { dir } as unknown as InboxStore;
+    expect(guidePatchOf(store, sha)).toBeNull();
+    const snapshot = buildGuideSnapshot({
+      guide: { title: "T", intent: "I", sections: [{ title: "S", overview: "O", diffs: [{ file: "img/modified.png", summary: "s" }] }] },
+      reviewed: [false],
+      review: { rawPatch: patch, gitRef: "main...HEAD", source: { kind: "local" } },
+      exportedAt: "2026-11-23T10:00:00.000Z",
+    });
+    const blob = inboxBlobPath(dir, sha);
+    mkdirSync(join(blob, ".."), { recursive: true });
+    writeFileSync(blob, JSON.stringify(snapshot));
+    expect(guidePatchOf(store, sha)).toBe(patch);
   });
 });

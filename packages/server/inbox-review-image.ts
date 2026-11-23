@@ -24,8 +24,8 @@
  */
 
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
-import { createConcurrencyLimiter, handleReviewImageRequest, REVIEW_IMAGE_READ_CONCURRENCY, type ReviewImageResponse } from "@plannotator/shared/review-image";
-import { readDiffSideBytes, readGitObjectBytes, type DiffSide, type FileBytesRead } from "@plannotator/shared/review-core";
+import { createConcurrencyLimiter, handleReviewImageRequest, REVIEW_IMAGE_READ_CONCURRENCY, reviewImageErrorResponse, type ReviewImageResponse } from "@plannotator/shared/review-image";
+import { readDiffSideBytes, readGitObjectBytes, validateFilePath, type DiffSide, type FileBytesRead } from "@plannotator/shared/review-core";
 import type { InboxPullDiffScope } from "@plannotator/core/inbox-types";
 import { runtime as gitRuntime } from "./git";
 import { gitBlobId, InboxPullsError, type InboxPulls } from "./inbox-pulls";
@@ -44,6 +44,24 @@ function forgeRefusal(cause: unknown): never {
   throw cause;
 }
 
+/**
+ * The shared handler's answer for a request whose `path` or `side` is no use, before the diff it names is read; null
+ * for one worth reading the diff for. The handler checks both again, after the diff.
+ */
+export function refusedAsked(params: URLSearchParams, pathParam = "path"): ReviewImageResponse | null {
+  const path = params.get(pathParam);
+  const side = params.get("side");
+  if (!path || (side !== "old" && side !== "new") || !params.get("snapshot")) {
+    return reviewImageErrorResponse(400, { reason: "bad-request", error: `Expected ${pathParam}, side=old|new and snapshot` });
+  }
+  try {
+    validateFilePath(path);
+  } catch {
+    return reviewImageErrorResponse(404, { reason: "not-in-diff", error: "Invalid file path" });
+  }
+  return null;
+}
+
 /** One side of a changed image in a pull request's diff (`/api/inbox/pulls/review-image`). */
 export async function pullReviewImage(options: {
   pulls: Pick<InboxPulls, "diff" | "fileBytes">;
@@ -57,6 +75,9 @@ export async function pullReviewImage(options: {
   signal?: AbortSignal;
 }): Promise<ReviewImageResponse> {
   const { pulls, key, scope, from, params } = options;
+  // What the request names is checked before anything is read: a bad path or side never reads the diff (or the forge).
+  const refused = refusedAsked(params);
+  if (refused) return refused;
   const asked = params.get("snapshot") ?? "";
   const pinned = /^[0-9a-f]{40,64}$/.test(asked) ? asked : null;
   // The diff on screen, read at the head the window names (the PR page's `/pulls/diff` read it a moment ago).
@@ -112,6 +133,8 @@ export async function guideReviewImage(options: {
   signal?: AbortSignal;
 }): Promise<ReviewImageResponse> {
   const { patch, root } = options;
+  const refused = refusedAsked(options.params);
+  if (refused) return refused;
   let files: ReturnType<typeof parseDiffToFiles> | null = null;
   return handleReviewImageRequest({
     params: options.params,
@@ -131,8 +154,9 @@ export async function guideReviewImage(options: {
           if (stored.kind === "ok" || stored.kind === "too-large") return stored;
           // Uncommitted edits name a blob git never stored: the working tree's file, while it is still those bytes.
           if (side === "new") {
+            // Only bytes that hash to the patch's blob say anything: a file past the cap cannot be hashed, so it is
+            // "missing", never "too large" (that would tell the size of whatever sits at a path the patch names).
             const tree = await readDiffSideBytes(gitRuntime, { kind: "worktree", path: filePath }, maxBytes, root);
-            if (tree.kind === "too-large") return tree;
             if (tree.kind === "ok" && gitBlobId(tree.bytes).startsWith(id)) return tree;
           }
         }
