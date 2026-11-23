@@ -58,16 +58,34 @@ export type ActedKey = (row: InboxListRow) => string;
 
 /**
  * The rows' places while Recent activity is on (null while off): a row takes the time it has when first drawn after
- * each whole sort, and keeps it until the next (`sort.epoch`); `sort.keep`'s row keeps the one it had, as List's does.
+ * each whole sort, and keeps it until the next (`sort.epoch`, or `backs`: a Back to a covered list); `sort.keep`'s row
+ * keeps the one it had, as List's does.
  */
-export function useActedKeys(on: boolean, sort: ListSort): ActedKey | null {
+export function useActedKeys(on: boolean, sort: ListSort, backs = 0): ActedKey | null {
   const [last] = useState(() => ({ keys: null as Map<string, string> | null }));
   return useMemo(() => {
     const placed = on ? actedPlaces(last.keys, sort.keep) : null;
     last.keys = placed?.keys ?? null;
     return placed?.key ?? null;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `last` is this hook's own holder.
-  }, [on, sort.epoch, sort.keep]);
+  }, [on, sort.epoch, sort.keep, backs]);
+}
+
+/**
+ * Back from a thread to a list it covered (a phone, a stacked window; `covered`, app/focus.ts `listCovered`): there
+ * the list settled when the thread opened (App.tsx, `COVERED_LIST_SETTLES`), before the open was an act, and no
+ * settle comes after Back. Recent activity sorts whole at it instead, as a close beside the list does after its
+ * beat, so the thread just read is at the top when the list shows. Counts those Backs, and names the sort epoch the
+ * last came in (its sort keeps no row: `keep` is the open thread's, which is closed now).
+ */
+export function useCoveredBacks(thread: string | null, covered: () => boolean, epoch: number): { backs: number; epoch: number | null } {
+  const [seen, setSeen] = useState({ thread, backs: 0, epoch: null as number | null });
+  if (seen.thread !== thread) {
+    // Set while drawing (React draws again at once, before anything shows): the list shows already sorted.
+    const back = seen.thread !== null && thread === null && covered();
+    setSeen({ thread, backs: seen.backs + (back ? 1 : 0), epoch: back ? epoch : seen.epoch });
+  }
+  return seen;
 }
 
 /** One whole sort's places: empty but for `keep`'s row (its place from `before`); each row takes its time when first asked. */
@@ -105,11 +123,15 @@ export interface RecentActivity {
   held: ((listed: readonly InboxListSection[], kept: InboxListSection[], now: number) => InboxListSection[]) | null;
 }
 
-export function useRecentActivity(on: boolean, listSort: ListSort): RecentActivity {
-  const key = useActedKeys(on, listSort);
+/** `thread` and `covered`: the open thread, and whether it covers the list (`useCoveredBacks`). */
+export function useRecentActivity(on: boolean, listSort: ListSort, thread: string | null = null, covered: () => boolean = () => false): RecentActivity {
+  const back = useCoveredBacks(thread, covered, listSort.epoch);
+  // A Back's whole sort keeps no row, until the next one.
+  const keep = back.epoch === listSort.epoch ? null : listSort.keep;
+  const key = useActedKeys(on, keep === listSort.keep ? listSort : { ...listSort, keep }, back.backs);
   return useMemo(
-    () => ({ sort: key ? { ...listSort, by: key } : listSort, held: key ? (listed, kept, now) => heldRecentRows(listed, kept, key, now) : null }),
-    [key, listSort],
+    () => ({ sort: key ? { ...listSort, keep, by: key } : listSort, held: key ? (listed, kept, now) => heldRecentRows(listed, kept, key, now) : null }),
+    [key, keep, listSort],
   );
 }
 

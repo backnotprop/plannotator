@@ -255,4 +255,28 @@ describe("acted.json: what the log does not hold", () => {
     again.flush();
     expect([...readInboxActed(dir).keys()]).toEqual([LINKED]);
   });
+
+  test("a time ahead of the clock (the clock set back since) is never read, gives way to the next note, and the next write drops it", () => {
+    const dir = dirOf();
+    const AHEAD = "msg_01ARZ3NDEKTSV4RRFFQ69G5FAZ";
+    const now = START + DAY;
+    // Noted on a clock a day fast, then set right; T1's time is 30 s ahead, inside the margin, and stays.
+    writeFileSync(join(dir, INBOX_ACTED_FILE), JSON.stringify({ v: 1, threads: { [AHEAD]: at(now + DAY), [T1]: at(now + 30_000), [T2]: at(now - 60_000) } }));
+    const acted = createInboxActed(dir, { flushMs: 60_000, now: () => new Date(now) });
+    expect(acted.at(AHEAD)).toBeNull();
+    expect(acted.at(T1)).toBe(at(now + 30_000));
+    expect(acted.at(T2)).toBe(at(now - 60_000));
+    acted.note(T2, at(now));
+    acted.flush();
+    expect(readInboxActed(dir)).toEqual(new Map([[T1, at(now + 30_000)], [T2, at(now)]]));
+
+    // Set back while the server runs: the kept time is no longer read, and an act now replaces it.
+    let clock = now + DAY;
+    const running = createInboxActed(dir, { flushMs: 60_000, now: () => new Date(clock) });
+    running.note(AHEAD, at(clock));
+    clock = now;
+    expect(running.at(AHEAD)).toBeNull();
+    running.note(AHEAD, at(clock - 1000));
+    expect(running.at(AHEAD)).toBe(at(clock - 1000));
+  });
 });

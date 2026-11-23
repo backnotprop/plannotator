@@ -76,6 +76,8 @@ describe("the row's acted_at", () => {
     await ok(post(server, `/api/inbox/messages/${replied.message_id}/reply`, { idempotency_key: "r1", words: "Yes, 24 hours." }));
     await ok(post(server, `/api/inbox/threads/${opened.thread_id}/seen`, { opened: true }));
     await ok(post(server, `/api/inbox/threads/${looked.thread_id}/seen`, {}));
+    // The box saving nothing there (an empty box, no draft): no act either (inbox-reply-drafts.ts `onEdited`).
+    await ok(post(server, `/api/inbox/threads/${looked.thread_id}/draft`, { body: "", base: null }));
     await ok(post(server, `/api/inbox/threads/${drafted.thread_id}/draft`, { body: "Looks right, one quest", base: null }));
     await ok(post(server, `/api/inbox/threads/${film.thread_id}/acted`, {}));
 

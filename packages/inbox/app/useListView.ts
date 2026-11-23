@@ -17,6 +17,7 @@ import { withLiveTagPicks } from '../listFilterTags';
 import { routineHold, useRoutineThreads } from '../listFilterRoutines';
 import { useRecentActivity } from '../listFilterRecent';
 import { useRecentActs } from '../recentActs';
+import { listCovered } from './focus';
 import type { ListSort } from '../listView';
 import { useThreadTagsHost } from '../useThreadTagsHost';
 import { projectsWithReadable, shownProjects } from '../projectMenu';
@@ -125,7 +126,8 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
   const listHeld = routineHold(routines, listFilterApplied);
   // Recent activity (listFilterRecent.ts): one list, newest first by when the person last acted, its rows and places
   // as of the last whole sort.
-  const recent = useRecentActivity(listFilterApplied.recent, listSort);
+  // Back to a list the thread covered sorts it whole too (`useCoveredBacks`).
+  const recent = useRecentActivity(listFilterApplied.recent, listSort, route.page === 'inbox' ? (route.thread ?? null) : null, listCovered);
   const recentHeld = (listed: InboxListSection[]) => {
     const kept = filterListSections(listed, listFilterApplied, Date.now(), heldRead, filterTagsOfRow, routineTest);
     return recent.held ? recent.held(listed, kept, Date.now()) : kept;

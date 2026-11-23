@@ -11,7 +11,7 @@ import { RowTagName, rowTintOf, tintProps, type ListTagColours, type RowTintProp
 import { RowAgents, RowAgentTiles } from './RowAgents';
 import { RowPullsMark } from '../threadPulls/ThreadPulls';
 import { isTextCut, ProjectTipText, Tip } from './Tip';
-import { LazyRowTips, RowTip } from './RowTip';
+import { RowTip } from './RowTip';
 import { Icon } from '../icons';
 import { PinMark, PinnedWords } from '../parts/RowPin';
 import { notePressPointer, pressRow } from '../starPress';
@@ -58,7 +58,7 @@ import { bandOnScreen, useBandTip, type BandTipHost } from '../bandTip';
 import { bandMenuOf, listMarkAllRows } from '../markAllRead';
 import { AgentsList } from '../agentsView/AgentsList';
 import { LineRow } from '../agentsView/LineRow';
-import { rowAgent, slotSession, cardOf, SnoozedUntil, RowTime, BadgeWords, subjectOf, sentWordsOf, titleOf, RowTitle, countWords, liveCount, CountWords, EndedMark, LineCount, openCountsKey, OpenCounts, ClipText, RowWithAction } from './rowParts';
+import { rowAgent, slotSession, cardOf, SnoozedUntil, RowTime, ListRows, BadgeWords, subjectOf, sentWordsOf, titleOf, RowTitle, countWords, liveCount, CountWords, EndedMark, LineCount, openCountsKey, OpenCounts, ClipText, RowWithAction } from './rowParts';
 import { ArchivedGroup } from './ArchivedGroup';
 import type { ArchivedGroupHost } from '../data/actions/archivedGroup';
 import { useShowArchived } from '../showArchived';
@@ -1193,8 +1193,8 @@ export function InboxList(props: InboxListProps) {
           {/* The band alone is an empty list with a band under it: nothing else says the list is clear. */}
           {/* So is a list whose rows are all archived, waiting for the list to settle without them (Archive all). */}
           {visible.every((section) => section.id === 'snoozed' || section.threads.every(inboxRowArchived)) && props.empty}
-          {/* The rows' tooltips mount on first use (RowTip.tsx): drawing every row's at once is most of a redraw. */}
-          <LazyRowTips.Provider value={true}>
+          {/* The rows' tooltips mount on first use (RowTip.tsx): drawing every row's at once is most of a redraw. Recent activity's times (`sort.by`). */}
+          <ListRows timeBy={props.sort?.by}>
           {flat && flat.rows.length > 0 && (
             // List: one run of rows, newest first, no bands; each row keeps the group it is drawn in for its actions.
             <div className="ib-group" data-section-id="list" data-flat-list="">
@@ -1238,7 +1238,7 @@ export function InboxList(props: InboxListProps) {
             );
           })}
           {props.archived && showArchived && <ArchivedGroup host={props.archived} renderRow={renderRow} onRows={setArchivedRows} phone={props.phone === true} onSearch={props.onSearch} />}
-          </LazyRowTips.Provider>
+          </ListRows>
         </ThreadRowMenu>
       {pick.sheet}
       <HeldNoticeSaid words={bar.words} place={`${props.scope ?? ''}\n${props.title}`} />

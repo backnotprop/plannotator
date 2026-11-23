@@ -4,8 +4,10 @@
  *
  * - The person opened a thread: the opening look (`POST /seen`) says `opened` when the person chose the thread, so
  *   opening adds no request. Chosen: the route moved to that thread within `CHOSEN_MS` of the person's own click, tap
- *   or key in this window (a row, search, a star, a link in a message, the keyboard), or of their click on a
- *   notification about it (notify.ts calls `gestured`). Not chosen: a thread shown on load, or because an agent or a
+ *   or opening key in this window (a row, search, a star, a link in a message; `keyChooses`: Enter, Space, the list's
+ *   arrows and Home / End, J / K), or of their click on a notification about it (notify.ts calls `gestured`). Typing
+ *   is not: a key in the reply box or another field (Enter in a one-line field, search's, aside) never makes an
+ *   agent's open land as the person's. Not chosen: a thread shown on load, or because an agent or a
  *   launch link opened it (no gesture here). The browser's user activation is not read: it lasts about 5 s, long
  *   enough for an agent's open after an unrelated click to pass as the person's.
  * - The person played a film or a recording in the open thread (a `play` with a gesture just before it): one
@@ -19,6 +21,7 @@ import { apiPost } from './api';
 import { inboxUrl } from './inboxUrl';
 import { readRoute } from './app/route';
 import { noteActedHere } from './listFilterRecent';
+import { hasCommandModifier, isComposingKey, isEditableTarget, keyTarget } from './shortcuts/guards';
 
 /** How soon after the person's gesture a route change is theirs. */
 export const CHOSEN_MS = 1000;
@@ -45,9 +48,23 @@ export function routeChanged(now = Date.now(), thread = routeThread()): void {
   shownThread = thread;
 }
 
-/** The person clicked, tapped or pressed a key in this window, or clicked one of its notifications. */
+/** The person clicked, tapped or pressed a choosing key (`keyChooses`) in this window, or clicked one of its notifications. */
 export function gestured(now = Date.now()): void {
   gestureAt = now;
+}
+
+/** Keys that move along the list, or open what has focus, outside a field: the list's and the thread's. */
+const CHOOSING_KEYS = new Set(['Enter', ' ', 'ArrowDown', 'ArrowUp', 'Home', 'End', 'j', 'J', 'k', 'K']);
+
+/**
+ * A key that can choose a thread: Enter (a row, a search result, a link), Space (a row or a button), the list's ↑ ↓
+ * Home End, J / K. Never a key typed in a field (the reply box, a comment), but Enter in a one-line field (search).
+ */
+export function keyChooses(event: KeyboardEvent): boolean {
+  if (isComposingKey(event) || hasCommandModifier(event) || !CHOOSING_KEYS.has(event.key)) return false;
+  const target = keyTarget(event);
+  if (!isEditableTarget(target)) return true;
+  return event.key === 'Enter' && target instanceof HTMLInputElement;
 }
 
 /** The opening look's `opened`: the person chose this thread (once per choice). */
@@ -73,18 +90,21 @@ export function useRecentActs(): void {
   useEffect(() => {
     shownThread = routeThread();
     const onGesture = () => gestured();
+    const onKey = (event: KeyboardEvent) => {
+      if (keyChooses(event)) gestured();
+    };
     const onRoute = () => routeChanged();
     const onPlay = (event: Event) => {
       if (event.target instanceof HTMLMediaElement) mediaPlayed();
     };
     window.addEventListener('pointerdown', onGesture, true);
-    window.addEventListener('keydown', onGesture, true);
+    window.addEventListener('keydown', onKey, true);
     window.addEventListener('hashchange', onRoute);
     // `play` does not bubble: caught on the way down.
     document.addEventListener('play', onPlay, true);
     return () => {
       window.removeEventListener('pointerdown', onGesture, true);
-      window.removeEventListener('keydown', onGesture, true);
+      window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('hashchange', onRoute);
       document.removeEventListener('play', onPlay, true);
     };

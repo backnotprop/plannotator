@@ -3,8 +3,10 @@
  * compiled binary, agents writing through `plannotator inbox mcp` (scripts/inbox-sim.ts):
  *
  *  - before anything else, three threads seeded with the person's replies minutes apart (Ada Novak's 4 min ago, Bob
- *    Tully's 18, Charlie Dunn's 41, which its agent has answered since): with the pick on they draw newest first, the
- *    row times reading 4m, 18m, 30m down the list (pictures 04b and 05b), though Smart groups put Charlie Dunn's first;
+ *    Tully's 18, Charlie Dunn's 41, which its agent has answered since, 30 min ago): with the pick on they draw newest
+ *    first, though Smart groups put Charlie Dunn's first, and each row shows the time of the person's act, the time the
+ *    list is sorted by, so the times read 4, 18 and 41 minutes ago down the list (never Charlie Dunn's agent's 30), on
+ *    a desktop and on a phone 390 and 320 wide (no row wider than the screen);
  *  - the person opens two threads by clicking their rows (Charlie Dunn's, then Bob Tully's: both wait on them), gives
  *    a third a 👍 Looks good (Ada Novak's, which goes to Quiet), stars a fourth (tidying, which never counts) and
  *    leaves a fifth alone (only an agent wrote there);
@@ -22,13 +24,14 @@
  * that does not count, a star that does, the filter sorting by the newest message instead of the person's own act, a
  * pick that does not hold a reload or does not turn off from the same row, the pick drawn with Updated's clock, a
  * filtered list that still draws groups (a fresh act in Quiet under an old one waiting), a view that does not come back,
- * the opened row jumping to the top under the pointer, a thread pushed in at the top while the list holds.
+ * the opened row jumping to the top under the pointer, a thread pushed in at the top while the list holds, a row time
+ * that is the thread's newest message's while the list is sorted by the act (the times then read out of order).
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/recent-activity-filter: 01 the menu open, 02 the list with the filter on,
- * 03 the list after turning it off, 04b (dark) and 05b (light) the seeded threads filtered, one list newest first by
- * replies minutes apart (no pointer, no focus ring on them), 06 (dark) and 07 (light) the same on a phone 390 wide.
- * Build the
- * binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
+ * 03 the list after turning it off, 08 (dark) and 09 (light) the seeded threads filtered, one list newest first by
+ * replies minutes apart, each row at its act's time (no pointer, no focus ring on them), 10 (dark) and 11 (light) the
+ * same on a phone 390 wide, 12 (light) on a phone 320 wide. Build the binary first (see inbox.spec.ts), then
+ * `bun run test:e2e:inbox`.
  */
 
 import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
@@ -196,6 +199,65 @@ test.afterAll(async () => {
   }
 });
 
+/**
+ * Each row's time as drawn, beside the person's last act there, the thread's newest message and the row's own time,
+ * each written as a row writes a time today ("4:48 PM"; another day "Nov 22": format.ts `shortTime`).
+ */
+const rowTimes = (page: Page, ids: string[]) =>
+  page.evaluate(async (ids) => {
+    const model = (await (await fetch('/api/inbox/threads?archived=exclude')).json()) as { sections: { threads: { thread_id: string; acted_at?: string; last_at: string; snooze_back?: unknown; delivery?: { state: string; at?: string | null } | null }[] }[] };
+    const rows = new Map(model.sections.flatMap((s) => s.threads).map((row) => [row.thread_id, row]));
+    const now = new Date();
+    const time = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' });
+    const day = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' });
+    const short = (iso: string) => (new Date(iso).toDateString() === now.toDateString() ? time : day).format(new Date(iso));
+    return ids.map((id) => {
+      const row = rows.get(id)!;
+      const cell = [...document.querySelectorAll(`.ib-lbody [data-thread-id="${id}"] .ib-t`)].find((el) => el.getClientRects().length > 0);
+      // The row's own time with the pick off (rowDelivery.ts `rowTimeIso`): its delivery's once delivered, else its newest message's.
+      const own = !row.snooze_back && row.delivery?.state === 'delivered' && row.delivery.at ? row.delivery.at : row.last_at;
+      return { shown: cell?.textContent ?? null, actedAt: row.acted_at ?? null, act: row.acted_at ? short(row.acted_at) : null, last: short(row.last_at), own: short(own) };
+    });
+  }, ids);
+
+/** The seeded rows' times read in order down the list: each its act's, newest first; Charlie Dunn's not its agent's. */
+async function timesReadDown(page: Page, seeded: World['seeded']) {
+  const times = await rowTimes(page, [seeded.ada, seeded.bob, seeded.charlie]);
+  for (const t of times) expect(t.shown).toBe(t.act);
+  const acts = times.map((t) => Date.parse(t.actedAt!));
+  expect(acts[0]).toBeGreaterThan(acts[1]!);
+  expect(acts[1]).toBeGreaterThan(acts[2]!);
+  expect(times[2]!.shown).not.toBe(times[2]!.last);
+  // Today, as the clock writes it: each time earlier than the one above it.
+  const minutes = times.map((t) => /^(\d{1,2}):(\d{2})\s([AP])M$/.exec(t.shown ?? ''));
+  if (minutes.every(Boolean)) {
+    const at = minutes.map((m) => ((Number(m![1]) % 12) + (m![3] === 'P' ? 12 : 0)) * 60 + Number(m![2]));
+    expect(at[0]).toBeGreaterThan(at[1]!);
+    expect(at[1]).toBeGreaterThan(at[2]!);
+  }
+}
+
+/** Nothing on the page is wider than the screen: no sideways scroll, every row and its time inside it. */
+async function noOverflow(page: Page) {
+  const widths = await page.evaluate(() => {
+    const screen = document.documentElement.clientWidth;
+    const rows = [...document.querySelectorAll('.ib-lbody [data-thread-id]')].map((row) => {
+      const box = row.getBoundingClientRect();
+      const time = [...row.querySelectorAll('.ib-t')].find((el) => el.getClientRects().length > 0)?.getBoundingClientRect();
+      return { left: box.left, right: box.right, timeRight: time?.right ?? 0, timeLeft: time?.left ?? 0 };
+    });
+    return { screen, scroll: document.documentElement.scrollWidth, rows };
+  });
+  expect(widths.scroll).toBeLessThanOrEqual(widths.screen);
+  expect(widths.rows.length).toBeGreaterThan(0);
+  for (const row of widths.rows) {
+    expect(row.left).toBeGreaterThanOrEqual(0);
+    expect(row.right).toBeLessThanOrEqual(widths.screen + 0.5);
+    expect(row.timeLeft).toBeGreaterThanOrEqual(row.left);
+    expect(row.timeRight).toBeLessThanOrEqual(row.right + 0.5);
+  }
+}
+
 /** No pointer over a row (no tooltip, no hover) and no focus ring: the list as it reads. */
 async function still(page: Page) {
   const size = page.viewportSize();
@@ -204,23 +266,38 @@ async function still(page: Page) {
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 }
 
-test('the seeded replies minutes apart: one list newest first, the row times reading it down the list', async () => {
+test("the seeded replies minutes apart: one list newest first, each row at its act's time, the times reading it down the list", async () => {
   const { page, seeded } = world;
   await expect(rowButton(page, seeded.charlie)).toBeVisible();
+  // Off, a row shows its own time, as before the pick: Charlie Dunn's (Waiting on you, drawn first) never its act's.
+  const [off] = await rowTimes(page, [seeded.charlie]);
+  expect(off!.shown).toBe(off!.own);
+  expect(off!.shown).not.toBe(off!.act);
   await listFilter(page).click();
   await recentPick(page).click();
   await expect(recentPick(page)).toHaveAttribute('aria-checked', 'true');
   await page.keyboard.press('Escape');
   await expect.poll(() => listOrder(page)).toEqual([seeded.ada, seeded.bob, seeded.charlie]);
   await expect(bands(page)).toHaveCount(0);
+  await timesReadDown(page, seeded);
   await still(page);
-  await shotBoth(page, '04b-flat-minutes-apart.png', '05b-flat-minutes-apart-light.png');
-  // A phone, 390 wide: the same one list.
+  await shotBoth(page, '08-flat-act-times-dark.png', '09-flat-act-times-light.png');
+  // A phone, 390 wide: the same one list, the same times.
   await page.setViewportSize({ width: 390, height: 844 });
   await expect.poll(() => listOrder(page)).toEqual([seeded.ada, seeded.bob, seeded.charlie]);
   await expect(bands(page)).toHaveCount(0);
+  await timesReadDown(page, seeded);
+  await noOverflow(page);
   await still(page);
-  await shotBoth(page, '06-phone-flat-minutes-apart.png', '07-phone-flat-minutes-apart-light.png');
+  await shotBoth(page, '10-phone-act-times-dark.png', '11-phone-act-times-light.png');
+  // The narrowest phone, 320 wide: the same, and nothing wider than the screen.
+  await page.setViewportSize({ width: 320, height: 640 });
+  await expect.poll(() => listOrder(page)).toEqual([seeded.ada, seeded.bob, seeded.charlie]);
+  await timesReadDown(page, seeded);
+  await noOverflow(page);
+  await still(page);
+  await page.emulateMedia({ colorScheme: 'light' });
+  await shot(page, '12-phone-320-light.png');
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(listFilter(page)).toBeVisible();
   // Off again for what follows.

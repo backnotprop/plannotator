@@ -16,7 +16,8 @@
  *   inbox/acted.json   { v: 1, threads: { <thread id>: <ISO time> } }, 0600, written whole (temp, then rename)
  *
  * Written at most once per `INBOX_ACTED_FLUSH_MS` (a draft saved as the person types is one write, not one per save),
- * keeping the newest `INBOX_ACTED_MAX` threads, none older than the filter reaches (`INBOX_RECENT_ACTIVITY_DAYS`) and
+ * keeping the newest `INBOX_ACTED_MAX` threads, none older than the filter reaches (`INBOX_RECENT_ACTIVITY_DAYS`), none
+ * ahead of the clock (`INBOX_ACTED_FUTURE_MS`: a clock set back; never read either) and
  * none of a thread this store held and no longer does (deleted; `sweep`). A file from a newer Plannotator is never
  * written over (the notes hold in memory); one that does not read is moved aside first (`acted.json.unreadable-<time>`),
  * as pins.json is. The person's private view state, like pins: outside the event log (no
@@ -71,14 +72,30 @@ export function personActOfAnnotation(record: InboxAnnotationRecord): string {
   return laterActed(laterActed(record.created_at, record.updated_at), record.removed_at)!;
 }
 
-/** acted.json as a map; a file that does not read (or a newer version's) is none. */
-export function readInboxActed(inboxDirPath: string): Map<string, string> {
+/**
+ * How far past the server's clock a kept time may be. More is a time from before the clock was set back (a clock
+ * change, a machine's clock fixed): it is dropped, read or written, so it never holds its thread at the top of
+ * "Recent activity" for as long as the clock takes to catch up.
+ */
+export const INBOX_ACTED_FUTURE_MS = 60_000;
+
+/** The time is no later than `now` allows (`INBOX_ACTED_FUTURE_MS`). */
+export function actedNotAhead(at: string, now: number): boolean {
+  return Date.parse(at) <= now + INBOX_ACTED_FUTURE_MS;
+}
+
+/**
+ * acted.json as a map; a file that does not read (or a newer version's) is none. `now` (the server's clock): a time
+ * too far ahead of it is left out (`actedNotAhead`).
+ */
+export function readInboxActed(inboxDirPath: string, now?: number): Map<string, string> {
   const out = new Map<string, string>();
   try {
     const value = JSON.parse(readFileSync(join(inboxDirPath, INBOX_ACTED_FILE), "utf8")) as { v?: unknown; threads?: unknown } | null;
     if (!value || typeof value !== "object" || value.v !== 1 || !value.threads || typeof value.threads !== "object") return out;
     for (const [id, at] of Object.entries(value.threads as Record<string, unknown>)) {
-      if (isInboxId("msg", id) && typeof at === "string" && !Number.isNaN(Date.parse(at))) out.set(id, at);
+      if (!isInboxId("msg", id) || typeof at !== "string" || Number.isNaN(Date.parse(at))) continue;
+      if (now === undefined || actedNotAhead(at, now)) out.set(id, at);
     }
   } catch {
     // Missing or unreadable: no notes yet.
@@ -150,20 +167,23 @@ export function createInboxActed(inboxDirPath: string, options: { now?: () => Da
   let timer: ReturnType<typeof setTimeout> | null = null;
   const loaded = () => {
     if (threads) return threads;
-    threads = readInboxActed(inboxDirPath);
+    threads = readInboxActed(inboxDirPath, now().getTime());
     for (const id of threads.keys()) if (held(id)) own.add(id);
     return threads;
   };
   // Read at once: a deletion before the first note must know which of the file's threads this store held.
   loaded();
-  /** What the file keeps: no deleted thread's time, none past the filter's reach, the newest `INBOX_ACTED_MAX`. */
+  /** What the file keeps: no deleted thread's time, none past the filter's reach or ahead of the clock, the newest `INBOX_ACTED_MAX`. */
   const pruned = (all: Map<string, string>): Map<string, string> => {
-    const reach = now().getTime() - INBOX_RECENT_ACTIVITY_DAYS * DAY_MS;
-    const kept = [...all].filter(([id, at]) => Date.parse(at) >= reach && !(own.has(id) && !held(id)));
+    const clock = now().getTime();
+    const reach = clock - INBOX_RECENT_ACTIVITY_DAYS * DAY_MS;
+    const kept = [...all].filter(([id, at]) => Date.parse(at) >= reach && actedNotAhead(at, clock) && !(own.has(id) && !held(id)));
     for (const id of own) if (!held(id)) own.delete(id);
     kept.sort((a, b) => Date.parse(b[1]) - Date.parse(a[1]));
     return new Map(kept.slice(0, INBOX_ACTED_MAX));
   };
+  /** A kept time, unless the clock went back past it since it was noted. */
+  const fresh = (at: string | undefined): string | null => (at !== undefined && actedNotAhead(at, now().getTime()) ? at : null);
   const later = () => {
     if (timer) return;
     timer = setTimeout(flush, flushMs);
@@ -187,12 +207,14 @@ export function createInboxActed(inboxDirPath: string, options: { now?: () => Da
       if (!isInboxId("msg", threadId)) return;
       const all = loaded();
       if (held(threadId)) own.add(threadId);
-      const next = laterActed(all.get(threadId), at)!;
-      if (next === all.get(threadId)) return;
+      // A time kept from before the clock went back is no longer one: the note replaces it.
+      const kept = fresh(all.get(threadId));
+      const next = laterActed(kept, at)!;
+      if (next === kept) return;
       all.set(threadId, next);
       later();
     },
-    at: (threadId) => loaded().get(threadId) ?? null,
+    at: (threadId) => fresh(loaded().get(threadId)),
     flush,
     sweep() {
       loaded();

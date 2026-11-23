@@ -5427,10 +5427,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     readBody: (req) => readBody(req),
     json,
     onChange: (threadId) => {
-      // A draft saved or dropped is the person's doing in the thread ("Recent activity", acted.ts).
-      acted.note(threadId);
       for (const listener of draftListeners) listener(threadId);
     },
+    // A draft changed or dropped is the person's doing in the thread ("Recent activity", acted.ts); a save of the same draft is not.
+    onEdited: (threadId) => acted.note(threadId),
   });
   const commentDrafts = createInboxCommentDrafts({ store, serverSession, readBody: (req) => readBody(req), json, onSaved: (threadId) => acted.note(threadId) });
   // A film played: "Recent activity"'s one write of its own (inbox-acted.ts).
