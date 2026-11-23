@@ -22074,6 +22074,146 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-door-post-threads-id-remove-agent",
+      "title": "door:POST threads/:id/remove-agent",
+      "surface": [
+        "door:POST threads/:id/remove-agent"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "Remove an agent from a thread (approval \"inbox-remove-agent-from-thread\"). The iPhone app does not build it now: the door takes the route for the web phone sheet's swipe and for a linked machine whose list names `remove-agent` in `marks`.",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-threads-id-remove-agent-undo",
+      "title": "door:POST threads/:id/remove-agent/undo",
+      "surface": [
+        "door:POST threads/:id/remove-agent/undo"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "The toast's Undo of a Remove (approval \"inbox-remove-agent-from-thread\"). The iPhone app does not build it now: the door takes the route for the web phone sheet and for a linked machine whose list names `remove-agent` in `marks`.",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-threads-id-remove-agent",
+      "title": "window:/api/inbox/threads/:id/remove-agent",
+      "surface": [
+        "window:/api/inbox/threads/:id/remove-agent"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "The window's Remove on a \"to\" picker row (approval \"inbox-remove-agent-from-thread\"). The iPhone app does not build it now; the phone reaches it through the door route of the same name.",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-threads-id-remove-agent-undo",
+      "title": "window:/api/inbox/threads/:id/remove-agent/undo",
+      "surface": [
+        "window:/api/inbox/threads/:id/remove-agent/undo"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "The window's Undo of a Remove (approval \"inbox-remove-agent-from-thread\"). The iPhone app does not build it now; the phone reaches it through the door route of the same name.",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-removed",
+      "title": "field:InboxMessageWire.removed",
+      "surface": [
+        "field:InboxMessageWire.removed"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "The thread's removals, on its root (approval \"inbox-remove-agent-from-thread\"). The iPhone app does not build it now: it does not draw \"You removed <name> from this thread\", and it may still offer a removed agent as a recipient; writing to it brings it back, as on the computer.",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxremoval-after",
+      "title": "field:InboxRemoval.after",
+      "surface": [
+        "field:InboxRemoval.after"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "Part of a thread's removal (InboxMessageWire.removed): the last message before it, where the line is drawn. The iPhone app does not build it now.",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxremoval-at",
+      "title": "field:InboxRemoval.at",
+      "surface": [
+        "field:InboxRemoval.at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "Part of a thread's removal (InboxMessageWire.removed): when the person removed the agent. The iPhone app does not build it now.",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxremoval-host",
+      "title": "field:InboxRemoval.host",
+      "surface": [
+        "field:InboxRemoval.host"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "Part of a thread's removal (InboxMessageWire.removed): the removed agent's host. The iPhone app does not build it now.",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxremoval-name",
+      "title": "field:InboxRemoval.name",
+      "surface": [
+        "field:InboxRemoval.name"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "Part of a thread's removal (InboxMessageWire.removed): the removed agent's name, for the line. The iPhone app does not build it now.",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxremoval-session",
+      "title": "field:InboxRemoval.session",
+      "surface": [
+        "field:InboxRemoval.session"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "Part of a thread's removal (InboxMessageWire.removed): the removed agent's session. The iPhone app does not build it now.",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

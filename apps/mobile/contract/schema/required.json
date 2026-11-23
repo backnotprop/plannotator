@@ -636,6 +636,12 @@
     "InboxReaction": [
       "emoji"
     ],
+    "InboxRemoval": [
+      "after",
+      "at",
+      "host",
+      "session"
+    ],
     "InboxReplyDraft": [
       "body",
       "created_at",

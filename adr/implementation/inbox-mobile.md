@@ -1362,6 +1362,21 @@ curl -sS -X POST "$INBOX/api/inbox/device/threads/msg_01K70000000000000000000020
   -d '{"idempotency_key":"00000000-0000-4000-8000-000000000066","priority":true}'
 ```
 
+### 7.67 Remove an agent from a thread, and its Undo
+
+Added 2026-11-23 (approval "inbox-remove-agent-from-thread"). A thread's root carries an additive `removed`: `[{ host, session, name?, at, after }]`, or null. A removal stands until a later person message writes to that session (its `to`, the author of the message it replies to, or a tag that is not `handed_away`); while it stands the agent is out of the thread's participants, is never its owner, and gets nothing from it. `after` is the id of the last message at the press, where the computer draws "You removed <name> from this thread". Two door routes, each the window's own route behind the door's `idempotency_key`, sent to the thread's own machine:
+
+- `POST threads/:id/remove-agent` `{ idempotency_key, session }`: remove it. Answers `{ thread_id, removal }`. `422 not_in_thread` for a session that is not in the thread; `409 last_agent` when no other agent could take the person's reply. A second press writes nothing.
+- `POST threads/:id/remove-agent/undo` `{ idempotency_key, session }`: Undo. The session's latest removal goes. Answers `{ thread_id, removed }`.
+
+The store line (the root again) comes down the event stream and the relay like any other. A linked machine whose list names `remove-agent` in `marks` takes them. The iPhone app does not offer Remove yet; an app that does not read `removed` may still offer a removed agent as a recipient, and writing to it brings it back, as on the computer.
+
+```sh
+curl -sS -X POST "$INBOX/api/inbox/device/threads/msg_01K70000000000000000000020/remove-agent" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"idempotency_key":"00000000-0000-4000-8000-000000000067","session":"ses_webhooks"}'
+```
+
 ## 8. What this contract leaves out
 
 The Workspaces app's side (it has its own contract, and decides how to draw a message's images), the iPad, pairing through the relay, deleting a mailbox, a retention sweep at the relay, rates beyond the reused creation brake, raw attachment bytes on the door, device attestation, request signing, re-authentication, and any Settings, restart or storage route on the phone.

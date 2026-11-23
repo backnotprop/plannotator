@@ -1374,6 +1374,9 @@ button.ib-band:is(:hover, [data-menu]) { background: var(--ib-band-hover-s, var(
 .ib-arcswipe[data-swiping] .ib-arcswipe-under { visibility: visible; }
 .ib-arcswipe[data-armed] .ib-arcswipe-under { background: var(--primary); color: var(--primary-foreground); }
 .ib-arcswipe-face { position: relative; background: var(--background); }
+/* The reply sheet's agent row over "Remove" (SwipeToRemove.tsx): the sheet row's own corners and surface. */
+.ib-rmswipe { flex: none; border-radius: 12px; }
+.ib-rmswipe .ib-arcswipe-face { background: var(--popover); border-radius: 12px; }
 @media (prefers-reduced-motion: reduce) {
   .pn-inbox .ib-band svg.ib-band-chev, .pn-inbox .ib-band[data-chev] svg.ib-band-chev { translate: none; transition-property: opacity; }
 }
@@ -6027,6 +6030,8 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 /* A thread that moved (approval "inbox-tag-handoff"): one centered line above the reply that handed it off or added a session. */
 .ib-tmove { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 2px 6px; margin: 14px 0 4px; padding: 0 8px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); text-align: center; }
 .ib-tmove > svg { flex: none; color: var(--primary); }
+/* "You removed … from this thread" (approval "inbox-remove-agent-from-thread"): its mark is quiet, as in the design. */
+.ib-tmove[data-thread-move="removed"] > svg { color: var(--muted-foreground); }
 .ib-tmove-t { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0 5px; min-width: 0; overflow-wrap: anywhere; }
 .ib-tmove-t b { font-weight: 600; color: var(--foreground); }
 /* Sessions added to a thread of several: one quiet line, the names in the text colour at the line's weight. */
@@ -9754,6 +9759,16 @@ dialog.ib-pqi .ib-listcol.ib-pqi-list { position: relative; inset: auto; visibil
 .pn-inbox :is(.ib-rpick-name, .ib-rpick-tick, .ib-rpick-more):focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .pn-inbox .ib-rpick-more { display: block; width: 100%; height: 34px; margin-top: 4px; padding: 0 8px; border: 0; border-radius: 8px; background: none; color: var(--muted-foreground); font: inherit; text-align: left; cursor: pointer; }
 @media (hover: hover) { .pn-inbox .ib-rpick-more:hover { background: color-mix(in oklch, var(--muted) 55%, transparent); color: var(--foreground); } }
+/* Remove on an agent's row (approval "inbox-remove-agent-from-thread", proposal B): quiet words between the name and
+   the circle while the row is hovered or holds focus. Hidden it takes no room; shown it takes the name's (the name
+   cuts with "…"), so the circle never moves. It stays in the Tab order: name, Remove, circle. */
+.pn-inbox .ib-rpick-rm { flex: none; max-width: 0; height: 30px; margin: 0; padding: 0; overflow: hidden; border: 0; border-radius: 6px; background: none; color: var(--muted-foreground); font: inherit; white-space: nowrap; opacity: 0; cursor: pointer; }
+.pn-inbox .ib-rpick-row:focus-within .ib-rpick-rm { max-width: 96px; padding: 0 8px; opacity: 1; }
+@media (hover: hover) {
+  .pn-inbox .ib-rpick-row:hover .ib-rpick-rm { max-width: 96px; padding: 0 8px; opacity: 1; }
+  .pn-inbox .ib-rpick-rm:hover { color: var(--foreground); }
+}
+.pn-inbox .ib-rpick-rm:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   /* The Draft line is above the box, at the right, once something is saved (the owner, 2026-11-03): the foot is held
      at the bottom, so the line grows it upward and the box, its row, the mic and Send stay where they are. Nothing is
