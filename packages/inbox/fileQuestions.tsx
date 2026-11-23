@@ -33,6 +33,8 @@ export interface FileQuestions {
   footerFor: (key: string) => string | null;
   /** A card to bring into view (the open questions list, a reply's answer row): its record key; `seq` changes per ask. */
   focus?: { key: string; seq: number } | null;
+  /** The thread's questions moved to another thread (its root's `moved_to`): an archive-closed card reads "Closed". */
+  moved?: boolean;
 }
 
 /** The status tag a pick not sent shows, as on the body's cards. */
@@ -103,6 +105,7 @@ export function useFileQuestionViewerProps(questions: FileQuestions | null | und
   const locked = questions?.locked ?? true;
   const onPick = questions?.onPick;
   const footerFor = questions?.footerFor;
+  const moved = questions?.moved === true;
   return useMemo(() => {
     if (!records || records.length === 0 || !answers || !onPick || !footerFor) return {};
     const byFileKey = recordsByFileKey(records);
@@ -115,8 +118,8 @@ export function useFileQuestionViewerProps(questions: FileQuestions | null | und
       questionReadOnly: (indexed: IndexedQuestion) => fileQuestionLocked(cardRecord(byFileKey, indexed), locked),
       questionStatusLabel: (indexed: IndexedQuestion, status: QuestionStatus) => {
         const record = cardRecord(byFileKey, indexed);
-        // Closed by the archive: "Closed", as the body's cards (useQuestionCards), never "Open".
-        if (closedByArchive(record)) return ARCHIVE_CLOSED_STATUS;
+        // Closed by the archive of a moved thread: "Closed", as the body's cards (useQuestionCards), never "Open".
+        if (moved && closedByArchive(record)) return ARCHIVE_CLOSED_STATUS;
         if (status !== 'answered' && status !== 'skipped') return undefined;
         return record && (record.state === 'open' || record.state === 'picked') ? DRAFT_STATUS : undefined;
       },
@@ -129,5 +132,5 @@ export function useFileQuestionViewerProps(questions: FileQuestions | null | und
       questionOptionLines: true,
       questionChangeLines: true,
     };
-  }, [records, answers, locked, onPick, footerFor]);
+  }, [records, answers, locked, onPick, footerFor, moved]);
 }

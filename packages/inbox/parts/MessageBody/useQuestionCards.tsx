@@ -22,6 +22,7 @@ export function useQuestionCards({
   message,
   projectRoot,
   readOnly,
+  movedThread,
   footerFor,
   answers,
   renderReplacedCard,
@@ -33,7 +34,7 @@ export function useQuestionCards({
   noteAtLine,
   notesRef,
   refRepo,
-}: Pick<MessageBodyProps, 'message' | 'projectRoot' | 'readOnly' | 'footerFor' | 'answers' | 'renderReplacedCard' | 'renderReplacesLine' | 'renderActions' | 'renderRunBlock' | 'onTryPrototype'> & {
+}: Pick<MessageBodyProps, 'message' | 'projectRoot' | 'readOnly' | 'movedThread' | 'footerFor' | 'answers' | 'renderReplacedCard' | 'renderReplacesLine' | 'renderActions' | 'renderRunBlock' | 'onTryPrototype'> & {
   blocks: Block[];
   noteAtLine: ReadonlyMap<number, InboxNoteBlock>;
   notesRef: { readonly current: MessageBodyProps['contextNotes'] };
@@ -139,16 +140,16 @@ export function useQuestionCards({
   );
 
   // A pick not sent yet tags its card "Draft", not "Answered" (the footer says when it was picked);
-  // a sent answer, and a question a Mark read closed, keep the card's own tag. One the archive closed reads "Closed",
+  // a sent answer, and a question a Mark read closed, keep the card's own tag. One the archive of a moved thread closed reads "Closed",
   // never the "Open" its missing answer would give it (a pick saved before the archive does not make it "Draft").
   const statusLabel = useCallback(
     (question: IndexedQuestion, status: QuestionStatus) => {
       const wire = message.questions?.find((q) => q.key === question.question.key);
-      if (closedByArchive(wire)) return ARCHIVE_CLOSED_STATUS;
+      if (movedThread && closedByArchive(wire)) return ARCHIVE_CLOSED_STATUS;
       if (status !== 'answered' && status !== 'skipped') return undefined;
       return wire && (wire.state === 'open' || wire.state === 'picked') ? NOT_SENT_STATUS : undefined;
     },
-    [message.questions],
+    [message.questions, movedThread],
   );
   return { renderFooter, acceptBehavior, questionCard, belowPrompt, directiveBlock, afterChoices, answerLocked, statusLabel };
 }

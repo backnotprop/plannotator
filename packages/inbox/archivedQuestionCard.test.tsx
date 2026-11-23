@@ -1,5 +1,6 @@
 /**
- * A question the archive closed draws closed: the server reads it `closed`
+ * A question the archive of a MOVED thread closed draws closed (the owner, 2026-11-22: only a thread whose
+ * questions moved, its root's `moved_to`; a plainly archived thread stays as on main): the server reads it `closed`
  * (no answer, no Mark read), and the card used to take its tag from the
  * missing answer, so an archived thread showed "Open" over its choices and
  * the person could take it for a question still waiting. It reads "Closed"
@@ -62,7 +63,10 @@ function questions(state: InboxQuestion['state'], given: Given = false): InboxQu
   }));
 }
 
-function thread(archived: boolean, picked: Given = false): InboxThread {
+const BRIEF = 'msg_01M4H6G73M9H3Z32T859E72DQ0';
+
+/** `moved`: the archive pointed its questions at another thread (resolve_message's `moved_to`). */
+function thread(archived: boolean, picked: Given = false, moved = archived): InboxThread {
   const root: InboxMessageWire = {
     id: M1,
     project_id: PROJECT.id,
@@ -76,6 +80,7 @@ function thread(archived: boolean, picked: Given = false): InboxThread {
     idempotency_key: null,
     seq: 1,
     questions: questions(archived ? 'closed' : 'open', picked),
+    ...(moved ? { moved_to: { thread_id: BRIEF, subject: 'Morning brief', open: true as const, name: 'Morning brief' } } : {}),
   };
   return { thread_id: M1, project: PROJECT, subject: 'Retry policy', thread_name: null, resolved_at: root.resolved_at, archive_seq: archived ? 5 : null, messages: [root] };
 }
@@ -137,7 +142,15 @@ function card(el: HTMLElement) {
   };
 }
 
-test.skipIf(!hasDom)('an archived thread: its question reads Closed, with the archived words, and no choice can be ticked; Unarchive opens it again', async () => {
+test.skipIf(!hasDom)('a plainly archived thread (no moved_to) is as on main: no Closed tag, no archived words', async () => {
+  const el = await render(thread(true, false, false));
+  const plain = card(el);
+  expect(plain.text).toContain('Open');
+  expect(plain.text).not.toContain('Closed');
+  expect(plain.enabled).toBe(0);
+});
+
+test.skipIf(!hasDom)('a moved thread: its question reads Closed, with the archived words, and no choice can be ticked; Unarchive opens it again', async () => {
   const el = await render(thread(true));
   const closed = card(el);
   expect(closed.text).toContain('Closed');
