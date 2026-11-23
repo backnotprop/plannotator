@@ -111,6 +111,28 @@ export const GuideReaderPart = lazyPart(() => import('#guide-reader'));
 export const PullAllFilesPart = lazyPart(() => import('#guide-reader').then((mod) => ({ default: mod.PullAllFiles })));
 export const PullRepoFilePart = lazyPart(() => import('#guide-reader').then((mod) => ({ default: mod.PullRepoFile })));
 export const PullChangesTreePart = lazyPart(() => import('#guide-reader').then((mod) => ({ default: mod.PullChangesTree })));
+/** The review app's keys on a review (guide/ReviewKeys.tsx), from the reader's own chunk; a reader without them takes none. */
+export const ReviewKeysPart = lazyPart(() => import('#guide-reader').then((mod) => ({ default: mod.ReviewKeys ?? NoKeys })));
+function NoKeys() {
+  return null;
+}
+/**
+ * Beside a review's reader: the review's keys win while it is on screen. Drawn once its chunk is in (the reader's, so
+ * at once beside a drawn reader), never through Suspense, so it never holds the reader or its failure notice.
+ */
+export function ReviewKeysHere() {
+  const [ready, setReady] = useState(ReviewKeysPart.isLoaded);
+  useEffect(() => {
+    if (ready) return;
+    let live = true;
+    // A chunk that cannot arrive: no keys, and the reader's own boundary says so.
+    ReviewKeysPart.preload().then(() => live && setReady(true), () => {});
+    return () => {
+      live = false;
+    };
+  }, [ready]);
+  return ready ? <ReviewKeysPart.Part /> : null;
+}
 export const ShapeBoardPart = lazyPart(() => import('#shape-board'));
 export const SearchPalettePart = lazyPart(() => import('#search-palette'));
 export const PlatformPostPart = lazyPart(() => import('#platform-post'));
