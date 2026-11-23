@@ -12329,6 +12329,16 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
   .ib-ctxn-chev { transition: none; }
 }
 
+/* The risk bars' card (pulls/RiskBarsCard.tsx): ui's Popover surface on the diff's bars, saying what an open risk
+   row said (its head wraps as the open row's did). Fits a phone's width, and its height: never taller than the room
+   on its side of the bars (Base UI's `--available-height`, inside the 12px collision padding) or the screen; longer
+   reasons scroll inside it. */
+.ib-riskcard { width: min(320px, calc(100vw - 24px)); max-height: min(var(--available-height, 100dvh), calc(100dvh - 24px)); overflow-y: auto; overscroll-behavior: contain; padding: 8px 12px 10px; color: var(--foreground); }
+.ib-riskcard .ib-ctxn-h { display: block; overflow-wrap: anywhere; }
+.ib-riskcard .ib-ctxn-h > svg { display: inline-block; vertical-align: -2px; margin-right: 6px; }
+.ib-riskcard .ib-ctxn-h > .ib-ctxn-risk { display: inline-flex; margin-left: 6px; vertical-align: 1px; }
+.ib-riskcard-note + .ib-riskcard-note { margin-top: 8px; }
+
 /* The list's filter (components/ListFilter.tsx, listFilter.ts): the funnel alone in the list header, at every width.
    With picks it takes the accent colour and a count in its corner (the icon cut round it, as the PR badge's count
    is); the menu is the Pull requests filter's (`.ib-pc-menu`). */

@@ -724,6 +724,9 @@ packages/inbox/shortcuts/useSheetEscape.test.tsx
 packages/inbox/pulls/pullRisk.test.tsx
 packages/inbox/pulls/riskAlreadyRanked.test.tsx
 packages/inbox/pulls/riskWaitingDialog.test.tsx
+packages/inbox/pulls/riskBarsCard.test.tsx
+packages/inbox/guide/pullChangesTreeRisk.test.tsx
+packages/review-editor/components/hostLineMarks.test.ts
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx
 packages/inbox/pulls/pullReviewKept.test.tsx
 packages/inbox/pulls/pullReviewCommentsToggle.test.tsx
