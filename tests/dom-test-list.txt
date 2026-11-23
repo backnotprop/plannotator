@@ -404,6 +404,7 @@ packages/review-editor/App.sessionTitle.test.tsx
 packages/review-editor/App.diffLoadFailure.test.tsx
 packages/review-editor/components/AnnotationToolbar.placement.test.tsx
 packages/review-editor/dock/panels/ReviewPROverviewPanel.ui.test.tsx
+packages/review-editor/components/explicitForgeLinks.dom.test.tsx
 packages/review-editor/components/FileHeader.edit.test.tsx
 packages/review-editor/edit/useEditSession.recovery.test.tsx
 packages/review-editor/edit/discardRestoreRender.test.tsx
@@ -717,11 +718,16 @@ packages/inbox/pulls/face.test.tsx
 packages/inbox/pulls/lineThreads.test.tsx
 packages/inbox/pulls/usePulls.test.tsx
 packages/inbox/pulls/hidePulls.test.tsx
+packages/inbox/pulls/onThisComputer.test.tsx
+packages/inbox/compose/reviewBoxBranch.test.tsx
 packages/inbox/hidePullsList.test.tsx
 packages/inbox/shortcuts/useSheetEscape.test.tsx
 packages/inbox/pulls/pullRisk.test.tsx
 packages/inbox/pulls/riskAlreadyRanked.test.tsx
 packages/inbox/pulls/riskWaitingDialog.test.tsx
+packages/inbox/pulls/riskBarsCard.test.tsx
+packages/inbox/guide/pullChangesTreeRisk.test.tsx
+packages/review-editor/components/hostLineMarks.test.ts
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx
 packages/inbox/pulls/pullReviewKept.test.tsx
 packages/inbox/pulls/pullReviewCommentsToggle.test.tsx
@@ -758,6 +764,7 @@ packages/ui/components/AnnotationToolstrip.hideActionModes.test.tsx
 packages/ui/components/CommentPopover.extraAction.test.tsx
 packages/ui/components/shape/ShapeSurface.changed.test.tsx
 packages/ui/components/shape/ShapeSurface.stack.test.tsx
+packages/ui/components/shape/explicitForgeLinks.dom.test.tsx
 packages/inbox/shapeWhatsChanged.test.tsx
 packages/inbox/reviewPaneAt.test.tsx
 packages/inbox/shapeBoardPlace.test.tsx
@@ -919,6 +926,8 @@ packages/inbox/reaskAllList.test.tsx
 packages/ui/utils/diagramLabelScrub.test.ts
 packages/ui/utils/diagramRemoteLoads.test.ts
 packages/review-editor/components/DiffViewer.selectionClears.test.tsx
+packages/ui/components/RefHoverCardClick.dom.test.tsx
+packages/ui/components/RefCardProseMark.dom.test.tsx
 packages/inbox/components/diffControlsWholeFile.test.tsx
 packages/inbox/commentBoxFiles.test.tsx
 packages/inbox/commentRowFiles.test.tsx

@@ -4,8 +4,8 @@
  * sends while the person has Branch reviews on (`InboxReviewsAnswer.branch_reviews`, a row's `started.report`): off,
  * nothing here shows.
  */
-import { inboxBranchPlaceWords, inboxBranchReachWords, type InboxBranchReportRow, type InboxReviewRow, type InboxReviewsAnswer, type InboxUnreportedBranchesAnswer } from '@plannotator/core/inbox-types';
-import { get, post } from '../api';
+import { inboxBranchPlaceWords, inboxBranchReachWords, type InboxBranchReportRow, type InboxReviewRow, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
+import { post } from '../api';
 import { inboxUrl, rememberMachine } from '../inboxUrl';
 
 /** A reported branch's row: what the agent reported. Null for every other row. */
@@ -53,9 +53,4 @@ export function branchNoteOf(report: InboxBranchReportRow): BranchNote {
  */
 export function rankBranch(threadId: string): Promise<{ started: boolean }> {
   return post<{ started: boolean }>(inboxUrl('/reviews/branches/rank'), { thread_id: threadId });
-}
-
-/** The safety net: one project's local branches nobody reported (`GET /api/inbox/reviews/branches/unreported`). Read only when the person opens it. */
-export function readUnreportedBranches(projectId: string, signal?: AbortSignal): Promise<InboxUnreportedBranchesAnswer> {
-  return get<InboxUnreportedBranchesAnswer>(inboxUrl(`/reviews/branches/unreported?project=${encodeURIComponent(projectId)}`), signal);
 }

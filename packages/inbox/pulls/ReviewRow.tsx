@@ -98,7 +98,7 @@ function Chain({ stack }: { stack: InboxPullStack }) {
  * A title on one line: cut at its end, or, a long unbroken run, in its middle so the end that tells rows apart stays.
  * A split title's pieces sit in one line (`.ib-rvr-tin`) that, too narrow for the kept end, cuts plainly at its end.
  */
-function Title({ text }: { text: string }) {
+export function Title({ text }: { text: string }) {
   const split = titleTail(text);
   if (!split) {
     return (
@@ -119,7 +119,7 @@ function Title({ text }: { text: string }) {
 }
 
 /** The age, in its fixed column; a screen reader hears it in words (on a phone, at the end of the second line). */
-function Age({ iso, now, spoken = true }: { iso: string; now: number; spoken?: boolean }) {
+export function Age({ iso, now, spoken = true }: { iso: string; now: number; spoken?: boolean }) {
   return (
     <span className="ib-t ib-rvr-age">
       <span aria-hidden="true">{reviewAge(iso, now)}</span>

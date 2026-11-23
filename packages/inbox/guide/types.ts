@@ -111,6 +111,10 @@ export interface GuideReaderProps {
    * comments: nothing counts, sends or posts them. Absent: none, as before.
    */
   lineNotes?: readonly GuideLineNote[];
+  /** The host's marks at the right edge of lines (the PR page: the risk bars), never over code. Absent: none. */
+  lineMarks?: readonly GuideLineMark[];
+  /** Hears the marks (hover, keyboard focus, a press): the PR page opens its card on them. */
+  onLineMark?: OnGuideLineMark;
   /**
    * What the host draws itself about whole files, in each file's header under its path (the PR page: other people's
    * folded comments on a whole file), so it stays with the header. Never comments, as `lineNotes`; something that
@@ -136,6 +140,23 @@ export interface GuideLineNote {
   key: string;
   render: () => ReactNode;
 }
+
+/** A mark at the right edge of a line (review-editor's `HostLineMark`, as the window's strict typecheck sees it). */
+export interface GuideLineMark {
+  /** Unique on the page: what `onLineMark` hands back. */
+  id: string;
+  filePath: string;
+  side: 'old' | 'new';
+  line: number;
+  /** Its accessible name. */
+  label: string;
+  /** Its look: CSS background declarations for its box (review-editor's `LINE_MARK_WIDTH` × one line). */
+  paint: string;  /** It opens a popup of this kind (`aria-haspopup`; `aria-expanded` is the host's to set while it is open). */
+  popup?: 'dialog';
+}
+
+/** review-editor's `OnHostLineMark`: a mark's id, what happened on it, its button, and where the pointer or focus went. */
+export type OnGuideLineMark = (id: string, event: 'enter' | 'leave' | 'focus' | 'blur' | 'press', button: HTMLButtonElement, related: EventTarget | null) => void;
 
 /** One thing the host draws about a whole file (review-editor's `HostFileNote`, as the window's strict typecheck sees it). */
 export interface GuideFileNote {
