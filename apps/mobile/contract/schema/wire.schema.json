@@ -4149,6 +4149,16 @@
                 },
                 "root": {
                   "type": "string"
+                },
+                "repo": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/InboxProjectRepo"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [

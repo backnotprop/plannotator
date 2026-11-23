@@ -5801,14 +5801,16 @@ public enum InboxMessageWireDeliverNowBy: Codable, Hashable, Sendable, RawRepres
 public struct InboxMessageWireFromProject: Codable, Hashable, Sendable {
   public var name: String
   public var root: String
+  public var repo: InboxProjectRepo?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["name", "root"]
+  static let knownKeys: Set<String> = ["name", "root", "repo"]
 
-  public init(name: String, root: String, unknownFields: [String: JSONValue] = [:]) {
+  public init(name: String, root: String, repo: InboxProjectRepo? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.name = name
     self.root = root
+    self.repo = repo
     self.unknownFields = unknownFields
   }
 
@@ -5816,6 +5818,7 @@ public struct InboxMessageWireFromProject: Codable, Hashable, Sendable {
     let c = try decoder.container(keyedBy: WireKey.self)
     self.name = try c.decode(String.self, forKey: WireKey("name"))
     self.root = try c.decode(String.self, forKey: WireKey("root"))
+    self.repo = try c.decodeIfPresent(InboxProjectRepo.self, forKey: WireKey("repo"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -5823,6 +5826,7 @@ public struct InboxMessageWireFromProject: Codable, Hashable, Sendable {
     var c = encoder.container(keyedBy: WireKey.self)
     try c.encode(self.name, forKey: WireKey("name"))
     try c.encode(self.root, forKey: WireKey("root"))
+    try c.encodeIfPresent(self.repo, forKey: WireKey("repo"))
     try WireKey.write(unknownFields, to: &c)
   }
 }
