@@ -234,6 +234,9 @@ describe.skipIf(!hasDom)("the person's choosing keys", () => {
     expect(opensAfter(search, 'k')).toBe(false);
     expect(opensAfter(document.body, 'x')).toBe(false);
     expect(opensAfter(rowButton, 'Enter', { metaKey: true })).toBe(false);
+    // Archive (E, Shift+E) moves to the next thread: being moved there is not choosing it.
+    expect(opensAfter(document.body, 'e')).toBe(false);
+    expect(opensAfter(document.body, 'E', { shiftKey: true })).toBe(false);
     // The list's keys and the opening ones.
     expect(opensAfter(rowButton, 'Enter')).toBe(true);
     expect(opensAfter(rowButton, ' ')).toBe(true);
