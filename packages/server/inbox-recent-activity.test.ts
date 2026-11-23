@@ -6,7 +6,8 @@
  * Priority, snooze, tag, mark read and unread, archive). Also counts: a 👍 Looks good from the window or the phone's
  * door, and a question asked in the thread's Ask AI. Kept across a restart, in `inbox/acted.json`, never in the event
  * log, and never in anything an agent reads: read_thread (a thread and the list) and search, through `/mcp` and
- * through a paired cloud agent's door.
+ * through a paired cloud agent's door, a wake's words, or a send_message answer: the time acted.json keeps for a
+ * thread the person only opened appears in none of them.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
@@ -16,7 +17,7 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import type { InboxListRow, InboxListSection } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { INBOX_ASK_POLL_FIELD, INBOX_BRIDGE_POLL_PATH } from "@plannotator/shared/inbox/connection";
-import { doorCleanups, doorWorld, type DoorResult } from "../../tests/helpers/inbox-agent-door-world";
+import { doorCleanups, doorWorld, until, type DoorResult } from "../../tests/helpers/inbox-agent-door-world";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -203,6 +204,49 @@ describe("agents never read it", () => {
       expect(result.isError ? result.content[0]?.text : null, what).toBeNull();
       const text = JSON.stringify(result);
       expect(text, what).toContain(id);
+      expect(text, what).not.toContain("acted_at");
+    }
+  });
+
+  test("a thread the person only opened: the time acted.json keeps for it is in no agent read, no wake and no send_message answer", async () => {
+    const w = await doorWorld(cleanups);
+    const id = w.local.thread_id;
+    // A look not chosen first (it writes the look's line), then the person's chosen open: no reply, no other record,
+    // so the open's time is acted.json's alone.
+    expect((await w.call(`/api/inbox/threads/${id}/seen`, {})).status).toBe(200);
+    await Bun.sleep(15);
+    expect((await w.call(`/api/inbox/threads/${id}/seen`, { opened: true })).status).toBe(200);
+    const file = join(w.dataDir, "inbox", "acted.json");
+    await until(() => existsSync(file) && !!JSON.parse(readFileSync(file, "utf8")).threads?.[id]);
+    const opened = JSON.parse(readFileSync(file, "utf8")).threads[id] as string;
+    const listed = (await w.call("/api/inbox/threads?archived=include")).json as { sections: InboxListSection[] };
+    expect(listed.sections.flatMap((s) => s.threads).find((row) => row.thread_id === id)?.acted_at).toBe(opened);
+
+    const local = (name: string, args: Record<string, unknown>) => w.mcp.callTool({ name, arguments: name === "read_thread" ? { agent_session: "ses_reader", ...args } : args }) as Promise<DoorResult>;
+    const { pairing, hook } = await w.pair();
+    const door = async (tool: string, args: Record<string, unknown>) => (await w.door(pairing.token, tool, args)).result!;
+    // A wake: the door agent's own thread, which the person answers.
+    const asked = await door("send_message", { body: "Found the flaky test. Fix it now?", idempotency_key: "s1" });
+    const askedId = asked.structuredContent!.thread_id as string;
+    const posted = (await w.thread(askedId)).messages[0]!;
+    expect((await w.call(`/api/inbox/messages/${posted.id}/reply`, { words: "Yes, fix it.", idempotency_key: "r1" })).status).toBe(200);
+    await until(() => hook.seen.length === 1);
+    const reads: [string, unknown][] = [
+      ["mcp read_thread", await local("read_thread", { thread_id: id })],
+      ["mcp list as another session", await local("read_thread", { project_path: w.project, asked_by: "anyone" })],
+      ["mcp search", await local("search", { query: "zebra", project_path: w.project })],
+      ["door read_thread", await door("read_thread", { thread_id: id })],
+      ["door list", await door("read_thread", { asked_by: "anyone" })],
+      ["door search", await door("search", { query: "zebra" })],
+      ["mcp send_message into the opened thread", await w.mcp.callTool({ name: "send_message", arguments: { agent_session: "ses-pi", agent_host: "pi", reply_to: w.local.message_id, body: "One more note on the zebra launch.", project_path: w.project, idempotency_key: "k2" } })],
+      ["door send_message", asked],
+      ["the wake", hook.seen],
+    ];
+    for (const [what, result] of reads) {
+      const failed = (result as DoorResult).isError ? (result as DoorResult).content[0]?.text : null;
+      expect(failed ?? null, what).toBeNull();
+      const text = JSON.stringify(result);
+      expect(text, what).not.toContain(opened);
       expect(text, what).not.toContain("acted_at");
     }
   });
