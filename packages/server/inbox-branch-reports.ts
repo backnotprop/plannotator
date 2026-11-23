@@ -24,7 +24,7 @@ import {
 } from "@plannotator/core/inbox-branch-reports";
 import { inboxGitRemoteKey } from "@plannotator/core/inbox-git-url";
 import { inboxPullLongLived, inboxPullSafeBranch } from "@plannotator/core/inbox-types";
-import { getDefaultBranch, getWorktrees, type ReviewGitRuntime } from "@plannotator/shared/review-core";
+import { getDefaultBranch, getWorktrees, type GitCommandOptions, type ReviewGitRuntime } from "@plannotator/shared/review-core";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 
 export const INBOX_BRANCH_REPORTS_FILE = "branch-reports.json";
@@ -126,14 +126,15 @@ export function offlineGitVersionOk(text: string): boolean {
  */
 const versionChecks = new WeakMap<ReviewGitRuntime, Promise<boolean | null>>();
 
-const guardedRun = (runtime: ReviewGitRuntime): ReviewGitRuntime["runGit"] => (args, options) =>
-  runtime.runGit(args, {
-    timeoutMs: BRANCH_GIT_TIMEOUT_MS,
-    ...options,
-    interaction: "forbid",
-    config: { ...options?.config, "protocol.allow": "never" },
-    env: { ...options?.env, GIT_NO_LAZY_FETCH: "1" },
-  });
+const guardedOptions = (options: GitCommandOptions | undefined): GitCommandOptions => ({
+  timeoutMs: BRANCH_GIT_TIMEOUT_MS,
+  ...options,
+  interaction: "forbid",
+  config: { ...options?.config, "protocol.allow": "never" },
+  env: { ...options?.env, GIT_NO_LAZY_FETCH: "1" },
+});
+
+const guardedRun = (runtime: ReviewGitRuntime): ReviewGitRuntime["runGit"] => (args, options) => runtime.runGit(args, guardedOptions(options));
 
 async function versionAnswer(runtime: ReviewGitRuntime, cwd?: string): Promise<boolean | null> {
   let check = versionChecks.get(runtime);
@@ -156,12 +157,20 @@ async function versionAnswer(runtime: ReviewGitRuntime, cwd?: string): Promise<b
  */
 export function offlineGit(runtime: ReviewGitRuntime): ReviewGitRuntime {
   const guarded = guardedRun(runtime);
+  const bytes = runtime.runGitBytes;
   return {
     ...runtime,
     runGit: async (args, options) => {
       if ((await versionAnswer(runtime, options?.cwd)) !== true) return { stdout: "", stderr: OFFLINE_GIT_TOO_OLD, exitCode: 1 };
       return guarded(args, options);
     },
+    // The capped reader (`maxOutputBytes` held to), under the same guards; absent where the runtime has none.
+    runGitBytes: bytes
+      ? async (args, options) => {
+          if ((await versionAnswer(runtime, options?.cwd)) !== true) return { stdout: new Uint8Array(0), stderr: OFFLINE_GIT_TOO_OLD, exitCode: 1 };
+          return bytes(args, guardedOptions(options));
+        }
+      : undefined,
   };
 }
 
@@ -268,25 +277,38 @@ async function baseRef(runtime: ReviewGitRuntime, root: string, base: string): P
   return null;
 }
 
-/** A reported branch's whole diff from its merge base with the base to its head, for its risk run. Throws a sentence. */
+/** A branch's diff past `BRANCH_DIFF_MAX_BYTES`: git was stopped there and nothing of it is kept. */
+export class BranchDiffTooLarge extends Error {
+  constructor() {
+    super("This diff is too large to read here.");
+    this.name = "BranchDiffTooLarge";
+  }
+}
+
+/**
+ * A reported branch's whole diff from its merge base with the base to its head (its risk run; an "On this computer"
+ * row's diff). Held to `BRANCH_DIFF_MAX_BYTES` by the capped reader (`runGitBytes`; the Bun `runGit` reads whole):
+ * past it, `BranchDiffTooLarge`, never a cut diff. Throws a sentence.
+ */
 export async function readBranchDiff(runtime: ReviewGitRuntime, root: string, base: string, head: string): Promise<string> {
   const ref = await baseRef(runtime, root, base);
   if (!ref) throw new Error(`The base ${base} isn't in the project's checkout on this computer.`);
   if (!(await commitOf(runtime, root, head))) throw new Error("The reported commit isn't in the project's checkout on this computer.");
-  const answer = await offlineGit(runtime).runGit(["diff", "--no-ext-diff", "--no-textconv", "--no-relative", "--no-color", "--end-of-options", `${ref}...${head}`], {
-    cwd: root,
-    timeoutMs: 5 * 60_000,
-    maxOutputBytes: BRANCH_DIFF_MAX_BYTES,
-  });
+  const git = offlineGit(runtime);
+  const args = ["diff", "--no-ext-diff", "--no-textconv", "--no-relative", "--no-color", "--end-of-options", `${ref}...${head}`];
+  const options = { cwd: root, timeoutMs: 5 * 60_000, maxOutputBytes: BRANCH_DIFF_MAX_BYTES };
+  const answer = git.runGitBytes ? await git.runGitBytes(args, options) : await git.runGit(args, options);
+  if (answer.truncated) throw new BranchDiffTooLarge();
   if (answer.exitCode !== 0) throw new Error("git couldn't read the branch's diff.");
-  return answer.stdout;
+  return typeof answer.stdout === "string" ? answer.stdout : new TextDecoder().decode(answer.stdout);
 }
 
 /**
  * The safety net: local branches with a commit in the last `INBOX_UNREPORTED_BRANCH_DAYS` days and commits not on the
  * default branch, newest first, at most `INBOX_UNREPORTED_BRANCHES_MAX` of them (counted after the ones with nothing of
  * their own are dropped; no more than `UNREPORTED_SCAN_MAX` are looked at), each with the worktree it is checked out in.
- * `skip`: branches reported or with an open PR. `caps`: Reviews' "On this computer" looks at fewer (inbox-local-work.ts).
+ * `skip`: branches reported or in a PR (given the branch's head commit). A branch whose upstream is gone (`[gone]`: its
+ * remote branch was deleted, as after a squash or rebase merge) is not listed. `caps`: Reviews' "On this computer" looks at fewer (inbox-local-work.ts).
  * Read only, when the person opens the list. A read that fails or times out throws (the list says it could not be read),
  * never "nothing".
  */
@@ -294,7 +316,7 @@ export async function readUnreportedBranches(
   runtime: ReviewGitRuntime,
   root: string,
   projectId: string,
-  skip: (branch: string) => boolean,
+  skip: (branch: string, head: string) => boolean,
   now: number = Date.now(),
   caps: { scan: number; list: number } = { scan: UNREPORTED_SCAN_MAX, list: INBOX_UNREPORTED_BRANCHES_MAX },
 ): Promise<{ git: boolean; branches: InboxUnreportedBranch[] }> {
@@ -303,17 +325,17 @@ export async function readUnreportedBranches(
   if (!inside || inside.exitCode !== 0) return { git: false, branches: [] };
   const baseRefName = await getDefaultBranch(offlineGit(runtime), root);
   const base = branchBaseName(baseRefName);
-  const listed = await git(runtime, root, ["for-each-ref", "--sort=-committerdate", "--format=%(refname)%00%(committerdate:unix)", "refs/heads/"]);
+  const listed = await git(runtime, root, ["for-each-ref", "--sort=-committerdate", "--format=%(refname)%00%(committerdate:unix)%00%(objectname)%00%(upstream:track)", "refs/heads/"]);
   if (listed.exitCode !== 0) throw new Error("git couldn't list the branches.");
   const since = now / 1000 - INBOX_UNREPORTED_BRANCH_DAYS * 86_400;
   const candidates: { branch: string; at: number }[] = [];
   for (const line of listed.stdout.split("\n")) {
-    const [ref, at] = line.split("\u0000");
+    const [ref, at, head = "", track = ""] = line.split("\u0000");
     const seconds = Number(at);
     // The full ref, never `%(refname:short)`: a name that is also a tag would read `heads/x` there.
     const branch = ref?.startsWith("refs/heads/") ? ref.slice("refs/heads/".length) : "";
     if (!branch || !Number.isFinite(seconds) || seconds < since) continue;
-    if (!inboxPullSafeBranch(branch) || inboxPullLongLived(branch) || branch === base || skip(branch)) continue;
+    if (!inboxPullSafeBranch(branch) || inboxPullLongLived(branch) || branch === base || track === "[gone]" || skip(branch, head)) continue;
     candidates.push({ branch, at: seconds });
     if (candidates.length >= caps.scan) break;
   }

@@ -18,13 +18,16 @@
  *   kept `LOCAL_WORK_CACHE_MS` and shared by every read while it is made. Read only when Reviews asks, after its list.
  * - Bun only: the Inbox is.
  */
-import { stat } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { InboxLocalDiffAnswer, InboxLocalWork, InboxLocalWorkAnswer } from "@plannotator/core/inbox-types";
 import type { InboxProject } from "@plannotator/core/inbox-types";
 import { inboxPullIsOpen, inboxPullRepoKey, type InboxPull } from "@plannotator/core/inbox-types";
-import { getDefaultBranch, runGitDiff, type ReviewGitRuntime } from "@plannotator/shared/review-core";
-import { branchBaseName, offlineGit, OFFLINE_GIT_TOO_OLD, readBranchDiff, readUnreportedBranches } from "./inbox-branch-reports";
+import { getDefaultBranch, runGitDiff, type GitCommandOptions, type ReviewGitRuntime } from "@plannotator/shared/review-core";
+import { BranchDiffTooLarge, branchBaseName, offlineGit, OFFLINE_GIT_TOO_OLD, readBranchDiff, readUnreportedBranches } from "./inbox-branch-reports";
+
+/** A branch diff past its cap (the route says so with a 413). */
+export { BranchDiffTooLarge };
 
 /** The projects read, newest activity first. */
 export const LOCAL_WORK_PROJECTS_MAX = 24;
@@ -43,11 +46,32 @@ const LOCAL_WORK_STAT_MAX = 200;
 
 const quiet = new WeakMap<ReviewGitRuntime, ReviewGitRuntime>();
 
-/** `offlineGit` that also takes no optional lock (`git status` writes no refreshed index). One per runtime, so its version check is once. */
+/**
+ * What every local-work command is given besides `offlineGit`'s guards. A list read runs in the background, so it starts
+ * nothing a repository configures: no fsmonitor daemon (`core.fsmonitor`), no automatic gc or maintenance (as the PR
+ * page's git, `createPullGitRunner`), and no optional lock (`git status` writes no refreshed index). Pager and colour are
+ * off for every command already (`prepareGitCommand`), and both diffs run with `--no-ext-diff` (the branch's with
+ * `--no-textconv` too; the uncommitted changes read as `plannotator review` reads them).
+ */
+export const LOCAL_WORK_GIT_CONFIG: Readonly<Record<string, string>> = Object.freeze({ "core.fsmonitor": "false", "maintenance.auto": "false", "gc.auto": "0" });
+export const LOCAL_WORK_GIT_ENV: Readonly<Record<string, string>> = Object.freeze({ GIT_OPTIONAL_LOCKS: "0" });
+
+const quietOptions = (options: GitCommandOptions | undefined): GitCommandOptions => ({
+  ...options,
+  config: { ...options?.config, ...LOCAL_WORK_GIT_CONFIG },
+  env: { ...options?.env, ...LOCAL_WORK_GIT_ENV },
+});
+
+/** `offlineGit` with `LOCAL_WORK_GIT_CONFIG` and `LOCAL_WORK_GIT_ENV`, its capped reader too. One per runtime, so its version check is once. */
 export function localWorkGit(runtime: ReviewGitRuntime): ReviewGitRuntime {
   let git = quiet.get(runtime);
   if (!git) {
-    git = offlineGit({ ...runtime, runGit: (args, options) => runtime.runGit(args, { ...options, env: { ...options?.env, GIT_OPTIONAL_LOCKS: "0" } }) });
+    const bytes = runtime.runGitBytes;
+    git = offlineGit({
+      ...runtime,
+      runGit: (args, options) => runtime.runGit(args, quietOptions(options)),
+      runGitBytes: bytes ? (args, options) => bytes(args, quietOptions(options)) : undefined,
+    });
     quiet.set(runtime, git);
   }
   return git;
@@ -93,21 +117,27 @@ export async function readUncommitted(git: ReviewGitRuntime, top: string, projec
 }
 
 /**
- * A project's branch is in an open pull request: one whose head is that branch, on that project's repository (the
- * PR's own, or its head's for a fork; `projectsByRepo` is Reviews' map from a repository key to the projects on it).
- * A same-named branch with an open PR on another repository is not this one.
+ * A project's branch is in a pull request, on that project's repository (the PR's own, or its head's for a fork;
+ * `projectsByRepo` is Reviews' map from a repository key to the projects on it), from what Reviews last listed (no
+ * forge is asked): an open one whose head is that branch, or a merged one whose head commit is the branch's head
+ * (squash- and rebase-merged work stays ahead of the default branch). A same-named branch's PR on another
+ * repository is not this one.
  */
-export function localBranchInOpenPull(pulls: readonly InboxPull[], projectsByRepo: ReadonlyMap<string, readonly string[]>, projectId: string, branch: string): boolean {
+export function localBranchInPull(pulls: readonly InboxPull[], projectsByRepo: ReadonlyMap<string, readonly string[]>, projectId: string, branch: string, head: string): boolean {
   const on = (host: string, repo: string | null) => !!repo && (projectsByRepo.get(inboxPullRepoKey(host, repo)) ?? []).includes(projectId);
-  return pulls.some((pull) => inboxPullIsOpen(pull) && pull.head === branch && (on(pull.host, pull.repo) || on(pull.host, pull.head_repo)));
+  return pulls.some(
+    (pull) =>
+      ((inboxPullIsOpen(pull) && pull.head === branch) || (pull.state === "merged" && !!head && pull.head_sha === head)) &&
+      (on(pull.host, pull.repo) || on(pull.host, pull.head_repo)),
+  );
 }
 
 export interface InboxLocalWorkOptions {
   runtime: ReviewGitRuntime;
   /** The projects a person sees, newest activity first. */
   projects: () => InboxProject[];
-  /** A branch not to list: one with an open PR, or (Branch reviews on) one an agent reported. */
-  skip: (projectId: string, branch: string) => boolean;
+  /** A branch not to list, given its head commit: one in a PR (`localBranchInPull`), or (Branch reviews on) one an agent reported. */
+  skip: (projectId: string, branch: string, head: string) => boolean;
   now?: () => number;
 }
 
@@ -122,17 +152,26 @@ export function createInboxLocalWork(options: InboxLocalWorkOptions) {
     const at = now();
     const projects = options.projects().slice(0, LOCAL_WORK_PROJECTS_MAX);
     const repos = new Map<string, Promise<void>>();
+    // A working tree's uncommitted changes once, though projects inside it (a folder within another's) reach it too:
+    // read once, shown under the project whose folder is its top, else the first project (newest activity) to reach it.
+    const trees = new Map<string, { read: Promise<InboxLocalWork | null>; owners: { order: number; id: string; atTop: boolean }[] }>();
     const items: InboxLocalWork[] = [];
     let unread = 0;
-    const one = async (project: InboxProject) => {
+    const one = async (project: InboxProject, order: number) => {
       try {
         const repo = await repoOf(git, project.root);
         if (!repo) return;
-        const uncommitted = await readUncommitted(git, repo.top, project.id, at);
-        if (uncommitted) items.push(uncommitted);
+        const atTop = (await realpath(project.root).catch(() => project.root)) === repo.top;
+        let tree = trees.get(repo.top);
+        if (!tree) {
+          tree = { read: readUncommitted(git, repo.top, project.id, at), owners: [] };
+          trees.set(repo.top, tree);
+        }
+        tree.owners.push({ order, id: project.id, atTop });
+        await tree.read;
         // A repository's branches once, under the first of its projects to reach it.
         if (repos.has(repo.common)) return;
-        const branches = readUnreportedBranches(git, repo.top, project.id, (branch) => options.skip(project.id, branch), at, { scan: LOCAL_WORK_SCAN_MAX, list: LOCAL_WORK_BRANCHES_MAX }).then(({ branches: found }) => {
+        const branches = readUnreportedBranches(git, repo.top, project.id, (branch, head) => options.skip(project.id, branch, head), at, { scan: LOCAL_WORK_SCAN_MAX, list: LOCAL_WORK_BRANCHES_MAX }).then(({ branches: found }) => {
           for (const branch of found) items.push({ project_id: project.id, kind: "branch", branch: branch.branch, base: branch.base, at: branch.last_commit_at });
         });
         repos.set(repo.common, branches);
@@ -144,9 +183,17 @@ export function createInboxLocalWork(options: InboxLocalWorkOptions) {
     let next = 0;
     await Promise.all(
       Array.from({ length: Math.min(LOCAL_WORK_PARALLEL, projects.length) }, async () => {
-        while (next < projects.length) await one(projects[next++]!);
+        while (next < projects.length) {
+          const order = next++;
+          await one(projects[order]!, order);
+        }
       }),
     );
+    for (const tree of trees.values()) {
+      const row = await tree.read.catch(() => null);
+      const owner = tree.owners.find((o) => o.atTop) ?? [...tree.owners].sort((a, b) => a.order - b.order)[0];
+      if (row && owner) items.push({ ...row, project_id: owner.id });
+    }
     items.sort((a, b) => b.at.localeCompare(a.at));
     return { items: items.slice(0, LOCAL_WORK_ROWS_MAX), unread };
   };
@@ -178,7 +225,8 @@ export function createInboxLocalWork(options: InboxLocalWorkOptions) {
       if (!repo) return null;
       if (branch) {
         const base = branchBaseName(await getDefaultBranch(git, repo.top));
-        const patch = await readBranchDiff(git, repo.top, base, `refs/heads/${branch}`).catch(() => {
+        const patch = await readBranchDiff(git, repo.top, base, `refs/heads/${branch}`).catch((cause: unknown) => {
+          if (cause instanceof BranchDiffTooLarge) throw cause;
           throw new Error(`git couldn't read ${branch}'s diff against ${base} in this project's folder.`);
         });
         return { project_id: project.id, kind: "branch", branch, base, patch };

@@ -14,6 +14,7 @@
  *  5. The diff cramped: drawn as a guided review's chapter card (its "Every changed file" column beside a narrow
  *     diff) instead of the files across the pane's width, as the PR page draws them; a code line cut off (03, 04).
  *  6. On a phone (390 wide), the group open, and a row's diff in the list's place at the screen's width (05, 06).
+ *  6b. On a phone, a row shorter than 44px, at 390 and 320 (05b).
  *  7. On a phone, a long branch name in a long-named project cut to a few letters by the bar's buttons, or anything
  *     in the bar or the facts under it overlapping, at 390 and 320 (07, 08).
  *
@@ -292,6 +293,21 @@ test.describe('phone at 390', () => {
       await expect(group(page).locator('[data-local-row]')).toHaveCount(3);
       await group(page).scrollIntoViewIfNeeded();
       await shot(page, '05-phone-group-open');
+      await page.setViewportSize({ width: 320, height: 700 });
+      await group(page).scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
+      await shot(page, '05b-phone-320-group-open');
+      // A phone keeps 44px rows, at 390 and at 320.
+      for (const width of [320, 390]) {
+        await page.setViewportSize({ width, height: 844 });
+        await page.waitForTimeout(200);
+        const rows = group(page).locator('[data-local-row]');
+        for (let i = 0; i < 3; i++) {
+          const height = (await rows.nth(i).boundingBox())!.height;
+          expect(height, `row ${i} at ${width}`).toBeGreaterThanOrEqual(43.5);
+          expect(height, `row ${i} at ${width}`).toBeLessThanOrEqual(45);
+        }
+      }
       await expect(toggle).toHaveText('On this computer 3');
       await row(page, `${world.plannotatorId}:${BRANCH}`).click();
       const pane = page.locator('[data-local-diff="branch"]');

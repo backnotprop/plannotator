@@ -364,7 +364,7 @@ import { createInboxPullStates, createInboxReviewIndex, readInboxReviewLink } fr
 import { INBOX_PULL_ASKS, inboxPullRiskAutoOf, inboxPullRefOfKey, inboxPullUrlOfKey, isInboxPullAsk, type InboxPull, type InboxPullLink } from "@plannotator/core/inbox-types";
 import { inboxThreadPullsSummary, parseInboxThreadPullRef, type InboxThreadPull } from "@plannotator/core/inbox-types";
 import { readInboxReviewChanges } from "./inbox-review-changes";
-import { createInboxLocalWork, localBranchInOpenPull } from "./inbox-local-work";
+import { BranchDiffTooLarge, createInboxLocalWork, localBranchInPull } from "./inbox-local-work";
 import { createInboxBranchService } from "./inbox-branch-service";
 import { inboxFarBranchReviewRow } from "@plannotator/core/inbox-branch-reports";
 import { runtime as gitRuntime } from "./git";
@@ -1642,8 +1642,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       for (const project of store.listProjects().reverse()) if (!seen.has(project.id)) seen.set(project.id, project);
       return [...seen.values()];
     },
-    skip: (projectId, branch) =>
-      (!!lastReviewsRead && localBranchInOpenPull(lastReviewsRead.listed.pulls, lastReviewsRead.projectsByRepo, store.canonicalProjectId(projectId), branch)) ||
+    skip: (projectId, branch, head) =>
+      (!!lastReviewsRead && localBranchInPull(lastReviewsRead.listed.pulls, lastReviewsRead.projectsByRepo, store.canonicalProjectId(projectId), branch, head)) ||
       (branchReviewsOn() && branchService.reported(projectId, branch)),
   });
   let lastReviewsRead: { projectsByRepo: Awaited<ReturnType<typeof pullProjects>>["projectsByRepo"]; wanted: Awaited<ReturnType<typeof pullProjects>>["wanted"]; listed: Awaited<ReturnType<typeof pulls.list>> } | null = null;
@@ -6595,6 +6595,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (!answer) return json({ error: "This project's folder isn't a git repository on this computer.", code: "not_git" }, 404);
           return json({ serverSession, ...answer });
         } catch (cause) {
+          // Past the cap: said, never a cut diff.
+          if (cause instanceof BranchDiffTooLarge) return json({ error: cause.message, code: "diff_too_large" }, 413);
           return json({ error: cause instanceof Error ? cause.message : "The diff could not be read.", code: "git_failed" }, 500);
         }
       }

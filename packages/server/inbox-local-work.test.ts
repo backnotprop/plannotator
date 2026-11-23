@@ -9,7 +9,10 @@
  *  - every read of the list running git again instead of the kept answer;
  *  - a row's diff missing its changes, or a branch's diff checking the branch out;
  *  - a branch hidden by a same-named branch's open PR on another repository, or listed beside its own repository's
- *    open PR (or its fork's).
+ *    open PR (or its fork's); a squash- or rebase-merged branch listed (its upstream gone, or its head a merged PR's);
+ *  - a branch diff past its cap drawn cut instead of said too large;
+ *  - a background read starting a repository's fsmonitor, gc or maintenance;
+ *  - one working tree's uncommitted changes listed under each project inside it.
  */
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -18,8 +21,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxProject, InboxPull } from "@plannotator/core/inbox-types";
 import type { ReviewGitRuntime } from "@plannotator/shared/review-core";
-import { BRANCH_GIT_TIMEOUT_MS } from "./inbox-branch-reports";
-import { createInboxLocalWork, localBranchInOpenPull, LOCAL_WORK_BRANCHES_MAX, LOCAL_WORK_CACHE_MS, LOCAL_WORK_PROJECTS_MAX } from "./inbox-local-work";
+import { BRANCH_DIFF_MAX_BYTES, BRANCH_GIT_TIMEOUT_MS } from "./inbox-branch-reports";
+import { BranchDiffTooLarge, createInboxLocalWork, localBranchInPull, LOCAL_WORK_BRANCHES_MAX, LOCAL_WORK_CACHE_MS, LOCAL_WORK_PROJECTS_MAX } from "./inbox-local-work";
 import { runtime } from "./git";
 
 const DAY = 86_400;
@@ -70,6 +73,10 @@ function watched(): { runtime: ReviewGitRuntime; commands: { args: string[]; cwd
         commands.push({ args, cwd: given?.cwd, options: given });
         return runtime.runGit(args, given);
       },
+      runGitBytes: (args, given) => {
+        commands.push({ args, cwd: given?.cwd, options: given });
+        return runtime.runGitBytes!(args, given);
+      },
     },
   };
 }
@@ -83,7 +90,7 @@ const READ_SHAPES: RegExp[] = [
   /^rev-parse --show-toplevel$/,
   /^symbolic-ref (refs\/remotes\/origin\/HEAD|-q --short HEAD)$/,
   /^show-ref --verify( --quiet)? refs\/(heads|remotes\/origin)\/[\w./-]+$/,
-  /^for-each-ref --sort=-committerdate --format=%\(refname\)%00%\(committerdate:unix\) refs\/heads\/$/,
+  /^for-each-ref --sort=-committerdate --format=%\(refname\)%00%\(committerdate:unix\)%00%\(objectname\)%00%\(upstream:track\) refs\/heads\/$/,
   /^rev-list --count --end-of-options \S+\.\.refs\/heads\/[\w./-]+$/,
   /^worktree list --porcelain$/,
   /^status --porcelain=v1 -z --no-renames --untracked-files=normal --ignore-submodules=dirty$/,
@@ -105,6 +112,10 @@ function onlyGuardedReads(seen: ReturnType<typeof watched>) {
     expect(options?.config?.["protocol.allow"]).toBe("never");
     expect(options?.env?.GIT_NO_LAZY_FETCH).toBe("1");
     expect(options?.env?.GIT_OPTIONAL_LOCKS).toBe("0");
+    // Nothing the repository configures starts from a background read.
+    expect(options?.config?.["core.fsmonitor"]).toBe("false");
+    expect(options?.config?.["maintenance.auto"]).toBe("false");
+    expect(options?.config?.["gc.auto"]).toBe("0");
   }
 }
 
@@ -221,6 +232,51 @@ describe("the list", () => {
   });
 });
 
+describe("work already merged, and one working tree", () => {
+  test("a branch whose upstream is gone (merged and deleted on the remote) is not listed; one with its upstream is", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const repo = scratchRepo(now);
+    // ada's upstream was deleted after a squash merge: configured, but no remote-tracking ref (no fetch is made).
+    git(repo, ["config", "branch.ada/retry-jitter.remote", "origin"]);
+    git(repo, ["config", "branch.ada/retry-jitter.merge", "refs/heads/ada/retry-jitter"]);
+    // bob's is still there.
+    git(repo, ["update-ref", "refs/remotes/origin/bob/has-a-pr", "main"]);
+    git(repo, ["config", "branch.bob/has-a-pr.remote", "origin"]);
+    git(repo, ["config", "branch.bob/has-a-pr.merge", "refs/heads/bob/has-a-pr"]);
+    const work = createInboxLocalWork({ runtime, projects: () => [project("prj_a", repo)], skip: () => false, now: () => now * 1000 });
+    const branches = (await work.list()).items.filter((item) => item.kind === "branch").map((item) => item.branch);
+    expect(branches).toEqual(["bob/has-a-pr"]);
+  });
+
+  test("a branch whose head is a merged PR's head on its repository is not listed; elsewhere, or another commit, it is", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const repo = scratchRepo(now);
+    const ada = git(repo, ["rev-parse", "refs/heads/ada/retry-jitter"]);
+    const projectsByRepo = new Map([["github.com/charlie-dunn/plannotator", ["prj_a"]], ["github.com/charlie-dunn/spaces-site", ["prj_b"]]]);
+    const merged = (repo: string, head_sha: string) => ({ host: "github.com", repo, head: "squashed-elsewhere", head_repo: repo, head_sha, state: "merged" }) as InboxPull;
+    const list = async (pulls: InboxPull[]) => {
+      const work = createInboxLocalWork({ runtime, projects: () => [project("prj_a", repo)], skip: (id, branch, head) => localBranchInPull(pulls, projectsByRepo, id, branch, head), now: () => now * 1000 });
+      return (await work.list()).items.filter((item) => item.kind === "branch").map((item) => item.branch).sort();
+    };
+    expect(await list([merged("charlie-dunn/plannotator", ada)])).toEqual(["bob/has-a-pr"]);
+    expect(await list([merged("charlie-dunn/spaces-site", ada)])).toEqual(["ada/retry-jitter", "bob/has-a-pr"]);
+    expect(await list([merged("charlie-dunn/plannotator", "0".repeat(40))])).toEqual(["ada/retry-jitter", "bob/has-a-pr"]);
+  });
+
+  test("a folder inside another project's working tree: its uncommitted changes listed once, under the tree's own project", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const repo = scratchRepo(now);
+    mkdirSync(join(repo, "packages", "web"), { recursive: true });
+    writeFileSync(join(repo, "packages", "web", "page.ts"), "export const page = 1;\n");
+    const seen = watched();
+    // The inner folder is the newer project, read first.
+    const work = createInboxLocalWork({ runtime: seen.runtime, projects: () => [project("prj_web", join(repo, "packages", "web")), project("prj_repo", repo)], skip: () => false, now: () => now * 1000 });
+    const answer = await work.list();
+    expect(answer.items.filter((item) => item.kind === "uncommitted")).toEqual([expect.objectContaining({ project_id: "prj_repo" })]);
+    expect(seen.commands.filter((command) => command.args[0] === "status")).toHaveLength(1);
+  });
+});
+
 describe("a row's diff", () => {
   test("a branch's whole diff against the default branch, read by ref: nothing checked out, nothing written", async () => {
     const now = Math.floor(Date.now() / 1000);
@@ -270,16 +326,37 @@ describe("a row's diff", () => {
     const pull = (repo: string, head: string, extra: Partial<InboxPull> = {}) => ({ host: "github.com", repo, head, head_repo: repo, state: "open", ...extra }) as InboxPull;
     const spacesPull = [pull("charlie-dunn/spaces-site", "fix/readme")];
     // Another repository's open PR on a branch of the same name: this project's branch stays listed.
-    expect(localBranchInOpenPull(spacesPull, projectsByRepo, "prj_plannotator", "fix/readme")).toBe(false);
+    expect(localBranchInPull(spacesPull, projectsByRepo, "prj_plannotator", "fix/readme", "")).toBe(false);
     // Its own repository's: hidden, on that repository's project only.
-    expect(localBranchInOpenPull(spacesPull, projectsByRepo, "prj_spaces", "fix/readme")).toBe(true);
+    expect(localBranchInPull(spacesPull, projectsByRepo, "prj_spaces", "fix/readme", "")).toBe(true);
     // A fork's PR into the upstream: the fork's clone (its head's repository) and the upstream's both have it.
     const forkPull = [pull("charlie-dunn/plannotator", "feat/share", { head_repo: "Ada-Novak/plannotator" })];
-    expect(localBranchInOpenPull(forkPull, projectsByRepo, "prj_fork", "feat/share")).toBe(true);
-    expect(localBranchInOpenPull(forkPull, projectsByRepo, "prj_plannotator", "feat/share")).toBe(true);
-    expect(localBranchInOpenPull(forkPull, projectsByRepo, "prj_spaces", "feat/share")).toBe(false);
+    expect(localBranchInPull(forkPull, projectsByRepo, "prj_fork", "feat/share", "")).toBe(true);
+    expect(localBranchInPull(forkPull, projectsByRepo, "prj_plannotator", "feat/share", "")).toBe(true);
+    expect(localBranchInPull(forkPull, projectsByRepo, "prj_spaces", "feat/share", "")).toBe(false);
     // A closed or merged PR hides nothing; another branch's PR hides nothing.
-    expect(localBranchInOpenPull([pull("charlie-dunn/spaces-site", "fix/readme", { state: "merged" })], projectsByRepo, "prj_spaces", "fix/readme")).toBe(false);
-    expect(localBranchInOpenPull(spacesPull, projectsByRepo, "prj_spaces", "fix/other")).toBe(false);
+    expect(localBranchInPull([pull("charlie-dunn/spaces-site", "fix/readme", { state: "merged" })], projectsByRepo, "prj_spaces", "fix/readme", "")).toBe(false);
+    expect(localBranchInPull(spacesPull, projectsByRepo, "prj_spaces", "fix/other", "")).toBe(false);
+  });
+
+  test("a branch diff past its cap is said too large, never drawn cut", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const repo = scratchRepo(now);
+    git(repo, ["checkout", "--quiet", "-b", "bob/huge", "main"]);
+    // Over the cap once a diff: 9 MB of lines.
+    const line = "export const filler = \"Bob Tully's generated fixture line\";\n";
+    writeFileSync(join(repo, "huge.ts"), line.repeat(Math.ceil((BRANCH_DIFF_MAX_BYTES + 1024 * 1024) / line.length)));
+    git(repo, ["add", "huge.ts"]);
+    git(repo, ["commit", "--quiet", "-m", "huge"]);
+    git(repo, ["checkout", "--quiet", "main"]);
+    const seen = watched();
+    const work = createInboxLocalWork({ runtime: seen.runtime, projects: () => [], skip: () => false });
+    const read = work.diff(project("prj_a", repo), "bob/huge");
+    await expect(read).rejects.toBeInstanceOf(BranchDiffTooLarge);
+    await expect(read).rejects.toThrow("This diff is too large to read here.");
+    // Read through the capped reader, at the cap.
+    expect(seen.commands.find((command) => command.args[0] === "diff")?.options?.maxOutputBytes).toBe(BRANCH_DIFF_MAX_BYTES);
+    // Under the cap, the whole diff as before.
+    expect((await work.diff(project("prj_a", repo), "ada/retry-jitter"))!.patch).toContain("ada-retry-jitter.txt");
   });
 });
