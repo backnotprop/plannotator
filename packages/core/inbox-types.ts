@@ -1232,6 +1232,11 @@ export interface InboxLaunchRecord {
   effort?: string;
   /** OpenCode's own primary agent the session started as (build, plan, …); absent: its default. */
   primary_agent?: string;
+  /**
+   * A reply's Resume row: the ended session the person started outside the Inbox (in a terminal), resumed as itself
+   * instead of a new session. The start resumes this session (the host's `resume`), never makes one.
+   */
+  adopted_session?: string;
   error?: InboxLaunchError | null;
   /** The ⋯ menu's Delete removed the session and its files; the thread stays, with no run line. */
   deleted_at?: string;
@@ -3878,8 +3883,9 @@ export interface InboxComposeLaunch {
    * `scratch_trusted: false`: the agent does not trust the scratch root yet. `untrusted`: only for the owner's window,
    * the folders the agent does not trust and the owner can trust from here, by project id, the scratch root under
    * `INBOX_SCRATCH_PICK`. No entry for a trusted folder, the home folder, the root or a folder above home.
+   * `adopts` (additive): it resumes a session this Inbox never started, so a reply to one that ended offers Resume.
    */
-  agents: { agent: InboxLaunchAgent; name: string; scratch_trusted?: boolean; untrusted?: Record<string, InboxLaunchUntrusted>; choices?: InboxLaunchChoices }[];
+  agents: { agent: InboxLaunchAgent; name: string; scratch_trusted?: boolean; untrusted?: Record<string, InboxLaunchUntrusted>; choices?: InboxLaunchChoices; adopts?: true }[];
   /** `slow`: the project is on a network drive that isn't answering now (approval "inbox-launch-any-folder"). */
   projects: { id: string; name: string; root: string; exists: boolean; slow?: true }[];
   /**

@@ -81,7 +81,7 @@ export function PhoneReplyRecipient({
       {!first ? (
         <AgentPill {...control} label="Choose an agent" ask />
       ) : chosen.length === 1 ? (
-        <AgentPill {...control} host={first.host} agent={first.start ? null : first.session} start={!!first.start} label={null} detail={ended ? 'ended' : null} />
+        <AgentPill {...control} host={first.host} agent={first.start ? (first.start.resume ?? null) : first.session} start={!!first.start && !first.start.resume} label={null} detail={ended ? 'ended' : null} />
       ) : (
         <AgentMark {...control} host={first.host} agent={first.session} count={chosen.length} />
       )}
@@ -95,11 +95,13 @@ export function PhoneReplyRecipient({
                   key={row.session}
                   lead={
                     <>
-                      <span className="ib-cp-plus" aria-hidden="true">
-                        <Icon name="plus" size={12} />
-                      </span>
+                      {!row.start.resume && (
+                        <span className="ib-cp-plus" aria-hidden="true">
+                          <Icon name="plus" size={12} />
+                        </span>
+                      )}
                       <span className="ib-sheet-mark">
-                        <HostMark host={row.host} />
+                        <HostMark host={row.host} agent={row.start.resume ?? null} />
                       </span>
                     </>
                   }

@@ -131,7 +131,7 @@ import { ReplyRecipientControl } from '../parts/ReplyRecipientControl';
 import { aimable, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, sessionFolder, toggleRecipient, type RecipientRow } from '../replyRecipients';
 import { replyRecipientList } from '../thread/recipientList';
 import { followedSession, useReplyAim, wordsHeldAt, wordsSession } from '../thread/replyAim';
-import { isStartRow, replyStartOf } from '../thread/replyStart';
+import { isStartRow, replyResumeOf, replyStartOf } from '../thread/replyStart';
 import { useReplyLaunchBlock } from '../data/replyLaunch';
 import { coverVoice, useThreadVoice } from '../thread/useThreadVoice';
 import { useLateVoice } from '../thread/useLateVoice';
@@ -1049,7 +1049,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** The session the ended note and the choice are about: the words', else another this Send answers that ended. */
   const asking = endedOther ?? wordsAsking;
   const askerEnded = wordsEnded || endedOther !== null;
-  const replyStart = replyStartOf(useReplyLaunchBlock(!resolved && askerEnded, machine), thread, asking, !!machine && machine.state !== 'online');
+  const replyBlock = useReplyLaunchBlock(!resolved && askerEnded, machine);
+  const replyStart = replyStartOf(replyBlock, thread, asking, !!machine && machine.state !== 'online');
+  /** The Resume row: the ended session itself, started again (an agent that resumes a session the Inbox never started). */
+  const replyResume = replyResumeOf(replyBlock, thread, asking, !!machine && machine.state !== 'online');
   /** Each session whose replies the choice sends on: every one of this Send's sessions that ended. */
   const endedSends = new Set([...(wordsEnded && wordsAsking ? [wordsAsking.session] : []), ...otherSessions.filter((s) => !resolved && endedOthers.has(s.session)).map((s) => s.session)]);
   // Tags (approval "inbox-tag-agents"): who the person can tag with `@`, read while the reply box is open. In a
@@ -1118,8 +1121,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     [tagOpts],
   );
   const anyOtherLive = asking !== null && othersLive(asking, live).length > 0;
-  /** Another session can take an ended session's reply: a live one, or a new one (the start row). */
-  const anotherTakes = anyOtherLive || replyStart !== null;
+  /** Another session can take an ended session's reply: a live one, a new one (the start row), or the same one resumed. */
+  const anotherTakes = anyOtherLive || replyStart !== null || replyResume !== null;
   // Who gets the reply (approval "inbox-reply-recipient"): in a thread with more than one agent, or one whose only
   // agent ended while another can take it (it does the old route choice's job).
   const pillActive = !resolved && (multiAgent || (askerEnded && anotherTakes));
@@ -1130,8 +1133,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** Sessions a Send was refused for as not live any more (the race): ended in the list from then on. */
   const [rcptGone, setRcptGone] = useState<ReadonlyMap<string, string | null>>(() => new Map());
   const rcptAgents = useMemo(
-    (): RecipientRow[] => (pillActive ? replyRecipientList({ participants, thread, askerEnded, asking, live, taggable, gone: rcptGone, rcptDefault, start: replyStart, givenNameOf: (session) => givenName(agentNames, session) }) : []),
-    [pillActive, participants, thread, askerEnded, asking, live, taggable, rcptGone, rcptDefault, replyStart, agentNames],
+    (): RecipientRow[] => (pillActive ? replyRecipientList({ participants, thread, askerEnded, asking, live, taggable, gone: rcptGone, rcptDefault, start: replyStart, resume: replyResume, givenNameOf: (session) => givenName(agentNames, session) }) : []),
+    [pillActive, participants, thread, askerEnded, asking, live, taggable, rcptGone, rcptDefault, replyStart, replyResume, agentNames],
   );
   /** Whether a session can be the first recipient (a typed tag's, not in the list, is live). */
   const rcptAlone = (id: string) => rcptAgents.find((r) => r.session === id)?.alone !== false;
@@ -3048,7 +3051,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     // The message the chip's default answered at the press: an agent writing while the Send is on its way never moves the words.
     const pressWords = pillActive && !handingTo && first !== null && !aimed && !isStartRow(first) ? wordsMessage(thread) : undefined;
     const firstLive = first ? (live?.sessions.find((s) => s.session === first) ?? null) : null;
-    const aimedTo = firstLive ? { host: firstLive.host, session: firstLive.session } : isStartRow(first) ? replyStart?.to : undefined;
+    const aimedTo = firstLive ? { host: firstLive.host, session: firstLive.session } : isStartRow(first) ? (first === replyResume?.row.session ? replyResume.to : replyStart?.to) : undefined;
     const pillExtra = pillActive && !handingTo && rcptPicked ? rcptPicked.slice(1) : [];
     const to = chosen ? { host: chosen.host, session: chosen.session } : aimedTo;
     // live or not as this window last read it. One not live any more is the server's refusal (409), never another agent.

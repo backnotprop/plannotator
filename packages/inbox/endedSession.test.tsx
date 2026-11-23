@@ -1206,6 +1206,32 @@ test.skipIf(!hasDom)('picked: the pill reads "to New Claude Code session", and S
   expect(replies()[0]!.body.to).toEqual({ launch: { agent: 'claude-code', project_id: PROJECT.id, model: 'opus' } });
 });
 
+// The Resume row: the ended session itself, started again, when its agent there resumes a session the Inbox never
+// started (`adopts`). The failures this catches: a resume the person did not pick, the "+" of a new session on it, and a
+// Send that starts a new session instead of naming the one to resume.
+test.skipIf(!hasDom)('the agent adopts: "Resume this Claude Code session" above the start row, with the session\'s own mark; picked, Send names that session to resume', async () => {
+  sessions = { sessions: [], asker: { session: 'ses_asker', live: false } };
+  launchBlock = { ...CAN_START, agents: CAN_START.agents.map((a) => (a.agent === 'claude-code' ? { ...a, adopts: true } : a)) };
+  const el = await render(threadOf(asking()));
+  await writeReply(el);
+  act(() => button(el, 'Send').click());
+  await settle();
+  expect(replies()).toHaveLength(0);
+  expect(pillRows(el)).toEqual([
+    ['ses_asker', 'Claude Code', 'ended'],
+    ['resume:ses_asker', 'Resume this Claude Code session', null],
+    ['new:claude-code', 'New Claude Code session', null],
+  ]);
+  const resume = el.querySelector('[data-recipient-row="resume:ses_asker"]')!;
+  expect(resume.querySelector('.ib-rpick-name')?.getAttribute('aria-label')).toBe('Resume this Claude Code session in ledger');
+  expect(resume.querySelector('.ib-cp-plus, .ib-cp-stile')).toBeNull();
+  pickOnly(el, 'resume:ses_asker');
+  await settle();
+  act(() => button(el, 'Send').click());
+  await settle();
+  expect(replies().map((r) => r.body.to)).toEqual([{ launch: { agent: 'claude-code', project_id: PROJECT.id, resume: 'ses_asker' } }]);
+});
+
 test.skipIf(!hasDom)('the asking agent cannot be started there: the first agent that can; none can, or starting is off: no row, and Send saves at once as before', async () => {
   sessions = { sessions: [], asker: { session: 'ses_asker', live: false } };
   launchBlock = { ...CAN_START, agents: [{ agent: 'pi', name: 'Pi' }] };

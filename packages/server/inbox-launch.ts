@@ -122,7 +122,8 @@ const HOST_TTL_MS = 10_000;
  * this reading of it; the press is the consent, so the Send saves the trust ("Trusting a folder").
  */
 export type InboxLaunchTarget = (
-  | { agent: InboxLaunchAgent; project_id: string }
+  // `resume`: a reply's Resume row, the ended session it answers, resumed as itself (`adopted_session`).
+  | { agent: InboxLaunchAgent; project_id: string; resume?: string }
   | { agent: InboxLaunchAgent; scratch: true }
   | { agent: InboxLaunchAgent; folder: string; create?: true; clone?: { url: string; branch?: string } }
 ) & {
@@ -964,6 +965,22 @@ export function createInboxLaunch(options: {
   /** A launch's Rex record once Rex made its tab: where, and the pane (for Stop). */
   const rexRecord = (line: string, pane: InboxPlace | null): InboxLaunchRecord["rex"] => ({ line, ...(pane ? { session: pane.session, block: pane.block } : {}) });
 
+  /**
+   * A reply's Resume row: why the ended session must not start again now, or null. Never while a process still runs it
+   * (the person reopened it in a terminal, or `ps` could not tell): two writers on one session would interleave.
+   */
+  const adoptHeld = async (launch: InboxLaunchRecord, host: LaunchHost): Promise<LaunchStartFailure | null> => {
+    const found = await sessionPidsOf(launch, host);
+    return found === null || found.wrapped || found.pids.length > 0 ? { code: "failed", text: `${host.name} is still running this session somewhere else. Quit it there, then try again.` } : null;
+  };
+  /** A reply's Resume row, in the background: the host resumes the ended session as itself. */
+  const adopt = async (launch: InboxLaunchRecord, host: LaunchHost): Promise<{ ok: true; session: string; ref: string } | ({ ok: false } & LaunchStartFailure)> => {
+    const session = launch.session_ref!;
+    const resumed = await host.resume(launch);
+    startLog(launch.id, `resume ${session}: exit ${resumed.exitCode}\n${resumed.text}`);
+    return resumed.failure ? { ok: false, code: resumed.failure.code, text: resumed.failure.text } : { ok: true, session, ref: session };
+  };
+
   /** Start (or start again after a failed start) the agent for a launched root: in Rex when it asked for Rex and Rex is here, else in the background. */
   const run = async (root: InboxMessage, host: LaunchHost, again: boolean): Promise<void> => {
     const launch = root.launch!;
@@ -987,10 +1004,13 @@ export function createInboxLaunch(options: {
       const head = root.id === root.thread_id ? root : (store.message(root.thread_id) ?? root);
       const name = head.thread_name ?? head.subject ?? "Inbox";
       const wantsRex = !!launch.rex && !!host.rexCommand;
-      const asked = wantsRex ? await startInRex(root, host, launch, { name, login, resume: false }) : null;
+      // A reply's Resume row: the session it answers, resumed as itself (never a new one).
+      const adopted = launch.adopted_session ? { ...launch, session_ref: launch.adopted_session } : null;
+      const held = adopted ? await adoptHeld(adopted, host) : null;
+      const asked = wantsRex && !held ? await startInRex(root, host, adopted ?? launch, { name, login, resume: !!adopted }) : null;
       const away = asked && "away" in asked ? asked.away : null;
       const viaRex = asked && !("away" in asked) ? asked : null;
-      const result = viaRex ?? (await host.start(launch, { name, login }));
+      const result = held ? { ok: false as const, ...held } : (viaRex ?? (adopted ? await adopt(adopted, host) : await host.start(launch, { name, login })));
       // Rex not here, or it said no: it started in the background, and the line says why.
       const rex = !wantsRex ? undefined : away === "refused" ? { refused: true as const } : away ? { unavailable: true as const, ...(away === "server" || away === "shared" ? { why: away } : {}) } : viaRex?.ok && viaRex.line ? rexRecord(viaRex.line, viaRex.pane) : undefined;
       // Deleted while it started: the session it made goes too (one in Rex is Rex's: left), and the thread stays as the person left it.
@@ -2092,6 +2112,12 @@ ${result.text}`);
         const agent = hostList.map((h) => `"${h.agent}"`).join(" | ");
         throw new InboxError("validation_error", `to.launch: { agent: ${agent}, project_id }, { agent: ${agent}, folder } or { agent: ${agent}, scratch: true }.`, { field: "to.launch" });
       }
+      if (value!.resume !== undefined) {
+        const session = value!.resume;
+        if (typeof session !== "string" || !host.adopts?.(session)) throw new InboxError("validation_error", `${host.name} can't resume that session from the Inbox. Nothing was sent.`, { field: "to.launch.resume" });
+        // The session keeps its own model and agent: a resume takes no choice and no trust press.
+        return { agent: host.agent, project_id: value!.project_id, resume: session };
+      }
       return { agent: host.agent, project_id: value!.project_id, ...trustOfTarget(value!), ...choiceOfTarget(value!) };
     },
 
@@ -2258,6 +2284,7 @@ ${result.text}`);
         ...(model ? { model } : {}),
         ...(effort ? { effort } : {}),
         ...(primaryAgent ? { primary_agent: primaryAgent } : {}),
+        ...("resume" in target && target.resume ? { adopted_session: target.resume } : {}),
         ...(input.from ? { from: { machine: input.from.machine, name: input.from.name } } : {}),
         // Start new agents in Rex: asked for now, decided at the start (Rex may not be here then), wherever the Send
         // came from (this computer's window, a phone, the tailnet, a linked machine). A routine's run (`background`)
@@ -2266,7 +2293,8 @@ ${result.text}`);
       };
       // Default sent while the lists were being read or could not be read (no menu to pick from): the saved pick stays.
       const picked = !!(target.choice?.model || target.choice?.effort || target.choice?.primary_agent);
-      if (host.choices && input.keepLastChoice !== true && (lists || picked)) {
+      // A resume picks nothing: the menu's saved pick stays.
+      if (host.choices && input.keepLastChoice !== true && !launch.adopted_session && (lists || picked)) {
         try {
           writeLastLaunchChoice(options.dataDir, host.agent, target.choice ?? {});
         } catch {
@@ -2384,7 +2412,7 @@ ${result.text}`);
           const choices = lists
             ? { ...lists, ...(lists.default_model && namedHere ? { default_for: namedHere } : {}), ...(last && (last.model || last.effort || last.primary_agent) ? { last } : {}) }
             : null;
-          return [{ agent: host.agent, name: host.name, scratch_trusted: host.trusts(root), ...(owner ? { untrusted: untrustedOf(host, owner.pick) } : {}), ...(choices ? { choices } : {}) }];
+          return [{ agent: host.agent, name: host.name, scratch_trusted: host.trusts(root), ...(owner ? { untrusted: untrustedOf(host, owner.pick) } : {}), ...(choices ? { choices } : {}), ...(host.adopts ? { adopts: true as const } : {}) }];
         }),
       );
       // Why the others can't start now, for a linked machine's window to say with this machine's name (remote launch).

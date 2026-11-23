@@ -321,6 +321,12 @@ export interface LaunchHost {
   sessions(): Promise<LaunchSessions | null>;
   /** The session connected to the Inbox now; null when not. `polls` must rise whenever it shows new life (Stop waits for a higher count). */
   live(session: string): LaunchLive | null;
+  /**
+   * Whether `resume` can take a session this Inbox never started (one the person ran in a terminal): `session` is one
+   * of this agent's own ids. A reply's Resume row (inbox-reply-launch.ts) is offered and taken only for such a host.
+   * No member: a session the Inbox did not start is never resumed by it.
+   */
+  adopts?(session: string): boolean;
   /** Start a session that is not live again (a reply to it, Try again). `failure` when it did not take. */
   resume(launch: InboxLaunchRecord): Promise<LaunchHostResult & { failure: { code: "untrusted" | "failed"; text: string } | null }>;
   stop(ref: string): Promise<LaunchHostResult>;

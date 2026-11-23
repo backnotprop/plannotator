@@ -154,11 +154,11 @@ function recipientFace(rows: readonly RecipientRow[], chosen: readonly Recipient
   };
   const names = namesList(chosen.map(nameOf));
   const ended = one?.state === 'ended';
-  const tile = one?.start ? (
+  const tile = one?.start && !one.start.resume ? (
     <StartTile host={one.host} />
   ) : one ? (
     <span className="ib-atile">
-      <HostMark host={one.host} agent={one.session} />
+      <HostMark host={one.host} agent={one.start?.resume ?? one.session} />
     </span>
   ) : (
     <TagStack participants={chosen} />
@@ -455,7 +455,13 @@ export function ReplyRecipient({
             <div key={row.session} className="ib-rpick-row" data-recipient-row={row.session} data-recipient-start={row.host ?? ''} data-on={on ? '' : undefined}>
               {row.start ? (
                 <button type="button" className="ib-rpick-name" aria-label={`${row.label} in ${row.start.project}`} onClick={() => onOnly(row)}>
-                  <StartTile host={row.host} />
+                  {row.start.resume ? (
+                    <span className="ib-atile">
+                      <HostMark host={row.host} agent={row.start.resume} />
+                    </span>
+                  ) : (
+                    <StartTile host={row.host} />
+                  )}
                   <span className="ib-rpick-l" dir="auto">
                     {row.label}
                   </span>

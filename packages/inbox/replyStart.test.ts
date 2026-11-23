@@ -7,7 +7,7 @@
 import { expect, test } from 'bun:test';
 import type { InboxComposeLaunch, InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import type { AskingSession } from './components/ReplyRoute';
-import { isStartRow, replyStartOf } from './thread/replyStart';
+import { isStartRow, replyResumeOf, replyStartOf } from './thread/replyStart';
 
 const thread = { thread_id: 'm1', project: { id: 'prj_ledger', key: 'ledger', name: 'ledger', root: '/work/ledger', created_at: '' }, subject: null, thread_name: null, resolved_at: null, messages: [] } as InboxThread;
 const asking = (host: string, fromRoot?: string): AskingSession => ({
@@ -53,4 +53,16 @@ test('no row: no block (starting off, Windows), no agent to start, the folder go
 
 test('the thread\'s machine is away: the row says it starts when it is back', () => {
   expect(replyStartOf(block(), thread, asking('claude-code'), true)!.row.start).toEqual({ project: 'ledger', asleep: true });
+});
+
+test('Resume: the ended session itself, for an agent that adopts it, in the same folder; never for another agent', () => {
+  const adopting = block({ agents: [{ agent: 'opencode', name: 'OpenCode', adopts: true }, { agent: 'claude-code', name: 'Claude Code' }] });
+  const resume = replyResumeOf(adopting, thread, asking('opencode'))!;
+  expect(resume.row).toMatchObject({ session: 'resume:ses_asker', host: 'opencode', label: 'Resume this OpenCode session', start: { project: 'ledger', asleep: false, resume: 'ses_asker' } });
+  expect(resume.to).toEqual({ launch: { agent: 'opencode', project_id: 'prj_ledger', resume: 'ses_asker' } });
+  expect(isStartRow(resume.row.session)).toBe(true);
+  // Claude Code there doesn't adopt; a session of an agent the machine lacks has no Resume (never another agent's).
+  expect(replyResumeOf(adopting, thread, asking('claude-code'))).toBeNull();
+  expect(replyResumeOf(adopting, thread, asking('pi'))).toBeNull();
+  expect(replyResumeOf(undefined, thread, asking('opencode'))).toBeNull();
 });
