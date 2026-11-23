@@ -167,8 +167,8 @@ function build(s:DiagramSpec,pack:Fonts,extended:ReadonlySet<Weight>) {
     const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img"><title>${escape(s.title)}</title><desc>${escape(description)}</desc><rect width="${width}" height="${height}" fill="${t.paper}"/>${c.parts.join("")}</svg>\n`;
     const box=(b:Box)=>({x:b.x+dx,y:b.y+dy,w:b.w,h:b.h});
     const parts:DiagramPart[]=[
-        ...groups.map(g=>({kind:"group" as const,id:g.id??g.label,title:g.label,refs:g.refs??[],...box(g)})),
-        ...panels.map(p=>({kind:"panel" as const,id:p.id,title:p.panel.title,refs:p.panel.refs??[],...box(p)})),
+        ...groups.map(g=>({kind:"group" as const,id:g.id??g.label,title:g.label,summary:g.sub,refs:g.refs??[],...box(g)})),
+        ...panels.map(p=>({kind:"panel" as const,id:p.id,title:p.panel.title,summary:p.panel.sub,refs:p.panel.refs??[],...box(p)})),
         ...c.sections.map(section=>({...section,...box(section)})),
     ];
     const used=new Set(s.links?.flatMap(link=>link.id === undefined ? [] : [link.id]));
@@ -184,6 +184,7 @@ function build(s:DiagramSpec,pack:Fonts,extended:ReadonlySet<Weight>) {
         }
         parts.push({kind:"link",id,title:link.label || link.a.panel.title+" → "+link.b.panel.title,
             refs:authored.refs??[],from:link.a.id,to:link.b.id,...box(link.bounds),
+            labelBox:link.labelBox && box(link.labelBox),
             points:link.samples.concat([link.tip]).map(([x,y]):Point=>[x+dx,y+dy])});
     }
     return {svg,width,height,parts,minText:Number.isFinite(c.minText)?c.minText:null,description,problems:c.problems,

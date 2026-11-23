@@ -27,6 +27,8 @@ export interface DiagramPart extends Box {
     id: string;
     title: string;
     refs: DiagramReference[];
+    summary?: string;
+    labelBox?: Box;
     points?: Point[];
     from?: string;
     to?: string;
