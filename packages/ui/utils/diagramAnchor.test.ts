@@ -206,6 +206,49 @@ describe.if(hasDom)('the other id-bearing families', () => {
   });
 });
 
+describe.if(hasDom)('parts a comment used to miss or mislabel (20-sequence-parts, 22-class-parts, 24-requirement-parts, 25-…, 27-…)', () => {
+  // What regresses: a comment on a stick-figure actor, on the second of two
+  // relations with the same ends, or on a requirement lands on nothing, on
+  // the other relation, or carries the type line as its label; these are
+  // the anchors the Pele finder makes for the same parts.
+  test('a stick-figure actor is a part, by name and display name, and restores', () => {
+    const svg = loadSvg('20-sequence-parts');
+    const figure = svg.querySelector('g.actor-man.actor-top')!;
+    const target = targetFromElement(svg, figure.querySelector('text.actor')!, RENDER_ID);
+    expect(target).toEqual({ family: 'sequence', kind: 'node', id: 'C', label: 'Charlie Dunn' });
+    expect(targetFromElement(svg, svg.querySelector('line.actor-line[name="C"]')!, RENDER_ID)).toEqual(target);
+    expect(findDiagramTarget(svg, target!, RENDER_ID)).toBe(figure);
+    expect(findDiagramTarget(svg, { family: 'sequence', kind: 'node', id: 'Gone', label: 'Charlie Dunn' }, RENDER_ID)).toBe(figure);
+  });
+
+  test('two relations with the same ends restore by their label, else the first', () => {
+    const svg = loadSvg('22-class-parts');
+    const owns = svg.querySelector(`[id="${RENDER_ID}-id_User_Order_2"]`)!;
+    const places = svg.querySelector(`[id="${RENDER_ID}-id_User_Order_1"]`)!;
+    expect(findDiagramTarget(svg, { family: 'class', kind: 'edge', from: 'User', to: 'Order', label: 'owns' }, RENDER_ID)).toBe(owns);
+    expect(findDiagramTarget(svg, { family: 'class', kind: 'edge', from: 'User', to: 'Order', label: 'places' }, RENDER_ID)).toBe(places);
+    expect(findDiagramTarget(svg, { family: 'class', kind: 'edge', from: 'User', to: 'Order', label: 'edited since' }, RENDER_ID)).toBe(places);
+    const requirement = loadSvg('24-requirement-parts');
+    expect(findDiagramTarget(requirement, { family: 'requirement', kind: 'edge', id: 'e1-r1', label: '<<verifies>>' }, RENDER_ID)?.id).toBe(`${RENDER_ID}-e1-r1-4`);
+  });
+
+  test('a requirement, an element and an annotated class are labelled by their name', () => {
+    const requirement = loadSvg('24-requirement-parts');
+    const labels = [...describeAll(requirement).values()].filter((t) => t.kind === 'node').map((t) => `${t.id}: ${t.label}`).sort();
+    expect(labels).toEqual(['e1: e1', 'e2: e2', 'r1: r1', 'r2: r2']);
+    const annotated = loadSvg('27-class-namespace-annotation');
+    expect(describeAll(annotated).get(`${RENDER_ID}-classId-Shape-2`)).toEqual({ family: 'class', kind: 'node', id: 'Shape', label: 'Shape' });
+    // The label fallback (restore step 2) reads the same name.
+    expect(findDiagramTarget(annotated, { family: 'class', kind: 'node', id: 'Renamed', label: 'Shape' }, RENDER_ID)?.id).toBe(`${RENDER_ID}-classId-Shape-2`);
+  });
+
+  test("a frame with no label is labelled by its kind alone (Mermaid's zero-width placeholder is dropped)", () => {
+    const svg = loadSvg('25-sequence-frames-multiline');
+    const loop = Array.from(svg.querySelectorAll('text.labelText')).find((el) => el.textContent === 'loop')!;
+    expect(targetFromElement(svg, loop, RENDER_ID)).toEqual({ family: 'sequence', kind: 'cluster', id: 'frame-3', label: 'loop' });
+  });
+});
+
 describe.if(hasDom)('scrubDiagramSvg (the belt over the engine output)', () => {
   test('drops script elements, handler attributes, javascript: and data: references, and every anchor target', () => {
     const svg = parseInertSvg(

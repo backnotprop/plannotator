@@ -135,6 +135,7 @@ export const SLICE_RULES: SliceRule[] = [
   { name: 'ref cards', paths: ['packages/server/ref-cards*', 'packages/shared/ref-cards*', 'packages/core/forge-ref*', 'packages/ui/components/RefHoverCard*', 'packages/ui/utils/refCard*', 'packages/inbox/pulls/refCardReviews*'], specs: ['ref-cards-review.spec.ts', 'inbox-ref-cards.spec.ts', 'inbox-open-in-refs.spec.ts', 'ref-card-click.spec.ts'] },
   { name: 'question card', paths: ['packages/ui/components/blocks/Question*', 'packages/ui/components/Question*'], specs: ['question-*.spec.ts'] },
   { name: 'chat window and Ask AI', paths: ['packages/ui/components/chat/**', 'packages/ai/**'], specs: ['chat-window.spec.ts', 'ask-ai-sanitize.spec.ts', 'annotate-ai-history.spec.ts'] },
+  { name: 'Pele diagram labels', paths: ['packages/ui/utils/pele*', 'packages/ui/utils/diagram-anchor-pele.ts', 'packages/ui/utils/diagram-engine.ts', 'packages/ui/utils/diagram-render.ts'], specs: ['pele-labels.spec.ts'] },
   { name: 'phone surface', paths: ['packages/inbox/surface/**'], specs: ['surface.spec.ts'] },
   {
     name: 'VS Code Guides webview',
