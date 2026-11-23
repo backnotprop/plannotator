@@ -253,6 +253,16 @@ describe("a question no longer open is left as it is and the message is sent", (
 });
 
 describe("refusals that stay", () => {
+  test("a question the archive closed is still refused, by key and by message", () => {
+    const { store, first, q1 } = setup();
+    store.resolveThread(first.id, true);
+    const cursor = store.cursor();
+    const byKey = refusal(() => store.sendMessage({ project_id: first.project_id, author: AGENT, body: "x", reply_to: first.id, supersedes: [`${first.id}/${q1.key}`] }));
+    expect(byKey.message).toContain(`${first.id}/${q1.key} is not open (it is closed).`);
+    expect(refusal(() => store.sendMessage({ project_id: first.project_id, author: AGENT, body: "x", reply_to: first.id, supersedes: [first.id] })).message).toContain("no open question");
+    expect(store.cursor()).toBe(cursor);
+  });
+
   test("two blocks naming the same old question refuse the send", () => {
     const { store, first, q1 } = setup();
     const cursor = store.cursor();
