@@ -428,7 +428,8 @@ describe("Inbox over your tailnet", () => {
     inbox.stop();
     servers.splice(servers.indexOf(inbox), 1);
     expect(ts.serve.size).toBe(0);
-    expect(registryOf(dataDir).tailscale).toBeUndefined();
+    // No mapping is named any more, but the ports it made stay known until the switch goes off (#3591).
+    expect(registryOf(dataDir).tailscale).toEqual({ url: null, error: null, made: { https_port: port, proxy_ports: expect.any(Array) } });
     const next = await start(dataDir, ts.run);
     expect(next.port).toBe(port);
     expect(ts.serve.get(port)).toBe(`http://127.0.0.1:${next.tailscale.listenerPort()}`);
