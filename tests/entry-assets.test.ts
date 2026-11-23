@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { openPackedApp, PACKED_ASSETS_MARKER } from '../packages/shared/packed-app';
+import { DIAGRAM_ENGINE_MODE } from '../packages/ui/utils/diagram-engine';
 
 const root = resolve(import.meta.dir, '..');
 const read = (path: string) => readFileSync(resolve(root, path), 'utf8');
@@ -163,6 +164,29 @@ describe('review entry assets', () => {
     expect(read('packages/ui/utils/graphviz.ts')).not.toMatch(staticImport('@viz-js/viz'));
     expect(read('packages/ui/utils/graphviz.ts')).toContain("import('@viz-js/viz')");
     expect(read('packages/ui/utils/generateIdentity.ts')).not.toMatch(staticImport('unique-username-generator'));
+    // Pele (the second Mermaid engine, off by default) arrives only through
+    // `pele/lazy`, whose core and diagram types are chunks of their own.
+    for (const path of ['packages/ui/utils/pele.ts', 'packages/ui/utils/diagram-render.ts', 'packages/ui/utils/diagram-engine.ts', 'packages/ui/utils/peleTheme.ts', 'packages/ui/components/DiagramBlock.tsx', 'packages/ui/components/MermaidBlock.tsx']) {
+      expect(read(path)).not.toMatch(/^import\s+(?!type\b)[^;]*from\s+['"]pele(?:\/[^'"]*)?['"]/m);
+    }
+    expect(read('packages/ui/utils/pele.ts')).toContain("import('pele/lazy')");
+  });
+
+  // While the switch is 'mermaid', Pele's library is in no build: its one
+  // import sits behind `PELE_IN_BUILD` (utils/pele.ts), a constant Rollup
+  // folds. A second import of Pele anywhere else (a new module, a component)
+  // would bring it back ungated, and the single-file builds would inline all
+  // of it, so only that one file may name it outside tests.
+  test("only utils/pele.ts names Pele's library, and only behind its build gate", () => {
+    const listed = Bun.spawnSync(['git', 'ls-files', '-z', '--', 'packages', 'apps', 'build'], { cwd: root }).stdout.toString().split('\0');
+    const sources = listed.filter((file) => /\.(?:[cm]?[jt]sx?)$/.test(file) && !/(?:^|\/)(?:test-setup|tests?)\/|\.test\.[jt]sx?$/.test(file));
+    expect(sources.length).toBeGreaterThan(100);
+    const naming = sources.filter((file) => {
+      const text = existsSync(resolve(root, file)) ? read(file) : '';
+      return /\bimport\(\s*['"]pele(?:\/[^'"]*)?['"]|^\s*(?:import|export)\s+(?!type\b)[^;]*from\s+['"]pele(?:\/[^'"]*)?['"]/m.test(text);
+    });
+    expect(naming).toEqual(['packages/ui/utils/pele.ts']);
+    expect(read('packages/ui/utils/pele.ts')).toMatch(/PELE_IN_BUILD\s*\?\s*import\('pele\/lazy'\)/);
   });
 
   // The Inbox window's guided review (PLAN step 5) reaches the guide chain and
@@ -426,6 +450,40 @@ describe('review entry assets', () => {
     });
   }
 
+  // While the switch is 'mermaid' no built file carries any of Pele's
+  // library: not the single-file builds that inline every dynamic import
+  // (the Inbox surface, the Shape page, code review's diagram engine), and no
+  // never-loaded lazy chunk in a packed app either. These markers are class
+  // names only Pele's own svg writer prints (Plannotator's finder reads
+  // `pele-edge`, `pele-node`, `pele-marker`, never these). The last two are
+  // Plannotator's own Pele code (`utils/pele-labels.ts`), which the same
+  // switch keeps out: its math labels' attribute and class.
+  const PELE_MARKERS = ['pele-shape-', 'pele-icon', 'pele-ticket', 'pele-slice-labels', 'pele-commit-label', 'data-pele-tex', 'pele-math'];
+  const builtFiles = [
+    'apps/review/dist/index.html',
+    'apps/review/dist/diagram-engine/engine.js',
+    'apps/hook/dist/index.html',
+    'apps/hook/dist/redline.html',
+    'apps/hook/dist/review.html',
+    'apps/hook/dist/inbox.html',
+    'apps/hook/dist/surface.html',
+    'apps/hook/dist/shape.html',
+    'apps/hook/dist/diagram-engine/engine.js',
+    'apps/inbox/dist/index.html',
+    'apps/inbox/dist/surface.html',
+    'apps/inbox/dist/shape.html',
+    'apps/opencode-plugin/plannotator.html',
+    'apps/opencode-plugin/review-editor.html',
+    'apps/opencode-plugin/diagram-engine/engine.js',
+  ];
+  for (const path of builtFiles) {
+    test.skipIf(DIAGRAM_ENGINE_MODE !== 'mermaid' || !existsSync(resolve(root, path)))(`${path} carries none of Pele while the engine switch is 'mermaid'`, () => {
+      const text = readFileSync(resolve(root, path), 'utf8');
+      const markers = PELE_MARKERS.filter((marker) => text.includes(marker));
+      expect({ path, markers }).toEqual({ path, markers: [] });
+    });
+  }
+
   // The phone's surface and the Shape page stay one self-contained page each
   // (vite-plugin-singlefile): a native shell loads the surface with no server
   // and no network behind it, and the Shape page's server serves it whole, with
@@ -453,6 +511,9 @@ describe('review entry assets', () => {
     Mermaid: 'flowchart-v2',
     Graphviz: 'viz_set_y_invert',
     KaTeX: 'katex-display',
+    // Pele is in no build while the engine switch is 'mermaid' (checked
+    // above); once it is on, it is a lazy part like Mermaid.
+    ...(DIAGRAM_ENGINE_MODE === 'mermaid' ? {} : { Pele: 'pele-shape-' }),
   };
   test.skipIf(!existsSync(resolve(root, inboxWindow)))(`${inboxWindow} loads its entry script up front and the review, diagrams and grammars on first use`, async () => {
     const bundle = readFileSync(resolve(root, inboxWindow), 'utf8');

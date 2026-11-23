@@ -401,7 +401,7 @@ test.skipIf(!hasDom)("split view: the pane at the window's corner is cut, and a 
   expect(right.hasAttribute('data-side-scoop')).toBe(false);
 });
 
-test.skipIf(!hasDom)("something else's in the pane's corner (a board in the thread, a folded file's panel, the drafts' pile there): no circle or cut until it goes", async () => {
+test.skipIf(!hasDom)("something else's in the pane's corner (a board in the thread, a folded file's panel): no circle or cut until it goes; the drafts' pile there never hides it", async () => {
   await show(THREAD);
   await until(() => circleShown(), 'the circle');
   const pane = shell!.querySelector<HTMLElement>('section.ib-pane')!;
@@ -417,14 +417,17 @@ test.skipIf(!hasDom)("something else's in the pane's corner (a board in the thre
   board.remove();
   await wait(40);
   expect(circleShown()).toBe(true);
-  // The floating drafts' pile resting in the window's corner (no reply foot on screen), then level with Send again.
+  // The floating drafts' pile resting in the window's corner (no reply foot on screen): both show, the pile above the
+  // circle (floaters.test.tsx), so the circle and the cut stay.
   const pile = document.createElement('div');
   pile.setAttribute('data-rf-corner', '');
   pile.setAttribute('data-rf-spot', 'corner');
   shell!.appendChild(pile);
-  await until(() => !circleShown(), 'no circle over the pile');
-  pile.setAttribute('data-rf-spot', 'foot');
-  await until(() => circleShown(), 'the circle back with the pile at the foot');
+  window.dispatchEvent(new Event('resize'));
+  await wait(80);
+  expect(circleShown()).toBe(true);
+  expect(cutPane()).toBe(pane);
+  pile.remove();
   // A file beside the thread at the corner, folded with its annotations panel open down its right edge.
   const main = shell!.querySelector('.ib-main')!;
   const file = paneEl('ib-view ib-fold');
