@@ -8151,6 +8151,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 actions: body.actions,
                 // The message the reply quotes (approval "inbox-reply-quote"); absent from an older window.
                 ...(body.quote !== undefined ? { quote: body.quote } : {}),
+                // New thread from this message: the message's own session only, and no #tag read from the words.
+                ...(body.author_only === true ? { author_only: true } : {}),
               });
             } catch (error) {
               removeInboxAttachmentFiles(store.dir, attachments);

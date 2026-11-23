@@ -14,6 +14,7 @@ import { inboxReplyQuoteExcerpt } from '@plannotator/core/inbox-reply-quote';
 import type { InboxAuthor, InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
 import { NEW_THREAD_FROM_MESSAGE_LABEL, newThreadFromMessageOffered, newThreadFromMessageWords } from './thread/newThreadFromMessage';
 import type { InboxToastModel } from './components/Toast';
+import { lastReplySent } from './api';
 
 const hasDom = typeof document !== 'undefined';
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
@@ -220,6 +221,40 @@ test.skipIf(!hasDom)("in a thread two agents share, the item on agent B's messag
   expect(posts[0]!.body.to).toBeUndefined();
   expect(posts[0]!.body.tags).toBeUndefined();
   expect(typeof posts[0]!.body.idempotency_key).toBe('string');
+  // Only that session: the sessions the person added to the thread are not handed it, no #tag is read from it.
+  expect(posts[0]!.body.author_only).toBe(true);
+  // Not the person's long reply: the page notes no reply's length for it (the one-time voice announcement).
+  expect(lastReplySent()).toBeNull();
+  expect(toasts).toEqual([]);
+});
+
+test.skipIf(!hasDom)('a second press while the first is on its way sends nothing, and the item is off until it lands', async () => {
+  let land: () => void = () => {};
+  const held = new Promise<void>((resolve) => (land = resolve));
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    if (init?.method === 'POST' && path.includes('/reply')) {
+      posts.push({ path, body: JSON.parse(String(init.body ?? '{}')) });
+      await held;
+      return Response.json({ serverSession: 's', reply: { id: 'msg_reply' }, questions: [] });
+    }
+    if (path.includes('/sessions')) return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions: [] });
+    return Response.json({ serverSession: 's', attachments: [], annotations: [] });
+  }) as typeof fetch;
+  await render(sample());
+  const first = await openMenu(M2);
+  await act(async () => first.querySelector<HTMLElement>('[data-new-thread-item]')!.click());
+  await until(() => posts.length === 1, 'the first send');
+  await until(() => !menuOf(M2), 'the menu to close');
+  const again = await openMenu(M2);
+  const item = again.querySelector<HTMLElement>('[data-new-thread-item]')!;
+  expect(item.hasAttribute('data-disabled') || item.getAttribute('aria-disabled') === 'true').toBe(true);
+  await act(async () => item.click());
+  await settle();
+  expect(posts).toHaveLength(1);
+  land();
+  await until(() => changed > 0, 'the thread read again');
+  expect(posts).toHaveLength(1);
   expect(toasts).toEqual([]);
 });
 

@@ -16,6 +16,8 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { NEW_THREAD_FROM_MESSAGE_WORDS } from '../../packages/core/inbox-new-thread-ask';
+import { inboxReplyQuoteExcerpt } from '../../packages/core/inbox-reply-quote';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
@@ -146,8 +148,14 @@ test("pressing it on agent B's message writes one reply to that message, which g
   expect(added).toHaveLength(1);
   expect(added[0]!.author.kind).toBe('person');
   expect(added[0]!.reply_to).toBe(ids.b);
-  expect(added[0]!.body).toContain(`(${ids.b})`);
-  expect(added[0]!.body).toContain('I looked at the webhook side.');
+  // What B reads, word for word: the approved sentence with B's first words and id.
+  expect(added[0]!.body).toBe(NEW_THREAD_FROM_MESSAGE_WORDS(inboxReplyQuoteExcerpt({ author: { kind: 'agent' }, body: B_BODY }), ids.b));
+  // Who it is handed to, as Codex's own full read of the thread records it: a reply to B's message, tagging nobody else.
+  const got = (await world.codex.nextReply(world.thread, 20, ids.b)) as { id: string; reply_to: string | null; tags?: unknown[]; to?: unknown };
+  expect(got.id).toBe(added[0]!.id);
+  expect(got.reply_to).toBe(ids.b);
+  expect(got.tags ?? []).toEqual([]);
+  expect(got.to).toBeUndefined();
   // The thread names who gets it: Codex, the agent that wrote the message, not Claude Code.
   const sent = article(page, added[0]!.id);
   await expect(sent).toBeVisible();

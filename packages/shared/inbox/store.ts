@@ -128,6 +128,7 @@ import { createInboxHandover, type InboxHandover } from "./handover";
 import { inboxTakeBackRefusal, type InboxHolder } from "./take-back";
 import { inboxWakeQuote } from "./wake-quote";
 import { laterActed, personActOfAnnotation, personActOfMessage, personActOfMessageLine, personActOfQuestion } from "./acted";
+import { isNewThreadFromMessageAsk } from "@plannotator/core/inbox-new-thread-ask";
 import { inboxReplyQuoteExcerpt, inboxReplyQuoteLead, inboxReplyQuoteTime, type InboxReplyQuote, type InboxReplyQuoteWhose } from "@plannotator/core/inbox-reply-quote";
 import { whenTime } from "@plannotator/core/inbox-format";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
@@ -448,6 +449,11 @@ export interface InboxReplyInput {
    * Absent (an older window, or no quote): nothing changes.
    */
   quote?: unknown;
+  /**
+   * Only the session the reply goes to gets it (New thread from this message): the sessions the person added to the
+   * thread are not tagged again, and the words file no `#tag` (they quote the agent's message, not the person).
+   */
+  author_only?: boolean;
   /**
    * The person's verdict on the review this reply answers (code review in the
    * Inbox: Approve or Send feedback in the review's header). Only on a reply
@@ -5366,7 +5372,7 @@ export class InboxStore {
     // The sessions the person added to this thread ("Add instead") get every later reply that carries
     // the person's words or files too, tagged again; never the reply's owner or the former owner.
     const carriesWords = words.trim() !== "" || attachments.length > 0;
-    const members = carriesWords
+    const members = carriesWords && input.author_only !== true
       ? this.addedSessions(message.thread_id).filter(
           (m) => m.session !== recipient && m.session !== handoff?.from?.session && !typed.some((t) => t.session === m.session),
         )
@@ -5417,7 +5423,7 @@ export class InboxStore {
     }
     this.endSnooze(message.thread_id);
     // The person's words as typed: never the picks, the action items or the feedback the Send adds.
-    this.tagThreadCards(reply.thread_id, words);
+    if (input.author_only !== true && !isNewThreadFromMessageAsk(words)) this.tagThreadCards(reply.thread_id, words);
     return { reply, questions: this.questionsOf(message.id), replayed: false };
   }
 
@@ -8733,7 +8739,7 @@ export class InboxStore {
   /** A person's message's tag keys, kept by message and thread (`personTagsByMessage`). */
   private indexPersonTags(record: InboxMessage): void {
     const had = this.personTagsByMessage.get(record.id);
-    const keys = typeof record.body === "string" && /#[\p{L}\p{N}]/u.test(record.body) ? [...new Set(inboxHashtags(personWords(record.body)).map((tag) => tag.key))].filter(Boolean) : [];
+    const keys = typeof record.body === "string" && /#[\p{L}\p{N}]/u.test(record.body) && !isNewThreadFromMessageAsk(personWords(record.body)) ? [...new Set(inboxHashtags(personWords(record.body)).map((tag) => tag.key))].filter(Boolean) : [];
     if (keys.length === 0) {
       if (!had) return;
       this.personTagsByMessage.delete(record.id);
@@ -9498,6 +9504,8 @@ export class InboxStore {
       for (let i = messages.length - 1; i >= 0; i--) {
         const message = messages[i]!;
         if (message.author.kind !== "person") continue;
+        // New thread from this message quotes the agent's words: a #tag there is not the person's.
+        if (isNewThreadFromMessageAsk(personWords(message.body))) continue;
         const found = inboxTaggedInitiative(personWords(message.body), live);
         if (!found) continue;
         const seq = this.messageSeq.get(message.id) ?? 0;

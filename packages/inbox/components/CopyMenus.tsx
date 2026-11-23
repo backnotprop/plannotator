@@ -22,7 +22,7 @@ import { useMessageArm } from '../messageArming';
 import type { InboxToastModel } from './Toast';
 import { TAKE_BACK_LABEL } from '../takeBack';
 import { PaneMenuItems } from '../panes/PaneMenu';
-import { askNewThreadFromMessage, NEW_THREAD_FROM_MESSAGE_LABEL, newThreadFromMessageOffered } from '../thread/newThreadFromMessage';
+import { askNewThreadFromMessage, NEW_THREAD_FROM_MESSAGE_LABEL, newThreadFromMessageOffered, newThreadFromMessageSending } from '../thread/newThreadFromMessage';
 
 /**
  * Copy a message, copy a thread (design record "inbox-copy-message", option
@@ -159,7 +159,7 @@ export function MessageMenu(props: {
       {/* Take back's place: an act on this message leads (Take back is the person's, this an agent's). */}
       {newThread && (
         <>
-          <Menu.Item className="ib-pmi" label={NEW_THREAD_FROM_MESSAGE_LABEL} onClick={() => void askNewThreadFromMessage(message, newest.current)} data-new-thread-item="">
+          <Menu.Item className="ib-pmi" label={NEW_THREAD_FROM_MESSAGE_LABEL} disabled={newThreadFromMessageSending(message.id)} onClick={() => void askNewThreadFromMessage(message, newest.current)} data-new-thread-item="">
             <Icon name="moveOut" size={15} />
             {NEW_THREAD_FROM_MESSAGE_LABEL}
           </Menu.Item>
