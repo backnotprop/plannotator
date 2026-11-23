@@ -463,7 +463,7 @@ function Reader({
   const fileMarks = useCallback((path: string): readonly GuideLineMark[] => {
     const next = marksByFile.get(path) ?? NO_LINE_MARKS;
     const kept = keptMarks.current.get(path);
-    const same = kept && kept.length === next.length && kept.every((mark, i) => mark.id === next[i]!.id && mark.side === next[i]!.side && mark.line === next[i]!.line && mark.label === next[i]!.label && mark.paint === next[i]!.paint);
+    const same = kept && kept.length === next.length && kept.every((mark, i) => mark.id === next[i]!.id && mark.side === next[i]!.side && mark.line === next[i]!.line && mark.label === next[i]!.label && mark.paint === next[i]!.paint && mark.popup === next[i]!.popup);
     if (same) return kept;
     keptMarks.current.set(path, next);
     return next;

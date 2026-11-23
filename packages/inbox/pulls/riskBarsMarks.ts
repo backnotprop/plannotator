@@ -29,15 +29,26 @@ export function riskBarsPaint(level: RiskBarsLevel): string {
   ].join(' ');
 }
 
-/** The mark's accessible name: "High risk: <reason>" (its places' reasons, in order), or the level alone with none. */
+/**
+ * The mark's accessible name, what its card says in its words (RiskBarsCard.tsx): "High risk: <reason>", with the
+ * person's rule as the card words it when the place named one ("High risk · your rule “…”: <reason>"); with two
+ * places on the line, each one's rule and reason in order; the level alone when nothing was said.
+ */
 export function riskBarsLabel(level: RiskBarsLevel, notes: readonly RiskBarsNote[]): string {
-  const why = notes.map((note) => note.why).filter(Boolean).join(' ');
-  return why ? `${riskBarsWord[level]}: ${why}` : riskBarsWord[level];
+  const word = riskBarsWord[level];
+  const said = notes.filter((note) => note.why || note.rule);
+  const rule = (words: string) => `your rule “${words}”`;
+  if (said.length === 1) {
+    const one = said[0]!;
+    return `${word}${one.rule ? ` · ${rule(one.rule)}` : ''}${one.why ? `: ${one.why}` : ''}`;
+  }
+  const words = said.map((note) => [note.rule ? rule(note.rule) : '', note.why].filter(Boolean).join(': ')).join(' ');
+  return words ? `${word}: ${words}` : word;
 }
 
 /** Each named range the diff draws, as a mark on its first line. */
 export function riskBarsLineMarks(bars: RiskBars | null): GuideLineMark[] {
   if (!bars) return [];
   const paint = riskBarsPaint(bars.level);
-  return bars.ranges.map((range) => ({ id: range.id, filePath: range.file, side: range.side, line: range.line, label: riskBarsLabel(bars.level, range.notes), paint }));
+  return bars.ranges.map((range) => ({ id: range.id, filePath: range.file, side: range.side, line: range.line, label: riskBarsLabel(bars.level, range.notes), paint, popup: 'dialog' as const }));
 }

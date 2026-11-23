@@ -9,7 +9,7 @@
  * two filled bars; a Low PR nothing. The diff's mark (a button named "High risk: <reason>") never covers code: on lines
  * long enough to reach the edge, split and unified, old and new sides, scrolling sideways or wrapped. No row under the
  * code says the reason (q-070bc2a3): the bars' card does, on hover, keyboard focus or a press (pinned), and the header's
- * "N places" opens each place's card in turn; the card moves nothing in the diff and is not cut by the column. A phone's
+ * "N places" opens each place's card in turn; a pinned card closes when its bars scroll out of the diff; the card moves nothing in the diff and is not cut by the column. A phone's
  * tap opens it inside the screen. A marked file at the tree's root keeps its mark inside its row. The bars' tone keeps
  * 3:1 against the tree and both diff line colours, light and dark (written to contrast.json). Made-up people and code
  * only.
@@ -17,7 +17,7 @@
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/review-risk-bars:
  *   01-high-card-dark.png, 02-medium-card-dark.png, 03-closeup-tree-light.png, 03-closeup-diff-card-light.png,
  *   04-low-no-marks-dark.png, 05-long-line-split-card-dark.png, 06-long-line-unified-card-dark.png,
- *   07-root-file-tree-dark.png, 08-phone-card-dark.png.
+ *   07-root-file-tree-dark.png, 08-phone-card-dark.png, 09-scrolled-away-no-card-dark.png.
  */
 import { expect, test, type BrowserContext, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
@@ -38,6 +38,7 @@ const keyOf = (n: number) => `github.com/${REPO}#${n}`;
 const RULES = 'Anything in billing or charges.\nAnything that changes permissions.';
 
 const fileDiff = (path: string, hunk: string) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n${hunk}`;
+const CLIENT_LIMITS = Array.from({ length: 80 }, (_, i) => `   limit${i + 1}: ${(i + 1) * 10},`);
 const PATCHES: Record<number, string> = {
   601: [
     fileDiff(
@@ -59,7 +60,8 @@ const PATCHES: Record<number, string> = {
     ),
     fileDiff(
       'src/charges/client.ts',
-      ['@@ -6,5 +6,5 @@ export const client = {', "   base: 'https://pay.example.test',", '   timeoutMs: 10_000,', '-  idempotent: true,', '+  idempotent: false,', '   retries: 0,', ' };', ''].join('\n'),
+      // Long enough that its marked line scrolls out of the diff (the card closes then).
+      ['@@ -6,85 +6,85 @@ export const client = {', "   base: 'https://pay.example.test',", '   timeoutMs: 10_000,', '-  idempotent: true,', '+  idempotent: false,', '   retries: 0,', ...CLIENT_LIMITS, ' };', ''].join('\n'),
     ),
     fileDiff('docs/retries.md', ['@@ -1,3 +1,4 @@', ' # Retries', ' ', '-A failed charge is tried three more times.', '+A failed charge is tried three more times,', '+twice each time.', ''].join('\n')),
   ].join(''),
@@ -529,7 +531,7 @@ test('a High PR: once on each named file in the tree, once on each named range i
 
   // No row under the code says the reason (q-070bc2a3): the bars are a button that says it, and its card shows it.
   await expect(review.locator('[data-context-note-row], .ib-ctxn-line')).toHaveCount(0);
-  await expect(review.getByRole('button', { name: 'High risk: Each retry charges the card twice.' })).toHaveCount(1);
+  await expect(review.getByRole('button', { name: 'High risk · your rule “Anything in billing or charges.”: Each retry charges the card twice.' })).toHaveCount(1);
   await expect(review.getByRole('button', { name: 'High risk: Charges stop being idempotent.' })).toHaveCount(1);
   await scheme('dark');
 
@@ -571,6 +573,22 @@ test('a High PR: once on each named file in the tree, once on each named range i
   await expect(riskCard()).toBeInViewport();
   await page.keyboard.press('Escape');
   await expect(riskCard()).toHaveCount(0);
+
+  // A pinned card whose bars scroll out of the diff closes (it never floats over the header or the rail); scrolled
+  // back, the bars show no card until asked.
+  await openCard(review, client, ['Charges stop being idempotent.']);
+  await expect(barsOf(review, client)).toHaveAttribute('aria-expanded', 'true');
+  const code = (await review.locator('[data-guide-file-shell="src/charges/client.ts"]').boundingBox())!;
+  await page.mouse.move(code.x + 80, Math.min(code.y + code.height, page.viewportSize()!.height) - 40);
+  await page.mouse.wheel(0, 4000);
+  await expect(barsOf(review, client)).not.toBeInViewport();
+  await expect(riskCard()).toHaveCount(0);
+  await page.screenshot({ path: join(proofDir, '09-scrolled-away-no-card-dark.png') });
+  await barsOf(review, client).scrollIntoViewIfNeeded();
+  await expect(barsOf(review, client)).toBeInViewport();
+  await page.waitForTimeout(700);
+  await expect(riskCard()).toHaveCount(0);
+  await expect(barsOf(review, client)).toHaveAttribute('aria-expanded', 'false');
 
   await review.locator('[data-guide-file-shell="src/charges/retry.ts"]').scrollIntoViewIfNeeded();
   await openCard(review, retry, ['Each retry charges the card twice.']);

@@ -4,7 +4,8 @@
  * reason unreadable (no card on hover, keyboard focus or a press), a pinned card closing when the pointer leaves, a card
  * that Escape, a press outside or a second press does not close, the header's places stepper not opening the place's
  * card (or leaving the one before open), the bars with no accessible name that says the reason, the person's rule the
- * old row showed missing, or a Medium place's card without its reason (or a made-up one when it has none).
+ * old row showed missing, or a Medium place's card without its reason (or a made-up one when it has none); a card
+ * left on bars that are gone (stuck at the page's corner), or one that takes an Escape a comment box was typed in.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act, type ReactElement } from 'react';
@@ -90,9 +91,9 @@ afterEach(async () => {
 });
 
 describe.skipIf(!hasDom)('the risk bars card', () => {
-  test('the bars are a button named by the level and the reason', async () => {
+  test('the bars are a button named by the level, the rule and the reason, as the card says them', async () => {
     await mount(HIGH);
-    expect(bars('src/retry.ts').getAttribute('aria-label')).toBe('High risk: Each retry charges the card twice.');
+    expect(bars('src/retry.ts').getAttribute('aria-label')).toBe('High risk · your rule “Anything in billing.”: Each retry charges the card twice.');
     expect(bars('src/client.ts').getAttribute('aria-label')).toBe('High risk: Charges stop being idempotent.');
     expect(bars('src/client.ts').parentElement!.closest('[data-deletions]')).not.toBeNull();
   });
@@ -107,7 +108,7 @@ describe.skipIf(!hasDom)('the risk bars card', () => {
     expect(text).toContain('High');
     expect(text).toContain('your rule “Anything in billing.”');
     expect(text).toContain('Each retry charges the card twice.');
-    expect(card()!.getAttribute('aria-label')).toBe('High risk: Each retry charges the card twice.');
+    expect(card()!.getAttribute('aria-label')).toBe('High risk · your rule “Anything in billing.”: Each retry charges the card twice.');
     await act(async () => void bars('src/retry.ts').dispatchEvent(new PointerEvent('pointerleave', { pointerType: 'mouse' })));
     await wait(REF_CARD_CLOSE_MS + 50);
     expect(card()).toBeNull();
@@ -145,6 +146,65 @@ describe.skipIf(!hasDom)('the risk bars card', () => {
     expect(card()).not.toBeNull();
     await act(async () => void document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
     expect(card()).toBeNull();
+  });
+
+  test('a card closes when its bars are taken away, and the bars made again open none until asked', async () => {
+    await mount(HIGH);
+    const b = bars('src/retry.ts');
+    await act(async () => b.click());
+    expect(card()).not.toBeNull();
+    // The line drawn again (Pierre replaces its element): the same button goes back on it, and the card stays.
+    const line = b.parentElement!;
+    const again = document.createElement('div');
+    again.setAttribute('data-line', line.getAttribute('data-line')!);
+    again.textContent = 'const x = 1;';
+    await act(async () => line.replaceWith(again));
+    await wait(50);
+    expect(bars('src/retry.ts')).toBe(b);
+    expect(card()).not.toBeNull();
+    // The file's element let go (the view drops its marks): the card closes.
+    const shadow = shadows[0]!;
+    await act(async () => dropHostLineMarks(shadow));
+    await wait(50);
+    expect(b.isConnected).toBe(false);
+    expect(card()).toBeNull();
+    // The file back: its bars are a new button, and no card opens on them by itself.
+    const marks = riskBarsLineMarks(HIGH).filter((m) => m.filePath === 'src/retry.ts');
+    await act(async () => keepHostLineMarks(shadow, marks, (...args) => api!.onMark(...args)));
+    await wait(50);
+    expect(bars('src/retry.ts')).not.toBe(b);
+    expect(card()).toBeNull();
+  });
+
+  test('Escape typed in a comment box is the box’s, with a card open; from the bars or nowhere it closes the card', async () => {
+    await mount(HIGH);
+    const box = document.createElement('textarea');
+    host!.appendChild(box);
+    let boxHeard = 0;
+    box.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !e.defaultPrevented) boxHeard++;
+    });
+    const b = bars('src/retry.ts');
+    await act(async () => b.click());
+    await act(async () => box.focus());
+    await act(async () => void box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, composed: true })));
+    expect(boxHeard).toBe(1);
+    expect(card()).not.toBeNull();
+    // From the bars themselves: the card's.
+    await act(async () => b.focus());
+    await act(async () => void b.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, composed: true })));
+    expect(card()).toBeNull();
+  });
+
+  test('the bars say they open a dialog, and whether it is open', async () => {
+    await mount(HIGH);
+    const b = bars('src/retry.ts');
+    expect(b.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(b.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => b.click());
+    expect(b.getAttribute('aria-expanded')).toBe('true');
+    await act(async () => b.click());
+    expect(b.getAttribute('aria-expanded')).toBe('false');
   });
 
   test('the places stepper opens each place’s card in turn, closing the one before', async () => {

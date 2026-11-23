@@ -134,7 +134,8 @@ export interface GuideLineMark {
   /** Its accessible name. */
   label: string;
   /** Its look: CSS background declarations for its box (review-editor's `LINE_MARK_WIDTH` × one line). */
-  paint: string;
+  paint: string;  /** It opens a popup of this kind (`aria-haspopup`; `aria-expanded` is the host's to set while it is open). */
+  popup?: 'dialog';
 }
 
 /** review-editor's `OnHostLineMark`: a mark's id, what happened on it, its button, and where the pointer or focus went. */

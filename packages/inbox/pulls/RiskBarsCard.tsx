@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Popover, PopoverContent } from '@plannotator/ui/components/Popover';
 import { REF_CARD_CLOSE_MS, REF_CARD_DELAY_MS } from '@plannotator/ui/components/RefHoverCard';
 import { RiskGauge } from '../contextNotes/ContextNotes';
+import { inOverlay, isComposingKey, isEditableTarget, keyTarget, modalOpen } from '../shortcuts/guards';
 import type { OnGuideLineMark } from '../guide/types';
 import type { RiskBars, RiskBarsLevel, RiskBarsNote } from './riskBars';
 import { riskBarsLabel } from './riskBarsMarks';
@@ -44,6 +45,36 @@ function containerOf(anchor: Element): HTMLElement | undefined {
   const root = anchor.getRootNode();
   const host = root instanceof ShadowRoot ? root.host : anchor;
   return host.closest<HTMLElement>('dialog[open], .pn-inbox') ?? undefined;
+}
+
+/**
+ * The scroller the bars' line scrolls in (up from the file's host, out of the shadow root): the nearest element that
+ * scrolls up and down; none (null) is the window's.
+ */
+export function scrollerOf(anchor: Element): Element | null {
+  const root = anchor.getRootNode();
+  let el: Element | null = root instanceof ShadowRoot ? root.host : anchor.parentElement;
+  while (el) {
+    const overflow = getComputedStyle(el).overflowY;
+    if ((overflow === 'auto' || overflow === 'scroll' || overflow === 'overlay') && el.scrollHeight > el.clientHeight) return el;
+    const up: Node | null = el.parentElement ?? el.parentNode;
+    el = up instanceof ShadowRoot ? up.host : up instanceof Element ? up : null;
+  }
+  return null;
+}
+
+/**
+ * Whether an Escape from `from` belongs to something else than the card on `anchor`: a field being typed in, a
+ * dialog or popover layer (shortcuts/guards.ts `inOverlay`) or a modal (`modalOpen`), unless that layer holds the
+ * bars' diff itself (a review shown in a dialog).
+ */
+export function escapeIsOthers(from: Element | null, anchor: Element): boolean {
+  const root = anchor.getRootNode();
+  const host = root instanceof ShadowRoot ? root.host : anchor;
+  if (modalOpen() && !host.closest('dialog[open]')) return true;
+  if (!from) return false;
+  if (isEditableTarget(from)) return true;
+  return inOverlay(from) && !from.closest('dialog, [role="dialog"], [role="alertdialog"], [data-popover-layer]')?.contains(host);
 }
 
 /** What the card says: the old row's head and words, for each place on the line. */
@@ -183,11 +214,68 @@ export function useRiskBarsCard(bars: RiskBars | null): { onMark: OnGuideLineMar
     if (card && !byId.has(card.id)) close();
   }, [byId, card, close]);
 
-  // While open: Escape and a press outside close it (the window's own Escape does not also run).
+  // The bars gone or out of sight close their card: the file's diff let its element go (its button is made again
+  // when the file comes back, so the card would point at nothing), or the line scrolled out of the diff's scroller
+  // (a card left open would float over the header or the rail). Back in view, no card opens until asked. A line drawn
+  // again keeps its button (hostLineMarks.ts), so that closes nothing. The stepper's line may start out of view: only
+  // leaving the view after being in it closes.
+  const anchor = card?.anchor ?? null;
+  useEffect(() => {
+    if (!anchor) return;
+    let frame = 0;
+    const check = () => {
+      frame = 0;
+      if (!anchor.isConnected) close();
+    };
+    const soon = () => {
+      if (!frame) frame = window.requestAnimationFrame(check);
+    };
+    const watch = new MutationObserver(soon);
+    watch.observe(document.body, { childList: true, subtree: true });
+    const home = anchor.getRootNode();
+    if (home instanceof ShadowRoot) watch.observe(home, { childList: true, subtree: true });
+    let seen = false;
+    const view =
+      typeof IntersectionObserver === 'function'
+        ? new IntersectionObserver(
+            (entries) => {
+              const last = entries[entries.length - 1];
+              if (!last) return;
+              if (!anchor.isConnected) close();
+              else if (last.isIntersecting) seen = true;
+              else if (seen) close();
+            },
+            { root: scrollerOf(anchor) },
+          )
+        : null;
+    view?.observe(anchor);
+    check();
+    return () => {
+      watch.disconnect();
+      view?.disconnect();
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [anchor, close]);
+
+  // The bars say whether their card is open (they carry `aria-haspopup="dialog"`, riskBarsMarks.ts).
+  useEffect(() => {
+    if (!anchor) return;
+    anchor.setAttribute('aria-expanded', 'true');
+    return () => anchor.setAttribute('aria-expanded', 'false');
+  }, [anchor]);
+
+  // While open: Escape and a press outside close it (the window's own Escape does not also run). Escape is the card's
+  // only while it shows and the key comes from the bars or the card, or from nowhere that has its own Escape: a field
+  // being typed in (a comment box), a dialog or another popover layer, or a modal keeps it.
   useEffect(() => {
     if (!card) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
+      if (e.key !== 'Escape' || e.defaultPrevented || isComposingKey(e)) return;
+      const shown = cardRef.current;
+      if (!shown?.isConnected || !card.anchor.isConnected) return;
+      const from = keyTarget(e);
+      const ours = !!from && (from === card.anchor || shown.contains(from));
+      if (!ours && escapeIsOthers(from, card.anchor)) return;
       e.preventDefault();
       e.stopPropagation();
       close();

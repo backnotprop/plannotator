@@ -34,6 +34,11 @@ export interface HostLineMark {
    * `-size`, `-position`); its fill under them is the line's.
    */
   paint: string;
+  /**
+   * The mark opens a popup of this kind (`aria-haspopup`); its `aria-expanded` starts false and is the host's to set
+   * while the popup is open (the button is what `OnHostLineMark` hands it).
+   */
+  popup?: 'dialog';
 }
 
 /** What happened on a mark: the pointer came or went, keyboard focus came or went, or it was pressed (click, tap, key). */
@@ -125,6 +130,13 @@ function dress(button: HTMLButtonElement, mark: HostLineMark): void {
   const at = `${mark.side}:${Math.trunc(mark.line)}`;
   if (button.getAttribute(HOST_LINE_MARK_ATTR) !== at) button.setAttribute(HOST_LINE_MARK_ATTR, at);
   if (button.getAttribute('aria-label') !== mark.label) button.setAttribute('aria-label', mark.label);
+  if (mark.popup) {
+    if (button.getAttribute('aria-haspopup') !== mark.popup) button.setAttribute('aria-haspopup', mark.popup);
+    if (!button.hasAttribute('aria-expanded')) button.setAttribute('aria-expanded', 'false');
+  } else if (button.hasAttribute('aria-haspopup')) {
+    button.removeAttribute('aria-haspopup');
+    button.removeAttribute('aria-expanded');
+  }
   if (paintOf.get(button) !== mark.paint) {
     paintOf.set(button, mark.paint);
     button.style.cssText = mark.paint;

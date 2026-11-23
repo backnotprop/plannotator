@@ -26,7 +26,13 @@ describe('riskBarsOf', () => {
     expect([...bars!.files].sort()).toEqual(['src/auth.ts', 'src/billing.ts']);
     expect(bars!.ranges.map(({ file, side, line }) => `${file} ${side} ${line}`)).toEqual(['src/billing.ts new 11', 'src/auth.ts new 11']);
     expect(bars!.ranges[0]!.notes).toEqual([{ why: 'Charges now retry.' }, { why: 'And it skips the lock.', rule: 'Anything in billing.' }]);
-    expect(riskBarsLineMarks(bars)[0]!.label).toBe('High risk: Charges now retry. And it skips the lock.');
+    expect(riskBarsLineMarks(bars)[0]!.label).toBe('High risk: Charges now retry. your rule “Anything in billing.”: And it skips the lock.');
+  });
+
+  test('the mark’s name says the person’s rule as its card does, when the place named one', () => {
+    const ruled = { ...place('src/billing.ts', [11, 11]), rule: 'Anything in billing.' };
+    expect(riskBarsLineMarks(riskBarsOf(judged('high', [ruled]), FILES))[0]!.label).toBe('High risk · your rule “Anything in billing.”: Charges now retry.');
+    expect(riskBarsLineMarks(riskBarsOf(judged('medium', [{ ...ruled, why: '' }]), FILES))[0]!.label).toBe('Medium risk · your rule “Anything in billing.”');
   });
 
   test('Medium carries its places as High does; a removed line is marked on the old side', () => {
