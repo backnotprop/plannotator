@@ -17832,6 +17832,7 @@
       "id": "window-only-messages",
       "title": "Window endpoints under messages with no door route",
       "surface": [
+        "window:/api/inbox/messages/:id/guide/package-changes",
         "window:/api/inbox/messages/:id/guide/review-image"
       ],
       "flows": [],
@@ -17847,6 +17848,7 @@
       "id": "window-only-pulls",
       "title": "Window endpoints under pulls with no door route",
       "surface": [
+        "window:/api/inbox/pulls/package-changes",
         "window:/api/inbox/pulls/repo-file",
         "window:/api/inbox/pulls/repo-files",
         "window:/api/inbox/pulls/review-image"

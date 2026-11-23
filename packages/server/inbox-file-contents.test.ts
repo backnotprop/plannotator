@@ -963,3 +963,113 @@ describe("the image previews' routes", () => {
     expect(w.forge.reads).toEqual([]);
   });
 });
+
+/**
+ * The package changes card's routes (review parity B5: `/api/inbox/pulls/package-changes` and
+ * `/api/inbox/messages/:id/guide/package-changes`) through the running Inbox's doors: the guards inbox.ts puts around
+ * the shared service (inbox-package-changes.test.ts proves the rows and the reads).
+ */
+describe("the package changes card's routes", () => {
+  const manifest = (dependencies: Record<string, string>) => `${JSON.stringify({ name: "billing-svc", version: "1.0.0", dependencies }, null, 2)}\n`;
+  type Cards = { cards: { path: string; changes: { name: string; kind: string }[]; lookup: { names: string[] } }[]; lookup: { total: number } };
+  const rowsOf = (body: Cards) => body.cards.flatMap((card) => card.changes.map((change) => `${card.path} ${change.name} ${change.kind}`)).sort();
+
+  /** A PR that bumps a dependency in package.json, its two commits in the project's clone. */
+  async function bumped(w: Awaited<ReturnType<typeof world>>) {
+    writeFileSync(join(w.project, "package.json"), manifest({ "left-pad": "^1.1.0" }));
+    w.git("add", ".");
+    w.git("commit", "-qm", "one");
+    const baseSha = w.git("rev-parse", "HEAD").trim();
+    writeFileSync(join(w.project, "package.json"), manifest({ "left-pad": "^1.3.0", "tiny-queue": "^0.2.1" }));
+    w.git("commit", "-qam", "two");
+    const headSha = w.git("rev-parse", "HEAD").trim();
+    const patch = w.git("diff", `${baseSha}..${headSha}`);
+    await w.sendGuide(patch, ["package.json"]);
+    w.forge.pull = ghPull({ headRefOid: headSha });
+    w.forge.mergeBase = baseSha;
+    w.forge.patch = patch;
+    w.forge.headNow = headSha;
+    expect((await fetch(`${w.base}/api/inbox/pulls?refresh=1`)).status).toBe(200);
+    w.forge.reads.length = 0;
+    return headSha;
+  }
+  const askPull = (base: string, snapshot: string, headers: Record<string, string> = {}) =>
+    fetch(`${base}/api/inbox/pulls/package-changes?key=${encodeURIComponent(KEY)}&scope=layer&snapshot=${snapshot}`, { headers });
+  const askGuide = (base: string, id: string, headers: Record<string, string> = {}) => fetch(`${base}/api/inbox/messages/${id}/guide/package-changes?snapshot=${id}`, { headers });
+
+  test("a PR's card: the rows of the diff at the head on screen, read from the project's clone; no name offered to npm", async () => {
+    const w = await world({ codeReview: true });
+    const head = await bumped(w);
+    const response = await askPull(w.base, head);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Cards;
+    expect(rowsOf(body)).toEqual(["package.json left-pad upgraded", "package.json tiny-queue added"]);
+    expect(body.lookup.total).toBe(0);
+    expect(w.forge.reads.filter((r) => r.includes("/contents/"))).toEqual([]);
+  });
+
+  test("a PR's card with Code review off: 409 code_review_off, and nothing runs", async () => {
+    const w = await world({ codeReview: false });
+    const response = await askPull(w.base, HEAD);
+    expect(response.status).toBe(409);
+    expect(((await response.json()) as { code: string }).code).toBe("code_review_off");
+    expect(w.forge.reads).toEqual([]);
+  });
+
+  test("a PR's card asked by another site: 403, and nothing is read", async () => {
+    const w = await world({ codeReview: true });
+    const head = await bumped(w);
+    expect((await askPull(w.base, head, { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect((await askPull(w.base, head, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect(w.forge.reads).toEqual([]);
+  });
+
+  test("a guide's card: the blobs its patch names, through the route; another site's ask refused", async () => {
+    const w = await world({ codeReview: false });
+    writeFileSync(join(w.project, "package.json"), manifest({ "left-pad": "^1.1.0" }));
+    w.git("add", ".");
+    w.git("commit", "-qm", "one");
+    writeFileSync(join(w.project, "package.json"), manifest({ "left-pad": "^2.0.0" }));
+    const id = await w.sendGuide(w.git("diff"), ["package.json"]);
+    const response = await askGuide(w.base, id);
+    expect(response.status).toBe(200);
+    expect(rowsOf((await response.json()) as Cards)).toEqual(["package.json left-pad upgraded"]);
+    expect((await askGuide(w.base, id, { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect(w.forge.reads).toEqual([]);
+  });
+
+  test("a guide in another project naming this PR: the forge is never asked for its files", async () => {
+    const w = await world({ codeReview: true, repoOf: (root) => ({ host: "github.com", display: root.endsWith("billing-svc") ? "northwind/billing-svc" : "someone/third" }) });
+    const text = manifest({ "tiny-queue": "^0.2.1" });
+    const bytes = Buffer.from(text);
+    w.forge.files.set(`repos/northwind/billing-svc/contents/${encodeURIComponent("tools/package.json")}?ref=${HEAD}`, JSON.stringify({ type: "file", sha: "c".repeat(40), size: bytes.length, encoding: "base64", content: bytes.toString("base64") }));
+    const added = `diff --git a/tools/package.json b/tools/package.json\nnew file mode 100644\nindex 0000000000..${gitBlobId(bytes).slice(0, 10)}\n--- /dev/null\n+++ b/tools/package.json\n@@ -0,0 +1,${text.split("\n").length - 1} @@\n${text.split("\n").slice(0, -1).map((line) => `+${line}`).join("\n")}\n`;
+    const pr = (project?: string) =>
+      w.sendGuide("", [], {
+        ...(project ? { project_path: project } : {}),
+        patch: undefined,
+        guide: undefined,
+        snapshot: buildGuideSnapshot({
+          guide: { title: "T", intent: "I", sections: [{ title: "S", overview: "O", diffs: [{ file: "tools/package.json", summary: "s" }] }] },
+          review: { rawPatch: added, gitRef: "main...head", source: { kind: "pr", pr: { url: "https://github.com/northwind/billing-svc/pull/412", number: 412, title: "PR 412", platform: "github" } } },
+          reviewed: [],
+        } as unknown as Parameters<typeof buildGuideSnapshot>[0]),
+      });
+    const own = await pr();
+    const third = join(w.project, "..", "third");
+    mkdirSync(third, { recursive: true });
+    Bun.spawnSync(["git", "init", "-q"], { cwd: third, env: GIT_ENV });
+    const cross = await pr(third);
+    expect((await fetch(`${w.base}/api/inbox/pulls?refresh=1`)).status).toBe(200);
+    // The PR's own project's guide reads the PR's side from the forge ...
+    const near = await askGuide(w.base, own);
+    expect(near.status).toBe(200);
+    expect(rowsOf((await near.json()) as Cards)).toEqual(["tools/package.json tiny-queue added"]);
+    // ... and one in another project naming the same PR reads nothing of it.
+    w.forge.reads.length = 0;
+    const far = await askGuide(w.base, cross);
+    expect(far.status).toBe(200);
+    expect(rowsOf((await far.json()) as Cards)).toEqual([]);
+    expect(w.forge.reads).toEqual([]);
+  });
+});

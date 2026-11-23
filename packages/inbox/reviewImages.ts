@@ -2,7 +2,9 @@
  * The image preview of code review on the Inbox's diffs (review parity B2): the review app's own `ImageDiffPreview`
  * asks `/api/review-image?path&side&snapshot`; these send that read to the Inbox's routes for one diff
  * (packages/server/inbox-review-image.ts), the rest of the query as it was, as `pullRepoFetch` does for All files.
- * Anything else is refused, never fetched. Plain data, passed as `ReaderPart` `images` (lazyParts.tsx), which the
+ * Its package changes card (B5) asks `/api/package-changes?snapshot`, sent the same way to the diff's
+ * package-changes route (packages/server/inbox-package-changes.ts). Anything else (the card's npm lookup among them:
+ * the Inbox has none) is refused, never fetched. Plain data, passed as `ReaderPart` `images` (lazyParts.tsx), which the
  * reader reads from `ReviewImagesContext`: no review-editor code here, so the pages that pass it load none until the
  * reader's own chunk does.
  *
@@ -13,12 +15,12 @@ import { inboxUrl, machineOf, selfMachineId } from './inboxUrl';
 import { pullMachine, pullUrl } from './pulls/pullMachines';
 import type { GuideReaderImages } from './guide/types';
 
-function imageFetch(route: (query: string) => string): typeof fetch {
+function reviewFetch(route: (read: 'review-image' | 'package-changes', query: string) => string): typeof fetch {
   return ((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    const asked = /^\/api\/review-image\?(.*)$/.exec(url);
-    if (!asked) return Promise.reject(new Error('The image could not be read.'));
-    return globalThis.fetch(route(asked[1]!), init);
+    const asked = /^\/api\/(review-image|package-changes)\?(.*)$/.exec(url);
+    if (!asked || (init?.method && init.method !== 'GET')) return Promise.reject(new Error('The file could not be read.'));
+    return globalThis.fetch(route(asked[1] as 'review-image' | 'package-changes', asked[2]!), init);
   }) as typeof fetch;
 }
 
@@ -37,7 +39,7 @@ export function pullReviewImages(key: string, scope: string, from: string | unde
   return {
     // The review app's caches key by snapshot id: this diff's own, never another review's.
     snapshotId: `inbox:pull:${key}:${scope}:${from ?? ''}:${head}`,
-    fetchImpl: imageFetch((query) => pullUrl('/pulls/review-image', key, `${scoped}&${query.replace(/(^|&)snapshot=[^&]*/, '$1snapshot=' + head)}`)),
+    fetchImpl: reviewFetch((read, query) => pullUrl(`/pulls/${read}`, key, `${scoped}&${query.replace(/(^|&)snapshot=[^&]*/, '$1snapshot=' + head)}`)),
   };
 }
 
@@ -46,6 +48,6 @@ export function guideReviewImages(messageId: string): GuideReaderImages | undefi
   if (!here(machineOf(messageId))) return undefined;
   return {
     snapshotId: `inbox:guide:${messageId}`,
-    fetchImpl: imageFetch((query) => inboxUrl(`/messages/${encodeURIComponent(messageId)}/guide/review-image`, query.replace(/(^|&)snapshot=[^&]*/, `$1snapshot=${encodeURIComponent(messageId)}`))),
+    fetchImpl: reviewFetch((read, query) => inboxUrl(`/messages/${encodeURIComponent(messageId)}/guide/${read}`, query.replace(/(^|&)snapshot=[^&]*/, `$1snapshot=${encodeURIComponent(messageId)}`))),
   };
 }

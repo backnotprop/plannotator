@@ -114,11 +114,42 @@ function indexIds(patch: string): { old: string | null; new: string | null } | n
   return { old: side(ids[1]!), new: side(ids[2]!) };
 }
 
+/** A forge's read of one side of a guide's pull request (`InboxPulls.fileBytes` for that PR), as the routes pass it. */
+export type GuideForgeRead = (side: DiffSide, filePath: string, oldPath: string | undefined, maxBytes: number) => Promise<FileBytesRead>;
+
 /**
- * One side of a changed image in a guided review's patch (`/api/inbox/messages/:id/guide/review-image`). The guide
- * keeps the diff as sent while the working tree moves on, so a side is only ever the blob the patch's `index` line
- * names (a file whose patch names none, a pure rename or a patch rebuilt without them, reads from `forge` alone).
+ * One side of a file a guided review's patch changes, read the one way a guide's sides are: only ever the blob the
+ * patch's `index` line names (a file whose patch names none, a pure rename or a patch rebuilt without them, reads from
+ * `forge` alone), from the project's git, or the working tree for the new side while its bytes are that blob, or the
+ * guide's pull request on the forge while its side is still that blob. Shared by the image previews and the package
+ * changes (inbox-package-changes.ts).
  */
+export function guideSideReader(patch: string | null, root: string | null, forge: GuideForgeRead | undefined): (side: DiffSide, filePath: string, oldPath: string | undefined, maxBytes: number) => Promise<FileBytesRead> {
+  let files: ReturnType<typeof parseDiffToFiles> | null = null;
+  return async (side, filePath, oldPath, maxBytes) => {
+    files ??= parseDiffToFiles(patch ?? "");
+    const file = files.find((f) => f.path === filePath);
+    const ids = file ? indexIds(file.patch) : null;
+    const id = ids?.[side] ?? null;
+    if (root && id) {
+      const stored = await readGitObjectBytes(gitRuntime, id, maxBytes, root);
+      if (stored.kind === "ok" || stored.kind === "too-large") return stored;
+      // Uncommitted edits name a blob git never stored: the working tree's file, while it is still those bytes.
+      if (side === "new") {
+        // Only bytes that hash to the patch's blob say anything: a file past the cap cannot be hashed, so it is
+        // "missing", never "too large" (that would tell the size of whatever sits at a path the patch names).
+        const tree = await readDiffSideBytes(gitRuntime, { kind: "worktree", path: filePath }, maxBytes, root);
+        if (tree.kind === "ok" && gitBlobId(tree.bytes).startsWith(id)) return tree;
+      }
+    }
+    if (!forge) return { kind: "missing" };
+    // The PR may have moved on since the guide was sent: its side only while it is still the blob the patch names.
+    const far = await forge(side, filePath, oldPath, maxBytes).catch(forgeRefusal);
+    return far.kind !== "ok" || !id || gitBlobId(far.bytes).startsWith(id) ? far : { kind: "missing" };
+  };
+}
+
+/** One side of a changed image in a guided review's patch (`/api/inbox/messages/:id/guide/review-image`), as `guideSideReader` reads it. */
 export async function guideReviewImage(options: {
   /** The guide's patch, as the agent sent it (null when its snapshot is gone from the store). */
   patch: string | null;
@@ -128,14 +159,14 @@ export async function guideReviewImage(options: {
   root: string | null;
   params: URLSearchParams;
   /** A guide of a pull request with Code review on: that PR's own side read (`InboxPulls.fileBytes`), else absent. */
-  forge?: (side: DiffSide, filePath: string, oldPath: string | undefined, maxBytes: number) => Promise<FileBytesRead>;
+  forge?: GuideForgeRead;
   ifNoneMatch?: string | null;
   signal?: AbortSignal;
 }): Promise<ReviewImageResponse> {
   const { patch, root } = options;
   const refused = refusedAsked(options.params);
   if (refused) return refused;
-  let files: ReturnType<typeof parseDiffToFiles> | null = null;
+  const read = guideSideReader(patch, root, options.forge);
   return handleReviewImageRequest({
     params: options.params,
     ifNoneMatch: options.ifNoneMatch ?? null,
@@ -143,27 +174,6 @@ export async function guideReviewImage(options: {
     patch: patch ?? "",
     isCurrentSnapshot: (snapshot) => snapshot === options.messageId,
     ...(options.signal ? { signal: options.signal } : {}),
-    readSide: (side, filePath, oldPath, maxBytes, signal) =>
-      runImageRead(async (): Promise<FileBytesRead> => {
-        files ??= parseDiffToFiles(patch ?? "");
-        const file = files.find((f) => f.path === filePath);
-        const ids = file ? indexIds(file.patch) : null;
-        const id = ids?.[side] ?? null;
-        if (root && id) {
-          const stored = await readGitObjectBytes(gitRuntime, id, maxBytes, root);
-          if (stored.kind === "ok" || stored.kind === "too-large") return stored;
-          // Uncommitted edits name a blob git never stored: the working tree's file, while it is still those bytes.
-          if (side === "new") {
-            // Only bytes that hash to the patch's blob say anything: a file past the cap cannot be hashed, so it is
-            // "missing", never "too large" (that would tell the size of whatever sits at a path the patch names).
-            const tree = await readDiffSideBytes(gitRuntime, { kind: "worktree", path: filePath }, maxBytes, root);
-            if (tree.kind === "ok" && gitBlobId(tree.bytes).startsWith(id)) return tree;
-          }
-        }
-        if (!options.forge) return { kind: "missing" };
-        // The PR may have moved on since the guide was sent: its side only while it is still the blob the patch names.
-        const far = await options.forge(side, filePath, oldPath, maxBytes).catch(forgeRefusal);
-        return far.kind !== "ok" || !id || gitBlobId(far.bytes).startsWith(id) ? far : { kind: "missing" };
-      }, signal),
+    readSide: (side, filePath, oldPath, maxBytes, signal) => runImageRead(() => read(side, filePath, oldPath, maxBytes), signal),
   });
 }

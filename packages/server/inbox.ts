@@ -216,6 +216,7 @@ import { markPlannotatorResponse, withPlannotatorServerHeader } from "./plannota
 import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT, inboxMcpInitializeClient, resolveInboxMcpReminder, type InboxMcpClient, type InboxMcpContext } from "./inbox-mcp";
 import { guidePatchOf, guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewSnapshot } from "./inbox-guides";
 import { guideReviewImage, pullReviewImage, reviewImageHttp } from "./inbox-review-image";
+import { guidePackageChanges, packageCardOn, pullPackageChanges } from "./inbox-package-changes";
 import { createInboxRepoCache } from "./inbox-repos";
 import { createGitlabHosts, unnamedForgeHost, type GitlabHosts } from "./inbox-gitlab-hosts";
 import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-refs";
@@ -6340,7 +6341,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         pullHiddenChanged();
         return json({ serverSession, hidden: hiddenList(), hidden_repos: pullHidden.repos(), hid: hide.map((pull) => pull.key), rehid, threads_left: left, threads_back: back });
       }
-      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes" || path === "/api/inbox/pulls/review-image") {
+      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes" || path === "/api/inbox/pulls/review-image" || path === "/api/inbox/pulls/package-changes") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
@@ -6416,6 +6417,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (!scoped) throw new InboxError("validation_error", "scope: layer, stack, range with from (a layer's key) or since with from (a commit).", { field: "scope" });
           if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
           return reviewImageHttp(await pullReviewImage({ pulls, key, scope: scoped.scope, ...(scoped.from ? { from: scoped.from } : {}), params: url.searchParams, roots: () => pullRoots(key), ifNoneMatch: req.headers.get("if-none-match"), signal: req.signal }));
+        }
+        // The package changes card under a package.json or lockfile the diff changes (inbox-package-changes.ts): the
+        // shared service's rows, from the diff at the head the window names; never npm.
+        if (path === "/api/inbox/pulls/package-changes") {
+          const key = url.searchParams.get("key") ?? "";
+          const scoped = pullDiffScopeOf(url.searchParams);
+          if (!scoped) throw new InboxError("validation_error", "scope: layer, stack, range with from (a layer's key) or since with from (a commit).", { field: "scope" });
+          if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
+          const out = await pullPackageChanges({ pulls, key, scope: scoped.scope, ...(scoped.from ? { from: scoped.from } : {}), params: url.searchParams, roots: () => pullRoots(key), cardOn: packageCardOn(loadConfig()) });
+          return Response.json(out.body, { status: out.status, headers: { "Cache-Control": "no-store" } });
         }
         if (path === "/api/inbox/pulls/file") {
           const key = url.searchParams.get("key") ?? "";
@@ -7942,8 +7953,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
 
       // A guided review's image previews (inbox-review-image.ts): one side of a changed image, the blob the guide's patch
-      // names, from the project's git or working tree; as for the arrows, only Code review may ask the forge.
-      const guideImage = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/guide\/review-image$/.exec(path);
+      // names, from the project's git or working tree; as for the arrows, only Code review may ask the forge. Its package
+      // changes card (inbox-package-changes.ts) reads its sides the same way.
+      const guideImage = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/guide\/(review-image|package-changes)$/.exec(path);
       if (guideImage) {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
@@ -7963,6 +7975,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 return projectRoot && roots.includes(projectRoot) ? pulls.fileBytes(pullKey, "layer", side, filePath, oldPath, roots, maxBytes) : ({ kind: "missing" } as const);
               }
             : undefined;
+        if (guideImage[2] === "package-changes") {
+          const out = await guidePackageChanges({ patch: guidePatchOf(store, sha256), messageId: message.id, root: projectRoot, params: url.searchParams, ...(forge ? { forge } : {}), cardOn: packageCardOn(loadConfig()) });
+          return Response.json(out.body, { status: out.status, headers: { "Cache-Control": "no-store" } });
+        }
         return reviewImageHttp(await guideReviewImage({ patch: guidePatchOf(store, sha256), messageId: message.id, root: projectRoot, params: url.searchParams, ...(forge ? { forge } : {}), ifNoneMatch: req.headers.get("if-none-match"), signal: req.signal }));
       }
 

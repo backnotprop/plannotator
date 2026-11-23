@@ -31,6 +31,8 @@ export interface PackageChangesCardProps {
   /** Re-measure hook for the virtualized all-files host. */
   onHeightChange?: () => void;
   compactTouchLayout?: boolean;
+  /** Where the card's reads go (absent, code review's own `/api/package-changes`), as `ImageDiffPreview`'s. */
+  fetchImpl?: typeof fetch;
 }
 
 type SortKey = 'change' | 'name' | 'downloads' | 'released';
@@ -186,18 +188,19 @@ export const PackageChangesCard: React.FC<PackageChangesCardProps> = ({
   reviewSnapshotId,
   onHeightChange,
   compactTouchLayout,
+  fetchImpl,
 }) => {
   const setting = usePackageChangesSetting();
   const enabled = setting?.card === true;
   const scope = useMemo(() => ({ snapshot: reviewSnapshotId, base: reviewBase }), [reviewSnapshotId, reviewBase]);
-  const data = usePackageCard(filePath, scope, enabled);
+  const data = usePackageCard(filePath, scope, enabled, fetchImpl);
   const card = data?.card;
   const folded = usePackageChangesFolded();
   const [retry, setRetry] = useState(0);
   const [asking, setAsking] = useState(false);
   const names = card?.lookup.names.length ?? 0;
   const lookupOn = setting?.lookup === true && names > 0;
-  const lookup = usePackageLookup(filePath, scope, lookupOn && !!card, retry);
+  const lookup = usePackageLookup(filePath, scope, lookupOn && !!card, retry, fetchImpl);
 
   if (!enabled || !card) return null;
   return (
