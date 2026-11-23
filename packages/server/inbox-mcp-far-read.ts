@@ -29,9 +29,12 @@ export interface InboxFarReadMcpContext {
   farThreadMachine?: (threadId: string) => string | null;
 }
 
+/** Where a thread an id names lives: "<id> is a thread on <machine>." (send_message's and resolve_message's refusals). */
+export const farThreadWords = (id: string, machine: string): string => `${id} is a thread on ${machineNameWords(machine)}.`;
+
 /** DRAFT words (the owner's to approve): send_message's reply_to names a thread on a linked machine. */
 export const farReplyRefusal = (id: string, machine: string): string =>
-  `${id} is a thread on ${machineNameWords(machine)}. You can read it with read_thread, but replying there is not available from this computer yet.`;
+  `${farThreadWords(id, machine)} You can read it with read_thread, but replying there is not available from this computer yet.`;
 
 /** Whether a read names an id this store does not hold, so a linked machine may. */
 function farCandidate(store: InboxStore, input: FarReadAsk): boolean {

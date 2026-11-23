@@ -504,7 +504,7 @@ export const INBOX_SEARCH_FIRST_RULE = 'Search before you say something was neve
  */
 export const INBOX_AGENT_ACTION_LEADS: Readonly<Record<string, string>> = {
   send_message: "Message the person (markdown); with no reply_to or thread, it starts a new thread.",
-  resolve_message: "Archive a message's thread, only when nothing in it is left for the person to read or answer.",
+  resolve_message: "Archive a thread once nothing in it is left to read or answer, or its questions moved (moved_to).",
   // What a read shows lives on `thread_id` (a field description does not count toward the 2,048).
   read_thread: 'Read a thread (thread_id); with no id, list your threads (asked_by "anyone": all).',
   search: 'Find messages by words, older ones too (read-only).',
@@ -529,6 +529,21 @@ export const INBOX_REREAD_RULE = 'Reread the body once before you send; check ea
  * 2,048-character cut would drop its `- [x]` rule; --help and llms.txt carry it after the guide.
  */
 export const INBOX_ASK_RECOGNISE_RULE = 'Ask only about things the person would recognise from using the product; decide the rest and say so in one line.'
+
+/**
+ * Closing out threads whose questions moved (the owner, 2026-11-20: "if it combines any previous threads, then it
+ * should like close out the previous threads on its own"; approved 2026-11-21, the last sentence 2026-11-22): an agent that
+ * gathers questions from other threads into one archives each old thread with resolve_message's `moved_to`, which
+ * writes nothing in it, instead of a withdrawal message that makes every old thread "New since you looked"; the
+ * Inbox tells those threads' agents quietly, and it passes the person's answers on. On every copy of send_message's
+ * `supersedes`, and in --help.
+ */
+export const INBOX_MOVED_TO_RULE =
+  "When you gather questions from other threads into one thread, archive each old thread with resolve_message and moved_to instead of writing a withdrawal into it. Pass the person's answers on to the agents whose threads you archived this way."
+
+/** resolve_message's `moved_to` (approved 2026-11-22, with INBOX_MOVED_TO_RULE): the MCP field, so every host's copy, and --help. */
+export const INBOX_MOVED_TO_FIELD_DESCRIPTION =
+  "After you asked this thread's open questions again in another thread (one that gathers several): that thread's id, or a message id in it. It must be an open thread of this project where you asked a question. The person then sees a link to it on the archived thread; nothing is written there, and it does not show as new."
 
 /** The end of every copy of send_message's `thread` field (approved 2026-11-15): INBOX_THREAD_RULE says when, this says how. */
 export const INBOX_THREAD_NEW_ISSUE_RULE =
@@ -658,7 +673,7 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
     ].join('\n'),
     reply_to: `A message id: post this as a reply in that message's thread. ${INBOX_REPLY_TO_CHECK}`,
     thread: `A short thread name, one line: the same name in this project is the same open thread, across sessions. With no thread and no reply_to, the message starts a new thread; to add to a thread, reply_to its latest message or use the same thread name. Ignored with reply_to, except when you are asked to name a thread the person started: then it names that thread, once. ${INBOX_THREAD_NEW_ISSUE_RULE}`,
-    supersedes: 'Your own questions in this thread that are still open (read_thread state open or picked) and no longer apply: a newer message replaces them, or the reply settled them in words. "<message id>/<key>" for one, "<message id>" for all of that message\'s, as a list of strings, e.g. ["msg_…/q-…"]; send with reply_to into their thread. With one question in this message it replaces them, otherwise they read "No longer applies".',
+    supersedes: `Your own questions in this thread that are still open (read_thread state open or picked) and no longer apply: a newer message replaces them, or the reply settled them in words. "<message id>/<key>" for one, "<message id>" for all of that message's, as a list of strings, e.g. ["msg_…/q-…"]; send with reply_to into their thread. With one question in this message it replaces them, otherwise they read "No longer applies". ${INBOX_MOVED_TO_RULE}`,
     done: 'Your own open action items (`:::action`) in this thread that you saw done yourself, e.g. the deploy you watch is Ready: "<message id>/<key>" (key a-…); send with reply_to into their thread. The card says you saw it done; nothing is sent to the person.',
     attachments: `Files to show the person beside the message, absolute or relative to project_path: a plan, an HTML mock, code, a video, any file. ${INBOX_ATTACHMENTS_PICTURES_LINE} Link one from the body (\`[the mock](mock.html)\`) to open it beside the thread; ${INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE} Their comments on the files come back in the reply. Folders and .env files are refused.`,
   },
@@ -1360,6 +1375,16 @@ export interface InboxReplyCommand {
    */
   ack_reaction?: { emoji: string; label?: string }
   /**
+   * On the Inbox's note telling a session that another agent archived the
+   * thread it asked in and moved its questions to another thread
+   * (`InboxMessage.moved_note`): the wake is INBOX_MOVED_WAKE_INSTRUCTION and
+   * the note, with no reply instruction (an answer in the archived thread
+   * would bring it back to the person). The command stays a `reply`, so an
+   * older connection still delivers it, as a reply. Absent on every other
+   * command.
+   */
+  moved?: true
+  /**
    * On a reply handed to a session the person tagged with `@` that does not
    * own the thread (approval "inbox-tag-agents"): the owning session's agent,
    * named from its host (`Claude Code`). The wake takes
@@ -1770,6 +1795,12 @@ export function parseInboxBridgeCommands(text: string): InboxReplyCommand[] {
   }
 }
 
+/**
+ * The second line of the wake carrying the Inbox's note that a session's questions moved to another thread
+ * (`moved`): a notice, not the person's words, so nothing to answer (approved 2026-11-22).
+ */
+export const INBOX_MOVED_WAKE_INSTRUCTION = 'This is a notice from Plannotator Inbox, not a reply from the person. Nothing here needs an answer.'
+
 /** The fixed second line of every wake: who is speaking, and how to answer. */
 export const INBOX_WAKE_INSTRUCTION =
   "This is a user reply from Plannotator Inbox. Their reply follows as they wrote it: it is their answer to you. When they need to hear back, answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above."
@@ -2060,7 +2091,9 @@ export function inboxWakeCommand<T extends { body: string; thread_id?: unknown; 
  * their data (`inboxWakeDetailsLine`, `inboxWakeReplyingLine`), then the words
  * verbatim, then INBOX_WAKE_CLOSING_LINE. Never the thread re-sent. A 👍 Looks
  * good (`ack_of`) is the first line and `inboxAckLine`, closed by
- * `[thread <id>]` alone.
+ * `[thread <id>]` alone. The note that a session's questions moved (`moved`)
+ * is the first line, INBOX_MOVED_WAKE_INSTRUCTION and the note, closed by
+ * `[thread <id>]` alone: no reply instruction.
  */
 export function inboxWakeText(
   command: Pick<InboxReplyCommand, 'id' | 'subject' | 'body'> & {
@@ -2073,6 +2106,7 @@ export function inboxWakeText(
     launched?: unknown
     ack_of?: string
     ack_reaction?: unknown
+    moved?: unknown
     tagged?: { owner?: unknown } | null
     also_tagged?: unknown
     added?: unknown
@@ -2098,6 +2132,12 @@ export function inboxWakeText(
     const ackSubject = (command.subject ?? '').replace(/\s+/g, ' ').trim() || 'a message'
     const thread = wakeThreadId(command.thread_id)
     return `Plannotator Inbox: ${ackSubject} (${command.id})\n${inboxAckLine(command.ack_of, command.ack_reaction)}${thread ? `\n\n[thread ${thread}]` : ''}`
+  }
+  // The note that this session's questions moved: a notice, never a reply to answer in the archived thread.
+  if (command.moved === true) {
+    const movedSubject = (command.subject ?? '').replace(/\s+/g, ' ').trim() || 'a message'
+    const thread = wakeThreadId(command.thread_id)
+    return `Plannotator Inbox: ${movedSubject} (${command.id})\n${INBOX_MOVED_WAKE_INSTRUCTION}\n\n${command.body}${thread ? `\n\n[thread ${thread}]` : ''}`
   }
   // The session's steps in this thread (approval "inbox-thread-steps"), its own paragraph before the closing line;
   // with none there yet and the person's answers in this reply, the line that says when to start one.
