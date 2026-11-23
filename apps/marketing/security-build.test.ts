@@ -4,7 +4,7 @@ import { join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { ossMenu, readOssStars } from './src/lib/oss-stars';
-import { PLAN_CARDS } from './src/lib/spaces-pricing';
+import { PLAN_CARDS, YEARLY_PERCENT_OFF } from './src/lib/spaces-pricing';
 
 const marketingRoot = fileURLToPath(new URL('.', import.meta.url));
 const hostileWaitlistUrl =
@@ -254,18 +254,20 @@ describe('the Spaces pricing page as built', () => {
     }
   });
 
-  test('Monthly is the checked choice, and without scripts the switch is not shown', async () => {
+  test('Monthly is the checked choice, Yearly carries its saving, and without scripts the switch is not shown', async () => {
     const html = await readFile(join(outputRoot, 'workspaces/pricing/index.html'), 'utf8');
     const group = /<div class="pp-sw" role="radiogroup"[^>]*>([\s\S]*?)<\/div>/.exec(html)?.[1] ?? '';
-    const radios = [...group.matchAll(/<button\b([^>]*)>([^<]*)<\/button>/g)].map(([, attrs, label]) => ({
-      label,
+    const radios = [...group.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)].map(([, attrs, inner]) => ({
+      text: inner.replace(/<[^>]*>/g, ''),
+      name: /aria-label="([^"]*)"/.exec(attrs)?.[1] ?? null,
       checked: /aria-checked="true"/.test(attrs),
     }));
     expect(radios).toEqual([
-      { label: 'Monthly', checked: true },
-      { label: 'Yearly', checked: false },
+      { text: 'Monthly', name: null, checked: true },
+      { text: `Yearly ${YEARLY_PERCENT_OFF}`, name: `Yearly, ${YEARLY_PERCENT_OFF}`, checked: false },
     ]);
+    expect(html).not.toContain('class="pp-saving"');
     const noscript = [...html.matchAll(/<noscript>([\s\S]*?)<\/noscript>/g)].map(([, inner]) => inner).join('');
-    expect(noscript).toMatch(/\.pp-sw\{display:none\}/);
+    expect(noscript).toMatch(/\.pp-pick\{display:none\}/);
   });
 });
