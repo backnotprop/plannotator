@@ -134,6 +134,19 @@ function indexIds(patch: string): { old: string | null; new: string | null } | n
   return { old: side(ids[1]!), new: side(ids[2]!) };
 }
 
+const insideRepository = (name: string) => {
+  try {
+    validateFilePath(name);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** A pure rename (`similarity index 100%`): both sides are the same bytes, under either name. */
+const pureRename = (patch: string, oldPath: string | undefined, filePath: string): oldPath is string =>
+  !!oldPath && oldPath !== filePath && /^similarity index 100%$/m.test(patch);
+
 export interface GuideImageOptions {
   /** The guide's patch, as the agent sent it (null when its snapshot is gone from the store). */
   patch: string | null;
@@ -141,7 +154,7 @@ export interface GuideImageOptions {
   messageId: string;
   /** The project's folder on this computer, or null. */
   root: string | null;
-  /** The commit the guide pins (`guideReviewOf`), or null when it records none. */
+  /** The commit the guide pins (`guideReviewOf`: a commit guide's commit, else its source's `headSha`), or null when it records none. */
   revision?: string | null;
   params: URLSearchParams;
   /** A guide of a pull request with Code review on: that PR's own side read (`InboxPulls.fileBytes`), else absent. */
@@ -152,8 +165,10 @@ export interface GuideImageOptions {
 
 /**
  * A guided review's patch and its reader. The guide keeps the diff as sent while the working tree moves on, so a side
- * of a file the patch changes is only ever the blob its `index` line names (a file whose patch names none, a pure
- * rename or a patch rebuilt without them, reads from `forge` alone). `unchanged`: how a path the patch does not change
+ * of a file the patch changes is only ever the blob its `index` line names. A pure rename names none: its bytes are
+ * the file at the commit the guide pins (`revision`), under the side's own name or else the other one (a rename not
+ * yet committed has only the old name there). Any other file whose patch names no blob (a patch rebuilt without them)
+ * reads from `forge` alone. `unchanged`: how a path the patch does not change
  * is read (a Markdown file's picture): `"head"`, as committed at the guide's own revision (`revision`), a git object
  * (never the working tree, never the forge); absent, it is missing.
  */
@@ -186,6 +201,14 @@ export function guideImageSource(options: GuideImageOptions, unchanged?: "head")
             // "missing", never "too large" (that would tell the size of whatever sits at a path the patch names).
             const tree = await readDiffSideBytes(gitRuntime, { kind: "worktree", path: filePath }, maxBytes, root);
             if (tree.kind === "ok" && gitBlobId(tree.bytes).startsWith(id)) return tree;
+          }
+        }
+        const pinned = options.revision && /^[0-9a-f]{40,64}$/.test(options.revision) ? options.revision : null;
+        if (root && pinned && !ids && file && pureRename(file.patch, oldPath, filePath)) {
+          for (const name of side === "old" ? [oldPath, filePath] : [filePath, oldPath]) {
+            if (!insideRepository(name)) continue;
+            const named = await readGitObjectBytes(gitRuntime, `${pinned}:${name}`, maxBytes, root);
+            if (named.kind === "ok" || named.kind === "too-large") return named;
           }
         }
         if (!options.forge) return { kind: "missing" };

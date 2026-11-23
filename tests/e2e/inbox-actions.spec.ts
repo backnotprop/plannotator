@@ -259,10 +259,12 @@ test('adjacent action items are one checklist, one row open at a time; prose bet
   await expect(first.locator('[data-action-badge]')).toHaveText('Holds up 2');
   const rows = first.locator('[data-action-card]');
   const toggle = (i: number) => rows.nth(i).locator('[data-action-toggle]');
+  // A click on the task's words opens its row (the words sit over the toggle so they can be selected).
+  const task = (i: number) => rows.nth(i).locator('[data-action-task]');
   await expect(toggle(0)).toHaveAttribute('aria-expanded', 'true');
   await expect(toggle(1)).toHaveAttribute('aria-expanded', 'false');
   // One open at a time.
-  await toggle(1).click();
+  await task(1).click();
   await expect(toggle(1)).toHaveAttribute('aria-expanded', 'true');
   await expect(toggle(0)).toHaveAttribute('aria-expanded', 'false');
   const open = rows.nth(1);
@@ -275,7 +277,7 @@ test('adjacent action items are one checklist, one row open at a time; prose bet
   const fit = await cmd.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth, lines: Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)) }));
   expect(fit.scroll).toBeLessThanOrEqual(fit.client);
   expect(fit.lines).toBeGreaterThan(1);
-  await toggle(0).click();
+  await task(0).click();
   await shot(page, '03b-checklist');
 });
 
@@ -339,7 +341,7 @@ test('Send carries the Done and its note with the answer: one first line, the se
   expect(body.indexOf('## Answers to your questions')).toBeLessThan(body.indexOf('## Action items you asked for'));
   const card = pane.locator('[data-action-card]');
   await expect(card).toHaveAttribute('data-action-state', 'done', { timeout: 20_000 });
-  await card.locator('[data-action-toggle]').click();
+  await card.locator('[data-action-task]').click();
   await expect(card.locator('[data-action-settled]')).toContainText('Sent to Claude Code with your reply.');
   const sent = pane.locator('[data-reply-actions="sent"]');
   await expect(sent).toContainText('You did 1 action item');

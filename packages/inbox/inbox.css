@@ -3978,6 +3978,7 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .pn-inbox .ib-ccard .ib-ta { flex: 1 1 auto; min-height: 44px; padding: 11px 8px; font-size: var(--ib-fs-16-in, 16px); }
   .pn-inbox .ib-ccard .ib-btn { height: 44px; min-width: 44px; justify-content: center; }
   .pn-inbox .ib-ccard .ib-cbtn { width: 44px; padding: 0; }
+  .pn-inbox .ib-imgcompose .ib-ccard .ib-cclip { width: 44px; height: 44px; }
   .ib-ccard .ib-cbtn-l { display: none; }
   .ib-ccard .ib-markup, .pn-inbox .ib-kept .ib-kept-img { width: 44px; height: 44px; }
   .pn-inbox .ib-kept.ib-kept-wide .ib-kept-img { width: 56px; }
@@ -6290,6 +6291,11 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .pn-inbox .ib-chk-do { flex: 1; min-width: 0; font-weight: 550; font-size: var(--ib-fs-14, 14px); line-height: 1.4; overflow-wrap: anywhere; }
 .pn-inbox .ib-chk-toggle > .ib-ic { width: 14px; height: 14px; flex: none; color: var(--muted-foreground); }
 .pn-inbox .ib-chk-toggle .ib-badge { flex: none; }
+/* The toggle button fills the line under the task's words (ActionChecklist.tsx), which stay selectable above it; the chevron lets clicks through. */
+.pn-inbox .ib-chk-toggle { position: relative; }
+.pn-inbox .ib-chk-hit { position: absolute; inset: 0; margin: 0; padding: 0; border: 0; background: transparent; border-radius: inherit; cursor: inherit; appearance: none; }
+.pn-inbox .ib-chk-toggle > :not(.ib-chk-hit) { position: relative; }
+.pn-inbox .ib-chk-toggle > .ib-ic { pointer-events: none; }
 .pn-inbox .ib-chk-row:not([data-action-state="open"]) .ib-chk-do { color: var(--muted-foreground); font-weight: 500; }
 .pn-inbox .ib-chk-row:is([data-action-state="done"], [data-action-state="seen"], [data-action-state="pending"][data-action-outcome="done"]) .ib-chk-do { text-decoration: line-through; text-decoration-color: color-mix(in oklch, var(--muted-foreground) 70%, transparent); }
 .pn-inbox .ib-chk-under { margin: -3px 10px 7px 38px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); line-height: 1.45; overflow-wrap: anywhere; }
@@ -8551,7 +8557,7 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 .ib-fcomp[data-fcomp-sized] > * { flex: none; }
 /* The field's row never goes under the field's own least (one line): a card too low for its parts shows as the body
    overflowing, which composerDrag.ts reads to grow it. */
-.ib-fcomp[data-fcomp-sized] > .ib-fcomp-body { flex: 1 1 auto; min-height: 0; grid-template-rows: auto minmax(min-content, 1fr) auto; }
+.ib-fcomp[data-fcomp-sized] > .ib-fcomp-body { flex: 1 1 auto; min-height: 0; grid-template-rows: auto auto minmax(min-content, 1fr) auto; }
 .ib-fcomp[data-fcomp-sized] .ib-fcomp-field { align-self: stretch; display: flex; flex-direction: column; }
 .ib-fcomp[data-fcomp-sized] .ib-fcomp-field :is(.ib-cfield, .ib-cfield > .relative) { flex: 1 1 0; display: flex; flex-direction: column; }
 .pn-inbox .ib-fcomp[data-fcomp-sized] .ib-fcomp-field .ib-rtext { flex: 1 1 0; max-height: none; field-sizing: fixed; }
@@ -8607,8 +8613,8 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
    comment and its card are display: contents); the reply's row is one flex line (`.ib-fcomp-foot`) across it. */
 .ib-fcomp-body {
   display: grid; align-items: center; column-gap: 2px;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
-  grid-template-areas: "thumbs thumbs thumbs thumbs" "field field field field" "tools mid end pri";
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+  grid-template-areas: "thumbs thumbs thumbs thumbs thumbs" "files files files files files" "field field field field field" "tools clip mid end pri";
   padding: 0 8px 8px;
 }
 .ib-fcomp :is(.ib-fcomp-slot, .ib-fcomp-comment, .ib-ccard) { display: contents; }
@@ -8632,9 +8638,9 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 .ib-fcomp-field { grid-area: field; min-width: 0; padding: 6px 0 0; }
 .ib-fcomp-field .ib-rtext, .ib-fcomp-field .ib-rmirror { min-height: 36px; max-height: min(160px, 24vh); padding: 6px; }
 .ib-fcomp .ib-fcomp-field :is(textarea, .ib-rtext):focus { outline: none; box-shadow: none; border-color: transparent; }
-.pn-inbox .ib-fcomp :is(.ib-fcomp-bin, .ib-fcomp-clip) { flex: none; width: 30px; height: 30px; padding: 0; border: 0; background: none; color: var(--muted-foreground); }
+.pn-inbox .ib-fcomp :is(.ib-fcomp-bin, .ib-fcomp-clip, .ib-cclip) { flex: none; width: 30px; height: 30px; padding: 0; border: 0; background: none; color: var(--muted-foreground); }
 .pn-inbox .ib-fcomp .ib-fcomp-bin:disabled { opacity: 0.35; cursor: default; }
-.pn-inbox .ib-fcomp :is(.ib-fcomp-min, .ib-fcomp-bin, .ib-cbtn, .ib-fcomp-clip, .ib-vmic):hover:not(:disabled) { color: var(--foreground); background: none; }
+.pn-inbox .ib-fcomp :is(.ib-fcomp-min, .ib-fcomp-bin, .ib-cbtn, .ib-fcomp-clip, .ib-cclip, .ib-vmic):hover:not(:disabled) { color: var(--foreground); background: none; }
 /* Send: the reply box's round pill (T6), first in the reply's row. */
 .pn-inbox .ib-fcomp-send { flex: none; height: 30px; margin: 0 4px 0 0; padding: 0 15px; border: 0; border-radius: 15px; background: var(--primary); color: var(--primary-foreground); font-size: var(--ib-fs-13, 13px); font-weight: 600; }
 .pn-inbox .ib-fcomp-send:hover:not(:disabled) { background: color-mix(in oklch, var(--primary) 88%, black); }
@@ -8642,7 +8648,7 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 
 /* The reply's row, and under it the refused Send's words. */
 .ib-fcomp-err { margin: 0 12px 10px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--destructive); }
-.ib-fcomp-foot { grid-row: 3; grid-column: 1 / -1; display: flex; align-items: center; gap: 4px; min-width: 0; min-height: 30px; margin: 2px 0 0; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-fcomp-foot { grid-row: 4; grid-column: 1 / -1; display: flex; align-items: center; gap: 4px; min-width: 0; min-height: 30px; margin: 2px 0 0; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-fcomp-foot > .ib-fcomp-chips { padding: 0 4px; }
 .pn-inbox .ib-fcomp-foot > .ib-fcomp-link { margin-left: auto; }
 .ib-fcomp-foot > .ib-fcomp-link ~ .ib-fcomp-bin { margin-left: 2px; }
@@ -8652,11 +8658,24 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
   .pn-inbox .ib-fcomp.ib-phone .ib-fcomp-tab .ib-ic { display: none; }
 }
 /* The reply's paperclip (the reply box's AttachFilesButton), first in the toolbar, the card's 30 px button. */
-.pn-inbox .ib-fcomp .ib-fcomp-clip { width: 30px; padding: 0; margin-left: -2px; cursor: pointer; }
-.pn-inbox .ib-fcomp .ib-fcomp-clip:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
+.pn-inbox .ib-fcomp :is(.ib-fcomp-clip, .ib-cclip) { width: 30px; padding: 0; margin-left: -2px; cursor: pointer; }
+.pn-inbox .ib-fcomp :is(.ib-fcomp-clip, .ib-cclip):has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
 /* The reply box's file tiles and its drop target, in the card. */
 .ib-fcomp .ib-fcomp-files { padding: 4px 2px 2px; max-height: min(136px, 22vh); overflow-y: auto; overscroll-behavior: contain; }
 .ib-fcomp[data-drop-over] { border-style: dashed; border-color: var(--primary); }
+/* A comment's own files (commentFiles.tsx): the reply's paperclip after the pencil, the reply's tiles over the field. */
+.ib-fcomp .ib-ccard > :is(.ib-cclip, .ib-tipwrap:has(> .ib-cclip)) { grid-area: clip; }
+.ib-fcomp .ib-ccard > .ib-cfiles { grid-area: files; }
+/* Beside the thread: the tiles take their own line over the row, the paperclip the row's 34 px (44 on a phone). */
+.ib-imgcompose .ib-ccard { position: relative; }
+.ib-imgcompose .ib-ccard:has(> .ib-cfiles) { flex-wrap: wrap; }
+/* Beside the thread the tiles are the reply box's compact chips, under the words (`order`), capped and scrolled as its region is. */
+.ib-imgcompose .ib-ccard > .ib-cfiles { flex: 0 0 100%; order: 1; max-height: max(150px, calc(52vh - 120px)); overflow-y: auto; overscroll-behavior: contain; }
+.pn-inbox .ib-imgcompose .ib-cclip { width: 34px; height: 34px; padding: 0; cursor: pointer; }
+.pn-inbox .ib-imgcompose .ib-cclip:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-imgcompose .ib-ccard > .ib-rdrop { border-radius: var(--ib-r12-s, 12px); }
+/* A film's comment card in the panel: the pictures and files added to it (its image row is off; Markup.tsx `fileCardBody`). */
+.ib-cardadded { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .ib-fcomp .ib-fcomp-drop { border-radius: 13px; }
 .ib-fcomp-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 1; min-width: 0; }
 .ib-fcomp-chip { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 999px; background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); font-weight: 600; }
@@ -8751,7 +8770,7 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 .pn-inbox .ib-fcomp.ib-phone .ib-fcomp-tab:not(.ib-on) { height: 44px; margin-bottom: 0; }
 .pn-inbox .ib-fcomp.ib-phone .ib-fcomp-tab.ib-on { border-radius: 12px 12px 0 0; }
 .pn-inbox .ib-fcomp.ib-phone .ib-fcomp-top { padding-top: 4px; }
-.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-min, .ib-fcomp-clip, .ib-fcomp-bin) { width: 44px; height: 44px; }
+.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-min, .ib-fcomp-clip, .ib-cclip, .ib-fcomp-bin) { width: 44px; height: 44px; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-fcomp.ib-phone .ib-fcomp-field .ib-rtext, .ib-fcomp.ib-phone .ib-fcomp-field .ib-rmirror { min-height: 44px; font-size: var(--ib-fs-16-in, 16px); }
   .pn-inbox .ib-fcomp.ib-phone .ib-ccard .ib-ta { min-height: 44px; font-size: var(--ib-fs-16-in, 16px); }
@@ -8809,7 +8828,7 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
    reach over the field's first pixels, so it is painted over the field (its textarea is positioned). */
 .ib-fcomp.ib-phone .ib-fcomp-top { position: relative; z-index: 1; }
 .pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-send, .ib-ccard .ib-btn, .ib-fcomp-link, button.ib-fcomp-chip, .ib-fcomp-q, .ib-dtlink) { position: relative; }
-.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-min, .ib-fcomp-clip, .ib-fcomp-send, .ib-ccard .ib-btn, .ib-vmic, .ib-fcomp-link, button.ib-fcomp-chip, .ib-fcomp-q, .ib-dtlink)::after { content: ''; position: absolute; inset: auto; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
+.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-min, .ib-fcomp-clip, .ib-cclip, .ib-fcomp-send, .ib-ccard .ib-btn, .ib-vmic, .ib-fcomp-link, button.ib-fcomp-chip, .ib-fcomp-q, .ib-dtlink)::after { content: ''; position: absolute; inset: auto; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
 .ib-fcomp-pillwrap.ib-phone { left: calc(12px + env(safe-area-inset-left)); bottom: calc(14px + env(safe-area-inset-bottom)); transform: none; }
 .ib-fcomp-pillwrap.ib-phone[data-fcomp-pill-above] { bottom: calc(14px + 52px + 8px + env(safe-area-inset-bottom)); }
 .pn-inbox .ib-fcomp-pillwrap.ib-phone .ib-fcomp-pill { height: 52px; min-width: 52px; justify-content: center; border-radius: 14px; padding: 0 14px; gap: 7px; font-size: var(--ib-fs-14, 14px); }
@@ -11439,12 +11458,12 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 .ib-pfoot .ib-rscroll :is(.ib-ranswer-p, .ib-ranswer-a) { unicode-bidi: plaintext; }
 .ib-pfoot .ib-rscroll .ib-ranswers { margin-inline: 14px; }
 /* Files (D2): compact chips that wrap, the name cut in the middle, the kind and size under it. */
-.ib-pfoot .ib-rscroll .ib-rfiles { padding: 2px 12px 6px; }
-.ib-pfoot .ib-rscroll .ib-rfiles .ib-cp-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 0; }
-.ib-pfoot .ib-rscroll .ib-rfiles .ib-cp-file { flex: 1 1 190px; max-width: 280px; gap: 8px; padding: 4px 2px 4px 6px; border-radius: 9px; }
-.ib-pfoot .ib-rscroll .ib-rfiles .ib-cp-file .ib-fi { width: 28px; height: 28px; border-radius: 6px; }
-.ib-pfoot .ib-rscroll .ib-rfiles .ib-cp-file .ib-nm { font-size: var(--ib-fs-12-5, 12.5px); }
-.ib-pfoot .ib-rscroll .ib-rfiles .ib-cp-file .ib-kd { font-size: var(--ib-fs-11-5, 11.5px); }
+:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard) .ib-rfiles { padding: 2px 12px 6px; }
+:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard) .ib-rfiles .ib-cp-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 0; }
+:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard) .ib-rfiles .ib-cp-file { flex: 1 1 190px; max-width: 280px; gap: 8px; padding: 4px 2px 4px 6px; border-radius: 9px; }
+:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard) .ib-rfiles .ib-cp-file .ib-fi { width: 28px; height: 28px; border-radius: 6px; }
+:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard) .ib-rfiles .ib-cp-file .ib-nm { font-size: var(--ib-fs-12-5, 12.5px); }
+:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard) .ib-rfiles .ib-cp-file .ib-kd { font-size: var(--ib-fs-11-5, 11.5px); }
 /* The close chevron over the region's top right, on its own ground, so words scrolling under it never show through. */
 /* Clear of a classic (always shown) scrollbar on the scroll region: `--ib-rsb` is its width (Thread.tsx), 0 for overlay scrollbars. */
 .pn-inbox .ib-rclose {
@@ -11558,7 +11577,7 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
   .pn-inbox .ib-pfoot .ib-rbox { border-radius: 18px; }
   .ib-rscroll { max-height: max(120px, calc(46dvh - 130px)); }
   .ib-pfoot .ib-rscroll :is(.ib-rtext, .ib-rmirror) { padding: 13px 52px 6px 14px; }
-  .ib-pfoot .ib-rscroll .ib-rfiles .ib-cp-file { flex-basis: 100%; max-width: none; }
+  :is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard) .ib-rfiles .ib-cp-file { flex-basis: 100%; max-width: none; }
   .pn-inbox .ib-rclose { top: 4px; right: 4px; width: 44px; height: 44px; }
   .ib-rquote { padding: 12px 52px 0 14px; }
   .ib-rquote-x { width: 32px; height: 32px; margin: -6px -6px 0 0; }
