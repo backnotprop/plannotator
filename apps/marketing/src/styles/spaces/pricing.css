@@ -40,11 +40,8 @@ html:not(.light) .spp{--quiet:#7d84b3}
 .spp .pp-card li::before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;background:var(--sv)}
 html:not(.light) .spp .pp-card li::before{background:var(--violet)}
 
-/* The two facts under the cards are a two-item list; the dot between them is not read out. */
 .spp .pp-ask{display:flex;justify-content:center;white-space:nowrap;margin:30px 0 0}
-.spp .pp-ask .note{margin:0;padding:0;list-style:none;font-size:40px;transform-origin:50% 100%}
-.spp .pp-ask .pp-fact{display:inline}
-.spp .pp-ask .pp-dot{margin:0 .42em}
+.spp .pp-ask .note{font-size:40px;transform-origin:50% 100%}
 
 .spp .pp-row,.spp .pp-close{display:grid;grid-template-columns:385px minmax(0,1fr);column-gap:35px;padding:0 96px;margin-top:150px}
 .spp .pp-row{position:relative;align-items:start}
@@ -84,8 +81,5 @@ html:not(.light) .spp .pp-card li::before{background:var(--violet)}
   .spp .pp-hero{padding-top:110px}
   .spp .pp-price{font-size:44px}
   .spp .pp-ask .note{font-size:34px}
-  .spp .pp-ask .pp-fact{display:block;text-align:center}
-  .spp .pp-ask .pp-fact+.pp-fact{margin-top:6px}
-  .spp .pp-ask .pp-dot{display:none}
   .spp .pp-qa{grid-template-columns:1fr}
 }

@@ -41,6 +41,21 @@ describe('Spaces pricing facts', () => {
     }
   });
 
+  test('every card has three rows, so the cards line up', () => {
+    expect(PLAN_CARDS.map((card) => card.includes.length)).toEqual([3, 3, 3]);
+  });
+
+  test("the Free card's member and guest limits are the ones the answers use", () => {
+    const free = PLAN_CARDS.find((card) => card.id === 'free')?.includes ?? [];
+    const members = free.map((row) => /^Up to (\d+) members$/.exec(row)?.[1]).find(Boolean);
+    const guests = free.map((row) => /^Up to (\d+) guests$/.exec(row)?.[1]).find(Boolean);
+    expect(members).toBeDefined();
+    expect(guests).toBeDefined();
+    const answers = QUESTIONS.map((item) => item.answer).join(' ');
+    expect(answers).toContain(`Free holds up to ${guests} guests.`);
+    expect(answers).toContain(`for up to ${members} members and ${guests} guests`);
+  });
+
   test("the Team card's member limit is the one the questions use", () => {
     const limit = PRICED_PLANS.team.memberLimit;
     const team = PLAN_CARDS.find((card) => card.id === 'team');

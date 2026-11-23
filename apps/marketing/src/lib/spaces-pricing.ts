@@ -29,7 +29,7 @@ export const PRICED_PLANS: Readonly<Record<PricedPlan, PricedPlanFacts>> = {
 
 export const YEARLY_SAVING = 'one month free, 8 percent off';
 export const REFUND_WINDOW_DAYS = 14;
-export const UNLIMITED_FACTS = ['Unlimited agents', 'Unlimited guests'] as const;
+export const UNDER_CARDS = 'Unlimited agents';
 const AGENTS_UNLIMITED_WORDS = 'Agents are unlimited and free on every plan, and do not count as members.';
 
 export const INTERVAL_WORDS: Readonly<Record<BillingInterval, string>> = {
@@ -104,9 +104,9 @@ const WHO: Readonly<Record<PricedPlan, string>> = {
 };
 
 const INCLUDES: Readonly<Record<PricedPlan, readonly string[]>> = {
-  free: ['Everything in Spaces', room('free')],
-  team: [`Up to ${TEAM_MEMBERS} members`, room('team')],
-  team_unlimited: ['Any number of members', room('team_unlimited')],
+  free: ['Up to 3 members', 'Up to 3 guests', room('free')],
+  team: [`Up to ${TEAM_MEMBERS} members`, 'Unlimited guests', room('team')],
+  team_unlimited: ['Any number of members', 'Unlimited guests', room('team_unlimited')],
 };
 
 export interface PlanPrice {
@@ -150,7 +150,7 @@ export const QUESTIONS: readonly PricingQuestion[] = [
   },
   {
     question: 'What about clients and partners?',
-    answer: 'People you invite from outside the team are free and do not count as members.',
+    answer: 'People you invite from outside the team are free and do not count as members. Free holds up to 3 guests. Paid plans have no limit.',
   },
   {
     question: `What happens at ${TEAM_MEMBERS + 1} members?`,
@@ -158,7 +158,7 @@ export const QUESTIONS: readonly PricingQuestion[] = [
   },
   {
     question: 'What is free?',
-    answer: `Everything in Spaces, with ${room('free')}. ${NAMES.free} is a plan, not a trial.`,
+    answer: `Everything in Spaces, for up to 3 members and 3 guests, with ${room('free')}. ${NAMES.free} is a plan, not a trial.`,
   },
   {
     question: 'What counts as storage?',
