@@ -2,11 +2,11 @@
  * Who gets the reply in a thread with more than one agent (approval "inbox-reply-recipient"), and when that choice
  * holds. The owner's decision of 2026-11-21, "Yes, follow until I type or pick": while the reply is empty and the
  * person has not picked, it goes to the agent that wrote last (`followedSession`), so an agent writing while the
- * thread is open moves it. The moment the reply holds anything (a character, a file, a comment, an answer picked or
- * still saving, dictation under way, a saved draft) or the person picks (the list, the Reply arrow), it holds,
- * whatever arrives after: it never changes under words being written. Emptied again without a pick (the words
- * deleted, a Send), it follows again; a pick holds until a Send, the box closed with no draft, or another thread (as
- * a pick always did).
+ * thread is open moves it. The moment the reply holds anything (a character, a file, a comment, a quote, an answer
+ * picked or still saving, dictation under way, a saved draft) or the person picks (the list, the Reply arrow), it
+ * holds, whatever arrives after: it never changes under words being written. Emptied again without a pick or a
+ * draft's choice (the words deleted, a Send), it follows again; a pick, and a choice a draft brought back, hold until
+ * a Send, the box closed with no draft (a Discard), or another thread (as a pick always did).
  */
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { isInboxPermissionSession } from '@plannotator/core/inbox-permission';
@@ -83,7 +83,7 @@ export function useReplyAim(input: {
   follow: string | null;
   text: ReplyText;
   /**
-   * Anything else the reply holds: files, comments, answers picked (a pick still saving too), dictation under way,
+   * Anything else the reply holds: files, comments, a quote, answers picked (a pick still saving too), dictation under way,
    * a draft's words or files with the box closed.
    */
   carries: boolean;
@@ -130,13 +130,14 @@ export function useReplyAim(input: {
     setListOpen(false);
   }, [threadId]);
   // Fixed before the paint (and before any Send can read it) the moment the box holds something; following again
-  // once it is empty again, unless the person picked.
+  // once it is empty again, only when what fixed it was the box's content: a pick holds, and so does a draft's
+  // choice (a pick, or words, that came back after a reload or another thread), until a Send or a Discard.
   const held = useRef(holds);
   useLayoutEffect(() => {
     const was = held.current;
     held.current = holds;
     if (holds && aim === null && lead) setAim({ ids: [lead], by: 'words' });
-    else if (!holds && was && aim !== null && aim.by !== 'pick') setAim(null);
+    else if (!holds && was && aim?.by === 'words') setAim(null);
     // Without the control it is whom the words go to (`follow` is the words' default then), so a second agent
     // writing into a one-agent thread mid-reply shows the chip on that one. What stands in for a fixed choice this
     // window cannot use (a restored draft's unknown lead) stays put too.

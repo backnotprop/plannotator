@@ -1135,11 +1135,28 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   );
   /** Whether a session can be the first recipient (a typed tag's, not in the list, is live). */
   const rcptAlone = (id: string) => rcptAgents.find((r) => r.session === id)?.alone !== false;
+  const saveOpenDraft = () => {
+    const text = replyText.get();
+    const files = replyFiles.draftFiles(text);
+    if (boxRef.current.open && (text.trim() !== '' || files.length > 0)) replyDraft.save(text, files);
+  };
+  const { quote, quoteRef, quotedMessage, setQuote, forgetQuote, removeQuote, jumpToQuote, quoteWordsAtPress } = useReplyQuote({
+    threadId: thread.thread_id,
+    messages: thread.messages,
+    replyDraft,
+    boxOpen: box.open,
+    boxOpenNow: () => boxRef.current.open,
+    saveDraft: saveOpenDraft,
+    announce,
+    textRef,
+    bodyRef,
+    jumpToMessage: (messageId) => jumpTo({ kind: 'message', messageId }),
+  });
   // The choice (thread/replyAim.ts): the first answers its own latest message, the rest ride as tags. It follows the
   // agent that wrote last until the box holds something or the person picks; kept with the draft (its `recipients`).
   const rcptAim = useReplyAim({
     threadId: thread.thread_id, active: pillActive, boxOpen: box.open, boxOpenNow: () => boxRef.current.open, follow: followedSession(thread, rcptAgents, rcptDefault), text: replyText,
-    carries: replyFiles.files.length > 0 || records.length > 0 || thread.messages.some(answersItself) || [...pending.values()].some(Boolean) || voice.busy || (!box.open && (keptWords !== '' || draftPastes > 0)), saved: replyDraft.draft?.recipients, hasDraft: !!replyDraft.draft,
+    carries: replyFiles.files.length > 0 || records.length > 0 || thread.messages.some(answersItself) || [...pending.values()].some(Boolean) || voice.busy || quote !== null || (!box.open && (keptWords !== '' || draftPastes > 0)), saved: replyDraft.draft?.recipients, hasDraft: !!replyDraft.draft,
   });
   const { listOpen: rcptOpen, setListOpen: setRcptOpen } = rcptAim;
   /**
@@ -1168,29 +1185,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     if (pillActive) replyDraft.aim(rcptAim.picked);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rcptAim.picked, pillActive]);
-  const saveOpenDraft = () => {
-    const text = replyText.get();
-    const files = replyFiles.draftFiles(text);
-    if (boxRef.current.open && (text.trim() !== '' || files.length > 0)) replyDraft.save(text, files);
-  };
   const aimReply = (pick: readonly string[]) => {
     rcptAim.pick(pick);
     rcptAsked.current = false;
     replyDraft.aim(pick);
     saveOpenDraft();
   };
-  const { quote, quoteRef, quotedMessage, setQuote, forgetQuote, removeQuote, jumpToQuote, quoteWordsAtPress } = useReplyQuote({
-    threadId: thread.thread_id,
-    messages: thread.messages,
-    replyDraft,
-    boxOpen: box.open,
-    boxOpenNow: () => boxRef.current.open,
-    saveDraft: saveOpenDraft,
-    announce,
-    textRef,
-    bodyRef,
-    jumpToMessage: (messageId) => jumpTo({ kind: 'message', messageId }),
-  });
 
   const noteId = `ib-asker-note-${thread.thread_id}`;
   const conflictId = `ib-draft-conflict-${thread.thread_id}`;

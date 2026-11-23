@@ -584,6 +584,67 @@ test.skipIf(!hasDom)('typed (no pick), to another thread and back after an agent
   expect(named(el)).toBe('Pi');
 });
 
+test.skipIf(!hasDom)('a pick that comes back with its draft (another thread and back, or a reload) holds after its words are deleted; a Discard or a Send lets it follow again', async () => {
+  const X = growing(message(M1, CLAUDE, 41), message(M2, PI, 45));
+  const el = await render(X.thread);
+  await openBox(el);
+  await pick(el, 'ses_claude');
+  await write(el, 'Half a thought');
+  await settle(1100);
+  const other = 'msg_01M4H9ZZZZZZZZZZZZZZZZZZZZ';
+  act(() => draw({ ...threadOf({ ...message(other, CLAUDE, 30), thread_id: other, reply_to: null }), thread_id: other }));
+  await settle();
+  await settle();
+  act(() => X.add(message(M3, PI, 47)));
+  await settle();
+  await settle();
+  expect(field(el)?.value).toBe('Half a thought');
+  expect(named(el)).toBe('Claude Code');
+  await write(el, '');
+  act(() => X.add(message(M4, PI, 48)));
+  await settle();
+  expect(named(el)).toBe('Claude Code');
+  // Discard: the box closes, and the next one follows the newest writer.
+  act(() => (el.querySelector('[data-reply-discard]') as HTMLButtonElement).click());
+  await settle();
+  await openBox(el);
+  expect(named(el)).toBe('Pi');
+  act(() => root?.unmount());
+  host?.remove();
+  posted = [];
+
+  // A reload: the draft comes back with the pick, the words are deleted, and it still holds until a Send.
+  savedDraft = { v: 1, thread_id: M1, body: 'Still on it?', created_at: '2026-11-01T10:46:00.000Z', updated_at: '2026-11-01T10:46:00.000Z', recipients: ['ses_claude'] };
+  const t = growing(message(M1, CLAUDE, 41), message(M2, PI, 45));
+  const again = await render(t.thread);
+  expect(named(again)).toBe('Claude Code');
+  await write(again, '');
+  act(() => t.add(message(M3, PI, 47)));
+  await settle();
+  expect(named(again)).toBe('Claude Code');
+  await write(again, 'Done.');
+  await send(again);
+  expect(answered()).toEqual([M1]);
+  await openBox(again);
+  expect(named(again)).toBe('Pi');
+});
+
+test.skipIf(!hasDom)('a quote alone holds the chip: the Reply arrow on the person\'s own message, nothing typed, and a newer agent message moves nothing; taking the quote away follows again', async () => {
+  const t = growing(message(M1, CLAUDE, 41), message(M2, PERSON, 43), message(M3, PI, 45));
+  const el = await render(t.thread);
+  act(() => (el.querySelector(`[data-message-article="${M2}"] button[aria-label="Reply"]`) as HTMLButtonElement).click());
+  await settle();
+  expect(el.querySelector(`[data-reply-quote="${M2}"]`)).not.toBeNull();
+  expect(field(el)?.value).toBe('');
+  expect(named(el)).toBe('Pi');
+  act(() => t.add(message(M4, CLAUDE, 47)));
+  await settle();
+  expect(named(el)).toBe('Pi');
+  act(() => (el.querySelector('[data-reply-quote-remove]') as HTMLButtonElement).click());
+  await settle();
+  expect(named(el)).toBe('Claude Code');
+});
+
 test.skipIf(!hasDom)('the followed agent ends while the box is empty: the chip still names the newest writer, now marked ended, and follows the next one', async () => {
   const t = growing(message(M1, CLAUDE, 41), message(M2, PI, 45));
   const el = await render(t.thread);
