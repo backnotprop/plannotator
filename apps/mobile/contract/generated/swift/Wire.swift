@@ -4876,6 +4876,7 @@ public struct InboxListRow: Codable, Hashable, Sendable {
   public var unsent: InboxRowUnsent?
   public var waitingSince: String?
   public var pinnedAt: String?
+  public var actedAt: String?
   public var tags: [String]?
   public var snoozed: InboxRowSnooze?
   public var priority: InboxRowPriority?
@@ -4914,9 +4915,9 @@ public struct InboxListRow: Codable, Hashable, Sendable {
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["project", "machine", "thread_name", "latest_preview", "section", "session_ended", "unread", "answered_not_sent", "unsent", "waiting_since", "pinned_at", "tags", "snoozed", "priority", "snooze_back", "steps_waiting", "pulls", "hide_pulls", "unseen", "sent", "participants", "last_agent_at", "last_agent", "guide", "guide_walkthrough", "addressee", "run", "combining", "read_at", "ack", "agent_after_archive", "back_from_archive", "reask_pending", "delivery", "waits", "thread_id", "project_id", "subject", "author", "created_at", "last_at", "last_author", "message_count", "resolved_at", "questions", "waiting_on_person"]
+  static let knownKeys: Set<String> = ["project", "machine", "thread_name", "latest_preview", "section", "session_ended", "unread", "answered_not_sent", "unsent", "waiting_since", "pinned_at", "acted_at", "tags", "snoozed", "priority", "snooze_back", "steps_waiting", "pulls", "hide_pulls", "unseen", "sent", "participants", "last_agent_at", "last_agent", "guide", "guide_walkthrough", "addressee", "run", "combining", "read_at", "ack", "agent_after_archive", "back_from_archive", "reask_pending", "delivery", "waits", "thread_id", "project_id", "subject", "author", "created_at", "last_at", "last_author", "message_count", "resolved_at", "questions", "waiting_on_person"]
 
-  public init(project: InboxListRowProject, machine: String? = nil, threadName: String? = nil, latestPreview: String? = nil, section: InboxSectionId, sessionEnded: Bool? = nil, unread: Bool, answeredNotSent: Bool, unsent: InboxRowUnsent? = nil, waitingSince: String? = nil, pinnedAt: String? = nil, tags: [String]? = nil, snoozed: InboxRowSnooze? = nil, priority: InboxRowPriority? = nil, snoozeBack: String? = nil, stepsWaiting: Bool? = nil, pulls: InboxThreadPullsSummary? = nil, hidePulls: [String]? = nil, unseen: Double, sent: InboxListRowSent? = nil, participants: [InboxParticipant]? = nil, lastAgentAt: String? = nil, lastAgent: InboxListRowLastAgent? = nil, guide: Bool, guideWalkthrough: Bool? = nil, addressee: InboxAddressee? = nil, run: InboxListRowRun? = nil, combining: Bool? = nil, readAt: String? = nil, ack: InboxListRowAck? = nil, agentAfterArchive: Bool? = nil, backFromArchive: Bool? = nil, reaskPending: Bool? = nil, delivery: InboxRowDelivery? = nil, waits: [InboxRowWait]? = nil, threadId: ThreadID, projectId: ProjectID, subject: String? = nil, author: InboxAuthor, createdAt: String, lastAt: String, lastAuthor: InboxListRowLastAuthor, messageCount: Int64, resolvedAt: String? = nil, questions: InboxQuestionSummary, waitingOnPerson: Bool, unknownFields: [String: JSONValue] = [:]) {
+  public init(project: InboxListRowProject, machine: String? = nil, threadName: String? = nil, latestPreview: String? = nil, section: InboxSectionId, sessionEnded: Bool? = nil, unread: Bool, answeredNotSent: Bool, unsent: InboxRowUnsent? = nil, waitingSince: String? = nil, pinnedAt: String? = nil, actedAt: String? = nil, tags: [String]? = nil, snoozed: InboxRowSnooze? = nil, priority: InboxRowPriority? = nil, snoozeBack: String? = nil, stepsWaiting: Bool? = nil, pulls: InboxThreadPullsSummary? = nil, hidePulls: [String]? = nil, unseen: Double, sent: InboxListRowSent? = nil, participants: [InboxParticipant]? = nil, lastAgentAt: String? = nil, lastAgent: InboxListRowLastAgent? = nil, guide: Bool, guideWalkthrough: Bool? = nil, addressee: InboxAddressee? = nil, run: InboxListRowRun? = nil, combining: Bool? = nil, readAt: String? = nil, ack: InboxListRowAck? = nil, agentAfterArchive: Bool? = nil, backFromArchive: Bool? = nil, reaskPending: Bool? = nil, delivery: InboxRowDelivery? = nil, waits: [InboxRowWait]? = nil, threadId: ThreadID, projectId: ProjectID, subject: String? = nil, author: InboxAuthor, createdAt: String, lastAt: String, lastAuthor: InboxListRowLastAuthor, messageCount: Int64, resolvedAt: String? = nil, questions: InboxQuestionSummary, waitingOnPerson: Bool, unknownFields: [String: JSONValue] = [:]) {
     self.project = project
     self.machine = machine
     self.threadName = threadName
@@ -4928,6 +4929,7 @@ public struct InboxListRow: Codable, Hashable, Sendable {
     self.unsent = unsent
     self.waitingSince = waitingSince
     self.pinnedAt = pinnedAt
+    self.actedAt = actedAt
     self.tags = tags
     self.snoozed = snoozed
     self.priority = priority
@@ -4979,6 +4981,7 @@ public struct InboxListRow: Codable, Hashable, Sendable {
     self.unsent = try c.decodeIfPresent(InboxRowUnsent.self, forKey: WireKey("unsent"))
     self.waitingSince = try c.decodeIfPresent(String.self, forKey: WireKey("waiting_since"))
     self.pinnedAt = try c.decodeIfPresent(String.self, forKey: WireKey("pinned_at"))
+    self.actedAt = try c.decodeIfPresent(String.self, forKey: WireKey("acted_at"))
     self.tags = try c.decodeIfPresent([String].self, forKey: WireKey("tags"))
     self.snoozed = try c.decodeIfPresent(InboxRowSnooze.self, forKey: WireKey("snoozed"))
     self.priority = try c.decodeIfPresent(InboxRowPriority.self, forKey: WireKey("priority"))
@@ -5030,6 +5033,7 @@ public struct InboxListRow: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.unsent, forKey: WireKey("unsent"))
     try c.encode(self.waitingSince, forKey: WireKey("waiting_since"))
     try c.encodeIfPresent(self.pinnedAt, forKey: WireKey("pinned_at"))
+    try c.encodeIfPresent(self.actedAt, forKey: WireKey("acted_at"))
     try c.encodeIfPresent(self.tags, forKey: WireKey("tags"))
     try c.encodeIfPresent(self.snoozed, forKey: WireKey("snoozed"))
     try c.encodeIfPresent(self.priority, forKey: WireKey("priority"))

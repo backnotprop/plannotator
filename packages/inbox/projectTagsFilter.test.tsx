@@ -98,6 +98,7 @@ function ListHarness({ route }: { route: Route }) {
     hideAway: false,
     openedHere: { current: new Set() },
     heldOpen: () => null,
+    listSort: { epoch: 0, keep: null },
     heldRead: new Set(),
     tags: { listTags: [WORK], across: null, rowOf: () => undefined, showError: () => {}, showToast: () => {}, dismissToast: () => {}, refreshList: async () => {}, openTag: () => {}, tagGone: () => {} },
   });

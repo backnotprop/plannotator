@@ -195,6 +195,7 @@ packages/inbox/tidyMenu.test.tsx
 packages/inbox/listLook.test.tsx
 packages/inbox/threadPanel.test.tsx
 packages/inbox/listViewMenu.test.tsx
+packages/inbox/listRecentHolds.test.tsx
 packages/inbox/agentsView/agentsList.test.tsx
 packages/inbox/archivedGroup.test.tsx
 packages/inbox/lineLatch.test.tsx
@@ -916,5 +917,6 @@ packages/inbox/reaskAllList.test.tsx
 packages/ui/utils/diagramLabelScrub.test.ts
 packages/ui/utils/diagramRemoteLoads.test.ts
 packages/review-editor/components/DiffViewer.selectionClears.test.tsx
+packages/inbox/components/diffControlsWholeFile.test.tsx
 packages/inbox/commentBoxFiles.test.tsx
 packages/inbox/commentRowFiles.test.tsx

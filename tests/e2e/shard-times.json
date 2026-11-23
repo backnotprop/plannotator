@@ -171,6 +171,7 @@
   "inbox-q-open-items.spec.ts": 127,
   "inbox-question-before-after.spec.ts": 8,
   "inbox-reask.spec.ts": 99,
+  "inbox-recent-activity-filter.spec.ts": 10,
   "inbox-ref-cards.spec.ts": 18,
   "inbox-refresh.spec.ts": 11,
   "inbox-reload-hosts.spec.ts": 24,
