@@ -4,8 +4,8 @@
  * slot serving captured Chromium svgs, Pele for real (it needs no DOM).
  *
  * What regresses if these fail:
- * - the shipped switch no longer draws every fence with Mermaid, or it loads
- *   Pele at all;
+ * - the shipped switch no longer draws with Pele every fence Pele can draw,
+ *   or it asks Mermaid for one;
  * - `PELE_CAPABILITIES` no longer says what a click on a part does under each
  *   engine (the data a quiet fallback reads);
  * - `'pele-where-safe'` draws with Pele a fence that would lose its part
@@ -28,7 +28,7 @@ import { installInertDiagramSvgParser } from '../test-setup/diagramSvg';
 import { loadRealPele, setPeleInBuildForTests } from '../test-setup/pele';
 import { AnnotationType, type Annotation, type Block } from '../types';
 import { MERMAID_FINDER, type DiagramTarget } from '../utils/diagram-anchor';
-import { PELE_FINDER } from '../utils/diagram-anchor-pele';
+import { PELE_COMPAT_FINDER, PELE_FINDER } from '../utils/diagram-anchor-pele';
 import { diagramFinder } from '../utils/diagram-render';
 import {
   __setDiagramEngineModeForTests,
@@ -201,26 +201,23 @@ async function commentOnAPart(type: CaseType, mode: DiagramEngineMode, pick?: (s
   return { engine: engineOf(svg), annotation: added[0]! };
 }
 
-describe.if(hasDom)('diagram engine: the shipped switch is Mermaid', () => {
-  test('every fence is drawn by Mermaid, Pele is never imported, and the finder is Mermaid\'s own', async () => {
-    expect(DIAGRAM_ENGINE_MODE).toBe('mermaid');
-    // The shipped build's own state: Pele not in it (the suite puts it back after).
+describe.if(hasDom)("diagram engine: the shipped switch is 'pele-where-safe'", () => {
+  test('Pele draws every fence it can, Mermaid draws none of them, and the finder reads both engines', async () => {
+    expect(DIAGRAM_ENGINE_MODE).toBe('pele-where-safe');
+    // The shipped build's own state: its own Pele loader, no override (the suite puts its own back after).
     setPeleInBuildForTests(false);
     try {
-      let peleImports = 0;
-      __setPeleRuntimeLoaderForTests(() => {
-        peleImports += 1;
-        return Promise.reject(new Error('Pele must not load'));
-      });
-      for (const type of Object.keys(CASES) as CaseType[]) {
-        await mount(<MermaidBlock block={fence(CASES[type].source)} annotations={[]} onAddAnnotation={noop} />);
+      const before = mermaidRenders;
+      const others = ['pie title Pets\n  "Dogs" : 3\n  "Cats" : 2', 'gantt\n  title Plan\n  dateFormat YYYY-MM-DD\n  Build :a1, 2026-01-01, 3d'];
+      for (const source of [...Object.values(CASES).map((c) => c.source), ...others]) {
+        await mount(<MermaidBlock block={fence(source)} annotations={[]} onAddAnnotation={noop} />);
         await waitFor(() => drawn());
-        expect(engineOf(drawn())).toBe('mermaid');
+        expect(engineOf(drawn())).toBe('pele');
         await act(async () => root!.unmount());
         root = null;
       }
-      expect(peleImports).toBe(0);
-      expect(diagramFinder('mermaid')).toBe(MERMAID_FINDER);
+      expect(mermaidRenders).toBe(before);
+      expect(diagramFinder('mermaid')).toBe(PELE_COMPAT_FINDER);
     } finally {
       setPeleInBuildForTests(true);
     }
@@ -315,6 +312,49 @@ describe.if(hasDom)('diagram engine: a comment anchored under one engine restore
       expect(host!.querySelector('[data-diagram-badge="e1"]')).not.toBeNull();
       await waitFor(() => expect(reports.length).toBeGreaterThan(0));
       expect(reports[reports.length - 1]!.unanchored).toEqual([]);
+      await act(async () => root!.unmount());
+      root = null;
+    }
+  });
+
+  // What regresses: under the shipped switch, a comment saved on one of two
+  // edges between the same nodes shows "Unanchored", and a new click on
+  // either becomes a whole-diagram comment.
+  test('two flowchart edges between the same nodes: Mermaid-saved comments restore under Pele, and a click on either is an edge comment', async () => {
+    const block = fence('flowchart LR\n  A[Ask] -->|yes| B[Ship]\n  A -->|no| B');
+    const yes = stored(block, 'y1', { v: 1, family: 'flowchart', kind: 'edge', from: 'A', to: 'B', label: 'yes', sourceLine: [5, 5] }, 'yes');
+    const no = stored(block, 'n1', { v: 1, family: 'flowchart', kind: 'edge', from: 'A', to: 'B', label: 'no', sourceLine: [6, 6] }, 'no');
+    const reports: AnnotationRestoreReport[] = [];
+    await mount(<MermaidBlock block={block} annotations={[yes, no]} onRestoreReport={(r) => reports.push(r)} />);
+    await waitFor(() => expect(host!.querySelector('[data-diagram-badge="y1"]')).not.toBeNull());
+    expect(engineOf(drawn())).toBe('pele');
+    expect(host!.querySelector('[data-diagram-badge="n1"]')).not.toBeNull();
+    await waitFor(() => expect(reports.length).toBeGreaterThan(0));
+    expect(reports.at(-1)!.unanchored).toEqual([]);
+    await act(async () => root!.unmount());
+    root = null;
+
+    for (const label of ['yes', 'no']) {
+      const added: Annotation[] = [];
+      await mount(<MermaidBlock block={block} annotations={[]} onAddAnnotation={(a) => added.push(a)} />);
+      await waitFor(() => drawn());
+      const svg = drawn();
+      const edge = Array.from(svg.querySelectorAll('g.pele-edge[data-id]')).find((el) => PELE_FINDER.targetFromElement(svg, el, svg.id)?.label === label);
+      expect(edge).toBeDefined();
+      const line = edge!.querySelector('path:not(.pele-marker)')!;
+      await act(async () => {
+        pointer('pointerdown', line);
+        pointer('pointerup', line);
+      });
+      await waitFor(() => expect(host!.querySelector('[data-diagram-composer] textarea')).not.toBeNull());
+      const textarea = host!.querySelector<HTMLTextAreaElement>('[data-diagram-composer] textarea')!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, 'a note');
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      });
+      await waitFor(() => expect(added).toHaveLength(1));
+      expect(added[0]!.diagramAnchor).toMatchObject({ family: 'flowchart', kind: 'edge', from: 'A', to: 'B', label });
       await act(async () => root!.unmount());
       root = null;
     }

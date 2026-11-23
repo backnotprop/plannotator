@@ -141,7 +141,9 @@ function noSourcePane(): Plugin {
  * (anchorClaims) is provided and read inside the engine only. React and the
  * runtimes must not be bundled either, nor Pele's library while the engine
  * switch is 'mermaid' (packages/ui/PELE.md): this build inlines every dynamic
- * import, so a reachable dynamic import of pele/lazy would put all of Pele here. */
+ * import, so a reachable dynamic import of pele/lazy puts all of Pele here.
+ * As shipped ('pele-where-safe') that is wanted: the engine draws with Pele,
+ * and fetches the Mermaid runtime file only for a fence that falls back. */
 function guardBundle(): Plugin {
   const forbidPele = DIAGRAM_ENGINE_MODE === 'mermaid';
   const ownContexts = new Set([normalizePath(path.join(uiRoot, 'components/diagram/anchorClaims.ts'))]);

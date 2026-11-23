@@ -1,8 +1,8 @@
 /**
  * Math and styled text in diagram labels drawn by Pele (`packages/ui/utils/pele-labels.ts`),
  * in a real browser: only a browser lays out MathML, measures text and paints a foreignObject.
- * The shipped switch keeps Pele out of every build, so this spec bundles `diagram-render.ts`
- * itself with the switch forced to Pele (`test-setup/pele.ts`) and KaTeX filled as Plannotator's
+ * This spec bundles `diagram-render.ts` itself with the switch forced to Pele
+ * (`test-setup/pele.ts`), whatever the shipped switch says, and KaTeX filled as Plannotator's
  * apps fill it. Runs in Chromium and WebKit (playwright.config.ts).
  *
  * What regresses if these fail: a `$$…$$` label under Pele prints its TeX or nothing, its

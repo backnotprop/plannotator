@@ -9,8 +9,10 @@
  *    words, or one token per line of height for taller math, on lines of its
  *    own (`<br>`). Each styled HTML run (`<span style="color:…">`,
  *    `<font color>`, `<u>`, `<ins>`, `<s>`, `<del>`, `<strike>`, `<code>`,
- *    `<kbd>`) becomes a start and an end marker with its tags removed;
- *    pictures (`<img>`) and Font Awesome icons (`fa:fa-…`) are dropped.
+ *    `<kbd>`) becomes a start and an end marker with its tags removed; a
+ *    picture (`<img>`) or Font Awesome icon (`fa:fa-…`) beside words is
+ *    dropped (a label that is only one is a Pele failure, so under
+ *    `'pele-where-safe'` Mermaid draws the fence, picture included).
  * 2. `peleLabelMeasurer(base, prepared)` wraps the text measurer Pele is
  *    given: a math token measures as its typeset width, a marker as nothing,
  *    and text inside a `<code>` run in the mono font. Pele therefore reserves
@@ -652,6 +654,9 @@ function mathObject(doc: Document, m: PeleMath, box: { x: number; y: number; w: 
   fo.setAttribute('y', round(box.y));
   fo.setAttribute('width', round(box.w + 2));
   fo.setAttribute('height', round(box.h));
+  // Firefox paints a script past the width it reports for the formula (the 2
+  // of `\sum i^2`), and a foreignObject clips at its own box by default.
+  fo.setAttribute('style', 'overflow:visible');
   const div = doc.createElementNS(XHTML_NS, 'div');
   div.setAttribute(
     'style',
