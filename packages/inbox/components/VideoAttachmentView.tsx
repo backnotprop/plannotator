@@ -134,14 +134,24 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
   // read again as it closes.
   const waiting = useRowDraft(() => {
     const kept = files.kept();
-    return readOnly || (sentWords.current === text && kept.length === 0) ? null : { kind: 'row', text, markup, time: pinned, frame: frameRef.current?.blob ?? null, files: kept };
+    const late = files.flying();
+    return readOnly || (sentWords.current === text && kept.length === 0 && late.length === 0) ? null : { kind: 'row', text, markup, time: pinned, frame: frameRef.current?.blob ?? null, files: kept, late };
   });
   const [text, setText] = useState(waiting?.text ?? '');
   const [pinned, setPinned] = useState<number | null>(waiting?.time ?? null);
   const [frame, setFrame] = useState<Frame | null>(() => (waiting?.frame ? { blob: waiting.frame, url: URL.createObjectURL(waiting.frame) } : null));
   const [markup, setMarkup] = useState<ImageAttachment | null>(waiting?.markup ?? null);
   // Pictures and files added to the comment (the reply box's paperclip, paste and drop): they go with its words.
-  const files = useCommentFiles({ initial: waiting?.files, phone, inCard: fullComposer !== null, focus: () => textRef.current?.focus({ preventScroll: true }) });
+  const textNow = useRef(text);
+  textNow.current = text;
+  const files = useCommentFiles({
+    initial: waiting?.files,
+    late: waiting?.late,
+    phone,
+    inCard: fullComposer !== null,
+    focus: () => textRef.current?.focus({ preventScroll: true }),
+    text: { get value() { return textNow.current; }, set: setText },
+  });
   /** The row's words as a save took them: the file closing before the save answers (and the row clears) keeps no draft of them. */
   const sentWords = useRef<string | null>(null);
   const sendRow = async (annotation: Annotation) => {
@@ -261,14 +271,15 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
     return next;
   }, [pinned, current, replaceFrame, audio]);
 
-  const reset = () => {
+  /** The row starts over; its added files go too unless `keepFiles` (they did not ride the comment just saved). */
+  const reset = (keepFiles = false) => {
     setText('');
     setPinned(null);
     setMarkup(null);
     setKept(null);
     replaceFrame(null);
     setComposing(false);
-    files.clear();
+    if (!keepFiles) files.clear();
   };
 
   const shownTime = pinned ?? current;
@@ -302,7 +313,8 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
       return;
     }
     setMarkup(null);
-    if (words) reset();
+    // Files still uploading did not go with the words: they stay in the row for the next comment.
+    if (words) reset(added.length === 0);
     else {
       setText('');
       setKept({ id, image, time });
@@ -463,7 +475,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
       )}
       {files.clip}
       {phone && !fullComposer && (
-        <button type="button" className="ib-btn ib-ccancel" onClick={reset} data-video-cancel="">
+        <button type="button" className="ib-btn ib-ccancel" onClick={() => reset()} data-video-cancel="">
           Cancel
         </button>
       )}
@@ -519,7 +531,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
       setPlaying(true);
       // Playing on after a drawing went into the reply: the row follows the film again (the comment stays);
       // never while a redraw that failed to save waits in the row.
-      if (kept && text.trim() === '' && !markup) reset();
+      if (kept && text.trim() === '' && !markup && files.ready === 0 && !files.uploading) reset();
     },
     onPause: () => {
       setPlaying(false);

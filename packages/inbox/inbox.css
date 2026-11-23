@@ -8660,11 +8660,12 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 .ib-fcomp[data-drop-over] { border-style: dashed; border-color: var(--primary); }
 /* A comment's own files (commentFiles.tsx): the reply's paperclip after the pencil, the reply's tiles over the field. */
 .ib-fcomp .ib-ccard > :is(.ib-cclip, .ib-tipwrap:has(> .ib-cclip)) { grid-area: clip; }
-.ib-fcomp .ib-ccard > .ib-cfiles { grid-area: files; padding: 8px 2px 0; max-height: min(136px, 22vh); overflow-y: auto; overscroll-behavior: contain; }
+.ib-fcomp .ib-ccard > .ib-cfiles { grid-area: files; }
 /* Beside the thread: the tiles take their own line over the row, the paperclip the row's 34 px (44 on a phone). */
 .ib-imgcompose .ib-ccard { position: relative; }
 .ib-imgcompose .ib-ccard:has(> .ib-cfiles) { flex-wrap: wrap; }
-.ib-imgcompose .ib-ccard > .ib-cfiles { flex: 0 0 100%; padding: 2px 2px 4px; }
+/* Beside the thread the tiles are the reply box's compact chips, under the words (`order`), capped and scrolled as its region is. */
+.ib-imgcompose .ib-ccard > .ib-cfiles { flex: 0 0 100%; order: 1; max-height: max(150px, calc(52vh - 120px)); overflow-y: auto; overscroll-behavior: contain; }
 .pn-inbox .ib-imgcompose .ib-cclip { width: 34px; height: 34px; padding: 0; cursor: pointer; }
 .pn-inbox .ib-imgcompose .ib-cclip:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
 .ib-imgcompose .ib-ccard > .ib-rdrop { border-radius: var(--ib-r12-s, 12px); }
@@ -11373,12 +11374,12 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 .ib-pfoot .ib-rscroll :is(.ib-ranswer-p, .ib-ranswer-a) { unicode-bidi: plaintext; }
 .ib-pfoot .ib-rscroll .ib-ranswers { margin-inline: 14px; }
 /* Files (D2): compact chips that wrap, the name cut in the middle, the kind and size under it. */
-.ib-pfoot .ib-rscroll .ib-rfiles { padding: 2px 12px 6px; }
-.ib-pfoot .ib-rscroll .ib-rfiles .ib-cp-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 0; }
-.ib-pfoot .ib-rscroll .ib-rfiles .ib-cp-file { flex: 1 1 190px; max-width: 280px; gap: 8px; padding: 4px 2px 4px 6px; border-radius: 9px; }
-.ib-pfoot .ib-rscroll .ib-rfiles .ib-cp-file .ib-fi { width: 28px; height: 28px; border-radius: 6px; }
-.ib-pfoot .ib-rscroll .ib-rfiles .ib-cp-file .ib-nm { font-size: var(--ib-fs-12-5, 12.5px); }
-.ib-pfoot .ib-rscroll .ib-rfiles .ib-cp-file .ib-kd { font-size: var(--ib-fs-11-5, 11.5px); }
+:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard) .ib-rfiles { padding: 2px 12px 6px; }
+:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard) .ib-rfiles .ib-cp-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 0; }
+:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard) .ib-rfiles .ib-cp-file { flex: 1 1 190px; max-width: 280px; gap: 8px; padding: 4px 2px 4px 6px; border-radius: 9px; }
+:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard) .ib-rfiles .ib-cp-file .ib-fi { width: 28px; height: 28px; border-radius: 6px; }
+:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard) .ib-rfiles .ib-cp-file .ib-nm { font-size: var(--ib-fs-12-5, 12.5px); }
+:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard) .ib-rfiles .ib-cp-file .ib-kd { font-size: var(--ib-fs-11-5, 11.5px); }
 /* The close chevron over the region's top right, on its own ground, so words scrolling under it never show through. */
 /* Clear of a classic (always shown) scrollbar on the scroll region: `--ib-rsb` is its width (Thread.tsx), 0 for overlay scrollbars. */
 .pn-inbox .ib-rclose {
@@ -11492,7 +11493,7 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
   .pn-inbox .ib-pfoot .ib-rbox { border-radius: 18px; }
   .ib-rscroll { max-height: max(120px, calc(46dvh - 130px)); }
   .ib-pfoot .ib-rscroll :is(.ib-rtext, .ib-rmirror) { padding: 13px 52px 6px 14px; }
-  .ib-pfoot .ib-rscroll .ib-rfiles .ib-cp-file { flex-basis: 100%; max-width: none; }
+  :is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard) .ib-rfiles .ib-cp-file { flex-basis: 100%; max-width: none; }
   .pn-inbox .ib-rclose { top: 4px; right: 4px; width: 44px; height: 44px; }
   .ib-rquote { padding: 12px 52px 0 14px; }
   .ib-rquote-x { width: 32px; height: 32px; margin: -6px -6px 0 0; }

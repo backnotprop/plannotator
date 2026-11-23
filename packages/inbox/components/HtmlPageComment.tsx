@@ -88,7 +88,12 @@ export function useHtmlPageComment({ enabled, fileKey, threadId, name, viewer, t
   const expected = useRef<string | null>(null);
   /** Pictures and files added to the comment (a phone's card: the paperclip and a paste). They go with its words. */
   const fieldRef = useRef<HTMLTextAreaElement | null>(null);
-  const files = useCommentFiles({ phone: true, inCard: true, focus: () => fieldRef.current?.focus({ preventScroll: true }) });
+  const files = useCommentFiles({
+    phone: true,
+    inCard: true,
+    focus: () => fieldRef.current?.focus({ preventScroll: true }),
+    text: { get value() { return wordsRef.current; }, set: setWords },
+  });
   const clearFiles = files.clear;
   /** Files wait in the card: as words do, they keep it open. */
   const holdsFiles = useRef(false);
@@ -297,7 +302,7 @@ function HtmlCommentCard({
 }
 
 /** Where a page row's words (and the files added to it) wait while the row is off screen and the file still open (a linked page over it). */
-export type PageCommentParking = { current: { key: string; text: string; files?: readonly InboxUpload[] } | null };
+export type PageCommentParking = { current: { key: string; text: string; files?: readonly InboxUpload[]; late?: readonly Promise<InboxUpload | null>[] } | null };
 
 /** A fresh id for a comment on the whole page. */
 function pageCommentId(): string {
@@ -338,14 +343,22 @@ export function HtmlPageCommentRow({
   const wordsRef = useRef('');
   const waiting = useRowDraft(() => {
     const kept = filesRef.current?.kept() ?? [];
-    return sentWords.current === wordsRef.current && kept.length === 0 ? null : { kind: 'row', text: wordsRef.current, markup: null, files: kept };
+    const late = filesRef.current?.flying() ?? [];
+    return sentWords.current === wordsRef.current && kept.length === 0 && late.length === 0 ? null : { kind: 'row', text: wordsRef.current, markup: null, files: kept, late };
   });
   const [parked] = useState(() => (parking.current?.key === fileKey ? parking.current : null));
   const [words, setWords] = useState(() => waiting?.text ?? parked?.text ?? '');
   wordsRef.current = words;
   const fieldRef = useRef<HTMLTextAreaElement | null>(null);
   // Pictures and files added to the comment (the reply box's paperclip, paste and drop): they go with its words.
-  const files = useCommentFiles({ initial: waiting?.files ?? parked?.files, phone: usePhone(), inCard: true, focus: () => fieldRef.current?.focus({ preventScroll: true }) });
+  const files = useCommentFiles({
+    initial: waiting?.files ?? parked?.files,
+    late: waiting?.late ?? parked?.late,
+    phone: usePhone(),
+    inCard: true,
+    focus: () => fieldRef.current?.focus({ preventScroll: true }),
+    text: { get value() { return wordsRef.current; }, set: setWords },
+  });
   const filesRef = useRef(files);
   filesRef.current = files;
   const [saving, setSaving] = useState(false);
@@ -356,7 +369,8 @@ export function HtmlPageCommentRow({
     return () => {
       const text = wordsRef.current;
       const kept = filesRef.current.kept();
-      parking.current = text.trim() !== '' && sentWords.current !== text ? { key: fileKey, text, files: kept } : kept.length > 0 ? { key: fileKey, text: '', files: kept } : null;
+      const late = filesRef.current.flying();
+      parking.current = text.trim() !== '' && sentWords.current !== text ? { key: fileKey, text, files: kept, late } : kept.length > 0 || late.length > 0 ? { key: fileKey, text: '', files: kept, late } : null;
     };
   }, [fileKey, parking]);
 

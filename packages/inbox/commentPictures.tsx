@@ -48,7 +48,7 @@ export function CommentPictures({ thread, records, children }: { thread: string;
   const transport = useMemo(() => commentPictureTransport(machine, () => pictureFileNames(recordsRef.current)), [machine]);
   const drafts = useMemo(() => (machine ? null : commentDraftHost(thread)), [machine, thread]);
   // A file's own comment row (an image's, a film's, an HTML page's) takes files through the reply box's parts (commentFiles.tsx).
-  const files = useMemo(() => commentFilesHost(machine, (name) => freshName(name, pictureFileNames(recordsRef.current))), [machine]);
+  const files = useMemo(() => commentFilesHost(machine, (name) => freshName(name, pictureFileNames(recordsRef.current)), (name) => named.delete(name)), [machine]);
   return (
     <CommentFilesContext.Provider value={files}>
     <CommentUploadContext.Provider value={transport}>

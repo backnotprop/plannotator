@@ -149,7 +149,8 @@ export function ImageAttachmentView({
   // Words (and a drawing) the box held when this file last closed: back in it, and read again as it closes.
   const waiting = useRowDraft(() => {
     const files = commentFiles.kept();
-    return readOnly || (sentWords.current === text && files.length === 0) ? null : { kind: 'row', text, markup, files };
+    const late = commentFiles.flying();
+    return readOnly || (sentWords.current === text && files.length === 0 && late.length === 0) ? null : { kind: 'row', text, markup, files, late };
   });
   const [text, setText] = useState(waiting?.text ?? suggestion ?? '');
   const [markup, setMarkup] = useState<ImageAttachment | null>(waiting?.markup ?? null);
@@ -225,7 +226,16 @@ export function ImageAttachmentView({
   // whole on a phone; a tall screenshot fits its width from the top.
   const phone = usePhone();
   // Pictures and files added to the comment (the reply box's paperclip, paste and drop): they go with its words.
-  const commentFiles = useCommentFiles({ initial: waiting?.files, phone, inCard: composer !== null, focus: () => textRef.current?.focus({ preventScroll: true }) });
+  const textNow = useRef(text);
+  textNow.current = text;
+  const commentFiles = useCommentFiles({
+    initial: waiting?.files,
+    late: waiting?.late,
+    phone,
+    inCard: composer !== null,
+    focus: () => textRef.current?.focus({ preventScroll: true }),
+    text: { get value() { return textNow.current; }, set: setText },
+  });
   const wide = natural !== null && natural.width > natural.height * WIDE_IMAGE_RATIO;
   const tall = natural !== null && natural.height > natural.width * 2;
   const fitAxis: FitAxis = natural ? imageFitAxis(natural, phone) : 'contain';

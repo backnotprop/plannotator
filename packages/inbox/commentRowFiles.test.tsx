@@ -12,6 +12,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAnnotationRecord, InboxAttachmentState, InboxUpload } from '@plannotator/core/inbox-types';
 import type { CommentFilesHost } from './commentFiles';
 import { imageCommentAnnotation } from './attachments';
+import { clearFileDrafts } from './fileCommentDrafts';
 import type { InboxToastModel } from './components/Toast';
 
 const hasDom = typeof document !== 'undefined';
@@ -20,13 +21,19 @@ const { CommentFilesContext } = (hasDom ? await import('./commentFiles') : {}) a
 
 /** The uploads this test's uploader took, in order (no network: each answers at once). */
 let uploaded: InboxUpload[] = [];
+/** While set, every upload waits for it (a slow upload); `refuseUploads` makes each fail; `storedAs` renames the stored file. */
+let uploadGate: Promise<void> | null = null;
+let refuseUploads = false;
+let storedAs: ((name: string) => string) | null = null;
 const host_: CommentFilesHost = {
   machine: null,
   uploader: {
     upload: async (file) => {
+      if (uploadGate) await uploadGate;
+      if (refuseUploads) throw new Error('refused');
       const upload: InboxUpload = {
         upload_id: `upl_01JD2Q9V8Y6K3M4N5P7R8S9T0${uploaded.length}`,
-        name: file.name,
+        name: storedAs ? storedAs(file.name) : file.name,
         size: file.size,
         kind: file.type.startsWith('image/') ? 'image' : 'text',
         sha256: String(uploaded.length).repeat(64).slice(0, 64),
@@ -261,8 +268,28 @@ async function dragOn(target: Element, type: 'dragover' | 'drop', files: File[])
 }
 
 beforeEach(() => {
+  // A row's draft is window memory: one test's open row never reaches the next.
+  clearFileDrafts();
   uploaded = [];
+  uploadGate = null;
+  refuseUploads = false;
+  storedAs = null;
 });
+
+/** A gate for the uploads: they wait until `open()`. */
+function holdUploads() {
+  let open = () => {};
+  uploadGate = new Promise<void>((resolve) => {
+    open = () => {
+      uploadGate = null;
+      resolve();
+    };
+  });
+  return async () => {
+    open();
+    await settle();
+  };
+}
 
 test.skipIf(!hasDom)('no Inbox uploads above the pane (the tour): the row has no paperclip, and a paste is left to the field', async () => {
   await render(<Harness attachment={shot} uploads={false} />);
@@ -353,4 +380,138 @@ test.skipIf(!hasDom)('a film’s row takes files too: Comment keeps them after i
   expect(tiles()).toHaveLength(0);
   const card = $(`[data-annotation-id="${comment!.id}"]`)!;
   expect(card.querySelector(`[data-comment-added] img[src*="${uploaded[0]!.upload_id}"]`)).not.toBeNull();
+});
+
+// ── The review's cases (2026-11-22): uploads still on their way, a refused one, a failed save, the film's ✓ and play. ──
+
+const press = (key: string) => act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
+const states = () => tiles().map((t) => t.getAttribute('data-compose-file'));
+
+async function openAndDraw() {
+  await act(async () => $<HTMLButtonElement>('[data-markup-open]')!.click());
+  await settle();
+  const stage = $('[data-pn-image-annotator-stage]')!;
+  await act(async () => stage.querySelector('img')!.dispatchEvent(new Event('load')));
+  const canvas = stage.querySelector('canvas')!;
+  for (const [type, x] of [['pointerdown', 10], ['pointermove', 30], ['pointermove', 50], ['pointerup', 50]] as const) {
+    await act(async () => canvas.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: x, clientY: x, pointerId: 1 })));
+  }
+}
+
+async function renderFilm() {
+  stub(HTMLMediaElement.prototype, 'pause', { value: () => {}, writable: true });
+  stub(HTMLMediaElement.prototype, 'currentTime', {
+    get(this: { _t?: number }) {
+      return this._t ?? 0;
+    },
+    set(this: { _t?: number }, value: number) {
+      this._t = value;
+    },
+  });
+  stub(HTMLVideoElement.prototype, 'videoWidth', { get: () => 1920 });
+  stub(HTMLVideoElement.prototype, 'videoHeight', { get: () => 1080 });
+  await render(<Harness attachment={film} />);
+  const video = $<HTMLVideoElement>('video[data-video-player]')!;
+  video.currentTime = 102.4;
+  await act(async () => video.dispatchEvent(new Event('timeupdate', { bubbles: true })));
+}
+
+test.skipIf(!hasDom)('Comment waits while a file uploads; the finished tile says the name the agent gets; a refused one stays out of the comment', async () => {
+  await render(<Harness attachment={shot} />);
+  const open = holdUploads();
+  storedAs = (name) => name.replace('.png', '-2.png');
+  await choose(clipInput()!, [picture('shot.png')]);
+  await typeInto($<HTMLTextAreaElement>('[data-image-composer] textarea')!, 'Crop it.');
+  const save = () => $<HTMLButtonElement>('[data-image-comment-save]')!;
+  expect(states()).toEqual(['uploading']);
+  expect(save().disabled).toBe(true);
+  await open();
+  expect(states()).toEqual(['done']);
+  expect(tiles()[0]!.getAttribute('data-compose-file-name')).toBe('shot-2.png');
+  expect(save().disabled).toBe(false);
+  // A refused upload: its tile says so and the comment goes without it.
+  refuseUploads = true;
+  await choose(clipInput()!, [picture('broken.png')]);
+  expect(states()).toEqual(['done', 'refused']);
+  await act(async () => save().click());
+  await settle();
+  expect((saved()[0]!.images as { path: string }[]).map((i) => i.path)).toEqual([`${uploaded[0]!.upload_id}/shot-2.png`]);
+});
+
+test.skipIf(!hasDom)('a save that fails keeps the words and the files in the row; the next Comment carries them', async () => {
+  await render(<Harness attachment={shot} />);
+  await choose(clipInput()!, [picture('legend.png')]);
+  await typeInto($<HTMLTextAreaElement>('[data-image-composer] textarea')!, 'The legend is cut off.');
+  failSaves = true;
+  await act(async () => $<HTMLButtonElement>('[data-image-comment-save]')!.click());
+  await settle();
+  expect(saved()).toHaveLength(0);
+  expect(states()).toEqual(['done']);
+  expect($<HTMLTextAreaElement>('[data-image-composer] textarea')!.value).toBe('The legend is cut off.');
+  failSaves = false;
+  await act(async () => $<HTMLButtonElement>('[data-image-comment-save]')!.click());
+  await settle();
+  expect((saved()[0]!.images as { name: string }[]).map((i) => i.name)).toEqual(['legend']);
+  expect(tiles()).toHaveLength(0);
+});
+
+test.skipIf(!hasDom)('the ✓ with words while a file uploads drops nothing: the files stay in the row for the next comment', async () => {
+  await render(<Harness attachment={shot} />);
+  await choose(clipInput()!, [picture('first.png')]);
+  const open = holdUploads();
+  await choose(clipInput()!, [picture('second.png')]);
+  await typeInto($<HTMLTextAreaElement>('[data-image-composer] textarea')!, 'Like this.');
+  await openAndDraw();
+  await press('Enter');
+  await settle();
+  // One file still uploading: none go with the drawing, and none are dropped.
+  expect(saved()).toHaveLength(1);
+  expect((saved()[0]!.images as { path: string }[]).every((i) => !i.path.startsWith('upl_'))).toBe(true);
+  expect(states()).toEqual(['done', 'uploading']);
+  await open();
+  expect(states()).toEqual(['done', 'done']);
+});
+
+test.skipIf(!hasDom)('a film: the ✓ with words while a file uploads keeps the files in the row', async () => {
+  await renderFilm();
+  const open = holdUploads();
+  await choose(clipInput()!, [picture('cut.png')]);
+  await typeInto($<HTMLTextAreaElement>('[data-video-composer] textarea')!, 'The logo is clipped.');
+  await openAndDraw();
+  await press('Enter');
+  await settle();
+  expect(saved()).toHaveLength(1);
+  expect(states()).toEqual(['uploading']);
+  await open();
+  expect(states()).toEqual(['done']);
+});
+
+test.skipIf(!hasDom)('a film: files attached for the note after a wordless ✓ stay when the film plays on', async () => {
+  await renderFilm();
+  await openAndDraw();
+  await press('Enter');
+  await settle();
+  expect(saved()).toHaveLength(1);
+  await choose(clipInput()!, [picture('note.png')]);
+  await act(async () => $<HTMLVideoElement>('video[data-video-player]')!.dispatchEvent(new Event('play')));
+  expect(states()).toEqual(['done']);
+  // Without files the row follows the film again, as before.
+  await act(async () => tiles()[0]!.querySelector<HTMLButtonElement>('button')!.click());
+  await act(async () => $<HTMLVideoElement>('video[data-video-player]')!.dispatchEvent(new Event('pause')));
+  await act(async () => $<HTMLVideoElement>('video[data-video-player]')!.dispatchEvent(new Event('play')));
+  expect($('[data-video-composer] [data-markup-kept]') === null).toBe(true);
+});
+
+test.skipIf(!hasDom)('closing the file while a file uploads: the upload goes on, and its tile is in the row when the file opens again', async () => {
+  await render(<Harness attachment={shot} />);
+  const open = holdUploads();
+  await choose(clipInput()!, [picture('late.png')]);
+  expect(states()).toEqual(['uploading']);
+  await act(async () => root?.unmount());
+  root = null;
+  await open();
+  expect(uploaded.map((u) => u.name)).toEqual(['late.png']);
+  await render(<Harness attachment={shot} />);
+  await settle();
+  expect(tiles().map((t) => [t.getAttribute('data-compose-file-name'), t.getAttribute('data-compose-file')])).toEqual([['late.png', 'done']]);
 });

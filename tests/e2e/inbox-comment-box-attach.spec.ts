@@ -15,7 +15,7 @@
  * PNGs land in <PLANNOTATOR_E2E_PROOF_DIR or .local/proof>/comment-box-attach/.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
+import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -228,3 +228,113 @@ test('a phone (390 px): the paperclip is a 44 px button beside the pencil on the
     await context.close();
   }
 });
+
+/** A real ClipboardEvent on the focused element carrying one picture, as a screenshot arrives (image.png, no text). */
+async function pastePicture(page: Page, png: Buffer): Promise<boolean> {
+  return page.evaluate((b64) => {
+    const data = new DataTransfer();
+    data.items.add(new File([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], 'image.png', { type: 'image/png' }));
+    const event = new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true });
+    (document.activeElement ?? document.body).dispatchEvent(event);
+    return event.defaultPrevented;
+  }, png.toString('base64'));
+}
+
+const NOTES = { name: 'board-notes.md', mimeType: 'text/markdown', buffer: Buffer.from('# Board\n\nThe Backlog column needs a limit.\n') };
+
+/** One tile's look and where it sits against its field: what must read the same in both boxes. */
+async function tileLook(tile: Locator, field: Locator) {
+  const look = await tile.evaluate((el) => {
+    const s = getComputedStyle(el);
+    const px = (sel: string, prop: 'fontSize' | 'width' | 'height') => getComputedStyle(el.querySelector(sel)!)[prop];
+    return {
+      height: Math.round(el.getBoundingClientRect().height),
+      padding: s.padding,
+      radius: s.borderRadius,
+      gap: s.gap,
+      name: px('.ib-nm', 'fontSize'),
+      kind: px('.ib-kd', 'fontSize'),
+      icon: `${px('.ib-fi', 'width')} × ${px('.ib-fi', 'height')}`,
+    };
+  });
+  const t = (await tile.boundingBox())!;
+  const f = (await field.boundingBox())!;
+  return { ...look, underField: t.y >= f.y + f.height - 1 };
+}
+
+test('beside the thread, the comment box’s tiles are the reply box’s: the same pasted picture and file look the same, under the words', async () => {
+  const page = world.page;
+  await page.goto(fileUrl('board.png', false));
+  const thread = page.locator('section.ib-pane');
+  await thread.getByRole('button', { name: 'Reply', exact: true }).last().click();
+  const box = thread.locator('.ib-rbox');
+  const replyField = box.getByRole('textbox');
+  await expect(replyField).toBeFocused();
+  expect(await pastePicture(page, world.swatch)).toBe(true);
+  await box.locator('[data-reply-attach]').setInputFiles(NOTES);
+  await expect(box.locator('[data-compose-file="done"]')).toHaveCount(2);
+
+  const row = pane().locator('[data-image-composer] .ib-ccard');
+  const commentField = row.locator('textarea');
+  await commentField.focus();
+  expect(await pastePicture(page, world.swatch)).toBe(true);
+  await row.locator('input[data-comment-attach]').setInputFiles(NOTES);
+  await expect(row.locator('[data-compose-file="done"]')).toHaveCount(2);
+
+  for (const index of [0, 1]) {
+    const reply = await tileLook(box.locator('.ib-cp-file').nth(index), replyField);
+    const comment = await tileLook(row.locator('.ib-cp-file').nth(index), commentField);
+    expect(comment, `tile ${index + 1}`).toEqual(reply);
+    expect(comment.underField, `tile ${index + 1} under the words`).toBe(true);
+  }
+  await page.mouse.move(10, 10);
+  await shot(page, '07-reply-and-comment-light', ['light']);
+  await shot(page, '08-reply-and-comment-dark', ['dark']);
+  expect(world.errors).toEqual([]);
+  await discardReply();
+});
+
+/** The reply box's draft (its files) goes, so the next test's box starts empty. */
+async function discardReply() {
+  const page = world.page;
+  await page.goto(`${world.url}#thread=${world.threadId}`);
+  const thread = page.locator('section.ib-pane');
+  const box = thread.locator('.ib-rbox');
+  if ((await box.count()) === 0) await thread.getByRole('button', { name: /^(Reply|Edit draft)$/ }).last().click();
+  await box.locator('[data-reply-discard]').click();
+  await expect(box).toHaveCount(0);
+}
+
+for (const width of [390, 320])
+  test(`a phone (${width} px): the reply box and the comment box hold the same picture and file as the same tiles`, async ({ browser }: { browser: Browser }) => {
+    const context = await browser.newContext({ viewport: { width, height: 760 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: 'light' });
+    try {
+      const page = await context.newPage();
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      // The comment box: the picture in full screen, its Comment tab.
+      await page.goto(fileUrl('board.png'));
+      await expect(pane(page)).toHaveAttribute('data-full-view', '');
+      await card(page).getByRole('radio', { name: 'Comment' }).click();
+      const field = card(page).getByRole('textbox', { name: 'Comment on board.png' });
+      await field.focus();
+      expect(await pastePicture(page, world.swatch)).toBe(true);
+      await card(page).locator('input[data-comment-attach]').setInputFiles(NOTES);
+      await expect(card(page).locator('[data-comment-files] [data-compose-file="done"]')).toHaveCount(2);
+      // The field keeps room to write in beside the row's controls.
+      expect((await field.boundingBox())!.width).toBeGreaterThanOrEqual(120);
+      await shot(page, `09-phone-${width}-comment`, ['light']);
+      // The reply box with the same two.
+      await page.goto(`${world.url}#thread=${world.threadId}`);
+      const thread = page.locator('section.ib-pane');
+      await thread.getByRole('button', { name: 'Reply', exact: true }).last().click();
+      const box = thread.locator('.ib-rbox');
+      await box.getByRole('textbox').focus();
+      expect(await pastePicture(page, world.swatch)).toBe(true);
+      await box.locator('[data-reply-attach]').setInputFiles(NOTES);
+      await expect(box.locator('[data-compose-file="done"]')).toHaveCount(2);
+      await shot(page, `10-phone-${width}-reply`, ['light']);
+    } finally {
+      await context.close();
+    }
+    await discardReply();
+  });

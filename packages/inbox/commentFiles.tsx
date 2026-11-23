@@ -11,10 +11,12 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ClipboardEvent, type ReactNode } from 'react';
 import type { DraftFileUploader } from '@plannotator/core/inbox-reply-draft';
+import type { ComposeFilesText } from './compose/ComposeFiles';
+import { announce } from './panes/paneDrag';
 import type { InboxUpload } from '@plannotator/core/inbox-types';
 import type { ImageAttachment } from '@plannotator/ui/types';
 import { commentImageOf } from './commentPictureFiles';
-import { AttachFilesButton, ComposeFileTiles, useComposeFiles, useFileDrop } from './compose/ComposeFiles';
+import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, useComposeFiles, useFileDrop } from './compose/ComposeFiles';
 import { inboxApi, reuseAttachment, uploadFile } from './api';
 import { rememberMachine } from './inboxUrl';
 import { Icon } from './icons';
@@ -27,8 +29,11 @@ export interface CommentFilesHost {
 
 export const CommentFilesContext = createContext<CommentFilesHost | null>(null);
 
-/** The uploader for a thread's comment rows: the reply box's uploads, each named by `name` (commentPictures.tsx `freshName`). */
-export function commentFilesHost(machine: string | null, name: (file: string) => string): CommentFilesHost {
+/**
+ * The uploader for a thread's comment rows: the reply box's uploads, each named by `name` (commentPictures.tsx
+ * `freshName`); the name of an upload that failed is given back with `release`, as the comment card's transport does.
+ */
+export function commentFilesHost(machine: string | null, name: (file: string) => string, release: (file: string) => void = () => {}): CommentFilesHost {
   return {
     machine,
     uploader: {
@@ -38,6 +43,9 @@ export function commentFilesHost(machine: string | null, name: (file: string) =>
           machine,
           signal: options.signal,
           onProgress: options.onProgress,
+        }).catch((cause: unknown) => {
+          release(named);
+          throw cause;
         });
         if (machine) rememberMachine([upload.upload_id], machine);
         return upload;
@@ -100,6 +108,8 @@ export interface CommentFiles {
   ready: number;
   /** The finished uploads not on their way in a save, for the row's draft as the file closes. */
   kept: () => InboxUpload[];
+  /** Uploads still on their way, for the row's draft as the file closes (they keep going: `late`). */
+  flying: () => Promise<InboxUpload | null>[];
   /** A save carries these entries: the uploads they name are no draft's while it is on its way. The way back if it fails. */
   sending: (images: readonly ImageAttachment[] | undefined) => () => void;
   /** The comment was saved: its files go with it. */
@@ -120,10 +130,62 @@ function CommentDropTarget({ add }: { add: (list: FileList) => void }) {
  * paperclip's size and its picker (the photo library), as the reply box's. `inCard`: the row is full screen's Comment
  * tab, whose card takes the drop (the row draws `dropTarget`); beside the thread the row is its own drop target.
  */
-export function useCommentFiles({ initial, phone = false, inCard = false, focus }: { initial?: readonly InboxUpload[] | null; phone?: boolean; inCard?: boolean; focus?: () => void }): CommentFiles {
+export function useCommentFiles({
+  initial,
+  late,
+  phone = false,
+  inCard = false,
+  focus,
+  text,
+}: {
+  initial?: readonly InboxUpload[] | null;
+  /** Uploads still on their way when the row's draft was kept (the file closed mid-upload): each joins the row as it lands. */
+  late?: readonly Promise<InboxUpload | null>[] | null;
+  phone?: boolean;
+  inCard?: boolean;
+  focus?: () => void;
+  /** The row's words: a paste of 32 KB or more becomes the reply box's pasted text tile, put back into them. */
+  text?: ComposeFilesText;
+}): CommentFiles {
   const host = useContext(CommentFilesContext);
   const on = host !== null;
-  const files = useComposeFiles(initial ?? [], { machine: host?.machine ?? null, ...(host ? { uploader: host.uploader } : {}) });
+  /** Uploads on their way, for the row's draft as the file closes: they keep going and land in it. */
+  const flying = useRef(new Set<Promise<InboxUpload | null>>());
+  const uploader = useMemo<DraftFileUploader | null>(() => {
+    if (!host) return null;
+    return {
+      ...host.uploader,
+      upload: (file, options) => {
+        const going = host.uploader.upload(file, options);
+        const settled = going.then(
+          (upload) => upload,
+          () => null,
+        );
+        flying.current.add(settled);
+        void settled.finally(() => flying.current.delete(settled));
+        return going;
+      },
+    };
+  }, [host]);
+  const files = useComposeFiles(initial ?? [], {
+    machine: host?.machine ?? null,
+    ...(uploader ? { uploader } : {}),
+    // As the reply box: a paste is said in a polite live region, and a long one is a pasted text tile.
+    onPasted: (names) => announce(attachedAnnouncement(names)),
+    ...(text ? { text } : {}),
+    // The row goes (the file closed or stepped) while files upload: they keep going, for its draft (`late`).
+    onUnmountUploads: () => {},
+  });
+  const restore = files.restoreDraft;
+  useEffect(() => {
+    let live = true;
+    for (const promise of late ?? []) void promise.then((upload) => live && upload && restore([upload], '', 'add'));
+    return () => {
+      live = false;
+    };
+    // Once, as the row mounts with its draft.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const attach = useCallback((list: FileList) => (phone ? files.attach(list) : files.add(list)), [files.attach, files.add, phone]);
   const own = useFileDrop((list) => files.add(list), on && !inCard);
   // In full screen's card the drop is the card's: it hands it here.
@@ -131,9 +193,12 @@ export function useCommentFiles({ initial, phone = false, inCard = false, focus 
   const clip = on ? <AttachFilesButton className="ib-fvb ib-cclip" iconSize={phone ? 18 : 15} phone={phone} inputData="data-comment-attach" onFiles={attach} /> : null;
   const tiles =
     files.files.length > 0 ? (
-      <div className="ib-rfiles ib-cfiles" data-comment-files="">
+      // Full screen's card: the Reply tab's tile box (`ib-fcomp-files`); beside the thread, the reply box's (`ib-rfiles`).
+      <div className={`ib-rfiles ib-cfiles${inCard ? ' ib-fcomp-files' : ''}`} data-comment-files="">
         <ComposeFileTiles
-          files={files.files}
+          // A finished tile says the name the agent gets (a second shot.png is stored as shot-2.png).
+          files={files.files.map((file) => (file.upload && file.upload.name !== file.name ? { ...file, name: file.upload.name } : file))}
+          onPutBack={text ? (key) => void files.putBack(key) : undefined}
           onRemove={(key) => {
             files.remove(key);
             // The × goes with its tile: focus stays in the comment, as in the reply box.
@@ -169,6 +234,7 @@ export function useCommentFiles({ initial, phone = false, inCard = false, focus 
     uploading: files.uploading,
     ready: files.uploaded.length,
     kept: () => current().flatMap((file) => (file.state === 'done' && file.upload && !inSave.current.has(file.upload.upload_id) ? [file.upload] : [])),
+    flying: () => [...flying.current],
     sending: (images) => {
       const ids = (images ?? []).map((image) => image.path.split('/')[0]!).filter((id) => current().some((file) => file.upload?.upload_id === id));
       for (const id of ids) inSave.current.add(id);

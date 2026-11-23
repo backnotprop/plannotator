@@ -18,8 +18,8 @@ export type FileCommentDraft =
   | { kind: 'comment'; annotation: Annotation }
   /** A saved comment's edit box, its words changed and not saved. */
   | { kind: 'edit'; id: string; text: string }
-  /** The file's own comment row (an image's, a film's): its words, a drawing not yet added, a film's pinned moment and frame, the files added to it. */
-  | { kind: 'row'; text: string; markup: ImageAttachment | null; time?: number | null; frame?: Blob | null; files?: readonly InboxUpload[] };
+  /** The file's own comment row (an image's, a film's): its words, a drawing not yet added, a film's pinned moment and frame, the files added to it (`late`: still uploading as it closed). */
+  | { kind: 'row'; text: string; markup: ImageAttachment | null; time?: number | null; frame?: Blob | null; files?: readonly InboxUpload[]; late?: readonly Promise<InboxUpload | null>[] };
 
 const drafts = new Map<string, FileCommentDraft[]>();
 
@@ -51,7 +51,7 @@ export function draftHasWords(draft: FileCommentDraft): boolean {
     case 'edit':
       return true;
     case 'row':
-      return draft.text.trim() !== '' || draft.markup !== null || (draft.files?.length ?? 0) > 0;
+      return draft.text.trim() !== '' || draft.markup !== null || (draft.files?.length ?? 0) > 0 || (draft.late?.length ?? 0) > 0;
   }
 }
 
