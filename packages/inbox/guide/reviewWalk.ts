@@ -47,10 +47,12 @@ export function fileShells(root: ParentNode): HTMLElement[] {
  * review's chapter title and overview) keeps it from ever reaching the top, and J must go on to the next.
  */
 export function stepOrigin(files: readonly Span[], view: Span, atStart = false): number {
-  const viewTop = view.top;
+  // Where a jump leaves a file is not exactly the top: its scroll margin and its card's edge (30 px in a guided
+  // review's chapter). A file whose top is in the top quarter of the view is the one being read.
+  const reading = view.top + Math.max(AT_TOP, (view.bottom - view.top) / 4);
   let origin = atStart && files[0] && files[0].top < view.bottom ? 0 : -1;
   for (const [i, file] of files.entries()) {
-    if (file.top > viewTop + AT_TOP) break;
+    if (file.top > reading) break;
     origin = i;
   }
   return origin;

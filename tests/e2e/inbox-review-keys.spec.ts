@@ -56,33 +56,6 @@ const atTop = (page: Page, path: string) =>
     return (top < 200 && top > -40) || (top > 0 && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2);
   });
 
-/** What the review's keys see, printed with the run: the focus, what stops them, the scroller and the files. */
-const probe = (page: Page, label: string) =>
-  page.evaluate((label) => {
-    const scrollerOf = (el: Element) => {
-      for (let parent = el.parentElement; parent; parent = parent.parentElement) {
-        const overflow = getComputedStyle(parent).overflowY;
-        if (overflow === 'auto' || overflow === 'scroll') return parent;
-      }
-      return document.scrollingElement as HTMLElement;
-    };
-    const shells = [...document.querySelectorAll<HTMLElement>('[data-guide-file-shell]')];
-    const scroller = shells[0] ? scrollerOf(shells[0]) : null;
-    const marker = document.querySelector('[data-review-keys]');
-    const last = (window as { __lastKey?: unknown }).__lastKey;
-    return JSON.stringify({
-      label,
-      active: `${document.activeElement?.tagName}.${(document.activeElement as HTMLElement | null)?.className ?? ''}`,
-      dialogs: [...document.querySelectorAll('dialog[open], [role="dialog"], [aria-modal="true"]')].map((el) => `${el.tagName}.${el.className}`),
-      layers: [...document.querySelectorAll('[data-shape-layer]')].map((el) => `${el.getAttribute('data-shape-layer')} hidden=${!!el.closest('[hidden]')}`),
-      toolbars: document.querySelectorAll('[data-pn-annotation-toolbar-row], [data-quick-label-picker]').length,
-      root: marker?.closest('[data-pull-review], [data-review-message], [data-local-diff]')?.tagName ?? null,
-      scroller: scroller && { cls: scroller.className, top: scroller.scrollTop, height: scroller.clientHeight, scrollHeight: scroller.scrollHeight },
-      shells: shells.map((shell) => ({ path: shell.dataset.guideFileShell, hidden: !!shell.closest('[hidden]'), top: Math.round(shell.getBoundingClientRect().top) })),
-      last,
-    });
-  }, label).then((line) => console.log(`review-keys probe ${line}`));
-
 /** Keys from the page itself, as after a click on nothing in particular. */
 async function fromThePage(page: Page): Promise<void> {
   await expect(page.locator('[data-review-keys]')).toHaveCount(1);
@@ -96,23 +69,14 @@ async function walk(page: Page, picture?: string): Promise<void> {
   const [FIRST, SECOND] = await filesOf(page);
   expect(SECOND).toBeTruthy();
   expect(await placeOf(page, SECOND!)).toBeGreaterThan(600);
-  // Whether each key was taken (a listener after every other, on the way out of the page).
-  await page.evaluate(() => {
-    window.addEventListener('keydown', (event) => {
-      (window as { __lastKey?: unknown }).__lastKey = { key: event.key, taken: event.defaultPrevented, target: (event.target as Element | null)?.tagName };
-    });
-  });
 
   // Home: the first file at the top of the view, from further down. J: the next file there; K back. The route (the
   // thread, the PR) stays.
   await page.locator(`[data-guide-file-shell="${SECOND}"]`).evaluate((shell) => shell.scrollIntoView({ block: 'start' }));
   await expect.poll(() => placeOf(page, FIRST!)).toBeLessThan(-100);
-  await probe(page, 'before Home');
   await page.keyboard.press('Home');
-  await probe(page, 'after Home');
   await expect.poll(() => placeOf(page, FIRST!)).toBeLessThan(60);
   await page.keyboard.press('j');
-  await probe(page, 'after J');
   await expect.poll(() => atTop(page, SECOND!)).toBe(true);
   await expect(page.locator(`[data-guide-file-shell="${SECOND}"]`)).toBeInViewport();
   await page.keyboard.press('k');

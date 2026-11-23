@@ -293,9 +293,12 @@ describe.skipIf(!hasDom)('the review’s keys in the Inbox', () => {
     expect(stepOrigin([{ top: 200, bottom: 300 }], { top: 0, bottom: VIEW })).toBe(-1);
     // At the start of the view, a first file held below the top by what is drawn above it (a chapter's title) counts
     // as reached, so J goes on to the next; out of view, or scrolled, it does not.
-    expect(stepOrigin([{ top: 60, bottom: 300 }, { top: 300, bottom: 800 }], { top: 0, bottom: VIEW }, true)).toBe(0);
+    expect(stepOrigin([{ top: 150, bottom: 300 }, { top: 300, bottom: 800 }], { top: 0, bottom: VIEW }, true)).toBe(0);
     expect(stepOrigin([{ top: 500, bottom: 900 }], { top: 0, bottom: VIEW }, true)).toBe(-1);
-    expect(stepOrigin([{ top: 60, bottom: 300 }], { top: 0, bottom: VIEW }, false)).toBe(-1);
+    expect(stepOrigin([{ top: 150, bottom: 300 }], { top: 0, bottom: VIEW }, false)).toBe(-1);
+    // Where a jump leaves a file in a guided review's chapter (30 px down, its margin and its card's edge): that file is
+    // the one being read, so J goes on to the next and never back to it.
+    expect(stepOrigin([{ top: 76, bottom: 2600 }, { top: 2605, bottom: 3400 }], { top: 46, bottom: 893 })).toBe(0);
     expect(activeFile(files, { top: 0, bottom: VIEW })).toBe(1);
     expect(fileStep('next', -1, 3)).toBe(0);
     expect(fileStep('next', 2, 3)).toBe(2);
