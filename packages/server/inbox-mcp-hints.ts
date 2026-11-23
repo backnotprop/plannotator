@@ -11,8 +11,9 @@
  *     2026-11-15). A number it does not know yet is looked up after the send
  *     (inbox-pull-lookups.ts); a PR found so is named on that agent's next
  *     send in the thread.
- *  2. `question_options`: the body asks a question with two or more choices,
- *     and no question in it has a `Pros:`, `Cons:` or `Prototype:` line. Said
+ *  2. `question_options`: the body asks a question with three or more
+ *     choices, and no question in it has a `Pros:`, `Cons:` or `Prototype:`
+ *     line or a scenario table. Said
  *     once per session (`agent_session`, which every connection fills with
  *     the host's own session id; see inbox-session-reads.ts); a send with no
  *     session never gets it.
@@ -313,11 +314,12 @@ export function attachPullText(refs: readonly InboxThreadPullRef[]): string {
 }
 
 /**
- * Whether the body asks a pick-one or pick-several question with two or more
- * choices while no question in it has a `Pros:`, `Cons:` or `Prototype:` line
- * (under a choice, or the block's shared `Prototype:`). Read from the format
- * only: a yes/no question counts like any other. A free-text question and a
- * `:::action` block never count. Pure; never throws.
+ * Whether the body asks a pick-one or pick-several question with three or
+ * more choices (approval "question-scenario-table", 2026-11-23; two before)
+ * while no question in it has a `Pros:`, `Cons:` or `Prototype:` line (under
+ * a choice, or the block's shared `Prototype:`) or a scenario table. Read
+ * from the format only. A free-text question and a `:::action` block never
+ * count. Pure; never throws.
  */
 export function questionWithBareOptions(body: string): boolean {
   if (typeof body !== "string" || !body.includes(":::question")) return false;
@@ -328,13 +330,13 @@ export function questionWithBareOptions(body: string): boolean {
     return false;
   }
   const asked = blocks.filter((q) => q.kind === "single" || q.kind === "multi");
-  if (!asked.some((q) => q.parsed.choices.length >= 2)) return false;
-  return !asked.some((q) => q.parsed.prototype || q.parsed.choices.some((c) => (c.pros?.length ?? 0) > 0 || (c.cons?.length ?? 0) > 0 || c.prototype));
+  if (!asked.some((q) => q.parsed.choices.length >= 3)) return false;
+  return !asked.some((q) => q.parsed.prototype || q.parsed.scenarios || q.parsed.choices.some((c) => (c.pros?.length ?? 0) > 0 || (c.cons?.length ?? 0) > 0 || c.prototype));
 }
 
-/** The options line (the approved words). */
+/** The options line (the approved words; replaced by approval "question-scenario-table", 2026-11-23). */
 export const QUESTION_OPTIONS_HINT =
-  "If it helps the person choose, options can carry pros and cons, and a prototype they can try: `Pros:`, `Cons:` and `Prototype:` lines indented under a choice (send_message's body says how).";
+  "If the choice is not obvious, help the person compare: `Pros:` and `Cons:` under each choice; a `Prototype:` line for an option you built or run; and when the best choice depends on the situation, a table after `Why:` (a row per situation, a column per choice, cells `<verdict> — <detail>`).";
 
 /**
  * The quiet hint this send's answer carries, or null; the thread (for each PR

@@ -168,6 +168,7 @@
   "inbox-pull-sheets-webkit.spec.ts": 3,
   "inbox-q-open-items.spec.ts": 127,
   "inbox-question-before-after.spec.ts": 8,
+  "inbox-question-scenarios.spec.ts": 12,
   "inbox-reask.spec.ts": 99,
   "inbox-ref-cards.spec.ts": 18,
   "inbox-refresh.spec.ts": 11,
