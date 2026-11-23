@@ -1,6 +1,7 @@
 /** The route written back to the address, as a new history entry or in place. */
 
 import { systemHashOf } from '../system/route';
+import { localHashOf } from '../pulls/localRoute';
 import { sheetLayoutHash } from '../prs/tableModel';
 import { pushScreen, whileWritingRoute } from '../history';
 import { withFullMark, type FullMark } from '../fullScreenOrigin';
@@ -33,6 +34,7 @@ export function hashOf(route: Route): string {
       (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${viewScopeHash(route.scope)}` : '') +
       (!route.layer && route.backLayer ? `&back=${encodeURIComponent(route.backLayer)}` : '') +
       systemHashOf(route) +
+      localHashOf(route) +
       (route.new ? '&new' : '');
   else if (route.page === 'prs')
     hash =

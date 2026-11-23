@@ -19,6 +19,7 @@ import { HostTitle } from "./HostTitle";
 import { AuthorColorText } from "./AuthorColorText";
 import { matchAuthorColor } from "../utils/authorColor";
 import { plainTextLinkSpans, usePlainTextLinkers } from "../utils/refCardProviders";
+import { proseRefLinkProps } from "../utils/refCardClick";
 import { autolinkMayFollow, autolinkRunningPast, emailMayFollow, findWwwAutolinks, matchEmailAutolink, matchHtmlEntity, matchWwwAutolink, wwwAutolinkHref } from "../utils/inlineAutolinks";
 import { FOOTNOTE_REF_RE, footnoteKey } from "../utils/footnotes";
 import { FootnoteRef, useFootnoteScope } from "./footnotes/footnoteScope";
@@ -413,6 +414,7 @@ function emitPlainTextWithBareUrls(
           href={span.href ?? span.value}
           target="_blank"
           rel="noopener noreferrer"
+          {...proseRefLinkProps(span.href ?? span.value)}
           className="text-primary underline underline-offset-2 hover:text-primary/80"
         >
           {span.value}
@@ -878,6 +880,7 @@ export const InlineMarkdown: React.FC<{
               href={safe}
               target="_blank"
               rel="noopener noreferrer"
+              {...proseRefLinkProps(safe)}
               className="text-primary underline underline-offset-2 hover:text-primary/80"
             >
               {url}
@@ -933,6 +936,7 @@ export const InlineMarkdown: React.FC<{
             href={crossRepoRef.href}
             target="_blank"
             rel="noopener noreferrer"
+            {...proseRefLinkProps(crossRepoRef.href)}
             className="text-primary font-medium hover:underline"
           >
             {crossRepoRef.label}
@@ -974,6 +978,7 @@ export const InlineMarkdown: React.FC<{
           href={url}
           target="_blank"
           rel="noopener noreferrer"
+          {...proseRefLinkProps(url)}
           className="text-primary underline underline-offset-2 hover:text-primary/80"
         >
           {url}
@@ -1210,6 +1215,7 @@ export const InlineMarkdown: React.FC<{
               href={href}
               target="_blank"
               rel="noopener noreferrer"
+              {...proseRefLinkProps(href)}
               className="text-primary font-medium hover:underline"
             >
               {label}

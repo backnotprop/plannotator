@@ -214,8 +214,9 @@ import { isAddressInUseError } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
 import { markPlannotatorResponse, withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT, inboxMcpInitializeClient, resolveInboxMcpReminder, type InboxMcpClient, type InboxMcpContext } from "./inbox-mcp";
-import { guidePatchOf, guidePullKey, guideRevisionOf, inboxGuideFileContents, inboxGuideRoute } from "./inbox-guides";
+import { guideReviewOf, guidePullKey, inboxGuideFileContents, inboxGuideRoute } from "./inbox-guides";
 import { guideReviewImage, pullReviewImage, reviewImageHttp } from "./inbox-review-image";
+import { guideReviewMarkdownImage, pullReviewMarkdownImage } from "./inbox-review-markdown-image";
 import { createInboxRepoCache } from "./inbox-repos";
 import { createGitlabHosts, unnamedForgeHost, type GitlabHosts } from "./inbox-gitlab-hosts";
 import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-refs";
@@ -366,6 +367,7 @@ import { createInboxPullStates, createInboxReviewIndex, readInboxReviewLink } fr
 import { INBOX_PULL_ASKS, inboxPullRiskAutoOf, inboxPullRefOfKey, inboxPullUrlOfKey, isInboxPullAsk, type InboxPull, type InboxPullLink } from "@plannotator/core/inbox-types";
 import { inboxThreadPullsSummary, parseInboxThreadPullRef, type InboxThreadPull } from "@plannotator/core/inbox-types";
 import { readInboxReviewChanges } from "./inbox-review-changes";
+import { BranchDiffTooLarge, createInboxLocalWork, localBranchInPull } from "./inbox-local-work";
 import { createInboxBranchService } from "./inbox-branch-service";
 import { inboxFarBranchReviewRow } from "@plannotator/core/inbox-branch-reports";
 import { runtime as gitRuntime } from "./git";
@@ -834,7 +836,7 @@ const ERROR_STATUS: Record<string, number> = {
   question_revision_conflict: 409,
   question_already_sent: 409,
   // Replaced questions: answering one the agent superseded, or superseding
-  // an id that names no open question of the thread.
+  // an id that names no question of the thread.
   question_superseded: 422,
   invalid_supersedes: 422,
   // A pick on a question a Mark read closed: Move back first.
@@ -1603,6 +1605,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   // Reviews (inbox-reviews.ts): every thread with a review card, derived from the store's messages on read.
   const reviewIndex = createInboxReviewIndex(store);
+  // Reviews' "On this computer" (inbox-local-work.ts): the projects newest activity first, and a branch with an open PR
+  // (or, with Branch reviews on, an agent's report) left to its own row.
+  const localWork = createInboxLocalWork({
+    runtime: gitRuntime,
+    projects: () => {
+      const seen = new Map<string, InboxProject>();
+      for (const row of store.listRows()) {
+        const project = row.project?.id ? store.project(store.canonicalProjectId(row.project.id)) : null;
+        if (project && !seen.has(project.id)) seen.set(project.id, project);
+      }
+      for (const project of store.listProjects().reverse()) if (!seen.has(project.id)) seen.set(project.id, project);
+      return [...seen.values()];
+    },
+    skip: (projectId, branch, head) =>
+      (!!lastReviewsRead && localBranchInPull(lastReviewsRead.listed.pulls, lastReviewsRead.projectsByRepo, store.canonicalProjectId(projectId), branch, head)) ||
+      (branchReviewsOn() && branchService.reported(projectId, branch)),
+  });
   let lastReviewsRead: { projectsByRepo: Awaited<ReturnType<typeof pullProjects>>["projectsByRepo"]; wanted: Awaited<ReturnType<typeof pullProjects>>["wanted"]; listed: Awaited<ReturnType<typeof pulls.list>> } | null = null;
   // A review thread's PR that left the list: one read of its state, so a closed PR, or one merged long ago, is recorded.
   // A PR's owner as the lists use it. A thread archived before any review came is no one's to curate: its PR is
@@ -6260,7 +6279,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         pullHiddenChanged();
         return json({ serverSession, hidden: hiddenList(), hidden_repos: pullHidden.repos(), hid: hide.map((pull) => pull.key), rehid, threads_left: left, threads_back: back });
       }
-      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes" || path === "/api/inbox/pulls/review-image") {
+      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes" || path === "/api/inbox/pulls/review-image" || path === "/api/inbox/pulls/review-markdown-image") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
@@ -6330,12 +6349,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         // One side of a changed image, for the review app's own image preview on the PR page (inbox-review-image.ts):
         // only a file the diff at the head the window names changes, every check the shared handler's.
-        if (path === "/api/inbox/pulls/review-image") {
+        // And a picture a changed Markdown file shows, for code review's rendered view (inbox-review-markdown-image.ts).
+        if (path === "/api/inbox/pulls/review-image" || path === "/api/inbox/pulls/review-markdown-image") {
           const key = url.searchParams.get("key") ?? "";
           const scoped = pullDiffScopeOf(url.searchParams);
           if (!scoped) throw new InboxError("validation_error", "scope: layer, stack, range with from (a layer's key) or since with from (a commit).", { field: "scope" });
           if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
-          return reviewImageHttp(await pullReviewImage({ pulls, key, scope: scoped.scope, ...(scoped.from ? { from: scoped.from } : {}), params: url.searchParams, roots: () => pullRoots(key), ifNoneMatch: req.headers.get("if-none-match"), signal: req.signal }));
+          const asked = { pulls, key, scope: scoped.scope, ...(scoped.from ? { from: scoped.from } : {}), params: url.searchParams, roots: () => pullRoots(key), ifNoneMatch: req.headers.get("if-none-match"), signal: req.signal };
+          return reviewImageHttp(await (path === "/api/inbox/pulls/review-image" ? pullReviewImage(asked) : pullReviewMarkdownImage(asked)));
         }
         if (path === "/api/inbox/pulls/file") {
           const key = url.searchParams.get("key") ?? "";
@@ -6483,36 +6504,53 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const project = store.project(url.searchParams.get("project") ?? "");
         const changes = url.searchParams.get("changes");
         if (!project || (changes !== "uncommitted" && changes !== "last" && changes !== "branch")) return json({ error: "A project and which changes.", code: "validation_error" }, 400);
-        // Branch reviews: a named branch's whole diff (the safety net's Start a review), not the checked-out one's.
-        const branch = changes === "branch" && branchReviewsOn() ? url.searchParams.get("branch") : null;
-        return json(await readInboxReviewChanges(project.root, changes, branch && inboxPullSafeBranch(branch) ? branch : null));
+        // A named branch's whole diff (Reviews' "On this computer": a branch's Review with an agent), not the checked-out one's.
+        const branch = changes === "branch" ? url.searchParams.get("branch") : null;
+        // A branch's diff that can't be read, or is past its cap, is said so, never "No changes" (the box would move To).
+        return await readInboxReviewChanges(project.root, changes, branch && inboxPullSafeBranch(branch) ? branch : null).then(json, (cause: unknown) =>
+          cause instanceof BranchDiffTooLarge ? json({ error: cause.message, code: "diff_too_large" }, 413) : json({ error: cause instanceof Error ? cause.message : "The diff could not be read.", code: "git_failed" }, 500),
+        );
       }
-      // Branch reviews (inbox-branch-service.ts): the reported branches, the by-hand list of branches nobody reported,
-      // and a reported branch's Rank. Refused before any git while Branch reviews (or Code review) is off.
-      if (path === "/api/inbox/reviews/branches" || path === "/api/inbox/reviews/branches/unreported" || path === "/api/inbox/reviews/branches/rank") {
+      // Reviews' "On this computer" (inbox-local-work.ts): this computer's work in no PR, and a row's diff, read only.
+      // The window's own reads: never through the door, never a program without the window's same-origin mark.
+      if (path === "/api/inbox/reviews/local" || path === "/api/inbox/reviews/local/diff") {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (fromDeviceDoor.get(req) || req.headers.get("sec-fetch-site")?.trim().toLowerCase() !== "same-origin") {
+          return json({ error: "Only the Inbox window reads this computer's local work.", code: "window_only" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        // `?project=`: a list filtered to one project gets all of its rows, up to the cap, whatever the others have.
+        if (path === "/api/inbox/reviews/local") return json({ serverSession, ...(await localWork.list(url.searchParams.get("project") || null)) });
+        const project = store.project(url.searchParams.get("project") ?? "");
+        const branch = url.searchParams.get("branch");
+        if (!project || (branch !== null && !inboxPullSafeBranch(branch))) return json({ error: "A project, and a branch or none.", code: "validation_error" }, 400);
+        try {
+          const answer = await localWork.diff(project, branch);
+          if (!answer) return json({ error: "This project's folder isn't a git repository on this computer.", code: "not_git" }, 404);
+          return json({ serverSession, ...answer });
+        } catch (cause) {
+          // Past the cap: said, never a cut diff.
+          if (cause instanceof BranchDiffTooLarge) return json({ error: cause.message, code: "diff_too_large" }, 413);
+          return json({ error: cause instanceof Error ? cause.message : "The diff could not be read.", code: "git_failed" }, 500);
+        }
+      }
+      // Branch reviews (inbox-branch-service.ts): the reported branches and a reported branch's Rank. Refused before any
+      // git while Branch reviews (or Code review) is off.
+      if (path === "/api/inbox/reviews/branches" || path === "/api/inbox/reviews/branches/rank") {
         const rank = path === "/api/inbox/reviews/branches/rank";
         if (req.method !== (rank ? "POST" : "GET")) return json({ error: rank ? "Use POST." : "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
         if (!branchReviewsOn()) return json({ error: "Branch reviews are off.", code: "branch_reviews_off" }, 409);
-        if (path === "/api/inbox/reviews/branches") return json({ serverSession, reports: await branchService.rows() });
-        if (rank) {
-          const body = (await readBody(req)) as { thread_id?: unknown };
-          if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-          if (!isInboxId("msg", body?.thread_id)) return json({ error: "thread_id: a reported branch's thread.", code: "validation_error" }, 400);
-          return json({ serverSession, started: await branchService.rank(body.thread_id) });
-        }
-        const project = store.project(url.searchParams.get("project") ?? "");
-        if (!project) return json({ error: "A project.", code: "validation_error" }, 400);
-        // A branch with an open PR is the PR's row: never listed here.
-        const openHeads = new Set((lastReviewsRead?.listed.pulls ?? []).filter(inboxPullIsOpen).map((pull) => pull.head));
-        try {
-          return json({ serverSession, ...(await branchService.unreported(store.project(store.canonicalProjectId(project.id)) ?? project, openHeads)) });
-        } catch {
-          // A git read that failed or ran out of time: the list says so, never "no branches".
-          return json({ error: "The branches could not be read.", code: "git_failed" }, 500);
-        }
+        if (!rank) return json({ serverSession, reports: await branchService.rows() });
+        const body = (await readBody(req)) as { thread_id?: unknown };
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        if (!isInboxId("msg", body?.thread_id)) return json({ error: "thread_id: a reported branch's thread.", code: "validation_error" }, 400);
+        return json({ serverSession, started: await branchService.rank(body.thread_id) });
       }
       // System's project setup (inbox-system-setup.ts): the projects found on this Mac with a git remote, and the
       // save of one project's setup.json. Owner only, same origin, and only while System is on.
@@ -7865,7 +7903,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
       // A guided review's image previews (inbox-review-image.ts): one side of a changed image, the blob the guide's patch
       // names, from the project's git or working tree; as for the arrows, only Code review may ask the forge.
-      const guideImage = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/guide\/review-image$/.exec(path);
+      // And a picture a changed Markdown file shows (inbox-review-markdown-image.ts), with the same readers.
+      const guideImage = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/guide\/(review-image|review-markdown-image)$/.exec(path);
       if (guideImage) {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
@@ -7885,7 +7924,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 return projectRoot && roots.includes(projectRoot) ? pulls.fileBytes(pullKey, "layer", side, filePath, oldPath, roots, maxBytes) : ({ kind: "missing" } as const);
               }
             : undefined;
-        return reviewImageHttp(await guideReviewImage({ patch: guidePatchOf(store, sha256), messageId: message.id, root: projectRoot, pinned: guideRevisionOf(store, sha256), params: url.searchParams, ...(forge ? { forge } : {}), ifNoneMatch: req.headers.get("if-none-match"), signal: req.signal }));
+        // One read of the guide: its patch, and the commit it pins (a pure rename's sides, an unchanged picture of a Markdown file).
+        const review = guideReviewOf(store, sha256);
+        const asked = { patch: review?.patch ?? null, revision: review?.revision ?? null, messageId: message.id, root: projectRoot, params: url.searchParams, ...(forge ? { forge } : {}), ifNoneMatch: req.headers.get("if-none-match"), signal: req.signal };
+        return reviewImageHttp(await (guideImage[2] === "review-image" ? guideReviewImage(asked) : guideReviewMarkdownImage(asked)));
       }
 
       // Guided reviews (step 5): the snapshot a message carries (packages/server/inbox-guides.ts).

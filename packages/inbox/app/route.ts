@@ -2,6 +2,7 @@
 
 import { tourStepOf } from '../tour/model';
 import { systemRouteOf } from '../system/route';
+import { localRouteOf, type LocalOpen } from '../pulls/localRoute';
 import { withoutClickSignal } from '../history';
 import { parseFileView } from '../fileView';
 import { parseSettingsHash, type SettingsSection } from '../settingsRoute';
@@ -74,6 +75,8 @@ export interface Route {
   system?: string | null;
   sheet?: string | null;
   full?: boolean;
+  /** Reviews' "On this computer" (pulls/localRoute.ts): the row whose diff is open beside the list (`&local=prj_…&branch=…`). */
+  local?: LocalOpen | null;
   /** The Board's list (`#board`, `#board=done`, `#board=cancelled`; `#board=shipped` before the rename opens Done, `#board=icebox` from before v2 Cancelled). */
   board?: BoardView;
   /** The opened Board card (`#board&card=crd_…`), or on a thread the card it was opened from (its "‹ Board" way back). */
@@ -210,6 +213,7 @@ export function routeOf(fullHash: string): Route {
       backLayer: !layer ? params.get('back') || null : null,
       new: params.has('new'),
       ...systemRouteOf(params),
+      ...localRouteOf(params),
     };
   }
   if (params.has('board'))

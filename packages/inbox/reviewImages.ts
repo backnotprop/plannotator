@@ -22,6 +22,17 @@ function imageFetch(route: (query: string) => string): typeof fetch {
   }) as typeof fetch;
 }
 
+/**
+ * A rendered Markdown file's pictures are `<img src>`s, not reads: code review's `/api/review-markdown-image?…` URL
+ * turned into the host's route, the rest of the query as it was. Anything else is never asked (an empty picture).
+ */
+function markdownImageRoute(route: (query: string) => string): (url: string) => string {
+  return (url) => {
+    const asked = /^\/api\/review-markdown-image\?(.*)$/.exec(url);
+    return asked ? route(asked[1]!) : 'data:,';
+  };
+}
+
 /** Where the reader inside reads its images (`ReaderPart` provides it). Absent: no image previews. */
 export const ReviewImagesContext = createContext<GuideReaderImages | undefined>(undefined);
 
@@ -38,6 +49,7 @@ export function pullReviewImages(key: string, scope: string, from: string | unde
     // The review app's caches key by snapshot id: this diff's own, never another review's.
     snapshotId: `inbox:pull:${key}:${scope}:${from ?? ''}:${head}`,
     fetchImpl: imageFetch((query) => pullUrl('/pulls/review-image', key, `${scoped}&${query.replace(/(^|&)snapshot=[^&]*/, '$1snapshot=' + head)}`)),
+    markdownImageUrl: markdownImageRoute((query) => pullUrl('/pulls/review-markdown-image', key, `${scoped}&${query.replace(/(^|&)snapshot=[^&]*/, '$1snapshot=' + head)}`)),
   };
 }
 
@@ -47,5 +59,6 @@ export function guideReviewImages(messageId: string): GuideReaderImages | undefi
   return {
     snapshotId: `inbox:guide:${messageId}`,
     fetchImpl: imageFetch((query) => inboxUrl(`/messages/${encodeURIComponent(messageId)}/guide/review-image`, query.replace(/(^|&)snapshot=[^&]*/, `$1snapshot=${encodeURIComponent(messageId)}`))),
+    markdownImageUrl: markdownImageRoute((query) => inboxUrl(`/messages/${encodeURIComponent(messageId)}/guide/review-markdown-image`, query.replace(/(^|&)snapshot=[^&]*/, `$1snapshot=${encodeURIComponent(messageId)}`))),
   };
 }

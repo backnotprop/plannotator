@@ -9424,8 +9424,7 @@
       "surface": [
         "field:InboxLaunchClone.branch",
         "field:InboxReviewSource.branch",
-        "window:/api/inbox/reviews/branches/rank",
-        "window:/api/inbox/reviews/branches/unreported"
+        "window:/api/inbox/reviews/branches/rank"
       ],
       "flows": [],
       "mobile": "v1",
@@ -17830,7 +17829,8 @@
       "id": "window-only-messages",
       "title": "Window endpoints under messages with no door route",
       "surface": [
-        "window:/api/inbox/messages/:id/guide/review-image"
+        "window:/api/inbox/messages/:id/guide/review-image",
+        "window:/api/inbox/messages/:id/guide/review-markdown-image"
       ],
       "flows": [],
       "mobile": "later",
@@ -17847,7 +17847,8 @@
       "surface": [
         "window:/api/inbox/pulls/repo-file",
         "window:/api/inbox/pulls/repo-files",
-        "window:/api/inbox/pulls/review-image"
+        "window:/api/inbox/pulls/review-image",
+        "window:/api/inbox/pulls/review-markdown-image"
       ],
       "flows": [],
       "mobile": "later",
@@ -21961,6 +21962,76 @@
       "title": "field:InboxListRow.acted_at",
       "surface": [
         "field:InboxListRow.acted_at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxquestion-scenarios",
+      "title": "field:InboxQuestion.scenarios",
+      "surface": [
+        "field:InboxQuestion.scenarios"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxquestionscenarios-columns",
+      "title": "field:InboxQuestionScenarios.columns",
+      "surface": [
+        "field:InboxQuestionScenarios.columns"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxquestionscenarios-rows",
+      "title": "field:InboxQuestionScenarios.rows",
+      "surface": [
+        "field:InboxQuestionScenarios.rows"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-reviews-local",
+      "title": "window:/api/inbox/reviews/local",
+      "surface": [
+        "window:/api/inbox/reviews/local"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-reviews-local-diff",
+      "title": "window:/api/inbox/reviews/local/diff",
+      "surface": [
+        "window:/api/inbox/reviews/local/diff"
       ],
       "flows": [],
       "mobile": "undecided",

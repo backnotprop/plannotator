@@ -353,6 +353,7 @@ packages/ui/components/blocks/QuestionBlock.host.test.tsx
 packages/ui/components/blocks/QuestionBlock.decisionToggle.test.tsx
 packages/ui/components/blocks/QuestionBlock.decisionAnyQuestion.test.tsx
 packages/ui/components/blocks/QuestionBlock.change.test.tsx
+packages/ui/components/blocks/QuestionScenarios.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.questionSkip.test.tsx
 packages/ui/hooks/usePinpoint.question.test.tsx
 packages/ui/utils/blockTargeting.blocks.test.tsx
@@ -403,6 +404,7 @@ packages/review-editor/App.sessionTitle.test.tsx
 packages/review-editor/App.diffLoadFailure.test.tsx
 packages/review-editor/components/AnnotationToolbar.placement.test.tsx
 packages/review-editor/dock/panels/ReviewPROverviewPanel.ui.test.tsx
+packages/review-editor/components/explicitForgeLinks.dom.test.tsx
 packages/review-editor/components/FileHeader.edit.test.tsx
 packages/review-editor/edit/useEditSession.recovery.test.tsx
 packages/review-editor/edit/discardRestoreRender.test.tsx
@@ -706,6 +708,7 @@ packages/inbox/guideChapterDiagram.test.tsx
 packages/inbox/guideOverviewMermaid.test.tsx
 packages/inbox/guideExpandContext.test.tsx
 packages/inbox/guideImagePreview.test.tsx
+packages/inbox/guideMarkdownPreview.test.tsx
 packages/inbox/guideCollapseAllAfterSwitch.test.tsx
 packages/inbox/guideScrollsWithPage.test.tsx
 packages/inbox/pulls/pullReview.test.tsx
@@ -714,11 +717,16 @@ packages/inbox/pulls/face.test.tsx
 packages/inbox/pulls/lineThreads.test.tsx
 packages/inbox/pulls/usePulls.test.tsx
 packages/inbox/pulls/hidePulls.test.tsx
+packages/inbox/pulls/onThisComputer.test.tsx
+packages/inbox/compose/reviewBoxBranch.test.tsx
 packages/inbox/hidePullsList.test.tsx
 packages/inbox/shortcuts/useSheetEscape.test.tsx
 packages/inbox/pulls/pullRisk.test.tsx
 packages/inbox/pulls/riskAlreadyRanked.test.tsx
 packages/inbox/pulls/riskWaitingDialog.test.tsx
+packages/inbox/pulls/riskBarsCard.test.tsx
+packages/inbox/guide/pullChangesTreeRisk.test.tsx
+packages/review-editor/components/hostLineMarks.test.ts
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx
 packages/inbox/pulls/pullReviewKept.test.tsx
 packages/inbox/pulls/pullReviewCommentsToggle.test.tsx
@@ -892,6 +900,8 @@ packages/inbox/reaskAllList.test.tsx
 packages/ui/utils/diagramLabelScrub.test.ts
 packages/ui/utils/diagramRemoteLoads.test.ts
 packages/review-editor/components/DiffViewer.selectionClears.test.tsx
+packages/ui/components/RefHoverCardClick.dom.test.tsx
+packages/ui/components/RefCardProseMark.dom.test.tsx
 packages/inbox/components/diffControlsWholeFile.test.tsx
 packages/inbox/commentBoxFiles.test.tsx
 packages/inbox/commentRowFiles.test.tsx

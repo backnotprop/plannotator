@@ -27,7 +27,13 @@
  *
  * Read only while the page is open (usePulls). No new keyboard shortcuts.
  */
-import { reviewBoxPull, type ReviewBoxBranch, type ReviewBoxPull } from '../compose/reviewBox';
+import { reviewBoxPull, type ReviewBoxPull, type ReviewBoxRequest } from '../compose/reviewBox';
+import { OnThisComputer } from './OnThisComputer';
+import { LocalDiffPane } from './LocalDiffPane';
+import { closeLocal, openLocal } from './localNav';
+import { localOpenKey, type LocalOpen } from './localRoute';
+/** App's Reviews list reads PullsPage's address props through here (localRoute.ts). */
+export { pullsPageAddress } from './localRoute';
 import { forwardRef, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullRiskJudgment, type InboxPullsAnswer, type InboxPullStack, type InboxReviewRow } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
@@ -140,8 +146,10 @@ export interface PullsPageProps {
   onOpenCard?: (cardId: string) => void;
   /** A PR nobody is reviewing: the New review box, filled in with it. */
   onNewReview: (pick: ReviewBoxPull, opener: HTMLElement, ask?: 'picture_it') => void;
-  /** Branch reviews' "Branches nobody reported": New review with that branch, in its project. */
-  onReviewBranch?: (branch: ReviewBoxBranch, opener: HTMLElement) => void;
+  /** "On this computer": the row whose diff is open beside the list (`&local=`), or null. */
+  local?: LocalOpen | null;
+  /** An "On this computer" diff's Review with an agent: New review on that branch, or on that project's uncommitted changes. */
+  onReviewLocal?: (review: ReviewBoxRequest, opener: HTMLElement) => void;
   /** The launchpad's Guided review: that message's guide in its thread. Absent: the thread. */
   onOpenGuide?: (threadId: string, messageId: string) => void;
   onOpenPicture?: (threadId: string, attachmentId: string | null, messageId: string) => void;
@@ -203,6 +211,8 @@ export function PullsPage(given: PullsPageProps) {
   const system = props.system ?? null;
   // The drawing shows while no PR's pane does: a PR opened from it closes back to it.
   const systemOpen = system?.open && !open ? system.open : null;
+  // An "On this computer" diff, while no PR's pane is open.
+  const localOpen = !open ? (props.local ?? null) : null;
   // The drawing closed (its ×, Escape, a phone's "Reviews"): the focus it held returns to the System button.
   const drawingWas = useRef(system?.open ?? null);
   useEffect(() => {
@@ -323,7 +333,7 @@ export function PullsPage(given: PullsPageProps) {
             onShowRepo={(repo) => void showRepoWithToast(repo, props.onToast)}
             onOpenThread={props.onOpenThread}
             project={props.project}
-            onReviewBranch={props.onReviewBranch ? (branch, opener) => props.onReviewBranch!({ name: branch.branch, projectId: branch.project_id }, opener) : undefined}
+            localGroup={(fold) => <OnThisComputer project={props.project} projectNames={props.projectNames} openKey={localOpenKey(localOpen)} phone={phone} readAgain={answer} fold={fold} onOpen={(work) => openLocal({ project: work.project_id, branch: work.kind === 'branch' ? work.branch : null }, phone)} />}
           />
         )}
       </ReviewsMenu>
@@ -362,9 +372,21 @@ export function PullsPage(given: PullsPageProps) {
         onOpenStack={(key) => props.onOpenStack(key)}
       />
     ) : null;
+  const localPane = localOpen ? (
+    <LocalDiffPane
+      key={localOpenKey(localOpen)}
+      open={localOpen}
+      projectName={props.projectNames.get(localOpen.project) ?? null}
+      phone={phone}
+      stacked={!!props.stacked}
+      onClose={closeLocal}
+      onReview={props.onReviewLocal ? (opener) => props.onReviewLocal!(localOpen.branch ? { branch: { name: localOpen.branch, projectId: localOpen.project } } : { project: localOpen.project }, opener) : undefined}
+    />
+  ) : null;
   if (phone && open && model) {
     return <StackView key={open.stack.id} {...props} item={open} model={model} judgments={judgments} riskFailed={riskFailed} phone onClose={() => props.onOpenStack(null)} />;
   }
+  if (phone && localPane) return localPane;
   if (phone && drawing) return drawing;
   return (
     <>
@@ -372,6 +394,8 @@ export function PullsPage(given: PullsPageProps) {
       {!phone &&
         (open && model ? (
           <StackView key={open.stack.id} {...props} item={open} model={model} judgments={judgments} riskFailed={riskFailed} phone={false} onClose={() => props.onOpenStack(null)} />
+        ) : localPane ? (
+          localPane
         ) : drawing ? (
           drawing
         ) : (

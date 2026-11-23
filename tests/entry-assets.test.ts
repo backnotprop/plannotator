@@ -222,9 +222,10 @@ describe('review entry assets', () => {
       );
     // Shape's board (its Code view is a guided review) is the same kind of lazy module: `#shape-board`. So is the
     // Post to GitHub/GitLab dialog of a pull request's review (the review app's own): `#platform-post`. The PR page's
-    // All files (the review app's tree and file view) rides the reader's chunk, re-exported by GuideReader.tsx. So do the
-    // review app's keys on a review (ReviewKeys.tsx, with reviewWalk.ts).
-    const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx', 'packages/inbox/shape/ShapeBoard.tsx', 'packages/inbox/guide/PlatformPost.tsx', 'packages/inbox/guide/PullRepoParts.tsx', 'packages/inbox/guide/PullChangesTree.tsx', 'packages/inbox/guide/useSemDiffClient.ts', 'packages/inbox/guide/ReviewKeys.tsx', 'packages/inbox/guide/reviewWalk.ts'];
+    // All files (the review app's tree and file view) rides the reader's chunk, re-exported by GuideReader.tsx. So do
+    // the rendered Markdown files (renderedFiles.tsx), which only GuideReader.tsx imports, and the review app's keys on
+    // a review (ReviewKeys.tsx, with reviewWalk.ts).
+    const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx', 'packages/inbox/shape/ShapeBoard.tsx', 'packages/inbox/guide/PlatformPost.tsx', 'packages/inbox/guide/PullRepoParts.tsx', 'packages/inbox/guide/PullChangesTree.tsx', 'packages/inbox/guide/useSemDiffClient.ts', 'packages/inbox/guide/renderedFiles.tsx', 'packages/inbox/guide/ReviewKeys.tsx', 'packages/inbox/guide/reviewWalk.ts'];
     const eager = walk('packages/inbox').filter((path) => !readers.includes(path) && heavy.test(read(path)));
     expect(eager).toEqual([]);
     // The window's parts (lazyParts.tsx): fetched in idle time, each through its dynamic import only.

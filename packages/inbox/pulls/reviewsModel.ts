@@ -377,14 +377,15 @@ export { ReviewViewNote } from './ReviewViewNote';
 
 /** The groups that start folded, and the person's own choice for each, kept in this browser. */
 export const REVIEW_FOLDS_KEY = 'plannotator-inbox-reviews-folds';
-export type ReviewFolds = { waiting: boolean; not_reviewed: boolean };
+/** Which folded groups are open, kept: "On this computer" (`local`, OnThisComputer.tsx) is one. */
+export type ReviewFolds = { waiting: boolean; not_reviewed: boolean; local: boolean };
 
 export function readReviewFolds(): ReviewFolds {
   try {
     const kept = JSON.parse(localStorage.getItem(REVIEW_FOLDS_KEY) ?? '{}') as Partial<ReviewFolds>;
-    return { waiting: kept.waiting === true, not_reviewed: kept.not_reviewed === true };
+    return { waiting: kept.waiting === true, not_reviewed: kept.not_reviewed === true, local: kept.local === true };
   } catch {
-    return { waiting: false, not_reviewed: false };
+    return { waiting: false, not_reviewed: false, local: false };
   }
 }
 

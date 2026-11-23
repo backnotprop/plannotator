@@ -26,7 +26,7 @@ import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_DONE_DESCRIPTION } from
 import { INBOX_RUN_TOOL_TEXT } from "@plannotator/core/inbox-run-guide";
 import { INBOX_NOTE_BLOCK_LINE } from "@plannotator/core/inbox-review";
 import { antigravityConversationOfCall, checkInboxSubject, INBOX_ANTIGRAVITY_HOST, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, INBOX_T3_HOST, inboxTidyMcpLine, isInboxCombineRun, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
-import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_CHANGE_RULE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SHOWING_RULE, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_MOVED_TO_FIELD_DESCRIPTION, INBOX_MOVED_TO_RULE, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
+import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_CHANGE_RULE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SCENARIO_TABLE_RULE, INBOX_SHOWING_RULE, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_MOVED_TO_FIELD_DESCRIPTION, INBOX_MOVED_TO_RULE, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
 import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { inboxMcpInstructions, inboxMcpTierOf, type InboxMcpClient, type InboxMcpReminder } from "./inbox-mcp-instructions";
 import { bodyShowsLocalImages, captureInboxInlineImages, INBOX_INLINE_IMAGES_MAX, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
@@ -41,12 +41,13 @@ import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly 
 import { QUESTION_OPENERS_WITH_TEXT_MAX, questionOpenersWithText, questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxSendResult, InboxStore } from "@plannotator/shared/inbox/store";
+import { inboxSupersedeSkipsText, type InboxSupersedeSkip } from "@plannotator/shared/inbox/supersede-skips";
 import type { InboxAttachment, InboxListRow, InboxLiveSiteRef, InboxMessageWire } from "@plannotator/core/inbox-types";
 import { inboxAgentFilesOf } from "./inbox-agent-files";
 import { registerInboxGuideTools } from "./inbox-guides";
 import { inboxSendUploadPictures, type InboxSendUpload } from "./inbox-cloud-pictures";
 import { lastContactOf, noteSessionRead, staleThreadOf, staleThreadText } from "./inbox-session-reads";
-import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, clip, inboxFullReadLines, shortTime, sizeText, windowedThread, windowedThreadText } from "./inbox-mcp-read";
+import { INBOX_BODY_CUT_BYTES, INBOX_THREAD_LINES, INBOX_THREAD_WINDOW, clip, inboxFullReadLines, shortTime, sizeText, windowedThread, windowedThreadText } from "./inbox-mcp-read";
 import { registerInboxSearchTool } from "./inbox-mcp-search";
 import { registerInboxCardTool } from "./inbox-mcp-cards";
 export { INBOX_BOARD_OFF_TEXT } from "./inbox-mcp-cards";
@@ -124,14 +125,14 @@ export const SEND_MESSAGE_DESCRIPTION = [
  * whole; send_message's own description is cut at 2,048 characters).
  */
 export const SUPERSEDES_DESCRIPTION =
-  `Earlier questions in this thread that no longer apply, so the person cannot answer them any more. Withdraw your own questions that are still open (read_thread state open or picked; a sent, skipped or closed one is refused) this way as the thread moves on: when this message replaces them, makes them moot or follows up on them, or the person's reply settled them in words, so they stop keeping the thread at the top of the person's list. "<message id>/<key>" for one question (read_thread gives each question's key) or "<message id>" for every open question of that message, as a list of strings, e.g. ["msg_…/q-…"]. With exactly one question in this message, it replaces them; otherwise they read \"No longer applies\". To replace one with a particular new question, put \`Replaces: <message id>/<key>\` in that question's block instead. The person's pick on a superseded question is never sent. Every id must name an open question of the thread this message lands in (use reply_to); otherwise nothing is sent and the refusal, invalid_supersedes, lists the thread's open questions. ${INBOX_MOVED_TO_RULE}`;
+  `Earlier questions in this thread that no longer apply, so the person cannot answer them any more. Withdraw your own questions that are still open (read_thread state open or picked; a sent, skipped or closed one is left as it is, and the result says so) this way as the thread moves on: when this message replaces them, makes them moot or follows up on them, or the person's reply settled them in words, so they stop keeping the thread at the top of the person's list. "<message id>/<key>" for one question (read_thread gives each question's key) or "<message id>" for every open question of that message, as a list of strings, e.g. ["msg_…/q-…"]. With exactly one question in this message, it replaces them; otherwise they read \"No longer applies\". To replace one with a particular new question, put \`Replaces: <message id>/<key>\` in that question's block instead. The person's pick on a superseded question is never sent. Every id must name a question of the thread this message lands in (use reply_to); otherwise nothing is sent and the refusal, invalid_supersedes, lists the thread's open questions. ${INBOX_MOVED_TO_RULE}`;
 
 /**
  * read_thread, as a raw MCP client reads it (the agent tool words its lead
  * itself, INBOX_AGENT_ACTION_LEADS). A thread read is a window, so a long
  * thread costs a few thousand tokens instead of the whole history.
  */
-export const READ_THREAD_DESCRIPTION = `Read one Inbox thread (thread_id, or message_id to show that message in full) as a transcript: the questions still waiting on the person (key, state, prompt, choices), the newest messages in full (\`limit\`, default ${INBOX_THREAD_WINDOW}), the person's earlier messages in full (up to ${sizeText(INBOX_EARLIER_PERSON_BYTES)}), and every other earlier message as one line with its questions' states and answers; a body over ${sizeText(INBOX_BODY_CUT_BYTES)} is cut. \`expand\` shows messages in full, \`before\` reads further back, \`after\` (the result's cursor, or a message id) returns only what is new; \`format: "full"\` returns every full record. A message the person reacted to carries \`ack\` with the person's \`reaction\`: a quick label. Decide from it whether to reply or act. Without an id, list this project's threads, newest activity first, one short row each (subject, name, section in the person's list, open questions, last author and time, the person's last message, \`unread\`: the person wrote something you have not read): only the ones you sent in unless asked_by is "anyone", and only open ones unless include_resolved. ${INBOX_REPLY_TO_CHECK}`;
+export const READ_THREAD_DESCRIPTION = `Read one Inbox thread (thread_id, or message_id to show that message in full) as a transcript: the questions still waiting on the person (key, state, prompt, choices; very long ones shortened), the newest messages in full (\`limit\`, default ${INBOX_THREAD_WINDOW}), the person's newest message in full, the ${INBOX_THREAD_LINES} messages before them as one line each with their questions' states, and your unread replies among the older ones; a body over ${sizeText(INBOX_BODY_CUT_BYTES)} is cut. \`expand\` shows messages in full, \`before\` reads further back, \`after\` (the result's cursor, or a message id) returns only what is new; \`format: "full"\` returns every full record. A message the person reacted to carries \`ack\` with the person's \`reaction\`: a quick label. Decide from it whether to reply or act. Without an id, list this project's threads, newest activity first, one short row each (subject, name, section in the person's list, open questions, last author and time, the person's last message, \`unread\`: the person wrote something you have not read): only the ones you sent in unless asked_by is "anyone", and only open ones unless include_resolved. ${INBOX_REPLY_TO_CHECK}`;
 
 /**
  * The Inbox-only `Stopped:` / `Holds up:` lines, as a whole block. The body
@@ -227,6 +228,7 @@ export const SEND_BODY_DESCRIPTION = [
   "- `Why: <one line>`, on its own line after `Recommended:`: why you recommend it.",
   "- `Reversible: no — <why>`: only when the answer cannot be taken back.",
   INBOX_OPTION_LINES_RULE,
+  INBOX_SCENARIO_TABLE_RULE,
   INBOX_DELEGATED_OPTIONS_RULE,
   "",
   INBOX_CONTRACT_EXAMPLE,
@@ -1062,6 +1064,7 @@ export async function sendAgentMessage(
       superseded,
       /** The action items this message marked done (`done`). */
       ...(markedDone.length > 0 ? { done: markedDone } : {}),
+      ...(result.skipped ? { skipped: result.skipped } : {}),
       replayed: result.replayed,
       cursor: store.messageCursor(message.id) ?? store.cursor(),
       url: threadUrl(context.baseUrl(), message.thread_id),
@@ -1378,6 +1381,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           pictureChoices,
           prototypesNotFramedText(sent.notFramed),
           questionOpenersWithTextText(sent.questionOpenersWithText),
+          inboxSupersedeSkipsText(sent.structured.skipped as InboxSupersedeSkip[] | undefined),
         ];
         if (stale) hints.push(`\n${staleThreadText(stale, shortTime)}`);
         hints.push(askedRefsText(String(sent.structured.message_id), sent.asked));
@@ -1504,7 +1508,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             store.markAcksSeen(threadId, shown);
           }
           // What this session was owed in the messages it was shown, and no wake is left to settle.
-          if (reader) store.recordOwnRead(threadId, reader, shown);
+          if (reader) store.recordOwnRead(threadId, reader, shown, readThrough);
           store.recordAgentRead(shown, reader);
           noteSessionRead(store, reader, threadId, clock());
           // The thread's steps (approval "inbox-thread-steps"), the reader's own first: only while the person has steps on.
