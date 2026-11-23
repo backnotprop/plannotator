@@ -844,7 +844,7 @@ const ERROR_STATUS: Record<string, number> = {
   question_revision_conflict: 409,
   question_already_sent: 409,
   // Replaced questions: answering one the agent superseded, or superseding
-  // an id that names no open question of the thread.
+  // an id that names no question of the thread.
   question_superseded: 422,
   invalid_supersedes: 422,
   // A pick on a question a Mark read closed: Move back first.

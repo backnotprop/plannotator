@@ -288,7 +288,7 @@ export interface ParsedQuestion {
   /** `Replaces: <message id>/<key>` (the Plannotator Inbox): the earlier
    *  questions this one replaces, each token as written. Absent when the
    *  block has no such line. The host checks them (the Inbox refuses an id
-   *  that names no open question of the thread). */
+   *  that names no question of the thread). */
   replaces?: string[];
   /** `Stakes:` — what the choice affects, in product terms. */
   stakes?: string;

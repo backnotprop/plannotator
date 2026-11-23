@@ -41,6 +41,7 @@ import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly 
 import { QUESTION_OPENERS_WITH_TEXT_MAX, questionOpenersWithText, questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxSendResult, InboxStore } from "@plannotator/shared/inbox/store";
+import { inboxSupersedeSkipsText, type InboxSupersedeSkip } from "@plannotator/shared/inbox/supersede-skips";
 import type { InboxAttachment, InboxListRow, InboxLiveSiteRef, InboxMessageWire } from "@plannotator/core/inbox-types";
 import { inboxAgentFilesOf } from "./inbox-agent-files";
 import { registerInboxGuideTools } from "./inbox-guides";
@@ -124,7 +125,7 @@ export const SEND_MESSAGE_DESCRIPTION = [
  * whole; send_message's own description is cut at 2,048 characters).
  */
 export const SUPERSEDES_DESCRIPTION =
-  `Earlier questions in this thread that no longer apply, so the person cannot answer them any more. Withdraw your own questions that are still open (read_thread state open or picked; a sent, skipped or closed one is refused) this way as the thread moves on: when this message replaces them, makes them moot or follows up on them, or the person's reply settled them in words, so they stop keeping the thread at the top of the person's list. "<message id>/<key>" for one question (read_thread gives each question's key) or "<message id>" for every open question of that message, as a list of strings, e.g. ["msg_…/q-…"]. With exactly one question in this message, it replaces them; otherwise they read \"No longer applies\". To replace one with a particular new question, put \`Replaces: <message id>/<key>\` in that question's block instead. The person's pick on a superseded question is never sent. Every id must name an open question of the thread this message lands in (use reply_to); otherwise nothing is sent and the refusal, invalid_supersedes, lists the thread's open questions. ${INBOX_MOVED_TO_RULE}`;
+  `Earlier questions in this thread that no longer apply, so the person cannot answer them any more. Withdraw your own questions that are still open (read_thread state open or picked; a sent, skipped or closed one is left as it is, and the result says so) this way as the thread moves on: when this message replaces them, makes them moot or follows up on them, or the person's reply settled them in words, so they stop keeping the thread at the top of the person's list. "<message id>/<key>" for one question (read_thread gives each question's key) or "<message id>" for every open question of that message, as a list of strings, e.g. ["msg_…/q-…"]. With exactly one question in this message, it replaces them; otherwise they read \"No longer applies\". To replace one with a particular new question, put \`Replaces: <message id>/<key>\` in that question's block instead. The person's pick on a superseded question is never sent. Every id must name a question of the thread this message lands in (use reply_to); otherwise nothing is sent and the refusal, invalid_supersedes, lists the thread's open questions. ${INBOX_MOVED_TO_RULE}`;
 
 /**
  * read_thread, as a raw MCP client reads it (the agent tool words its lead
@@ -1067,6 +1068,7 @@ export async function sendAgentMessage(
       superseded,
       /** The action items this message marked done (`done`). */
       ...(markedDone.length > 0 ? { done: markedDone } : {}),
+      ...(result.skipped ? { skipped: result.skipped } : {}),
       replayed: result.replayed,
       cursor: store.messageCursor(message.id) ?? store.cursor(),
       url: threadUrl(context.baseUrl(), message.thread_id),
@@ -1383,6 +1385,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           pictureChoices,
           prototypesNotFramedText(sent.notFramed),
           questionOpenersWithTextText(sent.questionOpenersWithText),
+          inboxSupersedeSkipsText(sent.structured.skipped as InboxSupersedeSkip[] | undefined),
         ];
         if (stale) hints.push(`\n${staleThreadText(stale, shortTime)}`);
         hints.push(askedRefsText(String(sent.structured.message_id), sent.asked));
