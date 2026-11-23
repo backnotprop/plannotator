@@ -127,6 +127,18 @@ const numericHeader = (response: Response, name: string): number | undefined => 
   return Number.isFinite(value) && value > 0 ? value : undefined;
 };
 
+const reviewImageRequest = (snapshot: string, path: string, side: ReviewImageSide) => `/api/review-image?${new URLSearchParams({ path, side, snapshot })}`;
+
+/**
+ * One side's bytes again, by the same request through `fetchImpl`: for Differences on a host whose page policy
+ * refuses `fetch` of the `blob:` URL a side is shown from (the Inbox's `connect-src 'self'`). Throws on a refusal.
+ */
+export async function readReviewImageBlob(snapshot: string, path: string, side: ReviewImageSide, fetchImpl: typeof fetch): Promise<Blob> {
+  const response = await fetchImpl(reviewImageRequest(snapshot, path, side));
+  if (!response.ok) throw new Error(`The image could not be read (${response.status}).`);
+  return response.blob();
+}
+
 /**
  * `fetchImpl`: where the request goes. Code review passes none (its own
  * `/api/review-image`); a host with its own routes (the Inbox) passes a fetch
@@ -144,10 +156,9 @@ export async function fetchReviewImage(
   if (cached) return { ok: true, image: cached };
   enterSnapshot(snapshot);
 
-  const params = new URLSearchParams({ path, side, snapshot });
   let response: Response;
   try {
-    response = await fetchImpl(`/api/review-image?${params}`, { signal });
+    response = await fetchImpl(reviewImageRequest(snapshot, path, side), { signal });
   } catch (error) {
     if (signal.aborted) throw error;
     return { ok: false, error: { status: 0, reason: 'network' } };

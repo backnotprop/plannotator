@@ -24,7 +24,8 @@ import { HeldWrites } from './HeldWrites';
 import { annotationOf, attachmentFeedback, attachmentImageUrl, isFileComment, OWN_MESSAGE_COMMENT_ROW, readableVersion } from '../attachments';
 import { withPictures } from '../commentPictureFiles';
 import { CommentPictures } from '../commentPictures';
-import { fileQuestionRecords, type FileQuestions } from '../fileQuestions';
+import { closedByArchive, fileQuestionRecords, type FileQuestions } from '../fileQuestions';
+import { ArchivedFoot } from '../parts/ArchivedFoot';
 import { ThreadMeta } from '../parts/ThreadMeta';
 import { replyViewingOf } from '../replyViewing';
 import { AttachmentTiles, changedCount } from './AttachmentTiles';
@@ -2616,6 +2617,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       return at ? `Sent ${whenTime(at)}` : 'Sent';
     }
     if (q.state === 'closed' && q.set_aside_at) return `Closed unanswered when you marked it read · ${whenTime(q.set_aside_at)}`;
+    // The archive closed it unanswered (an archived action item's own words, ActionChecklist); one sent before keeps its tag.
+    if (closedByArchive(q) && thread.messages[0]?.moved_to) return 'Closed when the thread was archived.';
     if (q.state === 'picked' && q.picked_at) return `Picked ${whenTime(q.picked_at)} · in your draft`;
     // Re-ask: the person asked the agent for it again; it stays open until the agent replaces it.
     const reaskedBy = reaskedIn(thread.messages, message.id, q);
@@ -4425,7 +4428,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             !liveMessage(fileOwner) ||
             (file!.version === 'current' && openAttachment.changed_since_sent),
           onPick: (key, answer) => pick(fileOwner.id, key, answer),
-          footerFor: footerFor(fileOwner),
+          footerFor: footerFor(fileOwner), moved: !!thread.messages[0]?.moved_to,
           focus: fileQuestionFocus,
         }
       : null;
@@ -5224,7 +5227,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                       const key = `${message.id}/${q.key}`;
                       return [replacementOf(thread.messages, q), pending.has(key) ? (pending.get(key) ?? null) : undefined, q.message_id ? replacedBy(thread.messages, q) : NO_QUESTIONS] as const;
                     }),
-                    readOnly: !isAgent || !liveMessage(message) || questions.length === 0 || allSent,
+                    readOnly: !isAgent || !liveMessage(message) || questions.length === 0 || allSent, movedThread: !!thread.messages[0]?.moved_to,
                     live: liveMessage(message),
                     sentAnswers: message.author.kind === 'person' ? (sentAnswersByReply.get(message.id) ?? NO_SENT_ANSWERS) : undefined,
                     sentActions: message.author.kind === 'person' ? sentActionsByReply.get(message.id) : undefined,
@@ -5464,12 +5467,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           </div>
         )}
         {resolved ? (
-          <div className="ib-acts">
-            <span className="ib-st">Archived. The next message from {asker} starts a new thread.</span>
-            <button type="button" className="ib-btn" onClick={() => void resolve(false)}>
-              Unarchive
-            </button>
-          </div>
+          <ArchivedFoot movedTo={root.moved_to} asker={asker} onUnarchive={() => void resolve(false)} />
         ) : guard && staleQuestions.length > 0 ? (
           <StaleGuard
             ref={guardRef}
