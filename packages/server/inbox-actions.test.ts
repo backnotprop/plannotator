@@ -123,6 +123,25 @@ describe("an agent sends an action item", () => {
   });
 });
 
+describe("a message with questions and an action item", () => {
+  test("send_message lists each new ref with its prompt; read_thread counts questions and action items apart", async () => {
+    const { server, send } = await setup();
+    const asked = await send({ body: `${BODY}\n\n:::question\nWhich database should invoices live in?\n- [ ] Postgres\n- [ ] SQLite\n:::\n\n:::question\nShip it behind a flag?\n- [ ] Yes\n- [ ] No\n:::` });
+    const id = asked.structuredContent.message_id;
+    const text = asked.content[0]!.text;
+    const action = asked.structuredContent.actions![0]!.key;
+    const question = (asked.structuredContent as unknown as { questions: { key: string }[] }).questions[0]!.key;
+    expect(text).toContain(`\n- ${id}/${question}: "Which database should invoices live in?"`);
+    expect(text).toContain(`\n- ${id}/${action}: "Approve the production deploy on Vercel"`);
+    const { client } = await setupClientFor(server);
+    const list = (await client.callTool({ name: "read_thread", arguments: { asked_by: "anyone", project_path: (asked.structuredContent as unknown as { project: { root: string } }).project.root } })) as { content: { text: string }[] };
+    const row = list.content[0]!.text.split("\n").find((line) => line.startsWith(`- ${asked.structuredContent.thread_id}`))!;
+    expect(row).toContain(" · 2 questions, 1 action item: ");
+    const thread = (await client.callTool({ name: "read_thread", arguments: { thread_id: asked.structuredContent.thread_id } })) as { content: { text: string }[] };
+    expect(thread.content[0]!.text).toContain("Waiting on the person (2 questions, 1 action item):");
+  });
+});
+
 describe("the person's Done", () => {
   test("nothing goes inside the Undo window; then one reply, delivered over the bridge with the exact wake text and shown by read_thread", async () => {
     const { server, client, sent } = await setup();
