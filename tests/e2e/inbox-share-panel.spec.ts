@@ -90,6 +90,8 @@ test('the Share panel, B1: three parts in every state, one row of actions with o
         const panel = page.locator('[data-plan-share-panel]');
         await expect(panel).toBeVisible();
         await expect(panel.locator('[data-share-status] h2')).toHaveText(state.title);
+        // The desktop popover opens with a short scale: measure once it has settled.
+        await panel.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished.catch(() => null))));
         if (phone) {
           // The Inbox's own bottom sheet, risen all the way.
           const sheet = page.locator('[data-sheet][data-plan-share-sheet]');
@@ -109,7 +111,7 @@ test('the Share panel, B1: three parts in every state, one row of actions with o
         await expect(panel).not.toContainText('spaces.example');
         await expect(panel).not.toContainText('Make it yours');
         // The buttons sit on one line, inside the panel, none cut.
-        const boxes = await panel.locator('.ib-shr-b').evaluateAll((els) => els.map((el) => { const r = el.getBoundingClientRect(); return { top: Math.round(r.top), left: r.left, right: r.right, height: r.height, cut: el.scrollWidth > el.clientWidth + 1 }; }));
+        const boxes = await panel.locator('.ib-shr-b').evaluateAll((els) => els.map((el) => { const r = el.getBoundingClientRect(); return { top: Math.round(r.top), left: r.left, right: r.right, height: (el as HTMLElement).offsetHeight, cut: el.scrollWidth > el.clientWidth + 1 }; }));
         const frame = (await panel.boundingBox())!;
         expect(new Set(boxes.map((b) => b.top)).size).toBeLessThanOrEqual(1);
         for (const b of boxes) {
@@ -124,14 +126,13 @@ test('the Share panel, B1: three parts in every state, one row of actions with o
         if (state.open) {
           await expect(open).toHaveAttribute('href', LINK);
           await expect(open).toHaveAttribute('target', '_blank');
-          const box = (await open.boundingBox())!;
-          expect([box.width, box.height]).toEqual(phone ? [44, 44] : [28, 28]);
+          expect(await open.evaluate((el) => [(el as HTMLElement).offsetWidth, (el as HTMLElement).offsetHeight])).toEqual(phone ? [44, 44] : [28, 28]);
         }
         if (phone) {
           const details = panel.locator('[data-share-act="details"]');
-          if (await details.count()) expect((await details.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+          if (await details.count()) expect(await details.evaluate((el) => (el as HTMLElement).offsetHeight)).toBeGreaterThanOrEqual(44);
           const info = panel.locator('[data-share-info]');
-          if (await info.count()) expect((await info.boundingBox())!.height).toBe(44);
+          if (await info.count()) expect(await info.evaluate((el) => (el as HTMLElement).offsetHeight)).toBe(44);
         }
 
         // The pictures: focus off any control first, so no ring is drawn.
