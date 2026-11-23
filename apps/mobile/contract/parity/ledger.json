@@ -6102,7 +6102,7 @@
     },
     {
       "id": "messages-186",
-      "title": "Combine refusals: \"Pick two or more threads to combine\", \"No agent that wrote in these threads is running…\", \"These threads are on two machines…\", \"<machine> can't be asked now: it is away.\"",
+      "title": "Combine refusals: \"Pick two or more threads to combine\", \"No agent is running…\", \"These threads are on two machines…\", \"<machine> can't be asked now: it is away.\"",
       "surface": [],
       "flows": [],
       "mobile": "later",
@@ -21741,6 +21741,76 @@
       "title": "door:GET agent-threads",
       "surface": [
         "door:GET agent-threads"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-combine-hold",
+      "title": "door:POST combine/hold",
+      "surface": [
+        "door:POST combine/hold"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-combine-hold",
+      "title": "window:/api/inbox/combine/hold",
+      "surface": [
+        "window:/api/inbox/combine/hold"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxcombineleft-files",
+      "title": "field:InboxCombineLeft.files",
+      "surface": [
+        "field:InboxCombineLeft.files"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxcombineleft-open",
+      "title": "field:InboxCombineLeft.open",
+      "surface": [
+        "field:InboxCombineLeft.open"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-combine-left",
+      "title": "field:InboxMessageWire.combine_left",
+      "surface": [
+        "field:InboxMessageWire.combine_left"
       ],
       "flows": [],
       "mobile": "undecided",
