@@ -32,6 +32,7 @@ import { Icon } from '../icons';
 import { registerActionFlush, trackActionSave } from '../actionSaves';
 import { registerReloadFlush } from '../stalePage';
 import { inboxApi } from '../api';
+import { useLineToggle } from './actionLineToggle';
 
 /** A Done, Can't do it or Skip as the window marks it: always into the reply draft (`staged` on the wire). */
 export interface ActionMark {
@@ -46,7 +47,7 @@ export interface ActionChecklistProps {
   actions: readonly InboxQuestion[];
   /** The agent that asked, as the person sees it ("Claude Code"). */
   agent: string;
-  /** The thread's repo: refs in an item's why link into it. Never in the task (a button): its refs stay plain. */
+  /** The thread's repo: refs in an item's why link into it. Never in the task (a click on it opens the row): its refs stay plain. */
   refRepo?: { display: string; host?: string } | null;
   /** No Done (the thread is archived, a test). */
   readOnly?: boolean;
@@ -80,9 +81,9 @@ function isSkippedState(action: InboxQuestion, state: ActionCardState): boolean 
 const CROSS_REPO_REF_GLOBAL = new RegExp(CROSS_REPO_REF_PATTERN.source, 'g');
 
 /**
- * The task, for its row's toggle (a button): inline markdown as a question's
- * prompt draws it (bold, `code`), but never a link, which cannot sit inside a
- * button: `[label](url)` keeps its label, and a bare or `<…>` URL reads as
+ * The task, on its row's toggle line (a click on it opens the row): inline
+ * markdown as a question's prompt draws it (bold, `code`), but never a link,
+ * which would fight that click: `[label](url)` keeps its label, and a bare or `<…>` URL reads as
  * code. An `owner/repo#123` ref stays plain text (its `#` escaped). The row's
  * Open button carries a `Where:` link.
  */
@@ -261,6 +262,9 @@ function ActionRow({ action, state, agent, refRepo, readOnly, open, onToggle, to
   const tickDoneAt = useRef(0);
   const panelId = useId();
   const noteId = useId();
+  const taskId = useId();
+  const chipId = useId();
+  const { onLinePress, onLineClick } = useLineToggle(onToggle);
   useEffect(() => {
     if (composing) areaRef.current?.focus();
     else if (refocusCant.current) {
@@ -396,21 +400,29 @@ function ActionRow({ action, state, agent, refRepo, readOnly, open, onToggle, to
     >
       <div className="ib-chk-line">
         {tick}
-        <button
-          type="button"
-          className="ib-chk-toggle"
-          ref={toggleRef}
-          onClick={onToggle}
-          aria-expanded={open}
-          aria-controls={panelId}
-          data-action-toggle=""
-        >
-          <span className="ib-chk-do">
+        {/* The task and its chip sit beside the toggle, not in it: text inside a button cannot be selected. The
+            button fills the line under them (inbox.css), so its focus ring and its name are the row's as before. */}
+        <div className="ib-chk-toggle" onPointerDown={onLinePress} onClick={onLineClick} data-action-line="">
+          <button
+            type="button"
+            className="ib-chk-hit"
+            ref={toggleRef}
+            onClick={onToggle}
+            aria-expanded={open}
+            aria-controls={panelId}
+            aria-labelledby={chip ? `${taskId} ${chipId}` : taskId}
+            data-action-toggle=""
+          />
+          <span className="ib-chk-do" id={taskId} aria-hidden="true" data-action-task="">
             <InlineMarkdown text={taskMarkdown(action.prompt)} />
           </span>
-          {chip && <span className={chip.className}>{chip.label}</span>}
+          {chip && (
+            <span className={chip.className} id={chipId} aria-hidden="true">
+              {chip.label}
+            </span>
+          )}
           <Icon name={open ? 'chevD' : 'chevR'} />
-        </button>
+        </div>
       </div>
       {underLine && (
         <p className="ib-chk-under" data-action-settled="">
