@@ -70,7 +70,15 @@ describe('the star count beside "Open source" on the Spaces page', () => {
   });
 
   test("the page never asks GitHub from the visitor's browser", () => {
-    const files = ['src/pages/workspaces/index.astro', 'src/scripts/spaces/page.js', 'src/scripts/spaces/signup-dialog.js'];
+    const files = [
+      'src/pages/workspaces/index.astro',
+      'src/pages/workspaces/pricing.astro',
+      'src/components/spaces/SpacesTopStrip.astro',
+      'src/scripts/spaces/page.js',
+      'src/scripts/spaces/pricing.js',
+      'src/scripts/spaces/theme-switch.js',
+      'src/scripts/spaces/signup-dialog.js',
+    ];
     for (const file of files) {
       const text = readFileSync(join(here, file), 'utf8');
       expect(text).not.toContain('api.github.com');
