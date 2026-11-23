@@ -19,7 +19,7 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
-import { linkEnd } from "@plannotator/core/link-tail";
+import { linkEnd } from "@plannotator/core";
 import {
   inboxAgentName,
   inboxThreadPullText,

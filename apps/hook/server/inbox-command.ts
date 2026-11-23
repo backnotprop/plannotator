@@ -82,7 +82,7 @@ import { withoutRexPane } from "@plannotator/server/inbox-launch-env";
 import { INBOX_REX_SERVER_ENV, inboxRexServerSocket } from "@plannotator/server/inbox-rex-where";
 import { addInboxNote, INBOX_NOTE_BODY, inboxNotesDisabled, markNotesAsked } from "@plannotator/server/inbox-agent-notes";
 import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_NOTE_AGENT_IDS, type InboxConnectReport, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
-import { withoutLinkTail } from "@plannotator/core/link-tail";
+import { withoutLinkTail } from "@plannotator/core";
 import { writeUrlQr } from "@plannotator/server/qr";
 import { shellLine } from "@plannotator/inbox/harnesses";
 import { getCliVersion, hasHelpFlag } from "./cli";

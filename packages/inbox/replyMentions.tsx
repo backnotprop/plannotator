@@ -36,7 +36,7 @@ import {
   type MentionRef,
 } from './threadMentions';
 import { isTouchScreen } from './phone';
-import { LINK_TAIL } from '@plannotator/core/link-tail';
+import { LINK_TAIL } from '@plannotator/core';
 
 /** A thread link this Inbox gave out (`…/#thread=msg_…`, Copy link), or a bare thread id: the thread's id, else null. */
 export function pastedThreadId(text: string): string | null {

@@ -30,7 +30,7 @@ import {
   type GuideViewerAssets,
 } from '@plannotator/core/guide-format';
 import { decrypt } from '@plannotator/core/crypto';
-import { LINK_BASE64URL, withoutLinkTail } from '@plannotator/core/link-tail';
+import { LINK_BASE64URL, withoutLinkTail } from '@plannotator/core';
 import { decompress } from '@plannotator/core/compress';
 
 export interface HostedPageInfo {

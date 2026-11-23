@@ -327,9 +327,10 @@ describe("a reply to a T3 thread whose Claude runs the Claude Code mod: one owne
           arguments: { body: "Which queue?", project_path: "/tmp", agent_session: session, ...(host ? { agent_host: host } : {}) },
           ...(wakes ? { _meta: { [INBOX_WAKES_META_KEY]: true } } : {}),
         });
-        return (result.content as { text: string }[])[0]!.text.split("\n")[0]!;
+        // The thread's link ends the first line; the reply line is the second.
+        return (result.content as { text: string }[])[0]!.text.split("\n")[1]!;
       };
-      const ends = (text: string, line: string) => expect(text.endsWith(` ${line}`)).toBe(true);
+      const ends = (text: string, line: string) => expect(text === line || text.endsWith(` ${line}`)).toBe(true);
       // An interactive Claude Code session, Pi and OpenCode 2, each woken by its own connection.
       for (const host of ["claude-code", "pi", "opencode"]) ends(await send(host, `ses_${host}`, true), ARRIVES);
       // `claude -p` or another SDK session not under T3: the mod sends without the wake. An MCP-over-HTTP agent.

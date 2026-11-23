@@ -12,7 +12,7 @@ import { pullFilterOf, type PullFilter } from '../pulls/model';
 import { boardInitiativeOf, boardViewOf, type BoardView } from '../board/model';
 import { shapeReviewAtOf, type ReviewAt } from '../shape/review';
 import { viewScopeOf, type PullViewScope } from '../pulls/viewScope';
-import { routeIdWithoutLinkTail } from '@plannotator/core/link-tail';
+import { routeIdWithoutLinkTail } from '@plannotator/core';
 
 export interface Route {
   page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'reviews' | 'shapes' | 'prs' | 'artifacts' | 'scheduled' | 'plans';

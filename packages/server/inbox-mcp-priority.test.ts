@@ -39,7 +39,8 @@ test("true marks the thread and says so; leaving it out changes nothing; false t
   const w = world();
   const first = await w.send({ body: "Re-review done: checks green, 2 approvals.", subject: "PR #88: retry policy", priority: true });
   const thread = String(first.structured.thread_id);
-  expect(first.text.split("\n")[0]).toContain(`).${INBOX_PRIORITY_IN_TEXT}`);
+  // The thread's link ends the first line; the Priority line opens the next.
+  expect(first.text.split("\n")[1]).toStartWith(INBOX_PRIORITY_IN_TEXT.trimStart());
   expect(first.structured.priority).toBe(true);
   expect(w.marked(thread)).toBe(true);
 
@@ -49,7 +50,7 @@ test("true marks the thread and says so; leaving it out changes nothing; false t
   expect(w.marked(thread)).toBe(true);
 
   const done = await w.send({ body: "Merged.", reply_to: thread, priority: false });
-  expect(done.text.split("\n")[0]).toContain(`).${INBOX_PRIORITY_OUT_TEXT}`);
+  expect(done.text.split("\n")[1]).toStartWith(INBOX_PRIORITY_OUT_TEXT.trimStart());
   expect(done.structured.priority).toBe(false);
   expect(w.marked(thread)).toBe(false);
 });
