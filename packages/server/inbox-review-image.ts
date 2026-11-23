@@ -208,11 +208,16 @@ export function guideSideReader(options: GuideReadOptions, unchanged?: "head"): 
       }
     }
     const pinned = options.revision && /^[0-9a-f]{40,64}$/.test(options.revision) ? options.revision : null;
-    if (root && pinned && !ids && file && pureRename(file.patch, oldPath, filePath)) {
-      for (const name of side === "old" ? [oldPath, filePath] : [filePath, oldPath]) {
+    // The name it had: the caller's, else the patch's own (a new side is asked without one, as package changes ask it).
+    const renamedFrom = oldPath ?? file?.oldPath;
+    if (root && pinned && !ids && file && pureRename(file.patch, renamedFrom, filePath)) {
+      for (const name of side === "old" ? [renamedFrom, filePath] : [filePath, renamedFrom]) {
         if (!insideRepository(name)) continue;
         const named = await readGitObjectBytes(gitRuntime, `${pinned}:${name}`, maxBytes, root);
-        if (named.kind === "ok" || named.kind === "too-large") return named;
+        if (named.kind === "ok") return named;
+        // Past the cap: "missing", never "too large", as the working tree's read above (a size would be told of a file
+        // the patch names no blob for).
+        if (named.kind === "too-large") return { kind: "missing" };
       }
     }
     if (!forge) return { kind: "missing" };

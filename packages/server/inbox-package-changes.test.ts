@@ -220,4 +220,19 @@ describe("a guided review's package changes", () => {
     const moved = await read({ patch: onlyManifest, root: null, forge });
     expect(cardsOf(moved.body)[0]?.error).toMatchObject({ side: "new" });
   });
+
+  test("a package moved as a pure rename: both sides read at the guide's commit, no unreadable card", async () => {
+    mkdirSync(join(repo, "packages/a"), { recursive: true });
+    writeFileSync(join(repo, "packages/a/package.json"), AFTER.pkg);
+    git("add", "-A");
+    git("commit", "-q", "-m", "a package");
+    git("mv", "packages/a", "packages/b");
+    git("commit", "-q", "-m", "move the package");
+    const moved = git("diff", "-M", "HEAD~1", "HEAD");
+    expect(moved).toContain("similarity index 100%");
+    expect(moved).not.toMatch(/^index /m);
+    const answer = await read({ patch: moved, revision: git("rev-parse", "HEAD").trim() });
+    expect(answer.status).toBe(200);
+    expect(cardsOf(answer.body).filter((card) => card.error !== undefined)).toEqual([]);
+  });
 });
