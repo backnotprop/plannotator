@@ -498,6 +498,7 @@ Everything lives under `~/.plannotator/inbox/` (or `$PLANNOTATOR_DATA_DIR/inbox/
 | `seq.json` | The highest event number ever written, kept across deletions |
 | `agents.json` | The agents `plannotator inbox` found or connected, so it never adds one back that you turned off |
 | `drafts/` | Messages you started and did not send, one file each. They never reach an agent, a phone or search |
+| `pull-closes.jsonl` | One line each time a pull request was closed or reopened from the Pull requests page: which pull request, when, and whether it worked. No titles or names. Owner-only |
 | `reply-drafts/` | The words typed in a thread's reply box and not sent, one file per thread. They never reach an agent or search; a phone can read them |
 | `uploads/` | Files you attached to a message you started or pasted into a reply: those not sent yet (forgotten after a day unless a draft keeps them), and read-only copies of those you sent, which the agent opens |
 | `board.json` | When you last looked at the Board, so the cards written since show bold |

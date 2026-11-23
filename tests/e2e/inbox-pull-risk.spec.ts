@@ -403,12 +403,20 @@ test('the dialog: the guided review\'s list; Sonnet on Claude, the newest Luna o
 
 test('the rows: all three levels; an answer that makes no sense and a refused diff say so, with no level; how the agent ran', async () => {
   await expect(row(501).locator('[data-pull-risk="high"]')).toBeVisible({ timeout: 30_000 });
-  await expect(row(502).locator('[data-pull-risk="medium"]')).toBeVisible({ timeout: 30_000 });
-  await expect(row(503).locator('[data-pull-risk="low"]')).toBeVisible({ timeout: 30_000 });
+  // Medium, Low and a failure: the row's level, its mark drawn on the open row's second line only.
+  await expect(row(502)).toHaveAttribute('data-pulls-risk', 'medium', { timeout: 30_000 });
+  await expect(row(503)).toHaveAttribute('data-pulls-risk', 'low', { timeout: 30_000 });
+  await expect(row(502).locator('[data-pull-risk]')).toHaveCount(0);
   // A stack is one row, at its highest layer.
   await expect(row(506).locator('[data-pull-risk="high"]')).toBeVisible({ timeout: 30_000 });
   await expect.poll(() => prompts().length).toBe(11);
-  await expect(row(504).locator('[data-pull-risk="failed"]')).toBeVisible({ timeout: 30_000 });
+  await expect(row(504)).toHaveAttribute('data-pulls-risk', 'failed', { timeout: 30_000 });
+  for (const [n, level] of [[502, 'medium'], [503, 'low']] as const) {
+    await row(n).click();
+    await expect(row(n).locator(`[data-reviews-line2] [data-pull-risk="${level}"]`)).toBeVisible();
+  }
+  await row(504).click();
+  await expect(row(504).locator('[data-reviews-line2] [data-pull-risk="failed"]')).toBeVisible();
   await expect(row(504).locator('[data-pull-risk="failed"]')).toContainText('I would say this looks fine to me.');
 
   // The forge refused #503 as one document: the agent read its per-file pages, and ranked it.
@@ -419,13 +427,18 @@ test('the rows: all three levels; an answer that makes no sense and a refused di
   // The whole 9 MB reached the agent, and it refused: failed to rank, with its words. Not Low.
   const big = prompts().find((l) => l.prompt!.includes('Title: Regenerate the API client'))!.prompt!;
   expect(big.match(/export const line = 1;/g)).toHaveLength(BIG_LINES);
+  await expect(row(507)).toHaveAttribute('data-pulls-risk', 'failed', { timeout: 30_000 });
+  await row(507).click();
   const refused = row(507).locator('[data-pull-risk]');
-  await expect(refused).toHaveAttribute('data-pull-risk', 'failed', { timeout: 30_000 });
+  await expect(refused).toHaveAttribute('data-pull-risk', 'failed');
   await expect(refused).toContainText('Couldn\u2019t rank');
   await refused.hover();
   await expect(page.locator('[data-pn-tooltip]')).toContainText(REFUSAL);
   await page.mouse.move(0, 0);
-  await shots('rows-refused');
+  // Open beside the list: a phone would show the PR's page in its place.
+  await shots('rows-refused', [1440]);
+  await page.locator('[data-launchpad] .ib-pr-bar [aria-label="Close"]').click();
+  await expect(page.locator('[data-pulls-list] [aria-current="true"]')).toHaveCount(0);
 
   const judged = piLog().filter((l) => l.argv?.includes('--no-tools'));
   expect(judged).toHaveLength(11);
@@ -577,7 +590,7 @@ test('the automatic line: a pick names the agent it would start; Save starts not
     expect(Object.keys(await autoRuns())).toEqual([keyOf(509)]);
     expect((await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: false } })).status()).toBe(200);
     await openPulls();
-    for (const n of [504, 507]) await expect(row(n).locator('[data-pull-risk="failed"]')).toBeVisible({ timeout: 60_000 });
+    for (const n of [504, 507]) await expect(row(n)).toHaveAttribute('data-pulls-risk', 'failed', { timeout: 60_000 });
   } finally {
     page.off('request', onRequest);
     await page.setViewportSize(VIEWPORTS[1440]);
@@ -616,8 +629,8 @@ test('the filter: High, Medium and up, remembered; under High what it could not 
   await shots('filter-high');
   await notRanked.click();
   for (const n of [504, 507, 508]) await expect(page.locator(`[data-pulls-risk-not-ranked] [data-pulls-row="${keyOf(n)}"]`)).toBeVisible();
-  await expect(row(504).locator('[data-pull-risk="failed"]')).toBeVisible();
-  await expect(row(508).locator('[data-pull-risk]')).toHaveCount(0);
+  await expect(row(504)).toHaveAttribute('data-pulls-risk', 'failed');
+  await expect(row(508)).not.toHaveAttribute('data-pulls-risk');
   await page.mouse.move(0, 0);
   await shots('filter-high-open');
   await notRanked.click();

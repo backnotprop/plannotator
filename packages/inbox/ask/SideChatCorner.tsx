@@ -48,14 +48,13 @@ const PANES = [
 
 /**
  * Something else's in the corner pane's bottom-right corner, which the cut would clip and the circle cover: a Shape
- * board open in the thread (its side panel and its More run to the pane's corner), a narrow file view's annotations
- * panel (open down its right edge to its foot), or the floating drafts' pile resting in the window's corner (a
- * thread with no reply foot on screen). The circle and the cut keep off; they come back when it goes.
+ * board open in the thread (its side panel and its More run to the pane's corner), or a narrow file view's annotations
+ * panel (open down its right edge to its foot). The circle and the cut keep off; they come back when it goes. The
+ * floating drafts' pile never takes the corner: resting there, it sits just above the circle (useReplyFloaters).
  */
 function cornerOwned(pane: HTMLElement): boolean {
   if (pane.querySelector('.ib-shape-inthread:not([hidden])')) return true;
-  if (pane.matches(FOLDED_PANEL) || pane.querySelector(FOLDED_PANEL)) return true;
-  return document.querySelector('[data-rf-corner][data-rf-spot="corner"]') !== null;
+  return pane.matches(FOLDED_PANEL) || pane.querySelector(FOLDED_PANEL) !== null;
 }
 const FOLDED_PANEL = '.ib-view.ib-fold.ib-panel-open';
 /** Classes on a pane that hand its corner to something else, or the whole window to a layer. */
@@ -118,11 +117,10 @@ export function cornerMoves(record: MutationRecord): boolean {
 }
 
 /**
- * An attribute change that gives the corner to something else or takes it back (cornerOwned): the drafts' pile moving
- * to or from the window's corner, a board in a thread shown or hidden, a pane folding, opening its panel or going full.
+ * An attribute change that gives the corner to something else or takes it back (cornerOwned): a board in a thread
+ * shown or hidden, a pane folding, opening its panel or going full.
  */
 function ownerChanged(record: MutationRecord, target: Element): boolean {
-  if (record.attributeName === 'data-rf-spot') return true;
   if (record.attributeName === 'hidden') return target.matches('.ib-shape-inthread');
   if (record.attributeName !== 'class' || !target.matches(PANES)) return false;
   const was = new Set((record.oldValue ?? '').split(/\s+/));
@@ -257,7 +255,7 @@ export function SideChatCorner({ host, unseen, answering, onOpen, flight, opener
     });
     // The window's root, which outlives the layouts inside it (a narrow window swaps the shell on its first frames).
     // Attributes: only those that hand the corner to something else or back (ownerChanged).
-    watch.observe(rootRef.current?.closest('.pn-inbox') ?? document.body, { childList: true, subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['class', 'hidden', 'data-rf-spot'] });
+    watch.observe(rootRef.current?.closest('.pn-inbox') ?? document.body, { childList: true, subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['class', 'hidden'] });
     // A theme or palette change: the pane's shadow is another list.
     const theme = new MutationObserver(soon);
     theme.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });

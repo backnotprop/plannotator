@@ -922,7 +922,10 @@ export function windowedThreadText(result: ThreadWindowResult, order: readonly s
   if (thread.open_questions.length === 0) {
     out.push("No question waits on the person.");
   } else {
-    out.push(`Waiting on the person (${thread.open_questions.length}):`);
+    const actions = thread.open_questions.filter((q) => q.key.startsWith("a-")).length;
+    const questions = thread.open_questions.length - actions;
+    const each = (n: number, noun: string) => (n > 0 ? [`${n} ${noun}${n === 1 ? "" : "s"}`] : []);
+    out.push(`Waiting on the person (${[...each(questions, "question"), ...each(actions, "action item")].join(", ")}):`);
     for (const q of thread.open_questions) {
       // An action item (key `a-…`): A1, A2…, "action item, open", or what the person marked and has not sent (in their reply draft, or inside its Undo window).
       const todo = q.key.startsWith("a-");
