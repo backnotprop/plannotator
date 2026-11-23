@@ -280,9 +280,9 @@ export function buildSrcdocInjection({
  * the security boundary for the annotate surface; the page's CSP was written
  * for its standalone context, so it is removed before injection.
  *
- * The package itself never adds a CSP `<meta>` to the srcdoc document (the
- * injection is `<style>` and `<script>` only), so nothing here blocks a
- * `<script src>` on the URL path. A CSP delivered as an HTTP header on the
+ * Without `resourcePolicy`, the package adds no CSP `<meta>` to the srcdoc
+ * document. The opt-in host policy is applied after this removal. Nothing
+ * here blocks a `<script src>` on the URL path. A CSP delivered as an HTTP header on the
  * HOST page is inherited by the srcdoc document, and the host must allow
  * `script-src` for the origin the asset is served from.
  */
@@ -314,4 +314,22 @@ export function injectIntoHead(rawHtml: string, injection: string): string {
     return html.slice(0, headClose) + injection + html.slice(headClose);
   }
   return injection + html;
+}
+
+/** Host resource restrictions for a single-file, inline-interactive document. */
+export const SELF_CONTAINED_CSP = "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'";
+
+/** Apply last: the parser must see the host policy and lock before author markup. */
+export function applySelfContainedPolicy(document: string): string {
+  // Skip only HTML whitespace and complete comments. Commit to each comment's
+  // first terminator so the scan cannot backtrack across author markup.
+  const preambleToken = /[ \t\n\f\r]+|<!--(?:-?>|[\s\S]*?--!?>)/y;
+  let preambleEnd = 0;
+  while (preambleToken.test(document)) preambleEnd = preambleToken.lastIndex;
+
+  const doctype = /<!doctype[^>]*>/iy;
+  doctype.lastIndex = preambleEnd;
+  const position = doctype.test(document) ? doctype.lastIndex : 0;
+  const policy = `<meta http-equiv="Content-Security-Policy" content="${SELF_CONTAINED_CSP}"><script>Object.defineProperty(window, "__plannotatorLiveConfig", { value: null, writable: false, configurable: false, enumerable: false });</script>`;
+  return document.slice(0, position) + policy + document.slice(position);
 }

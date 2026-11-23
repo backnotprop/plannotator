@@ -18,6 +18,8 @@ import { exportAnnotations } from "../../utils/parser";
 import { ANNOTATION_HIGHLIGHT_CSS, BRIDGE_SCRIPT } from "./bridge-script";
 import {
   DIFF_HIGHLIGHT_CSS,
+  SELF_CONTAINED_CSP,
+  applySelfContainedPolicy,
   buildSrcdocInjection,
   buildThemeTokenPayload,
   hasHostThemeOptIn,
@@ -5110,5 +5112,41 @@ describe("injectPrintDefaults", () => {
     expect(css).not.toContain("break-inside");
     expect(css).not.toContain("break-after");
     expect(css).not.toContain("min-height");
+  });
+});
+
+
+describe("self-contained host policy", () => {
+  const cases: Array<[string, string]> = [
+    ["<!doctype html>", "<html lang='en'><head></head><body>text</body></html>"],
+    ["<!DOCTYPE html>", "<head></head>"],
+    [" \t\n\f\r<!-- lead --><!-- another --><!doctype html>", "<head></head>"],
+    ["<!--><!---><!-- lead --!><!doctype html>", "<head></head>"],
+    ["", "\u00a0<!doctype html><head></head><p>Author text</p>"],
+    ["", "<!--><p>Author text</p><!-- tail --><!doctype html><head></head>"],
+    ["", "<!-- lead --!><p>Author text</p><!-- tail --><!doctype html><head></head>"],
+    ["", "<html><head></head><body>no doctype</body></html>"],
+    ["<!doctype html>", "<html><body>no head</body></html>"],
+    ["<!doctype html>", '<script src="remote.js"></script><head></head>'],
+    ["<!doctype html>", '<img src="remote.png"><head></head>'],
+    ["", "<!-- <head> --><p>fragment</p>"],
+    ["", '<script>var fake = "<head>";</script><head></head>'],
+    ["", '<div title="<head>">attribute</div><head></head>'],
+    ["<!doctype html>", '<head><meta http-equiv="Content-Security-Policy" content="default-src *"></head>'],
+    ["", "<p>fragment</p>"],
+    ["", "<p>before doctype</p><!doctype html><head></head>"],
+  ];
+  for (const [prefix, rest] of cases) {
+    test(`policy precedes author elements in ${prefix + rest}`, () => {
+      const output = applySelfContainedPolicy(prefix + rest);
+      const meta = `<meta http-equiv="Content-Security-Policy" content="${SELF_CONTAINED_CSP}">`;
+      expect(output.startsWith(prefix + meta + '<script>')).toBe(true);
+      const end = output.indexOf('</script>') + '</script>'.length;
+      expect(output.slice(end)).toBe(rest);
+      expect(output.slice(prefix.length, end)).toContain('Object.defineProperty(window, "__plannotatorLiveConfig", { value: null, writable: false, configurable: false, enumerable: false });');
+    });
+  }
+  test("the policy permits inline interaction and only embedded image/font resources", () => {
+    expect(SELF_CONTAINED_CSP).toBe("default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'");
   });
 });

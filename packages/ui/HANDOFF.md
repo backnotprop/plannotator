@@ -572,7 +572,7 @@ import bridgeScriptUrl from "@plannotator/ui/components/html-viewer/bridge-scrip
 
 With the prop set, `buildSrcdocInjection` emits `<script src="…"></script>` in the exact position the inline `<script>` occupied (there is one injection point, `buildBridgeScriptTag` in `srcdoc.ts`, for both paths), so placement is unchanged: at the end of `<head>`, before the body, on both paths (the page's head scripts run before the bridge, its body scripts after). The URL is resolved against the PARENT document (`resolveBridgeScriptUrl(url, document.baseURI)`) before it is written into the srcdoc, never against the framed page: the injection follows any `<base href>` the page declares, so a relative URL left unresolved would let a hostile document point the viewer at an attacker-served bridge and defeat the version check. The srcdoc is rebuilt on `rawHtml`, theme and diff changes and the browser then re-fetches the asset from cache, so serve it with normal immutable-asset cache headers. An empty string counts as absent (inline). The prop is ignored in live (`src`) mode, where the proxy injects the bridge.
 
-**CSP.** Confirmed by grep and pinned by test: the package never writes a CSP `<meta>` into the srcdoc document (the injection is one `<style>` and one `<script>`; an author-written CSP meta is still neutralized as before), and the bridge sets none at runtime. The srcdoc frame is an opaque origin, and a classic `<script src>` executes without CORS; no `crossorigin` attribute is set, so do not expect one. A `Content-Security-Policy` HTTP header on the host page IS inherited by the srcdoc document: a host with its own CSP must allow `script-src` for the origin the asset is served from (same-origin `'self'` in the wiring above). Note the asset form is easier under CSP than the inline form, which would need `'unsafe-inline'` or a nonce. One more header to check: an asset served with `Cross-Origin-Resource-Policy: same-origin` (common with COEP) is blocked for the opaque-origin frame; serve the bridge asset with a CORP that admits cross-origin loads (`cross-origin`) or without CORP.
+**CSP.** Confirmed by grep and pinned by test: without `resourcePolicy`, the package never writes a CSP `<meta>` into the srcdoc document (the injection is one `<style>` and one `<script>`; an author-written CSP meta is still neutralized as before), and the bridge sets none at runtime. The srcdoc frame is an opaque origin, and a classic `<script src>` executes without CORS; no `crossorigin` attribute is set, so do not expect one. A `Content-Security-Policy` HTTP header on the host page IS inherited by the srcdoc document: a host with its own CSP must allow `script-src` for the origin the asset is served from (same-origin `'self'` in the wiring above). Note the asset form is easier under CSP than the inline form, which would need `'unsafe-inline'` or a nonce. One more header to check: an asset served with `Cross-Origin-Resource-Policy: same-origin` (common with COEP) is blocked for the opaque-origin frame; serve the bridge asset with a CORP that admits cross-origin loads (`cross-origin`) or without CORP.
 
 **Protocol version.** `BRIDGE_PROTOCOL_VERSION` (exported from `components/html-viewer/bridge-script` and re-exported from `components/html-viewer`) is embedded in the bridge text and stamped on its `ready` message as `protocolVersion`. Note for the design record's "current state": `BRIDGE_SCRIPT` now carries its first `${}` interpolation (that constant, evaluated at module load); it remains a plain string export with no per-session values, so the CLI, Pi and the live proxy consume it exactly as before. The parent (`checkBridgeProtocolVersion`, `HtmlViewer`'s ready branch) compares it: on the inline path and in live sessions the two sides come from one bundle and always match; on the URL path a cached asset from a previous package version answers with an older stamp, or none, and the viewer logs one console warning naming both versions, shows a dismissible error banner over the top of the frame (`[data-bridge-error="version-mismatch"]`, `role="alert"`, a `[data-bridge-error-dismiss]` button; the page stays visible) and calls `onBridgeUnavailable` once. The ready is still honored (an older bridge answers every message shape it knows), so this is a loud diagnostic, not a refusal. Bump the constant whenever a bridge message shape changes in a way an older bridge or parent would misread; a bump forces a warning against any not-yet-redeployed asset, which is the point.
 
@@ -3142,3 +3142,45 @@ Pinned by `components/CommentPopover.hostDraft.test.tsx`.
   - `keepOther`: on a pick-any question, a tap keeps the words typed under Other in the answer, beside the recommended ticks, and the button is then offered until the ticks alone are the recommended ones (PR #1913's rule, read on the ticks). Pick one and text questions never offer the button once Other or the answer holds words, so nothing changes there.
   - `onAccepted(undo, { key, answer })`: called after a tap, with the question's key and the answer the tap set (so the host can tell when it is no longer current; `sameAnswerParts` is exported for that). `undo` puts back the answer from before it (picks, ticks, Other words, Skip; the note as it is now) and does nothing once the answer has changed since the tap. The card draws no Undo itself: the host shows it (the Plannotator Inbox: an Undo at the end of the card's status line).
 - Pinned by `components/blocks/QuestionBlock.acceptBehavior.test.tsx`.
+
+## `HtmlViewer` self-contained resource policy (opt-in)
+
+Pass `resourcePolicy="self-contained"` to restrict resource loading in a single-file document. The exported `HtmlResourcePolicy` type is `"self-contained"`. With no option, the srcdoc and sandbox output are unchanged.
+
+```tsx
+import { HtmlViewer, type HtmlResourcePolicy } from "@plannotator/ui/components/html-viewer";
+
+const policy: HtmlResourcePolicy = "self-contained";
+// Keep the usual annotation state and callbacks in viewerProps.
+<HtmlViewer {...viewerProps} rawHtml={html} resourcePolicy={policy} />;
+```
+
+The viewer puts this host CSP before author markup, after a leading doctype when present:
+
+```text
+default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'
+```
+
+Inline scripts (including event handlers and eval-based libraries), inline styles, and embedded `data:` images and fonts work. Remote and sibling-file resources, nested frames, workers, and data requests are blocked; `blob:` images are blocked too. The viewer locks `window.__plannotatorLiveConfig` to `null` before author scripts, so the page cannot select live bridge mode. The iframe sandbox is exactly `allow-scripts`. Changing the policy remounts the iframe and reloads its document.
+
+Conflicting props throw during render; the viewer does not fall back to unrestricted rendering:
+
+| Prop | Rejected value |
+| --- | --- |
+| `src`, `liveSession`, `liveSandbox` | Any supplied value |
+| `bridgeScriptUrl` | Any supplied value; only the inline bridge is supported |
+| `frameUrl` | Any supplied value |
+| `hostNavigates` | `true` |
+| `sandbox` | Any supplied value other than `"allow-scripts"` |
+
+A stricter host page CSP is inherited and intersects this policy. If it forbids inline scripts, it blocks the inline bridge and annotation cannot start. The inline path has no ready timeout or failure banner. A host that aliases the bridge to the lite module has no inline bridge and gets the existing missing-bridge error.
+
+`base-uri 'none'` makes the browser ignore `<base href>`; link relaying still reports the raw `href`. **Navigation is not blocked.** A page can navigate its own frame with `location`, meta refresh, or a link the bridge does not catch, and that request can reach the network. This is not a no-network guarantee. The sandbox still blocks top-level navigation and popups. Author code shares the bridge's realm: this option does not prevent bridge tampering or forged annotation text.
+
+### Browser verification harness
+
+Run `bun tests/e2e/html-viewer-resource-policy-harness.ts` from the checkout. It bundles the real viewer with `bun build --target=browser`, builds the package CSS, starts two loopback servers, and prints the harness URL and counter URL. The harness page has no CSP unless `&inherited` is set. Add `&control` for the unrestricted control. `/counts` reports resource requests by run, phase and resource class. No Plannotator data directory is used. Stop with Ctrl+C.
+
+The Chromium spec, `tests/e2e/html-viewer-resource-policy.spec.ts`, runs through `bun run test:sandbox`. It checks working control endpoints, zero restricted resource requests, CSP events, inline interaction, the live-config lock, text/pinpoint annotation payloads and restore, and the inherited-host-CSP limit. Chromium rejects a remote worker at its origin check before CSP, so a blob worker also tests `worker-src 'none'` through a CSP event.
+
+Headed check command: `bun tests/e2e/html-viewer-resource-policy-harness.ts`, then `agent-browser --headed --session html-e954 open 'http://127.0.0.1:58728/?run=headed'`. The final URL was `http://127.0.0.1:58728/?run=headed&counter=http%3A%2F%2F127.0.0.1%3A58727` (ports are assigned per run). At 1440 × 1000: both cart buttons changed the count to 2, the computed value was 42, the data image drew, a text comment and a pinpoint comment submitted, and both numbered markers returned after reload. The counter at `/counts` returned `{}`. The console showed forwarded browser CSP events for the blocked resource classes; no page errors were reported. Screenshots: `/tmp/html-e954-comments.png` and `/tmp/html-e954-restored.png`.

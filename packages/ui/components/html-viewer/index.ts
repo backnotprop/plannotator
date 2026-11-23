@@ -5,6 +5,7 @@ export {
   formatBridgeUnavailableMessage,
   type BridgeUnavailableInfo,
   type HtmlViewerProps,
+  type HtmlResourcePolicy,
 } from "./HtmlViewer";
 export { BRIDGE_PROTOCOL_VERSION } from "./bridge-script";
 export {

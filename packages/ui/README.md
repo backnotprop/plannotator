@@ -125,6 +125,40 @@ Requires `@plannotator/markdown-editor ^0.4.0` and `@plannotator/atomic-editor ^
 
 **`sandbox`** (published in ui 0.55.0): the srcdoc frame's whole `sandbox` attribute. The default is `"allow-scripts allow-modals"`, so a page's `alert`, `confirm` and `prompt` open. A host that shows documents other people wrote passes `sandbox="allow-scripts"`, so no dialog draws over its origin. `hostNavigates` still adds `allow-popups`. A non-string such as `null` gets the default. `""` is the strictest frame: no scripts, so nothing on the page can be annotated. A changed value applies when the frame next loads a document. Do not add `allow-same-origin`. See HANDOFF.md § "`HtmlViewer` `sandbox`".
 
+#### Self-contained HTML (`resourcePolicy`)
+
+Pass `resourcePolicy="self-contained"` to restrict resource loading in a single-file document. The exported `HtmlResourcePolicy` type is `"self-contained"`. With no option, the srcdoc and sandbox output are unchanged.
+
+```tsx
+import { HtmlViewer, type HtmlResourcePolicy } from "@plannotator/ui/components/html-viewer";
+
+const policy: HtmlResourcePolicy = "self-contained";
+// Keep the usual annotation state and callbacks in viewerProps.
+<HtmlViewer {...viewerProps} rawHtml={html} resourcePolicy={policy} />;
+```
+
+The viewer puts this host CSP before author markup, after a leading doctype when present:
+
+```text
+default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'
+```
+
+Inline scripts (including event handlers and eval-based libraries), inline styles, and embedded `data:` images and fonts work. Remote and sibling-file resources, nested frames, workers, and data requests are blocked; `blob:` images are blocked too. The viewer locks `window.__plannotatorLiveConfig` to `null` before author scripts, so the page cannot select live bridge mode. The iframe sandbox is exactly `allow-scripts`. Changing the policy remounts the iframe and reloads its document.
+
+Conflicting props throw during render; the viewer does not fall back to unrestricted rendering:
+
+| Prop | Rejected value |
+| --- | --- |
+| `src`, `liveSession`, `liveSandbox` | Any supplied value |
+| `bridgeScriptUrl` | Any supplied value; only the inline bridge is supported |
+| `frameUrl` | Any supplied value |
+| `hostNavigates` | `true` |
+| `sandbox` | Any supplied value other than `"allow-scripts"` |
+
+A stricter host page CSP is inherited and intersects this policy. If it forbids inline scripts, it blocks the inline bridge and annotation cannot start. The inline path has no ready timeout or failure banner. A host that aliases the bridge to the lite module has no inline bridge and gets the existing missing-bridge error.
+
+`base-uri 'none'` makes the browser ignore `<base href>`; link relaying still reports the raw `href`. **Navigation is not blocked.** A page can navigate its own frame with `location`, meta refresh, or a link the bridge does not catch, and that request can reach the network. This is not a no-network guarantee. The sandbox still blocks top-level navigation and popups. Author code shares the bridge's realm: this option does not prevent bridge tampering or forged annotation text.
+
 #### HTML annotation parity seams (0.32.0)
 
 Everything a host needs around `HtmlViewer` to match Plannotator's HTML annotation experience, all additive and all defaulting to today's behavior. Requires `@plannotator/core` 0.25.0 (the `html-anchor` subpath), so install and publish core before ui:
@@ -150,7 +184,7 @@ import bridgeScriptUrl from "@plannotator/ui/components/html-viewer/bridge-scrip
 <HtmlViewer rawHtml={html} bridgeScriptUrl={bridgeScriptUrl} … />
 ```
 
-The srcdoc then carries one classic `<script src>` in the exact place the inline script sat (at the end of `<head>`, before the body), the browser caches the asset across documents, and the bridge's `ready` message carries `BRIDGE_PROTOCOL_VERSION`, which the viewer checks: a stale cached asset (no stamp, or another version) logs one console warning naming both versions and shows a dismissible error banner in the surface (`onBridgeUnavailable` fires too); no `ready` within `bridgeReadyTimeoutMs` (default 5000) shows a timeout banner. The package owns that banner by default (`bridgeErrorDisplay="banner"`); a host that renders its own notice from `onBridgeUnavailable` passes `bridgeErrorDisplay="none"` (0.34.0) and no strip is rendered, while the callback and the console warning are unchanged. The URL is resolved against your document's base (`document.baseURI`) before it is written into the srcdoc, never against the framed page, so a page's own `<base href>` cannot redirect it. Plannotator passes nothing and stays inline; none of this runs on the inline path. **CSP:** the package sets no CSP `<meta>` in the srcdoc document, and the frame is an opaque origin so the classic script needs no CORS (no `crossorigin` is set), but a CSP delivered as a header on your page is inherited by the frame: allow `script-src` for the asset's origin. Because the frame is an opaque origin, an asset served with `Cross-Origin-Resource-Policy: same-origin` (common alongside COEP) is blocked; serve it with a CORP that admits cross-origin loads, or without CORP. To also drop the inline literal from your viewer chunk, alias the package's relative `./bridge-script` import (match `/^\.\/bridge-script$/`, never a bare `/\/bridge-script$/`, which would also catch another package's `bridge-script` entry) to the generated `bridge-script.lite` module (see HANDOFF.md § "HTML viewer bridge as an asset").
+The srcdoc then carries one classic `<script src>` in the exact place the inline script sat (at the end of `<head>`, before the body), the browser caches the asset across documents, and the bridge's `ready` message carries `BRIDGE_PROTOCOL_VERSION`, which the viewer checks: a stale cached asset (no stamp, or another version) logs one console warning naming both versions and shows a dismissible error banner in the surface (`onBridgeUnavailable` fires too); no `ready` within `bridgeReadyTimeoutMs` (default 5000) shows a timeout banner. The package owns that banner by default (`bridgeErrorDisplay="banner"`); a host that renders its own notice from `onBridgeUnavailable` passes `bridgeErrorDisplay="none"` (0.34.0) and no strip is rendered, while the callback and the console warning are unchanged. The URL is resolved against your document's base (`document.baseURI`) before it is written into the srcdoc, never against the framed page, so a page's own `<base href>` cannot redirect it. Plannotator passes nothing and stays inline; none of this runs on the inline path. **CSP:** without `resourcePolicy`, the package sets no CSP `<meta>` in the srcdoc document, and the frame is an opaque origin so the classic script needs no CORS (no `crossorigin` is set), but a CSP delivered as a header on your page is inherited by the frame: allow `script-src` for the asset's origin. Because the frame is an opaque origin, an asset served with `Cross-Origin-Resource-Policy: same-origin` (common alongside COEP) is blocked; serve it with a CORP that admits cross-origin loads, or without CORP. To also drop the inline literal from your viewer chunk, alias the package's relative `./bridge-script` import (match `/^\.\/bridge-script$/`, never a bare `/\/bridge-script$/`, which would also catch another package's `bridge-script` entry) to the generated `bridge-script.lite` module (see HANDOFF.md § "HTML viewer bridge as an asset").
 
 #### Also blessed in 0.32.0: `shortcuts` and `utils/inputMethod`
 
