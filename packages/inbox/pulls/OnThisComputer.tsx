@@ -9,9 +9,13 @@
  * facts), all its branches behind the Agents view's "N more" fold, for a list filtered to one project with nothing
  * here, its words for that, and for git that could not be read, its "The branches could not be read." (a filtered
  * list reads that project's rows only, so none is crowded out by others). No new keyboard shortcuts.
+ *
+ * Its heading's + (approval "reviews-open-any-branch-a", OpenLocalPicker.tsx) opens any branch or worktree folder, or
+ * a folder through "Another folder…"; what the person opens there stays in the group (localKept.ts), read again with
+ * each list read, under the group's own rules (`keptShows`), and while open it shows whatever it holds.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { INBOX_UNREPORTED_BRANCH_DAYS, inboxLocalWorkKey, inboxLocalWorkLabel, type InboxLocalWork, type InboxLocalWorkAnswer } from '@plannotator/core/inbox-types';
+import { INBOX_UNREPORTED_BRANCH_DAYS, inboxLocalFolderQuiet, inboxLocalWorkKey, inboxLocalWorkLabel, type InboxLocalWork, type InboxLocalWorkAnswer } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { Icon } from '../icons';
 import { AGENT_ROWS_SHOWN } from '../agentsView/AgentsList';
@@ -19,6 +23,9 @@ import { Age, Title } from './ReviewRow';
 import { useRelativeClock } from '../relativeTime';
 import { localWorkIn, localWorkUnread, readLocalWork } from './localWork';
 import { ReviewGroup, type ReviewGroupFold } from './ReviewGroup';
+import { keepLocal, keptShows, useKeptLocal } from './localKept';
+import { localOpenKey, type LocalOpen } from './localRoute';
+import { OpenLocal } from './OpenLocalPicker';
 
 export interface OnThisComputerProps {
   /** The list's project filter. */
@@ -31,24 +38,50 @@ export interface OnThisComputerProps {
   readAgain: unknown;
   /** The group's saved fold (ReviewsList's `folds.local`): closed until opened. */
   fold: ReviewGroupFold;
-  onOpen: (work: InboxLocalWork) => void;
+  /** A row, or what the + picked, opened beside the list. */
+  onOpen: (open: LocalOpen) => void;
+}
+
+/** What a row opens: its branch, its folder, or its project's uncommitted changes. */
+export const localOpenOf = (work: InboxLocalWork): LocalOpen =>
+  work.kind === 'folder' ? { project: work.project_id, branch: null, folder: work.folder ?? '' } : { project: work.project_id, branch: work.kind === 'branch' ? work.branch : null };
+
+/**
+ * The list's rows and what the person kept from the +: a kept row not listed already shows under `keptShows`, by age
+ * with the rest; one that shows only because it is open (nothing beyond main, or quiet) goes first.
+ */
+export function withKept(items: InboxLocalWork[], kept: readonly InboxLocalWork[] | undefined, opened: ReadonlyMap<string, number>, project: string | null, openKey: string | null, now: number): InboxLocalWork[] {
+  if (!kept?.length) return items;
+  const listed = new Set(items.map(inboxLocalWorkKey));
+  const extra = kept.filter((row) => (project === null || row.project_id === project) && !listed.has(inboxLocalWorkKey(row)) && opened.has(inboxLocalWorkKey(row)));
+  const first: InboxLocalWork[] = [];
+  const rest = [...items];
+  for (const row of extra) {
+    const key = inboxLocalWorkKey(row);
+    if (keptShows(row, opened.get(key)!, now, false)) rest.push(row);
+    else if (key === openKey) first.push(row);
+  }
+  if (rest.length === items.length) return [...first, ...items];
+  return [...first, ...rest.sort((a, b) => b.at.localeCompare(a.at))];
 }
 
 export function OnThisComputer({ project, projectNames, openKey, phone, readAgain, fold, onOpen }: OnThisComputerProps) {
   const now = useRelativeClock(true);
   const [answer, setAnswer] = useState<InboxLocalWorkAnswer | null>(null);
+  const kept = useKeptLocal();
+  const keepKeys = kept.map((item) => item.key).join('\n');
   useEffect(() => {
     const controller = new AbortController();
     // A read that fails, or answers without rows (an older Inbox), keeps what was last read: the group never says
     // "nothing" for a read it did not get, and never takes the list down with it.
-    readLocalWork(project, controller.signal).then(
+    readLocalWork(project, controller.signal, keepKeys ? keepKeys.split('\n') : []).then(
       (read) => {
         if (Array.isArray(read?.items)) setAnswer(read);
       },
       () => {},
     );
     return () => controller.abort();
-  }, [readAgain, project]);
+  }, [readAgain, project, keepKeys]);
   // Back from a row's diff: the focus it left goes back to its row.
   const wasOpen = useRef(openKey);
   useEffect(() => {
@@ -68,7 +101,19 @@ export function OnThisComputer({ project, projectNames, openKey, phone, readAgai
     firstHidden.current = null;
     if (key) document.querySelector<HTMLElement>(`[data-pulls-group="local"] [data-local-row="${CSS.escape(key)}"]`)?.focus({ preventScroll: true });
   }, [more]);
-  const items = answer ? localWorkIn(answer.items, project) : [];
+  const opened = new Map(kept.map((item) => [item.key, item.at] as const));
+  const items = answer ? withKept(localWorkIn(answer.items, project), answer.kept, opened, project, openKey, now) : [];
+  // The heading's +: what it opens is kept, then opened as a row is.
+  const plus = (
+    <OpenLocal
+      phone={phone}
+      projectNames={projectNames}
+      onOpen={(what) => {
+        keepLocal(localOpenKey(what)!);
+        onOpen(what);
+      }}
+    />
+  );
   // Git that could not be read for this list: Branch reviews' words for it, where the group is, never "nothing".
   const unread = !!answer && localWorkUnread(answer, project);
   const unreadNote = unread && (
@@ -81,7 +126,7 @@ export function OnThisComputer({ project, projectNames, openKey, phone, readAgai
     const nothing = project && answer && !unread ? (answer.not_git?.includes(project) ? "This project's folder isn't a git repository on this computer." : answer.quiet?.includes(project) ? `No other branch had a commit in the last ${INBOX_UNREPORTED_BRANCH_DAYS} days.` : null) : null;
     if (!nothing && !unread) return null;
     return (
-      <ReviewGroup label="On this computer" name="local" count={0} empty fold={fold}>
+      <ReviewGroup label="On this computer" name="local" count={0} empty fold={fold} tool={plus}>
         {unreadNote || (
           <p className="ib-pr-risknote ib-local-none" data-local-none="">
             {nothing}
@@ -96,8 +141,8 @@ export function OnThisComputer({ project, projectNames, openKey, phone, readAgai
   const shown = folded ? items.filter((item, i) => i < AGENT_ROWS_SHOWN || inboxLocalWorkKey(item) === openKey) : items;
   const hidden = items.length - shown.length;
   return (
-    <ReviewGroup label="On this computer" name="local" count={items.length} fold={{ open, onToggle: fold.onToggle }}>
-      {shown.map((item) => <LocalRow key={inboxLocalWorkKey(item)} item={item} projectName={projectNames.get(item.project_id) ?? null} selected={inboxLocalWorkKey(item) === openKey} phone={phone} now={now} onOpen={() => onOpen(item)} />)}
+    <ReviewGroup label="On this computer" name="local" count={items.length} fold={{ open, onToggle: fold.onToggle }} tool={plus}>
+      {shown.map((item) => <LocalRow key={inboxLocalWorkKey(item)} item={item} projectName={projectNames.get(item.project_id) ?? null} selected={inboxLocalWorkKey(item) === openKey} phone={phone} now={now} onOpen={() => onOpen(localOpenOf(item))} />)}
       {hidden > 0 && (
         <button
           type="button"
@@ -127,8 +172,10 @@ function aheadWords(item: InboxLocalWork): string | null {
  * commits not on its default branch where the row has room for them beside a readable name (inbox.css), the project
  * quiet, the age. A screen reader hears the commits always.
  */
-function LocalRow({ item, projectName, selected, phone, now, onOpen }: { item: InboxLocalWork; projectName: string | null; selected: boolean; phone: boolean; now: number; onOpen: () => void }) {
+function LocalRow({ item, projectName: project, selected, phone, now, onOpen }: { item: InboxLocalWork; projectName: string | null; selected: boolean; phone: boolean; now: number; onOpen: () => void }) {
   const ahead = aheadWords(item);
+  // A folder: its own name (or, on no branch, its short commit) where a row's project goes.
+  const projectName = item.kind === 'folder' ? inboxLocalFolderQuiet(item) : project;
   return (
     <button
       type="button"
@@ -140,7 +187,7 @@ function LocalRow({ item, projectName, selected, phone, now, onOpen }: { item: I
     >
       <span className="ib-rvr-l1">
         <span className="ib-rvr-mark" aria-hidden="true">
-          <Icon name={item.kind === 'branch' ? 'gitBranch' : 'laptop'} size={15} />
+          <Icon name={item.kind === 'branch' ? 'gitBranch' : item.kind === 'folder' ? 'folder' : 'laptop'} size={15} />
         </span>
         <Title text={inboxLocalWorkLabel(item)} />
         <span className="ib-rvr-end">
