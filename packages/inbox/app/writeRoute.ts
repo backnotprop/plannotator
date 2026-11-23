@@ -32,6 +32,7 @@ export function hashOf(route: Route): string {
       (route.view && route.view !== 'all' ? `&view=${route.view}` : '') +
       (route.stack ? `&stack=${encodeURIComponent(route.stack)}` : '') +
       (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${viewScopeHash(route.scope)}` : '') +
+      (!route.layer && route.backLayer ? `&back=${encodeURIComponent(route.backLayer)}` : '') +
       systemHashOf(route) +
       (route.new ? '&new' : '');
   else if (route.page === 'prs')
