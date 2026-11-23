@@ -220,12 +220,11 @@ describe('review entry assets', () => {
           ? entry.name === 'node_modules' ? [] : walk(`${dir}/${entry.name}`)
           : /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [`${dir}/${entry.name}`] : [],
       );
-    // Shape's board (its Code view is a guided review) is the same kind of lazy module: `#shape-board`. So is the
-    // Post to GitHub/GitLab dialog of a pull request's review (the review app's own): `#platform-post`. The PR page's
+    // The Post to GitHub/GitLab dialog of a pull request's review (the review app's own) is a lazy module too: `#platform-post`. The PR page's
     // All files (the review app's tree and file view) rides the reader's chunk, re-exported by GuideReader.tsx. So do
     // the rendered Markdown files (renderedFiles.tsx), which only GuideReader.tsx imports, and the review app's keys on
     // a review (ReviewKeys.tsx, with reviewWalk.ts).
-    const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx', 'packages/inbox/shape/ShapeBoard.tsx', 'packages/inbox/guide/PlatformPost.tsx', 'packages/inbox/guide/PullRepoParts.tsx', 'packages/inbox/guide/PullChangesTree.tsx', 'packages/inbox/guide/useSemDiffClient.ts', 'packages/inbox/guide/renderedFiles.tsx', 'packages/inbox/guide/ReviewKeys.tsx', 'packages/inbox/guide/reviewWalk.ts'];
+    const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx','packages/inbox/guide/PlatformPost.tsx', 'packages/inbox/guide/PullRepoParts.tsx', 'packages/inbox/guide/PullChangesTree.tsx', 'packages/inbox/guide/useSemDiffClient.ts', 'packages/inbox/guide/renderedFiles.tsx', 'packages/inbox/guide/ReviewKeys.tsx', 'packages/inbox/guide/reviewWalk.ts'];
     const eager = walk('packages/inbox').filter((path) => !readers.includes(path) && heavy.test(read(path)));
     expect(eager).toEqual([]);
     // The window's parts (lazyParts.tsx): fetched in idle time, each through its dynamic import only.
@@ -237,9 +236,6 @@ describe('review entry assets', () => {
     expect(read('packages/inbox/lazyParts.tsx')).toContain("lazyPart(() => import('#platform-post'))");
     const post = /^import\s+(?!type\b)[^;]*from\s+['"](?:#platform-post|[^'"]*guide\/PlatformPost(?:\.tsx)?)['"]/m;
     expect(walk('packages/inbox').filter((path) => post.test(read(path)))).toEqual([]);
-    // The board itself (ShapeSurface, through the shape index) reaches the window only through #shape-board.
-    const board = /^import\s+(?!type\b)[^;]*from\s+['"]@plannotator\/ui\/components\/shape(?:\/ShapeSurface)?['"]/m;
-    expect(walk('packages/inbox').filter((path) => path !== 'packages/inbox/shape/ShapeBoard.tsx' && board.test(read(path)))).toEqual([]);
   });
 
   // Inbox search's palette (the approved "inbox-search" design: "the palette
@@ -394,7 +390,7 @@ describe('review entry assets', () => {
   // dist/ is gitignored, so this skips cleanly on an unbuilt checkout. The CI
   // job that builds the bundles runs this file right after the build so the
   // assertion is not silently optional there.
-  const bundles = ['apps/review/dist/index.html', 'apps/hook/dist/index.html', 'apps/hook/dist/inbox.html', 'apps/hook/dist/surface.html', 'apps/hook/dist/shape.html'];
+  const bundles = ['apps/review/dist/index.html', 'apps/hook/dist/index.html', 'apps/hook/dist/inbox.html', 'apps/hook/dist/surface.html'];
   for (const path of bundles) {
     test.skipIf(!existsSync(resolve(root, path)))(`${path} ships no inlined WebAssembly`, () => {
       // Asserted on a boolean, not the string: these bundles are ~20MB and a
@@ -411,7 +407,7 @@ describe('review entry assets', () => {
   // (`inlineDynamicImports`, vite-plugin-singlefile) builds and passes
   // everything else while quietly restoring the ~25 MB first load over a
   // tailnet or tunnel, so this reads the ARTIFACT.
-  const forkBundles = { 'apps/hook/dist/inbox.html': true, 'apps/hook/dist/surface.html': false, 'apps/hook/dist/shape.html': false };
+  const forkBundles = { 'apps/hook/dist/inbox.html': true, 'apps/hook/dist/surface.html': false };
   for (const [path, fork] of Object.entries(forkBundles)) {
     test.skipIf(!existsSync(resolve(root, path)))(`${path} draws diffs with ${fork ? 'the vendored fork' : 'the stock'} @pierre/diffs`, () => {
       const onFork = readFileSync(resolve(root, path), 'utf8').includes('data-connector-level');
@@ -453,7 +449,7 @@ describe('review entry assets', () => {
 
   // While the switch is 'mermaid' no built file carries any of Pele's
   // library: not the single-file builds that inline every dynamic import
-  // (the Inbox surface, the Shape page, code review's diagram engine), and no
+  // (the Inbox surface, code review's diagram engine), and no
   // never-loaded lazy chunk in a packed app either. These markers are class
   // names only Pele's own svg writer prints (Plannotator's finder reads
   // `pele-edge`, `pele-node`, `pele-marker`, never these). The last two are
@@ -468,11 +464,9 @@ describe('review entry assets', () => {
     'apps/hook/dist/review.html',
     'apps/hook/dist/inbox.html',
     'apps/hook/dist/surface.html',
-    'apps/hook/dist/shape.html',
     'apps/hook/dist/diagram-engine/engine.js',
     'apps/inbox/dist/index.html',
     'apps/inbox/dist/surface.html',
-    'apps/inbox/dist/shape.html',
     'apps/opencode-plugin/plannotator.html',
     'apps/opencode-plugin/review-editor.html',
     'apps/opencode-plugin/diagram-engine/engine.js',
@@ -485,11 +479,9 @@ describe('review entry assets', () => {
     });
   }
 
-  // The phone's surface and the Shape page stay one self-contained page each
-  // (vite-plugin-singlefile): a native shell loads the surface with no server
-  // and no network behind it, and the Shape page's server serves it whole, with
-  // no asset route behind it.
-  for (const path of ['apps/hook/dist/surface.html', 'apps/hook/dist/shape.html']) {
+  // The phone's surface stays one self-contained page (vite-plugin-singlefile):
+  // a native shell loads it with no server and no network behind it.
+  for (const path of ['apps/hook/dist/surface.html']) {
     test.skipIf(!existsSync(resolve(root, path)))(`${path} stays single-file`, () => {
       const html = readFileSync(resolve(root, path), 'utf8');
       const facts = { path, packed: html.includes(PACKED_ASSETS_MARKER), linksAssets: /(?:src|href)="\/assets\//.test(html) };

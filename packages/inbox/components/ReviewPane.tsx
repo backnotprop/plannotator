@@ -7,8 +7,8 @@
  *
  * - What Code review brings shows only while it is on (Settings →
  *   Capabilities → Code review) and the agent sent a review (`review: true`):
- *   the verdict, Viewed ticks, Show me and Ask on selected lines, the
- *   Overview's picture and Post to GitHub/GitLab. Open in follows the switch
+ *   the verdict, Viewed ticks, Ask on selected lines and Post to
+ *   GitHub/GitLab. Open in follows the switch
  *   alone. Otherwise (a guide, or a review with Code review off) there is no
  *   verdict to give: the comments ride the person's next Send from the
  *   thread, and the header's Write the reply goes back to it with the reply

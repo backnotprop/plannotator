@@ -65,7 +65,7 @@ export interface GuideReaderProps {
   viewed?: { files: ReadonlySet<string>; onToggle: (path: string) => void };
   /**
    * Choices for selected lines before the comment box (code review in the
-   * Inbox: Comment · Ask · Show me; review-editor's `DiffSelectionActions`).
+   * Inbox: Comment · Ask; review-editor's `DiffSelectionActions`).
    * Absent: a selection opens the comment box at once, as before.
    */
   selectionActions?: GuideSelectionActions;
