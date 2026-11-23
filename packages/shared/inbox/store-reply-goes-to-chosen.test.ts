@@ -101,6 +101,43 @@ describe("two agents in a thread, one added", () => {
     expect(receivers(store, reply)).toEqual([B.session]);
   });
 
+  test("a hand-off after Add: the new owner gets it, the former owner its one stop notice, the added session nothing", () => {
+    const { store, asked } = world();
+    const C = { host: "codex", session: "ses_third" };
+    const reply = store.sendReply(asked.id, {
+      idempotency_key: "h1",
+      words: "@Codex this is yours now.",
+      handoff: { to: C, label: "Codex", from: { host: A.host, session: A.session, wakes: true, label: "Claude Code" } },
+    }).reply;
+    // Held for the Undo window: nobody is handed it.
+    for (const session of [A.session, B.session, C.session]) expect(store.pendingReplies(session, { tags: true }).some((m) => m.id === reply.id)).toBe(false);
+    store.settleHandoffs(0);
+    expect(store.pendingReplies(C.session, { tags: true }).map((m) => m.id)).toEqual([reply.id]);
+    // The former owner: one item, the notice (its tag is the hand-away one), never the words as its own reply.
+    const formerOwner = store.pendingReplies(A.session, { tags: true }).filter((m) => m.id === reply.id);
+    expect(formerOwner).toHaveLength(1);
+    expect(store.deliveryIdOf(formerOwner[0]!, A.session)).not.toBe(reply.id);
+    expect(store.isOwner(formerOwner[0]!, A.session)).toBe(false);
+    expect(store.pendingReplies(B.session, { tags: true }).some((m) => m.id === reply.id)).toBe(false);
+    expect(store.isFor(store.message(reply.id)!, B.session)).toBe(false);
+  });
+
+  test("a hand-off to the added session: it gets the reply as the new owner, the former owner only its notice", () => {
+    const { store, asked } = world();
+    const reply = store.sendReply(asked.id, {
+      idempotency_key: "h1",
+      words: "@Pi it is yours now.",
+      handoff: { to: { host: B.host, session: B.session }, label: "Pi", from: { host: A.host, session: A.session, wakes: true, label: "Claude Code" } },
+    }).reply;
+    store.settleHandoffs(0);
+    const settled = store.message(reply.id)!;
+    expect(store.isOwner(settled, B.session)).toBe(true);
+    expect(store.pendingReplies(B.session, { tags: true }).filter((m) => m.id === reply.id)).toHaveLength(1);
+    const notice = store.pendingReplies(A.session, { tags: true }).filter((m) => m.id === reply.id);
+    expect(notice).toHaveLength(1);
+    expect(store.deliveryIdOf(notice[0]!, A.session)).not.toBe(reply.id);
+  });
+
   test("an answer to the owner's question goes to the owner alone", () => {
     const { store, asked, add } = world();
     const question = [":::question", "Keep the order?", "", "- [ ] Yes", "- [ ] No", ":::"].join("\n");
