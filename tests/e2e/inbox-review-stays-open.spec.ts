@@ -182,9 +182,13 @@ test('a merged PR’s diff stays open with the comment being written, and its he
   await shot('before-merge', 1440, 900, 'light');
 
   // The forge merges it; the window reads the list again (focus, past its 20 s).
+  // The review page keeps the list's count only, so its focus read takes the server's cache: the server reads the
+  // forge again first (as the Reviews page's own refresh would), then the window's focus read brings that answer.
   listAs('MERGED');
   await page.waitForTimeout(FOCUS_READ_MS);
-  const reread = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/inbox/pulls' && response.url().includes('refresh=1') && !response.url().includes('everywhere=1'), { timeout: 30_000 });
+  const served = (await (await page.request.get(`${url}api/inbox/pulls?refresh=1`)).json()) as { pulls: { key: string; state: string }[] };
+  expect(served.pulls.find((p) => p.key === KEY)?.state).toBe('merged');
+  const reread = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/inbox/pulls' && !response.url().includes('everywhere=1'), { timeout: 30_000 });
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   const answer = (await (await reread).json()) as { pulls: { key: string; state: string }[] };
   expect(answer.pulls.find((p) => p.key === KEY)?.state).toBe('merged');
