@@ -322,7 +322,7 @@ describe("supersedes on an action item", () => {
   test("the result names a superseded action item as an action item, not a question", async () => {
     const { send, sent } = await setup();
     const replaced = await send({ body: "The deploy was promoted by CI; no need.", reply_to: sent.message_id, supersedes: [`${sent.message_id}/${sent.actions![0]!.key}`] });
-    expect(replaced.content[0]!.text).toContain(", superseding 1 earlier action item (");
+    expect(replaced.content[0]!.text).toContain(", superseding 1 earlier action item, thread ");
     expect(replaced.content[0]!.text).not.toContain("earlier question");
   });
 });
