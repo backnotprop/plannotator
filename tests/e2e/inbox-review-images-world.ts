@@ -212,7 +212,8 @@ export async function startWorld(browser: Browser): Promise<ImagesWorld> {
 
 /**
  * A scratch Inbox whose one pull request (#815, its title the guide's) is `made`'s change, with an agent's guided
- * review of the same diff (shared by inbox-review-markdown-world.ts).
+ * review of the same diff (shared by the other review-parity worlds: inbox-review-markdown-world.ts and
+ * inbox-review-generated-world.ts).
  */
 export async function startPullWorld(
   browser: Browser,
