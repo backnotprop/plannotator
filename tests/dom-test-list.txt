@@ -172,6 +172,8 @@ packages/inbox/endedSession.test.tsx
 packages/inbox/listRowEnded.test.tsx
 packages/inbox/multiAgentNames.test.tsx
 packages/inbox/replyRecipient.test.tsx
+packages/inbox/replyFollow.test.tsx
+packages/inbox/replyFollowVoice.test.tsx
 packages/inbox/replyQuote.test.tsx
 packages/inbox/phoneComposer.test.tsx
 packages/inbox/compose.test.tsx
@@ -234,6 +236,7 @@ packages/inbox/rowSlotRenders.test.tsx
 packages/inbox/actionDraftSend.test.tsx
 packages/inbox/actionNoteRefusal.test.tsx
 packages/inbox/actionSkip.test.tsx
+packages/inbox/actionTextSelect.test.tsx
 packages/inbox/newMessagePicker.test.tsx
 packages/inbox/wordsOnlyTwoAsks.test.tsx
 packages/inbox/firstRunNotifications.test.tsx
@@ -698,6 +701,7 @@ packages/inbox/guideRefCards.test.tsx
 packages/inbox/guideChapterDiagram.test.tsx
 packages/inbox/guideOverviewMermaid.test.tsx
 packages/inbox/guideExpandContext.test.tsx
+packages/inbox/guideImagePreview.test.tsx
 packages/inbox/guideCollapseAllAfterSwitch.test.tsx
 packages/inbox/guideScrollsWithPage.test.tsx
 packages/inbox/pulls/pullReview.test.tsx
@@ -909,3 +913,5 @@ packages/ui/utils/diagramLabelScrub.test.ts
 packages/ui/utils/diagramRemoteLoads.test.ts
 packages/review-editor/components/DiffViewer.selectionClears.test.tsx
 packages/inbox/pulls/onThisComputer.test.tsx
+packages/inbox/commentBoxFiles.test.tsx
+packages/inbox/commentRowFiles.test.tsx

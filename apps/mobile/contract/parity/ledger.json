@@ -17828,11 +17828,27 @@
       }
     },
     {
+      "id": "window-only-messages",
+      "title": "Window endpoints under messages with no door route",
+      "surface": [
+        "window:/api/inbox/messages/:id/guide/review-image"
+      ],
+      "flows": [],
+      "mobile": "later",
+      "why": "L-nodoor: the phone reaches these only once a door route is added for them (messages).",
+      "reason": "L-nodoor",
+      "source": "seed: no SCOPE row names it",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "window-only-pulls",
       "title": "Window endpoints under pulls with no door route",
       "surface": [
         "window:/api/inbox/pulls/repo-file",
-        "window:/api/inbox/pulls/repo-files"
+        "window:/api/inbox/pulls/repo-files",
+        "window:/api/inbox/pulls/review-image"
       ],
       "flows": [],
       "mobile": "later",

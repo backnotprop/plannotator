@@ -214,7 +214,8 @@ import { isAddressInUseError } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
 import { markPlannotatorResponse, withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT, inboxMcpInitializeClient, resolveInboxMcpReminder, type InboxMcpClient, type InboxMcpContext } from "./inbox-mcp";
-import { guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewSnapshot } from "./inbox-guides";
+import { guidePatchOf, guidePullKey, guideRevisionOf, inboxGuideFileContents, inboxGuideRoute, readInboxReviewSnapshot } from "./inbox-guides";
+import { guideReviewImage, pullReviewImage, reviewImageHttp } from "./inbox-review-image";
 import { createInboxRepoCache } from "./inbox-repos";
 import { createGitlabHosts, unnamedForgeHost, type GitlabHosts } from "./inbox-gitlab-hosts";
 import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-refs";
@@ -6358,7 +6359,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         pullHiddenChanged();
         return json({ serverSession, hidden: hiddenList(), hidden_repos: pullHidden.repos(), hid: hide.map((pull) => pull.key), rehid, threads_left: left, threads_back: back });
       }
-      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes") {
+      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes" || path === "/api/inbox/pulls/review-image") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
@@ -6425,6 +6426,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, cause.code === "pull_unknown" ? 404 : cause.code === "pull_diff_fork" ? 409 : 502);
             throw cause;
           }
+        }
+        // One side of a changed image, for the review app's own image preview on the PR page (inbox-review-image.ts):
+        // only a file the diff at the head the window names changes, every check the shared handler's.
+        if (path === "/api/inbox/pulls/review-image") {
+          const key = url.searchParams.get("key") ?? "";
+          const scoped = pullDiffScopeOf(url.searchParams);
+          if (!scoped) throw new InboxError("validation_error", "scope: layer, stack, range with from (a layer's key) or since with from (a commit).", { field: "scope" });
+          if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
+          return reviewImageHttp(await pullReviewImage({ pulls, key, scope: scoped.scope, ...(scoped.from ? { from: scoped.from } : {}), params: url.searchParams, roots: () => pullRoots(key), ifNoneMatch: req.headers.get("if-none-match"), signal: req.signal }));
         }
         if (path === "/api/inbox/pulls/file") {
           const key = url.searchParams.get("key") ?? "";
@@ -7976,6 +7986,31 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             : null;
         });
         return json({ serverSession, ...contents });
+      }
+
+      // A guided review's image previews (inbox-review-image.ts): one side of a changed image, the blob the guide's patch
+      // names, from the project's git or working tree; as for the arrows, only Code review may ask the forge.
+      const guideImage = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/guide\/review-image$/.exec(path);
+      if (guideImage) {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        const message = store.message(guideImage[1]!);
+        if (!message) return json({ error: "No such message.", code: "message_not_found" }, 404);
+        if (!message.guide) return json({ error: "This message carries no guided review.", code: "guide_not_found" }, 404);
+        const { sha256 } = message.guide;
+        const projectRoot = store.project(message.project_id)?.root ?? null;
+        const pullKey = codeReviewOn() ? guidePullKey(store, sha256) : null;
+        const forge =
+          pullKey && pulls.find(pullKey)
+            ? async (side: "old" | "new", filePath: string, oldPath: string | undefined, maxBytes: number) => {
+                const roots = await pullRoots(pullKey);
+                // Only a PR of this message's own project: a guide cannot name any PR on this machine to read its files.
+                return projectRoot && roots.includes(projectRoot) ? pulls.fileBytes(pullKey, "layer", side, filePath, oldPath, roots, maxBytes) : ({ kind: "missing" } as const);
+              }
+            : undefined;
+        return reviewImageHttp(await guideReviewImage({ patch: guidePatchOf(store, sha256), messageId: message.id, root: projectRoot, pinned: guideRevisionOf(store, sha256), params: url.searchParams, ...(forge ? { forge } : {}), ifNoneMatch: req.headers.get("if-none-match"), signal: req.signal }));
       }
 
       // Guided reviews (step 5): the snapshot a message carries (packages/server/inbox-guides.ts).

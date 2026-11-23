@@ -15,7 +15,7 @@ import {
   QUESTIONS,
   QUESTIONS_HEADING,
   SAVING_LINE,
-  UNDER_CARDS,
+  UNLIMITED_FACTS,
 } from '../../lib/spaces-pricing';
 import '../../styles/spaces/page.css';
 import '../../styles/spaces/signup.css';
@@ -101,7 +101,13 @@ const said = (amount: string, per: string | null) => (per === null ? amount : `$
         );
       })}
     </div>
-    <p class="pp-ask"><span class="note">{UNDER_CARDS}</span></p>
+    <div class="pp-ask">
+      <ul class="note">
+        {UNLIMITED_FACTS.map((fact, at) => (
+          <li class="pp-fact">{at > 0 && <span class="pp-dot" aria-hidden="true">·</span>}{fact}</li>
+        ))}
+      </ul>
+    </div>
   </section>
   <section class="pp-row" data-job="questions">
     <div>
