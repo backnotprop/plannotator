@@ -6,7 +6,7 @@
  *
  * Proved: a High PR's review marks each named file once in the tree, a clear gap before its icon, without moving the
  * row, and each named range once in the diff, on its first line at the column's right edge; a Medium PR the same with
- * two filled bars; a Low PR nothing. The diff's mark (a button named "High risk: <reason>") never covers code: on lines
+ * two filled bars; a Low PR nothing. The diff's mark (a button named "High risk: <reason>", the person's rule before the reason when the place named one) never covers code: on lines
  * long enough to reach the edge, split and unified, old and new sides, scrolling sideways or wrapped. No row under the
  * code says the reason (q-070bc2a3): the bars' card does, on hover, keyboard focus or a press (pinned), and the header's
  * "N places" opens each place's card in turn; a pinned card closes when its bars scroll out of the diff; the card moves nothing in the diff and is not cut by the column. A phone's
@@ -402,7 +402,7 @@ async function expectBeforeIcon(marked: string, unmarked: string) {
 /** The diff's mark sits on the named range's first line (its column), at the column's right edge, over no code. */
 async function expectOnLine(review: Locator, ref: LineRef) {
   await expectNoOverlap(review, ref, { long: false });
-  await expect(barsOf(review, ref)).toHaveAttribute('aria-label', /^(High|Medium) risk: /);
+  await expect(barsOf(review, ref)).toHaveAttribute('aria-label', /^(High|Medium) risk( · your rule “[^”]+”)?: /);
 }
 
 /** sRGB of any CSS colour, and WCAG's contrast ratio of two. */
