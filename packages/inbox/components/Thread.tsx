@@ -1,4 +1,4 @@
-import type { CanvasReplySketch } from '../canvas/canvasApi';
+import { useCanvasReply } from '../canvas/useCanvasReply';
 import { perfInteraction, perfKeystroke } from '../perfMarks';
 import { useThreadArmed } from '../threadArmed';
 import { postDecisions, threadHasQuestionCards } from '../decisionExport';
@@ -124,7 +124,6 @@ import { ReaskNote } from './ReaskNote';
 import { CombineLeftNote, TidyNote } from './Tidy';
 import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } from '../reask';
 import { ChangedNotice, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
-import type { ComposerCommand } from './ComposerField';
 import { VoiceMicButton, VoiceStatusLine } from './VoiceMic';
 import { ReplySummary } from './ReplySummary';
 import { ReplyRow } from './ReplyRow';
@@ -159,7 +158,7 @@ import {
   type TagOption,
 } from '../tags';
 import type { MentionSource } from '@plannotator/ui/utils/mentions';
-import { TAG_TOKEN_CLASS } from './ComposerField';
+import { TAG_TOKEN_CLASS, type ComposerCommand } from './ComposerField';
 import { INBOX_REPLY_SKILL_AUDIENCE, annotationSkillTexts, inboxSkillFilter, inboxSkillsBlock, withSkillsBlock } from '../skills';
 import { fetchSkillCatalog, getCachedSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import { type ActionMark } from './ActionChecklist';
@@ -211,8 +210,7 @@ import { replyWordsWithMentions, useMentionBoxOpener } from '../threadMentions';
 import { labelledAuthorName } from '../parts/AuthorName';
 import { MessageBody } from '../parts/MessageBody/MessageBody';
 
-export { AckPill, MessageBody };
-export { routeSendAnnotations, sendTargetsOf, type SendTarget };
+export { AckPill, MessageBody, routeSendAnnotations, sendTargetsOf, type SendTarget };
 
 export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, pullReview, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, onTakenBack, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, parked = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, board = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onReplyPartOutcome, sketchButton = null, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, namedFile = null, onOpenNamedFile, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, paired = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
   /**
@@ -480,10 +478,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   }, []);
   /** A board's Add to reply whose Undo is live (one at a time): `closing` as the box closes into a draft, `end` when it can no longer. */
   const partUndo = useRef<{ end: () => void; closing: () => void } | null>(null);
-  /** A reply part from the thread's canvas: what rides the Send that carries its files, and its own Send. */
-  const canvasSketch = useRef<{ sketch: CanvasReplySketch; keys: string[] } | null>(null);
-  const canvasSend = useRef<{ keys: string[] } | null>(null);
-  const [canvasSendTick, setCanvasSendTick] = useState(0);
   /** `discarded`: Discard closed it, so a file still uploading stops instead of joining the draft. */
   const closeBox = (discarded = false) => {
     // A board's Add to reply still undoable: it reads the box as it goes into the draft (its Undo works on that).
@@ -3290,9 +3284,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           ...(feedback ? { feedback } : {}),
           ...(own.length > 0 ? { annotation_ids: own.map((r) => r.id) } : {}),
           // From the floating box, the file on screen rides the reply that carries the words (the server drops it when a comment on that file already names it).
-          ...(last && options.stayFull && file && fileAttachment ? { viewing: replyViewingOf(fileAttachment, file, current.messages) } : {}),
-          // Sent from the thread's canvas, while one of its files is still in the box: what the agent reads of the canvas.
-          ...(last && canvasSketch.current && replyFiles.current().some((f) => canvasSketch.current!.keys.includes(f.key)) ? { sketch: canvasSketch.current.sketch } : {}),
+          ...(last && options.stayFull && file && fileAttachment ? { viewing: replyViewingOf(fileAttachment, file, current.messages) } : {}), ...(last ? canvasReply.sketch() : {}), // and from the thread's canvas, what the agent reads of it
           // The pasted files ride the reply that carries the words, as attachments.
           ...(files.length > 0 ? { uploads: files } : {}),
           // The message the words answer (approval "inbox-reply-quote") rides the reply that carries them.
@@ -3334,7 +3326,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         setComposerSentAt(Date.now());
         announce(`Sent to ${replyToNames}.`);
       }
-      canvasSketch.current = null;
       finishSent(sentUploads, sendClears, sendThread);
       if (handedReply) {
         const reply = handedReply;
@@ -4339,22 +4330,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         : undefined,
     [onSideWords, replyText],
   );
-  // The canvas's Send (canvas/CanvasBoard.tsx): once its files are in, the reply goes as if the person pressed Send.
-  // A reply that cannot go by itself (a file refused, a choice to make at Send) stays in the box, and the canvas gives way to it.
-  useEffect(() => {
-    const want = canvasSend.current;
-    if (!want || sending) return;
-    const mine = replyFiles.files.filter((f) => want.keys.includes(f.key));
-    if (mine.length < want.keys.length || mine.some((f) => f.state === 'uploading')) return;
-    canvasSend.current = null;
-    if (mine.some((f) => f.state === 'refused')) {
-      onReplyPartOutcome?.('held');
-      return;
-    }
-    void send().then(() => onReplyPartOutcome?.(replyFiles.current().some((f) => want.keys.includes(f.key)) ? 'held' : 'sent'));
-    // send reads this render's box.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [replyFiles.files, sending, canvasSendTick]);
+  const canvasReply = useCanvasReply(replyFiles, sending, () => send(), onReplyPartOutcome); // the canvas's files, sketch and own Send
   useEffect(() => {
     if (!replyPart || sending) return;
     onReplyPartTaken?.();
@@ -4364,30 +4340,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const words = replyPart.words;
     // Which of the words' places is this press's: the same box added twice reads the same.
     const nth = words ? replyWordsCount(kept, words) : 0;
-    if (replyPart.replace) changeReply(words);
-    else if (words) changeReply(kept.trim() ? `${kept.trimEnd()}\n\n${words}` : words);
+    if (replyPart.replace || words) changeReply(replyPart.replace ? words : kept.trim() ? `${kept.trimEnd()}\n\n${words}` : words);
     // Its name beside every file the reply holds: a closed box's draft files come back through state, after this.
     const taken = [...replyFiles.files.map((f) => f.name), ...draftFilesWithMine(replyDraft.draft?.files ?? []).map((f) => f.name)];
     const file = replyPart.file ? withFreeName(replyPart.file, taken) : null;
-    const keys = file ? replyFiles.add([file]) : [];
-    // From the thread's canvas: its pictures and scene file, what the agent reads of it, and Send pressed for the person.
-    const renamed = new Map<string, string>();
-    const canvasFiles = (replyPart.files ?? []).map((given) => {
-      const free = withFreeName(given, taken);
-      taken.push(free.name);
-      renamed.set(given.name, free.name);
-      return free;
-    });
-    const canvasKeys = canvasFiles.length > 0 ? replyFiles.add(canvasFiles) : [];
-    keys.push(...canvasKeys);
-    if (replyPart.sketch) {
-      const pictures = Object.fromEntries(Object.entries(replyPart.sketch.pictures).map(([thing, name]) => [thing, renamed.get(name) ?? name]));
-      canvasSketch.current = { sketch: { ...replyPart.sketch, pictures }, keys: canvasKeys };
-    }
-    if (replyPart.send) {
-      canvasSend.current = { keys: canvasKeys };
-      setCanvasSendTick((n) => n + 1);
-    }
+    const keys = [...(file ? replyFiles.add([file]) : []), ...canvasReply.take(replyPart, taken)];
     setError(null);
     partUndo.current?.end();
     let live = true;
@@ -5696,13 +5653,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   />
                 }
                 skills={
-                  <Tip content="Skills (or type / in the reply)">
+                  <><Tip content="Skills (or type / in the reply)">
                     <button type="button" className="ib-ricon" aria-label="Skills" data-reply-skills="" onClick={openSkillsFromBox}>
                       <Icon name="cube" size={phone ? 20 : 16} />
                     </button>
-                  </Tip>
+                  </Tip>{sketchButton}</>
                 }
-                sketch={sketchButton}
                 mic={<VoiceMicButton voice={voice} phone={phone} />}
                 status={<VoiceStatusLine voice={voice} phone={phone} />}
                 files={

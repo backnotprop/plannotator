@@ -4467,6 +4467,9 @@
         "viewing": {
           "$ref": "#/$defs/InboxReplyViewing"
         },
+        "sketch": {
+          "$ref": "#/$defs/InboxReplySketch"
+        },
         "sent_from": {
           "anyOf": [
             {
@@ -5594,6 +5597,39 @@
       },
       "required": [
         "of"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxReplySketch": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "selection",
+            "sketch"
+          ],
+          "x-open": true
+        },
+        "rev": {
+          "type": "integer"
+        },
+        "things": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reading": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "rev",
+        "things",
+        "reading"
       ],
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"

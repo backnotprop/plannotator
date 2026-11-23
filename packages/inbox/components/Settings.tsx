@@ -44,6 +44,7 @@ import type { SystemProjectRow } from '@plannotator/core/inbox-system';
 import { openSystemSetup } from '../system/opener';
 import { systemStateWords } from '../system/projects';
 import { ScheduledSettingsRow } from '../scheduled/SettingsRow';
+import { CanvasSettingsRow } from '../canvas/SettingsRow';
 import { usePhone } from '../phone';
 
 const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
@@ -106,6 +107,7 @@ export interface SettingsPageProps {
   systemProjects?: SystemProjectRow[] | null;
   /** Settings → Capabilities → Chapter diagrams, under Code review and shown only while it is on. Absent (or an Inbox without it): no row. */
   onToggleChapterDiagrams?: (next: boolean) => void;
+  /** Settings → Capabilities → Canvas (config.json `inboxCanvas`, off by default). Absent (or an Inbox without it): no row. */ onToggleCanvas?: (next: boolean) => void;
   /** Settings → Capabilities → Checklist (thread steps, approval "inbox-thread-steps"). Absent (or an Inbox without it): no row. */
   onToggleSteps?: (next: boolean) => void;
   /** Settings → Capabilities → Routines (after Checklist). Absent (or an Inbox without it, Windows among them): no row. */
@@ -555,6 +557,7 @@ function CapabilitiesSection({
   systemProjects,
   chapterDiagrams,
   onToggleChapterDiagrams,
+  canvasRow,
   bro,
   onToggleBro,
   floatDrafts,
@@ -584,6 +587,7 @@ function CapabilitiesSection({
   /** Chapter diagrams: null unless Code review is on (the server sends it only then). */
   chapterDiagrams: { on: boolean } | null;
   onToggleChapterDiagrams?: (next: boolean) => void;
+  /** The canvas's row (canvas/SettingsRow.tsx), last in the card; null on an Inbox without it. */ canvasRow?: ReactNode;
   /** Bro mode (approval "bro-mode"), null on an Inbox without it. */
   bro: { on: boolean } | null;
   onToggleBro?: (next: boolean) => void;
@@ -614,7 +618,7 @@ function CapabilitiesSection({
   const decisionRow = experimental && onToggleExperimental;
   return (
     <>
-      {(boardRow || stepsRow || scheduledRow || codeReviewRow || shapeRow) && (
+      {(boardRow || stepsRow || scheduledRow || codeReviewRow || shapeRow || canvasRow) && (
         <section className="ib-sgroup" data-settings-capabilities="" aria-label="Capabilities">
           <div className="ib-card">
             {boardRow && (
@@ -723,6 +727,7 @@ function CapabilitiesSection({
                 </span>
               </div>
             )}
+            {canvasRow}
           </div>
         </section>
       )}
@@ -1107,7 +1112,7 @@ export function SettingsPage(props: SettingsPageProps) {
   const voice = useVoiceSettings();
   const [look] = useListLook();
   const sections = SETTINGS_SECTIONS.filter(
-    (id) => (id !== 'capabilities' || board !== null || steps !== null || scheduled !== null || codeReview !== null || shape !== null || bro !== null || floatDrafts !== null || experimental !== null) && (id !== 'cloud-agents' || cloud.shown === true) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
+    (id) => (id !== 'capabilities' || board !== null || steps !== null || scheduled !== null || codeReview !== null || shape !== null || bro !== null || floatDrafts !== null || experimental !== null || !!settings?.canvas) && (id !== 'cloud-agents' || cloud.shown === true) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
   );
   /** The phone's list of sections, in its groups: settings (Capabilities last of them), then your data and Plannotator. */
   const phoneGroups: { label: string; ids: SettingsSection[] }[] = [
@@ -1305,7 +1310,7 @@ export function SettingsPage(props: SettingsPageProps) {
         break;
       case 'capabilities':
         body =
-          (board && props.onToggleBoard) || steps || scheduled || codeReview || shape || bro || experimental ? (
+          (board && props.onToggleBoard) || steps || scheduled || codeReview || shape || bro || experimental || (settings?.canvas && props.onToggleCanvas) ? (
             <CapabilitiesSection
               board={board}
               onToggleBoard={props.onToggleBoard}
@@ -1322,6 +1327,7 @@ export function SettingsPage(props: SettingsPageProps) {
               systemProjects={props.systemProjects}
               chapterDiagrams={chapterDiagrams}
               onToggleChapterDiagrams={props.onToggleChapterDiagrams}
+              canvasRow={settings?.canvas && props.onToggleCanvas ? <CanvasSettingsRow value={settings.canvas} onToggle={props.onToggleCanvas} /> : null}
               bro={bro}
               onToggleBro={props.onToggleBro}
               floatDrafts={floatDrafts}

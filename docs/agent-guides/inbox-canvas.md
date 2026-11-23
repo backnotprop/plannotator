@@ -1,6 +1,17 @@
-## A thread's canvas (prototype)
+## A thread's canvas
 
-Every thread of this computer's Inbox can hold one canvas: a real Excalidraw scene that the person draws on and an agent reads and changes. Prototype grade: local threads only, no linked machines, no phone relay, no approval record yet.
+Every thread of this computer's Inbox can hold one canvas: a real Excalidraw scene that the person draws on and an agent reads and changes. Local threads only, no linked machines, no phone relay, no approval record yet.
+
+### The switch
+
+A capability, off by default: Settings → Capabilities → Canvas, last in the main card (`canvas/SettingsRow.tsx`, config.json `inboxCanvas`, `POST /api/inbox/settings` `{ canvas: { on } }`, answered as `canvas: { on }` and sent to every window in `event: capabilities`; `packages/server/inbox-canvas-switch.ts`). Read on every request. Off:
+
+- no pen in a thread's header or reply box, and the window loads nothing of the canvas (`canvas/useThreadCanvas.tsx` renders nothing; the pens and the layer are the lazy `canvas/CanvasParts.tsx`, the editor the lazy `#canvas-board`);
+- every canvas route answers `409 canvas_off`; no `event: canvas` or `canvas-job` frame is sent; a reply's `sketch` is dropped (the reply goes);
+- `canvas` is not in an agent's tools/list (`inboxServedTools`' `canvas`), and a session that listed it while it was on gets `INBOX_CANVAS_OFF_TEXT`; `plannotator inbox --help` and `inbox call`'s action list leave it out;
+- stored canvases stay as they are: a deleted thread's canvas is not moved aside and nothing is swept.
+
+Agents pick a change up in their next session.
 
 ### The window
 

@@ -628,6 +628,12 @@ export interface PlannotatorConfig {
    */
   inboxChapterDiagrams?: boolean;
   /**
+   * The canvas in every thread (Settings → Capabilities → Canvas; docs/agent-guides/inbox-canvas.md): off unless
+   * `true`. On: the pen in a thread's header and its reply box, and agents' `canvas` action. Off: none of it, and
+   * every stored canvas is kept. Written by `POST /api/inbox/settings` `{ canvas: { on } }`, read on every request.
+   */
+  inboxCanvas?: boolean;
+  /**
    * Shape in the Inbox (approval "shape-inbox-placement"): living boards an
    * agent draws and keeps current. Off unless the person turns it on. On: the
    * thread header's Pebble, the sidebar's Shape row (3+ boards), the Shape

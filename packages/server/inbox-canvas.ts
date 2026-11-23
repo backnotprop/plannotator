@@ -1,5 +1,6 @@
 /**
- * Plannotator Inbox: a thread's canvas (prototype).
+ * Plannotator Inbox: a thread's canvas, a capability off by default
+ * (inbox-canvas-switch.ts; the routes and the tool exist only while it is on).
  *
  * Every thread can hold one canvas: an Excalidraw scene the person draws on
  * in the window (packages/inbox/canvas) and an agent reads and changes with
@@ -117,6 +118,8 @@ export function createInboxCanvas(options: {
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   sessionMismatch: (body: Record<string, unknown>) => Response | null;
   now?: () => number;
+  /** The canvas switch (inbox-canvas-switch.ts). Off: stored canvases are left exactly as they are, deleted threads' too. Absent: on. */
+  on?: () => boolean;
 }): InboxCanvas {
   const { store, json } = options;
   const dir = store.dir;
@@ -126,12 +129,14 @@ export function createInboxCanvas(options: {
   const emit = (event: string, data: unknown) => {
     for (const send of windows) send(event, data);
   };
-  // A deleted thread's canvas goes with it (moved aside, store.ts `retireCanvas`).
+  // A deleted thread's canvas goes with it (moved aside, store.ts `retireCanvas`). Only while the canvas is on.
+  const on = options.on ?? (() => true);
   store.onDeletion(() => {
+    if (!on()) return;
     for (const id of canvasThreads(dir)) if (!store.message(id)) retireCanvas(dir, id, now());
     sweepGoneCanvases(dir, now());
   });
-  sweepGoneCanvases(dir, now());
+  if (on()) sweepGoneCanvases(dir, now());
 
   const threadOf = (id: string): string => {
     const root = store.message(id.trim())?.thread_id;

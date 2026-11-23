@@ -65,6 +65,10 @@ export function useSettingsSaves(
   const toggleChapterDiagrams = (next: boolean) =>
     saveSetting((s) => ({ ...s, chapter_diagrams: { on: next } }), () => inboxApi.saveChapterDiagrams(next), (s, saved) => ({ ...s, chapter_diagrams: saved.chapter_diagrams ?? { on: next } }));
 
+  // The canvas in every thread (Settings → Capabilities → Canvas).
+  const toggleCanvas = (next: boolean) =>
+    saveSetting((s) => ({ ...s, canvas: { on: next } }), () => post<{ canvas?: { on: boolean } }>(inboxUrl('/settings'), { canvas: { on: next } }), (s, saved) => ({ ...s, canvas: saved.canvas ?? { on: next } }));
+
   const toggleShape = (next: boolean) => saveSetting((s) => ({ ...s, shape: { on: next } }), () => inboxApi.saveShape(next), (s, saved) => ({ ...s, shape: saved.shape }), reloadSkillCatalog);
 
   const toggleScheduled = (next: boolean) =>
@@ -112,7 +116,7 @@ export function useSettingsSaves(
     }
     await refreshList(true);
   };
-  return { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleShape, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject };
+  return { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleCanvas, toggleShape, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject };
 }
 
 /** App's settings take a saved thread panes switch through this (set where App runs `useSettingsSaves`). */

@@ -187,7 +187,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       "`thread_pulls`: A thread's pull/merge requests. `thread_id`; `add` and `remove`, lists of `owner/repo#123` (GitHub), `group/sub/project!45` (GitLab) or PR URLs (Bitbucket: the URL only). Neither lists them. You own your thread's list: add a PR when you open or take on one for this work (or pass `pulls` on send_message), and remove one when it stops being part of the work; merged ones stay. The person can add and remove too; read_thread shows who did, and your next reply in the thread says what they changed. From a shell: `plannotator inbox pulls ls|add|rm <thread> [<ref>...]`.",
     ],
   },
-  // A thread's canvas (prototype): packages/server/inbox-canvas.ts.
+  // A thread's canvas: packages/server/inbox-canvas.ts. Shown only while the person has it on (`canvas`).
   canvas: {
     args: ["thread_id", "in", "things", "after_thing", "picture", "base", "do"],
     lines: [
@@ -331,6 +331,8 @@ export interface InboxHelpOptions {
   steps?: boolean;
   /** The person turned routines on (config.json `inboxScheduledThreads`). Off (the default), the guide says nothing of them. */
   scheduled?: boolean;
+  /** The person turned the canvas on (config.json `inboxCanvas`). Off (the default), the guide says nothing of it. */
+  canvas?: boolean;
   /**
    * The person turned code review on (config.json `inboxCodeReview`, read by
    * the caller). Off (the default), the guide says nothing of it: no `review`
@@ -375,6 +377,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
   const board = INBOX_CARD_ACTION_ON && options.board === true;
   const steps = options.steps === true;
   const scheduled = options.scheduled === true;
+  const canvas = options.canvas === true;
   const codeReview = options.codeReview === true;
   const branchReviews = codeReview && options.branchReviews === true;
   const mcpCommand = [...options.command, "inbox", "mcp"];
@@ -475,7 +478,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     // Every tool this Inbox serves (`card` only while the Board is on and INBOX_CARD_ACTION_ON lets it ship).
     // `steps` only while the person has thread steps on.
-    ...inboxServedTools({ board, steps, scheduled }).flatMap((name) => toolBlock(name, steps, codeReview, branchReviews)),
+    ...inboxServedTools({ board, steps, scheduled, canvas }).flatMap((name) => toolBlock(name, steps, codeReview, branchReviews)),
     "## Threads",
     "",
     "Where send_message (and submit_guide) puts a message; the first rule that applies wins:",
@@ -637,7 +640,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     `${self} inbox call [--session <id>] <action> [<json> | -]`,
     "```",
     "",
-    `- Actions: ${INBOX_CALL_ACTIONS.filter((action) => (steps || action !== "steps") && (scheduled || action !== "routine")).map(code).join(", ")}, with the arguments above as one JSON object. \`-\` reads the JSON from stdin, for PowerShell and for loops, where quoting JSON is painful. A stopped Inbox starts in the background.`,
+    `- Actions: ${INBOX_CALL_ACTIONS.filter((action) => (steps || action !== "steps") && (scheduled || action !== "routine") && (canvas || action !== "canvas")).map(code).join(", ")}, with the arguments above as one JSON object. \`-\` reads the JSON from stdin, for PowerShell and for loops, where quoting JSON is painful. A stopped Inbox starts in the background.`,
     "- stdout is the result as one JSON value (the tool's structured result), so `jq` and scripts can read it. On failure stdout is empty, stderr says `<code>: <message>`, and the exit code is 1 (refused, or no Inbox) or 2 (bad usage: an unknown action, bad JSON). Test the exit code before you use the output.",
     "- Pass an `idempotency_key` on each `send_message` and `card` create, so a rerun cannot post twice. Only those two take one; moving a card again changes nothing.",
     "- Who you are: a Tidy gives you the exact `--session` value; pass it on every call. Otherwise the call is the session this shell names, and the same as your tool: your threads and cards, your name, the person's reply reaches you. Claude Code, Pi, Codex, Qwen Code and DeepSeek Harness each name theirs. A DeepSeek Harness subagent's shell names the session the subagent works for only while Plannotator's plugin runs its Inbox connection in that DSH (the inbox tool on, and the Inbox run once; the shell then has `DSH_PLANNOTATOR_SESSION_ID`); otherwise it names the subagent's own session. With neither, it is nobody in particular: `read_thread` and `card list` show every thread and card in the project, and a reply cannot find you. In a Claude Code or Pi session, a call with no `project_path` files under your session's project, as your tool does, whatever folder the shell is in; name `project_path` only for another project. The JSON cannot name a session. `session_ambiguous` means this shell was started inside another agent and carries both: pass `--session` with your own. `session_mismatch` means your `--session` is not the session this shell names, and nothing was sent. Never drop `--session` to get past it, that writes as the session the shell names: if the value is from your own Tidy, this shell is older than your session, so use a new shell or unset the variable the error names.",

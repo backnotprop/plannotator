@@ -1,7 +1,5 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { inboxAgentName } from '@plannotator/core/inbox-types';
-import { CanvasLayer, SketchButton } from '../canvas/CanvasParts';
-import { useInboxTheme } from '../theme';
+import { useEffect, useMemo, useRef } from 'react';
+import { useThreadCanvas } from '../canvas/useThreadCanvas';
 import { closeTo } from '../app/focus';
 import { writeRoute } from '../app/writeRoute';
 import { CardChip } from '../board/CardChip';
@@ -13,8 +11,6 @@ import { useHeldThread } from '../data/queries/thread';
 import type { HeldThread } from '../data/apply/record';
 import { drawnSection } from '../held';
 import { machineOf } from '../inboxUrl';
-import { inboxApi } from '../api';
-import { HostMark } from '../icons';
 import { machineTakes, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from '../machines';
 import { MAIN_PANE, type PaneId } from '../panes/model';
 import type { PaneOnScreen } from '../panes/onScreen';
@@ -27,6 +23,7 @@ import { threadBoardCard } from '../steps/model';
 import { openTakenBack } from '../takenBackCompose';
 import { pageOffersUpdates } from '../updateNotice';
 import { fileOpener } from './openFile';
+import { useFocusSubject } from './focusSubject';
 import type { ThreadSlotHost } from './slotHost';
 
 export interface ThreadSlotProps {
@@ -66,17 +63,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
   const scope = useMemo(() => ({ paneId, active }), [paneId, active]);
   const activeRef = useRef(active);
   activeRef.current = active;
-  /** Focus was in the thread's place when it gave way to the thread: it goes to the thread's subject. */
-  const focusSubject = useRef(false);
-  useEffect(() => {
-    focusSubject.current = false;
-  }, [threadId]);
-  // The thread landed while focus was in its place: focus goes to its subject, never to the page.
-  useLayoutEffect(() => {
-    if (!focusSubject.current || !thread || thread.thread_id !== threadId) return;
-    focusSubject.current = false;
-    document.querySelector<HTMLElement>(`section.ib-pane[data-thread-id="${CSS.escape(thread.thread_id)}"] .ib-subject`)?.focus();
-  }, [thread, threadId]);
+  const focusSubject = useFocusSubject(thread, threadId);
   // What the thread says of itself on screen, held back while the pane waits off the page.
   const screen = useRef<PaneOnScreen | null>(null);
   const reportScreen = () => {
@@ -93,70 +80,12 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
   const onClose = fromCard ? host.backToCard : () => close({ ...route, thread: null, file: null });
   // The address's board, in this pane while it shows that thread: only one the window draws (none with Shape off, or
   // while a review draws its own). On a phone it is a screen of its own, as the Artifacts view is: back is the thread.
-  const shapeNode = route.shape && host.board && thread && thread.thread_id === route.thread ? host.board(true, stack.thread) || null : null;
-  // The thread's canvas (canvas/CanvasParts.tsx), in the same place: one view at a time. Not on a linked machine's
-  // thread yet (its scene lives in that machine's Inbox).
-  const canvasFor = thread && !machineOf(thread.thread_id) ? thread.thread_id : null;
-  const [canvasOpen, setCanvasOpen] = useState<string | null>(null);
-  const canvasOn = !!canvasFor && canvasOpen === canvasFor;
-  const { shown: themeShown } = useInboxTheme();
-  // The reply box's words go to the canvas's bar and come back: what the box held when the canvas opened (its saved
-  // draft), and the bar's words as the person leaves them.
-  const [canvasDraft, setCanvasDraft] = useState('');
-  const canvasWords = useRef('');
-  const openCanvas = () => {
-    if (!canvasFor) return;
-    setCanvasDraft('');
-    canvasWords.current = '';
-    setCanvasOpen(canvasFor);
-    const id = canvasFor;
-    void inboxApi
-      .replyDraft(id)
-      .then((answer) => {
-        const body = answer.draft?.body ?? '';
-        if (!body) return;
-        canvasWords.current = body;
-        setCanvasDraft(body);
-      })
-      .catch(() => {});
-  };
-  const closeCanvas = () => {
-    const id = canvasOpen;
-    setCanvasOpen(null);
-    // Words typed (or changed) in the bar and not sent go to the reply box.
-    if (id && canvasWords.current !== canvasDraft) host.setShapeReply({ words: canvasWords.current, file: null, replace: true, quiet: true, threadId: id });
-  };
-  const toggleCanvas = () => (canvasOn ? closeCanvas() : openCanvas());
-  const canvasAgent = thread ? ([...thread.messages].reverse().find((m) => m.author.kind === 'agent')?.author ?? null) : null;
-  // The person's newest reply reached a running session (the thread's own delivery mark): the canvas shows the agent at work.
-  const canvasLast = thread ? thread.messages[thread.messages.length - 1] : undefined;
-  const canvasReceived = !!canvasLast && canvasLast.author.kind === 'person' && canvasLast.delivery?.state === 'delivered';
-  const boardNode = shapeNode;
-  const canvasNode =
-    canvasOn && canvasFor && thread ? (
-      <CanvasLayer
-        threadId={canvasFor}
-        subject={thread.thread_name?.trim() || thread.subject || 'Thread'}
-        dark={themeShown === 'dark'}
-        agent={canvasAgent ? inboxAgentName(canvasAgent) : null}
-        agentMark={canvasAgent && canvasAgent.kind === 'agent' ? <HostMark host={canvasAgent.host} agent={canvasAgent.session} /> : undefined}
-        received={canvasReceived}
-        draft={canvasDraft}
-        onWords={(words) => {
-          canvasWords.current = words;
-        }}
-        onSend={(reply) => {
-          // Sent: the bar is empty again, and so is what goes back to the reply box.
-          canvasWords.current = '';
-          setCanvasDraft('');
-          host.setShapeReply({ words: reply.words, file: null, files: reply.files, sketch: reply.sketch, send: true, replace: true, threadId: canvasFor });
-        }}
-        onClose={closeCanvas}
-      />
-    ) : null;
+  const boardNode = route.shape && host.board && thread && thread.thread_id === route.thread ? host.board(true, stack.thread) || null : null;
+  // The thread's canvas (canvas/useThreadCanvas.tsx): over the whole window while open; its pens only while it is on.
+  const canvas = useThreadCanvas(thread, host, phone);
   return (
     <PaneScopeContext.Provider value={scope}>
-      {canvasNode}
+      {canvas.layer}
       {/* Beside the list, the thread's place says it is opening (or why not) until its read lands; a phone
           and a stacked window keep the list until there is a thread to show, or the thread's machine is away. */}
       {threadId && !ready && ((!phone && !stack.thread) || awayWait) && (
@@ -270,22 +199,14 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
           draftSignal={host.draftSignals.of(thread.thread_id)}
           filesSignal={host.filesSignals.of(thread.thread_id)}
           onReplyOpened={() => host.setReplyFor(null)}
-          sketchButton={canvasFor ? <SketchButton threadId={canvasFor} where="reply" open={canvasOn} onToggle={toggleCanvas} size={phone ? 20 : 16} /> : null}
-          // The canvas's Send could not go by itself: the reply box, with what it holds, takes the canvas's place.
-          onReplyPartOutcome={(outcome) => outcome === 'held' && setCanvasOpen(null)}
+          sketchButton={canvas.reply} onReplyPartOutcome={canvas.outcome}
           shapeButton={(() => {
-            const sketch = canvasFor ? <SketchButton threadId={canvasFor} where="header" open={canvasOn} onToggle={toggleCanvas} size={17} /> : null;
             const board = host.boardsOn && thread ? host.shapes.byThread.get(thread.thread_id) : undefined;
-            if (!board) return sketch;
+            if (!board) return canvas.header;
             const open = !!route.shape;
             // In the Artifacts view's place (one view at a time); opened by this press, its title takes the focus.
             const show = () => (go({ ...route, shape: board.id, artifacts: false, links: false }), focusBoardTitle(board.id));
-            return (
-              <>
-                {sketch}
-                <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : show())} />
-              </>
-            );
+            return <>{canvas.header}<ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : show())} /></>;
           })()}
           board={boardNode}
           onSide={host.ask.side}

@@ -776,8 +776,8 @@ export const INBOX_CALL_USAGE = [
   "  plannotator inbox call [--session <id>] <action> [<json> | -]",
   "",
   "Runs one Inbox action from a shell, so a script can make many fixes in one go.",
-  // `steps` and `routine` are left out: each is served only while the person has it on, and the guide names it then.
-  `Actions: ${INBOX_CALL_ACTIONS.filter((action) => action !== "steps" && action !== "routine").join(", ")}. The JSON holds the action's fields, as in`,
+  // `steps`, `routine` and `canvas` are left out: each is served only while the person has it on, and the guide names it then.
+  `Actions: ${INBOX_CALL_ACTIONS.filter((action) => action !== "steps" && action !== "routine" && action !== "canvas").join(", ")}. The JSON holds the action's fields, as in`,
   "'plannotator inbox --help'; - reads it from stdin (for PowerShell and for loops, where",
   "quoting JSON is painful). A stopped Inbox starts in the background.",
   "",

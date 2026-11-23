@@ -285,7 +285,6 @@ import { ThreadShapeLayer, ThreadShowMeBox, useThreadShowMe } from './shape/Thre
 import { setReviewSkillsDiagrams, setReviewSkillsShape } from './skills';
 import { showMeBoardOpensIn } from './shape/showMeOpensIn';
 import { shapeReplyPart, type ShapeReplyPart } from './shape/addToReply';
-import { onCanvasFrame, onCanvasJob } from './canvas/canvasApi';
 import type { ShapeBoxSelection } from '@plannotator/ui/components/shape';
 import { useBoardPlaces } from './shape/boardPlace';
 import { useInboxShapes } from './shape/useInboxShapes';
@@ -1771,7 +1770,6 @@ function Inbox() {
         // "Over your tailnet" published by itself once Tailscale came back: Settings' row shows the address at once.
         onTailscale: (tailscale) => setSettings((current) => (current ? { ...current, tailscale } : current)),
         // Shape's boards changed (only sent while Shape is on).
-        onCanvas: (name, data) => (name === 'canvas' ? onCanvasFrame(data) : onCanvasJob(data)),
         onShapes: (ids) => {
           for (const listener of shapeFrameListeners) listener(ids);
         },
@@ -3704,7 +3702,7 @@ function Inbox() {
     };
   }, [whatsNewVersion, whatsNewRetry]);
 
-  const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleShape, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
+  const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleCanvas, toggleShape, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
     useSettingsSaves({ setSettings, setError: setSettingsError, refresh: refreshSettings, adoptStore, readStore, refreshList });
   const scheduledOn = useScheduledOn(settings, settingsReadFailed);
   const plansOn = usePlansOn(settings, showToast);
@@ -5200,7 +5198,7 @@ function Inbox() {
         onToggleCodeReview={(next) => void toggleCodeReview(next)}
         onToggleShape={(next) => void toggleShape(next)}
         onToggleSystem={(next) => void toggleSystem(next)}
-        onToggleChapterDiagrams={(next) => void toggleChapterDiagrams(next)}
+        onToggleChapterDiagrams={(next) => void toggleChapterDiagrams(next)} onToggleCanvas={(next) => void toggleCanvas(next)}
         systemProjects={systemProjects.projects}
         agents={agents}
         onAgents={setAgents}

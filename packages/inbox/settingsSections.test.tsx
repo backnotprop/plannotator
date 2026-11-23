@@ -458,7 +458,8 @@ test.skipIf(!hasDom)('Capabilities: the Checklist switch, off by default under t
   const group = el.querySelector('[data-settings-capabilities]')!;
   const rows = [...group.querySelectorAll('.ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
   // Code review shows to everyone, off (the owner, 2026-11-17); Shape is held: off, and without PLANNOTATOR_INBOX_PREVIEW, no row.
-  expect(rows).toEqual(['Board', 'Checklist', ...SCHEDULED_ROW, 'Code review']);
+  // Canvas shows to everyone, off, last in the card.
+  expect(rows).toEqual(['Board', 'Checklist', ...SCHEDULED_ROW, 'Code review', 'Canvas']);
   // Peers: each switch has its own element, so the Board's selector finds one switch (e2e inbox-board, inbox-tailnet-owner).
   expect(el.querySelectorAll('[data-settings-board] [role="switch"]').length).toBe(1);
   expect(el.querySelector('[data-settings-steps]')?.contains(switchNamed(el, 'Checklist'))).toBe(true);
@@ -589,7 +590,7 @@ test.skipIf(!hasDom)(
       const el = await renderApp('#settings/capabilities');
       await until(() => switchNamed(el, 'Shape') !== null, 'the Shape switch');
       const rows = [...el.querySelectorAll('[data-settings-capabilities] .ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
-      expect(rows).toEqual(['Board', 'Checklist', ...SCHEDULED_ROW, 'Code review', 'Shape']);
+      expect(rows).toEqual(['Board', 'Checklist', ...SCHEDULED_ROW, 'Code review', 'Shape', 'Canvas']);
       for (const held of HELD) {
         expect(el.querySelector(held.selector)?.contains(switchNamed(el, held.name))).toBe(true);
         expect(switchNamed(el, held.name)!.getAttribute('aria-checked')).toBe('false');
