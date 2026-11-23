@@ -391,7 +391,7 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
         if (error instanceof InboxError) {
           // The reason without the address again (the probe's own words start with it).
           const reason = error.message.replace(/^url: /, "").replace(/^(\S+) (?=did not answer)/, "");
-          throw new InboxError("validation_error", `body: ${prototypePlace(app)}: Prototype: ${app.target}: ${reason}`, { field: "body" });
+          throw new InboxError("validation_error", `body: ${prototypePlace(app)}: The prototype ${app.target} cannot be shown: ${reason}`, { field: "body" });
         }
         throw error;
       }

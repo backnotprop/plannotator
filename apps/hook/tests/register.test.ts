@@ -620,7 +620,7 @@ describe('register', () => {
       const answer = (value: unknown) => ({ status: 200, ok: true, headers: {}, text: JSON.stringify(value) })
       if (e.url === 'http://127.0.0.1:5150/mcp' && body?.method === 'tools/list') return { status: 200, ok: true, headers: {}, text: `event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id: 1, result: { tools } })}\n\n` }
       if (e.url === 'http://127.0.0.1:5150/mcp' && body?.method === 'tools/call') {
-        return answer({ jsonrpc: '2.0', id: 1, result: { content: [{ type: 'text', text: 'Sent to the Plannotator Inbox (thread msg_1).' }], structuredContent: { thread_id: 'msg_1' } } })
+        return answer({ jsonrpc: '2.0', id: 1, result: { content: [{ type: 'text', text: 'Sent to the Plannotator Inbox, thread msg_1: http://localhost:5150/#thread=msg_1\nThe person\'s reply arrives in this session.' }], structuredContent: { thread_id: 'msg_1' } } })
       }
       if (e.url === 'http://127.0.0.1:5150/api/inbox/health') return answer({ ok: true, app: 'plannotator-inbox', serverSession: 'srv-1', peek: true })
       if (e.url.startsWith('http://127.0.0.1:5150/api/inbox/bridge/')) return answer(bridge(e.url.slice('http://127.0.0.1:5150'.length), body))

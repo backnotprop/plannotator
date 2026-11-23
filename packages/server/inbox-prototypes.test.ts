@@ -65,7 +65,7 @@ test('refused before anything is written, naming the question and the option: a 
   const shared = await refusal(question(['- [ ] A', '- [ ] B', 'Prototype: proto/gone.html']), { attachments: [a], bases, probing: true });
   expect(shared).toContain('question "Which checkout ships?" (its shared prototype): Prototype: proto/gone.html');
   const noApps = await refusal(question(['- [ ] A', '    Prototype: http://localhost:4000/a', '- [ ] B']), { attachments: [], bases, probing: true });
-  expect(noApps).toContain('option "A": Prototype: http://localhost:4000/a: this Inbox shows no running app');
+  expect(noApps).toContain('option "A": The prototype http://localhost:4000/a cannot be shown: this Inbox shows no running app');
 });
 
 test('apps go to the live engine with their question and option, probed unless the send is a replay; files alone never reach it', async () => {

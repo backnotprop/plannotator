@@ -420,9 +420,15 @@ export function useSharing(
       if (shortMatch) {
         const pasteId = shortMatch[1];
         const fragParams = new URLSearchParams(shortMatch[2] ?? '');
-        const encryptionKey = fragParams.get('key') ?? undefined;
-        const pasteFromFragment = fragParams.get('paste')
-          ? atob(fragParams.get('paste')!.replace(/-/g, '+').replace(/_/g, '/'))
+        // A pasted link can carry the sentence's punctuation (`…#key=abc).`), as on page load.
+        const fragmentValue = (name: string) => {
+          const value = fragParams.get(name);
+          return value === null ? undefined : shareFragmentValue(value);
+        };
+        const encryptionKey = fragmentValue('key');
+        const pastedOrigin = fragmentValue('paste');
+        const pasteFromFragment = pastedOrigin
+          ? atob(pastedOrigin.replace(/-/g, '+').replace(/_/g, '/'))
           : undefined;
         const loaded = await loadFromPasteId(pasteId, pasteFromFragment ?? pasteApiUrl, encryptionKey);
         if (!loaded) {
@@ -435,7 +441,7 @@ export function useSharing(
         if (hashIndex === -1) {
           return { success: false, count: 0, planTitle: '', error: 'Invalid share URL: no hash fragment or short link found' };
         }
-        const hash = url.slice(hashIndex + 1);
+        const hash = shareFragmentValue(url.slice(hashIndex + 1));
         if (!hash) {
           return { success: false, count: 0, planTitle: '', error: 'Invalid share URL: empty hash' };
         }

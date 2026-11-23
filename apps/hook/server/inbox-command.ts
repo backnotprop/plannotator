@@ -322,13 +322,13 @@ async function publishRunningInbox(entry: InboxRegistryEntry): Promise<void> {
   }
 }
 
+const INBOX_OPEN_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
 /**
  * The thread `--open` names: a thread or message id (`msg_…`), or a link
  * with `#thread=` (the Inbox's own, or the one the agent tools hand out).
  * Null when it is none of these.
  */
-const INBOX_OPEN_ID = /^[A-Za-z0-9_-]{1,128}$/;
-
 export function inboxThreadRef(arg: string): string | null {
   const value = arg.trim();
   const hash = value.indexOf("#");

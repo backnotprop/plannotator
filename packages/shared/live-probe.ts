@@ -127,7 +127,7 @@ export async function probeLiveAppTarget(
 
 /** --app given with a file/folder target. */
 export const LIVE_APP_REQUIRES_URL_MESSAGE =
-  "--app requires a URL target (a running local app, e.g. http://localhost:5173)";
+  "--app requires a URL target, a running local app such as http://localhost:5173";
 
 /** --app given with a non-loopback URL. */
 export const LIVE_APP_REQUIRES_LOOPBACK_MESSAGE = "--app requires a localhost/loopback URL";

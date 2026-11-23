@@ -1,11 +1,15 @@
 /**
- * Every line Plannotator prints with a link in it ends the link at whitespace or the end of the text. A terminal
+ * The printed lines listed in `printedTexts` below end each link at whitespace or the end of the text. A terminal
  * (and many agent UIs) makes a link of everything up to the next space: the Inbox's send answer once read
  * `(thread msg_…, http://localhost:59812/#thread=msg_…).`, and a click opened `…#thread=msg_…).`, a thread that
- * does not exist. The texts here come from their real builders (a real store and the tools' own handlers, no Inbox
+ * does not exist. Covered: the Inbox's send_message and submit_guide answers, the PR list change line, the prototype
+ * refusals and the not-framed note, the live-URL and `--app` errors, the Tailscale setup hints, the Inbox install
+ * line, an agent's docs-only launch message, and the plan-waiting deny text. Other printed lines are not checked here.
+ * The texts come from their real builders (a real store on a temp folder and the tools' own handlers, no Inbox
  * server), each with a link in it, so a reworded line that puts punctuation back after its link fails here.
+ * PLANNOTATOR_DATA_DIR points at the test's temp folder while it runs, so nothing reaches the real data folder.
  */
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,8 +18,9 @@ import { createInboxMcpServer, type InboxMcpContext } from "../packages/server/i
 import { GUIDE_BRIEF_EXAMPLE } from "../packages/server/inbox-guides";
 import { pullsChangeText } from "../packages/server/inbox-mcp-pulls";
 import { prototypesNotFramedText } from "../packages/server/inbox-web-prototypes";
-import { checkInboxLiveUrl } from "../packages/server/inbox-live";
-import { buildForceAppFailureMessage } from "../packages/shared/live-probe";
+import { checkInboxLiveUrl, createInboxLiveSites } from "../packages/server/inbox-live";
+import { checkSendPrototypes } from "../packages/server/inbox-prototypes";
+import { buildForceAppFailureMessage, LIVE_APP_REQUIRES_URL_MESSAGE } from "../packages/shared/live-probe";
 import { explainTailscaleSetup } from "../packages/shared/tailscale";
 import { INBOX_INSTALL_TEXT } from "../packages/shared/inbox/agent-link";
 import { resolveAgentLaunch, KNOWN_AGENTS } from "../packages/acp-client/agents";
@@ -23,7 +28,16 @@ import { waitingDenyText } from "../apps/hook/hooks/mod/plan";
 import { linksNotEndingClean } from "./helpers/printed-links";
 
 const roots: string[] = [];
+let savedDataDir: string | undefined;
+beforeEach(() => {
+  savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
+  const dataDir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-printed-links-data-")));
+  roots.push(dataDir);
+  process.env.PLANNOTATOR_DATA_DIR = dataDir;
+});
 afterEach(() => {
+  if (savedDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+  else process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -48,7 +62,7 @@ function world() {
   const server = createInboxMcpServer(context) as unknown as { _registeredTools: Record<string, { handler: Handler }> };
   const tool = (name: string) => (input: Record<string, unknown>) =>
     server._registeredTools[name]!.handler({ project_path: project.root, agent_session: "ses_a", agent_host: "claude-code", ...input }, {});
-  return { send: tool("send_message"), guide: tool("submit_guide") };
+  return { root, store, send: tool("send_message"), guide: tool("submit_guide") };
 }
 
 /** The texts, each paired with what produced it, so a failure names the builder. */
@@ -73,6 +87,31 @@ async function printedTexts(): Promise<[string, string][]> {
   const pr = (n: number) => ({ pull: `${GITLAB}/acme/api#${n}:pull`, url: `https://${GITLAB}/acme/api/-/merge_requests/${n}` });
   texts.push(["pullsChangeText", pullsChangeText({ added: [pr(1), pr(2)], already: [pr(3)], removed: [pr(4)], missing: [{ key: pr(5).pull, url: pr(5).url }] as never })]);
   texts.push(["prototypesNotFramedText", prototypesNotFramedText(["https://preview.example.com/a", "http://localhost:5173/b"])]);
+  const refusal = async (label: string, check: () => Promise<unknown>) => {
+    const error = await check().then(() => null, (thrown: unknown) => thrown);
+    expect(error, `${label} refuses`).toBeInstanceOf(Error);
+    texts.push([label, (error as Error).message]);
+  };
+  const ask = (prototype: string) => `:::question\nWhich page ships?\n- [ ] A\n    Prototype: ${prototype}\n- [ ] B\n:::`;
+  await refusal("prototype file not attached", () => checkSendPrototypes(ask("proto/a.html"), { attachments: [], bases: [w.root], probing: false }));
+  await refusal("prototype app, no live engine", () => checkSendPrototypes(ask("http://localhost:4000/a"), { attachments: [], bases: [w.root], probing: false }));
+  const live = createInboxLiveSites({
+    store: w.store,
+    serverSession: "srv-printed-links",
+    dataDir: join(w.root, "data"),
+    readBody: async () => ({}),
+    json: (body, status) => Response.json(body, { status }),
+    errorResponse: () => new Response(null, { status: 500 }),
+    localOnly: () => new Response(null, { status: 403 }),
+    port: () => 59813,
+    bridge: null,
+  });
+  try {
+    await refusal("prototype app refused by the live engine", () => checkSendPrototypes(ask("http://user:pw@localhost:4000/a"), { attachments: [], bases: [w.root], checkApps: live.checkPrototypeApps, probing: false }));
+  } finally {
+    live.stop();
+  }
+  texts.push(["LIVE_APP_REQUIRES_URL_MESSAGE", LIVE_APP_REQUIRES_URL_MESSAGE]);
   for (const raw of ["", "not an address"]) {
     try {
       checkInboxLiveUrl(raw, []);
