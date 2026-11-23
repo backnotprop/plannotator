@@ -211,6 +211,33 @@ describe('the Spaces header on the built pages', () => {
   });
 });
 
+describe('the Decide together row as built', () => {
+  async function decideFigure() {
+    const html = await readFile(join(outputRoot, 'workspaces/index.html'), 'utf8');
+    const section = /<section class="sec blk dev row" data-job="decide">([\s\S]*?)<\/section>/.exec(html)?.[1] ?? '';
+    const figure = /<figure\b([^>]*)>([\s\S]*?)<\/figure>/.exec(section);
+    expect(figure, 'the decide row has a figure').not.toBeNull();
+    return { attrs: figure![1], inner: figure![2] };
+  }
+
+  test('a screen reader gets one labelled image; the drawn scenes are hidden and nothing in them takes focus', async () => {
+    const { attrs, inner } = await decideFigure();
+    expect(attrs).toContain('role="img"');
+    expect(/aria-label="([^"]+)"/.exec(attrs)?.[1]).toContain('Keep both');
+    const scenes = [...inner.matchAll(/<div class="dsn( dsn-phone)?"([^>]*)>/g)];
+    expect(scenes).toHaveLength(2);
+    for (const [, , sceneAttrs] of scenes) expect(sceneAttrs).toContain('aria-hidden="true"');
+    expect(inner).not.toMatch(/<(?:a|button|input|select|textarea)\b|\btabindex=|\bcontenteditable\b/);
+  });
+
+  test('the agent marks point at a file the site ships', async () => {
+    const { inner } = await decideFigure();
+    const urls = new Set([...inner.matchAll(/mask-image: url\(&quot;([^&]+)&quot;\)/g)].map(([, url]) => url));
+    expect([...urls]).toEqual(['/assets/agents/claude.svg']);
+    expect(await listFiles(outputRoot)).toContain('assets/agents/claude.svg');
+  });
+});
+
 describe('the Spaces pricing page as built', () => {
   test('every card carries both prices for the switch and shows the monthly one first', async () => {
     const html = await readFile(join(outputRoot, 'workspaces/pricing/index.html'), 'utf8');

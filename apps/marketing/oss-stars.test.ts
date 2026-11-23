@@ -100,6 +100,7 @@ describe('the star counts in the Spaces header', () => {
       'src/components/spaces/SpacesOssList.astro',
       'src/scripts/spaces/header.js',
       'src/scripts/spaces/page.js',
+      'src/scripts/spaces/decide.js',
       'src/scripts/spaces/pricing.js',
       'src/scripts/spaces/theme-switch.js',
       'src/scripts/spaces/signup-dialog.js',
