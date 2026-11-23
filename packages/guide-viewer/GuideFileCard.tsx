@@ -163,6 +163,12 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   const settledRef = useRef(true);
   const pendingRef = useRef<number | null>(null);
   const settleFrameRef = useRef<number | null>(null);
+  // Folded, what the renderer last drew under the header (a generated file's strip, a lockfile's package changes), kept
+  // for the box while the CodeView is unmounted as the open height is, so the page does not shift when it leaves and
+  // comes back.
+  const [foldedHeight, setFoldedHeight] = useState<number | null>(null);
+  const collapsedRef = useRef(collapsed);
+  collapsedRef.current = collapsed;
   const applyMeasured = useCallback((height: number) => {
     measuredRef.current = height;
     setMeasuredHeight(height);
@@ -180,6 +186,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   }, [mounted, fitContent, stopWaiting]);
   const onContentHeightChange = useCallback((height: number) => {
     const next = height + boxChrome;
+    if (collapsedRef.current) setFoldedHeight(next);
     if (!settledRef.current) {
       if (measuredRef.current !== null && next < measuredRef.current) {
         pendingRef.current = next;
@@ -204,7 +211,9 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   // Folded: the header alone (a flush box has no padding around it).
   const collapsedHeight = flush ? COLLAPSED_HEIGHT - 16 : COLLAPSED_HEIGHT + (fitContent ? FIT_BOX_CHROME - 16 : 0);
   const renderedHeight = collapsed
-    ? collapsedHeight
+    ? fitContent && foldedHeight !== null
+      ? Math.max(collapsedHeight, foldedHeight)
+      : collapsedHeight
     : fitContent && measuredHeight !== null
       ? Math.max(flush ? collapsedHeight : COLLAPSED_HEIGHT, measuredHeight)
       : diffHeight;

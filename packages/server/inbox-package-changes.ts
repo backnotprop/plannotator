@@ -14,7 +14,7 @@
  * which files hold package changes, which other files a lockfile's card needs, the read cap, the rows. This module
  * only says where a side's text comes from. It never asks npm: the Inbox has no lookup (`lookupEnabled` false,
  * `PLANNOTATOR_PACKAGE_LOOKUP=0`, so no registry setting is ever read either), and the card shows no consent button
- * (packages/inbox/guide/packageChanges.tsx). Code review's card switch (config.json `packageChanges.card`) holds here
+ * (`usePackageChangeCards` in packages/inbox/guide/GuideReader.tsx). Code review's card switch (config.json `packageChanges.card`) holds here
  * too: off, no cards. A service per request, so a failed read is never kept. Bun only: the Inbox has no Pi server.
  * The routes' guards (GET, same origin, Code review on for a PR) are inbox.ts's, as for their neighbours.
  */
