@@ -28,12 +28,13 @@
  *    heap after the first round (the warm-up, which loads the thread view's
  *    code and fills its caches once);
  *  - the heap right after the window opens is over OPEN_CEILING_MB;
- *  - a main-thread task takes over LONG_TASK_LIMIT_MS while messages arrive
- *    after the warm-up (PerformanceObserver `longtask`). Two kinds of task
- *    are left out: the forced collections, and every task during the page
- *    load and the first WARMUP messages. Those first tasks parse the large
- *    list and load the thread view's code once, so a slow first load is not
- *    a hang. The frame and response checks below still cover the warm-up;
+ *  - a main-thread task does over LONG_TASK_LIMIT_MS of work while messages
+ *    arrive after the warm-up (PerformanceObserver `longtask`, counted in the
+ *    main thread's CPU time: see "Work, not wall time" below). Two kinds of
+ *    task are left out: the forced collections, and every task during the
+ *    page load and the first WARMUP messages. Those first tasks parse the
+ *    large list and load the thread view's code once, so a slow first load is
+ *    not a hang. The frame and response checks below still cover the warm-up;
  *  - the window draws no frame within FRAME_TIMEOUT_MS of a request;
  *  - a new thread's row (after Show), or a message in the open thread, is
  *    not on screen within RESPONSE_TIMEOUT_MS of the agent's send returning;
@@ -58,6 +59,23 @@
  *    times slower.
  *  - Slowest response: 487 to 648 ms. Slowest frame: 11 to 17 ms. The
  *    timeouts are 15 s and 5 s.
+ *
+ * Work, not wall time. A long task's `duration` is wall time: it counts the
+ * time the runner kept the renderer's main thread off the CPU as if the
+ * window were working. On CI the runner is far more than three times slower
+ * for this run: in 12 green full runs on main (2026-11-21 to 23) the longest
+ * task while messages arrived was 1,321 to 1,812 ms, and the spec failed at
+ * 2,174 and 2,721 ms (CI runs 45032323106 and 45242282073), both times with
+ * the slowest response at about 9.4 s against 4.8 to 7.6 s in the green runs:
+ * the whole runner was slow, not one task. So each long task counts what the
+ * main thread really ran in it: the main thread's CPU time (`ThreadTime` in
+ * Performance.getMetrics), sampled every CPU_SAMPLE_MS while messages arrive,
+ * from the sample before the task to the sample after it, and never more than
+ * the task's duration. On an idle machine, where the budget was set, a task's
+ * CPU time is its duration, so the check there is what it was; it is never
+ * stricter than the wall-time check it replaces, and a window that really
+ * works for two seconds fails it on any runner. The summary prints both, for
+ * the slowest tasks.
  *
  * Build the binary first (see inbox.spec.ts), then run
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-memory-soak`.
@@ -95,8 +113,10 @@ const MB = 1024 * 1024;
 const GROWTH_BUDGET_MB = 14;
 /** The most the heap may hold right after the window opens on the large store. */
 const OPEN_CEILING_MB = 135;
-/** The longest main-thread task allowed while messages arrive. */
+/** The most main-thread work (CPU time) one task may do while messages arrive. */
 const LONG_TASK_LIMIT_MS = 2_000;
+/** How often the main thread's CPU time is read while messages arrive. */
+const CPU_SAMPLE_MS = 100;
 /** A frame must be drawn within this time of a request. */
 const FRAME_TIMEOUT_MS = 5_000;
 /** A sent message must be on screen within this time. */
@@ -158,6 +178,8 @@ test('the window keeps its memory flat and keeps answering through a long run of
   const projects = ['checkout-web', 'ledger-api', 'docs-site'].map((name) => scratchProject(join(root, 'src'), name));
   const agents: SimAgent[] = [];
   let page: RawPage | undefined;
+  /** The main thread's CPU time is being read (below); false stops the reads before the page closes. */
+  let sampling = false;
   try {
     // Inside the try: when one connect fails, the shims that did start are closed in the finally below.
     const connected = await Promise.allSettled(
@@ -211,6 +233,46 @@ test('the window keeps its memory flat and keeps answering through a long run of
     };
     const shown = (selector: string) => `document.querySelector(${JSON.stringify(selector)})`;
 
+    /** The main thread's CPU time, read while messages arrive: [when (getMetrics' Timestamp, ms), CPU time (ms)], in order. */
+    const cpuSamples: [number, number][] = [];
+    const readCpu = async (): Promise<[number, number]> => {
+      const { metrics } = await p.call<{ metrics: { name: string; value: number }[] }>('Performance.getMetrics');
+      const m = Object.fromEntries(metrics.map((x) => [x.name, x.value]));
+      if (typeof m.Timestamp !== 'number' || typeof m.ThreadTime !== 'number') throw new Error('Performance.getMetrics has no Timestamp or ThreadTime');
+      return [m.Timestamp * 1000, m.ThreadTime * 1000];
+    };
+    /**
+     * performance.now() on getMetrics' clock (both are the renderer's
+     * monotonic clock, from different origins): the offset, and how far off it
+     * can be (half the time the read took). The tightest of five reads.
+     */
+    const pageClock = async () => {
+      let best = { offset: 0, error: Number.POSITIVE_INFINITY };
+      for (let k = 0; k < 5; k++) {
+        const t0 = await p.evaluate<number>('performance.now()');
+        const [stamp] = await readCpu();
+        const t1 = await p.evaluate<number>('performance.now()');
+        if ((t1 - t0) / 2 < best.error) best = { offset: stamp - (t0 + t1) / 2, error: (t1 - t0) / 2 };
+      }
+      return best;
+    };
+    let sampler: Promise<void> | undefined;
+    const startSampling = () => {
+      sampling = true;
+      sampler = (async () => {
+        while (sampling) {
+          const s = await readCpu().catch(() => null);
+          if (!s) return;
+          cpuSamples.push(s);
+          await pause(CPU_SAMPLE_MS);
+        }
+      })();
+    };
+    const stopSampling = async () => {
+      sampling = false;
+      await sampler;
+    };
+
     await page.goto(`${url}/`);
     expect(await page.waitFor(shown('.ib-lbody [data-thread-id]'), 60_000), 'the list showed no row').toBe(true);
     await pause(5_000);
@@ -220,6 +282,7 @@ test('the window keeps its memory flat and keeps answering through a long run of
     let open: string | null = null;
     let baseline: Sample | undefined;
     let soakStart = 0;
+    let clock = { offset: 0, error: 0 };
     for (let i = 0; i < MESSAGES; i++) {
       const k = i % THREADS;
       const first = i < THREADS;
@@ -267,17 +330,42 @@ test('the window keeps its memory flat and keeps answering through a long run of
         const s = await sample(done);
         if (done === WARMUP) {
           baseline = s;
+          clock = await pageClock();
           soakStart = await p.evaluate<number>('performance.now()');
+          startSampling();
         }
       }
       await pause(SEND_GAP_MS);
     }
     await frame('at the end');
+    await stopSampling();
 
     const longTasks = (await p.evaluate<[number, number][]>('window.__soak.long'))
       .filter(([start]) => start >= soakStart)
       .filter(([start, duration]) => !gcWindows.some(([a, b]) => start + duration >= a && start <= b));
     const longest = Math.round(longTasks.reduce((m, [, d]) => Math.max(m, d), 0));
+    // A task's work: the main thread's CPU time from the last sample before it
+    // to the first sample after it (kept clear of it by the clock's error),
+    // never more than its duration. A task with no sample on both sides counts
+    // its whole duration, as before.
+    const margin = clock.error + 20;
+    const cpuOf = ([start, duration]: [number, number]): number => {
+      const from = start + clock.offset - margin;
+      const to = start + duration + clock.offset + margin;
+      let before: [number, number] | undefined;
+      let after: [number, number] | undefined;
+      for (const s of cpuSamples) {
+        if (s[0] <= from) before = s;
+        else if (s[0] >= to) {
+          after = s;
+          break;
+        }
+      }
+      return before && after ? Math.min(duration, after[1] - before[1]) : duration;
+    };
+    const worked = longTasks.map((t) => ({ wallMs: Math.round(t[1]), cpuMs: Math.round(cpuOf(t)) }));
+    const busiest = worked.reduce((m, t) => Math.max(m, t.cpuMs), 0);
+    const mainThreadCpuMs = cpuSamples.length > 1 ? Math.round(cpuSamples[cpuSamples.length - 1]![1] - cpuSamples[0]![1]) : 0;
     const last = samples[samples.length - 1]!;
     const growth = round1(last.heapMB - baseline!.heapMB);
     const summary = {
@@ -288,6 +376,11 @@ test('the window keeps its memory flat and keeps answering through a long run of
       nodes: { baseline: baseline!.nodes, last: last.nodes },
       longTasksOver50ms: longTasks.length,
       longestTaskMs: longest,
+      busiestTaskCpuMs: busiest,
+      slowestTasks: [...worked].sort((a, b) => b.wallMs - a.wallMs).slice(0, 5),
+      mainThreadCpuMs,
+      cpuSamples: cpuSamples.length,
+      clockErrorMs: round1(clock.error),
       slowestResponseMs: Math.max(...responses),
       slowestFrameMs: Math.round(Math.max(...frames)),
       samples,
@@ -297,8 +390,12 @@ test('the window keeps its memory flat and keeps answering through a long run of
 
     expect(opened.heapMB, `JS heap right after the window opened (MB); ceiling ${OPEN_CEILING_MB}`).toBeLessThanOrEqual(OPEN_CEILING_MB);
     expect(growth, `JS heap growth over ${MESSAGES - WARMUP} messages (MB); budget ${GROWTH_BUDGET_MB}`).toBeLessThanOrEqual(GROWTH_BUDGET_MB);
-    expect(longest, `longest main-thread task while messages arrived (ms); limit ${LONG_TASK_LIMIT_MS}`).toBeLessThanOrEqual(LONG_TASK_LIMIT_MS);
+    // The work check reads the main thread's CPU time all through the run, or it is not the check it says.
+    expect(cpuSamples.length, `the main thread's CPU time was read every ${CPU_SAMPLE_MS} ms while messages arrived`).toBeGreaterThan(100);
+    expect(mainThreadCpuMs, 'the main thread did work while messages arrived (ms of CPU time)').toBeGreaterThan(0);
+    expect(busiest, `most main-thread work in one task while messages arrived (ms of CPU time; longest by the clock ${longest} ms); limit ${LONG_TASK_LIMIT_MS}`).toBeLessThanOrEqual(LONG_TASK_LIMIT_MS);
   } finally {
+    sampling = false;
     await page?.close();
     await Promise.all(agents.map((a) => a.close().catch(() => {})));
     // Now, not in afterAll: a repeated run (--repeat-each) must not leave a large Inbox running beside the next one.
