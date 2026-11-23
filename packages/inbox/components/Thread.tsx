@@ -826,7 +826,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     return true;
   }, []);
 
-  // Replaced-question cards link `#123` refs into the project's repo, as message bodies do.
+  // Each message's `#123` refs, its cards' and the Links view's link into the repo messageRefRepo.ts picks for it.
   const refRepos = useMessageRefRepos(thread, row);
   /** A jump to a question inside an attached file (issue #2828): opens the file on its card; false for any other question. Set below, once the file opener is. */
   const fileJumpRef = useRef<(target: { messageId: string; key: string }) => boolean>(() => false);

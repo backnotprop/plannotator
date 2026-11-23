@@ -3,30 +3,42 @@ import type { InboxProjectRepo } from '@plannotator/core/inbox-types';
 import { messageRefRepo, threadPullKeys } from './messageRefRepo';
 import { threadLinks } from './threadLinks';
 
+let next = 0;
 const writer: InboxProjectRepo = { display: 'backnotprop/plannotator', host: 'github.com' };
 const threadRepo: InboxProjectRepo = { display: 'acme/billing', host: 'github.com' };
-const fromWriter = (body: string) => ({ body, from_project: { name: 'plannotator', root: '/w/plannotator', repo: writer } });
-const plain = (body: string) => ({ body });
+const fromWriter = (body: string, repo: InboxProjectRepo | null = writer) => ({ id: `m${next++}`, body, from_project: { name: 'plannotator', root: '/w/plannotator', repo } });
+const notLookedUp = (body: string) => ({ id: `m${next++}`, body, from_project: { name: 'plannotator', root: '/w/plannotator' } });
+const plain = (body: string) => ({ id: `m${next++}`, body });
+const attached = ['github.com/backnotprop/plannotator#3951', 'github.com/acme/web#12'];
 
 describe('which repository a bare #123 links into', () => {
   test("the writer's repository wins over the thread's", () => {
     expect(messageRefRepo(fromWriter('See #3951.'), threadRepo, [])).toEqual(writer);
   });
 
-  test("the thread's repository when the writer has none, as for a message stored before the fix", () => {
-    expect(messageRefRepo(plain('See #3951.'), threadRepo, [])).toEqual(threadRepo);
-    expect(messageRefRepo({ body: 'See #3951.', from_project: { name: 'scratch', root: '/w/scratch', repo: null } }, threadRepo, [])).toEqual(threadRepo);
-    expect(messageRefRepo({ body: 'See #3951.', from_project: { name: 'scratch', root: '/w/scratch' } }, threadRepo, [])).toEqual(threadRepo);
+  test("the thread's repository for a message with no writer's folder (the thread's own agent, the person, a message stored before the fix)", () => {
+    expect(messageRefRepo(plain('See #3951.'), threadRepo, attached)).toEqual(threadRepo);
+  });
+
+  test("a writer's folder with no repository falls back to the thread's, never to an attached PR", () => {
+    expect(messageRefRepo(fromWriter('See #3951.', null), threadRepo, [])).toEqual(threadRepo);
+    expect(messageRefRepo(fromWriter('See #3951.', null), null, attached)).toBeNull();
+  });
+
+  test("a writer's repository not looked up yet is no guess: neither the thread's nor an attached PR's", () => {
+    expect(messageRefRepo(notLookedUp('See #3951.'), threadRepo, attached)).toBeNull();
+    expect(messageRefRepo(notLookedUp('See #3951.'), null, attached)).toBeNull();
   });
 
   test('an attached PR with the same number names the repository, only when exactly one repository matches', () => {
-    const one = ['github.com/backnotprop/plannotator#3951', 'github.com/acme/web#12'];
-    expect(messageRefRepo(plain('Fixed in #3951.'), null, one)).toEqual({ display: 'backnotprop/plannotator', host: 'github.com' });
-    expect(messageRefRepo(plain('Fixed in #3951 and #12.'), null, one)).toBeNull();
-    expect(messageRefRepo(plain('Fixed in #3951, see also #77.'), null, one)).toBeNull();
-    expect(messageRefRepo(plain('Fixed in #3951.'), null, [...one, 'github.com/acme/web#3951'])).toBeNull();
-    expect(messageRefRepo(plain('Nothing to link.'), null, one)).toBeNull();
-    expect(messageRefRepo(plain('`#3951` in code'), null, one)).toBeNull();
+    expect(messageRefRepo(plain('Fixed in #3951.'), null, attached)).toEqual(writer);
+    expect(messageRefRepo(plain('Fixed in #3951 and #12.'), null, attached)).toBeNull();
+    expect(messageRefRepo(plain('Fixed in #3951, see also #77.'), null, attached)).toBeNull();
+    expect(messageRefRepo(plain('Fixed in #3951.'), null, [...attached, 'github.com/acme/web#3951'])).toBeNull();
+    expect(messageRefRepo(plain('Nothing to link.'), null, attached)).toBeNull();
+    expect(messageRefRepo(plain('`#3951` in code'), null, attached)).toBeNull();
+    expect(messageRefRepo(plain('Fixed in #3951, not `#77`.'), null, attached)).toBeNull();
+    expect(messageRefRepo(plain('Fixed in #3951, see a/#77.'), null, attached)).toBeNull();
   });
 
   test("a GitLab merge request does not claim a bare #N, which is the project's issue there", () => {

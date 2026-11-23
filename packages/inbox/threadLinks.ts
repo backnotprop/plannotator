@@ -253,8 +253,8 @@ function linksOfMessage(id: string, body: string, repo: RefRepo, fallbackHost?: 
 const NUMBERS_REPO = { display: '\u0001/\u0001' };
 const NUMBERS_BASE = 'https://github.com/\u0001/\u0001/issues/';
 
-export function bareRefNumbers(body: string): number[] {
-  return linksOfBody(body, NUMBERS_REPO).flatMap((link) => (link.fromRef && link.href.startsWith(NUMBERS_BASE) ? [Number(link.href.slice(NUMBERS_BASE.length))] : []));
+export function bareRefNumbers(id: string, body: string): number[] {
+  return linksOfMessage(id, body, NUMBERS_REPO).flatMap((link) => (link.fromRef && link.href.startsWith(NUMBERS_BASE) ? [Number(link.href.slice(NUMBERS_BASE.length))] : []));
 }
 
 // ── What a link is ──

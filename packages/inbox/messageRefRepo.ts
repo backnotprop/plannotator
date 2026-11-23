@@ -6,14 +6,17 @@ type RefRepo = { display: string; host?: string };
 
 const sameRepo = (a: InboxProjectRepo, b: InboxProjectRepo) => a.display.toLowerCase() === b.display.toLowerCase() && (a.host ?? '').toLowerCase() === (b.host ?? '').toLowerCase();
 
-export function attachedRefRepo(body: string, pullKeys: readonly string[]): InboxProjectRepo | null {
+export function attachedRefRepo(message: Pick<InboxMessageWire, 'id' | 'body'>, pullKeys: readonly string[]): InboxProjectRepo | null {
   const attached = pullKeys.flatMap((key) => {
     const ref = key.endsWith(':pull') ? null : inboxPullRefOfKey(key);
     return ref ? [{ number: ref.number, repo: { display: ref.repo, host: ref.host } }] : [];
   });
   if (attached.length === 0) return null;
+  const drawn = bareRefNumbers(message.id, message.body);
+  if (drawn.length === 0) return null;
+  const loose = [...message.body.matchAll(/(?<!\w)#(\d+)(?!\w)/g)].map((match) => Number(match[1]));
   let found: InboxProjectRepo | null = null;
-  for (const number of bareRefNumbers(body)) {
+  for (const number of new Set([...drawn, ...loose])) {
     const repos = attached.filter((pull) => pull.number === number).map((pull) => pull.repo);
     const one = repos[0];
     if (!one || repos.some((repo) => !sameRepo(repo, one))) return null;
@@ -23,8 +26,10 @@ export function attachedRefRepo(body: string, pullKeys: readonly string[]): Inbo
   return found;
 }
 
-export function messageRefRepo(message: Pick<InboxMessageWire, 'body' | 'from_project'>, threadRepo: InboxProjectRepo | null | undefined, pullKeys: readonly string[]): InboxProjectRepo | null {
-  return message.from_project?.repo ?? threadRepo ?? attachedRefRepo(message.body, pullKeys);
+export function messageRefRepo(message: Pick<InboxMessageWire, 'id' | 'body' | 'from_project'>, threadRepo: InboxProjectRepo | null | undefined, pullKeys: readonly string[]): InboxProjectRepo | null {
+  const from = message.from_project;
+  if (from) return from.repo === undefined ? null : (from.repo ?? threadRepo ?? null);
+  return threadRepo ?? attachedRefRepo(message, pullKeys);
 }
 
 export function threadPullKeys(thread: Pick<InboxThread, 'pull_keys'>, row: Pick<InboxListRow, 'pulls'> | null | undefined): string[] {
@@ -46,7 +51,7 @@ export function useMessageRefRepos(thread: Pick<InboxThread, 'messages' | 'pull_
       byId.set(message.id, { repo, refRepo: repo ? shared.get(id)! : null });
     }
     return {
-      repoOf: (id: string) => byId.get(id)?.repo ?? threadRepo,
+      repoOf: (id: string) => (byId.has(id) ? byId.get(id)!.repo : threadRepo),
       refRepoOf: (id: string) => byId.get(id)?.refRepo ?? null,
     };
   }, [thread.messages, threadRepo, keys, shared]);

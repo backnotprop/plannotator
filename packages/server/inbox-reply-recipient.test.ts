@@ -15,7 +15,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import type { InboxDecision, InboxProjectRepo, InboxReplyDraft, InboxThread } from "@plannotator/core/inbox-types";
+import type { InboxDecision, InboxReplyDraft, InboxThread } from "@plannotator/core/inbox-types";
 import { INBOX_BRIDGE_POLL_PATH, INBOX_WAKES_META_KEY } from "@plannotator/shared/inbox/connection";
 import { startInboxServer, type InboxServer } from "./inbox";
 
@@ -29,14 +29,14 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-async function setup(options: { readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null> } = {}) {
+async function setup() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-reply-recipient-")));
   roots.push(root);
   const billing = join(root, "billing-api");
   const plannotator = join(root, "plannotator");
   mkdirSync(billing, { recursive: true });
   mkdirSync(plannotator, { recursive: true });
-  const server = await startInboxServer({ dataDir: join(root, "data"), ...options });
+  const server = await startInboxServer({ dataDir: join(root, "data") });
   servers.push(server);
   const client = new Client({ name: "inbox-reply-recipient-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -139,34 +139,48 @@ describe("an agent answering from another folder keeps its project", () => {
 });
 
 describe("the writer's repository rides on the window's reads", () => {
-  test("a reply from another folder carries that folder's repo on the thread and its decision; an agent's read never does", async () => {
-    const { server, client, billing, plannotator } = await setup({
-      readProjectRepo: async (root) => (basename(root) === "plannotator" ? { display: "backnotprop/plannotator", host: "github.com" } : null),
-    });
-    const started = await claudeSends(client, billing, "ses-a", "The invoice PDF export is in.");
-    const fromThere = await claudeSends(client, plannotator, "ses-b", "Fixed in #3951.\n\n:::question\nMerge #3951?\n- Yes\n- No\n:::", started.message_id);
-
-    let writer: InboxThread["messages"][number] | undefined;
-    for (let i = 0; i < 50 && !writer?.from_project?.repo; i++) {
-      writer = (await thread(server, started.thread_id)).messages.find((m) => m.id === fromThere.message_id);
-      if (!writer?.from_project?.repo) await Bun.sleep(20);
-    }
-    expect(writer?.from_project?.repo).toEqual({ display: "backnotprop/plannotator", host: "github.com" });
-    expect((await thread(server, started.thread_id)).project.repo).toBeNull();
-
-    const setDecisionMode = (on: boolean) =>
-      fetch(`${base(server)}/api/inbox/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: server.serverSession, experimental: { decision_mode: on } }) });
-    expect((await setDecisionMode(true)).status).toBe(200);
+  test("the first read after a restart already carries the writer's repo, on the thread and its decision; an agent's read never does", async () => {
+    const envBefore = { data: process.env.PLANNOTATOR_DATA_DIR, experimental: process.env.PLANNOTATOR_EXPERIMENTAL };
     try {
-      const decisions = ((await (await fetch(`${base(server)}/api/inbox/decisions`)).json()) as { decisions: InboxDecision[] }).decisions;
-      const asked = decisions.find((d) => d.message.id === fromThere.message_id);
-      expect(asked?.message.repo).toEqual({ display: "backnotprop/plannotator", host: "github.com" });
-    } finally {
-      await setDecisionMode(false);
-    }
+      const first = await setup();
+      const dataDir = join(first.billing, "..", "data");
+      process.env.PLANNOTATOR_DATA_DIR = dataDir;
+      delete process.env.PLANNOTATOR_EXPERIMENTAL;
+      const started = await claudeSends(first.client, first.billing, "ses-a", "The invoice PDF export is in.");
+      const fromThere = await claudeSends(first.client, first.plannotator, "ses-b", "Fixed in #3951.\n\n:::question\nMerge #3951?\n- Yes\n- No\n:::", started.message_id);
+      await first.client.close();
+      first.server.stop();
 
-    const read = await client.callTool({ name: "read_thread", arguments: { thread_id: started.thread_id, agent_session: "ses-a", format: "full" } });
-    expect(JSON.stringify(read)).not.toContain("backnotprop/plannotator");
+      const writerRepo = { display: "backnotprop/plannotator", host: "github.com" };
+      const server = await startInboxServer({
+        dataDir,
+        readProjectRepo: async (root) => {
+          await Bun.sleep(150);
+          return basename(root) === "plannotator" ? writerRepo : null;
+        },
+      });
+      servers.push(server);
+      const client = new Client({ name: "inbox-reply-recipient-test", version: "1.0.0" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
+      clients.push(client);
+
+      const read = await thread(server, started.thread_id);
+      expect(read.messages.find((m) => m.id === fromThere.message_id)?.from_project?.repo).toEqual(writerRepo);
+      expect(read.messages.find((m) => m.id === started.message_id)?.from_project).toBeUndefined();
+
+      const on = await fetch(`${base(server)}/api/inbox/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: server.serverSession, experimental: { decision_mode: true } }) });
+      expect(on.status).toBe(200);
+      const decisions = ((await (await fetch(`${base(server)}/api/inbox/decisions`)).json()) as { decisions: InboxDecision[] }).decisions;
+      expect(decisions.find((d) => d.message.id === fromThere.message_id)?.message.repo).toEqual(writerRepo);
+
+      const agentRead = await client.callTool({ name: "read_thread", arguments: { thread_id: started.thread_id, agent_session: "ses-a", format: "full" } });
+      expect(JSON.stringify(agentRead)).not.toContain("backnotprop/plannotator");
+    } finally {
+      if (envBefore.data === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = envBefore.data;
+      if (envBefore.experimental === undefined) delete process.env.PLANNOTATOR_EXPERIMENTAL;
+      else process.env.PLANNOTATOR_EXPERIMENTAL = envBefore.experimental;
+    }
   });
 });
 
