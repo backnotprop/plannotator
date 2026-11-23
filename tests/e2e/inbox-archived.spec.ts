@@ -274,8 +274,8 @@ test("a thread whose questions moved: its foot names the brief, and its question
   const { page } = world;
   const [claude, codex] = world.agents as [SimAgent, SimAgent];
   const ask = (prompt: string) => [':::question', prompt, '', '- [ ] Yes, for Ada Novak', '- [ ] No, email Charlie Dunn', ':::'].join('\n');
-  const old = await codex.send({ project_path: world.billing, subject: 'Refund for Ada Novak', thread: 'refund', body: `Overnight work on refunds.\n\n${ask('Refund the double charge?')}` });
-  const brief = await claude.send({ project_path: world.billing, subject: 'Morning brief', thread: 'brief', body: `Three things from last night.\n\n${ask('Refund the double charge? (from Refund for Ada Novak)')}` });
+  const old = await codex.send({ project_path: world.billing, subject: 'Refund for Ada Novak', thread: 'Refund for Ada Novak', body: `Overnight work on refunds.\n\n${ask('Refund the double charge?')}` });
+  const brief = await claude.send({ project_path: world.billing, subject: 'Morning brief', thread: 'Morning brief', body: `Three things from last night.\n\n${ask('Refund the double charge? (from Refund for Ada Novak)')}` });
   await claude.resolve(old.thread_id as string, brief.thread_id as string);
   await page.goto(new URL(`#thread=${old.thread_id as string}`, world.url).href);
   const pane = page.locator('section.ib-pane');
