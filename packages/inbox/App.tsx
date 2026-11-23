@@ -293,7 +293,7 @@ import type { SearchShape } from './search/model';
 import { connectCommand } from './connectPrompt';
 import { SIDEBAR_OPEN_COOKIE, HIDE_AWAY_MACHINES_COOKIE, COMPOSE_LAST_COOKIE, DRAFTS_REFRESH_MS, EMPTY_SET, REFRESH_SPIN_MS, RECONNECT_SAY_GAP_MS, STALE_NOT_SAVED_MS, AGENTS_SESSIONS_REFRESH_MS, SEEN_RETRIES, SEEN_RETRY_MS, LOOK_RECORD_WAIT_MS, RECORD_PAUSE_MS, WHATS_NEW_RETRIES, WHATS_NEW_RETRY_MS, WHATS_NEW_RELEASES_RETRIES, WHATS_NEW_RELEASES_RETRY_MS, UNSENT_TOAST_MS } from './app/constants';
 import { shapeFrameListeners, subscribeShapeFrames } from './app/shapeFrames';
-import { readRoute, routeOf, type Route } from './app/route';
+import { layerClosed, readRoute, routeOf, type Route } from './app/route';
 import { hashOf, writeRoute } from './app/writeRoute';
 import { TOUR_ENDED_STATE, settleTourEntry, settleOldExperimental, settleMovedSettings, stripStrayMsg, stripClickSignal, settleReviewsAlias } from './app/boot';
 import { closeTo, covering, listCovered, rowElement, tourPageInFront, focusAfterOpen, SETTINGS_LATE_MS, FIRST_RUN_AGENTS_REFRESH_MS, FIRST_RUN_AGENTS_MIN_GAP_MS, platformOf, replyInProgress, listIntroHeldBack } from './app/focus';
@@ -5085,7 +5085,7 @@ function Inbox() {
     return (
     <PullsPage
       state={pulls}
-      stackId={route.stack ?? null}
+      stackId={route.stack ?? null} layerId={route.layer ?? route.backLayer ?? null}
       threadId={threadId}
       onHide={threadId && !stack.thread ? () => setThreadFull(true) : undefined}
       project={project}
@@ -5449,10 +5449,10 @@ function Inbox() {
         layerKey={route.layer}
         scope={route.scope ?? 'layer'}
         onLayer={(layer, scope) => writeRoute({ ...route, layer, scope }, { replace: true })}
-        onBack={() => close({ ...route, layer: null, scope: 'layer' })}
+        onBack={() => close(layerClosed(route))}
         onPosted={pullsReloadRows}
         onSent={() => {
-          close({ ...route, layer: null, scope: 'layer' });
+          close(layerClosed(route));
           showToast({ icon: 'check', lead: 'Verdict sent', detail: 'in the agent’s thread', speech: 'Your verdict was sent into the agent’s thread.' }, 5000);
         }}
       />

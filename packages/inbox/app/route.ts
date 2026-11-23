@@ -52,6 +52,12 @@ export interface Route {
   layer?: string | null;
   scope?: PullViewScope;
   /**
+   * The layer whose diff closed back to this stack's page (`&back=`, `layerClosed`), or to the list it was opened from
+   * (a layer's row, focus.ts `listUnder`): the list shows that layer's row selected, its stack unfolded. Only a diff's
+   * Back writes it, so any other way to the stack (a row, a thread, a tile) shows the stack's.
+   */
+  backLayer?: string | null;
+  /**
    * A thread opened from Reviews (`#reviews&thread=…`): the same thread and pane as the Inbox's (`page: 'inbox'`), with
    * Reviews' list beside it and its filter kept. It doesn't move threads: a different list on the same thread.
    */
@@ -153,6 +159,11 @@ export function listProjectOf(route: Pick<Route, 'page' | 'project'>): string | 
   return route.page === 'reviews' || route.page === 'prs' ? null : (route.project ?? null);
 }
 
+/** A layer's diff in Reviews closed (its Back, a verdict sent): its stack's page, that layer still the list's selection. */
+export function layerClosed(route: Route): Route {
+  return { ...route, layer: null, scope: 'layer', backLayer: route.layer ?? null };
+}
+
 export function readRoute(): Route {
   return routeOf(window.location.hash);
 }
@@ -203,6 +214,7 @@ export function routeOf(fullHash: string): Route {
       stack,
       layer,
       scope: layer ? viewScopeOf(params) : 'layer',
+      backLayer: !layer ? params.get('back') || null : null,
       new: params.has('new'),
       ...systemRouteOf(params),
     };

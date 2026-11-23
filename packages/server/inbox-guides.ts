@@ -412,6 +412,28 @@ function patchFilesOf(store: InboxStore, sha256: string): DiffFile[] {
 }
 
 /**
+ * A guide's patch as the agent sent it (its image previews), read once per guide; null when it cannot be read. Only a
+ * patch is kept: a read that failed (a passing file error) is tried again on the next request, never remembered.
+ */
+const guidePatches = new Map<string, string>();
+
+export function guidePatchOf(store: InboxStore, sha256: string): string | null {
+  const kept = guidePatches.get(sha256);
+  if (kept !== undefined) return kept;
+  let patch: string | null = null;
+  try {
+    const parsed = parseGuideSnapshotJson(readFileSync(inboxBlobPath(store.dir, sha256), "utf8"));
+    if (parsed.ok) patch = parsed.value.review.rawPatch;
+  } catch {
+    // Gone from the store, or a passing read error.
+  }
+  if (patch === null) return null;
+  guidePatches.set(sha256, patch);
+  while (guidePatches.size > 8) guidePatches.delete(guidePatches.keys().next().value!);
+  return patch;
+}
+
+/**
  * One changed file's whole text for a guided review's expand arrows
  * (`GET /api/inbox/messages/:id/guide/file`). The guide keeps the diff as sent
  * and the working tree moves on, so each side is taken only when it is the very
