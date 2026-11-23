@@ -505,6 +505,18 @@ export function inboxAgentName(author: { kind: string; host?: string | null; nam
  * What was on screen when the person sent a reply from full screen's floating box. Context for the agent, not a
  * choice: it never touches the words, and only the agent's read gets it (`inboxViewingLine`), never the thread.
  */
+/**
+ * What a reply sent from a thread's canvas carries for the agent: the canvas revision, whether the person sent a
+ * drawing or picked part of the canvas to be worked on, and the text reading of those things (one line each).
+ */
+export interface InboxReplySketch {
+  kind: 'sketch' | 'selection';
+  rev: number;
+  /** The things' ids in the reading. */
+  things: string[];
+  reading: string;
+}
+
 export interface InboxReplyViewing {
   /** The open file's name. */
   name: string;
@@ -885,6 +897,8 @@ export interface InboxMessage {
   rows_ask?: true;
   /** On a person's reply sent from full screen's floating box: the file on screen. Rendered for the agent at read time; the body never holds it. */
   viewing?: InboxReplyViewing;
+  /** On a person's reply sent from the thread's canvas (prototype): what they drew or selected, as the agent reads it. The body never holds it. */
+  sketch?: InboxReplySketch;
   /**
    * On a person's message written away from this computer (another device, the phone app, a linked computer), as the
    * server told it from the request (inbox-sent-from.ts). Rendered for the agent at read time; absent from this computer.

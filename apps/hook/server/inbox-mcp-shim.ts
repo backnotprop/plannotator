@@ -81,7 +81,7 @@ import { INBOX_MAX_REQUEST_BYTES, INBOX_OFF_LINE, inboxRequestTooLargeMessage } 
 import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 
-const FILLED_TOOLS = new Set(["send_message", "read_thread", "submit_guide", "card", "steps", "thread_pulls", "routine", "resolve_message"]);
+const FILLED_TOOLS = new Set(["send_message", "read_thread", "submit_guide", "card", "steps", "thread_pulls", "canvas", "routine", "resolve_message"]);
 /**
  * The filled tools that take no project: thread steps name their thread, and resolve_message its message (their
  * schemas are strict, so no `project_path`). resolve_message takes the session only with `moved_to` (a plain
@@ -91,7 +91,7 @@ const NO_PROJECT_TOOLS = new Set(["steps", "resolve_message"]);
 /** The tools that take the project but no session: search (its schema is strict, so no `agent_session`). */
 const PROJECT_ONLY_TOOLS = new Set(["search"]);
 /** The tools that record an author, and so take `agent_host` / `agent_name` (their schemas are strict). A card records who made and moved it; a thread's PRs, who added each. */
-export const AUTHOR_TOOLS = new Set(["send_message", "submit_guide", "card", "steps", "thread_pulls", "routine"]);
+export const AUTHOR_TOOLS = new Set(["send_message", "submit_guide", "card", "steps", "thread_pulls", "canvas", "routine"]);
 
 /**
  * The hosts whose sessions a reply wakes, with the name each one's

@@ -8,6 +8,7 @@ import { packedInboxApp } from '../../build/pack-inbox';
 import { diffsWorkerCatalogs } from '../../build/diffs-worker-catalogs';
 import { inboxPageMarks } from '../../build/inbox-page-marks';
 import { webTreeSitterServedWasm } from '../../build/web-tree-sitter-served-wasm';
+import { excalidrawLocal } from '../../build/excalidraw-local';
 
 /**
  * What the window, the phone's surface (vite.surface.config.ts) and the Shape
@@ -88,7 +89,7 @@ export default mergeConfig(
   defineConfig({
     esbuild: { charset: 'ascii' },
     // The window's sheet keys on page marks, not on :has() anchored on the page (build/inbox-page-marks.ts).
-    plugins: [packedInboxApp(), inboxPageMarks()],
+    plugins: [excalidrawLocal(path.resolve(__dirname, '../..')), packedInboxApp(), inboxPageMarks()],
     resolve: { alias: { '@pierre/diffs': '@pierre/diffs-sem' } },
     worker: { plugins: () => [webTreeSitterServedWasm()] },
   }),

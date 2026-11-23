@@ -1,0 +1,95 @@
+/* A thread's canvas (packages/inbox/canvas/CanvasBoard.tsx). Loaded with the editor's chunk, never with the window. */
+.ibc-root { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; background: var(--background); border-bottom-left-radius: inherit; border-bottom-right-radius: inherit; overflow: hidden; }
+.ibc-stage { position: relative; flex: 1; min-height: 0; min-width: 0; }
+.ibc-stage > .excalidraw-host { position: absolute; inset: 0; }
+.ibc-wait { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
+
+/* The Inbox's own type inside Excalidraw's panels; its canvas keeps the hand-drawn faces. */
+.ibc-root .excalidraw, .excalidraw.excalidraw-modal-container { --ui-font: inherit; font-family: inherit; }
+.ibc-root .excalidraw .welcome-screen-center__heading { font-family: inherit; font-size: 1.05rem; max-width: 26em; line-height: 1.5; }
+
+/* What just changed: a soft wash over each changed thing, gone in a moment. */
+.ibc-flash { position: absolute; pointer-events: none; border-radius: 10px; background: color-mix(in oklab, var(--primary) 22%, transparent); box-shadow: 0 0 0 6px color-mix(in oklab, var(--primary) 12%, transparent); animation: ibc-flash 2.4s ease-out forwards; z-index: 3; }
+@keyframes ibc-flash { 0% { opacity: 0; transform: scale(0.96); } 12% { opacity: 1; transform: scale(1); } 70% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .ibc-flash { animation: ibc-flash-still 2.4s linear forwards; } }
+@keyframes ibc-flash-still { 0%, 85% { opacity: 1; } 100% { opacity: 0; } }
+
+/* Who changed what, over the canvas's top edge, under Excalidraw's toolbar. */
+.ibc-note { position: absolute; left: 50%; top: 68px; transform: translateX(-50%); z-index: 4; display: flex; align-items: center; gap: 10px; max-width: min(560px, calc(100% - 24px)); padding: 7px 8px 7px 14px; border-radius: 999px; background: var(--popover); color: var(--popover-foreground, var(--foreground)); box-shadow: 0 6px 24px rgb(0 0 0 / 0.16), 0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent); font-size: var(--ib-fs-13, 13px); line-height: 1.35; animation: ibc-note-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.ibc-note-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ibc-note-text b { font-weight: 600; }
+.ibc-note button { all: unset; cursor: pointer; flex: none; padding: 3px 10px; border-radius: 999px; font-weight: 550; color: var(--primary); }
+.ibc-note button:hover { background: var(--muted); }
+.ibc-note button:focus-visible { box-shadow: 0 0 0 2px var(--ring); }
+.ibc-note .ibc-note-x { color: var(--muted-foreground); padding: 3px 7px; }
+@keyframes ibc-note-in { from { opacity: 0; transform: translateX(-50%) translateY(-6px); } to { opacity: 1; transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) { .ibc-note { animation: none; } }
+
+/* The bar under the canvas: what goes to the agent, the words, Send. */
+.ibc-bar { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--background); box-shadow: 0 -1px 0 color-mix(in oklab, var(--foreground) 9%, transparent); }
+.ibc-what { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; background: var(--muted); color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); font-weight: 550; white-space: nowrap; }
+.ibc-what[data-on] { background: color-mix(in oklab, var(--primary) 14%, transparent); color: var(--primary); }
+.ibc-words { flex: 1; min-width: 0; height: 36px; padding: 0 12px; border-radius: 10px; border: 0; outline: 0; background: var(--muted); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); }
+.ibc-words::placeholder { color: var(--muted-foreground); }
+.ibc-words:focus-visible { box-shadow: 0 0 0 2px var(--ring); }
+.ibc-send { flex: none; height: 36px; padding: 0 16px; border-radius: 10px; border: 0; cursor: pointer; background: var(--primary); color: var(--primary-foreground); font: inherit; font-size: var(--ib-fs-14, 14px); font-weight: 600; white-space: nowrap; }
+.ibc-send:disabled { opacity: 0.45; cursor: default; }
+.ibc-send:focus-visible { box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring); }
+.ibc-state { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); white-space: nowrap; }
+.ibc-state[data-bad] { color: var(--destructive, #c0392b); }
+
+@media (max-width: 767px) {
+  .ibc-bar { padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px)); gap: 8px; }
+  .ibc-what:not([data-on]), .ibc-state { display: none; }
+  .ibc-words { height: 44px; font-size: 16px; }
+  .ibc-send { height: 44px; padding: 0 14px; }
+  .ibc-note { top: 60px; }
+}
+
+/* Sent, waiting for the agent's change: three quiet dots, still for people who ask for less motion. */
+.ibc-waiting { padding: 8px 16px 8px 14px; }
+.ibc-dots { display: inline-flex; gap: 4px; flex: none; }
+.ibc-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--primary); opacity: 0.35; animation: ibc-dot 1.2s ease-in-out infinite; }
+.ibc-dots i:nth-child(2) { animation-delay: 0.15s; }
+.ibc-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes ibc-dot { 0%, 60%, 100% { opacity: 0.3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
+@media (prefers-reduced-motion: reduce) { .ibc-dots i { animation: none; opacity: 0.7; } }
+/* The layer is the whole window: no pane corner to follow. */
+.ibc-root { border-radius: 0; }
+
+/* Break pass. The pill and the chip: a long agent name gives way (its full text is its title); the counts never do. */
+.ibc-note { touch-action: none; top: auto; bottom: 22px; }
+.ibc-who { min-width: 0; max-width: 16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.ibc-counts { flex: none; white-space: nowrap; }
+.ibc-note button { flex: none; }
+.ibc-bar { touch-action: none; align-items: flex-end; }
+.ibc-what, .ibc-state, .ibc-send { margin-bottom: 0; align-self: center; }
+.ibc-what[data-lost] { background: color-mix(in oklab, var(--destructive, #c0392b) 14%, transparent); color: var(--destructive, #c0392b); }
+textarea.ibc-words { height: auto; min-height: 36px; max-height: 132px; padding: 8px 12px; line-height: 20px; resize: none; overflow-y: auto; display: block; }
+.ibc-state { max-width: 16em; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 767px) {
+  /* The words get the row; what goes and the state sit above them. */
+  .ibc-bar { flex-wrap: wrap; }
+  .ibc-what:not([data-on]):not([data-lost]) { display: none; }
+  .ibc-what, .ibc-state { order: -1; display: inline-flex; }
+  textarea.ibc-words { flex: 1 1 60%; min-height: 44px; padding: 11px 12px; font-size: 16px; }
+  /* Under Excalidraw's own toolbar, over the canvas; its buttons are finger-sized. */
+  .ibc-note { top: 64px; bottom: auto; padding: 4px 6px 4px 12px; }
+  .ibc-note button { min-width: 44px; min-height: 44px; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; }
+}
+
+/* Fix round 4. The pill names the agent by its icon; the name sits beside it where there is room and never shrinks to nothing. */
+.ibc-mark { flex: none; display: inline-flex; align-items: center; }
+.ibc-who:not([data-marked]) { min-width: 3.2em; }
+.ibc-note[data-canvas-waiting="working"] { padding: 6px 14px 6px 10px; gap: 8px; }
+@media (max-width: 520px) {
+  .ibc-who[data-marked] { display: none; }
+}
+@media (max-width: 767px) {
+  /* One row, as tall as a finger needs and no taller, above the bar: Excalidraw's own top row (its lock, hand and library buttons) stays free. */
+  .ibc-note { top: auto; bottom: 68px; padding: 0 2px 0 12px; gap: 6px; min-height: 44px; }
+  .ibc-note button, .ibc-note .ibc-note-x { padding: 0 8px; min-height: 44px; }
+  .ibc-note.ibc-waiting { padding: 0 14px; }
+}
+/* Until every text is measured in its own face (a moment), the drawing is not shown half-wrapped. */
+.ibc-stage > .excalidraw-host[data-settling] canvas { opacity: 0; }

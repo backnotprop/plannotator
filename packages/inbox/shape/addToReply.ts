@@ -4,12 +4,21 @@
  * its picture as a file beside the words. The board itself stays as it was.
  */
 import type { ShapeBoxSelection } from '@plannotator/ui/components/shape';
+import type { CanvasReplySketch } from '../canvas/canvasApi';
 
 export interface ShapeReplyPart {
   /** The words the reply takes, after any it already holds. */
   words: string;
   /** The picture, or null when the box has none (a capture that failed). */
   file: File | null;
+  /** From the thread's canvas (canvas/CanvasBoard.tsx): its pictures and scene file, what the agent reads of it, and Send pressed for the person. */
+  files?: File[];
+  sketch?: CanvasReplySketch;
+  send?: boolean;
+  /** The words are the reply's words, not an addition to them (the canvas's bar started from the reply box's words). */
+  replace?: boolean;
+  /** No "Added to your reply" line: the words only came back from the canvas's bar. */
+  quiet?: boolean;
 }
 
 const clip = (text: string, max: number) => {

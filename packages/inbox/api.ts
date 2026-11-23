@@ -922,7 +922,8 @@ export async function post<T>(path: string, body: Record<string, unknown>, init:
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Plannotator-Load': pageLoad, ...(machine ? threadHeader(path) : {}), ...(zipped ? { 'Content-Encoding': 'gzip' } : {}) },
     body: zipped ?? text,
-    ...(init.keepalive && text.length <= KEEPALIVE_BODY_MAX ? { keepalive: true } : {}),
+    // What counts against the browser's limit is what is sent: the compressed bytes when the body is compressed.
+    ...(init.keepalive && (zipped ? zipped.byteLength : text.length) <= KEEPALIVE_BODY_MAX ? { keepalive: true } : {}),
   });
   if (machine && (await localInstead(response))) return post<T>(localRoute(path), body);
   if (machine && response.status === 202) {
@@ -1469,6 +1470,8 @@ export const inboxApi = {
       annotation_ids?: string[];
       /** The file on screen, on the reply a Send from full screen's floating box writes its words on. */
       viewing?: ReplyViewing;
+      /** Sent from the thread's canvas (canvas/canvasApi.ts): the Inbox writes what the agent reads of the drawing. */
+      sketch?: { kind: 'sketch' | 'selection'; elements: string[]; pictures: Record<string, string> };
       /** Another live session takes the reply, or a new one starts for it (`launch`): the session that asked has ended. */
       to?: { host?: string; session: string } | { launch: { agent: string; project_id: string; model?: string; effort?: string } };
       /**

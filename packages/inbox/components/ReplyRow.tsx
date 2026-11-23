@@ -23,6 +23,7 @@ export function ReplyRow({
   send,
   clip,
   skills,
+  sketch = null,
   mic,
   status,
   files,
@@ -41,6 +42,8 @@ export function ReplyRow({
   send: ReactNode;
   clip: ReactNode;
   skills: ReactNode;
+  /** Opens the thread's canvas (canvas/CanvasParts.tsx); nothing where a thread has none. */
+  sketch?: ReactNode;
   mic: ReactNode;
   /** The voice status, nothing while idle (`VoiceStatusLine`). */
   status: ReactNode;
@@ -119,6 +122,7 @@ export function ReplyRow({
           <div className="ib-rlayer">
             {clip}
             {skills}
+            {sketch}
             {pill}
             {files}
             {hint && (
@@ -140,6 +144,7 @@ export function ReplyRow({
         {send}
         {clip}
         {skills}
+        {sketch}
         {mic}
       </div>
       <div className="ib-rmid" ref={midRef} data-fold={fold ? '' : undefined} data-hint={hint ? '' : undefined}>

@@ -223,6 +223,7 @@ import { createGitlabHosts, unnamedForgeHost, type GitlabHosts } from "./inbox-g
 import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-refs";
 import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
+import { createInboxCanvas } from "./inbox-canvas";
 import { createInboxScheduled, INBOX_SCHEDULED_ERROR_STATUS, INBOX_SCHEDULED_OFF_TEXT, type InboxScheduled } from "./inbox-scheduled";
 import { createRoutineGrants, sendRecipients } from "./inbox-routine-grants";
 import { scheduledRoute, scheduledSwitch } from "./inbox-scheduled-routes";
@@ -4333,6 +4334,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // again, so a window polls only while a command it shows is running. Windows only (additive).
         const onRunState = (messageIds: readonly string[] | null) => send(`event: runs\ndata: ${JSON.stringify(messageIds ? { message_ids: messageIds } : { all: true })}\n\n`);
         if (windowId) runStateListeners.add(onRunState);
+        // A thread's canvas changed, or the server asks a window to draw (inbox-canvas.ts). Windows only.
+        const stopCanvas = windowId ? canvas.listen((event, data) => send(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)) : null;
         // How the rows look was saved (any window's, a phone's too): every window takes it at once. Windows only.
         const onRows = (rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev, prev: last.prev, by: last.by })}\n\n`);
         if (windowId) rowsListeners.add(onRows);
@@ -4416,6 +4419,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           snoozeListeners.delete(onSnoozes);
           threadPullLiveListeners.delete(onThreadPullsLive);
           runStateListeners.delete(onRunState);
+          stopCanvas?.();
           rowsListeners.delete(onRows);
           soundListeners.delete(onSound);
           stopShowArchived();
@@ -5630,6 +5634,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * A thread's PRs in the window (approval "inbox-pr-binding", inbox-thread-pulls.ts): the read, and the person's
    * add and remove from the popover.
    */
+  const canvas = createInboxCanvas({
+    store,
+    serverSession,
+    json,
+    readBody,
+    sessionMismatch: (body) => (checkServerSession(body, serverSession) === "mismatch" ? json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409) : null),
+  });
+  mcpContext.canvas = canvas;
   const threadPullsRoute = createThreadPullsRoute({
     store,
     states: threadPullStates,
@@ -8189,6 +8201,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 annotation_ids: body.annotation_ids as never,
                 viewing: body.viewing,
                 sent_from: sentFromOf(req, via, body),
+                // Sent from the thread's canvas: what they drew or picked, read from the stored scene (inbox-canvas.ts).
+                ...(body.sketch ? (() => { const thread = store.message(messageId)?.thread_id; const sketch = thread ? canvas.replySketch(thread, body.sketch) : undefined; return sketch ? { sketch } : {}; })() : {}),
                 // A verdict on a review (Approve / Send feedback in the review's header): only while Code review is on.
                 ...(body.review_verdict !== undefined && body.review_verdict !== null
                   ? codeReviewOn()
@@ -8227,6 +8241,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               const words = typeof body.words === "string" ? body.words : undefined;
               const sentUploads = uploads.filter((id): id is string => typeof id === "string");
               if (threadId && store.clearSentReplyDraft(threadId, body.clear_draft, words, sentUploads)) for (const listener of draftListeners) listener(threadId);
+            }
+            // Sent from the thread's canvas, and stored: the things the reply lists are now shown, as they were when it was
+            // written, to the session the reply went to (its addressee, else the session that wrote the message
+            // answered). Never before the store took the reply, never on a replay, never to anyone else.
+            if (!result.replayed && result.reply.sketch) {
+              const answered = store.message(messageId);
+              const session = result.reply.to?.session ?? (answered?.author.kind === "agent" ? answered.author.session : null);
+              if (session) canvas.replyShown(result.reply.thread_id, result.reply.sketch, session);
             }
             // A hand-off waits out its Undo window, then goes to both sessions.
             if (!result.replayed && result.reply.handoff) scheduleHandoffSettle();
@@ -8334,6 +8356,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (steps) return steps;
       // A thread's PRs (approval "inbox-pr-binding"): the window's read and the person's add and remove (inbox-thread-pulls.ts).
       // Never another site. On the device door for a linked machine (mark `pulls`), never a phone.
+      // A thread's canvas (prototype, inbox-canvas.ts): the window's read and save, and its answers to the server's drawing jobs.
+      if (/^\/api\/inbox\/threads\/[A-Za-z0-9_]+\/canvas(\/picture|\/undo)?$/.test(path) || /^\/api\/inbox\/threads\/[A-Za-z0-9_]+\/canvas\/files\/[A-Za-z0-9_-]+$/.test(path) || path === "/api/inbox/canvases" || path.startsWith("/api/inbox/canvas/jobs/")) {
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        const canvasAnswer = await canvas.route(req, path);
+        if (canvasAnswer) return canvasAnswer;
+      }
       if (/^\/api\/inbox\/threads\/[A-Za-z0-9_]+\/pulls$/.test(path)) {
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);

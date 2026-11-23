@@ -67,6 +67,7 @@ export const INBOX_TOOL_ACTIONS = [
   'resolve_message',
   'snooze_thread',
   'thread_pulls',
+  'canvas',
   'submit_guide',
   'get_guide_brief',
   'card',
@@ -534,7 +535,7 @@ function wakeSteps(value: unknown): { done: number; total: number; doing: string
  * and its field's description say what they do, and a field description does
  * not count toward the 2,048 (the owner: do not grow the main description).
  */
-export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread', 'thread_pulls']
+export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread', 'thread_pulls', 'canvas']
 
 /**
  * Before saying something was never discussed (approved 2026-11-15): the MCP search tool's description and --help's

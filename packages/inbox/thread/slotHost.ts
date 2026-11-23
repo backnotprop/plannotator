@@ -89,7 +89,7 @@ export interface ThreadSlotHost {
   askReply: { threadId: string; words: string } | null;
   setAskReply: (next: null) => void;
   shapeReply: (ShapeReplyPart & { threadId: string }) | null;
-  setShapeReply: (next: null) => void;
+  setShapeReply: (next: (ShapeReplyPart & { threadId: string }) | null) => void;
   patchQuestions: ThreadPaneProps['onQuestions'];
   /** A run of pick saves on `threadId` (this pane's) changed or ended (App's `onPickSaves`). */
   onPickSaves: (ids: ReadonlySet<string>, paneClosed: boolean | undefined, threadId: string | null) => void;

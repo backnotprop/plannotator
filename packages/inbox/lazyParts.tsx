@@ -142,6 +142,16 @@ export function ReviewKeysHere(props: { diff: string; viewed: boolean }) {
   return ready ? <ReviewKeysPart.Part {...props} /> : null;
 }
 export const ShapeBoardPart = lazyPart(() => import('#shape-board'));
+/**
+ * A thread's canvas (Excalidraw, packages/inbox/canvas): several MB, so never warmed with PARTS; it arrives when a
+ * person opens a canvas, or when the Inbox asks this window to draw one for an agent (`canvasWork`).
+ */
+export const canvasWork = () => {
+  // Excalidraw fetches its drawing fonts from here: the Inbox's own pack (build/excalidraw-local.ts), never a CDN.
+  (window as unknown as { EXCALIDRAW_ASSET_PATH?: string }).EXCALIDRAW_ASSET_PATH = '/assets/excalidraw/';
+  return import('#canvas-board');
+};
+export const CanvasBoardPart = lazyPart(canvasWork);
 export const SearchPalettePart = lazyPart(() => import('#search-palette'));
 export const PlatformPostPart = lazyPart(() => import('#platform-post'));
 
