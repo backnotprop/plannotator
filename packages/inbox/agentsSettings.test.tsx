@@ -209,6 +209,34 @@ test.skipIf(!hasDom)('"Start agents from New message": always shown, saves confi
   expect(launchRows()).toEqual([true, true]);
 });
 
+test.skipIf(!hasDom)('"Replies to an ended session": only where an agent can resume one; the switch saves it and the row says which way it goes', async () => {
+  const base: InboxLaunchSettings = { enabled: true, full_permissions: false };
+  // An older Inbox, or no agent that resumes a session it never started: no row.
+  expect(mount(model(), base).querySelector('[data-launch-resume-ended-row]')).toBeNull();
+  act(() => root?.unmount());
+  host?.remove();
+  let state: InboxLaunchSettings = { ...base, resume_ended: false, resume_agents: ['OpenCode'] };
+  const posts: unknown[] = [];
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    if ((init?.method ?? 'GET') === 'POST') {
+      posts.push(body);
+      state = { ...state, resume_ended: body.resume_ended };
+    }
+    return new Response(JSON.stringify({ launch: state }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }) as typeof fetch;
+  const settle = () => act(async () => void (await new Promise((resolve) => setTimeout(resolve, 0))));
+  const el = mount(model(), state);
+  await settle();
+  const row = () => el.querySelector('[data-launch-resume-ended-row]')!;
+  expect(row().getAttribute('data-launch-resume-ended-row')).toBe('off');
+  expect(row().textContent).toContain('Your reply to an ended OpenCode session you started yourself resumes it here');
+  await act(async () => (row().querySelector('[role="switch"]') as HTMLButtonElement).click());
+  await settle();
+  expect(posts).toEqual([{ resume_ended: true }]);
+  expect(row().getAttribute('data-launch-resume-ended-row')).toBe('on');
+});
+
 test.skipIf(!hasDom)('"Start new agents in": only while Rex is open here or chosen; saves the choice; says which agents start in Rex, and when Rex is away', async () => {
   const base: InboxLaunchSettings = { enabled: true, full_permissions: false, rex_agents: ['claude-code', 'pi'] };
   // A person without Rex sees no change.

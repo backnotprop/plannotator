@@ -153,6 +153,14 @@ describe.skipIf(!hasDom)('reads that follow every thread on screen', () => {
     expect(w.asked).toEqual(['thr_b']);
   });
 
+  test('a thread whose reply started (or resumed) the session is a launched one too: its run line is read again', async () => {
+    const base = threadOf('thr_b');
+    const replyLaunched = { ...base, messages: [...base.messages, { ...base.messages[0]!, id: 'msg_reply', reply_to: 'thr_b', author: { kind: 'person' as const }, launch: { id: 'lch_2' } as never }] };
+    const w = await mountTwo('thr_a', 'thr_b', listOf('thr_a', 'thr_b'), { thr_b: replyLaunched });
+    await settle(() => w.shown().launched());
+    expect(w.asked).toEqual(['thr_b']);
+  });
+
   test('a stale copy of either thread on screen is read after the wait; one no pane shows is not', async () => {
     const w = await mountTwo('thr_a', 'thr_b', listOf('thr_a', 'thr_b'));
     putThread(w.client, 'thr_z', { serverSession: 's', cursor: 1, thread: threadOf('thr_z') });

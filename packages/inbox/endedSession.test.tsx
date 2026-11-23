@@ -1206,6 +1206,65 @@ test.skipIf(!hasDom)('picked: the pill reads "to New Claude Code session", and S
   expect(replies()[0]!.body.to).toEqual({ launch: { agent: 'claude-code', project_id: PROJECT.id, model: 'opus' } });
 });
 
+// The Resume row: the ended session itself, started again, when its agent there resumes a session the Inbox never
+// started (`adopts`). The failures this catches: a resume the person did not pick, the "+" of a new session on it, and a
+// Send that starts a new session instead of naming the one to resume.
+test.skipIf(!hasDom)('the agent adopts: "Resume this Claude Code session" above the start row, with the session\'s own mark; picked, Send names that session to resume', async () => {
+  sessions = { sessions: [], asker: { session: 'ses_asker', live: false } };
+  launchBlock = { ...CAN_START, agents: CAN_START.agents.map((a) => (a.agent === 'claude-code' ? { ...a, adopts: true } : a)) };
+  const el = await render(threadOf(asking()));
+  await writeReply(el);
+  act(() => button(el, 'Send').click());
+  await settle();
+  expect(replies()).toHaveLength(0);
+  expect(pillRows(el)).toEqual([
+    ['ses_asker', 'Claude Code', 'ended'],
+    ['resume:ses_asker', 'Resume this Claude Code session', null],
+    ['new:claude-code', 'New Claude Code session', null],
+  ]);
+  const resume = el.querySelector('[data-recipient-row="resume:ses_asker"]')!;
+  expect(resume.querySelector('.ib-rpick-name')?.getAttribute('aria-label')).toBe('Resume this Claude Code session in ledger');
+  expect(resume.querySelector('.ib-cp-plus, .ib-cp-stile')).toBeNull();
+  pickOnly(el, 'resume:ses_asker');
+  await settle();
+  // Picked: named as the agent it is, never as the row's words ("To Resume this … session"), and says it resumes.
+  expect(pill(el)?.getAttribute('aria-label')).toBe('To Claude Code, resumes. Change who gets this reply');
+  act(() => button(el, 'Send').click());
+  await settle();
+  expect(replies().map((r) => r.body.to)).toEqual([{ launch: { agent: 'claude-code', project_id: PROJECT.id, resume: 'ses_asker' } }]);
+});
+
+// Settings → Agents' "Replies to an ended session resume it" on the thread's machine: the Resume row is the default.
+// The failures this catches: Send stopping to show the list as for an ended recipient, a reply that waits instead of
+// resuming, and no way back to waiting (the ended session stays in the list).
+test.skipIf(!hasDom)('resume by default: the pill says "resumes", Send resumes the session at once, and the ended session can still be picked', async () => {
+  sessions = { sessions: [], asker: { session: 'ses_asker', live: false } };
+  launchBlock = { ...CAN_START, resume_ended: true, agents: CAN_START.agents.map((a) => (a.agent === 'claude-code' ? { ...a, adopts: true } : a)) };
+  const el = await render(threadOf(asking()));
+  await writeReply(el);
+  expect(pill(el)?.getAttribute('aria-label')).toBe('To Claude Code, resumes. Change who gets this reply');
+  act(() => button(el, 'Send').click());
+  await settle();
+  expect(replies().map((r) => r.body.to)).toEqual([{ launch: { agent: 'claude-code', project_id: PROJECT.id, resume: 'ses_asker' } }]);
+});
+
+test.skipIf(!hasDom)('resume by default, the ended session picked instead: the reply waits for it, as before', async () => {
+  sessions = { sessions: [], asker: { session: 'ses_asker', live: false } };
+  launchBlock = { ...CAN_START, resume_ended: true, agents: CAN_START.agents.map((a) => (a.agent === 'claude-code' ? { ...a, adopts: true } : a)) };
+  const el = await render(threadOf(asking()));
+  await writeReply(el);
+  act(() => pill(el)!.click());
+  pickOnly(el, 'ses_asker');
+  await settle();
+  expect(pill(el)?.getAttribute('aria-label')).toBe('To Claude Code, ended. Change who gets this reply');
+  act(() => button(el, 'Send').click());
+  await settle();
+  act(() => button(el, 'Send').click());
+  await settle();
+  expect(replies()).toHaveLength(1);
+  expect(replies()[0]!.body.to).toBeUndefined();
+});
+
 test.skipIf(!hasDom)('the asking agent cannot be started there: the first agent that can; none can, or starting is off: no row, and Send saves at once as before', async () => {
   sessions = { sessions: [], asker: { session: 'ses_asker', live: false } };
   launchBlock = { ...CAN_START, agents: [{ agent: 'pi', name: 'Pi' }] };

@@ -44,7 +44,8 @@ export function createShownReads({ reads, latest, filesSignals, split, open }: S
   const owe = (which: (threadId: string) => boolean) => {
     if (split()) for (const threadId of reads.parkedThreads()) if (which(threadId)) reads.owe(threadId);
   };
-  const isLaunched = (id: string) => reads.readOf(id).loaded?.thread_id === id && !!reads.readOf(id).loaded?.messages[0]?.launch;
+  // Started from the Inbox by its root, or by a reply (a new session, or a resumed one): either has a run line.
+  const isLaunched = (id: string) => reads.readOf(id).loaded?.thread_id === id && !!reads.readOf(id).loaded?.messages.some((m) => m.launch);
   const onMachine = (machines: ReadonlySet<string>) => (id: string) => {
     const owner = machineOf(id);
     return owner !== null && machines.has(owner);

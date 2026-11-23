@@ -130,7 +130,7 @@ export interface OpenThreadState {
   threadId: string;
   /** On another machine (`machineOf`). */
   remote: boolean;
-  /** Its last read that landed, or null (none yet since it opened). A root with `launch`: started from the Inbox. */
+  /** Its last read that landed, or null (none yet since it opened). A message with `launch`: started from the Inbox. */
   loaded: { thread_id: string; project: { repo?: unknown; repo_known?: true }; messages?: readonly { launch?: unknown }[] } | null;
   /** When that read landed (ms, the window's clock), and now. */
   loadedAt: number;
@@ -151,8 +151,8 @@ export function openThreadRead(batch: RecordBatch, open: OpenThreadState): OpenT
   if (batch.any || batch.threads.has(open.threadId)) return 'thread';
   if (onlyOwnRecords(batch) && batch.own.has(open.threadId)) return open.remote || !open.listed ? 'thread' : 'none';
   if (open.remote || !open.settled || !open.listed) return 'thread';
-  // Started from the Inbox: its run line moves with no record.
-  if (open.loaded?.messages?.[0]?.launch) return 'thread';
+  // Started from the Inbox (by its root, or by a reply that started or resumed a session): its run line moves with no record.
+  if (open.loaded?.messages?.some((m) => m.launch)) return 'thread';
   if (open.loaded?.thread_id !== open.threadId) return 'thread';
   // Not known yet (an older Inbox never says it knows): the next read may bring it.
   if (open.loaded.project.repo == null && open.loaded.project.repo_known !== true) return 'thread';

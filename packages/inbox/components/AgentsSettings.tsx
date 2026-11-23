@@ -23,6 +23,7 @@ import { clockTime, dayWords, formatCount } from '../format';
 import { codexAccountLine } from '../codexAccount';
 import { hostLabel } from '../compose/model';
 import { launchStartIn } from '../data/actions/launchStartIn';
+import { launchResumeEnded } from '../data/actions/launchResumeEnded';
 import { INBOX_REX_SERVER_AWAY_SETTINGS, INBOX_REX_SHARED_AGAIN } from '@plannotator/core/inbox-run-line';
 
 /** The agents New message starts, as Settings names them in "Start new agents in". */
@@ -734,6 +735,30 @@ export function AgentsSettings({
         data={{ 'data-launch-start-in-row': launchState.start_in ?? 'inbox' }}
       />
     ) : null;
+  // "Replies to an ended session resume it" (`inboxLaunch.resumeEnded`): the reply box picks the Resume row by default.
+  const toggleResumeEnded = async () => {
+    if (!launchState || launchBusy) return;
+    setLaunchBusy(true);
+    setError(null);
+    try {
+      takeLaunch((await launchResumeEnded(!launchState.resume_ended)).launch);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setLaunchBusy(false);
+    }
+  };
+  const resumeNames = launchState?.resume_agents ?? [];
+  const resumeRow =
+    launchState?.enabled && resumeNames.length > 0 && launchState.resume_ended !== undefined ? (
+      <Row
+        k="Replies to an ended session"
+        v={launchState.resume_ended ? 'Resume it' : 'Wait for it'}
+        sub={`Your reply to an ended ${listWords(resumeNames)} session you started yourself resumes it here, with its history, instead of waiting until you reopen it. You can still pick the ended session in the reply's list to wait.`}
+        data={{ 'data-launch-resume-ended-row': launchState.resume_ended ? 'on' : 'off' }}
+        r={<Switch on={launchState.resume_ended} label="Replies to an ended session resume it" busy={launchBusy} onClick={() => void toggleResumeEnded()} />}
+      />
+    ) : null;
   // Windows (`unsupported`): no switch; launch there is config.json only.
   const enabledRow = launchState && !launchState.unsupported ? (
     <div className="ib-agent ib-aglaunch" data-launch-enabled-group="">
@@ -745,6 +770,7 @@ export function AgentsSettings({
         r={<Switch on={launchState.enabled} label="Start agents from New message" busy={launchBusy} onClick={() => void toggleEnabled()} />}
       />
       {startInRow}
+      {resumeRow}
     </div>
   ) : null;
   const toggleFull = async () => {

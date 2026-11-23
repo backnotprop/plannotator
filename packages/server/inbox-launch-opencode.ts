@@ -782,6 +782,9 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
       return { ...polled, busy: s.busySince !== null, busySince: s.busySince };
     },
 
+    /** Any OpenCode session resumes as itself: `opencode serve` with its id, and the plugin there watches it. */
+    adopts: (session: string) => openCodeSessionIdOk(session),
+
     async resume(launch: InboxLaunchRecord): Promise<ResumeResult> {
       const session = launch.session_ref!;
       if (spawning.has(session)) return nothing("starting already");

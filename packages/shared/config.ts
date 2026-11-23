@@ -844,7 +844,7 @@ export interface PlannotatorConfig {
    * Rex in a tab of Rex (superlogical.com/rex) when Rex is on this computer; anything else (the default) runs it in
    * the background.
    */
-  inboxLaunch?: { enabled?: boolean; fullPermissions?: boolean; model?: string; settingsFile?: string; scratchDir?: string; startIn?: "inbox" | "rex" };
+  inboxLaunch?: { enabled?: boolean; fullPermissions?: boolean; model?: string; settingsFile?: string; scratchDir?: string; startIn?: "inbox" | "rex"; resumeEnded?: boolean };
   /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
@@ -1976,7 +1976,7 @@ function parseLaunchFlag(value: unknown): boolean | undefined {
 export function resolveInboxLaunch(
   config: PlannotatorConfig,
   platform: NodeJS.Platform = process.platform,
-): { enabled: boolean; fullPermissions: boolean | null; model: string | null; settingsFile: string | null; scratchDir: string | null; startIn: "inbox" | "rex" } {
+): { enabled: boolean; fullPermissions: boolean | null; model: string | null; settingsFile: string | null; scratchDir: string | null; startIn: "inbox" | "rex"; resumeEnded: boolean } {
   const raw: unknown = config.inboxLaunch;
   const value = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as NonNullable<PlannotatorConfig["inboxLaunch"]>) : {};
   // `"inboxLaunch": false` (or "off") by hand: the whole feature off.
@@ -1989,6 +1989,8 @@ export function resolveInboxLaunch(
     settingsFile: typeof value.settingsFile === "string" && value.settingsFile.trim() ? value.settingsFile.trim() : null,
     scratchDir: typeof value.scratchDir === "string" && isAbsolute(value.scratchDir) && resolve(value.scratchDir) !== resolve("/") ? resolve(value.scratchDir) : null,
     startIn: value.startIn === "rex" ? "rex" : "inbox",
+    // Settings → Agents' "Replies to an ended session resume it": the reply box picks the Resume row by default.
+    resumeEnded: parseConfigBoolean(value.resumeEnded) === true,
   };
 }
 

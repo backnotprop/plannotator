@@ -6,13 +6,14 @@ import { hostName } from './NewMessage';
 
 /**
  * A launched thread's meta line: "You started Claude Code in acme-api" ("Routine · Claude Code in acme-api"
- * when a schedule started it), then Full permissions and what was asked at launch.
+ * when a schedule started it, "You resumed OpenCode in acme-api" for a session resumed from a reply), then Full permissions and what was asked at launch.
  */
 export function StartedBy({ launched, root, project }: { launched: InboxLaunchRecord; root: InboxMessageWire | undefined; project: string }) {
   return (
     <div className="ib-tmeta" data-started-by="" data-launched={launched.id}>
       <span>
-        {startedWords(root)}
+        {/* A reply's Resume row: the person's own session, started again. */}
+        {launched.adopted_session ? 'You resumed ' : startedWords(root)}
         {hostName(launched.agent)} in <bdi>{project}</bdi>
         {/* Started from another linked machine's window (remote launch): which one. */}
         {launched.from && launched.from.machine !== selfMachineId() && <> from {launched.from.name}</>}

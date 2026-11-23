@@ -5,7 +5,9 @@
  * launch and takes the thread over, and the agent starts once, never again for a replayed or doubled Send; the new
  * session's first wake is the redirected and launched one; the thread's run line, its respawn and its owner follow the
  * reply's launch (the engine no longer reads launches off a thread's root alone); a start that fails keeps the reply,
- * on its placeholder, with the failed line; with the switch off nothing is prepared.
+ * on its placeholder, with the failed line; with the switch off nothing is prepared. The Resume row: the ended session
+ * itself is resumed (never a new one), only for the session the reply answers and an agent that adopts, and never while
+ * a process still runs it.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -31,7 +33,7 @@ function setEnv(name: string, value: string) {
   });
 }
 
-function setup() {
+function setup(options: { adopts?: boolean; listing?: () => Promise<string | null> } = {}) {
   const root = mkdtempSync(join(tmpdir(), "plannotator-reply-launch-"));
   restore.push(() => rmSync(root, { recursive: true, force: true }));
   const dataDir = join(root, "data");
@@ -45,7 +47,7 @@ function setup() {
   const clock = { now: Date.parse("2026-11-15T18:00:00.000Z") };
   const store = InboxStore.open(dataDir, { now: () => new Date(clock.now) });
   const project = store.ensureProject({ name: "ledger", root: folder });
-  const fake = fakeLaunchHost();
+  const fake = fakeLaunchHost({ adopts: options.adopts });
   const launch = createInboxLaunch({
     store,
     live: { runStateOf: () => null },
@@ -63,6 +65,8 @@ function setup() {
     selfCommand: ["plannotator"],
     hosts: () => [fake.host],
     now: () => clock.now,
+    // Never the real `ps`: no process runs any session unless the test says so.
+    processListing: options.listing ?? (async () => ""),
   });
   restore.push(() => launch.stop());
   /** The sessions the Inbox hears from now: none, so the session that asked has ended. */
@@ -196,5 +200,93 @@ describe("the order a reply's new session is refused in", () => {
   test("the asker still there: session_still_live; ended, nothing refuses", () => {
     expect(codeOf({ door: there, switchOn: true, askerEnded: () => false })).toBe("session_still_live");
     expect(codeOf({ door: null, switchOn: true, askerEnded: () => true })).toBeNull();
+  });
+});
+
+describe("a reply that resumes the ended session itself (the Resume row)", () => {
+  /** An ended session of the fake agent, started outside the Inbox (no launch): its question came through a waking connection. */
+  function endedOwn(world: ReturnType<typeof setup>) {
+    return world.store.sendMessage({
+      project_id: world.project.id,
+      author: { kind: "agent", host: FAKE, session: "ses-ended", name: "Fake Agent" },
+      body: "New day, new emails?",
+      subject: "Daily emails",
+      wakes: true,
+      idempotency_key: "own",
+    }).message;
+  }
+  const resumeTo = (world: ReturnType<typeof setup>, session = "ses-ended") => ({ launch: { agent: FAKE, project_id: world.project.id, resume: session } });
+
+  test("resumes that session as itself, never a new one, and the reply goes to it as a plain reply", async () => {
+    const world = setup({ adopts: true });
+    const asked = endedOwn(world);
+    const body = { idempotency_key: "r1", words: "New day new emails?", to: resumeTo(world) };
+    const prepared = await world.replyLaunch.prepare(asked.id, body, null);
+    expect(prepared!.launch.adopted_session).toBe("ses-ended");
+    const { reply } = world.store.sendReply(asked.id, { words: body.words, idempotency_key: "r1", to: prepared!.to, launch: prepared!.launch, took_over: true });
+    world.replyLaunch.settle(prepared, { message: reply, replayed: false });
+    await until(() => world.store.message(reply.id)!.launch!.session_ref === "ses-ended");
+    expect(world.fake.calls).toEqual(["resume ses-ended"]);
+    const now = world.store.message(reply.id)!;
+    expect(now.to).toEqual({ host: FAKE, session: "ses-ended" });
+    // Its own session: the wake is no "written to another session that has ended" line, and the session keeps the thread.
+    expect(world.store.redirectedFrom(now)).toBeNull();
+    expect(world.store.threadOwner(asked.thread_id)).toEqual({ host: FAKE, session: "ses-ended" });
+    // From now on it is a launched session: a reply to it is not to an ended one (its launch resumes it).
+    expect(world.launch.resumes(asked.thread_id, "ses-ended")).toBe(true);
+  });
+
+  test("refused before anything is written: another session than the one answered, or an agent that can't adopt", async () => {
+    const world = setup({ adopts: true });
+    const asked = endedOwn(world);
+    await expect(world.replyLaunch.prepare(asked.id, { idempotency_key: "r1", words: "Go.", to: resumeTo(world, "ses-other") }, null)).rejects.toMatchObject({ code: "validation_error" });
+    // The Claude Code session of the base thread: the reply answers it, but the resume names the fake agent.
+    await expect(world.replyLaunch.prepare(world.asked.id, { idempotency_key: "r2", words: "Go.", to: resumeTo(world, "ses-asker") }, null)).rejects.toMatchObject({ code: "validation_error" });
+    const plain = setup();
+    const own = endedOwn(plain);
+    await expect(plain.replyLaunch.prepare(own.id, { idempotency_key: "r3", words: "Go.", to: resumeTo(plain) }, null)).rejects.toMatchObject({ code: "validation_error" });
+    expect(world.store.threadMessageIds(asked.thread_id)).toHaveLength(1);
+    expect(plain.fake.calls).toEqual([]);
+  });
+
+  test("never a second writer: a process still running that session (a terminal), or a ps that can't be read, fails the start with the reply kept", async () => {
+    for (const listing of [async () => "  4242     1 opencode2 --session ses-ended\n", async () => null]) {
+      const world = setup({ adopts: true, listing });
+      const asked = endedOwn(world);
+      const body = { idempotency_key: "r1", words: "Go.", to: resumeTo(world) };
+      const prepared = await world.replyLaunch.prepare(asked.id, body, null);
+      const { reply } = world.store.sendReply(asked.id, { words: "Go.", idempotency_key: "r1", to: prepared!.to, launch: prepared!.launch, took_over: true });
+      world.replyLaunch.settle(prepared, { message: reply, replayed: false });
+      await until(() => !!world.store.message(reply.id)!.launch!.error);
+      expect(world.store.message(reply.id)!.launch!.error!.text).toContain("still running this session");
+      expect(world.fake.calls).toEqual([]);
+    }
+  });
+});
+
+describe('Settings → Agents\' "Replies to an ended session resume it"', () => {
+  const save = (world: ReturnType<typeof setup>, on: unknown) =>
+    world.launch.route(
+      new Request("http://127.0.0.1/api/inbox/launch/settings", { method: "POST", headers: { Origin: "http://127.0.0.1", Host: "127.0.0.1" }, body: JSON.stringify({ serverSession: "srv", resume_ended: on }) }),
+      "/api/inbox/launch/settings",
+      "local",
+    );
+
+  test("saved in config.json and read back; this machine's compose block carries it, so its threads' reply boxes pick Resume", async () => {
+    const world = setup({ adopts: true });
+    expect((await world.launch.composeBlock())!.resume_ended).toBeUndefined();
+    const on = (await (await save(world, true))!.json()) as { launch: Record<string, unknown> };
+    expect(on.launch.resume_ended).toBe(true);
+    expect(on.launch.resume_agents).toContain("Fake Agent");
+    expect((await world.launch.composeBlock())!.resume_ended).toBe(true);
+    const off = (await (await save(world, false))!.json()) as { launch: Record<string, unknown> };
+    expect(off.launch.resume_ended).toBe(false);
+    expect((await world.launch.composeBlock())!.resume_ended).toBeUndefined();
+  });
+
+  test("anything but a boolean is refused, and nothing changes", async () => {
+    const world = setup({ adopts: true });
+    await expect(save(world, "yes")).rejects.toMatchObject({ code: "validation_error" });
+    expect((await world.launch.composeBlock())!.resume_ended).toBeUndefined();
   });
 });

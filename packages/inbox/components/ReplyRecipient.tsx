@@ -38,7 +38,8 @@ const PILL_TITLE_MAX = 26;
 const NO_LABELS: SessionLabels = {};
 const NO_FOLDER = () => '';
 
-function Face({ tile, full, short, ended }: { tile: ReactNode; full: string; short: string; ended: boolean }) {
+/** `word`: the quiet word after the name, "ended", or "resumes" for the Resume row; null, none. */
+function Face({ tile, full, short, word }: { tile: ReactNode; full: string; short: string; word: string | null }) {
   return (
     <>
       <span className="ib-rto-l">to</span>
@@ -51,7 +52,7 @@ function Face({ tile, full, short, ended }: { tile: ReactNode; full: string; sho
           {short}
         </span>
       </span>
-      {ended && <span className="ib-rto-q">ended</span>}
+      {word && <span className="ib-rto-q">{word}</span>}
       <svg className="ib-rto-c" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
         <path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
@@ -154,11 +155,13 @@ function recipientFace(rows: readonly RecipientRow[], chosen: readonly Recipient
   };
   const names = namesList(chosen.map(nameOf));
   const ended = one?.state === 'ended';
-  const tile = one?.start ? (
+  /** The word after the name: "ended", or "resumes" for the Resume row (it starts that session again). */
+  const word = ended ? 'ended' : one?.start?.resume ? 'resumes' : null;
+  const tile = one?.start && !one.start.resume ? (
     <StartTile host={one.host} />
   ) : one ? (
     <span className="ib-atile">
-      <HostMark host={one.host} agent={one.session} />
+      <HostMark host={one.host} agent={one.start?.resume ?? one.session} />
     </span>
   ) : (
     <TagStack participants={chosen} />
@@ -166,7 +169,7 @@ function recipientFace(rows: readonly RecipientRow[], chosen: readonly Recipient
   const words = one ? pillOf(one) : `${chosen.length} agents`;
   /** The face leaves something out (several names, a title too long, the fallback name): the hover says it whole. */
   const partial = chosen.length > 1 || (one !== null && words !== nameOf(one));
-  return { one, named, nameOf, pillOf, names, ended, tile, words, partial };
+  return { one, named, nameOf, pillOf, names, ended, word, tile, words, partial };
 }
 
 /** `name` already says `words` as words of its own ("Claude Code (plannotator)" says "plannotator"; "Pipeline" never says "Pi"). */
@@ -328,7 +331,7 @@ function RecipientChip({
   /** `aria-*` and `data-*` attributes of the host (the list it controls). */
   attrs?: Record<string, string | undefined>;
 }) {
-  const { one, names, ended, tile, words, partial } = recipientFace(rows, chosen, labels, folderOf);
+  const { one, names, ended, word, tile, words, partial } = recipientFace(rows, chosen, labels, folderOf);
   const ownRef = useRef<HTMLButtonElement | null>(null);
   const narrow = useNarrowField(ownRef);
   const tight = useTightChip(ownRef);
@@ -351,14 +354,14 @@ function RecipientChip({
         data-ended={ended ? '' : undefined}
         data-narrow={narrow ? '' : undefined}
         data-tight={tight ? '' : undefined}
-        aria-label={`To ${spoken}${ended ? ', ended' : ''}. Change who gets this ${noun}`}
+        aria-label={`To ${spoken}${word ? `, ${word}` : ''}. Change who gets this ${noun}`}
         aria-expanded={open}
         // The press must not take focus from the words.
         onMouseDown={(event) => event.preventDefault()}
         onClick={onClick}
         {...attrs}
       >
-        <Face tile={tile} full={words} short={one ? one.short : words} ended={ended} />
+        <Face tile={tile} full={words} short={one ? one.short : words} word={word} />
       </button>
     </Tip>
   );
@@ -402,7 +405,7 @@ export function ReplyRecipient({
   const spot = useListSpot(pillRef, open, rows.some((row) => row.start), chip);
   const host = pillRef.current ? skillMenuHost(pillRef.current) : null;
   const chosenIds = chosen.map((r) => r.session);
-  const { one, named, nameOf, pillOf, names, ended, tile, words, partial } = recipientFace(rows, chosen, labels, folderOf);
+  const { one, named, nameOf, pillOf, names, ended, word, tile, words, partial } = recipientFace(rows, chosen, labels, folderOf);
 
   // A press outside the pill and its list closes the list; so does Escape, before anything else hears it.
   useEffect(() => {
@@ -432,14 +435,14 @@ export function ReplyRecipient({
       className="ib-rto"
       data-recipient=""
       data-ended={ended ? '' : undefined}
-      aria-label={`To ${names}${ended ? ', ended' : ''}. Change who gets this ${noun}`}
+      aria-label={`To ${names}${word ? `, ${word}` : ''}. Change who gets this ${noun}`}
       aria-expanded={open}
       aria-controls={open ? listId : undefined}
       // The press must not take focus from the reply field.
       onMouseDown={(event) => event.preventDefault()}
       onClick={() => onOpen(!open)}
     >
-      <Face tile={tile} full={words} short={one ? one.short : words} ended={ended} />
+      <Face tile={tile} full={words} short={one ? one.short : words} word={word} />
     </button>
   );
 
@@ -454,10 +457,16 @@ export function ReplyRecipient({
           return (
             <div key={row.session} className="ib-rpick-row" data-recipient-row={row.session} data-recipient-start={row.host ?? ''} data-on={on ? '' : undefined}>
               {row.start ? (
-                <button type="button" className="ib-rpick-name" aria-label={`${row.label} in ${row.start.project}`} onClick={() => onOnly(row)}>
-                  <StartTile host={row.host} />
+                <button type="button" className="ib-rpick-name" aria-label={`${row.start.title ?? row.label} in ${row.start.project}`} onClick={() => onOnly(row)}>
+                  {row.start.resume ? (
+                    <span className="ib-atile">
+                      <HostMark host={row.host} agent={row.start.resume} />
+                    </span>
+                  ) : (
+                    <StartTile host={row.host} />
+                  )}
                   <span className="ib-rpick-l" dir="auto">
-                    {row.label}
+                    {row.start.title ?? row.label}
                   </span>
                   <span className="ib-cp-stin" dir="auto">
                     in {row.start.project}
@@ -545,7 +554,7 @@ export function ReplyRecipient({
     <span className="ib-rto-slot">
       {rows.map((row) => (
         <span key={row.session} className="ib-rto ib-rto-ghost" aria-hidden="true">
-          <Face tile={<span className="ib-atile" />} full={pillOf(row)} short={row.short} ended={row.state === 'ended'} />
+          <Face tile={<span className="ib-atile" />} full={pillOf(row)} short={row.short} word={row.state === 'ended' ? 'ended' : null} />
         </span>
       ))}
       {pill}
