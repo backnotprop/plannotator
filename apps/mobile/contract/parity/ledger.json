@@ -21828,7 +21828,7 @@
       ],
       "flows": [],
       "mobile": "undecided",
-      "why": "",
+      "why": "The phone app shows the scenario table as part of the question's context (the record and the wire keep it there, as a plain table); drawing it as its own Scenarios section natively is not built.",
       "since": "2026-11-23",
       "ios": {
         "state": "not-started"
@@ -21842,7 +21842,7 @@
       ],
       "flows": [],
       "mobile": "undecided",
-      "why": "",
+      "why": "The phone app shows the scenario table as part of the question's context (the record and the wire keep it there, as a plain table); drawing it as its own Scenarios section natively is not built.",
       "since": "2026-11-23",
       "ios": {
         "state": "not-started"
@@ -21856,7 +21856,7 @@
       ],
       "flows": [],
       "mobile": "undecided",
-      "why": "",
+      "why": "The phone app shows the scenario table as part of the question's context (the record and the wire keep it there, as a plain table); drawing it as its own Scenarios section natively is not built.",
       "since": "2026-11-23",
       "ios": {
         "state": "not-started"

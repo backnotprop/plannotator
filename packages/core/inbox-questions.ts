@@ -223,14 +223,21 @@ function prototypeFact(prototype: { target: string; label?: string }): { target:
   return { target: prototype.target, ...(prototype.label ? { label: prototype.label } : {}) };
 }
 
-/** A scenario table as stored and served: a deep copy, absent when malformed (a hand-edited record). */
+/** A scenario table as stored and served: a deep copy, absent when malformed (a hand-edited record: a
+ *  missing list, a `null` column, row or cell, a word that is not a string). Never throws. */
 function scenariosFact(table: InboxQuestionScenarios | undefined): InboxQuestionScenarios | undefined {
-  if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return undefined;
+  const str = (v: unknown): v is string => typeof v === "string";
+  const obj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
+  if (!obj(table) || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return undefined;
+  const { columns, rows } = table as { columns: unknown[]; rows: unknown[] };
+  if (!columns.every((c) => obj(c) && str(c.choice) && str(c.header))) return undefined;
+  const cellOk = (c: unknown) => obj(c) && str(c.verdict) && (c.detail === undefined || str(c.detail));
+  if (!rows.every((r) => obj(r) && str(r.situation) && Array.isArray(r.cells) && r.cells.every(cellOk))) return undefined;
   return {
     columns: table.columns.map((c) => ({ choice: c.choice, header: c.header })),
     rows: table.rows.map((r) => ({
       situation: r.situation,
-      cells: (Array.isArray(r.cells) ? r.cells : []).map((cell) => ({ verdict: cell.verdict, ...(cell.detail ? { detail: cell.detail } : {}) })),
+      cells: r.cells.map((cell) => ({ verdict: cell.verdict, ...(cell.detail ? { detail: cell.detail } : {}) })),
     })),
   };
 }

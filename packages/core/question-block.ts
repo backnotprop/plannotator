@@ -125,12 +125,14 @@
  *   block's own indent whose first column names a situation and whose every
  *   other header names a different choice (matched as `Recommended:` matches
  *   one, or by the label's first words), each cell `<verdict> — <detail>`,
- *   becomes `scenarios` and leaves the context. Any other table stays context.
+ *   becomes `scenarios`; its lines stay in `context` too (the card leaves
+ *   them out when it draws the section). Any other table is only context.
  */
 
 import { sliceText } from "./text-cut";
 import { readQuestionScenarioTable, type QuestionScenarioTable } from './question-scenarios';
 export {
+  contextWithoutScenarioTable,
   MAX_QUESTION_SCENARIO_CELL_CHARS,
   MAX_QUESTION_SCENARIO_COLUMNS,
   MAX_QUESTION_SCENARIO_ROWS,
@@ -321,8 +323,8 @@ export interface ParsedQuestion {
    *  the block has none of them and no choice carries a change. */
   change?: QuestionChange;
   /** The scenario table (`question-scenarios.ts`): scenarios as rows, the
-   *  choices it names as columns. Absent when the block has none (a table
-   *  that does not qualify stays in `context`). */
+   *  choices it names as columns. Absent when the block has none. Additive:
+   *  the table's lines stay in `context` either way. */
   scenarios?: QuestionScenarioTable;
 }
 
@@ -1717,17 +1719,15 @@ export const parseQuestionBlock = (
   }
 
   // The scenario table: its header names choices by their final labels, so it
-  // is read last; its lines leave the context.
+  // is read last. Its lines stay in the context (every reader that does not
+  // draw `scenarios` shows the table as before); the card that draws the
+  // section leaves them out when it renders (`contextWithoutScenarioTable`).
   let scenarios: QuestionScenarioTable | undefined;
   if (kind !== 'text') {
     const names = choices.map((c, i) => [...(choiceNames[i] ?? []), ...(c.aliases ?? []), ...(marked[i] ? [marked[i]!.label] : [])]);
     const matchHeader = (header: string): number =>
       matchRecommendation(header, raws, choices, false, names, choicesArePlainBullets)[0] ?? firstWordsChoice(header, choices);
-    const read = readQuestionScenarioTable(contextLines, indentWidth(lines[promptLine] ?? ''), choices.map((c) => c.label), matchHeader);
-    if (read) {
-      scenarios = read.table;
-      for (let k = read.indices.length - 1; k >= 0; k--) contextLines.splice(read.indices[k]!, 1);
-    }
+    scenarios = readQuestionScenarioTable(contextLines, indentWidth(lines[promptLine] ?? ''), choices.map((c) => c.label), matchHeader)?.table;
   }
 
   // Context keeps each line's indentation (a nested list, a wrapped list item,

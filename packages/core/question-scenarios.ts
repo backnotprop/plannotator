@@ -7,8 +7,14 @@
  *
  * Read strictly, so nothing an agent sends today changes: only a table whose
  * every option header names a different choice, with at least one body row,
+ * at least one cell written `<verdict> — <detail>` (an em dash with spaces),
  * within the caps below, is taken. Any other table (and every table when two
- * qualify) stays in the context, drawn as the markdown it is.
+ * qualify) is only context, drawn as the markdown it is.
+ *
+ * Additive: the table's lines stay in the question's `context` (the stored
+ * record and the wire carry them, so every reader that does not draw the
+ * section shows the table as before). Only the card that draws the section
+ * leaves them out of the context it renders (`contextWithoutScenarioTable`).
  *
  * Pure and browser-safe.
  */
@@ -106,22 +112,56 @@ const readTable = (
     columns.push({ choice: labels[hit]!, header: text });
   }
   const rows: QuestionScenarioRow[] = [];
+  let verdictAndDetail = false;
   for (const line of body) {
     const cells = splitScenarioRow(line);
     if (cells.length !== header.length || cells.some(tooLong)) return null;
     const situation = cells[0]!;
     if (!situation) return null;
+    if (!verdictAndDetail) verdictAndDetail = cells.slice(1).some(isVerdictAndDetail);
     rows.push({ situation, cells: cells.slice(1).map(splitScenarioCell) });
   }
-  return { columns, rows };
+  // An ordinary comparison table (`Yes` / `No` cells) is not a scenario table.
+  return verdictAndDetail ? { columns, rows } : null;
+};
+
+/** A cell written `<verdict> — <detail>`: words, an em dash with spaces outside inline code, words. */
+const isVerdictAndDetail = (cell: string): boolean => {
+  const at = maskCode(cell).search(/\s—\s/);
+  return at > 0 && cell.slice(0, at).trim() !== '' && cell.slice(at + 3).trim() !== '';
+};
+
+/**
+ * The tables among `lines` as the card's markdown renderer finds them
+ * (`packages/ui/utils/parser.ts`): a run of lines starting with `|`, outside a
+ * code fence, that ends at the first line that does not (GFM would continue a
+ * row without a leading pipe; the renderer does not, so neither does this).
+ */
+const tableRuns = (lines: ReadonlyArray<string>): { start: number; end: number }[] => {
+  const runs: { start: number; end: number }[] = [];
+  let fence: string | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const marker = line.trimStart().match(/^(`{3,}|~{3,})/)?.[1];
+    if (marker) {
+      if (!fence) fence = marker;
+      else if (marker[0] === fence[0] && marker.length >= fence.length && line.trim() === marker) fence = null;
+      continue;
+    }
+    if (fence || !line.trimStart().startsWith('|')) continue;
+    const start = i;
+    while (i + 1 < lines.length && lines[i + 1]!.trimStart().startsWith('|')) i++;
+    runs.push({ start, end: i });
+  }
+  return runs;
 };
 
 /**
  * The block's one scenario table among its context lines: the table and the
- * context indices it takes, or null when none (or more than one) qualifies.
+ * context indices it spans, or null when none (or more than one) qualifies.
  * A table is a run of lines starting with `|` at the block's own indent
  * (`blockIndent`, the prompt's), outside a code fence, as the renderer draws
- * one; its second line is the delimiter row.
+ * one (`tableRuns`); its second line is the delimiter row.
  */
 export const readQuestionScenarioTable = (
   contextLines: ReadonlyArray<string>,
@@ -131,22 +171,38 @@ export const readQuestionScenarioTable = (
 ): { table: QuestionScenarioTable; indices: number[] } | null => {
   if (labels.length === 0) return null;
   const found: { table: QuestionScenarioTable; indices: number[] }[] = [];
-  let fence: string | null = null;
-  for (let i = 0; i < contextLines.length; i++) {
-    const line = contextLines[i]!;
-    const marker = line.trimStart().match(/^(`{3,}|~{3,})/)?.[1];
-    if (marker) {
-      if (!fence) fence = marker;
-      else if (marker[0] === fence[0] && marker.length >= fence.length && line.trim() === marker) fence = null;
-      continue;
-    }
-    if (fence || !line.trimStart().startsWith('|')) continue;
-    const start = i;
-    while (i + 1 < contextLines.length && contextLines[i + 1]!.trimStart().startsWith('|')) i++;
-    const run = contextLines.slice(start, i + 1);
+  for (const { start, end } of tableRuns(contextLines)) {
+    const run = contextLines.slice(start, end + 1);
     if (run.some((l) => indentWidth(l) > blockIndent)) continue;
     const table = readTable(run, labels, matchHeader);
     if (table) found.push({ table, indices: run.map((_, k) => start + k) });
   }
   return found.length === 1 ? found[0]! : null;
+};
+
+/** Whether a run of table lines is `table`: its option headers and its scenarios, as read. */
+const isTable = (run: ReadonlyArray<string>, table: QuestionScenarioTable): boolean => {
+  if (run.length !== table.rows.length + 2) return false;
+  const header = splitScenarioRow(run[0]!).slice(1);
+  if (header.length !== table.columns.length || header.some((h, i) => h !== table.columns[i]!.header)) return false;
+  return run.slice(2).every((line, r) => splitScenarioRow(line)[0] === table.rows[r]!.situation);
+};
+
+/**
+ * A question's context without its scenario table, for the card that draws the
+ * table as its own section (so it is not shown twice). The table's lines leave
+ * a paragraph break, so the paragraph above and the one below stay apart; a
+ * table at either end leaves no blank line behind. A context without the
+ * table (an edited record, a table that no longer matches) comes back as it is.
+ */
+export const contextWithoutScenarioTable = (context: string, table: QuestionScenarioTable): string => {
+  const lines = context.split('\n');
+  const run = tableRuns(lines).find(({ start, end }) => isTable(lines.slice(start, end + 1), table));
+  if (!run) return context;
+  const blank = (l: string | undefined) => l === undefined || l.trim() === '';
+  const before = lines.slice(0, run.start);
+  const after = lines.slice(run.end + 1);
+  while (before.length && blank(before[before.length - 1])) before.pop();
+  while (after.length && blank(after[0])) after.shift();
+  return [...before, ...(before.length && after.length ? [''] : []), ...after].join('\n');
 };

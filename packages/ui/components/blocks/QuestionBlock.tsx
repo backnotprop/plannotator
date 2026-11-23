@@ -1,6 +1,7 @@
 import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   canonicalQuestionAnswer,
+  contextWithoutScenarioTable,
   emptyQuestionAnswer,
   isQuestionAnswerEmpty,
   isRecommendedQuestionAnswer,
@@ -860,7 +861,10 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     );
   };
 
-  const describedBy = [question.stakes ? stakesId : null, change?.where ? whereId : null, question.context ? contextId : null, question.kind === 'text' && question.suggestedText && !answered ? suggestId : null]
+  // The scenario table stays in the question's context (every other reader shows it there); the card draws it as its
+  // own section instead, so it leaves the context drawn here.
+  const context = question.kind !== 'text' && question.scenarios ? contextWithoutScenarioTable(question.context, question.scenarios) : question.context;
+  const describedBy = [question.stakes ? stakesId : null, change?.where ? whereId : null, context ? contextId : null, question.kind === 'text' && question.suggestedText && !answered ? suggestId : null]
     .filter(Boolean)
     .join(' ') || undefined;
 
@@ -1042,10 +1046,10 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
           )}
         </div>
       )}
-      {question.context && (
+      {context && (
         <QuestionContext
           id={contextId}
-          markdown={question.context}
+          markdown={context}
           imageBaseDir={imageBaseDir}
           onImageClick={onImageClick}
           onOpenLinkedDoc={onOpenLinkedDoc}

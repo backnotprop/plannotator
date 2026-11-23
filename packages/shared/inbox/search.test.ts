@@ -145,6 +145,31 @@ describe("text the index reads", () => {
 });
 
 describe("groups and rows", () => {
+  test("a question's scenario table is searchable as its context (the table stays there, approval question-scenario-table)", async () => {
+    const store = open();
+    const project = store.ensureProject({ name: "notes", root: "/src/notes" });
+    const block = [
+      ":::question",
+      "Where should a losing edit go?",
+      "",
+      "- [ ] Nowhere — dropped",
+      "- [ ] Local only — kept here",
+      "",
+      "| Scenario | Nowhere | Local only |",
+      "| --- | --- | --- |",
+      "| You edit offline on a plane | Lost — nothing says so | Kept — in the quarantine drawer |",
+      ":::",
+    ].join("\n");
+    const root = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Sync conflicts", thread: "sync", body: `Before I go on.\n\n${block}` }).message;
+    const q = store.questionsOf(root.id)[0]!;
+    expect(q.scenarios?.rows).toHaveLength(1);
+    const answer = search(await built(store), "quarantine");
+    expect(messageIds(answer)).toEqual([root.id]);
+    const message = answer.groups!.messages![0] as InboxSearchMessageRow;
+    expect(message.question?.key).toBe(q.key);
+    expect(marked(message.snippet.text, message.snippet.marks)).toEqual(["quarantine"]);
+  });
+
   test("a thread, its message, its question, its file, its guide and a project each land in their group", async () => {
     const store = open();
     const relay = store.ensureProject({ name: "plannotator", root: "/src/plannotator" });

@@ -178,7 +178,7 @@ test('desktop: a real table under Why and above Trade-offs; a pick fills its col
   const tops = await card.evaluate((el) => ['why', 'scenarios', 'tradeoffs'].map((part) => Math.round(el.querySelector(`[data-question-part="${part}"]`)!.getBoundingClientRect().top)));
   expect(tops[0]).toBeLessThan(tops[1]!);
   expect(tops[1]).toBeLessThan(tops[2]!);
-  // The table left the context: the card draws one table.
+  // The table stays in the question's context, but the card leaves it out of the context it draws: one table.
   await expect(card.locator('table')).toHaveCount(1);
   await expectNoSideScroll(page);
   await snap(page, '01-desktop-light', card);
@@ -209,6 +209,23 @@ test('desktop: a real table under Why and above Trade-offs; a pick fills its col
         'Ada and Bob edit the same line at once',
         'You come back after 6 weeks to look for your edit',
       ]);
+      // An option's name wraps between words, never inside one.
+      const broken = await list.evaluate((el) => [...el.querySelectorAll('[data-question-scenario-name]')].flatMap((name) => {
+        const words: string[] = [];
+        const walk = document.createTreeWalker(name, NodeFilter.SHOW_TEXT);
+        for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+          if ((node.parentElement as HTMLElement).closest('.sr-only')) continue;
+          for (const m of (node.textContent ?? '').matchAll(/\S+/g)) {
+            const range = document.createRange();
+            range.setStart(node, m.index!);
+            range.setEnd(node, m.index! + m[0].length);
+            const lines = new Set([...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top)));
+            if (lines.size > 1) words.push(m[0]);
+          }
+        }
+        return words;
+      }));
+      expect(broken).toEqual([]);
       await expectNoSideScroll(p);
       await snap(p, name, phoneCard);
     });

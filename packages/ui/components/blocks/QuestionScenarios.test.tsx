@@ -6,9 +6,11 @@
  * wrong option; the verdict and detail of a cell run together; the picked
  * option's column stops taking the picked fill (or another column takes it);
  * the narrow form stops being a list with each scenario a heading; an
- * answered, read-only card hides the table; a question parsed without the
- * field (an older record, a table that does not qualify) breaks or loses its
- * table.
+ * answered, read-only card hides the table; the table shows twice (in the
+ * section and the context) or the paragraphs around it run together; a
+ * question parsed without the field (an older record, a table that does not
+ * qualify) breaks or loses its table; right-to-left words lose their
+ * direction.
  *
  * DOM-gated (DOM_TESTS=1). Container queries do not run here: both forms are
  * in the DOM and the browser shows one (the Inbox e2e checks which).
@@ -123,8 +125,41 @@ describe('the scenario table', () => {
     expect(text(verdict)).toBe("Kept on Bob's laptop");
     expect(verdict!.className).toContain('font-semibold');
     expect(text(detail)).toContain("Ada can't see it");
-    // The table left the context: it is drawn once, in the section.
+    // The table stays in the question's context (every other reader draws it there); the card draws it once, in
+    // the section, and its words are nowhere in the context it draws.
     expect(el.querySelectorAll('table').length).toBe(1);
+    const context = el.querySelector('[data-question-part="context"]');
+    expect(context === null || !text(context).includes('You edit offline on a plane')).toBe(true);
+  });
+
+  test.skipIf(!hasDom)('the context around the table stays two paragraphs; the question itself still carries the table', async () => {
+    const el = await mount(<Harness markdown={card(`Two copies disagree.\n${TABLE}\nThe losing edit is set aside.`)} />);
+    const context = el.querySelector('[data-question-part="context"]')!;
+    expect([...context.querySelectorAll('p')].map(text)).toEqual(['Two copies disagree.', 'The losing edit is set aside.']);
+    expect(context.querySelector('table')).toBeNull();
+    expect(el.querySelectorAll('[data-question-part="scenarios"]').length).toBe(1);
+    const [indexed] = indexQuestionBlocks(parseMarkdownToBlocks(card()), { decisionLines: false, optionLines: true });
+    expect(indexed!.question.context).toContain('| You edit offline on a plane |');
+  });
+
+  test.skipIf(!hasDom)('one scenario is titled "Scenario"', async () => {
+    const el = await mount(<Harness markdown={card(TABLE.split('\n').slice(0, 3).join('\n'))} />);
+    expect(text(el.querySelector('[data-question-scenarios-table] caption'))).toBe('Scenario');
+    expect(el.querySelector('[data-question-scenarios-list] > ul')!.getAttribute('aria-label')).toBe('Scenario');
+  });
+
+  test.skipIf(!hasDom)('right-to-left words take their own direction: every situation, header and cell is dir="auto"', async () => {
+    const rtl = TABLE.replace('You edit offline on a plane', 'אתה עורך במטוס').replace('Lost — nothing says so', 'אבד — אין הודעה');
+    const el = await mount(<Harness markdown={card(rtl)} />);
+    const table = el.querySelector('[data-question-scenarios-table]')!;
+    const situation = [...table.querySelectorAll('tbody th')].find((th) => text(th) === 'אתה עורך במטוס')!;
+    expect(situation.getAttribute('dir')).toBe('auto');
+    expect([...table.querySelectorAll('thead th[data-question-scenario-on], thead th:not(:first-child)')].every((th) => th.getAttribute('dir') === 'auto')).toBe(true);
+    const cell = table.querySelector('tbody tr td')!;
+    expect([...cell.children].map((c) => c.getAttribute('dir'))).toEqual(['auto', 'auto']);
+    const list = el.querySelector('[data-question-scenarios-list]')!;
+    expect(list.querySelector('[role="heading"]')!.getAttribute('dir')).toBe('auto');
+    expect([...list.querySelectorAll('[data-question-scenario-name]')].every((n) => n.getAttribute('dir') === 'auto')).toBe(true);
   });
 
   test.skipIf(!hasDom)('the picked option\'s column takes the picked fill, and moves with the pick', async () => {
@@ -167,10 +202,11 @@ describe('the scenario table', () => {
     expect(onCells(el).every((c) => (c as HTMLTableCellElement).cellIndex === 1)).toBe(true);
   });
 
-  test.skipIf(!hasDom)('a question without the field (an older record) draws no section and nothing breaks', async () => {
+  test.skipIf(!hasDom)('a question without the field (an older record) draws no section and shows the table in its context', async () => {
     const el = await mount(<Harness markdown={card()} strip />);
     expect(el.querySelector('[data-question-part="scenarios"]')).toBeNull();
     expect(el.querySelector('[data-question-part="why"]')).not.toBeNull();
+    expect(text(el.querySelector('[data-question-part="context"] table'))).toContain('You edit offline on a plane');
   });
 
   test.skipIf(!hasDom)('a table that does not qualify stays in the context, drawn as before', async () => {
