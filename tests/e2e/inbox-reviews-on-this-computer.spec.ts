@@ -178,14 +178,31 @@ async function readableDiff(pane: ReturnType<Page['locator']>, file: string, lin
   await expect(pane.locator('[data-guide-section-narrative]')).toBeHidden();
   const code = shell.locator('[data-line-type="change-addition"]').filter({ hasText: line }).last();
   await expect(code).toBeVisible();
-  // The line's text as drawn: wholly inside the file's box (a cramped column scrolls or clips it).
+  // The line's text as drawn, each of its text nodes measured (shadow roots too): wholly inside the file's box (a
+  // cramped column scrolls or clips it).
   const text = await code.evaluate((el) => {
+    let left = Infinity;
+    let right = -Infinity;
     const range = document.createRange();
-    range.selectNodeContents(el);
-    const box = range.getBoundingClientRect();
-    return { left: box.left, right: box.right };
+    const visit = (root: Node) => {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+      for (let node: Node | null = walker.currentNode; node; node = walker.nextNode()) {
+        if (node instanceof Element && node.shadowRoot) visit(node.shadowRoot);
+        if (node.nodeType !== Node.TEXT_NODE || !node.textContent?.trim()) continue;
+        range.selectNodeContents(node);
+        const rects = range.getClientRects();
+        for (let i = 0; i < rects.length; i++) {
+          const rect = rects[i]!;
+          if (rect.width <= 0) continue;
+          left = Math.min(left, rect.left);
+          right = Math.max(right, rect.right);
+        }
+      }
+    };
+    visit(el);
+    return { left, right, html: el.outerHTML.slice(0, 400) };
   });
-  expect(text.right - text.left).toBeGreaterThan(0);
+  expect(text.right - text.left, text.html).toBeGreaterThan(0);
   expect(text.right).toBeLessThanOrEqual(shellBox.x + shellBox.width);
   expect(text.right).toBeLessThanOrEqual(paneBox.x + paneBox.width);
 }
