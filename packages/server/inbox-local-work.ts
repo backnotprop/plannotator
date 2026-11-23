@@ -14,15 +14,23 @@
  * - The diff (`GET /api/inbox/reviews/local/diff`): a branch's whole diff from its merge base with the default branch,
  *   by ref, checked out or not, against the very ref its count used (`readDefaultBranch`, `readBranchDiffFrom`); or the
  *   folder's uncommitted changes as `plannotator review` reads them (`runGitDiff`'s `uncommitted`). Either is held to
- *   `BRANCH_DIFF_MAX_BYTES`: past it, `BranchDiffTooLarge`, never a cut diff.
+ *   `BRANCH_DIFF_MAX_BYTES`: past it, `BranchDiffTooLarge`, never a cut diff. For the uncommitted changes that is every
+ *   `git diff` it runs together (the tracked files' and one per new file): once they have read past it, no other starts.
  * - Never the network, never a write: every git command goes through `offlineGit` (no transport, no prompt, killed
  *   after `BRANCH_GIT_TIMEOUT_MS`) with `GIT_OPTIONAL_LOCKS=0`, so not even `git status` refreshes the index on disk. No
- *   checkout, no stash. A folder that is gone, moved or no repository is skipped before any git runs.
+ *   checkout, no stash. A folder that is gone, moved or no repository is skipped before any git runs. What the
+ *   repository's own config still runs is in `LOCAL_WORK_GIT_CONFIG`'s note (a clean filter); besides that, the
+ *   uncommitted diff opened on click runs a textconv program git config names for a file's `diff=` attribute
+ *   (`diff.<driver>.textconv`), as `git diff` in that folder runs it (the list never does). With no index refresh, an
+ *   index entry git can't trust by its time (racily clean: the file changed in the same second the index was written)
+ *   is compared by content on each read, until the person's own git refreshes the index.
  * - Cost: at most `LOCAL_WORK_PROJECTS_MAX` projects (newest activity first), `LOCAL_WORK_PARALLEL` git reads at a
  *   time; per repository about seven commands plus one count per recent branch (no more than `LOCAL_WORK_SCAN_MAX`);
  *   one answer kept `LOCAL_WORK_CACHE_MS` and shared by every read while it is made, whatever its project filter. Read
- *   only when Reviews asks, after its list. A repository whose git fails counts once in `unread`, however many of its
- *   projects reach it.
+ *   only when Reviews asks, after its list. A repository whose branches git can't read counts once in `unread` (and
+ *   names each of its projects in `unread_projects`), however many of its projects reach it. A working tree whose
+ *   uncommitted changes git can't read (`git status` failing or past its time, as it can in a big repository with
+ *   fsmonitor off) simply has no uncommitted row: its branches still list, and it is not counted unread.
  * - Bun only: the Inbox is.
  */
 import { realpath, stat } from "node:fs/promises";
@@ -187,7 +195,8 @@ export function createInboxLocalWork(options: InboxLocalWorkOptions) {
     const git = localWorkGit(runtime);
     const at = now();
     const projects = options.projects().slice(0, LOCAL_WORK_PROJECTS_MAX);
-    // What failed, once per repository (a project's id when git could not even say which repository it is in).
+    // What failed, once per repository (a project's id when git could not even say which repository it is in): its
+    // branches' read, never its uncommitted changes'.
     const failed = new Set<string>();
     const where = new Map<string, ProjectRepo>();
     await inTurn(
@@ -216,13 +225,11 @@ export function createInboxLocalWork(options: InboxLocalWorkOptions) {
     const items: InboxLocalWork[] = [];
     const caps = { scan: LOCAL_WORK_SCAN_MAX, list: LOCAL_WORK_BRANCHES_MAX };
     await inTurn([
+      // A working tree whose changes git can't read (in time) has no uncommitted row; its branches still list, and it is
+      // not a repository that could not be read.
       ...[...trees].map(([top, tree]) => async () => {
-        try {
-          const row = await readUncommitted(git, top, tree.owner, at);
-          if (row) items.push(row);
-        } catch {
-          failed.add(tree.common);
-        }
+        const row = await readUncommitted(git, top, tree.owner, at).catch(() => null);
+        if (row) items.push(row);
       }),
       // A repository's branches under its newest project; one in a PR or reported from any of its projects is left out.
       ...[...repos].map(([common, repo]) => async () => {
@@ -306,24 +313,29 @@ export function createInboxLocalWork(options: InboxLocalWorkOptions) {
 }
 
 /**
- * The uncommitted diff's git with a branch diff's cap: each `git diff` read through the capped reader at
- * `BRANCH_DIFF_MAX_BYTES` (stopped there, never held whole), and `over` once any was. Other commands as they were.
+ * The uncommitted diff's git with a branch diff's cap on all its `git diff` commands together (the tracked diff and one
+ * per new file): each read through the capped reader at what is left of `BRANCH_DIFF_MAX_BYTES` (stopped there, never
+ * held whole), and once they have read past it (`over`), no further `git diff` starts. Other commands as they were.
  */
 function cappedDiffGit(git: ReviewGitRuntime): { git: ReviewGitRuntime; over: () => boolean } {
-  let over = false;
+  let read = 0;
+  const over = () => read > BRANCH_DIFF_MAX_BYTES;
+  const tooLarge = { stdout: "", stderr: "This diff is too large to read here.", exitCode: 1 };
   const bytes = git.runGitBytes;
   return {
-    over: () => over,
+    over,
     git: {
       ...git,
       runGit: async (args, options) => {
         if (!bytes || args[0] !== "diff" || options?.stdin !== undefined) return git.runGit(args, options);
-        const answer = await bytes(args, { ...options, maxOutputBytes: BRANCH_DIFF_MAX_BYTES });
+        if (over()) return tooLarge;
+        const answer = await bytes(args, { ...options, maxOutputBytes: BRANCH_DIFF_MAX_BYTES - read });
         if (answer.truncated) {
-          over = true;
-          return { stdout: "", stderr: "This diff is too large to read here.", exitCode: 1 };
+          read = BRANCH_DIFF_MAX_BYTES + 1;
+          return tooLarge;
         }
-        return { stdout: new TextDecoder().decode(answer.stdout), stderr: answer.stderr, exitCode: answer.exitCode };
+        read += answer.stdout.byteLength;
+        return over() ? tooLarge : { stdout: new TextDecoder().decode(answer.stdout), stderr: answer.stderr, exitCode: answer.exitCode };
       },
     },
   };

@@ -22,7 +22,8 @@
  *  - a branch reported (or in a PR) from one worktree project listed through another of the same repository;
  *  - a repository whose default is neither main nor master (a local-only `trunk`) listing nothing, or a failed read
  *    named quiet ("nothing") for any project of its repository, or counted unread once per project;
- *  - the uncommitted diff sent whole past the branch diff's cap.
+ *  - the uncommitted diff sent whole past the branch diff's cap, or every new file read before the cap is checked;
+ *  - a folder whose uncommitted changes can't be read (a slow `git status`) counted unread, though its branches list.
  */
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -216,17 +217,22 @@ describe("the list", () => {
     expect(answer.items).toEqual([expect.objectContaining({ project_id: "prj_busy", branch: "ada/three", ahead: 3 })]);
   });
 
-  test("a folder whose git can't be read in time counts as unread, and the others still list", async () => {
+  test("a folder whose uncommitted changes can't be read in time has no uncommitted row; its branches list and it is not unread", async () => {
     const now = Math.floor(Date.now() / 1000);
     const slow = scratchRepo(now);
     const fine = scratchRepo(now);
     writeFileSync(join(slow, "base.txt"), "changed\n");
+    writeFileSync(join(fine, "base.txt"), "changed\n");
     const failing: ReviewGitRuntime = { ...runtime, runGit: (args, given) => (args[0] === "status" && given?.cwd === realpathSync(slow) ? Promise.resolve({ stdout: "", stderr: "timed out", exitCode: 124 }) : runtime.runGit(args, given)) };
     const work = createInboxLocalWork({ runtime: failing, projects: () => [project("prj_slow", slow), project("prj_fine", fine)], skip: () => false, now: () => now * 1000 });
     const answer = await work.list();
-    expect(answer.unread).toBe(1);
-    expect(answer.unread_projects).toEqual(["prj_slow"]);
-    expect(answer.items.some((item) => item.project_id === "prj_fine" && item.branch === "ada/retry-jitter")).toBe(true);
+    expect(answer.unread).toBe(0);
+    expect(answer.unread_projects).toEqual([]);
+    const rows = answer.items.map((item) => `${item.project_id} ${item.kind} ${item.branch}`);
+    expect(rows).toContain("prj_slow branch ada/retry-jitter");
+    expect(rows).not.toContain("prj_slow uncommitted main");
+    expect(rows).toContain("prj_fine uncommitted main");
+    expect(rows).toContain("prj_fine branch ada/retry-jitter");
   });
 
   test("caps: the newest branches per repository, the first projects; one kept answer serves reads until it is old", async () => {
@@ -429,10 +435,31 @@ describe("a row's diff", () => {
     const seen = watched();
     const work = createInboxLocalWork({ runtime: seen.runtime, projects: () => [], skip: () => false });
     await expect(work.diff(project("prj_a", repo), null)).rejects.toBeInstanceOf(BranchDiffTooLarge);
-    // Every diff read through the capped reader, at the cap: none held whole.
+    // Every diff read through the capped reader, at most at the cap: none held whole.
     const diffs = seen.commands.filter((command) => command.args[0] === "diff");
     expect(diffs.length).toBeGreaterThan(0);
-    for (const command of diffs) expect(command.options?.maxOutputBytes).toBe(BRANCH_DIFF_MAX_BYTES);
+    for (const command of diffs) {
+      expect(command.options?.maxOutputBytes).toBeGreaterThan(0);
+      expect(command.options?.maxOutputBytes).toBeLessThanOrEqual(BRANCH_DIFF_MAX_BYTES);
+    }
+  });
+
+  test("the uncommitted diff's new files stop being read once together they are past the cap", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const repo = scratchRepo(now);
+    // Eight new files, each under the per-file limit and under the cap alone; any two are past it.
+    const line = "export const filler = \"Charlie Dunn's generated fixture line\";\n";
+    const files = Array.from({ length: 8 }, (_, i) => `gen-${i}.ts`);
+    for (const name of files) writeFileSync(join(repo, name), line.repeat(Math.ceil((4.2 * 1024 * 1024) / line.length)));
+    const seen = watched();
+    const work = createInboxLocalWork({ runtime: seen.runtime, projects: () => [], skip: () => false });
+    const read = work.diff(project("prj_a", repo), null);
+    await expect(read).rejects.toBeInstanceOf(BranchDiffTooLarge);
+    await expect(read).rejects.toThrow("This diff is too large to read here.");
+    // Each new file is one `git diff --no-index`: the ones started once the total was past the cap were never run.
+    const started = seen.commands.filter((command) => command.args[0] === "diff" && command.args.includes("--no-index"));
+    expect(started.length).toBeGreaterThan(0);
+    expect(started.length).toBeLessThan(files.length);
   });
 });
 
