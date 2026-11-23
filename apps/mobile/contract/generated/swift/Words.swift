@@ -83,6 +83,52 @@ public enum Words {
   public static let feedbackSentYours = " (the version you sent)"
   /// markup.only: packages/inbox/markup.ts MARKUP_ONLY_TEXT
   public static let markupOnly = "See the marked-up image."
+  /// upload.too_large: packages/shared/inbox/uploads.ts receiveInboxUpload, INBOX_UPLOAD_MAX_BYTES
+  public static let uploadTooLarge = "Not attached: a file is at most 100 MB."
+  /// upload.not_received: packages/shared/inbox/uploads.ts receiveInboxUpload, upload_refused body
+  public static let uploadNotReceived = "The file could not be received; try again."
+  /// host.claude-code: packages/core/inbox-types.ts INBOX_HOST_NAMES claude-code
+  public static let hostClaudeCode = "Claude Code"
+  /// host.claude: packages/core/inbox-types.ts INBOX_HOST_NAMES claude
+  public static let hostClaude = "Claude Code"
+  /// host.pi: packages/core/inbox-types.ts INBOX_HOST_NAMES pi
+  public static let hostPi = "Pi"
+  /// host.opencode: packages/core/inbox-types.ts INBOX_HOST_NAMES opencode
+  public static let hostOpencode = "OpenCode"
+  /// host.codex: packages/core/inbox-types.ts INBOX_HOST_NAMES codex
+  public static let hostCodex = "Codex"
+  /// host.cursor: packages/core/inbox-types.ts INBOX_HOST_NAMES cursor
+  public static let hostCursor = "Cursor"
+  /// host.grok: packages/core/inbox-types.ts INBOX_HOST_NAMES grok
+  public static let hostGrok = "Grok Build"
+  /// host.qwen: packages/core/inbox-types.ts INBOX_HOST_NAMES qwen
+  public static let hostQwen = "Qwen Code"
+  /// host.dsh: packages/core/inbox-types.ts INBOX_HOST_NAMES dsh
+  public static let hostDsh = "DeepSeek Harness"
+  /// host.t3: packages/core/inbox-types.ts INBOX_HOST_NAMES t3
+  public static let hostT3 = "T3 Code"
+  /// host.antigravity: packages/core/inbox-types.ts INBOX_HOST_NAMES antigravity
+  public static let hostAntigravity = "Antigravity"
+  /// host.cline: packages/core/inbox-types.ts INBOX_HOST_NAMES cline
+  public static let hostCline = "Cline"
+  /// host.muse: packages/core/inbox-types.ts INBOX_HOST_NAMES muse
+  public static let hostMuse = "Muse Code"
+  /// host.openclaw: packages/core/inbox-types.ts INBOX_HOST_NAMES openclaw
+  public static let hostOpenclaw = "OpenClaw"
+  /// host.hermes: packages/core/inbox-types.ts INBOX_HOST_NAMES hermes
+  public static let hostHermes = "Hermes Agent"
+  /// host.cloud: packages/core/inbox-types.ts INBOX_HOST_NAMES cloud
+  public static let hostCloud = "Cloud agent"
+  /// host.cloud-claude: packages/core/inbox-types.ts INBOX_HOST_NAMES cloud-claude
+  public static let hostCloudClaude = "Claude Code routine"
+  /// host.cloud-grok: packages/core/inbox-types.ts INBOX_HOST_NAMES cloud-grok
+  public static let hostCloudGrok = "Grok Bot"
+  /// host.cloud-muse: packages/core/inbox-types.ts INBOX_HOST_NAMES cloud-muse
+  public static let hostCloudMuse = "Muse by Meta"
+  /// host.cloud-hermes: packages/core/inbox-types.ts INBOX_HOST_NAMES cloud-hermes
+  public static let hostCloudHermes = "Hermes Agent server"
+  /// host.cloud-openclaw: packages/core/inbox-types.ts INBOX_HOST_NAMES cloud-openclaw
+  public static let hostCloudOpenclaw = "OpenClaw server"
 
   /// A section's name by its id (InboxSectionId's raw value).
   public static let sections: [String: String] = [
@@ -113,5 +159,30 @@ public enum Words {
     "hermes": agentHermes,
     "antigravity": agentAntigravity,
     "claude-app": agentClaudeApp,
+  ]
+
+  /// A host's name by its id, as a quoting reply's lead names it (INBOX_HOST_NAMES).
+  public static let hosts: [String: String] = [
+    "claude-code": hostClaudeCode,
+    "claude": hostClaude,
+    "pi": hostPi,
+    "opencode": hostOpencode,
+    "codex": hostCodex,
+    "cursor": hostCursor,
+    "grok": hostGrok,
+    "qwen": hostQwen,
+    "dsh": hostDsh,
+    "t3": hostT3,
+    "antigravity": hostAntigravity,
+    "cline": hostCline,
+    "muse": hostMuse,
+    "openclaw": hostOpenclaw,
+    "hermes": hostHermes,
+    "cloud": hostCloud,
+    "cloud-claude": hostCloudClaude,
+    "cloud-grok": hostCloudGrok,
+    "cloud-muse": hostCloudMuse,
+    "cloud-hermes": hostCloudHermes,
+    "cloud-openclaw": hostCloudOpenclaw,
   ]
 }

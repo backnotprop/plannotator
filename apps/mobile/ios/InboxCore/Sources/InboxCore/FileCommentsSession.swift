@@ -250,6 +250,7 @@ extension InboxSession {
     if text.isEmpty, comment.images.isEmpty {
       // Taken out of the Send that carries it first; a Send that carried nothing else is not made.
       if let carrier, strip(carrier.id, of: [id]) == .wouldEmpty {
+        returnToDraft(carrier, fresh: false)
         held.removeAll { $0.id == carrier.id }
         saveOutbox()
       }
@@ -397,8 +398,10 @@ extension InboxSession {
     }
   }
 
-  /// A Send with no words, no answer and no action: what it carries is its comments.
-  static func onlyComments(_ body: DoorReplyBody) -> Bool { (body.words ?? "").isEmpty && (body.questions ?? []).isEmpty && (body.actions ?? []).isEmpty }
+  /// A Send with no words, no answer, no action and no file: what it carries is its comments.
+  static func onlyComments(_ body: DoorReplyBody) -> Bool {
+    (body.words ?? "").isEmpty && (body.questions ?? []).isEmpty && (body.actions ?? []).isEmpty && (body.uploads ?? []).isEmpty
+  }
 
   /// Whether every write of this thread that waits is held back by a drawing (nothing to retry until another way).
   func onlyHeldBack(_ thread: String? = nil) -> Bool {
@@ -434,6 +437,7 @@ extension InboxSession {
       return false
     case .stripped: break
     case .wouldEmpty:
+      returnToDraft(reply, fresh: false)
       held.removeAll { $0.id == reply.id }
       saveOutbox()
     }
