@@ -3889,6 +3889,11 @@ export interface InboxComposeLaunch {
   /** `slow`: the project is on a network drive that isn't answering now (approval "inbox-launch-any-folder"). */
   projects: { id: string; name: string; root: string; exists: boolean; slow?: true }[];
   /**
+   * Additive: this machine's Settings → Agents says "Replies to an ended session resume it", so a reply to an ended
+   * session of an agent that `adopts` picks the Resume row by default (the person can still pick the ended session).
+   */
+  resume_ended?: true;
+  /**
    * Additive (remote launch): the agents this machine has a host for but can't start now, and why, so a linked
    * machine's window can say so with this machine's name (`inboxLaunchNotReadyWords`). `over_ssh`: this Inbox was
    * started over SSH, which is why Claude Code reads as signed out (macOS keeps its login locked for SSH).

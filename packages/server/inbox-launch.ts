@@ -53,7 +53,7 @@
  *   POST /api/inbox/launch/:id/delete    stop, remove, and the launch folder; the thread stays
  *   POST /api/inbox/launch/:id/retry     Try again after a failed start, restart or connection
  *   POST /api/inbox/launch/:id/trust     Trust folder: the host saves the trust, then Try again (owner only, tailnet too)
- *   POST /api/inbox/launch/settings      `{ full_permissions }`, `{ scratch_dir }` or `{ start_in }` (Settings → Agents)
+ *   POST /api/inbox/launch/settings      `{ full_permissions }`, `{ scratch_dir }`, `{ start_in }` or `{ resume_ended }` (Settings → Agents)
  *   POST /api/inbox/launch/choose-folder macOS's folder dialog on this computer ("Choose in Finder…"; its own window only)
  *   GET  /api/inbox/launch/settings      the switch as it stands (never set: what the login shell says)
  *
@@ -1562,6 +1562,9 @@ ${result.text}`);
           // Rex is asked only for this computer's own Settings → Agents read (`rexHere`): never for a routine's tick, New
           // message's agent pick, a save's answer or another reader, so with the default setting nothing else contacts it.
           start_in: config().startIn,
+          // "Replies to an ended session resume it", and the agents it can apply to (those that resume a session the Inbox never started).
+          resume_ended: config().resumeEnded,
+          resume_agents: hostList.filter((host) => host.adopts).map((host) => host.name),
           ...(rexHere !== undefined ? { rex_here: rexHere } : {}),
           // Rex there is a server with no app beside it: "not here" means its server is not running (the row's words).
           ...(options.rex?.headless ? { rex_headless: true as const } : {}),
@@ -1776,6 +1779,13 @@ ${result.text}`);
         if (body.start_in !== "inbox" && body.start_in !== "rex") throw new InboxError("validation_error", 'start_in: "inbox" or "rex".', { field: "start_in" });
         saveConfig({ inboxLaunch: { startIn: body.start_in === "rex" ? "rex" : undefined } as { startIn?: "rex" } });
         if (config().startIn !== body.start_in) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
+        return json({ launch: settingsState() });
+      }
+      if ("resume_ended" in body) {
+        // Settings → Agents' "Replies to an ended session resume it": only the reply box's default pick; nothing starts unsent.
+        if (typeof body.resume_ended !== "boolean") throw new InboxError("validation_error", "resume_ended: a boolean.", { field: "resume_ended" });
+        saveConfig({ inboxLaunch: { resumeEnded: body.resume_ended ? true : undefined } as { resumeEnded?: boolean } });
+        if (config().resumeEnded !== body.resume_ended) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
         return json({ launch: settingsState() });
       }
       if ("settings_file" in body) {
@@ -2430,6 +2440,8 @@ ${result.text}`);
         ...(notReady.length > 0 ? { not_ready: notReady } : {}),
         drives: mounted.map((d) => ({ path: d.path, name: d.name, ...(d.network ? { network: true as const } : {}), ...(d.shortcut === false ? { shortcut: false as const } : {}) })),
         ...(options.platform === "darwin" ? { finder: true as const } : {}),
+        // This machine's "Replies to an ended session resume it": its threads' reply boxes pick Resume by default.
+        ...(config().resumeEnded ? { resume_ended: true as const } : {}),
       };
     },
 

@@ -131,7 +131,7 @@ import { ReplyRecipientControl } from '../parts/ReplyRecipientControl';
 import { aimable, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, sessionFolder, toggleRecipient, type RecipientRow } from '../replyRecipients';
 import { replyRecipientList } from '../thread/recipientList';
 import { followedSession, useReplyAim, wordsHeldAt, wordsSession } from '../thread/replyAim';
-import { isStartRow, replyResumeOf, replyStartOf } from '../thread/replyStart';
+import { isStartRow, replyResumeOf, replyStartOf, resumesByDefault } from '../thread/replyStart';
 import { useReplyLaunchBlock } from '../data/replyLaunch';
 import { coverVoice, useThreadVoice } from '../thread/useThreadVoice';
 import { useLateVoice } from '../thread/useLateVoice';
@@ -1157,8 +1157,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   });
   // The choice (thread/replyAim.ts): the first answers its own latest message, the rest ride as tags. It follows the
   // agent that wrote last until the box holds something or the person picks; kept with the draft (its `recipients`).
+  // With the thread's machine set to resume an ended session (Settings → Agents), the Resume row leads in its place.
+  const followed = followedSession(thread, rcptAgents, rcptDefault);
+  const follow = resumesByDefault(replyBlock, replyResume, followed, askerEnded ? (asking?.session ?? null) : null);
   const rcptAim = useReplyAim({
-    threadId: thread.thread_id, active: pillActive, boxOpen: box.open, boxOpenNow: () => boxRef.current.open, follow: followedSession(thread, rcptAgents, rcptDefault), text: replyText,
+    threadId: thread.thread_id, active: pillActive, boxOpen: box.open, boxOpenNow: () => boxRef.current.open, follow, text: replyText,
     carries: replyFiles.files.length > 0 || records.length > 0 || thread.messages.some(answersItself) || [...pending.values()].some(Boolean) || voice.busy || quote !== null || (!box.open && (keptWords !== '' || draftPastes > 0)), saved: replyDraft.draft?.recipients, hasDraft: !!replyDraft.draft,
   });
   const { listOpen: rcptOpen, setListOpen: setRcptOpen } = rcptAim;

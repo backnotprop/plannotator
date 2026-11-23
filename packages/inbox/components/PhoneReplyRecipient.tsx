@@ -67,13 +67,15 @@ export function PhoneReplyRecipient({
   const chosenIds = chosen.map((r) => r.session);
   const first = chosen[0];
   const ended = chosen.length === 1 && first!.state === 'ended';
+  /** The word after the name: "ended", or "resumes" for the Resume row. */
+  const word = ended ? 'ended' : chosen.length === 1 && first!.start?.resume ? 'resumes' : null;
   /** As it is read out: "Claude Code · Invoice PDF fonts", each agent with its session's title. */
   const spoken = namesList(chosen.map((r) => (titleOf(r) ? `${agentName(r.host)} · ${titleOf(r)}` : r.label)));
   const control = {
     open,
     keepFocus: true,
     onClick: () => onOpen(!open),
-    ariaLabel: `${noun === 'reply' ? 'Reply' : 'Message'} goes to ${spoken || 'nobody yet'}${ended ? ', ended' : ''}. Change`,
+    ariaLabel: `${noun === 'reply' ? 'Reply' : 'Message'} goes to ${spoken || 'nobody yet'}${word ? `, ${word}` : ''}. Change`,
     attrs: { 'data-recipient': '', 'data-recipient-chosen': chosenIds.join(' ') },
   };
   return (
@@ -81,7 +83,7 @@ export function PhoneReplyRecipient({
       {!first ? (
         <AgentPill {...control} label="Choose an agent" ask />
       ) : chosen.length === 1 ? (
-        <AgentPill {...control} host={first.host} agent={first.start ? (first.start.resume ?? null) : first.session} start={!!first.start && !first.start.resume} label={null} detail={ended ? 'ended' : null} />
+        <AgentPill {...control} host={first.host} agent={first.start ? (first.start.resume ?? null) : first.session} start={!!first.start && !first.start.resume} label={null} detail={word} />
       ) : (
         <AgentMark {...control} host={first.host} agent={first.session} count={chosen.length} />
       )}

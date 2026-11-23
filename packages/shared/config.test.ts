@@ -60,7 +60,7 @@ import type { PlannotatorConfig } from "./config";
 describe("resolveInboxLaunch", () => {
   test("on unless enabled is false; the model only when it is a plain model name, never settings of another shape", () => {
     // fullPermissions null: never set (a launch follows the login shell); a value once set, either way.
-    expect(resolveInboxLaunch({}, "darwin")).toEqual({ enabled: true, fullPermissions: null, model: null, settingsFile: null, scratchDir: null, startIn: "inbox" });
+    expect(resolveInboxLaunch({}, "darwin")).toEqual({ enabled: true, fullPermissions: null, model: null, settingsFile: null, scratchDir: null, startIn: "inbox", resumeEnded: false });
     // Absent is on (0.29's default) on macOS and Linux; an explicit false, as Settings → Agents' switch writes it, is off.
     const on = (config: unknown, platform: NodeJS.Platform = "linux") => resolveInboxLaunch(config as PlannotatorConfig, platform).enabled;
     expect(on({ inboxLaunch: {} })).toBe(true);
@@ -76,9 +76,12 @@ describe("resolveInboxLaunch", () => {
     expect(on({}, "win32")).toBe(false);
     expect(on({ inboxLaunch: { fullPermissions: true } }, "win32")).toBe(false);
     expect(on({ inboxLaunch: { enabled: true } }, "win32")).toBe(true);
-    expect(resolveInboxLaunch({ inboxLaunch: { enabled: true, model: "haiku" } })).toEqual({ enabled: true, fullPermissions: null, model: "haiku", settingsFile: null, scratchDir: null, startIn: "inbox" });
+    expect(resolveInboxLaunch({ inboxLaunch: { enabled: true, model: "haiku" } })).toEqual({ enabled: true, fullPermissions: null, model: "haiku", settingsFile: null, scratchDir: null, startIn: "inbox", resumeEnded: false });
     // Rex only when it says exactly that: anything else starts in the background.
     expect(resolveInboxLaunch({ inboxLaunch: { startIn: "rex" } }).startIn).toBe("rex");
+    // "Replies to an ended session resume it": only a true (or "true") turns it on.
+    expect(resolveInboxLaunch({ inboxLaunch: { resumeEnded: true } }).resumeEnded).toBe(true);
+    expect(resolveInboxLaunch({ inboxLaunch: { resumeEnded: "yes" as never } }).resumeEnded).toBe(false);
     for (const startIn of ["REX", "inbox", true, 1, null]) expect(resolveInboxLaunch({ inboxLaunch: { startIn } } as unknown as PlannotatorConfig).startIn).toBe("inbox");
     expect(resolveInboxLaunch({ inboxLaunch: { fullPermissions: false } }).fullPermissions).toBe(false);
     expect(resolveInboxLaunch({ inboxLaunch: { fullPermissions: true } }).fullPermissions).toBe(true);

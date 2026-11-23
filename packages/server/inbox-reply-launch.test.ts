@@ -263,3 +263,30 @@ describe("a reply that resumes the ended session itself (the Resume row)", () =>
     }
   });
 });
+
+describe('Settings → Agents\' "Replies to an ended session resume it"', () => {
+  const save = (world: ReturnType<typeof setup>, on: unknown) =>
+    world.launch.route(
+      new Request("http://127.0.0.1/api/inbox/launch/settings", { method: "POST", headers: { Origin: "http://127.0.0.1", Host: "127.0.0.1" }, body: JSON.stringify({ serverSession: "srv", resume_ended: on }) }),
+      "/api/inbox/launch/settings",
+      "local",
+    );
+
+  test("saved in config.json and read back; this machine's compose block carries it, so its threads' reply boxes pick Resume", async () => {
+    const world = setup({ adopts: true });
+    expect((await world.launch.composeBlock())!.resume_ended).toBeUndefined();
+    const on = (await (await save(world, true))!.json()) as { launch: Record<string, unknown> };
+    expect(on.launch.resume_ended).toBe(true);
+    expect(on.launch.resume_agents).toContain("Fake Agent");
+    expect((await world.launch.composeBlock())!.resume_ended).toBe(true);
+    const off = (await (await save(world, false))!.json()) as { launch: Record<string, unknown> };
+    expect(off.launch.resume_ended).toBe(false);
+    expect((await world.launch.composeBlock())!.resume_ended).toBeUndefined();
+  });
+
+  test("anything but a boolean is refused, and nothing changes", async () => {
+    const world = setup({ adopts: true });
+    await expect(save(world, "yes")).rejects.toMatchObject({ code: "validation_error" });
+    expect((await world.launch.composeBlock())!.resume_ended).toBeUndefined();
+  });
+});

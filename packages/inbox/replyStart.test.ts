@@ -7,7 +7,7 @@
 import { expect, test } from 'bun:test';
 import type { InboxComposeLaunch, InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import type { AskingSession } from './components/ReplyRoute';
-import { isStartRow, replyResumeOf, replyStartOf } from './thread/replyStart';
+import { isStartRow, replyResumeOf, replyStartOf, resumesByDefault } from './thread/replyStart';
 
 const thread = { thread_id: 'm1', project: { id: 'prj_ledger', key: 'ledger', name: 'ledger', root: '/work/ledger', created_at: '' }, subject: null, thread_name: null, resolved_at: null, messages: [] } as InboxThread;
 const asking = (host: string, fromRoot?: string): AskingSession => ({
@@ -66,4 +66,15 @@ test('Resume: the ended session itself, for an agent that adopts it, in the same
   expect(replyResumeOf(adopting, thread, asking('claude-code'))).toBeNull();
   expect(replyResumeOf(adopting, thread, asking('pi'))).toBeNull();
   expect(replyResumeOf(undefined, thread, asking('opencode'))).toBeNull();
+});
+
+test('resume by default: the Resume row leads in the ended session\'s place only with the machine\'s switch on, and only for that session', () => {
+  const adopting = block({ agents: [{ agent: 'opencode', name: 'OpenCode', adopts: true }] });
+  const resume = replyResumeOf(adopting, thread, asking('opencode'))!;
+  expect(resumesByDefault({ ...adopting, resume_ended: true }, resume, 'ses_asker', 'ses_asker')).toBe('resume:ses_asker');
+  // Switch off, nothing ended, the reply follows another session, or no Resume row: the followed session as it is.
+  expect(resumesByDefault(adopting, resume, 'ses_asker', 'ses_asker')).toBe('ses_asker');
+  expect(resumesByDefault({ ...adopting, resume_ended: true }, resume, 'ses_asker', null)).toBe('ses_asker');
+  expect(resumesByDefault({ ...adopting, resume_ended: true }, resume, 'ses_live', 'ses_asker')).toBe('ses_live');
+  expect(resumesByDefault({ ...adopting, resume_ended: true }, null, 'ses_asker', 'ses_asker')).toBe('ses_asker');
 });

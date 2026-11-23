@@ -72,3 +72,12 @@ export function replyResumeOf(block: InboxComposeLaunch | null | undefined, thre
     to: { launch: { agent: agent.agent, project_id: project.id, resume: session } },
   };
 }
+
+/**
+ * The session the reply box follows: the Resume row's id in place of the ended session it resumes, while the thread's
+ * machine says "Replies to an ended session resume it" (`resume_ended` on its launch block); else `followed` as it is.
+ * `ended`: the session the ended note is about, or null while none has ended.
+ */
+export function resumesByDefault(block: InboxComposeLaunch | null | undefined, resume: ReplyStart | null, followed: string | null, ended: string | null): string | null {
+  return block?.resume_ended && resume && ended !== null && followed === ended && resume.row.start?.resume === ended ? resume.row.session : followed;
+}
