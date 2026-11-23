@@ -62,8 +62,15 @@ export function refusedAsked(params: URLSearchParams, pathParam = "path"): Revie
   return null;
 }
 
-/** One side of a changed image in a pull request's diff (`/api/inbox/pulls/review-image`). */
-export async function pullReviewImage(options: {
+/** Where a request's sides come from: the patch it is checked against, its snapshot rule and its side reader. */
+export interface ImageSource {
+  available: boolean;
+  patch: string;
+  isCurrentSnapshot: (snapshot: string) => boolean;
+  readSide: (side: DiffSide, filePath: string, oldPath: string | undefined, maxBytes: number, signal?: AbortSignal) => Promise<FileBytesRead>;
+}
+
+export interface PullImageOptions {
   pulls: Pick<InboxPulls, "diff" | "fileBytes">;
   key: string;
   scope: InboxPullDiffScope;
@@ -73,11 +80,15 @@ export async function pullReviewImage(options: {
   roots: () => Promise<string[]>;
   ifNoneMatch?: string | null;
   signal?: AbortSignal;
-}): Promise<ReviewImageResponse> {
+}
+
+/**
+ * A pull request's diff in `scope`, read at the head the request's `snapshot` names, and its reader: any path of the
+ * repository at that head (the new side) or where the diff runs from (the old), never anything else. The caller has
+ * checked what the request names first (`refusedAsked`); an answer here is the forge's refusal.
+ */
+export async function pullImageSource(options: PullImageOptions): Promise<ImageSource | ReviewImageResponse> {
   const { pulls, key, scope, from, params } = options;
-  // What the request names is checked before anything is read: a bad path or side never reads the diff (or the forge).
-  const refused = refusedAsked(params);
-  if (refused) return refused;
   const asked = params.get("snapshot") ?? "";
   const pinned = /^[0-9a-f]{40,64}$/.test(asked) ? asked : null;
   // The diff on screen, read at the head the window names (the PR page's `/pulls/diff` read it a moment ago).
@@ -91,19 +102,28 @@ export async function pullReviewImage(options: {
     }
   }
   let roots: Promise<string[]> | null = null;
-  return handleReviewImageRequest({
-    params,
-    ifNoneMatch: options.ifNoneMatch ?? null,
+  return {
     available: true,
     patch: answer?.patch ?? "",
     isCurrentSnapshot: (snapshot) => !!answer?.head_sha && snapshot === answer.head_sha,
-    ...(options.signal ? { signal: options.signal } : {}),
     readSide: (side, filePath, oldPath, maxBytes, signal) =>
       runImageRead(async () => {
         roots ??= options.roots();
         return pulls.fileBytes(key, scope, side, filePath, oldPath, await roots, maxBytes, from, answer!.head_sha!).catch(forgeRefusal);
       }, signal),
-  });
+  };
+}
+
+export const isImageResponse = (value: ImageSource | ReviewImageResponse): value is ReviewImageResponse => "status" in value;
+
+/** One side of a changed image in a pull request's diff (`/api/inbox/pulls/review-image`). */
+export async function pullReviewImage(options: PullImageOptions): Promise<ReviewImageResponse> {
+  // What the request names is checked before anything is read: a bad path or side never reads the diff (or the forge).
+  const refused = refusedAsked(options.params);
+  if (refused) return refused;
+  const source = await pullImageSource(options);
+  if (isImageResponse(source)) return source;
+  return handleReviewImageRequest({ params: options.params, ifNoneMatch: options.ifNoneMatch ?? null, ...source, ...(options.signal ? { signal: options.signal } : {}) });
 }
 
 /** The two blob ids a file's patch names (its `index` line), each null where that side does not exist. */
@@ -117,18 +137,49 @@ function indexIds(patch: string): { old: string | null; new: string | null } | n
 /** A forge's read of one side of a guide's pull request (`InboxPulls.fileBytes` for that PR), as the routes pass it. */
 export type GuideForgeRead = (side: DiffSide, filePath: string, oldPath: string | undefined, maxBytes: number) => Promise<FileBytesRead>;
 
+/** What a guided review's files are read from: the one set of extras every guide route passes its reader. */
+export interface GuideReadOptions {
+  /** The guide's patch, as the agent sent it (null when its snapshot is gone from the store). */
+  patch: string | null;
+  /** The project's folder on this computer, or null. */
+  root: string | null;
+  /** The commit the guide pins (`guideReviewOf`), or null when it records none. */
+  revision?: string | null;
+  /** A guide of a pull request with Code review on: that PR's own side read (`InboxPulls.fileBytes`), else absent. */
+  forge?: GuideForgeRead;
+}
+
+export interface GuideImageOptions extends GuideReadOptions {
+  /** The message the guide is on: the request's `snapshot`. */
+  messageId: string;
+  params: URLSearchParams;
+  ifNoneMatch?: string | null;
+  signal?: AbortSignal;
+}
+
 /**
- * One side of a file a guided review's patch changes, read the one way a guide's sides are: only ever the blob the
- * patch's `index` line names (a file whose patch names none, a pure rename or a patch rebuilt without them, reads from
- * `forge` alone), from the project's git, or the working tree for the new side while its bytes are that blob, or the
- * guide's pull request on the forge while its side is still that blob. Shared by the image previews and the package
- * changes (inbox-package-changes.ts).
+ * The one reader of a guided review's files, shared by the image previews, the rendered Markdown files' pictures and
+ * the package changes (inbox-package-changes.ts). The guide keeps the diff as sent while the working tree moves on, so
+ * a side of a file the patch changes is only ever the blob its `index` line names (a file whose patch names none, a
+ * pure rename or a patch rebuilt without them, reads from `forge` alone): from the project's git, or the working tree
+ * for the new side while its bytes are that blob, or the guide's pull request on the forge while its side is still
+ * that blob. `unchanged`: how a path the patch does not change is read (a Markdown file's picture, a lockfile's
+ * manifest): `"head"`, as committed at the guide's own revision (`revision`), a git object (never the working tree,
+ * never the forge); absent, it is missing.
  */
-export function guideSideReader(patch: string | null, root: string | null, forge: GuideForgeRead | undefined): (side: DiffSide, filePath: string, oldPath: string | undefined, maxBytes: number) => Promise<FileBytesRead> {
+export function guideSideReader(options: GuideReadOptions, unchanged?: "head"): GuideForgeRead {
+  const { patch, root, forge } = options;
   let files: ReturnType<typeof parseDiffToFiles> | null = null;
   return async (side, filePath, oldPath, maxBytes) => {
     files ??= parseDiffToFiles(patch ?? "");
     const file = files.find((f) => f.path === filePath);
+    if (!file && unchanged === "head") {
+      validateFilePath(filePath);
+      // A guide that records no revision (a producer that names none) is read at the project's HEAD now: the best
+      // there is, though the project may have moved on since the guide was made.
+      const at = options.revision ?? "HEAD";
+      return root ? readGitObjectBytes(gitRuntime, `${at}:${filePath}`, maxBytes, root) : { kind: "missing" };
+    }
     const ids = file ? indexIds(file.patch) : null;
     const id = ids?.[side] ?? null;
     if (root && id) {
@@ -149,31 +200,20 @@ export function guideSideReader(patch: string | null, root: string | null, forge
   };
 }
 
-/** One side of a changed image in a guided review's patch (`/api/inbox/messages/:id/guide/review-image`), as `guideSideReader` reads it. */
-export async function guideReviewImage(options: {
-  /** The guide's patch, as the agent sent it (null when its snapshot is gone from the store). */
-  patch: string | null;
-  /** The message the guide is on: the request's `snapshot`. */
-  messageId: string;
-  /** The project's folder on this computer, or null. */
-  root: string | null;
-  params: URLSearchParams;
-  /** A guide of a pull request with Code review on: that PR's own side read (`InboxPulls.fileBytes`), else absent. */
-  forge?: GuideForgeRead;
-  ifNoneMatch?: string | null;
-  signal?: AbortSignal;
-}): Promise<ReviewImageResponse> {
-  const { patch, root } = options;
+/** A guided review's patch, its snapshot rule and `guideSideReader`, for the shared image handlers. */
+export function guideImageSource(options: GuideImageOptions, unchanged?: "head"): ImageSource {
+  const read = guideSideReader(options, unchanged);
+  return {
+    available: options.patch !== null,
+    patch: options.patch ?? "",
+    isCurrentSnapshot: (snapshot) => snapshot === options.messageId,
+    readSide: (side, filePath, oldPath, maxBytes, signal) => runImageRead(() => read(side, filePath, oldPath, maxBytes), signal),
+  };
+}
+
+/** One side of a changed image in a guided review's patch (`/api/inbox/messages/:id/guide/review-image`). */
+export async function guideReviewImage(options: GuideImageOptions): Promise<ReviewImageResponse> {
   const refused = refusedAsked(options.params);
   if (refused) return refused;
-  const read = guideSideReader(patch, root, options.forge);
-  return handleReviewImageRequest({
-    params: options.params,
-    ifNoneMatch: options.ifNoneMatch ?? null,
-    available: patch !== null,
-    patch: patch ?? "",
-    isCurrentSnapshot: (snapshot) => snapshot === options.messageId,
-    ...(options.signal ? { signal: options.signal } : {}),
-    readSide: (side, filePath, oldPath, maxBytes, signal) => runImageRead(() => read(side, filePath, oldPath, maxBytes), signal),
-  });
+  return handleReviewImageRequest({ params: options.params, ifNoneMatch: options.ifNoneMatch ?? null, ...guideImageSource(options), ...(options.signal ? { signal: options.signal } : {}) });
 }

@@ -965,6 +965,125 @@ describe("the image previews' routes", () => {
 });
 
 /**
+ * The rendered Markdown pictures' routes (review parity B3: `/api/inbox/pulls/review-markdown-image` and
+ * `/api/inbox/messages/:id/guide/review-markdown-image`) through the running Inbox's doors: the guards inbox.ts puts
+ * around the shared handler (inbox-review-markdown-image.test.ts proves the handler's own answers).
+ */
+describe("the rendered Markdown pictures' routes", () => {
+  const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+  const png = (tag: string) => Buffer.concat([PNG, Buffer.from(tag, "latin1")]);
+  const imageOf = async (response: Response) => Buffer.from(await response.arrayBuffer());
+
+  /** A PR whose README.md comes to show img/logo.png (unchanged), its two commits in the project's clone. */
+  async function documented(w: Awaited<ReturnType<typeof world>>) {
+    mkdirSync(join(w.project, "img"), { recursive: true });
+    writeFileSync(join(w.project, "img/logo.png"), png("logo"));
+    writeFileSync(join(w.project, "README.md"), "# Ledger\n");
+    w.git("add", ".");
+    w.git("commit", "-qm", "one");
+    const baseSha = w.git("rev-parse", "HEAD").trim();
+    writeFileSync(join(w.project, "README.md"), "# Ledger\n\n![logo](img/logo.png)\n");
+    w.git("commit", "-qam", "two");
+    const headSha = w.git("rev-parse", "HEAD").trim();
+    const patch = w.git("diff", `${baseSha}..${headSha}`);
+    await w.sendGuide(patch, ["README.md"]);
+    w.forge.pull = ghPull({ headRefOid: headSha });
+    w.forge.mergeBase = baseSha;
+    w.forge.patch = patch;
+    w.forge.headNow = headSha;
+    expect((await fetch(`${w.base}/api/inbox/pulls?refresh=1`)).status).toBe(200);
+    w.forge.reads.length = 0;
+    return headSha;
+  }
+  const askPull = (base: string, snapshot: string, headers: Record<string, string> = {}) =>
+    fetch(`${base}/api/inbox/pulls/review-markdown-image?key=${encodeURIComponent(KEY)}&scope=layer&doc=README.md&side=new&src=img%2Flogo.png&snapshot=${snapshot}`, { headers });
+  const askGuide = (base: string, id: string, src: string, headers: Record<string, string> = {}) =>
+    fetch(`${base}/api/inbox/messages/${id}/guide/review-markdown-image?doc=README.md&side=new&src=${encodeURIComponent(src)}&snapshot=${id}`, { headers });
+
+  test("a PR's README picture: read from the project's clone at the head on screen", async () => {
+    const w = await world({ codeReview: true });
+    const head = await documented(w);
+    const response = await askPull(w.base, head);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect((await imageOf(response)).equals(png("logo"))).toBe(true);
+    expect(w.forge.reads.filter((r) => r.includes("/contents/"))).toEqual([]);
+  });
+
+  test("a PR's README picture with Code review off: 409 code_review_off, and nothing runs", async () => {
+    const w = await world({ codeReview: false });
+    const response = await askPull(w.base, HEAD);
+    expect(response.status).toBe(409);
+    expect(((await response.json()) as { code: string }).code).toBe("code_review_off");
+    expect(w.forge.reads).toEqual([]);
+  });
+
+  test("a PR's README picture asked by another site: 403, and nothing is read", async () => {
+    const w = await world({ codeReview: true });
+    const head = await documented(w);
+    expect((await askPull(w.base, head, { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect(w.forge.reads).toEqual([]);
+  });
+
+  test("a guide's README picture: through the route, never from another site", async () => {
+    const w = await world({ codeReview: false });
+    mkdirSync(join(w.project, "img"), { recursive: true });
+    writeFileSync(join(w.project, "img/logo.png"), png("logo"));
+    writeFileSync(join(w.project, "README.md"), "# Ledger\n");
+    w.git("add", ".");
+    w.git("commit", "-qm", "one");
+    writeFileSync(join(w.project, "README.md"), "# Ledger\n\n![logo](img/logo.png)\n");
+    const id = await w.sendGuide(w.git("diff"), ["README.md"]);
+    const response = await askGuide(w.base, id, "img/logo.png");
+    expect(response.status).toBe(200);
+    expect((await imageOf(response)).equals(png("logo"))).toBe(true);
+    expect((await askGuide(w.base, id, "img/logo.png", { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect((await askGuide(w.base, id, "../outside.png")).status).toBe(403);
+    expect(w.forge.reads).toEqual([]);
+  });
+
+  test("a guide in another project naming this PR: the forge is never asked for its README's picture", async () => {
+    const w = await world({ codeReview: true, repoOf: (root) => ({ host: "github.com", display: root.endsWith("billing-svc") ? "northwind/billing-svc" : "someone/third" }) });
+    const readme = Buffer.from("![b](img/b.png)\n");
+    const picture = png("forge");
+    const served = (path: string, bytes: Buffer) =>
+      w.forge.files.set(`repos/northwind/billing-svc/contents/${encodeURIComponent(path)}?ref=${HEAD}`, JSON.stringify({ type: "file", sha: "c".repeat(40), size: bytes.length, encoding: "base64", content: bytes.toString("base64") }));
+    served("README.md", readme);
+    served("img/b.png", picture);
+    const id10 = (bytes: Buffer) => gitBlobId(bytes).slice(0, 10);
+    const rawPatch =
+      `diff --git a/README.md b/README.md\nindex ${id10(Buffer.from("old\n"))}..${id10(readme)} 100644\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+![b](img/b.png)\n` +
+      `diff --git a/img/b.png b/img/b.png\nindex ${id10(png("old"))}..${id10(picture)} 100644\nBinary files a/img/b.png and b/img/b.png differ\n`;
+    const pr = (project?: string) =>
+      w.sendGuide("", [], {
+        ...(project ? { project_path: project } : {}),
+        patch: undefined,
+        guide: undefined,
+        snapshot: buildGuideSnapshot({
+          guide: { title: "T", intent: "I", sections: [{ title: "S", overview: "O", diffs: [{ file: "README.md", summary: "s" }] }] },
+          review: { rawPatch, gitRef: "main...head", source: { kind: "pr", pr: { url: "https://github.com/northwind/billing-svc/pull/412", number: 412, title: "PR 412", platform: "github" } } },
+          reviewed: [],
+        } as unknown as Parameters<typeof buildGuideSnapshot>[0]),
+      });
+    const own = await pr();
+    const third = join(w.project, "..", "third");
+    mkdirSync(third, { recursive: true });
+    Bun.spawnSync(["git", "init", "-q"], { cwd: third, env: GIT_ENV });
+    const cross = await pr(third);
+    expect((await fetch(`${w.base}/api/inbox/pulls?refresh=1`)).status).toBe(200);
+    // The PR's own project's guide reads the document and its picture from the forge ...
+    const near = await askGuide(w.base, own, "img/b.png");
+    expect(near.status).toBe(200);
+    expect((await imageOf(near)).equals(picture)).toBe(true);
+    // ... and one in another project naming the same PR reads nothing of it.
+    w.forge.reads.length = 0;
+    expect((await askGuide(w.base, cross, "img/b.png")).status).not.toBe(200);
+    expect(w.forge.reads).toEqual([]);
+  });
+});
+
+
+/**
  * The package changes card's routes (review parity B5: `/api/inbox/pulls/package-changes` and
  * `/api/inbox/messages/:id/guide/package-changes`) through the running Inbox's doors: the guards inbox.ts puts around
  * the shared service (inbox-package-changes.test.ts proves the rows and the reads).

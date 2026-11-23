@@ -64,6 +64,7 @@ import { fileKind } from '@plannotator/core/file-kind';
 import { useGuideHost } from '@plannotator/guide-viewer';
 import { differencesSupported, ImageViewMenu } from '@plannotator/review-editor/components/image-diff/ImageViewMenu';
 import type { GuideReaderImages } from './types';
+import { RenderedFilesProvider, useRenderedFiles } from './renderedFiles';
 import type { ImageAttachment } from '@plannotator/ui/types';
 
 /** A line range the review app selects on (Pierre's). */
@@ -121,6 +122,8 @@ export const GuideDiff: FC<
     renderImageViewControl?: AllFilesCodeViewProps['renderImageViewControl'];
     /** Code review's package changes card under a package.json or lockfile (`usePackageChangeCards`). Absent: none. */
     renderPackageChanges?: AllFilesCodeViewProps['renderPackageChanges'];
+    /** Code review's rendered Markdown files and SVG Image / Source (`useRenderedFiles`), forwarded likewise. Absent: the source diff. */
+    markdownPreview?: AllFilesCodeViewProps['markdownPreview'];
     comments?: GuideDiffComments;
     /** Draw this layout whatever the setting says, leaving the setting as it is (a phone: always Unified). */
     diffStyleOverride?: 'split' | 'unified';
@@ -512,20 +515,25 @@ function Reader({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollTarget]);
   // The review's rail moves the view too (`reveal`): whichever moved last wins, under one token count of its own.
-  const moves = useRef({ count: 0, comment: commentFile, rail: reveal, target: null as { path: string; token: number } | null });
+  // And a link in a rendered Markdown file to another file of the review (renderedFiles.tsx), as code review opens it.
+  const [linked, setLinked] = useState<{ path: string; token: number } | null>(null);
+  const openLinkedFile = useCallback((path: string) => setLinked((was) => ({ path, token: (was?.token ?? 0) + 1 })), []);
+  const moves = useRef({ count: 0, comment: commentFile, rail: reveal, link: linked, target: null as { path: string; token: number } | null });
   const revealFile = useMemo(() => {
     const seen = moves.current;
     const railMoved = reveal !== seen.rail && reveal !== null;
     const commentMoved = commentFile !== seen.comment && commentFile !== null;
+    const linkMoved = linked !== seen.link && linked !== null;
     seen.rail = reveal;
     seen.comment = commentFile;
-    const next = railMoved ? reveal : commentMoved ? commentFile : null;
+    seen.link = linked;
+    const next = railMoved ? reveal : commentMoved ? commentFile : linkMoved ? linked : null;
     if (next) {
       seen.count += 1;
       seen.target = { path: next.path, token: seen.count };
     }
     return seen.target;
-  }, [commentFile, reveal]);
+  }, [commentFile, reveal, linked]);
 
   // A phone draws one column, always, and offers no switch (two ~130 px columns read as nothing);
   // the saved layout is left as it is. Elsewhere the first card carries the Split | Unified tab, unless the host's bar has it.
@@ -663,10 +671,26 @@ function Reader({
   const drawOverviewDiagram = useMemo(() => withOverviewMermaid(renderOverviewDiagram), [renderOverviewDiagram]);
   // And each chapter's diagram (format version 5), at the top of the chapter's code pane.
   const drawChapterDiagram = useMemo(() => withChapterMermaid(renderChapterDiagram), [renderChapterDiagram]);
-  // Each file's renderer props, with the image previews and package cards where the host has them.
+  // Code review's rendered files (renderedFiles.tsx): a changed Markdown file's Source / Changes / Read, read through the
+  // host's whole-file reader, and a changed SVG's Image / Source where the host names its images. Never on a walkthrough
+  // of code as it is.
+  const { markdownPreview, rendered } = useRenderedFiles({
+    files,
+    read: fetchFileContent,
+    images: readerImages,
+    enabled: !asItIs,
+    compact: phone,
+    openFile: openLinkedFile,
+  });
+  // Each file's renderer props, with code review's extras where the host has them (image previews, rendered files and
+  // package cards), passed one way: spread over the host's props.
+  const reviewExtras = useMemo(
+    () => ({ ...imagePreviews, ...(markdownPreview ? { markdownPreview } : {}), ...(renderPackageChanges ? { renderPackageChanges } : {}) }),
+    [imagePreviews, markdownPreview, renderPackageChanges],
+  );
   const rendererProps = useCallback(
-    (context: GuideDiffRendererContext) => ({ ...getDiffRendererProps(context), ...imagePreviews, ...(renderPackageChanges ? { renderPackageChanges } : {}) }),
-    [getDiffRendererProps, imagePreviews, renderPackageChanges],
+    (context: GuideDiffRendererContext) => ({ ...getDiffRendererProps(context), ...reviewExtras }),
+    [getDiffRendererProps, reviewExtras],
   );
   const host = useMemo(
     () => ({
@@ -704,6 +728,7 @@ function Reader({
 
   return (
     <GuideHostProvider value={host}>
+      <RenderedFilesProvider value={rendered}>
       <GuideCodeSpanContext.Provider value={codeSpan}>
       <GuideView
         guide={guide}
@@ -724,6 +749,7 @@ function Reader({
       />
       {refCard}
       </GuideCodeSpanContext.Provider>
+      </RenderedFilesProvider>
       {globalAnchor && globalDraftKey && (
         <CommentPopover
           anchorEl={globalAnchor}

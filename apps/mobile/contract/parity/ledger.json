@@ -17832,8 +17832,8 @@
       "id": "window-only-messages",
       "title": "Window endpoints under messages with no door route",
       "surface": [
-        "window:/api/inbox/messages/:id/guide/package-changes",
-        "window:/api/inbox/messages/:id/guide/review-image"
+        "window:/api/inbox/messages/:id/guide/review-image",
+        "window:/api/inbox/messages/:id/guide/review-markdown-image"
       ],
       "flows": [],
       "mobile": "later",
@@ -17848,10 +17848,10 @@
       "id": "window-only-pulls",
       "title": "Window endpoints under pulls with no door route",
       "surface": [
-        "window:/api/inbox/pulls/package-changes",
         "window:/api/inbox/pulls/repo-file",
         "window:/api/inbox/pulls/repo-files",
-        "window:/api/inbox/pulls/review-image"
+        "window:/api/inbox/pulls/review-image",
+        "window:/api/inbox/pulls/review-markdown-image"
       ],
       "flows": [],
       "mobile": "later",
@@ -21834,6 +21834,34 @@
       "mobile": "undecided",
       "why": "",
       "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-messages-id-guide-package-changes",
+      "title": "window:/api/inbox/messages/:id/guide/package-changes",
+      "surface": [
+        "window:/api/inbox/messages/:id/guide/package-changes"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-pulls-package-changes",
+      "title": "window:/api/inbox/pulls/package-changes",
+      "surface": [
+        "window:/api/inbox/pulls/package-changes"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
       "ios": {
         "state": "not-started"
       }

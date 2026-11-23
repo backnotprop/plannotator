@@ -2,6 +2,7 @@
  * The image preview of code review on the Inbox's diffs (review parity B2): the review app's own `ImageDiffPreview`
  * asks `/api/review-image?path&side&snapshot`; these send that read to the Inbox's routes for one diff
  * (packages/server/inbox-review-image.ts), the rest of the query as it was, as `pullRepoFetch` does for All files.
+ * A rendered Markdown file's pictures (B3) are `<img src>`s, turned into the diff's review-markdown-image route.
  * Its package changes card (B5) asks `/api/package-changes?snapshot`, sent the same way to the diff's
  * package-changes route (packages/server/inbox-package-changes.ts). Anything else (the card's npm lookup among them:
  * the Inbox has none) is refused, never fetched. Plain data, passed as `ReaderPart` `images` (lazyParts.tsx), which the
@@ -24,6 +25,17 @@ function reviewFetch(route: (read: 'review-image' | 'package-changes', query: st
   }) as typeof fetch;
 }
 
+/**
+ * A rendered Markdown file's pictures are `<img src>`s, not reads: code review's `/api/review-markdown-image?…` URL
+ * turned into the host's route, the rest of the query as it was. Anything else is never asked (an empty picture).
+ */
+function markdownImageRoute(route: (query: string) => string): (url: string) => string {
+  return (url) => {
+    const asked = /^\/api\/review-markdown-image\?(.*)$/.exec(url);
+    return asked ? route(asked[1]!) : 'data:,';
+  };
+}
+
 /** Where the reader inside reads its images (`ReaderPart` provides it). Absent: no image previews. */
 export const ReviewImagesContext = createContext<GuideReaderImages | undefined>(undefined);
 
@@ -40,6 +52,7 @@ export function pullReviewImages(key: string, scope: string, from: string | unde
     // The review app's caches key by snapshot id: this diff's own, never another review's.
     snapshotId: `inbox:pull:${key}:${scope}:${from ?? ''}:${head}`,
     fetchImpl: reviewFetch((read, query) => pullUrl(`/pulls/${read}`, key, `${scoped}&${query.replace(/(^|&)snapshot=[^&]*/, '$1snapshot=' + head)}`)),
+    markdownImageUrl: markdownImageRoute((query) => pullUrl('/pulls/review-markdown-image', key, `${scoped}&${query.replace(/(^|&)snapshot=[^&]*/, '$1snapshot=' + head)}`)),
   };
 }
 
@@ -49,5 +62,6 @@ export function guideReviewImages(messageId: string): GuideReaderImages | undefi
   return {
     snapshotId: `inbox:guide:${messageId}`,
     fetchImpl: reviewFetch((read, query) => inboxUrl(`/messages/${encodeURIComponent(messageId)}/guide/${read}`, query.replace(/(^|&)snapshot=[^&]*/, `$1snapshot=${encodeURIComponent(messageId)}`))),
+    markdownImageUrl: markdownImageRoute((query) => inboxUrl(`/messages/${encodeURIComponent(messageId)}/guide/review-markdown-image`, query.replace(/(^|&)snapshot=[^&]*/, `$1snapshot=${encodeURIComponent(messageId)}`))),
   };
 }

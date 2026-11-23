@@ -25,7 +25,7 @@ import { MAX_REVIEW_IMAGE_PREVIEW_BYTES } from "@plannotator/core/diff-paths";
 import type { FileBytesRead } from "@plannotator/shared/review-core";
 import { createInboxPulls, gitBlobId, type InboxPulls } from "./inbox-pulls";
 import { guideReviewImage, pullReviewImage } from "./inbox-review-image";
-import { guidePatchOf } from "./inbox-guides";
+import { guidePatchOf, guideReviewOf } from "./inbox-guides";
 import { buildGuideSnapshot } from "@plannotator/core/guide-format";
 import { inboxBlobPath } from "@plannotator/shared/inbox/attachments";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -320,5 +320,28 @@ describe("a guide's patch for its previews", () => {
     mkdirSync(join(blob, ".."), { recursive: true });
     writeFileSync(blob, JSON.stringify(snapshot));
     expect(guidePatchOf(store, sha)).toBe(patch);
+  });
+
+  test("the commit a guide pins: a commit guide's commit, else the head it was made at; never a ref or none", () => {
+    const dir = join(scratch, "store-pins");
+    const store = { dir } as unknown as InboxStore;
+    const head = "1".repeat(40);
+    const commit = "2".repeat(40);
+    const pinOf = (sha: string, source: Record<string, unknown>) => {
+      const snapshot = buildGuideSnapshot({
+        guide: { title: "T", intent: "I", sections: [{ title: "S", overview: "O", diffs: [{ file: "img/modified.png", summary: "s" }] }] },
+        reviewed: [false],
+        review: { rawPatch: patch, gitRef: "main...HEAD", source: source as { kind: "local" } },
+        exportedAt: "2026-11-23T10:00:00.000Z",
+      });
+      const blob = inboxBlobPath(dir, sha);
+      mkdirSync(join(blob, ".."), { recursive: true });
+      writeFileSync(blob, JSON.stringify(snapshot));
+      return guideReviewOf(store, sha)?.revision;
+    };
+    expect(pinOf("a".repeat(64), { kind: "local", headSha: head })).toBe(head);
+    expect(pinOf("b".repeat(64), { kind: "commit", headSha: head, commitSha: commit })).toBe(commit);
+    expect(pinOf("c".repeat(64), { kind: "local" })).toBeNull();
+    expect(pinOf("d".repeat(64), { kind: "local", headSha: "main~1" })).toBeNull();
   });
 });

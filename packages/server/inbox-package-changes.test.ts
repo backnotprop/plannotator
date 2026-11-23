@@ -135,11 +135,12 @@ describe("a pull request's package changes", () => {
 
 describe("a guided review's package changes", () => {
   const MESSAGE = "msg_1";
-  const read = (options: { patch?: string | null; snapshot?: string; root?: string | null; forge?: Parameters<typeof guidePackageChanges>[0]["forge"] } = {}) =>
+  const read = (options: { patch?: string | null; snapshot?: string; root?: string | null; revision?: string; forge?: Parameters<typeof guidePackageChanges>[0]["forge"] } = {}) =>
     guidePackageChanges({
       patch: options.patch === undefined ? patch : options.patch,
       messageId: MESSAGE,
       root: options.root === undefined ? repo : options.root,
+      ...(options.revision ? { revision: options.revision } : {}),
       params: new URLSearchParams({ snapshot: options.snapshot ?? MESSAGE }),
       ...(options.forge ? { forge: options.forge } : {}),
       cardOn: true,
@@ -166,6 +167,22 @@ describe("a guided review's package changes", () => {
       expect(rowsOf(card)["tiny-queue"]).toEqual(["upgraded", "0.2.1", "0.2.3"]);
     } finally {
       writeFileSync(join(repo, "package.json"), AFTER.pkg);
+    }
+  });
+
+  test("a lockfile-only change of a guide that pins its commit: the manifest beside it read there, not at the project's HEAD now", async () => {
+    const pinned = git("rev-parse", "HEAD").trim();
+    writeFileSync(join(repo, "package.json"), "{ not json");
+    git("commit", "-q", "-m", "a broken manifest", "--", "package.json");
+    try {
+      const [card] = cardsOf((await read({ patch: lockOnly, revision: pinned })).body);
+      expect(card?.error).toBeUndefined();
+      expect(rowsOf(card)["tiny-queue"]).toEqual(["upgraded", "0.2.1", "0.2.3"]);
+      // A guide that records none: the project's HEAD, broken manifest and all.
+      expect(cardsOf((await read({ patch: lockOnly })).body)[0]?.error).toBeDefined();
+    } finally {
+      writeFileSync(join(repo, "package.json"), AFTER.pkg);
+      git("commit", "-q", "-m", "the manifest back", "--", "package.json");
     }
   });
 

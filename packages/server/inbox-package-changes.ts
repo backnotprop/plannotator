@@ -8,7 +8,8 @@
  *    (`InboxPulls.fileBytes`: a clone on this computer, else the forge, at most `REMOTE_PACKAGE_READS` forge reads).
  *  - `GET /api/inbox/messages/:id/guide/package-changes?snapshot`: a guided review's patch, as the agent sent it;
  *    `snapshot` is the message id. A changed file's sides are the blobs the patch names (`guideSideReader`), a
- *    lockfile's unchanged manifest the project's commit (`HEAD:<path>`, a git object, never the working tree).
+ *    lockfile's unchanged manifest as committed at the commit the guide pins (the project's HEAD for a guide that
+ *    records none), a git object, never the working tree.
  *
  * Every decision is the shared service's (packages/shared/package-changes-service.ts), as in code review's servers:
  * which files hold package changes, which other files a lockfile's card needs, the read cap, the rows. This module
@@ -23,10 +24,9 @@ import { parseDiffToFiles } from "@plannotator/core/diff-files";
 import type { InboxPullDiffScope } from "@plannotator/core/inbox-types";
 import { coerceConfigBoolean, type PlannotatorConfig } from "@plannotator/shared/config";
 import { createPackageChangesService, MAX_PACKAGE_FILE_BYTES, REMOTE_PACKAGE_READS, type PackageSideRead } from "@plannotator/shared/package-changes-service";
-import { readGitObjectBytes, validateFilePath, type DiffSide, type FileBytesRead } from "@plannotator/shared/review-core";
-import { runtime as gitRuntime } from "./git";
+import { validateFilePath, type DiffSide, type FileBytesRead } from "@plannotator/shared/review-core";
 import { InboxPullsError, type InboxPulls } from "./inbox-pulls";
-import { guideSideReader, type GuideForgeRead } from "./inbox-review-image";
+import { guideSideReader, type GuideReadOptions } from "./inbox-review-image";
 
 /** A route's answer: a status and a JSON body. */
 export interface PackageChangesAnswer {
@@ -119,35 +119,24 @@ export async function pullPackageChanges(options: {
   );
 }
 
-/** A guided review's package changes (`/api/inbox/messages/:id/guide/package-changes`). */
-export async function guidePackageChanges(options: {
-  /** The guide's patch, as the agent sent it (null when its snapshot is gone from the store). */
-  patch: string | null;
+/** A guided review's package changes (`/api/inbox/messages/:id/guide/package-changes`), read by `guideSideReader`. */
+export async function guidePackageChanges(options: GuideReadOptions & {
   /** The message the guide is on: the request's `snapshot`. */
   messageId: string;
-  /** The project's folder on this computer, or null. */
-  root: string | null;
   params: URLSearchParams;
-  /** A guide of a pull request with Code review on: that PR's own side read, else absent. */
-  forge?: GuideForgeRead;
   cardOn: boolean;
 }): Promise<PackageChangesAnswer> {
-  const { patch, root, messageId } = options;
+  const { patch, messageId } = options;
   const refused = refusedAsked(options.params, (snapshot) => snapshot === messageId);
   if (refused) return refused;
   if (!options.cardOn) return NO_CARDS(messageId);
   if (patch === null) return { status: 404, body: { error: "This guided review's diff is gone." } };
-  const inPatch = new Set(parseDiffToFiles(patch).map((file) => file.path));
-  const read = guideSideReader(patch, root, options.forge);
+  // A lockfile's manifest the patch leaves alone: as committed at the guide's revision, never the working tree.
+  const read = guideSideReader(options, "head");
   return analyse(
     messageId,
     patch,
-    async (side, path, oldPath) => {
-      if (inPatch.has(path)) return textOf(await read(side, path, oldPath, MAX_PACKAGE_FILE_BYTES));
-      // A lockfile's manifest the patch leaves alone: the project's commit, a git object, never the working tree.
-      if (!root) return { kind: "missing" };
-      return textOf(await readGitObjectBytes(gitRuntime, `HEAD:${path}`, MAX_PACKAGE_FILE_BYTES, root));
-    },
+    async (side, path, oldPath) => textOf(await read(side, path, oldPath, MAX_PACKAGE_FILE_BYTES)),
     async () => !!options.forge,
   );
 }
