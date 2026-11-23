@@ -200,6 +200,11 @@ describe("resolve_message with moved_to", () => {
     expect(store.cursor()).toBe(cursor);
     expect(store.message(old.id)!.moved_to?.thread_id).toBe(brief.id);
     expect(store.pendingReplies(SUB.session!).filter((m) => m.moved_note)).toHaveLength(1);
+    const moved = `${old.id}/${store.questionsOf(old.id)[0]!.key}`;
+    const again = refusal(() => store.sendMessage({ project_id: old.project_id, author: SUB, body: ASK("Retry failed charges?").replace(":::question\n", `:::question\nReplaces: ${moved}\n`), reply_to: old.id }));
+    expect(again.code).toBe("invalid_supersedes");
+    expect(store.cursor()).toBe(cursor);
+    expect(store.message(old.id)!.moved_to?.thread_id).toBe(brief.id);
   });
 
   test("Unarchive drops it, and the person's own Archive never sets it", () => {

@@ -41,7 +41,7 @@ import {
   type ParsedInboxQuestion,
 } from "@plannotator/core/inbox-questions";
 import type { InboxPictureItPage } from "@plannotator/core/picture-it-page";
-import { inboxSupersedeSkipState, type InboxSupersedeSkip } from "./supersede-skips";
+import { inboxStoredSkips, inboxSupersedeSkipState, type InboxStoredMessage, type InboxSupersedeSkip } from "./supersede-skips";
 import { inboxFileQuestionTwin } from "@plannotator/core/inbox-file-question-twin";
 import { inboxTwinChoicesRefusal } from "@plannotator/core/inbox-choice-twins";
 import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
@@ -2025,7 +2025,7 @@ export class InboxStore {
     return this.questionRecords(messageId).map((record) => toInboxQuestion(record, closed));
   }
 
-  private wire(message: InboxMessage): InboxMessageWire {
+  private wire(message: InboxStoredMessage): InboxMessageWire {
     const questions = this.questionsOf(message.id);
     // A subject is served as shown (displayInboxSubject), never as stored.
     const { supersede_skipped: _skipped, ...wired } = message;
@@ -4356,12 +4356,13 @@ export class InboxStore {
           );
         }
         const markedDone = this.doneBy(message.id);
+        const keptSkips = inboxStoredSkips(message);
         return {
           message: this.wire(message),
           replayed: true,
           ...(message.thread_naming ? { naming: message.thread_naming } : {}),
           ...(markedDone.length > 0 ? { done: markedDone } : {}),
-          ...(message.supersede_skipped ? { skipped: message.supersede_skipped } : {}),
+          ...(keptSkips ? { skipped: keptSkips } : {}),
         };
       }
     }
@@ -4414,7 +4415,7 @@ export class InboxStore {
     const { plan: superseding, skipped } = this.planSupersede(threadId, id, supersedes, [...parsed, ...fileQuestions.map((f) => ({ key: f.key, replaces: f.question.replaces }))], actions);
     const doneIds = this.planDone(threadId, done, superseding, input.author);
     const agentSubject = subjectCheck.subject;
-    const message: InboxMessage = {
+    const message: InboxStoredMessage = {
       id,
       project_id: projectId,
       thread_id: threadId ?? id,

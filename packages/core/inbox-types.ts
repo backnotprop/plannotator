@@ -922,7 +922,6 @@ export interface InboxMessage {
    * same. Absent everywhere else.
    */
   thread_naming?: InboxThreadNaming;
-  supersede_skipped?: InboxSupersedeSkip[];
   /**
    * On an agent's message: the person's 👍 Looks good (design record
    * "inbox-acknowledge", approved 2026-10-15, amended 2026-10-16). The thread
@@ -1724,15 +1723,6 @@ export interface InboxQuestionSetAside {
    */
   read_seq?: number;
   previous: Pick<InboxQuestionRecord, "answer" | "revision" | "sent_revision" | "picked_by" | "picked_at" | "action_result">;
-}
-
-export type InboxSupersedeSkipState = "answered" | "skipped" | "replaced" | "dropped" | "closed" | "marked" | "marked_sent" | "no_open_question";
-
-export interface InboxSupersedeSkip {
-  ref: string;
-  id: string;
-  was: InboxSupersedeSkipState;
-  new_question: string | null;
 }
 
 /**
