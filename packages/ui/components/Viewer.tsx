@@ -590,6 +590,15 @@ export interface ViewerHandle {
    * selection's comment.
    */
   peekComment?: () => Annotation | null;
+  /**
+   * Markdown `Viewer` only, for a host that offers the document actions from
+   * its own controls (a menu) and hides the Viewer's own: open the global
+   * comment box at `anchor`, as the Global comment button does. Returns false
+   * when authoring is off. The DOM is unchanged.
+   */
+  openGlobalComment?: (anchor: HTMLElement) => boolean;
+  /** Markdown `Viewer` only: copy the document's Markdown, as Copy does. Resolves false when the clipboard refused. */
+  copyDocument?: () => Promise<boolean>;
 }
 
 interface CodeBlockToolbarTarget {
@@ -1032,13 +1041,14 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   const fenceThemeRef = useRef(fenceTheme);
   fenceThemeRef.current = fenceTheme;
 
-  const handleCopyPlan = async () => {
+  const handleCopyPlan = async (): Promise<boolean> => {
     if (await copyTextToClipboard(markdown)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } else {
-      console.error('Failed to copy');
+      return true;
     }
+    console.error('Failed to copy');
+    return false;
   };
   const containerRef = useRef<HTMLDivElement>(null);
   // "Open in" opens the document's file at the picked comment's line, else the
@@ -1682,7 +1692,13 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     takeSelection,
     reopenComment,
     peekComment,
-  }), [hookRemoveHighlight, clearAllHighlights, applyAnnotations, blocks, takeSelection, scrollToAnchor, reopenComment, peekComment]);
+    openGlobalComment: (anchorEl: HTMLElement) => {
+      if (authoringOff) return false;
+      setViewerCommentPopover({ anchorEl, contextText: '', isGlobal: true });
+      return true;
+    },
+    copyDocument: handleCopyPlan,
+  }), [hookRemoveHighlight, clearAllHighlights, applyAnnotations, blocks, takeSelection, scrollToAnchor, reopenComment, peekComment, authoringOff, markdown]);
 
   // --- Viewer-specific: code block annotation ---
 

@@ -13,8 +13,8 @@
  * first (the frame's sheet, `RailSheet docked={false}`), then the versions open as the frame's sheet; on a phone the
  * frame's sheets carry both. A write of the page's own (a version, an approval, a Send) reads the plan again in place.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type MouseEvent, type ReactElement } from 'react';
-import { planApprovalState, planDecisionVersion, type PlanDecision, type PlanDocument as PlanDocumentRecord, type PlanVersion } from '@plannotator/core/plans';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactElement } from 'react';
+import { planApprovalState, planDecisionVersion, planDocumentFileName, type PlanDecision, type PlanDocument as PlanDocumentRecord, type PlanVersion } from '@plannotator/core/plans';
 import { storage } from '@plannotator/ui/utils/storage';
 import {
   AppRail,
@@ -33,7 +33,9 @@ import {
 import { SidebarTrigger } from '../shell/sidebar';
 import { Icon } from '../icons';
 import { hashOf, writeRoute } from '../app/writeRoute';
-import type { PlanRead } from './client';
+import { plansApi, type PlanRead } from './client';
+import type { PaneHostHandle } from '../parts/paneHost';
+import { PlanBarTitle, PlanChromeContext, PlanKicker, PlanMenu, planMenuItems, usePlanChrome, type PlanBarState, type PlanDocActs } from './PlanChrome';
 import { recordPlanLook, useDocVersions, usePlan, usePlanShareOn } from './store';
 import { PlanShare } from './PlanShare';
 import { approvalTone, approvalWords, PLAN_FILES_WORDS } from './words';
@@ -203,14 +205,30 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions, fresh
   // phone it sits in the bar's own end slot, so it stays on the first row.
   const shareOn = usePlanShareOn();
   const share = shareOn ? <PlanShare id={id} phone={phone} fresh={fresh} /> : null;
+  // The header (approval "inbox-plan-page-header-a3", PlanChrome.tsx). A phone: the bar holds the project (the plan's
+  // name once the document's title is out of view), Share and the page's menu, which holds Files and the document's
+  // actions; the document hands those up (`acts`) and says whether its state line is above its title (`bar.a3`).
+  const acts = useRef<PlanDocActs | null>(null);
+  const [bar, setBar] = useState<PlanBarState>({ a3: false, shown: null, away: true });
+  const chrome = useMemo(() => ({ acts, setBar }), []);
+  const [filesSheet, setFilesSheet] = useState(false);
+  const fileCount = read.documents.filter((d) => !d.archived_at).length + artifacts.length;
+  const menu = phone ? <PlanMenu phone items={() => planMenuItems({ phone: true, acts: acts.current, files: { count: fileCount, open: () => setFilesSheet(true) }, close: toList })} /> : null;
   const band = (
     <AppRail
       variant="dense"
-      account={phone ? share : null}
+      account={
+        phone ? (
+          <>
+            {share}
+            {menu}
+          </>
+        ) : null
+      }
       leading={
         <>
           <SidebarTrigger />
-          <RailSheet closeKey={`${document.id}:${file ?? ''}`} docked={railDocks ? undefined : false} head={head} triggerLabel={PLAN_FILES_WORDS.show} triggerTitle={PLAN_FILES_WORDS.panel} title={PLAN_FILES_WORDS.panel} description="This plan's pages and artifacts.">
+          <RailSheet closeKey={`${document.id}:${file ?? ''}`} docked={railDocks ? undefined : false} head={head} triggerLabel={PLAN_FILES_WORDS.show} triggerTitle={PLAN_FILES_WORDS.panel} title={PLAN_FILES_WORDS.panel} description="This plan's pages and artifacts." open={filesSheet} onOpenChange={setFilesSheet} trigger={!phone}>
             <PlanFiles {...filesProps} />
           </RailSheet>
         </>
@@ -218,7 +236,9 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions, fresh
     >
       <PageHeader
         identity={
-          onMain && project ? (
+          phone && bar.a3 ? (
+            <PlanBarTitle rest={project ?? 'Spaces'} name={read.plan.name} away={bar.away} shown={bar.shown} decision={railDecision} versionsOpen={place.open} onVersions={place.setOpen} />
+          ) : onMain && project ? (
             <Breadcrumbs root={{ label: 'Spaces', link: spacesLink(id) }} collectionName={project} collectionLink={<span data-plan-crumb-project="" />} path={read.plan.name} />
           ) : onMain ? (
             <Breadcrumbs collectionName="Spaces" collectionLink={spacesLink(id)} path={read.plan.name} />
@@ -231,8 +251,9 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions, fresh
     </AppRail>
   );
   return (
+    <PlanChromeContext.Provider value={chrome}>
     <FrameGround as="div" colors="theme">
-      <section className="ib-plans ib-plan-page" aria-label={read.plan.name} data-plan-page={id} data-phone={phone ? '' : undefined} data-files={railDocks ? (filesOpen ? 'docked' : 'closed') : phone ? 'phone' : 'sheet'} data-rail={place.docked ? (place.open ? 'docked' : 'closed') : phone ? 'phone' : 'sheet'}>
+      <section className="ib-plans ib-plan-page" aria-label={read.plan.name} data-plan-page={id} data-phone={phone ? '' : undefined} data-files={railDocks ? (filesOpen ? 'docked' : 'closed') : phone ? 'phone' : 'sheet'} data-rail={place.docked ? (place.open ? 'docked' : 'closed') : phone ? 'phone' : 'sheet'} data-plan-header={phone && bar.a3 ? (bar.away ? 'name' : 'project') : undefined}>
         <FrameBox band={band} rowRef={setRow}>
           <DocumentRailShell
             head={head}
@@ -260,6 +281,7 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions, fresh
         </FrameBox>
       </section>
     </FrameGround>
+    </PlanChromeContext.Provider>
   );
 }
 
@@ -404,10 +426,43 @@ function DocLoaded({
   const editing = usePlanEditing({ read, document, docRef, versions, head, shown, comparing: !!compare, onChanged, toNewest: () => go({ version: null }), showChanges: (from, to) => go({ diff: { from, to } }) });
   // An older version is read, compared or restored (approval "plans-editing"): never edited.
   const older = !compare && shown !== head ? { back: routeLink(routeOf({ version: null }), { 'data-plan-newest': '' }, { replace: true }), restore: editing.restore } : null;
+
+  // The header (approval "inbox-plan-page-header-a3", PlanChrome.tsx). The Markdown file pane, out of full screen,
+  // draws its controls in the page's bars; its Viewer's actions are reached through `paneHandle`.
+  const chrome = usePlanChrome();
+  const [full, setFull] = useState(false);
+  const paneHandle = useRef<PaneHostHandle | null>(null);
+  const contentsOpen = useRef<((back: HTMLElement | null) => void) | null>(null);
+  const onContents = useCallback((open: ((back: HTMLElement | null) => void) | null) => void (contentsOpen.current = open), []);
+  const annotated = document.kind === 'markdown' && !compare && !editing.editing;
+  // A phone on the main page's newest version, read: the state line sits above the document's own title (A3).
+  const a3 = phone && isMain && annotated && shown === head;
+  const pageActs: PlanDocActs = {
+    edit: a3 ? editing.edit : null,
+    pane: annotated ? paneHandle : null,
+    get contents() {
+      return phone && annotated ? contentsOpen.current : null;
+    },
+    download: annotated ? { href: plansApi.versionUrl(id, shown, docRef), name: planDocumentFileName(document) } : null,
+    full: !phone && annotated ? () => setFull(true) : null,
+  };
+  useLayoutEffect(() => {
+    if (!chrome) return;
+    chrome.acts.current = pageActs;
+    return () => void (chrome.acts.current = null);
+  });
+  useEffect(() => {
+    chrome?.setBar((b) => (b.a3 === a3 && b.shown === shown ? b : { ...b, a3, shown }));
+  }, [chrome, a3, shown]);
+  useEffect(() => () => chrome?.setBar(() => ({ a3: false, shown: null, away: true })), [chrome]);
+  const onTitleAway = useCallback((away: boolean) => chrome?.setBar((b) => (b.away === away ? b : { ...b, away })), [chrome]);
+  const kicker = a3 ? <PlanKicker start={editing.startNoEdit} approved={editing.approved} shown={shown} count={versions.length} versionsOpen={place.open} onVersions={place.setOpen} /> : null;
+  const annotateChrome = { full, onFull: setFull, handle: paneHandle, kicker, onContents, onTitleAway: a3 ? onTitleAway : null };
   return (
     <>
       <PageCard
         top={
+          a3 ? null : (
           <div data-plan-reading="" className="ib-plan-reading">
             <ReadingLine
               shownNumber={shown}
@@ -420,7 +475,10 @@ function DocLoaded({
               start={editing.start}
               approved={editing.approved}
             />
+            {/* A computer: the menu at the reading line's end (Copy file, Download, Full screen). */}
+            {!phone && <PlanMenu phone={false} items={() => planMenuItems({ phone: false, acts: pageActs, files: null, close: toList })} />}
           </div>
+          )
         }
       >
         <div className="ib-plan-cardbody">
@@ -455,7 +513,7 @@ function DocLoaded({
             ) : (
               document.kind === 'markdown' ? (
                 // A Markdown page in the Inbox's own file viewer, with its toolbars and comments (PlanAnnotate.tsx); × goes back to Plans.
-                <PlanAnnotate read={read} document={document} docRef={docRef} versions={versions} shown={shown} phone={phone} agent={agent} onClose={toList} onChanged={onChanged} />
+                <PlanAnnotate read={read} document={document} docRef={docRef} versions={versions} shown={shown} phone={phone} agent={agent} onClose={toList} onChanged={onChanged} chrome={annotateChrome} />
               ) : (
                 <PlanDocument id={id} version={shown} doc={docRef} kind={document.kind} title={document.title} phone={phone} />
               )

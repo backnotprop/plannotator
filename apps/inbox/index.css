@@ -64,6 +64,7 @@
 @import "../../packages/inbox/pulls/pullThread.css";
 /* Plans (packages/inbox/plans/). */
 @import "../../packages/inbox/plans/plans.css";
+@import "../../packages/inbox/plans/planHeader.css";
 /* A launched session's permission prompt (components/PermissionCard.tsx). */
 @import "../../packages/inbox/permissionCard.css";
 /* `:::run` and `:::secret` cards (packages/inbox/parts/RunBlocks/). */

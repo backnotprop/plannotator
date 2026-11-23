@@ -1,0 +1,82 @@
+/*
+ * The plan page's header (approval "inbox-plan-page-header-a3", PlanChrome.tsx): the document's own title is the
+ * header. Every colour is a theme token, so light and dark follow.
+ */
+
+/* ── The file pane inside the page (parts/paneHost.tsx): no file-name row, the tools in the bottom bar ── */
+.ib-plan-annotate .ib-view[data-host-chrome] { grid-template-rows: 0 auto minmax(0, 1fr) auto auto; }
+.ib-plan-annotate .ib-view[data-host-chrome] > [data-host-head] { overflow: hidden; }
+.ib-plan-annotate .ib-view[data-host-chrome] .ib-docscroll { padding-top: 0; }
+/* The Viewer's own Global comment and Copy file are the page's (its menu, the bar's mark): hidden, still in the DOM,
+   so the document's elements (and the stored comments' places in it) are as before. */
+.ib-plan-annotate .ib-view[data-host-chrome] [data-sticky-actions] { display: none; }
+.ib-plan-annotate .ib-view[data-host-chrome] article > [data-sticky-actions] + h1 { margin-top: 0; }
+
+/* ── The bottom bar: the tools, the comments, Send ── */
+.ib-plan-dock { flex-wrap: wrap; justify-content: flex-start; gap: 8px; padding: 8px 12px; background: var(--card); container: ib-plan-dock / inline-size; }
+.ib-plan-dock-tools, .ib-plan-dock-comments { display: contents; }
+.ib-plan-dock-sp { flex: 1 1 0; min-width: 0; }
+.ib-plan-dock .ib-toolstrip[data-tools-in-bar] { position: static; inset: auto; flex: none; padding: 0; margin: 0; background: transparent; box-shadow: none; border: 0; pointer-events: auto; }
+.ib-plan-dock .ib-plan-send-t { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The Send line gives way whole when the bar has no room for it; Send's description keeps it. */
+@container ib-plan-dock (max-width: 640px) {
+  .ib-plan-dock .ib-plan-send-t[data-plan-send-line="shown"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+.ib-plan-dock .ib-vcomments { flex: none; }
+.ib-plan-globalmark { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 34px; height: 32px; border-radius: 8px; color: var(--muted-foreground); background: color-mix(in oklch, var(--muted) 50%, transparent); border: 1px solid color-mix(in oklch, var(--border) 30%, transparent); cursor: pointer; }
+.ib-plan-globalmark:hover { color: var(--foreground); background: var(--muted); }
+
+/* A phone: 44 px targets; the tools are marks; Send is its mark; the Send line is its description, but a failed
+   Send's words are a row of their own above the bar. */
+.ib-plan-page[data-phone] .ib-plan-dock { gap: 8px; padding: 6px 10px calc(6px + env(safe-area-inset-bottom)); }
+.ib-plan-page[data-phone] .ib-plan-dock .ib-plan-send-t[data-plan-send-line="described"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.ib-plan-page[data-phone] .ib-plan-dock .ib-plan-send-t[data-plan-send-line="failed"] { order: -1; flex: 1 0 100%; white-space: normal; }
+.ib-plan-page[data-phone] .ib-plan-dock .ib-toolstrip button { min-width: 44px; height: 44px; justify-content: center; }
+.ib-plan-page[data-phone] .ib-plan-dock .ib-toolstrip button svg { width: 18px; height: 18px; }
+.ib-plan-page[data-phone] .ib-plan-dock .ib-vcomments { height: 44px; min-width: 48px; padding: 0 10px; border-radius: 11px; }
+.ib-plan-page[data-phone] .ib-plan-dock [data-plan-send-button] { width: 48px; height: 44px; padding: 0; border-radius: 12px; justify-content: center; }
+.ib-plan-page[data-phone] .ib-plan-dock [data-plan-send-button] svg { width: 18px; height: 18px; margin: 0; }
+
+/* ── The menu ("Page actions") ── */
+.ib-plan-more { flex: none; color: var(--muted-foreground); }
+.ib-plan-more[aria-expanded="true"], .ib-plan-more[data-popup-open] { background: var(--muted); color: var(--foreground); }
+.ib-plan-page[data-phone] .ib-plan-more { width: 44px; height: 44px; }
+/* The sheet's head is its grab handle alone; its title stays its accessible name. */
+[data-plan-menu] .ib-sheet-title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.ib-plan-menu-list .ib-sheet-row { width: 100%; min-height: 48px; text-align: left; color: inherit; text-decoration: none; cursor: pointer; }
+.ib-plan-menu-list .ib-sheet-lead { color: var(--muted-foreground); }
+.ib-plan-menu-end { color: var(--muted-foreground); font-variant-numeric: tabular-nums; padding-right: 4px; }
+/* A computer: the menu at the reading line's end. */
+.ib-plan-reading:has(> [data-plan-more]) { display: flex; align-items: center; }
+.ib-plan-reading:has(> [data-plan-more]) > [data-reading-line] { flex: 1 1 auto; min-width: 0; }
+.ib-plan-reading > [data-plan-more] { width: 30px; height: 30px; margin-right: 8px; }
+
+/* ── A phone's top bar: the project, Share, the menu ── */
+.ib-plan-page[data-phone] [data-page-account] .ib-shr-btn[data-phone] { height: 44px; }
+.ib-plan-bartitle { position: relative; flex: 1 1 0; min-width: 0; height: 44px; }
+.ib-plan-bartitle > * { position: absolute; inset: 0; transition: opacity 160ms ease-out, transform 160ms ease-out; }
+.ib-plan-bartitle-rest { padding: 0 6px; line-height: 44px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; font-weight: 500; color: var(--muted-foreground); }
+.ib-plan-titleblock { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; min-width: 0; padding: 0 6px; border-radius: 10px; text-align: left; cursor: pointer; opacity: 0; transform: translateY(4px); pointer-events: none; }
+.ib-plan-titleblock:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+.ib-plan-bartitle[data-away] > .ib-plan-bartitle-rest { opacity: 0; transform: translateY(-4px); }
+.ib-plan-bartitle[data-away] > .ib-plan-titleblock { opacity: 1; transform: none; pointer-events: auto; }
+.ib-plan-title-n { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; line-height: 20px; color: var(--foreground); }
+.ib-plan-title-s { display: flex; align-items: center; gap: 5px; max-width: 100%; font-size: 12.5px; line-height: 16px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; }
+.ib-plan-title-s > b { flex: none; font-weight: 600; color: var(--foreground); }
+/* The decision is cut before the version ever is. */
+.ib-plan-title-dec { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; }
+.ib-plan-title-dec > span { overflow: hidden; text-overflow: ellipsis; }
+.ib-plan-title-dec[data-plan-decision="approved"] { color: var(--success, var(--foreground)); }
+.ib-plan-title-dec svg.ib-ic, .pn-inbox .ib-plan-title-dec svg.ib-ic { width: 12px; height: 12px; flex: none; }
+.ib-plan-title-s > svg.ib-ic:last-child { flex: none; opacity: 0.7; }
+@media (prefers-reduced-motion: reduce) { .ib-plan-bartitle > * { transition: none; transform: none !important; } }
+
+/* ── A phone's line above the document's title: Approve when offered, the approval, the version ── */
+.ib-plan-kicker { align-self: stretch; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; width: 100%; max-width: 640px; min-height: 44px; margin: 8px auto 0; font-size: 14px; color: var(--muted-foreground); }
+.ib-plan-kicker-start { display: flex; align-items: center; gap: 8px; }
+.ib-plan-kicker .ib-plan-approval > svg.ib-ic { width: 15px; height: 15px; }
+.ib-plan-kstate { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 4px; margin-left: -4px; border-radius: 8px; white-space: nowrap; color: var(--muted-foreground); cursor: pointer; }
+.ib-plan-kstate [data-page-version] { font-weight: 600; color: var(--foreground); }
+.ib-plan-kstate > svg.ib-ic { opacity: 0.7; flex: none; }
+.ib-plan-kstate:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+.ib-plan-kicker + div article { padding-top: 6px; }

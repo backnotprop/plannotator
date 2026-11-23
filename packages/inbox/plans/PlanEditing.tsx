@@ -90,6 +90,10 @@ export interface PlanEditing {
   kept: boolean;
   /** The editor, in the page's place, while editing. */
   editor: ReactNode;
+  /** Edit, as an action (a menu's row), while Edit is offered; null otherwise. */
+  edit: (() => void) | null;
+  /** The reading line's start without Edit (Approve alone, or Done and Cancel while editing): Edit is in a menu. */
+  startNoEdit: ReactNode;
 }
 
 export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docRef: string | null; versions: readonly PlanVersion[]; head: number; shown: number; comparing: boolean; onChanged: () => void; toNewest: () => void; showChanges: (from: number, to: number) => void }): PlanEditing {
@@ -289,7 +293,7 @@ export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docR
   };
 
   const canEdit = document.kind === 'markdown' && onNewest;
-  const start = editing ? (
+  const startOf = (withEdit: boolean) => editing ? (
     <>
       <FrameButton size="xs" onClick={() => void done()} disabled={busy} data-plan-edit-done="">
         Done
@@ -298,9 +302,9 @@ export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docR
         Cancel
       </FrameButton>
     </>
-  ) : canEdit || (onNewest && approval.kind !== 'approved') ? (
+  ) : (canEdit && withEdit) || (onNewest && approval.kind !== 'approved') ? (
     <>
-      {canEdit && (
+      {canEdit && withEdit && (
         <FrameButton variant="outline" size="xs" onClick={() => void edit(null)} disabled={busy} data-plan-edit="">
           Edit
         </FrameButton>
@@ -312,6 +316,7 @@ export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docR
       )}
     </>
   ) : null;
+  const start = startOf(true);
 
   let approved: ReactNode = null;
   if (onNewest && !editing) {
@@ -408,5 +413,5 @@ export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docR
     </Suspense>
   ) : null;
 
-  return { editing: editing !== null, start, approved, restore: restoreButton, banner, kept: kept !== null, editor };
+  return { editing: editing !== null, start, approved, restore: restoreButton, banner, kept: kept !== null, editor, edit: canEdit && !editing ? () => void (busy || edit(null)) : null, startNoEdit: startOf(false) };
 }

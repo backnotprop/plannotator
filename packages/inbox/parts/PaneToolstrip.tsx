@@ -10,6 +10,7 @@ export function PaneToolstrip({
   onModeChange,
   phone,
   contents,
+  marks,
 }: {
   inputMethod: InputMethod;
   onInputMethodChange: (method: InputMethod) => void;
@@ -18,10 +19,12 @@ export function PaneToolstrip({
   phone: boolean;
   /** The file shows a Contents button at the top right. */
   contents: boolean;
+  /** In a page's bottom bar (paneHost.tsx): marks only, in the bar's row. */
+  marks?: boolean;
 }) {
   const narrow = useNarrowPhone();
   return (
-    <div className="ib-toolstrip">
+    <div className="ib-toolstrip" data-tools-in-bar={marks === undefined ? undefined : ''}>
       <AnnotationToolstrip
         inputMethod={inputMethod}
         onInputMethodChange={onInputMethodChange}
@@ -31,7 +34,7 @@ export function PaneToolstrip({
         hideQuickLabel
         compact
         // Under 360 px the labelled strip ran under the Contents button (the 2026-11-19 phone audit): icons there.
-        iconOnly={phone && narrow && contents}
+        iconOnly={marks ?? (phone && narrow && contents)}
       />
     </div>
   );

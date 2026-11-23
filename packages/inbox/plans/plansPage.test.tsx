@@ -5,8 +5,9 @@
  * - an empty library does not show the get-started screen, or its action does not say how a plan arrives;
  * - a plan's page does not show the newest version's text, the versions newest first, the version you saw, or the
  *   "changed since you looked" banner; opening it does not record the look;
- * - a plan's Markdown page stops being the Inbox's own file viewer (AttachmentPane: its header with Download and the
- *   view switch, the annotation toolstrip, Copy file and Global comment, the comments panel, the contents rail);
+ * - a plan's Markdown page stops being the Inbox's own file viewer (AttachmentPane: the annotation toolstrip, Copy
+ *   file and Global comment, the comments panel, the contents rail), or its file-name row comes back (approval
+ *   "inbox-plan-page-header-a3": the page's own bars hold its controls, planHeader.test.tsx);
  * - a comment made there is not kept in the plan library, not back after the page opens again, or not taken away;
  * - Send opens New message with anything but the plan's own agent session and the comments as plan feedback, or is
  *   not disabled, in the Inbox's words, when no session is known; once sent, its comments are not marked sent or the
@@ -501,13 +502,13 @@ test.skipIf(!hasDom)('a plan’s Markdown page is the Inbox’s own file viewer:
     // The pane a Markdown file opens in beside a thread (components/AttachmentPane.tsx), its file this version.
     const pane = host.querySelector<HTMLElement>('[data-plan-annotate] section.ib-view[data-attachment-pane]')!;
     expect(pane).not.toBeNull();
-    expect(text(pane.querySelector('.ib-vhead [data-header-name]'))).toBe('Rotate refresh tokens.md');
-    expect(pane.querySelector('.ib-vhead [data-attachment-download]')!.getAttribute('href')).toBe(`/api/plans/${id}/versions/1`);
-    expect(pane.querySelector('.ib-vhead [data-view-switch] [data-full-screen-toggle]')).not.toBeNull();
-    // Its annotation toolstrip, and the Viewer's own header: Copy file and Global comment.
-    expect(pane.querySelector('.ib-toolstrip')?.querySelectorAll('button').length).toBeGreaterThan(1);
-    expect([...pane.querySelectorAll('button')].some((b) => text(b) === 'Copy file')).toBe(true);
-    expect(pane.querySelector('button[title="Add global comment"]')).not.toBeNull();
+    // No file-name row (approval "inbox-plan-page-header-a3"): its annotation toolstrip is in the page's bottom bar.
+    expect(pane.querySelector('.ib-vhead')).toBeNull();
+    expect(pane.querySelector('.ib-toolstrip')).toBeNull();
+    expect(host.querySelector('[data-plan-dock] .ib-toolstrip')?.querySelectorAll('button').length).toBeGreaterThan(1);
+    // The Viewer's own Copy file and Global comment stay in its document (the page's stylesheet hides them).
+    expect([...pane.querySelectorAll('[data-sticky-actions] button')].some((b) => text(b) === 'Copy file')).toBe(true);
+    expect(pane.querySelector('[data-sticky-actions] button[title="Add global comment"]')).not.toBeNull();
     // The reader's frame: `.ib-docscroll`, the Clean look on the card colour; the comments panel beside it.
     const page = pane.querySelector<HTMLElement>('.ib-docscroll.bg-card[data-look="clean"]')!;
     expect(page).not.toBeNull();
@@ -526,9 +527,9 @@ test.skipIf(!hasDom)('a plan’s Markdown page is the Inbox’s own file viewer:
   }
 });
 
-/** Add a global comment through the Viewer's own button and composer, as the person does. */
+/** Add a global comment through the page's Global comment mark and the Viewer's composer, as the person does. */
 async function globalComment(host: Element, words: string) {
-  act(() => host.querySelector<HTMLButtonElement>('button[title="Add global comment"]')!.click());
+  act(() => host.querySelector<HTMLButtonElement>('[data-plan-dock] [data-plan-global]')!.click());
   await settle();
   const area = document.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea')!;
   const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(area), 'value')!.set!;
@@ -675,7 +676,7 @@ async function editAndDone(host: Element, words: string) {
   await settle();
 }
 
-test.skipIf(!hasDom)('an Escape never leaves the plan page for the Spaces home; × still goes back to it', async () => {
+test.skipIf(!hasDom)('an Escape never leaves the plan page for the Spaces home; the file pane draws no × of its own', async () => {
   const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nRetire keys after 14 days.\n']);
   keptStorage();
   window.location.hash = `#plans=${id}`;
@@ -688,9 +689,8 @@ test.skipIf(!hasDom)('an Escape never leaves the plan page for the Spaces home; 
     expect(window.location.hash).toBe(`#plans=${id}`);
     expect(host.querySelector(`[data-plan-page="${id}"]`)).not.toBeNull();
   }
-  await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-annotate] button[aria-label^="Close"]')!.click());
-  await settle();
-  expect(window.location.hash).toBe('#plans');
+  // The Spaces crumb and the rail's back go back (a phone's menu has Close, planHeader.test.tsx).
+  expect(host.querySelector('[data-plan-annotate] button[aria-label^="Close"]')).toBeNull();
 });
 
 test.skipIf(!hasDom)('Edit is on the newest version of a Markdown page only: an older version offers Restore, a diagram page no Edit', async () => {

@@ -14,6 +14,9 @@ export function RailSheet({
   title = "Pages",
   description = "The pages in this collection.",
   docked,
+  open: openProp,
+  onOpenChange,
+  trigger = true,
 }: {
   head: ReactNode;
   children: ReactNode;
@@ -27,22 +30,33 @@ export function RailSheet({
    * (pass `DocumentRailShell`'s `onFitChange` result). Below 768px the sheet always shows.
    */
   docked?: boolean;
+  /** Controlled open state (with `onOpenChange`), for a host that opens the sheet from its own control. Absent: the sheet keeps its own. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** `false` draws no trigger button: the host opens the sheet through `open`. */
+  trigger?: boolean;
 }) {
   const wide = useSupportsDockedRail();
   const supportsDockedRail = wide && docked !== false;
-  const [open, setOpen] = useState(false);
+  const [ownOpen, setOwnOpen] = useState(false);
+  const open = openProp ?? ownOpen;
+  const setOpen = (next: boolean) => {
+    if (openProp === undefined) setOwnOpen(next);
+    onOpenChange?.(next);
+  };
   useEffect(() => {
-    if (supportsDockedRail) setOpen(false);
+    if (supportsDockedRail && open) setOpen(false);
   }, [supportsDockedRail]);
 
   useEffect(() => {
-    setOpen(false);
+    if (open) setOpen(false);
   }, [closeKey]);
 
   if (supportsDockedRail) return null;
 
   return (
     <>
+      {trigger && (
       <Button
         type="button"
         variant="ghost"
@@ -55,6 +69,7 @@ export function RailSheet({
       >
         <PanelLeftOpen aria-hidden="true" />
       </Button>
+      )}
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent
           side="left"
