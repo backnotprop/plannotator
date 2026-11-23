@@ -1,9 +1,8 @@
 /**
  * Branch reviews in the window. What regresses:
- *  - anything of it drawn while Branch reviews is off (a row mark, the safety net);
+ *  - anything of it drawn while Branch reviews is off (a row mark);
  *  - a reported branch's row not saying where the branch is (this computer, another, a cloud agent's), or showing a risk
  *    mark with no judgment;
- *  - the safety net read before the person opens it, or its "Start a review" starting anything by itself;
  *  - the thread's "Ask for a guided review" going anywhere but a reply in the same thread, or offered for code that
  *    can't be opened;
  *  - a cloud agent's remote drawn as a link, or with anything but its host and repository;
@@ -71,7 +70,7 @@ const fetches = (routes: Record<string, unknown>) => {
   restores.push(() => made.mockRestore());
   return seen;
 };
-const page = (answer: InboxReviewsAnswer, onReviewBranch?: (branch: { name: string; projectId: string }) => void, threadId?: string) => (
+const page = (answer: InboxReviewsAnswer, threadId?: string) => (
   <SidebarProvider>
     <PullsPage
       state={{ model: LIST, reviews: answer, error: null, loading: false, refresh: () => {}, reload: () => {}, reloadRows: () => {} }}
@@ -88,18 +87,16 @@ const page = (answer: InboxReviewsAnswer, onReviewBranch?: (branch: { name: stri
       onOpenThread={() => {}}
       onNew={() => {}}
       onNewReview={() => {}}
-      onReviewBranch={onReviewBranch ? (branch) => onReviewBranch(branch) : undefined}
     />
   </SidebarProvider>
 );
 const rowLine = (thread: string | null) => document.querySelector(`[data-reviews-row="${thread}"] .ib-pr-l3`)?.textContent ?? null;
 
-test.skipIf(!hasDom)('off: no branch rows from the server, and no safety net', async () => {
+test.skipIf(!hasDom)('off: no branch rows from the server, and no branch read', async () => {
   const restore = spyOn(inboxApi, 'pullRisk').mockImplementation(async () => RISK);
   restores.push(() => restore.mockRestore());
   const seen = fetches({});
-  await mount(page({ fetched_at: null, hosts: [], rows: [], projects: {} }, () => {}));
-  expect(document.querySelector('[data-reviews-unreported]')).toBeNull();
+  await mount(page({ fetched_at: null, hosts: [], rows: [], projects: {} }));
   expect(seen.some((url) => url.includes('/reviews/branches'))).toBe(false);
 });
 
@@ -113,7 +110,7 @@ test.skipIf(!hasDom)('on: each reported branch says where it is and waits on the
   expect(ROWS.map((row) => rowLine(row.thread_id))).toEqual([null, null, null]);
   // Open, its second line says where the branch is, its project and why it waits.
   const opened = async (row: (typeof ROWS)[number]) => {
-    await act(async () => root!.render(page(answer, undefined, row.thread_id!)));
+    await act(async () => root!.render(page(answer, row.thread_id!)));
     await settle();
     return rowLine(row.thread_id);
   };
@@ -122,28 +119,6 @@ test.skipIf(!hasDom)('on: each reported branch says where it is and waits on the
   expect(await opened(ROWS[2]!)).toBe('web-fonts on Mac mini · billing · Ready for review');
   expect(document.querySelector(`[data-reviews-row="${ROWS[0]!.thread_id}"] [data-pull-risk]`)).toBeNull();
   expect(document.querySelector(`[data-reviews-row="${ROWS[1]!.thread_id}"] [data-pull-risk]`)?.getAttribute('data-pull-risk')).toBe('high');
-  // No onReviewBranch: no safety net.
-  expect(document.querySelector('[data-reviews-unreported]')).toBeNull();
-});
-
-test.skipIf(!hasDom)('the safety net is read only when opened, and Start a review only opens New review with the branch', async () => {
-  const restore = spyOn(inboxApi, 'pullRisk').mockImplementation(async () => RISK);
-  restores.push(() => restore.mockRestore());
-  const seen = fetches({ '/reviews/branches/unreported': { project_id: 'prj_billing', git: true, branches: [{ project_id: 'prj_billing', branch: 'old-idea', base: 'main', ahead: 3, last_commit_at: '2026-11-15T10:00:00.000Z', worktree: null }] } });
-  const asked: { name: string; projectId: string }[] = [];
-  await mount(page({ fetched_at: null, hosts: [], rows: ROWS, projects: {}, branch_reviews: true }, (branch) => asked.push(branch)));
-  expect(document.querySelector('[data-reviews-unreported="prj_billing"]')).not.toBeNull();
-  expect(seen.some((url) => url.includes('/reviews/branches/unreported'))).toBe(false);
-  await act(async () => document.querySelector<HTMLButtonElement>('[data-reviews-unreported-toggle]')!.click());
-  await settle();
-  expect(seen.filter((url) => url.includes('/reviews/branches/unreported?project=prj_billing'))).toHaveLength(1);
-  const row = document.querySelector('[data-reviews-unreported-branch="old-idea"]');
-  expect(row?.textContent).toContain('3 commits not on main');
-  const before = seen.length;
-  await act(async () => row!.querySelector<HTMLButtonElement>('[data-reviews-unreported-start]')!.click());
-  expect(asked).toEqual([{ name: 'old-idea', projectId: 'prj_billing' }]);
-  // Nothing was sent or started: the click opened New review, no request went out.
-  expect(seen.length).toBe(before);
 });
 
 const view = (branch: ReviewView['branch']): ReviewView => ({ context: 'billing · Local branch: retry-jitter, against main', kind: 'local', title: null, name: null, firstReviewId: null, latestReviewId: null, curating: null, asked: null, fromThread: null, onWholeThread: () => {}, onOpenPull: null, pullUrl: null, branch });

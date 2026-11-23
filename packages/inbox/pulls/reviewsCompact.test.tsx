@@ -219,7 +219,7 @@ test.skipIf(!hasDom)("groups: today's order and counts under plain labels; the f
   act(() => fold.click());
   expect(fold.getAttribute('aria-expanded')).toBe('true');
   expect($('[data-pulls-group="waiting"] [data-reviews-row]')).not.toBeNull();
-  expect(JSON.parse(window.localStorage.getItem('plannotator-inbox-reviews-folds')!)).toEqual({ waiting: true, not_reviewed: false });
+  expect(JSON.parse(window.localStorage.getItem('plannotator-inbox-reviews-folds')!)).toEqual({ waiting: true, not_reviewed: false, local: false });
 });
 
 test.skipIf(!hasDom)("an unread review's title is bold; a listed PR's is not", () => {

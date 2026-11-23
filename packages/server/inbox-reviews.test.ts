@@ -934,3 +934,39 @@ describe("a walkthrough", () => {
     expect(guideOf(w, sent.message_id).walkthrough).toBeUndefined();
   });
 });
+
+describe("On this computer's routes (inbox-local-work.ts)", () => {
+  const sameOrigin = { "Sec-Fetch-Site": "same-origin" };
+  test("the window's own reads: a program without the window's mark or another site is refused, Code review off too", async () => {
+    const w = await world();
+    await w.call("send_message", { body: "Working on retries." });
+    writeFileSync(join(w.project, "retry.ts"), "export const retries = 3;\n");
+    // An agent's program on this computer: no Origin, no Sec-Fetch-Site.
+    for (const path of ["/api/inbox/reviews/local", "/api/inbox/reviews/local/diff?project=x"]) {
+      const res = await fetch(`${w.base}${path}`);
+      expect([res.status, ((await res.json()) as { code: string }).code]).toEqual([403, "window_only"]);
+      const cross = await fetch(`${w.base}${path}`, { headers: { Origin: "https://example.com", "Sec-Fetch-Site": "cross-site" } });
+      expect(cross.status).toBe(403);
+    }
+    const off = await fetch(`${w.base}/api/inbox/reviews/local`, { headers: sameOrigin });
+    expect([off.status, ((await off.json()) as { code: string }).code]).toEqual([409, "code_review_off"]);
+  });
+
+  test("the window reads the project folder's uncommitted changes, and their diff; a bad branch name is refused", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    await w.call("send_message", { body: "Working on retries." });
+    writeFileSync(join(w.project, "retry.ts"), "export const retries = 3;\n");
+    const projects = (await (await fetch(`${w.base}/api/inbox/projects`)).json()) as { projects: { id: string; root: string }[] };
+    const id = projects.projects.find((p) => p.root === w.project)!.id;
+    const list = await fetch(`${w.base}/api/inbox/reviews/local`, { headers: sameOrigin });
+    expect(list.status).toBe(200);
+    const answer = (await list.json()) as { items: { project_id: string; kind: string }[]; unread: number };
+    expect(answer.items).toEqual([expect.objectContaining({ project_id: id, kind: "uncommitted" })]);
+    const diff = await fetch(`${w.base}/api/inbox/reviews/local/diff?project=${id}`, { headers: sameOrigin });
+    expect(diff.status).toBe(200);
+    expect(((await diff.json()) as { patch: string }).patch).toContain("+export const retries = 3;");
+    const bad = await fetch(`${w.base}/api/inbox/reviews/local/diff?project=${id}&branch=${encodeURIComponent("--output=/tmp/x")}`, { headers: sameOrigin });
+    expect(bad.status).toBe(400);
+  });
+});

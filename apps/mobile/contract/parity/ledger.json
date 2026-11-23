@@ -9426,8 +9426,7 @@
       "surface": [
         "field:InboxLaunchClone.branch",
         "field:InboxReviewSource.branch",
-        "window:/api/inbox/reviews/branches/rank",
-        "window:/api/inbox/reviews/branches/unreported"
+        "window:/api/inbox/reviews/branches/rank"
       ],
       "flows": [],
       "mobile": "v1",
@@ -22011,6 +22010,34 @@
       "title": "field:InboxQuestionScenarios.rows",
       "surface": [
         "field:InboxQuestionScenarios.rows"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-reviews-local",
+      "title": "window:/api/inbox/reviews/local",
+      "surface": [
+        "window:/api/inbox/reviews/local"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-reviews-local-diff",
+      "title": "window:/api/inbox/reviews/local/diff",
+      "surface": [
+        "window:/api/inbox/reviews/local/diff"
       ],
       "flows": [],
       "mobile": "undecided",
