@@ -652,6 +652,9 @@ function mathObject(doc: Document, m: PeleMath, box: { x: number; y: number; w: 
   fo.setAttribute('y', round(box.y));
   fo.setAttribute('width', round(box.w + 2));
   fo.setAttribute('height', round(box.h));
+  // Firefox paints a script past the width it reports for the formula (the 2
+  // of `\sum i^2`), and a foreignObject clips at its own box by default.
+  fo.setAttribute('style', 'overflow:visible');
   const div = doc.createElementNS(XHTML_NS, 'div');
   div.setAttribute(
     'style',

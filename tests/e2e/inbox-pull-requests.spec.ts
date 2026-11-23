@@ -1671,15 +1671,16 @@ test("the details as real gh answers them: a running check, a template for a bod
     await expect(panel).not.toContainText('your-change-here');
     await expect(panel).not.toContainText('hidden-bot-marker');
 
-    // What a diagram in a comment draws can copy the marks of the window's overlays. It draws late, above the note
-    // below, so it is waited for first; Escape still closes the panel.
-    await expect(panel.locator('.pn-visible-viewport-overlay [data-pn-image-annotator-stage]').first()).toBeAttached({ timeout: 15_000 });
+    // What a diagram in a comment draws could copy the marks of the window's overlays under Mermaid (Pele, which draws
+    // it now, keeps no markup from a label). It draws late, above the note below, so it is waited for first; Escape
+    // still closes the panel.
+    await expect(panel.locator('[data-diagram-svg] svg').first()).toBeAttached({ timeout: 15_000 });
 
     await expect(panel.locator('[data-pull-details-threads-missing]')).toBeVisible();
     write(`ctxg-${number}.json`, { data: { repository: { pullRequest: { comments: { nodes: [] }, reviews: { nodes: [] }, reviewThreads: { nodes: [] } } } } });
     await panel.locator('[data-pull-details-threads-missing] button').click();
     await expect(panel.locator('[data-pull-details-threads-missing]')).toHaveCount(0);
-    await expect(panel.locator('.pn-visible-viewport-overlay [data-pn-image-annotator-stage]').first()).toBeAttached();
+    await expect(panel.locator('[data-diagram-svg] svg').first()).toBeAttached();
     await page.mouse.move(700, 5);
     await page.keyboard.press('Escape');
     await expect(panel).toBeHidden();
@@ -2136,7 +2137,8 @@ test("a description's markup can't pose as the window's own overlays, even throu
       const review = page.locator('[data-pull-review]');
       await openDetails(review);
       const section = page.locator('[data-pull-review] [data-pull-description]');
-      const posing = section.locator('[data-pn-annotation-toolbar-row], [data-quick-label-picker], .pn-visible-viewport-overlay [data-pn-image-annotator-stage]');
+      // The diagram: Pele draws it and keeps no markup from its label, so what is waited for there is the drawing.
+      const posing = section.locator('[data-pn-annotation-toolbar-row], [data-quick-label-picker], .pn-visible-viewport-overlay [data-pn-image-annotator-stage], [data-diagram-svg] svg');
       await expect(posing.first()).toBeAttached({ timeout: 15_000 });
       await page.keyboard.press('Escape');
       await expect(review.locator('[data-pull-details]')).toHaveCount(0);

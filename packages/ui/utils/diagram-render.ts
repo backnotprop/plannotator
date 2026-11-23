@@ -1214,9 +1214,9 @@ const engineSwitchRenderer: DiagramRenderer = {
 
 /**
  * The engine switch's renderer, when Pele is part of the build
- * (`PELE_IN_BUILD`, false while `DIAGRAM_ENGINE_MODE` is `'mermaid'`). A
- * conditional on that constant, so a shipped build drops the switch and all
- * of Plannotator's Pele code behind it (`renderPele`, the Pele finders,
+ * (`PELE_IN_BUILD`, false only while `DIAGRAM_ENGINE_MODE` is `'mermaid'`). A
+ * conditional on that constant, so a build under `'mermaid'` drops the switch
+ * and Plannotator's Pele code behind it (`renderPele`, the Pele finders,
  * `peleTheme`), not only Pele's library.
  */
 let engineSwitch: DiagramRenderer | undefined = PELE_IN_BUILD ? engineSwitchRenderer : undefined;
@@ -1228,8 +1228,8 @@ export function __setPeleInBuildForTests(on: boolean | undefined): void {
   engineSwitch = (on ?? PELE_IN_BUILD) ? engineSwitchRenderer : undefined;
 }
 
-/** The renderer for a kind. With the switch on `'mermaid'` (the shipped
- * value) a Mermaid fence gets exactly the Mermaid entry above. */
+/** The renderer for a kind. With the switch on `'mermaid'` a Mermaid fence
+ * gets exactly the Mermaid entry above; otherwise the engine switch. */
 function rendererFor(kind: DiagramKind): DiagramRenderer {
   if (kind === 'graphviz') return graphvizRenderer;
   return engineSwitch === undefined || diagramEngineMode() === 'mermaid' ? mermaidRenderer : engineSwitch;

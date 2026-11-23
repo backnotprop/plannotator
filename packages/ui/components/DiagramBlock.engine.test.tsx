@@ -4,8 +4,8 @@
  * slot serving captured Chromium svgs, Pele for real (it needs no DOM).
  *
  * What regresses if these fail:
- * - the shipped switch no longer draws every fence with Mermaid, or it loads
- *   Pele at all;
+ * - the shipped switch no longer draws with Pele every fence Pele can draw,
+ *   or it asks Mermaid for one;
  * - `PELE_CAPABILITIES` no longer says what a click on a part does under each
  *   engine (the data a quiet fallback reads);
  * - `'pele-where-safe'` draws with Pele a fence that would lose its part
@@ -28,7 +28,7 @@ import { installInertDiagramSvgParser } from '../test-setup/diagramSvg';
 import { loadRealPele, setPeleInBuildForTests } from '../test-setup/pele';
 import { AnnotationType, type Annotation, type Block } from '../types';
 import { MERMAID_FINDER, type DiagramTarget } from '../utils/diagram-anchor';
-import { PELE_FINDER } from '../utils/diagram-anchor-pele';
+import { PELE_COMPAT_FINDER, PELE_FINDER } from '../utils/diagram-anchor-pele';
 import { diagramFinder } from '../utils/diagram-render';
 import {
   __setDiagramEngineModeForTests,
@@ -201,26 +201,23 @@ async function commentOnAPart(type: CaseType, mode: DiagramEngineMode, pick?: (s
   return { engine: engineOf(svg), annotation: added[0]! };
 }
 
-describe.if(hasDom)('diagram engine: the shipped switch is Mermaid', () => {
-  test('every fence is drawn by Mermaid, Pele is never imported, and the finder is Mermaid\'s own', async () => {
-    expect(DIAGRAM_ENGINE_MODE).toBe('mermaid');
-    // The shipped build's own state: Pele not in it (the suite puts it back after).
+describe.if(hasDom)("diagram engine: the shipped switch is 'pele-where-safe'", () => {
+  test('Pele draws every fence it can, Mermaid draws none of them, and the finder reads both engines', async () => {
+    expect(DIAGRAM_ENGINE_MODE).toBe('pele-where-safe');
+    // The shipped build's own state: its own Pele loader, no override (the suite puts its own back after).
     setPeleInBuildForTests(false);
     try {
-      let peleImports = 0;
-      __setPeleRuntimeLoaderForTests(() => {
-        peleImports += 1;
-        return Promise.reject(new Error('Pele must not load'));
-      });
-      for (const type of Object.keys(CASES) as CaseType[]) {
-        await mount(<MermaidBlock block={fence(CASES[type].source)} annotations={[]} onAddAnnotation={noop} />);
+      const before = mermaidRenders;
+      const others = ['pie title Pets\n  "Dogs" : 3\n  "Cats" : 2', 'gantt\n  title Plan\n  dateFormat YYYY-MM-DD\n  Build :a1, 2026-01-01, 3d'];
+      for (const source of [...Object.values(CASES).map((c) => c.source), ...others]) {
+        await mount(<MermaidBlock block={fence(source)} annotations={[]} onAddAnnotation={noop} />);
         await waitFor(() => drawn());
-        expect(engineOf(drawn())).toBe('mermaid');
+        expect(engineOf(drawn())).toBe('pele');
         await act(async () => root!.unmount());
         root = null;
       }
-      expect(peleImports).toBe(0);
-      expect(diagramFinder('mermaid')).toBe(MERMAID_FINDER);
+      expect(mermaidRenders).toBe(before);
+      expect(diagramFinder('mermaid')).toBe(PELE_COMPAT_FINDER);
     } finally {
       setPeleInBuildForTests(true);
     }

@@ -25,6 +25,11 @@
  * `buildDiagramUiBundle({ realKatex: true })` keeps the real KaTeX (the webview
  * options stub it out) so a `$$...$$` label is typeset as in the apps
  * (diagram-math-labels.spec.ts, with `katexCss()` on the page).
+ *
+ * Mermaid draws every fence on this page (`engine`, default `'mermaid'`): the
+ * specs that use it are about Mermaid's own drawing, which the shipped switch
+ * ('pele-where-safe') still uses for a fence Pele cannot draw. Pele's labels
+ * have their own spec (pele-labels.spec.ts).
  */
 import type { Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
@@ -36,7 +41,7 @@ import { dirname, join, resolve } from 'node:path';
 const EXTENSION = resolve(__dirname, '../../apps/vscode-extension');
 const UI = resolve(__dirname, '../../packages/ui');
 
-export function buildDiagramUiBundle(options: { splitPurify?: boolean; realKatex?: boolean } = {}): string {
+export function buildDiagramUiBundle(options: { splitPurify?: boolean; realKatex?: boolean; engine?: 'mermaid' | 'pele-where-safe' | 'pele' } = {}): string {
   const work = mkdtempSync(join(tmpdir(), 'pn-diagram-scrub-'));
   try {
     const entry = join(work, 'entry.ts');
@@ -50,6 +55,8 @@ import { parseDiagramSvg, renderDiagram, sanitizeDiagramSvg } from ${JSON.string
 import { loadMermaidRuntime } from ${JSON.stringify(join(UI, 'utils/mermaid.ts'))};
 import { applyMermaidTheme, mermaidThemeKey } from ${JSON.stringify(join(UI, 'utils/mermaidTheme.ts'))};
 import { configurePlannotatorUI } from ${JSON.stringify(join(UI, 'configure.ts'))};
+import { __setDiagramEngineModeForTests } from ${JSON.stringify(join(UI, 'utils/diagram-engine.ts'))};
+__setDiagramEngineModeForTests(${JSON.stringify(options.engine ?? 'mermaid')});
 const host = () => document.getElementById('host')!;
 let seq = 0;
 /** A reference the post-pass always dropped (not a fragment, not http(s)). */

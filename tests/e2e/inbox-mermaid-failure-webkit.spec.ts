@@ -74,6 +74,21 @@ const outside = (page: Page) =>
     overflows: document.documentElement.scrollHeight > window.innerHeight + 1,
   }));
 
+/**
+ * Pele's core chunk answers 404, as from a tab older than the Inbox's build.
+ * Pele draws a sequence diagram itself, so without this the Mermaid chunk the
+ * next tests break is never asked for; with it the fence falls back to
+ * Mermaid, as a fence Pele cannot draw does. Pele's core is the one chunk
+ * that names its error class.
+ */
+const withoutPele = (page: Page) =>
+  page.route(/\/assets\/[^/]+\.js$/, async (route) => {
+    const response = await route.fetch();
+    const body = await response.text();
+    if (body.includes('PeleError')) return route.fulfill({ status: 404, contentType: 'text/plain', body: 'Not found' });
+    return route.fulfill({ response, body });
+  });
+
 const openOnIpad = async (browser: import('@playwright/test').Browser) => {
   const context = await browser.newContext({ viewport: { width: 820, height: 1180 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 });
   return { context, page: await context.newPage() };
@@ -119,6 +134,7 @@ test('a diagram chunk whose download breaks off once draws on the automatic re-a
   const { context, page } = await openOnIpad(browser);
   try {
     let tries = 0;
+    await withoutPele(page);
     await page.route(/\/assets\/sequenceDiagram-[^/]+\.js$/, (route) => (++tries === 1 ? route.abort('connectionreset') : route.continue()));
     await page.goto(`${url}#thread=${sent.thread_id}`);
     const block = page.locator(`[data-message-id="${sent.message_id}"] [data-diagram-block="mermaid"]`);
@@ -135,6 +151,7 @@ test('a diagram type whose chunk does not arrive shows the source under Reload, 
   const { context, page } = await openOnIpad(browser);
   try {
     // As a tab older than the Inbox's build asks for a chunk name that is gone.
+    await withoutPele(page);
     await page.route(/\/assets\/sequenceDiagram-[^/]+\.js$/, (route) => route.fulfill({ status: 404, contentType: 'text/plain', body: 'Not found' }));
     await page.goto(`${url}#thread=${sent.thread_id}`);
     const block = page.locator(`[data-message-id="${sent.message_id}"] [data-diagram-block="mermaid"]`);

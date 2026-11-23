@@ -39,6 +39,10 @@ import {
   setMathRendererLoader,
   type MathRenderer,
 } from '../utils/math';
+import { drawMermaidFencesWithMermaid } from '../test-setup/mermaidEngine';
+
+// A stand-in Mermaid runtime draws here; Pele is DiagramBlock.engine.test.tsx's.
+drawMermaidFencesWithMermaid();
 
 const hasDom = typeof document !== 'undefined';
 const RETRY_DELAY_MS = 10;

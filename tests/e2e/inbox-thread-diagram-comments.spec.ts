@@ -81,8 +81,8 @@ let world: World;
 const message = (page: Page, id: string) => page.locator(`[data-message-id="${id}"]`);
 const composer = (page: Page) => page.locator('[data-diagram-composer]');
 const badges = (scope: Page | Locator) => scope.locator('[data-diagram-badge]');
-/** A rendered part by its words: Mermaid's `g.node`, Graphviz's `g.node`. */
-const part = (scope: Locator, words: string) => scope.locator('[data-diagram-canvas] g.node', { hasText: words }).first();
+/** A rendered part by its words: Pele's `g.pele-node` (Mermaid's `g.node` for a fence that falls back), Graphviz's `g.node`. */
+const part = (scope: Locator, words: string) => scope.locator('[data-diagram-canvas] :is(g.node, g.pele-node)', { hasText: words }).first();
 
 async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: join(proofDir, `${name}.png`) });
