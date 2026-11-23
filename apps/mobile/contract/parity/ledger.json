@@ -22046,6 +22046,34 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-window-api-inbox-messages-id-guide-package-changes",
+      "title": "window:/api/inbox/messages/:id/guide/package-changes",
+      "surface": [
+        "window:/api/inbox/messages/:id/guide/package-changes"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-pulls-package-changes",
+      "title": "window:/api/inbox/pulls/package-changes",
+      "surface": [
+        "window:/api/inbox/pulls/package-changes"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }
