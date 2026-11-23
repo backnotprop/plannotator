@@ -942,7 +942,7 @@ export function inboxUnreadInputText(input: unknown, tools: readonly InboxToolIn
     const named = keys.slice(0, 3).map((key) => JSON.stringify(key.slice(0, 40))).join(', ')
     got = keys.length === 0 ? 'it arrived empty' : `it arrived as ${named}${keys.length > 3 ? ` and ${keys.length - 3} more` : ''}`
   }
-  return `Invalid plannotator_inbox call: its input could not be read as fields (${got}). Check the JSON quoting and call again: every field is its own key and every string value is in double quotes, e.g. {"action": "send_message", "body": "…", "supersedes": ["msg_…/q-…"]}. action is one of ${tools.map((tool) => tool.name).join(', ')}.`
+  return `Invalid plannotator_inbox call: its input was not valid JSON (${got}), so nothing was sent. Check the JSON quoting and call again: every field is its own key and every string value is in double quotes, e.g. {"action": "send_message", "body": "…", "supersedes": ["msg_…/q-…"]}. action is one of ${tools.map((tool) => tool.name).join(', ')}.`
 }
 
 /**
@@ -1106,7 +1106,7 @@ function readUnparsedInput(
     }
   }
   const failure = jsonFailure(raw)
-  const prefix = 'Invalid plannotator_inbox call: '
+  const prefix = 'Invalid plannotator_inbox call, nothing was sent: '
   if (raw.length < len && (!failure || failure.at >= raw.length - 1 || failure.kind === 'unterminated')) {
     const where = failure?.field ? `inside ${failure.field}` : 'past what arrived'
     const what = failure?.field ?? 'the long text'
@@ -1171,6 +1171,10 @@ export function inboxToolCall(
       const refusal = inboxProjectPathShapeRefusal(value)
       if (refusal) return { error: `Invalid plannotator_inbox call: ${refusal}` }
       projectPath = value as string
+      continue
+    }
+    if (name === 'id' && tool.name === 'read_thread' && 'message_id' in own && !('message_id' in rest) && !('thread_id' in rest)) {
+      args.message_id = value
       continue
     }
     if (!(name in own) || isFilled(name)) {

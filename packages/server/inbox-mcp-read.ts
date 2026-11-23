@@ -32,6 +32,7 @@
 import { INBOX_ROWS_ASK_BLOCK } from "@plannotator/core/inbox-types";
 import { INBOX_DECISION_ASK_BLOCK, INBOX_HOST_NAMES, inboxAgentName, inboxBoardRequestBlock, inboxSentFromLine, isInboxNote, type InboxMessageWire, type InboxQuestion } from "@plannotator/core/inbox-types";
 import { inboxAnswersSectionEnd } from "@plannotator/core/inbox-questions";
+import { openItemsLabel } from "@plannotator/core/inbox-open-questions";
 import { QUESTION_ANSWERS_HEADING, type QuestionAnswer } from "@plannotator/core/question-block";
 import { inboxAckReaction } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -834,7 +835,8 @@ export function windowedThreadText(result: ThreadWindowResult, order: readonly s
   if (thread.open_questions.length === 0) {
     out.push("No question waits on the person.");
   } else {
-    out.push(`Waiting on the person (${thread.open_questions.length}):`);
+    const actions = thread.open_questions.filter((q) => q.key.startsWith("a-")).length;
+    out.push(`Waiting on the person (${openItemsLabel(thread.open_questions.length - actions, actions)}):`);
     for (const q of thread.open_questions) {
       // An action item (key `a-…`): A1, A2…, "action item, open", or what the person marked and has not sent (in their reply draft, or inside its Undo window).
       const todo = q.key.startsWith("a-");

@@ -199,7 +199,7 @@ function argumentsOf(text: string, cwd: string): { args: Record<string, unknown>
   try {
     value = JSON.parse(text.replace(/^﻿/, ""));
   } catch (error) {
-    return { code: "invalid_json", error: `The arguments are not JSON: ${error instanceof Error ? error.message : String(error)}` };
+    return { code: "invalid_json", error: `The arguments are not JSON, so nothing was sent: ${error instanceof Error ? error.message : String(error)}` };
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) return { code: "invalid_json", error: "The arguments must be one JSON object." };
   const args = value as Record<string, unknown>;
@@ -426,7 +426,7 @@ async function runPairedCall(
     if (!value || typeof value !== "object" || Array.isArray(value)) return refused("invalid_json", "The arguments must be one JSON object.", 2);
     args = value as Record<string, unknown>;
   } catch (error) {
-    return refused("invalid_json", `The arguments are not JSON: ${error instanceof Error ? error.message : String(error)}`, 2);
+    return refused("invalid_json", `The arguments are not JSON, so nothing was sent: ${error instanceof Error ? error.message : String(error)}`, 2);
   }
   const { relayed, transport, resultOf, call: pieceCall } = link;
   if (parsed.action === INBOX_AGENT_FETCH_FILE) {

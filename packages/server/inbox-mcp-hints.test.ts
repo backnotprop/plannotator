@@ -53,7 +53,7 @@ function world(options: { projectHost?: InboxMcpContext["projectHost"]; known?: 
   const server = createInboxMcpServer(context) as unknown as { _registeredTools: Record<string, { handler: (input: Record<string, unknown>, ctx: unknown) => Promise<Result> }> };
   const send = async (session: string, input: Record<string, unknown>) => {
     const result = await server._registeredTools.send_message!.handler({ project_path: project.root, agent_session: session, agent_host: "claude-code", ...input }, {});
-    const lines = result.content[0]!.text.split("\n");
+    const lines = result.content[0]!.text.split("\n").filter((line) => !/^- msg_\w+\/[aq]-/.test(line));
     return { result, lines, last: lines.at(-1)!, id: result.structuredContent?.message_id as string, thread: String(result.structuredContent?.thread_id) };
   };
   return { store, project, send };

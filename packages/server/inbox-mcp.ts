@@ -17,6 +17,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
+import { openItemsLabel } from "@plannotator/core/inbox-open-questions";
 import { inboxQuestionKeysWithRecommendedMarker, inboxQuestionsToCheck, parseInboxQuestionBlocks, type InboxQuestionToCheck, type PrototypeAppTarget } from "@plannotator/core/inbox-questions";
 import { checkSendPrototypes } from "./inbox-prototypes";
 import { prototypesNotFramedText } from "./inbox-web-prototypes";
@@ -1134,10 +1135,11 @@ export interface InboxAgentThreadRow {
   section: InboxListRow["section"];
   message_count: number;
   /**
-   * Questions in it still waiting on the person: `open`, and `picked`
-   * (answered in the window, not sent yet); `prompt` is the first open one's.
+   * Questions and action items in it still waiting on the person: `open`
+   * (`actions` of them action items), and `picked` (answered in the window,
+   * not sent yet); `prompt` is the first open one's.
    */
-  questions: { open: number; picked: number; prompt: string | null };
+  questions: { open: number; actions: number; picked: number; prompt: string | null };
   last_author: InboxListRow["last_author"];
   last_at: string;
   /**
@@ -1206,9 +1208,9 @@ export function threadRowText(row: Omit<InboxAgentThreadRow, "unread"> & { unrea
   if (row.subject) parts.push(JSON.stringify(row.subject));
   if (row.thread_name) parts.push(`name ${JSON.stringify(row.thread_name)}`);
   parts.push(row.section, `${row.message_count} message${row.message_count === 1 ? "" : "s"}`);
-  const { open, picked, prompt } = row.questions;
+  const { open, actions, picked, prompt } = row.questions;
   if (open + picked > 0) {
-    parts.push(`${open} open${picked > 0 ? `, ${picked} picked not sent` : ""}${prompt ? `: ${JSON.stringify(clip(prompt, 100))}` : ""}`);
+    parts.push(`${open > 0 ? openItemsLabel(open - actions, actions) : "0 open"}${picked > 0 ? `, ${picked} picked not sent` : ""}${prompt ? `: ${JSON.stringify(clip(prompt, 100))}` : ""}`);
   }
   parts.push(`last ${row.last_author} ${shortTime(row.last_at)}`);
   if (row.last_person_message_id && row.last_person_at) parts.push(`person's last ${row.last_person_message_id} ${shortTime(row.last_person_at)}`);
@@ -1221,6 +1223,12 @@ export function threadRowText(row: Omit<InboxAgentThreadRow, "unread"> & { unrea
   return parts.join(" · ");
 }
 
+/** One line per question and action item a send asked: its `<message id>/<key>` (what `supersedes` and `done` take) and its prompt, clipped. */
+export function askedRefsText(structured: Record<string, unknown>): string {
+  const items = [...((structured.questions as { key: string; prompt: string }[] | undefined) ?? []), ...((structured.actions as { key: string; prompt: string }[] | undefined) ?? [])];
+  return items.map((item) => `\n- ${structured.message_id}/${item.key}: ${JSON.stringify(clip(item.prompt, 80))}`).join("");
+}
+
 export function agentThreadRow(store: InboxStore, row: InboxListRow, caller: string | null): InboxAgentThreadRow {
   const person = personFacts(store, row.thread_id, caller);
   return {
@@ -1230,7 +1238,7 @@ export function agentThreadRow(store: InboxStore, row: InboxListRow, caller: str
     // The section without the person's unsent work: a reply draft (and comments not sent) never reach an agent.
     section: inboxSectionOf({ ...row, unsent: null }),
     message_count: row.message_count,
-    questions: { open: row.questions.open, picked: row.questions.picked, prompt: row.questions.prompt },
+    questions: { open: row.questions.open, actions: row.questions.actions ?? 0, picked: row.questions.picked, prompt: row.questions.prompt },
     last_author: row.last_author,
     last_at: row.last_at,
     last_person_at: person.last?.created_at ?? null,
@@ -1415,7 +1423,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           }, 0);
         }
         return ok(
-          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${branchLine}${stepsLine}${pullsLine}${priorityLine(sent.priority)}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host, await t3WokenOnlyWhileRunning(context, wakes, input), antigravityHandsOver(ctx, wakes, input))}${hints.join("")}`,
+          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${branchLine}${stepsLine}${pullsLine}${priorityLine(sent.priority)}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host, await t3WokenOnlyWhileRunning(context, wakes, input), antigravityHandsOver(ctx, wakes, input))}${hints.join("")}${askedRefsText(sent.structured)}`,
           stale ? { ...sent.structured, not_read_since: lastContactOf(stale) } : sent.structured,
         );
       }),
