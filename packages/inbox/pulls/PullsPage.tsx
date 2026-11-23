@@ -32,6 +32,8 @@ import { OnThisComputer } from './OnThisComputer';
 import { LocalDiffPane } from './LocalDiffPane';
 import { closeLocal, openLocal } from './localNav';
 import { localOpenKey, type LocalOpen } from './localRoute';
+/** App's Reviews list reads PullsPage's address props through here (localRoute.ts). */
+export { pullsPageAddress } from './localRoute';
 import { forwardRef, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullRiskJudgment, type InboxPullsAnswer, type InboxPullStack, type InboxReviewRow } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';

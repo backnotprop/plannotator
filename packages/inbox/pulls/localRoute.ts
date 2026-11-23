@@ -25,3 +25,14 @@ export function localHashOf(route: LocalRoutePart): string {
 
 /** The open row's key, as the list keys its rows (`inboxLocalWorkKey`). */
 export const localOpenKey = (open: LocalOpen | null | undefined): string | null => (open ? `${open.project}:${open.branch ?? ''}` : null);
+
+/**
+ * What PullsPage takes from the address (App's Reviews list): the open stack, the layer its row shows selected (the open
+ * one, or the one whose diff closed back to the stack), and an "On this computer" row's diff, never beside a thread.
+ */
+export function pullsPageAddress(
+  route: LocalRoutePart & { stack?: string | null; layer?: string | null; backLayer?: string | null },
+  threadId: string | null,
+): { stackId: string | null; layerId: string | null; local: LocalOpen | null } {
+  return { stackId: route.stack ?? null, layerId: route.layer ?? route.backLayer ?? null, local: threadId ? null : (route.local ?? null) };
+}
