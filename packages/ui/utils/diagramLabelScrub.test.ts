@@ -174,7 +174,9 @@ describe.if(hasDom)('what a label may hold once mounted', () => {
           .filter((e) => e.localName !== 'a')
           .map((e) => `${e.localName} ${Array.from(e.attributes).map((a) => `${a.name}=${a.value}`).sort().join(' ')}`);
       expect([file, shape(clean)]).toEqual([file, shape(raw)]);
-      // The sheet too: the position filter leaves every one of Mermaid's rule bodies whole.
+      // The sheet too: the position filter leaves every one of Mermaid's rule bodies whole. Pele's
+      // captured svg (`pele-*.svg`) has no sheet: its styling is inline, covered by the shape check above.
+      if (file.startsWith('pele-')) continue;
       const bodies = Array.from(raw.querySelectorAll('style')).flatMap((s) => Array.from((s.textContent ?? '').matchAll(/\{([^{}]*)\}/gu), (m) => m[1] ?? ''));
       expect(bodies.length).toBeGreaterThan(0);
       expect([file, bodies.filter((body) => keepContainedDeclarations(body) !== body)]).toEqual([file, []]);
