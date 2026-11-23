@@ -51,7 +51,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
-import { GuideReaderPart, PanePart, PullChangesTreePart, ReaderPart } from '../lazyParts';
+import { GuideReaderPart, PanePart, PullChangesTreePart, ReaderPart, ReviewKeysHere } from '../lazyParts';
 import { CommentPictures } from '../commentPictures';
 import { inboxPullIsOpen, inboxPullUrlOfKey, type InboxMessageWire, type InboxPull, type InboxThread } from '@plannotator/core/inbox-types';
 import { parseDiffToFiles, type DiffFile } from '@plannotator/core/diff-files';
@@ -83,6 +83,7 @@ import type { InboxShapes } from '../shape/useInboxShapes';
 import type { GuideSelection, GuideSelectionActions } from '../guide/types';
 import { reviewSourceLine } from '../guide/sourceLine';
 import { InboxApiError, inboxApi } from '../api';
+import { guideReviewImages } from '../reviewImages';
 import { agentName, whenTime } from '../format';
 import { Icon } from '../icons';
 import { useNarrowerThan } from '../narrower';
@@ -263,6 +264,8 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
   useEffect(() => setPosted(null), [message.id]);
   const phone = usePhone();
   // With Code review on, its diff headers offer Open in (the thread's project; nothing when the file is not there).
+  // Code review's image previews on changed images, from the patch the agent sent (reviewImages.ts).
+  const images = useMemo(() => guideReviewImages(message.id), [message.id]);
   const fileOpenIn = useCallback((path: string) => <OpenInFile scope={{ thread: thread.thread_id, message: message.id, from: 'root' }} path={path} />, [thread.thread_id, message.id]);
   const [mode, setMode] = useState<RailMode>('walkthrough');
   const [reveal, setReveal] = useState<{ path: string; token: number } | null>(null);
@@ -1272,7 +1275,8 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
                 </button>
               </div>
             )}
-            <ReaderPart diff={snapshot.review.rawPatch}>
+            <ReaderPart diff={snapshot.review.rawPatch} images={images}>
+              <ReviewKeysHere diff={snapshot.review.rawPatch} viewed={!!viewedProp} />
               <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on={codeReview}>
               <ContextNotesProvider api={noteRows.api}>
               <GuideReader

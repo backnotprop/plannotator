@@ -98,12 +98,19 @@ export function resetListViewForTests(): void {
 export interface ListSort {
   epoch: number;
   keep: string | null;
+  /**
+   * The time a row is placed by; absent: its `last_at`. Recent activity's (listFilterRecent.ts): when the person last
+   * acted there. Set, InboxList draws List's one list whatever the view.
+   */
+  by?: (row: InboxListRow) => string;
 }
 
 /** Each row's place in List: the time it is sorted by, and the group it had when it took it. */
 export interface ListPlaces {
   epoch: number;
   keys: ReadonlyMap<string, { key: string; group: InboxListGroupId }>;
+  /** The `ListSort.by` they were placed by: another one sorts the list whole. */
+  by?: ListSort['by'];
 }
 
 export interface FlatRow {
@@ -118,7 +125,7 @@ export interface FlatRow {
  * (`sort`) or it changed group. Returns the rows and the places to keep for the next call. Pure.
  */
 export function flatRows(sections: readonly InboxListSection[], places: ListPlaces | null, sort: ListSort): { rows: FlatRow[]; places: ListPlaces } {
-  const sorted = places === null || places.epoch !== sort.epoch;
+  const sorted = places === null || places.epoch !== sort.epoch || places.by !== sort.by;
   const keys = new Map<string, { key: string; group: InboxListGroupId }>();
   const rows: Array<FlatRow & { key: string }> = [];
   for (const section of sections) {
@@ -126,11 +133,11 @@ export function flatRows(sections: readonly InboxListSection[], places: ListPlac
     for (const row of section.threads) {
       const old = places?.keys.get(row.thread_id);
       const holds = old !== undefined && old.group === section.id && (!sorted || row.thread_id === sort.keep);
-      const key = holds ? old.key : row.last_at;
+      const key = holds ? old.key : sort.by ? sort.by(row) : row.last_at;
       keys.set(row.thread_id, { key, group: section.id });
       rows.push({ row, drawn: section.id, key });
     }
   }
   rows.sort((left, right) => right.key.localeCompare(left.key) || left.row.thread_id.localeCompare(right.row.thread_id));
-  return { rows: rows.map(({ row, drawn }) => ({ row, drawn })), places: { epoch: sort.epoch, keys } };
+  return { rows: rows.map(({ row, drawn }) => ({ row, drawn })), places: { epoch: sort.epoch, keys, by: sort.by } };
 }

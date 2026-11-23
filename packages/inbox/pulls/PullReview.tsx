@@ -34,7 +34,7 @@
  */
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
-import { GuideReaderPart, PanePart, PullAllFilesPart, PullChangesTreePart, PullRepoFilePart, ReaderPart } from '../lazyParts';
+import { GuideReaderPart, PanePart, PullAllFilesPart, PullChangesTreePart, PullRepoFilePart, ReaderPart, ReviewKeysHere } from '../lazyParts';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import { patchBlobIds, type DiffFile } from '@plannotator/core/diff-files';
 import { anchorStillMatches, captureAnchor } from '@plannotator/ui/utils/codeAnnotationAnchor';
@@ -45,6 +45,7 @@ import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { DecisionControl, type DecisionHandler } from '@plannotator/ui/components/DecisionControl';
 import { buildDecisionSpec, type DecisionActionId } from '@plannotator/ui/utils/decisionSpec';
 import { InboxApiError, inboxApi } from '../api';
+import { pullReviewImages } from '../reviewImages';
 import { guideCommentSections } from '../attachments';
 import { RefMarkIcon } from '../board/RefMark';
 import { Icon } from '../icons';
@@ -469,6 +470,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
     },
     [layerKey, on?.scope, on?.from, headMoved, patchHead], // eslint-disable-line react-hooks/exhaustive-deps
   );
+  // Code review's image previews on changed images, read at this diff's own head (reviewImages.ts).
+  const images = useMemo(() => pullReviewImages(layerKey, on?.scope ?? 'layer', on?.from, headMoved ? null : patchHead), [layerKey, on?.scope, on?.from, headMoved, patchHead]);
   const [picked, pick] = useReviewDestination();
   const [posted, setPosted] = useState<{ label: string; url: string; action: string } | null>(null);
   useEffect(() => setPosted(null), [keptId]);
@@ -1149,7 +1152,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
             // Keyed on the code: new code brings a new reader, so a composer left open cannot save onto a moved line; the
             // same code keeps it, whatever the head reads said. The reader is a chunk loaded on first use: one that cannot
             // arrive says so here.
-            <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch}>
+            <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch} images={images}>
+              <ReviewKeysHere diff={snapshot.review.rawPatch} viewed />
               <OpenInCodeSpans scope={{ repo: repoKey ?? '', pull: layerKey }} on={!!repoKey}>
                 <ContextNotesProvider api={places.api}>
                   <GuideReader

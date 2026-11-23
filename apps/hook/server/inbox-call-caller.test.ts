@@ -7,6 +7,7 @@
 import { expect, test } from "bun:test";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { inboxCallerOf, inboxShellAgentOf, runInboxCallCommand } from "./inbox-call-command";
+import { fillInboxToolArguments } from "./inbox-mcp-shim";
 
 const caller = (flag: string | null, env: Record<string, string>) => {
   const answer = inboxCallerOf(flag, env);
@@ -68,6 +69,69 @@ test("send_message from a Gemini CLI shell carries its name; from a plain shell,
       ["send_message", "Gemini CLI", null, null],
       ["send_message", null, null, null],
       ["read_thread", null, null, null],
+    ]);
+  } finally {
+    stub.stop(true);
+  }
+});
+
+/**
+ * resolve_message's `moved_to` needs the caller's session (the store checks the thread it names holds the caller's
+ * question). The stdio shim and `inbox call` fill `agent_session` on a call with `moved_to`, as on send_message,
+ * and nothing else: its schema is strict, so no `project_path` and no author. A plain archive is sent untouched:
+ * an older Inbox still running has a strict schema without `agent_session`, and would refuse it.
+ */
+test("the stdio shim fills resolve_message's session only with moved_to (no project, no author); a plain archive goes untouched", () => {
+  const fill = (args: Record<string, unknown>, hostSession: { host: string; session: string; name: string } | null, own: string | null = "ses_OWN") =>
+    fillInboxToolArguments({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "resolve_message", arguments: args } }, "/work", own, hostSession).params!.arguments;
+  const claude = { host: "claude-code", session: "ses-claude", name: "Claude Code" };
+  expect(fill({ message_id: "msg_old", moved_to: "msg_brief" }, claude)).toEqual({ message_id: "msg_old", moved_to: "msg_brief", agent_session: "ses-claude" });
+  // No host session: the shim's own id, the one its send_message wrote with.
+  expect(fill({ message_id: "msg_old", moved_to: "msg_brief" }, null)).toEqual({ message_id: "msg_old", moved_to: "msg_brief", agent_session: "ses_OWN" });
+  // The agent's own session stands.
+  expect(fill({ message_id: "msg_old", moved_to: "msg_brief", agent_session: "mine" }, claude)).toEqual({ message_id: "msg_old", moved_to: "msg_brief", agent_session: "mine" });
+  // A plain archive (or reopen) is sent as the agent wrote it: an older Inbox's strict schema refuses agent_session.
+  expect(fill({ message_id: "msg_old" }, claude)).toEqual({ message_id: "msg_old" });
+  expect(fill({ message_id: "msg_old", resolved: false }, null)).toEqual({ message_id: "msg_old", resolved: false });
+  // A Codex call is its thread's, as its send_message is.
+  const codex = fillInboxToolArguments(
+    { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "resolve_message", arguments: { message_id: "msg_old", moved_to: "msg_brief" }, _meta: { threadId: "019a7d3e-5c1b-7f20-9b8e-2d4c6a8e0f13" } } },
+    "/work",
+    "ses_OWN",
+    claude,
+    "codex-mcp-client",
+  ).params!.arguments;
+  expect(codex).toEqual({ message_id: "msg_old", moved_to: "msg_brief", agent_session: "019a7d3e-5c1b-7f20-9b8e-2d4c6a8e0f13" });
+});
+
+test("inbox call resolve_message with moved_to sends --session's session, with no project and no author; with no session, none; a plain one, none", async () => {
+  const bodies: { name: string; arguments: Record<string, unknown> }[] = [];
+  const stub = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    async fetch(request) {
+      const call = (await request.json()) as { params: { name: string; arguments: Record<string, unknown> } };
+      bodies.push(call.params);
+      return Response.json({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: "ok" }], structuredContent: { ok: true } } });
+    },
+  });
+  try {
+    const entry = { v: 1, pid: 1, port: stub.port, url: `http://127.0.0.1:${stub.port}`, version: "0", token: "t", serverSession: "s", startedAt: "2026-11-19T00:00:00.000Z" } as InboxRegistryEntry;
+    const run = (argv: string[], env: Record<string, string>) =>
+      runInboxCallCommand(argv, { cwd: "/work/ledger", env, ensureRunning: async () => entry, out: () => {}, err: () => {}, timeoutMs: 5_000 });
+    const args = JSON.stringify({ message_id: "msg_01M4H6G73M9H3Z32T859E72DPY", moved_to: "msg_01M4H6G73M9H3Z32T859E72DPZ" });
+    expect(await run(["resolve_message", "--session", "claude-code:ses-ops", args], {})).toBe(0);
+    expect(await run(["resolve_message", args], { PLANNOTATOR_SESSION_TAG: "claude-code:ses-ops" })).toBe(0);
+    expect(await run(["resolve_message", args], { GEMINI_CLI: "1" })).toBe(0);
+    expect(await run(["resolve_message", "--session", "claude-code:ses-ops", JSON.stringify({ message_id: "msg_01M4H6G73M9H3Z32T859E72DPY" })], {})).toBe(0);
+    const want = { message_id: "msg_01M4H6G73M9H3Z32T859E72DPY", moved_to: "msg_01M4H6G73M9H3Z32T859E72DPZ" };
+    expect(bodies.map((b) => [b.name, b.arguments])).toEqual([
+      ["resolve_message", { ...want, agent_session: "ses-ops" }],
+      ["resolve_message", { ...want, agent_session: "ses-ops" }],
+      // A shell with no session sends none: the Inbox refuses moved_to with "needs your session".
+      ["resolve_message", want],
+      // A plain archive goes as before (an older Inbox's strict schema has no agent_session).
+      ["resolve_message", { message_id: "msg_01M4H6G73M9H3Z32T859E72DPY" }],
     ]);
   } finally {
     stub.stop(true);
