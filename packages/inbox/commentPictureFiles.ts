@@ -1,4 +1,4 @@
-import { inboxCommentPicture, inboxCommentPictureUploads, type InboxAnnotationRecord } from '@plannotator/core/inbox-types';
+import { inboxCommentPicture, inboxCommentPictureUploads, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxUpload } from '@plannotator/core/inbox-types';
 import type { Annotation, ImageAttachment } from '@plannotator/ui/types';
 import { inboxUrl, machineOf } from './inboxUrl';
 import { attachedLines } from '@plannotator/ui/utils/attachedLines';
@@ -30,4 +30,10 @@ export function withPictureFiles<T extends { images?: ImageAttachment[] }>(annot
 
 export function pictureLines(annotation: Pick<Annotation, 'images'>): string {
   return attachedLines(withPictureFiles(annotation).images);
+}
+
+/** An upload added to a comment as its `images` entry (commentFiles.tsx): a picture by its name's stem, any other file by its whole name. */
+export function commentImageOf(upload: Pick<InboxUpload, 'upload_id' | 'name' | 'kind'>): ImageAttachment {
+  const path = `${upload.upload_id}/${upload.name}`;
+  return readInboxAttachmentKind(upload.kind) === 'image' ? { path, name: upload.name.replace(/\.[^.]+$/, '') || upload.name } : { path, name: upload.name, kind: 'file' };
 }

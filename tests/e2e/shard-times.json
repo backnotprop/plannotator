@@ -53,6 +53,7 @@
   "inbox-cloud-wake.spec.ts": 3,
   "inbox-code-review.spec.ts": 65,
   "inbox-combine-machines.spec.ts": 150,
+  "inbox-comment-box-attach.spec.ts": 60,
   "inbox-comment-pictures.spec.ts": 3,
   "inbox-comments-list-webkit.spec.ts": 10,
   "inbox-comments-list.spec.ts": 35,
