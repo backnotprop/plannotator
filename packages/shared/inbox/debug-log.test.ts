@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { cleanWindowRecord, debugPageId, debugRoute, isDebugRequestId, pullCloseFields, resolveInboxDebug } from './debug-log';
+import { cleanWindowRecord, debugPageId, debugRoute, isDebugRequestId, pullCloseFields, pullKeyForLog, resolveInboxDebug } from './debug-log';
 import { inboxId } from '@plannotator/core/inbox-types';
 
 const MSG = 'msg_01J9Z3V5K8Q2W4E6R7T8Y9M0NP';
@@ -24,10 +24,14 @@ describe('what may enter the debug log', () => {
     expect(debugRoute(`/api/inbox/m/${machine}/pulls/close`)).toBe(`/api/inbox/m/${machine}/pulls/close`);
   });
 
-  test("a close's line: what, which PR by its key, how it ended and how it came; a key not of the Inbox's shape or a code not of the route's is not written", () => {
-    expect(pullCloseFields('close', 'github.com/northwind/web-app#2039', 200, undefined, 'local', 'window')).toEqual({ act: 'close', key: 'github.com/northwind/web-app#2039', ok: true, status: 200, via: 'local', by: 'window' });
-    expect(pullCloseFields('reopen', 'gitlab.example.com/group/sub/api!12', 409, 'reopen_not_closed_here', 'tailnet', 'machine')).toEqual({ act: 'reopen', key: 'gitlab.example.com/group/sub/api!12', ok: false, status: 409, code: 'reopen_not_closed_here', via: 'tailnet', by: 'machine' });
-    expect(pullCloseFields('close', 'Fix the salary review page', 404, 'something typed', 'local', 'window')).toMatchObject({ key: '*', code: 'other' });
+  test("a close's debug line says what and how it ended, never which PR; the kept line's key is the key or `*`", () => {
+    expect(pullCloseFields('close', 200, undefined, 'local', 'window')).toEqual({ act: 'close', ok: true, status: 200, via: 'local', by: 'window' });
+    expect(pullCloseFields('reopen', 409, 'reopen_not_closed_here', 'tailnet', 'machine')).toEqual({ act: 'reopen', ok: false, status: 409, code: 'reopen_not_closed_here', via: 'tailnet', by: 'machine' });
+    expect(pullCloseFields('close', 0, 'threw', 'local', 'window')).toMatchObject({ ok: false, status: 0, code: 'threw' });
+    expect(pullCloseFields('close', 404, 'something typed', 'local', 'window')).toMatchObject({ code: 'other' });
+    expect(Object.keys(pullCloseFields('close', 200, undefined, 'local', 'window'))).not.toContain('key');
+    expect(pullKeyForLog('gitlab.example.com/group/sub/api!12')).toBe('gitlab.example.com/group/sub/api!12');
+    expect(pullKeyForLog('Fix the salary review page')).toBe('*');
   });
 
   test('every id the Inbox really makes survives in a route', () => {

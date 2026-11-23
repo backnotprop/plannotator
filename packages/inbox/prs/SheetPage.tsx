@@ -35,7 +35,7 @@ import { ChecksMark, checksLabel } from './ChecksMark';
 import { BoxMark, boxState, SelectBox } from './SelectBox';
 import { cantMergeLine, confirmWords, farMergeLine, mergeHint, mergePlan, notMergedLine, refusedLine, type MergePlan } from './bulkMerge';
 import { CLOSE_UNDO_MS, closedToast, doneLine, reopenRefusedForGood, runningWords, toastLead, type BulkVerb, type RunOutcome } from './bulkClose';
-import { keepClosed, putBackClosed, takeClosed } from './closedUndo';
+import { dropEnded, keepClosed, putBackClosed, takeClosed } from './closedUndo';
 import { ClosedLines } from './ClosedLines';
 import { useBarFit } from './useBarFit';
 import { ALREADY_HEADING, ALREADY_LEAD, alreadyPart, groupPart, notStartedLine, reviewPlan, startButtonWords, startedHeading, startedLead, startedToast, startingWords, stoppedToast, untiedLine, type ReviewReport } from './bulkReview';
@@ -216,6 +216,11 @@ export function SheetPage(props: SheetPageProps) {
   // Bulk Merge: the confirm and the report hold the picks they were for; another pick drops them.
   const [bulk, setBulk] = useState<BulkPhase>({ at: 'idle' });
   const chosenKey = [...chosen].sort().join('\n');
+  // What a run that ends later reads: the picks and the view as they are then, not as when it started.
+  const now$ = useRef({ chosen, view });
+  now$.current = { chosen, view };
+  // Undo lines whose window ended go when the view changes, if the pointer has not left the board first (closedUndo.ts).
+  useEffect(() => dropEnded(), [view]);
   const pickSheet = useToastAbove();
 
   const show = useCallback((next: Pop) => {
@@ -496,15 +501,19 @@ export function SheetPage(props: SheetPageProps) {
       const repos = Object.fromEntries(closed.map((p) => inboxPullRepoKey(p.host, p.repo)).map((key) => [key, labelOf(key)]));
       const batch = keepClosed(closed, firstAt, repos);
       props.onToast?.({ icon: 'check', ...closedToast(closed, (key) => repos[key] ?? key), onUndo: () => undoClose(batch.id), noKey: true }, CLOSE_UNDO_MS);
+      // Close went from under the focus: it goes to this Close's Undo on its line.
+      setTimeout(() => document.querySelector<HTMLElement>(`[data-pr-closed-undo="${batch.id}"]`)?.focus());
     });
   /**
-   * Close's Undo (the toast's or the line's): reopens exactly what that Close closed, once, picks them again, and says
-   * how each went; one the server may still take later goes back to the line.
+   * Close's Undo (the toast's or the line's): reopens exactly what that Close closed, once, and says how each went in
+   * Open's select mode (from Merged too, so a refusal shows); one the server may still take later goes back to the line.
+   * What reopened is picked again only when nothing is picked: picks made since stay as they are. Focus goes to Done.
    */
   const undoClose = (batchId: number) =>
     queue(async () => {
       const batch = takeClosed(batchId);
       if (!batch) return;
+      if (now$.current.view !== 'open') props.onView('open');
       setSelecting(true);
       const outcomes = await runEach('reopen', batch.pulls, (pull) => inboxApi.pullReopen(pull.key, pull.machine ?? null), (pull) => {
         setClosedHere((was) => withoutKey(was, pull.key));
@@ -512,8 +521,13 @@ export function SheetPage(props: SheetPageProps) {
       });
       putBackClosed(batch, outcomes.flatMap((o) => (!o.ok && !reopenRefusedForGood(o.code) ? [o.pull] : [])));
       const reopened = outcomes.filter((o) => o.ok).map((o) => o.pull.key);
-      report('reopen', outcomes, [], new Set(reopened));
+      const pickedNow = now$.current.chosen;
+      report('reopen', outcomes, [], pickedNow.size > 0 ? pickedNow : new Set(reopened));
       if (reopened.length > 0) props.onToast?.({ icon: 'check', lead: toastLead('reopen', reopened.length) }, CLOSE_UNDO_MS);
+      setTimeout(() => {
+        const to = barRef.current?.querySelector<HTMLElement>('[data-pr-select="done"]') ?? (reopened[0] ? document.querySelector<HTMLElement>(`[data-pr-tile="${CSS.escape(reopened[0])}"]`) : null);
+        to?.focus();
+      });
     });
   /**
    * Start review thread: one thread per repository, one after another, each on its PRs' machine; a pick with a thread
@@ -1050,8 +1064,9 @@ export function SheetPage(props: SheetPageProps) {
             </button>
           )}
         </div>
-        {selectOn && !phone && ((picking && mergeNote) || mergeList) && (
-          <div className="ib-prs-under">
+        {/* Kept while select mode is on, at least a line tall, so a pick that brings or drops Merge's note moves nothing. */}
+        {selectOn && !phone && (
+          <div className="ib-prs-under" data-pr-under="">
             {picking && mergeNote}
             {mergeList}
           </div>

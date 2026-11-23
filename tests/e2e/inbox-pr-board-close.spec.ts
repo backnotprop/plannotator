@@ -9,14 +9,16 @@
  *     one row, Close last and outside the field's box, Done where it was before the pick, Merge's note under the bar.
  *  2. An own PR picked, Merge shown: Close at the same place.
  *  3. Close: the toast names the PR ("Closed #2039" and its title); the Undo line under the bar says the same.
- *  4. Two minutes later the toast is gone and the line stays; at five minutes it goes.
+ *  4. Two minutes later the toast is gone and the line stays; at five minutes its Undo goes, and its words once the
+ *     pointer leaves the board, so the grid never moves under the pointer (nor when Merge's note comes and goes, 1-2).
  *  5. Three closed: "Closed 3: …"; the line's Undo reopens exactly those three.
  *  6. The board as Reviews' right pane, three picked with Merge: still one row, Close outside the field.
  *  7. A phone: one row in the sheet, Close last, short of the right corner where Clear was; still so with Merge shown
- *     and on Merge's second tap (shot 09).
+ *     and on Merge's second tap (shot 09); two Undo lines, each Undo its own 44 px target (10). At 360 and 375 px,
+ *     fourteen picked with Merge armed: one row, every word whole, nothing past the sheet's edge (11).
  *  8. Light theme of 1. Close in the warning colour in both, unlike the other actions.
  *
- * Shots land in PLANNOTATOR_E2E_PROOF_DIR/inbox-pr-board-close, `01-…png` to `09-…png`.
+ * Shots land in PLANNOTATOR_E2E_PROOF_DIR/inbox-pr-board-close, `01-…png` to `11-…png`.
  */
 import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
@@ -76,13 +78,16 @@ const PULLS = [
   pull('mobile-app', 391, 'Bigger tap targets in settings'),
   pull('mobile-app', 388, 'Keep the draft when the app sleeps', { checks: 'pending' }),
   pull('mobile-app', 384, 'Fix the crash on rotate', { checks: 'failure' }),
+  // Enough for two-digit counts on a phone: with web-app's six, fourteen picked.
+  pull('docs-site', 77, 'Explain the retry settings', mine),
+  ...[76, 75, 74, 73, 72, 71, 70].map((n) => pull('docs-site', n, `Docs fix ${n}`)),
 ];
 const ANSWER = {
   fetched_at: UPDATED,
   hosts: [{ cli: 'gh', host: 'github.com', login: 'charlie-dunn' }],
   pulls: PULLS,
   links: {},
-  projects: { 'github.com/northwind/web-app': ['prj_web'], 'github.com/northwind/billing-svc': ['prj_billing'], 'github.com/northwind/mobile-app': ['prj_mobile'] },
+  projects: { 'github.com/northwind/web-app': ['prj_web'], 'github.com/northwind/billing-svc': ['prj_billing'], 'github.com/northwind/mobile-app': ['prj_mobile'], 'github.com/northwind/docs-site': ['prj_docs'] },
   cards: {},
   clis: { gh: 'signed_in' },
   unsigned: [],
@@ -204,6 +209,8 @@ test('desktop: one PR picked, then an own one; Close, its toast, the Undo line t
     expect(await box(board.locator('[data-pr-select="done"]'))).toEqual(doneBefore);
     await expectOneRow(page);
     await expect(board.locator('.ib-prs-under [data-pr-merge-hint]')).toHaveText('#2039 can’t merge now: it still needs a review.');
+    const grid = board.locator('.ib-prs-body');
+    const gridTop = (await box(grid)).y;
     // Close in the warning colour, unlike Hide and Start review thread.
     const colorOf = (selector: string) => board.locator(selector).evaluate((el) => getComputedStyle(el).color);
     const closeColor = await colorOf('[data-pr-close]');
@@ -222,6 +229,9 @@ test('desktop: one PR picked, then an own one; Close, its toast, the Undo line t
     await expect(board.locator('[data-pr-merge]')).toHaveText('Merge 1');
     await expectOneRow(page);
     expect(await box(board.locator('[data-pr-close]'))).toEqual(closeAt);
+    // Merge's note went with the pick that needed it: nothing below the bar moved.
+    await expect(board.locator('[data-pr-merge-hint]')).toHaveCount(0);
+    expect((await box(grid)).y, 'the grid stays put as the note comes and goes').toBe(gridTop);
     await shot(page, '02-own-picked-merge-dark.png');
 
     // 3. Close #2039: the toast names it, the line under the bar says it with Undo.
@@ -242,8 +252,15 @@ test('desktop: one PR picked, then an own one; Close, its toast, the Undo line t
     await expect(toast).toHaveCount(0);
     await expect(lines).toHaveCount(1);
     await shot(page, '04-undo-line-two-minutes-dark.png');
-    // Past five minutes from the close: the line goes with the server's window.
+    // Past five minutes from the close, the pointer on a tile: Undo goes at once, the words stay so nothing moves under
+    // the pointer; they go once it leaves the board.
+    await board.locator(`[data-pr-tile="${key('web-app', 2047)}"]`).hover();
+    const gridAtEnd = (await box(grid)).y;
     await page.clock.fastForward('03:01');
+    await expect(lines.first().locator('[data-pr-closed-undo]')).toHaveCount(0);
+    await expect(lines).toHaveCount(1);
+    expect((await box(grid)).y, 'nothing moves under the pointer at the end of the window').toBe(gridAtEnd);
+    await board.dispatchEvent('pointerleave');
     await expect(lines).toHaveCount(0);
 
     // 5. Three closed: one line; its Undo reopens exactly those three.
@@ -318,7 +335,54 @@ test('a phone: one row in the sheet, Close last and short of the corner where Cl
     await expect(sheet.locator('[data-pr-merge="confirm"]')).toBeVisible();
     await oneRowClearOfCorner("Merge's second tap");
     await shot(page, '09-phone-sheet-merge-confirm-light.png');
+
+    // Two Closes, two lines: on a finger each Undo is its own 44 px target, and the two never overlap.
+    await page.keyboard.press('Escape');
+    await board.locator(`[data-pr-tile="${key('web-app', 2050)}"]`).click();
+    await sheet.locator('[data-pr-close]').click();
+    await expect(page.locator('[data-pr-closed-line]')).toHaveCount(1);
+    await board.locator(`[data-pr-tile="${key('web-app', 2041)}"]`).click();
+    await sheet.locator('[data-pr-close]').click();
+    const undos = page.locator('[data-pr-closed-undo]');
+    await expect(undos).toHaveCount(2);
+    const [first, second] = [await box(undos.nth(0)), await box(undos.nth(1))];
+    for (const b of [first, second]) expect(b.height, 'an Undo a finger can hit').toBeGreaterThanOrEqual(44);
+    expect(second.y, 'the second Undo starts where the first ends, or below').toBeGreaterThanOrEqual(first.y + first.height);
+    await shot(page, '10-phone-two-undo-lines-light.png');
   } finally {
     await context.close();
   }
 });
+
+for (const width of [360, 375]) {
+  test(`a ${width} px phone: fourteen picked, Merge armed, one row inside the sheet, every word whole`, async ({ browser }) => {
+    const { context, page } = await open(browser, { width, height: 780, scheme: 'dark', phone: true, hash: '#prs' });
+    try {
+      const board = page.locator('[data-prs-page]');
+      await board.locator('[data-pr-select="select"]').click();
+      // Each repository's own box (dispatched: the second may sit under the sheet the first brought up).
+      for (const repoName of ['web-app', 'docs-site']) await board.getByRole('checkbox', { name: `Select all in ${repoName}` }).dispatchEvent('click');
+      const sheet = page.locator('.ib-prs-picksheet');
+      await expect(sheet.locator('[data-pr-picked]')).toHaveText('14 selected');
+      await expect(sheet.locator('[data-pr-close]')).toHaveText('Close 14');
+      await expect(sheet.locator('[data-pr-hide]')).toHaveText('Hide 14');
+      await sheet.locator('[data-pr-merge]').click();
+      await expect(sheet.locator('[data-pr-merge="confirm"]')).toHaveText('Confirm');
+      const buttons = sheet.locator('.ib-prs-pickrow > button');
+      const tops = new Set<number>();
+      for (const b of await buttons.all()) {
+        tops.add(Math.round((await box(b)).y));
+        expect(await b.evaluate((el) => el.scrollWidth <= el.clientWidth), 'its words whole').toBe(true);
+      }
+      expect([...tops], 'one row').toHaveLength(1);
+      expect(await sheet.locator('.ib-prs-pickrow > :last-child').getAttribute('data-pr-close')).toBe('');
+      const close = await box(sheet.locator('[data-pr-close]'));
+      expect(close.x + close.width, 'Close inside the sheet').toBeLessThanOrEqual(width - 12);
+      expect(await sheet.evaluate((el) => el.scrollWidth <= el.clientWidth), "nothing past the sheet's edge").toBe(true);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'no sideways scroll').toBe(true);
+      await shot(page, `11-phone-${width}-fourteen-confirm-dark.png`);
+    } finally {
+      await context.close();
+    }
+  });
+}

@@ -11,9 +11,9 @@
  * The one thing a shape cannot rule out: a crafted 26-character string in the ULID alphabet passes as an id. The Inbox
  * makes no such string from a person's words.
  *
- * One kind of line names more, by the owner's choice (approval "inbox-pr-board-close-safe"): the server's `pull_close`
- * line, one per close and per reopen from the Pull requests board, holds the PR's key (`host/owner/repo#n`), so a past
- * close can be confirmed later. Never its title, author or anyone's name.
+ * The server's `pull_close` line (approval "inbox-pr-board-close-safe"), one per close and per reopen from the Pull
+ * requests board, says how it went and never which PR: this log may be pasted in public. Which PR it was is kept only in
+ * the Inbox's own `pull-closes.jsonl` (packages/server/inbox-pull-closes.ts).
  *
  * The window imports this by relative path, so it stays free of imports. It is private: `@plannotator/core` is
  * published, and a new core export would need a release of core before the UI's.
@@ -60,17 +60,22 @@ export function debugRoute(path: string): string {
     .join("/");
 }
 
-/** A PR's key as the Inbox makes it (`host/owner/repo#12`, GitLab `!12`): anything else stays out of the line. */
+/** A PR's key as the Inbox makes it (`host/owner/repo#12`, GitLab `!12`): anything else is written as `*`. */
 const PULL_KEY = /^[A-Za-z0-9.-]{1,253}(?::\d{1,5})?\/[A-Za-z0-9._/-]{1,300}[#!]\d{1,9}$/;
-const PULL_CLOSE_CODES = new Set(["reopen_not_closed_here", "pull_unknown", "pull_merged", "pull_closed", "pull_open", "pull_state_unknown", "pull_close_failed"]);
+const PULL_CLOSE_CODES = new Set(["reopen_not_closed_here", "pull_unknown", "pull_merged", "pull_closed", "pull_open", "pull_state_unknown", "pull_close_failed", "threw"]);
+
+/** The PR's key for `pull-closes.jsonl`: the key when it is of the Inbox's shape, else `*`. Never for the debug log. */
+export function pullKeyForLog(key: string): string {
+  return PULL_KEY.test(key) ? key : "*";
+}
 
 /**
- * The server's `pull_close` line, one per close and per reopen from the Pull requests board: which (`act`), the PR's
- * key, how it ended (`ok`, the answer's `status`, a refusal's `code`), and how the press came (`via`, and `by`: this
- * window, or another machine's through its link). Never the PR's title or anyone's name.
+ * A close's or reopen's line from the Pull requests board: which (`act`), how it ended (`ok`, the answer's `status`, a
+ * refusal's `code`; `status` 0 with `code` `threw` when it threw before an answer), and how the press came (`via`, and
+ * `by`: this window, or another machine's through its link). No PR key, title or name: the debug log writes it as is.
  */
-export function pullCloseFields(act: "close" | "reopen", key: string, status: number, code: unknown, via: string, by: "window" | "machine"): Record<string, unknown> {
-  const fields: Record<string, unknown> = { act, key: PULL_KEY.test(key) ? key : "*", ok: status >= 200 && status < 300, status, via, by };
+export function pullCloseFields(act: "close" | "reopen", status: number, code: unknown, via: string, by: "window" | "machine"): Record<string, unknown> {
+  const fields: Record<string, unknown> = { act, ok: status >= 200 && status < 300, status, via, by };
   if (typeof code === "string") fields.code = PULL_CLOSE_CODES.has(code) ? code : "other";
   return fields;
 }

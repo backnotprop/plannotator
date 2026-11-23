@@ -9,7 +9,8 @@
  *  - (approval "inbox-pr-board-close-safe") Close anywhere but last of the actions, inside the field's box, or without
  *    its warning look; Merge's note inside the bar; a toast that doesn't name what closed; the Undo line under the bar
  *    not outliving another toast, a pick, select mode or the board leaving the screen, outliving the server's window,
- *    reopening anything but what that Close closed, or reopening it twice;
+ *    reopening anything but what that Close closed, or reopening it twice; Undo replacing picks made since, staying
+ *    silent on Merged, or leaving the focus nowhere; the focus not on the new line's Undo after Close;
  *  - a linked machine's PR closed or reopened here, or its Undo going anywhere but the machine that closed it.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. No gh: the window's fetch is stubbed.
@@ -136,8 +137,9 @@ function draw(over: Partial<SheetPageProps> = {}) {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
-  act(() => root!.render(<div className="pn-inbox"><SidebarProvider><SheetPage {...props} /></SidebarProvider></div>));
-  return { refreshed };
+  const render = (p: SheetPageProps) => act(() => root!.render(<div className="pn-inbox"><SidebarProvider><SheetPage {...p} /></SidebarProvider></div>));
+  render(props);
+  return { refreshed, redraw: (more: Partial<SheetPageProps>) => render({ ...props, ...more }) };
 }
 
 const click = (el: HTMLElement) => act(() => el.click());
@@ -319,7 +321,10 @@ test('one PR closed: the toast names its number and title, and the line keeps Un
   await answerAll([[200, { ok: true, key: key(7), url: '' }]]);
   expect(toasts[0]!.toast).toMatchObject({ lead: 'Closed #7', detail: 'Change 7' });
   expect(line()).toEqual(['Closed #7 Change 7.Undo']);
-  expect($('[data-pr-closed-lines]')!.getAttribute('aria-live')).toBe('polite');
+  // Said once, by the toast: the line is no live region, and its Undo is described by its words.
+  expect($('[data-pr-closed-lines]')!.getAttribute('aria-live')).toBeNull();
+  const undoNow = $('[data-pr-closed-undo]')!;
+  expect(document.getElementById(undoNow.getAttribute('aria-describedby')!)!.textContent).toBe('Closed #7 Change 7.');
   // Another pick, then another toast (Hide's, which also leaves select mode), the board gone and back: the line stays.
   click(tile(key(8))!);
   expect(line()).toEqual(['Closed #7 Change 7.Undo']);
@@ -380,4 +385,49 @@ test("the line goes when the server's window ends; a reopen the server refuses a
   expect(line()).toHaveLength(1);
   act(() => jest.advanceTimersByTime(1));
   expect(line()).toEqual([]);
+});
+
+test('Undo leaves picks made since alone; with none, it picks what reopened; the focus goes to the line\'s Undo after Close, to Done after Undo', async () => {
+  if (!hasDom) return;
+  draw();
+  click($('[data-pr-select="select"]')!);
+  click(tile(key(7))!);
+  click($('[data-pr-close]')!);
+  await answerAll([[200, { ok: true, key: key(7), url: '' }]]);
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(document.activeElement).toBe($('[data-pr-closed-undo]'));
+  // Something else picked since: Undo reopens #7 and leaves the picks as they are.
+  click(tile(key(9))!);
+  click($('[data-pr-closed-undo]')!);
+  await answerAll([[200, { ok: true, key: key(7), url: '' }]]);
+  expect(rows('reopened')).toEqual(['Reopened #7.']);
+  expect(pickedTiles()).toEqual([key(9)]);
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(document.activeElement).toBe($('[data-pr-select="done"]'));
+  // Nothing picked: what reopened is picked again.
+  click($('[data-pr-close]')!);
+  await answerAll([[200, { ok: true, key: key(9), url: '' }]]);
+  expect(pickedTiles()).toEqual([]);
+  click($('[data-pr-closed-undo]')!);
+  await answerAll([[200, { ok: true, key: key(9), url: '' }]]);
+  expect(pickedTiles()).toEqual([key(9)]);
+});
+
+test('Undo pressed on the Merged view goes back to Open, where a refusal shows in its words', async () => {
+  if (!hasDom) return;
+  const views: string[] = [];
+  draw({ onView: (v) => views.push(v) });
+  click($('[data-pr-select="select"]')!);
+  click(tile(key(7))!);
+  click($('[data-pr-close]')!);
+  await answerAll([[200, { ok: true, key: key(7), url: '' }]]);
+  act(() => root!.unmount());
+  host!.remove();
+  const { redraw } = draw({ view: 'merged', onView: (v) => views.push(v) });
+  click($('[data-pr-closed-undo]')!);
+  expect(views).toEqual(['open']);
+  redraw({ view: 'open' });
+  const late = 'Only a pull request closed here in the last 5 minutes can be reopened here.';
+  await answerAll([[409, { error: late, code: 'reopen_not_closed_here' }]]);
+  expect(rows('refused')).toEqual([`#7 ${late}`]);
 });

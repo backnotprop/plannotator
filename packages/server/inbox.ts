@@ -166,7 +166,7 @@ import { foldCheckoutFolderProjects } from "./inbox-checkout-folders";
 import { combineSuggestions, type InboxAgentWork } from "./inbox-combine-suggestions";
 import { createInboxTidy } from "./inbox-tidy";
 import { createInboxListVersions } from "./inbox-list-delta";
-import { debugRoute, INBOX_DEBUG_PATH, pullCloseFields, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
+import { debugRoute, INBOX_DEBUG_PATH, pullCloseFields, pullKeyForLog, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
 import { perfPhase, retainPerfPhases, syncSection, watchLoopStalls, withServerTiming } from "./inbox-perf";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
@@ -6795,8 +6795,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const key = typeof body.key === "string" && body.key.length > 0 && body.key.length <= 600 ? body.key : null;
         if (!key) throw new InboxError("validation_error", "key: a pull request key from the list.", { field: "key" });
         const reopen = path === "/api/inbox/pulls/reopen";
-        // One line per close and per reopen, whatever its end: kept in pull-closes.jsonl always, and in the debug log
-        // while it is on (`pull_close`, debug-log.ts). The key, never the title.
+        // One line per close and per reopen, whatever its end (a throw too): kept in pull-closes.jsonl always, with the
+        // PR's key; in the debug log while it is on, without it (`pull_close`, debug-log.ts). Never the title.
+        const by = fromDeviceDoor.has(req) ? "machine" : "window";
+        const line = (status: number, code: unknown) => {
+          const fields = pullCloseFields(reopen ? "reopen" : "close", status, code, via, by);
+          keepPullClose(inboxDir(dataDir), { ...fields, key: pullKeyForLog(key) });
+          debugLog?.note("pull_close", fields);
+        };
         const [answer, status] = await (async (): Promise<[Record<string, unknown>, number]> => {
           const closedHere = closedByInbox.get(key);
           if (reopen && !reopenAllowed(closedHere?.at, Date.now())) {
@@ -6816,10 +6822,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             pulls.markClosed(key);
           }
           return [{ serverSession, ok: true, key, url: pull.url }, 200];
-        })();
-        const closeLine = pullCloseFields(reopen ? "reopen" : "close", key, status, answer.code, via, fromDeviceDoor.has(req) ? "machine" : "window");
-        keepPullClose(join(dataDir, "inbox"), closeLine);
-        debugLog?.note("pull_close", closeLine);
+        })().catch((cause: unknown) => {
+          line(0, "threw");
+          throw cause;
+        });
+        line(status, answer.code);
         return json(answer, status);
       }
       if (path === "/api/inbox/events" && req.method === "GET") {

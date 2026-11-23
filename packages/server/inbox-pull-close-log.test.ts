@@ -1,9 +1,10 @@
 /**
  * The board's Close and its Undo each leave one line (approval "inbox-pr-board-close-safe", so a past close can be
  * confirmed later): always in `inbox/pull-closes.jsonl`, and as `pull_close` in the debug log while it is on, with
- * what (`act`), the PR's key, how it ended and how the press came; the request lines name the routes as themselves.
- * What regresses: a close or a reopen with no line, a refused reopen with no line, no line with the debug log off, the
- * PR's title in a line, or the routes logged as `/api/inbox/*\/*`.
+ * what (`act`), how it ended and how the press came (the kept line also with the PR's key; the debug line, which may be
+ * pasted in public, without it); the request lines name the routes as themselves. What regresses: a close or a reopen
+ * with no line, a refused reopen with no line, no line with the debug log off, the PR's title in a line, which PR in the
+ * debug log, or the routes logged as `/api/inbox/*\/*`.
  *
  * Starts an Inbox (one, on loopback, under a temp data dir, its gh a script): CI runs it.
  */
@@ -88,18 +89,20 @@ test("a close, its reopen and a refused reopen each write one pull_close line wi
 
     await flushInboxDebugLogs();
     const text = readFileSync(join(dataDir, "inbox", "debug.log"), "utf8");
+    // The debug log may be pasted in public: no title, and not which PR either.
     expect(text).not.toContain(TITLE);
+    expect(text).not.toContain(REPO);
     const all = text.trim().split("\n").map((line) => JSON.parse(line) as Json);
     const closes = all.filter((line) => line.ev === "pull_close");
     expect(closes.map(({ act, key, ok, status, code, via, by }) => ({ act, key, ok, status, code, via, by }))).toEqual([
-      { act: "close", key: KEY, ok: true, status: 200, code: undefined, via: "local", by: "window" },
-      { act: "reopen", key: KEY, ok: true, status: 200, code: undefined, via: "local", by: "window" },
-      { act: "reopen", key: KEY, ok: false, status: 409, code: "reopen_not_closed_here", via: "local", by: "window" },
+      { act: "close", key: undefined, ok: true, status: 200, code: undefined, via: "local", by: "window" },
+      { act: "reopen", key: undefined, ok: true, status: 200, code: undefined, via: "local", by: "window" },
+      { act: "reopen", key: undefined, ok: false, status: 409, code: "reopen_not_closed_here", via: "local", by: "window" },
     ]);
     for (const line of closes) expect(typeof line.t).toBe("number");
-    // The same three, kept in their own file.
+    // The same three, kept in their own file, with which PR.
     const kept = keptLines(dataDir);
-    expect(kept.map(({ act, key, ok, code }) => ({ act, key, ok, code }))).toEqual(closes.map(({ act, key, ok, code }) => ({ act, key, ok, code })));
+    expect(kept.map(({ act, key, ok, code }) => ({ act, key, ok, code }))).toEqual(closes.map(({ act, ok, code }) => ({ act, key: KEY, ok, code })));
     for (const line of kept) expect(typeof line.t).toBe("number");
     const routes = all.filter((line) => line.ev === "req_start").map((line) => line.route);
     expect(routes).toContain("/api/inbox/pulls/close");
