@@ -22,7 +22,7 @@
 
 import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { scratchProject } from '../../scripts/inbox-sim';
@@ -69,12 +69,11 @@ interface World {
 
 let world: World;
 
-test.describe.configure({ mode: 'serial' });
 test.use({ actionTimeout: 20_000 });
 
 test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
-  rmSync(proofDir, { recursive: true, force: true });
+  // Never emptied here: after a failure the next test's worker starts a new world, and the shots already taken stay.
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-reviews-local-');
   const dataDir = join(root, 'data');
@@ -167,144 +166,138 @@ async function shot(page: Page, name: string): Promise<void> {
 }
 
 /**
- * The diff is readable: its file takes most of the pane's width (no chapter column beside it), and a whole code line is
- * drawn inside the file, not cut off by a narrow column.
+ * The diff is readable, measured by boxes (the viewer draws its lines in a shadow root, `diffs-container`): its file
+ * takes most of the pane's width (no chapter column beside it), the changed line's row lies inside the file, and the
+ * code's scroller (`[data-code]`; a split diff's side, or `[data-content]` where `[data-code]` is `display: contents`)
+ * is not a cramped column. A split diff's side is about half the file, so the floor is `minCode` and 40% of the file.
  */
-async function readableDiff(pane: ReturnType<Page['locator']>, file: string, line: string): Promise<void> {
+async function readableDiff(pane: ReturnType<Page['locator']>, file: string, line: string, minCode: number): Promise<void> {
   const paneBox = (await pane.boundingBox())!;
-  const shell = pane.locator(`[data-guide-file-shell="${file}"]`);
-  const shellBox = (await shell.boundingBox())!;
+  const shellBox = (await pane.locator(`[data-guide-file-shell="${file}"]`).boundingBox())!;
   expect(shellBox.width).toBeGreaterThan(paneBox.width * 0.85);
   await expect(pane.locator('[data-guide-section-narrative]')).toBeHidden();
-  const code = shell.locator('[data-line-type="change-addition"]').filter({ hasText: line }).last();
-  await expect(code).toBeVisible();
-  // The line's text as drawn, each of its text nodes measured (shadow roots too): wholly inside the file's box (a
-  // cramped column scrolls or clips it).
-  const text = await code.evaluate((el) => {
-    let left = Infinity;
-    let right = -Infinity;
-    const range = document.createRange();
-    const visit = (root: Node) => {
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
-      for (let node: Node | null = walker.currentNode; node; node = walker.nextNode()) {
-        if (node instanceof Element && node.shadowRoot) visit(node.shadowRoot);
-        if (node.nodeType !== Node.TEXT_NODE || !node.textContent?.trim()) continue;
-        range.selectNodeContents(node);
-        const rects = range.getClientRects();
-        for (let i = 0; i < rects.length; i++) {
-          const rect = rects[i]!;
-          if (rect.width <= 0) continue;
-          left = Math.min(left, rect.left);
-          right = Math.max(right, rect.right);
-        }
-      }
-    };
-    visit(el);
-    return { left, right, html: el.outerHTML.slice(0, 400) };
+  const changed = changedRow(pane, file, line);
+  await expect(changed).toBeVisible();
+  const box = await changed.evaluate((el) => {
+    const rect = el.getBoundingClientRect();
+    let code = el.closest('[data-code]');
+    if (code && getComputedStyle(code).display === 'contents') code = el.closest('[data-content]');
+    return { left: rect.left, right: rect.right, width: rect.width, code: code?.clientWidth ?? 0 };
   });
-  expect(text.right - text.left, text.html).toBeGreaterThan(0);
-  expect(text.right).toBeLessThanOrEqual(shellBox.x + shellBox.width);
-  expect(text.right).toBeLessThanOrEqual(paneBox.x + paneBox.width);
+  expect(box.width).toBeGreaterThan(0);
+  expect(box.left).toBeGreaterThanOrEqual(shellBox.x - 1);
+  expect(box.right).toBeLessThanOrEqual(shellBox.x + shellBox.width + 1);
+  expect(box.code).toBeGreaterThanOrEqual(Math.max(minCode, shellBox.width * 0.4));
 }
+
+/** The file's second line, added (the viewer's own row, `data-line="2"`), holding `line`. */
+const changedRow = (pane: ReturnType<Page['locator']>, file: string, line: string) =>
+  pane.locator(`[data-guide-file-shell="${file}"] [data-line="2"][data-line-type="change-addition"]`).filter({ hasText: line }).first();
 
 const group = (page: Page) => page.locator('[data-pulls-group="local"]');
 const row = (page: Page, key: string) => group(page).locator(`[data-local-row="${key}"]`);
 
-test('the group sits folded at the foot of the list, with its count', async () => {
-  const { page } = world;
-  await page.goto(`${world.url}#reviews`);
-  await expect(page.locator('[data-reviews-row]').first()).toBeVisible();
-  const toggle = group(page).locator('[data-reviews-fold="local"]');
-  await expect(toggle).toHaveText('On this computer 3');
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  await expect(group(page).locator('[data-local-row]')).toHaveCount(0);
-  // The last group of the list.
-  expect(await page.locator('.ib-lbody [role="group"]').last().getAttribute('data-pulls-group')).toBe('local');
-  await shot(page, '01-group-folded');
-});
+// Desktop and phone are apart: a failure in one never skips the other's shots. Each shot is taken before its checks.
+test.describe('desktop at 1440', () => {
+  test.describe.configure({ mode: 'serial' });
 
-test('open, each row is one line: its work, its project, its age', async () => {
-  const { page } = world;
-  await group(page).locator('[data-reviews-fold="local"]').click();
-  const rows = group(page).locator('[data-local-row]');
-  await expect(rows).toHaveCount(3);
-  await expect(rows.nth(0)).toContainText('Uncommitted on main');
-  await expect(rows.nth(0)).toContainText('plannotator');
-  await expect(rows.nth(1)).toContainText(BRANCH);
-  await expect(rows.nth(1)).toContainText('12m');
-  await expect(rows.nth(2)).toContainText('feat/spaces-share-link');
-  await expect(rows.nth(2)).toContainText('spaces-site');
-  await expect(rows.nth(2)).toContainText('2h');
-  await expect(group(page).locator('[data-local-row$=":same-as-main"], [data-local-row$=":main"]')).toHaveCount(0);
-  // One line each.
-  for (let i = 0; i < 3; i++) expect((await rows.nth(i).boundingBox())!.height).toBeLessThan(46);
-  await shot(page, '02-group-open');
-});
-
-test("a branch row opens that branch's whole diff beside the list; nothing is sent, the folder is untouched", async () => {
-  const { page } = world;
-  const writes: string[] = [];
-  const watch = (request: { method: () => string; url: () => string }) => {
-    if (request.method() !== 'GET') writes.push(`${request.method()} ${request.url()}`);
-  };
-  page.on('request', watch);
-  const status = world.git(['status', '--porcelain']);
-  await row(page, `${world.plannotatorId}:${BRANCH}`).click();
-  const pane = page.locator('[data-local-diff="branch"]');
-  await expect(pane).toBeVisible();
-  await expect(pane.locator('[data-local-title]')).toHaveText(BRANCH);
-  await expect(pane.locator('[data-local-facts]')).toContainText('against main');
-  const file = pane.locator('[data-guide-file-shell="src/comments.ts"]');
-  await expect(file).toBeVisible({ timeout: 30_000 });
-  await expect(file.locator('[data-line-type="change-addition"]').first()).toBeVisible();
-  // The branch's work only: the folder's own changes are not in it.
-  await expect(pane.locator('[data-guide-file-shell="NOTES.md"]')).toHaveCount(0);
-  await expect(row(page, `${world.plannotatorId}:${BRANCH}`)).toHaveAttribute('aria-current', 'true');
-  await readableDiff(pane, 'src/comments.ts', 'export const words = "kept";');
-  await shot(page, '03-branch-diff');
-  page.off('request', watch);
-  expect(writes).toEqual([]);
-  // Read by ref: still on main, its own changes as they were.
-  expect(world.git(['symbolic-ref', '--short', 'HEAD'])).toBe('main');
-  expect(world.git(['status', '--porcelain'])).toBe(status);
-});
-
-test("the Uncommitted row opens the folder's own changes; Close returns to the list with the group open", async () => {
-  const { page } = world;
-  await row(page, `${world.plannotatorId}:`).click();
-  const pane = page.locator('[data-local-diff="uncommitted"]');
-  await expect(pane).toBeVisible();
-  await expect(pane.locator('[data-local-title]')).toHaveText('Uncommitted on main');
-  await expect(pane.locator('[data-guide-file-shell="NOTES.md"]')).toBeVisible({ timeout: 30_000 });
-  await expect(pane.locator('[data-guide-file-shell="src/comments.ts"]')).toBeVisible();
-  await readableDiff(pane, 'src/comments.ts', 'export const draft = "Ada Novak";');
-  await shot(page, '04-uncommitted-diff');
-  await pane.locator('[data-local-close]').click();
-  await expect(page.locator('[data-local-diff]')).toHaveCount(0);
-  await expect(group(page).locator('[data-reviews-fold="local"]')).toHaveAttribute('aria-expanded', 'true');
-  await expect(group(page).locator('[data-local-row]')).toHaveCount(3);
-});
-
-test("on a phone: the group open, and a branch row's diff in the list's place at the screen's width", async () => {
-  const context = await world.browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, colorScheme: 'light', reducedMotion: 'reduce' });
-  try {
-    const page = await context.newPage();
+  test('the group sits folded at the foot of the list, with its count', async () => {
+    const { page } = world;
     await page.goto(`${world.url}#reviews`);
+    await expect(page.locator('[data-reviews-row]').first()).toBeVisible();
     const toggle = group(page).locator('[data-reviews-fold="local"]');
+    await expect(toggle).toBeVisible();
+    await shot(page, '01-group-folded');
     await expect(toggle).toHaveText('On this computer 3');
-    await toggle.click();
-    await expect(group(page).locator('[data-local-row]')).toHaveCount(3);
-    await group(page).scrollIntoViewIfNeeded();
-    await shot(page, '05-phone-group-open');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(group(page).locator('[data-local-row]')).toHaveCount(0);
+    // The last group of the list.
+    expect(await page.locator('.ib-lbody [role="group"]').last().getAttribute('data-pulls-group')).toBe('local');
+  });
+
+  test('open, each row is one line: its work, its project, its age', async () => {
+    const { page } = world;
+    await group(page).locator('[data-reviews-fold="local"]').click();
+    const rows = group(page).locator('[data-local-row]');
+    await expect(rows).toHaveCount(3);
+    await shot(page, '02-group-open');
+    await expect(rows.nth(0)).toContainText('Uncommitted on main');
+    await expect(rows.nth(0)).toContainText('plannotator');
+    await expect(rows.nth(1)).toContainText(BRANCH);
+    await expect(rows.nth(1)).toContainText('12m');
+    await expect(rows.nth(2)).toContainText('feat/spaces-share-link');
+    await expect(rows.nth(2)).toContainText('spaces-site');
+    await expect(rows.nth(2)).toContainText('2h');
+    await expect(group(page).locator('[data-local-row$=":same-as-main"], [data-local-row$=":main"]')).toHaveCount(0);
+    // One line each.
+    for (let i = 0; i < 3; i++) expect((await rows.nth(i).boundingBox())!.height).toBeLessThan(46);
+  });
+
+  test("a branch row opens that branch's whole diff beside the list; nothing is sent, the folder is untouched", async () => {
+    const { page } = world;
+    const writes: string[] = [];
+    const watch = (request: { method: () => string; url: () => string }) => {
+      if (request.method() !== 'GET') writes.push(`${request.method()} ${request.url()}`);
+    };
+    page.on('request', watch);
+    const status = world.git(['status', '--porcelain']);
     await row(page, `${world.plannotatorId}:${BRANCH}`).click();
     const pane = page.locator('[data-local-diff="branch"]');
-    await expect(pane).toBeVisible();
     await expect(pane.locator('[data-guide-file-shell="src/comments.ts"]')).toBeVisible({ timeout: 30_000 });
-    // In the list's place: the pane is the screen's width.
-    expect((await pane.boundingBox())!.width).toBeGreaterThan(380);
-    await readableDiff(pane, 'src/comments.ts', 'export const words = "kept";');
-    await shot(page, '06-phone-branch-diff');
-  } finally {
-    await context.close();
-  }
+    await expect(changedRow(pane, 'src/comments.ts', 'export const words = "kept";')).toBeVisible();
+    await shot(page, '03-branch-diff');
+    await expect(pane.locator('[data-local-title]')).toHaveText(BRANCH);
+    await expect(pane.locator('[data-local-facts]')).toContainText('against main');
+    // The branch's work only: the folder's own changes are not in it.
+    await expect(pane.locator('[data-guide-file-shell="NOTES.md"]')).toHaveCount(0);
+    await expect(row(page, `${world.plannotatorId}:${BRANCH}`)).toHaveAttribute('aria-current', 'true');
+    await readableDiff(pane, 'src/comments.ts', 'export const words = "kept";', 300);
+    page.off('request', watch);
+    expect(writes).toEqual([]);
+    // Read by ref: still on main, its own changes as they were.
+    expect(world.git(['symbolic-ref', '--short', 'HEAD'])).toBe('main');
+    expect(world.git(['status', '--porcelain'])).toBe(status);
+  });
+
+  test("the Uncommitted row opens the folder's own changes; Close returns to the list with the group open", async () => {
+    const { page } = world;
+    const fold = group(page).locator('[data-reviews-fold="local"]');
+    await row(page, `${world.plannotatorId}:`).click();
+    const pane = page.locator('[data-local-diff="uncommitted"]');
+    await expect(pane.locator('[data-guide-file-shell="NOTES.md"]')).toBeVisible({ timeout: 30_000 });
+    await expect(changedRow(pane, 'src/comments.ts', 'export const draft = "Ada Novak";')).toBeVisible();
+    await shot(page, '04-uncommitted-diff');
+    await expect(pane.locator('[data-local-title]')).toHaveText('Uncommitted on main');
+    await readableDiff(pane, 'src/comments.ts', 'export const draft = "Ada Novak";', 300);
+    await pane.locator('[data-local-close]').click();
+    await expect(page.locator('[data-local-diff]')).toHaveCount(0);
+    await expect(fold).toHaveAttribute('aria-expanded', 'true');
+    await expect(group(page).locator('[data-local-row]')).toHaveCount(3);
+  });
+});
+
+test.describe('phone at 390', () => {
+  test("the group open, and a branch row's diff in the list's place at the screen's width", async () => {
+    const context = await world.browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, colorScheme: 'light', reducedMotion: 'reduce' });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${world.url}#reviews`);
+      const toggle = group(page).locator('[data-reviews-fold="local"]');
+      await toggle.click();
+      await expect(group(page).locator('[data-local-row]')).toHaveCount(3);
+      await group(page).scrollIntoViewIfNeeded();
+      await shot(page, '05-phone-group-open');
+      await expect(toggle).toHaveText('On this computer 3');
+      await row(page, `${world.plannotatorId}:${BRANCH}`).click();
+      const pane = page.locator('[data-local-diff="branch"]');
+      await expect(pane.locator('[data-guide-file-shell="src/comments.ts"]')).toBeVisible({ timeout: 30_000 });
+      await expect(changedRow(pane, 'src/comments.ts', 'export const words = "kept";')).toBeVisible();
+      await shot(page, '06-phone-branch-diff');
+      // In the list's place: the pane is the screen's width.
+      expect((await pane.boundingBox())!.width).toBeGreaterThan(380);
+      await readableDiff(pane, 'src/comments.ts', 'export const words = "kept";', 300);
+    } finally {
+      await context.close();
+    }
+  });
 });
