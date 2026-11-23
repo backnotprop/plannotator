@@ -1227,6 +1227,8 @@ test.skipIf(!hasDom)('the agent adopts: "Resume this Claude Code session" above 
   expect(resume.querySelector('.ib-cp-plus, .ib-cp-stile')).toBeNull();
   pickOnly(el, 'resume:ses_asker');
   await settle();
+  // Picked: named as the agent it is, never as the row's words ("To Resume this … session").
+  expect(pill(el)?.getAttribute('aria-label')).toBe('To Claude Code. Change who gets this reply');
   act(() => button(el, 'Send').click());
   await settle();
   expect(replies().map((r) => r.body.to)).toEqual([{ launch: { agent: 'claude-code', project_id: PROJECT.id, resume: 'ses_asker' } }]);

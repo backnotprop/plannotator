@@ -36,9 +36,10 @@ export interface RecipientRow {
   alone?: boolean;
   /**
    * A start row (thread/replyStart.ts): a new session of this agent, in `project`; `asleep`, its machine is away.
-   * `resume`: the Resume row instead, the ended session (this id) started again as itself.
+   * `resume`: the Resume row instead, the ended session (this id) started again as itself; `title`, the list's words
+   * for it ("Resume this OpenCode session"), while the pill, the reply box and the sent line name the agent (`label`).
    */
-  start?: { project: string; asleep: boolean; resume?: string };
+  start?: { project: string; asleep: boolean; resume?: string; title?: string };
 }
 
 /** Whether a session can take the reply alone: it wrote here (the reply answers its message), or `to` reaches it (live). */

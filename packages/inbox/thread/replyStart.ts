@@ -66,9 +66,9 @@ export function replyResumeOf(block: InboxComposeLaunch | null | undefined, thre
   if (!agent) return null;
   const project = placeOf(block, thread, asking);
   if (!project) return null;
-  const label = `Resume this ${agent.name} session`;
+  // Picked, it is that same agent's session: the pill, "Reply to …" and the sent line say its name, the list what it does.
   return {
-    row: { session: `${RESUME_PREFIX}${session}`, host: agent.agent, label, short: label, state: 'live', start: { project: project.name, asleep, resume: session } },
+    row: { session: `${RESUME_PREFIX}${session}`, host: agent.agent, label: agent.name, short: agent.name, state: 'live', start: { project: project.name, asleep, resume: session, title: `Resume this ${agent.name} session` } },
     to: { launch: { agent: agent.agent, project_id: project.id, resume: session } },
   };
 }

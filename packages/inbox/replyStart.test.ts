@@ -58,7 +58,8 @@ test('the thread\'s machine is away: the row says it starts when it is back', ()
 test('Resume: the ended session itself, for an agent that adopts it, in the same folder; never for another agent', () => {
   const adopting = block({ agents: [{ agent: 'opencode', name: 'OpenCode', adopts: true }, { agent: 'claude-code', name: 'Claude Code' }] });
   const resume = replyResumeOf(adopting, thread, asking('opencode'))!;
-  expect(resume.row).toMatchObject({ session: 'resume:ses_asker', host: 'opencode', label: 'Resume this OpenCode session', start: { project: 'ledger', asleep: false, resume: 'ses_asker' } });
+  // The list says what it does; picked, the pill and the reply box name the agent.
+  expect(resume.row).toMatchObject({ session: 'resume:ses_asker', host: 'opencode', label: 'OpenCode', start: { project: 'ledger', asleep: false, resume: 'ses_asker', title: 'Resume this OpenCode session' } });
   expect(resume.to).toEqual({ launch: { agent: 'opencode', project_id: 'prj_ledger', resume: 'ses_asker' } });
   expect(isStartRow(resume.row.session)).toBe(true);
   // Claude Code there doesn't adopt; a session of an agent the machine lacks has no Resume (never another agent's).

@@ -454,7 +454,7 @@ export function ReplyRecipient({
           return (
             <div key={row.session} className="ib-rpick-row" data-recipient-row={row.session} data-recipient-start={row.host ?? ''} data-on={on ? '' : undefined}>
               {row.start ? (
-                <button type="button" className="ib-rpick-name" aria-label={`${row.label} in ${row.start.project}`} onClick={() => onOnly(row)}>
+                <button type="button" className="ib-rpick-name" aria-label={`${row.start.title ?? row.label} in ${row.start.project}`} onClick={() => onOnly(row)}>
                   {row.start.resume ? (
                     <span className="ib-atile">
                       <HostMark host={row.host} agent={row.start.resume} />
@@ -463,7 +463,7 @@ export function ReplyRecipient({
                     <StartTile host={row.host} />
                   )}
                   <span className="ib-rpick-l" dir="auto">
-                    {row.label}
+                    {row.start.title ?? row.label}
                   </span>
                   <span className="ib-cp-stin" dir="auto">
                     in {row.start.project}

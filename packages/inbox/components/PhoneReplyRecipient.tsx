@@ -105,9 +105,9 @@ export function PhoneReplyRecipient({
                       </span>
                     </>
                   }
-                  title={row.label}
+                  title={row.start.title ?? row.label}
                   detail={[`in ${row.start.project}`, row.start.asleep ? "starts when it's back" : null].filter(Boolean).join(' · ')}
-                  ariaLabel={`${row.label} in ${row.start.project}`}
+                  ariaLabel={`${row.start.title ?? row.label} in ${row.start.project}`}
                   selected={on}
                   attrs={{ 'data-recipient-row': row.session, 'data-recipient-start': row.host ?? '' }}
                   onClick={() => onOnly(row)}
