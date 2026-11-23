@@ -151,7 +151,7 @@ const EXCEPTIONS: Record<Sentence, Record<string, string>> = {
   "subagent reports to its agent": {
     ...Object.fromEntries(reminders.map((s) => [s, "main sessions only: no subagent gets the reminder"])),
     "note (opt-in)": "the note is read by the main agent; every tool and MCP surface carries the line",
-    "plannotator skill": "in the skill's description, lowercase in parentheses (checked below)",
+    "plannotator skill": "agents no longer load the skill to send: the tool and MCP surfaces they send with carry the line",
     ...Object.fromEntries(inboxCommands.map((s) => [s, "the person types it in their own session, never a subagent"])),
   },
   "reply_to check": {
@@ -337,9 +337,5 @@ describe("Inbox guidance parity across harnesses", () => {
       expect([surface, body.split(INBOX_SCENARIO_TABLE_RULE).length - 1]).toEqual([surface, 1]);
       expect([surface, body.includes(`${INBOX_OPTION_LINES_RULE}\n${INBOX_SCENARIO_TABLE_RULE}`)]).toEqual([surface, true]);
     }
-  });
-
-  test("the skill's description carries the subagent rule", () => {
-    expect(SURFACES["plannotator skill"]).toContain(`(${INBOX_SUBAGENT_RULE.charAt(0).toLowerCase()}${INBOX_SUBAGENT_RULE.slice(1, -1)})`);
   });
 });

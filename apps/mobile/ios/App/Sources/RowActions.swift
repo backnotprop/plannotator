@@ -125,6 +125,9 @@ final class RowActions {
 
   /// The reasons acts were not taken, said once: at once for an act the computer refused, later for acts that
   /// waited on the phone and gave way. Several at once (a bulk action sent when the computer was back) are counted.
+  /// Say something that offers no Undo (a new message sent), in the same toast.
+  func tell(_ words: ToastWords) { show(words) }
+
   func told() {
     var notices = session.actionNotices
     guard !notices.isEmpty else { return }

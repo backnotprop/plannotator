@@ -30,7 +30,8 @@ export const PRICED_PLANS: Readonly<Record<PricedPlan, PricedPlanFacts>> = {
   },
 };
 
-export const YEARLY_SAVING = 'one month free, 8 percent off';
+export const YEARLY_PERCENT_OFF = '8 percent off';
+export const YEARLY_SAVING = `one month free, ${YEARLY_PERCENT_OFF}`;
 export const REFUND_WINDOW_DAYS = 14;
 export const UNLIMITED_FACTS = ['Unlimited agents', 'Unlimited guests'] as const;
 const AGENTS_UNLIMITED_WORDS = 'Agents are unlimited and free on every plan, and do not count as members.';
@@ -88,12 +89,15 @@ export const LEDE = 'No fee per person. Agents and guests are free.';
 export const CLOSING_LINE = 'Bring your team.';
 export const QUESTIONS_HEADING = 'Questions.';
 
-export const BILLING_INTERVALS: ReadonlyArray<{ readonly interval: BillingInterval; readonly label: string }> = [
+// The Yearly side of the switch carries the saving next to its label, whichever side is chosen.
+export const BILLING_INTERVALS: ReadonlyArray<{
+  readonly interval: BillingInterval;
+  readonly label: string;
+  readonly off?: string;
+}> = [
   { interval: 'month', label: 'Monthly' },
-  { interval: 'year', label: 'Yearly' },
+  { interval: 'year', label: 'Yearly', off: YEARLY_PERCENT_OFF },
 ];
-
-export const SAVING_LINE = `Yearly: ${YEARLY_SAVING}`;
 
 const FREE = PRICED_PLANS.free;
 const PAID = PRICED_PLAN_ORDER.filter((plan) => PRICED_PLANS[plan].cents !== null);
