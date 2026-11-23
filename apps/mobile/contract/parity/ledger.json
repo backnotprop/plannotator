@@ -17832,7 +17832,8 @@
       "id": "window-only-messages",
       "title": "Window endpoints under messages with no door route",
       "surface": [
-        "window:/api/inbox/messages/:id/guide/review-image"
+        "window:/api/inbox/messages/:id/guide/review-image",
+        "window:/api/inbox/messages/:id/guide/review-markdown-image"
       ],
       "flows": [],
       "mobile": "later",
@@ -17849,7 +17850,8 @@
       "surface": [
         "window:/api/inbox/pulls/repo-file",
         "window:/api/inbox/pulls/repo-files",
-        "window:/api/inbox/pulls/review-image"
+        "window:/api/inbox/pulls/review-image",
+        "window:/api/inbox/pulls/review-markdown-image"
       ],
       "flows": [],
       "mobile": "later",

@@ -192,6 +192,7 @@
   "inbox-review-images.spec.ts": 30,
   "inbox-review-jumps.spec.ts": 18,
   "inbox-review-keys.spec.ts": 30,
+  "inbox-review-markdown.spec.ts": 35,
   "inbox-review-plus-button.spec.ts": 14,
   "inbox-review-selection-bar.spec.ts": 39,
   "inbox-root-scroll.spec.ts": 12,
