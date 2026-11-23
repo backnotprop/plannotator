@@ -5934,6 +5934,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * (what is new since the last look) and a reply's sent annotations. A Send asks for it with its reply
    * (`with_thread`), so the window draws the sent reply from that answer instead of reading the thread again.
    */
+  const writerRepo = (from: { root: string } | null | undefined): { repo?: InboxProjectRepo | null } => {
+    if (!from) return {};
+    const repo = repos.get(from.root);
+    return repos.known(from.root) ? { repo } : {};
+  };
   const windowThreadRead = async (threadId: string) => {
     // Images the messages show with no captured file yet: copied in the background; the read never waits (approval "inbox-image-viewer").
     if (store.thread(threadId)) imageCapture.schedule(threadId);
@@ -5945,6 +5950,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const pullKeys = codeReviewOn() ? pullOwners.keys(thread.thread_id) : [];
     const withRepo = {
       ...thread,
+      messages: thread.messages.map((message) => (message.from_project ? { ...message, from_project: { ...message.from_project, ...writerRepo(message.from_project) } } : message)),
       // `repo_known` (additive): resolved, so a null repo is "no origin" and the window need not read again for it.
       project: { ...thread.project, repo: repos.get(thread.project.root), ...(repos.known(thread.project.root) ? { repo_known: true as const } : {}) },
       ...(pullOwners.theirs(thread.thread_id) ? { pull_theirs: true as const } : {}),
@@ -6249,7 +6255,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const decisions = open.map((decision) => {
           // The thread's own folder: `thread.project` is the head of a combined project.
           const root = store.thread(decision.thread.id)?.project.root;
-          return { ...decision, thread: { ...decision.thread, project: { ...decision.thread.project, repo: root ? repos.get(root) : null } } };
+          const writer = writerRepo(store.message(decision.message.id)?.from_project);
+          return { ...decision, message: { ...decision.message, ...writer }, thread: { ...decision.thread, project: { ...decision.thread.project, repo: root ? repos.get(root) : null } } };
         });
         return json({ serverSession, cursor: store.cursor(), decisions });
       }

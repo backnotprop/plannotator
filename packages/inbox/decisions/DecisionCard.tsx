@@ -198,7 +198,7 @@ export function DecisionCard(props: DecisionCardProps) {
   const { decision } = props;
   const q = decision.question;
   // The thread's repo, so `#123` and `owner/repo#123` link as in the thread (none: they stay plain).
-  const refRepo = useRefRepo(decision.thread.project.repo ?? null);
+  const refRepo = useRefRepo(decision.message.repo ?? decision.thread.project.repo ?? null);
   const refProps = { githubRepo: refRepo?.display, repoHost: refRepo?.host };
   const kind = readInboxQuestionKind(q.kind);
   const facts = cardFacts(decision);

@@ -13,9 +13,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import type { InboxReplyDraft, InboxThread } from "@plannotator/core/inbox-types";
+import type { InboxDecision, InboxProjectRepo, InboxReplyDraft, InboxThread } from "@plannotator/core/inbox-types";
 import { INBOX_BRIDGE_POLL_PATH, INBOX_WAKES_META_KEY } from "@plannotator/shared/inbox/connection";
 import { startInboxServer, type InboxServer } from "./inbox";
 
@@ -29,14 +29,14 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-async function setup() {
+async function setup(options: { readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null> } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-reply-recipient-")));
   roots.push(root);
   const billing = join(root, "billing-api");
   const plannotator = join(root, "plannotator");
   mkdirSync(billing, { recursive: true });
   mkdirSync(plannotator, { recursive: true });
-  const server = await startInboxServer({ dataDir: join(root, "data") });
+  const server = await startInboxServer({ dataDir: join(root, "data"), ...options });
   servers.push(server);
   const client = new Client({ name: "inbox-reply-recipient-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -125,7 +125,7 @@ describe("an agent answering from another folder keeps its project", () => {
     const fromHere = await claudeSends(client, billing, "ses-c", "Totals match.", started.message_id);
 
     const messages = (await thread(server, started.thread_id)).messages;
-    expect(messages.find((m) => m.id === fromThere.message_id)?.from_project).toEqual({ name: "plannotator", root: plannotator });
+    expect(messages.find((m) => m.id === fromThere.message_id)?.from_project).toMatchObject({ name: "plannotator", root: plannotator });
     expect(messages.find((m) => m.id === fromHere.message_id)?.from_project).toBeUndefined();
     expect(messages.find((m) => m.id === started.message_id)?.from_project).toBeUndefined();
 
@@ -135,6 +135,38 @@ describe("an agent answering from another folder keeps its project", () => {
     const seen = JSON.stringify(read);
     expect(seen).not.toContain(plannotator);
     expect(seen).toContain('"from_project":{"name":"plannotator"}');
+  });
+});
+
+describe("the writer's repository rides on the window's reads", () => {
+  test("a reply from another folder carries that folder's repo on the thread and its decision; an agent's read never does", async () => {
+    const { server, client, billing, plannotator } = await setup({
+      readProjectRepo: async (root) => (basename(root) === "plannotator" ? { display: "backnotprop/plannotator", host: "github.com" } : null),
+    });
+    const started = await claudeSends(client, billing, "ses-a", "The invoice PDF export is in.");
+    const fromThere = await claudeSends(client, plannotator, "ses-b", "Fixed in #3951.\n\n:::question\nMerge #3951?\n- Yes\n- No\n:::", started.message_id);
+
+    let writer: InboxThread["messages"][number] | undefined;
+    for (let i = 0; i < 50 && !writer?.from_project?.repo; i++) {
+      writer = (await thread(server, started.thread_id)).messages.find((m) => m.id === fromThere.message_id);
+      if (!writer?.from_project?.repo) await Bun.sleep(20);
+    }
+    expect(writer?.from_project?.repo).toEqual({ display: "backnotprop/plannotator", host: "github.com" });
+    expect((await thread(server, started.thread_id)).project.repo).toBeNull();
+
+    const setDecisionMode = (on: boolean) =>
+      fetch(`${base(server)}/api/inbox/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: server.serverSession, experimental: { decision_mode: on } }) });
+    expect((await setDecisionMode(true)).status).toBe(200);
+    try {
+      const decisions = ((await (await fetch(`${base(server)}/api/inbox/decisions`)).json()) as { decisions: InboxDecision[] }).decisions;
+      const asked = decisions.find((d) => d.message.id === fromThere.message_id);
+      expect(asked?.message.repo).toEqual({ display: "backnotprop/plannotator", host: "github.com" });
+    } finally {
+      await setDecisionMode(false);
+    }
+
+    const read = await client.callTool({ name: "read_thread", arguments: { thread_id: started.thread_id, agent_session: "ses-a", format: "full" } });
+    expect(JSON.stringify(read)).not.toContain("backnotprop/plannotator");
   });
 });
 
