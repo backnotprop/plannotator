@@ -9,6 +9,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
+import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
 import type { InboxAuthor, InboxQuestion } from "@plannotator/core/inbox-types";
 import { InboxError, parseInboxLine } from "./schema";
 import { InboxStore } from "./store";
@@ -19,10 +20,11 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function open(): { store: InboxStore; dir: string } {
+function open(): { store: InboxStore; dir: string; project: ReturnType<InboxStore["ensureProject"]> } {
   const dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-supersede-"));
   roots.push(dir);
-  return { store: InboxStore.open(dir), dir };
+  const store = InboxStore.open(dir);
+  return { store, dir, project: store.ensureProject({ name: "billing-svc", root: "/work/billing-svc" }) };
 }
 
 const AGENT: Extract<InboxAuthor, { kind: "agent" }> = { kind: "agent", host: "claude-code", session: "ses_a", name: null };
@@ -68,8 +70,7 @@ function answerFor(q: InboxQuestion, label: string): QuestionAnswer {
 }
 
 function setup() {
-  const { store, dir } = open();
-  const project = store.ensureProject({ name: "billing-svc", root: "/work/billing-svc" });
+  const { store, dir, project } = open();
   const first = store.sendMessage({ project_id: project.id, author: AGENT, body: WORKER }).message;
   const [q1, q2] = store.questionsOf(first.id) as [InboxQuestion, InboxQuestion];
   return { store, dir, project, first, q1, q2 };
@@ -220,6 +221,8 @@ describe("a question no longer open is left as it is and the message is sent", (
     expect(old.state).toBe("sent");
     expect(old.answer?.selected).toEqual(["Yes"]);
     expect(store.supersededBy(sent.message.id)).toEqual([]);
+    expect(store.messageWire(sent.message.id)).not.toHaveProperty("supersede_skipped");
+    expect(sent.message).not.toHaveProperty("supersede_skipped");
     expect(sent.skipped).toEqual([
       { ref: `${first.id}/${q2.key}`, id: `${first.id}/${q2.key}`, was: "answered", new_question: `${sent.message.id}/${sent.message.questions![0]!.key}` },
     ]);
@@ -251,6 +254,52 @@ describe("a question no longer open is left as it is and the message is sent", (
     expect(store.questionsOf(first.id)[0]!.superseded_by).toBeNull();
     expect(store.listRow(first.thread_id)!.back_from_archive).toBe(true);
     expect(sent.skipped?.map(inboxSupersedeSkipLine)).toEqual([`${ref} was already closed, so it was left as it is.`, `${first.id} has no open question left, so it was left as it is.`]);
+  });
+
+  test("each state no longer open reads as it is: the person's skip, a Mark read, a withdrawal; a message with no question stays refused", () => {
+    const skipped = setup();
+    skipped.store.sendReply(skipped.first.id, { idempotency_key: "s1", skip: [skipped.q1.key] });
+    const read = setup();
+    read.store.markRead(read.first.thread_id, true);
+    const dropped = setup();
+    dropped.store.sendMessage({ project_id: dropped.first.project_id, author: AGENT, body: "Not that one.", reply_to: dropped.first.id, supersedes: [`${dropped.first.id}/${dropped.q1.key}`] });
+    for (const [world, was] of [[skipped, "skipped"], [read, "closed"], [dropped, "dropped"]] as const) {
+      const ref = `${world.first.id}/${world.q1.key}`;
+      const sent = world.store.sendMessage({ project_id: world.first.project_id, author: AGENT, body: "Still on it.", reply_to: world.first.id, supersedes: [ref] });
+      expect(sent.skipped?.map((s) => [s.id, s.was])).toEqual([[ref, was]]);
+    }
+    const plain = skipped.store.sendMessage({ project_id: skipped.first.project_id, author: AGENT, body: "CI is green.", reply_to: skipped.first.id }).message;
+    const cursor = skipped.store.cursor();
+    const error = refusal(() => skipped.store.sendMessage({ project_id: skipped.first.project_id, author: AGENT, body: "x", reply_to: skipped.first.id, supersedes: [plain.id] }));
+    expect(error.message).toContain(`${plain.id}: that message has no question.`);
+    expect(skipped.store.cursor()).toBe(cursor);
+  });
+
+  test("a key alone that only questions no longer open share skips each of them", () => {
+    const { store, first, q2 } = setup();
+    const again = store.sendMessage({ project_id: first.project_id, author: AGENT, body: WORKER, reply_to: first.id }).message;
+    store.resolveThread(first.id, true);
+    const sent = store.sendMessage({ project_id: first.project_id, author: AGENT, body: "Back on this.", reply_to: first.id, supersedes: [q2.key] });
+    expect(sent.skipped?.map((s) => [s.ref, s.id, s.was])).toEqual([
+      [q2.key, `${first.id}/${q2.key}`, "closed"],
+      [q2.key, `${again.id}/${q2.key}`, "closed"],
+    ]);
+  });
+
+  test("a whole message whose first record is an action item still names the new question open on its own", () => {
+    const { store, project } = open();
+    const plan = { id: "att_01JAAAAAAAAAAAAAAAAAAAAAAA", path: "/work/billing/plan.md", named_path: null, name: "plan.md", kind: "markdown" as const, sent_sha256: "0".repeat(64), size: 1, sent_at: "", sent_mtime: "2026-11-09T00:00:00.000Z" };
+    const asked = store.sendMessage({
+      project_id: project.id,
+      author: AGENT,
+      body: ":::action\nApprove the deploy on Vercel\n:::",
+      attachments: [plan],
+      attachment_questions: [{ attachment_id: plan.id, questions: parseInboxQuestionBlocks(":::question\nShip it today?\n\n- [ ] Yes\n- [ ] No\n:::") }],
+    }).message;
+    expect(store.questionsOf(asked.id).map((q) => q.kind)).toEqual(["action", "single"]);
+    store.resolveThread(asked.id, true);
+    const sent = store.sendMessage({ project_id: project.id, author: AGENT, body: queueBlock(), reply_to: asked.id, supersedes: [asked.id] });
+    expect(sent.skipped).toEqual([{ ref: asked.id, id: asked.id, was: "no_open_question", new_question: `${sent.message.id}/${sent.message.questions![0]!.key}` }]);
   });
 
   test("already replaced, and a whole message with nothing open, are skipped with their own words", () => {

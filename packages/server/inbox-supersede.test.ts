@@ -118,7 +118,7 @@ describe("send_message supersedes earlier questions", () => {
     expect(states).toEqual(["open", "superseded"]);
   });
 
-  test("an id that names no open question of the thread refuses the whole send with invalid_supersedes, listing the open keys", async () => {
+  test("an id that names no question of the thread refuses the whole send with invalid_supersedes, listing the open keys", async () => {
     const w = await world();
     const first = structured<Sent>(await w.call("send_message", { body: WORKER }));
     const [q1, q2] = first.questions;

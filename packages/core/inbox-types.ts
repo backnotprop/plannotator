@@ -1726,13 +1726,7 @@ export interface InboxQuestionSetAside {
   previous: Pick<InboxQuestionRecord, "answer" | "revision" | "sent_revision" | "picked_by" | "picked_at" | "action_result">;
 }
 
-/**
- * Derived, never stored. `superseded`: the agent replaced or withdrew the
- * question (`superseded_by`); it wins over `closed`, so a resolved thread's
- * card still says what replaced it. `closed`: the thread is archived, or the
- * person's Mark read closed the question (`set_aside_at`).
- */
-export type InboxSupersedeSkipState = "answered" | "skipped" | "replaced" | "dropped" | "closed" | "marked" | "no_open_question";
+export type InboxSupersedeSkipState = "answered" | "skipped" | "replaced" | "dropped" | "closed" | "marked" | "marked_sent" | "no_open_question";
 
 export interface InboxSupersedeSkip {
   ref: string;
@@ -1741,6 +1735,12 @@ export interface InboxSupersedeSkip {
   new_question: string | null;
 }
 
+/**
+ * Derived, never stored. `superseded`: the agent replaced or withdrew the
+ * question (`superseded_by`); it wins over `closed`, so a resolved thread's
+ * card still says what replaced it. `closed`: the thread is archived, or the
+ * person's Mark read closed the question (`set_aside_at`).
+ */
 export type InboxQuestionState = "open" | "picked" | "sent" | "closed" | "superseded";
 
 /**

@@ -7,7 +7,7 @@ export function inboxSupersedeSkipState(record: InboxQuestionRecord, resolved: b
   if (personMarked) return "marked";
   const state = inboxQuestionState(record, resolved);
   if (state === "superseded") return record.superseded_by?.key ? "replaced" : "dropped";
-  if (state === "sent") return record.answer?.skipped === true ? "skipped" : "answered";
+  if (state === "sent") return record.kind === "action" ? "marked_sent" : record.answer?.skipped === true ? "skipped" : "answered";
   return "closed";
 }
 
@@ -18,6 +18,7 @@ const WAS_WORDS: Record<InboxSupersedeSkipState, string> = {
   dropped: "was already dropped",
   closed: "was already closed",
   marked: "was already marked by the person (their answer reaches you in a few seconds)",
+  marked_sent: "was already marked by the person",
   no_open_question: "has no open question left",
 };
 
