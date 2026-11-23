@@ -218,7 +218,7 @@ import { guideReviewOf, guidePullKey, inboxGuideFileContents, inboxGuideRoute, r
 import { guideReviewImage, pullReviewImage, reviewImageHttp } from "./inbox-review-image";
 import { guideReviewMarkdownImage, pullReviewMarkdownImage } from "./inbox-review-markdown-image";
 import { guidePackageChanges, packageCardOn, pullPackageChanges } from "./inbox-package-changes";
-import { createInboxRepoCache } from "./inbox-repos";
+import { createInboxRepoCache, INBOX_REPO_GIT_TIMEOUT_MS } from "./inbox-repos";
 import { createGitlabHosts, unnamedForgeHost, type GitlabHosts } from "./inbox-gitlab-hosts";
 import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-refs";
 import { systemSetupRoute } from "./inbox-system-setup";
@@ -5934,17 +5934,31 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * (what is new since the last look) and a reply's sent annotations. A Send asks for it with its reply
    * (`with_thread`), so the window draws the sent reply from that answer instead of reading the thread again.
    */
+  const writerRepo = (from: { root: string } | null | undefined): { repo?: InboxProjectRepo | null } => {
+    if (!from) return {};
+    const repo = repos.get(from.root);
+    return repos.known(from.root) ? { repo } : {};
+  };
+  const writerReposRead = async (froms: readonly ({ root: string } | null | undefined)[]): Promise<void> => {
+    const roots = [...new Set(froms.flatMap((from) => (from && !repos.known(from.root) ? [from.root] : [])))];
+    if (roots.length === 0) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([Promise.all(roots.map((root) => repos.refresh(root))), new Promise<void>((done) => (timer = setTimeout(done, INBOX_REPO_GIT_TIMEOUT_MS)))]);
+    clearTimeout(timer);
+  };
   const windowThreadRead = async (threadId: string) => {
     // Images the messages show with no captured file yet: copied in the background; the read never waits (approval "inbox-image-viewer").
     if (store.thread(threadId)) imageCapture.schedule(threadId);
     const thread = perfPhase("thread", () => store.windowThread(threadId));
     const cursor = store.cursor();
     if (!thread) return null;
+    await writerReposRead(thread.messages.map((message) => message.from_project));
     // `pull_theirs`: the person handed this thread only teammates' PRs, so its reviews take no verdict.
     // `pull_keys` (Code review on): the PRs it owns, which its review may be posted to (Post to GitHub/GitLab).
     const pullKeys = codeReviewOn() ? pullOwners.keys(thread.thread_id) : [];
     const withRepo = {
       ...thread,
+      messages: thread.messages.map((message) => (message.from_project ? { ...message, from_project: { ...message.from_project, ...writerRepo(message.from_project) } } : message)),
       // `repo_known` (additive): resolved, so a null repo is "no origin" and the window need not read again for it.
       project: { ...thread.project, repo: repos.get(thread.project.root), ...(repos.known(thread.project.root) ? { repo_known: true as const } : {}) },
       ...(pullOwners.theirs(thread.thread_id) ? { pull_theirs: true as const } : {}),
@@ -6246,10 +6260,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // A snoozed thread's decisions wait with it (approval "inbox-snooze"): they come back with the thread.
         const snoozedNow = store.snoozedThreads();
         const open = store.openDecisions({ projectId: projectFilterOf(url) }).filter((decision) => !snoozedNow.has(decision.thread.id));
+        await writerReposRead(open.map((decision) => store.message(decision.message.id)?.from_project));
         const decisions = open.map((decision) => {
           // The thread's own folder: `thread.project` is the head of a combined project.
           const root = store.thread(decision.thread.id)?.project.root;
-          return { ...decision, thread: { ...decision.thread, project: { ...decision.thread.project, repo: root ? repos.get(root) : null } } };
+          const repo = root ? repos.get(root) : null;
+          const from = store.message(decision.message.id)?.from_project;
+          const writer = from ? { repo: repos.known(from.root) ? (repos.get(from.root) ?? repo) : null } : {};
+          return { ...decision, message: { ...decision.message, ...writer }, thread: { ...decision.thread, project: { ...decision.thread.project, repo } } };
         });
         return json({ serverSession, cursor: store.cursor(), decisions });
       }
