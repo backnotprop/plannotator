@@ -533,7 +533,7 @@ export async function runGuideImport(argv: string[], cwd = process.cwd(), io: Gu
   if (ownUrl && !ownRef) return unrecognizedPr(ownUrl, "The guide's source.pr.url");
   const ownCanonical = ownRef ? canonicalPRUrl(ownRef) : undefined;
   if (argUrl && ownCanonical && argUrl.toLowerCase() !== ownCanonical.toLowerCase()) {
-    return { code: 1, stderr: `--pr ${prOpt.value} is not the PR the guide names (source.pr.url ${ownUrl}). Drop --pr, or fix source.pr in the guide.\n` };
+    return { code: 1, stderr: `--pr ${prOpt.value} is not the PR the guide names, source.pr.url ${ownUrl}\nDrop --pr, or fix source.pr in the guide.\n` };
   }
 
   const pr = argRef ?? ownRef;

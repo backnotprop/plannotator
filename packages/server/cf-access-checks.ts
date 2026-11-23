@@ -70,7 +70,7 @@ async function waitConnected(child: ReturnType<typeof Bun.spawn>, metricsPort: n
 function loginMiss(url: string, team: string, seen: { status: number; location: string | null } | { error: string }): string {
   if ("error" in seen) return `${url} does not answer yet (${seen.error}). A new address can take a minute or two to appear; check that its DNS record exists in Cloudflare and is proxied (orange cloud).`;
   if (seen.status >= 300 && seen.status < 400) {
-    return `A visit to ${url} without a sign-in was sent to ${seen.location ?? "nowhere"}, not to your Cloudflare Access login page at ${team}. Check that the Access application covers this name and that your Zero Trust team domain is ${team}.`;
+    return `A visit to ${url} without a sign-in was sent to ${seen.location ?? "nowhere"} and not to your Cloudflare Access login page at ${team}. Check that the Access application covers this name and that your Zero Trust team domain is ${team}.`;
   }
   if (seen.status === 401 || seen.status === 403) {
     return `A visit to ${url} without a sign-in got HTTP ${seen.status} instead of a redirect to your Cloudflare Access login page (${team}). Check in the Cloudflare dashboard (Zero Trust, Access, Applications) that an application covers this name with a sign-in method.`;

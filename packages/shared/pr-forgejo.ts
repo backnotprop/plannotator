@@ -53,7 +53,7 @@ function missingTokenMessage(origin: string): string {
   return (
     `${origin} needs an access token for this. Create one on the instance (Settings, Applications) with the scopes ` +
     `${FORGEJO_TOKEN_SCOPES.join(", ")}, then add it under forgejoTokens in ${configPath} ` +
-    `(\`{ "forgejoTokens": { "${origin}": "<token>" } }\`), or set PLANNOTATOR_FORGEJO_TOKEN and PLANNOTATOR_FORGEJO_URL=${origin}.`
+    `(\`{ "forgejoTokens": { "${origin}": "<token>" } }\`), or set PLANNOTATOR_FORGEJO_TOKEN and PLANNOTATOR_FORGEJO_URL=${origin}`
   );
 }
 
@@ -275,11 +275,11 @@ async function request(
           const scheme = next.protocol.replace(/:$/, "");
           if (next.host === new URL(ctx.apiOrigin).host && (scheme === "https" || scheme === "http")) {
             throw new ForgejoApiError(
-              `Forgejo redirected off the API origin (${next.origin}): this server answers on ${scheme}. Use the PR's ${scheme}:// link (${next.origin}/…) instead.`,
+              `Forgejo redirected off the API origin to ${next.origin} because this server answers on ${scheme}. Use the PR's link that starts ${next.origin}/ instead.`,
               res.status,
             );
           }
-          throw new ForgejoApiError(`Forgejo redirected off the API origin (${next.origin})`, res.status);
+          throw new ForgejoApiError(`Forgejo redirected off the API origin to ${next.origin}`, res.status);
         }
         if (res.status === 303 && method !== "GET" && method !== "HEAD") {
           method = "GET";

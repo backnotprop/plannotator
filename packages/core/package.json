@@ -32,6 +32,7 @@
     "./code-file": "./code-file.ts",
     "./compress": "./compress.ts",
     "./crypto": "./crypto.ts",
+    "./link-tail": "./link-tail.ts",
     "./embed-insert": "./embed-insert.ts",
     "./html-embed": "./html-embed.ts",
     "./external-annotation": "./external-annotation.ts",

@@ -224,7 +224,7 @@ describe("authentication", () => {
     const httpRef: ForgejoPRRef = { ...ref, host: "codeberg.org", scheme: "http" };
     const { runtime, calls } = fake(() => new Response(null, { status: 301, headers: { location: "https://codeberg.org/api/v1/repos/acme/widgets/pulls/5" } }));
     const error = await fetchFjPR(runtime, httpRef).then(() => null, (e: Error) => e);
-    expect(error?.message).toContain("this server answers on https. Use the PR's https:// link (https://codeberg.org/…) instead.");
+    expect(error?.message).toContain("this server answers on https. Use the PR's link that starts https://codeberg.org/ instead.");
     expect(calls.every((c) => c.url.startsWith("http://codeberg.org/"))).toBe(true);
   });
 

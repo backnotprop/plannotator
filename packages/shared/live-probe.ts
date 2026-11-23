@@ -149,10 +149,10 @@ export function buildForceAppFailureMessage(
     return `--app: ${targetUrl} is a Plannotator server; live annotation never proxies a Plannotator server, because the proxied page would get same-origin access to it`;
   }
   if (probe.probeError !== null) {
-    return `--app: could not reach ${targetUrl}: ${probe.probeError}`;
+    return `--app: could not reach ${targetUrl} (${probe.probeError})`;
   }
   if (probe.probeRedirectedTo !== null) {
-    return `--app: ${targetUrl} redirected off its loopback origin (${probe.probeRedirectedTo}); live mode requires the app to serve HTML from the probed origin`;
+    return `--app: ${targetUrl} redirected off its loopback origin to ${probe.probeRedirectedTo} but live mode requires the app to serve HTML from the probed origin`;
   }
   return `--app: ${targetUrl} did not return an HTML page`;
 }

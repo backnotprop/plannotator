@@ -109,8 +109,9 @@ export function approvedPermissionDecision(toolInput: unknown, approval: Pending
 // --- Copy (what Claude reads in the denied ExitPlanMode result) -----------
 
 export function waitingDenyText(version: number, url?: string): string {
-  const where = url ? ` (${url})` : ''
-  return `Plan v${version} is open in Plannotator for the user's review${where}. It is NOT approved. Stay in plan mode and do not implement. End your turn. The user's decision will arrive as a message from the plannotator plugin. Until then you may answer questions, and you may revise the plan by calling ExitPlanMode again.`
+  // The link ends its line: a terminal links up to the next space, so a `).` after it would be part of the link.
+  const where = url ? `: ${url}\n` : '. '
+  return `Plan v${version} is open in Plannotator for the user's review${where}It is NOT approved. Stay in plan mode and do not implement. End your turn. The user's decision will arrive as a message from the plannotator plugin. Until then you may answer questions, and you may revise the plan by calling ExitPlanMode again.`
 }
 
 export function revisedDenyText(version: number): string {

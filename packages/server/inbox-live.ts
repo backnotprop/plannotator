@@ -163,13 +163,13 @@ function refuse(message: string): never {
  * (Plannotator's own). Returns the URL without its fragment.
  */
 export function checkInboxLiveUrl(raw: unknown, reservedPorts: Iterable<number>): URL {
-  if (typeof raw !== "string" || raw.trim() === "") refuse("a running local site's address, e.g. http://localhost:5173/.");
+  if (typeof raw !== "string" || raw.trim() === "") refuse("a running local site's address, e.g. http://localhost:5173/");
   if (raw.length > INBOX_LIVE_URL_MAX) refuse(`at most ${INBOX_LIVE_URL_MAX} characters.`);
   let url: URL;
   try {
     url = new URL(raw.trim());
   } catch {
-    refuse(`${raw.trim()} is not an address; give one like http://localhost:5173/.`);
+    refuse(`${raw.trim()} is not an address; give one like http://localhost:5173/`);
   }
   if (url.protocol !== "http:") refuse("only an http:// address on this computer opens live.");
   if (!isLoopbackHostname(url.hostname)) refuse(`${url.host} is not this computer: give its https:// address, or a localhost one.`);

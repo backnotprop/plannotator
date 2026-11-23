@@ -109,7 +109,7 @@ async function callService(
     return await doFetch(target, { ...init, signal: init.signal ?? AbortSignal.timeout(GUIDE_SHARE_REQUEST_TIMEOUT_MS) });
   } catch (e) {
     const reason = e instanceof Error ? (e.name === "TimeoutError" ? `no response within ${GUIDE_SHARE_REQUEST_TIMEOUT_MS / 1000}s` : e.message) : String(e);
-    throw new GuideShareError(`Guide share service unreachable at ${serviceUrl}: ${reason}`);
+    throw new GuideShareError(`Guide share service unreachable at ${serviceUrl} (${reason})`);
   }
 }
 

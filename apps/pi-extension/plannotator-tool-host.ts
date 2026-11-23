@@ -214,7 +214,7 @@ export function getProcessPiReviewRegistry(): PiReviewRegistry {
 export function fixedPortBusyText(open: PiOpenReview, ownedByCaller: boolean): string {
 	const lead = "Plannotator did not open: this Pi runs Plannotator on one fixed port (remote mode or PLANNOTATOR_PORT), so only one review can be open at a time.";
 	if (!ownedByCaller) {
-		return `${lead} A review that another Pi session opened is still open at ${open.url}. You cannot close it from here: ask the user to finish or close that review in its browser tab, then try again.`;
+		return `${lead} A review that another Pi session opened is still open at ${open.url}\nYou cannot close it from here: ask the user to finish or close that review in its browser tab, then try again.`;
 	}
 	if (open.kind === "plan") return `${lead} The plan review ${open.id} is open; wait for the reviewer's decision.`;
 	return `${lead} ${open.subject} (${open.id}) is open: wait for the reviewer's decision, or close it first with action "close" and session "${open.id}".`;

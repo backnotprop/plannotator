@@ -72,7 +72,7 @@ describe("thread_pulls", () => {
     const url = "https://bitbucket.org/acme/api/pull-requests/3";
     const result = await w.call({ thread_id: w.thread, add: [`${url}/diff`], ...FILLED });
     expect(result.isError).toBeUndefined();
-    expect(textOf(result).split("\n")[0]).toBe(`Thread ${w.thread}: Added ${url}. Nothing was sent to the person.`);
+    expect(textOf(result).split("\n")[0]).toBe(`Thread ${w.thread}: Added ${url} . Nothing was sent to the person.`);
     expect(w.refreshed).toEqual([["bitbucket.org/acme/api#3:pull"]]);
     expect(threadPullsText(w.context, w.thread, "ses_a")[1]).toStartWith(`- ${url} `);
   });
@@ -82,7 +82,7 @@ describe("thread_pulls", () => {
     const w = world(async (projectId) => (asked.push(projectId), "gitlab.acme.dev"));
     const result = await w.call({ thread_id: w.thread, add: ["acme/api!7"], ...FILLED });
     expect(asked).toEqual([w.project.id]);
-    expect(textOf(result).split("\n")[0]).toBe(`Thread ${w.thread}: Added https://gitlab.acme.dev/acme/api/-/merge_requests/7. Nothing was sent to the person.`);
+    expect(textOf(result).split("\n")[0]).toBe(`Thread ${w.thread}: Added https://gitlab.acme.dev/acme/api/-/merge_requests/7 . Nothing was sent to the person.`);
     expect(w.store.threadPulls(w.thread).map((p) => p.url)).toEqual(["https://gitlab.acme.dev/acme/api/-/merge_requests/7"]);
     await w.call({ thread_id: w.thread, remove: ["acme/api!7"], ...FILLED });
     expect(w.store.threadPulls(w.thread)).toEqual([]);

@@ -20,6 +20,7 @@ import {
   formatUrlSize,
   createShortShareUrl,
   loadFromPasteId,
+  shareFragmentValue,
 } from '../utils/sharing';
 
 export interface ImportResult {
@@ -91,7 +92,7 @@ type ShortShareUrlLifecycle =
 // of those signals. So: run share parsing only when the hash looks like a
 // share payload. Everything else is left for Viewer to scroll to (or ignore).
 function looksLikeSharePayload(rawHash: string): boolean {
-  const hash = rawHash.replace(/^#/, '').split('?')[0];
+  const hash = shareFragmentValue(rawHash.replace(/^#/, '').split('?')[0]);
   return hash.length >= 30 && /^[A-Za-z0-9_-]+$/.test(hash) && /[A-Z]/.test(hash);
 }
 
@@ -167,9 +168,14 @@ export function useSharing(
         // Extract key and optional paste origin from fragment: #key=<k>&paste=<base64url>
         const fragment = window.location.hash.slice(1);
         const params = new URLSearchParams(fragment);
-        const encryptionKey = params.get('key') ?? undefined;
-        const pasteFromFragment = params.get('paste')
-          ? atob(params.get('paste')!.replace(/-/g, '+').replace(/_/g, '/'))
+        const fragmentValue = (name: string) => {
+          const value = params.get(name);
+          return value === null ? undefined : shareFragmentValue(value);
+        };
+        const encryptionKey = fragmentValue('key');
+        const pastedOrigin = fragmentValue('paste');
+        const pasteFromFragment = pastedOrigin
+          ? atob(pastedOrigin.replace(/-/g, '+').replace(/_/g, '/'))
           : undefined;
 
         const payload = await loadFromPasteId(pasteId, pasteFromFragment ?? pasteApiUrl, encryptionKey);

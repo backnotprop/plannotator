@@ -393,7 +393,7 @@ export function resolveAgentLaunch(
       ? `${notOnPath}.`
       : install
         ? `${agent.label} is not installed: ${notOnPath}. Install it with \`${install}\`, then try again.`
-        : `${agent.label} is not installed: ${notOnPath}. Install it as its docs say (${agent.docsUrl}), then try again.`,
+        : `${agent.label} is not installed: ${notOnPath}. Install it as its docs say, then try again. Its docs: ${agent.docsUrl}`,
   };
 }
 

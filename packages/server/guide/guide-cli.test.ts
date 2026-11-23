@@ -450,7 +450,7 @@ describe("plannotator guide", () => {
       const other = "https://github.com/acme/widgets/pull/999";
       const fromSnapshot = await runGuideCli(["import", "--snapshot", "snap.json", "--pr", other], {}, workDir);
       expect(fromSnapshot.code).toBe(1);
-      expect(fromSnapshot.stderr).toBe(`--pr ${other} is not the PR the guide names (source.pr.url ${FIXTURE_V1_PR.source.pr!.url}). Drop --pr, or fix source.pr in the guide.\n`);
+      expect(fromSnapshot.stderr).toBe(`--pr ${other} is not the PR the guide names, source.pr.url ${FIXTURE_V1_PR.source.pr!.url}\nDrop --pr, or fix source.pr in the guide.\n`);
 
       writeFileSync(join(workDir, "guide.json"), JSON.stringify({ ...AUTHORED, source: { pr: { url: "https://github.com/acme/widgets/pull/7" } } }));
       writeFileSync(join(workDir, "guide.patch"), TWO_FILE_PATCH);

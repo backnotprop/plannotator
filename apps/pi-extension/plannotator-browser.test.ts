@@ -28,6 +28,8 @@ import {
 	stopAllBrowserDecisionSessions,
 } from "./plannotator-browser.ts";
 import { sessionOpenedMessage } from "./session-opened.ts";
+import { fixedPortBusyText, type PiOpenReview } from "./plannotator-tool-host.ts";
+import { linksNotEndingClean } from "../../tests/helpers/printed-links.ts";
 import { NO_BROWSER } from "../../tests/helpers/no-browser.ts";
 
 afterAll(() => {
@@ -200,6 +202,8 @@ describe("sessionOpenedMessage", () => {
 	test("carries the URL for a local session", () => {
 		const message = withRemote("0", () => sessionOpenedMessage("Code review opened", url));
 		expect(message.split(url).length - 1).toBe(1);
+		// A terminal links up to the next space: no full stop right after the URL.
+		expect(linksNotEndingClean(message)).toEqual([]);
 	});
 
 	test("says no browser opens when PLANNOTATOR_BROWSER says none", () => {
@@ -220,6 +224,14 @@ describe("sessionOpenedMessage", () => {
 		const message = withRemote("1", () => sessionOpenedMessage("Code review opened", url));
 		expect(message.split(url).length - 1).toBe(1);
 		expect(message).toContain("forward the port");
+		expect(linksNotEndingClean(message)).toEqual([]);
+	});
+
+	test("the fixed-port answer names another session's open review by a link that ends at whitespace", () => {
+		const open = { id: "pn-abc123", kind: "review", subject: "Code review", url: `${url}/` } as unknown as PiOpenReview;
+		const text = fixedPortBusyText(open, false);
+		expect(text).toContain(`${url}/`);
+		expect(linksNotEndingClean(text)).toEqual([]);
 	});
 });
 

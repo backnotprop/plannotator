@@ -28,6 +28,10 @@ describe('readShareKey', () => {
     expect(readShareKey('#key=')).toBeNull();
     expect(readShareKey('#other=1')).toBeNull();
   });
+
+  test('a link clicked with the punctuation of its sentence (`#key=….`) still opens the guide', () => {
+    for (const tail of [').', '.', ',', ';', ':', ']', '>', '"', "'"]) expect(readShareKey(`#key=abc-DEF_123${tail}`)).toBe('abc-DEF_123');
+  });
 });
 
 describe('loadHostedEncryptedSnapshot', () => {

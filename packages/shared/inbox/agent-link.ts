@@ -92,7 +92,7 @@ export const INBOX_STATE_EVERY_TICKS = 5;
 
 /** The first time a call finds no `plannotator` to start the Inbox with. */
 export const INBOX_INSTALL_TEXT =
-  "The Plannotator Inbox is not running, and there is no plannotator command on this machine to start it: install Plannotator (https://plannotator.ai/docs/getting-started/installation/), then call again.";
+  "The Plannotator Inbox is not running, and there is no plannotator command on this machine to start it: install Plannotator from https://plannotator.ai/docs/getting-started/installation/ and then call again.";
 /** Every later call that finds none, in the same session. */
 export const INBOX_STILL_MISSING_TEXT = "The Plannotator Inbox is not running (no plannotator command on PATH).";
 
@@ -446,7 +446,7 @@ export async function openInboxInBrowser(
     if (/unknown inbox option: --open|unknown command/i.test(why)) return { error: INBOX_OPEN_UPDATE_TEXT };
     return { error: `Could not open the Plannotator Inbox: ${why}` };
   }
-  return { error: "There is no plannotator command on this machine: install Plannotator (https://plannotator.ai/docs/getting-started/installation/)." };
+  return { error: "There is no plannotator command on this machine: install Plannotator from https://plannotator.ai/docs/getting-started/installation/" };
 }
 
 /** An older plannotator answered `/plannotator-inbox` with "Unknown inbox option: --open". */
