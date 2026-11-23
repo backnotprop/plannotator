@@ -7,7 +7,7 @@
  *
  * The failures this catches: a folded generated file with no reason; the strip not opening the file; a card asked of
  * code review's `/api/package-changes` (which the Inbox does not serve) or under another snapshot than the message; a
- * lockfile's card hidden while it is folded; the npm consent button offered (the Inbox has no lookup); a host that
+ * lockfile's card hidden while it is folded, or cut off by a folded box of the header's height; the npm consent button offered (the Inbox has no lookup); a host that
  * passed no `images` reading anything. (A real browser: tests/e2e/inbox-review-generated.spec.ts.)
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -165,6 +165,9 @@ test.skipIf(!hasDom)("a thread's guided review: code review's package cards, rea
   expect(within(LOCK, '[data-pn-generated-badge]').length).toBe(1);
   expect(within(LOCK, `[data-package-changes-path="${LOCK}"]`).length).toBe(1);
   expect(within(MANIFEST, '[data-pn-generated-collapsed-notice]').length).toBe(0);
+  // The folded file's box follows what is drawn under its header (a floor, not a fixed height that cuts them off).
+  const lockBox = shell(LOCK).querySelector<HTMLElement>('[data-guide-code-view-mounted="true"]')!;
+  expect([lockBox.style.height, lockBox.style.minHeight !== '']).toEqual(['', true]);
   // Drawn, it stays still: the card's height reports and the file's re-measure do not draw each other for ever.
   const drawn = commits;
   await settle(10);

@@ -70,6 +70,17 @@ test("a pull request: the folded lockfiles say why, package.json and the lockfil
   await expect(tool.locator('[data-pn-generated-badge]')).toBeVisible();
   await expect(cardOf(page, TOOL_LOCK)).toBeVisible({ timeout: 30_000 });
   await expect(cardOf(page, TOOL_LOCK).locator('[data-package-row]').filter({ hasText: 'prettier' })).toHaveCount(1);
+  // Both inside the file's box, not cut off under a header-high fold.
+  const inside = await tool.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const selector = '[data-pn-generated-collapsed-notice], [data-package-changes="ready"]';
+    const parts = [...el.querySelectorAll(selector), ...[...el.querySelectorAll('diffs-container')].flatMap((view) => [...(view.shadowRoot?.querySelectorAll(selector) ?? [])])];
+    return parts.map((part) => {
+      const r = part.getBoundingClientRect();
+      return r.height > 0 && r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5;
+    });
+  });
+  expect(inside).toEqual([true, true]);
   await tool.screenshot({ path: join(parityDir, 'b5-01-lockfile-folded-reason-light.png') });
 
   // package-lock.json: folded with the reason, no card of its own (package.json's card reads it); the strip opens it.

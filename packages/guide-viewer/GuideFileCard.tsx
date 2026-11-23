@@ -209,8 +209,10 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
       ? Math.max(flush ? collapsedHeight : COLLAPSED_HEIGHT, measuredHeight)
       : diffHeight;
   // Fitting, a mounted box follows its content by itself; the last height holds it until the viewer has drawn. No
-  // `overflow: hidden` there: it would make the box the sticky header's scroller.
-  const followsContent = fitContent && mounted && !collapsed;
+  // `overflow: hidden` there: it would make the box the sticky header's scroller. A folded box too: under its header
+  // the renderer may draw why it is folded and what still reads while folded (a generated file's strip, a lockfile's
+  // package changes), which a box of the header's height alone would cut off.
+  const followsContent = fitContent && mounted;
 
   // A navigation target can live far outside the current outer window or in a
   // chapter that was just reopened. Force its CodeView first, then take the
