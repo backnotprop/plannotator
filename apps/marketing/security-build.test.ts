@@ -4,6 +4,7 @@ import { join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { ossMenu, readOssStars } from './src/lib/oss-stars';
+import { PLAN_CARDS } from './src/lib/spaces-pricing';
 
 const marketingRoot = fileURLToPath(new URL('.', import.meta.url));
 const hostileWaitlistUrl =
@@ -207,5 +208,37 @@ describe('the Spaces header on the built pages', () => {
     const { html } = await header('workspaces/pricing/index.html');
     expect(sitemap).toContain('<loc>https://plannotator.ai/workspaces/pricing/</loc>');
     expect(html).toContain('<meta name="robots" content="index, follow">');
+  });
+});
+
+describe('the Spaces pricing page as built', () => {
+  test('every card carries both prices for the switch and shows the monthly one first', async () => {
+    const html = await readFile(join(outputRoot, 'workspaces/pricing/index.html'), 'utf8');
+    const cards = [...html.matchAll(/<article class="pp-card"([^>]*)>([\s\S]*?)<\/article>/g)];
+    expect(cards.map(([, attrs]) => /data-plan="([^"]*)"/.exec(attrs)?.[1])).toEqual(PLAN_CARDS.map((card) => card.id));
+    for (const [index, [, attrs, inner]] of cards.entries()) {
+      const plan = PLAN_CARDS[index]!;
+      const month = plan.price('month');
+      const year = plan.price('year');
+      expect(attrs).toContain(`data-month-amount="${month.amount}"`);
+      expect(attrs).toContain(`data-year-amount="${year.amount}"`);
+      if (year.per !== null) expect(attrs).toContain(`data-year-per="${year.per}"`);
+      expect(inner).toContain(`<b aria-hidden="true">${month.amount}</b>`);
+    }
+  });
+
+  test('Monthly is the checked choice, and without scripts the switch is not shown', async () => {
+    const html = await readFile(join(outputRoot, 'workspaces/pricing/index.html'), 'utf8');
+    const group = /<div class="pp-sw" role="radiogroup"[^>]*>([\s\S]*?)<\/div>/.exec(html)?.[1] ?? '';
+    const radios = [...group.matchAll(/<button\b([^>]*)>([^<]*)<\/button>/g)].map(([, attrs, label]) => ({
+      label,
+      checked: /aria-checked="true"/.test(attrs),
+    }));
+    expect(radios).toEqual([
+      { label: 'Monthly', checked: true },
+      { label: 'Yearly', checked: false },
+    ]);
+    const noscript = [...html.matchAll(/<noscript>([\s\S]*?)<\/noscript>/g)].map(([, inner]) => inner).join('');
+    expect(noscript).toMatch(/\.pp-sw\{display:none\}/);
   });
 });
