@@ -160,7 +160,7 @@ export function MessageMenu(props: {
       {newThread && (
         <>
           <Menu.Item className="ib-pmi" label={NEW_THREAD_FROM_MESSAGE_LABEL} onClick={() => void askNewThreadFromMessage(message, newest.current)} data-new-thread-item="">
-            <Icon name="compose" size={15} />
+            <Icon name="moveOut" size={15} />
             {NEW_THREAD_FROM_MESSAGE_LABEL}
           </Menu.Item>
           <Menu.Separator className="ib-pm-sep" />

@@ -12,7 +12,7 @@ export const NEW_THREAD_FROM_MESSAGE_LABEL = 'New thread from this message';
  * word for word). A message with no words to quote (pictures only) drops the quoted part and keeps the id.
  */
 export const NEW_THREAD_FROM_MESSAGE_WORDS = (excerpt: string, messageId: string): string =>
-  `Move this message of yours to a new thread${excerpt ? `: "${excerpt}"` : ''} (${messageId}). Start a new thread, named as you see fit, that carries everything in it: its text, its files and its questions. Then, in this thread, close only that message's open questions as replaced and say where it went. Leave everything else here as it is.`;
+  `Move this message of yours to a new thread${excerpt ? `: "${excerpt}"` : ''} (${messageId}). Start a new thread, named as you see fit, that carries everything in it: its text, its files and its questions. Then, in this thread, withdraw only that message's open questions (they will read "No longer applies") and say where it went. Leave everything else here as it is.`;
 
 /** Offered on a message an agent with a session wrote: a script's post (no session) has nobody to ask. */
 export const newThreadFromMessageOffered = (message: InboxMessageWire): boolean => message.author.kind === 'agent' && !!message.author.session;
