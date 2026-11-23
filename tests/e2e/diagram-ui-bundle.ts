@@ -220,14 +220,17 @@ ${box}
   return { requests, navigations, errors };
 }
 
-/** Click the middle of every element drawn in a label, then press Enter in each field. */
-export async function clickEveryLabelElement(page: Page): Promise<number> {
-  const points = await page.evaluate(() =>
-    Array.from(document.querySelectorAll('#host foreignObject *'))
+/**
+ * Click the middle of every element drawn in a label, then press Enter in each field. `selector`: what a label is
+ * drawn as (Mermaid's HTML labels by default; Pele draws its labels as svg text).
+ */
+export async function clickEveryLabelElement(page: Page, selector = '#host foreignObject *'): Promise<number> {
+  const points = await page.evaluate((sel) =>
+    Array.from(document.querySelectorAll(sel))
       .map((e) => e.getBoundingClientRect())
       .filter((b) => b.width > 0 && b.height > 0)
       .map((b) => [b.x + b.width / 2, b.y + b.height / 2] as const),
-  );
+  selector);
   for (const [x, y] of points) await page.mouse.click(x, y);
   for (const field of await page.locator('#host input, #host textarea').all()) await field.press('Enter').catch(() => {});
   return points.length;

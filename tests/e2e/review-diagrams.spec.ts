@@ -45,17 +45,17 @@ digraph G { review -> hook -> binary; review -> engine; }
 Done.
 `;
 
-/** A fence neither engine parses (the hexagon is never closed): Pele gives it
- * to Mermaid, so the page asks for the Mermaid runtime file, and Mermaid's
- * error shows. */
-const BROKEN = `# Intake
+/** A fence Pele cannot draw and Mermaid can (an icon-only label): Pele gives
+ * it to Mermaid, so the page asks for the Mermaid runtime file, and Mermaid
+ * draws it. */
+const FALLS_BACK = `# Intake
 
 The intake as drawn today:
 
 \`\`\`mermaid
 flowchart LR
-  A[Start] --> B{{"Check"}
-  B --> C[Store]
+  P["fa:fa-user"] --> A[Start]
+  A --> B[Store]
 \`\`\`
 
 Done.
@@ -303,17 +303,17 @@ test('Retry after a failed engine load fetches the engine again and draws the di
   }
 });
 
-test('a failed Mermaid runtime load is fetched again under a new URL and Mermaid answers', async () => {
+test('a failed Mermaid runtime load is fetched again under a new URL and draws', async () => {
   // The engine's renderer re-attempts a failed runtime import once by itself;
   // the runtime URL it reads then carries a retry query. A fence Pele cannot
-  // parse is the one that reaches Mermaid: its parse error shows, never the
-  // Retry of a runtime that did not load.
-  const session = await review(BROKEN);
+  // draw is the one that reaches Mermaid: the re-fetched runtime draws it,
+  // with no Retry of a runtime that did not load.
+  const session = await review(FALLS_BACK);
   try {
     const asked: string[] = [];
     const { context, page } = await open(browser, session.url, 'read', (p) => failEngineFile(p, 'mermaid', asked));
     const block = page.locator('[data-diagram-block="mermaid"]').first();
-    await expect(block).toContainText('Parse error on line 2', { timeout: 30_000 });
+    await expect(block.locator('[data-diagram-inline] [data-diagram-svg] > svg:not(.pele)').first()).toBeVisible({ timeout: 30_000 });
     await expect(block.getByRole('button', { name: 'Retry' })).toHaveCount(0);
     expect(asked).toHaveLength(2);
     expect(asked[0]).toMatch(/^\/assets\/diagram-engine\/mermaid-[^?]+\.js$/);
