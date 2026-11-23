@@ -1,38 +1,12 @@
 ---
 import Base from '../../layouts/Base.astro';
+import SignupDialog from '../../components/spaces/SignupDialog.astro';
+import SpacesFootStrip from '../../components/spaces/SpacesFootStrip.astro';
+import SpacesTopStrip from '../../components/spaces/SpacesTopStrip.astro';
 import '../../styles/spaces/page.css';
 import '../../styles/spaces/signup.css';
 import '../../styles/spaces/site.css';
 import '../../styles/spaces/header.css';
-import { ossStarsLink, readOssStars } from '../../lib/oss-stars';
-
-const waitlistUrl =
-  import.meta.env.PUBLIC_WAITLIST_URL ||
-  'https://plannotator-waitlist.plannotator.workers.dev';
-
-// Cloudflare Turnstile sitekey. Public by design — embedded in the rendered
-// HTML on every visit. Override at build time via PUBLIC_TURNSTILE_SITEKEY
-// if you spin up a separate widget. Set to '' to disable the widget locally.
-const turnstileSitekey =
-  import.meta.env.PUBLIC_TURNSTILE_SITEKEY ?? '0x4AAAAAADUgxk47fMzTYOZp';
-
-// Display strings shown in the UI; the slug is what we send to the worker.
-const teamSizes = [
-  { slug: 'solo',    label: 'Just me' },
-  { slug: '2-5',     label: '2–5' },
-  { slug: '6-20',    label: '6–20' },
-  { slug: '21-50',   label: '21–50' },
-  { slug: '50+',     label: '50+' },
-];
-
-// The star count beside "Open source" comes from the snapshot checked into
-// src/data/ (bun apps/marketing/scripts/oss-stars.ts refreshes it). Read as
-// text so a missing or broken file leaves the link without a count instead of
-// failing the build.
-const ossSnapshot = Object.values(
-  import.meta.glob<string>('../../data/oss-stars.json', { query: '?raw', import: 'default', eager: true }),
-)[0];
-const oss = ossStarsLink(readOssStars(ossSnapshot));
 ---
 <Base
   title="Plannotator Spaces"
@@ -43,14 +17,14 @@ const oss = ossStarsLink(readOssStars(ossSnapshot));
     <script is:inline>document.documentElement.classList.add("pfc");</script>
     <!-- Light or dark before paint. The site's plannotator-theme cookie wins when it says light or dark;
          with no cookie (or "system") this page follows the system setting. Base.astro only ever adds
-         .light in the cases this also does. The switch in the top bar is in scripts/spaces/page.js. -->
+         .light in the cases this also does. The switch in the top bar is in scripts/spaces/theme-switch.js. -->
     <script is:inline>(function(){var m=document.cookie.match(/(?:^|; )plannotator-theme=([^;]*)/),t=m?decodeURIComponent(m[1]):"";if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.classList.toggle("light",t==="light")})();</script>
     <!-- The two handwriting subsets carry the first-screen notes; fetch them with the CSS, not after layout. -->
     <link rel="preload" href="/fonts/spaces-hand/SpacesHandOne.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/spaces-hand/SpacesHandTwo.woff2" as="font" type="font/woff2" crossorigin />
   </Fragment>
 
-<header class="nav"><a class="act home" href="/" aria-label="Plannotator Spaces"><svg viewBox="0 0 64 64" width="24" height="24" aria-hidden="true"><defs><mask id="mc" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><rect width="64" height="64" fill="white"/><path d="M3 32 A29 8 0 0 0 61 32" transform="rotate(-20 32 32)" fill="none" stroke="black" stroke-width="10.5" stroke-linecap="round"/></mask><mask id="mb" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><rect width="64" height="64" fill="white"/><rect x="14" y="7" width="36" height="50" rx="10" fill="black"/></mask></defs><g mask="url(#mc)" fill="currentColor"><rect x="17" y="10" width="30" height="44" rx="7"/></g><g mask="url(#mb)"><path d="M3 32 A29 8 0 0 1 61 32" transform="rotate(-20 32 32)" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/></g><path d="M3 32 A29 8 0 0 0 61 32" transform="rotate(-20 32 32)" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/></svg><span class="nm"><span class="nmp">Plannotator</span> Spaces</span></a><nav class="lk" aria-label="Site"><a href="https://github.com/backnotprop/plannotator" target="_blank" rel="noopener" aria-label={oss.label}><span class="lk-w">Open source</span>{oss.count && <span class="lk-n" aria-hidden="true" title={oss.title ?? undefined}><svg class="lk-st" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M12 .587l3.668 7.568L24 9.306l-6 5.848 1.417 8.259L12 19.446l-7.417 3.967L6 15.154 0 9.306l8.332-1.151z"/></svg>{oss.count}</span>}</a></nav><button type="button" class="thm" aria-label="Switch to light theme"><svg class="thm-sun" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg><svg class="thm-moon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button></header>
+<SpacesTopStrip />
 <main>
 <div class="frame">
   
@@ -70,20 +44,18 @@ const oss = ossStarsLink(readOssStars(ossSnapshot));
   </div>
 
   <div class="art" aria-hidden="true">
-    <svg class="beams" width="1440" height="1000" viewBox="0 0 1440 1000"><polygon class="v" points="619.2 253.4 684 266 684 293 619.2 345.4 613.2 345.4 613.2 253.4"/><polygon class="a" points="586.8 363.8 1032 413 1032 439 586.8 455.8 580.8 455.8 580.8 363.8"/><polygon class="g" points="835.1 474.2 1032 608 1032 666 835.1 566.2 829.1 566.2 829.1 474.2"/></svg>
+    <svg class="beams" width="1440" height="1000" viewBox="0 0 1440 1000"><polygon class="v" points="619.2 253.4 684 252 684 279 619.2 345.4 613.2 345.4 613.2 253.4"/><polygon class="a" points="586.8 363.8 1032 413 1032 439 586.8 455.8 580.8 455.8 580.8 363.8"/><polygon class="g" points="835.1 474.2 1032 608 1032 666 835.1 566.2 829.1 566.2 829.1 474.2"/></svg>
 
     <article class="sheet plan main" style="--x:684px;--y:72px;--w:324px;--mw:342px">
-      <h2>Edit a note with no signal</h2>
-      <p class="pr">Larch is our notes app for field crews, who often have no signal. Each edit saves on the phone first, then sends in order.</p>
-      <p class="pr ph">Today an edit made with no signal is gone when the app reconnects. Crews tell us they write a reading down twice, or wait until they are back at the van.</p>
-      <div class="fig"><svg class="dw" viewBox="0 0 324 102"><path class="l" d="M47.5 20V102"/><path class="l" d="M162.5 20V102"/><path class="l" d="M276.5 20V102"/><rect class="hit v" x="0" y="69" width="324" height="27"/><path class="k" d="M47.5 69V96"/><path class="k" d="M162.5 69V96"/><path class="k" d="M276.5 69V96"/><text class="b m" x="47.5" y="12">Phone</text><path class="h" d="M22.5 19.500H72.5"/><text class="b m" x="162.5" y="12">Queue</text><path class="h" d="M137.5 19.500H187.5"/><text class="b m" x="276.5" y="12">Server</text><path class="h" d="M251.5 19.500H301.5"/><rect class="box" x="158" y="40.5" width="9" height="22"/><path class="l" d="M158 48h9M158 55h9"/><path class="h" d="M47.5 40.5H151"/><path class="f" d="M158 40.5l-9 -3.500v7z"/><text class="m" x="102.75" y="33.5">save edit</text><path class="h" d="M167 62.5H269.5"/><path class="f" d="M276.5 62.5l-9 -3.500v7z"/><text class="m" x="221.75" y="55.5">send in order</text><path class="kh" d="M276.5 87.5H54.5"/><path class="kf" d="M47.5 87.5l9 -3.500v7z"/><circle class="kf" cx="276.5" cy="87.5" r="2.600"/><text class="m kt b" x="219.5" y="80.5">keep both</text></svg></div>
-      <p class="q">Clashing edits are both kept. <b>Claude Code</b> changed this step on the team’s call.</p>
-      <p class="af ph">Before, the newest edit won and the other vanished without a word. Now both lines stay in the note until someone picks one.</p>
+      <h2>The plan</h2>
+      <p class="pr">Claude Code wrote it in the team’s space. The team read it and marked one step.</p>
+      <div class="fig"><svg class="dw" viewBox="0 0 324 116"><rect class="bar" x="22" y="6" width="96" height="5" rx="2.500"/><rect class="bar" x="22" y="20" width="270" height="4" rx="2"/><rect class="bar" x="22" y="30" width="226" height="4" rx="2"/><rect class="box" x="22.5" y="46.5" width="56" height="18" rx="2"/><rect class="bar" x="35.5" y="53.500" width="30" height="4" rx="2"/><rect class="box" x="104.5" y="46.5" width="56" height="18" rx="2"/><rect class="bar" x="117.5" y="53.500" width="30" height="4" rx="2"/><rect class="box" x="186.5" y="46.5" width="56" height="18" rx="2"/><rect class="bar" x="199.5" y="53.500" width="30" height="4" rx="2"/><path class="l" d="M78.5 55.500H104.500M160.500 55.500H186.500"/><rect class="hit v" x="0" y="74" width="324" height="27"/><text class="kt b" x="22" y="92">On a clash, keep both</text><text class="pc-s e" x="302" y="92">Ramos</text><rect class="bar" x="22" y="110" width="250" height="4" rx="2"/></svg></div>
+      <p class="q">Both are kept. <b>Claude Code</b> changed this step on the team’s call.</p>
     </article>
     <article class="sheet call main" style="--x:1032px;--y:255px;--w:312px;--mw:342px">
       <h2>Which decision?</h2>
       <svg class="dw" viewBox="0 0 312 170"><rect class="bx" x="22.5" y=".500" width="126" height="92" rx="3"/><path class="l" d="M22.5 15.500H148.5"/><rect class="f" x="31.5" y="5" width="6" height="7" rx="1"/><rect class="bar" x="43.5" y="6.500" width="34" height="4" rx="2"/><text class="b" x="32.5" y="34.500">Site visit</text><text class="w" x="32.5" y="55">Meter reads 4407</text><text class="w" x="32.5" y="74">Meter reads 4410</text><rect class="bx" x="163.5" y=".500" width="126" height="92" rx="3"/><path class="l" d="M163.5 15.500H289.5"/><rect class="f" x="172.5" y="5" width="6" height="7" rx="1"/><rect class="bar" x="184.5" y="6.500" width="34" height="4" rx="2"/><text class="b" x="173.5" y="34.500">Site visit</text><text class="w" x="173.5" y="55">Meter reads 4410</text><rect class="hit a" x="0" y="102" width="149" height="26"/><text class="kt b" x="22" y="119.600">Keep both</text><text class="b" x="163" y="119.600">Newest wins</text><text class="s n" x="22" y="146">Both readings stay.</text><text class="s n" x="22" y="164">A day more to build.</text><text class="s n" x="163" y="146">One reading is lost.</text><text class="s n" x="163" y="164">Nothing to build.</text></svg>
-      <p class="hand">never lose a decision. Ada</p>
+      <p class="hand">never lose a decision. Ramos</p>
     </article>
     <article class="sheet mock main" style="--x:1032px;--y:558px;--w:312px;--mw:342px">
       <div class="app"><svg width="16" height="16" viewBox="0 0 16 16"><path fill="currentColor" d="M3.500 1H9.500L14 5.500V13.500A1.500 1.500 0 0112.500 15H3.500A1.500 1.500 0 012 13.500V2.500A1.500 1.500 0 013.500 1Z"/></svg>Larch<div class="field"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="6" cy="6" r="4.2"/><path d="M9.3 9.3L12.5 12.5"/></svg>Search notes</div></div>
@@ -105,14 +77,14 @@ const oss = ossStarsLink(readOssStars(ossSnapshot));
         </svg>
 </span><span class="ag1"><img loading="lazy" class="am il" src="/assets/agents/opencode-light.svg" width="24" height="24" alt="OpenCode"><img loading="lazy" class="am id" src="/assets/agents/opencode-dark.svg" width="24" height="24" alt="OpenCode"></span><span class="ag1"><img loading="lazy" class="am" src="/assets/agents/pi.svg" width="24" height="24" alt="Pi"></span></div></div>
     <div class="unit"><i class="tl sv" data-edge="t" data-t="908,36,1208,792">AGENT PARTICIPANTS</i><i class="tx tv f2">LOCAL OR CLOUD</i>
-    <figure class="frm" role="img" aria-label="A space with a plan open: the page list, the plan with its state diagram, and the comments where Ada Novak, Claude Code, Codex and Charlie Dunn work on it"><div class="cap wide "><img loading="lazy" class="il" src="/assets/spaces/img/whole-l.png" width="1216" height="800" alt=""><img loading="lazy" class="id" src="/assets/spaces/img/whole-d.png" width="1216" height="800" alt=""></div><div class="cap pn" style="width:390px"><img loading="lazy" class="il" src="/assets/spaces/img/plan-c-l.png" width="390" height="487" alt=""><img loading="lazy" class="id" src="/assets/spaces/img/plan-c-d.png" width="390" height="487" alt=""></div></figure></div>
+    <figure class="frm" role="img" aria-label="A space with a plan open: the page list, the plan with its state diagram, and the comments where Ramos, Claude Code, Codex and Charlie Dunn work on it"><div class="cap wide "><img loading="lazy" class="il" src="/assets/spaces/img/whole-l.png" width="1216" height="800" alt=""><img loading="lazy" class="id" src="/assets/spaces/img/whole-d.png" width="1216" height="800" alt=""></div><div class="cap pn" style="width:390px"><img loading="lazy" class="il" src="/assets/spaces/img/plan-c-l.png" width="390" height="487" alt=""><img loading="lazy" class="id" src="/assets/spaces/img/plan-c-d.png" width="390" height="487" alt=""></div></figure></div>
     <div class="gm"><svg class="gw" width="314" height="100" aria-hidden="true"><polygon points="0 0 314 0 237 100 0 100"/></svg><div class="ga"><i class="tk sv">ALL BACKED BY GIT</i><span class="gc"><span class="gcs" tabindex="0"><code class="cmd">git clone https://larch.example/git/ws_01M7VG99HWCQWPSKC5W1VR59GS.git larch</code></span></span></div><div class="gb"><span class="gg" role="group" aria-label="Claude Code, Codex, Cursor, OpenCode and Pi"><span class="ic" style="--i:0"><img loading="lazy" class="am" src="/assets/agents/claude.svg" width="24" height="24" alt="Claude Code"></span><span class="ic" style="--i:1"><img loading="lazy" class="am" src="/assets/agents/codex.png" width="24" height="24" alt="Codex"></span><span class="ic" style="--i:2"><svg class="am cur" role="img" aria-label="Cursor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 466.73 532.09" fill="currentColor">
           <path d="M457.43,125.94L244.42,2.96c-6.84-3.95-15.28-3.95-22.12,0L9.3,125.94c-5.75,3.32-9.3,9.46-9.3,16.11v247.99c0,6.65,3.55,12.79,9.3,16.11l213.01,122.98c6.84,3.95,15.28,3.95,22.12,0l213.01-122.98c5.75-3.32,9.3-9.46,9.3-16.11v-247.99c0-6.65-3.55-12.79-9.3-16.11h-.01ZM444.05,151.99l-205.63,356.16c-1.39,2.4-5.06,1.42-5.06-1.36v-233.21c0-4.66-2.49-8.97-6.53-11.31L24.87,145.67c-2.4-1.39-1.42-5.06,1.36-5.06h411.26c5.84,0,9.49,6.33,6.57,11.39h-.01Z" />
         </svg></span><span class="ic" style="--i:3"><img loading="lazy" class="am il" src="/assets/agents/opencode-light.svg" width="24" height="24" alt="OpenCode"><img loading="lazy" class="am id" src="/assets/agents/opencode-dark.svg" width="24" height="24" alt="OpenCode"></span><span class="ic" style="--i:4"><img loading="lazy" class="am" src="/assets/agents/pi.svg" width="24" height="24" alt="Pi"></span></span><span class="gg" role="group" aria-label="VS Code and Obsidian"><span class="ic" style="--i:5"><img loading="lazy" class="am" src="/assets/spaces/vendor-icons/vscode.svg" width="24" height="24" alt="VS Code"></span><span class="ic" style="--i:6"><img loading="lazy" class="am" src="/assets/spaces/vendor-icons/obsidian.svg" width="24" height="24" alt="Obsidian"></span></span><span class="gs">Open it locally, however you like.</span></div></div>
     <svg class="wg" aria-hidden="true"><polygon/></svg>
   </section>
   
-  <section class="sec fanf"><div class="fanbox"><section class="shf" data-font="sans" data-stage="none" aria-label="The plan in the centre with documents, the team's questions, a guided review and diagrams round it"><ul class="shf-fan"><li class="shf-card" data-card="docs"><div class="shf-face"><div class="shf-thumb"><img loading="lazy" class="shf-l" src="/assets/spaces/shelf/mock-light.png" width="240" height="156" alt="An HTML mock-up of the note screen, open as a page in a space" decoding="async"><img loading="lazy" class="shf-d" src="/assets/spaces/shelf/mock-dark.png" width="240" height="156" alt="An HTML mock-up of the note screen, open as a page in a space" decoding="async"></div><h2 class="shf-kind"><span class="shf-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M4 2.5h5.5L12.5 5.5V13.5H4z"/><path d="M9.5 2.5v3h3"/></svg></span><span class="shf-prefix">Artifact</span><span class="shf-k">Any document</span></h2><p class="shf-line">Markdown, MDX, HTML. Any file an agent writes.</p></div></li><li class="shf-card" data-card="question"><div class="shf-face"><div class="shf-thumb"><img loading="lazy" class="shf-l" src="/assets/spaces/shelf/question-light.png" width="240" height="156" alt="A question card answered Keep both" decoding="async"><img loading="lazy" class="shf-d" src="/assets/spaces/shelf/question-dark.png" width="240" height="156" alt="A question card answered Keep both" decoding="async"><img loading="lazy" class="shf-l ph" src="/assets/spaces/shelf/question-phone-light.png" width="334" height="160" alt="A question card answered Keep both" decoding="async"><img loading="lazy" class="shf-d ph" src="/assets/spaces/shelf/question-phone-dark.png" width="334" height="160" alt="A question card answered Keep both" decoding="async"></div><h2 class="shf-kind"><span class="shf-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M6.3 6.4a1.8 1.8 0 1 1 2.7 1.5c-.6.4-1 .8-1 1.5M8 11.5v.1"/></svg></span><span class="shf-prefix">Decision</span><span class="shf-k">Team <code class="shf-cmd">/grill-me</code></span></h2><p class="shf-line">Your agent grills the whole team before it builds.</p></div></li><li class="shf-card" data-card="plan" data-source><div class="shf-face"><div class="shf-thumb"><img loading="lazy" class="shf-l" src="/assets/spaces/shelf/plan-light.png" width="272" height="150" alt="The plan open in a space, approved, with comments from people answered by agents" decoding="async"><img loading="lazy" class="shf-d" src="/assets/spaces/shelf/plan-dark.png" width="272" height="150" alt="The plan open in a space, approved, with comments from people answered by agents" decoding="async"><img loading="lazy" class="shf-l ph" src="/assets/spaces/shelf/plan-phone-light.png" width="334" height="160" alt="The plan open in a space, approved, with comments from people answered by agents" decoding="async"><img loading="lazy" class="shf-d ph" src="/assets/spaces/shelf/plan-phone-dark.png" width="334" height="160" alt="The plan open in a space, approved, with comments from people answered by agents" decoding="async"></div><h2 class="shf-kind"><span class="shf-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M4 2.5h5.5L12.5 5.5V13.5H4z"/><path d="M9.5 2.5v3h3"/><path d="M6 8.5h4.5M6 11h4.5"/></svg></span><span class="shf-prefix">Source</span><span class="shf-k">The plan</span></h2><div class="ags inc" role="group" aria-label="Claude Code, Codex, Cursor, OpenCode and Pi"><span class="ag1"><img loading="lazy" class="am" src="/assets/agents/claude.svg" width="24" height="24" alt="Claude Code"></span><span class="ag1"><img loading="lazy" class="am" src="/assets/agents/codex.png" width="24" height="24" alt="Codex"></span><span class="ag1"><svg class="am cur" role="img" aria-label="Cursor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 466.73 532.09" fill="currentColor">
+  <section class="sec fanf"><div class="fanbox"><section class="shf" data-font="sans" data-stage="none" aria-label="The plan in the centre with documents, the team's questions, a guided review and diagrams round it"><ul class="shf-fan"><li class="shf-card" data-card="docs"><div class="shf-face"><div class="shf-thumb"><img loading="lazy" class="shf-l" src="/assets/spaces/shelf/mock-light.png" width="240" height="156" alt="An HTML mock-up of the note screen, open as a page in a space" decoding="async"><img loading="lazy" class="shf-d" src="/assets/spaces/shelf/mock-dark.png" width="240" height="156" alt="An HTML mock-up of the note screen, open as a page in a space" decoding="async"></div><h2 class="shf-kind"><span class="shf-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M4 2.5h5.5L12.5 5.5V13.5H4z"/><path d="M9.5 2.5v3h3"/></svg></span><span class="shf-prefix">Artifact</span><span class="shf-k">Any document</span></h2><p class="shf-line">Markdown, MDX, HTML. Any file an agent writes.</p></div></li><li class="shf-card" data-card="question"><div class="shf-face"><div class="shf-thumb"><img loading="lazy" class="shf-l" src="/assets/spaces/shelf/question-light.png" width="240" height="156" alt="A question card answered Keep both" decoding="async"><img loading="lazy" class="shf-d" src="/assets/spaces/shelf/question-dark.png" width="240" height="156" alt="A question card answered Keep both" decoding="async"><img loading="lazy" class="shf-l ph" src="/assets/spaces/shelf/question-phone-light.png" width="334" height="160" alt="A question card answered Keep both" decoding="async"><img loading="lazy" class="shf-d ph" src="/assets/spaces/shelf/question-phone-dark.png" width="334" height="160" alt="A question card answered Keep both" decoding="async"><img loading="lazy" class="shf-l tb" src="/assets/spaces/shelf/question-tall-light.png" width="240" height="156" alt="A question card answered Keep both" decoding="async"><img loading="lazy" class="shf-d tb" src="/assets/spaces/shelf/question-tall-dark.png" width="240" height="156" alt="A question card answered Keep both" decoding="async"></div><h2 class="shf-kind"><span class="shf-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M6.3 6.4a1.8 1.8 0 1 1 2.7 1.5c-.6.4-1 .8-1 1.5M8 11.5v.1"/></svg></span><span class="shf-prefix">Decision</span><span class="shf-k">Team <code class="shf-cmd">/grill-me</code></span></h2><p class="shf-line">Your agent grills the whole team before it builds.</p></div></li><li class="shf-card" data-card="plan" data-source><div class="shf-face"><div class="shf-thumb" role="img" aria-label="The plan: Claude Code wrote it in the team’s space, the team read it and marked one step, keep both"><div class="spw pc-face" aria-hidden="true"><h5>The plan</h5><p>Claude Code wrote it in the team’s space. The team read it and marked one step.</p><div class="pc-w"><svg class="dw" viewBox="0 0 324 88"><rect class="bar" x="22" y="4" width="96" height="5" rx="2.500"/><rect class="bar" x="22" y="15" width="270" height="4" rx="2"/><rect class="bar" x="22" y="23" width="226" height="4" rx="2"/><rect class="box" x="22.5" y="32.5" width="56" height="14" rx="2"/><rect class="bar" x="35.5" y="37.500" width="30" height="4" rx="2"/><rect class="box" x="104.5" y="32.5" width="56" height="14" rx="2"/><rect class="bar" x="117.5" y="37.500" width="30" height="4" rx="2"/><rect class="box" x="186.5" y="32.5" width="56" height="14" rx="2"/><rect class="bar" x="199.5" y="37.500" width="30" height="4" rx="2"/><path class="l" d="M78.5 39.500H104.500M160.500 39.500H186.500"/><rect class="pc-v" x="0" y="54" width="324" height="20"/><text class="kt b" x="22" y="68.300">On a clash, keep both</text><text class="pc-s e" x="302" y="68.300">Ramos</text><rect class="bar" x="22" y="80" width="250" height="4" rx="2"/></svg></div></div><div class="pc-tall" aria-hidden="true"><h5>The plan</h5><p class="pr">Claude Code wrote it in the team’s space. The team read it and marked one step.</p><div class="fig"><svg class="dw" viewBox="0 0 324 116"><rect class="bar" x="22" y="6" width="96" height="5" rx="2.500"/><rect class="bar" x="22" y="20" width="270" height="4" rx="2"/><rect class="bar" x="22" y="30" width="226" height="4" rx="2"/><rect class="box" x="22.5" y="46.5" width="56" height="18" rx="2"/><rect class="bar" x="35.5" y="53.500" width="30" height="4" rx="2"/><rect class="box" x="104.5" y="46.5" width="56" height="18" rx="2"/><rect class="bar" x="117.5" y="53.500" width="30" height="4" rx="2"/><rect class="box" x="186.5" y="46.5" width="56" height="18" rx="2"/><rect class="bar" x="199.5" y="53.500" width="30" height="4" rx="2"/><path class="l" d="M78.5 55.500H104.500M160.500 55.500H186.500"/><rect class="hit v" x="0" y="74" width="324" height="27"/><text class="kt b" x="22" y="92">On a clash, keep both</text><text class="pc-s e" x="302" y="92">Ramos</text><rect class="bar" x="22" y="110" width="250" height="4" rx="2"/></svg><svg class="dw pc-mid" viewBox="0 0 324 166"><rect class="bar" x="22" y="6" width="96" height="5" rx="2.5"/><rect class="bar" x="22" y="20" width="270" height="4" rx="2"/><rect class="bar" x="22" y="30" width="226" height="4" rx="2"/><rect class="bar" x="22" y="40" width="262" height="4" rx="2"/><rect class="bar" x="22" y="50" width="190" height="4" rx="2"/><rect class="box" x="22.5" y="66.5" width="56" height="18" rx="2"/><rect class="bar" x="35.5" y="73.5" width="30" height="4" rx="2"/><rect class="box" x="104.5" y="66.5" width="56" height="18" rx="2"/><rect class="bar" x="117.5" y="73.5" width="30" height="4" rx="2"/><rect class="box" x="186.5" y="66.5" width="56" height="18" rx="2"/><rect class="bar" x="199.5" y="73.5" width="30" height="4" rx="2"/><path class="l" d="M78.5 75.5H104.500M160.500 75.5H186.500"/><rect class="pc-v" x="0" y="94" width="324" height="27"/><text class="kt b" x="22" y="112">On a clash, keep both</text><text class="pc-s e" x="302" y="112">Ramos</text><rect class="bar" x="22" y="130" width="250" height="4" rx="2"/><rect class="bar" x="22" y="140" width="270" height="4" rx="2"/><rect class="bar" x="22" y="150" width="236" height="4" rx="2"/><rect class="bar" x="22" y="160" width="150" height="4" rx="2"/></svg><svg class="dw pc-long" viewBox="0 0 324 218"><rect class="bar" x="22" y="6" width="96" height="5" rx="2.5"/><rect class="bar" x="22" y="20" width="270" height="4" rx="2"/><rect class="bar" x="22" y="30" width="226" height="4" rx="2"/><rect class="bar" x="22" y="40" width="262" height="4" rx="2"/><rect class="bar" x="22" y="50" width="190" height="4" rx="2"/><rect class="bar" x="22" y="68" width="70" height="5" rx="2.5"/><rect class="bar" x="22" y="82" width="270" height="4" rx="2"/><rect class="bar" x="22" y="92" width="244" height="4" rx="2"/><rect class="box" x="22.5" y="108.5" width="56" height="18" rx="2"/><rect class="bar" x="35.5" y="115.5" width="30" height="4" rx="2"/><rect class="box" x="104.5" y="108.5" width="56" height="18" rx="2"/><rect class="bar" x="117.5" y="115.5" width="30" height="4" rx="2"/><rect class="box" x="186.5" y="108.5" width="56" height="18" rx="2"/><rect class="bar" x="199.5" y="115.5" width="30" height="4" rx="2"/><path class="l" d="M78.5 117.5H104.500M160.500 117.5H186.500"/><rect class="pc-v" x="0" y="136" width="324" height="27"/><text class="kt b" x="22" y="154">On a clash, keep both</text><text class="pc-s e" x="302" y="154">Ramos</text><rect class="bar" x="22" y="172" width="250" height="4" rx="2"/><rect class="bar" x="22" y="182" width="270" height="4" rx="2"/><rect class="bar" x="22" y="192" width="236" height="4" rx="2"/><rect class="bar" x="22" y="202" width="262" height="4" rx="2"/><rect class="bar" x="22" y="212" width="150" height="4" rx="2"/></svg></div><p class="q">Both are kept. <b>Claude Code</b> changed this step on the team’s call.</p></div></div><h2 class="shf-kind"><span class="shf-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M4 2.5h5.5L12.5 5.5V13.5H4z"/><path d="M9.5 2.5v3h3"/><path d="M6 8.5h4.5M6 11h4.5"/></svg></span><span class="shf-prefix">Source</span><span class="shf-k">The plan</span></h2><div class="ags inc" role="group" aria-label="Claude Code, Codex, Cursor, OpenCode and Pi"><span class="ag1"><img loading="lazy" class="am" src="/assets/agents/claude.svg" width="24" height="24" alt="Claude Code"></span><span class="ag1"><img loading="lazy" class="am" src="/assets/agents/codex.png" width="24" height="24" alt="Codex"></span><span class="ag1"><svg class="am cur" role="img" aria-label="Cursor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 466.73 532.09" fill="currentColor">
           <path d="M457.43,125.94L244.42,2.96c-6.84-3.95-15.28-3.95-22.12,0L9.3,125.94c-5.75,3.32-9.3,9.46-9.3,16.11v247.99c0,6.65,3.55,12.79,9.3,16.11l213.01,122.98c6.84,3.95,15.28,3.95,22.12,0l213.01-122.98c5.75-3.32,9.3-9.46,9.3-16.11v-247.99c0-6.65-3.55-12.79-9.3-16.11h-.01ZM444.05,151.99l-205.63,356.16c-1.39,2.4-5.06,1.42-5.06-1.36v-233.21c0-4.66-2.49-8.97-6.53-11.31L24.87,145.67c-2.4-1.39-1.42-5.06,1.36-5.06h411.26c5.84,0,9.49,6.33,6.57,11.39h-.01Z" />
         </svg>
 </span><span class="ag1"><img loading="lazy" class="am il" src="/assets/agents/opencode-light.svg" width="24" height="24" alt="OpenCode"><img loading="lazy" class="am id" src="/assets/agents/opencode-dark.svg" width="24" height="24" alt="OpenCode"></span><span class="ag1"><img loading="lazy" class="am" src="/assets/agents/pi.svg" width="24" height="24" alt="Pi"></span></div><p class="shf-line">Multi-agent participation</p></div></li><li class="shf-card" data-card="review"><div class="shf-face"><div class="shf-thumb"><img loading="lazy" class="shf-l" src="/assets/spaces/shelf/review-light.png" width="240" height="156" alt="A guided review open in a space: step 2 follows the plan, step 3 departs from it, with the changed lines" decoding="async"><img loading="lazy" class="shf-d" src="/assets/spaces/shelf/review-dark.png" width="240" height="156" alt="A guided review open in a space: step 2 follows the plan, step 3 departs from it, with the changed lines" decoding="async"></div><h2 class="shf-kind"><span class="shf-icon" aria-hidden="true"><svg class="shf-i24" viewBox="0 0 24 24"><path d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"/></svg></span><span class="shf-prefix">Artifact</span><span class="shf-k">Guided review</span></h2><p class="shf-line">The pull request, walked step by step against the plan.</p></div></li><li class="shf-card" data-card="flow"><div class="shf-face"><div class="shf-thumb"><img loading="lazy" class="shf-l" src="/assets/spaces/shelf/diagram-light.png" width="240" height="156" alt="A diagram open in a space" decoding="async"><img loading="lazy" class="shf-d" src="/assets/spaces/shelf/diagram-dark.png" width="240" height="156" alt="A diagram open in a space" decoding="async"></div><h2 class="shf-kind"><span class="shf-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><rect x="1.5" y="5.5" width="5" height="5" rx="1.5"/><rect x="9.5" y="2" width="5" height="4" rx="1.5"/><rect x="9.5" y="10" width="5" height="4" rx="1.5"/><path d="M6.5 8h1.5l1.5-4M8 8l1.5 4"/></svg></span><span class="shf-prefix">Artifact</span><span class="shf-k">Diagrams</span></h2><p class="shf-line">The agent's Mermaid, drawn where the team reads it.</p></div></li></ul><svg class="fan-pen" aria-hidden="true" width="230" height="60" viewBox="0 0 230 60"><path d="M100 11C108 48 180 58 213 28M201 30.500 213 28 209.500 39.500"/></svg></section></div></section>
@@ -121,7 +93,7 @@ const oss = ossStarsLink(readOssStars(ossSnapshot));
   <section class="sec blk dev row" data-job="decide">
     <div class="words rw"><h2 class="h2s">Decide together,<br>as a team.</h2><p class="say"><code class="gr">/grill-me</code> as a team. All decisions are recorded, and questions can be shared among team members.</p></div>
     <div class="unit"><i class="tl sv" data-edge="l" data-t="48,336,464,557">DECIDE</i>
-    <figure class="frm" role="img" aria-label="The question Which decision in the page, answered Keep both, with the thread beside it where Claude Code asks and Charlie Dunn, Bob Tully, a guest, and Ada Novak each answer Keep both"><div class="cap wide "><img loading="lazy" class="il" src="/assets/spaces/img/decide-l.png" width="828" height="600" alt=""><img loading="lazy" class="id" src="/assets/spaces/img/decide-d.png" width="828" height="600" alt=""></div><div class="cap pn" style="width:390px"><img loading="lazy" class="il" src="/assets/spaces/img/decide-c-l.png" width="390" height="244" alt=""><img loading="lazy" class="id" src="/assets/spaces/img/decide-c-d.png" width="390" height="244" alt=""></div></figure></div>
+    <figure class="frm" role="img" aria-label="The question Which decision in the page, answered Keep both, with the thread beside it where Claude Code asks and Charlie Dunn, Bob Tully, a guest, and Ramos each answer Keep both"><div class="cap wide "><img loading="lazy" class="il" src="/assets/spaces/img/decide-l.png" width="828" height="600" alt=""><img loading="lazy" class="id" src="/assets/spaces/img/decide-d.png" width="828" height="600" alt=""></div><div class="cap pn" style="width:390px"><img loading="lazy" class="il" src="/assets/spaces/img/decide-c-l.png" width="390" height="244" alt=""><img loading="lazy" class="id" src="/assets/spaces/img/decide-c-d.png" width="390" height="244" alt=""></div></figure></div>
     <svg class="wg" aria-hidden="true"><polygon/></svg>
   </section>
   
@@ -156,361 +128,9 @@ const oss = ossStarsLink(readOssStars(ossSnapshot));
   <section class="sec blk close" data-job="close"><div class="fin rw"><h2 class="h2s">Start with one plan.</h2><button type="button" class="act" data-signup aria-haspopup="dialog">Join the waitlist</button></div></section>
 </div>
 </main>
-<footer class="ft blk"><a class="act home" href="/" aria-label="Plannotator Spaces"><svg viewBox="0 0 64 64" width="24" height="24" aria-hidden="true"><defs><mask id="mcf" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><rect width="64" height="64" fill="white"/><path d="M3 32 A29 8 0 0 0 61 32" transform="rotate(-20 32 32)" fill="none" stroke="black" stroke-width="10.5" stroke-linecap="round"/></mask><mask id="mbf" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><rect width="64" height="64" fill="white"/><rect x="14" y="7" width="36" height="50" rx="10" fill="black"/></mask></defs><g mask="url(#mcf)" fill="currentColor"><rect x="17" y="10" width="30" height="44" rx="7"/></g><g mask="url(#mbf)"><path d="M3 32 A29 8 0 0 1 61 32" transform="rotate(-20 32 32)" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/></g><path d="M3 32 A29 8 0 0 0 61 32" transform="rotate(-20 32 32)" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/></svg><span class="nm"><span class="nmp">Plannotator</span> Spaces</span></a></footer>
+<SpacesFootStrip />
 
-<dialog class="sg" id="signup-dialog" aria-labelledby="sg-title">
-  <div class="sg-in">
-    <button type="button" class="sg-x" data-signup-close aria-label="Close"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square"/></svg></button>
-    <form class="ws-form-card" id="signup-form" novalidate>
-      <header class="ws-form-head">
-        <h2 class="ws-form-title" id="sg-title">Join the waitlist</h2>
-      </header>
-      <div class="ws-form-body">
-        <div class="ws-honeypot" aria-hidden="true">
-          <label>
-            Website
-            <input type="text" name="website" tabindex="-1" autocomplete="off" />
-          </label>
-        </div>
-        <div class="ws-row-2">
-          <div class="ws-field">
-            <label class="ws-label" for="sg-email">Email</label>
-            <input id="sg-email" type="email" name="email" placeholder="jane@company.com" autocomplete="email" maxlength="320" />
-          </div>
-          <div class="ws-field">
-            <label class="ws-label" for="sg-company">Company <span class="ws-opt">optional</span></label>
-            <input id="sg-company" type="text" name="company" placeholder="Acme Inc." autocomplete="organization" maxlength="160" />
-          </div>
-        </div>
-        <div class="ws-field">
-          <span class="ws-label" id="sg-team">Team size <span class="ws-opt">engineers + adjacent</span></span>
-          <div class="ws-pills" data-field="teamSize" data-single="1" role="group" aria-labelledby="sg-team">
-            {teamSizes.map((t) => (
-              <button type="button" class="ws-pill" data-v={t.slug} aria-pressed="false">{t.label}</button>
-            ))}
-          </div>
-        </div>
-        <div class="ws-field">
-          <label class="ws-label" for="sg-note">Anything else? <span class="ws-opt">optional</span></label>
-          <textarea id="sg-note" name="note" placeholder="What breaks today when your team reviews plans, code, or agent work?" maxlength="1000"></textarea>
-        </div>
-        <div class="ws-check-row" id="contributor-toggle" role="checkbox" aria-checked="false" aria-labelledby="sg-contrib" tabindex="0">
-          <span class="ws-box" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path stroke-linecap="square" d="M5 13l4 4L19 7" /></svg></span>
-          <span id="sg-contrib">I've contributed to or maintain the Plannotator OSS core.</span>
-        </div>
-        <p class="ws-contrib-note">Early contributors and meaningful early supporters receive <span class="ws-accent">lifetime free access</span> to Spaces.</p>
-        <div class="sg-form-err" id="sg-form-err"></div>
-        <div class="ws-form-foot">
-          <button type="submit" class="ws-submit">
-            <span class="ws-submit-idle"><span>Join the waitlist</span></span>
-            <span class="ws-submit-busy" aria-hidden="true"><span class="ws-submit-busy-label">Submitting…</span></span>
-          </button>
-        </div>
-            {turnstileSitekey && (
-              <div
-                id="ws-turnstile"
-                class="cf-turnstile ws-turnstile"
-                data-sitekey={turnstileSitekey}
-                data-callback="onWsTurnstile"
-                data-expired-callback="onWsTurnstileExpired"
-                data-error-callback="onWsTurnstileError"
-                data-theme="auto"
-                data-retry="auto"
-              />
-            )}
-      </div>
-      <div class="ws-success" role="status" tabindex="-1">
-        <div class="ws-ok"><span id="ok-stamp">SIGNUP CONFIRMED</span></div>
-        <h3 class="ws-success-title">You're on the list<span class="sg-nm">, <em id="ok-name">friend</em></span>.</h3>
-        <p>We'll email <strong id="ok-email">your address</strong> when the next cohort opens. Expect a real note from a human, not a marketing sequence.</p>
-        <p id="ok-contrib-note"></p>
-        <div class="ws-receipt" id="receipt"></div>
-      </div>
-    </form>
-  </div>
-</dialog>
-
-  {turnstileSitekey && (
-    <script
-      is:inline
-      src="https://challenges.cloudflare.com/turnstile/v0/api.js"
-      async
-      defer
-    />
-  )}
-
-  <script
-    is:inline
-    define:vars={{ waitlistUrl, turnstileEnabled: !!turnstileSitekey }}
-  >
-    (function () {
-      var form = document.getElementById('signup-form');
-      if (!form) return;
-
-      var turnstileEl = document.getElementById('ws-turnstile');
-      var turnstileToken = null;
-      var turnstileWaiters = [];
-      var isSubmitting = false;
-      var fields = { teamSize: '' };
-      var contributor = false;
-
-      window.onWsTurnstile = function (token) {
-        // Useful breadcrumb when debugging signup failures from devtools.
-        console.info('[waitlist] turnstile token received');
-        turnstileToken = token;
-        var waiters = turnstileWaiters;
-        turnstileWaiters = [];
-        waiters.forEach(function (resolve) { resolve(token); });
-      };
-      window.onWsTurnstileExpired = function () {
-        console.info('[waitlist] turnstile token expired');
-        turnstileToken = null;
-        if (window.turnstile && turnstileEl) {
-          try { window.turnstile.reset(turnstileEl); } catch (_) {}
-        }
-      };
-      window.onWsTurnstileError = function (err) {
-        console.warn('[waitlist] turnstile error:', err);
-        turnstileToken = null;
-      };
-
-      // Resolves with `{ token, reason }`. `reason` is null on success,
-      // 'no-script' if the Turnstile API never loaded (usually a content
-      // blocker), 'timeout' if it loaded but didn't issue a token in time.
-      function awaitTurnstileToken() {
-        if (!turnstileEnabled) return Promise.resolve({ token: null, reason: null });
-        if (turnstileToken) return Promise.resolve({ token: turnstileToken, reason: null });
-
-        if (!window.turnstile) {
-          // Script never executed — extension blocked it, or the user is
-          // offline. Surface a clear, actionable error instead of a generic
-          // "couldn't verify" 400 from the worker.
-          return Promise.resolve({ token: null, reason: 'no-script' });
-        }
-        if (turnstileEl) {
-          try { window.turnstile.execute(turnstileEl); } catch (_) {}
-        }
-        return new Promise(function (resolve) {
-          var done = false;
-          turnstileWaiters.push(function (token) {
-            if (done) return;
-            done = true;
-            resolve({ token: token, reason: null });
-          });
-          // 10s gives Turnstile plenty of time on slow networks. Most
-          // legit visitors get a token in well under 1s.
-          setTimeout(function () {
-            if (done) return;
-            done = true;
-            resolve({ token: null, reason: 'timeout' });
-          }, 10000);
-        });
-      }
-
-      // Pill picker
-      document.querySelectorAll('.ws-pills').forEach(function (group) {
-        var key = group.dataset.field;
-        var single = group.dataset.single === '1';
-        group.addEventListener('click', function (e) {
-          var p = e.target.closest('.ws-pill');
-          if (!p) return;
-          var v = p.dataset.v;
-          if (single) {
-            group.querySelectorAll('.ws-pill').forEach(function (x) {
-              x.classList.remove('on');
-              x.setAttribute('aria-pressed', 'false');
-            });
-            p.classList.add('on');
-            p.setAttribute('aria-pressed', 'true');
-            fields[key] = v;
-          }
-          clearErr(group);
-        });
-      });
-
-      // Contributor toggle (click + keyboard)
-      var contribEl = document.getElementById('contributor-toggle');
-      function toggleContributor() {
-        contributor = !contributor;
-        contribEl.classList.toggle('on', contributor);
-        contribEl.setAttribute('aria-checked', contributor ? 'true' : 'false');
-      }
-      if (contribEl) {
-        contribEl.addEventListener('click', toggleContributor);
-        contribEl.addEventListener('keydown', function (e) {
-          if (e.key === ' ' || e.key === 'Enter') {
-            e.preventDefault();
-            toggleContributor();
-          }
-        });
-      }
-
-      function clearErr(el) {
-        var f = el.closest('.ws-field');
-        if (!f) return;
-        var existing = f.querySelector('.ws-err');
-        if (existing) existing.remove();
-      }
-      function showErr(el, msg) {
-        clearErr(el);
-        var f = el.closest('.ws-field');
-        if (!f) return;
-        var e = document.createElement('div');
-        e.className = 'ws-err';
-        e.textContent = '↳ ' + msg;
-        f.appendChild(e);
-      }
-      function clearAllFormErrors() {
-        form.querySelectorAll('.ws-err').forEach(function (n) { n.remove(); });
-      }
-
-      form.querySelectorAll('input, textarea').forEach(function (el) {
-        el.addEventListener('input', function () { clearErr(el); });
-      });
-
-      function setBusy(busy, label) {
-        var btn = form.querySelector('.ws-submit');
-        if (!btn) return;
-        btn.disabled = busy;
-        btn.classList.toggle('is-loading', busy);
-        if (busy) {
-          var labelEl = btn.querySelector('.ws-submit-busy-label');
-          if (labelEl && label) labelEl.textContent = label;
-        }
-      }
-
-      function teamSizeLabel(slug) {
-        var pill = form.querySelector('[data-field="teamSize"] [data-v="' + slug + '"]');
-        return pill ? pill.textContent : slug;
-      }
-
-      function renderReceipt(data) {
-        var company = data.company;
-        // Derive a 2-letter sigil from email + company. Email gives the user's
-        // initial, company gives the org's. Avoids needing the user's name.
-        var emailInitial = (data.email.charAt(0) || 'X').toUpperCase();
-        var companyInitial = (company.charAt(0) || 'X').toUpperCase();
-        var id = 'WL-' + Math.floor(Math.random() * 9000 + 1000) + '-' +
-          emailInitial + companyInitial;
-        var pos = Math.floor(Math.random() * 240 + 380);
-
-        // Address by the email-local-part as a friendly fallback for "name".
-        var greeting = data.email.split('@')[0] || 'friend';
-        document.getElementById('ok-name').textContent = greeting;
-        document.getElementById('ok-email').textContent = data.email;
-        document.getElementById('ok-stamp').textContent =
-          'SIGNUP CONFIRMED · ' + new Date().toISOString().slice(0, 10);
-        if (data.is_contributor) {
-          document.getElementById('ok-contrib-note').textContent =
-            "Since you contribute to the core, you'll hear from us about lifetime access shortly.";
-        }
-
-        var receipt = document.getElementById('receipt');
-        var rows = [
-          ['ticket', id],
-          ['company', company],
-          ['team size', teamSizeLabel(data.team_size)],
-          ['cohort position', '~#' + pos],
-          ['oss contributor', data.is_contributor ? 'yes, flagged for review' : 'no'],
-        ];
-        receipt.innerHTML = rows.map(function (r) {
-          return '<div class="ws-r"><span class="ws-r-k">' + r[0] +
-            '</span><span class="ws-r-v">' + (r[1] || '-') + '</span></div>';
-        }).join('');
-      }
-
-      form.addEventListener('submit', function (e) {
-        e.preventDefault();
-        if (isSubmitting) return;
-        clearAllFormErrors();
-
-        var get = function (n) { return form.querySelector('[name="' + n + '"]'); };
-        var email = (get('email').value || '').trim();
-        var company = (get('company').value || '').trim();
-        var note = (get('note').value || '').trim();
-        var team_size = fields.teamSize;
-
-        var ok = true;
-        if (!email) { showErr(get('email'), 'Required'); ok = false; }
-        else if (!/^[^\s@]+@[^\s@.]+\.[^\s@]+$/.test(email)) {
-          showErr(get('email'), 'Looks invalid'); ok = false;
-        }
-        // Company is presented as optional in the UI. The worker still
-        // requires a non-empty value, so stub one here when the user
-        // leaves it blank — keeps the server contract untouched.
-        if (!company) company = '(not provided)';
-        if (!team_size) {
-          showErr(form.querySelector('[data-field="teamSize"]'), 'Pick one');
-          ok = false;
-        }
-        if (!ok) return;
-
-        var payload = {
-          email: email,
-          company: company,
-          team_size: team_size,
-          note: note || undefined,
-          is_contributor: contributor,
-          website: (get('website') && get('website').value) || '',
-        };
-
-        isSubmitting = true;
-        setBusy(true, turnstileEnabled ? 'Verifying…' : 'Submitting…');
-
-        awaitTurnstileToken()
-          .then(function (result) {
-            if (result.reason === 'no-script') {
-              showErr(get('email'),
-                "Couldn't load Cloudflare's verification. Try disabling your ad/content blocker for this site, then retry.");
-              return null;
-            }
-            if (result.reason === 'timeout') {
-              showErr(get('email'),
-                'Verification timed out. Refresh the page and try again.');
-              if (window.turnstile && turnstileEl) {
-                try { window.turnstile.reset(turnstileEl); } catch (_) {}
-              }
-              return null;
-            }
-            // Token may be null when Turnstile is disabled entirely; that's
-            // fine — the worker won't enforce verification in that mode.
-            if (result.token) payload.turnstile_token = result.token;
-            setBusy(true, 'Submitting…');
-            return fetch(waitlistUrl + '/signup', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
-            });
-          })
-          .then(function (res) {
-            if (!res) return null; // Turnstile failure — already surfaced.
-            return res.json().then(function (body) { return { res: res, body: body }; });
-          })
-          .then(function (result) {
-            if (!result) return; // Turnstile failure path.
-            if (!result.res.ok) {
-              var msg = (result.body && result.body.error) || 'Something went wrong. Please try again.';
-              showErr(get('email'), msg);
-              if (turnstileEnabled && window.turnstile && turnstileEl) {
-                turnstileToken = null;
-                try { window.turnstile.reset(turnstileEl); } catch (_) {}
-              }
-              return;
-            }
-            renderReceipt(payload);
-            form.classList.add('ws-submitted');
-          })
-          .catch(function () {
-            showErr(get('email'), "Couldn't reach the waitlist server. Try again.");
-          })
-          .finally(function () {
-            isSubmitting = false;
-            setBusy(false);
-          });
-      });
-    })();
-  </script>
+<SignupDialog />
 
   <script src="../../scripts/spaces/page.js"></script>
-  <script src="../../scripts/spaces/signup-dialog.js"></script>
 </Base>
