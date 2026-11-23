@@ -56,7 +56,10 @@ import { reviewSourceLine } from './sourceLine';
 import { withChapterMermaid, withOverviewMermaid } from './overviewMermaid';
 import { usePhone } from '../phone';
 import { useCommentPictures } from '../commentPictures';
-import { useImagePreviews } from './imagePreview';
+import { ReviewImagesContext } from '../reviewImages';
+import { ImageDiffPreview } from '@plannotator/review-editor/components/ImageDiffPreview';
+import { differencesSupported, ImageViewMenu } from '@plannotator/review-editor/components/image-diff/ImageViewMenu';
+import type { GuideReaderImages } from './types';
 import type { ImageAttachment } from '@plannotator/ui/types';
 
 /** A line range the review app selects on (Pierre's). */
@@ -106,6 +109,12 @@ export interface GuideDiffComments {
 export const GuideDiff: FC<
   GuideDiffRendererProps & {
     compactTouchLayout?: boolean;
+    /**
+     * Code review's image preview and its view menu for a changed image (`useImagePreviews`). Forwarded to
+     * AllFilesCodeView with the rest of `props`. Absent: the binary notice.
+     */
+    renderImagePreview?: AllFilesCodeViewProps['renderImagePreview'];
+    renderImageViewControl?: AllFilesCodeViewProps['renderImageViewControl'];
     comments?: GuideDiffComments;
     /** Draw this layout whatever the setting says, leaving the setting as it is (a phone: always Unified). */
     diffStyleOverride?: 'split' | 'unified';
@@ -125,11 +134,8 @@ export const GuideDiff: FC<
     /** Context notes on this file's lines (review-editor's seam). Absent: none, as before. */
     contextNotes?: AllFilesCodeViewProps['contextNotes'];
     renderContextNote?: AllFilesCodeViewProps['renderContextNote'];
-    /** Code review's image preview and its view menu, for a changed image (imagePreview.tsx). Absent: the binary notice. */
-    renderImagePreview?: AllFilesCodeViewProps['renderImagePreview'];
-    renderImageViewControl?: AllFilesCodeViewProps['renderImageViewControl'];
   }
-> = ({ comments, diffStyleOverride, plainSeparators, viewedFiles, onToggleViewed, fileOpenIn, lineNotes, wholeFileNotes, contextNotes, renderContextNote, renderImagePreview, renderImageViewControl, ...props }) => {
+> = ({ comments, diffStyleOverride, plainSeparators, viewedFiles, onToggleViewed, fileOpenIn, lineNotes, wholeFileNotes, contextNotes, renderContextNote, ...props }) => {
   const savedDiffStyle = useConfigValue('diffStyle');
   const diffStyle = diffStyleOverride ?? savedDiffStyle;
   const diffOverflow = useConfigValue('diffOverflow');
@@ -171,8 +177,6 @@ export const GuideDiff: FC<
       {...(comments?.selectionActions ? { selectionActions: comments.selectionActions } : {})}
       {...(onToggleViewed ? { viewedFiles, onToggleViewed } : {})}
       {...(contextNotes && renderContextNote ? { contextNotes, renderContextNote } : {})}
-      {...(renderImagePreview ? { renderImagePreview } : {})}
-      {...(renderImageViewControl ? { renderImageViewControl } : {})}
     />
   );
 };
@@ -196,6 +200,54 @@ function allFilesGuide(snapshot: GuideSnapshot, files: readonly { path: string; 
     unplacedFiles: [],
     reviewed: [false],
   };
+}
+
+interface ImagePreviewProps {
+  renderImagePreview?: AllFilesCodeViewProps['renderImagePreview'];
+  renderImageViewControl?: AllFilesCodeViewProps['renderImageViewControl'];
+}
+const NO_IMAGE_PREVIEWS: ImagePreviewProps = {};
+
+/**
+ * Code review's image preview on a changed image (review parity B2): the review app's own `ImageDiffPreview` in place
+ * of the binary notice and its `ImageViewMenu` (Side by side, Swipe, Onion skin, Differences) on the file's header,
+ * wired as its All files wires them (review-editor ReviewAllFilesDiffPanel.tsx). Only the reads differ: they go to the
+ * host's route (`images.fetchImpl`, packages/inbox/reviewImages.ts), under the host's snapshot id. Stable while
+ * `images` and the layout are, so the headers do not churn.
+ */
+function useImagePreviews(images: GuideReaderImages | undefined): ImagePreviewProps {
+  const compact = usePhone();
+  const snapshotId = images?.snapshotId;
+  const fetchImpl = images?.fetchImpl;
+  return useMemo<ImagePreviewProps>(() => {
+    if (!snapshotId || !fetchImpl) return NO_IMAGE_PREVIEWS;
+    return {
+      renderImagePreview: ({ file, fallback, tooLargeFallback, onHeightChange }) => (
+        <ImageDiffPreview
+          key={`${snapshotId}:${file.path}`}
+          filePath={file.path}
+          status={file.status}
+          patch={file.patch}
+          snapshotId={snapshotId}
+          variant="all-files"
+          compact={compact}
+          fallback={fallback}
+          tooLargeFallback={tooLargeFallback}
+          onHeightChange={onHeightChange}
+          fetchImpl={fetchImpl}
+        />
+      ),
+      renderImageViewControl: ({ file, iconOnly, touch }) => (
+        <ImageViewMenu
+          filePath={file.path}
+          comparable={file.status !== 'added' && file.status !== 'deleted'}
+          differencesAvailable={differencesSupported()}
+          iconOnly={iconOnly}
+          touch={touch}
+        />
+      ),
+    };
+  }, [snapshotId, fetchImpl, compact]);
 }
 
 /**
@@ -238,14 +290,14 @@ function Reader({
   wholeFileNotes,
   contextNotes,
   renderContextNote,
-  images,
 }: GuideReaderProps) {
   const savedDiffStyle = useConfigValue('diffStyle');
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
   const wholeFiles = useRef<KeptWholeFiles>(new Map());
   const fetchFileContent = useMemo<AllFilesCodeViewProps['fetchFileContent']>(() => (fileContents ? wholeFileReader(fileContents, wholeFiles.current) : undefined), [fileContents]);
   const semDiffClient = useSemDiffClient();
-  const imagePreviews = useImagePreviews(images);
+  // Code review's image previews, where the host's reader part names where its images are read (ReaderPart `images`).
+  const imagePreviews = useImagePreviews(useContext(ReviewImagesContext));
   const walkthrough = useMemo<CodeGuideData>(
     () => ({
       title: snapshot.guide.title,
@@ -483,8 +535,6 @@ function Reader({
       wholeFileNotes?: readonly GuideFileNote[];
       contextNotes?: AllFilesCodeViewProps['contextNotes'];
       renderContextNote?: AllFilesCodeViewProps['renderContextNote'];
-      renderImagePreview?: AllFilesCodeViewProps['renderImagePreview'];
-      renderImageViewControl?: AllFilesCodeViewProps['renderImageViewControl'];
     } => ({
       ...(lineNotes ? { lineNotes: fileNotes(file.path) } : {}),
       ...(wholeFileNotes ? { wholeFileNotes: wholeNotesFor(file.path) } : {}),
@@ -497,7 +547,6 @@ function Reader({
       ...(fetchFileContent && { fetchFileContent }),
       ...(fetchFileContent && semDiffClient && !asItIs && { semDiffClient }),
       ...(fileOpenIn ? { fileOpenIn } : {}),
-      ...imagePreviews,
       ...(viewedSet && viewed ? { viewedFiles: viewedSet, onToggleViewed: viewed.onToggle } : {}),
       ...(comments
         ? {
@@ -516,7 +565,7 @@ function Reader({
           }
         : {}),
     }),
-    [bare, contextNotes, renderContextNote, phone, asItIs, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, semDiffClient, fileOpenIn, imagePreviews, lineNotes, fileNotes, wholeFileNotes, wholeNotesFor],
+    [bare, contextNotes, renderContextNote, phone, asItIs, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, semDiffClient, fileOpenIn, lineNotes, fileNotes, wholeFileNotes, wholeNotesFor],
   );
   // Global comments: the list under the header and its button, while the review takes comments (as line comments).
   // One chosen in the list is shown where the pane lists comments (its folded sheet opens on it).
@@ -549,11 +598,13 @@ function Reader({
   const drawOverviewDiagram = useMemo(() => withOverviewMermaid(renderOverviewDiagram), [renderOverviewDiagram]);
   // And each chapter's diagram (format version 5), at the top of the chapter's code pane.
   const drawChapterDiagram = useMemo(() => withChapterMermaid(renderChapterDiagram), [renderChapterDiagram]);
+  // Each file's renderer props, with the image previews where the host has them.
+  const rendererProps = useCallback((context: GuideDiffRendererContext) => ({ ...getDiffRendererProps(context), ...imagePreviews }), [getDiffRendererProps, imagePreviews]);
   const host = useMemo(
     () => ({
       files,
       DiffRenderer: GuideDiff,
-      getDiffRendererProps,
+      getDiffRendererProps: rendererProps,
       ...(revealFile ? { revealFile } : {}),
       ...(phone || asItIs || hostDiffControls ? {} : { renderSectionTab }),
       // A walkthrough's chapter can be words alone: nothing is missing, so it says that and not "out of date".
@@ -572,7 +623,7 @@ function Reader({
       ...(bare ? { flushFiles: true, keepsFileOrder: true } : {}),
       ...(collapseAll ? { collapseAll } : {}),
     }),
-    [files, asItIs, getDiffRendererProps, revealFile, phone, hostDiffControls, renderSectionTab, drawOverviewDiagram, drawChapterDiagram, chapterDiagramsFolded, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle, fetchFileContent, collapseAll, bare],
+    [files, asItIs, rendererProps, revealFile, phone, hostDiffControls, renderSectionTab, drawOverviewDiagram, drawChapterDiagram, chapterDiagramsFolded, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle, fetchFileContent, collapseAll, bare],
   );
 
   // The window's wrap for a code span, for the viewer's own inline parser.

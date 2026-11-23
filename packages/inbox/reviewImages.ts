@@ -2,11 +2,13 @@
  * The image preview of code review on the Inbox's diffs (review parity B2): the review app's own `ImageDiffPreview`
  * asks `/api/review-image?path&side&snapshot`; these send that read to the Inbox's routes for one diff
  * (packages/server/inbox-review-image.ts), the rest of the query as it was, as `pullRepoFetch` does for All files.
- * Anything else is refused, never fetched. Plain data for `GuideReader`'s `images`: no review-editor code here, so
- * the pages that pass it load none until the reader's own chunk does.
+ * Anything else is refused, never fetched. Plain data, passed as `ReaderPart` `images` (lazyParts.tsx), which the
+ * reader reads from `ReviewImagesContext`: no review-editor code here, so the pages that pass it load none until the
+ * reader's own chunk does.
  *
  * A diff on another linked machine gets none (its door does not carry these routes): its images stay as before.
  */
+import { createContext } from 'react';
 import { inboxUrl, machineOf, selfMachineId } from './inboxUrl';
 import { pullMachine, pullUrl } from './pulls/pullMachines';
 import type { GuideReaderImages } from './guide/types';
@@ -19,6 +21,9 @@ function imageFetch(route: (query: string) => string): typeof fetch {
     return globalThis.fetch(route(asked[1]!), init);
   }) as typeof fetch;
 }
+
+/** Where the reader inside reads its images (`ReaderPart` provides it). Absent: no image previews. */
+export const ReviewImagesContext = createContext<GuideReaderImages | undefined>(undefined);
 
 const here = (machine: string | null) => !machine || machine === selfMachineId();
 

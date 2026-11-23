@@ -1152,7 +1152,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
             // Keyed on the code: new code brings a new reader, so a composer left open cannot save onto a moved line; the
             // same code keeps it, whatever the head reads said. The reader is a chunk loaded on first use: one that cannot
             // arrive says so here.
-            <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch}>
+            <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch} images={images}>
               <OpenInCodeSpans scope={{ repo: repoKey ?? '', pull: layerKey }} on={!!repoKey}>
                 <ContextNotesProvider api={places.api}>
                   <GuideReader
@@ -1169,7 +1169,6 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
                     viewed={{ files: viewedSet, onToggle: toggleViewed }}
                     fileOpenIn={fileOpenIn}
                     fileContents={fileContents}
-                    {...(images ? { images } : {})}
                     lineNotes={lineNotes}
                     wholeFileNotes={wholeFileNotes}
                     {...(places.anchors.length > 0 ? { contextNotes: places.anchors, renderContextNote: places.renderContextNote } : {})}

@@ -1275,7 +1275,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
                 </button>
               </div>
             )}
-            <ReaderPart diff={snapshot.review.rawPatch}>
+            <ReaderPart diff={snapshot.review.rawPatch} images={images}>
               <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on={codeReview}>
               <ContextNotesProvider api={noteRows.api}>
               <GuideReader
@@ -1288,7 +1288,6 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
                 reveal={reveal}
                 viewed={viewedProp}
                 fileContents={fileContents}
-                {...(images ? { images } : {})}
                 {...(codeReview ? { fileOpenIn } : {})}
                 {...(selectionActions ? { selectionActions } : {})}
                 renderOverviewDiagram={renderOverviewDiagram}

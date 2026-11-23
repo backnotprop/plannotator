@@ -30,7 +30,8 @@ export interface GuideReaderComments {
 /**
  * Code review's image preview on changed images (review-editor's `ImageDiffPreview`, as its All files draws it): the
  * reads of `/api/review-image` sent to the host's own route (packages/inbox/reviewImages.ts), under a snapshot id of
- * the host's own. Absent: an image's diff is the binary notice, as before.
+ * the host's own. A host names it with `ReaderPart` `images` (lazyParts.tsx), which the reader reads from
+ * `ReviewImagesContext`. Absent: an image's diff is the binary notice, as before.
  */
 export interface GuideReaderImages {
   snapshotId: string;
@@ -78,8 +79,6 @@ export interface GuideReaderProps {
   controlsHost?: HTMLElement | null;
   /** Reads one changed file's whole text, for the "N unmodified lines" arrows. Absent: the diffs show as they came. */
   fileContents?: (path: string, signal: AbortSignal, patch: string) => Promise<InboxFileContents>;
-  /** Before / after previews of changed images, with code review's view menu on their headers. Absent: none, as before. */
-  images?: GuideReaderImages;
   /**
    * Under a top bar that names the review and lists its chapters (the full-window review): the heading reads like a
    * thread's (GuideView `threadHeading`). Absent: as before.
