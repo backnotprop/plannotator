@@ -626,9 +626,13 @@ describe("after a reboot, the Inbox takes back its own mapping and never anyone 
       expect(clock.waits()).toEqual([]);
       const writes = ts.calls.slice(before).filter((args) => args[0] === "serve" && args[1] !== "status");
       expect(writes.filter((args) => args.includes("--bg"))).toHaveLength(1);
-      kept = next.registry.tailscale;
-      expect(kept?.made?.proxy_ports.length).toBeLessThanOrEqual(3);
+      // What a clean stop leaves (Tailscale running: the mapping comes down), for the next round.
       next.module.stop();
+      expect(ts.serve.has(PORT)).toBe(false);
+      kept = next.registry.tailscale;
+      expect(kept).toMatchObject({ url: null, error: null });
+      expect(kept?.https_port).toBeUndefined();
+      expect(kept?.made?.proxy_ports.length).toBeLessThanOrEqual(3);
     }
   });
 });
