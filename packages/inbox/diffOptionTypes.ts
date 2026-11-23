@@ -2,8 +2,8 @@ import type { InboxDiffStyle } from './api';
 
 /**
  * How diffs are drawn (config.json `diffOptions`, shared with code review), by
- * the wire's names: each null when never chosen. Whole file, Hide whitespace
- * and the fonts are code review's alone.
+ * the wire's names: each null when never chosen. Hide whitespace and the
+ * fonts are code review's alone.
  */
 export interface InboxDiffOptions {
   diff_style: InboxDiffStyle | null;
@@ -15,4 +15,5 @@ export interface InboxDiffOptions {
   background_intensity: 'subtle' | 'normal' | 'strong' | null;
   tab_size: number | null;
   semantic: boolean | null;
+  expand_unchanged: boolean | null;
 }

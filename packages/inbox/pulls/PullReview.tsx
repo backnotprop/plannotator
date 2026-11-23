@@ -988,7 +988,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
         <span className="ib-sp" />
         {/* Every review header's diff controls (approval diff-controls-headers), in the bar as in a thread's review: one
             Split / Unified button, Collapse all, the Diff display gear. No row over the code holds them: in the Inbox they
-            are always in the header (the owner). A phone has none. */}
+            are always in the header (the owner). A phone has the gear alone, in the row under the bar. */}
         {!phone && snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
         {!phone && <div ref={setControlsHost} className="ib-prr-controls" data-pull-controls="" />}
         {(readerComments || comments.length > 0) && (
@@ -1068,6 +1068,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
                 <span>{files.length}</span>
               </button>
             )}
+            {snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
           </div>
         )}
         {detailsOpen && (

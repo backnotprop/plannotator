@@ -10074,6 +10074,12 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   .gv-head-row { display: contents; }
   .gv-head .gv-meta { order: 1; margin-top: 8px; }
   .gv-head .gv-tools { order: 2; margin-top: 12px; }
+  /* The Diff display gear (a phone's only diff control) at the row's right end, a 44 px target that leaves the
+     row's height to its 30 px buttons. */
+  .gv-head .gv-tools > .ib-dctl { order: 1; margin-left: auto; margin-block: -7px; }
+  .pn-inbox .gv-head .gv-tools .ib-dctl .ib-dctl-b { width: 44px; height: 44px; }
+  /* Its menu (a phone's, compact) no taller than the room the gear leaves it: it scrolls rather than leave the window. */
+  [data-diff-display-popup][data-pn-compact-diff-options] { max-height: var(--available-height, 80vh); }
   /* A phone's bar: one row, every control one height. Each keeps a 44 px target over the row's own height. */
   .pn-inbox .ib-review.ib-rv-walk .ib-vhead { gap: 6px; padding-inline: 4px 6px; }
   .pn-inbox .ib-rv-walk .ib-vhead :is(.ib-back, .ib-iconbtn, .ib-btn.ib-sm, .ib-rj-btn, .ib-rv-decide button) { position: relative; height: 36px; min-height: 0; }
@@ -11057,6 +11063,8 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   .ib-prreview { --ib-prp-h: 30px; }
   .pn-inbox .ib-prreview :is(.ib-vhead, .ib-prp-row2) :is(.ib-iconbtn, .ib-back) { position: relative; min-width: 30px; }
   .pn-inbox .ib-prreview :is(.ib-vhead, .ib-prp-row2) :is(.ib-iconbtn, .ib-back)::after { content: ""; position: absolute; inset: -7px 0; }
+  /* The Diff display gear beside Files, one height with it (a phone's only diff control). */
+  .pn-inbox .ib-prreview .ib-prp-row2 .ib-dctl .ib-dctl-b { height: var(--ib-prp-h); }
 }
 
 .ib-prreview { --ib-prp-chrome: color-mix(in oklab, var(--muted) 42%, var(--background)); --ib-prp-file: color-mix(in oklab, var(--foreground) 4.5%, var(--background)); --ib-prp-page: var(--ib-prp-file); --ib-prp-fill: color-mix(in oklab, var(--foreground) 7%, transparent); background: var(--ib-prp-chrome); }
