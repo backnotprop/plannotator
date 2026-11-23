@@ -166,7 +166,9 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     // is a share to go on with: an Update, or, never finished, the first share again (the person pressed no Stop).
     const overOwn = !!record && record.job?.ended === "over_limit" && own;
     const overStill = overOwn && record!.job!.bytes === plan.file_bytes;
-    const ended = record?.job ? (overOwn && !overStill ? null : (record.job.ended ?? "failed")) : null;
+    // A run the Inbox's going down cut (`ended: null`, not running now) reads "Sharing stopped", never "Couldn't reach
+    // Spaces.": Spaces was reached; the record still holds it as a run not finished, which Try again goes on from.
+    const ended = record?.job ? (overOwn && !overStill ? null : (record.job.ended ?? "stopped")) : null;
     // A space that is up and waits for Keep shows as the result, with Keep this space; one that is gone has no link.
     const phase: SpaceShareStatus["phase"] = running ? "sharing" : !record ? "none" : record.refused ? "refused" : gone ? "gone" : needsKeep && record.created && record.share_url ? "shared" : ended ? ended : record.shared_at ? "shared" : "none";
     const progress = running && live.progress ? { done: live.progress.done, total: live.progress.total } : record?.job && phase !== "shared" && phase !== "gone" && phase !== "none" ? { done: record.job.done, total: record.job.total } : null;

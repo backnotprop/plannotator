@@ -215,6 +215,7 @@
   "inbox-shape-box.spec.ts": 177,
   "inbox-shape-follow.spec.ts": 86,
   "inbox-shape.spec.ts": 42,
+  "inbox-share-panel.spec.ts": 40,
   "inbox-shared-events-webkit.spec.ts": 89,
   "inbox-shared-events.spec.ts": 112,
   "inbox-show-me-part.spec.ts": 80,
