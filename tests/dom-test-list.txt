@@ -416,6 +416,8 @@ packages/review-editor/components/AllFilesCodeView.hostSemantic.test.tsx
 packages/review-editor/components/AllFilesCodeView.generated.test.tsx
 packages/review-editor/components/AllFilesCodeView.autoViewed.test.tsx
 packages/review-editor/components/AllFilesCodeView.imagePreview.test.tsx
+packages/review-editor/components/AllFilesCodeView.fileCommentAttachments.test.tsx
+packages/review-editor/components/DiffViewer.fileCommentAttachments.test.tsx
 packages/ui/utils/highlightCopy.test.ts
 packages/ui/components/Viewer.highlightCopy.test.tsx
 packages/ui/components/CodeFilePopout.highlightCopy.test.tsx
