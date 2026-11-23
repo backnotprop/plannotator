@@ -5,11 +5,18 @@ import { join } from "node:path";
 const skill = readFileSync(join(import.meta.dir, "SKILL.md"), "utf-8");
 
 describe("plannotator-setup-goal skill", () => {
+  test("takes the goal directory from the CLI instead of hardcoding goals/", () => {
+    expect(skill).toContain("GOAL_DIR=$(plannotator setup-goal dir <slug>)");
+    expect(skill).toContain("/goal $GOAL_DIR/goal.md");
+    expect(skill).not.toContain("goals/<slug>");
+    expect(skill).not.toContain("mkdir -p goals");
+  });
+
   test("uses bundled goal setup UI as the default interview path", () => {
     expect(skill).toContain("Build a compact bundle of questions");
     expect(skill).toContain("plannotator setup-goal interview");
-    expect(skill).toContain("goals/<slug>/interview.json");
-    expect(skill).toContain("goals/<slug>/interview-result.json");
+    expect(skill).toContain("$GOAL_DIR/interview.json");
+    expect(skill).toContain("$GOAL_DIR/interview-result.json");
     expect(skill).toContain("Do not ask obvious confirmation questions");
     expect(skill).toContain("Before moving to facts, read every answer and note carefully");
     expect(skill).toContain("be absolutely patient and keep waiting on the user");
@@ -31,8 +38,8 @@ describe("plannotator-setup-goal skill", () => {
 
   test("facts phase captures automated verification selections", () => {
     expect(skill).toContain("plannotator setup-goal facts");
-    expect(skill).toContain("goals/<slug>/facts-review.json");
-    expect(skill).toContain("goals/<slug>/facts-result.json");
+    expect(skill).toContain("$GOAL_DIR/facts-review.json");
+    expect(skill).toContain("$GOAL_DIR/facts-result.json");
     expect(skill).toContain("facts.meta.json");
     expect(skill).toContain("automatedVerification");
     expect(skill).not.toContain("setup-goal facts -");

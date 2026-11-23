@@ -6,7 +6,7 @@ description: Turn an idea or objective into a goal package for /goal. Interviews
 
 # Setup Goal
 
-Turn an idea into a goal package at `goals/<slug>/` through structured discovery, user interview, and codebase exploration.
+Turn an idea into a goal package in its own directory, `$GOAL_DIR`, through structured discovery, user interview, and codebase exploration.
 
 ## Phases
 
@@ -14,13 +14,13 @@ Turn an idea into a goal package at `goals/<slug>/` through structured discovery
 
 State back what the user wants in your own words. If the conversation already has rich context, summarize it. If the goal is bare or vague, do minimal shallow exploration of the codebase to ground your understanding. Keep it to 2-3 sentences. Wait for the user to confirm or correct before continuing.
 
-Create the goal directory once the slug is clear:
+Create the goal directory once the slug is clear. Plannotator picks the goals folder (`goalsDir` in config.json, or `PLANNOTATOR_GOALS_DIR`; default `goals`) and prints the new directory's absolute path:
 
 ```bash
-mkdir -p goals/<slug>
+GOAL_DIR=$(plannotator setup-goal dir <slug>)
 ```
 
-Use `goals/<slug>/` for both working JSON files and final docs. The JSON files are provenance and iteration state; the markdown files are the human-readable authoritative goal package.
+Use `$GOAL_DIR/` for both working JSON files and final docs. The JSON files are provenance and iteration state; the markdown files are the human-readable authoritative goal package.
 
 **Browser session patience rule:** Plannotator goal setup is a user-driven browser session. After launching an interview or facts command, be absolutely patient and keep waiting on the user until they submit, dismiss, or explicitly ask you to stop. Do not close, kill, restart, refresh, or open a second copy just because the UI is idle or the user is taking time. Never close and reopen the session as a way to update state; if a rerun is needed after the prior session ends, update the working JSON file and launch a new command from that file.
 
@@ -56,7 +56,7 @@ Question areas that usually matter:
 
 Write the interview bundle before showing it to the user:
 
-`goals/<slug>/interview.json`
+`$GOAL_DIR/interview.json`
 
 ```json
 {
@@ -86,13 +86,13 @@ Supported `answerMode` values: `text`, `single`, `multi`, `custom`, `single-cust
 Run this as a monitored foreground process and wait patiently for the browser session to finish. The command may appear idle while the user is reading, editing, or asking questions; leave it running:
 
 ```bash
-plannotator setup-goal interview goals/<slug>/interview.json --json
+plannotator setup-goal interview $GOAL_DIR/interview.json --json
 ```
 
-The command returns JSON on stdout with the submitted answers. Write that exact result to `goals/<slug>/interview-result.json` before continuing. A convenient pattern is:
+The command returns JSON on stdout with the submitted answers. Write that exact result to `$GOAL_DIR/interview-result.json` before continuing. A convenient pattern is:
 
 ```bash
-plannotator setup-goal interview goals/<slug>/interview.json --json | tee goals/<slug>/interview-result.json
+plannotator setup-goal interview $GOAL_DIR/interview.json --json | tee $GOAL_DIR/interview-result.json
 ```
 
 If the user revises after the session finishes, update `interview.json` and rerun the command instead of reconstructing the whole bundle from memory. If the session is dismissed, stop and tell the user the goal setup was closed.
@@ -107,11 +107,11 @@ Before moving to facts, read every answer and note carefully:
 
 A fact is a simple description of each outcome of a goal. It should be easily testable and verifiable. A fact may describe the function of a specific feature or aspect of a system. A fact may determine specific UI and UX. Again, a fact is literally anything that can be tested and verified in automated or manual testing. Keep fact language simple. In a way, a fact sheet is a design spec, but less verbose & using language the human user can easily visualize & rationalize. 
 
-Prepare a facts review bundle from `goals/<slug>/interview-result.json`. Each fact should include whether automated verification is recommended and preselected.
+Prepare a facts review bundle from `$GOAL_DIR/interview-result.json`. Each fact should include whether automated verification is recommended and preselected.
 
 Write the facts review bundle before showing it to the user. If revising after a prior facts pass, start from `facts-review.json` and `facts-result.json`, include previously accepted facts with `"accepted": true`, and preserve their state.
 
-`goals/<slug>/facts-review.json`
+`$GOAL_DIR/facts-review.json`
 
 ```json
 {
@@ -134,16 +134,16 @@ Write the facts review bundle before showing it to the user. If revising after a
 Run this as a monitored foreground process and wait patiently for the browser session to finish. The command may appear idle while the user is reviewing, editing, or asking questions; leave it running:
 
 ```bash
-plannotator setup-goal facts goals/<slug>/facts-review.json --json
+plannotator setup-goal facts $GOAL_DIR/facts-review.json --json
 ```
 
-The command returns JSON on stdout with accepted/edited/removed facts plus automated verification selections. Write that exact result to `goals/<slug>/facts-result.json`. A convenient pattern is:
+The command returns JSON on stdout with accepted/edited/removed facts plus automated verification selections. Write that exact result to `$GOAL_DIR/facts-result.json`. A convenient pattern is:
 
 ```bash
-plannotator setup-goal facts goals/<slug>/facts-review.json --json | tee goals/<slug>/facts-result.json
+plannotator setup-goal facts $GOAL_DIR/facts-review.json --json | tee $GOAL_DIR/facts-result.json
 ```
 
-Write `goals/<slug>/facts.md` as a flat readable list of accepted facts. Each fact is one line; add a minimal note only when the fact cannot be stated clearly on its own. Also write `goals/<slug>/facts.meta.json` preserving each accepted fact's `id`, final `text`, `comment`, `recommendedAutomatedVerification`, and `automatedVerification` value.
+Write `$GOAL_DIR/facts.md` as a flat readable list of accepted facts. Each fact is one line; add a minimal note only when the fact cannot be stated clearly on its own. Also write `$GOAL_DIR/facts.meta.json` preserving each accepted fact's `id`, final `text`, `comment`, `recommendedAutomatedVerification`, and `automatedVerification` value.
 
 If the user edits or removes facts in the UI, apply that result directly. If the session is dismissed, stop and tell the user the facts review was closed.
 
@@ -151,7 +151,7 @@ If the user edits or removes facts in the UI, apply that result directly. If the
 
 Explore the codebase. Discover and validate implementation paths toward each accepted fact. Treat facts with `automatedVerification: true` as requiring concrete automated checks unless you document a blocker. Trace through code, identify files and systems involved, surface risks and unknowns. Refine until you have a confident order of operations.
 
-Write `goals/<slug>/plan.md`:
+Write `$GOAL_DIR/plan.md`:
 
 - Solution approach (brief)
 - Ordered steps with the files/systems each touches
@@ -161,14 +161,14 @@ Write `goals/<slug>/plan.md`:
 Gate the plan with Plannotator:
 
 ```bash
-plannotator annotate goals/<slug>/plan.md --gate
+plannotator annotate $GOAL_DIR/plan.md --gate
 ```
 
 If denied, revise from feedback and re-gate until approved.
 
 ### 5. Goal Output
 
-Write `goals/<slug>/goal.md`:
+Write `$GOAL_DIR/goal.md`:
 
 - The articulated goal (1-3 sentences)
 - Reference to `facts.md` as the shared understanding
@@ -178,5 +178,5 @@ Write `goals/<slug>/goal.md`:
 Tell the user:
 
 ```
-Done! Launch a goal with `/goal goals/<slug>/goal.md`
+Done! Launch a goal with `/goal $GOAL_DIR/goal.md`
 ```
