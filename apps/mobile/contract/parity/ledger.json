@@ -22135,7 +22135,7 @@
       ],
       "flows": [],
       "mobile": "undecided",
-      "why": "",
+      "why": "Remove an agent from a thread (approval \"inbox-remove-agent-from-thread\"). The iPhone app does not build it now: the door takes the route for the web phone sheet's swipe and for a linked machine whose list names `remove-agent` in `marks`.",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"
@@ -22149,7 +22149,7 @@
       ],
       "flows": [],
       "mobile": "undecided",
-      "why": "",
+      "why": "The toast's Undo of a Remove (approval \"inbox-remove-agent-from-thread\"). The iPhone app does not build it now: the door takes the route for the web phone sheet and for a linked machine whose list names `remove-agent` in `marks`.",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"
@@ -22163,7 +22163,7 @@
       ],
       "flows": [],
       "mobile": "undecided",
-      "why": "",
+      "why": "The window's Remove on a \"to\" picker row (approval \"inbox-remove-agent-from-thread\"). The iPhone app does not build it now; the phone reaches it through the door route of the same name.",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"
@@ -22177,7 +22177,7 @@
       ],
       "flows": [],
       "mobile": "undecided",
-      "why": "",
+      "why": "The window's Undo of a Remove (approval \"inbox-remove-agent-from-thread\"). The iPhone app does not build it now; the phone reaches it through the door route of the same name.",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"
@@ -22191,7 +22191,7 @@
       ],
       "flows": [],
       "mobile": "undecided",
-      "why": "",
+      "why": "The thread's removals, on its root (approval \"inbox-remove-agent-from-thread\"). The iPhone app does not build it now: it does not draw \"You removed <name> from this thread\", and it may still offer a removed agent as a recipient; writing to it brings it back, as on the computer.",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"
@@ -22205,7 +22205,7 @@
       ],
       "flows": [],
       "mobile": "undecided",
-      "why": "",
+      "why": "Part of a thread's removal (InboxMessageWire.removed): the last message before it, where the line is drawn. The iPhone app does not build it now.",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"
@@ -22219,7 +22219,7 @@
       ],
       "flows": [],
       "mobile": "undecided",
-      "why": "",
+      "why": "Part of a thread's removal (InboxMessageWire.removed): when the person removed the agent. The iPhone app does not build it now.",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"
@@ -22233,7 +22233,7 @@
       ],
       "flows": [],
       "mobile": "undecided",
-      "why": "",
+      "why": "Part of a thread's removal (InboxMessageWire.removed): the removed agent's host. The iPhone app does not build it now.",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"
@@ -22247,7 +22247,7 @@
       ],
       "flows": [],
       "mobile": "undecided",
-      "why": "",
+      "why": "Part of a thread's removal (InboxMessageWire.removed): the removed agent's name, for the line. The iPhone app does not build it now.",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"
@@ -22261,7 +22261,7 @@
       ],
       "flows": [],
       "mobile": "undecided",
-      "why": "",
+      "why": "Part of a thread's removal (InboxMessageWire.removed): the removed agent's session. The iPhone app does not build it now.",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"
