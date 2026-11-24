@@ -44,10 +44,9 @@ export interface LaunchHostResult {
  * launch of this Inbox owns), it could not (`failed`: tried again later, as a failed `codex queue` is), or it may
  * have gone (`uncertain`: sent and never answered; kept claimed and never sent again, as a `codex queue` that ran
  * out of time is). `hold` (the engine's answer, never a host's): not now, and not the wake's own way either; the
- * item waits in the Inbox (a deleted launch's session, a reply the person's Stop held). `steered`: delivered into the
- * turn that was running (Codex's `turn/steer`); recorded at once, and its line says so.
+ * item waits in the Inbox (a deleted launch's session, a reply the person's Stop held).
  */
-export type LaunchDelivery = "delivered" | "steered" | "queue" | "hold" | { failed: string } | { uncertain: string };
+export type LaunchDelivery = "delivered" | "queue" | "hold" | { failed: string } | { uncertain: string };
 
 /**
  * The folder the person's files sent to an agent sit in (a message's `attachments`). A launched session reads them
@@ -352,10 +351,9 @@ export interface LaunchHost {
    * Only a host whose sessions the Inbox wakes itself (Codex: inbox-codex-wake.ts, no plugin poll): the wake text of
    * a person's item for a launched session goes in as that session's turn. Without it, the wake's own way. `signal`:
    * the person pressed Stop or Delete meanwhile (the engine waits for this call before it stops the session): start
-   * no turn after it. `intoTurn`: it may go into the running turn (`steered`); only when the Codex wake's experimental
-   * `codex-steer` switch is on and it found the thread's rollout to see it arrive in. Absent: as before the switch.
+   * no turn after it.
    */
-  deliver?(launch: InboxLaunchRecord, text: string, signal: AbortSignal, options?: { intoTurn?: boolean }): Promise<LaunchDelivery>;
+  deliver?(launch: InboxLaunchRecord, text: string, signal: AbortSignal): Promise<LaunchDelivery>;
   /**
    * Only a host whose session writes its failed turns down where the Inbox can read them (Claude Code's transcript)
    * and says nothing to the Inbox itself: the error the session's last turn ended in, or null (it ended well, a new
