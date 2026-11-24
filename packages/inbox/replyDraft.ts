@@ -169,6 +169,13 @@ const discards = new Map<string, number>();
 const discardsOf = (threadId: string) => discards.get(threadId) ?? 0;
 /** Another machine's thread keeps no draft here: dictated words for its closed box wait in this page for the box. */
 const heldVoice = new Map<string, string[]>();
+/**
+ * Another machine's thread keeps no draft here yet (its door takes none): the words typed in its box are kept in this
+ * page per thread, so leaving the thread and coming back keeps them, and the restart guard and "Leave page?" ask.
+ */
+const remoteWords = new Map<string, string>();
+/** Words the box shows for the thread that no draft holds: a save that did not land, or another machine's thread. */
+const unsavedOf = (threadId: string): string | null => failedWords.get(threadId) ?? remoteWords.get(threadId) ?? null;
 /** The dictated words waiting for this thread's box (`landWordsInReplyDraft` on another machine's thread), taken once. */
 export function takeHeldVoiceWords(threadId: string): string[] {
   const words = heldVoice.get(threadId) ?? [];
@@ -177,7 +184,7 @@ export function takeHeldVoiceWords(threadId: string): string[] {
   return words;
 }
 export function replyDraftUnsaved(): boolean {
-  return unsaved > 0 || landing > 0 || heldVoice.size > 0 || conflictWords.size > 0 || offerWords.size > 0 || tooLongThreads.size > 0 || refusedThreads.size > 0 || failedWords.size > 0 || carriesFiles();
+  return unsaved > 0 || landing > 0 || heldVoice.size > 0 || conflictWords.size > 0 || offerWords.size > 0 || tooLongThreads.size > 0 || refusedThreads.size > 0 || failedWords.size > 0 || remoteWords.size > 0 || carriesFiles();
 }
 
 /**
@@ -487,10 +494,10 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     if (on) refusedThreads.add(target);
     else refusedThreads.delete(target);
     unsavedChanged();
-    if (target === current.current) setState((s) => ({ ...s, failed: on, unsaved: failedWords.get(target) ?? null }));
+    if (target === current.current) setState((s) => ({ ...s, failed: on, unsaved: unsavedOf(target) }));
   };
   const show = (target: string, draft: InboxReplyDraft | null) => {
-    if (target === current.current) setState({ loadedFor: target, draft, conflict: conflicts.current.get(target) ?? null, tooLong: tooLongThreads.has(target), failed: refusedThreads.has(target), offer: offers.get(target) ?? null, unsaved: failedWords.get(target) ?? null });
+    if (target === current.current) setState({ loadedFor: target, draft, conflict: conflicts.current.get(target) ?? null, tooLong: tooLongThreads.has(target), failed: refusedThreads.has(target), offer: offers.get(target) ?? null, unsaved: unsavedOf(target) });
   };
   /**
    * A draft read while the person's box (`ownedBox`: they typed in it since it opened) holds other words. `offer`: the
@@ -793,11 +800,11 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
         const knewBase = bases.current.has(threadId) ? baseOf(threadId) : undefined;
         const change = ownedChange(threadId, draft, true);
         if (change === null) adopt(threadId, draft);
-        setState({ loadedFor: threadId, draft, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId), offer: offers.get(threadId) ?? null, unsaved: waiting ?? null });
+        setState({ loadedFor: threadId, draft, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId), offer: offers.get(threadId) ?? null, unsaved: unsavedOf(threadId) });
         if (change === 'typed') onOfferRef.current?.(threadId);
         else if (waiting !== undefined) failedAfterRead(threadId, waiting, draft, knewBase);
       } catch {
-        if (live) setState({ loadedFor: threadId, draft: null, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId), unsaved: failedWords.get(threadId) ?? null });
+        if (live) setState({ loadedFor: threadId, draft: null, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId), unsaved: unsavedOf(threadId) });
       }
     });
     return () => {
@@ -872,9 +879,14 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   const save = useCallback(
     (text: string, files: ReplyDraftFiles = NO_FILES) => {
       const target = current.current;
-      // Another machine's thread (linked machines): its drafts live on that machine, whose door takes none, so
-      // the words stay in this box only.
-      if (claimed.current.has(target) || machineOf(target)) return;
+      if (claimed.current.has(target)) return;
+      // Another machine's thread (linked machines): its drafts live on that machine, whose door takes none yet, so the
+      // words are kept in this page for the thread (`remoteWords`): back in the box when it opens again, and guarded.
+      if (machineOf(target)) {
+        if (text.trim() !== '') remoteWords.set(target, text);
+        else remoteWords.delete(target);
+        return unsavedChanged();
+      }
       // Longer than a draft holds: never sent (the Inbox would refuse it), said above the box instead. The file
       // changes wait for the next save (the box keeps its last held files).
       if (text.length > INBOX_DRAFT_BODY_MAX) {
@@ -965,6 +977,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     tooLongThreads.delete(target);
     refusedThreads.delete(target);
     failedWords.delete(target);
+    remoteWords.delete(target);
     unsavedChanged();
     setState({ loadedFor: target, draft: null, conflict: null, tooLong: false, failed: false });
     if (machineOf(target)) return;
@@ -1033,6 +1046,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     tooLongThreads.delete(target);
     refusedThreads.delete(target);
     failedWords.delete(target);
+    remoteWords.delete(target);
     unsavedChanged();
     if (!open) {
       if (conflicts.current.has(target) || offeredSends.current.delete(target)) setConflict(target, null);

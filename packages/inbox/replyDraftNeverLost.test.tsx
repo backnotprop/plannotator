@@ -23,6 +23,7 @@ const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as ty
 const { replyDraftUnsaved } = (hasDom ? await import('./replyDraft') : {}) as typeof import('./replyDraft');
 const { createSignal } = (hasDom ? await import('./signal') : {}) as typeof import('./signal');
 const { inboxReconnected } = (hasDom ? await import('./sessionAdopt') : {}) as typeof import('./sessionAdopt');
+const { rememberMachine, resetMachineRoutes } = (hasDom ? await import('./inboxUrl') : {}) as typeof import('./inboxUrl');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'ledger-abcdef', name: 'ledger', root: '/work/ledger', created_at: '2026-11-02T09:00:00.000Z' };
 const A: Extract<InboxAuthor, { kind: 'agent' }> = { kind: 'agent', host: 'codex', session: 'ses_a', name: 'Codex' };
@@ -391,6 +392,38 @@ test.skipIf(!hasDom)('the page hidden inside the pause in typing: the words are 
     expect(el.querySelector('[data-draft-conflict]') === null).toBe(true);
   } finally {
     pageVisibility('visible');
+  }
+});
+
+test.skipIf(!hasDom)("another computer's thread: words typed in its box stay with it when the person goes to another thread and back, and are guarded", async () => {
+  const MAC = `ibx_01K${'0'.repeat(22)}M`;
+  rememberMachine([TWO], MAC);
+  try {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    act(() => {
+      root = createRoot(host!);
+      draw(TWO);
+    });
+    await settle();
+    const el = host;
+    await reply(el);
+    typeOn(el, 'Words for the Mac mini thread.');
+    await settle(2);
+    expect(replyDraftUnsaved()).toBe(true);
+    act(() => draw(ONE));
+    await settle();
+    act(() => draw(TWO));
+    await until(() => box(el)?.value === 'Words for the Mac mini thread.', 'the words back in the box');
+    expect(replyDraftUnsaved()).toBe(true);
+    // Discard lets them go (and nothing is left waiting for the next test).
+    const bin = el.querySelector<HTMLButtonElement>('[data-reply-discard]');
+    expect(!!bin).toBe(true);
+    await act(async () => bin!.click());
+    await settle(2);
+    expect(replyDraftUnsaved()).toBe(false);
+  } finally {
+    resetMachineRoutes();
   }
 });
 
