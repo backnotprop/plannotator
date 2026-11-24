@@ -22839,6 +22839,300 @@
       }
     },
     {
+      "id": "undecided-door-get-capabilities",
+      "title": "door:GET capabilities",
+      "surface": [
+        "door:GET capabilities"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-scheduled",
+      "title": "door:GET scheduled",
+      "surface": [
+        "door:GET scheduled"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-scheduled-id",
+      "title": "door:GET scheduled/:id",
+      "surface": [
+        "door:GET scheduled/:id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-capabilities",
+      "title": "door:POST capabilities",
+      "surface": [
+        "door:POST capabilities"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-scheduled",
+      "title": "door:POST scheduled",
+      "surface": [
+        "door:POST scheduled"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-scheduled-id",
+      "title": "door:POST scheduled/:id",
+      "surface": [
+        "door:POST scheduled/:id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-scheduled-id-delete",
+      "title": "door:POST scheduled/:id/delete",
+      "surface": [
+        "door:POST scheduled/:id/delete"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-scheduled-id-off",
+      "title": "door:POST scheduled/:id/off",
+      "surface": [
+        "door:POST scheduled/:id/off"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-scheduled-id-on",
+      "title": "door:POST scheduled/:id/on",
+      "surface": [
+        "door:POST scheduled/:id/on"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-scheduled-id-restore",
+      "title": "door:POST scheduled/:id/restore",
+      "surface": [
+        "door:POST scheduled/:id/restore"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-scheduled-id-run",
+      "title": "door:POST scheduled/:id/run",
+      "surface": [
+        "door:POST scheduled/:id/run"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-scheduled-id-stop",
+      "title": "door:POST scheduled/:id/stop",
+      "surface": [
+        "door:POST scheduled/:id/stop"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-scheduled-preview",
+      "title": "door:POST scheduled/preview",
+      "surface": [
+        "door:POST scheduled/preview"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-capabilities",
+      "title": "window:/api/inbox/capabilities",
+      "surface": [
+        "window:/api/inbox/capabilities"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-capability",
+      "title": "window:/api/inbox/capability",
+      "surface": [
+        "window:/api/inbox/capability"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-taggable-agents",
+      "title": "door:GET taggable-agents",
+      "surface": [
+        "door:GET taggable-agents"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-agent-reply",
+      "title": "door:POST agent-reply",
+      "surface": [
+        "door:POST agent-reply"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-far-delivered",
+      "title": "door:POST far-delivered",
+      "surface": [
+        "door:POST far-delivered"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-far-wake",
+      "title": "door:POST far-wake",
+      "surface": [
+        "door:POST far-wake"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxaddressee-machine",
+      "title": "field:InboxAddressee.machine",
+      "surface": [
+        "field:InboxAddressee.machine"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxtag-machine",
+      "title": "field:InboxTag.machine",
+      "surface": [
+        "field:InboxTag.machine"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "undecided-setting-decision-mode",
       "title": "setting:decision_mode",
       "surface": [

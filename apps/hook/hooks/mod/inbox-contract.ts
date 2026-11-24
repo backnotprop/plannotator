@@ -488,8 +488,11 @@ function wakeSteps(value: unknown): { done: number; total: number; doing: string
  * Actions with no line in the agent tool's description: the name in `action`
  * and its field's description say what they do, and a field description does
  * not count toward the 2,048 (the owner: do not grow the main description).
+ * `routine` too (the owner, 2026-11-24): with the Board, the Checklist and
+ * Routines on, its line would pass Claude Code's 2,048 and cut off the
+ * `--help` line; `plannotator routine --help` says the rest.
  */
-export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread', 'thread_pulls']
+export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread', 'thread_pulls', 'routine']
 
 /**
  * Before saying something was never discussed (approved 2026-11-15): the MCP search tool's description and --help's

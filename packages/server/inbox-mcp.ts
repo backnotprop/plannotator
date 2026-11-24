@@ -618,6 +618,11 @@ export type AgentSendInput = {
   agent_session?: string;
   agent_name?: string;
   agent_host?: string;
+  /**
+   * Not a tool field: a session on another linked computer writing here (inbox-far-tags.ts), that computer's id and
+   * name. Its paths are that computer's, so nothing in its body is read from this disk.
+   */
+  agent_machine?: { id: string; name: string | null };
 };
 
 /** The project a send lands in: reply_to's, else the one at project_path. */
@@ -924,7 +929,9 @@ export async function sendAgentMessage(
   // Asynchronous and yielding; the blobs stay staged until the store accepts the message.
   // Pictures sent as bytes go first, so each is taken now: their bytes are not on disk for a later read to find.
   const fromBytes = uploaded && uploaded.pictures.size > 0 ? [...uploaded.pictures.keys()] : null;
-  const captured = bodyShowsLocalImages(input.body)
+  // A session on another computer (inbox-far-send.ts): only the pictures it sent as bytes, never a path on this disk.
+  const farAuthor = input.agent_machine ?? context.farAuthor;
+  const captured = (farAuthor ? !!fromBytes : bodyShowsLocalImages(input.body))
     ? await captureInboxInlineImages(store.dir, {
         body: input.body,
         root: project.root,
@@ -935,7 +942,7 @@ export async function sendAgentMessage(
         ...(uploaded && fromBytes
           ? {
               files: uploaded.pictures,
-              refs: [...fromBytes, ...inboxMessageImageRefsInOrder(input.body).filter((ref) => !uploaded.pictures.has(ref))],
+              refs: farAuthor ? [...fromBytes] : [...fromBytes, ...inboxMessageImageRefsInOrder(input.body).filter((ref) => !uploaded.pictures.has(ref))],
               max: Math.max(INBOX_INLINE_IMAGES_MAX, fromBytes.length),
             }
           : {}),
@@ -960,6 +967,7 @@ export async function sendAgentMessage(
         host: input.agent_host?.trim() || null,
         session: input.agent_session?.trim() || null,
         name: inboxStoredAgentName(input.agent_name),
+        ...(farAuthor ? { machine: farAuthor.id, ...(farAuthor.name ? { machine_name: farAuthor.name } : {}) } : {}),
       },
       body: input.body,
       subject: input.subject ?? null,
@@ -1311,6 +1319,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
     },
     async (input, ctx) =>
       guarded(async () => {
+        // A thread on another computer: the send runs there, with every field, by that computer's rules (inbox-mcp-far-reply.ts).
+        const farSent = input.reply_to && !store.message(ownMessageId(store, input.reply_to)) && context.farReply ? await context.farReply(input, async () => replyNextStepText(await senderWakes(context, ctx, input), input.agent_host), callerWorkingFolder(ctx)) : null;
+        if (farSent) return ok(farSent.text, farSent.structured);
         // A list that does not read is refused before anything is sent, so a message never lands without its steps.
         const withSteps = (input as { steps?: unknown }).steps;
         if (withSteps !== undefined) {

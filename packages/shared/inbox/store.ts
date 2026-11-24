@@ -123,6 +123,7 @@ import {
 import { INBOX_COMMENT_PICTURES_MAX, inboxCommentPicture, inboxCommentPictureUploads } from "@plannotator/core/inbox-types";
 import { inboxListSections, inboxRowDraftOnly, inboxRowUnread, inboxSectionOf } from "./list";
 import { inboxProjectLabels } from "./project-name";
+import { sameInboxSend } from "./send-same";
 import { inboxActivity, type InboxActivitySource } from "./activity";
 import { inboxAckLine, inboxStopNoticeId, inboxStopNoticeReply, type InboxWakeContext } from "./connection";
 import { inboxClaimDirs } from "./claims";
@@ -688,7 +689,7 @@ export function normalizeInboxTags(value: unknown, owner: string | null): InboxT
   const out: InboxTag[] = [];
   for (const entry of value) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new InboxError("validation_error", "tags: each one { host, session, wakes }.", { field: "tags" });
-    const { host, session, name, wakes, label, joined } = entry as Record<string, unknown>;
+    const { host, session, name, wakes, label, joined, machine } = entry as Record<string, unknown>;
     if (!isInboxTagSessionId(host, session)) {
       throw new InboxError("validation_error", "tags: each session an id.", { field: "tags" });
     }
@@ -700,6 +701,10 @@ export function normalizeInboxTags(value: unknown, owner: string | null): InboxT
     if (label !== undefined && label !== null && (typeof label !== "string" || label.length > 120 || /[\u0000-\u001f\u007f]/.test(label))) {
       throw new InboxError("validation_error", "tags: label a short line.", { field: "tags" });
     }
+    // A session on another linked computer (inbox-far-tags.ts): that computer's Inbox id.
+    if (machine !== undefined && (typeof machine !== "string" || !/^ibx_[0-9A-HJKMNP-TV-Z]{26}$/.test(machine))) {
+      throw new InboxError("validation_error", "tags: machine an ibx_ id.", { field: "tags" });
+    }
     if (session === owner || out.some((tag) => tag.session === session)) continue;
     out.push({
       host: host as string | null,
@@ -709,6 +714,7 @@ export function normalizeInboxTags(value: unknown, owner: string | null): InboxT
       wakes,
       // "Add instead": the session joins the thread (a member: a later reply reaches it when the box names it).
       ...(joined === true ? { joined: true } : {}),
+      ...(typeof machine === "string" ? { machine } : {}),
     });
   }
   return out;
@@ -3855,6 +3861,51 @@ export class InboxStore {
     return out;
   }
 
+  /**
+   * The sessions a thread names on another linked computer (packages/server/inbox-far-tags.ts), each with that
+   * computer's Inbox id: a far tag, a hand-off to a far session, a message a far session wrote here. A session the
+   * thread names from two computers is left out (no computer may answer for another's session).
+   */
+  farSessions(threadId: string): Map<string, { machine: string; host: string | null }> {
+    const out = new Map<string, { machine: string; host: string | null }>();
+    const clash = new Set<string>();
+    const add = (session: string | null | undefined, machine: string | undefined, host: string | null | undefined) => {
+      if (!session || !machine) return;
+      const known = out.get(session);
+      if (known && known.machine !== machine) clash.add(session);
+      else if (!known) out.set(session, { machine, host: host ?? null });
+    };
+    for (const message of this.threadMessages(threadId)) {
+      if (message.author.kind === "agent") add(message.author.session, message.author.machine, message.author.host);
+      else {
+        for (const tag of message.tags ?? []) add(tag.session, tag.machine, tag.host);
+        add(message.to?.session, message.to?.machine, message.to?.host);
+      }
+    }
+    for (const session of clash) out.delete(session);
+    return out;
+  }
+
+  /**
+   * Where this store knows `session`: "here" when it wrote here as this computer's own (no `machine`), else the
+   * linked computer its messages, tags or addressing name (the first seen), else null.
+   */
+  sessionMachine(session: string): string | null {
+    let found: string | null = null;
+    for (const message of this.messages.values()) {
+      if (message.author.kind === "agent") {
+        if (message.author.session === session) {
+          if (!message.author.machine) return "here";
+          found ??= message.author.machine;
+        }
+        continue;
+      }
+      for (const tag of message.tags ?? []) if (tag.session === session && tag.machine) found ??= tag.machine;
+      if (message.to?.session === session && message.to.machine) found ??= message.to.machine;
+    }
+    return found;
+  }
+
   /** Hand-offs still inside their Undo window (or that a stop interrupted). */
   handoffsPending(): number {
     let count = 0;
@@ -4418,15 +4469,13 @@ export class InboxStore {
         // naming came to.
         // A reply's `thread` counts only where it could name the thread (the reply kept `thread_naming`):
         // anywhere else it is ignored, and an older store never recorded it.
-        const sameName =
-          inboxThreadNameKey(message.thread_name ?? "") === inboxThreadNameKey(threadName ?? "") &&
-          (!message.thread_naming || inboxThreadNameKey(message.reply_thread ?? "") === inboxThreadNameKey(replyThread ?? ""));
-        const sameGuide = (message.guide?.input_sha256 ?? null) === (input.guide?.input_sha256 ?? null);
-        const sameSupersedes = [...(message.supersedes ?? [])].sort().join("\n") === [...supersedes].sort().join("\n");
-        const sameDone = [...(message.done ?? [])].sort().join("\n") === [...done].sort().join("\n");
-        const liveIds = (sites: readonly { id: string }[] | undefined) => [...new Set((sites ?? []).map((site) => site.id))].sort().join("\n");
-        const sameLive = liveIds(message.live_sites) === liveIds(input.live_sites);
-        if (message.body !== body || message.reply_to !== replyTo || !sameName || !sameGuide || !sameSupersedes || !sameDone || !sameLive) {
+        const naming = !!message.thread_naming;
+        const liveIds = (sites: readonly { id: string }[] | undefined) => (sites ?? []).map((site) => site.id);
+        const same = sameInboxSend(
+          { body: message.body, reply_to: message.reply_to, thread_name: message.thread_name ?? null, reply_thread: naming ? (message.reply_thread ?? null) : null, guide: message.guide?.input_sha256 ?? null, supersedes: message.supersedes ?? [], done: message.done ?? [], live: liveIds(message.live_sites) },
+          { body, reply_to: replyTo, thread_name: threadName, reply_thread: naming ? replyThread : null, guide: input.guide?.input_sha256 ?? null, supersedes, done, live: liveIds(input.live_sites) },
+        );
+        if (!same) {
           throw new InboxError(
             "idempotency_key_reused",
             "This idempotency_key was already used for a different message.",
@@ -5454,7 +5503,7 @@ export class InboxStore {
       created_at: at,
       resolved_at: null,
       idempotency_key: key,
-      ...(to ? { to: { host: to.host, session: to.session } } : {}),
+      ...(to ? { to: { host: to.host, session: to.session, ...(to.machine ? { machine: to.machine } : {}) } } : {}),
       ...(to && input.took_over ? { took_over: true } : {}),
       ...(input.to && input.launch ? { launch: input.launch } : {}),
       ...(attachments.length > 0 ? { attachments: attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),

@@ -217,6 +217,7 @@ packages/inbox/takeBack.test.tsx
 packages/inbox/sendWaitsForComments.test.tsx
 packages/inbox/undelivered.test.tsx
 packages/inbox/tagAgents.test.tsx
+packages/inbox/tagPickerComputers.test.tsx
 packages/inbox/threadSessionsHeader.test.tsx
 packages/inbox/taterMark.test.tsx
 packages/inbox/restartWarning.test.tsx
@@ -873,6 +874,7 @@ packages/review-editor/components/AllFilesCodeView.lineTarget.test.tsx
 packages/inbox/scheduled/scheduledSidebar.test.tsx
 packages/inbox/scheduled/scheduledTable.test.tsx
 packages/inbox/scheduled/scheduledEditor.test.tsx
+packages/inbox/scheduled/routinesAcross.test.tsx
 packages/inbox/scheduled/scheduledThread.test.tsx
 packages/inbox/scheduled/scheduledRows.test.tsx
 packages/inbox/scheduled/rowRunEnds.test.tsx
