@@ -23,7 +23,7 @@ import { expect, test, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { INBOX_BRIDGE_POLL_PATH } from '../../packages/shared/inbox/connection';
+import { INBOX_BRIDGE_POLL_PATH, INBOX_TAGS_POLL_FIELD } from '../../packages/shared/inbox/connection';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
@@ -59,7 +59,10 @@ async function swarmAsk(by: { host: string; session: string }, ask: Record<strin
   return json;
 }
 
-/** One live session: the bridge's long-poll. `busy`: a turn runs. */
+/**
+ * One live session: the bridge's long-poll, as a current connection sends it (the mod, agent-link): it says it
+ * understands tags, so it can be tagged. `busy`: a turn runs.
+ */
 class Poll {
   private stopped = false;
   private readonly loop: Promise<void>;
@@ -77,7 +80,7 @@ class Poll {
       const response = await fetch(`http://127.0.0.1:${port}${INBOX_BRIDGE_POLL_PATH}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ session: this.session, host: this.host, waitMs: 1_000, project_path: world.project, started_at: this.startedAt, busy: this.busy, idle_since: this.busy ? null : this.startedAt }),
+        body: JSON.stringify({ session: this.session, host: this.host, waitMs: 1_000, [INBOX_TAGS_POLL_FIELD]: true, project_path: world.project, started_at: this.startedAt, busy: this.busy, idle_since: this.busy ? null : this.startedAt }),
       }).catch(() => null);
       await response?.text().catch(() => '');
     }
@@ -184,7 +187,7 @@ async function startSwarm(page: Page, words: string, proof?: string): Promise<st
 
 test('New message to two agents with Swarm on makes one swarm thread, its root to the first and tagging the other', async ({ page }) => {
   await openWindow(page, 1440, 900);
-  threadId = await startSwarm(page, "Refunds are off by a cent after Ada Novak's rounding change. Split it between you: the rounding, and the refunds that went out wrong.", '01-new-message-two-agents');
+  threadId = await startSwarm(page, "Refunds are off by a cent after Bob Tully's rounding change. Split it between you: the rounding, and the refunds that went out wrong.", '01-new-message-two-agents');
   const thread = await read<{ thread: { swarm?: { on: boolean }; messages: { to?: { session: string }; tags?: { session: string }[] }[] } }>(`/api/inbox/threads/${threadId}`);
   expect(thread.thread.swarm?.on).toBe(true);
   const sent = thread.thread.messages[0]!;
@@ -304,8 +307,10 @@ test('a phone: the swarm thread, then the ghost pane as its own page whose way b
   const pane = page.locator('[data-ghost-pane]');
   await expect(pane).toBeVisible();
   await expect(pane).toHaveClass(/ib-full/);
+  // The way back names the thread as its bar does: its name (compose's suggestion, kept as the thread's name), else its subject.
+  const named = (await read<{ thread: { thread_name?: string | null; subject: string | null } }>(`/api/inbox/threads/${threadId}`)).thread;
   const back = pane.locator('[data-ghost-back]');
-  await expect(back).toContainText('Refunds are off by a cent');
+  await expect(back).toContainText((named.thread_name || named.subject)!);
   const fits = await page.evaluate(() => {
     const box = document.querySelector('[data-ghost-pane]')!.getBoundingClientRect();
     return box.left >= 0 && box.right <= window.innerWidth + 0.5;
