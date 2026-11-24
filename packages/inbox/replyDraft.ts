@@ -175,7 +175,9 @@ const heldVoice = new Map<string, string[]>();
  */
 const remoteWords = new Map<string, string>();
 /** Words the box shows for the thread that no draft holds: a save that did not land, or another machine's thread. */
-const unsavedOf = (threadId: string): string | null => failedWords.get(threadId) ?? remoteWords.get(threadId) ?? null;
+const unsavedOf = (threadId: string): string | null => failedWords.get(threadId) ?? (machineOf(threadId) ? remoteWords.get(threadId) : undefined) ?? null;
+/** Another machine's threads with words kept here (a thread no longer marked as that machine's keeps none here). */
+const remoteKept = (): boolean => [...remoteWords.keys()].some((threadId) => machineOf(threadId) !== null);
 /** The dictated words waiting for this thread's box (`landWordsInReplyDraft` on another machine's thread), taken once. */
 export function takeHeldVoiceWords(threadId: string): string[] {
   const words = heldVoice.get(threadId) ?? [];
@@ -184,7 +186,7 @@ export function takeHeldVoiceWords(threadId: string): string[] {
   return words;
 }
 export function replyDraftUnsaved(): boolean {
-  return unsaved > 0 || landing > 0 || heldVoice.size > 0 || conflictWords.size > 0 || offerWords.size > 0 || tooLongThreads.size > 0 || refusedThreads.size > 0 || failedWords.size > 0 || remoteWords.size > 0 || carriesFiles();
+  return unsaved > 0 || landing > 0 || heldVoice.size > 0 || conflictWords.size > 0 || offerWords.size > 0 || tooLongThreads.size > 0 || refusedThreads.size > 0 || failedWords.size > 0 || remoteKept() || carriesFiles();
 }
 
 /**
