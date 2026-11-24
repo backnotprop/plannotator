@@ -1740,8 +1740,8 @@ export interface InboxActionResult {
   /**
    * The person's Done or Can't do it waits in their reply draft and goes with
    * their next Send, never on a timer (approval "inbox-action-items-in-reply").
-   * Absent: marked through the timed path (decision mode, the phone door, an
-   * older window), sent once the Undo window passes.
+   * Decision mode stages its marks too. Absent: marked through the timed path
+   * (the phone door, an older window), sent once the Undo window passes.
    */
   staged?: boolean;
   /**
@@ -1843,7 +1843,8 @@ export interface InboxQuestion extends InboxQuestionContract {
 }
 
 /**
- * Decision mode (approval "inbox-decision-mode", experimental): one open or
+ * Decision mode (approval "inbox-decision-mode"; on unless Settings →
+ * Capabilities turns it off): one open or
  * picked question or action item, with what a card needs to be answered
  * without opening its thread. `GET /api/inbox/decisions` lists them; a
  * read-only projection over the store (no record of its own).

@@ -1295,7 +1295,7 @@ export const inboxApi = {
     if (project) query.set('project', project);
     return get<InboxActivityModel>(inboxUrl('/activity', query.toString()));
   },
-  /** Decision mode (experimental): every decision waiting on the person, in queue order. 404 while the feature is off. */
+  /** Decision mode (on unless Settings › Capabilities turns it off): every decision waiting on the person, in queue order. 404 while it is off. */
   decisions: () => get<InboxDecisionsModel>(inboxUrl('/decisions')),
   /** Tidy: who it would ask in the list's (or the Board's) scope, or about picked `threads`, and the last run; `machine`: a linked machine's. */
   tidy: (project: string | null, surface: 'list' | 'board', machine?: string | null, threads?: readonly string[]) =>

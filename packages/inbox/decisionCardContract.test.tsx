@@ -136,10 +136,12 @@ interface Heard {
   sets: [string, number][];
   protos: string[];
   actions: string[];
+  /** Pictures the dialog's own viewer was asked to show. */
+  images: string[];
 }
 
-async function mount(decision: InboxDecision, withBody = true): Promise<Heard> {
-  const heard: Heard = { picks: [], sets: [], protos: [], actions: [] };
+async function mount(decision: InboxDecision, withBody = true, body: InboxMessageWire = message): Promise<Heard> {
+  const heard: Heard = { picks: [], sets: [], protos: [], actions: [], images: [] };
   setImageSrcResolver(inboxImageSrcResolver);
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -148,13 +150,13 @@ async function mount(decision: InboxDecision, withBody = true): Promise<Heard> {
     root.render(
       <DecisionCard
         decision={decision}
-        body={withBody ? { message, projectRoot: '/work/harbor', repo: null, answers: new Map(), footerFor: () => null } : null}
+        body={withBody ? { message: body, projectRoot: '/work/harbor', repo: null, answers: new Map(), footerFor: () => null } : null}
         stamp={null}
         onPick={(key, answer, pointer) => heard.picks.push([key, answer, pointer])}
         onAction={(mark) => heard.actions.push(mark.outcome)}
         onOpenThread={() => {}}
         onOpenFileRef={() => {}}
-        onImage={() => {}}
+        onImage={(pictures, index) => heard.images.push(pictures[index]!.src)}
         onOptionSet={(key, _image, choice) => heard.sets.push([key, choice])}
         onTryPrototype={(key) => heard.protos.push(key)}
         fieldOpenRef={{ current: null }}
@@ -209,9 +211,22 @@ describe.skipIf(!hasDom)("decision mode's card is the thread's card", () => {
     expect(heard.protos).toEqual([KEYS[1]!]);
   });
 
+  test("a picture the store never captured opens in the dialog's own viewer, never the page's lightbox behind the modal dialog", async () => {
+    // No `inline_images`: the zoom has no captured file, so it falls back; that fallback is the dialog's viewer.
+    const heard = await mount(decisionFor(KEYS[1]!), true, { ...message, inline_images: [] } as InboxMessageWire);
+    const tiles = [...host!.querySelectorAll<HTMLElement>('[data-question-tile]')];
+    expect(tiles).toHaveLength(2);
+    await act(async () => tiles[0]!.querySelector<HTMLButtonElement>('[data-question-zoom]')!.click());
+    expect(heard.images).toHaveLength(1);
+    expect(heard.images[0]).toContain('a.png');
+    expect(heard.sets).toHaveLength(0);
+    expect(document.querySelector('[data-image-lightbox]')).toBeNull();
+    expect(heard.picks).toHaveLength(0);
+  });
+
   test('read only once its reply is on its way: no pick reaches the draft', async () => {
     host = null;
-    const heard: Heard = { picks: [], sets: [], protos: [], actions: [] };
+    const heard: Heard = { picks: [], sets: [], protos: [], actions: [], images: [] };
     setImageSrcResolver(inboxImageSrcResolver);
     host = document.createElement('div');
     document.body.appendChild(host);

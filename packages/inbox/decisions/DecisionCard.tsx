@@ -195,6 +195,8 @@ export function DecisionCard(props: DecisionCardProps) {
                   }
                   onOpenFileRef={props.onOpenFileRef}
                   onOpenInlineImage={(image) => props.onImage([{ name: image.name, src: attachmentPictureUrl(image.id) }], 0)}
+                  // A picture not captured yet (a choice's zoom too) opens in the same viewer, never the page's lightbox behind the dialog.
+                  onOpenUncapturedImage={(src, alt) => props.onImage([{ name: alt || 'image', src }], 0)}
                   onOpenOptionSet={props.onOptionSet}
                   onTryPrototype={author.kind === 'agent' ? props.onTryPrototype : undefined}
                 />
