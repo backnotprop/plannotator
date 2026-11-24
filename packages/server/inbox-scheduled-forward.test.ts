@@ -6,7 +6,8 @@
  * (it is refused at the press, said in plain words, and never sent); a Stop that waited for it ending whatever run is
  * going when it lands (it names the run it was pressed for, also after this Inbox restarts); a held edit that looks
  * undone on the next read or a reload (the merged read lays it on the rows from the outbox until that computer takes it);
- * a computer's Capabilities group gone after a reload while it is away, or its held turn not shown.
+ * a computer's Capabilities group gone after a reload while it is away, or its held turn not shown; a turn off pressed
+ * while it is away lost, sent without the window's mark, or sent again on a later reconnect.
  */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -40,7 +41,8 @@ afterEach(() => {
 
 /** Studio's door: its list takes routines and the switches; `away()` drops its line and answers nothing until `back()`. */
 function studioDoor() {
-  const state = { down: false, name: "Morning digest", writes: [] as { route: string; body: Record<string, unknown>; window: boolean }[], board: { on: true } };
+  /** `running`: a run of sch_1 is going there, so its row says "running" whether it is on or off (as rowOf does). */
+  const state = { down: false, name: "Morning digest", enabled: true, running: false, writes: [] as { route: string; body: Record<string, unknown>; window: boolean }[], board: { on: true } };
   const streams = new Set<ReadableStreamDefaultController<Uint8Array>>();
   const server = Bun.serve({
     hostname: "127.0.0.1",
@@ -62,12 +64,16 @@ function studioDoor() {
         });
         return new Response(body, { headers: { "Content-Type": "text/event-stream" } });
       }
-      if (req.method === "GET" && route === "scheduled") return Response.json({ scheduled: [{ id: "sch_1", name: state.name, enabled: true, state: "on", updated_at: "2026-11-24T08:00:00.000Z" }], launch_on: true });
+      if (req.method === "GET" && route === "scheduled") {
+        const row = { id: "sch_1", name: state.name, enabled: state.enabled, state: state.running ? "running" : state.enabled ? "on" : "off", updated_at: "2026-11-24T08:00:00.000Z" };
+        return Response.json({ scheduled: [row], launch_on: true });
+      }
       if (req.method === "GET" && route === "capabilities") return Response.json({ capabilities: { board: state.board } });
       if (req.method === "POST") {
         const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
         state.writes.push({ route, body, window: req.headers.get(MACHINE_WINDOW_HEADER) === "1" });
         if (route === "scheduled/sch_1" && typeof body.name === "string") state.name = body.name;
+        if (route === "scheduled/sch_1/on" || route === "scheduled/sch_1/off") state.enabled = route.endsWith("/on");
         if (route === "capabilities" && body.board) state.board = body.board as { on: boolean };
         // A run's answer, as Studio's window route gives it: 202, the run's divider.
         if (route === "scheduled/sch_1/run") return Response.json({ scheduled: { id: "sch_1", name: state.name, state: "running" }, message_id: "msg_run_1" }, { status: 202 });
@@ -175,6 +181,35 @@ test("Studio online: Run once now from this window goes there at the press, keye
   const run = await call("POST", `/api/inbox/m/${FAR}/scheduled/sch_1/run`, { idempotency_key: "run-1" });
   expect([run.status, run.body?.message_id, run.body?.scheduled?.state]).toEqual([202, "msg_run_1", "running"]);
   expect(door.state.writes.map((w) => [w.route, w.body.idempotency_key, w.body.serverSession, w.window])).toEqual([["scheduled/sch_1/run", "run-1", undefined, true]]);
+});
+
+test("a turn off pressed while Studio is away, its run still going there: held, shown off and running, and taken there exactly once when it is back", async () => {
+  const door = studioDoor();
+  door.state.running = true;
+  const { machines, call, studio } = inbox(linked(door.url));
+  await until(() => studio()?.state === "online" && studio()?.list_cursor === 1, "Studio online");
+  expect((await machines.farRoutines.read()).map((one) => one.rows.map((r) => [r.enabled, r.state]))).toEqual([[[true, "running"]]]);
+
+  door.away();
+  await until(() => studio()?.state !== "online", "Studio away");
+  expect((await call("POST", `/api/inbox/m/${FAR}/scheduled/sch_1/off`, { idempotency_key: "off-1" })).status).toBe(202);
+  // The person's turn shows on the last-known row; the run going there keeps the row "running".
+  const [held] = await machines.farRoutines.read();
+  expect([held!.away, held!.rows.map((r) => [r.enabled, r.state])]).toEqual([true, [[false, "running"]]]);
+
+  door.back();
+  await until(() => door.state.writes.length > 0, "the held turn off delivered");
+  await until(() => studio()?.state === "online", "Studio back");
+  // Its line drops and comes back once more: every hello drains the outbox, and a settled write never goes again.
+  door.away();
+  await until(() => studio()?.state !== "online", "Studio away again");
+  door.back();
+  await until(() => studio()?.state === "online", "Studio back again");
+  await Bun.sleep(150);
+  expect(door.state.writes.map((w) => [w.route, w.body.idempotency_key, w.window])).toEqual([["scheduled/sch_1/off", "off-1", true]]);
+  expect((await call("GET", "/api/inbox/outbox")).body.waiting).toEqual([]);
+  const [now] = await machines.farRoutines.read();
+  expect([now!.away, now!.rows.map((r) => [r.enabled, r.state])]).toEqual([false, [[false, "running"]]]);
 });
 
 test("a held edit stays on Studio's last-known row on every read (a reload too) until Studio takes it; a held switch the same", async () => {

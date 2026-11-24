@@ -150,7 +150,9 @@ describe("routines and capability switches across linked computers", () => {
       expect((asleep.computers as Json[])[0]!.away).toBe(true);
       expect((await press(a.port, `${far}/scheduled/${id}/off`)).status).toBe(202);
       b = await start(dataB);
-      await waitFor("the held turn off on B", async () => ((await get(b.port, `/api/inbox/scheduled/${id}`)).scheduled as Json).state === "off", 45_000);
+      // Off is the routine's switch: the run Run now started is still going there (the fake agent never ends), so its
+      // row says "running" until that run ends, turned off or not.
+      await waitFor("the held turn off on B", async () => ((await get(b.port, `/api/inbox/scheduled/${id}`)).scheduled as Json).enabled === false, 45_000);
     } finally {
       a.stop();
       b.stop();
