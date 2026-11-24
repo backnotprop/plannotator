@@ -33,10 +33,13 @@ let reading: Promise<void> | null = null;
 let again = false;
 let pages = 0;
 const listeners = new Set<() => void>();
+/** Hear changes without asking for a read (see `watch`). */
+const watchers = new Set<() => void>();
 
 function emit(next: Partial<ScheduledSnapshot>) {
   snap = { ...snap, ...next };
   for (const listener of listeners) listener();
+  for (const watcher of watchers) watcher();
 }
 
 setRoutineRowReader((id) => snap.rows?.find((row) => row.id === id) ?? null);
@@ -118,6 +121,13 @@ function subscribe(listener: () => void): () => void {
 }
 const current = () => snap;
 
+/** Hears the store without counting as something that shows routines: it asks for no read. */
+function watch(watcher: () => void): () => void {
+  watchers.add(watcher);
+  return () => watchers.delete(watcher);
+}
+const farOnNow = () => farRoutinesOn(snap);
+
 export function useScheduled(): ScheduledSnapshot {
   return useSyncExternalStore(subscribe, current, current);
 }
@@ -143,7 +153,11 @@ export function useScheduledOn(settings: Pick<SettingsModel, 'scheduled_threads'
   const value = settings?.scheduled_threads?.on === true;
   const known = settings !== null || settingsFailed;
   useEffect(() => setScheduledOn(known ? value : null), [known, value]);
-  return value || farRoutinesOn(useScheduled());
+  // One hook call on every render (a call skipped once Routines turn on breaks the window's hooks). With Routines on
+  // here it only watches, so the window reads nothing more than it did before linked computers; off, it reads, so a
+  // linked computer's routines can offer the page.
+  const far = useSyncExternalStore(value ? watch : subscribe, farOnNow, farOnNow);
+  return value || far;
 }
 
 /** Saved rows go in at once, before the read again. */
