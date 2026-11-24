@@ -53,6 +53,8 @@ import { checkTailnetAddress } from "./inbox-transport-tailnet";
 import type { FarArchived } from "./inbox-archived-merged";
 import { ARTIFACT_PINS_MARK, readFarWall } from "./inbox-artifacts-merged";
 import type { InboxShowArchived } from "./inbox-show-archived";
+import { createFarRoutines } from "./inbox-scheduled-machines";
+import { createFarCapabilities } from "./inbox-capabilities-machines";
 import type { SharedReactions } from "./inbox-reactions-shared";
 
 /** The most rows a linked machine's door gives in one archived page (its `INBOX_ARCHIVED_PAGE_MAX`). */
@@ -401,13 +403,15 @@ export function forwardedFileReadRefusal(route: string, req: Request): { status:
 const LAUNCH_ROUTE = /^launch\/[^/]+\/(stop|retry|trust|delete)$/;
 /** New message, and a reply sent to a new session in place of one that ended: both carry `to.launch`. */
 const LAUNCHES_WITH_TO = /^messages(\/[^/]+\/reply)?$/;
+/** A routine's write there (make, edit, turn, run, stop, delete, bring back): that computer takes it only from a window. */
+const ROUTINE_WRITE = /^scheduled(\/sch_[^/]+(\/(on|off|run|stop|delete|restore))?)?$/;
 
 /**
  * Remote launch: a write that starts, stops or trusts an agent on another machine, which is code run there. Only a
  * press in a window of this Inbox sends one; an agent's or a script's bare call through the forward never does.
  */
 export function startsAgentThere(route: string, body: Record<string, unknown>): boolean {
-  if (LAUNCH_ROUTE.test(route)) return true;
+  if (LAUNCH_ROUTE.test(route) || ROUTINE_WRITE.test(route)) return true;
   const to = body.to;
   return LAUNCHES_WITH_TO.test(route) && !!to && typeof to === "object" && "launch" in to;
 }
@@ -465,6 +469,12 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const machineBranches = createMachineBranches({ peers: () => peers.values() });
   /** Each linked machine's last good launch read, so a window opened while it sleeps still lists its projects. */
   const launchReads = createMachineLaunchReads();
+  /** The person's writes waiting for a linked computer, laid on its routines and switches as they are shown. */
+  const heldOn = (machine: string) => outbox.list(machine, "pending").filter((entry) => !entry.auto);
+  /** Each linked computer's routines (mark `routines`), for the Routines page's merged read (inbox-scheduled-machines.ts). */
+  const farRoutines = createFarRoutines(() => peers.values(), heldOn);
+  /** Each linked computer's Capabilities switches, as it last gave them (inbox-capabilities-machines.ts). */
+  const farCapabilities = createFarCapabilities(heldOn);
   // An agent here reads a linked machine's thread, and saves its files here (inbox-machine-agent-read.ts).
   const agentRead = createMachineAgentRead({ peers: () => peers.values(), nameOf: (id) => links.get(id)?.name ?? "A linked machine" });
   // ...and finds them: its search and read_thread's list ask every linked machine too (inbox-machine-agent-find.ts).
@@ -610,6 +620,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     machinePulls.forget(id);
     machineBranches.forget(id);
     launchReads.forget(id);
+    farCapabilities.forget(id);
     const link = links.remove(id);
     if (link?.device_id) context.door.revokeDevice(link.device_id, { oweRefusal: closeDoor === "after_refusal" });
     outbox.dropMachine(id, link?.name ?? null);
@@ -885,6 +896,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
       const sessionsRead = route === MACHINE_SESSIONS_ROUTE ? launchReads.begin() : null;
       // An attached page's own tab is made here from its door's `view` (inbox-machine-page.ts): no page route there.
       const page = MACHINE_PAGE_ROUTE.exec(route);
+      // Its switches: read now, or the last it gave while it is away, with the person's held turns on them.
+      if (route === "capabilities" && !head) return farCapabilities.read(peer, offline);
       try {
         const answer = await peer.request(page ? `attachments/${page[1]}/view` : route, search, { method: "GET", headers, signal: req.signal });
         if (sessionsRead !== null && answer.ok) void launchReads.keep(machine, sessionsRead, answer.clone(), () => peers.has(machine));
@@ -1392,6 +1405,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     tagColourLists,
     cardLists,
     archivedPages,
+    farRoutines,
     /** Pinned artifacts and the Wall on linked machines (mark `artifact-pins`, inbox-artifacts-merged.ts). */
     artifactPins,
     showArchivedCopies,

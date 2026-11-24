@@ -4,7 +4,7 @@ import { inboxUrl, rememberLocal, rememberMachine } from './inboxUrl';
 import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEvents, subscribeSharedInboxEvents } from './sharedEvents';
 import { parseRestartAgents } from './restartAgents';
 import { readHello, type RestartHello } from './sessionAdopt';
-import { scheduledFrame } from './scheduled/store';
+import { scheduledFrame, scheduledMachineFrame } from './scheduled/store';
 import { readRunStateFrame, runEvents } from './data/runEvents';
 import { shipEvents } from './data/shipEvents';
 import { gridHeard } from './grid/gridOn';
@@ -239,6 +239,7 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
           if (machineKind === 'steps' || machineKind === 'thread_pull') return;
           rememberMachine(idsIn(data.record), data.machine);
           handlers.onMachine?.({ machine: data.machine, seq: data.seq, live: data.live === true, record: (data.record as InboxEvent | undefined) ?? null });
+          scheduledMachineFrame((data.record as InboxEvent | undefined) ?? null);
         }
       } catch {
       }

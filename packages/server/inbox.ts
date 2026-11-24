@@ -308,6 +308,7 @@ import { createIconSetFetcher, iconSetsPointer, INBOX_ICON_SETS_DIR } from "./in
 import { createInboxAgentFacesFile } from "@plannotator/shared/inbox/agent-faces";
 import type { InboxAgentFacesWire } from "@plannotator/core/inbox-types";
 import { createInboxArtifactPins } from "./inbox-artifact-pins";
+import { inboxCapabilitySwitchesOf } from "@plannotator/core/inbox-types";
 import { artifactPinsWire } from "./inbox-artifacts-merged";
 import { createInboxSnoozes } from "./inbox-snooze";
 import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/core/inbox-snooze";
@@ -7317,6 +7318,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         return json(perfPhase("disk", () => store.diskUsage()));
       }
+      // Settings → Capabilities' switches alone, for a linked computer's window (the door's `GET capabilities`); the door's
+      // `POST capabilities` writes them through the settings route below, with those keys only.
+      if (path === "/api/inbox/capabilities") {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        return json({ capabilities: inboxCapabilitySwitchesOf(settingsModel(via, false, null, false)) });
+      }
       if (path === "/api/inbox/settings") {
         if (req.method === "GET") {
           // The page's load id (api.ts): kept with a claim's stamp as a record (`inboxReveals.shownLoad`).
@@ -7462,7 +7469,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
         const launchOn = () => launch.enabled();
-        const answer = await scheduledRoute(req, path, { scheduled, on: scheduledCap.on, launchOn, serverSession, json, readBody });
+        // Linked computers: the merged read (`machines=1`), and a press in a window there through the door (its mark).
+        const farWindow = (r: Request) => fromDeviceDoor.get(r)?.platform === MACHINE_PLATFORM && fromDeviceDoor.get(r)?.window === true;
+        const answer = await scheduledRoute(req, path, { scheduled, on: scheduledCap.on, launchOn, serverSession, json, readBody, far: () => machines.farRoutines.read(), farWindow });
         if (answer) return answer;
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.

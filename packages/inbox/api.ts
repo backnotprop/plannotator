@@ -923,7 +923,7 @@ export async function post<T>(path: string, body: Record<string, unknown>, init:
   });
   if (machine && (await localInstead(response))) return post<T>(localRoute(path), body);
   if (machine && response.status === 202) {
-    const held = (await response.json().catch(() => ({}))) as { outbox?: OutboxView; machine?: MachineView | null };
+    const held = (await response.clone().json().catch(() => ({}))) as { outbox?: OutboxView; machine?: MachineView | null };
     if (held.outbox) {
       const entry = held.outbox;
       // Still on its way: held. A key sent before and already settled (replayed) says how it ended instead.

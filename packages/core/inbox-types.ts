@@ -3702,10 +3702,13 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * `artifact-pins` (approval "inbox-artifact-stars"): its threads' artifacts are pinned from
  * a linked machine's window and kept here (`POST artifact-pins` through its door); its list carries its pins to a
  * linked machine (`artifact_pins`), and its Artifacts wall is read through its door (`GET artifacts`).
+ * `routines`: its routines are listed, made, changed and run from a linked machine's window through its door
+ * (`scheduled…`; inbox-scheduled-machines.ts in the server). `capabilities`: its Settings → Capabilities switches are
+ * read and turned from there (`capabilities`; core inbox-capability-switches.ts).
  * `ships` (approval "inbox-ship-mode"): its ships are read, started and stopped through its door (`ships`, `ships/log`,
  * `ships/stop`), so a linked machine's Reviews draws them and offers its agents in Ship's list.
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "ships"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "ships"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**
@@ -4515,3 +4518,7 @@ export function readInboxAgentFaces(value: unknown): Record<string, InboxAgentFa
 
 /** Whether `id` is a key or session an agent face entry may name. */
 export const isInboxAgentFaceId = isId;
+
+// Settings → Capabilities' switches, for a linked computer's window and the agents' capability action. Exported here,
+// not as a subpath of its own: a new subpath needs a core release before the UI package publishes.
+export * from "./inbox-capability-switches";
