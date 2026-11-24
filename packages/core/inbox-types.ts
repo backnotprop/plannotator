@@ -3473,13 +3473,19 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * 131 bytes off. Re-measured on the entry as the tool builds it from the default tool list (Pi's request shape), with
  * main as of 2026-11-24: 16,141 bytes; tokens scaled at the entry's bytes per token (3.7), 4,342. Board on: the
  * `card` action's measured share (1,929 bytes) on top, 18,070, tokens scaled at its own ratio, 4,932.
+ * The `ship` field's words out of the schema (the owner: ship starts only from the window, so the ship instruction and
+ * `--help` teach the field; it keeps its shape and carries only the "(thread_pulls)" tag every field gets): the entry
+ * as the tool builds it from the default tool list (Pi's request shape), 16,141 → 15,890 bytes (−251). Not measured on
+ * the real Pi (that test starts an Inbox and Pi; CI runs it). Board on the same −251, 17,819. Tokens scaled at each
+ * entry's own bytes per token, −68: 4,275 and 4,864.
  * The `routine` action's line out of the description (INBOX_AGENT_ACTIONS_NO_LINE, the owner 2026-11-24): `routine`
- * is listed only while Routines are on, so the default entry is unchanged, re-measured the same way at 16,141 bytes;
- * with the Board, the Checklist and Routines on, 20,601 → 20,439 bytes and the description 2,200 → 2,039 characters.
+ * is listed only while Routines are on, so the default entry and the Board's are unchanged by it (re-measured the same
+ * way before the `ship` change, 16,141 bytes either way); with the Board, the Checklist and Routines on it took
+ * 20,601 → 20,439 bytes and the description 2,200 → 2,039 characters.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 16141, tokens: 4342 };
+const INBOX_TOOL_COST_NOW = { bytes: 15890, tokens: 4275 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 18070, tokens: 4932 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 17819, tokens: 4864 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval
