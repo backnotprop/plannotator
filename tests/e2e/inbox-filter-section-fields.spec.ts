@@ -67,23 +67,37 @@ const inner = (page: Page) => projects(page).locator('[data-list-filter-scroll]'
 const words = (page: Page, where: string) => page.locator(where).evaluateAll((rows) => rows.map((row) => row.querySelector('.ib-pmi-l')?.textContent ?? ''));
 const top = async (page: Page) => (await field(page).boundingBox())!.y;
 const scrollOf = (page: Page, which: 'menu' | 'inner') => (which === 'menu' ? menu(page) : inner(page)).evaluate((el) => el.scrollTop);
+/**
+ * The menu's entrance (it scales from 0.97) has finished. The measures below also take the list's foot in the same
+ * transformed pixels as its rows' rects: an unscaled `clientHeight` added to a scaled rect, read on the entrance's
+ * first frame, put the cut at 0.75 of a row.
+ */
+const entered = async (page: Page) => {
+  await menu(page).evaluate((m) => Promise.all(m.getAnimations({ subtree: true }).map((a) => a.finished)));
+};
 /** How much of the row the inner list's foot cuts through shows, scrolled to its top (0.5: half a row says "more"). */
-const cutShows = (page: Page) =>
-  inner(page).evaluate((el) => {
+const cutShows = async (page: Page) => {
+  await entered(page);
+  return inner(page).evaluate((el) => {
     el.scrollTop = 0;
-    const foot = el.getBoundingClientRect().top + el.clientHeight;
+    const box = el.getBoundingClientRect();
+    const foot = box.top + el.clientHeight * (box.height / el.offsetHeight);
     const cut = [...el.querySelectorAll('.ib-pmi')].map((r) => r.getBoundingClientRect()).find((r) => r.top < foot && r.bottom > foot);
     return cut ? (foot - cut.top) / cut.height : null;
   });
+};
 /** The row Enter in the field acts on is in full view inside the inner list. */
-const firstInView = (page: Page) =>
-  inner(page).evaluate((el) => {
+const firstInView = async (page: Page) => {
+  await entered(page);
+  return inner(page).evaluate((el) => {
     const row = el.querySelector('[data-list-filter-first]');
     if (!row) return null;
     const box = el.getBoundingClientRect();
+    const foot = box.top + el.clientHeight * (box.height / el.offsetHeight);
     const at = row.getBoundingClientRect();
-    return { label: row.querySelector('.ib-pmi-l')?.textContent ?? '', seen: at.top >= box.top - 0.5 && at.bottom <= box.top + el.clientHeight + 0.5 };
+    return { label: row.querySelector('.ib-pmi-l')?.textContent ?? '', seen: at.top >= box.top - 0.5 && at.bottom <= foot + 0.5 };
   });
+};
 
 async function shot(page: Page, name: string) {
   // The menu's entrance has played.
@@ -293,6 +307,21 @@ test('seven ticked: the cut still halves a row under the separator; the first ma
     .evaluate((label) => ({ label: Number(getComputedStyle(label).fontWeight), hit: Number(getComputedStyle(label.querySelector('.ib-lflt-hit')!).fontWeight) }));
   expect(weights.hit - weights.label).toBeGreaterThanOrEqual(200);
   await field(page).fill('');
+  await page.keyboard.press('Escape');
+  await expect(menu(page)).toHaveCount(0);
+  // Nine ticked, more than the list's seven whole rows: the separator is below the cut, which still halves a row.
+  const NINE = ['billing-api', 'billing-worker'];
+  await funnel(page).click();
+  for (const name of NINE) await projects(page).locator('.ib-pmi').filter({ hasText: new RegExp(`^${name}`) }).first().click();
+  await page.keyboard.press('Escape');
+  await expect(menu(page)).toHaveCount(0);
+  await funnel(page).click();
+  await expect(projects(page).locator('[data-list-filter-pins] .ib-pmi')).toHaveCount(9);
+  const cutNine = await cutShows(page);
+  expect(cutNine).toBeGreaterThan(0.4);
+  expect(cutNine).toBeLessThan(0.6);
+  // Back to seven for the phone's check.
+  for (const name of NINE) await projects(page).locator('.ib-pmi').filter({ hasText: new RegExp(`^${name}`) }).first().click();
   await page.keyboard.press('Escape');
   await expect(menu(page)).toHaveCount(0);
   expect(world.errors).toEqual([]);
