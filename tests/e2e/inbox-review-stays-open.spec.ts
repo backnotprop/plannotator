@@ -329,9 +329,8 @@ test('a teammate’s PR: merged as the diff reads it, then gone from every list,
   writeLists();
   forgeHas(THEIRS, 'open');
   forgeHas(LAGGING, 'merged');
-  const listed = await serverLists();
-  expect(listed.get(keyOf(LAGGING))).toBe('open');
-  expect(listed.get(keyOf(THEIRS))).toBe('open');
+  // A forced read is held for 20 s after the last one (the test before forced one): ask until it lands.
+  await expect.poll(async () => { const listed = await serverLists(); return `${listed.get(keyOf(LAGGING))} ${listed.get(keyOf(THEIRS))}`; }, { timeout: 60_000, intervals: [5_000] }).toBe('open open');
 
   // #881's page: the list says open, the diff's own read of the PR says merged, and the header says so.
   await openPull(LAGGING);
@@ -357,7 +356,7 @@ test('a teammate’s PR: merged as the diff reads it, then gone from every list,
   writeLists();
   forgeHas(THEIRS, 'merged');
   await page.waitForTimeout(FOCUS_READ_MS);
-  expect((await serverLists()).has(keyOf(THEIRS))).toBe(false);
+  await expect.poll(async () => (await serverLists()).has(keyOf(THEIRS)), { timeout: 60_000, intervals: [5_000] }).toBe(false);
   await focusUntil(() => markOf().getAttribute('data-ref-state'), 'merged');
   const answer = (await (await asked).json()) as { pull: { state: string } | null; unreadable?: boolean };
   expect(answer.pull?.state).toBe('merged');
