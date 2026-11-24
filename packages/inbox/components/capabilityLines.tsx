@@ -17,10 +17,19 @@ export const capabilityLine: CapabilityLineOf = (key, computer) => {
       if (computer !== undefined) return `Agents on ${computer} keep cards on the Board for their work. Off, they are not offered cards; every card is kept. Agents pick this up in their next session.`;
       return 'A page of the work in flight, one card per piece, that your agents keep current. Off, there is no Board page and agents are not offered cards; every card is kept. Agents pick this up in their next session.';
     case 'steps':
+      // Whether a checklist shows in a window follows that window's own switch: a linked computer's offers its agents one.
+      if (computer !== undefined) return `Agents on ${computer} keep their plan for the work in a thread as a checklist, one step per line. Off, they are not offered a checklist; every checklist is kept. Agents pick this up in their next session.`;
       return "Your agents' plan for the work in a thread as a checklist, one step per line, under a button at the thread's foot. Off, agents are not offered a checklist and none shows; every checklist is kept. Agents pick this up in their next session.";
     case 'scheduled_threads':
       return computer === undefined ? 'Runs saved prompts on a schedule, on this computer, while the Inbox is running.' : `Runs saved prompts on a schedule, on ${computer}, while its Inbox is running.`;
     case 'code_review':
+      // This window's / list and reviews follow its own switch: a linked computer's changes its agents and its own window.
+      if (computer !== undefined)
+        return (
+          <>
+            Agents on {computer} are offered code reviews, and {computer}'s own window offers them in the / list. Off, {computer}'s agents are not offered reviews; guided reviews and <code>plannotator review</code> work as before either way. Agents pick this up in their next session.
+          </>
+        );
       return (
         <>
           Review your agents' code changes and your pull requests from GitHub and GitLab: type / in a reply to ask for a review, then approve it, send feedback to the agent, or post it on the pull request. Off, agents are not offered reviews and the review skills leave the / list; guided reviews and <code>plannotator review</code> work as before either way. Agents pick this up in their next session.

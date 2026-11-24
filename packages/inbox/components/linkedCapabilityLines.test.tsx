@@ -75,11 +75,15 @@ test.skipIf(!hasDom)("a linked computer's switches show this computer's lines, s
   for (const [key, attr] of Object.entries(LOCAL_ROW)) {
     const linked = linkedLine(key);
     expect([key, linked?.textContent?.includes('this computer')]).toEqual([key, false]);
-    if (key === 'board' || key === 'scheduled_threads' || key === 'bro' || key === 'float_drafts') continue;
+    if (key !== 'chapter_diagrams') continue;
     expect([key, linked?.innerHTML]).toEqual([key, host.querySelector(`[${attr}] .ib-desc`)!.innerHTML]);
   }
   // The Board is one page across computers: Studio's switch offers its agents cards, and never takes the page away.
   expect(linkedLine('board')!.textContent).toBe('Agents on Studio keep cards on the Board for their work. Off, they are not offered cards; every card is kept. Agents pick this up in their next session.');
+  // Checklist and Code review in this window follow this computer's switch: Studio's changes its agents and its own window.
+  expect(linkedLine('steps')!.textContent).toBe('Agents on Studio keep their plan for the work in a thread as a checklist, one step per line. Off, they are not offered a checklist; every checklist is kept. Agents pick this up in their next session.');
+  expect(linkedLine('code_review')!.textContent).toBe("Agents on Studio are offered code reviews, and Studio's own window offers them in the / list. Off, Studio's agents are not offered reviews; guided reviews and plannotator review work as before either way. Agents pick this up in their next session.");
+  expect([...linkedLine('code_review')!.querySelectorAll('code')].map((c) => c.textContent)).toEqual(['plannotator review']);
   // Float reply drafts changes only Studio's own window.
   expect(linkedLine('float_drafts')!.textContent).toBe("In Studio's own window, an unsent reply stays in a small window in the corner when you leave its thread.");
   // Routines runs on Studio, not here.
