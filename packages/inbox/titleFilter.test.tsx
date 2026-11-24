@@ -475,7 +475,7 @@ describe.skipIf(!hasDom)('Filter by typing', () => {
       await typeKeys(field()!, 'billing');
       // No live row holds "billing"; the Archived group's row does, and it is drawn.
       expect(rowIds(el)).toEqual(['old']);
-      expect(el.querySelector('.ib-lbody [data-title-filter-none]')).toBeNull();
+      expect(el.querySelector('.ib-lbody [data-title-filter-none]') === null).toBe(true);
       await typeKeys(field()!, 'billing nothing');
       expect(el.querySelector('.ib-lbody [data-title-filter-none]')!.textContent).toBe(TITLE_FILTER_NONE);
     } finally {

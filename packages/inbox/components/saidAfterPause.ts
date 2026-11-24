@@ -1,7 +1,7 @@
 /**
  * The count a screen reader hears from a field that narrows as the person types: once typing pauses, not on every key.
- * Drawn in a polite live region (`.ib-sr`, `role="status"`, no visible words). Read by the filter menu's "Search
- * filters" (ListFilter.tsx) and the list's Filter by typing (TitleFilter.tsx).
+ * Drawn in a polite live region (`.ib-sr`, `role="status"`, no visible words). Read by the filter menu's
+ * find fields (ListFilterSections.tsx) and the list's Filter by typing (TitleFilter.tsx).
  */
 import { useEffect, useState } from 'react';
 import { formatCount } from '../format';
