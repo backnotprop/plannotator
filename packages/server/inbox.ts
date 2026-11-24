@@ -367,7 +367,7 @@ import { gridRowDecorator, gridRowStripped } from "./inbox-grid-row";
 import { createInboxPullHidden, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, threadStaysHidden, type PullToHide } from "./inbox-pull-hidden";
 import { createShipReader } from "./inbox-ship-read";
 import { shipBinds, shipLaunchFailed, shipSessionEnded, shipShipper, type InboxShipAgentDeps } from "./inbox-ship-agent";
-import { inboxNoticeOf, shipsMergedShown, type InboxShip } from "@plannotator/core/inbox-pull-handoff";
+import { inboxNoticeOf, shipActive, shipsMergedShown, type InboxShip } from "@plannotator/core/inbox-pull-handoff";
 import { createInboxShipRoutes } from "./inbox-ship-routes";
 import { createInboxShipStore } from "./inbox-ship-store";
 import { createInboxShipWatch, shipEndedWaiting } from "./inbox-ship-watch";
@@ -6829,11 +6829,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const allOwners = new Map([...branchOwners, ...pullOwners.all()]);
         // The PRs whose ship merged and still says so, here and on each linked machine (that machine's as last read,
         // never waited for; a linked machine reading this list gets this machine's own).
-        const shipMerged = shipsMergedShown([...ships.all(), ...(byWindow ? machines.mergedShips() : [])]);
+        const shipList = [...ships.all(), ...(byWindow ? machines.mergedShips() : [])];
+        const shipMerged = shipsMergedShown(shipList);
+        // A PR seen landed before its ship's watch marks it merged keeps its row in between.
+        const shipGoing = new Set(shipList.filter(shipActive).map((ship) => ship.key));
         // A teammate's PR leaves the list once merged: the thread the person tied it to keeps it while Merged shows.
         linkUnlistedPulls(shipMerged.keys(), links, pullLinkStore, owners);
         const rows = reviewRowsShown(
-          inboxReviewRows({ threads, stacks, links, pulls: shownPulls, pullReasons, landed: pullOwners.landings(), owners: allOwners, posted: pullOwners.posted(), started, ended: (threadId) => threadAgent(pullLinkStore, threadId)?.ended === true, shipMerged }),
+          inboxReviewRows({ threads, stacks, links, pulls: shownPulls, pullReasons, landed: pullOwners.landings(), owners: allOwners, posted: pullOwners.posted(), started, ended: (threadId) => threadAgent(pullLinkStore, threadId)?.ended === true, shipMerged, shipActive: shipGoing }),
           hiddenKeys,
           (key) => links[key]?.thread_id ?? allOwners.get(key)?.thread_id ?? null,
         );

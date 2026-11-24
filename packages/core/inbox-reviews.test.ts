@@ -408,6 +408,14 @@ describe("landed PRs", () => {
     expect(reviewed()).toMatchObject({ id: "t", move: "on_you", landed: [] });
   });
 
+  test("a PR seen landed while its ship still ships (not marked merged yet) keeps its row in between, calm", () => {
+    const thread = review({ thread_id: "t", source: { kind: "pr", pr: { url: landing().url } } });
+    const rows = (shipActive?: ReadonlySet<string>) => inboxReviewRows({ threads: [thread], stacks: [], links: {}, pulls: [merged()], landed: [landing()], shipActive });
+    expect(rows(new Set([landing().key])).map((r) => [r.id, r.move])).toEqual([["t", "waiting"]]);
+    expect(rows(new Set(["github.com/northwind/billing-svc#99"]))).toEqual([]);
+    expect(rows()).toEqual([]);
+  });
+
   test("a row kept for its ship's Merged words never moves to On you; an approval stays Ready to land", () => {
     // A teammate's PR, reviewed in a thread and answered on the forge only (Waiting on others while open), then shipped and merged.
     const theirs = pr({ number: 10, head: "feature", state: "merged", merged_at: MERGED_AT, mine: false });

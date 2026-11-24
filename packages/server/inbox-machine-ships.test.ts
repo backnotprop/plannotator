@@ -56,7 +56,8 @@ describe("a linked machine's merged ships", () => {
     ships.start();
     await ships.settled();
     const got = ships.start();
-    expect(got.map((ship) => ship.key)).toEqual(["github.com/harbor/fern-api#614"]);
+    // A shipping one is kept too (its PR may land before its ship is marked merged), never as merged.
+    expect(got.map((ship) => [ship.key, ship.state])).toEqual([["github.com/harbor/fern-api#614", "merged"], ["github.com/harbor/fern-api#615", "shipping"]]);
     expect(asked).toEqual([`${B} ships`]);
     // What Reviews keeps by: this machine's own ships and the far ones, the far one's PR by its key.
     expect([...shipsMergedShown(got, NOW).keys()]).toEqual(["github.com/harbor/fern-api#614"]);
@@ -75,6 +76,27 @@ describe("a linked machine's merged ships", () => {
     release();
     await ships.settled();
     expect(ships.start().map((ship) => ship.key)).toEqual(["github.com/harbor/fern-api#614"]);
+  });
+
+  test("another computer's clock never stretches or cuts the 6 hours: they run from this computer's first sight", async () => {
+    const DAY = 24 * 3_600_000;
+    let clock = NOW;
+    let list = [far(1, { ended_at: new Date(NOW + DAY).toISOString() }), far(2, { ended_at: new Date(NOW - DAY).toISOString() }), far(2099, { ended_at: "2099-01-01T00:00:00.000Z" })];
+    const ships = createMachineShips({ now: () => clock, peers: () => [peer(B, ["ships"], () => Response.json({ ships: list }), [])] });
+    const shown = async (at: number) => {
+      clock = at;
+      ships.start();
+      await ships.settled();
+      return [...shipsMergedShown(ships.start(), at).keys()].map((key) => Number(key.split("#")[1]));
+    };
+    // Ended "tomorrow" and in 2099 by their clock, "yesterday" by its own: all three show now, first seen now.
+    expect(await shown(NOW)).toEqual([1, 2, 2099]);
+    expect(await shown(NOW + 5 * 3_600_000)).toEqual([1, 2, 2099]);
+    // 7 hours after this computer first saw them: none, whatever the other clock says.
+    expect(await shown(NOW + 7 * 3_600_000)).toEqual([]);
+    // One first seen 7 hours in, though it ended long before by its own clock: shown from then.
+    list = [...list, far(3, { ended_at: new Date(NOW - DAY).toISOString() })];
+    expect(await shown(NOW + 7 * 3_600_000 + 60_000)).toEqual([3]);
   });
 
   test("Code review off there (409) counts none of its ships; a refusal or a failure keeps the last read", async () => {
