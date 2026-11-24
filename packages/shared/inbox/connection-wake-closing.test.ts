@@ -304,3 +304,16 @@ test("the moved note's wake: the first line, the notice line, the note, its thre
   expect(text).not.toContain("send_message");
   expect(text).not.toContain("reply_to");
 });
+
+// Ship's note (approval "inbox-ship-mode"): the same notice shape, with the note's own first line (`notice`), since it
+// asks the agent to act ("Fix them and push") where the moved line says nothing needs doing.
+test("a notice with its own line: that line in place of the moved one; a bad one falls back to the moved line", () => {
+  const SHIP = "Checks failed on aaaaaaa: lint. Fix them and push.\nYou are still shipping #614.";
+  const LINE = "A note about the pull request you ship. Act on it.";
+  const text = wake({ moved: true, notice: LINE, body: SHIP, subject: null });
+  expect(text.split("\n")).toEqual(["Plannotator Inbox: a message (msg_01REPLY)", LINE, "", ...SHIP.split("\n"), "", "[thread msg_01THREAD]"]);
+  expect(text).not.toContain(INBOX_MOVED_WAKE_INSTRUCTION);
+  // Only one line: anything else is the moved line, so a command can't smuggle a second paragraph in.
+  expect(wake({ moved: true, notice: "two\nlines", body: SHIP, subject: null }).split("\n")[1]).toBe(INBOX_MOVED_WAKE_INSTRUCTION);
+  expect(wake({ moved: true, notice: 7, body: SHIP, subject: null }).split("\n")[1]).toBe(INBOX_MOVED_WAKE_INSTRUCTION);
+});

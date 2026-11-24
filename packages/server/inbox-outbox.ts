@@ -237,6 +237,13 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST pulls/reopen": "forge",
   "POST pulls/merge": "forge",
   "POST pulls/owner": "forge",
+  // Ship (approval "inbox-ship-mode"): shipped or stopped on the machine of the agent's thread, from a press in a
+  // window, now or not at all (a Ship held for days would start an agent nobody is looking at).
+  "POST ships": "now",
+  "POST ships/stop": "now",
+  // This Inbox's own word to each linked computer that it started shipping a PR: held until it lands, so a computer
+  // asleep at the Ship stops its older ship of that PR when it is back.
+  "POST ships/newer": "set",
   // The PR page's look at a linked machine's PR (approval "inbox-pr-dashboard"): kept there; the newer look wins.
   "POST pulls/looked": "set",
   // A file a linked machine's agent message names, attached there when the person comments on it (approval "inbox-file-refs-open-viewer").
