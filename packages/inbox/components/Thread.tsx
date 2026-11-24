@@ -194,7 +194,7 @@ import { keepEqualByKey } from '../thread/keepEqual';
 import { useKeptScroll } from '../thread/keptScroll';
 import { sentActionsOf } from '../thread/sentActions';
 import { leftoverWords } from '../thread/leftover';
-import { answersItself, replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, tookOverReply, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
+import { answersItself, replyKeysToRenew, routeReplyContents, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, tookOverReply, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
 import { FOLD_STEP, isSuperseded, NO_ANNOTATIONS, NO_QUESTIONS, NO_IDS, NO_OUTBOX, NO_SENT_ANSWERS, NO_UPLOADS, askingSessionOf, commentTags, emptyAnswerFor, isOtherAgent, newBelow, otherSendSessions, reducedMotion, replyKeyOf, reviewOutcomesOf, spanWords, stillHidden, type FoldState } from '../thread/helpers';
 import { NO_SKILLS_HINT_MS, REPLY_FILES_SUMMARY_FROM, SHOW_NEW_MESSAGE_BUTTON, SIDE_COMMAND_DESCRIPTION, SIDE_COMMAND_NAME, THREAD_GONE_TEXT, focusReplyFromBox } from '../thread/replyBox';
 import { AckPill } from '../parts/AckPill';
@@ -3190,12 +3190,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       // that asked them, with no words, and the words go only to the aimed one. Each half keeps its own key.
       const wordsTo = aimed && !aimedAt && carries ? aimedAway : undefined;
       // A comment on another session's message rides a reply to that message (routeSendAnnotations).
-      const routed = routeSendAnnotations(current, plain, pendingAnnotations);
-      const { carried } = routed;
-      // A diagram note for an earlier author can leave the default words recipient with nothing to send.
-      const targets = routed.targets.filter(({ message, questions, skip, actions }, index, all) =>
-        (carried.get(message.id)?.length ?? 0) > 0 || questions.length || skip.length || actions.length ||
-        (index === all.length - 1 && (words !== '' || uploads.length > 0)));
+      const { targets, carried } = routeReplyContents(current, plain, pendingAnnotations, words !== '' || uploads.length > 0);
       if (targets.length === 0) {
         setError('Write a reply or pick an answer first.');
         return;

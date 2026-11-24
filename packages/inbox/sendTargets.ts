@@ -64,6 +64,15 @@ export function routeSendAnnotations(
   return { targets: [...before, last], carried };
 }
 
+/** An annotation for an earlier author can leave the default words recipient with an empty reply. */
+export function routeReplyContents(thread: InboxThread, plain: readonly SendTarget[], records: readonly InboxAnnotationRecord[], hasWordsOrUploads: boolean) {
+  const routed = routeSendAnnotations(thread, plain, records);
+  const targets = routed.targets.filter(({ message, questions, skip, actions }, index, all) =>
+    routed.carried.has(message.id) || questions.length > 0 || skip.length > 0 || actions.length > 0 ||
+    (hasWordsOrUploads && index === all.length - 1));
+  return { targets, carried: routed.carried };
+}
+
 /** Two agent messages one session wrote (a message with no session matches none). */
 export function sameSession(a: InboxMessageWire, b: InboxMessageWire): boolean {
   if (a.author.kind !== 'agent' || b.author.kind !== 'agent') return false;
