@@ -60,10 +60,10 @@ const ghostMessage = (id: string, author: InboxMessage['author'], body: string, 
   ({ id, project_id: PROJECT.id, thread_id: GHOST_ID, reply_to: GHOST_ID, author, subject: null, subject_question: null, body, created_at: '2026-11-24T15:10:00.000Z', resolved_at: null, idempotency_key: id, tags }) as InboxMessage;
 
 const GHOST: InboxMessage[] = [
-  ghostMessage('msg_g1', { kind: 'agent', host: 'claude-code', session: 'ses_claude', name: 'Claude Code' }, 'I take the refund routes.', [{ host: 'codex', session: 'ses_codex', name: 'Codex' }]),
+  ghostMessage('msg_g1', { kind: 'agent', host: 'claude-code', session: 'ses_claude', name: 'Claude Code' }, 'I take the refund routes.', [{ host: 'codex', session: 'ses_codex', name: 'Codex', wakes: true }]),
   ghostMessage('msg_g2', { kind: 'agent', host: 'codex', session: 'ses_codex', name: 'Codex' }, 'Then I take the tests.', [
-    { host: 'claude-code', session: 'ses_claude', name: 'Claude Code' },
-    { host: 'claude-code', session: 'ses_sub', name: 'Explorer' },
+    { host: 'claude-code', session: 'ses_claude', name: 'Claude Code', wakes: true },
+    { host: 'claude-code', session: 'ses_sub', name: 'Explorer', wakes: true },
   ]),
 ];
 
