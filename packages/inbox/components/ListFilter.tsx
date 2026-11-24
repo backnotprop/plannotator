@@ -5,7 +5,9 @@
  *
  * - The header holds the filter icon (three lines narrowing) alone, at every width. With picks it takes the accent
  *   colour and a small count in its corner (`CountBadge`, the PRs button's size): one per ticked row. No tokens, no line over the list: what is picked is read in the menu.
- * - The menu (Base UI's: arrows, Home/End, type-ahead, Escape and Tab close, focus back to the funnel): Not seen (one
+ * - The menu (Base UI's: arrows, Home/End, type-ahead, Escape and Tab close, focus back to the funnel): first, alone,
+ *   the row that opens Filter by typing (`TITLE_FILTER_LABEL`, the search mark, no count; it closes the menu and the
+ *   field under the header takes focus: TitleFilter.tsx), then Not seen (one
  *   row: only the rows drawn bold) and Recent activity (one row, the cursor mark, not Updated's clock: the threads the
  *   person did something in lately, newest first by that; listFilterRecent.ts), Updated (Today, Last 7 days, Last 30 days, Custom range…), Agent (several; only
  *   with two agents or more), Routine (Routine threads, Other threads; only while Routines are on and a routine's thread
@@ -15,8 +17,9 @@
  *   more). Each row shows how many threads it would leave and a tick when picked, then "Clear filters". It stays open while picking. A phone draws it as the bottom
  *   sheet titled "Filter".
  * - Custom range… opens a small panel by the funnel: From, To, Apply.
- * - Long lists (a section of more than 8 rows, listFilterSearch.ts): one field at the top, "Search filters".
- *   Typing narrows every section at once (the match bold, a ticked row kept, a section with nothing left gone,
+ * - Long lists (a section of more than 8 rows, listFilterSearch.ts): one field at the top, "Search filters". It
+ *   searches the menu's rows, never the threads; the row that opens Filter by typing is one of those rows, as Custom
+ *   range… is. Typing narrows every section at once (the match bold, a ticked row kept, a section with nothing left gone,
  *   "Nothing matches “…”" when no row matches); the menu keeps its one scroll. Base UI's filterable menu
  *   (`Menu.FilterProvider`, `Menu.Input`, `Menu.List`): the field keeps focus while ↑ ↓ move the highlight
  *   (`aria-activedescendant`, wrapping as the plain menu does), Enter ticks or unticks the highlighted row, Space types
@@ -29,7 +32,8 @@
  *
  * No shortcut of its own.
  */
-import { Fragment, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { flushSync } from 'react-dom';
 import { Menu } from '@base-ui/react/menu';
 import { Popover } from '@base-ui/react/popover';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
@@ -44,6 +48,11 @@ import { toggledTagPick, withLiveTagPicks } from '../listFilterTags';
 import { useRoutineThreads } from '../listFilterRoutines';
 import { rowRecentlyActed } from '../listFilterRecent';
 import { filterSearchShown, labelStart, searchFilterSections, type FilterSearchRow } from '../listFilterSearch';
+import { TITLE_FILTER_LABEL, filterRowsByTitle } from '../listTitleFilter';
+import { openTitleFilter, useTitleFilterTextWhen } from '../listTitleFilterStore';
+import { noteTravelFrom } from './titleFilterMotion';
+import { matchCount, useSaidAfterPause } from './saidAfterPause';
+export { useTitleFilterList } from './TitleFilter';
 import {
   NO_LIST_FILTER,
   PULL_OPTIONS,
@@ -84,7 +93,12 @@ export interface ListFilterSource {
   names: ReadonlyMap<string, string>;
   filter: ListFilter;
   onChange: (next: ListFilter) => void;
+  /** Which list this is (the sidebar's view): Filter by typing's close puts back the scroll of this list only. */
+  place?: string;
 }
+
+/** The same source, field by field: App hands a new object on every draw of the window. */
+const sameSource = (a: ListFilterSource, b: ListFilterSource) => a.rows === b.rows && a.scoped === b.scoped && a.names === b.names && a.filter === b.filter && a.onChange === b.onChange && a.place === b.place;
 
 function usePortal(anchor: RefObject<HTMLElement | null>) {
   const [portal, setPortal] = useState<HTMLElement | null>(null);
@@ -100,7 +114,7 @@ const FIND_WORDS = 'Search filters';
  * Base UI hides its clear button from screen readers; `aria-hidden={false}` puts it back. */
 const CLEAR_WORDS = 'Clear search';
 const nothingMatches = (query: string) => `Nothing matches “${query}”`;
-const matchWords = (n: number, query: string) => (n === 0 ? nothingMatches(query) : n === 1 ? '1 match' : `${formatCount(n)} matches`);
+const matchWords = (n: number, query: string) => (n === 0 ? nothingMatches(query) : matchCount(n));
 
 /** A row's label with the search's match drawn bold, from `labelStart` ("…" for what it drops). */
 function lit(label: string, hit: readonly [number, number] | null) {
@@ -158,8 +172,18 @@ export function rangeWords(range: { from: string; to: string }): string {
   return a === b ? at(a) : `${at(a)} – ${at(b)}`;
 }
 
-export function ListFilterButton({ source, phone }: { source: ListFilterSource; phone: boolean }) {
+/**
+ * Memoized on the source's fields (`sameSource`): typing in Filter by typing's field redraws the list, and a draw of
+ * the window that changes none of them hands an equal source, so the menu's counts are not worked out again. While the
+ * menu is open they count what the typed words leave.
+ */
+export const ListFilterButton = memo(function ListFilterButton({ source, phone }: { source: ListFilterSource; phone: boolean }) {
   const { rows, scoped, names, onChange } = source;
+  const [open, setOpen] = useState(false);
+  // The rows the counts read: those the typed words leave. The choices offered stay those of every row, so narrowing
+  // by title never takes away a group whose pick is on.
+  const typed = useTitleFilterTextWhen(open);
+  const counted = useMemo(() => filterRowsByTitle(rows, typed), [rows, typed]);
   // Tags (approval "inbox-thread-tags", step 2): the window's, read with the rows' own rule (`rowTags`).
   const host = useThreadTags();
   const tagScoped = !!host?.listed;
@@ -170,10 +194,29 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
   // A row's tags as the Tag group reads them: its own and its project's (projectTags.ts).
   const tagsOf = host?.filterTags ?? host?.rowTags;
   const routineTest = isRoutine ?? undefined;
-  const countOf = (group: Parameters<typeof countWhere>[3], test: (row: InboxListRow) => boolean) => countWhere(rows, filter, now, group, test, tagsOf, routineTest);
-  const [open, setOpen] = useState(false);
+  const countOf = (group: Parameters<typeof countWhere>[3], test: (row: InboxListRow) => boolean) => countWhere(counted, filter, now, group, test, tagsOf, routineTest);
   const [rangeOpen, setRangeOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
+  // Filter by typing's row: the menu closes and the field takes focus. Drawn and focused inside the click, so a phone
+  // raises its keyboard; the menu's close then gives focus to the field, not back to the funnel.
+  const toField = useRef(false);
+  const fieldOf = () => trigger.current?.closest('.ib-listcol')?.querySelector<HTMLInputElement>('[data-title-filter-input]') ?? null;
+  const openField = () => {
+    toField.current = true;
+    // The row flies to the field's place (titleFilterMotion.ts), from the menu or from a phone's sheet.
+    const row = (portal ?? document).querySelector<HTMLElement>('[data-list-filter-menu] [data-list-filter-title]');
+    noteTravelFrom(row);
+    if (row) row.style.visibility = 'hidden';
+    setOpen(false);
+    const list = trigger.current?.closest('.ib-listcol')?.querySelector<HTMLElement>('.ib-lbody');
+    flushSync(() => openTitleFilter(list?.scrollTop ?? 0, source.place ?? ''));
+    fieldOf()?.focus({ preventScroll: true });
+  };
+  const finalFocus = useCallback(() => {
+    if (!toField.current) return true;
+    toField.current = false;
+    return fieldOf() ?? true;
+  }, []);
   // The funnel sits outside the menu (a detached trigger), so the menu can gain or lose its search without the funnel
   // being drawn again.
   const [handle] = useState(() => Menu.createHandle());
@@ -216,6 +259,12 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
   // The menu as data, in its order (the owner, 2026-11-08): what the sidebar cannot do first, Project last (the sidebar
   // has its own). Not seen first: what every row shows, bold or not. The search narrows these (listFilterSearch.ts).
   const sections: FilterSection[] = [
+    {
+      // Filter by typing: alone, first; it opens something, as Custom range… does (no count, no tick).
+      id: 'title',
+      title: null,
+      rows: [{ key: 'title', label: TITLE_FILTER_LABEL, on: false, count: null, onToggle: openField, mark: <Icon name="search" />, data: { 'data-list-filter-title': '' }, opens: TITLE_FILTER_LABEL.replace('…', '') }],
+    },
     {
       id: 'notSeen',
       title: null,
@@ -348,17 +397,14 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
           </span>
         </Menu.Trigger>
       </Tip>
-      <FilterMenu handle={handle} open={open} onOpenChange={setOpen} phone={phone} portal={portal} searchable={searchable} sections={sections} onClear={clear} />
+      <FilterMenu handle={handle} open={open} onOpenChange={setOpen} phone={phone} portal={portal} searchable={searchable} sections={sections} onClear={clear} finalFocus={finalFocus} />
       <RangePanel key={rangeOpen ? 'open' : 'shut'} open={rangeOpen} onOpenChange={setRangeOpen} anchor={trigger} portal={portal} phone={phone} start={custom} onApply={(range) => set({ updated: range })} />
     </>
   );
-}
+}, (a, b) => a.phone === b.phone && sameSource(a.source, b.source));
 
 /** The keys that pick a row from the field while nothing matches (Home and End only move the caret then). */
 const STEP_KEYS = new Set(['ArrowDown', 'ArrowUp']);
-
-/** How long the match count waits for typing to pause before a screen reader hears it. */
-const STATUS_WAIT_MS = 400;
 
 /**
  * The menu itself. The search's query lives here, so typing redraws only the menu: the rows and their counts are worked
@@ -373,6 +419,7 @@ function FilterMenu({
   searchable,
   sections,
   onClear,
+  finalFocus,
 }: {
   handle: ReturnType<typeof Menu.createHandle>;
   open: boolean;
@@ -383,6 +430,8 @@ function FilterMenu({
   sections: readonly FilterSection[];
   /** Clear filters; null: nothing is picked, no row. */
   onClear: (() => void) | null;
+  /** Where focus goes as the menu closes: the funnel, or Filter by typing's field after its row. */
+  finalFocus: () => true | HTMLElement;
 }) {
   const [query, setQuery] = useState('');
   /** An arrow moved the highlight since the query last changed. */
@@ -390,16 +439,7 @@ function FilterMenu({
   const found = searchFilterSections<FilterSection, FilterRow>(sections, searchable ? query : '');
   const typed = query.trim();
   // The count a screen reader hears, once typing pauses (not on every key).
-  const words = found.searching ? matchWords(found.matches, typed) : '';
-  const [said, setSaid] = useState('');
-  useEffect(() => {
-    if (words === '') {
-      setSaid('');
-      return;
-    }
-    const wait = setTimeout(() => setSaid(words), STATUS_WAIT_MS);
-    return () => clearTimeout(wait);
-  }, [words]);
+  const said = useSaidAfterPause(found.searching ? matchWords(found.matches, typed) : '');
 
   // While nothing matches, the rows still drawn (kept because they are ticked, and Clear filters) take new keys, so Base
   // UI sees new rows and drops a highlight left on one from the query before (it clears a highlight on a change only when
@@ -448,7 +488,7 @@ function FilterMenu({
       <Menu.Portal container={portal ?? undefined}>
         {phone && <Menu.Backdrop className="ib-pm-scrim" />}
         <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={6} data-phone={phone ? '' : undefined} data-list-filter-searchable={searchable ? '' : undefined}>
-          <Menu.Popup className="ib-pm ib-pc-menu ib-lflt-menu" aria-label="Filter" data-list-filter-menu="" data-list-filter-searchable={searchable ? '' : undefined}>
+          <Menu.Popup className="ib-pm ib-pc-menu ib-lflt-menu" aria-label="Filter" finalFocus={finalFocus} data-list-filter-menu="" data-list-filter-searchable={searchable ? '' : undefined}>
             <div className="ib-pm-title" aria-hidden="true">
               Filter
             </div>
