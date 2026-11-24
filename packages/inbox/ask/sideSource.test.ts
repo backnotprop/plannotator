@@ -8,7 +8,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { Annotation, Block } from '@plannotator/ui/types';
 import { askSourceFor } from './askWords';
-import { fileSideSource, messageSideSource, sideTime } from './sideSource';
+import type { AttachmentView } from '../api';
+import { diagramFileAsk, fileSideSource, messageSideSource, sideTime } from './sideSource';
 
 const block = (id: string, type: Block['type'], content: string, startLine: number): Block => ({ id, type, content, order: startLine, startLine }) as Block;
 const BLOCKS: Block[] = [
@@ -65,4 +66,25 @@ describe('Side source', () => {
     expect(askSourceFor('> five attempts\n> second backoff', sources)).toBe('[A]\n[B]');
     expect(askSourceFor('Why?', sources)).toBeUndefined();
   });
+});
+
+test("a diagram question identifies the displayed version and the attachment's owning message", () => {
+  const sent = "a".repeat(64);
+  const current = "b".repeat(64);
+  const attachment: AttachmentView['attachment'] = {
+    id: 'att_delivery', message_id: 'msg_owner', path: '/project/delivery.diagram.json', name: 'delivery.diagram.json', named_path: null,
+    kind: 'plannotator-diagram', sent_sha256: sent, sent_at: AT, sent_mtime: AT, size: 100,
+    current: { sha256: current, size: 103, mtime: AT }, changed_since_sent: true, unavailable: null,
+  };
+  for (const [version, sha] of [[sent, sent], ['current', current]]) {
+    const view = { serverSession: 'server', attachment, version: version!, text: '{}', html: null };
+    const calls: { question: string; source?: string }[] = [];
+    const ask = diagramFileAsk(view, (question, source) => { calls.push({ question, source }); });
+    ask?.('Where does this run?', { kind: 'selection', detail: 'Asset: delivery; panel queue' });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.source).toContain(`SHA-256: ${sha}`);
+    expect(calls[0]?.source).toContain('Message: msg_owner');
+    expect(calls[0]?.source).toContain('panel queue');
+    expect(diagramFileAsk(view)).toBeUndefined();
+  }
 });

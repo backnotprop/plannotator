@@ -1,3 +1,4 @@
+import type { DiagramRenderKind } from '@plannotator/core/annotatable';
 import type { Block, Annotation, CodeAnnotation, EditorAnnotation, ImageAttachment } from '../types';
 import { attachedLines } from './attachedLines';
 import { planDenyFeedback } from '@plannotator/core/feedback-templates';
@@ -344,7 +345,7 @@ export interface ParseMarkdownOptions {
  * block itself, so the export's `(lines a–b)` label names the file's real
  * span.
  */
-export const diagramDocumentBlocks = (text: string, kind: import('@plannotator/core/annotatable').DiagramRenderKind): Block[] => [
+export const diagramDocumentBlocks = (text: string, kind: DiagramRenderKind): Block[] => [
   {
     id: 'block-0',
     type: 'code',

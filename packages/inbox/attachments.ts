@@ -118,6 +118,12 @@ export function codeDocumentBlocks(text: string, name: string): Block[] {
   ];
 }
 
+export function fileCommentCounts(records: readonly InboxAnnotationRecord[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const record of records) counts.set(record.path, (counts.get(record.path) ?? 0) + 1);
+  return counts;
+}
+
 export function annotationOf(record: InboxAnnotationRecord): Annotation {
   return record.annotation as unknown as Annotation;
 }

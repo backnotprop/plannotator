@@ -22,6 +22,7 @@
  * does every reader that may be on another machine (`isDocServeAllowed`).
  */
 
+import { diagramRenderKindForPath } from "./annotatable";
 import { readFileSync, realpathSync, statSync } from "fs";
 import { basename, dirname, join, posix } from "path";
 import { parseCodePath, type ParsedCodePath } from "./code-file";
@@ -458,7 +459,7 @@ export async function resolveDocTarget(
 	const base = options.base ?? null;
 	const projectRoot = roots[0];
 	const docExtensions = getAnnotatableDocRegex();
-	const nativeDiagram = (path: string) => /\.diagram\.json$/i.test(path);
+	const nativeDiagram = (path: string) => diagramRenderKindForPath(path) === "plannotator-diagram";
 	const wantsDocRender = (path: string) =>
 		docExtensions.test(path) && (options.forceDoc || nativeDiagram(path) || !isCodeFilePath(path));
 

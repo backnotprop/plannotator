@@ -27,7 +27,7 @@
 
 import { createHash } from "node:crypto";
 import { constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync, type Stats } from "node:fs";
-import { lstat, open, realpath, type FileHandle } from "node:fs/promises";
+import { lstat, open, readFile, realpath, type FileHandle } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { getPlannotatorDataDir } from "../data-dir";
 import { inboxOwnSecretRefusal } from "./own-secrets";
@@ -292,6 +292,18 @@ export function sweepStaleInboxSendTemps(inboxDirPath: string, now = Date.now())
   }
 }
 
+/** Identify successive sends from their saved bytes, even if the working file is renamed or replaced later. */
+export async function sentDiagramIdentity(kind: InboxAttachmentKind, size: number, blob: string, head?: Buffer): Promise<{ diagram_id?: string }> {
+  if (kind !== "plannotator-diagram" || size > INBOX_VIEW_MAX_BYTES) return {};
+  try {
+    const bytes = head?.length === size ? head : await readFile(blob);
+    const id: unknown = JSON.parse(bytes.toString("utf8")).id;
+    return typeof id === "string" && id.trim() ? { diagram_id: id } : {};
+  } catch {
+    return {};
+  }
+}
+
 /**
  * Record the files an agent attached: each path absolute (anywhere the agent
  * can read) or relative to `base` (the agent's project_path), resolved to its
@@ -388,7 +400,8 @@ export async function recordInboxAttachments(inboxDirPath: string, paths: readon
     }
   }
 
-  return read.map(({ named, real, scan, stat, temp, video }) => {
+  const attachments: InboxAttachment[] = [];
+  for (const { named, real, scan, stat, temp, video } of read) {
     const path = inboxBlobPath(inboxDirPath, scan.sha256);
     if (existsSync(path)) unlinkSync(temp);
     else renameSync(temp, path);
@@ -399,6 +412,7 @@ export async function recordInboxAttachments(inboxDirPath: string, paths: readon
       named_path: named === real ? null : named,
       name: basename(real),
       kind: decided.kind,
+      ...await sentDiagramIdentity(decided.kind, scan.size, path, scan.head),
       sent_sha256: scan.sha256,
       size: scan.size,
       sent_at: options.at,
@@ -409,8 +423,9 @@ export async function recordInboxAttachments(inboxDirPath: string, paths: readon
     } satisfies InboxAttachment;
     // The file was just read whole: listing the thread needs no second read.
     primeCurrentInfo(attachment, stat, { ok: true, sha256: scan.sha256, size: scan.size, mtime: stat.mtime.toISOString() });
-    return attachment;
-  });
+    attachments.push(attachment);
+  }
+  return attachments;
 }
 
 export type CurrentCheck = { ok: true; stat: Stats } | { ok: false; unavailable: InboxAttachmentUnavailable };

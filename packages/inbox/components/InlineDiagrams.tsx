@@ -2,13 +2,13 @@ import { lazy, Suspense, useContext, useEffect, useState } from 'react';
 import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { NativeDiagramEnabled } from '@plannotator/ui/components/diagram/nativeDiagramEnabled';
 import type { NativeDiagramFileReference } from '@plannotator/ui/components/diagram/nativeDiagramDrawing';
-import type { CommentAskAIHandler } from '@plannotator/ui/components/CommentPopover';
 import type { Annotation } from '@plannotator/ui/types';
 import { diagramDocumentBlocks } from '@plannotator/ui/utils/parser';
-import { annotationOf, inboxViewKind, readableVersion } from '../attachments';
+import { annotationOf, inboxViewKind } from '../attachments';
+import { latestDiagramFor, type Artifact } from '../artifacts';
 import { useInboxFileSource } from '../fileSource';
 import type { AttachmentView } from '../api';
-import { fileSideSource } from '../ask/sideSource';
+import { diagramFileAsk } from '../ask/sideSource';
 
 const NativeDiagramBlock = lazy(async () => ({ default: (await import('@plannotator/ui/components/diagram/NativeDiagramBlock')).NativeDiagramBlock }));
 
@@ -20,17 +20,23 @@ interface InlineDiagramProps {
   onSide?: (words: string, source?: string) => void;
 }
 
-export function InlineDiagrams({ files, ...props }: InlineDiagramProps & { files: readonly InboxAttachmentState[] }) {
+export function InlineDiagrams({ files, artifacts = [], onOpenLatest, ...props }: InlineDiagramProps & {
+  files: readonly InboxAttachmentState[];
+  artifacts?: readonly Artifact[];
+  onOpenLatest?: (attachment: InboxAttachmentState) => void;
+}) {
   const enabled = useContext(NativeDiagramEnabled);
   if (!enabled) return null;
-  return <>{files.filter((a) => inboxViewKind(a.kind, a.name) === 'plannotator-diagram').map((attachment) => (
-    <InlineDiagram key={`${attachment.id}:${attachment.current?.sha256 ?? attachment.sent_sha256}:${readableVersion(attachment)}`} attachment={attachment} {...props} />
-  ))}</>;
+  return <>{files.filter((a) => inboxViewKind(a.kind, a.name) === 'plannotator-diagram').map((attachment) => {
+    const latest = latestDiagramFor(artifacts, attachment);
+    return <InlineDiagram key={`${attachment.id}:${attachment.sent_sha256}`} attachment={attachment}
+      openLatest={latest && onOpenLatest ? () => onOpenLatest(latest) : undefined} {...props} />;
+  })}</>;
 }
 
-function InlineDiagram({ attachment, records, readOnly, onOpenFile, onSide, onSaved }: InlineDiagramProps & { attachment: InboxAttachmentState }) {
+function InlineDiagram({ attachment, records, readOnly, onOpenFile, onSide, onSaved, openLatest }: InlineDiagramProps & { attachment: InboxAttachmentState; openLatest?: () => void }) {
   const source = useInboxFileSource();
-  const version = readableVersion(attachment);
+  const version = 'sent';
   const [view, setView] = useState<AttachmentView | null>(null);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -52,8 +58,6 @@ function InlineDiagram({ attachment, records, readOnly, onOpenFile, onSide, onSa
       return false;
     }
   };
-  const ask: CommentAskAIHandler | undefined = onSide && ((question, context) =>
-    onSide(question, [fileSideSource(attachment, version, { selected: context.text ?? '', blockId: blocks[0]?.id ?? '', blocks, annotations }), context.detail].filter(Boolean).join('\n')));
   return <div data-inline-diagram-attachment={attachment.id}>
     <Suspense fallback={null}>
       <NativeDiagramBlock block={blocks[0]!} annotations={annotations}
@@ -62,7 +66,7 @@ function InlineDiagram({ attachment, records, readOnly, onOpenFile, onSide, onSa
           const prior = annotations.find((a) => a.id === id);
           return prior ? save({ ...prior, ...changes }) : false;
         }}
-        onOpenFile={onOpenFile} onAskAI={ask} sourcePath={attachment.path}
+        onOpenLatest={openLatest} onOpenFile={onOpenFile} onAskAI={diagramFileAsk(view, onSide)} sourcePath={attachment.path}
         embedded />
     </Suspense>
     {error && <p role="alert">{error}</p>}

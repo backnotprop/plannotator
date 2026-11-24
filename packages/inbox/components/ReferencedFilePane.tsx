@@ -10,6 +10,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { InboxAttachmentState } from '@plannotator/core/inbox-types';
+import type { NativeDiagramFileReference } from '@plannotator/ui/components/diagram/nativeDiagramDrawing';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { CodeFileView } from '@plannotator/ui/components/CodeFilePopout';
 import { HtmlViewer } from '@plannotator/ui/components/html-viewer';
@@ -99,8 +100,8 @@ export function ReferencedFilePane({
   const [view, setView] = useState<ReferencedFileView | null>(null);
   const [failed, setFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const scope = useMemo<ReferencedFileScope>(() => ({ thread: threadId, message: fileRef.messageId }), [threadId, fileRef.messageId]);
-  const key = `${fileRef.messageId}\u0000${fileRef.path}`;
+  const scope = useMemo<ReferencedFileScope>(() => ({ thread: threadId, message: fileRef.messageId, ...(fileRef.from ? { from: fileRef.from } : {}) }), [threadId, fileRef.messageId, fileRef.from]);
+  const key = `${fileRef.messageId}\u0000${fileRef.from ?? ""}\u0000${fileRef.path}`;
   const attachedRef = useRef(onAttached);
   attachedRef.current = onAttached;
   useEffect(() => {
@@ -251,8 +252,8 @@ export function ReferencedFilePane({
               <span className="ib-refmissing-t">{reason === 'refused' ? 'does not show here.' : 'is not on this computer.'}</span>
             </div>
           )}
-          {found && found.contents !== undefined && (kind === 'markdown' || kind === 'text') && (
-            <RefDocument key={key} text={found.contents} name={name} kind={kind} scope={scope} folder={folder} onOpenLink={openFromDoc} onComment={writes ? save : undefined} />
+          {found && found.contents !== undefined && (kind === 'markdown' || kind === 'text' || kind === 'plannotator-diagram') && (
+            <RefDocument key={key} text={found.contents} name={name} kind={kind} scope={scope} folder={folder} onOpenLink={openFromDoc} onOpenDiagramFile={ref => onOpen({ messageId: fileRef.messageId, path: ref.path, from: 'root', line: ref.start, lineEnd: ref.end })} onComment={writes ? save : undefined} />
           )}
           {found && found.contents !== undefined && (kind === 'code' || kind === 'mermaid' || kind === 'graphviz') && (
             <div className="ib-codeview" data-code-view="">
@@ -322,7 +323,7 @@ export function ReferencedFilePane({
               )}
             </InboxFileSourceProvider>
           )}
-          {found && (found.tooLarge || (kind !== null && !['markdown', 'text', 'code', 'mermaid', 'graphviz', 'html', 'image', 'video'].includes(kind))) && (
+          {found && (found.tooLarge || (kind !== null && !['markdown', 'text', 'code', 'mermaid', 'graphviz', 'plannotator-diagram', 'html', 'image', 'video'].includes(kind))) && (
             <div className="ib-refmissing" role="status" data-ref-missing="kind">
               <span className="ib-refmissing-ic">
                 <Icon name="doc" size={22} />
@@ -344,15 +345,17 @@ function RefDocument({
   kind,
   scope,
   folder,
+  onOpenDiagramFile,
   onOpenLink,
   onComment,
 }: {
   text: string;
   name: string;
-  kind: 'markdown' | 'text';
+  kind: 'markdown' | 'text' | 'plannotator-diagram';
   scope: ReferencedFileScope;
   folder: string;
   onOpenLink: (href: string) => void;
+  onOpenDiagramFile?: (ref: NativeDiagramFileReference) => void;
   onComment?: (annotation: Annotation) => Promise<boolean>;
 }) {
   const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
@@ -381,6 +384,7 @@ function RefDocument({
             onSelectAnnotation={noop}
             selectedAnnotationId={null}
             resolveLocalLink={resolveLocalLink}
+            onOpenDiagramFile={onOpenDiagramFile}
             questionDecisionLines={false}
             stickyActions={false}
             disableCodePathValidation

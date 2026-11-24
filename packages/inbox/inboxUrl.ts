@@ -150,3 +150,12 @@ export function inboxUrl(path: string, query?: string, machine?: string | null):
   if (machine && machine !== selfMachine) return `/api/inbox/m/${machine}${tail}`;
   return `/api/inbox${tail}`;
 }
+
+/** `/threads/<id><rest>` on the machine that owns the thread. */
+export const threadUrl = (threadId: string, rest = '', query?: string) => inboxUrl(`/threads/${encodeURIComponent(threadId)}${rest}`, query, machineOf(threadId));
+/** `/messages/<id><rest>` on the machine that owns the message. */
+export const messageUrl = (messageId: string, rest = '', query?: string) => inboxUrl(`/messages/${encodeURIComponent(messageId)}${rest}`, query, machineOf(messageId));
+/** `/attachments/<id><rest>` on the machine that owns the file. */
+export const attachmentUrl = (attachmentId: string, rest = '', query?: string) => inboxUrl(`/attachments/${encodeURIComponent(attachmentId)}${rest}`, query, machineOf(attachmentId));
+/** `/projects/<id><rest>` on the machine that owns the project. */
+export const projectUrl = (projectId: string, rest = '') => inboxUrl(`/projects/${encodeURIComponent(projectId)}${rest}`, undefined, machineOf(projectId));

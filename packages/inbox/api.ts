@@ -18,7 +18,7 @@ import type { InboxArtifactPin, InboxArtifactsPage, InboxArtifactType } from '@p
 import type { CloudflareAccessSettings, TailscaleSettings } from './data/reach';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
-import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, rememberSearchMachines, selfMachineId, setSelfMachine } from './inboxUrl';
+import { attachmentUrl, messageUrl, projectUrl, threadUrl, inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, rememberSearchMachines, selfMachineId, setSelfMachine } from './inboxUrl';
 import { threadPullsOf } from './threadPulls/model';
 import { learnPullMachines, pullMachine, pullUrl } from './pulls/pullMachines';
 import { learnProjects } from './projectPictures';
@@ -965,14 +965,6 @@ function threadHeader(path: string): Record<string, string> {
 /** The cursor of the last read of another machine's thread: a reply there says what the person saw (rule 11). */
 const remoteThreadCursor = new Map<string, number>();
 
-/** `/threads/<id><rest>` on the machine that owns the thread. */
-const threadUrl = (threadId: string, rest = '', query?: string) => inboxUrl(`/threads/${encodeURIComponent(threadId)}${rest}`, query, machineOf(threadId));
-/** `/messages/<id><rest>` on the machine that owns the message. */
-const messageUrl = (messageId: string, rest = '', query?: string) => inboxUrl(`/messages/${encodeURIComponent(messageId)}${rest}`, query, machineOf(messageId));
-/** `/attachments/<id><rest>` on the machine that owns the file. */
-const attachmentUrl = (attachmentId: string, rest = '', query?: string) => inboxUrl(`/attachments/${encodeURIComponent(attachmentId)}${rest}`, query, machineOf(attachmentId));
-/** `/projects/<id><rest>` on the machine that owns the project. */
-const projectUrl = (projectId: string, rest = '') => inboxUrl(`/projects/${encodeURIComponent(projectId)}${rest}`, undefined, machineOf(projectId));
 /** The merged list names each row's and project's machine: their routes go there from now on (inboxUrl.ts). */
 function learnMachines(model: ListModel): void {
   setSelfMachine(model.self, model.machines);
@@ -1643,7 +1635,7 @@ export const inboxApi = {
   referencedFile: (scope: ReferencedFileScope, path: string) => get<ReferencedFileView>(referencedFileUrl('view', scope, path)),
   /** The person commented on a file a message names: it becomes one of that message's attachments (once), on its thread's machine. */
   attachReferencedFile: (scope: ReferencedFileScope, path: string) =>
-    post<{ attachment: InboxAttachmentState }>(inboxUrl('/open-in/file/attach', undefined, machineOf(scope.thread)), { thread: scope.thread, message: scope.message, path, idempotency_key: crypto.randomUUID() }),
+    post<{ attachment: InboxAttachmentState }>(inboxUrl('/open-in/file/attach', undefined, machineOf(scope.thread)), { ...scope, path, idempotency_key: crypto.randomUUID() }),
   openInFileCode: (scope: OpenInFileScope, path: string) => get<OpenInFileCode>(inboxUrl(`/open-in/file/code?${new URLSearchParams({ ...scope, path })}`)),
   openInFile: (scope: OpenInFileScope, path: string, appId: string, line?: number) =>
     post<{ ok: boolean; error?: string }>(inboxUrl('/open-in/file'), { ...scope, path, app_id: appId, ...(line ? { line } : {}) }),

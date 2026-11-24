@@ -376,7 +376,7 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
   };
 
   const scopeOf = (params: URLSearchParams | Record<string, unknown>): FileScope =>
-    params instanceof URLSearchParams ? { thread: params.get("thread"), message: params.get("message") } : { thread: params.thread, message: params.message };
+    params instanceof URLSearchParams ? { thread: params.get("thread"), message: params.get("message"), from: params.get("from") } : { thread: params.thread, message: params.message, from: params.from };
 
   /**
    * Where a path a message names may be, as absolute paths to try in order (approval "inbox-file-refs-open-viewer": no
@@ -416,6 +416,12 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
    * agent cannot read the rest of this computer through a thread.
    */
   const reachOf = (req: Request, scope: FileScope, named: string): string[] | null => {
+    // Diagram references name files in the sender's checkout. Hold the real path there too,
+    // whether this press came from this window or from a linked machine.
+    if (scope.from === "root") {
+      const owner = placesOf(scope, "x")[0]?.root;
+      return owner ? [owner, realpathOrNull(owner) ?? owner] : [];
+    }
     if (!context.doorOf?.(req) || namedBy(scope, named)) return null;
     const roots = placesOf({ thread: scope.thread, message: scope.message }, "x").map((place) => place.root);
     return [...new Set(roots.flatMap((root) => [root, realpathOrNull(root) ?? root]))];

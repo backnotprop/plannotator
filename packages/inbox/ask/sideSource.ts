@@ -9,6 +9,8 @@
  * comment the person already has on those words.
  */
 import { inboxAgentName } from '@plannotator/core/inbox-types';
+import type { AttachmentView } from '../api';
+import type { CommentAskAIHandler } from '@plannotator/ui/components/CommentPopover';
 import type { Annotation, Block } from '@plannotator/ui/types';
 
 /** A time as the person reads it in the thread: "Nov 8, 11:55 AM". */
@@ -74,4 +76,15 @@ export function fileSideSource(
   const heading = where.blockId ? headingBefore(where.blocks, where.blockId) : null;
   const under = heading ? `, under "${heading}"` : '';
   return `[Quoted from ${file.name} (${file.named_path ?? file.path}, attached to this thread; ${which})${line}${under}.${commentsOn(where.annotations, where.selected).join('')}]`;
+}
+
+/** The exact attachment bytes under review accompany a question, including on a linked machine. */
+export function diagramFileAsk(view: AttachmentView, onSide?: (words: string, source?: string) => void): CommentAskAIHandler | undefined {
+  if (!onSide) return undefined;
+  const file = view.attachment;
+  const sha = view.version === 'current' ? file.current?.sha256 : view.version;
+  return (question, context) => onSide(question, [
+    `Diagram file: ${file.path}`, `Attachment: ${file.id}`, `Message: ${file.message_id}`,
+    `Version: ${view.version}`, sha && `SHA-256: ${sha}`, context.detail,
+  ].filter(Boolean).join('\n'));
 }

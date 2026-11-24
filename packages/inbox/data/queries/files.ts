@@ -28,7 +28,12 @@ export function useThreadAttachments(threadId: string, revision: unknown, again:
   const patch = useCallback((update: (records: InboxAnnotationRecord[]) => InboxAnnotationRecord[]) => {
     setModel((current) => (current ? { ...current, annotations: update(current.annotations) } : current));
   }, []);
-  return { model, load, patch };
+  const saveRecord = useCallback(
+    (record: InboxAnnotationRecord) => patch((list) => [...list.filter((r) => r.id !== record.id), record]),
+    [patch],
+  );
+  const dropRecord = useCallback((id: string) => patch((list) => list.filter((r) => r.id !== id)), [patch]);
+  return { model, load, patch, saveRecord, dropRecord };
 }
 
 type FileCarrier = InboxThread['messages'][number];

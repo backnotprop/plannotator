@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefO
 import { KeyboardSettings } from './KeyboardSettings';
 import { INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
 import type { InboxSound } from '../sound';
+import { DiagramCapabilityRow } from '../parts/DiagramCapabilityRow';
 import { SoundRow, Switch } from './SoundRow';
 import { type AgentToolHost, type InboxCookieHost, type InboxExperimentalSettings, type InboxStorageModel, type MachineView, type SettingsModel } from '../api';
 import { cookieHostDescription } from '@plannotator/ui/hooks/useCookieHostSetting';
@@ -636,15 +637,7 @@ function CapabilitiesSection({
                 </span>
               </div>
             )}
-            {diagrams && onToggleDiagrams && (
-              <div className="ib-prow" data-settings-diagrams="">
-                <span className="ib-txt">
-                  <span className="ib-l" id="ib-native-diagrams-label">Diagrams</span>
-                  <span className="ib-desc">Preview diagram files in threads and leave comments on their parts.</span>
-                </span>
-                <Switch on={diagrams.on} labelledBy="ib-native-diagrams-label" onClick={() => onToggleDiagrams(!diagrams.on)} />
-              </div>
-            )}
+            {diagrams && onToggleDiagrams && <DiagramCapabilityRow on={diagrams.on} onToggle={onToggleDiagrams} />}
             {stepsRow && (
               <div className="ib-prow" data-settings-steps="">
                 <span className="ib-txt">

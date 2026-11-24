@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { renderDiagram, type DiagramSpec } from '@plannotator/diagrams';
 import { NativeDiagramReview, type NativeDiagramReviewProps, type NativeDiagramAnchor, type NativeDiagramAskContext } from './NativeDiagramReview';
 import { partKey, placeCommentPins } from './nativeDiagramDrawing';
+import { getRefCardTransport, setRefCardTransport } from '../../utils/refCard';
 
 const file = { kind: 'file', title: 'Configuration', path: 'src/config.ts', start: 8, end: 12 } as const;
 const link = { kind: 'link', title: 'Protocol', url: 'https://example.org/protocol' } as const;
@@ -87,6 +88,15 @@ describe.if(typeof document !== 'undefined')('native diagram review', () => {
     expect(edited).toBe('annotationNew label');
   });
 
+  test('a native host composer takes the selected part without drawing a second editor', async () => {
+    let request: NativeDiagramAnchor | undefined;
+    await show({ onRequestComment: a => { request = a; } });
+    await click('section Queue');
+    await click('Comment');
+    expect(request).toMatchObject({ kind: 'section', id: 'queue', title: 'Queue' });
+    expect(host.querySelector('.ndr-card')).toBeNull();
+  });
+
   test('scoped Ask AI carries both link endpoints; a failed dispatch keeps the question for retry', async () => {
     const asks: NativeDiagramAskContext[] = [];
     await show({ onAskAI: ctx => { asks.push(ctx); return asks.length > 1; } });
@@ -99,6 +109,26 @@ describe.if(typeof document !== 'undefined')('native diagram review', () => {
     await click('Send question');
     expect(asks[1]).toMatchObject({ assetId: 'review', question: 'What happens on a timeout?', part: { id: 'request', from: 'client', to: 'server' } });
     expect(host.querySelector('[role=dialog]')?.getAttribute('aria-label')).toBe('Request');
+  });
+
+  test('an unavailable provider leaves the authored link usable; an invalid edit reports the existing pin unresolved', async () => {
+    const previous = getRefCardTransport();
+    const url = 'https://github.com/example/project/pull/42';
+    try {
+      setRefCardTransport(async () => ({ ok: false, error: 'signed_out', fetchedAt: Date.now() }));
+      let found: boolean | undefined;
+      const props = { comments: [{ id: 'placed', text: 'Check this', anchor }], onResolutionChange: (m: ReadonlyMap<string, boolean>) => { found = m.get('placed'); } };
+      await show({ ...props, source: JSON.stringify({ title: 'Review', columns: [{ id: 'client', title: 'Client', refs: [{ kind: 'link', title: 'Proposed fix', url }] }] }) });
+      await click('panel Client');
+      expect(host.querySelector('.ndr-references')?.textContent).toContain('Proposed fix');
+      expect(host.querySelector('.ndr-references a')?.getAttribute('href')).toBe(url);
+      expect(host.querySelector('.ndr-references code')).toBeNull();
+      expect(found).toBe(true);
+      await show({ ...props, source: '{' });
+      expect(found).toBe(false);
+    } finally {
+      setRefCardTransport(previous);
+    }
   });
 
   test('keyboard targets cover every kind; a revision permalink opens the exact file and unavailable parts stay unresolved', async () => {

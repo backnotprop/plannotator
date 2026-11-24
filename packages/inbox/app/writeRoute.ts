@@ -73,6 +73,7 @@ export function hashOf(route: Route): string {
     if (route.thread && route.ref && !route.file) {
       params.set('ref', route.ref.path);
       params.set('in', route.ref.messageId);
+      if (route.ref.from) params.set('from', route.ref.from);
       if (route.ref.line) params.set('line', String(route.ref.line));
       if (route.ref.lineEnd) params.set('to', String(route.ref.lineEnd));
     }

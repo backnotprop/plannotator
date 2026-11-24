@@ -6,6 +6,8 @@
  * its row comes or goes in every open window, and a window on its page goes back to the Inbox. Thread panes too
  * (`split_view`, Settings → General → Appearance): every window, the one that saved it included, turns them on or off.
  */
+import type { Dispatch, SetStateAction } from 'react';
+import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import type { InboxEventHandlers, SettingsModel } from './api';
 
 export type InboxCapabilities = Parameters<NonNullable<InboxEventHandlers['onCapabilities']>>[0];
@@ -20,4 +22,12 @@ export function namesCapability(capabilities: InboxCapabilities): boolean {
 export function withCapabilities<S extends CapabilitySettings>(current: S, capabilities: InboxCapabilities): S {
   const { board, steps, bro, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, code_review: codeReview, shape, system, chapter_diagrams: chapterDiagrams, scheduled_threads: scheduled, diagrams, plans } = capabilities;
   return { ...current, ...(board ? { board } : {}), ...(steps ? { steps } : {}), ...(bro ? { bro } : {}), ...(floatDrafts ? { float_drafts: floatDrafts } : {}), ...(markReadWarning ? { mark_read_warning: markReadWarning } : {}), ...(splitView ? { split_view: splitView } : {}), ...(codeReview ? { code_review: codeReview } : {}), ...(shape ? { shape } : {}), ...(system ? { system } : {}), ...(chapterDiagrams ? { chapter_diagrams: chapterDiagrams } : {}), ...(scheduled ? { scheduled_threads: { ...current.scheduled_threads, on: scheduled.on } } : {}), ...(diagrams ? { diagrams } : {}), ...(plans ? { plans } : {}) };
+}
+
+export function capabilityListener(setSettings: Dispatch<SetStateAction<SettingsModel | null>>, refresh: () => Promise<unknown>) {
+  return (capabilities: InboxCapabilities) => {
+    if (capabilities.code_review || capabilities.shape || capabilities.scheduled_threads || capabilities.diagrams) reloadSkillCatalog();
+    if (namesCapability(capabilities)) setSettings((current) => current ? withCapabilities(current, capabilities) : current);
+    else void refresh();
+  };
 }

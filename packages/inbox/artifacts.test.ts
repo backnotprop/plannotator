@@ -9,7 +9,7 @@
  */
 import { expect, test } from 'bun:test';
 import type { InboxAttachmentState, InboxGuideRef, InboxMessageWire } from '@plannotator/core/inbox-types';
-import { artifactKey, artifactOfFile, artifactsNewestFirst, threadArtifacts } from './artifacts';
+import { artifactKey, artifactOfFile, latestDiagramFor, artifactsNewestFirst, threadArtifacts } from './artifacts';
 import { attachmentSequence, stepIndexOf, stepsOf } from './stepping';
 import { artifactChanged, artifactDetail, artifactLabel } from './components/ArtifactsView';
 
@@ -121,4 +121,17 @@ test('a tile says everything it shows in its name, in the Inbox\'s own words', (
   expect(artifactChanged({ ...spec, captured: 'on_open' })?.short).toBe('Changed since opened');
   expect(artifactChanged({ ...spec, unavailable: { code: 'attachment_missing', message: 'gone' } })?.short).toBe('No longer on disk');
   expect(artifactChanged(sql)).toBeNull();
+});
+
+test('a new edition replaces its own diagram tile; a file with no diagram ID remains a separate artifact', () => {
+  const first = file('att_old', 'flow.diagram.json', 'plannotator-diagram', M1, { diagram_id: 'flow' });
+  const second = file('att_new', 'renamed.diagram.json', 'plannotator-diagram', M2, { diagram_id: 'flow', sent_sha256: 'b'.repeat(64) });
+  const separate = file('att_legacy', 'flow.diagram.json', 'plannotator-diagram', M3);
+  const rows = threadArtifacts(messages, [separate, second, first]);
+  expect(rows.filter((row) => row.type === 'file').map(artifactKey)).toEqual([first.id, separate.id]);
+  expect(stepIndexOf(stepsOf(rows), first.id)).toBe(stepIndexOf(stepsOf(rows), second.id));
+  expect(latestDiagramFor(rows, first)).toBe(second);
+  expect(latestDiagramFor(rows, second)).toBeNull();
+  expect(latestDiagramFor(rows, { ...first, sent_sha256: second.sent_sha256 })).toBeNull();
+  expect(latestDiagramFor(rows, separate)).toBeNull();
 });

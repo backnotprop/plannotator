@@ -1,6 +1,6 @@
 import type { DiagramPart } from '@plannotator/diagrams';
 import { MessageCircleQuestion, Paperclip } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
@@ -26,6 +26,8 @@ export interface NativeDiagramAskContext {
 export interface NativeDiagramReviewProps {
   source: string;
   comments?: readonly NativeDiagramComment[];
+  /** The host owns the writing surface (for example, a native phone composer). */
+  onRequestComment?: (anchor: NativeDiagramAnchor) => void;
   onCreateComment?: (anchor: NativeDiagramAnchor, text: string) => SubmitResult;
   onEditComment?: (id: string, text: string) => SubmitResult;
   onSelectComment?: (id: string | null) => void;
@@ -62,6 +64,7 @@ export function NativeDiagramReview(props: NativeDiagramReviewProps) {
 }
 
 function Loader(props: NativeDiagramReviewProps) {
+  const descriptionId = useId();
   const [drawing, setDrawing] = useState<Drawing | null>(null);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -84,38 +87,42 @@ function Loader(props: NativeDiagramReviewProps) {
     return () => { live = false; if (url) URL.revokeObjectURL(url); };
   }, [props.source]);
 
-  return <section className={cn('ndr annotation-exclude', props.inline && 'ndr-inline', props.className)} aria-label={drawing?.title ?? 'Diagram'}>
-    {drawing ? <ReviewSurface {...props} drawing={drawing} /> : error
+  const parts = useMemo(() => new Map(drawing?.diagram.parts.map(p => [partKey(p), p])), [drawing]);
+  const resolution = useMemo(() => new Map((props.comments ?? NO_COMMENTS).map(c => [c.id, parts.has(partKey(c.anchor))])), [parts, props.comments]);
+  const reported = useRef<ReadonlyMap<string, boolean> | null>(null);
+  useEffect(() => {
+    // Wait for a verdict on this revision. Invalid source leaves all its saved comments unresolved.
+    if (!drawing && !error) return;
+    const last = reported.current;
+    if (last?.size === resolution.size && [...resolution].every(([id, ok]) => last.get(id) === ok)) return;
+    reported.current = resolution;
+    props.onResolutionChange?.(resolution);
+  }, [drawing, error, resolution, props.onResolutionChange]);
+
+  return <section className={cn('ndr annotation-exclude', props.inline && 'ndr-inline', props.className)} aria-label={drawing?.title ?? 'Diagram'} aria-describedby={drawing ? descriptionId : undefined}>
+    {drawing && <span className="sr-only" id={descriptionId}>{drawing.diagram.description}</span>}
+    {drawing ? <ReviewSurface {...props} drawing={drawing} parts={parts} /> : error
       ? <div className="ndr-status" role="alert"><strong>Couldn’t draw the diagram</strong><p>{error}</p></div>
       : <div className="ndr-status" role="status">Drawing diagram…</div>}
   </section>;
 }
 
-function ReviewSurface({ drawing, comments = NO_COMMENTS, onCreateComment, onEditComment, onSelectComment, selectedCommentId,
-  selectedPart, onSelectPart, onResolutionChange, onAskAI, onOpenFile, inline }: NativeDiagramReviewProps & { drawing: Drawing }) {
+function ReviewSurface({ drawing, parts, comments = NO_COMMENTS, onRequestComment, onCreateComment, onEditComment, onSelectComment, selectedCommentId,
+  selectedPart, onSelectPart, onAskAI, onOpenFile, inline }: NativeDiagramReviewProps & { drawing: Drawing; parts: ReadonlyMap<string, DiagramPart> }) {
   const { diagram, svg, title, assetId } = drawing;
   const container = useRef<HTMLDivElement>(null);
   const canvas = useRef<DiagramCanvasHandle | null>(null);
   const [card, setCard] = useState<Card | null>(null);
   const [asking, setAsking] = useState(false);
   const [notice, setNotice] = useState('');
+  const drafts = useRef(new Map<string, string>());
   const openTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const stopTimers = useCallback(() => { clearTimeout(openTimer.current); clearTimeout(closeTimer.current); }, []);
   useEffect(() => stopTimers, [stopTimers]);
 
-  const parts = useMemo(() => new Map(diagram.parts.map(p => [partKey(p), p])), [diagram]);
   const activePart = card ? parts.get(partKey(card.anchor)) : null;
   const selectedComment = card?.commentId ? comments.find(c => c.id === card.commentId) : undefined;
-  const resolution = useMemo(() => new Map(comments.map(c => [c.id, parts.has(partKey(c.anchor))])), [parts, comments]);
-  const reported = useRef<ReadonlyMap<string, boolean> | null>(null);
-  useEffect(() => {
-    const last = reported.current;
-    if (last?.size === resolution.size && [...resolution].every(([id, ok]) => last.get(id) === ok)) return;
-    reported.current = resolution;
-    onResolutionChange?.(resolution);
-  }, [resolution, onResolutionChange]);
-
   function reveal(anchor: NativeDiagramAnchor) {
     const current = canvas.current;
     const part = parts.get(partKey(anchor));
@@ -169,6 +176,15 @@ function ReviewSurface({ drawing, comments = NO_COMMENTS, onCreateComment, onEdi
     onSelectComment?.(null);
     onSelectPart?.(anchor);
   }
+  function startComment() {
+    if (!card) return;
+    if (onRequestComment) {
+      onRequestComment(card.anchor);
+      setCard(null);
+    } else {
+      setCard({ ...card, mode: 'write' });
+    }
+  }
   function pin() {
     if (!card || card.pinned) return;
     setCard({ ...card, pinned: true });
@@ -212,6 +228,8 @@ function ReviewSurface({ drawing, comments = NO_COMMENTS, onCreateComment, onEdi
     const selectedPin = pins.find(p => p.comment.id === card?.commentId);
     const anchorRect = selectedPin ? { left: selectedPin.x - 13, top: selectedPin.y - 13, width: 26, height: 26 } :
       activePart ? screenRect(activePart, viewport) : null;
+    const commentKey = JSON.stringify(['comment', activePart?.kind, activePart?.id, selectedComment?.id]);
+    const askKey = JSON.stringify(['ask', activePart?.kind, activePart?.id]);
     return <>
       <div className="ndr-targets" role="group" aria-label="Parts of the diagram">
         {diagram.parts.map((part, i) => {
@@ -254,11 +272,12 @@ function ReviewSurface({ drawing, comments = NO_COMMENTS, onCreateComment, onEdi
       {card && activePart && anchorRect && !asking && <FloatingCard key={partKey(activePart) + (card.commentId ?? '')}
         anchor={anchorRect} host={hostRef.current} mode={card.mode} heading={card.mode === 'references' ? activePart.title : `Comment on ${activePart.title}`}
         pinned={card.pinned} keyboardOpen={!!card.keyboard} onClose={() => close()} onEnter={stopTimers} onLeave={leavePreview}>
-        {card.mode === 'write' ? <TextEditor key={card.commentId ?? 'new'} initial={selectedComment?.text ?? ''}
-          label={`Comment on ${activePart.title}`} editing={!!selectedComment}
+        {card.mode === 'write' ? <TextEditor key={card.commentId ?? 'new'} initial={drafts.current.get(commentKey) ?? selectedComment?.text ?? ''}
+          onChange={value => drafts.current.set(commentKey, value)}
+          label={`Comment on ${activePart.title}`} original={selectedComment?.text}
           onSubmit={text => selectedComment ? onEditComment!(selectedComment.id, text) : onCreateComment!(card.anchor, text)}
-          onCancel={() => selectedComment ? setCard({ ...card, mode: 'note' }) : close()}
-          onDone={() => { setNotice(`Comment saved on ${activePart.title}`); close(); }} /> :
+          onCancel={() => { drafts.current.delete(commentKey); if (selectedComment) setCard({ ...card, mode: 'note' }); else close(); }}
+          onDone={() => { drafts.current.delete(commentKey); setNotice(`Comment saved on ${activePart.title}`); close(); }} /> :
         card.mode === 'note' && selectedComment ? <div className="ndr-saved">
           <div className="ndr-note-heading">Comment {selectedComment.number ?? comments.indexOf(selectedComment) + 1}
             {onEditComment && <button type="button" onClick={() => setCard({ ...card, mode: 'write' })}>Edit</button>}</div>
@@ -273,12 +292,13 @@ function ReviewSurface({ drawing, comments = NO_COMMENTS, onCreateComment, onEdi
           <ReferenceDetails part={activePart} onOpenFile={onOpenFile} pin={pin} />
           {card.pinned && <>
             <CloseButton label="Close references" onClick={() => close()} />
-            <RefActions onComment={onCreateComment ? () => setCard({ ...card, mode: 'write' }) : undefined} onAsk={onAskAI ? ask : undefined} />
+            <RefActions onComment={onCreateComment || onRequestComment ? startComment : undefined} onAsk={onAskAI ? ask : undefined} />
           </>}
         </>}
       </FloatingCard>}
       {asking && onAskAI && <AskDrawer title={title} part={activePart ?? undefined} onClose={endAsk}>
-        <TextEditor ask initial="" label="Question about the diagram" onCancel={endAsk} onDone={endAsk}
+        <TextEditor ask initial={drafts.current.get(askKey) ?? ''} label="Question about the diagram" onCancel={endAsk}
+          onChange={value => drafts.current.set(askKey, value)} onDone={() => { drafts.current.delete(askKey); endAsk(); }}
           onSubmit={question => onAskAI({ question, title, assetId, description: diagram.description, part: activePart ?? undefined })} />
       </AskDrawer>}
       <span className="sr-only" role="status">{notice}</span>

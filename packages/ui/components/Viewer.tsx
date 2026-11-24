@@ -216,6 +216,8 @@ export interface ViewerProps {
   fillHeight?: boolean;
   onOpenLinkedDoc?: (path: string) => void;
   onOpenCodeFile?: (path: string) => void;
+  /** A host with a diagram-specific question action, such as an Inbox thread's Side. */
+  onAskDiagramAI?: CommentAskAIHandler;
   /** Opens a diagram's repository-relative source reference in this document's host. */
   onOpenDiagramFile?: (ref: NativeDiagramFileReference) => void;
   /**
@@ -930,7 +932,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   maxWidth,
   onOpenLinkedDoc,
   onOpenCodeFile,
-  onOpenDiagramFile,
+  onOpenDiagramFile, onAskDiagramAI,
   resolveLocalLink,
   linkedDocInfo,
   imageBaseDir,
@@ -1939,13 +1941,16 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // With no diagram in the document nobody can resolve a diagram comment:
   // it is unanchored, and the highlighter (which skips it) will not say so.
   useEffect(() => {
-    if (diagramBlockKey !== '' || onRestoreReport === undefined) return;
+    if (onRestoreReport === undefined) return;
     // `!= null`, not `!== undefined`: a nullish anchor is no anchor at all —
     // the highlighter restores such a row by text, so it must not be counted
     // here as a diagram comment nothing could resolve.
-    const ids = annotations.filter((ann) => ann.diagramAnchor != null).map((ann) => ann.id);
+    const nativeBlocks = new Set(blocks.filter((b) => nativeDiagrams && b.type === 'code' && isNativeDiagramLanguage(b.language)).map((b) => b.id));
+    const ids = annotations.filter((ann) => ann.diagramAnchor != null && (
+      ann.diagramAnchor.family === 'plannotator-diagram' ? !nativeBlocks.has(ann.blockId) : diagramBlockKey === ''
+    )).map((ann) => ann.id);
     if (ids.length > 0) onRestoreReport({ attempted: ids, unanchored: ids });
-  }, [annotations, diagramBlockKey, onRestoreReport]);
+  }, [annotations, blocks, diagramBlockKey, nativeDiagrams, onRestoreReport]);
 
   // The host's `belowTitle` slot (see the prop). Absent → the block list is
   // returned as is, so the DOM is the one without the prop. The wrapper's
@@ -2118,7 +2123,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   onAddAnnotation={selectionCommentsOn ? onAddAnnotation : undefined}
                   onEditAnnotation={selectionCommentsOn ? onEditAnnotation : undefined}
                   onRestoreReport={onRestoreReport} onOpenFile={onOpenDiagramFile}
-                  onAskAI={selectionCommentsOn ? onAskAI : undefined} sourcePath={linkedDocInfo?.filepath ?? sourceInfo} />
+                  onHostDraft={hostComposes ? onHostDraft : undefined}
+                  onAskAI={selectionCommentsOn ? (onAskDiagramAI ?? onAskAI) : undefined} sourcePath={linkedDocInfo?.filepath ?? sourceInfo} />
               </Suspense>
             </LazyBlockBoundary>
           ) : group.block.type === 'code' && isMermaidLanguage(group.block.language) ? (

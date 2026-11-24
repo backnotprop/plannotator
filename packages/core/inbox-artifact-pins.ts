@@ -48,12 +48,30 @@ export function inboxGuideArtifactKey(messageId: string): string {
 /** What a thread's artifact is made of, as the store holds it. */
 export interface InboxArtifactRef<M> {
   key: string;
+  /** Other attachment keys naming the same logical diagram in this thread. */
+  revisionKeys?: readonly string[];
   message: M;
   /** A file (an attachment or an image the text shows); null for a guided review. */
   attachment: InboxAttachment | null;
   /** An image the message's text shows (`inline_images`). */
   inline: boolean;
   guide: InboxGuideRef | null;
+}
+
+/** Group immutable sends within one thread. The first attachment keeps the pin key; the last supplies the bytes. */
+export function inboxDiagramRevisions(attachments: readonly Pick<InboxAttachment, "kind" | "id" | "diagram_id">[]) {
+  const families = new Map<string, string[]>();
+  for (const attachment of attachments) {
+    if (attachment.kind !== "plannotator-diagram" || !attachment.diagram_id) continue;
+    const family = families.get(attachment.diagram_id);
+    if (family) family.push(attachment.id);
+    else families.set(attachment.diagram_id, [attachment.id]);
+  }
+  const byAttachment = new Map<string, readonly string[]>();
+  for (const family of families.values()) {
+    if (family.length > 1) for (const id of family) byAttachment.set(id, family);
+  }
+  return byAttachment;
 }
 
 /**
@@ -84,7 +102,12 @@ export function inboxThreadArtifactRefs<M extends { id: string; attachments?: re
     }
     if (message.guide) out.push({ key: inboxGuideArtifactKey(message.id), message, attachment: null, inline: false, guide: message.guide });
   }
-  return out;
+  const revisions = inboxDiagramRevisions(out.flatMap((ref) => ref.attachment ? [ref.attachment] : []));
+  return out.flatMap((ref) => {
+    const family = revisions.get(ref.key);
+    if (!family) return [ref];
+    return ref.key === family.at(-1) ? [{ ...ref, key: family[0]!, revisionKeys: family }] : [];
+  });
 }
 
 /** A row of the Wall (`GET /api/inbox/artifacts`): one artifact, its thread, its message, and its pin. */

@@ -1902,6 +1902,9 @@
         "kind": {
           "$ref": "#/$defs/InboxAttachmentKind"
         },
+        "diagram_id": {
+          "type": "string"
+        },
         "sent_sha256": {
           "type": "string"
         },
@@ -1953,6 +1956,7 @@
         "markdown",
         "mermaid",
         "pdf",
+        "plannotator-diagram",
         "text",
         "video"
       ],
@@ -2070,6 +2074,9 @@
         },
         "kind": {
           "$ref": "#/$defs/InboxAttachmentKind"
+        },
+        "diagram_id": {
+          "type": "string"
         },
         "sent_sha256": {
           "type": "string"
@@ -3165,6 +3172,9 @@
         },
         "kind": {
           "$ref": "#/$defs/InboxAttachmentKind"
+        },
+        "diagram_id": {
+          "type": "string"
         },
         "sent_sha256": {
           "type": "string"

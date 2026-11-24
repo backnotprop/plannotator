@@ -1,3 +1,4 @@
+import notices from '@plannotator/diagrams/notices';
 import type { DiagramPart, DiagramReference, renderDiagram } from '@plannotator/diagrams';
 import type { ScreenRect } from '../../utils/diagram-projection';
 import type { Viewport } from './useDiagramViewport';
@@ -46,6 +47,9 @@ export function reviewSvg(drawing: NativeDiagramDrawing, imageUrl: string): SVGS
   const root = document.createElementNS(SVG, 'svg');
   root.setAttribute('viewBox', `0 0 ${drawing.width} ${drawing.height}`);
   root.setAttribute('aria-hidden', 'true');
+  const metadata = document.createElementNS(SVG, 'metadata');
+  metadata.textContent = notices;
+  root.appendChild(metadata);
   const image = document.createElementNS(SVG, 'image');
   image.setAttribute('href', imageUrl);
   image.setAttribute('width', String(drawing.width));

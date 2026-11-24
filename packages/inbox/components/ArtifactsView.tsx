@@ -64,6 +64,7 @@ export function artifactDetail(artifact: Artifact): string {
 
 /** A file that is not what was sent any more, in a tile's short words, or null. */
 export function artifactChanged(attachment: InboxAttachmentState): { short: string; long: string } | null {
+  if (attachment.kind === 'plannotator-diagram') return null;
   if (attachment.unavailable) {
     return attachment.unavailable.code === 'attachment_missing'
       ? { short: 'No longer on disk', long: 'no longer on disk, the sent version opens' }

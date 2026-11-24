@@ -3,7 +3,7 @@
  * it is on. The Inbox core (packages/server/inbox.ts) knows each one only by its key: it routes, answers the
  * settings and starts them through the list below, and never imports a capability's records, routes or text.
  *
- * Plans is the only one on it (packages/server/plans-capability.ts). Shape, Routines, the Board and code review are
+ * Plans and native diagram reviews use it. Shape, Routines, the Board and code review are
  * still wired by hand in inbox.ts; each may move here later, one at a time, once this holds.
  *
  * A capability's agent tool (`tools`) and the window's capability rows come with the first capability that has
@@ -40,9 +40,10 @@ export interface InboxCore {
   changed(): void;
 }
 
-/** The Inbox's capabilities, in order. */
+/** Native previews and skill discovery are opt-in for the Inbox window. */
 export const inboxDiagramsOn = (): boolean => loadConfig({ quiet: true }).inboxDiagrams === true;
 
+/** The Inbox's capabilities, in order. */
 export function inboxCapabilities(core: InboxCore): InboxCapability[] {
   return [createPlansCapability(core), {
     key: "diagrams",

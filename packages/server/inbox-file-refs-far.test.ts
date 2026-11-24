@@ -84,6 +84,7 @@ function world() {
       return this;
     },
     view: (path: string, in_?: string) => call(new Request(`http://127.0.0.1/api/inbox/open-in/file/view?${query(path, in_)}`)),
+    diagramFile: (path: string) => call(new Request(`http://127.0.0.1/api/inbox/open-in/file/view?${query(path)}&from=root`)),
     raw: (path: string, in_?: string) => call(new Request(`http://127.0.0.1/api/inbox/open-in/file/raw?${query(path, in_)}`)),
     attach: (path: string, in_ = message.id) =>
       call(
@@ -98,6 +99,16 @@ function world() {
 }
 
 describe("a file a message names, asked for by a linked machine", () => {
+  test("diagram source links keep to the author's checkout on both windows", async () => {
+    for (const door of [null, { window: true }]) {
+      const w = world().as(door);
+      const source = await w.diagramFile("src/app.ts");
+      expect(source.body.contents).toContain("export const app = 1");
+      expect((await w.diagramFile("docs/link.md")).body.found).toBe(false);
+      expect((await w.diagramFile(join(w.elsewhere, "named.log"))).body.found).toBe(false);
+    }
+  });
+
   test("a call that is not a press in a window there is refused on the view, the bytes and the attach", async () => {
     const w = world().as({ window: false });
     for (const answer of [await w.view("docs/plan.md"), await w.raw(join(w.elsewhere, "shot.png")), await w.attach("docs/plan.md")]) {

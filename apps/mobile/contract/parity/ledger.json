@@ -22112,6 +22112,62 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-enum-inboxattachmentkind-plannotator-diagram",
+      "title": "enum:InboxAttachmentKind.plannotator-diagram",
+      "surface": [
+        "enum:InboxAttachmentKind.plannotator-diagram"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachment-diagram-id",
+      "title": "field:InboxAttachment.diagram_id",
+      "surface": [
+        "field:InboxAttachment.diagram_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-diagram-id",
+      "title": "field:InboxAttachmentState.diagram_id",
+      "surface": [
+        "field:InboxAttachmentState.diagram_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxinlineimage-diagram-id",
+      "title": "field:InboxInlineImage.diagram_id",
+      "surface": [
+        "field:InboxInlineImage.diagram_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

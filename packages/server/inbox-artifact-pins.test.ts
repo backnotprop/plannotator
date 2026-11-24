@@ -6,12 +6,13 @@
  * a row, and the route guards (another site, a stale page's serverSession).
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inboxId, type InboxAttachment } from "@plannotator/core/inbox-types";
 import type { InboxArtifactsPage } from "@plannotator/core/inbox-artifact-pins";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { readInboxAttachmentText, recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxArtifactPins, inboxArtifactsPage } from "./inbox-artifact-pins";
 
@@ -49,6 +50,38 @@ function world() {
   store.sendMessage({ project_id: project.id, author: agent("ses_w"), thread: "web", body: "Pictures", attachments: [f.shotA, f.shotB] });
   return { store, f, old, web, docs };
 }
+
+test("a pinned diagram follows the newest sent edition through a rename; both messages retain their bytes", async () => {
+  const root = mkdtempSync(join(tmpdir(), "inbox-diagram-pin-"));
+  roots.push(root);
+  const store = InboxStore.open(join(root, "data"));
+  const project = store.ensureProject({ name: "repo", root });
+  const spec = (title: string) => JSON.stringify({ id: "payment-flow", title, columns: [{ id: "api", title: "API" }] });
+  async function send(name: string) {
+    const [attachment] = await recordInboxAttachments(store.dir, [name], { base: root, at: new Date().toISOString() });
+    const message = store.sendMessage({ project_id: project.id, author: agent("diagram-session"), thread: "payments", body: name, attachments: [attachment!] }).message;
+    return { attachment: attachment!, message };
+  }
+  const firstName = "checkout.diagram.json", nextName = "payment-capture.diagram.json";
+  writeFileSync(join(root, firstName), spec("Original"));
+  const first = await send(firstName);
+  expect(first.attachment.diagram_id).toBe("payment-flow");
+  store.setArtifactPinned(first.message.thread_id, first.attachment.id, true);
+  renameSync(join(root, firstName), join(root, nextName));
+  writeFileSync(join(root, nextName), spec("Revised"));
+  const next = await send(nextName);
+  writeFileSync(join(root, nextName), spec("Unsent edits"));
+
+  const reopened = InboxStore.open(join(root, "data"));
+  const pinned = await page(reopened, "?pinned=1");
+  expect(pinned.artifacts).toHaveLength(1);
+  expect(pinned.artifacts[0]).toMatchObject({ key: first.attachment.id, message_id: next.message.id, attachment: { id: next.attachment.id, name: nextName } });
+  for (const [entry, title] of [[first, "Original"], [next, "Revised"]] as const) {
+    const result = await readInboxAttachmentText(store.dir, entry.attachment, "sent");
+    expect(result.ok && result.bytes.toString()).toBe(spec(title));
+  }
+  expect(reopened.setArtifactPinned(first.message.thread_id, next.attachment.id, false)).toEqual([]);
+});
 
 const page = (store: InboxStore, query = "") => inboxArtifactsPage(store, new URL(`http://localhost/api/inbox/artifacts${query}`));
 const keys = (p: InboxArtifactsPage) => p.artifacts.map((a) => a.key);

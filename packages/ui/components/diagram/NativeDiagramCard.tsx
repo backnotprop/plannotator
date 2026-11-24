@@ -10,7 +10,7 @@ import type { NativeDiagramFileReference } from './nativeDiagramDrawing';
 
 export type SubmitResult = boolean | void | Promise<boolean | void>;
 
-function LinkDetail({ reference }: { reference: Extract<DiagramReference, { kind: 'link' }> }) {
+function LinkDetail({ reference, showTitle }: { reference: Extract<DiagramReference, { kind: 'link' }>; showTitle: boolean }) {
   const { url, title } = reference;
   const target = useMemo(() => refCardTarget(url), [url]);
   const [result, setResult] = useState(() => target ? peekRefCard(target) : null);
@@ -20,9 +20,9 @@ function LinkDetail({ reference }: { reference: Extract<DiagramReference, { kind
     void loadRefCard(url, target).then(answer => { if (active) setResult(answer); });
     return () => { active = false; };
   }, [target, url]);
-  if (target && result !== null) return <RefCardView href={url} target={target} result={result} />;
+  if (target && result?.ok) return <RefCardView href={url} target={target} result={result} />;
   return <>
-    <strong className="ndr-reference-title"><Link2 size={15} />{title}</strong>
+    {showTitle && <strong className="ndr-reference-title"><Link2 size={15} />{title}</strong>}
     <a className="ndr-link" href={url} target="_blank" rel="noopener noreferrer">{url}<ExternalLink size={13} /></a>
   </>;
 }
@@ -41,8 +41,8 @@ export function ReferenceDetails({ part, onOpenFile, pin }: {
         {ref.kind === 'file' ? <Code2 size={15} /> : <Link2 size={15} />}<span>{ref.title}</span>
       </button>
     </li>)}</ul>}
-    {reference.kind === 'link' ? <LinkDetail key={reference.url} reference={reference} /> : <>
-      <strong className="ndr-reference-title"><Code2 size={15} />{reference.title}</strong>
+    {reference.kind === 'link' ? <LinkDetail key={reference.url} reference={reference} showTitle={part.refs.length === 1} /> : <>
+      {part.refs.length === 1 && <strong className="ndr-reference-title"><Code2 size={15} />{reference.title}</strong>}
       <div className="ndr-file-path">{reference.path}</div>
       <div className="ndr-file-actions">
         {reference.start !== undefined && <span>{reference.end !== undefined && reference.end !== reference.start ? `Lines ${reference.start}–${reference.end}` : `Line ${reference.start}`}</span>}
@@ -69,6 +69,17 @@ export function FloatingCard({ anchor, heading, children, mode, host, pinned, on
   const ref = useRef<HTMLDivElement>(null);
   const [geometry, setGeometry] = useState({ width: 0, height: 0, roomWidth: 0, roomHeight: 0 });
   const [offset, setOffset] = useState<{ x: number; y: number } | null>(null);
+  // Replacing the references with a narrower editor keeps the card at the same place.
+  const previous = useRef<{ mode: typeof mode; left: number; top: number } | null>(null);
+  useLayoutEffect(() => {
+    const box = ref.current;
+    if (!box) return;
+    const last = previous.current;
+    if (mode === 'write' && last && last.mode !== 'write') {
+      setOffset({ x: last.left - anchor.left, y: last.top - anchor.top });
+    }
+    previous.current = { mode, left: box.offsetLeft, top: box.offsetTop };
+  });
   const drag = useRef<{ id: number; x: number; y: number; left: number; top: number } | null>(null);
   useLayoutEffect(() => {
     const node = ref.current;
@@ -127,16 +138,21 @@ export function CloseButton({ label, onClick }: { label: string; onClick: () => 
   return <Button className="ndr-close" size="icon" variant="ghost" aria-label={label} onClick={onClick}><X size={15} /></Button>;
 }
 
-export function TextEditor({ initial, label, ask, editing, onSubmit, onDone, onCancel }: {
-  initial: string; label: string; ask?: boolean; editing?: boolean;
-  onSubmit: (body: string) => SubmitResult; onDone: () => void; onCancel: () => void;
+export function TextEditor({ initial, label, ask, original, onSubmit, onDone, onCancel, onChange }: {
+  initial: string; label: string; ask?: boolean; original?: string;
+  onSubmit: (body: string) => SubmitResult; onDone: () => void; onCancel: () => void; onChange?: (body: string) => void;
 }) {
   const [text, setText] = useState(initial);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
   const input = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => { input.current?.focus({ preventScroll: true }); }, []);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    input.current?.focus({ preventScroll: true });
+    return () => { mounted.current = false; };
+  }, []);
   async function submit() {
     const body = text.trim();
     if (!body || pending.current) return;
@@ -145,17 +161,17 @@ export function TextEditor({ initial, label, ask, editing, onSubmit, onDone, onC
     setError('');
     try {
       if (await onSubmit(body) === false) throw new Error();
-      onDone();
+      if (mounted.current) onDone();
     } catch {
-      setError(ask ? 'Couldn’t send the question. Try again.' : 'Couldn’t save the comment. Try again.');
+      if (mounted.current) setError(ask ? 'Couldn’t send the question. Try again.' : 'Couldn’t save the comment. Try again.');
     } finally {
       pending.current = false;
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   }
   return <form className="ndr-editor" aria-busy={busy} onSubmit={e => { e.preventDefault(); void submit(); }}>
     <textarea ref={input} rows={2} aria-label={label} value={text} readOnly={busy}
-      placeholder={ask ? 'Ask a question…' : 'Add a comment…'} onChange={e => setText(e.target.value)}
+      placeholder={ask ? 'Ask a question…' : 'Add a comment…'} onChange={e => { setText(e.target.value); onChange?.(e.target.value); }}
       onKeyDown={e => {
         if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
         if (e.key === 'Enter' && (ask ? !e.shiftKey : e.ctrlKey || e.metaKey)) { e.preventDefault(); void submit(); }
@@ -163,8 +179,8 @@ export function TextEditor({ initial, label, ask, editing, onSubmit, onDone, onC
     {error && <div className="ndr-error" role="alert">{error}</div>}
     <div className="ndr-editor-actions">
       {!ask && <Button size="xs" variant="ghost" onClick={onCancel} type="button">Cancel</Button>}
-      <Button size={ask ? 'icon' : 'xs'} disabled={busy || !text.trim() || (editing && text.trim() === initial)} type="submit" aria-label={ask ? 'Send question' : undefined}>
-        {ask ? <ArrowUp /> : editing ? 'Save' : 'Add comment'}
+      <Button size={ask ? 'icon' : 'xs'} disabled={busy || !text.trim() || (text.trim() === original)} type="submit" aria-label={ask ? 'Send question' : undefined}>
+        {ask ? <ArrowUp /> : original !== undefined ? 'Save' : 'Add comment'}
       </Button>
     </div>
   </form>;

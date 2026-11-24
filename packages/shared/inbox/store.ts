@@ -1521,15 +1521,28 @@ export class InboxStore {
   private loadArtifactPins(): void {
     const before = this.artifactPinList;
     const read = readInboxArtifactPins(this.dir);
-    const keysOf = new Map<string, Set<string>>();
-    const kept = read.filter((pin) => {
-      if (!this.isThreadRoot(pin.thread_id)) return false;
+    const keysOf = new Map<string, Map<string, string>>();
+    const pins = new Map<string, InboxArtifactPin>();
+    for (const pin of read) {
+      if (!this.isThreadRoot(pin.thread_id)) continue;
       let keys = keysOf.get(pin.thread_id);
-      if (!keys) keysOf.set(pin.thread_id, (keys = new Set(this.threadArtifactRefs(pin.thread_id).map((ref) => ref.key))));
-      return keys.has(pin.key);
-    });
+      if (!keys) {
+        keys = new Map();
+        for (const ref of this.threadArtifactRefs(pin.thread_id)) {
+          keys.set(ref.key, ref.key);
+          for (const id of ref.revisionKeys ?? []) keys.set(id, ref.key);
+        }
+        keysOf.set(pin.thread_id, keys);
+      }
+      const key = keys.get(pin.key);
+      if (key) {
+        pins.delete(key);
+        pins.set(key, key === pin.key ? pin : { ...pin, key });
+      }
+    }
+    const kept = [...pins.values()];
     this.artifactPinList = kept;
-    if (kept.length !== read.length) {
+    if (kept.length !== read.length || kept.some((pin, index) => pin.key !== read[index]?.key)) {
       try {
         writeInboxArtifactPins(this.dir, kept);
       } catch {
@@ -1558,12 +1571,13 @@ export class InboxStore {
   setArtifactPinned(threadId: string, key: unknown, pinned: boolean): readonly InboxArtifactPin[] {
     if (!isInboxArtifactKey(key)) throw new InboxError("validation_error", "key: an attachment id (att_) or guide:<message id>.", { field: "key" });
     if (!this.isThreadRoot(threadId)) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
-    const has = this.artifactPinList.some((pin) => pin.key === key);
+    const requested = key;
+    const ref = this.threadArtifactRefs(threadId).find((row) => row.key === requested || row.revisionKeys?.includes(requested));
+    const pinKey = ref?.key ?? requested;
+    const has = this.artifactPinList.some((pin) => pin.thread_id === threadId && pin.key === pinKey);
     if (has === pinned) return this.artifactPinList;
-    if (pinned && !this.threadArtifactRefs(threadId).some((ref) => ref.key === key)) {
-      throw new InboxError("artifact_not_found", `No artifact ${key} in thread ${threadId}.`);
-    }
-    const next = pinned ? [...this.artifactPinList, { key, thread_id: threadId, pinned_at: this.now().toISOString() }] : this.artifactPinList.filter((pin) => pin.key !== key);
+    if (!ref && pinned) throw new InboxError("artifact_not_found", `No artifact ${requested} in thread ${threadId}.`);
+    const next = pinned ? [...this.artifactPinList, { key: pinKey, thread_id: threadId, pinned_at: this.now().toISOString() }] : this.artifactPinList.filter((pin) => pin.key !== pinKey);
     writeInboxArtifactPins(this.dir, next);
     this.artifactPinList = next;
     this.artifactPinsChanged();

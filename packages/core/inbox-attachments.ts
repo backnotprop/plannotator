@@ -86,6 +86,8 @@ export interface InboxAttachment {
   /** The file name, for display. */
   name: string;
   kind: InboxAttachmentKind;
+  /** Optional logical ID from the immutable .diagram.json sent with this attachment. */
+  diagram_id?: string;
   /** The sha256 of the bytes sent: the blob `inbox/blobs/<sent_sha256>`. */
   sent_sha256: string;
   /** Size in bytes of the sent version. */

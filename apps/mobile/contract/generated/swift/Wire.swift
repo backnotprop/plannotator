@@ -2890,6 +2890,7 @@ public struct InboxAttachment: Codable, Hashable, Sendable {
   public var namedPath: String?
   public var name: String
   public var kind: InboxAttachmentKind
+  public var diagramId: String?
   public var sentSha256: String
   public var size: Int64
   public var sentAt: String
@@ -2901,14 +2902,15 @@ public struct InboxAttachment: Codable, Hashable, Sendable {
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["id", "path", "named_path", "name", "kind", "sent_sha256", "size", "sent_at", "sent_mtime", "media_type", "width", "height", "duration_ms"]
+  static let knownKeys: Set<String> = ["id", "path", "named_path", "name", "kind", "diagram_id", "sent_sha256", "size", "sent_at", "sent_mtime", "media_type", "width", "height", "duration_ms"]
 
-  public init(id: String, path: String, namedPath: String? = nil, name: String, kind: InboxAttachmentKind, sentSha256: String, size: Int64, sentAt: String, sentMtime: String, mediaType: String? = nil, width: Double? = nil, height: Double? = nil, durationMs: Int64? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(id: String, path: String, namedPath: String? = nil, name: String, kind: InboxAttachmentKind, diagramId: String? = nil, sentSha256: String, size: Int64, sentAt: String, sentMtime: String, mediaType: String? = nil, width: Double? = nil, height: Double? = nil, durationMs: Int64? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.id = id
     self.path = path
     self.namedPath = namedPath
     self.name = name
     self.kind = kind
+    self.diagramId = diagramId
     self.sentSha256 = sentSha256
     self.size = size
     self.sentAt = sentAt
@@ -2927,6 +2929,7 @@ public struct InboxAttachment: Codable, Hashable, Sendable {
     self.namedPath = try c.decodeIfPresent(String.self, forKey: WireKey("named_path"))
     self.name = try c.decode(String.self, forKey: WireKey("name"))
     self.kind = try c.decode(InboxAttachmentKind.self, forKey: WireKey("kind"))
+    self.diagramId = try c.decodeIfPresent(String.self, forKey: WireKey("diagram_id"))
     self.sentSha256 = try c.decode(String.self, forKey: WireKey("sent_sha256"))
     self.size = try c.decode(Int64.self, forKey: WireKey("size"))
     self.sentAt = try c.decode(String.self, forKey: WireKey("sent_at"))
@@ -2945,6 +2948,7 @@ public struct InboxAttachment: Codable, Hashable, Sendable {
     try c.encode(self.namedPath, forKey: WireKey("named_path"))
     try c.encode(self.name, forKey: WireKey("name"))
     try c.encode(self.kind, forKey: WireKey("kind"))
+    try c.encodeIfPresent(self.diagramId, forKey: WireKey("diagram_id"))
     try c.encode(self.sentSha256, forKey: WireKey("sent_sha256"))
     try c.encode(self.size, forKey: WireKey("size"))
     try c.encode(self.sentAt, forKey: WireKey("sent_at"))
@@ -2968,12 +2972,13 @@ public enum InboxAttachmentKind: Codable, Hashable, Sendable, RawRepresentable {
   case markdown
   case mermaid
   case pdf
+  case plannotatorDiagram
   case text
   case video
   /// A value this app does not know (a newer Inbox).
   case unknown(String)
 
-  public static let known: [InboxAttachmentKind] = [.audio, .code, .file, .graphviz, .html, .image, .markdown, .mermaid, .pdf, .text, .video]
+  public static let known: [InboxAttachmentKind] = [.audio, .code, .file, .graphviz, .html, .image, .markdown, .mermaid, .pdf, .plannotatorDiagram, .text, .video]
 
   public init(rawValue: String) {
     switch rawValue {
@@ -2986,6 +2991,7 @@ public enum InboxAttachmentKind: Codable, Hashable, Sendable, RawRepresentable {
     case "markdown": self = .markdown
     case "mermaid": self = .mermaid
     case "pdf": self = .pdf
+    case "plannotator-diagram": self = .plannotatorDiagram
     case "text": self = .text
     case "video": self = .video
     default: self = .unknown(rawValue)
@@ -3003,6 +3009,7 @@ public enum InboxAttachmentKind: Codable, Hashable, Sendable, RawRepresentable {
     case .markdown: return "markdown"
     case .mermaid: return "mermaid"
     case .pdf: return "pdf"
+    case .plannotatorDiagram: return "plannotator-diagram"
     case .text: return "text"
     case .video: return "video"
     case .unknown(let value): return value
@@ -3027,6 +3034,7 @@ public struct InboxAttachmentState: Codable, Hashable, Sendable {
   public var namedPath: String?
   public var name: String
   public var kind: InboxAttachmentKind
+  public var diagramId: String?
   public var sentSha256: String
   public var size: Int64
   public var sentAt: String
@@ -3038,9 +3046,9 @@ public struct InboxAttachmentState: Codable, Hashable, Sendable {
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["message_id", "ref", "captured", "captured_at", "current", "changed_since_sent", "unavailable", "id", "path", "named_path", "name", "kind", "sent_sha256", "size", "sent_at", "sent_mtime", "media_type", "width", "height", "duration_ms"]
+  static let knownKeys: Set<String> = ["message_id", "ref", "captured", "captured_at", "current", "changed_since_sent", "unavailable", "id", "path", "named_path", "name", "kind", "diagram_id", "sent_sha256", "size", "sent_at", "sent_mtime", "media_type", "width", "height", "duration_ms"]
 
-  public init(messageId: MessageID, ref: String? = nil, captured: InboxAttachmentStateCaptured? = nil, capturedAt: String? = nil, current: InboxAttachmentStateCurrent? = nil, changedSinceSent: Bool, unavailable: InboxAttachmentStateUnavailable? = nil, id: String, path: String, namedPath: String? = nil, name: String, kind: InboxAttachmentKind, sentSha256: String, size: Int64, sentAt: String, sentMtime: String, mediaType: String? = nil, width: Double? = nil, height: Double? = nil, durationMs: Int64? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(messageId: MessageID, ref: String? = nil, captured: InboxAttachmentStateCaptured? = nil, capturedAt: String? = nil, current: InboxAttachmentStateCurrent? = nil, changedSinceSent: Bool, unavailable: InboxAttachmentStateUnavailable? = nil, id: String, path: String, namedPath: String? = nil, name: String, kind: InboxAttachmentKind, diagramId: String? = nil, sentSha256: String, size: Int64, sentAt: String, sentMtime: String, mediaType: String? = nil, width: Double? = nil, height: Double? = nil, durationMs: Int64? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.messageId = messageId
     self.ref = ref
     self.captured = captured
@@ -3053,6 +3061,7 @@ public struct InboxAttachmentState: Codable, Hashable, Sendable {
     self.namedPath = namedPath
     self.name = name
     self.kind = kind
+    self.diagramId = diagramId
     self.sentSha256 = sentSha256
     self.size = size
     self.sentAt = sentAt
@@ -3078,6 +3087,7 @@ public struct InboxAttachmentState: Codable, Hashable, Sendable {
     self.namedPath = try c.decodeIfPresent(String.self, forKey: WireKey("named_path"))
     self.name = try c.decode(String.self, forKey: WireKey("name"))
     self.kind = try c.decode(InboxAttachmentKind.self, forKey: WireKey("kind"))
+    self.diagramId = try c.decodeIfPresent(String.self, forKey: WireKey("diagram_id"))
     self.sentSha256 = try c.decode(String.self, forKey: WireKey("sent_sha256"))
     self.size = try c.decode(Int64.self, forKey: WireKey("size"))
     self.sentAt = try c.decode(String.self, forKey: WireKey("sent_at"))
@@ -3103,6 +3113,7 @@ public struct InboxAttachmentState: Codable, Hashable, Sendable {
     try c.encode(self.namedPath, forKey: WireKey("named_path"))
     try c.encode(self.name, forKey: WireKey("name"))
     try c.encode(self.kind, forKey: WireKey("kind"))
+    try c.encodeIfPresent(self.diagramId, forKey: WireKey("diagram_id"))
     try c.encode(self.sentSha256, forKey: WireKey("sent_sha256"))
     try c.encode(self.size, forKey: WireKey("size"))
     try c.encode(self.sentAt, forKey: WireKey("sent_at"))
@@ -4628,6 +4639,7 @@ public struct InboxInlineImage: Codable, Hashable, Sendable {
   public var namedPath: String?
   public var name: String
   public var kind: InboxAttachmentKind
+  public var diagramId: String?
   public var sentSha256: String
   public var size: Int64
   public var sentAt: String
@@ -4639,9 +4651,9 @@ public struct InboxInlineImage: Codable, Hashable, Sendable {
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["ref", "captured", "captured_at", "id", "path", "named_path", "name", "kind", "sent_sha256", "size", "sent_at", "sent_mtime", "media_type", "width", "height", "duration_ms"]
+  static let knownKeys: Set<String> = ["ref", "captured", "captured_at", "id", "path", "named_path", "name", "kind", "diagram_id", "sent_sha256", "size", "sent_at", "sent_mtime", "media_type", "width", "height", "duration_ms"]
 
-  public init(ref: String, captured: InboxInlineImageCaptured? = nil, capturedAt: String? = nil, id: String, path: String, namedPath: String? = nil, name: String, kind: InboxAttachmentKind, sentSha256: String, size: Int64, sentAt: String, sentMtime: String, mediaType: String? = nil, width: Double? = nil, height: Double? = nil, durationMs: Int64? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(ref: String, captured: InboxInlineImageCaptured? = nil, capturedAt: String? = nil, id: String, path: String, namedPath: String? = nil, name: String, kind: InboxAttachmentKind, diagramId: String? = nil, sentSha256: String, size: Int64, sentAt: String, sentMtime: String, mediaType: String? = nil, width: Double? = nil, height: Double? = nil, durationMs: Int64? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.ref = ref
     self.captured = captured
     self.capturedAt = capturedAt
@@ -4650,6 +4662,7 @@ public struct InboxInlineImage: Codable, Hashable, Sendable {
     self.namedPath = namedPath
     self.name = name
     self.kind = kind
+    self.diagramId = diagramId
     self.sentSha256 = sentSha256
     self.size = size
     self.sentAt = sentAt
@@ -4671,6 +4684,7 @@ public struct InboxInlineImage: Codable, Hashable, Sendable {
     self.namedPath = try c.decodeIfPresent(String.self, forKey: WireKey("named_path"))
     self.name = try c.decode(String.self, forKey: WireKey("name"))
     self.kind = try c.decode(InboxAttachmentKind.self, forKey: WireKey("kind"))
+    self.diagramId = try c.decodeIfPresent(String.self, forKey: WireKey("diagram_id"))
     self.sentSha256 = try c.decode(String.self, forKey: WireKey("sent_sha256"))
     self.size = try c.decode(Int64.self, forKey: WireKey("size"))
     self.sentAt = try c.decode(String.self, forKey: WireKey("sent_at"))
@@ -4692,6 +4706,7 @@ public struct InboxInlineImage: Codable, Hashable, Sendable {
     try c.encode(self.namedPath, forKey: WireKey("named_path"))
     try c.encode(self.name, forKey: WireKey("name"))
     try c.encode(self.kind, forKey: WireKey("kind"))
+    try c.encodeIfPresent(self.diagramId, forKey: WireKey("diagram_id"))
     try c.encode(self.sentSha256, forKey: WireKey("sent_sha256"))
     try c.encode(self.size, forKey: WireKey("size"))
     try c.encode(self.sentAt, forKey: WireKey("sent_at"))

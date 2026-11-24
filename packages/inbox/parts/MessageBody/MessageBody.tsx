@@ -29,6 +29,7 @@ import { PictureRetry } from './PictureRetry';
 import { useBodyLinks } from './useBodyLinks';
 import { useFileRefs } from './useFileRefs';
 import { useQuestionCards } from './useQuestionCards';
+import { messageSideSource } from '../../ask/sideSource';
 import { useBodyComments } from './useBodyComments';
 import { useCommentPictures } from '../../commentPictures';
 
@@ -165,7 +166,10 @@ export function MessageBody({
         textDeletions={comments !== undefined && message.author.kind === 'agent'}
         questionTextComments={comments !== undefined}
         suggestComment={comments?.suggest}
-        onOpenDiagramFile={refsOn ? (ref) => openFileRefRef.current?.({ path: ref.path, line: ref.start, lineEnd: ref.end }) : undefined}
+        onAskDiagramAI={comments?.onSide && ((question, context) => comments.onSide!(question, [
+          messageSideSource(message, { selected: context.text ?? '', blockId: '', blocks, annotations: commentList }), context.detail,
+        ].filter(Boolean).join('\n')))}
+        onOpenDiagramFile={refsOn ? (ref) => openFileRefRef.current?.({ from: 'root', path: ref.path, line: ref.start, lineEnd: ref.end }) : undefined}
         onSide={comments?.onSide ? side : undefined}
         sideButton={sideButton}
         allowImages={pictures}
