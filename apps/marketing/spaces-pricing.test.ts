@@ -5,12 +5,13 @@ import {
   PRICED_PLANS,
   QUESTIONS,
   UNLIMITED_FACTS,
+  YEARLY_PERCENT_OFF,
   YEARLY_SAVING,
   planPriceWords,
 } from './src/lib/spaces-pricing';
 
-// The Spaces pricing page states prices in three places (the cards, the Yearly
-// line, the first answer). These guard that they never disagree.
+// The Spaces pricing page states prices in three places (the cards, the saving on
+// the Yearly switch, the first answer). These guard that they never disagree.
 describe('Spaces pricing facts', () => {
   test('four cards: $0, $29, $59 and $119 a month, and $0, $319, $649 and $1,309 a year', () => {
     expect(PLAN_CARDS.map((card) => card.name)).toEqual(['Free', 'Team 5', 'Team 10', 'Team Unlimited']);
@@ -28,12 +29,13 @@ describe('Spaces pricing facts', () => {
     ]);
   });
 
-  test('every paid plan saves what the Yearly line promises', () => {
+  test('every paid plan saves what the Yearly switch and the first answer promise', () => {
     for (const plan of PRICED_PLAN_ORDER) {
       const cents = PRICED_PLANS[plan].cents;
       if (cents === null) continue;
       const monthsPaid = cents.year / cents.month;
       const percentOff = Math.floor((1 - monthsPaid / 12) * 100);
+      expect(YEARLY_PERCENT_OFF, plan).toBe(`${percentOff} percent off`);
       expect(YEARLY_SAVING, plan).toBe(`${12 - monthsPaid === 1 ? 'one month' : `${12 - monthsPaid} months`} free, ${percentOff} percent off`);
     }
   });

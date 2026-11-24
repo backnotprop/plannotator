@@ -15,6 +15,8 @@ struct Composer: View {
   /// The person types in a card: the foot steps aside until the keyboard goes, all but its fade, so the card has
   /// the room over the keyboard and one field only stands there, the one they type in.
   var inCard = false
+  /// The computer's draft the words came from: sending them clears it there too.
+  var clearDraft: String?
   /// Go to a card.
   let go: (String) -> Void
   let jump: () -> Void
@@ -32,16 +34,21 @@ struct Composer: View {
   private var hasPicks: Bool { thread.messages.contains { ($0.questions ?? []).contains { $0.state == .picked } } }
   private var canSend: Bool {
     // While a Send waits, its picks are already on their way: only new words make another Send.
-    if session.hasHeldReply(id), words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return false }
-    if guarded { return false }
-    return session.canSend(thread: id, words: words) && !session.sending.contains(id)
+    if session.hasHeldReply(id), words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, files.isEmpty { return false }
+    if guarded || pressed { return false }
+    return session.canSend(thread: id, words: words, files: files) && !session.sending.contains(id)
   }
+  /// Send was pressed and its Send has not run yet: a second press in between sends nothing.
+  @State private var pressed = false
   @Environment(\.dynamicTypeSize) private var typeSize
   /// One line of the reply field at this text size: the controls beside the words are centred on it, and stay
   /// at the foot of the field when the words run to more lines.
   @ScaledMetric(relativeTo: .body) private var textLine: CGFloat = Size.mark
   private var oneLine: CGFloat { max(Size.replyRow, textLine + 2 * Space.step) }
   private var hint: String { hasPicks ? PhoneWords.noteOrSend : PhoneWords.reply }
+  /// The files in the reply's draft, and the message it quotes.
+  private var files: [DraftFile] { session.files(.thread(id)) }
+  private var quote: DraftQuote? { session.draft(id)?.quote }
   /// The stale guard is up: it stands in place of the reply's own actions, as in the window.
   private var guarded: Bool { session.stopped.contains(id) && !(session.stale[id] ?? []).isEmpty }
 
@@ -201,13 +208,25 @@ struct Composer: View {
         commentStrip(riding)
         Hairline().padding(.horizontal, Space.card)
       }
+      if let quote {
+        QuoteLine(thread: thread, quote: quote) {
+          withAnimation(Motion.fade.animation(still: false)) { session.setQuote(id, nil) }
+          AccessibilityNotification.Announcement(PhoneWords.quoteRemoved).post()
+        }
+        Hairline().padding(.horizontal, Space.card)
+      }
+      if !files.isEmpty {
+        DraftTiles(session: session, place: .thread(id))
+        Hairline().padding(.horizontal, Space.card)
+      }
       HStack(alignment: .bottom, spacing: 0) {
         if jumps, waits == nil { jumpMark.frame(minHeight: oneLine) }
+        AttachButton(session: session, place: .thread(id)).frame(minHeight: oneLine).padding(.leading, jumps && waits == nil ? 0 : Space.tight)
         TextField("", text: $words, axis: .vertical)
           .lineLimit(1...6)
           .font(TextRole.body)
           .focused(focused)
-          .padding(.leading, jumps && waits == nil ? Space.close : Space.card)
+          .padding(.leading, Space.tight)
           .padding(.vertical, Space.step)
           // The hint whole, never cut: the long one when it fits on the line, else the short one.
           .overlay(alignment: .topLeading) {
@@ -218,7 +237,7 @@ struct Composer: View {
               }
               .font(TextRole.body)
               .foregroundStyle(Color(uiColor: .placeholderText))
-              .padding(.leading, jumps && waits == nil ? Space.close : Space.card)
+              .padding(.leading, Space.tight)
               .padding(.vertical, Space.step)
               .allowsHitTesting(false)
               .accessibilityHidden(true)
@@ -227,13 +246,18 @@ struct Composer: View {
           .frame(minHeight: Size.replyRow)
           .accessibilityLabel(hint)
         Button {
+          guard !pressed else { return }
+          pressed = true
           // Words typed on a card and not saved yet are saved first: what is on screen is what is sent.
           drafts.saveAll()
           let text = words
+          let files = files
+          let quote = quote
           words = ""
           Task {
             // A Send that could not be made at all gives the words straight back.
-            if !(await session.send(thread: id, words: text)), words.isEmpty { words = text }
+            if !(await session.send(thread: id, words: text, clearDraft: clearDraft, files: files, quote: quote)), words.isEmpty { words = text }
+            pressed = false
           }
         } label: {
           SendDisc(ready: canSend)
@@ -241,6 +265,8 @@ struct Composer: View {
         .buttonStyle(PressStyle())
         .disabled(!canSend)
         .accessibilityLabel(PhoneWords.send)
+        // What holds the Send: a file that waits for the computer's own network says so, not "uploading".
+        .accessibilityHint(DraftFiles.holdSend(files) ? (session.filesNeedNetwork(files) ? PhoneWords.needsNetwork : PhoneWords.waitForFiles) : "")
         // Send is a control of the foot's bar: it grows with the text to the bar's limit.
         .barSized()
         .frame(minHeight: oneLine)

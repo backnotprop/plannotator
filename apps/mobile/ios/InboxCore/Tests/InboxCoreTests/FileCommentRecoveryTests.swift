@@ -267,6 +267,30 @@ final class FileCommentRecoveryTests: XCTestCase {
     XCTAssertTrue(session.comments(retry).isEmpty)
   }
 
+  func testASendOfCommentsAndFilesGoesWithItsFilesWhenItsOnlyCommentIsRefused() async throws {
+    let (door, session) = try await seated()
+    _ = await door.addFile(thread: thread, message: StandInData.filesSecond, name: "flame.png", kind: .image, bytes: png(1), mediaType: "image/png", width: 8, height: 8)
+    await session.readAttachments(thread)
+    let item = try file(session, "flame.png")
+    // A file attached to the reply, on the computer already; then, away from it, a drawn comment and Send.
+    await session.attach(png(3), name: "shot.png", type: "image/png", to: .thread(thread))
+    await door.setOffline(true)
+    await session.refresh()
+    let made = try XCTUnwrap(session.addComment(thread: thread, item: item, version: .current, annotation: FileComments.picture(name: item.name, comment: "Too red.", markup: nil), drawing: png(9)))
+    let queued = await session.send(thread: thread, words: "", files: session.files(.thread(thread)))
+    XCTAssertTrue(queued)
+    await door.setOptions { $0.refusesMarkups = "markup_too_large" }
+    await door.setOffline(false)
+    await session.refresh()
+    await delivered(session)
+    let replies = await door.posts("/reply").map(body)
+    XCTAssertEqual(replies.count, 1, "the Send goes without the comment: its file is something to send")
+    XCTAssertNil(replies.first?["annotation_ids"])
+    let written = await door.thread(thread)?.messages.last
+    XCTAssertEqual(written?.attachments?.map(\.name), ["shot.png"], "the file was never dropped")
+    XCTAssertEqual(session.comments(thread).map(\.id), [made.id], "the comment stays, with its reason")
+  }
+
   func testASendOfOnlyCommentsADrawingRefusedForGoodEmptiesIsToldAboutAndItsCommentStays() async throws {
     let copy = LocalCopy(folder: folder())
     let cache = folder()

@@ -20,9 +20,15 @@ import { expect, test, type Page } from '@playwright/test';
 import { buildDiagramUiBundle, clickEveryLabelElement, NAVIGATING_LABELS, openDiagramPage, PICTURE_HOST } from './diagram-ui-bundle';
 
 let bundle = '';
+/** The switch as shipped: Pele draws what it can, Mermaid the rest. */
+let shipped = '';
 test.beforeAll(() => {
   bundle = buildDiagramUiBundle();
+  shipped = buildDiagramUiBundle({ engine: 'pele-where-safe' });
 });
+
+/** Whatever a label is drawn as: Mermaid's HTML, or Pele's svg text. */
+const ANY_LABEL = '#host foreignObject *, #host text, #host tspan';
 
 const flow = (label: string) => `flowchart LR\n  A["${label}"] --> B[ok]`;
 const render = (page: Page, source: string) =>
@@ -46,6 +52,32 @@ test('a click anywhere in a label never navigates the tab or submits a form', as
   // A form's words are kept, as text.
   await render(page, flow(NAVIGATING_LABELS[1]!));
   expect(await page.locator('#host').textContent()).toContain('Go');
+});
+
+test('as shipped (Pele where it can, Mermaid the rest), a click anywhere in a label never navigates the tab or submits a form', async ({ page }) => {
+  const { requests, navigations } = await openDiagramPage(page, shipped);
+  const start = page.url();
+  const engines = new Set<string>();
+  for (const label of NAVIGATING_LABELS) {
+    const r = await render(page, flow(label));
+    expect(r.ok, `${label}: ${r.message}`).toBe(true);
+    engines.add((await page.locator('#host > svg').getAttribute('class'))?.includes('pele') ? 'pele' : 'mermaid');
+    expect(await clickEveryLabelElement(page, ANY_LABEL), label).toBeGreaterThan(0);
+    await page.waitForTimeout(250);
+    expect([label, page.url(), navigations, requests.filter((x) => x.startsWith('document '))]).toEqual([label, start, [], []]);
+    expect(NAVIGATING.test(await page.locator('#host').innerHTML()), label).toBe(false);
+  }
+  // Pele draws every one of them (as its words); the Mermaid-forced test above covers Mermaid's drawing.
+  expect([...engines]).toEqual(['pele']);
+});
+
+test('as shipped, every diagram that drew before still draws', async ({ page }) => {
+  await openDiagramPage(page, shipped);
+  for (const source of DRAWS) {
+    const r = await render(page, source);
+    expect([source, r.ok, r.refused, r.message]).toEqual([source, true, false, '']);
+    expect(NAVIGATING.test(await page.locator('#host').innerHTML()), source).toBe(false);
+  }
 });
 
 test("Mermaid's own drawing never holds what navigates, and a directive cannot loosen that", async ({ page }) => {

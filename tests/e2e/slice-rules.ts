@@ -136,6 +136,12 @@ export const SLICE_RULES: SliceRule[] = [
   { name: 'question card', paths: ['packages/ui/components/blocks/Question*', 'packages/ui/components/Question*'], specs: ['question-*.spec.ts'] },
   { name: 'chat window and Ask AI', paths: ['packages/ui/components/chat/**', 'packages/ai/**'], specs: ['chat-window.spec.ts', 'ask-ai-sanitize.spec.ts', 'annotate-ai-history.spec.ts'] },
   { name: 'Pele diagram labels', paths: ['packages/ui/utils/pele*', 'packages/ui/utils/diagram-anchor-pele.ts', 'packages/ui/utils/diagram-engine.ts', 'packages/ui/utils/diagram-render.ts'], specs: ['pele-labels.spec.ts'] },
+  {
+    // The switch decides which engine draws a fence in the built apps; these specs expect Pele where it draws and Mermaid where a fence falls back.
+    name: 'diagram engine switch',
+    paths: ['packages/ui/utils/diagram-engine.ts', 'packages/ui/utils/pele.ts'],
+    specs: ['review-diagrams.spec.ts', 'inbox-mermaid-failure-webkit.spec.ts', 'inbox-thread-diagram-comments.spec.ts', 'vscode-guides-sanitize.spec.ts'],
+  },
   { name: 'phone surface', paths: ['packages/inbox/surface/**'], specs: ['surface.spec.ts'] },
   {
     name: 'VS Code Guides webview',

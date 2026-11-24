@@ -181,6 +181,14 @@ describe.if(hasDom)('math labels drawn by Pele', () => {
     expect(svg.querySelector('g.pele-node[data-id="B"] text')?.textContent?.replace(/\u200b/gu, '')).toContain('Cost');
   });
 
+  // Firefox reports a formula narrower than it paints it (the 2 of `\sum i^2`
+  // was cut off at the box's edge): the box must not clip, after the sanitizer.
+  test('a formula box lets what the browser paints past it show', async () => {
+    const svg = await draw('flowchart LR\n  A["$$\\sum_{i=1}^{n} i^2$$"] --> B["Cost $$O(n)$$ worst"]');
+    expect(formulas(svg)).toHaveLength(2);
+    for (const fo of formulas(svg)) expect((fo as SVGElement).style.overflow).toBe('visible');
+  });
+
   test('a formula takes the colour its label is drawn in', async () => {
     const svg = await draw('flowchart LR\n  subgraph G ["T $$t$$"]\n    A["$$a$$"]\n  end');
     const ink = (tex: string) => formulas(svg).find((fo) => fo.getAttribute(PELE_TEX_ATTR) === tex)?.firstElementChild?.getAttribute('style') ?? '';

@@ -50,6 +50,18 @@ struct StandInState {
   var annotations: [String: InboxAnnotationRecord] = [:]
   /// Drawings kept (`inbox/markups/<sha256>.png`), by file name.
   var markups: [String: Data] = [:]
+  /// Files the phone sent up and no Send named yet (StandInCompose.swift), the live sessions when set, the threads
+  /// New message made, and the refusal every upload meets when set.
+  var uploads: [String: StandInUpload] = [:]
+  var liveSessions: [InboxComposeProject]?
+  var started: [ThreadID] = []
+  var refusesUploads: (code: String, words: String, field: String)?
+  /// Every upload's first answer, by its idempotency key, kept forever as the door's command log keeps it: the same
+  /// key answers that upload again even once it is spent or swept.
+  var uploadKeys: [String: InboxUpload] = [:]
+  /// New messages written, by their Send's key (the store's `personThreadByKey`).
+  var startedByKey: [String: ThreadID] = [:]
+  var failsNextCompose = false
   /// Saves of a comment answered `422 annotation_not_allowed`, by attachment id (a file that takes none).
   var refusesComments: Set<String> = []
 }
