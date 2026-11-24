@@ -8,7 +8,7 @@
  * switches says so (the waiting toast's words). An older Plannotator there has no group.
  */
 import { useEffect, useState } from 'react';
-import { INBOX_CAPABILITY_SWITCHES, inboxCapabilitySwitchesOf, type InboxCapabilitySwitches, type InboxCapabilitySwitchKey } from '@plannotator/core/inbox-capability-switches';
+import { INBOX_CAPABILITY_SWITCHES, inboxCapabilitySwitchesOf, type InboxCapabilitySwitches, type InboxCapabilitySwitchKey } from '@plannotator/core/inbox-types';
 import { apiGet, apiPost, type MachineView } from '../api';
 import { inboxUrl } from '../inboxUrl';
 import { errorText } from '../toastError';

@@ -46,7 +46,7 @@
  */
 
 import { childEnv } from "@plannotator/shared/child-env";
-import { INBOX_CAPABILITY_SWITCH_KEYS } from "@plannotator/core/inbox-capability-switches";
+import { INBOX_CAPABILITY_SWITCH_KEYS } from "@plannotator/core/inbox-types";
 import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { hostname } from "node:os";
