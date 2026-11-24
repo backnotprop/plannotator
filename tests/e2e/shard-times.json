@@ -96,6 +96,7 @@
   "inbox-image-swipe.spec.ts": 24,
   "inbox-image-viewer.spec.ts": 66,
   "inbox-inline-html.spec.ts": 49,
+  "inbox-inline-media-artifacts.spec.ts": 40,
   "inbox-inline-media.spec.ts": 52,
   "inbox-ios-keyboard-shell.spec.ts": 22,
   "inbox-keyboard-journeys.spec.ts": 134,

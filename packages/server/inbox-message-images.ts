@@ -24,7 +24,7 @@ import { realpathSync } from "node:fs";
 import { basename, join } from "node:path";
 import { isInboxId, type InboxInlineImage } from "@plannotator/core/inbox-types";
 import { inboxBlobPath, inboxBlobsDir } from "@plannotator/shared/inbox/attachments";
-import { INBOX_MESSAGE_IMAGE_CSP, inboxMessageImageRefsInOrder, readInboxMessageImageAsync, readInboxPictureAsync, type InboxMessageImageResult } from "@plannotator/shared/inbox/message-images";
+import { INBOX_MESSAGE_IMAGE_CSP, inboxMessageShownFileRefsInOrder, readInboxMessageImageAsync, readInboxPictureAsync, type InboxMessageImageResult } from "@plannotator/shared/inbox/message-images";
 import { captureInboxInlineImages, yieldToLoop } from "@plannotator/shared/inbox/inline-images";
 import { openInboxMessageMedia } from "@plannotator/shared/inbox/message-media";
 import { inboxInlineMediaKind } from "@plannotator/core/inbox-inline-media";
@@ -83,6 +83,8 @@ export async function inboxMessageImageRoute(req: Request, url: URL, store: Inbo
   if (input.path && inboxInlineMediaKind(input.path)) {
     const media = await openInboxMessageMedia(input);
     if (!media.ok) return refuse(media.status, media.code, media.error);
+    // On disk now: it becomes a file of the thread (an artifact) as a shown picture does.
+    shown?.(message.id, input.path);
     const decision = decideByteRange(req.headers.get("range"), media.size, { ifRange: req.headers.get("if-range"), etag: media.etag });
     return byteRangeResponse(media.handle, media.size, decision, {
       ...GUARD_HEADERS,
@@ -189,7 +191,7 @@ const MESSAGE_BATCH = 64;
 /** Messages the retry table remembers (least recently tried dropped first). */
 const ATTEMPTS_MAX_MESSAGES = 10_000;
 /** Refusals that cost a read of the file (or will fail the same way at once): not tried again until the retry window passes. */
-const COSTLY_REFUSALS = new Set(["not_an_image", "image_changed", "image_too_large", "write_failed", "image_unreadable", "image_read_failed"]);
+const COSTLY_REFUSALS = new Set(["not_an_image", "not_media", "image_changed", "image_too_large", "write_failed", "image_unreadable", "image_read_failed"]);
 
 /** A source the capture could not take (`createInboxImageCapture`'s retry table). */
 interface Attempt {
@@ -302,7 +304,7 @@ export function createInboxImageCapture(
 
   const captureThread = async (threadId: string, budget: { bytes: number }) => {
     const version = store.threadVersion(threadId);
-    const gaps = syncSection("image-capture:gaps", () => store.imageCaptureGaps(threadId, inboxMessageImageRefsInOrder));
+    const gaps = syncSection("image-capture:gaps", () => store.imageCaptureGaps(threadId, inboxMessageShownFileRefsInOrder));
     const start = clock();
     const last = triedAt.get(threadId);
     const changed = last !== undefined && last !== version;
@@ -349,7 +351,7 @@ export function createInboxImageCapture(
           continue;
         }
         if (store.threadVersion(threadId) !== ours) raced = true;
-        syncSection("image-capture:write", () => store.addCapturedImages(message.id, captured.images, inboxMessageImageRefsInOrder(latest.body)));
+        syncSection("image-capture:write", () => store.addCapturedImages(message.id, captured.images, inboxMessageShownFileRefsInOrder(latest.body)));
         ours = store.threadVersion(threadId);
         await captured.commit();
         budget.bytes += captured.bytes;

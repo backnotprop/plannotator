@@ -3027,6 +3027,8 @@ export class InboxStore {
             .flatMap((other) => other.choices.flatMap((c) => (c.image ? [c.image.src] : []))),
         );
         const images = (message.inline_images ?? [])
+          // Pictures only: a sound or video the text plays is a file of the thread too, never a card's picture.
+          .filter((image) => image.kind === "image")
           .filter((image) => !otherChoices.has(image.ref) || inBlock(image.ref))
           .sort((a, b) => Number(inBlock(b.ref)) - Number(inBlock(a.ref)));
         candidates.push({
