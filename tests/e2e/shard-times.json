@@ -201,6 +201,7 @@
   "inbox-reviews-open-any-branch.spec.ts": 10,
   "inbox-root-scroll.spec.ts": 12,
   "inbox-routine-editor.spec.ts": 14,
+  "inbox-routine-row-run-ends.spec.ts": 20,
   "inbox-row-badges.spec.ts": 35,
   "inbox-row-lead.spec.ts": 3,
   "inbox-row-long-press.spec.ts": 11,
