@@ -17,9 +17,14 @@ function anchor(p:Box,side:Side,off:number):Point {
     if (horizontal(side)) return [side==="left"?p.x:p.x+p.w,p.y+off];
     return [p.x+off,side==="top"?p.y:p.y+p.h];
 }
+export function arrowVertices(tip: Point, direction: Point): Point[] {
+    const base=shift(tip,direction,-7);
+    const normal:Point=[-direction[1],direction[0]];
+    return [tip,shift(base,normal,3.6),shift(base,normal,-3.6)];
+}
 export function arrow(tip: Point,d: Point) {
-    const b=shift(tip,d,-7), normal:Point=[-d[1],d[0]];
-    return `M${xy(tip)}L${xy(shift(b,normal,3.6))}L${xy(shift(b,normal,-3.6))}Z`;
+    const [end,left,right]=arrowVertices(tip,d);
+    return `M${xy(end)}L${xy(left)}L${xy(right)}Z`;
 }
 function orthogonal(raw: Point[]) {
     const points: Point[]=[];

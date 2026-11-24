@@ -108,7 +108,7 @@ function section(c: Painter,s: Section): Block {
     if ("content" in s) {
         const block = section(c,s.content);
         return {...block, draw(x,y,w,h) {
-            c.sections.push({kind:"section",id:s.id,title:s.title,refs:s.refs ?? [],x,y,w,h});
+            c.sections.push({kind:"section",id:s.id,title:s.title,refs:s.refs?.map(ref=>({...ref})) ?? [],x,y,w,h});
             block.draw(x,y,w,h);
         }};
     }
