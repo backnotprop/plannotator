@@ -376,3 +376,24 @@ test.skipIf(!hasDom)("one row for one piece of work: a kept worktree folder and 
   expect(rows().map((row) => row.getAttribute('data-local-row'))).toContain(`prj_plannotator:${BRANCH}`);
   expect(rows().map((row) => row.getAttribute('data-local-row'))).not.toContain(`prj_plannotator::${folder}`);
 });
+
+test.skipIf(!hasDom)('two worktrees on no branch at one commit stay two rows; one such folder kept as a full path and as ~/… is one', async () => {
+  const detached = (folder: string, real: string, project: string, extra: Record<string, unknown> = {}) => ({ project_id: project, kind: 'folder' as const, branch: null, base: 'main', at: ago(120_000), ahead: 0, folder, head: '4e1c9a2', uncommitted: true, folder_real: real, ...extra });
+  // Two agents' worktrees, both started detached at main's tip, each with its own changes.
+  const one = detached('/tmp/agents/wt-one', '/private/tmp/agents/wt-one', 'prj_plannotator');
+  const two = detached('/tmp/agents/wt-two', '/private/tmp/agents/wt-two', 'prj_plannotator');
+  // wt-one again, through Another folder… by its ~/ spelling.
+  const oneAgain = detached('~/agents/wt-one', '/private/tmp/agents/wt-one', '', { in_project: 'prj_plannotator' });
+  window.localStorage.setItem(
+    'plannotator-inbox-reviews-opened',
+    JSON.stringify([
+      { key: 'prj_plannotator::/tmp/agents/wt-one', at: NOW - 60_000 },
+      { key: 'prj_plannotator::/tmp/agents/wt-two', at: NOW - 50_000 },
+      { key: '::~/agents/wt-one', at: NOW - 40_000 },
+    ]),
+  );
+  fetches({ '/reviews/local': { unread: 0, items: [], kept: [one, two, oneAgain] } satisfies InboxLocalWorkAnswer });
+  await mount(page());
+  await act(async () => toggle().click());
+  expect(rows().map((row) => row.getAttribute('data-local-row'))).toEqual(['prj_plannotator::/tmp/agents/wt-one', 'prj_plannotator::/tmp/agents/wt-two']);
+});

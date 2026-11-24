@@ -38,6 +38,8 @@ export interface InboxLocalWork {
   uncommitted?: boolean;
   /** A folder kept with no project ("Another folder…") that is a known project's repository (its folder or a worktree): that project. */
   in_project?: string;
+  /** A folder row: the folder's real path, so one folder kept by two spellings (a full path, `~/…`) is one. */
+  folder_real?: string;
 }
 
 /** `GET /api/inbox/reviews/local`. */
@@ -154,15 +156,16 @@ export function inboxLocalSameAsBase(work: Pick<InboxLocalWork, "kind" | "ahead"
 
 /**
  * One row for one piece of work: rows a kept folder repeats (its branch's row, its project's uncommitted row, or the
- * same folder kept twice, once through "Another folder…") give way to one. The open row stays; else a folder row, one
+ * same folder kept twice, once through "Another folder…") give way to one. A folder on a branch is that branch's work;
+ * a folder on no branch is only itself, by its real path (`folder_real`). The open row stays; else a folder row, one
  * with its project first. Rows with no folder among them stay as the list has them.
  */
 export function inboxLocalOneRowEach(rows: readonly InboxLocalWork[], openKey: string | null): InboxLocalWork[] {
   const sameWork = (row: InboxLocalWork) => {
+    // On no branch, only the folder itself: two worktrees detached at one commit are two pieces of work.
+    if (row.kind === "folder" && !row.branch) return row.folder_real ? `folder\u0000${row.folder_real}` : null;
     const project = row.project_id || row.in_project || "";
-    if (!project) return null;
-    if (row.branch) return `${project}\u0000branch\u0000${row.branch}`;
-    return row.kind === "folder" && row.head ? `${project}\u0000head\u0000${row.head}` : null;
+    return project && row.branch ? `${project}\u0000branch\u0000${row.branch}` : null;
   };
   const groups = new Map<string, InboxLocalWork[]>();
   for (const row of rows) {

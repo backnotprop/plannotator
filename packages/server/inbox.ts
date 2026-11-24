@@ -6695,7 +6695,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (branch !== null || (projectId && !project) || !localFolderFormOk(folder)) return json({ error: "A project, and a branch or none.", code: "validation_error" }, 400);
           try {
             const answer = await localRefs.diff(project, folder);
-            if (!answer) return json({ error: "This project's folder isn't a git repository on this computer.", code: "not_git" }, 404);
+            if (!answer) return json({ error: "This folder isn't a git repository on this computer.", code: "not_git" }, 404);
             return json({ serverSession, ...answer });
           } catch (cause) {
             if (cause instanceof BranchDiffTooLarge) return json({ error: cause.message, code: "diff_too_large" }, 413);

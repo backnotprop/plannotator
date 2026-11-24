@@ -16,7 +16,11 @@
  *  - past the cap of folders, the newest dropped for those git lists first, or a branch checked out in a folder past
  *    the cap offered nowhere (neither folder nor branch), or counted wrong in the projects step;
  *  - a folder kept through "Another folder…" that is a known project's repository not marked as that project's
- *    (the window then shows that work twice);
+ *    (the window then shows that work twice), or marked as another project on the same repository than the one
+ *    whose folder holds it;
+ *  - a worktree on no branch past the cap offered nowhere; one worktree on an unborn branch (all-zero HEAD) or a
+ *    commit git can't read throwing the ranking back to git's order;
+ *  - a folder row without its real path (the window tells two folders apart by it);
  *  - any read reaching the network, asking anything or writing (refs, HEAD, the index).
  */
 import { describe, expect, test } from "bun:test";
@@ -360,6 +364,63 @@ describe("a folder kept through Another folder…", () => {
       ["", "~/code/harbor", "main", "prj_harbor"],
       ["", "~/code/wt-login", "fix/login-redirect-loop", "prj_harbor"],
       ["", "~/code/notes", "main", null],
+    ]);
+  });
+});
+
+describe("past the cap: on no branch, an unborn branch", () => {
+  test("a worktree on an unborn branch among them ranks oldest and the rest keep their order; one on no branch past the cap is listed unread", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const repo = join(realpathSync(mkdtempSync(join(tmpdir(), "local-refs-orphan-"))), "harbor");
+    mkdirSync(repo);
+    git(repo, ["init", "--quiet", "-b", "main"]);
+    commitAt(repo, "base.txt", now - 90 * DAY);
+    const trees = realpathSync(mkdtempSync(join(tmpdir(), "local-refs-orphan-wt-")));
+    // An unborn branch first in git's list (`--orphan`: HEAD all zeros), then 20 worktrees, newest added first so
+    // git's order is the reverse of the newest-first order.
+    git(repo, ["worktree", "add", "--quiet", "--orphan", "-b", "empty/start", join(trees, "a-orphan")]);
+    for (let i = 0; i < 20; i++) {
+      const name = `wt/${String(i).padStart(2, "0")}`;
+      branchAt(repo, name, now - (i + 1) * DAY);
+      git(repo, ["worktree", "add", "--quiet", join(trees, `tree-${String(i).padStart(2, "0")}`), name]);
+    }
+    // Two worktrees on no branch, older than all 20: past the cap.
+    const spike = join(trees, "z-spike");
+    git(repo, ["worktree", "add", "--quiet", "--detach", spike, "main"]);
+    commitAt(spike, "spike.txt", now - 40 * DAY);
+    const plain = join(trees, "z-plain");
+    git(repo, ["worktree", "add", "--quiet", "--detach", plain, "main"]);
+    expect(git(repo, ["worktree", "list", "--porcelain"])).toContain(`HEAD ${"0".repeat(40)}`);
+    const p = project("prj_orphan", repo);
+    const answer = (await service(runtime, [p]).refs(p))!;
+    // Read whole: the 20 newest, newest first (the unborn one is the oldest, so past the cap and, on a branch, not listed).
+    const whole = answer.folders.filter((row) => row.ahead !== null);
+    expect(whole.map((row) => row.branch)).toEqual(Array.from({ length: 20 }, (_, i) => `wt/${String(i).padStart(2, "0")}`));
+    // Past them, on no branch: listed unread, newest first, each with its commit and real path, and opens.
+    const unread = answer.folders.filter((row) => row.ahead === null);
+    expect(unread.map((row) => [row.folder, row.branch, row.head?.length, row.folder_real])).toEqual([
+      [spike, null, 7, spike],
+      [plain, null, 7, plain],
+    ]);
+    expect(await service(runtime, [p]).allowed(p, spike)).toBe(true);
+    expect((await service(runtime, [p]).projects()).projects).toEqual([{ project_id: "prj_orphan", folders: 22, branches: 0 }]);
+    // Every folder row says its real path.
+    expect(whole.every((row) => row.folder_real === row.folder)).toBe(true);
+  });
+});
+
+describe("two projects on one repository", () => {
+  test("a folder kept through Another folder… is marked as the project whose folder holds it", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const h = harbor(now);
+    const picked = { "~/code/harbor": h.repo, "~/code/wt-login": h.login } as Record<string, string>;
+    // The worktree's project is listed second: the folder that holds it wins, not the first on the repository.
+    const projects = [project("prj_harbor", h.repo), project("prj_login", h.login)];
+    const refs = service(runtime, projects, { pickedFolder: async (folder) => picked[folder] ?? null });
+    const rows = await refs.kept(["::~/code/wt-login", "::~/code/harbor"]);
+    expect(rows.map((row) => [row.folder, row.in_project])).toEqual([
+      ["~/code/wt-login", "prj_login"],
+      ["~/code/harbor", "prj_harbor"],
     ]);
   });
 });
