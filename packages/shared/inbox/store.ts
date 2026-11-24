@@ -132,6 +132,7 @@ import { inboxClaimDirs } from "./claims";
 import { createInboxHandover, type InboxHandover } from "./handover";
 import { inboxTakeBackRefusal, type InboxHolder } from "./take-back";
 import { inboxWakeQuote } from "./wake-quote";
+import { planSkillReaction } from "./skill-reaction";
 import { laterActed, personActOfAnnotation, personActOfMessage, personActOfMessageLine, personActOfQuestion } from "./acted";
 import { isNewThreadFromMessageAsk } from "@plannotator/core/inbox-reply-quote";
 import { inboxReplyQuoteExcerpt, inboxReplyQuoteLead, inboxReplyQuoteTime, type InboxReplyQuote, type InboxReplyQuoteWhose } from "@plannotator/core/inbox-reply-quote";
@@ -459,6 +460,12 @@ export interface InboxReplyInput {
    * "still open" line goes under them (the ask carries those questions on to a new thread).
    */
   author_only?: boolean;
+  /**
+   * A skill emoji pressed in the reaction tray (approval "inbox-reactions-every-message"): `{ emoji, skill }`, kept on
+   * the reply (`InboxMessage.skill_reaction`) so the window draws it as one line. The words are the window's, exactly
+   * a typed `/<skill>` reply's; nothing here changes them. Anything but one emoji and a skill name is a `422`.
+   */
+  skill_reaction?: unknown;
   /**
    * The person's verdict on the review this reply answers (code review in the
    * Inbox: Approve or Send feedback in the review's header). Only on a reply
@@ -2605,8 +2612,8 @@ export class InboxStore {
       agent_after_archive: agentAfterArchive,
       back_from_archive: backFromArchive,
       read_at: readAt,
-      // The 👍 on the latest agent message, while the Mark read it made still holds.
-      ack: readAt !== null && lastAgent?.ack ? { label: lastAgent.ack.label, at: lastAgent.ack.at } : null,
+      // The 👍 on the latest agent message, while the Mark read it made still holds (a reaction on its own made none).
+      ack: readAt !== null && lastAgent?.ack && !lastAgent.ack.standalone ? { label: lastAgent.ack.label, at: lastAgent.ack.at } : null,
       project: { id: project.id, name: this.labeled(project).name },
       thread_name: root.thread_name ?? null,
       answered_not_sent: (root.resolved_at === null || backFromArchive) && summary.questions.open === 0 && summary.questions.picked > 0,
@@ -3164,9 +3171,10 @@ export class InboxStore {
         const at = this.stamp();
         // Move back withdraws a 👍 standing on this Mark read too, so the agent never sees a 👍
         // on a thread the person moved back to the top.
-        // A delivered one stays: the agent has it, and the message takes no second one.
+        // A delivered one stays: the agent has it, and the message takes no second one. A reaction on its own
+        // (`standalone`) made no Mark read, so it stays too.
         for (const message of members) {
-          if (message.author.kind === "agent" && message.ack && root.person_read_seq != null && message.ack.read_seq === root.person_read_seq && this.ackDeliveredAt(message.ack) === null) {
+          if (message.author.kind === "agent" && message.ack && !message.ack.standalone && root.person_read_seq != null && message.ack.read_seq === root.person_read_seq && this.ackDeliveredAt(message.ack) === null) {
             this.appendMessage({ ...message, ack: null }, at);
           }
         }
@@ -3407,14 +3415,18 @@ export class InboxStore {
   /**
    * 👍 Looks good (design record "inbox-acknowledge", approved 2026-10-15,
    * amended 2026-10-16), or take it back (`on: false`: the toast's Undo, the
-   * pressed button). It records `ack` on the agent's latest message and marks
-   * the thread read (Quiet until an agent writes again); once the Undo window
-   * passes, `settleAcks` sends it to the agent. Taking it back removes the ack
-   * and undoes the Mark read it made, and a note not delivered yet is then
-   * never delivered. Refused on a person's message, on a message that is not the
-   * thread's latest agent message (a newer one arrived), while a question in
-   * the thread is open or picked, and on an archived thread. No write when
-   * nothing changes.
+   * pressed button). It records `ack` on the agent's message; once the Undo
+   * window passes, `settleAcks` sends it to the agent. Any agent message takes
+   * one (approval "inbox-reactions-every-message", 2026-11-24). On the
+   * thread's latest agent message, when no person's message follows it, it
+   * also marks the thread read (Quiet until an agent writes again), and Move
+   * back on that Mark read withdraws it. Anywhere else it is a reaction on its
+   * own (`standalone`): no Mark read, Move back leaves it, and it is sent
+   * unless the agent asks a question inside its window. Taking it back
+   * removes the ack and undoes the Mark read it made, and a note not
+   * delivered yet is then never delivered. Refused on a person's message, on
+   * an archived thread, and while a question or action item in the thread is
+   * open or picked (as always). No write when nothing changes.
    *
    * `reaction` (approval "inbox-reaction-tray"): the emoji the person picked
    * in the 👍's tray, kept on the ack; undefined keeps an ack's reaction as it
@@ -3425,7 +3437,7 @@ export class InboxStore {
    * away after sending and only come back when I can send a new one"): another
    * emoji after the window closed is `409 ack_sent`, and so is taking back one
    * that was delivered (Move back leaves a delivered one standing too). The
-   * message takes no second one; the agent's next message takes a new one.
+   * message takes no second one.
    */
   ackMessage(messageId: string, on: boolean, reaction?: InboxReaction | null): { message: InboxMessageWire; thread: InboxListRow } {
     const message = this.messages.get(messageId);
@@ -3435,40 +3447,24 @@ export class InboxStore {
     if (on) {
       if (message.author.kind !== "agent") throw new InboxError("ack_not_allowed", "Only an agent's message takes 👍 Looks good.");
       if (root.resolved_at !== null) throw new InboxError("thread_resolved", "This thread is archived; unarchive it first.");
-      const members = this.threadMessages(threadId);
-      const latest = [...members].reverse().find((m) => m.author.kind === "agent");
-      if (latest?.id !== message.id) {
-        throw new InboxError("ack_stale", "A newer message arrived in this thread; read it first.", { latest: latest?.id ?? null });
-      }
-      // The person already wrote back (their reply, a New message): that reply is the answer, and
-      // a 👍 would hide its Sent / Delivered state. The Inbox's own notes do not count.
-      const after = members.slice(members.findIndex((m) => m.id === message.id) + 1);
-      if (after.some((m) => m.author.kind === "person" && !isInboxNote(m))) {
-        throw new InboxError("ack_after_reply", "You already replied in this thread after this message.");
-      }
-      const open = members
-        .filter((m) => m.author.kind === "agent")
-        .flatMap((m) => this.questionRecords(m.id))
-        .filter((r) => {
-          const state = inboxQuestionState(r, false);
-          return state === "open" || state === "picked";
-        });
-      if (open.length > 0) throw new InboxError("question_open", "A question here waits on you: answer it, or Mark read.");
+      // As before reactions reached every message: none while a question or action item in the thread waits, so
+      // "Take it as a go" never reaches an agent whose question is still open. A skill emoji is a reply, not this.
+      if (this.questionWaits(threadId)) throw new InboxError("question_open", "A question here waits on you: answer it, or Mark read.");
       if (!message.ack) {
-        const readBefore = root.person_read_seq ?? null;
-        this.markRead(threadId, true);
-        const readSeq = this.messages.get(threadId)!.person_read_seq ?? null;
-        const at = this.stamp();
-        const ack: InboxAck = {
-          label: INBOX_ACK_LABEL,
-          at,
-          read_seq: readSeq,
-          made_read: readSeq !== readBefore,
-          settled_seq: null,
-          settled_at: null,
-          seen_at: null,
-          ...(reaction ? { reaction } : {}),
-        };
+        const settle = { settled_seq: null, settled_at: null, seen_at: null, ...(reaction ? { reaction } : {}) };
+        let ack: InboxAck;
+        let at: string;
+        if (this.ackMarksRead(message)) {
+          const readBefore = root.person_read_seq ?? null;
+          this.markRead(threadId, true);
+          const readSeq = this.messages.get(threadId)!.person_read_seq ?? null;
+          at = this.stamp();
+          ack = { label: INBOX_ACK_LABEL, at, read_seq: readSeq, made_read: readSeq !== readBefore, ...settle };
+        } else {
+          // A reaction on its own: no Mark read (the person wrote after it, or a newer message).
+          at = this.stamp();
+          ack = { label: INBOX_ACK_LABEL, at, read_seq: null, made_read: false, standalone: true, ...settle };
+        }
         this.appendMessage({ ...this.messages.get(messageId)!, ack }, at);
       } else if (reaction !== undefined && !sameReaction(message.ack.reaction ?? null, reaction)) {
         // Sent (its Undo window closed): a reaction never changes after that (owner, 2026-11-07).
@@ -3494,6 +3490,30 @@ export class InboxStore {
   }
 
   /**
+   * Whether a 👍 on this agent message also marks the thread read (as 👍 Looks good always did): it is the thread's
+   * latest agent message and no person's message (the Inbox's notes aside) follows it (`ackMessage` already refused
+   * one while a question waits). Otherwise the reaction stands on its own (`InboxAck.standalone`).
+   */
+  private ackMarksRead(message: InboxMessage): boolean {
+    const members = this.threadMessages(message.thread_id);
+    const latest = [...members].reverse().find((m) => m.author.kind === "agent");
+    if (latest?.id !== message.id) return false;
+    const after = members.slice(members.findIndex((m) => m.id === message.id) + 1);
+    return !after.some((m) => m.author.kind === "person" && !isInboxNote(m));
+  }
+
+  /** A question or action item of an agent's in the thread is open or picked: it waits on the person. */
+  private questionWaits(threadId: string): boolean {
+    return this.threadMessages(threadId)
+      .filter((m) => m.author.kind === "agent")
+      .flatMap((m) => this.questionRecords(m.id))
+      .some((r) => {
+        const state = inboxQuestionState(r, false);
+        return state === "open" || state === "picked";
+      });
+  }
+
+  /**
    * Acks whose Undo window (`afterMs`) has passed while they still stand
    * are sent to the agent (amended 2026-10-16: "send looks good through"):
    * first the ack's line with `settled_seq` (the seq of that line) and
@@ -3502,10 +3522,12 @@ export class InboxStore {
    * also kept as `ack_reaction`), delivered like any reply (the wake).
    * The note's line is the one a held
    * bridge poll wakes on. From then on agents see it in read_thread too.
-   * `ackMessage`'s conditions are checked again here: when the person wrote
-   * back after the message inside the window, or the agent wrote again, the
-   * ack settles with `not_sent` (`replied` / `wrote_again`) and no note, and
-   * no agent ever sees it. Returns the messages settled.
+   * `ackMessage`'s conditions are checked again here for a 👍 that marked the
+   * thread read: when the person wrote back after the message inside the
+   * window, or the agent wrote again, the ack settles with `not_sent`
+   * (`replied` / `wrote_again`) and no note, and no agent ever sees it. A
+   * reaction on its own (`standalone`) is sent unless a question waits in
+   * the thread by then (`wrote_again`). Returns the messages settled.
    */
   settleAcks(afterMs: number): InboxMessage[] {
     const now = this.now().getTime();
@@ -3513,7 +3535,9 @@ export class InboxStore {
     for (const message of [...this.messages.values()]) {
       const ack = message.ack;
       if (!ack || ack.settled_seq != null || Date.parse(ack.at) + afterMs > now) continue;
-      const notSent = this.ackNotSentReason(message);
+      // A reaction on its own is sent, unless the agent asked a question inside its window (as a 👍 on the latest
+      // message is not sent once the agent wrote again): no "go" reaches an agent whose question is open.
+      const notSent = ack.standalone ? (this.questionWaits(message.thread_id) ? "wrote_again" : null) : this.ackNotSentReason(message);
       if (notSent) {
         const at = this.stamp();
         const settled: InboxMessage = { ...message, ack: { ...ack, settled_seq: this.seq + 1, settled_at: at, note_id: null, not_sent: notSent } };
@@ -4015,6 +4039,11 @@ export class InboxStore {
         let out: InboxMessageWire = message;
         // The writer's own folder, by name only: an agent never reads another folder's absolute path.
         if (message.from_project) out = { ...out, from_project: { name: message.from_project.name } } as unknown as InboxMessageWire;
+        // A skill emoji's reply reads as its body to an agent (the `/<skill>` reply it is); the emoji is the window's.
+        if (message.skill_reaction) {
+          const { skill_reaction: _skill, ...rest } = out;
+          out = rest as InboxMessageWire;
+        }
         if (message.ack !== undefined) {
           const { ack, ...rest } = out;
           out = { ...rest, ack: ack && ack.settled_seq != null && !ack.not_sent ? { label: ack.label, at: ack.at, reaction: ack.reaction ?? { emoji: "👍", label: INBOX_ACK_LABEL } } : null } as InboxMessageWire;
@@ -5350,6 +5379,7 @@ export class InboxStore {
     const entries = input.questions ?? [];
     if (!Array.isArray(entries)) throw new InboxError("validation_error", "questions: must be a list.", { field: "questions" });
     const words = typeof input.words === "string" ? input.words : "";
+    const skillReaction = planSkillReaction(input.skill_reaction);
     // One Send to one session is one reply: the answers may be on any of the
     // session's messages in this thread. Each is planned against its own
     // message's questions (revisions included); nothing is written unless
@@ -5528,6 +5558,7 @@ export class InboxStore {
       ...(quoted ? { quote: quoted.quote } : {}),
       ...(input.review_anchor ? { review_anchor: input.review_anchor } : {}),
       ...(input.review_batch ? { review_batch: input.review_batch } : {}),
+      ...(skillReaction ? { skill_reaction: skillReaction } : {}),
     };
     // A hand-off still inside its Undo window in this thread goes first (approval "inbox-tag-handoff"):
     // a later reply never reaches the new owner before the hand-off does, and Undo can no longer

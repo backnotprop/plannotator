@@ -205,8 +205,8 @@ test.skipIf(!hasDom)("in a thread two agents share, the item on agent B's messag
   const t = sample();
   await render(t);
   const menu = await openMenu(M2);
-  // It leads, in its own group, where Take back sits on the person's messages.
-  expect(labels(menu)).toEqual([NEW_THREAD_FROM_MESSAGE_LABEL, 'Copy message', 'Copy link to message', 'Copy thread']);
+  // It leads with Reply, in their own group, where Take back sits on the person's messages.
+  expect(labels(menu)).toEqual(['Reply', NEW_THREAD_FROM_MESSAGE_LABEL, 'Copy message', 'Copy link to message', 'Copy thread']);
   await act(async () => menu.querySelector<HTMLElement>('[data-new-thread-item]')!.click());
   await until(() => changed > 0, 'the thread read again');
   expect(posts).toHaveLength(1);
