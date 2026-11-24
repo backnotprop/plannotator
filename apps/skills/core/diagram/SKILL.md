@@ -136,6 +136,35 @@ Validation is strict—**unknown keys anywhere throw an error** naming the JSON 
   - Web link ref: `{ "kind": "link", "title": "...", "url": "https://..." }` — `http://` or `https://` only.
 - **Theme and colors:** Leave `theme.paper`, `theme.ink`, and default palette colors unset unless fixed colors were explicitly requested—omitting them lets Plannotator adapt the drawing automatically to the reader's light, dark, and custom themes. Any custom color (including `tone`) must be a 6-digit hex string (`#rrggbb`).
 
+### Recipe: embedding a local PNG or JPEG
+
+Generate the base64 data URL from disk in a short script rather than pasting base64 by hand, and wrap `{ "image": ... }` inside an addressable section's `content` so the image is clickable, commentable, and can carry `refs`. `width` and `height` are **display dimensions in SVG pixels** inside the panel (rendered with `preserveAspectRatio="xMidYMid meet"`), not raw image pixels. Choose `width` for **legibility**—a compact badge or icon needs far less room than a full desktop UI screenshot (for example, a 1440×900 interface often needs ~480 px wide so text stays readable)—and scale `height` to match the source aspect ratio to avoid letterboxing. Update any matching section `id` in place so re-running to refresh a screenshot preserves the ID and unrelated sections:
+
+```js
+import { readFileSync, writeFileSync } from "node:fs";
+
+// Use data:image/jpeg;base64, for .jpg/.jpeg files
+const src = "data:image/png;base64," + readFileSync("docs/checkout-screen.png").toString("base64");
+
+const spec = JSON.parse(readFileSync("checkout-flow.diagram.json", "utf8"));
+const sections = (spec.columns[0].sections ??= []);
+const entry = {
+  id: "checkout-screen",
+  title: "Checkout screen",
+  refs: [{ kind: "file", title: "Checkout UI", path: "src/ui/Checkout.tsx", start: 1, end: 40 }],
+  content: {
+    // SVG display size chosen for legibility, matching source aspect ratio (e.g. 1440x900 -> 480x300)
+    image: { src, alt: "Checkout screen", width: 480, height: 300 }
+  }
+};
+const idx = sections.findIndex(s => typeof s === "object" && s !== null && s.id === entry.id);
+if (idx >= 0) sections[idx] = entry;
+else sections.push(entry);
+writeFileSync("checkout-flow.diagram.json", JSON.stringify(spec, null, 2) + "\n");
+```
+
+Then render and verify with `plannotator diagram render` or `plannotator-diagrams render` (Section 4).
+
 ## 4. Render and fix layout problems
 
 Render the `.diagram.json` to a separate `.svg` file and check the exit code:
