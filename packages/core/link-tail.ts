@@ -10,7 +10,7 @@
 /** What a sentence can put right after a link: `)`, `.`, `,`, `;`, `:`, `]`, `>` and quotes. */
 export const LINK_TAIL = /[).,;:\]>"']+$/;
 
-/** An Inbox, plan or Shape id: a short lowercase prefix and a ULID (`msg_…`, `prj_…`, `att_…`, `shp_…`, `pln_…`). */
+/** An Inbox or plan id: a short lowercase prefix and a ULID (`msg_…`, `prj_…`, `att_…`, `pln_…`). */
 export const LINK_ULID_ID = /^[a-z]{2,4}_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 /** A pull request's key (`forgeRefKey`): `host/owner/repo#12`, a GitLab one `…#7:pull`. */
@@ -31,7 +31,7 @@ export function withoutLinkTail(value: string | null, grammar: RegExp): string |
   return grammar.test(kept) ? kept : value;
 }
 
-/** A route's id: an Inbox, plan or Shape id, or a pull request's key (`#thread=…`, `&shape=…`, `&stack=…`). */
+/** A route's id: an Inbox or plan id, or a pull request's key (`#thread=…`, `&guide=…`, `&stack=…`). */
 export function routeIdWithoutLinkTail(value: string): string {
   const ulid = withoutLinkTail(value, LINK_ULID_ID);
   return ulid !== value ? ulid : withoutLinkTail(value, LINK_PULL_KEY);

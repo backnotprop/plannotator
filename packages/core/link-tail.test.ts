@@ -29,9 +29,9 @@ describe("withoutLinkTail", () => {
 });
 
 describe("routeIdWithoutLinkTail", () => {
-  test("an Inbox, plan or Shape id, or a pull request's key, drops the tail", () => {
+  test("an Inbox or plan id, or a pull request's key, drops the tail", () => {
     expect(routeIdWithoutLinkTail(`${THREAD}).`)).toBe(THREAD);
-    expect(routeIdWithoutLinkTail("shp_01M7VKGWJTN05MAA6M48FV0HY0.")).toBe("shp_01M7VKGWJTN05MAA6M48FV0HY0");
+    expect(routeIdWithoutLinkTail("pln_01M7VKGWJTN05MAA6M48FV0HY0.")).toBe("pln_01M7VKGWJTN05MAA6M48FV0HY0");
     expect(routeIdWithoutLinkTail("github.com/acme/api#12).")).toBe("github.com/acme/api#12");
     expect(routeIdWithoutLinkTail("gitlab.example.com/acme/web#7:pull).")).toBe("gitlab.example.com/acme/web#7:pull");
   });

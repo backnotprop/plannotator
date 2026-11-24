@@ -166,8 +166,8 @@ export function readRoute(): Route {
   return routeOf(window.location.hash);
 }
 
-/** The keys whose value is an id the window looks up: an Inbox, plan or Shape id, or a pull request's key. */
-const ROUTE_ID_KEYS = ['thread', 'msg', 'file', 'guide', 'shape', 'card', 'project', 'machine', 'initiative', 'board-project', 'board-initiative', 'in', 'plans', 'doc', 'routine', 'stack', 'layer', 'back', 'system', 'local'];
+/** The keys whose value is an id the window looks up: an Inbox or plan id, or a pull request's key. */
+const ROUTE_ID_KEYS = ['thread', 'msg', 'file', 'guide', 'card', 'project', 'machine', 'initiative', 'board-project', 'board-initiative', 'in', 'plans', 'doc', 'routine', 'stack', 'layer', 'back', 'system', 'local'];
 
 /**
  * The ids with the punctuation a sentence put after the link taken off: `#thread=msg_…).` from a link an older

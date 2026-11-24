@@ -7,7 +7,7 @@ import { describe, expect, test } from 'bun:test';
 import { routeOf } from './route';
 
 const THREAD = 'msg_01M7VKGWJTN05MAA6M48FV0HY0';
-const SHAPE = 'shp_01M7VKGWJTN05MAA6M48FV0HY1';
+const GUIDE = 'msg_01M7VKGWJTN05MAA6M48FV0HY1';
 const FILE = 'att_01M7VKGWJTN05MAA6M48FV0HY2';
 
 describe('an id with the punctuation after its link', () => {
@@ -15,8 +15,8 @@ describe('an id with the punctuation after its link', () => {
     for (const tail of [').', '.', ',', ';', ':', ']', '>', '"', "'"]) expect(routeOf(`#thread=${THREAD}${tail}`).thread).toBe(THREAD);
   });
 
-  test('the last id of the address loses it: a Shape, a message, a file', () => {
-    expect(routeOf(`#thread=${THREAD}&shape=${SHAPE}).`)).toMatchObject({ thread: THREAD, shape: SHAPE });
+  test('the last id of the address loses it: a guide, a message, a file', () => {
+    expect(routeOf(`#thread=${THREAD}&guide=${GUIDE}).`)).toMatchObject({ thread: THREAD, guide: GUIDE });
     expect(routeOf(`#thread=${THREAD}&msg=${THREAD}.`).msg).toBe(THREAD);
     expect(routeOf(`#thread=${THREAD}&file=${FILE}).`).file?.id).toBe(FILE);
   });
