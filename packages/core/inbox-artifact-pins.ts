@@ -58,7 +58,7 @@ export interface InboxArtifactRef<M> {
   guide: InboxGuideRef | null;
 }
 
-/** Group verified revisions in reading order. A path survives an editor's atomic save; a file identity survives a rename. */
+/** Group revisions in reading order. A path is evidence within a session; a verified file on a known host survives an agent restart or rename. */
 export function inboxDiagramRevisions(entries: readonly {attachment: InboxAttachment; author?: InboxAuthor}[]) {
   type Family = { ids: string[]; path: string; file?: string };
   const byPath = new Map<string, Family>();
@@ -70,8 +70,9 @@ export function inboxDiagramRevisions(entries: readonly {attachment: InboxAttach
     if (author.kind === "agent" && !author.session) continue;
     const sender = author.kind === "person" ? ["person"] : ["agent", author.host, author.session];
     const path = JSON.stringify([sender, diagram, attachment.path]);
+    const fileOwner = author.kind === "agent" && author.host ? ["agent", author.host] : sender;
     const file = attachment.diagram_file_id && /^[a-f0-9]{64}$/.test(attachment.diagram_file_id)
-      ? JSON.stringify([sender, diagram, attachment.diagram_file_id]) : undefined;
+      ? JSON.stringify([fileOwner, diagram, attachment.diagram_file_id]) : undefined;
     const family: Family = (file && byFile.get(file)) || byPath.get(path) || { ids: [], path, file };
     if (family.path !== path && byPath.get(family.path) === family) byPath.delete(family.path);
     if (family.file && family.file !== file && byFile.get(family.file) === family) byFile.delete(family.file);
