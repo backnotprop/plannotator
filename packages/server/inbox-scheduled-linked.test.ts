@@ -69,7 +69,11 @@ describe("routines and capability switches across linked computers", () => {
     writeFileSync(join(dir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true } }));
     return dir;
   };
-  const start = (dir: string) => startInboxServer({ dataDir: dir, binaryPath: null, phones: false, tailscale: scriptedTailscale(), launchHosts: () => [fake.host], scheduledLogin: login });
+  /**
+   * `scheduled`: the Inbox's own Routines switch held (`options.scheduled`). Both Inboxes run in this one process and so
+   * read one config.json (each is its own process on a real computer): A's is held off, so B's turned on stays B's.
+   */
+  const start = (dir: string, scheduled?: boolean) => startInboxServer({ dataDir: dir, binaryPath: null, phones: false, tailscale: scriptedTailscale(), launchHosts: () => [fake.host], scheduledLogin: login, ...(scheduled === undefined ? {} : { scheduled }) });
   const at = (port: number) => `http://127.0.0.1:${port}`;
   const get = async (port: number, path: string) => (await (await fetch(`${at(port)}${path}`)).json()) as Json;
   let keys = 0;
@@ -85,7 +89,7 @@ describe("routines and capability switches across linked computers", () => {
   test("A turns on B's Routines, makes, turns on, runs and edits B's routine; a bare call cannot; B asleep, it stays listed and a turn off waits", async () => {
     const dataA = dataDir("a");
     const dataB = dataDir("b");
-    const a = await start(dataA);
+    const a = await start(dataA, false);
     let b = await start(dataB);
     try {
       const offered = (await (await fetch(`${at(b.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
@@ -106,6 +110,9 @@ describe("routines and capability switches across linked computers", () => {
       expect(turned.status).toBe(200);
       expect(Object.keys((await turned.json()) as Json).every((key) => ["board", "steps", "scheduled_threads", "code_review", "chapter_diagrams", "system", "bro", "float_drafts"].includes(key))).toBe(true);
       expect((await get(b.port, "/api/inbox/settings")).scheduled_threads.on).toBe(true);
+      // The turn went through B's door (its command log), not to A's own settings.
+      const doorLines = readFileSync(join(dataB, "inbox", "device-commands.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line) as Json);
+      expect(doorLines.map((line) => [line.method, line.path, line.status])).toContainEqual(["POST", "/api/inbox/device/capabilities", 200]);
       expect((await get(a.port, "/api/inbox/settings")).scheduled_threads.on).toBe(false);
       // Any other setting through that route is refused there.
       expect((await press(a.port, `${far}/capabilities`, { theme: "dark" })).status).toBe(422);
@@ -120,7 +127,7 @@ describe("routines and capability switches across linked computers", () => {
       // A's merged list: B's routine with its computer; A's Routines are off, so only B's.
       const list = await merged(a.port);
       expect((list.scheduled as Json[]).map((r) => [r.id, r.machine])).toEqual([[id, bId]]);
-      expect(list.computers).toEqual([{ id: bId, on: true, launch_on: true, away: false }]);
+      expect(list.computers).toEqual([{ id: bId, on: true, launch_on: true, away: false, read_at: expect.any(String) }]);
 
       // A bare call through the forward changes nothing: only a press in a window does.
       expect((await bare(a.port, `${far}/scheduled/${id}/on`)).status).toBe(403);
@@ -143,7 +150,9 @@ describe("routines and capability switches across linked computers", () => {
       expect((asleep.computers as Json[])[0]!.away).toBe(true);
       expect((await press(a.port, `${far}/scheduled/${id}/off`)).status).toBe(202);
       b = await start(dataB);
-      await waitFor("the held turn off on B", async () => ((await get(b.port, `/api/inbox/scheduled/${id}`)).scheduled as Json).state === "off", 45_000);
+      // Off is the routine's switch: the run Run now started is still going there (the fake agent never ends), so its
+      // row says "running" until that run ends, turned off or not.
+      await waitFor("the held turn off on B", async () => ((await get(b.port, `/api/inbox/scheduled/${id}`)).scheduled as Json).enabled === false, 45_000);
 
       // An agent on A, asked by the person, turns B's Routines off by B's name (the capability action): B's switch, not
       // A's; one line for the person on A, naming B.
