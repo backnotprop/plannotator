@@ -233,6 +233,8 @@ packages/inbox/ack.test.tsx
 packages/inbox/reactionLanding.test.ts
 packages/inbox/reactionTray.test.tsx
 packages/inbox/replyHoldTray.test.tsx
+packages/inbox/reactEveryMessage.test.tsx
+packages/inbox/reactFaceSelect.test.tsx
 packages/inbox/actionChecklist.test.tsx
 packages/inbox/keyboardKeys.test.tsx
 packages/inbox/keyGuardsPageQueries.test.tsx
@@ -920,5 +922,6 @@ packages/ui/components/RefCardProseMark.dom.test.tsx
 packages/inbox/components/diffControlsWholeFile.test.tsx
 packages/inbox/commentBoxFiles.test.tsx
 packages/inbox/commentRowFiles.test.tsx
+packages/inbox/sidebarStickyHeadings.test.tsx
 packages/inbox/grid/gridPage.test.tsx
 packages/inbox/titleFilter.test.tsx

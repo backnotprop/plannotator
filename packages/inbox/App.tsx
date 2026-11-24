@@ -190,7 +190,7 @@ import { snoozeWrites } from './snoozeWrites';
 import { agentWrites, type AgentDeleteAsk } from './agentWrites';
 import { sameSettings, settingsReadAtLoad, takeSettingsAtLoad } from './settingsAtLoad';
 import { restartInbox } from './restartInbox';
-import { errorToast } from './toastError';
+import { ackErrorToast, errorToast } from './toastError';
 import { useBulkWrites } from './components/useCombines';
 import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, offersRowMarkRead, seenHeldInNew, setAsideCount, setAsideOf, type SetAsideAnswer, type SetAsideCount, warnsBeforeRead } from './markRead';
 import { MarkReadWarning } from './components/MarkReadWarning';
@@ -2901,7 +2901,7 @@ function Inbox() {
     try {
       await inboxApi.ack(messageId, on, reaction);
     } catch (cause) {
-      showError(cause);
+      showToast(ackErrorToast(cause, messageId));
       await afterWrite();
       return;
     }
