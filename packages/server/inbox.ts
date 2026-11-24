@@ -47,7 +47,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import { type InboxSidebarLayout } from "@plannotator/core/inbox-sidebar";
-import { inboxSidebarState, saveInboxSidebar } from "./inbox-sidebar-save";
+import { inboxSidebarOff, inboxSidebarState, saveInboxSidebar } from "./inbox-sidebar-save";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import {
   INBOX_APP_ID,
@@ -356,6 +356,8 @@ import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitFo
 import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
 import { createInboxPullLooked, pullLookedSeenOf } from "./inbox-pull-looked";
+import { createInboxGridSeen, gridSeenOf } from "./inbox-grid-seen";
+import { gridRowDecorator } from "./inbox-grid-row";
 import { createInboxPullHidden, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, threadStaysHidden, type PullToHide } from "./inbox-pull-hidden";
 import { createPullRisk, type PullRiskOptions } from "./inbox-pull-risk";
 import { createPullRiskAuto, type PullRiskAuto } from "./inbox-pull-risk-auto";
@@ -1317,6 +1319,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pullHiddenListeners = new Set<() => void>();
   /** The person's Priority changed (inbox-priority.ts): the windows' streams say `event: priority`. */
   const priorityListeners = new Set<() => void>();
+  /** Grid's looks changed (inbox-grid-seen.ts): the windows' streams say `event: grid-seen`. */
+  const gridSeenListeners = new Set<() => void>();
   /** The pinned artifacts changed (inbox-artifact-pins.ts): the windows' streams say `event: artifact-pins`. */
   const artifactPinListeners = new Set<() => void>();
   /** A thread's tags changed (inbox-thread-tags.ts): the windows' streams say `event: tags`. */
@@ -1470,6 +1474,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Which agent thread owns a PR, as the person chose it (Hand to an agent, Launch an agent): inbox/pull-links.json.
   const pullOwners = createInboxPullLinks(dataDir);
   const pullLooked = createInboxPullLooked(dataDir);
+  // Grid's looks at this Inbox's threads (inbox-grid-seen.ts): inbox/grid-seen.json, written only when a window with Grid on sends one.
+  const gridSeen = createInboxGridSeen(dataDir);
   // PRs the person hid from Reviews, the PR board and the Inbox list (inbox-pull-hidden.ts): nothing is done on the forge.
   const pullHidden = createInboxPullHidden(dataDir);
   const pullHiddenChanged = () => {
@@ -2086,9 +2092,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     const withPulls = (row: InboxListRow): InboxListRow => {
       const pulls = pullsByThread.get(row.thread_id);
-      const summary = pulls ? inboxThreadPullsSummary(pulls.sort((a, b) => a.added_at.localeCompare(b.added_at) || a.id.localeCompare(b.id))) : undefined;
+      const summary = pulls ? inboxThreadPullsSummary(pulls.sort((a, b) => a.added_at.localeCompare(b.added_at) || a.id.localeCompare(b.id)), threadPullStates.live) : undefined;
       return summary ? { ...row, pulls: summary } : row;
     };
+    // Grid (approval "inbox-agent-grid", inbox-grid-row.ts): the thread's last look on Grid and its checklist's progress.
+    const withGrid = gridRowDecorator(gridSeen, stepsOn() ? store.allSteps() : null);
     // `tags` (additive, approval "inbox-thread-tags"): the live tags a thread is in, on the window's and the phone's rows only.
     const tagsOf = store.allThreadTags();
     const withTags = (row: InboxListRow): InboxListRow => {
@@ -2097,7 +2105,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     };
     const allOwn = store
       .listRows()
-      .map((row) => withActed(withHidePulls(withTags(withPriority(withPulls(withSnooze(withStepsWaiting(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row)), byThread, now)))))));
+      .map((row) => withGrid(withActed(withHidePulls(withTags(withPriority(withPulls(withSnooze(withStepsWaiting(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row)), byThread, now))))))));
     const own = hiddenPulls ? allOwn.filter((row) => !hiddenPulls.out(row)) : allOwn;
     hiddenPulls?.keep();
     if (pullsByThread.size > 0) {
@@ -2144,6 +2152,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       serverSession,
       version,
       cursor: store.cursor(),
+      /** This Inbox's clock as it answered (additive): a linked machine reads how far apart the two run (`clock_ms`). */
+      now: now.toISOString(),
       update: updates.current(),
       /** This Inbox started on a newer version than the last one: the sidebar's "What's new in X" link. */
       updated: updates.updated(),
@@ -3050,8 +3060,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const sidebarState = inboxSidebarState;
 
   const saveSidebar = (input: unknown, validateOnly = false): { sidebar: InboxSidebarLayout; rev: number } => {
-    // An item of a capability that is off (Plans) is never written (inbox-sidebar-save.ts).
-    const { sidebar, rev } = saveInboxSidebar(input, { off: capabilities.filter((capability) => !capability.on()).map((capability) => capability.key), validateOnly });
+    // An item of a capability that is off (Plans, Grid) is never written (inbox-sidebar-save.ts).
+    const { sidebar, rev } = saveInboxSidebar(input, { off: inboxSidebarOff(capabilities, gridOn()), validateOnly });
     if (validateOnly) return { sidebar, rev };
     for (const listener of sidebarListeners) listener(sidebar, rev);
     return { sidebar, rev };
@@ -3349,6 +3359,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * request, so a switch applies at once.
    */
   const decisionModeOn = () => resolveExperimental(loadConfig(), "decision-mode");
+  /** Grid (approval "inbox-agent-grid"), off by default: its sidebar row is never saved while it is off. */
+  const gridOn = () => resolveExperimental(loadConfig(), "grid");
   /**
    * The Board (approval "inbox-board", 2026-10-26): on only when the person
    * turned it on (config.json `inboxBoard`), and only in a build that has the
@@ -3976,7 +3988,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const experimentalState = () => ({
     decision_mode: { on: decisionModeOn(), env: parseExperimentalEnv("decision-mode") ?? null },
     // Grid (approval "inbox-agent-grid"): the window's page of work in flight, drawn from what the window already reads.
-    grid: { on: resolveExperimental(loadConfig(), "grid"), env: parseExperimentalEnv("grid") ?? null },
+    grid: { on: gridOn(), env: parseExperimentalEnv("grid") ?? null },
   });
 
   /** Save `experimental: { decision_mode?, grid? }` (one switch or both). `validateOnly`: check and write nothing. */
@@ -4274,6 +4286,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // is read again. Windows, and a linked machine that asks (`priority=1`, as `pins=1`).
         const onPriority = () => send(`event: priority\ndata: {}\n\n`);
         if (windowId || url.searchParams.get("priority") === "1") priorityListeners.add(onPriority);
+        // Grid's looks changed (inbox-grid-seen.ts): the list reads `grid_seen` again. Windows, and a linked machine that asks.
+        const onGridSeen = () => send(`event: grid-seen\ndata: {}\n\n`);
+        if (windowId || url.searchParams.get("grid-seen") === "1") gridSeenListeners.add(onGridSeen);
         // A thread's tags changed (any window's, a linked machine's, a rename's marks, or a deletion): the list reads
         // `tags` again. Windows, and a linked machine that asks (`tags=1`, as `pins=1`).
         const onThreadTags = () => send(`event: tags\ndata: {}\n\n`);
@@ -4360,6 +4375,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           pinListeners.delete(onPins);
           pullHiddenListeners.delete(onPullsHidden);
           priorityListeners.delete(onPriority);
+          gridSeenListeners.delete(onGridSeen);
           threadTagListeners.delete(onThreadTags);
           artifactPinListeners.delete(onArtifactPins);
           showListeners.delete(onShow);
@@ -7698,6 +7714,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const read = await windowThreadRead(threadMatch[1]!);
         if (!read) return json({ error: "No such thread.", code: "thread_not_found" }, 404);
         return json(read);
+      }
+
+      // Grid's look (inbox-grid-seen.ts): the lines a window showed the person, kept with this Inbox's threads. A
+      // linked machine's window sends its look at this Inbox's threads here (rule 8's `set`), a phone through the door.
+      if (path === "/api/inbox/grid/seen") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const looks = gridSeenOf(body, Date.now()).filter((look) => store.message(look.thread));
+        const before = JSON.stringify(looks.map((look) => gridSeen.get(look.thread) ?? null));
+        const held = looks.length > 0 ? gridSeen.mark(looks) : {};
+        if (JSON.stringify(looks.map((look) => held[look.thread] ?? null)) !== before) for (const listener of gridSeenListeners) listener();
+        return json({ seen: held });
       }
 
       const seenMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/seen$/.exec(path);

@@ -207,6 +207,8 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  */
 export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "forge" | "now" | "local">> = {
   "POST threads/:id/seen": "set",
+  // Grid's look (inbox-grid-seen.ts): each field keeps its larger value, so a held look lands as of then.
+  "POST grid/seen": "set",
   "POST threads/:id/read": "set",
   "POST threads/:id/unread": "set",
   "POST threads/:id/mark-unread": "set",

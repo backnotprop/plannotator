@@ -7,8 +7,8 @@
  * Nothing here measures: the bar's pieces sit at percentages of the clock, and the readout is the line's own child,
  * shown by CSS on hover and focus (the list's rows once read layout inside each row; this page reads none).
  */
-import { memo, type ReactNode } from 'react';
-import { GRID_PIECE_NAMES, gridExact, gridSaid, type GridLine as Line, type GridPiece } from '../../shared/inbox/grid';
+import { memo, useId, type ReactNode } from 'react';
+import { GRID_GROUPS, GRID_PIECE_NAMES, gridExact, gridSaid, gridSpoken, type GridLine as Line, type GridPiece } from '../../shared/inbox/grid';
 import { HostMark, Icon } from '../icons';
 import { RefMarkIcon } from '../board/RefMark';
 
@@ -124,6 +124,14 @@ function Readout({ line, clock, computer }: { line: Line; clock: GridClock; comp
           <span className="ib-grid-ro-d">{r.how}</span>
         </span>
       ))}
+      {line.steps && line.steps.total > 0 && (
+        // The checklist (approval "inbox-agent-grid": steps may show): how far, and the step in progress.
+        <span className="ib-grid-ro" data-grid-steps="">
+          <span className="ib-grid-ro-at">{clock.at(Date.parse(line.steps.at))}</span>
+          <span className="ib-grid-ro-w">{`Steps ${line.steps.done} of ${line.steps.total}`}</span>
+          <span className="ib-grid-ro-d">{line.steps.doing ?? ''}</span>
+        </span>
+      )}
       <span className="ib-grid-ro ib-grid-ro-by">{[line.agent?.name, computer].filter(Boolean).join(' · ')}</span>
     </>
   );
@@ -139,9 +147,27 @@ export interface GridLineProps {
   open: boolean;
   onOpen: (thread: string) => void;
   onTap: (id: string) => void;
+  /** Watches the line on screen (gridSeen.ts): what the person was shown counts as seen. */
+  observe?: (el: HTMLElement | null) => (() => void) | void;
 }
 
-export const GridLineView = memo(function GridLineView({ line, clock, phone, computer, open, onOpen, onTap }: GridLineProps) {
+/** The line as a screen reader says it: its name, its group, and the bar spelled out ("Working 2 hours, PR 40 minutes"). */
+export function gridLineSpoken(line: Line, clock: GridClock, phone: boolean): string {
+  const group = GRID_GROUPS.find((g) => g.id === line.group)!.heading;
+  let state: string;
+  if (line.dropped) state = `Dropped ${clock.at(line.dropped.at)}, ${line.dropped.why}`;
+  else if (line.planned !== null) state = `Planned ${clock.at(line.planned)}`;
+  else {
+    const said = gridSaid(line, { phone }).pieces.map((p) => `${p.name} ${gridSpoken(p.length)}`);
+    if (line.detail) said.push(line.detail.words);
+    if (line.merged !== null) said.push(`Merged ${clock.at(line.merged)}`);
+    state = said.join(', ');
+  }
+  return [`${line.name}${line.pr ? ` ${line.pr}` : ''}`, group, state, line.ask].filter(Boolean).join('. ');
+}
+
+export const GridLineView = memo(function GridLineView({ line, clock, phone, computer, open, onOpen, onTap, observe }: GridLineProps) {
+  const readoutId = useId();
   const thread = line.actions.find((a) => a.kind === 'open')?.thread ?? line.id;
   const words = <Said line={line} clock={clock} phone={phone} />;
   const who = line.agent && (
@@ -153,8 +179,16 @@ export const GridLineView = memo(function GridLineView({ line, clock, phone, com
     </span>
   );
   return (
-    <div role="listitem" className="ib-grid-ln" data-grid-line={line.id} data-group={line.group} data-fresh={line.fresh ? '' : undefined} data-open={open ? '' : undefined}>
-      <button type="button" className="ib-grid-name" onClick={() => (phone ? onTap(line.id) : onOpen(thread))} aria-expanded={phone ? open : undefined}>
+    <div role="listitem" ref={observe} className="ib-grid-ln" data-grid-line={line.id} data-group={line.group} data-fresh={line.fresh ? '' : undefined} data-open={open ? '' : undefined}>
+      {/* Its name says the states in words; the readout (every piece with its time) describes it. The bar is not read. */}
+      <button
+        type="button"
+        className="ib-grid-name"
+        onClick={() => (phone ? onTap(line.id) : onOpen(thread))}
+        aria-expanded={phone ? open : undefined}
+        aria-label={gridLineSpoken(line, clock, phone)}
+        aria-describedby={phone ? (open ? readoutId : undefined) : readoutId}
+      >
         <span className="ib-grid-t">{line.name}</span>
         {line.pr && !phone && <span className="ib-grid-pn">{line.pr}</span>}
       </button>
@@ -163,16 +197,24 @@ export const GridLineView = memo(function GridLineView({ line, clock, phone, com
       {phone ? (
         <span className="ib-grid-sub">
           {who}
-          <i className="ib-grid-dot">·</i>
-          {words}
+          <span className="ib-grid-said" aria-hidden="true">
+            <i className="ib-grid-dot">·</i>
+            {words}
+          </span>
         </span>
       ) : (
-        <span className="ib-grid-s">{words}</span>
+        <span className="ib-grid-s" aria-hidden="true">
+          {words}
+        </span>
       )}
-      {line.ask && <span className="ib-grid-q">{line.ask}</span>}
+      {line.ask && (
+        <span className="ib-grid-q" aria-hidden="true">
+          {line.ask}
+        </span>
+      )}
       {phone ? (
         open && (
-          <span className="ib-grid-exp" data-grid-readout="">
+          <span className="ib-grid-exp" data-grid-readout="" id={readoutId}>
             <Readout line={line} clock={clock} computer={computer} />
             <button type="button" className="ib-grid-ro ib-grid-ro-open" onClick={() => onOpen(thread)}>
               Open thread <Icon name="chevR" />
@@ -180,7 +222,7 @@ export const GridLineView = memo(function GridLineView({ line, clock, phone, com
           </span>
         )
       ) : (
-        <span className="ib-grid-pop" data-grid-readout="" aria-hidden="true">
+        <span className="ib-grid-pop" data-grid-readout="" id={readoutId}>
           <Readout line={line} clock={clock} computer={computer} />
         </span>
       )}

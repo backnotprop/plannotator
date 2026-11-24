@@ -70,7 +70,7 @@ export interface PeerRecord {
  * thread's tag): this Inbox asks for each (`<event>=1` on its stream), reads that machine's list again when one comes,
  * and tells its own windows the same event (approval "inbox-linked-marks"). A new mark adds its event here.
  */
-export const PEER_REREAD_EVENTS = ["snoozes", "pins", "priority", "agent-faces", "tags", "show-archived"] as const;
+export const PEER_REREAD_EVENTS = ["snoozes", "pins", "priority", "agent-faces", "tags", "show-archived", "grid-seen"] as const;
 export type PeerRereadEvent = (typeof PEER_REREAD_EVENTS)[number];
 const isRereadEvent = (event: string): event is PeerRereadEvent => (PEER_REREAD_EVENTS as readonly string[]).includes(event);
 
@@ -94,6 +94,19 @@ export interface PeerList {
   session_titles: Record<string, string>;
   /** Its "Show archived" switch (inbox-show-archived.ts); null from an Inbox before it. */
   show_archived: InboxShowArchived | null;
+  /**
+   * How far its clock runs ahead of this one's (ms, whole minutes; 0 within two minutes), from its list's `now` as it
+   * arrived: Grid measures that machine's quiet time against its own clock. 0 from an Inbox before `now`.
+   */
+  clock_ms: number;
+}
+
+/** A linked machine's clock against this one's, from its list's `now` when that list arrived: whole minutes, 0 within two. */
+export function peerClockMs(listNow: unknown, arrived: number): number {
+  const at = typeof listNow === "string" ? Date.parse(listNow) : NaN;
+  if (!Number.isFinite(at)) return 0;
+  const ahead = at - arrived;
+  return Math.abs(ahead) < 2 * 60_000 ? 0 : Math.round(ahead / 60_000) * 60_000;
 }
 
 /**
@@ -500,6 +513,7 @@ export class PeerLink {
       session_labels: inboxPeerSessionNames(list.session_labels),
       session_titles: inboxPeerSessionNames(list.session_titles),
       show_archived: list.show_archived === undefined ? null : readShowArchived(list.show_archived),
+      clock_ms: peerClockMs(list.now, Date.now()),
     };
     this.options.onChange();
     return true;

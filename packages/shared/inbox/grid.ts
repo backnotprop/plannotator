@@ -4,18 +4,24 @@
  * Not started and Dropped, each with a bar of its life and the bar in words.
  *
  * A piece of work is a thread with an agent, as the window's list already has
- * it (every linked computer's rows included), with its headline PR. Nothing
+ * it (every linked computer's rows included), with the PRs put on it. A PR on
+ * two threads is the work of the thread it was put on first, so it is one line
+ * and counts once (packages/inbox/grid/gridInput.ts decides that). Nothing
  * here reads anything: the window passes what it holds (`GridThreadIn`) and
  * the time, and draws what comes back. No new agent field, tool or poll.
  *
  * What stays (the approval's decay rules):
  * - open work stays (Moving, Not moving after 20 quiet minutes, Not started);
  *   work that needs the person never leaves by age;
- * - landed work stays until the person has seen Grid since, and 3 h at least;
- *   unseen for more than 12 h it is only a count in the Since line;
- * - nothing else leaves without first being in Dropped (a PR closed unmerged,
- *   open work whose agent ended, open work quiet for 3 days);
+ * - landed work stays until the person has seen its line, and 3 h at least;
+ *   unseen for more than 12 h it is only a count in the Since line (seen when
+ *   that line is), never gone while unseen;
+ * - nothing else leaves without first being in Dropped (every PR closed
+ *   unmerged, the agent ended, 3 days with no movement);
  * - Dropped stays until seen, and 3 h at least; then Earlier, for 7 days.
+ * "Seen" is the person's look at that line (`seen`, kept with the thread on
+ * its own computer). An end older than 7 days that no look ever showed (work
+ * that ended before Grid could show it) is not drawn.
  *
  * Room for round 4 (being drawn, not built): a Stale group is one more
  * `GridGroup` in `GRID_GROUPS` and one more branch in `gridPlace`; a per-line
@@ -26,7 +32,7 @@
 
 export type GridGroup = "you" | "move" | "quiet" | "land" | "plan" | "drop";
 
-/** The groups in page order, each with its heading. Landed's heading takes its word for the time of day. */
+/** The groups in page order, each with its heading. Landed's heading takes its word for when its work landed. */
 export const GRID_GROUPS: readonly { id: GridGroup; heading: string; count: string }[] = [
   { id: "you", heading: "Needs you", count: "need you" },
   { id: "move", heading: "Moving", count: "moving" },
@@ -63,12 +69,15 @@ export const GRID_LANDED_MAX_MS = 12 * GRID_HOUR;
 export const GRID_DROP_QUIET_MS = 3 * GRID_DAY;
 /** How long Earlier keeps what left. */
 export const GRID_EARLIER_MS = 7 * GRID_DAY;
+/** An end this old that no look ever showed happened before Grid could show it: not drawn. */
+export const GRID_FIRST_SIGHT_MS = 7 * GRID_DAY;
 
-/** A thread's headline PR as the window knows it: the list's summary, with the thread's PR read when there was one. */
+/** One PR of a line, as the list's summary has it. */
 export interface GridPullIn {
+  key: string;
   label: string | null;
   state: "open" | "draft" | "merged" | "closed" | "unknown";
-  /** When it was put on the thread (its start on the bar); null until the thread's PRs were read. */
+  /** When it was put on the thread (its start on the bar); null from an Inbox before the summary's items. */
   added_at: string | null;
   /** For a merged or closed PR: when the Inbox saw that state. */
   read_at: string | null;
@@ -76,7 +85,15 @@ export interface GridPullIn {
   review: "approved" | "changes_requested" | "review_required" | null;
 }
 
-/** One thread as Grid reads it (packages/inbox/grid/gridInput.ts makes it from a list row and its agent). */
+/** A thread's checklist as Grid reads it (the row's `steps_progress`). */
+export interface GridStepsIn {
+  done: number;
+  total: number;
+  doing: string | null;
+  at: string;
+}
+
+/** One thread as Grid reads it (packages/inbox/grid/gridInput.ts makes it from a list row and its agent). Times on this computer's clock. */
 export interface GridThreadIn {
   id: string;
   name: string;
@@ -104,7 +121,11 @@ export interface GridThreadIn {
   /** The person's reply is the last message: when, and when the agent read it. */
   sent: { at: string; checked_at: string | null } | null;
   session_ended: boolean;
-  pull: GridPullIn | null;
+  /** The PRs that are this line's work, the one to name first. */
+  pulls: readonly GridPullIn[];
+  steps: GridStepsIn | null;
+  /** The person's last look at this line (`through`: its last landing or drop that look showed; `at`: when), ms. */
+  seen: { through: number; at: number } | null;
 }
 
 export interface GridLine {
@@ -115,8 +136,10 @@ export interface GridLine {
   machine: string | null;
   agent: GridThreadIn["agent"];
   group: GridGroup;
-  /** Landed since the person last looked: drawn bold. */
+  /** Landed and not seen yet: drawn bold. */
   fresh: boolean;
+  /** Its landing or drop (`merged`, `dropped.at`) is not seen yet: counted in the Since line until a look shows it. */
+  unseen: boolean;
   pieces: GridPiece[];
   merged: number | null;
   dropped: { at: number; why: GridDropWhy } | null;
@@ -125,6 +148,7 @@ export interface GridLine {
   ask: string | null;
   /** After the last piece: the PR's checks or review, or draft. */
   detail: { words: string; bad: boolean } | null;
+  steps: GridStepsIn | null;
   actions: GridAction[];
   /** The order within its group. */
   at: number;
@@ -133,8 +157,10 @@ export interface GridLine {
 export interface GridModel {
   groups: { id: GridGroup; lines: GridLine[] }[];
   counts: Record<GridGroup, number>;
-  /** What happened since the person last looked; null with nothing to say (or no look yet). */
+  /** What landed or dropped that the person has not seen, since their last look; null with nothing to say (or no look yet). */
   since: { at: number; merged: number; dropped: number } | null;
+  /** Landed lines too long unseen to draw: only counted in the Since line, and seen when it is. */
+  counted: GridLine[];
   /** What left Grid in the last 7 days, newest first. */
   earlier: GridLine[];
   /** The clock the bars share: `to` is now. */
@@ -157,13 +183,27 @@ function askWords(t: GridThreadIn): string | null {
   return null;
 }
 
-function detailOf(pull: GridPullIn | null): GridLine["detail"] {
-  if (!pull || (pull.state !== "open" && pull.state !== "draft")) return null;
-  if (pull.checks === "failing") return { words: "tests failing", bad: true };
-  if (pull.checks === "running") return { words: "tests running", bad: false };
-  if (pull.review === "approved") return { words: "reviewed", bad: false };
-  if (pull.checks === "passing") return { words: "tests passing", bad: false };
-  return pull.state === "draft" ? { words: "draft", bad: false } : null;
+const inPlay = (state: GridPullIn["state"]) => state === "open" || state === "draft" || state === "unknown";
+
+/** A line's PRs as one: open while any is; else merged (any merged) or closed, ended at the last end. */
+function prsOf(pulls: readonly GridPullIn[]): { label: string | null; at: number | null; state: "open" | "merged" | "closed"; end: number | null; detail: GridLine["detail"] } | null {
+  if (pulls.length === 0) return null;
+  const starts = pulls.flatMap((p) => ms(p.added_at) ?? []);
+  const at = starts.length > 0 ? Math.min(...starts) : null;
+  const open = pulls.filter((p) => inPlay(p.state));
+  if (open.length > 0) return { label: open[0]!.label, at, state: "open", end: null, detail: detailOf(open) };
+  const merged = pulls.filter((p) => p.state === "merged");
+  const ends = pulls.flatMap((p) => ms(p.read_at) ?? []);
+  return { label: (merged.at(-1) ?? pulls.at(-1)!).label, at, state: merged.length > 0 ? "merged" : "closed", end: ends.length > 0 ? Math.max(...ends) : null, detail: null };
+}
+
+function detailOf(open: readonly GridPullIn[]): GridLine["detail"] {
+  if (open.some((p) => p.checks === "failing")) return { words: "tests failing", bad: true };
+  if (open.some((p) => p.checks === "running")) return { words: "tests running", bad: false };
+  const first = open[0]!;
+  if (first.review === "approved") return { words: "reviewed", bad: false };
+  if (first.checks === "passing") return { words: "tests passing", bad: false };
+  return first.state === "draft" ? { words: "draft", bad: false } : null;
 }
 
 /** The bar: Working from the start, PR from when it was put on, and over them Needs you or Not moving to the end. */
@@ -184,31 +224,34 @@ function piecesOf(start: number, prAt: number | null, end: number, over: GridPie
   return pieces.filter((p) => p.to > p.from);
 }
 
+export type GridPlace = { line: GridLine; place: "shown" | "earlier" | "counted" };
+
 /** Where one thread sits now: a shown line, a line in Earlier, a count in the Since line only, or nothing. */
-export function gridPlace(t: GridThreadIn, now: number, look: number | null): { line: GridLine; place: "shown" | "earlier" | "counted" } | null {
+export function gridPlace(t: GridThreadIn, now: number): GridPlace | null {
   const start = ms(t.created_at) ?? now;
-  const pull = t.pull;
-  const prAt = pull ? ms(pull.added_at) : null;
+  const pr = prsOf(t.pulls);
+  const prAt = pr?.at ?? null;
   const working = t.running || (t.agentState === "working" && t.agentHere);
-  const moved = Math.max(start, ms(t.last_agent_at) ?? start, ms(t.sent?.checked_at) ?? start, prAt ?? start);
+  const moved = Math.max(start, ms(t.last_agent_at) ?? start, ms(t.sent?.checked_at) ?? start, prAt ?? start, ms(t.steps?.at) ?? start);
   const ask = askWords(t);
-  const pullOpen = !!pull && (pull.state === "open" || pull.state === "draft" || pull.state === "unknown");
-  const ballWithAgent = t.section === "sent" && t.sent !== null;
-  const openWork = pullOpen || ballWithAgent || working;
   const ended = t.session_ended || t.agentState === "ended";
-  const unseen = (at: number) => look === null || at > look;
+  const unseen = (at: number) => t.seen === null || t.seen.through < at;
+  // Seen and past its three hours: Earlier, for a week from the later of those.
+  const afterSeen = (at: number, line: GridLine): GridPlace | null => (now - Math.max(at + GRID_KEEP_MS, t.seen?.at ?? 0) < GRID_EARLIER_MS ? { place: "earlier", line } : null);
   const base = {
     id: t.id,
     name: t.name,
-    pr: pull?.label ?? null,
+    pr: pr?.label ?? null,
     machine: t.machine,
     agent: t.agent,
     fresh: false,
+    unseen: false,
     merged: null,
     dropped: null,
     planned: null,
     ask: null,
-    detail: detailOf(pull),
+    detail: pr?.detail ?? null,
+    steps: t.steps,
     actions: [{ kind: "open", thread: t.id }] as GridAction[],
   } satisfies Partial<GridLine>;
   const idleOver = (end: number): GridPiece | null => (!working && end - moved >= GRID_QUIET_MS ? { kind: "idle", from: moved, to: end } : null);
@@ -217,28 +260,27 @@ export function gridPlace(t: GridThreadIn, now: number, look: number | null): { 
     const since = ms(t.waiting_since) ?? moved;
     return { place: "shown", line: { ...base, group: "you", ask, pieces: piecesOf(start, prAt, now, { kind: "wait", from: since, to: now }), at: since } };
   }
-  if (pull?.state === "merged") {
-    const at = ms(pull.read_at) ?? moved;
-    const line: GridLine = { ...base, group: "land", fresh: unseen(at), merged: at, pieces: piecesOf(start, prAt, at, null), at };
-    if (now - at < GRID_KEEP_MS || (unseen(at) && now - at < GRID_LANDED_MAX_MS)) return { place: "shown", line };
-    if (unseen(at)) return now - at < GRID_EARLIER_MS ? { place: "counted", line } : null;
-    return now - at < GRID_EARLIER_MS ? { place: "earlier", line } : null;
+  if (pr?.state === "merged") {
+    const at = pr.end ?? moved;
+    if (t.seen === null && now - at >= GRID_FIRST_SIGHT_MS) return null;
+    const line: GridLine = { ...base, group: "land", fresh: unseen(at), unseen: unseen(at), merged: at, pieces: piecesOf(start, prAt, at, null), at };
+    if (unseen(at)) return { place: now - at < GRID_LANDED_MAX_MS ? "shown" : "counted", line };
+    return now - at < GRID_KEEP_MS ? { place: "shown", line } : afterSeen(at, line);
   }
   let dropped: GridLine["dropped"] = null;
-  if (pull?.state === "closed") dropped = { at: ms(pull.read_at) ?? moved, why: "PR closed" };
-  else if (openWork && ended) dropped = { at: Math.max(moved, ms(t.agentEndedAt) ?? moved), why: "agent ended" };
-  else if (openWork && !working && now - moved >= GRID_DROP_QUIET_MS) dropped = { at: moved + GRID_DROP_QUIET_MS, why: "quiet 3 days" };
+  if (pr?.state === "closed") dropped = { at: pr.end ?? moved, why: "PR closed" };
+  else if (ended && !working) dropped = { at: Math.max(moved, ms(t.agentEndedAt) ?? moved), why: "agent ended" };
+  else if (!working && now - moved >= GRID_DROP_QUIET_MS) dropped = { at: moved + GRID_DROP_QUIET_MS, why: "quiet 3 days" };
   if (dropped) {
-    const line: GridLine = { ...base, group: "drop", detail: null, dropped, pieces: piecesOf(start, prAt, dropped.at, idleOver(dropped.at)), at: dropped.at };
-    if (now - dropped.at >= GRID_EARLIER_MS) return null;
-    return { place: unseen(dropped.at) || now - dropped.at < GRID_KEEP_MS ? "shown" : "earlier", line };
+    if (t.seen === null && now - dropped.at >= GRID_FIRST_SIGHT_MS) return null;
+    const line: GridLine = { ...base, group: "drop", detail: null, unseen: unseen(dropped.at), dropped, pieces: piecesOf(start, prAt, dropped.at, idleOver(dropped.at)), at: dropped.at };
+    return unseen(dropped.at) || now - dropped.at < GRID_KEEP_MS ? { place: "shown", line } : afterSeen(dropped.at, line);
   }
   if (!t.last_agent_at && t.sent && !t.sent.checked_at && !working) {
     const at = ms(t.sent.at) ?? start;
     return { place: "shown", line: { ...base, group: "plan", planned: at, pieces: [], at } };
   }
-  // A thread whose agent answered and asks nothing, with no PR in play: the talk is done, not work in flight.
-  if (!openWork) return null;
+  // Every other thread with an agent is open work: Moving, then Not moving after 20 quiet minutes, then Dropped.
   const quiet = !working && now - moved >= GRID_QUIET_MS;
   return {
     place: "shown",
@@ -246,43 +288,80 @@ export function gridPlace(t: GridThreadIn, now: number, look: number | null): { 
   };
 }
 
+const hasPr = (l: GridLine) => l.pieces.some((p) => p.kind === "pr");
 const ORDER: Readonly<Record<GridGroup, (a: GridLine, b: GridLine) => number>> = {
   you: (a, b) => a.at - b.at,
   // PRs first, then the oldest start.
-  move: (a, b) => Number(b.pieces.some((p) => p.kind === "pr")) - Number(a.pieces.some((p) => p.kind === "pr")) || a.at - b.at,
+  move: (a, b) => Number(hasPr(b)) - Number(hasPr(a)) || a.at - b.at,
   quiet: (a, b) => a.at - b.at,
   land: (a, b) => b.at - a.at,
   plan: (a, b) => a.at - b.at,
   drop: (a, b) => b.at - a.at,
 };
 
-/** The whole page at `now`, for the person whose last look at Grid was `look` (null: never). */
-export function gridModel(threads: readonly GridThreadIn[], now: number, look: number | null): GridModel {
+/** Moving keeps an agent's lines together, the agent with the most first, each kept in the order it had. O(n log n). */
+function byAgent(lines: GridLine[]): GridLine[] {
+  const key = (l: GridLine) => l.agent?.key ?? l.id;
+  const count = new Map<string, number>();
+  const first = new Map<string, number>();
+  lines.forEach((l, i) => {
+    const k = key(l);
+    count.set(k, (count.get(k) ?? 0) + 1);
+    if (!first.has(k)) first.set(k, i);
+  });
+  return lines
+    .map((line, i) => ({ line, i, n: count.get(key(line))!, f: first.get(key(line))! }))
+    .sort((a, b) => b.n - a.n || a.f - b.f || a.i - b.i)
+    .map((x) => x.line);
+}
+
+/**
+ * The page, kept between reads: each thread's place is worked out again only when what Grid reads of it, or the
+ * minute, changed, and a line that comes out the same is the same object as before (so its drawing is kept). A read
+ * costs O(n) to compare and O(n log n) to sort, n the threads.
+ */
+export function createGridModel(): (threads: readonly GridThreadIn[], now: number) => GridModel {
+  let held = new Map<string, { key: string; now: number; placed: GridPlace | null; json: string }>();
+  return (threads, now) => {
+    const next = new Map<string, { key: string; now: number; placed: GridPlace | null; json: string }>();
+    const placedAll: GridPlace[] = [];
+    let look: number | null = null;
+    for (const t of threads) {
+      if (t.seen && (look === null || t.seen.at > look)) look = t.seen.at;
+      const key = JSON.stringify(t);
+      const was = held.get(t.id);
+      let entry = was && was.key === key && was.now === now ? was : null;
+      if (!entry) {
+        let placed = gridPlace(t, now);
+        const json = placed ? `${placed.place}${JSON.stringify(placed.line)}` : "";
+        // The same line as before: the same object, so a memoized line does not draw again.
+        if (placed && was?.placed && was.json === json) placed = was.placed;
+        entry = { key, now, placed, json };
+      }
+      next.set(t.id, entry);
+      if (entry.placed) placedAll.push(entry.placed);
+    }
+    held = next;
+    return assemble(placedAll, now, look);
+  };
+}
+
+function assemble(placed: readonly GridPlace[], now: number, look: number | null): GridModel {
   const shown = new Map<GridGroup, GridLine[]>(GRID_GROUPS.map((g) => [g.id, []]));
   const earlier: GridLine[] = [];
+  const counted: GridLine[] = [];
   let mergedSince = 0;
   let droppedSince = 0;
-  for (const t of threads) {
-    const placed = gridPlace(t, now, look);
-    if (!placed) continue;
-    const { line, place } = placed;
-    if (look !== null && line.merged !== null && line.merged > look) mergedSince++;
-    if (look !== null && line.dropped && line.dropped.at > look) droppedSince++;
+  for (const { line, place } of placed) {
+    if (line.unseen && line.merged !== null) mergedSince++;
+    if (line.unseen && line.dropped) droppedSince++;
     if (place === "shown") shown.get(line.group)!.push(line);
     else if (place === "earlier") earlier.push(line);
+    else counted.push(line);
   }
   const groups = GRID_GROUPS.map(({ id }) => {
-    let lines = shown.get(id)!.sort(ORDER[id]);
-    // Moving keeps an agent's lines together, the agent with the most first (the order it had otherwise).
-    if (id === "move") {
-      const count = new Map<string, number>();
-      for (const l of lines) count.set(l.agent?.key ?? l.id, (count.get(l.agent?.key ?? l.id) ?? 0) + 1);
-      const firstAt = new Map<string, number>();
-      lines.forEach((l, i) => firstAt.has(l.agent?.key ?? l.id) || firstAt.set(l.agent?.key ?? l.id, i));
-      const key = (l: GridLine) => l.agent?.key ?? l.id;
-      lines = [...lines].sort((a, b) => count.get(key(b))! - count.get(key(a))! || firstAt.get(key(a))! - firstAt.get(key(b))! || lines.indexOf(a) - lines.indexOf(b));
-    }
-    return { id, lines };
+    const lines = shown.get(id)!.sort(ORDER[id]);
+    return { id, lines: id === "move" ? byAgent(lines) : lines };
   });
   const counts = Object.fromEntries(groups.map((g) => [g.id, g.lines.length])) as Record<GridGroup, number>;
   const width = look === null ? 6 * GRID_HOUR : Math.max(6 * GRID_HOUR, Math.min(12 * GRID_HOUR, now - look + 40 * GRID_MIN));
@@ -290,9 +369,15 @@ export function gridModel(threads: readonly GridThreadIn[], now: number, look: n
     groups: groups.filter((g) => g.lines.length > 0),
     counts,
     since: look !== null && mergedSince + droppedSince > 0 ? { at: look, merged: mergedSince, dropped: droppedSince } : null,
+    counted,
     earlier: earlier.sort((a, b) => b.at - a.at),
     span: { from: now - width, to: now },
   };
+}
+
+/** The whole page at `now`, once (the window keeps one `createGridModel` between reads). */
+export function gridModel(threads: readonly GridThreadIn[], now: number): GridModel {
+  return createGridModel()(threads, now);
 }
 
 /** A length as a line says it: minutes under an hour, then half hours, then days ("32 min", "1.5 h", "3 d"). */
@@ -313,6 +398,11 @@ export function gridExact(length: number): string {
   if (h >= 48) return `${Math.floor(h / 24)} d`;
   if (h >= 24) return "1 d";
   return h < 3 && m ? `${h} h ${m} min` : `${h} h`;
+}
+
+/** A length as a screen reader says it: the line's words with the units in full ("2 hours", "32 minutes"). */
+export function gridSpoken(length: string): string {
+  return length.replace(/(\d) h\b/g, (_, n) => `${n} ${n === "1" ? "hour" : "hours"}`).replace(/(\d) min\b/g, "$1 minutes").replace(/(\d) d\b/g, (_, n) => `${n} ${n === "1" ? "day" : "days"}`);
 }
 
 /** One piece of a line's words: its kind, its name, how long; `on`: where the work is now. */
@@ -337,7 +427,32 @@ export function gridSaid(line: GridLine, options: { phone: boolean; room?: numbe
   return { cut: shown.length < all.length, pieces: shown };
 }
 
-/** "tonight", "overnight" or "today" for Landed, from the hour of the day now. */
-export function gridLandedWord(hour: number): string {
-  return hour >= 18 ? "tonight" : hour < 9 ? "overnight" : "today";
+/**
+ * Landed's word, from when its work landed (local time, `offset`: minutes east of UTC at `now`, as `-getTimezoneOffset()`):
+ * "tonight" when all of it landed since 6 PM today, "overnight" when all of it landed between 6 PM yesterday and noon
+ * and it is not noon yet, "today" when all of it landed today; else none ("4 landed").
+ */
+export function gridLandedWord(times: readonly number[], now: number, offset: number): string | null {
+  if (times.length === 0) return null;
+  const local = (at: number) => at + offset * GRID_MIN;
+  const dayStart = Math.floor(local(now) / GRID_DAY) * GRID_DAY;
+  const hours = (at: number) => (local(at) - dayStart) / GRID_HOUR;
+  const first = Math.min(...times);
+  if (hours(first) >= 18) return "tonight";
+  if (hours(now) < 12 && hours(first) >= -6 && times.every((at) => hours(at) < 9)) return "overnight";
+  if (hours(first) >= 0) return "today";
+  return null;
+}
+
+/** The whole hours, local time, after `from` and before `to`: where the clock's ticks go (a :30 or :45 zone included). */
+export function gridHourTicks(from: number, to: number): number[] {
+  const out: number[] = [];
+  const at = new Date(from);
+  at.setMinutes(0, 0, 0);
+  if (at.getTime() <= from) at.setHours(at.getHours() + 1);
+  for (let guard = 0; at.getTime() < to && guard < 48; guard++) {
+    out.push(at.getTime());
+    at.setHours(at.getHours() + 1);
+  }
+  return out;
 }

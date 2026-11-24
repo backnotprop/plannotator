@@ -295,6 +295,8 @@ export interface MachineView {
    * (422) reads "<name> needs an update to delete words". True for this Inbox; false until its health is read, and for an older Inbox.
    */
   message_deletions: boolean;
+  /** How far its clock runs ahead of this one's (ms, whole minutes), from its list's `now`; absent within two minutes. Grid reads it. */
+  clock_ms?: number;
 }
 
 /** An agent's snooze of a linked machine's thread: its answer there, or `held`, the words for a write that waits. */
@@ -518,6 +520,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
         update: peer ? updateView(peer) : null,
         launch: peer?.launch ?? null,
         message_deletions: peer?.messageDeletions ?? false,
+        ...(peer?.list?.clock_ms ? { clock_ms: peer.list.clock_ms } : {}),
       } satisfies MachineView;
     }),
   ];

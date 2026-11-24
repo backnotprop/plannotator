@@ -132,7 +132,9 @@
 /* Each piece keeps its words together; the words under the name break between pieces (an inline-block allows it). */
 .ib-grid[data-phone] .ib-grid-pc { display: inline-block; }
 .ib-grid[data-phone] .ib-grid-q { grid-row: 3; margin: 1px 0 2px; font-size: var(--ib-fs-13-5, 13.5px); }
-.ib-grid[data-phone] .ib-grid-exp { grid-column: 1 / 3; display: block; margin: 6px 0 2px; padding: 6px 10px; border-radius: 10px; background: var(--ib-fill); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-grid-said { display: contents; }
+/* The readout opens in the line itself, on the page's own ground: no panel. */
+.ib-grid[data-phone] .ib-grid-exp { grid-column: 1 / 3; display: block; margin: 4px 0 2px; font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-grid[data-phone] .ib-grid-ro { grid-template-columns: 70px 96px minmax(0, 1fr); min-height: 26px; }
 .ib-grid[data-phone] .ib-grid-ro-open { display: flex; gap: 4px; width: 100%; padding: 0; border: 0; background: none; font: inherit; color: var(--primary); font-weight: 550; cursor: pointer; position: relative; z-index: 1; }
 .ib-grid[data-phone] .ib-grid-ro-open .ib-ic { width: 12px; height: 12px; }

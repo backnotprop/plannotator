@@ -59,7 +59,12 @@ import {
   subscribeInboxEvents,
   inboxAskOn,
   type InboxEvent, type CardsModel, type DraftView, type InboxRevealId, type InboxStorageModel, type UpdateCheckFailing,
-  type ListModel, type OutboxView, type SettingsModel, type UpdateDetails, type WhatsNewModel, type WhatsNewReleasesModel,
+  type ListModel,
+  type OutboxView,
+  type SettingsModel,
+  type UpdateDetails,
+  type WhatsNewModel,
+  type WhatsNewReleasesModel,
 } from './api';
 import { listReadRefused, readFirstList } from './firstListRead';
 import { adoptRestartedInbox, type RestartHello } from './sessionAdopt';
@@ -139,7 +144,8 @@ import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { connectLineNews, noteQuestionRows } from './agents';
 import { ScheduledRoute, useScheduledOn } from './scheduled/ScheduledPage';
 import { PlansRoute, usePlansOn } from './plans/PlansPage';
-import { GridRoute } from './grid/GridPage';
+import { GridRoute, useGridOn } from './grid/GridPage';
+import { pageLinks } from './app/pageLinks';
 import { SettingsPage } from './components/Settings';
 import { createStepsBus } from './steps/useThreadSteps';
 import { ArchivedBlock } from './components/Archived';
@@ -3632,7 +3638,7 @@ function Inbox() {
     useSettingsSaves({ setSettings, setError: setSettingsError, refresh: refreshSettings, adoptStore, readStore, refreshList });
   const scheduledOn = useScheduledOn(settings, settingsReadFailed);
   const plansOn = usePlansOn(settings, showToast);
-  const gridOn = settings?.experimental?.grid?.on === true;
+  const gridOn = useGridOn(settings, refreshList);
 
   const projects = latest?.projects ?? [];
   /**
@@ -5702,13 +5708,7 @@ function Inbox() {
             draftsCount={(drafts?.length ?? 0) + replyDrafts.length}
             onDrafts={() => leave({ page: 'drafts', project: null, thread: null })}
             onArtifacts={() => leave({ page: 'artifacts', project: null, thread: null })}
-            // The Board (approval "inbox-board"): a row only while the person has it on; no count (the header has it).
-            onBoard={boardEnabled ? () => leave({ page: 'board', project: null, thread: null }) : undefined}
-            onPlans={plansOn ? () => leave({ page: 'plans', project: null, thread: null }) : undefined}
-            onGrid={gridOn ? () => leave({ page: 'grid', project: null, thread: null }) : undefined}
-            onScheduled={scheduledOn ? () => leave({ page: 'scheduled', project: null, thread: null }) : undefined}
-            // Reviews: a row only while Code review is on; its count is the last read's "On you" (read at start and on focus).
-            onPulls={pullsShown ? () => leave({ page: 'reviews', project: null, thread: null }) : undefined}
+            {...pageLinks({ board: Boolean(boardEnabled), plans: plansOn, grid: gridOn, scheduled: scheduledOn, reviews: Boolean(pullsShown) }, leave)}
             pullsCount={pullsShown && pulls.reviews ? reviewsOnYou(pulls.reviews) : 0}
             // On the list it shows, Inbox (or a project) refreshes; with a thread open it closes it as before, and refreshes.
             onInbox={() => (route.page === 'inbox' && route.project === null && !route.machine && !route.agent && !route.tag ? void refreshInbox(null, route.thread !== null) : leave({ page: 'inbox', project: null, thread: null }))}

@@ -3,14 +3,21 @@
  * one page of every agent's work, this computer's and every linked computer's, grouped Needs you, Moving, Not moving,
  * Landed, Not started and Dropped, with a first line of plain counts and the Since line.
  *
- * Off, nothing of it runs: no row in the sidebar, no read, no timer; a `#grid` address goes to the Inbox. On, it
- * draws from the list the window already holds and the agents it already knows; the only reads are the PRs of the
- * threads that have one (gridPulls.ts). It draws again when the list or the agents change, when a PR read lands, and
- * once a minute while the tab shows (the bars and the times move with the clock).
+ * Off, nothing of it runs: no row in the sidebar, no read, no write, no timer; a `#grid` address goes to the Inbox.
+ * On, it draws from the list the window already holds and the agents it already knows: no read of its own (the PRs'
+ * times, checks and review ride the list's rows). It draws again when the list or the agents change, and once a
+ * minute while the tab shows (the bars and the times move with the clock). Each thread's line is worked out again only
+ * when what Grid reads of it changed (shared/inbox/grid.ts `createGridModel`), and a line that did not change keeps
+ * its drawing.
+ *
+ * A sitting compares with the looks it found when it began (the first look read for each thread), so what it shows
+ * bold stays bold while the person reads it; a sitting begins when the page opens, or when the tab shows again after
+ * five minutes away. What it shows is sent as seen (gridSeen.ts).
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { GRID_GROUPS, GRID_HOUR, gridLandedWord, gridModel, type GridGroup, type GridLine } from '../../shared/inbox/grid';
+import type { InboxListRow } from '@plannotator/core/inbox-types';
+import { createGridModel, GRID_GROUPS, GRID_HOUR, gridHourTicks, gridLandedWord, type GridGroup, type GridLine } from '../../shared/inbox/grid';
 import { useListModel } from '../data/queries/list';
 import { useInboxAgents } from '../agentsList';
 import { useSessionLabels } from '../sessionLabels';
@@ -19,30 +26,45 @@ import { writeRoute } from '../app/writeRoute';
 import { tabShown } from '../data/shownPoll';
 import { SidebarTrigger } from '../shell/sidebar';
 import { Icon } from '../icons';
-import { gridPullThreads, gridRows, gridThreads } from './gridInput';
-import { useGridPulls } from './gridPulls';
-import { readGridLook, writeGridLook } from './gridLook';
+import { gridClockOf, gridThreads } from './gridInput';
+import { useGridSeen } from './gridSeen';
+import { gridShown, useGridOn } from './gridOn';
 import { GridLineView, type GridClock } from './GridLine';
+
+export { useGridOn };
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const hm = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 const day = (ms: number) => DAYS[new Date(ms).getDay()]!;
 /** More than this many lines in Landed, Not started or Dropped: the rest behind "N more". */
 const CAP: Partial<Record<GridGroup, number>> = { land: 5, plan: 3, drop: 5 };
+/** Away this long, the tab starts a new sitting when it shows again. */
+const SITTING_GAP_MS = 5 * 60_000;
 
-/** The minute: the page's clock moves once a minute while the tab shows. */
-function useMinute(): number {
+/** The minute: the page's clock moves once a minute while the tab shows. `sitting` moves when a new sitting begins. */
+function useClock(): { now: number; sitting: number } {
   const [now, setNow] = useState(() => Date.now());
+  const [sitting, setSitting] = useState(0);
   useEffect(() => {
+    let hiddenAt: number | null = null;
     const tick = () => tabShown() && setNow(Date.now());
     const timer = setInterval(tick, 60_000);
-    document.addEventListener('visibilitychange', tick);
+    const shown = () => {
+      if (!tabShown()) {
+        hiddenAt = Date.now();
+        return;
+      }
+      if (hiddenAt !== null && Date.now() - hiddenAt >= SITTING_GAP_MS) setSitting((n) => n + 1);
+      hiddenAt = null;
+      tick();
+    };
+    document.addEventListener('visibilitychange', shown);
     return () => {
       clearInterval(timer);
-      document.removeEventListener('visibilitychange', tick);
+      document.removeEventListener('visibilitychange', shown);
     };
   }, []);
-  return now;
+  return { now, sitting };
 }
 
 export function GridRoute({ on, settingsKnown, phone, onOpen }: { on: boolean; settingsKnown: boolean; phone: boolean; onOpen: (thread: string) => void }) {
@@ -57,27 +79,42 @@ function GridPage({ phone, onOpen }: { phone: boolean; onOpen: (thread: string) 
   const list = useListModel(useQueryClient());
   const groups = useInboxAgents();
   const labels = useSessionLabels();
-  const now = useMinute();
-  // The last look this sitting compares with; the page writes its own look as it shows (gridLook.ts).
-  const [look] = useState(readGridLook);
-  useEffect(() => writeGridLook(now), [now]);
+  const { now, sitting } = useClock();
+  useEffect(() => {
+    gridShown(true);
+    return () => gridShown(false);
+  }, []);
+  // The looks this sitting compares with: the first read for each thread.
+  const looks = useMemo(() => new Map<string, InboxListRow['grid_seen'] | undefined>(), [sitting]);
+  const seenOf = useCallback(
+    (row: InboxListRow) => {
+      if (!looks.has(row.thread_id)) looks.set(row.thread_id, row.grid_seen);
+      return looks.get(row.thread_id);
+    },
+    [looks],
+  );
+  const derive = useMemo(() => createGridModel(), []);
   const [tapped, setTapped] = useState<string | null>(null);
   const [more, setMore] = useState<ReadonlySet<GridGroup>>(() => new Set());
   const [earlierOpen, setEarlierOpen] = useState(false);
   const sections = list?.sections ?? null;
   const machines = useMemo(() => machinesModel(list?.machines), [list?.machines]);
-  const wanted = useMemo(() => (sections ? gridPullThreads(gridRows(sections)) : []), [sections]);
-  const pulls = useGridPulls(wanted);
-  const pullsKey = [...pulls.values()].map((p) => p.map((x) => `${x.pull}${x.state}${x.checks}${x.review}${x.read_at}`).join()).join('|');
-  const model = useMemo(
-    () => (sections ? gridModel(gridThreads({ sections, groups, machines, labels, pulls }), now, look) : null),
-    // `pullsKey` says what the reads brought.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sections, groups, machines, labels, pullsKey, now, look],
-  );
+  const model = useMemo(() => (sections ? derive(gridThreads({ sections, groups, machines, labels, seenOf }), now) : null), [derive, sections, groups, machines, labels, seenOf, now]);
+  const clockOf = useCallback((machine: string | null) => gridClockOf(machine, machines), [machines]);
+  const seen = useGridSeen(model, clockOf);
+  // The window's open is a new function on each of its draws: the lines keep one, so they draw only when they change.
+  const opener = useRef(onOpen);
+  opener.current = onOpen;
+  const open = useCallback((thread: string) => opener.current(thread), []);
   const clock = useMemo<GridClock>(() => ({ from: model?.span.from ?? now - 6 * GRID_HOUR, to: now, at: (ms) => (now - ms >= 20 * GRID_HOUR ? `${day(ms)} ` : '') + hm(ms) }), [model?.span.from, now]);
   const onTap = useCallback((id: string) => setTapped((was) => (was === id ? null : id)), []);
-  const landed = `landed ${gridLandedWord(new Date(now).getHours())}`;
+  const landedLines = model?.groups.find((g) => g.id === 'land')?.lines ?? [];
+  const landedWord = gridLandedWord(
+    landedLines.map((l) => l.merged!),
+    now,
+    -new Date(now).getTimezoneOffset(),
+  );
+  const landed = landedWord ? `landed ${landedWord}` : 'landed';
 
   const counts = model
     ? GRID_GROUPS.filter((g) => g.id !== 'plan' && model.counts[g.id] > 0).map((g) => ({
@@ -87,13 +124,13 @@ function GridPage({ phone, onOpen }: { phone: boolean; onOpen: (thread: string) 
     : [];
   const since = model?.since;
   const sinceWords = since ? [since.merged ? `${since.merged} merged` : '', since.dropped ? `${since.dropped} dropped` : ''].filter(Boolean).join(' · ') : '';
-  const ticks: number[] = [];
-  // The hours on the clock: a line each, a label every hour (every two past eight hours).
-  if (model && !phone) for (let at = Math.ceil(model.span.from / GRID_HOUR) * GRID_HOUR; at < now; at += GRID_HOUR) ticks.push(at);
+  // The hours on the clock, local time: a line each, a label every hour (every two past eight hours).
+  const ticks = model && !phone ? gridHourTicks(model.span.from, now) : [];
   const pct = (ms: number) => ((ms - clock.from) / (clock.to - clock.from)) * 100;
   const step = model && model.span.to - model.span.from > 8 * GRID_HOUR ? 2 : 1;
+  const look = since?.at ?? null;
   const computerOf = (line: GridLine) => (line.machine ? (machines.names.get(line.machine) ?? null) : machines.all.length > 0 ? (machines.all.find((m) => m.self)?.name ?? null) : null);
-  const lineOf = (line: GridLine) => <GridLineView key={line.id} line={line} clock={clock} phone={phone} computer={computerOf(line)} open={tapped === line.id} onOpen={onOpen} onTap={onTap} />;
+  const lineOf = (line: GridLine) => <GridLineView key={line.id} line={line} clock={clock} phone={phone} computer={computerOf(line)} open={tapped === line.id} onOpen={open} onTap={onTap} observe={seen.line} />;
 
   return (
     <section className="ib-dpage ib-grid" aria-label="Grid" data-grid-page="" data-phone={phone ? '' : undefined}>
@@ -105,19 +142,19 @@ function GridPage({ phone, onOpen }: { phone: boolean; onOpen: (thread: string) 
       </div>
       {phone && <GridCounts counts={counts} />}
       <div className="ib-grid-ax">
-        <span className="ib-grid-since" data-grid-since={since ? '' : undefined}>
-          {since && sinceWords && (
-            <>
-              <i className="ib-grid-new" />
-              <span>Since {clock.at(since.at)}</span>
-              <span className="ib-grid-since-w">{sinceWords}</span>
-            </>
-          )}
-        </span>
+        {since && sinceWords ? (
+          <span className="ib-grid-since" data-grid-since="" ref={seen.since}>
+            <i className="ib-grid-new" />
+            <span>Since {clock.at(since.at)}</span>
+            <span className="ib-grid-since-w">{sinceWords}</span>
+          </span>
+        ) : (
+          <span className="ib-grid-since" />
+        )}
         {!phone && model && (
           <span className="ib-grid-axis" aria-hidden="true">
             {ticks.map((at) => (new Date(at).getHours() % step === 0 && pct(at) > 6 && pct(at) < 84 ? <span key={at} style={{ left: `${pct(at)}%` }}>{hm(at).replace(':00', '')}</span> : null))}
-            {look !== null && since && pct(look) > 0 && <i className="ib-grid-lkd" style={{ left: `${pct(look)}%` }} />}
+            {look !== null && pct(look) > 0 && <i className="ib-grid-lkd" style={{ left: `${pct(look)}%` }} />}
             <span className="ib-grid-now">now</span>
           </span>
         )}
@@ -127,7 +164,7 @@ function GridPage({ phone, onOpen }: { phone: boolean; onOpen: (thread: string) 
           <span className="ib-grid-vl" aria-hidden="true">
             <span>
               {ticks.map((at) => (pct(at) > 2 ? <i key={at} style={{ left: `${pct(at)}%` }} /> : null))}
-              {look !== null && since && pct(look) > 0 && <i className="ib-grid-lk" style={{ left: `${pct(look)}%` }} />}
+              {look !== null && pct(look) > 0 && <i className="ib-grid-lk" style={{ left: `${pct(look)}%` }} />}
               <i className="ib-grid-nowl" />
             </span>
           </span>
@@ -139,7 +176,7 @@ function GridPage({ phone, onOpen }: { phone: boolean; onOpen: (thread: string) 
           return (
             <div key={id} role="presentation" className="ib-grid-group" data-grid-group={id}>
               <h2 className="ib-grid-gh" data-you={id === 'you' ? '' : undefined}>
-                {id === 'land' ? `Landed ${gridLandedWord(new Date(now).getHours())}` : heading.heading}
+                {id === 'land' && landedWord ? `Landed ${landedWord}` : heading.heading}
                 <span className="ib-grid-n">{lines.length}</span>
               </h2>
               {lines.slice(0, cut).map(lineOf)}
