@@ -1,6 +1,4 @@
 import { useLayoutEffect, useRef } from 'react';
-// A thread on screen the Inbox no longer has: the same words, above it (thread/ThreadGone.tsx).
-export { ThreadGone } from '../thread/ThreadGone';
 import type { MachineView, OutboxView } from '../api';
 import { HeldWrites } from './HeldWrites';
 

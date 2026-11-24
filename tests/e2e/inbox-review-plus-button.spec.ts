@@ -83,7 +83,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const dataDir = join(root, 'data');
   markTourDecided(dataDir);
   const config = JSON.parse(readFileSync(join(dataDir, 'config.json'), 'utf8')) as Record<string, unknown>;
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...config, inboxCodeReview: true, inboxShape: true }));
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...config, inboxCodeReview: true }));
   // Nothing here may reach the real gh, glab or tailscale.
   const trap = join(root, 'trap');
   mkdirSync(trap);
@@ -119,7 +119,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const { path, patch } = project(join(root, 'src'));
   const client = new Client({ name: 'plus-button', version: '1.0.0' });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${registry.port}/mcp`)));
-  // A connected agent that can take a question: the bar offers Ask (and Show me).
+  // A connected agent that can take a question: the bar offers Ask.
   const agent = startScriptedAskAgent({ port: registry.port, token: registry.token, session: 'ses-plus', project: path, reply: async () => 'An answer.' });
   const sent = (await client.callTool({ name: 'submit_guide', arguments: { project_path: path, guide, patch, review: true, subject: 'A long worker', body: 'Ready for review.', agent_session: 'ses-plus', agent_host: 'claude-code', agent_name: 'Claude Code' } })) as { isError?: boolean; content?: { text: string }[]; structuredContent: { thread_id: string } };
   if (sent.isError) throw new Error(sent.content?.map((c) => c.text).join(' '));

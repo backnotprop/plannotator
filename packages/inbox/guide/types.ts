@@ -65,7 +65,7 @@ export interface GuideReaderProps {
   viewed?: { files: ReadonlySet<string>; onToggle: (path: string) => void };
   /**
    * Choices for selected lines before the comment box (code review in the
-   * Inbox: Comment · Ask · Show me; review-editor's `DiffSelectionActions`).
+   * Inbox: Comment · Ask; review-editor's `DiffSelectionActions`).
    * Absent: a selection opens the comment box at once, as before.
    */
   selectionActions?: GuideSelectionActions;
@@ -190,7 +190,6 @@ export interface GuideSelection {
 /** review-editor's `DiffSelectionActions`, as the window's strict typecheck sees it. */
 export interface GuideSelectionActions {
   onAsk?: (selection: GuideSelection) => void;
-  onShowMe?: (selection: GuideSelection) => void;
 }
 
 /** The surface's guide reader (SurfaceGuideReader.tsx): the sections (6.1), then one section per screen (6.2). */

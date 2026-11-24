@@ -15,10 +15,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { resolve } from 'node:path';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
-import type { ShapeHost } from '@plannotator/ui/components/shape';
-import type { InboxShapes } from './shape/useInboxShapes';
 
-const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 
 // The window's tsconfig points `#guide-reader` at the reader's type shape (reader-module.d.ts), which Bun
 // would load as the module; the real reader is package.json's `imports` entry (as guideDiffStyle.test.tsx).
@@ -150,7 +147,7 @@ async function render() {
     root = createRoot(host!);
     root.render(
       <div className="pn-inbox">
-        <ReviewPane thread={threadOf(message)} message={message} codeReview onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />
+        <ReviewPane thread={threadOf(message)} message={message} codeReview onBack={() => {}} onClose={() => {}} onSent={() => {}} />
       </div>,
     );
   });

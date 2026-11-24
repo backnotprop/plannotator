@@ -1,7 +1,7 @@
 /**
  * The Inbox window's page marks: attributes its parts hold on the page's root or on `.pn-inbox` while they are in
  * the page, in place of the `:has()` rules inbox.css keys on them (`html:has(.pn-inbox)`, `.pn-inbox:has(.ib-dm-pill)`,
- * `body:has([data-shape-layer] .shp-dock)`, …).
+ * …).
  *
  * Why: Chromium has to look again at a `:has()` anchored on `html`, `body` or `.pn-inbox` whenever anything under
  * that element changes. On a long thread (hundreds of highlighted code fences, about 440,000 elements) that was about
@@ -36,11 +36,3 @@ export const markDecisionPill = aboveInbox('data-ib-dm-pill');
 export const markImageComposer = aboveInbox('data-ib-imgcompose');
 /** `.ib-rpick`: `.pn-inbox:has(.ib-rpick)`. */
 export const markRecipientList = aboveInbox('data-ib-rpick');
-
-/** A ref for a part of a Shape board, inside the window's `[data-shape-layer]`: `<body>` carries `name`. */
-const onBody = (name: string) => (el: HTMLElement | null) => (el ? holdPageMark(el.ownerDocument.body, name) : undefined);
-
-/** The board's dock: `body:has([data-shape-layer] .shp-dock)`. */
-export const markShapeDock = onBody('data-ib-shape-dock');
-/** The board's update pill: `body:has([data-shape-layer] .shp-pill)`. */
-export const markShapePill = onBody('data-ib-shape-pill');

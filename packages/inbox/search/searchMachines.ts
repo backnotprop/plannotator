@@ -20,8 +20,6 @@ export function optionKey(option: SearchOption): string {
       return `more-${option.group}`;
     case 'recent-q':
       return `q-${option.q}`;
-    case 'shape':
-      return `shape-${option.shape.id}`;
     case 'action':
       return option.action.kind !== 'message' ? `action-${option.action.kind}` : `action-${option.action.target.session}`;
   }
