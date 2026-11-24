@@ -20,7 +20,7 @@
  * scripts/install.sh builds the same string (packages/shared/codex-hook-command.test.ts holds them equal).
  */
 
-import { basename, isAbsolute } from "node:path";
+import { posix, win32 } from "node:path";
 
 /** The subcommand the gate runs. */
 export const CODEX_HOOK_SUBCOMMAND = "codex-hook";
@@ -87,8 +87,11 @@ export function parseCodexHookCommand(command: string): { executable: string } |
   if (trimmed.startsWith(GATE_OPEN) && trimmed.includes(GATE_RUN)) executable = trimmed.slice(GATE_OPEN.length).split('"', 1)[0];
   else if (trimmed.startsWith("/bin/sh -c '") && trimmed.includes(OLD_MAILBOX_GLOB)) executable = /exec "([^"]+)" codex-hook;/.exec(trimmed)?.[1];
   if (!executable) return undefined;
-  const name = basename(executable).toLowerCase();
-  if (executable === "plannotator" || (isAbsolute(executable) && (name === "plannotator" || name === "plannotator.exe"))) return { executable };
+  // Whatever computer reads it: a POSIX path, or a Windows drive path in forward slashes (the gate's quotes carry no
+  // backslash), the same on every host, so uninstall recognises its own hook on Windows too.
+  const name = win32.basename(executable).toLowerCase();
+  const absolute = posix.isAbsolute(executable) || win32.isAbsolute(executable);
+  if (executable === "plannotator" || (absolute && (name === "plannotator" || name === "plannotator.exe"))) return { executable };
   return undefined;
 }
 
