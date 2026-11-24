@@ -121,7 +121,8 @@ afterEach(() => {
 
 const shipped: { target: ShipTarget; option: PullThreadOption }[] = [];
 const stopped: string[] = [];
-function draw(ships: ReadonlyMap<string, InboxShipView> = new Map(), phone = false) {
+function draw(ships: ReadonlyMap<string, InboxShipView> = new Map(), phone = false, rows: InboxReviewRow[] = ROWS) {
+  const answer = rows === ROWS ? ANSWER : { ...ANSWER, rows };
   shipped.length = 0;
   stopped.length = 0;
   const handlers: ShipHandlers = {
@@ -132,8 +133,8 @@ function draw(ships: ReadonlyMap<string, InboxShipView> = new Map(), phone = fal
     onStop: (s) => stopped.push(s.id),
   };
   const node = (
-    <ReviewsMenu className="ib-lbody" rows={ROWS} links={{}} phone={phone} onTarget={() => {}} onHide={() => {}} ship={handlers}>
-      <ReviewsList answer={ANSWER} model={MODEL} rows={ROWS} filter="all" projectNames={new Map()} selected={null} phone={phone} onOpen={() => {}} onNew={() => {}} ships={ships} />
+    <ReviewsMenu className="ib-lbody" rows={rows} links={{}} phone={phone} onTarget={() => {}} onHide={() => {}} ship={handlers}>
+      <ReviewsList answer={answer} model={MODEL} rows={rows} filter="all" projectNames={new Map()} selected={null} phone={phone} onOpen={() => {}} onNew={() => {}} ships={ships} />
     </ReviewsMenu>
   );
   if (root) return act(() => root!.render(node));
@@ -217,6 +218,38 @@ test.skipIf(!hasDom)('stuck says why on the row and keeps the sail; merged keeps
   expect(row('thr_receipt').hasAttribute('data-ship')).toBe(false);
   draw(new Map([[RECEIPT.key, ship(RECEIPT.key, { state: 'stopped', ended_at: ago(60_000) })]]));
   expect(row('thr_receipt').hasAttribute('data-ship')).toBe(false);
+});
+
+test.skipIf(!hasDom)("a shipped PR's thread, its PR merged (no stack left, the landing only), says Merged under the PR's title", () => {
+  const at = ago(5 * 60_000);
+  const landed: InboxReviewRow = {
+    ...reviewed('thr_receipt', [RECEIPT]),
+    move: 'agents',
+    reason: 'curating',
+    stacks: [],
+    pull_keys: [],
+    landed: [{ key: RECEIPT.key, thread_id: 'thr_receipt', state: 'merged', at, url: RECEIPT.url, number: 614, title: RECEIPT.title, platform: 'github', head: RECEIPT.head, through_review: null }],
+  };
+  draw(new Map([[RECEIPT.key, ship(RECEIPT.key, { state: 'merged', merged_at: at, ended_at: at })]]), false, [landed]);
+  expect(row('thr_receipt').getAttribute('data-ship')).toBe('merged');
+  expect(row('thr_receipt').querySelector('[data-ship-words]')!.textContent).toMatch(/Merged \d/);
+  expect(row('thr_receipt').textContent).toContain('Send a receipt after checkout');
+});
+
+test.skipIf(!hasDom)("a thread that shipped twice: yesterday's merge never hides today's, and the row is of today's PR", () => {
+  const old = ago(30 * HOUR);
+  const at = ago(5 * 60_000);
+  const landing = (p: InboxPull, when: string) => ({ key: p.key, thread_id: 'thr_receipt', state: 'merged' as const, at: when, url: p.url, number: p.number, title: p.title, platform: 'github' as const, head: p.head, through_review: null });
+  const landed: InboxReviewRow = { ...reviewed('thr_receipt', [RECEIPT]), stacks: [], pull_keys: [], landed: [landing(EXPORT, old), landing(RECEIPT, at)] };
+  const ships = new Map([
+    [EXPORT.key, ship(EXPORT.key, { state: 'merged', merged_at: old, ended_at: old, title: EXPORT.title })],
+    [RECEIPT.key, ship(RECEIPT.key, { state: 'merged', merged_at: at, ended_at: at })],
+  ]);
+  draw(ships, false, [landed]);
+  expect(row('thr_receipt').getAttribute('data-ship')).toBe('merged');
+  expect(row('thr_receipt').querySelector('[data-ship-words]')!.textContent).toMatch(/Merged \d/);
+  expect(row('thr_receipt').textContent).toContain('Send a receipt after checkout');
+  expect(row('thr_receipt').textContent).not.toContain('Rate-limit the export endpoint');
 });
 
 function stubLog(log: InboxShipLogEntry[]) {

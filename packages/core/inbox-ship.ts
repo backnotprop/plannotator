@@ -369,6 +369,27 @@ export function shipLook(ship: Pick<InboxShip, "state" | "ended_at"> | null | un
   return null;
 }
 
+/** A merged ship's pull request as its record knows it (`shipsMergedShown`): enough for its Reviews row's landing. */
+export interface InboxShipMergedPull {
+  key: string;
+  url: string;
+  number: number;
+  title: string;
+  /** When it merged, else when the ship ended. */
+  at: string | null;
+}
+
+/**
+ * The ships whose "Merged <time>" still shows, by pull request key: merged, and inside `INBOX_SHIP_MERGED_SHOWN_MS` of
+ * the stored ended time (`shipLook`). A stuck, shipping, stopped or closed ship, or an older merge, is left out. Their
+ * Reviews rows stay while they show (core `inboxReviewRows` `shipMerged`), whichever computer each ship is on.
+ */
+export function shipsMergedShown(ships: Iterable<Pick<InboxShip, "key" | "url" | "number" | "title" | "state" | "ended_at" | "merged_at">>, now: number = Date.now()): Map<string, InboxShipMergedPull> {
+  const out = new Map<string, InboxShipMergedPull>();
+  for (const ship of ships) if (shipLook(ship, now) === "merged") out.set(ship.key, { key: ship.key, url: ship.url, number: ship.number, title: ship.title, at: ship.merged_at ?? ship.ended_at });
+  return out;
+}
+
 /**
  * The person's message when they press Ship: the instruction (`SHIP_INSTRUCTION`), then the pull request's facts,
  * fenced as data (everything from the forge is its author's), as the hand-off lists them, without the hand-off's

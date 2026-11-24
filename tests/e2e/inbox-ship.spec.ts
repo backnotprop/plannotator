@@ -162,6 +162,8 @@ const THERE = {
 };
 
 let url = '';
+let reviews: Fields = REVIEWS;
+let board: Fields = BOARD;
 let env: Record<string, string> = {};
 let root = '';
 let ships: Ship[] = [];
@@ -222,8 +224,8 @@ async function open(browser: Browser, options: { width: number; height: number; 
   const page = await context.newPage();
   const settings = await page.request.post(`${url}api/inbox/settings`, { data: { code_review: { on: true } } });
   expect(settings.status()).toBe(200);
-  await page.route((u) => u.pathname === '/api/inbox/pulls', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: BOARD }) : route.continue()));
-  await page.route((u) => u.pathname === '/api/inbox/reviews', (route) => route.fulfill({ json: REVIEWS }));
+  await page.route((u) => u.pathname === '/api/inbox/pulls', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: board }) : route.continue()));
+  await page.route((u) => u.pathname === '/api/inbox/reviews', (route) => route.fulfill({ json: reviews }));
   await page.route((u) => u.pathname === '/api/inbox/sessions', (route) => route.fulfill({ json: SESSIONS }));
   await page.route(
     (u) => u.pathname === '/api/inbox/ships',
@@ -402,7 +404,19 @@ test('desktop: Ship from the row menu with the review agent, ship mode, stuck, t
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     expect(await receipt.evaluate((row) => [getComputedStyle(row).outlineStyle, getComputedStyle(row, '::before').boxShadow])).toEqual(['none', 'none']);
     await shot(page, '06-merged.png');
+
+    // 6b. The PR merged, as the Reviews read then answers it (core inboxReviewRows, `shipMerged`): no stack left, the
+    // landing only. The row stays with its title and Merged, read again from the start.
+    board = { ...BOARD, pulls: [{ ...RECEIPT, state: 'merged', merged_at: at }, RETRY, EXPORT] };
+    const landed = { key: RECEIPT.key, thread_id: 'thr_receipt', state: 'merged', at, url: RECEIPT.url, number: 614, title: RECEIPT.title, platform: 'github', head: RECEIPT.head, head_sha: RECEIPT.head_sha, through_review: null };
+    reviews = { ...REVIEWS, rows: ROWS.map((r) => (r.id === 'thr_receipt' ? { ...r, move: 'agents', reason: 'curating', stacks: [], pull_keys: [], landed: [landed] } : r)) };
+    await page.reload();
+    await expect(receipt).toHaveAttribute('data-ship', 'merged', { timeout: 30_000 });
+    await expect(receipt.locator('[data-ship-words]')).toContainText('Merged');
+    await expect(receipt.locator('.ib-rvr-t')).toHaveText(RECEIPT.title);
   } finally {
+    reviews = REVIEWS;
+    board = BOARD;
     await context.close();
   }
 });
