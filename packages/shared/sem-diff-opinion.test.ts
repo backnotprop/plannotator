@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, statSync, existsSync, readFileSync } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { answerSemDiffOpinionRequest, semDiffOpinionPath } from "./sem-diff-opinion";
+import { openaiAnswers } from "./sem-diff-openai";
 
 const KEY = "tsk-secret-value-123";
 let dir = "";
@@ -128,5 +129,23 @@ describe("Power Up key and opinion routes", () => {
     const reply = await route(opinion, "POST", { candidates: [candidate] }, rateLimited);
     expect(reply.body).toMatchObject({ ok: false, state: "failed" });
     expect(JSON.stringify(reply.body)).not.toContain(KEY);
+  });
+
+  test("an OpenAI batch waiting behind another gets its whole time limit once its turn comes", async () => {
+    // Each answer takes 120 ms against a 200 ms limit: the second batch would run out of time
+    // if its clock started while it waited for the first.
+    const slow = ((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((resolve, reject) => {
+      const timer = setTimeout(() => resolve(Response.json({ answers: [{
+        type: "choice", name: "q", choice: "moved", probabilities: [{ value: "moved", probability: 0.97 }],
+      }] })), 120);
+      init?.signal?.addEventListener("abort", () => {
+        clearTimeout(timer);
+        reject(init.signal!.reason);
+      });
+    })) as typeof fetch;
+    const ask = openaiAnswers(KEY, slow, 200);
+    const [first, second] = await Promise.allSettled([ask([candidate as never]), ask([candidate as never])]);
+    expect(first).toMatchObject({ status: "fulfilled", value: [{ accept: true }] });
+    expect(second).toMatchObject({ status: "fulfilled", value: [{ accept: true }] });
   });
 });

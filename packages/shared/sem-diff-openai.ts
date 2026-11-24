@@ -58,7 +58,7 @@ export async function checkOpenAIDecisions(apiKey: string, fetchImpl: typeof fet
   return Math.round(performance.now() - start);
 }
 
-export function openaiAnswers(apiKey: string, fetchImpl: typeof fetch) {
+export function openaiAnswers(apiKey: string, fetchImpl: typeof fetch, timeoutMs = 20_000) {
   let queue = Promise.resolve();
   async function ask(candidate: Candidate, signal: AbortSignal): Promise<OpinionAnswer> {
     const extract = candidate.kind === "extract";
@@ -94,8 +94,9 @@ export function openaiAnswers(apiKey: string, fetchImpl: typeof fetch) {
   }
 
   return (candidates: Candidate[]): Promise<OpinionAnswer[]> => {
-    const signal = AbortSignal.timeout(20_000);
     const run = queue.then(async () => {
+      // The time limit starts when this batch's turn comes, not while it waits behind another.
+      const signal = AbortSignal.timeout(timeoutMs);
       const answers: OpinionAnswer[] = [];
       for (let i = 0; i < candidates.length; i += 4) {
         signal.throwIfAborted();
