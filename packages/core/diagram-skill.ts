@@ -201,7 +201,7 @@ When revising:
 
 Interactive source navigation (\`refs\`), hover summaries, and pinned comments live in the editable \`.diagram.json\` when opened in Plannotator. The rendered \`.svg\` is a static image without clickable file anchors—always keep and share the \`.diagram.json\` alongside any standalone \`.svg\`.
 
-- **Plannotator Inbox thread:** Reply to the triggering message with \`reply_to\` set to its message ID and include the \`.diagram.json\` path in \`attachments\`. Inbox renders it inline with pan/zoom, clickable \`refs\`, pinned comments, and Ask AI, and groups revisions of the same drawing by its top-level \`"id"\` and source file.
+- **Plannotator Inbox thread:** Reply to the triggering message with \`reply_to\` set to its message ID and include the \`.diagram.json\` path in \`attachments\`. Inbox renders it inline with pan/zoom, clickable \`refs\`, pinned comments, and Ask AI. For a revision, edit and reattach the same source, keeping its drawing and part IDs.
 - **Plannotator Markdown plan or document:** Link the \`.diagram.json\` file for a live diagram, or paste a \`\`\`\` \`\`\`plannotator-diagram \`\`\`\` fenced code block containing the JSON for a frozen snapshot.
 - **Local interactive review (Plannotator CLI):** Run \`plannotator annotate my-diagram.diagram.json\` to open the review UI and collect the reader's pinned comments.
 - **Standalone / outside Plannotator:** Return paths to both the \`.diagram.json\` source and the rendered \`.svg\` (or embed the SVG where requested), along with a concise summary of what the diagram shows and any intentional simplifications. Note to the reader that clickable \`refs\` live in the \`.diagram.json\` for Plannotator rather than inside the static \`.svg\`.`,
