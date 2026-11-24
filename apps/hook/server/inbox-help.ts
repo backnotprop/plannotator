@@ -38,6 +38,7 @@ import { INBOX_TOOL_DEFAULTS, INBOX_TOOL_HOSTS } from "@plannotator/shared/confi
 import { INBOX_PRIORITY_FIELD_DESCRIPTION, INBOX_PULLS_FIELD_DESCRIPTION, INBOX_SETUP_COMMAND, INBOX_STEPS_LEAD, INBOX_STEPS_START_WAKE_LINE } from "@plannotator/shared/inbox/connection";
 import { INBOX_REVIEW_FIELD_DESCRIPTION, INBOX_WALKTHROUGH_FIELD_DESCRIPTION } from "@plannotator/core/inbox-review";
 import { INBOX_BRANCH_FIELD_DESCRIPTION } from "@plannotator/core/inbox-branch-reports";
+import { INBOX_CAPABILITY_AGENT_IDS } from "@plannotator/core/inbox-capability-switches";
 import { INBOX_HELP_TOPICS_LINES } from "./inbox-help-before-after";
 import { INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ANSWERS_WAKE_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_CHANGE_RULE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_FILLED_ARGUMENTS, INBOX_FOLLOW_THROUGH_RULE, INBOX_PICTURES_RULE, INBOX_PROTOTYPE_TRY_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SEARCH_FIRST_RULE, INBOX_SHOWING_RULE, INBOX_SUBAGENT_RULE, INBOX_TAGGED_INSTRUCTION, INBOX_MOVED_TO_FIELD_DESCRIPTION, INBOX_MOVED_TO_RULE, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_THREAD_RULE, INBOX_TOOL_NAME, inboxReaskInstruction } from "@plannotator/shared/inbox/connection";
 import { INBOX_CALL_ACTIONS, INBOX_COMMAND_USAGE } from "./cli";
@@ -202,7 +203,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
   card: {
     args: ["op", "card_id", "title", "column", "say", "you", "thread_id", "pr", "ref", "reason", "initiative", "idempotency_key", "asked_by", "include_resolved"],
     lines: [
-      "Keep a card on the person's Board for work that outlasts the reply it was asked in: a lane or background task started, a PR opened, \"I'll send you X\". Not for a quick answer. Make it when you take such an ask, then keep it current with one short call at the moments you already note: work started, your part handed over, done. The person reads the Board instead of asking each terminal where things are; each card shows how long ago anyone last wrote to it. A card is its own record: it never changes a thread or the person's list. The Board is something the person turns on (Settings → Capabilities in the Inbox); while it is off the Inbox does not list `card`, and a call answers `board_off` and writes nothing. Turned on, agents get `card` in their next session.",
+      "Keep a card on the person's Board for work that outlasts the reply it was asked in: a lane or background task started, a PR opened, \"I'll send you X\". Not for a quick answer. Make it when you take such an ask, then keep it current with one short call at the moments you already note: work started, your part handed over, done. The person reads the Board instead of asking each terminal where things are; each card shows how long ago anyone last wrote to it. A card is its own record: it never changes a thread or the person's list. The Board is turned on in Settings → Capabilities in the Inbox, or with the `capability` action when the person asks you to; while it is off the Inbox does not list `card`, and a call answers `board_off` and writes nothing. Turned on, agents get `card` in their next session.",
       "- `op`: `create`, `move`, `say`, `link`, `ship`, `drop`, `list` or `initiative_delete`. Every op but create, list and initiative_delete takes `card_id` (`crd_…`, from create or list); an op refuses a field it does not take.",
       "- `column` says where the work stands, never whose move it is: `todo` (you were asked, or the person sent it to you, and you have not started; the default for a card you make), `in_progress` (you are working on it: research, a plan, mocks, code, a draft PR), `in_review` (your part is done and you hand it over on purpose: a PR ready to merge, screenshots before a merge, a sheet or options to pick from, a release go), `done` (merged, live, staging included, or finished when it is not code), `dropped` (cancelled), `backlog` (nobody asked for it yet: an idea or a follow-up you propose; a backlog card is never a signal to start, the person sends it to you when it is to be done). A question you ask the person mid-work leaves the card in `in_progress`: the Board shows it from the thread. Work you hold back yourself stays in its column, with the reason in `say`. Names from before (`designing`, `building`, `your_look`, `your_review`, `asked`, `icebox`) are still read.",
       "- `you`: what the person owes, one line, shown as \"You: …\" in in_review. Moving a card into in_review needs it; it is dropped when the card leaves, and refused elsewhere. Link the Inbox thread where the person makes the call (`thread_id`), so \"You: …\" opens it. `say`: your last word, one line (\"lane running, sheet in ~1 h\"), shown on the opened card.",
@@ -214,6 +215,17 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       "- A card the person put in backlog is theirs to move: you cannot move it out (`card_backlog_person_only`), and only the person restores a card they dropped (`card_dropped_by_person`); you can still `say` and `link` on such a card. Leave its work alone until they send it to you. A card or thread of another project is refused (`card_other_project`): pass that project's `project_path`.",
     ],
   },
+  // Listed whatever is on: it is how a capability that is off gets turned on.
+  capability: {
+    args: ["capability", "on", "computer", "thread_id"],
+    lines: [
+      "Turn one of the Inbox's capabilities (Settings → Capabilities) on or off when the person asks you to; not on your own initiative.",
+      `- \`capability\`: ${INBOX_CAPABILITY_AGENT_IDS.map(code).join(", ")}. \`on\`: \`true\` or \`false\`. Without \`capability\` and \`on\`, it lists each one and whether it is on.`,
+      "- `computer`: a linked computer's name, as the Inbox shows it, to read or turn one there. One that is away gets it when it is back, and the result says so.",
+      "- A turn posts one line for the person (\"Turned on Routines.\"): in `thread_id`, the thread you work in, when you pass it, else in a new thread in your project. An action a capability serves (`card`, `steps`, `routine`) is in your session's next tool list.",
+      "- From a shell: `plannotator inbox capability routines on [--computer <name>] [--thread <id>]`, or `plannotator inbox capability` to list them.",
+    ],
+  },
   // Thread steps (approval "inbox-thread-steps"): shown only while the person has them on (formatInboxHelp's `steps`).
   steps: {
     args: ["thread_id", "steps"],
@@ -223,7 +235,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       "- The list is your session's own in that thread; another session's list there is its own. send_message takes the same `steps`, so a message and its list go together.",
       "- A reply in that thread wakes you with one line, \"Your checklist here: 3 of 6 done; doing: X. If you're still working on this, keep it current.\" Read_thread shows the lists. From a shell: `plannotator inbox steps <thread> --json '<list>'`.",
       `- No list of yours in a thread yet: a reply that answers your questions there wakes you with one line, "${INBOX_STEPS_START_WAKE_LINE}"`,
-      "- The person turns steps on and off (Settings → Capabilities in the Inbox). Off, the Inbox lists no `steps`, and a call answers `steps_off` and writes nothing.",
+      "- Steps are turned on and off in Settings → Capabilities in the Inbox, or with the `capability` action when the person asks you to (not on your own initiative). Off, the Inbox lists no `steps`, and a call answers `steps_off` and writes nothing.",
     ],
   },
   // Routines: shown only while the person has them on (formatInboxHelp's `scheduled`).
@@ -236,7 +248,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       "- One you create arrives off, unless the person asked you for it with `/create-routine` in the thread you pass as `thread_id`: then it is on, and the result says so. Off, the person turns it on the first time, in the Inbox; before that, `on` and `run` answer `routine_not_approved` and change nothing. After that you may `update`, turn it `on` or `off`, `run` it and `delete` it. Changing its folder or its agent turns it off again until the person turns it back on.",
       "- Every change posts one line for the person, with a link to the routine and, for an edit, what it was and what it is now: in `thread_id`, the thread you are working in, when you pass it, else in the routine's own thread. Runs never reply in `thread_id`.",
       "- Each run starts the agent the way New message in the Inbox does, in the person's own permission mode. Starting agents from the Inbox must be on (Settings → Agents).",
-      "- The person turns routines on and off (Settings → Capabilities in the Inbox). Off, the Inbox lists no `routine`, and a call answers `routines_off` and writes nothing.",
+      "- Routines are turned on and off in Settings → Capabilities in the Inbox, or with the `capability` action when the person asks you to (not on your own initiative). Off, the Inbox lists no `routine`, and a call answers `routines_off` and writes nothing.",
       "- From a shell: `plannotator routine --help`, then `plannotator routine <command> --help` for each command's options and examples (`plannotator routine create --name … --cron … --prompt …`).",
     ],
   },

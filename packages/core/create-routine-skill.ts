@@ -44,7 +44,7 @@ plannotator routine create --name "Dependency check" --cron '0 9 * * 1-5' --thre
    If it answers \`validation_error: agent: …\`, ask the person which agent runs it (claude-code, codex, opencode or pi) and pass their answer as \`agent\` (\`--agent\`). Never pick one yourself.
 3. Reply in this thread: the routine's name, that it is on, and when its next run is, as the result says. Ask whether they want any edits, and tell them they can see it under Routines in the Inbox.
 
-If the result says it is off, do what it says when you can. If it stays off, tell them so, and that they turn it on under Routines in the Inbox. If a call answers \`routines_off\`, tell them Routines are off (Settings → Capabilities) and stop.
+If the result says it is off, do what it says when you can. If it stays off, tell them so, and that they turn it on under Routines in the Inbox. If a call answers \`routines_off\`, tell them Routines are off and ask whether to turn them on; turn them on (the \`capability\` action, or \`plannotator inbox capability routines on\`) only if they say yes.
 
 Do not start a run unless they ask for one now, and do not pass \`--model\` or \`--effort\` unless they ask.
 `;

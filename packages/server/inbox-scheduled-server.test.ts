@@ -93,7 +93,7 @@ describe("the switch", () => {
     expect(await w.tools()).not.toContain("routine");
     const refused = await w.call({ op: "create", name: "Morning triage", prompt: "Triage.", schedule: w.daily, agent: FAKE });
     expect(refused.isError).toBe(true);
-    expect(refused.content[0]!.text).toBe("routines_off: Routines are off on this computer, so nothing was written. The person turns them on in Settings, Capabilities.");
+    expect(refused.content[0]!.text).toBe("routines_off: Routines are off on this computer, so nothing was written. They are turned on in Settings, Capabilities, or with the capability action when the person asks you to.");
     const list = await fetch(`${w.base}/api/inbox/scheduled`);
     expect(list.status).toBe(404);
     expect(((await list.json()) as { code: string }).code).toBe("routines_off");
@@ -111,6 +111,24 @@ describe("the switch", () => {
     expect((await w.setOn(false)).scheduled_threads).toEqual({ on: false });
     expect(w.login.calls).toEqual(["add", "remove"]);
     expect(await w.tools()).not.toContain("routine");
+  });
+});
+
+describe("the capability action (inbox-mcp-capability.ts)", () => {
+  test("listed while Routines are off; an agent the person asked turns them on, one line in its thread, and the routine tool is listed", async () => {
+    const w = await world();
+    expect(await w.tools()).toContain("capability");
+    expect(await w.tools()).not.toContain("routine");
+    const turn = async () => (await w.rpc("tools/call", { name: "capability", arguments: { agent_session: "ses_maya", agent_host: "claude-code", agent_name: "Claude Code", project_path: w.folder, capability: "routines", on: true, thread_id: w.thread } })).result as ToolResult;
+    const turned = await turn();
+    expect(turned.content[0]!.text).toBe(`Turned on Routines on this computer. The person sees it in thread ${w.thread}.`);
+    expect((await (await fetch(`${w.base}/api/inbox/settings`)).json()).scheduled_threads.on).toBe(true);
+    expect(await w.tools()).toContain("routine");
+    const said = () => w.server.store.threadMessageIds(w.thread).map((m) => w.server.store.message(m)!).filter((m) => m.body === "Turned on Routines.");
+    expect(said().map((m) => m.author.kind === "agent" && m.author.name)).toEqual(["Claude Code"]);
+    // Again: nothing changes and no second line.
+    expect((await turn()).content[0]!.text).toBe("Routines was already on (this computer). Nothing changed.");
+    expect(said()).toHaveLength(1);
   });
 });
 

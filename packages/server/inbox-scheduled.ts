@@ -38,7 +38,7 @@ import type { InboxAttachment } from "@plannotator/core/inbox-types";
 import type { InboxLaunch, InboxLaunchTarget } from "./inbox-launch";
 
 export const INBOX_SCHEDULED_OFF_TEXT =
-  "routines_off: Routines are off on this computer, so nothing was written. The person turns them on in Settings, Capabilities.";
+  "routines_off: Routines are off on this computer, so nothing was written. They are turned on in Settings, Capabilities, or with the capability action when the person asks you to.";
 
 /** Who asked: the person in the window, or an agent session (and the thread it asked from). */
 export type InboxScheduledBy = { kind: "person" } | { kind: "agent"; host: string; session: string; name: string; thread_id: string | null };

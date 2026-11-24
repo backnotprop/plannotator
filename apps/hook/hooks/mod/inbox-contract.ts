@@ -25,11 +25,23 @@ export const INBOX_TOOL_ACTIONS = [
   'submit_guide',
   'get_guide_brief',
   'card',
+  'capability',
   'steps',
   'routine',
 ] as const
 
 export type InboxToolAction = (typeof INBOX_TOOL_ACTIONS)[number]
+
+/**
+ * What a call to an action this Inbox does not list says, for an action a
+ * capability switch serves: an Inbox that lists `capability` has the action,
+ * and the switch is off.
+ */
+const INBOX_ACTION_OFF: Record<string, string> = {
+  card: 'the Board is off in this Plannotator Inbox; the capability action turns it on when the person asks',
+  steps: 'the Checklist is off in this Plannotator Inbox; the capability action turns it on when the person asks',
+  routine: 'Routines are off in this Plannotator Inbox; the capability action turns them on when the person asks',
+}
 
 /**
  * The action the Inbox no longer has, and what a call to it answers: an older
@@ -1138,7 +1150,7 @@ export function inboxToolCall(
   if (!tool) {
     if (inboxInputUnread(input as Record<string, unknown>, tools)) return { error: inboxUnreadInputText(input, tools) }
     return {
-      error: `Invalid plannotator_inbox call: action must be one of ${tools.map((candidate) => candidate.name).join(', ')}${typeof action === 'string' && (INBOX_TOOL_ACTIONS as readonly string[]).includes(action) ? ` (this Plannotator Inbox has no ${action}; update Plannotator for it)` : ''}.`,
+      error: `Invalid plannotator_inbox call: action must be one of ${tools.map((candidate) => candidate.name).join(', ')}${typeof action === 'string' && (INBOX_TOOL_ACTIONS as readonly string[]).includes(action) ? ` (${tools.some((candidate) => candidate.name === 'capability') && INBOX_ACTION_OFF[action] ? INBOX_ACTION_OFF[action] : `this Plannotator Inbox has no ${action}; update Plannotator for it`})` : ''}.`,
     }
   }
   const own = propertiesOf(tool)

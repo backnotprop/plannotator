@@ -16,7 +16,7 @@ const BYTES_PER_EXTRA_SECOND = 256 * 1024;
  */
 export const INBOX_AGENT_STALE_RESULT_MS = 10 * 60_000;
 
-export const INBOX_AGENT_WRITE_ACTIONS: readonly string[] = ["send_message", "resolve_message", "snooze_thread", "thread_pulls", "submit_guide", "card", "steps", "routine", "route"];
+export const INBOX_AGENT_WRITE_ACTIONS: readonly string[] = ["send_message", "resolve_message", "snooze_thread", "thread_pulls", "submit_guide", "card", "capability", "steps", "routine", "route"];
 
 /** The `routine` ops that only read; every other op (create, update, on, off, run, delete, or one the Inbox refuses) writes. */
 const ROUTINE_READ_OPS: readonly unknown[] = ["list", "get"];
@@ -35,6 +35,8 @@ export function isInboxAgentWrite(tool: string, args: Record<string, unknown>): 
   if (!INBOX_AGENT_WRITE_ACTIONS.includes(tool)) return false;
   if (tool === "card") return args.op !== "list";
   if (tool === "routine") return !ROUTINE_READ_OPS.includes(args.op);
+  // The capability switches: a list (no `on`) reads.
+  if (tool === "capability") return typeof args.on === "boolean";
   // A command's window route (inbox-agent-routes.ts): a GET reads, a POST changes something.
   if (tool === "route") return args.method !== "GET";
   if (tool === "thread_pulls") return listed(args.add) || listed(args.remove);

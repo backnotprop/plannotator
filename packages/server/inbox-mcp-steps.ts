@@ -37,7 +37,7 @@ import { guarded, okComplete } from "./inbox-mcp-result";
 
 /** What a `steps` call gets while the person has steps off: nothing is written. */
 export const INBOX_STEPS_OFF_TEXT =
-  "steps_off: The person's thread steps are off, so nothing was written. They turn them on in the Plannotator Inbox's Settings → Capabilities; agents get the steps action in their next session.";
+  "steps_off: The person's thread steps are off, so nothing was written. They are turned on in the Plannotator Inbox's Settings → Capabilities, or with the capability action when the person asks you to; agents get the steps action in their next session.";
 
 /** One step as an agent sends it: the schema advertises the limits, the store words the refusals. */
 const STEP_ITEM = z

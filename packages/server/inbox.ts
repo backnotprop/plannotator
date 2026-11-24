@@ -1884,6 +1884,28 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     findOnMachines: () => machines?.agentFind ?? null,
     projectRemoteKey: (root, waitMs) => farRemoteOf(repos, root, waitMs),
     snoozeMade: () => markSnoozeUsed(),
+    // The capability tool (inbox-mcp-capability.ts): this computer's switches, turned through the settings route as
+    // Settings turns them; a linked computer's through the forward, as its Settings group does.
+    capabilities: {
+      here: () => inboxCapabilitySwitchesOf(settingsModel("local", false, null, false)),
+      set: async (key, on) => {
+        const answer = await globalThis.fetch(`${baseUrl.replace(/\/+$/, "")}/api/inbox/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [key]: { on } }) });
+        const body = (await answer.json().catch(() => ({}))) as { code?: unknown; error?: unknown };
+        if (!answer.ok) throw new InboxError(typeof body.code === "string" ? body.code : "validation_error", typeof body.error === "string" ? body.error : "The switch did not turn.");
+        return inboxCapabilitySwitchesOf(settingsModel("local", false, null, false));
+      },
+      there: async (computer, change) => (machines ? machines.capabilitiesOn(computer, change) : null),
+      linked: () => machines?.linkedNames() ?? [],
+      tell: async (by, threadId, projectPath, body) => {
+        const author = { kind: "agent" as const, host: by.host, session: by.session, name: by.name };
+        const thread = threadId ? store.message(threadId) : null;
+        // The Inbox's own kind of note: no sound (`launch_note`).
+        if (thread) return store.sendMessage({ author, body, launch_note: true, project_id: thread.project_id, reply_to: store.threadMessageIds(thread.thread_id).at(-1) ?? thread.thread_id }).message.thread_id;
+        if (!projectPath) return null;
+        const project = await resolveProject(projectPath).catch(() => null);
+        return project ? store.sendMessage({ author, body, launch_note: true, project_id: project.id, subject: body }).message.thread_id : null;
+      },
+    },
     ...(options.mcpNow ? { now: options.mcpNow } : {}),
   };
   const mcp = createMcpHandler(() => createInboxMcpServer(mcpContext), { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES });
