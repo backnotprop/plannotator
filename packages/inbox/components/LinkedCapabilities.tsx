@@ -68,13 +68,13 @@ export function LinkedSwitchRow({ row, heading, held, waiting, onTurn }: { row: 
         <span className="ib-l" id={`${heading}-${row.key}`}>
           {row.name}
         </span>
-        {row.line != null && <span className="ib-desc">{row.line}</span>}
-        {/* Turned here, waiting for that computer: shown as turned until it takes or refuses it. */}
+        {/* Turned here, waiting for that computer: shown as turned until it takes or refuses it, under its name in the held words' look. */}
         {waiting && held && (
-          <span className="ib-desc" data-settings-linked-held="">
+          <span className="ib-desc ib-held-words" data-settings-linked-held="">
             {waiting}
           </span>
         )}
+        {row.line != null && <span className="ib-desc">{row.line}</span>}
       </span>
       <span className="ib-ctl">
         <Switch on={row.on} labelledBy={`${heading}-${row.key}`} onClick={onTurn} />

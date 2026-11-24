@@ -4,8 +4,9 @@
  * switch with no line shows its name alone.
  *
  * What regresses: a linked row back to its name only, a linked row's words drifting from this computer's, a linked row
- * saying "this computer" or telling a reload done on that computer, a local row's words changed by the move, or a
- * switch with no line drawing an empty line (or no row).
+ * saying "this computer" or telling a reload done on that computer, a linked Board or Float reply drafts line claiming
+ * what only this computer's switch does, a held turn's words read as more explanation, a local row's words changed by
+ * the move, or a switch with no line drawing an empty line (or no row).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. No server: SettingsPage on its own,
  * with fetch answered in the test.
@@ -74,9 +75,13 @@ test.skipIf(!hasDom)("a linked computer's switches show this computer's lines, s
   for (const [key, attr] of Object.entries(LOCAL_ROW)) {
     const linked = linkedLine(key);
     expect([key, linked?.textContent?.includes('this computer')]).toEqual([key, false]);
-    if (key === 'scheduled_threads' || key === 'bro') continue;
+    if (key === 'board' || key === 'scheduled_threads' || key === 'bro' || key === 'float_drafts') continue;
     expect([key, linked?.innerHTML]).toEqual([key, host.querySelector(`[${attr}] .ib-desc`)!.innerHTML]);
   }
+  // The Board is one page across computers: Studio's switch offers its agents cards, and never takes the page away.
+  expect(linkedLine('board')!.textContent).toBe('Agents on Studio keep cards on the Board for their work. Off, they are not offered cards; every card is kept. Agents pick this up in their next session.');
+  // Float reply drafts changes only Studio's own window.
+  expect(linkedLine('float_drafts')!.textContent).toBe("In Studio's own window, an unsent reply stays in a small window in the corner when you leave its thread.");
   // Routines runs on Studio, not here.
   expect(linkedLine('scheduled_threads')!.textContent).toBe('Runs saved prompts on a schedule, on Studio, while its Inbox is running.');
   // Bro mode's reload is typed in a session on that computer: only this computer's row says it.
@@ -136,4 +141,16 @@ test.skipIf(!hasDom)('a switch with no line shows its name alone, with its switc
   expect(bro.querySelector('.ib-desc')).toBeNull();
   expect(bro.querySelector('[role="switch"]')!.getAttribute('aria-checked')).toBe('false');
   expect(host.querySelector('[data-settings-linked-switch="board"] .ib-desc')!.textContent).toBe('A line.');
+});
+
+test.skipIf(!hasDom)("a held turn's words sit right under the switch's name, in the held words' look, before its line", async () => {
+  const [row] = linkedSwitchRows({ scheduled_threads: { on: true } }, 'Studio');
+  const host = mount();
+  await act(async () => root!.render(<LinkedSwitchRow row={row!} heading="h" held waiting="Waiting for Studio: this applies when Studio is back." onTurn={() => {}} />));
+  const parts = [...host.querySelectorAll('[data-settings-linked-switch="scheduled_threads"] .ib-txt > *')];
+  expect(parts.map((el) => [el.className, el.textContent])).toEqual([
+    ['ib-l', 'Routines'],
+    ['ib-desc ib-held-words', 'Waiting for Studio: this applies when Studio is back.'],
+    ['ib-desc', 'Runs saved prompts on a schedule, on Studio, while its Inbox is running.'],
+  ]);
 });

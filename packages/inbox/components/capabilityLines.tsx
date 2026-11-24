@@ -13,6 +13,8 @@ export type CapabilityLineOf = (key: InboxCapabilitySwitchKey, computer?: string
 export const capabilityLine: CapabilityLineOf = (key, computer) => {
   switch (key) {
     case 'board':
+      // The Board is one page across computers: a linked computer's switch offers its agents cards, never the page.
+      if (computer !== undefined) return `Agents on ${computer} keep cards on the Board for their work. Off, they are not offered cards; every card is kept. Agents pick this up in their next session.`;
       return 'A page of the work in flight, one card per piece, that your agents keep current. Off, there is no Board page and agents are not offered cards; every card is kept. Agents pick this up in their next session.';
     case 'steps':
       return "Your agents' plan for the work in a thread as a checklist, one step per line, under a button at the thread's foot. Off, agents are not offered a checklist and none shows; every checklist is kept. Agents pick this up in their next session.";
@@ -37,6 +39,8 @@ export const capabilityLine: CapabilityLineOf = (key, computer) => {
         'Agents write to your Inbox in plain words. Applies to new agent sessions.'
       );
     case 'float_drafts':
+      // It changes only that computer's own window.
+      if (computer !== undefined) return `In ${computer}'s own window, an unsent reply stays in a small window in the corner when you leave its thread.`;
       return 'Keep an unsent reply in a small window in the corner when you leave its thread.';
     default:
       return null;

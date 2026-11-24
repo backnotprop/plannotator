@@ -152,7 +152,9 @@ test("1. Settings → Capabilities: Studio's switches under Laptop's, and Routin
   const routines = group.locator('[data-settings-linked-switch="scheduled_threads"] [role="switch"]');
   await expect(routines).toHaveAttribute('aria-checked', 'false');
   // Each of Studio's switches has the line Laptop's own row has under its name, said of Studio.
-  await expect(group.locator('[data-settings-linked-switch="board"] .ib-desc')).toHaveText((await page.locator('[data-settings-board] .ib-desc').textContent())!);
+  await expect(group.locator('[data-settings-linked-switch="steps"] .ib-desc')).toHaveText((await page.locator('[data-settings-steps] .ib-desc').textContent())!);
+  await expect(group.locator('[data-settings-linked-switch="board"] .ib-desc')).toHaveText('Agents on Studio keep cards on the Board for their work. Off, they are not offered cards; every card is kept. Agents pick this up in their next session.');
+  await expect(group.locator('[data-settings-linked-switch="float_drafts"] .ib-desc')).toHaveText("In Studio's own window, an unsent reply stays in a small window in the corner when you leave its thread.");
   await expect(group.locator('[data-settings-linked-switch="scheduled_threads"] .ib-desc')).toHaveText('Runs saved prompts on a schedule, on Studio, while its Inbox is running.');
   await expect(group).not.toContainText('this computer');
   await routines.click();
