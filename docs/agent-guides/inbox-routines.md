@@ -12,7 +12,7 @@ Settings → Capabilities, config.json `inboxScheduledThreads` (`true`, else off
 
 The one-time Routines intro offers the switch once, after three good days of sends, the queue's gap from any other dialog; its "Turn on" saves this switch and opens `#routines`. Who, when and the dialog: "The Routines intro" under "The schedule of one-time dialogs" in `inbox-window.md`.
 
-On also adds a start-at-login item, removed when it goes off and by `plannotator uninstall` (the file only, on macOS; disabled, not stopped, on Linux: removing it never ends the Inbox it started): on macOS `~/Library/LaunchAgents/ai.plannotator.inbox.plist` (launchd reads it at the next login; it runs `plannotator inbox --no-open` for this data dir, no window); on Linux a systemd user unit `~/.config/systemd/user/plannotator-inbox.service`, enabled, only when `systemctl --user` answers (else none, and the switch reads `login: "unavailable"`).
+On also adds a start-at-login item, removed when it goes off and by `plannotator uninstall` (the file only, on macOS; disabled, not stopped, on Linux: removing it never ends the Inbox it started): on macOS `~/Library/LaunchAgents/ai.plannotator.inbox.plist` (launchd reads it at the next login; it runs `plannotator inbox --no-open` for this data dir, no window; a rewrite keeps the `EnvironmentVariables` a person added there, such as `PATH` or `NO_PROXY`, and `PLANNOTATOR_DATA_DIR` is always the Inbox's own); on Linux a systemd user unit `~/.config/systemd/user/plannotator-inbox.service`, enabled, only when `systemctl --user` answers (else none, and the switch reads `login: "unavailable"`).
 
 ### The record and the runs
 

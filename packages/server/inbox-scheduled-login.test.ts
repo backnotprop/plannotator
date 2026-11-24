@@ -5,9 +5,9 @@
  * unavailable otherwise with nothing left behind; Windows has none.
  */
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { inboxLoginItem } from "./inbox-scheduled-login";
 
 const roots: string[] = [];
@@ -37,6 +37,99 @@ test("macOS: a launchd item that starts the Inbox with no window; removing it de
   await item.remove();
   expect(w.ran).toEqual([]);
   expect(existsSync(item.path!)).toBe(false);
+});
+
+/** The EnvironmentVariables dictionary of a written plist, as text, to compare key order and escaping exactly. */
+const envBlock = (plist: string) => {
+  const start = plist.indexOf("<key>EnvironmentVariables</key>");
+  return plist
+    .slice(start, plist.indexOf("</dict>", start))
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("\n");
+};
+
+/** Puts a plist at the item's path (the item writes it itself first, so the rest is exactly what it generates). */
+function putExisting(item: { path: string | null }, text: string) {
+  mkdirSync(dirname(item.path!), { recursive: true });
+  writeFileSync(item.path!, text);
+}
+
+test("macOS: EnvironmentVariables a person added survive a rewrite, sorted, and PLANNOTATOR_DATA_DIR is the generated one", async () => {
+  const w = world();
+  const item = inboxLoginItem({ platform: "darwin", home: w.home, argv: ["plannotator"], dataDir: w.dataDir, run: w.run });
+  await item.add();
+  const stale = join(w.home, "old data");
+  putExisting(
+    item,
+    readFileSync(item.path!, "utf8")
+      .replace("<key>PLANNOTATOR_DATA_DIR</key>", "<key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin</string>\n    <key>NO_PROXY</key><string>mac-mini.tailnet</string>\n    <key>ANTHROPIC_API_KEY</key><string>sk-test</string>\n    <key>PLANNOTATOR_DATA_DIR</key>")
+      .replace(`<string>${w.dataDir}</string>`, `<string>${stale}</string>`),
+  );
+  expect(await item.add()).toBe("added");
+  expect(envBlock(readFileSync(item.path!, "utf8"))).toBe(
+    [
+      "<key>EnvironmentVariables</key>",
+      "<dict>",
+      "<key>ANTHROPIC_API_KEY</key><string>sk-test</string>",
+      "<key>NO_PROXY</key><string>mac-mini.tailnet</string>",
+      "<key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin</string>",
+      `<key>PLANNOTATOR_DATA_DIR</key><string>${w.dataDir}</string>`,
+    ].join("\n"),
+  );
+});
+
+test("macOS: an escaped value is read back and written escaped once, not twice", async () => {
+  const w = world();
+  const item = inboxLoginItem({ platform: "darwin", home: w.home, argv: ["plannotator"], dataDir: w.dataDir, run: w.run });
+  await item.add();
+  putExisting(item, readFileSync(item.path!, "utf8").replace("<key>PLANNOTATOR_DATA_DIR</key>", '<key>NOTE</key><string>a &amp; b &lt;c&gt; &quot;d&quot;</string>\n    <key>PLANNOTATOR_DATA_DIR</key>'));
+  await item.add();
+  await item.add();
+  expect(envBlock(readFileSync(item.path!, "utf8"))).toContain('<key>NOTE</key><string>a &amp; b &lt;c&gt; &quot;d&quot;</string>');
+});
+
+test("macOS: a missing or unreadable existing plist gives the fresh-install file", async () => {
+  const w = world();
+  const item = inboxLoginItem({ platform: "darwin", home: w.home, argv: ["plannotator"], dataDir: w.dataDir, run: w.run });
+  const log = join(w.dataDir, "inbox", "inbox.log");
+  const fresh = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0">',
+    "<dict>",
+    "  <key>Label</key><string>ai.plannotator.inbox</string>",
+    "  <key>ProgramArguments</key>",
+    "  <array>",
+    "    <string>plannotator</string>",
+    "    <string>inbox</string>",
+    "    <string>--no-open</string>",
+    "  </array>",
+    "  <key>EnvironmentVariables</key>",
+    "  <dict>",
+    `    <key>PLANNOTATOR_DATA_DIR</key><string>${w.dataDir}</string>`,
+    "  </dict>",
+    "  <key>RunAtLoad</key><true/>",
+    "  <key>ProcessType</key><string>Background</string>",
+    `  <key>StandardOutPath</key><string>${log}</string>`,
+    `  <key>StandardErrorPath</key><string>${log}</string>`,
+    "</dict>",
+    "</plist>",
+    "",
+  ].join("\n");
+  expect(await item.add()).toBe("added");
+  expect(readFileSync(item.path!, "utf8")).toBe(fresh);
+
+  for (const broken of [
+    '<?xml version="1.0"?><plist><dict><key>EnvironmentVariables</key><dict><key>PATH</key>',
+    '<?xml version="1.0"?><plist><dict><key>EnvironmentVariables</key><dict><key>PATH</key><string>/bin</string><key>N</key><integer>3</integer></dict></dict></plist>',
+    "not a plist at all",
+  ]) {
+    putExisting(item, broken);
+    expect(await item.add()).toBe("added");
+    expect(readFileSync(item.path!, "utf8")).toBe(fresh);
+  }
 });
 
 test("Linux: a user unit only where systemctl --user answers", async () => {

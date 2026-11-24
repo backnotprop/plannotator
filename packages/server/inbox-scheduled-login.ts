@@ -8,7 +8,7 @@
  * so. Windows: none (routines are not offered there). Tests pass their own `home` and `run`.
  */
 import { execFile } from "node:child_process";
-import { mkdirSync, renameSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 export const INBOX_LOGIN_LABEL = "ai.plannotator.inbox";
@@ -28,12 +28,28 @@ export type InboxLoginItem = {
 };
 
 const xml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+/** Reverse `xml` for a value read back out of an existing plist, so entities are not escaped twice on rewrite. */
+const unescapeXml = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+
+/** String-valued entries of a prior plist's `EnvironmentVariables`; a missing, corrupt or env-less file gives none. */
+function existingEnvOf(plistText: string): Record<string, string> {
+  const dict = plistText.match(/<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/);
+  if (!dict) return {};
+  const env: Record<string, string> = {};
+  const pair = /<key>([^<]*)<\/key>\s*<string>([\s\S]*?)<\/string>/g;
+  let match: RegExpExecArray | null;
+  while ((match = pair.exec(dict[1]!))) env[unescapeXml(match[1]!)] = unescapeXml(match[2]!);
+  // Anything else in the dictionary (an integer, an array) is not an environment entry we can carry: start fresh.
+  return dict[1]!.replace(pair, "").trim() === "" ? env : {};
+}
 /** One argument of a systemd ExecStart line: quoted, with `%` doubled (systemd's specifiers). */
 const unitArg = (s: string) => `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/%/g, "%%")}"`;
 
-/** The plist launchd reads at login: the Inbox, no window, its output in the Inbox's own log. */
-export function inboxLoginPlist(o: { argv: readonly string[]; dataDir: string; log: string }): string {
+/** The plist launchd reads at login: the Inbox, no window, its output in the Inbox's own log. Person-added env entries are carried over; the generated data dir stays authoritative. */
+export function inboxLoginPlist(o: { argv: readonly string[]; dataDir: string; log: string }, env: Record<string, string> = {}): string {
   const string = (s: string) => `<string>${xml(s)}</string>`;
+  const merged: Record<string, string> = { ...env, PLANNOTATOR_DATA_DIR: o.dataDir };
+  const envEntries = Object.keys(merged).sort().map((k) => `    <key>${xml(k)}</key>${string(merged[k]!)}`);
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
@@ -46,7 +62,7 @@ export function inboxLoginPlist(o: { argv: readonly string[]; dataDir: string; l
     "  </array>",
     "  <key>EnvironmentVariables</key>",
     "  <dict>",
-    `    <key>PLANNOTATOR_DATA_DIR</key>${string(o.dataDir)}`,
+    ...envEntries,
     "  </dict>",
     "  <key>RunAtLoad</key><true/>",
     "  <key>ProcessType</key><string>Background</string>",
@@ -87,7 +103,15 @@ export function inboxLoginItem(o: { platform: NodeJS.Platform; home: string; arg
       path,
       async add() {
         mkdirSync(dir, { recursive: true });
-        writeAtomic(path, inboxLoginPlist({ argv: o.argv, dataDir: o.dataDir, log: join(o.dataDir, "inbox", "inbox.log") }));
+        let existing: Record<string, string> = {};
+        if (existsSync(path)) {
+          try {
+            existing = existingEnvOf(readFileSync(path, "utf8"));
+          } catch {
+            existing = {};
+          }
+        }
+        writeAtomic(path, inboxLoginPlist({ argv: o.argv, dataDir: o.dataDir, log: join(o.dataDir, "inbox", "inbox.log") }, existing));
         return "added";
       },
       // Only the file: launchd reads it at login, and an unload would end this Inbox if the login started it.
