@@ -2048,13 +2048,13 @@ ${result.text}`);
     },
     /** The last login shell's PATH folders (empty until it was read, and on Windows): the installer's extra PATH on Update now. */
     loginPath: (): string[] => [...loginPath],
+    /** The home folder the folder opener reads `~/…` from. */
+    home: options.homeDir,
     /**
      * A folder picked in the folder opener outside compose (Reviews' "On this computer" +, "Another folder…"): its real
      * path when the opener offers to start in it, by the opener's own rules (`resolveHomeFolder`, read off the process
      * outside home); null while launch is off, or for a folder it refuses, can't open, isn't there or never starts in.
      */
-    /** The home folder the folder opener reads `~/…` from. */
-    home: options.homeDir,
     async pickedFolder(typed: string): Promise<string | null> {
       if (!enabled()) return null;
       const read = await resolveFolderAnywhere(typed);

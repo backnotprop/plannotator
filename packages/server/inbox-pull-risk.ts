@@ -7,11 +7,13 @@
  *
  *   inbox/pull-risk.json   { v: 1, judgments: { [pull key]: { head, base, rules, level, why, where? } } }
  *
- * - A high judgment may name its places in the diff (`where`, context notes,
- *   approval "inbox-context-notes"): checked against the diff that was judged
- *   when it is made, kept beside it, and shown on the PR's diff. Kept only when
- *   the diff judged is the one the PR's diff draws (the forge's one document):
- *   a per-file read, a clone's diff or a too-large one draws none of them.
+ * - A high or medium judgment may name its places in the diff (`where`, context
+ *   notes, approval "inbox-context-notes"; the risk bars, "review-risk-bars"):
+ *   checked against the diff that was judged when it is made, kept beside it,
+ *   and shown on the PR's diff. Kept only when the diff judged is the one the
+ *   PR's diff draws (the forge's one document): a per-file read, a clone's diff
+ *   or a too-large one draws none of them. The answer gives each judgment its
+ *   `head`, so a window never draws its places on another head's diff.
  *
  * - Runs only while Code review is on and rules exist, and only from the owner's
  *   window's list read (the routes in inbox.ts guard those). Open and draft PRs only.
@@ -536,7 +538,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
           const one = all.get(pull.key);
           if (!inboxPullIsOpen(pull)) continue;
           if (one && one.head === pull.head_sha && one.base === pull.base && one.rules === hash) {
-            judgments[pull.key] = { level: one.level, why: one.why, ...(one.where ? { where: one.where } : {}) };
+            judgments[pull.key] = { level: one.level, why: one.why, ...(one.where ? { where: one.where } : {}), head: one.head };
             continue;
           }
           const failure = failures.get(pull.key);

@@ -42,6 +42,7 @@
 import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxMachineTags, inboxRowsBy, inboxTagColoursOf, isInboxCombineRun, type InboxRowsBy } from "@plannotator/core/inbox-types";
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
 import { listIntroAtStart, listIntroDue, listIntroLookPicked } from "./inbox-list-intro";
+import { codeReviewOfferAtStart, codeReviewOfferDue } from "./inbox-code-review-offer";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -940,6 +941,9 @@ const ERROR_STATUS: Record<string, number> = {
   mode_needs_live: 409,
   already_owner: 409,
   handoff_settled: 409,
+  // Remove an agent from a thread (approval "inbox-remove-agent-from-thread"): one not in it, or the last one there.
+  not_in_thread: 422,
+  last_agent: 409,
   // Compose: a new thread the person starts (packages/server/inbox-compose.ts).
   already_delivered: 409,
   agent_has_it: 409,
@@ -3604,13 +3608,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const config = loadConfig();
     return INBOX_PROMPT_HOSTS.every((host) => inboxReminderRulesText(config, host) === null);
   };
+  // Who Code review's offer is for, decided at the first release start that shows it, as the tab icon's is
+  // (inbox-code-review-offer.ts): someone who used an earlier Inbox is marked due; a fresh install never sees it.
+  if (CODE_REVIEW_OFFER_SHOWN && normalizeStableVersion(version) !== null) {
+    const mark = codeReviewOfferAtStart(loadConfig().inboxReveals?.code_review, loadConfig().inboxCodeReview !== undefined, usedBefore, new Date().toISOString());
+    if (mark) saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, code_review: mark } });
+  }
   /**
-   * Code review's day-0 offer (approval "code-review-offer-card", 2026-11-06; its slot: `CODE_REVIEW_OFFER` in
-   * shared/inbox/reveals.ts): only while config.json `inboxCodeReview` is unset (nobody decided; `false` is the
-   * person's own off), and only while the offer is shown at all: `CODE_REVIEW_OFFER_SHOWN` (false for now: the
-   * owner chose the switch without the offer, 2026-11-17), so it is never open and never claimed.
+   * Code review's one-time offer (approval "code-review-offer-card", 2026-11-06; its slot: `CODE_REVIEW_OFFER` in
+   * shared/inbox/reveals.ts): only for someone who used an earlier Inbox (marked due at a release start, above), only
+   * while config.json `inboxCodeReview` is unset (nobody decided; `false` is the person's own off; `true` is theirs
+   * too), and only while the offer is shown at all: `CODE_REVIEW_OFFER_SHOWN` (held from 2026-11-17, shown again from
+   * the release after 2026-11-23, approval "inbox-code-review-offer": "for people who already use the Inbox").
    */
-  const codeReviewUndecided = () => CODE_REVIEW_OFFER_SHOWN && options.codeReview === undefined && loadConfig().inboxCodeReview === undefined;
+  const codeReviewUndecided = () =>
+    CODE_REVIEW_OFFER_SHOWN && options.codeReview === undefined && loadConfig().inboxCodeReview === undefined && codeReviewOfferDue(loadConfig().inboxReveals?.code_review);
   /**
    * The offers the line claims for itself (approval "inbox-one-time-dialogs"): each one's "undecided" (the person never
    * set its switch). The claim stamps `inboxReveals[id]` with the page's key and turns nothing on; its dialog's "Turn it
@@ -6591,7 +6603,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (branch !== null || (projectId && !project) || !localFolderFormOk(folder)) return json({ error: "A project, and a branch or none.", code: "validation_error" }, 400);
           try {
             const answer = await localRefs.diff(project, folder);
-            if (!answer) return json({ error: "This project's folder isn't a git repository on this computer.", code: "not_git" }, 404);
+            if (!answer) return json({ error: "This folder isn't a git repository on this computer.", code: "not_git" }, 404);
             return json({ serverSession, ...answer });
           } catch (cause) {
             if (cause instanceof BranchDiffTooLarge) return json({ error: cause.message, code: "diff_too_large" }, 413);
@@ -7749,6 +7761,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json(store.markUnread(unreadMatch[1]!));
       }
 
+      // Remove an agent from a thread, and the toast's Undo (approval "inbox-remove-agent-from-thread"): `{ session }`.
+      // It gets nothing more from the thread until the person writes to it again; nothing is sent and nobody is woken.
+      const removeAgentMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/remove-agent(\/undo)?$/.exec(path);
+      if (removeAgentMatch) {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const session = typeof body.session === "string" ? body.session.trim() : "";
+        if (!session) throw new InboxError("validation_error", "session: the agent session to remove.", { field: "session" });
+        const threadId = removeAgentMatch[1]!;
+        if (removeAgentMatch[2]) return json({ thread_id: threadId, removed: store.undoRemoveFromThread(threadId, session).removed ?? [] });
+        return json({ thread_id: threadId, removal: store.removeFromThread(threadId, session).removal });
+      }
+
       // 👍 Looks good (design record "inbox-acknowledge"): silent, nothing sent and no
       // session woken; an ack on the agent's latest message and a Mark read.
       // `{ ack: false }` takes it back (the toast's Undo, the pressed button).
@@ -8142,6 +8168,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 actions: body.actions,
                 // The message the reply quotes (approval "inbox-reply-quote"); absent from an older window.
                 ...(body.quote !== undefined ? { quote: body.quote } : {}),
+                // New thread from this message: no #tag read from the words, and no "still open" line under them.
+                ...(body.author_only === true ? { author_only: true } : {}),
               });
             } catch (error) {
               removeInboxAttachmentFiles(store.dir, attachments);

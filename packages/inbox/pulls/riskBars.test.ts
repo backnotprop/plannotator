@@ -1,11 +1,12 @@
 /**
  * The risk bars' places (approval "review-risk-bars"). What regresses: a Low judgment, or one with no places (stored
- * before Medium named any), drawing a mark; a file the judgment does not name getting one; one range drawn twice, or a
- * range the diff does not draw marked on lines that hold other code.
+ * before Medium named any), drawing a mark; a file the judgment does not name getting one; one range drawn twice, an
+ * unchanged line named by both its numbers given two marks, or a range the diff does not draw marked on lines that hold
+ * other code.
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxPullRiskJudgment, InboxPullRiskPlace } from '@plannotator/core/inbox-types';
-import { riskBarsOf } from './riskBars';
+import { riskBarsMarkFor, riskBarsOf } from './riskBars';
 import { riskBarsLineMarks, riskBarsPaint } from './riskBarsMarks';
 
 const file = (path: string, body: string[]) => ({ path, patch: `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -10,3 +10,${body.length} @@\n${body.join('\n')}\n` });
@@ -33,6 +34,22 @@ describe('riskBarsOf', () => {
     const ruled = { ...place('src/billing.ts', [11, 11]), rule: 'Anything in billing.' };
     expect(riskBarsLineMarks(riskBarsOf(judged('high', [ruled]), FILES))[0]!.label).toBe('High risk · your rule “Anything in billing.”: Charges now retry.');
     expect(riskBarsLineMarks(riskBarsOf(judged('medium', [{ ...ruled, why: '' }]), FILES))[0]!.label).toBe('Medium risk · your rule “Anything in billing.”');
+  });
+
+  // The unified view draws an unchanged line as one row under both its numbers: two marks there would stack on it.
+  test('an unchanged line named by its old and its new number is one mark saying both; named by its old number alone it stays there', () => {
+    const old = { ...place('src/billing.ts', [12, 12], 'old'), why: 'It still reads the old total.' };
+    for (const where of [[place('src/billing.ts', [14, 14]), old], [old, place('src/billing.ts', [14, 14])]]) {
+      const bars = riskBarsOf(judged('high', where), FILES)!;
+      expect(bars.ranges.map(({ file, side, line }) => `${file} ${side} ${line}`)).toEqual(['src/billing.ts new 14']);
+      expect(bars.ranges[0]!.notes.map((note) => note.why)).toEqual(where.map((p) => p.why));
+      // The places stepper opens the shared mark's card for either place.
+      expect(riskBarsMarkFor(bars, 'src/billing.ts', 'old', 12)).toBe(bars.ranges[0]!.id);
+      expect(riskBarsMarkFor(bars, 'src/billing.ts', 'new', 14)).toBe(bars.ranges[0]!.id);
+    }
+    expect(riskBarsOf(judged('high', [old]), FILES)!.ranges.map(({ side, line }) => `${side} ${line}`)).toEqual(['old 12']);
+    // A removed line and an added one at the same row of a split view are two lines: two marks.
+    expect(riskBarsOf(judged('high', [place('src/billing.ts', [11, 11], 'old'), place('src/billing.ts', [11, 11])]), FILES)!.ranges).toHaveLength(2);
   });
 
   test('Medium carries its places as High does; a removed line is marked on the old side', () => {
