@@ -20,6 +20,10 @@
     "./cli": {
       "types": "./bin/render.d.ts",
       "import": "./bin/render.js"
+    },
+    "./notices": {
+      "types": "./dist/notices.d.ts",
+      "import": "./dist/notices.js"
     }
   },
   "bin": {

@@ -31,4 +31,4 @@ Each entry in `parts` includes its kind, ID, title, references and bounds in the
 
 Run `npm test` in this directory. `npm pack` builds the package, including type declarations, the module worker and the four faces used for extended glyphs. The checked-in font geometry is the offline build input. To regenerate it, install Python fontTools and run `python3 scripts/generate-fonts.py /path/to/open-diagram` against upstream revision `387b2c09`. This extracts Inter 4.1 glyphs, advances, kerning and the default theme.
 
-The measured layout and typography are ported from Luke Deasy’s [open-diagram](https://github.com/lukendeasy/open-diagram). Its MIT notice is in [LICENSE](LICENSE). Inter font data is distributed under the [SIL Open Font License](fonts/OFL.txt).
+The measured layout and typography are ported from Luke Deasy’s [open-diagram](https://github.com/lukendeasy/open-diagram). Single-file applications can bundle the full notices with `import notices from "@plannotator/diagrams/notices"`. Its MIT notice is in [LICENSE](LICENSE). Inter font data is distributed under the [SIL Open Font License](fonts/OFL.txt).
