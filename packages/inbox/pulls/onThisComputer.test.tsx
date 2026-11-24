@@ -98,18 +98,22 @@ const fetches = (routes: Record<string, unknown>) => {
   return seen;
 };
 const REVIEWS: InboxReviewsAnswer = { fetched_at: null, hosts: [], rows: [], projects: {} };
-const page = (options: { project?: string | null; local?: LocalOpen | null; reviews?: InboxReviewsAnswer; onReviewLocal?: (review: ReviewBoxRequest) => void } = {}) => (
+const page = (options: { project?: string | null; local?: LocalOpen | null; reviews?: InboxReviewsAnswer; onReviewLocal?: (review: ReviewBoxRequest) => void; noProjects?: boolean } = {}) => (
   <SidebarProvider>
     <PullsPage
       state={{ model: LIST, reviews: options.reviews ?? REVIEWS, error: null, loading: false, refresh: () => {}, reload: () => {}, reloadRows: () => {} }}
       stackId={null}
       local={options.local ?? null}
       project={options.project ?? null}
-      projects={[{ id: 'prj_plannotator', name: 'plannotator', root: '/tmp/plannotator' } as never, { id: 'prj_spaces', name: 'spaces-site', root: '/tmp/spaces-site' } as never]}
-      projectNames={new Map([
-        ['prj_plannotator', 'plannotator'],
-        ['prj_spaces', 'spaces-site'],
-      ])}
+      projects={options.noProjects ? [] : [{ id: 'prj_plannotator', name: 'plannotator', root: '/tmp/plannotator' } as never, { id: 'prj_spaces', name: 'spaces-site', root: '/tmp/spaces-site' } as never]}
+      projectNames={
+        options.noProjects
+          ? new Map()
+          : new Map([
+              ['prj_plannotator', 'plannotator'],
+              ['prj_spaces', 'spaces-site'],
+            ])
+      }
       phone={false}
       onOpenStack={() => {}}
       filter="all"
@@ -271,7 +275,7 @@ test.skipIf(!hasDom)('past five rows, the Agents view\'s "N more" shows the rest
   expect(more()?.textContent).toBe('2 more');
 });
 
-test.skipIf(!hasDom)("one project with nothing here says so in the old list's words; the whole list, or a project not read, draws no group", async () => {
+test.skipIf(!hasDom)("one project with nothing here says so in the old list's words; the whole list, or a project not read, draws the heading and its + alone", async () => {
   const answer: InboxLocalWorkAnswer = { unread: 0, items: [], quiet: ['prj_spaces'], not_git: ['prj_plannotator'] };
   fetches({ '/reviews/local': answer });
   const reviews = { ...REVIEWS, projects: { 'github.com/charlie-dunn/spaces-site': ['prj_spaces'], 'github.com/charlie-dunn/plannotator': ['prj_plannotator'] } };
@@ -281,11 +285,35 @@ test.skipIf(!hasDom)("one project with nothing here says so in the old list's wo
   expect(document.querySelector('[data-local-none]')?.textContent).toBe('No other branch had a commit in the last 14 days.');
   await render(page({ project: 'prj_plannotator', reviews }));
   expect(document.querySelector('[data-local-none]')?.textContent).toBe("This project's folder isn't a git repository on this computer.");
-  // No filter: nothing to say for every project at once, no group.
+  // No filter: nothing to say for every project at once, so the heading and its + alone; nothing under it, open or not.
+  const bare = () => {
+    expect(group()).not.toBeNull();
+    expect(toggle().textContent?.trim()).toBe('On this computer');
+    expect(group()!.querySelector('[data-local-open]')).not.toBeNull();
+    expect(rows()).toHaveLength(0);
+    expect(document.querySelector('[data-local-none], [data-local-unread]')).toBeNull();
+    expect([...group()!.children].map((el) => el.className)).toEqual(['ib-pr-foldhead']);
+  };
   await render(page({ reviews }));
-  expect(group()).toBeNull();
-  // A project the answer did not read (past the cap, or its git unread): not "nothing".
+  bare();
+  // A project the answer did not read (past the cap, or its git unread): not "nothing", the + still there.
   await render(page({ project: 'prj_other', reviews }));
+  bare();
+});
+
+test.skipIf(!hasDom)('with no row, the + still opens the picker (a clean checkout can open a branch); with no project known, no group', async () => {
+  const projects = { projects: [{ project_id: 'prj_plannotator', folders: 0, branches: 4 }] };
+  fetches({ '/reviews/local/refs': projects, '/reviews/local': { unread: 0, items: [] } satisfies InboxLocalWorkAnswer });
+  await mount(page());
+  const plus = group()!.querySelector<HTMLButtonElement>('[data-local-open]')!;
+  expect(plus.getAttribute('aria-label')).toBe('Open branch or folder');
+  await act(async () => plus.click());
+  await settle();
+  expect(document.querySelector('[data-local-picker]')).not.toBeNull();
+  await act(async () => root!.unmount());
+  root = null;
+  document.body.innerHTML = '';
+  await mount(page({ noProjects: true }));
   expect(group()).toBeNull();
 });
 
