@@ -197,6 +197,7 @@ import { DEMO_DIFF } from './demoData';
 import { ReviewLoadError } from './components/ReviewLoadError';
 import { diffLoadFailureFromResponse, diffLoadFailureInfo, diffLoadUnreachable, type DiffLoadFailureInfo } from './utils/diffLoadFailure';
 import { exportReviewFeedback, buildProseFeedback, commitShaFromMode } from './utils/exportFeedback';
+import { newFileComment } from './utils/fileComment';
 import { parseDiffToFiles } from './utils/diffParser';
 import {
   ReviewSubmissionDialog,
@@ -3235,46 +3236,19 @@ const ReviewApp: React.FC = () => {
     handleAddAnnotationForFile(files[activeFileIndex].path, type, text, suggestedCode, originalCode, conventionalLabel, decorations, tokenMeta);
   }, [files, activeFileIndex, handleAddAnnotationForFile]);
 
-  const handleAddFileComment = useCallback((text: string) => {
-    const activeFile = files[activeFileIndex];
-    const trimmed = text.trim();
-    if (!activeFile || !trimmed) return;
-
-    const newAnnotation: CodeAnnotation = {
-      id: generateId(),
-      type: 'comment',
-      scope: 'file',
-      filePath: activeFile.path,
-      lineStart: 1,
-      lineEnd: 1,
-      side: 'new',
-      text: trimmed,
-      createdAt: Date.now(),
-      author: identity,
-    };
-
-    addCodeAnnotationsWithHistory([withPRContext(newAnnotation)]);
-  }, [files, activeFileIndex, identity, withPRContext, addCodeAnnotationsWithHistory]);
-
-  const handleAddFileCommentForFile = useCallback((filePath: string, text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-
-    const newAnnotation: CodeAnnotation = {
-      id: generateId(),
-      type: 'comment',
-      scope: 'file',
-      filePath,
-      lineStart: 1,
-      lineEnd: 1,
-      side: 'new',
-      text: trimmed,
-      createdAt: Date.now(),
-      author: identity,
-    };
-
+  // A file's comment keeps what the box attached (pictures, files), as a
+  // whole-file line comment does: saved in the draft, shown on the card, sent.
+  const handleAddFileCommentForFile = useCallback((filePath: string, text: string, images?: ImageAttachment[]) => {
+    const newAnnotation = newFileComment({ id: generateId(), filePath, text, images, createdAt: Date.now(), author: identity });
+    if (!newAnnotation) return;
     addCodeAnnotationsWithHistory([withPRContext(newAnnotation)]);
   }, [identity, withPRContext, addCodeAnnotationsWithHistory]);
+
+  const handleAddFileComment = useCallback((text: string, images?: ImageAttachment[]) => {
+    const activeFile = files[activeFileIndex];
+    if (!activeFile) return;
+    handleAddFileCommentForFile(activeFile.path, text, images);
+  }, [files, activeFileIndex, handleAddFileCommentForFile]);
 
   // A comment made in a whole-file view (explorer, step 2): a changed file's
   // Whole file, or a file the review does not change. Inside a hunk it is an
@@ -3282,7 +3256,8 @@ const ReviewApp: React.FC = () => {
   // was written on, so the agent and a PR's review body get the code quoted.
   const handleAddWholeFileAnnotation = useCallback((input: CodeFileAnnotationInput, options: { inDiff: boolean }) => {
     const text = input.text.trim();
-    if (!text) return;
+    // Pictures alone are a comment too (the box saves them): never dropped.
+    if (!text && !input.images?.length) return;
     const base: CodeAnnotation = {
       id: generateId(),
       type: 'comment',
@@ -3291,7 +3266,7 @@ const ReviewApp: React.FC = () => {
       lineStart: input.lineStart,
       lineEnd: input.lineEnd,
       side: 'new',
-      text,
+      ...(text ? { text } : {}),
       ...(input.images?.length ? { images: input.images } : {}),
       originalCode: input.originalCode,
       createdAt: Date.now(),

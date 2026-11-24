@@ -418,6 +418,8 @@ packages/review-editor/components/AllFilesCodeView.hostSemantic.test.tsx
 packages/review-editor/components/AllFilesCodeView.generated.test.tsx
 packages/review-editor/components/AllFilesCodeView.autoViewed.test.tsx
 packages/review-editor/components/AllFilesCodeView.imagePreview.test.tsx
+packages/review-editor/components/AllFilesCodeView.fileCommentAttachments.test.tsx
+packages/review-editor/components/DiffViewer.fileCommentAttachments.test.tsx
 packages/ui/utils/highlightCopy.test.ts
 packages/ui/components/Viewer.highlightCopy.test.tsx
 packages/ui/components/CodeFilePopout.highlightCopy.test.tsx
@@ -598,6 +600,7 @@ packages/ui/components/Settings.compactDisplay.test.tsx
 packages/ui/components/Settings.customFont.test.tsx
 packages/ui/components/Settings.documentTextSize.test.tsx
 packages/ui/components/Settings.documentSourceLineNumbers.test.tsx
+packages/ui/components/Settings.planWidth.test.tsx
 packages/ui/components/Settings.repoOwner.test.tsx
 packages/ui/components/Settings.experimental.test.tsx
 packages/ui/components/Settings.reviewDefaults.test.tsx
