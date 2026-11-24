@@ -392,6 +392,7 @@ import { agentSearchDoorAnswer, agentThreadsDoorAnswer } from "./inbox-far-find"
 import { farRemoteOf } from "./inbox-machine-agent-find";
 import { archivedAskOf, farRowTags, mergeArchived } from "./inbox-archived-merged";
 import { createShowArchived, type InboxShowArchived } from "./inbox-show-archived";
+import { nextSharedReactionsRev, settleSharedReactions, type SharedReactions } from "./inbox-reactions-shared";
 import { mergePullBoards } from "./inbox-machine-pulls";
 import { doorRefusesBare, replyIsStale } from "./inbox-outbox";
 import type { PairingProbes } from "./inbox-pairing-checks";
@@ -2969,10 +2970,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * answer and `event: reactions` carries it, so a window takes a list only
    * when it is newer than the last it took.
    */
-  const reactionsState = (): { reactions: InboxReaction[]; rev: number } => {
+  const reactionsState = (): SharedReactions => {
     const config = loadConfig();
     const rev = config.inboxReactionsRev;
-    return { reactions: parseInboxSavedReactions(config.inboxReactions) ?? [], rev: typeof rev === "number" && Number.isSafeInteger(rev) && rev > 0 ? rev : 0 };
+    return {
+      reactions: parseInboxSavedReactions(config.inboxReactions) ?? [],
+      rev: typeof rev === "number" && Number.isSafeInteger(rev) && rev > 0 ? rev : 0,
+      ...(config.inboxReactionsSynced === true ? { synced: true } : {}),
+    };
   };
   const reactionsWire = (state: { reactions: InboxReaction[]; rev: number }) => ({ reactions: state.reactions, reactions_rev: state.rev });
 
@@ -2981,14 +2986,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (body.reactions !== undefined) {
       const input = body.reactions;
       const list = parseInboxSavedReactions(input);
-      if (!list || !Array.isArray(input) || list.length !== input.length || input.length > INBOX_SAVED_REACTIONS_MAX) {
-        throw new InboxError("validation_error", `reactions: up to ${INBOX_SAVED_REACTIONS_MAX} of { emoji: one emoji, label?: string }, each emoji once.`, { field: "reactions" });
+      // A skill that is not a skill name is refused here (strict on write), not dropped as on read.
+      const skillDropped = (entry: unknown, i: number) =>
+        !!entry && typeof entry === "object" && (entry as { skill?: unknown }).skill !== undefined && list?.[i]?.skill !== (entry as { skill?: unknown }).skill;
+      if (!list || !Array.isArray(input) || list.length !== input.length || input.length > INBOX_SAVED_REACTIONS_MAX || input.some(skillDropped)) {
+        throw new InboxError("validation_error", `reactions: up to ${INBOX_SAVED_REACTIONS_MAX} of { emoji: one emoji, label?: string, skill?: a skill name }, each emoji once.`, { field: "reactions" });
       }
       return list;
     }
     const change = parseInboxReactionChange(body.reaction_change);
     if (!change) {
-      throw new InboxError("validation_error", "reaction_change: { op: add | remove, emoji } or { op: name, emoji, label } or { op: change, emoji, to }, each one emoji other than 👍.", { field: "reaction_change" });
+      throw new InboxError("validation_error", "reaction_change: { op: add | remove, emoji } or { op: name, emoji, label } or { op: change, emoji, to } or { op: skill, emoji, skill: a skill name or '' }, each one emoji other than 👍.", { field: "reaction_change" });
     }
     const list = applyInboxReactionChange(reactionsState().reactions, change);
     if (!list) throw new InboxError("validation_error", `reaction_change: your tray already has ${INBOX_SAVED_REACTIONS_MAX} emoji. Remove one to save another.`, { field: "reaction_change" });
@@ -3001,14 +3009,27 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (validateOnly) return before;
     // Nothing to change (a name for an emoji another window took out): no write, no event.
     if (JSON.stringify(before.reactions) === JSON.stringify(list)) return before;
-    const rev = before.rev + 1;
-    saveConfig({ inboxReactions: list, inboxReactionsRev: rev });
+    // One set on every linked machine (inbox-reactions-shared.ts): past the newest revision any of them holds.
+    return writeReactions(list, nextSharedReactionsRev(before.rev, machines?.reactionsCopies() ?? []));
+  };
+  const writeReactions = (list: InboxReaction[], rev: number, synced = false): { reactions: InboxReaction[]; rev: number } => {
+    saveConfig({ inboxReactions: list, inboxReactionsRev: rev, ...(synced ? { inboxReactionsSynced: true } : {}) });
     const saved = reactionsState();
     if (saved.rev !== rev || JSON.stringify(saved.reactions) !== JSON.stringify(list)) {
       throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     }
     for (const listener of reactionsListeners) listener(list, rev);
     return saved;
+  };
+  /**
+   * A linked machine's saved emoji, read in its list: taken when newer, or merged with this set the first time
+   * (inbox-reactions-shared.ts `settleSharedReactions`); every window here hears a change.
+   */
+  const adoptReactions = (far: SharedReactions): void => {
+    const held = reactionsState();
+    const next = settleSharedReactions(held, far);
+    if (next) writeReactions(next.reactions, next.rev, true);
+    else if (!held.synced) saveConfig({ inboxReactionsSynced: true });
   };
 
   /**
@@ -4345,9 +4366,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // once. Windows, and a linked machine that asks (`agent-faces=1`: a face writes no record, inbox-peer-link.ts).
         const onAgentFaces = (wire: InboxAgentFacesWire) => send(`event: agent-faces\ndata: ${JSON.stringify(wire)}\n\n`);
         if (windowId || url.searchParams.get("agent-faces") === "1") agentFaceListeners.add(onAgentFaces);
-        // The tray's saved emoji changed (any window's, a phone's too): every window takes the list at once. Windows only.
+        // The tray's saved emoji changed (any window's, a phone's, a linked machine's): every window takes the list at once.
+        // Windows, and a linked machine that asks (`reactions=1`: it reads this list and takes the newer set).
         const onReactions = (reactions: readonly InboxReaction[], rev: number) => send(`event: reactions\ndata: ${JSON.stringify({ reactions, rev })}\n\n`);
-        if (windowId) reactionsListeners.add(onReactions);
+        if (windowId || url.searchParams.get("reactions") === "1") reactionsListeners.add(onReactions);
         // The steps switch was saved (any window's): every window reads its settings and the open thread's steps again. Windows only.
         const onCapabilities = (changed?: "code_review" | "float_drafts" | "mark_read_warning" | "split_view" | "scheduled_threads" | "seam") => {
           const floats = floatDraftsOn();
@@ -6167,9 +6189,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const listed = faces ? rows.agents.map((group) => ({ ...group, faces: faces.faces, faces_rev: faces.rev, face_tiles: true as const })) : rows.agents;
         // Where this computer's agents live and what their panes say, as Rex says now, in every window; Show in Rex by where the window is.
         const agents = withRexPlaces(listed, phone ? null : thisComputersWindow(req, via) ? "here" : "away");
-        // And the "Show archived" switch, which every linked machine keeps the same (inbox-show-archived.ts), and the
-        // artifacts pinned here (mark `artifact-pins`): that machine's windows show them on this Inbox's threads.
-        const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state(), artifact_pins: artifactPinsWire(store.artifactPins()) } : {}) };
+        // And the "Show archived" switch, which every linked machine keeps the same (inbox-show-archived.ts), the
+        // artifacts pinned here (mark `artifact-pins`): that machine's windows show them on this Inbox's threads, and the
+        // saved reaction emoji (inbox-reactions-shared.ts).
+        const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state(), artifact_pins: artifactPinsWire(store.artifactPins()), reactions: reactionsState() } : {}) };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
         // the model, the labels too, goes as it is now. Without it, as before.
         const since = url.searchParams.get("since");
@@ -8216,6 +8239,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 ...(body.quote !== undefined ? { quote: body.quote } : {}),
                 // New thread from this message: no #tag read from the words, and no "still open" line under them.
                 ...(body.author_only === true ? { author_only: true } : {}),
+                // A skill emoji pressed in the reaction tray: kept on the reply; the words are the window's `/<skill>` reply.
+                ...(body.skill_reaction !== undefined ? { skill_reaction: body.skill_reaction } : {}),
               });
             } catch (error) {
               removeInboxAttachmentFiles(store.dir, attachments);
@@ -8573,6 +8598,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           showArchived.adopt(value);
         } catch {
           // config.json could not be written: this machine keeps its own switch until the next read.
+        }
+      },
+      reactionsSaid: (value) => {
+        try {
+          adoptReactions(value);
+        } catch {
+          // config.json could not be written: this machine keeps its own emoji until the next read.
         }
       },
       sentFrom: sentFromOf,

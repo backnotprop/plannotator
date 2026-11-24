@@ -174,6 +174,9 @@ import type { ThreadPaneProps } from '../thread/paneProps';
 export type { ThreadPaneProps };
 import { DeliveredLine, EndedActions } from '../parts/EndedActions';
 import { ReactionTray } from './ReactionTray';
+import { MessageReactHost, useMessageReactApi } from '../thread/MessageReactHost';
+import { ReactFace } from '../thread/ReactStrip';
+import { footAck } from '../thread/footAck';
 import { useHoldPress } from '../holdPress';
 import { threadChipName } from '../threadChip';
 import { OpenQuestionsButton } from './OpenQuestions';
@@ -299,18 +302,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const recipientName = (message: InboxMessageWire | null | undefined) => (isOtherAgent(message, firstAgent) ? agentName(message!.author) : asker);
   const agentMessages = thread.messages.filter((m) => m.author.kind === 'agent');
   const lastAgent = agentMessages[agentMessages.length - 1] ?? root;
-  // 👍 Looks good (design record "inbox-acknowledge"): on the agent's latest
-  // message, offered only while no question in the thread waits on the person
-  // (open or picked) and the thread is not archived.
-  const ackTarget = agentMessages.at(-1) ?? null;
-  // An action item counts like a question here (approval "inbox-next-actions"): the store refuses a 👍 while one waits.
-  const questionWaits = agentMessages.some((m) => [...(m.questions ?? []), ...(m.actions ?? [])].some((q) => q.state === 'open' || q.state === 'picked'));
-  // Nor once the person wrote back after it (their reply is the answer; its Sent / Delivered line stays).
-  const personWroteLast = lastNonNote(thread.messages)?.author.kind === 'person';
-  // Nor once it was sent (its Undo window closed): the reaction stays shown under the message with no button, and the
-  // agent's next message takes a new one (owner, 2026-11-07, approval "inbox-reaction-tray"; the store refuses a change).
-  const ackSent = ackTarget?.ack?.settled_seq != null;
-  const ackOffered = onAck !== undefined && ackTarget !== null && !archived && !questionWaits && !personWroteLast && !ackSent;
+  // The foot's 👍 Looks good (design record "inbox-acknowledge"): on the agent's latest message, while no question waits.
+  const { ackTarget, ackOffered } = footAck(thread.messages, onAck !== undefined, archived);
   const ackOn = ackTarget?.ack != null;
 
   // Action items: Done / Can't do it into the reply draft, or taken back, through the window or, without it, straight to the server.
@@ -4519,10 +4512,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const newest: MessageActs = { openFromReply, jumpTo, noteChips, openFromMessage, openOptionSet, pick, markAction, saveMessageComment, noteUnanchored, repaintHits, openListAt, onSide, toggleMessage, replyToMessage, quoteAtPress, setHeaderOpen, closeHeaderOnEscape, tryPrototype, takeBackOf, setPageStart, openFileRef };
   const acts = useRef(newest);
   acts.current = newest;
+  const reactApi = useMessageReactApi({ thread, onAck, agentOf: (m) => agentName(m.author), liveOf: liveMessage, reply: (m) => acts.current.replyToMessage(m), onToast, onChanged, announce });
   const copyHost: CopyMenuHost = {
     thread,
     phone,
     onToast, onChanged,
+    react: reactApi,
     linkOf: linkOf ?? ((messageId) => threadLink(thread.thread_id, null, window.location.origin, messageId)),
   };
   const newestCopyHost = useRef(copyHost);
@@ -4751,7 +4746,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         // A named session wrote here (issue #2450): every head's name column is wider, so the rows still line up.
         data-session-labels={thread.messages.some((m) => m.author.kind === 'agent' && labelOf(sessionLabels, m.author.session)) ? '' : undefined}
       >
-        {/* A focus target (the way back's fallback, a stacked thread), never a tab stop. */}
+        {/* A focus target (the way back's fallback, a stacked thread), never a tab stop. Reactions on every message: one host. */}
+        <MessageReactHost body={bodyRef} api={reactApi} copy={newestCopyHost} phone={phone} takeBackOf={(m) => acts.current.takeBackOf(m)} />
         {reviewView && <ReviewContextLine view={reviewView} thread={thread} onOpenGuide={onOpenGuide} />}
         <ThreadTagLine threadId={thread.thread_id} phone={phone} />
         {reviewView?.fromThread && (
@@ -5295,6 +5291,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     onMoved={onChanged}
                   />
                 )}
+                {!phone && reactApi.offered(message) && <ReactFace messageId={message.id} plain={reactApi.plain()} />}
               </div>
               </ArmScope>
             </article>,
@@ -5666,6 +5663,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   current={ackTarget!.ack?.reaction ?? null}
                   phone={phone}
                   onAck={(next, reaction, was) => onAck!(ackTarget!.id, next, agentName(ackTarget!.author), reaction, was)}
+                  onSkill={(reaction, from) => reactApi.react(ackTarget!, reaction, from)}
                   openRequest={trayRequest}
                 />
               )}

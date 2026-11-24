@@ -1159,6 +1159,16 @@ describe("the window's routes: settings, restart, favicon", () => {
       expect(full.status).toBe(422);
       expect(await settings()).toMatchObject({ reactions_rev: 7 });
       expect((await (await change({ op: "remove", emoji: "🚀" })).json()).reactions).toEqual([{ emoji: "🎉" }, { emoji: "🧪" }, { emoji: "👀" }, { emoji: "❤️" }]);
+
+      // A skill on a saved emoji (approval "inbox-reactions-every-message"): saved, read back, kept by a rename, '' takes it away.
+      expect((await (await change({ op: "skill", emoji: "🧪", skill: "review-recheck" })).json()).reactions[1]).toEqual({ emoji: "🧪", skill: "review-recheck" });
+      expect((await change({ op: "name", emoji: "🧪", label: "Test it" })).status).toBe(200);
+      expect(((await settings()).reactions as unknown[])[1]).toEqual({ emoji: "🧪", label: "Test it", skill: "review-recheck" });
+      expect((onDisk().inboxReactions as unknown[])[1]).toEqual({ emoji: "🧪", label: "Test it", skill: "review-recheck" });
+      expect((await change({ op: "skill", emoji: "🧪", skill: "not a skill" })).status).toBe(422);
+      const whole = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, reactions: [{ emoji: "🧪", skill: "../ledger" }] });
+      expect(whole.status).toBe(422);
+      expect((await (await change({ op: "skill", emoji: "🧪", skill: "" })).json()).reactions[1]).toEqual({ emoji: "🧪", label: "Test it" });
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;

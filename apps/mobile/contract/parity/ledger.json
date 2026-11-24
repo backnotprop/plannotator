@@ -22591,6 +22591,76 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-field-inboxack-standalone",
+      "title": "field:InboxAck.standalone",
+      "surface": [
+        "field:InboxAck.standalone"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-skill-reaction",
+      "title": "field:InboxMessageWire.skill_reaction",
+      "surface": [
+        "field:InboxMessageWire.skill_reaction"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxreaction-skill",
+      "title": "field:InboxReaction.skill",
+      "surface": [
+        "field:InboxReaction.skill"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxskillreaction-emoji",
+      "title": "field:InboxSkillReaction.emoji",
+      "surface": [
+        "field:InboxSkillReaction.emoji"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxskillreaction-skill",
+      "title": "field:InboxSkillReaction.skill",
+      "surface": [
+        "field:InboxSkillReaction.skill"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }
