@@ -5,7 +5,7 @@
  * logic lives here. Works whatever is on: it is how a capability that is off gets turned on.
  */
 
-import { INBOX_CAPABILITY_AGENT_IDS } from "@plannotator/core/inbox-capability-switches";
+import { INBOX_CAPABILITY_AGENT_IDS } from "@plannotator/core/inbox-types";
 import { hasHelpFlag } from "./cli";
 import { runInboxCallCommand, type CallCommandDeps } from "./inbox-call-command";
 import { writeWholeToStdout } from "./write-whole-stdout";

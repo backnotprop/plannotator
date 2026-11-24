@@ -7,7 +7,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { McpServer, createMcpHandler } from "@modelcontextprotocol/server";
-import type { InboxCapabilitySwitches, InboxCapabilitySwitchKey } from "@plannotator/core/inbox-capability-switches";
+import type { InboxCapabilitySwitches, InboxCapabilitySwitchKey } from "@plannotator/core/inbox-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { capabilityLineText, registerInboxCapabilityTool, type InboxCapabilityMcpContext } from "./inbox-mcp-capability";
 

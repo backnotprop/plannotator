@@ -53,7 +53,7 @@ import { checkTailnetAddress } from "./inbox-transport-tailnet";
 import type { FarArchived } from "./inbox-archived-merged";
 import type { InboxShowArchived } from "./inbox-show-archived";
 import { createFarRoutines } from "./inbox-scheduled-machines";
-import { inboxCapabilitySwitchesOf, type InboxCapabilitySwitches } from "@plannotator/core/inbox-capability-switches";
+import { inboxCapabilitySwitchesOf, type InboxCapabilitySwitches } from "@plannotator/core/inbox-types";
 
 /** The most rows a linked machine's door gives in one archived page (its `INBOX_ARCHIVED_PAGE_MAX`). */
 const FAR_ARCHIVED_LIMIT_MAX = 200;

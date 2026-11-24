@@ -8,7 +8,7 @@
 
 import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
-import { INBOX_CAPABILITY_AGENT_IDS, INBOX_CAPABILITY_SWITCHES, type InboxCapabilitySwitches, type InboxCapabilitySwitchKey } from "@plannotator/core/inbox-capability-switches";
+import { INBOX_CAPABILITY_AGENT_IDS, INBOX_CAPABILITY_SWITCHES, type InboxCapabilitySwitches, type InboxCapabilitySwitchKey } from "@plannotator/core/inbox-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { guarded, okComplete, PROJECT_PATH_DESCRIPTION } from "./inbox-mcp-result";
 import { NO_CHANGE_LINE } from "./inbox-mcp-scheduled";
