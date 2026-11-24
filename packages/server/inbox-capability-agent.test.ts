@@ -1,58 +1,37 @@
 /**
  * `plannotator inbox capability` on the Inbox's side (inbox-capability-agent.ts) against a stand-in context: no Inbox
- * runs. What regresses: a turn not taking, or taking on the wrong computer; the person's line posted twice, posted for
- * a turn that changed nothing, or not said when it had nowhere to go; a linked computer's held turn reported as done;
- * a linked computer too old for it, or a name that matches none, answered as if it worked; the route taking a field it
- * should refuse; a paired cloud agent's turn through the door not named as that agent, or naming someone else; the
- * answer naming a switch by a name the command does not take; the route answering another site's page or a request
- * through a device door.
+ * runs. What regresses: a turn not taking; the person's line posted twice, posted for a turn that changed nothing, or
+ * not said when it had nowhere to go; a `--computer` from before the one set refused, or turning anything but this
+ * computer's switch, or not said to be ignored; the route taking a field it should refuse; a paired cloud agent's turn
+ * through the door not named as that agent, or naming someone else; the answer naming a switch by a name the command
+ * does not take; the route answering another site's page or a request through a device door.
  */
 import { describe, expect, test } from "bun:test";
 import type { InboxCapabilitySwitches, InboxCapabilitySwitchKey } from "@plannotator/core/inbox-types";
-import { InboxError } from "@plannotator/shared/inbox/schema";
-import { capabilityAskOf, capabilityLineText, capabilityRoute, type InboxCapabilityContext } from "./inbox-capability-agent";
+import { capabilityAskOf, capabilityLineText, capabilityRoute, CAPABILITY_COMPUTER_IGNORED, type InboxCapabilityContext } from "./inbox-capability-agent";
 import { inboxAgentRouteAction } from "./inbox-agent-routes";
 
 type Result = { isError?: boolean; content: { text: string }[]; structuredContent?: Record<string, unknown> };
 
-function world(options: { far?: "online" | "away" | "older" | "last-said" } = {}) {
+function world() {
   const here: InboxCapabilitySwitches = { board: { on: false }, steps: { on: false }, scheduled_threads: { on: false }, bro: { on: false } };
-  const there: InboxCapabilitySwitches = { board: { on: true }, scheduled_threads: { on: false } };
   const lines: { thread: string | null; project: string | null; body: string; by: string }[] = [];
   const turns: string[] = [];
-  let settle: (end: { taken: boolean; why: string | null }) => void = () => {};
   const context: InboxCapabilityContext = {
     // The project an agent's path names: the line lands in it.
     resolveProject: async (path) => ({ id: `prj:${path}` }),
-      here: () => structuredClone(here),
-      set: async (key: InboxCapabilitySwitchKey, on: boolean) => {
-        turns.push(`here ${key} ${on}`);
-        here[key] = { on };
-        return structuredClone(here);
-      },
-      there: async (computer, change) => {
-        if (computer.toLowerCase() !== "studio") return null;
-        if (options.far === "older") throw new InboxError("machine_needs_update", "Update Plannotator on Studio: its capabilities cannot be turned from another computer yet. Nothing changed.");
-        if (options.far === "away" || options.far === "last-said") {
-          // Never read since this Inbox started (away), or read before it went away (last-said: board on, as it last said).
-          if (!change && options.far === "away") throw new InboxError("machine_offline", "Studio cannot be reached now.");
-          if (!change) return { name: "Studio", switches: structuredClone(there), held: null, awaySince: "2026-11-24T14:10:00.000Z", pending: [] };
-          turns.push(`Studio ${change.key} ${change.on} (held)`);
-          return { name: "Studio", switches: null, held: "Waiting for Studio: this applies when Studio is back.", settled: new Promise((resolve) => (settle = resolve)) };
-        }
-        if (change) {
-          turns.push(`Studio ${change.key} ${change.on}`);
-          there[change.key] = { on: change.on };
-        }
-        return { name: "Studio", switches: structuredClone(there), held: null };
-      },
-      linked: () => ["Studio"],
-      tell: async (by, thread, projectOf, body) => {
-        const project = thread ? null : await projectOf();
-        if (!thread && !project) return null;
-        lines.push({ thread, project, body, by: by.name });
-        return thread ?? "msg_new";
-      },
+    here: () => structuredClone(here),
+    set: async (key: InboxCapabilitySwitchKey, on: boolean) => {
+      turns.push(`here ${key} ${on}`);
+      here[key] = { on };
+      return structuredClone(here);
+    },
+    tell: async (by, thread, projectOf, body) => {
+      const project = thread ? null : await projectOf();
+      if (!thread && !project) return null;
+      lines.push({ thread, project, body, by: by.name });
+      return thread ?? "msg_new";
+    },
   };
   // As the route answers the command: `{ text, ...structured }`, or a refusal `<code>: <message>`.
   const call = async (args: Record<string, unknown>): Promise<Result> => {
@@ -60,7 +39,7 @@ function world(options: { far?: "online" | "away" | "older" | "last-said" } = {}
     const { text, code, error, ...structured } = (await response!.json()) as Record<string, unknown>;
     return response!.ok ? { content: [{ text: text as string }], structuredContent: structured } : { isError: true, content: [{ text: `${code}: ${error}` }] };
   };
-  return { here, there, lines, turns, context, call, settle: (end: { taken: boolean; why: string | null }) => settle(end) };
+  return { here, lines, turns, context, call };
 }
 
 const SHELL_NOW = "Agents get the routine action in their next session (a session's tools are listed once, at its start); from a shell it works now: `plannotator routine --help`.";
@@ -115,63 +94,22 @@ describe("plannotator inbox capability, on the Inbox's side", () => {
     expect(w.lines).toEqual([]);
   });
 
-  test("a linked computer's switch turns there, not here, and its line names it", async () => {
-    const w = world({ far: "online" });
-    expect((await w.call({ computer: "Studio" })).content[0]!.text).toBe("On Studio: board on, routines off.");
-    const turned = await w.call({ capability: "routines", on: true, computer: "studio" });
-    expect(turned.content[0]!.text).toBe("Turned on Routines on Studio. The person sees it in thread msg_new.");
-    expect([w.there.scheduled_threads, w.here.scheduled_threads]).toEqual([{ on: true }, { on: false }]);
-    expect(w.lines.map((line) => line.body)).toEqual(["Turned on Routines on Studio."]);
-    expect((await w.call({ capability: "board", on: true, computer: "Studio" })).content[0]!.text).toBe("Board was already on (Studio). Nothing changed.");
+  test("`computer` from before the one set: accepted, ignored, and said so; the turn is this computer's, with one line", async () => {
+    const w = world();
+    const turned = await w.call({ capability: "routines", on: true, computer: "Studio", thread_id: "msg_work" });
+    expect(turned.isError).toBeFalsy();
+    expect(turned.content[0]!.text).toBe(`Turned on Routines on this computer. The person sees it in thread msg_work. ${SHELL_NOW} ${CAPABILITY_COMPUTER_IGNORED}`);
+    expect([w.turns, w.lines.map((line) => line.body)]).toEqual([["here scheduled_threads true"], ["Turned on Routines."]]);
+    // A list and an "already" say it too; with no computer named, nothing is said of it.
+    expect((await w.call({ computer: "Mini" })).content[0]!.text).toBe(`On this computer: board off, checklist off, routines on, bro_mode off. ${CAPABILITY_COMPUTER_IGNORED}`);
+    expect((await w.call({ capability: "board", on: false, computer: "Studio" })).content[0]!.text).toBe(`Board was already off (this computer). Nothing changed. ${CAPABILITY_COMPUTER_IGNORED}`);
+    expect((await w.call({})).content[0]!.text).not.toContain("--computer");
     expect(w.lines).toHaveLength(1);
   });
 
-  test("a linked computer that is away holds the turn: the result and the line say it applies when it is back", async () => {
-    const w = world({ far: "away" });
-    const held = await w.call({ capability: "board", on: false, computer: "Studio", thread_id: "msg_work" });
-    expect(held.content[0]!.text).toBe("Asked Studio to turn Board off. Waiting for Studio: this applies when Studio is back. The person sees it in thread msg_work.");
-    expect(w.turns).toEqual(["Studio board false (held)"]);
-    expect(w.lines.map((line) => line.body)).toEqual(["Turned off Board on Studio. It applies when Studio is back."]);
-    // Taken when it is back: nothing more is said.
-    w.settle({ taken: true, why: null });
-    await Bun.sleep(0);
-    expect(w.lines).toHaveLength(1);
-  });
-
-  test("a held turn that computer refuses when it is back: one more line, in the same thread", async () => {
-    const w = world({ far: "away" });
-    await w.call({ capability: "routines", on: true, computer: "Studio" });
-    w.settle({ taken: false, why: "Routines are not offered on this computer." });
-    await Bun.sleep(0);
-    expect(w.lines.map((line) => [line.thread, line.body])).toEqual([
-      [null, "Turned on Routines on Studio. It applies when Studio is back."],
-      ["msg_new", "Studio did not turn on Routines: Routines are not offered on this computer."],
-    ]);
-  });
-
-  test("away, its switches are as it last said: listed as such, and never taken as current for a turn", async () => {
-    const w = world({ far: "last-said" });
-    const listed = await w.call({ computer: "Studio" });
-    expect(listed.content[0]!.text).toBe("On Studio: board on, routines off. Studio is away: these are as it last said, at 2026-11-24T14:10:00.000Z.");
-    expect(listed.structuredContent).toMatchObject({ away: true, read_at: "2026-11-24T14:10:00.000Z" });
-    // Board on, as it last said: not "already on"; the turn is held for it.
-    const turned = await w.call({ capability: "board", on: true, computer: "Studio", thread_id: "msg_work" });
-    expect(turned.content[0]!.text).toBe("Asked Studio to turn Board on. Waiting for Studio: this applies when Studio is back. The person sees it in thread msg_work.");
-    expect(w.turns).toEqual(["Studio board true (held)"]);
-  });
-
-  test("an older linked computer, or a name that matches none, changes nothing and says why", async () => {
-    const older = world({ far: "older" });
-    const refused = await older.call({ capability: "routines", on: true, computer: "Studio" });
-    expect([refused.isError, refused.content[0]!.text]).toEqual([true, "machine_needs_update: Update Plannotator on Studio: its capabilities cannot be turned from another computer yet. Nothing changed."]);
-    const unknown = await older.call({ capability: "routines", on: true, computer: "Mini" });
-    expect(unknown.content[0]!.text).toBe("machine_not_found: No linked computer is named Mini. Linked: Studio. Leave computer out for this computer.");
-    expect([older.turns, older.lines]).toEqual([[], []]);
-  });
-
-  test("the person's line: which way, which capability, and the computer only when it is not this one", () => {
-    expect(capabilityLineText("Checklist", false, null, false)).toBe("Turned off Checklist.");
-    expect(capabilityLineText("Routines", true, "Studio", false)).toBe("Turned on Routines on Studio.");
+  test("the person's line: which way, which capability", () => {
+    expect(capabilityLineText("Checklist", false)).toBe("Turned off Checklist.");
+    expect(capabilityLineText("Routines", true)).toBe("Turned on Routines.");
   });
 
   test("the route refuses a field it does not take, and a capability or a state an agent cannot name", () => {
@@ -180,24 +118,19 @@ describe("plannotator inbox capability, on the Inbox's side", () => {
     expect(() => capabilityAskOf({ capability: "routines", on: "yes" })).toThrow("on: true or false.");
   });
 
-  test("every name the answer prints is one the command takes back: the switches, and the turns that wait for a computer", async () => {
+  test("every name the answer prints is one the command takes back", async () => {
     const w = world();
     const listed = await w.call({});
     const here = Object.keys(listed.structuredContent!.capabilities as object);
     expect(here).toEqual(["board", "checklist", "routines", "bro_mode"]);
     for (const name of here) expect([name, (await w.call({ capability: name, on: true })).isError ?? false]).toEqual([name, false]);
-    // A linked computer away, with turns that wait for it.
-    w.context.there = async () => ({ name: "Studio", switches: { board: { on: true }, steps: { on: false }, scheduled_threads: { on: false }, bro: { on: false } }, held: null, awaySince: "2026-11-24T14:10:00.000Z", pending: ["scheduled_threads", "steps"] });
-    const far = (await w.call({ computer: "Studio" })).structuredContent!;
-    expect(far.waiting).toEqual(["routines", "checklist"]);
-    for (const name of [...Object.keys(far.capabilities as object), ...(far.waiting as string[])]) expect(capabilityAskOf({ capability: name, on: true }).capability).toBe(name);
   });
 
-  test("a list by GET, here or on a linked computer by its name", async () => {
-    const w = world({ far: "online" });
+  test("a list by GET; a `?computer=` is ignored and said so", async () => {
+    const w = world();
     const get = async (query: string) => (await (await capabilityRoute(new Request(`http://127.0.0.1/api/inbox/capability${query}`), new URL(`http://127.0.0.1/api/inbox/capability${query}`), w.context, async () => ({})))!.json()) as Record<string, unknown>;
     expect((await get("")).text).toBe("On this computer: board off, checklist off, routines off, bro_mode off.");
-    expect(await get("?computer=Studio")).toMatchObject({ text: "On Studio: board on, routines off.", computer: "Studio" });
+    expect((await get("?computer=Studio")).text).toBe(`On this computer: board off, checklist off, routines off, bro_mode off. ${CAPABILITY_COMPUTER_IGNORED}`);
     expect(w.turns).toEqual([]);
   });
 });
@@ -212,9 +145,9 @@ describe("the route is this computer's agents' own", () => {
   };
 
   test("another site's page is refused, a read and a write: nothing turns and nothing is told", async () => {
-    const w = world({ far: "online" });
+    const w = world();
     for (const headers of [{ Origin: "https://elsewhere.example" }, { "Sec-Fetch-Site": "cross-site" }, { Origin: "http://127.0.0.1:41000", "Sec-Fetch-Site": "same-site" }, { Origin: "null" }]) {
-      expect(await answer(ask({ headers }, "?computer=Studio"), w)).toEqual([403, "cross_origin"]);
+      expect(await answer(ask({ headers }), w)).toEqual([403, "cross_origin"]);
       expect(await answer(ask({ method: "POST", headers: { ...headers, "Content-Type": "text/plain" }, body: turn }), w)).toEqual([403, "cross_origin"]);
     }
     expect([w.turns, w.lines, w.here.scheduled_threads]).toEqual([[], [], { on: false }]);
@@ -224,11 +157,9 @@ describe("the route is this computer's agents' own", () => {
   });
 
   test("through a device door (a phone, a linked computer) it is not found, a read or a write: nothing turns and nothing is told", async () => {
-    const w = world({ far: "online" });
+    const w = world();
     expect(await answer(ask({}), w, true)).toEqual([404, "not_found"]);
-    expect(await answer(ask({}, "?computer=Studio"), w, true)).toEqual([404, "not_found"]);
     expect(await answer(ask({ method: "POST", body: turn }), w, true)).toEqual([404, "not_found"]);
-    expect(await answer(ask({ method: "POST", body: JSON.stringify({ capability: "board", on: false, computer: "Studio" }) }), w, true)).toEqual([404, "not_found"]);
     expect([w.turns, w.lines]).toEqual([[], []]);
   });
 });
@@ -254,9 +185,9 @@ describe("a paired cloud agent's turn, through the agent door's route", () => {
     expect(door.seen).toHaveLength(1);
   });
 
-  test("a list goes as a read, a linked computer's too", async () => {
+  test("a list goes as a read", async () => {
     const door = handled();
-    await inboxAgentRouteAction(door.handle, by, "route", { method: "GET", path: "/api/inbox/capability?computer=Studio" });
-    expect(door.seen.map((one) => [one.method, one.path])).toEqual([["GET", "/api/inbox/capability?computer=Studio"]]);
+    await inboxAgentRouteAction(door.handle, by, "route", { method: "GET", path: "/api/inbox/capability" });
+    expect(door.seen.map((one) => [one.method, one.path])).toEqual([["GET", "/api/inbox/capability"]]);
   });
 });

@@ -1,6 +1,8 @@
 /**
- * `plannotator inbox capability [<capability> on|off] [--computer <name>] [--thread <id>]`: the Inbox's capability
- * switches from a shell, for an agent the person asks (packages/server/inbox-capability-agent.ts). A command and not
+ * `plannotator inbox capability [<capability> on|off] [--thread <id>]`: the Inbox's capability switches from a shell,
+ * for an agent the person asks (packages/server/inbox-capability-agent.ts). A turn applies on every linked computer
+ * (one set of switches), so there is no computer to name: `--computer <name>`, from before, is still taken for one
+ * release and passed on, and the Inbox's answer says it was ignored. A command and not
  * an action of the agent tool (the owner, 2026-11-24): a thin client over the Inbox's `/api/inbox/capability` on this
  * computer's listener, or for a paired cloud agent through the agent door (`inboxPairedRouteFetch`), as `inbox rows`
  * is. Who is calling is what `inbox call` takes it to be (`inboxCallerOf`), so the person's line is the agent's. Works
@@ -23,13 +25,12 @@ const REQUEST_TIMEOUT_MS = 30_000;
 
 export const INBOX_CAPABILITY_USAGE = [
   "Usage:",
-  "  plannotator inbox capability [--computer <name>]",
-  "  plannotator inbox capability <capability> on|off [--computer <name>] [--thread <id>]",
+  "  plannotator inbox capability",
+  "  plannotator inbox capability <capability> on|off [--thread <id>]",
   "",
   "Lists the Inbox's capabilities (Settings → Capabilities) and whether each is on, or turns one on or off.",
   "Turn one on or off when the person asks you to; not on your own initiative.",
   `<capability>: ${INBOX_CAPABILITY_AGENT_IDS.join(", ")}.`,
-  "--computer <name>: a linked computer's name, as the Inbox shows it. Default: this computer.",
   "--thread <id>: the thread you work in; the line for the person goes there.",
   "--session <id>: as for 'plannotator inbox call'.",
   "",

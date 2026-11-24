@@ -457,6 +457,12 @@ export interface PlannotatorConfig {
    */
   inboxShowArchived?: { on: boolean; rev: number; by: string | null };
   /**
+   * When the person last flipped each Settings → Capabilities switch (`board`, `steps`, …, `grid`; ms since 1970) and
+   * on which Inbox (`ibx_…`): the newer flip wins on every linked computer (packages/server/inbox-capability-set.ts).
+   * A switch with no entry was never flipped since this was kept. The switches themselves stay in their own keys.
+   */
+  inboxCapabilityFlips?: Record<string, { at: number; by: string | null }>;
+  /**
    * The defaults `inboxRows` was saved under (core `INBOX_ROWS_DEFAULTS_VERSION`, 2: smaller thread names on).
    * Unset: saved before that, so an empty `inboxRows` is read as today's defaults (core `inboxRowsSaved`).
    */

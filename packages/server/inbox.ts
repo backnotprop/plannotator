@@ -407,6 +407,7 @@ import { agentSearchDoorAnswer, agentThreadsDoorAnswer } from "./inbox-far-find"
 import { farRemoteOf } from "./inbox-machine-agent-find";
 import { archivedAskOf, farRowTags, mergeArchived } from "./inbox-archived-merged";
 import { createShowArchived, type InboxShowArchived } from "./inbox-show-archived";
+import { capabilitySetKeysIn, createCapabilitySet } from "./inbox-capability-set";
 import { nextSharedReactionsRev, settleSharedReactions, type SharedReactions } from "./inbox-reactions-shared";
 import { mergePullBoards } from "./inbox-machine-pulls";
 import { doorRefusesBare, replyIsStale } from "./inbox-outbox";
@@ -1381,7 +1382,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
   const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
   /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: which one, for a switch whose frame names it only then. */
-  const capabilityListeners = new Set<(changed?: "code_review" | "float_drafts" | "mark_read_warning" | "split_view" | "scheduled_threads" | "seam") => void>();
+  const capabilityListeners = new Set<(changed?: "code_review" | "float_drafts" | "mark_read_warning" | "split_view" | "scheduled_threads" | "seam" | "experimental") => void>();
   /** "Over your tailnet" published by itself once Tailscale came back: the windows' streams say `event: tailscale` with the new state. */
   const tailscaleListeners = new Set<() => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
@@ -1922,7 +1923,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...(options.mcpNow ? { now: options.mcpNow } : {}),
   };
   // `plannotator inbox capability` (inbox-capability-agent.ts): this computer's switches, turned through the settings
-  // route as Settings turns them; a linked computer's through the forward, as its Settings group does.
+  // route as Settings turns them, so every linked computer takes the flip (inbox-capability-set.ts).
   const capabilityAgent: InboxCapabilityContext = {
     resolveProject,
     here: () => inboxCapabilitySwitchesOf(settingsModel("local", false, null, false)),
@@ -1932,8 +1933,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (!answer.ok) throw new InboxError(typeof body.code === "string" ? body.code : "validation_error", typeof body.error === "string" ? body.error : "The switch did not turn.");
       return inboxCapabilitySwitchesOf(settingsModel("local", false, null, false));
     },
-    there: async (computer, change, by) => (machines ? machines.capabilitiesOn(computer, change, by ?? null) : null),
-    linked: () => machines?.linkedNames() ?? [],
     // `project`: the agent's own project, by the lookup of the door it came through (a paired agent's is the door's).
     tell: async (by, threadId, project, body) => {
       const author = { kind: "agent" as const, host: by.host, session: by.session, name: by.name };
@@ -4097,6 +4096,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (Object.entries(change).some(([key, on]) => saved?.[key] !== on)) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     // Grid turned on or off: the linked machines are asked again with or without Grid's fields and looks.
     if (gridOn() !== gridWas) machines?.gridChanged();
+    // Every window follows at once (its Settings switch, Grid's sidebar row, Decision mode).
+    for (const listener of capabilityListeners) listener("experimental");
     return experimentalState();
   };
 
@@ -4412,6 +4413,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // (`show-archived=1`: a switch writes no record, inbox-peer-link.ts).
         const stopShowArchived =
           windowId || url.searchParams.get("show-archived") === "1" ? showArchived.subscribe(({ on, rev }) => send(`event: show-archived\ndata: ${JSON.stringify({ on, rev })}\n\n`)) : () => {};
+        // A capability switch flipped or taken here: a linked computer that asks reads this list and takes the newer flip.
+        const stopCapabilitySet = url.searchParams.get("capability-set") === "1" ? capabilitySet.subscribe(() => send(`event: capability-set\ndata: {}\n\n`)) : () => {};
         // The sidebar's layout was saved (any window's, a phone's too): every window takes it at once. Windows only.
         const onSidebar = (sidebar: InboxSidebarLayout, rev: number) => send(`event: sidebar\ndata: ${JSON.stringify({ sidebar, rev })}\n\n`);
         if (windowId) sidebarListeners.add(onSidebar);
@@ -4424,9 +4427,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const onReactions = (reactions: readonly InboxReaction[], rev: number) => send(`event: reactions\ndata: ${JSON.stringify({ reactions, rev })}\n\n`);
         if (windowId || url.searchParams.get("reactions") === "1") reactionsListeners.add(onReactions);
         // The steps switch was saved (any window's): every window reads its settings and the open thread's steps again. Windows only.
-        const onCapabilities = (changed?: "code_review" | "float_drafts" | "mark_read_warning" | "split_view" | "scheduled_threads" | "seam") => {
+        const onCapabilities = (changed?: "code_review" | "float_drafts" | "mark_read_warning" | "split_view" | "scheduled_threads" | "seam" | "experimental") => {
           const floats = floatDraftsOn();
-          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...(changed === "split_view" ? { split_view: { on: splitViewOn() } } : {}), code_review: { on: codeReviewOn() }, ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
+          // Decision mode and Grid: only when one of them was the change (a linked computer's flip taken here, too).
+          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...(changed === "split_view" ? { split_view: { on: splitViewOn() } } : {}), ...(changed === "experimental" ? { experimental: experimentalState() } : {}), code_review: { on: codeReviewOn() }, ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
           // Routines: while on, and to the save that turned them off.
           if (scheduledCap.on() || changed === "scheduled_threads") Object.assign(frame, scheduledCap.wire());
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
@@ -4478,6 +4482,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           rowsListeners.delete(onRows);
           soundListeners.delete(onSound);
           stopShowArchived();
+          stopCapabilitySet();
           sidebarListeners.delete(onSidebar);
           agentFaceListeners.delete(onAgentFaces);
           reactionsListeners.delete(onReactions);
@@ -5420,6 +5425,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   scheduled.sync();
   if (scheduledCap.on()) void scheduledCap.syncLogin();
+  // One set of Capabilities switches across linked computers (inbox-capability-set.ts): a switch an env var, the build
+  // or a test decides here is not shared. Taking a flip turns it as its Settings row does.
+  const experimentalFree = (feature: "decision-mode" | "grid") => parseExperimentalEnv(feature) === undefined;
+  const capabilitySet = createCapabilitySet({
+    switches: {
+      board: { on: boardOn, shared: () => INBOX_CARD_ACTION_ON && options.board === undefined, apply: (on) => saveBoard({ on }) },
+      steps: { on: stepsOn, shared: () => options.steps === undefined, apply: (on) => saveSteps({ on }) },
+      scheduled_threads: { on: scheduledCap.on, shared: () => options.scheduled === undefined && scheduledCap.wire().scheduled_threads !== undefined, apply: (on) => scheduledCap.answer({ scheduled_threads: { on } }) },
+      code_review: { on: codeReviewOn, shared: () => options.codeReview === undefined, apply: (on) => saveCodeReview({ on }) },
+      chapter_diagrams: { on: chapterDiagramsOn, shared: () => options.chapterDiagrams === undefined, apply: (on) => saveChapterDiagrams({ on }) },
+      bro: { on: broOn, shared: () => true, apply: (on) => saveBro({ on }) },
+      float_drafts: { on: floatDraftsOn, shared: () => true, apply: (on) => saveFloatDrafts({ on }) },
+      decision_mode: { on: decisionModeOn, shared: () => experimentalFree("decision-mode"), apply: (on) => saveExperimental({ decision_mode: on }) },
+      grid: { on: gridOn, shared: () => experimentalFree("grid"), apply: (on) => saveExperimental({ grid: on }) },
+    },
+    times: () => loadConfig().inboxCapabilityFlips,
+    saveTimes: (times) => void saveConfig({ inboxCapabilityFlips: times }),
+    self: () => machines?.selfId ?? null,
+  });
   routinesIntroUndecided = (waits) =>
     snoozeIntroRelease &&
     routinesIntroOpen({
@@ -6411,8 +6435,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const agents = withRexPlaces(listed, phone ? null : thisComputersWindow(req, via) ? "here" : "away");
         // And the "Show archived" switch, which every linked machine keeps the same (inbox-show-archived.ts), the
         // artifacts pinned here (mark `artifact-pins`): that machine's windows show them on this Inbox's threads, and the
-        // saved reaction emoji (inbox-reactions-shared.ts).
-        const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state(), artifact_pins: artifactPinsWire(store.artifactPins()), reactions: reactionsState() } : {}) };
+        // saved reaction emoji (inbox-reactions-shared.ts), and the capability switches with their flips (inbox-capability-set.ts).
+        const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state(), artifact_pins: artifactPinsWire(store.artifactPins()), reactions: reactionsState(), capability_set: capabilitySet.wire() } : {}) };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
         // the model, the labels too, goes as it is now. Without it, as before.
         const since = url.searchParams.get("since");
@@ -7553,6 +7577,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const chapterDiagrams = body.chapter_diagrams === undefined ? chapterDiagramsWire() : { chapter_diagrams: saveChapterDiagrams(body.chapter_diagrams) };
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
+        // The person's flips, stamped now: every linked computer takes them (inbox-capability-set.ts).
+        capabilitySet.flipped(capabilitySetKeysIn(body));
         const showArchivedNow = showArchivedOn === undefined ? showArchived.state() : saveShowArchived(showArchivedOn);
         return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, ...(body.sound === undefined ? {} : { sound_rev: soundRev }), tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, agent_status: agentStatusNow, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, code_review: { on: codeReview.on }, ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
       }
@@ -8867,6 +8893,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           // config.json could not be written: this machine keeps its own emoji until the next read.
         }
       },
+      // Each flip newer than this computer's is taken (inbox-capability-set.ts); a switch not saved stays until the next read.
+      capabilitySetSaid: (value) => void capabilitySet.take(value).catch(() => {}),
       sentFrom: sentFromOf,
       timings: options.machineLinkTimings,
     });

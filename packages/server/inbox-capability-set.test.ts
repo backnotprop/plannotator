@@ -1,0 +1,338 @@
+/**
+ * One set of Settings → Capabilities switches across linked computers (inbox-capability-set.ts). No Inbox runs: two
+ * computers are two sets over stand-in switches, meeting as their lists do (each takes the other's `capability_set`);
+ * the link part is this Inbox's real machines and PeerLink against a stand-in far door on loopback
+ * (PLANNOTATOR_TEST_SANDBOX lets the transport take it).
+ *
+ * What regresses: a flip on one computer not applied on the other, or the older flip winning; a computer that was away
+ * keeping its old switch when it is back; two computers that both flipped while apart settling on different answers;
+ * first contact (no flip recorded on either side) turning off what one of them uses; a computer with no recorded flip
+ * beating one that has one; a switch an env var forces given as a flip, or a far flip turning it; a flip made right
+ * after taking a far one losing to it on a slower clock; a take telling the linked computers when nothing changed; an
+ * older Plannotator's list taken (it keeps its own); this Inbox not asking for the event that says a flip was made.
+ */
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { INBOX_CAPABILITY_SET_KEYS, type InboxCapabilitySetKey } from "@plannotator/core/inbox-types";
+import { CAPABILITY_SET_MARK, capabilitySetKeysIn, compareCapabilityFlips, createCapabilitySet, readCapabilitySet, type CapabilitySet } from "./inbox-capability-set";
+import { createInboxMachines } from "./inbox-machines";
+import { InboxLinks } from "./inbox-links";
+
+const LAPTOP = `ibx_${"0".repeat(25)}1`;
+const STUDIO = `ibx_${"0".repeat(25)}2`;
+
+/** One computer: its switches, its config.json flips, its clock, what it turned and how often it told its links. */
+function computer(id: string, start: Partial<Record<InboxCapabilitySetKey, boolean>> = {}, options: { forced?: InboxCapabilitySetKey[]; clock?: number; failing?: InboxCapabilitySetKey[] } = {}) {
+  const on = Object.fromEntries(INBOX_CAPABILITY_SET_KEYS.map((key) => [key, start[key] ?? false])) as Record<InboxCapabilitySetKey, boolean>;
+  let config: unknown;
+  const applied: string[] = [];
+  const state = { clock: options.clock ?? 1_000, told: 0 };
+  const set = createCapabilitySet({
+    switches: Object.fromEntries(
+      INBOX_CAPABILITY_SET_KEYS.map((key) => [
+        key,
+        {
+          on: () => on[key],
+          shared: () => !options.forced?.includes(key),
+          apply: (value: boolean) => {
+            if (options.failing?.includes(key)) throw new Error("config.json could not be saved");
+            applied.push(`${key} ${value}`);
+            on[key] = value;
+          },
+        },
+      ]),
+    ) as never,
+    times: () => config,
+    saveTimes: (times) => void (config = structuredClone(times)),
+    self: () => id,
+    now: () => state.clock,
+  });
+  set.subscribe(() => state.told++);
+  return {
+    on,
+    set,
+    applied,
+    state,
+    flips: () => config,
+    /** The person's row: the switch saves, then the settings route stamps the flip. */
+    flip(key: InboxCapabilitySetKey, value: boolean, at = state.clock) {
+      state.clock = at;
+      on[key] = value;
+      set.flipped([key]);
+    },
+  };
+}
+type Computer = ReturnType<typeof computer>;
+
+/** Two linked computers read each other's lists (in either order). */
+async function meet(a: Computer, b: Computer) {
+  await a.set.take(b.set.wire());
+  await b.set.take(a.set.wire());
+}
+
+describe("one set of switches across linked computers", () => {
+  test("a flip on one applies on the other, both ways, the newer flip winning", async () => {
+    const laptop = computer(LAPTOP);
+    const studio = computer(STUDIO);
+    laptop.flip("board", true, 1_000);
+    await meet(laptop, studio);
+    expect([laptop.on.board, studio.on.board, studio.applied]).toEqual([true, true, ["board true"]]);
+    // Taken as of the person's flip there, never as a new one here.
+    expect(studio.set.wire().board).toEqual({ on: true, at: 1_000, by: LAPTOP });
+    studio.flip("board", false, 2_000);
+    await meet(studio, laptop);
+    expect([laptop.on.board, studio.on.board, laptop.applied]).toEqual([false, false, ["board false"]]);
+    // Met again: nothing more turns.
+    await meet(laptop, studio);
+    expect([laptop.applied.length, studio.applied.length]).toEqual([1, 1]);
+  });
+
+  test("a computer away while a switch flips takes it when it is back", async () => {
+    const laptop = computer(LAPTOP);
+    const studio = computer(STUDIO, { steps: true });
+    await meet(laptop, studio);
+    // Studio is away: Laptop's flip waits for the next meeting, with its time.
+    laptop.flip("steps", false, 5_000);
+    expect(studio.on.steps).toBe(true);
+    await studio.set.take(laptop.set.wire());
+    expect([studio.on.steps, studio.set.wire().steps]).toEqual([false, { on: false, at: 5_000, by: LAPTOP }]);
+  });
+
+  test("both flipped while apart: the newer flip of each switch wins, the same on both, whichever reads first", async () => {
+    for (const order of ["laptop first", "studio first"]) {
+      const laptop = computer(LAPTOP);
+      const studio = computer(STUDIO);
+      laptop.flip("board", true, 1_000);
+      studio.flip("board", false, 3_000);
+      laptop.flip("steps", true, 4_000);
+      studio.flip("steps", false, 2_000);
+      if (order === "laptop first") await meet(laptop, studio);
+      else await meet(studio, laptop);
+      expect([order, laptop.on.board, studio.on.board, laptop.on.steps, studio.on.steps]).toEqual([order, false, false, true, true]);
+    }
+  });
+
+  test("first contact, neither side ever flipped it: on wins, so nothing in use on one computer goes away", async () => {
+    const laptop = computer(LAPTOP, { scheduled_threads: true, grid: true });
+    const studio = computer(STUDIO, { bro: true });
+    await meet(laptop, studio);
+    for (const key of ["scheduled_threads", "grid", "bro"] as const) expect([key, laptop.on[key], studio.on[key]]).toEqual([key, true, true]);
+    expect([laptop.on.board, studio.on.board]).toEqual([false, false]);
+    // Taken with no time: neither person flipped it.
+    expect(studio.set.wire().scheduled_threads).toEqual({ on: true, at: null, by: null });
+    expect(studio.flips()).toBeUndefined();
+  });
+
+  test("a side with a recorded flip beats a side without, even off over on", async () => {
+    const laptop = computer(LAPTOP, { code_review: true });
+    const studio = computer(STUDIO);
+    studio.flip("code_review", false, 1_000);
+    await meet(laptop, studio);
+    expect([laptop.on.code_review, studio.on.code_review]).toEqual([false, false]);
+  });
+
+  test("the same time on both: the higher Inbox id stands, on either computer", () => {
+    const a = { on: true, at: 1_000, by: LAPTOP };
+    const b = { on: false, at: 1_000, by: STUDIO };
+    expect([compareCapabilityFlips(b, a) > 0, compareCapabilityFlips(a, b) < 0]).toEqual([true, true]);
+    expect(compareCapabilityFlips({ on: true, at: null, by: null }, { on: false, at: null, by: null })).toBeGreaterThan(0);
+  });
+
+  test("a flip made right after taking a far one stands over it, though this computer's clock is behind", async () => {
+    const laptop = computer(LAPTOP, {}, { clock: 9_000 });
+    const studio = computer(STUDIO, {}, { clock: 1_000 });
+    laptop.flip("float_drafts", true);
+    await meet(laptop, studio);
+    studio.flip("float_drafts", false);
+    expect(studio.set.wire().float_drafts).toEqual({ on: false, at: 9_001, by: STUDIO });
+    await meet(studio, laptop);
+    expect([laptop.on.float_drafts, studio.on.float_drafts]).toEqual([false, false]);
+  });
+
+  test("a switch an env var forces here is neither given nor taken, and stays as it is forced", async () => {
+    const laptop = computer(LAPTOP, { decision_mode: true }, { forced: ["decision_mode"] });
+    const studio = computer(STUDIO);
+    expect(laptop.set.wire().decision_mode).toBeUndefined();
+    await meet(laptop, studio);
+    expect([laptop.on.decision_mode, studio.on.decision_mode]).toEqual([true, false]);
+    studio.flip("decision_mode", false, 2_000);
+    laptop.flip("decision_mode", true, 3_000);
+    await meet(laptop, studio);
+    expect([laptop.on.decision_mode, studio.on.decision_mode, laptop.applied, studio.applied]).toEqual([true, false, [], []]);
+    // The forced computer recorded no flip for it either.
+    expect(laptop.flips()).toBeUndefined();
+  });
+
+  test("a take that turns something tells the linked computers (so a third one hears); one that turns nothing does not", async () => {
+    const laptop = computer(LAPTOP);
+    const studio = computer(STUDIO);
+    laptop.flip("bro", true, 1_000);
+    expect(laptop.state.told).toBe(1);
+    await studio.set.take(laptop.set.wire());
+    expect(studio.state.told).toBe(1);
+    await studio.set.take(laptop.set.wire());
+    await laptop.set.take(studio.set.wire());
+    expect([laptop.state.told, studio.state.told]).toEqual([1, 1]);
+  });
+
+  test("a switch that cannot be saved here keeps its state and its flip until the next read", async () => {
+    const laptop = computer(LAPTOP);
+    const studio = computer(STUDIO, {}, { failing: ["board"] });
+    laptop.flip("board", true, 1_000);
+    laptop.flip("steps", true, 1_000);
+    await studio.set.take(laptop.set.wire());
+    expect([studio.on.board, studio.on.steps, studio.set.wire().board, studio.state.told]).toEqual([false, true, { on: false, at: null, by: null }, 1]);
+  });
+
+  test("the switches a settings save names, Decision mode and Grid inside `experimental` too", () => {
+    expect(capabilitySetKeysIn({ board: { on: true }, sound: {}, experimental: { grid: true } })).toEqual(["board", "grid"]);
+    expect(capabilitySetKeysIn({ show_archived: { on: true } })).toEqual([]);
+  });
+
+  test("a linked computer's set is read by name: an unknown switch, a bad time or a foreign id is dropped", () => {
+    expect(readCapabilitySet({ board: { on: true, at: 5, by: STUDIO }, steps: { on: "yes" }, plans: { on: true }, bro: { on: false, at: -1, by: STUDIO }, grid: { on: true, at: 7, by: "laptop" } })).toEqual({
+      board: { on: true, at: 5, by: STUDIO },
+      bro: { on: false, at: null, by: null },
+      grid: { on: true, at: 7, by: null },
+    });
+    expect(readCapabilitySet(undefined)).toBeNull();
+  });
+});
+
+// ── Through a real link: which lists are taken, and the event that says a flip was made there ──
+
+const TOKEN = "tok_test";
+let root: string;
+let savedSandbox: string | undefined;
+const cleanups: (() => void)[] = [];
+
+beforeEach(() => {
+  root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-capability-set-")));
+  savedSandbox = process.env.PLANNOTATOR_TEST_SANDBOX;
+  process.env.PLANNOTATOR_TEST_SANDBOX = "1";
+});
+
+afterEach(() => {
+  for (const cleanup of cleanups.splice(0).reverse()) cleanup();
+  if (savedSandbox === undefined) delete process.env.PLANNOTATOR_TEST_SANDBOX;
+  else process.env.PLANNOTATOR_TEST_SANDBOX = savedSandbox;
+  rmSync(root, { recursive: true, force: true });
+});
+
+/** Studio's door: its list carries `capability_set` (and the mark, unless it is older); `say()` sends its stream an event. */
+function studioDoor(marks: string[]) {
+  const state = { down: false, set: { board: { on: true, at: 1_000, by: STUDIO } } as CapabilitySet, asked: [] as string[], lists: 0 };
+  const streams = new Set<ReadableStreamDefaultController<Uint8Array>>();
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    idleTimeout: 0,
+    fetch(req) {
+      const url = new URL(req.url);
+      const route = url.pathname.replace("/api/inbox/device/", "");
+      if (state.down) return new Response("away", { status: 503 });
+      if (req.headers.get("authorization") !== `Bearer ${TOKEN}`) return Response.json({ code: "device_token_invalid" }, { status: 401 });
+      if (route === "health") return Response.json({ ok: true, inbox_id: STUDIO, machine_links: 1, version: "0.29.9" });
+      if (route === "threads") {
+        state.lists++;
+        return Response.json({ cursor: 1, sections: [], projects: [], marks, capability_set: state.set });
+      }
+      if (route === "events") {
+        state.asked.push(url.search);
+        const body = new ReadableStream<Uint8Array>({
+          start: (c) => {
+            streams.add(c);
+            c.enqueue(new TextEncoder().encode(`event: hello\ndata: {"cursor":1}\n\n`));
+          },
+        });
+        return new Response(body, { headers: { "Content-Type": "text/event-stream" } });
+      }
+      return Response.json({ code: "device_route_not_found" }, { status: 404 });
+    },
+  });
+  cleanups.push(() => server.stop(true));
+  return {
+    url: `http://127.0.0.1:${server.port}`,
+    state,
+    say(event: string) {
+      for (const c of streams) c.enqueue(new TextEncoder().encode(`event: ${event}\ndata: {}\n\n`));
+    },
+    away() {
+      state.down = true;
+      for (const c of streams) c.close();
+      streams.clear();
+    },
+    back() {
+      state.down = false;
+    },
+  };
+}
+
+function laptopMachines(url: string) {
+  const dataDir = join(root, "data");
+  InboxLinks.open(dataDir).put({ id: STUDIO, name: "Studio", token: TOKEN, transport: { kind: "tailnet", url }, device_id: null, linked_at: "2026-11-01T00:00:00Z" });
+  const said: CapabilitySet[] = [];
+  const noop = () => {};
+  const machines = createInboxMachines({
+    dataDir,
+    serverSession: "srv",
+    computerName: () => "Laptop",
+    door: {
+      openMachineOffer: () => ({ secret: "s", code: "000000", expires_at: "" }),
+      offerDevice: () => null,
+      closeMachineOffer: () => null,
+      revokeDevice: noop,
+      tailnetAddress: () => null,
+      tailnetError: () => null,
+      publishTailnet: () => ({ ok: false, message: "no" }),
+      closeTailnetIfUnused: noop,
+    },
+    readBody: async (req) => ((await req.json().catch(() => ({}))) ?? {}) as Record<string, unknown>,
+    json: (body, status = 200) => Response.json(body, { status }),
+    holds: () => false,
+    ownVersions: () => ({ current: "0.29.9", latest: null }),
+    capabilitySetSaid: (value) => said.push(value),
+    timings: { silenceMs: 60_000, backoffMinMs: 50, backoffMaxMs: 200, requestMs: 1000, sendMs: 1000 },
+  });
+  cleanups.push(() => machines.stop());
+  machines.start();
+  const studio = () => machines.machinesView().find((m) => m.id === STUDIO);
+  return { said, studio };
+}
+
+async function until(check: () => boolean, what: string) {
+  for (let i = 0; i < 200 && !check(); i++) await Bun.sleep(20);
+  if (!check()) throw new Error(`never: ${what}`);
+}
+
+describe("through a link", () => {
+  test("a computer that keeps the one set: its set is taken, again when it says a flip was made and when it is back from away", async () => {
+    const door = studioDoor([CAPABILITY_SET_MARK]);
+    const { said, studio } = laptopMachines(door.url);
+    await until(() => studio()?.state === "online" && said.length > 0, "Studio's set read");
+    expect(said.at(-1)).toEqual({ board: { on: true, at: 1_000, by: STUDIO } });
+    // This Inbox asks for the event that says a flip was made there.
+    expect(door.state.asked.some((search) => new URLSearchParams(search).get("capability-set") === "1")).toBe(true);
+    // A flip there: its stream says so, its list is read again, and the new set is taken here.
+    door.state.set = { board: { on: false, at: 2_000, by: STUDIO } };
+    door.say("capability-set");
+    await until(() => said.at(-1)?.board?.on === false, "the flip there taken");
+    // Away, then a flip there, then back: the set it has now is taken when it is back.
+    door.away();
+    await until(() => studio()?.state !== "online", "Studio away");
+    door.state.set = { board: { on: false, at: 2_000, by: STUDIO }, steps: { on: true, at: 3_000, by: STUDIO } };
+    door.back();
+    await until(() => said.at(-1)?.steps?.on === true, "the set taken when Studio is back");
+  });
+
+  test("an older Plannotator (no mark) keeps its own switches: its list is read, its set never taken", async () => {
+    const door = studioDoor(["capabilities", "capability-note"]);
+    const { said, studio } = laptopMachines(door.url);
+    await until(() => studio()?.state === "online" && door.state.lists > 0, "Studio's list read");
+    door.say("capability-set");
+    await Bun.sleep(150);
+    expect(said).toEqual([]);
+  });
+});

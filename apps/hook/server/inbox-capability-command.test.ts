@@ -1,9 +1,10 @@
 /**
  * `plannotator inbox capability` (inbox-capability-command.ts): what it asks the Inbox, and its help. No Inbox runs:
  * a stand-in for the Inbox's route. What regresses: a turn sent the wrong way or as someone else; a typo turning
- * something on; bad usage starting the Inbox; the Inbox's answer (the line it posted, a linked computer's, an away
- * one's) not reaching stdout whole; a refusal printed as a result; an Inbox too old for the command not said so; the
- * help losing the rule that a turn is the person's request.
+ * something on; bad usage starting the Inbox; the Inbox's answer (the line it posted, its note on an ignored
+ * `--computer`) not reaching stdout whole; a `--computer` from before the one set refused as bad usage; a refusal
+ * printed as a result; an Inbox too old for the command not said so; the help losing the rule that a turn is the
+ * person's request, or still offering `--computer`.
  */
 import { expect, test } from "bun:test";
 import { INBOX_CAPABILITY_USAGE, parseCapabilityCommand, runInboxCapabilityCommand } from "./inbox-capability-command";
@@ -54,17 +55,22 @@ test("a turn is a POST as this shell's session, in its folder; the Inbox's answe
   expect(JSON.parse(w.out.join(""))).toEqual({ text, capabilities: { routines: { on: true } } });
 });
 
-test("a list is a read, of a linked computer by its name; an away computer's answer says so", async () => {
-  const w = inbox(() => ({ status: 200, json: { text: "On Studio: board on. Studio is away: these are as it last said, at 2026-11-24T14:10:00.000Z.", computer: "Studio", away: true } }));
+test("a list is a read; `--computer` from before the one set is still taken (one release), and the Inbox's note reaches stdout", async () => {
+  const text = "On this computer: board on. --computer was ignored: each switch is now one setting for all your linked computers.";
+  const w = inbox(() => ({ status: 200, json: { text, capabilities: { board: { on: true } } } }));
   expect(await runInboxCapabilityCommand(["--computer", "Studio Mini"], w.deps)).toBe(0);
   expect(w.asked).toEqual([{ method: "GET", path: "/api/inbox/capability?computer=Studio%20Mini", body: null }]);
-  expect(JSON.parse(w.out.join(""))).toMatchObject({ computer: "Studio", away: true });
+  expect(JSON.parse(w.out.join(""))).toEqual({ text, capabilities: { board: { on: true } } });
+  // A turn with it is a turn, not bad usage.
+  const turn = inbox(() => ({ status: 200, json: { text: "Turned on Board on this computer." } }));
+  expect(await runInboxCapabilityCommand(["board", "on", "--computer", "Studio"], turn.deps)).toBe(0);
+  expect(turn.asked[0]).toMatchObject({ method: "POST", path: "/api/inbox/capability", body: { capability: "board", on: true, computer: "Studio" } });
 });
 
 test("a refusal is `<code>: <message>` on stderr, exit 1, nothing on stdout", async () => {
-  const w = inbox(() => ({ status: 404, json: { code: "machine_not_found", error: "No linked computer is named Mini. Linked: Studio. Leave computer out for this computer." } }));
-  expect(await runInboxCapabilityCommand(["board", "on", "--computer", "Mini"], w.deps)).toBe(1);
-  expect([w.out, w.err.join("")]).toEqual([[], "machine_not_found: No linked computer is named Mini. Linked: Studio. Leave computer out for this computer.\n"]);
+  const w = inbox(() => ({ status: 409, json: { code: "not_offered", error: "Routines is not offered on this computer." } }));
+  expect(await runInboxCapabilityCommand(["routines", "on"], w.deps)).toBe(1);
+  expect([w.out, w.err.join("")]).toEqual([[], "not_offered: Routines is not offered on this computer.\n"]);
 });
 
 test("an Inbox from before the command says to update, here (its unknown-route 404) and through the agent door (its route's refusal); a refusal of the new route does not", async () => {
@@ -80,7 +86,7 @@ test("an Inbox from before the command says to update, here (its unknown-route 4
   expect(await run(502, { code: "validation_error", error: "method, path: one of the requests plannotator inbox rows, projects, icon and export-decisions make." })).toEqual([1, "", "inbox_needs_update"]);
   // This Inbox's own refusals are said as they are.
   expect(await run(502, { code: "validation_error", error: "method, path: one of the requests plannotator inbox rows, projects, icon, capability and export-decisions make." })).toEqual([1, "", "validation_error"]);
-  expect(await run(404, { code: "machine_not_found", error: "No linked computer is named Mini." })).toEqual([1, "", "machine_not_found"]);
+  expect(await run(409, { code: "not_offered", error: "Routines is not offered on this computer." })).toEqual([1, "", "not_offered"]);
   expect(await run(502, { code: "queued", error: "The person's computer is asleep or offline." })).toEqual([1, "", "queued"]);
 });
 
@@ -88,6 +94,8 @@ test("help and bad usage ask the Inbox nothing: help on stdout with exit 0, bad 
   const w = inbox(() => ({ status: 200, json: { text: "" } }));
   expect(await runInboxCapabilityCommand(["--help"], w.deps)).toBe(0);
   expect(w.out.join("")).toContain("Turn one on or off when the person asks you to; not on your own initiative.");
+  // A turn applies on every linked computer: the help names no computer to pick.
+  expect(w.out.join("")).not.toContain("--computer");
   expect(await runInboxCapabilityCommand(["routines", "maybe"], w.deps)).toBe(2);
   expect(w.err.join("")).toContain(INBOX_CAPABILITY_USAGE.split("\n")[0]!);
   expect([w.asked, w.started()]).toEqual([[], 0]);
