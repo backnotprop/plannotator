@@ -69,11 +69,6 @@ import {
 } from './model';
 import { newUuid } from '../uuid';
 
-/**
- * How long an action item's Done or Can't do it can be undone here: inside the actions route's own Undo window
- * (10 s), with a margin so a press at the last moment still reaches the server in time. A refusal is still shown.
- */
-export const DECISION_ACTION_UNDO_MS = 9000;
 /** The answer lands as a stamp before the card leaves (brief §7). */
 const STAMP_MS = 350;
 
