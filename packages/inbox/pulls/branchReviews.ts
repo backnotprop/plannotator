@@ -7,6 +7,7 @@
 import { inboxBranchPlaceWords, inboxBranchReachWords, type InboxBranchReportRow, type InboxReviewRow, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import { post } from '../api';
 import { inboxUrl, rememberMachine } from '../inboxUrl';
+import { localReviewMessage } from '../compose/reviewBox';
 
 /** A reported branch's row: what the agent reported. Null for every other row. */
 export function branchReportOf(row: Pick<InboxReviewRow, 'started'> | null | undefined): InboxBranchReportRow | null {
@@ -45,6 +46,24 @@ export interface BranchNote {
 
 export function branchNoteOf(report: InboxBranchReportRow): BranchNote {
   return { report, reach: inboxBranchReachWords(report), canAsk: report.reachable || !!report.machine, canRank: report.rankable === true && !report.machine };
+}
+
+/** The words of a reported branch's "Ask for a guided review": the New review box's request for the whole branch. */
+export function branchAskWords(report: Pick<InboxBranchReportRow, 'branch' | 'base'>, projectName: string | null): string {
+  return localReviewMessage({ changes: 'branch', project: projectName, branch: report.branch, base: report.base, words: '' });
+}
+
+/**
+ * The person already asked for a review of this report: a message of theirs since it came, carrying the ask's
+ * words. Read from the thread, so the ask stays asked when the thread is opened again (no second request).
+ */
+export function branchAskedAlready(
+  messages: readonly { author?: { kind: string }; body?: string; created_at?: string }[],
+  report: Pick<InboxBranchReportRow, 'branch' | 'base' | 'at'>,
+  projectName: string | null,
+): boolean {
+  const lead = branchAskWords(report, projectName).split('\n\n')[0]!;
+  return messages.some((message) => message.author?.kind === 'person' && !!message.created_at && message.created_at >= report.at && !!message.body?.includes(lead));
 }
 
 /**

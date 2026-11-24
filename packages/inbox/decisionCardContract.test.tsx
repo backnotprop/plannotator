@@ -182,6 +182,17 @@ describe.skipIf(!hasDom)('decision mode: refs link into the thread repo', () => 
     expect(links.some((h) => h?.includes('github.com'))).toBe(false);
   });
 
+  test("a question from another project's folder links bare refs into the writer's repo; one not looked up yet links none", () => {
+    const d = withRepo({ display: 'acme/billing', host: 'github.com' });
+    render({ ...d, message: { ...d.message, repo: { display: 'backnotprop/plannotator', host: 'github.com' } } });
+    expect(hrefs()).toContain('https://github.com/backnotprop/plannotator/issues/3');
+    expect(hrefs().some((h) => h?.includes('acme/billing'))).toBe(false);
+    act(() => root?.unmount());
+    host?.remove();
+    render({ ...d, message: { ...d.message, repo: null } });
+    expect(hrefs().filter((h) => h?.includes('/issues/3'))).toEqual([]);
+  });
+
   test('without the thread repo, refs stay plain text', () => {
     render(withRepo(null));
     expect(hrefs().filter((h) => h?.includes('/issues/'))).toEqual([]);

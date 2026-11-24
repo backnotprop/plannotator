@@ -15,7 +15,7 @@ import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, inbo
 import { isQuestionAnswerEmpty, type QuestionAnswer } from '@plannotator/core/question-block';
 import { StartedBy } from './StartedBy';
 import { earlierRunsLabel, RunDivider, runFolds, ScheduledFoot } from '../scheduled/thread';
-import { useRefRepo } from '../links';
+import { useMessageRefRepos } from '../messageRefRepo';
 import { InboxApiError, InboxHeldError, inboxApi, type OutboxView, type TagMode, type ThreadModel } from '../api';
 import { outboxLine } from '../machines';
 import { ThreadSessions } from './ThreadSessions';
@@ -826,8 +826,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     return true;
   }, []);
 
-  // Replaced-question cards link `#123` refs into the project's repo, as message bodies do.
-  const threadRefRepo = useRefRepo(thread.project.repo ?? null);
+  // Each message's `#123` refs, its cards' and the Links view's link into the repo messageRefRepo.ts picks for it.
+  const refRepos = useMessageRefRepos(thread, row);
   /** A jump to a question inside an attached file (issue #2828): opens the file on its card; false for any other question. Set below, once the file opener is. */
   const fileJumpRef = useRef<(target: { messageId: string; key: string }) => boolean>(() => false);
   /** The card the open file brings into view (its record key), once per ask. */
@@ -1390,7 +1390,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** The button shows once the thread's files have loaded and something is there (or the view is open, from a link). */
   // The thread's web links (threadLinks.ts). With none, nothing here changes: the same button, the same view.
   const refHost = useDefaultRefHost();
-  const linkList = useMemo(() => threadLinks(thread.messages, thread.project.repo, refHost), [thread.messages, thread.project.repo, refHost]);
+  const linkList = useMemo(() => threadLinks(thread.messages, refRepos.repoOf, refHost), [thread.messages, refRepos, refHost]);
   /** Links and no artifacts: the button opens on them, its count theirs. */
   const linksOnly = linkList.count > 0 && files !== null && artifactList.length === 0;
   const linksOn = artifactsOn && linkList.count > 0 && (linksRoute || linksOnly);
@@ -5232,10 +5232,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     files: message.author.kind === 'person' ? allFiles : null,
                     personMessageIds: message.author.kind === 'person' ? personMessageIds : null,
                     root: thread.project.root,
-                    repo: thread.project.repo ?? null,
+                    repo: refRepos.repoOf(message.id),
                     codeReview,
                     notes: codeReview && isAgent && hasReview ? reviewOfNote.has(message.id) : null,
-                    refRepo: threadRefRepo,
+                    refRepo: refRepos.refRepoOf(message.id),
                     name,
                     comments: (isAgent || !isInboxNote(message)) && liveMessage(message) ? (messageComments.get(message.id) ?? NO_ANNOTATIONS) : null,
                     openComment: commentsList?.at ?? null,

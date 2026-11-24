@@ -5,7 +5,7 @@ import React, { useMemo, useRef, useEffect, useLayoutEffect, useCallback, useSta
 import { FileDiff, type DiffLineAnnotation } from '@pierre/diffs/react';
 import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
 import { getSingularPatch, processFile } from '@pierre/diffs';
-import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/types';
+import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration, ImageAttachment } from '@plannotator/ui/types';
 import type { DiffTokenEventBaseProps } from '@pierre/diffs';
 import { usePierreTheme } from '../hooks/usePierreTheme';
 import { usePierreSelectedLines } from '../hooks/usePierreSelectedLines';
@@ -252,7 +252,8 @@ interface DiffViewerProps {
   compactTouchLayout?: boolean;
   onLineSelection: (range: SelectedLineRange | null) => void;
   onAddAnnotation: (type: CodeAnnotationType, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel, decorations?: ConventionalDecoration[], tokenMeta?: TokenAnnotationMeta) => void;
-  onAddFileComment: (text: string) => void;
+  /** The file's comment box: its words and what was attached (pictures, files). */
+  onAddFileComment: (text: string, images?: ImageAttachment[]) => void;
   onEditAnnotation: (id: string, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel | null, decorations?: ConventionalDecoration[]) => void;
   onSelectAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
@@ -1358,8 +1359,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           contextText={filePath.split('/').pop() || filePath}
           isGlobal={false}
           draftKey={`file:${prUrl ?? ''}:${prDiffScope ?? ''}:${filePath}`}
-          onSubmit={(text) => {
-            onAddFileComment(text);
+          onSubmit={(text, images) => {
+            onAddFileComment(text, images);
             setFileCommentAnchor(null);
           }}
           onClose={() => setFileCommentAnchor(null)}

@@ -5,6 +5,9 @@
  *    mark with no judgment;
  *  - the thread's "Ask for a guided review" going anywhere but a reply in the same thread, or offered for code that
  *    can't be opened;
+ *  - the ask sent twice: a double click, the button back once the ask is the thread's last message, or offered again
+ *    when the thread opens again after it was asked;
+ *  - a retry after a send that failed on the way back going out as a second request (a new idempotency key);
  *  - a cloud agent's remote drawn as a link, or with anything but its host and repository;
  *  - Rank offered for a branch that can't be ranked, or going anywhere but the rank route with its thread.
  *
@@ -23,6 +26,7 @@ const { PullsPage } = (hasDom ? await import('./PullsPage') : {}) as typeof impo
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
 const { ReviewViewNote } = (hasDom ? await import('./ReviewViewNote') : {}) as typeof import('./ReviewViewNote');
 const { branchNoteOf } = (hasDom ? await import('./branchReviews') : {}) as typeof import('./branchReviews');
+const { reviewViewOf } = (hasDom ? await import('./reviewsModel') : {}) as typeof import('./reviewsModel');
 
 const LIST = { fetched_at: '2026-11-16T10:00:00.000Z', hosts: [{ cli: 'gh', host: 'github.com', login: 'dana' }], pulls: [], links: {}, projects: {}, cards: {} } as unknown as InboxPullsAnswer;
 const RISK: InboxPullRiskAnswer = { rules: 'Anything in billing.', provider: 'pi-sdk', model: null, agents: [{ id: 'pi-sdk', label: 'Pi' }], pending: 0, last_failure: null, failed: {}, judgments: {} };
@@ -150,6 +154,73 @@ test.skipIf(!hasDom)("the thread's ask is a reply in the same thread, and is not
   expect(document.querySelector('[data-review-branch] a')).toBeNull();
   expect(document.querySelector('[data-review-branch-ask]')).toBeNull();
   expect(document.querySelector('[data-review-branch-rank]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('the ask is sent once: a double click sends one reply, and it stays asked as the thread grows and when it opens again', async () => {
+  fetches({});
+  const replies: string[] = [];
+  let release = () => {};
+  const restore = spyOn(inboxApi, 'reply').mockImplementation((async (id: string) => {
+    replies.push(id);
+    await new Promise<void>((resolve) => (release = resolve));
+    return { reply: null, questions: [], replayed: false };
+  }) as never);
+  restores.push(() => restore.mockRestore());
+  const note = { report: report(), reach: null, canAsk: true, canRank: false, projectName: 'billing', replyTo: 'msg_01JD0000000000000000000009' };
+  await mount(<ReviewViewNote view={view(note)} />);
+  const button = document.querySelector<HTMLButtonElement>('[data-review-branch-ask]')!;
+  await act(async () => {
+    button.click();
+    button.click();
+  });
+  await settle();
+  expect(button.disabled).toBe(true);
+  expect(button.textContent).toBe('Asking…');
+  await act(async () => release());
+  await settle();
+  expect(replies).toEqual(['msg_01JD0000000000000000000009']);
+  expect(document.querySelector('[data-review-branch-ask]')).toBeNull();
+  // The ask is the thread's last message now, so the message a reply would go to moves on: still asked.
+  await act(async () => root!.render(<ReviewViewNote view={view({ ...note, replyTo: 'msg_01JD000000000000000000000A' })} />));
+  expect(document.querySelector('[data-review-branch-ask]')).toBeNull();
+  expect(document.querySelector('[data-review-branch-asked]')).not.toBeNull();
+  if (root) await act(async () => root!.unmount());
+  document.body.innerHTML = '';
+
+  // Opened again: the thread holds the person's ask since the report, so it is not offered again.
+  const row = inboxFarBranchReviewRow(report());
+  const at = (minutes: number) => new Date(Date.parse(report().at) + minutes * 60_000).toISOString();
+  const agentReport = { id: 'msg_01JD0000000000000000000001', author: { kind: 'agent' }, body: 'Ready for review.', created_at: report().at };
+  const ask = { id: 'msg_01JD000000000000000000000A', author: { kind: 'person' }, body: 'Please send me a guided review of the whole branch in billing (retry-jitter, against main), using /review-curate.\n\nIf I ask for changes, make them and send me the updated review in this thread.', created_at: at(1) };
+  const options = { projectName: 'billing', onWholeThread: () => {}, onOpenStack: () => {} };
+  const opened = reviewViewOf(row, { messages: [agentReport, ask], subject: null }, options);
+  expect(opened.branch?.asked).toBe(true);
+  await mount(<ReviewViewNote view={opened} />);
+  expect(document.querySelector('[data-review-branch-ask]')).toBeNull();
+  expect(document.querySelector('[data-review-branch-asked]')).not.toBeNull();
+  // Another word from the person, or an ask before a newer report (a new head), leaves it to ask.
+  expect(reviewViewOf(row, { messages: [agentReport, { ...ask, body: 'Thanks.' }], subject: null }, options).branch?.asked).toBe(false);
+  expect(reviewViewOf(row, { messages: [{ ...ask, created_at: at(-1) }, agentReport], subject: null }, options).branch?.asked).toBe(false);
+});
+
+test.skipIf(!hasDom)('a retry after a failed send of the ask uses the same idempotency key, so the Inbox takes it as one request', async () => {
+  fetches({});
+  const keys: string[] = [];
+  const restore = spyOn(inboxApi, 'reply').mockImplementation((async (_id: string, input: { idempotency_key: string }) => {
+    keys.push(input.idempotency_key);
+    if (keys.length === 1) throw new Error('The connection dropped.');
+    return { reply: null, questions: [], replayed: true };
+  }) as never);
+  restores.push(() => restore.mockRestore());
+  await mount(<ReviewViewNote view={view({ report: report(), reach: null, canAsk: true, canRank: false, projectName: 'billing', replyTo: 'msg_01JD0000000000000000000009' })} />);
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-review-branch-ask]')!.click());
+  await settle();
+  expect(document.querySelector('[data-review-branch-error]')?.textContent).toBe('The connection dropped.');
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-review-branch-ask]')!.click());
+  await settle();
+  expect(keys).toHaveLength(2);
+  expect(keys[1]).toBe(keys[0]!);
+  expect(document.querySelector('[data-review-branch-asked]')).not.toBeNull();
 });
 
 test.skipIf(!hasDom)('Rank is offered only for a branch that can be ranked, and asks the rank route for its thread', async () => {

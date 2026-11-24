@@ -2184,7 +2184,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                     <div className="border-t border-border" />
 
                     {/* Plan Width */}
-                    <div className="space-y-3">
+                    <div className="space-y-3" data-plan-width-setting="">
                       <div>
                         <div className="text-sm font-medium flex items-center gap-2">{mode === 'annotate' ? 'Document Width' : 'Plan Width'}</div>
                         <div className="text-xs text-muted-foreground">
@@ -2213,7 +2213,8 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                         // Exaggerated proportions so the width difference is visually obvious in the small preview
                         const sidebarPct = 14;
                         const panelPct = 14;
-                        const cardPctMap: Record<PlanWidth, number> = { compact: 48, default: 70, wide: 94 };
+                        // Wide fills the space between the panels, so its card fills the preview's middle
+                        const cardPctMap: Record<PlanWidth, number> = { compact: 48, default: 70, wide: 100 };
                         const cardPct = cardPctMap[active.id];
                         return (
                           <div className="space-y-2">
@@ -2279,7 +2280,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                               </div>
                             </div>
                             <div className="text-[10px] text-muted-foreground/70 leading-snug">
-                              {active.px}px — {active.hint}
+                              {active.fills ? active.hint : `${active.px}px — ${active.hint}`}
                             </div>
                           </div>
                         );
