@@ -229,6 +229,7 @@
   "inbox-show-me.spec.ts": 139,
   "inbox-show-thread.spec.ts": 6,
   "inbox-side-by-side.spec.ts": 15,
+  "inbox-sidebar-connect-off.spec.ts": 15,
   "inbox-sidebar-spacing.spec.ts": 7,
   "inbox-sidebar.spec.ts": 24,
   "inbox-skill-list-webkit.spec.ts": 31,

@@ -1105,8 +1105,9 @@ export const CONNECT_COPY_FAILED_ANNOUNCEMENT = "Couldn't copy the connect promp
  * connect itself (connectPrompt.ts). Only a copy
  * button: no preview, no tooltip, no shortcut. The label says "Copied" for
  * 2 s (or "Couldn't copy"), the marks stay, focus stays on it, and a polite
- * live region says the same. Its name reads "Connect agent: copy the
- * prompt": the visible words first, then what a click does. Not navigation,
+ * live region says the same. Its name reads "Connect agent by copying a
+ * prompt": the visible words first, then what a click does (the hidden words
+ * start with a word: Chromium puts a space before them). Not navigation,
  * so the phone sheet stays open to show it. Not drawn on a phone (owner:
  * it does not need to show there); the tailnet page on a desktop shows it.
  */
@@ -1145,7 +1146,7 @@ function CopyConnectPrompt({ mcpCommand }: { mcpCommand: readonly string[] | nul
         </span>
         {state === 'idle' ? (
           <span className="ib-cpill-l">
-            Connect agent<span className="ib-sr">: copy the prompt</span>
+            Connect agent<span className="ib-sr"> by copying a prompt</span>
           </span>
         ) : (
           <>

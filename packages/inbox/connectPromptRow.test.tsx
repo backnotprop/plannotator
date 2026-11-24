@@ -22,7 +22,7 @@ const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as t
 
 const BIN = '/Users/ada/.local/bin/plannotator';
 /** The idle accessible name (visible "Connect agent" plus screen-reader words): pinned on purpose, it is the button's purpose. */
-const IDLE_NAME = 'Connect agent: copy the prompt';
+const IDLE_NAME = 'Connect agent by copying a prompt';
 
 let root: Root | null = null;
 const restorers: Array<() => void> = [];

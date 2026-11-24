@@ -22,7 +22,7 @@ const repo = resolve(__dirname, '../..');
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'sidebar-connect-off');
 const PAST = '2026-10-01T10:00:00.000Z';
-const PILL = 'Connect agent: copy the prompt';
+const PILL = 'Connect agent by copying a prompt';
 
 const contexts: BrowserContext[] = [];
 
