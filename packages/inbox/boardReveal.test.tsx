@@ -331,6 +331,8 @@ describe.skipIf(!hasDom)('the calm moment', () => {
       root.render(<BoardIntro mcpCommand={null} phone={false} onClose={() => {}} />);
     });
     expect(dialog()!.querySelector('[data-board-intro-copy]')).not.toBeNull();
+    // It copies the Board's prompt, not the sidebar's: it keeps its own name (the sidebar's reads "Connect agent").
+    expect(dialog()!.querySelector('[data-board-intro-copy]')!.textContent).toBe('Copy prompt');
     expect(dialog()!.querySelector('.ib-bi-q')).not.toBeNull();
     expect(dialog()!.querySelector('[data-board-intro-on]')).toBeNull();
   });

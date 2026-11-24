@@ -259,6 +259,8 @@ describe.skipIf(!hasDom)('System setup', () => {
     await press(ui.btn('next'));
     expect(ui.btn('draw')).toBeNull();
     expect(ui.q('[data-system-how]')?.getAttribute('data-system-how')).toBe('prompt');
+    // System's own prompt: it keeps its name (the sidebar's pill reads "Connect agent").
+    expect(ui.btn('copy')!.textContent).toBe('Copy prompt');
     await press(ui.btn('copy'));
     expect(ui.order).toEqual(['copy', 'save']);
     expect(ui.copies[0]).toContain('/Users/ada/code/app');

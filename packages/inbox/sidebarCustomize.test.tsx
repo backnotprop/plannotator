@@ -281,6 +281,26 @@ test.skipIf(!hasDom)('another window\'s save arrives (event: sidebar) and the si
   expect(doubted).toBe(true);
 });
 
+test.skipIf(!hasDom)('the server switches the Connect agent pill off (event: sidebar): it leaves, the foot keeps its order, and its switch, named Connect agent, reads off', async () => {
+  draw();
+  const foot = () => [...document.querySelectorAll('.ib-side-foot [data-sidebar-item]')].map((el) => el.getAttribute('data-sidebar-item'));
+  expect(foot()).toEqual(['copy-prompt', 'feedback', 'settings']);
+  await rightClick(document.querySelector('[data-board-nav]')!);
+  expect(document.querySelector('[data-sidebar-toggle="copy-prompt"]')!.textContent).toBe('Connect agent');
+  await act(async () => hearSidebarEvent({ ...INBOX_SIDEBAR_DEFAULT, hidden: ['copy-prompt'] }, 1));
+  expect(document.querySelector('[data-connect-prompt]')).toBeNull();
+  expect(foot()).toEqual(['feedback', 'settings']);
+  // The same switch the person would have used: off in the menu and in Customize sidebar, and on again in one press.
+  expect(document.querySelector('[data-sidebar-toggle="copy-prompt"]')!.getAttribute('aria-checked')).toBe('false');
+  await act(async () => openSidebarCustomizer(null));
+  const sw = panel()!.querySelector<HTMLElement>('[data-sidebar-switch="copy-prompt"]')!;
+  expect(document.getElementById(sw.getAttribute('aria-labelledby')!)!.textContent).toBe('Connect agent');
+  expect(sw.getAttribute('aria-checked')).toBe('false');
+  await click(sw);
+  expect(document.querySelector('[data-connect-prompt]')).not.toBeNull();
+  expect(saves.at(-1)).toEqual(INBOX_SIDEBAR_DEFAULT);
+});
+
 test.skipIf(!hasDom)('the tour\'s sidebar draws the default whatever is saved, and has no menu', async () => {
   draw();
   await act(async () => hearSidebarEvent({ ...INBOX_SIDEBAR_DEFAULT, hidden: ['feedback', 'logo'] }, 1));

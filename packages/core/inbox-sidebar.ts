@@ -50,7 +50,7 @@ export const INBOX_SIDEBAR_ITEMS = [
   { id: 'tags', label: 'Tags', place: 'middle', hideable: true },
   { id: 'agents', label: 'Agents', place: 'middle', hideable: true },
   { id: 'projects', label: 'Projects', place: 'middle', hideable: true },
-  { id: 'copy-prompt', label: 'Copy prompt', place: 'stack', stack: 'bottom', hideable: true },
+  { id: 'copy-prompt', label: 'Connect agent', place: 'stack', stack: 'bottom', hideable: true },
   { id: 'feedback', label: 'Feedback', place: 'stack', stack: 'bottom', hideable: true },
   { id: 'usage', label: 'Usage', place: 'stack', stack: 'bottom', hideable: true },
   { id: 'settings', label: 'Settings', place: 'stack', stack: 'bottom', hideable: false },

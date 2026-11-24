@@ -179,7 +179,7 @@ test('Copy connect prompt copies the prompt naming this binary, says Copied, and
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(url).origin });
   const foot = side(page).locator('.ib-side-foot');
   // Above Settings (and above the Update button or "What's new", when shown): an outlined pill with the four agents' marks, inside the sidebar.
-  const row = foot.getByRole('button', { name: 'Copy prompt to connect an agent' });
+  const row = foot.getByRole('button', { name: 'Connect agent: copy the prompt' });
   await expect(row).toBeVisible();
   const marks = row.locator('.ib-cpill-ag');
   await expect(marks).toHaveCount(4);
@@ -204,7 +204,7 @@ test('Copy connect prompt copies the prompt naming this binary, says Copied, and
   expect(copied).toContain(`${builtBinary} inbox --help`);
   expect(copied).toContain('plannotator inbox --help');
   await shot('connect-prompt-copied');
-  await expect(foot.locator('button[data-connect-prompt]')).toHaveText('Copy prompt to connect an agent', { timeout: 4_000 });
+  await expect(foot.locator('button[data-connect-prompt]')).toHaveText('Connect agent: copy the prompt', { timeout: 4_000 });
 });
 
 test('⌘B and Ctrl+B toggle it, and the choice survives a reload', async () => {
@@ -336,7 +336,7 @@ test('a phone width: the sidebar is a sheet the toggle opens, a pick and Escape 
   const sheet = page.getByRole('dialog');
   await expect(sheet).toBeVisible();
   await expect(sheet.getByRole('complementary', { name: 'Inbox navigation' })).toBeVisible();
-  // A phone's sheet has no Copy prompt pill (the desktop sidebar keeps it); Settings still ends the foot.
+  // A phone's sheet has no Connect agent pill (the desktop sidebar keeps it); Settings still ends the foot.
   await expect(sheet.getByRole('button', { name: 'Settings' })).toBeVisible();
   await expect(sheet.locator('button[data-connect-prompt]')).toHaveCount(0);
   await page.waitForTimeout(700);

@@ -473,6 +473,14 @@ export interface PlannotatorConfig {
   /** How many times `inboxSidebar` was saved: windows take a layout only when it is newer than the last they took. */
   inboxSidebarRev?: number;
   /**
+   * The Connect agent pill's one switch-off (packages/server/inbox-connect-pill-off.ts): when the server turned the
+   * sidebar's `copy-prompt` item off by itself, a day after the first agent connected. Once set it never runs again,
+   * so a person who turns the pill back on keeps it. `rev`: the `inboxSidebarRev` that switch-off saved (absent when
+   * the item was already hidden); `first`: that save was the first layout ever saved (the Sidebar tip still counts
+   * the sidebar as never customized). Written by the server only, to state.json (MACHINE_STATE_KEYS).
+   */
+  inboxSidebarConnectOff?: { at?: string; rev?: number; first?: boolean };
+  /**
    * The Inbox's onboarding tour, per machine (approval "inbox-onboarding-tour"):
    * when it was started, finished or skipped, and whether the first real thread
    * offers notifications once more. Written by the server only, through POST
@@ -1070,7 +1078,7 @@ function getStatePath(): string {
  */
 const MACHINE_STATE_KEYS = [
   "inboxAgentNotes", "inboxTour", "inboxBoardIntro", "inboxListIntro", "inboxVoiceIntro", "inboxSnoozeIntro",
-  "inboxReveals", "starAsk", "inboxThemeChooser", "inboxPriorityIntro",
+  "inboxReveals", "starAsk", "inboxThemeChooser", "inboxPriorityIntro", "inboxSidebarConnectOff",
 ] as const;
 type MachineStateKey = (typeof MACHINE_STATE_KEYS)[number];
 /** Machine-state fields inside a key whose other fields are settings (`inboxSound.enabled` / `volume`). */
@@ -1186,7 +1194,8 @@ const starAskTime = (record: Record<string, unknown>) => String(record.answeredA
  * | inboxReveals                            | stamps: later spacing clocks, earliest `waitingSince`, `shownFor` union |
  * | inboxSnoozeIntro                        | stamps, earliest `firstUseAt`                                           |
  * | inboxBoardIntro, inboxVoiceIntro,       | stamps: shown, skipped, used or not-needed anywhere stays so            |
- * | inboxThemeChooser, inboxPriorityIntro   |                                                                         |
+ * | inboxThemeChooser, inboxPriorityIntro,  |                                                                         |
+ * | inboxSidebarConnectOff                  |                                                                         |
  * | inboxSound dialog fields                | newer `dialogShownFor` and `dialogDueFor`; due only while the due       |
  * |                                         | version is newer than the shown one (soundDialog)                       |
  */

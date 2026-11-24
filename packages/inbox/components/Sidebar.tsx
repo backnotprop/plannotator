@@ -208,7 +208,7 @@ export interface SidebarProps {
    * the connect prompt names; null until the settings load.
    */
   mcpCommand?: readonly string[] | null;
-  /** The foot's Copy prompt pill (default true). The onboarding tour's sidebar leaves it out: it is for the person's own agents. */
+  /** The foot's Connect agent pill (default true). The onboarding tour's sidebar leaves it out: it is for the person's own agents. */
   connectPrompt?: boolean;
   /** Opens the Feedback dialog (components/FeedbackDialog.tsx): the row above Settings. Absent: no row. */
   onFeedback?: () => void;
@@ -687,7 +687,7 @@ export function Sidebar(props: SidebarProps) {
   /** A phone's sheet: Starred's heading in a row of its own, as Agents' and Projects' are, so all three stick alike. */
   const sheetHeading = (heading: ReactNode): ReactNode => (phone ? <div className="ib-secrow">{heading}</div> : heading);
   // The notices (Update, What's new, Can't check, Reload agents) are not items: they head the bottom area, under the
-  // Copy prompt pill when it leads it, as before.
+  // Connect agent pill when it leads it, as before.
   const noticesAfter = bottom[0] === 'copy-prompt' ? 1 : 0;
   return (
     <aside ref={asideRef} className="ib-side" aria-label="Inbox navigation" onContextMenu={menu.onContextMenu} onTouchStart={menu.onTouchStart}>
@@ -1096,16 +1096,17 @@ export const CONNECT_COPIED_ANNOUNCEMENT = 'Connect prompt copied.';
 export const CONNECT_COPY_FAILED_ANNOUNCEMENT = "Couldn't copy the connect prompt.";
 
 /**
- * "Copy connect prompt" (owner approval 2026-10-13, design record
+ * "Connect agent" (owner approval 2026-10-13, design record
  * `inbox-sidebar-connect-prompt`; its look amended 2026-10-15 by
- * `inbox-connect-row`, option 1b): an outlined pill above the Update button
- * (or "What's new in X") and Settings, with the four agent marks and "Copy
- * prompt", which copies the prompt an agent on this computer needs to
+ * `inbox-connect-row`, option 1b; its words "Connect agent" since the owner,
+ * 2026-11-23, it read "Copy prompt"): an outlined pill above the Update button
+ * (or "What's new in X") and Settings, with the four agent marks and "Connect
+ * agent", which copies the prompt an agent on this computer needs to
  * connect itself (connectPrompt.ts). Only a copy
  * button: no preview, no tooltip, no shortcut. The label says "Copied" for
  * 2 s (or "Couldn't copy"), the marks stay, focus stays on it, and a polite
- * live region says the same. Its name reads "Copy prompt to connect an
- * agent": the visible words first, then what they are for. Not navigation,
+ * live region says the same. Its name reads "Connect agent: copy the
+ * prompt": the visible words first, then what a click does. Not navigation,
  * so the phone sheet stays open to show it. Not drawn on a phone (owner:
  * it does not need to show there); the tailnet page on a desktop shows it.
  */
@@ -1144,7 +1145,7 @@ function CopyConnectPrompt({ mcpCommand }: { mcpCommand: readonly string[] | nul
         </span>
         {state === 'idle' ? (
           <span className="ib-cpill-l">
-            Copy prompt<span className="ib-sr"> to connect an agent</span>
+            Connect agent<span className="ib-sr">: copy the prompt</span>
           </span>
         ) : (
           <>
