@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { INBOX_ARTIFACTS_PAGE, INBOX_ARTIFACTS_PAGE_MAX, type InboxArtifactRow, type InboxArtifactsPage, type InboxArtifactType } from '@plannotator/core/inbox-artifact-pins';
 import { inboxApi } from '../api';
+import type { Route } from '../app/route';
 import { originOf, type Artifact } from '../artifacts';
 import { useArtifactPins } from '../artifactPins';
 import { dayWords, formatCount, plural } from '../format';
@@ -40,6 +41,13 @@ function readSize(): WallSize {
   } catch {
     return 'small';
   }
+}
+
+/** Where a tile opens: its file, or its guided review, in its thread (a linked machine's thread opens there). */
+export function wallRowRoute(row: InboxArtifactRow): Route {
+  return row.attachment
+    ? { page: 'inbox', project: null, thread: row.thread_id, file: { id: row.attachment.id, version: 'current', focus: null } }
+    : { page: 'inbox', project: null, thread: row.thread_id, guide: row.message_id };
 }
 
 /** A row of the Wall as a tile of the thread's grid draws it. */

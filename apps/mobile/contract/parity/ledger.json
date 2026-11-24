@@ -22120,6 +22120,34 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-door-get-artifacts",
+      "title": "door:GET artifacts",
+      "surface": [
+        "door:GET artifacts"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-artifact-pins",
+      "title": "door:POST artifact-pins",
+      "surface": [
+        "door:POST artifact-pins"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }
